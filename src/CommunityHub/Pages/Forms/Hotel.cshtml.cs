@@ -40,7 +40,8 @@ public class HotelModel : PageModel
         _logger = logger;
     }
 
-    [BindProperty] public bool NeedsRoom { get; set; }
+    // bool? so radio "true"/"false" is honored; null = user hasn't chosen yet.
+    [BindProperty] public bool? NeedsRoom { get; set; }
     [BindProperty] public DateOnly? CheckInDate { get; set; }
     [BindProperty] public DateOnly? CheckOutDate { get; set; }
     [BindProperty] public string? RoomShareWith { get; set; }
@@ -83,6 +84,19 @@ public class HotelModel : PageModel
             return Page();
         }
 
+        // Explicit choice required: user must pick Yes or No.
+        if (NeedsRoom is null)
+        {
+            Message = "Please choose 'Yes, I need a hotel room' or 'No, I don't need a hotel'.";
+            return Page();
+        }
+        // If Yes, dates are mandatory.
+        if (NeedsRoom == true && (CheckInDate is null || CheckOutDate is null))
+        {
+            Message = "Check-in and check-out dates are required when you need a hotel room.";
+            return Page();
+        }
+
         var booking = await _db.HotelBookings.FirstOrDefaultAsync(
             h => h.EventId == me.EventId && h.ParticipantId == me.ParticipantId,
             ct);
@@ -102,10 +116,11 @@ public class HotelModel : PageModel
             booking.UpdatedAt = _clock.GetUtcNow();
         }
 
-        booking.NeedsRoom = NeedsRoom;
-        booking.CheckInDate = CheckInDate;
-        booking.CheckOutDate = CheckOutDate;
-        booking.RoomShareWith = RoomShareWith;
+        // Choice is validated above; safe to deref the nullable bool.
+        booking.NeedsRoom    = NeedsRoom!.Value;
+        booking.CheckInDate  = NeedsRoom == true ? CheckInDate  : null;
+        booking.CheckOutDate = NeedsRoom == true ? CheckOutDate : null;
+        booking.RoomShareWith = NeedsRoom == true ? RoomShareWith : null;
         booking.Notes = Notes;
 
         await _db.SaveChangesAsync(ct);

@@ -105,7 +105,7 @@ public class SponsorsModel : PageModel
             companies.Cell(row, 5).Value = done;
             companies.Cell(row, 6).Value = ovr;
             companies.Cell(row, 7).Value = grp.Count();
-            companies.Cell(row, 8).Value = nxt?.ToString("yyyy-MM-dd") ?? "";
+            companies.Cell(row, 8).Value = nxt?.ToString("dd/MM/yyyy") ?? "";
             row++;
         }
         companies.Columns().AdjustToContents();
@@ -138,7 +138,7 @@ public class SponsorsModel : PageModel
             tasksSheet.Cell(trow, 1).Value = t.SponsorCompanyId ?? "";
             tasksSheet.Cell(trow, 2).Value = t.Title;
             tasksSheet.Cell(trow, 3).Value = t.State.ToString();
-            tasksSheet.Cell(trow, 4).Value = t.DueDate?.ToString("yyyy-MM-dd") ?? "";
+            tasksSheet.Cell(trow, 4).Value = t.DueDate?.ToString("dd/MM/yyyy") ?? "";
             int overdueDays = (t.State != TaskState.Done && t.DueDate is not null && t.DueDate < today)
                 ? today.DayNumber - t.DueDate.Value.DayNumber : 0;
             tasksSheet.Cell(trow, 5).Value = overdueDays;

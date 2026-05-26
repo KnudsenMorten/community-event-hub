@@ -156,6 +156,13 @@ public class IndexModel : PageModel
     private async Task LoadSectionDataAsync(
         CurrentParticipant me, CancellationToken ct)
     {
+        // Backfill auto-task rows for forms the participant submitted BEFORE
+        // the auto-task feature went live (or before they re-visited the form
+        // page). Keeps the unified Pending/Completed lists consistent with the
+        // per-form cards: Hotel/Dinner/Volunteer-shifts "Submitted" cards <->
+        // matching Done task rows.
+        await BackfillFormAutoTasksAsync(me, ct);
+
         var allMyTasks = await _db.Tasks
             .Where(t => t.EventId == me.EventId
                         && t.AssignedParticipantId == me.ParticipantId)
@@ -187,9 +194,15 @@ public class IndexModel : PageModel
 
         if (ShowHotel)
         {
+            // "Submitted" = the participant made an explicit decision:
+            //   declined (NeedsRoom = false), OR
+            //   needs a room AND both dates filled.
             HotelSubmitted = await _db.HotelBookings.AnyAsync(
                 h => h.EventId == me.EventId
-                     && h.ParticipantId == me.ParticipantId, ct);
+                     && h.ParticipantId == me.ParticipantId
+                     && (h.NeedsRoom == false
+                         || (h.NeedsRoom && h.CheckInDate != null && h.CheckOutDate != null)),
+                ct);
         }
 
         if (ShowDinner)
@@ -228,8 +241,89 @@ public class IndexModel : PageModel
         if (sourceKey.StartsWith("travel:submit-ticket-invoice:", StringComparison.Ordinal)) return "/Forms/Travel";
         if (sourceKey.StartsWith("hotel-form:",                   StringComparison.Ordinal)) return "/Forms/Hotel";
         if (sourceKey.StartsWith("dinner-form:",                  StringComparison.Ordinal)) return "/Forms/Dinner";
+        if (sourceKey.StartsWith("volunteer-form:",               StringComparison.Ordinal)) return "/Forms/VolunteerWizard";
         if (sourceKey.StartsWith("speaker-form:",                 StringComparison.Ordinal)) return "/Forms/Speaker";
         if (sourceKey.StartsWith("speakerdl:",                    StringComparison.Ordinal)) return "/Tasks";
         return null;
+    }
+
+    /// <summary>
+    /// Ensure the unified Pending / Completed task lists reflect the actual
+    /// state of the per-form submissions (Hotel / Dinner / Volunteer-shifts /
+    /// Swag). For each form where the participant has a record that meets the
+    /// completion rule, upsert a SourceKey-tagged ParticipantTask in state Done.
+    /// Lets users see prior submissions in the unified list even when those
+    /// were saved before the auto-task feature was wired into each form.
+    /// </summary>
+    private async Task BackfillFormAutoTasksAsync(
+        CurrentParticipant me, CancellationToken ct)
+    {
+        var entries = new List<(string key, string title, DateOnly? due, bool complete)>();
+
+        // Hotel: declined OR (needs room AND both dates).
+        var hotel = await _db.HotelBookings.FirstOrDefaultAsync(
+            h => h.EventId == me.EventId && h.ParticipantId == me.ParticipantId, ct);
+        if (hotel is not null)
+        {
+            bool complete = (!hotel.NeedsRoom)
+                || (hotel.NeedsRoom && hotel.CheckInDate is not null && hotel.CheckOutDate is not null);
+            entries.Add(($"hotel-form:{me.ParticipantId}",
+                "Complete the Hotel form", null, complete));
+        }
+
+        // Dinner: explicit RSVP (Yes / No / Maybe, not NotAnswered).
+        var dinner = await _db.DinnerSignups.FirstOrDefaultAsync(
+            d => d.EventId == me.EventId && d.ParticipantId == me.ParticipantId, ct);
+        if (dinner is not null && dinner.Rsvp != DinnerRsvp.NotAnswered)
+        {
+            entries.Add(($"dinner-form:{me.ParticipantId}",
+                "Complete the Appreciation Dinner RSVP", null, true));
+        }
+
+        // Volunteer-shifts: at least one shift picked.
+        var vol = await _db.VolunteerAvailabilities.FirstOrDefaultAsync(
+            v => v.EventId == me.EventId && v.ParticipantId == me.ParticipantId, ct);
+        if (vol is not null && !string.IsNullOrWhiteSpace(vol.SelectedShifts))
+        {
+            entries.Add(($"volunteer-form:{me.ParticipantId}",
+                "Complete the Volunteer shifts sign-up", null, true));
+        }
+
+        // Nothing to do.
+        if (entries.Count == 0) return;
+
+        var keys = entries.Select(e => e.key).ToList();
+        var existing = await _db.Tasks
+            .Where(t => t.EventId == me.EventId
+                        && t.AssignedParticipantId == me.ParticipantId
+                        && keys.Contains(t.SourceKey!))
+            .ToListAsync(ct);
+
+        bool changed = false;
+        foreach (var e in entries)
+        {
+            var row = existing.FirstOrDefault(x => x.SourceKey == e.key);
+            if (row is null)
+            {
+                _db.Tasks.Add(new ParticipantTask
+                {
+                    EventId = me.EventId,
+                    AssignedParticipantId = me.ParticipantId,
+                    Title = e.title,
+                    Description = null,
+                    DueDate = e.due,
+                    State = e.complete ? TaskState.Done : TaskState.Open,
+                    SourceKey = e.key,
+                    CreatedAt = DateTimeOffset.UtcNow,
+                });
+                changed = true;
+            }
+            else if (e.complete && row.State != TaskState.Done)
+            {
+                row.State = TaskState.Done;
+                changed = true;
+            }
+        }
+        if (changed) await _db.SaveChangesAsync(ct);
     }
 }

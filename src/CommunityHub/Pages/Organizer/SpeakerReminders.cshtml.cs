@@ -204,7 +204,7 @@ public class SpeakerRemindersModel : PageModel
         var firstName = string.IsNullOrWhiteSpace(fullName) ? "there" : fullName.Split(' ')[0];
         var dueText = due is null
             ? "no fixed due date"
-            : $"due <strong>{due:yyyy-MM-dd}</strong>";
+            : $"due <strong>{due:dd/MM/yyyy}</strong>";
         var encDesc = string.IsNullOrWhiteSpace(description)
             ? string.Empty
             : $"<p>{System.Net.WebUtility.HtmlEncode(description)}</p>";

@@ -12,9 +12,9 @@
         <strong>1 night</strong> hotel for speakers checking in the day
         BEFORE the main conference day, and
         <strong>2 nights</strong> for master-class speakers and speakers
-        running a workshop on the pre-day. Tick "I need a hotel room"
-        below and pick your check-in / check-out dates &mdash; we'll book
-        the covered nights based on your role.
+        running a workshop on the pre-day. Pick <em>Yes, I need a hotel room</em>
+        and your check-in / check-out dates, OR pick <em>No, I don't need a hotel</em>
+        &mdash; either is a valid completed answer.
     </p>
 
     @if (!string.IsNullOrEmpty(Model.Message))
@@ -25,27 +25,50 @@
     @if (Model.IsLocked)
     {
         <p class="error">Editing is closed for this event. Contact the organizers for changes.</p>
-        <p>Needs room: <strong>@(Model.NeedsRoom ? "Yes" : "No")</strong></p>
-        @if (Model.NeedsRoom)
+        <p>Needs room: <strong>@(Model.NeedsRoom == true ? "Yes" : Model.NeedsRoom == false ? "No" : "(not chosen)")</strong></p>
+        @if (Model.NeedsRoom == true)
         {
             <p>Check-in: @Model.CheckInDate?.ToString("dd/MM/yyyy") &middot; Check-out: @Model.CheckOutDate?.ToString("dd/MM/yyyy")</p>
-            <p>Room share: @Model.RoomShareWith</p>
         }
     }
     else
     {
         <form method="post">
-            <label><input type="checkbox" asp-for="NeedsRoom" /> I need a hotel room</label>
-            <label for="CheckInDate">Check-in date</label>
-            <input type="date" asp-for="CheckInDate" />
-            <label for="CheckOutDate">Check-out date</label>
-            <input type="date" asp-for="CheckOutDate" />
-            <label for="RoomShareWith">Share a room with (optional)</label>
-            <input type="text" asp-for="RoomShareWith" />
-            <label for="Notes">Notes (optional)</label>
-            <textarea asp-for="Notes" rows="3"></textarea>
+            <fieldset style="border:1px solid #e5e7eb;border-radius:6px;padding:10px 14px;margin:8px 0;">
+                <legend style="font-weight:600;">Do you need a hotel room?</legend>
+                <label style="display:block;margin:6px 0;">
+                    <input type="radio" asp-for="NeedsRoom" value="true" /> Yes, I need a hotel room
+                </label>
+                <label style="display:block;margin:6px 0;">
+                    <input type="radio" asp-for="NeedsRoom" value="false" /> No, I don't need a hotel
+                </label>
+            </fieldset>
+
+            <div id="hotelDetails">
+                <label for="CheckInDate">Check-in date</label>
+                <input type="date" asp-for="CheckInDate" />
+                <label for="CheckOutDate">Check-out date</label>
+                <input type="date" asp-for="CheckOutDate" />
+                <label for="Notes">Notes (optional)</label>
+                <textarea asp-for="Notes" rows="3"></textarea>
+            </div>
+
             <button type="submit">Save</button>
         </form>
+        <script>
+            // Show date/share/notes block only when "Yes" is chosen.
+            (function () {
+                var details = document.getElementById('hotelDetails');
+                var radios  = document.querySelectorAll('input[name="NeedsRoom"]');
+                function refresh() {
+                    var picked = document.querySelector('input[name="NeedsRoom"]:checked');
+                    var show   = picked && picked.value === 'true';
+                    details.style.display = show ? '' : 'none';
+                }
+                radios.forEach(function (r) { r.addEventListener('change', refresh); });
+                refresh();
+            })();
+        </script>
     }
     <p><a asp-page="/Index">Back to hub</a></p>
 </div>

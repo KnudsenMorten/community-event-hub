@@ -197,7 +197,7 @@ public class TravelModel : PageModel
                     AssignedParticipantId = participantId,
                     Title = "Submit flight ticket + invoice for reimbursement",
                     Description =
-                        $"Send your economy flight ticket + invoice to ELDK by {due:yyyy-MM-dd} " +
+                        $"Send your economy flight ticket + invoice to ELDK by {due:dd/MM/yyyy} " +
                         "(30 days before the event).",
                     DueDate = due,
                     State = TaskState.Open,

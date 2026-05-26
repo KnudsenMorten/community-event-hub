@@ -1,6 +1,6 @@
 # Community Event Hub — Concept & Vision
 
-Source-of-truth design document for the **Community Event Hub** (CEH). This is the "what we want and why" doc; the architecture sketch, role-by-role hub spec, organizer admin areas, and automation scope all live here.
+Source-of-truth design document for the **Community Event Hub** (CEH). This is the "what we want and why" doc — the architecture sketch, role-by-role hub spec, organizer admin areas, and automation scope all live here.
 
 The README at the repo root has the install + run instructions. This file is the spec.
 
@@ -8,6 +8,7 @@ The README at the repo root has the install + run instructions. This file is the
 
 ## Goals
 
+- Build an **open-source community event platform** that other communities can re-use — to help scale the Microsoft (and adjacent) community by automating many manual tasks. Public repo: <https://github.com/KnudsenMorten/community-event-hub>.
 - Provide a central hub for **speakers / volunteers / sponsors** to collect data and tasks — and let them see and manage their own submissions (self-service).
 - **Centralize tasks** — one overview, not five.
 - **Better change management** — hotel changes, speaker changes, etc. flow through the hub instead of email threads.
@@ -18,13 +19,15 @@ The README at the repo root has the install + run instructions. This file is the
 
 ---
 
-## Problems to solve (vs. how it works today)
+## Problems to solve
+
+(vs. how organizing a conference usually works today)
 
 - Move out of spreadsheets into a database — automation vs. manual.
-- Avoid static forms — lots of follow-up, manual merge in Excel.
+- Avoid static forms — they generate endless follow-up and manual merges in Excel.
 - Simplify the system landscape — drop Microsoft Planner with tenant integration for sponsors.
-- Avoid manual follow-up by validating data at creation time (e.g. company tax ID is valid).
-- Separate collection of info away from Sessionize / generic forms — only collect from selected people.
+- Avoid manual follow-up by validating data at creation time (e.g. company tax ID).
+- Separate collection of info away from Sessionize / generic forms — only collect from the selected people.
 - Provide more self-service so we don't have to update on people's behalf (avoids human mistake).
 - Minimize emails — only send for overdue tasks.
 
@@ -34,7 +37,7 @@ The README at the repo root has the install + run instructions. This file is the
 
 ### Open-source public solution
 
-- Lives on GitHub as `KnudsenMorten/community-event-hub`.
+- Lives on GitHub as [`KnudsenMorten/community-event-hub`](https://github.com/KnudsenMorten/community-event-hub).
 - Each community (e.g. ELDK) clones / forks the public repo and customizes per event.
 
 ### Design
@@ -54,7 +57,7 @@ The README at the repo root has the install + run instructions. This file is the
 ### Security — login
 
 - Login via email + PIN code (PIN valid for 15 minutes).
-- Magic-link / auto-login URL per email (valid 7 days).
+- URL support with PIN auto-login (valid 7 days).
 
 ### Integration
 
@@ -62,13 +65,20 @@ The README at the repo root has the install + run instructions. This file is the
 
 ### Cost
 
-- Estimated platform cost per instance: **~€15 / month** (~€30 / month for dev + prod combined).
+- Estimated platform cost per instance: **~€25 / month** (~€50 / month for dev + prod combined).
+
+![Architecture overview](img/image1.png)
+![Architecture detail](img/image2.png)
 
 ---
 
 ## End-user hubs (interfaces)
 
+### Welcome (one-time only)
+
 A first-time **Welcome** page is shown once per participant per edition.
+
+![Welcome landing page](img/image3.png)
 
 ### Speaker Hub
 
@@ -81,7 +91,11 @@ A first-time **Welcome** page is shown once per participant per edition.
   - **Lunch participation** (pre-day)
   - **Speaker info** — accreditation, country, first-time speaker
 
-### Volunteer Hub
+![Speaker hub](img/image4.png)
+![Speaker hub – tasks](img/image5.png)
+![Speaker hub – details](img/image6.png)
+
+### Volunteers Hub
 
 - Volunteer interest sign-up (unconfirmed participant) — collect availability.
 - **Confirmed-volunteers only** view: congrats mail on selection, then:
@@ -91,21 +105,31 @@ A first-time **Welcome** page is shown once per participant per edition.
   - **Lunch participation** (setup day, pre-day)
   - **Tasks assigned** with sync-to-calendar option (button)
 
-### Sponsor Hub
+![Volunteer hub](img/image7.png)
+![Volunteer hub – tasks](img/image8.png)
+![Volunteer hub – details](img/image9.png)
+
+### Sponsors Hub
 
 - Tasks + overdue-only reminders.
 - Register company info — automatic upload to Zoho Backstage (exhibitors only).
 
-### Attendee Hub
+![Sponsor hub](img/image10.png)
+
+### Attendees Hub
 
 - Pre-day attendees only:
   - See confirmed master class.
   - Remove master class booking(s).
   - Check if a booking was made with a different email.
 
+![Attendee hub](img/image11.png)
+
 ---
 
-## Organizer Hub (event management)
+## Organizers Hub (event management)
+
+![Organizer hub](img/image12.png)
 
 ### Speakers management
 
@@ -123,7 +147,9 @@ A first-time **Welcome** page is shown once per participant per edition.
 - Add (and link) extra event coordinator with automatic sync to ERP / Webshop / Hub.
 - Delete event coordinator (automatic across ERP / Webshop / Hub).
 - Set default signer / event coordinator.
-- Add / update / delete tasks for sponsors with deadlines — targeting `exhibitors-all`, `sponsors-all`, or `exhibitor-gold/diamond/platinum`.
+- Add / update / delete tasks for sponsors with deadlines — targeting `exhibitors-all`, `sponsors-all`, or `exhibitor-{gold,diamond,platinum}`.
+
+![Sponsor management](img/image13.png)
 
 ### Volunteer management
 
@@ -133,24 +159,30 @@ A first-time **Welcome** page is shown once per participant per edition.
 
 ### Organizer tasks management
 
-- Import / assign tasks to ELDK leads.
+- Import / assign tasks to the ELDK leads.
 
 ### Hotel management
 
-- Send Excel rooming list to hotel.
+- Send Excel rooming list to the hotel.
 - Import Excel with confirmation IDs.
 - Send email with updated calendar invite carrying the hotel confirmation.
 - Dashboard — pending / missing submissions.
+
+![Hotel management](img/image14.png)
 
 ### Travel reimbursement management
 
 - Overview of claims.
 - Register payout + send confirmation email to speaker.
 
+![Travel reimbursement management](img/image15.png)
+
 ### Swag management
 
 - Excel overview for ordering: polo, awards, jackets, etc.
 - Dashboard — pending / missing submissions.
+
+![Swag management](img/image16.png)
 
 ### Bella group event management
 
@@ -174,16 +206,20 @@ A first-time **Welcome** page is shown once per participant per edition.
 
 ## Automation (scripts)
 
+![Automation pipeline](img/image17.png)
+
 ### Sponsor automation
 
-- Automatic create / update of sponsors + exhibitors in Zoho Backstage — driven by sponsor webshop orders.
-- Automatic create sponsors in ERP (e-conomic) + sync to sponsor webshop.
+- Automatic create / update of sponsors + exhibitors in **Zoho Backstage** from sponsor webshop orders.
+- Automatic create sponsors in **e-conomic ERP** + sync to sponsor webshop.
 - Automatic API integration to validate company tax ID when a new sponsor is created.
 - Ability to create / update customers + contacts via webhook / API.
 - Automatic create contacts + roles in ERP (e-conomic) + sync to sponsor webshop.
 - Automatic set default signer / event coordinator in sponsor webshop.
 - Automatic create ERP (e-conomic) orders from sponsor webshop.
-- Automatic currency check on order creation (today's rate).
+- Automatic currency check on order creation (today's FX).
+
+![Sponsor automation](img/image18.png)
 
 ### Attendee automation
 

@@ -137,7 +137,7 @@ public class TasksTableModel : PageModel
         {
             t.Id.ToString(),
             t.Title,
-            t.DueDate?.ToString("yyyy-MM-dd") ?? string.Empty,
+            t.DueDate?.ToString("dd/MM/yyyy") ?? string.Empty,
             t.State.ToString(),
             t.AssignedParticipant?.FullName ?? string.Empty,
             t.SourceKey ?? string.Empty,

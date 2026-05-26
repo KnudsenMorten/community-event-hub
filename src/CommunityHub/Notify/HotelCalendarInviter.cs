@@ -49,8 +49,8 @@ public sealed class HotelCalendarInviter
 
         var description =
             $"Your hotel reservation at AC Hotel Bella Sky Copenhagen for {eventCode}.\n\n" +
-            $"Check-in:  {checkInDate:yyyy-MM-dd}\n" +
-            $"Check-out: {checkOutDate:yyyy-MM-dd}\n" +
+            $"Check-in:  {checkInDate:dd/MM/yyyy}\n" +
+            $"Check-out: {checkOutDate:dd/MM/yyyy}\n" +
             confLine + "\n" +
             "Questions: info@expertslive.dk\n\nCheers,\nELDK-team";
 
@@ -74,8 +74,8 @@ public sealed class HotelCalendarInviter
             (confirmed
                 ? $"<p>Your hotel reservation at <strong>AC Hotel Bella Sky Copenhagen</strong> for {eventCode} is now <strong>CONFIRMED</strong>.</p>"
                 : $"<p>Thanks for submitting your hotel preference for {eventCode}. We've added a placeholder calendar invitation to your inbox.</p>") +
-            $"<p><strong>Check-in:</strong> {checkInDate:yyyy-MM-dd}<br/>" +
-            $"<strong>Check-out:</strong> {checkOutDate:yyyy-MM-dd}<br/>" +
+            $"<p><strong>Check-in:</strong> {checkInDate:dd/MM/yyyy}<br/>" +
+            $"<strong>Check-out:</strong> {checkOutDate:dd/MM/yyyy}<br/>" +
             (confirmed
                 ? $"<strong>Confirmation number:</strong> {System.Net.WebUtility.HtmlEncode(confirmationNumber ?? "")}<br/>" +
                   $"<strong>Room type:</strong> {System.Net.WebUtility.HtmlEncode(roomType ?? "")}</p>"

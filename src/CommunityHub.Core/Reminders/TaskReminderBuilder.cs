@@ -98,7 +98,7 @@ public sealed class TaskReminderBuilder
             tokens["communityName"] = communityName;
             tokens["eventDisplayName"] = eventDisplayName;
             tokens["taskTitle"] = t.Title;
-            tokens["dueDate"] = t.DueDate.ToString("yyyy-MM-dd");
+            tokens["dueDate"] = t.DueDate.ToString("dd/MM/yyyy");
             tokens["state"] = state;
             tokens["taskLink"] = "Open the hub to see and update this task.";
 

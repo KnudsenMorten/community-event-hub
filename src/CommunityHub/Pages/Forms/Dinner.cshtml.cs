@@ -92,6 +92,13 @@ public class DinnerModel : PageModel
             return Page();
         }
 
+        // Require an explicit pick: YES / NO / MAYBE -- not blank.
+        if (Rsvp == DinnerRsvp.NotAnswered)
+        {
+            Message = "Please pick YES, NO or MAYBE so we know how many to plan for.";
+            return Page();
+        }
+
         var signup = await _db.DinnerSignups.FirstOrDefaultAsync(
             d => d.EventId == me.EventId && d.ParticipantId == me.ParticipantId, ct);
 

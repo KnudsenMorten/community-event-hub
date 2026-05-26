@@ -153,8 +153,8 @@ public class DataGridModel : PageModel
             r.Role.ToString(),
             r.IsActive ? "Yes" : "No",
             r.HasHotelBooking ? (r.NeedsRoom ? "Yes" : "No") : string.Empty,
-            r.CheckInDate?.ToString("yyyy-MM-dd") ?? string.Empty,
-            r.CheckOutDate?.ToString("yyyy-MM-dd") ?? string.Empty,
+            r.CheckInDate?.ToString("dd/MM/yyyy") ?? string.Empty,
+            r.CheckOutDate?.ToString("dd/MM/yyyy") ?? string.Empty,
         });
 
         var csv = CsvWriter.Write(header, rows);

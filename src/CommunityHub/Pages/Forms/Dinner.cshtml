@@ -42,17 +42,17 @@
             <div style="display:flex; flex-direction:column; gap:8px; margin:6px 0 14px;">
                 <label style="font-weight:normal;">
                     <input type="radio" asp-for="Rsvp"
-                           value="@((int)CommunityHub.Core.Domain.DinnerRsvp.Yes)" />
+                           value="@CommunityHub.Core.Domain.DinnerRsvp.Yes" />
                     <strong>YES</strong> &mdash; Count me in!
                 </label>
                 <label style="font-weight:normal;">
                     <input type="radio" asp-for="Rsvp"
-                           value="@((int)CommunityHub.Core.Domain.DinnerRsvp.No)" />
+                           value="@CommunityHub.Core.Domain.DinnerRsvp.No" />
                     <strong>NO</strong> &mdash; I won't be able to make it.
                 </label>
                 <label style="font-weight:normal;">
                     <input type="radio" asp-for="Rsvp"
-                           value="@((int)CommunityHub.Core.Domain.DinnerRsvp.Maybe)" />
+                           value="@CommunityHub.Core.Domain.DinnerRsvp.Maybe" />
                     <strong>MAYBE</strong>
                     <span style="color:#6b7280;font-size:12px;">
                         (final Yes / No must be given no later than
