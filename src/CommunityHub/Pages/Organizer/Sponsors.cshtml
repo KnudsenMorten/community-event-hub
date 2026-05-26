@@ -98,7 +98,7 @@
                             <td style="padding:6px;text-align:right;color:#0a6;">@c.Done</td>
                             <td style="padding:6px;text-align:right;@(c.Overdue > 0 ? "color:#c0392b;font-weight:600;" : "")">@c.Overdue</td>
                             <td style="padding:6px;text-align:right;">@c.Total</td>
-                            <td style="padding:6px;">@(c.NextDue?.ToString("yyyy-MM-dd") ?? "-")</td>
+                            <td style="padding:6px;">@(c.NextDue?.ToString("dd/MM/yyyy") ?? "-")</td>
                         </tr>
                     }
                 </tbody>

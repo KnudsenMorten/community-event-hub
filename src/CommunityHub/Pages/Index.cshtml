@@ -36,37 +36,47 @@
 {
     <div class="card">
         <h2>&#9888; Pending tasks (@Model.PendingTasks.Count)</h2>
-        <ul class="task-list">
-            @foreach (var t in Model.PendingTasks)
-            {
-                <li>
-                    <span>
-                        @if (t.Link is not null)
-                        {
-                            <a href="@t.Link" style="font-weight:600;">@t.Title &rarr;</a>
-                        }
-                        else
-                        {
-                            @t.Title
-                        }
-                    </span>
-                    <span class="due @(t.DaysOverdue is > 0 ? "overdue" : "")">
-                        @if (t.DueDate is null)
-                        {
-                            <text>no due date</text>
-                        }
-                        else if (t.DaysOverdue is > 0)
-                        {
-                            <text>overdue by @t.DaysOverdue day(s) &middot; due @t.DueDate</text>
-                        }
-                        else
-                        {
-                            <text>due @t.DueDate</text>
-                        }
-                    </span>
-                </li>
-            }
-        </ul>
+        <table class="task-table" style="width:100%; border-collapse:collapse;">
+            <thead>
+                <tr style="text-align:left; color:#6b7280; font-size:12px; border-bottom:1px solid #e5e7eb;">
+                    <th style="padding:8px 6px;">Task</th>
+                    <th style="padding:8px 6px; width:130px;">Due date</th>
+                    <th style="padding:8px 6px; width:120px;">Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var t in Model.PendingTasks)
+                {
+                    <tr style="border-bottom:1px solid #f3f4f6;">
+                        <td style="padding:10px 6px;">
+                            @if (t.Link is not null)
+                            {
+                                <a href="@t.Link" style="font-weight:600;">@t.Title &rarr;</a>
+                            }
+                            else
+                            {
+                                @t.Title
+                            }
+                        </td>
+                        <td style="padding:10px 6px; white-space:nowrap;">
+                            @(t.DueDate?.ToString("dd/MM/yyyy") ?? "-")
+                        </td>
+                        <td style="padding:10px 6px; white-space:nowrap;
+                                   color:@(t.DaysOverdue is > 0 ? "#c0392b" : "#6b7280");
+                                   font-weight:@(t.DaysOverdue is > 0 ? "600" : "400");">
+                            @if (t.DaysOverdue is > 0)
+                            {
+                                <text>Overdue (@t.DaysOverdue day@(t.DaysOverdue == 1 ? "" : "s"))</text>
+                            }
+                            else
+                            {
+                                <text>Pending</text>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
     </div>
 }
 
@@ -74,12 +84,32 @@
 {
     <div class="card">
         <h2 style="color:#0a6;">&#10003; Completed tasks (@Model.CompletedTasks.Count)</h2>
-        <ul class="task-list">
-            @foreach (var t in Model.CompletedTasks)
-            {
-                <li class="done-row"><span>@t.Title</span><span class="due">done</span></li>
-            }
-        </ul>
+        <table class="task-table" style="width:100%; border-collapse:collapse;">
+            <thead>
+                <tr style="text-align:left; color:#6b7280; font-size:12px; border-bottom:1px solid #e5e7eb;">
+                    <th style="padding:8px 6px;">Task</th>
+                    <th style="padding:8px 6px; width:120px;">Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var t in Model.CompletedTasks)
+                {
+                    <tr style="border-bottom:1px solid #f3f4f6;">
+                        <td style="padding:10px 6px;">
+                            @if (t.Link is not null)
+                            {
+                                <a href="@t.Link" style="color:#0a6;">@t.Title</a>
+                            }
+                            else
+                            {
+                                @t.Title
+                            }
+                        </td>
+                        <td style="padding:10px 6px; color:#0a6; font-weight:600;">&#10003; Done</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
     </div>
 }
 

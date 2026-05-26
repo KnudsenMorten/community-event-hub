@@ -1,5 +1,9 @@
 # Community Event Hub
 
+> Open-source platform — **free for any community to use**.
+> Built by Microsoft MVP **Morten Knudsen** ([aka.ms/morten](https://aka.ms/morten)).
+> Public mirror: <https://github.com/KnudsenMorten/community-event-hub>.
+
 A self-service participant portal for community-run tech events. One web app that every participant of an edition logs in to with a PIN, sees a personalized landing page for their role, and self-services everything they need to do before the event — book a hotel night, RSVP to the appreciation dinner, pick a polo size, accept a speaker slot, fill in travel reimbursement, upload a sponsor logo, etc.
 
 Built to be **evergreen and multi-community**: the codebase is generic (`CommunityHub`), the per-event data — community name, dates, venue, hostname, deadlines — lives in the `Events` table. A new edition or a different community is a new row, not a code change. Open-sourced from the **Experts Live Denmark** instance that runs the conference.

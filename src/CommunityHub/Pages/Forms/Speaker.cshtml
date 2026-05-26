@@ -98,7 +98,7 @@
         else
         {
             <p style="color:#6b7280;font-size:12px;">
-                Last imported @Model.LastSessionizeImportAt?.ToString("yyyy-MM-dd HH:mm 'UTC'").
+                Last imported @Model.LastSessionizeImportAt?.ToString("dd/MM/yyyy HH:mm 'UTC'").
                 These fields are read-only here — edit them in Sessionize and the organizer's next import will refresh them.
             </p>
             <p><strong>Tagline:</strong> @(string.IsNullOrEmpty(Model.Tagline) ? "(none)" : Model.Tagline)</p>

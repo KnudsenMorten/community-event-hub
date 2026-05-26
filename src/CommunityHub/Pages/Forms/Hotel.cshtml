@@ -28,7 +28,7 @@
         <p>Needs room: <strong>@(Model.NeedsRoom ? "Yes" : "No")</strong></p>
         @if (Model.NeedsRoom)
         {
-            <p>Check-in: @Model.CheckInDate &middot; Check-out: @Model.CheckOutDate</p>
+            <p>Check-in: @Model.CheckInDate?.ToString("dd/MM/yyyy") &middot; Check-out: @Model.CheckOutDate?.ToString("dd/MM/yyyy")</p>
             <p>Room share: @Model.RoomShareWith</p>
         }
     }

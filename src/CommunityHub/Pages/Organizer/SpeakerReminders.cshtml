@@ -62,7 +62,7 @@
                             </td>
                             <td style="padding:6px;">@r.Role</td>
                             <td style="padding:6px;">@r.TaskTitle</td>
-                            <td style="padding:6px;">@(r.DueDate?.ToString("yyyy-MM-dd") ?? "-")</td>
+                            <td style="padding:6px;">@(r.DueDate?.ToString("dd/MM/yyyy") ?? "-")</td>
                             <td style="padding:6px;text-align:right;@(r.DaysOverdue is > 0 ? "color:#c0392b;font-weight:600;" : "")">
                                 @(r.DaysOverdue is null ? "-" : r.DaysOverdue.ToString())
                             </td>
@@ -72,7 +72,7 @@
                                 </span>
                             </td>
                             <td style="padding:6px;">
-                                @(r.LastRemindedAt?.ToString("yyyy-MM-dd HH:mm") ?? "(never)")
+                                @(r.LastRemindedAt?.ToString("dd/MM/yyyy HH:mm") ?? "(never)")
                             </td>
                             <td style="padding:6px;text-align:right;">@r.RemindersSent</td>
                             <td style="padding:6px;">

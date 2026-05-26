@@ -4,7 +4,9 @@ using CommunityHub.Core.Email;
 using CommunityHub.Core.Integrations;
 using CommunityHub.Core.Reminders;
 using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Localization;
 using Microsoft.EntityFrameworkCore;
+using System.Globalization;
 
 // ===========================================================================
 //  CommunityHub - web app entry point.
@@ -123,6 +125,20 @@ if (!app.Environment.IsDevelopment())
     app.UseExceptionHandler("/Error");
     app.UseHsts();
 }
+
+// Force Danish locale on every request so all date/number rendering is
+// dd-MM-yyyy (Monday-first week, comma decimal separator). Both
+// CurrentCulture (number/date formatting) and CurrentUICulture (resource
+// lookup) are pinned -- the app is single-language Danish.
+var daDk = new CultureInfo("da-DK");
+CultureInfo.DefaultThreadCurrentCulture   = daDk;
+CultureInfo.DefaultThreadCurrentUICulture = daDk;
+app.UseRequestLocalization(new RequestLocalizationOptions
+{
+    DefaultRequestCulture = new RequestCulture(daDk),
+    SupportedCultures     = new[] { daDk },
+    SupportedUICultures   = new[] { daDk },
+});
 
 app.UseHttpsRedirection();
 app.UseStaticFiles();

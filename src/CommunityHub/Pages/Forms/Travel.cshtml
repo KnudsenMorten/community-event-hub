@@ -29,7 +29,7 @@
             <li>If neither cap fits (e.g. cheapest flight is above), choose <em>Other</em> and explain &mdash; we'll work with you.</li>
             @if (Model.SubmitInvoiceDueDate is not null)
             {
-                <li>Submit ticket + invoice to ELDK by <strong>@Model.SubmitInvoiceDueDate?.ToString("yyyy-MM-dd")</strong> (30 days before the event).</li>
+                <li>Submit ticket + invoice to ELDK by <strong>@Model.SubmitInvoiceDueDate?.ToString("dd/MM/yyyy")</strong> (30 days before the event).</li>
             }
         </ul>
 

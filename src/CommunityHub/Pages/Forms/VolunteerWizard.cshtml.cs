@@ -20,6 +20,9 @@ namespace CommunityHub.Pages.Forms;
 [Authorize]
 public class VolunteerWizardModel : PageModel
 {
+    /// <summary>SourceKey prefix for the "complete the volunteer sign-up" task.</summary>
+    public const string VolunteerTaskKey = "volunteer-form";
+
     private const char ShiftDelimiter = '|';
 
     private readonly CommunityHubDbContext _db;
@@ -64,6 +67,7 @@ public class VolunteerWizardModel : PageModel
         if (me is null) return RedirectToPage("/Login");
 
         IsLocked = await IsEditingLockedAsync(me.EventId, ct);
+        await EnsureVolunteerTaskExistsAsync(me.EventId, me.ParticipantId, ct);
 
         // Pre-fill from an existing submission so the wizard edits it.
         var existing = await _db.VolunteerAvailabilities.FirstOrDefaultAsync(
@@ -138,11 +142,55 @@ public class VolunteerWizardModel : PageModel
         availability.MaxHoursPerDay = Math.Clamp(MaxHoursPerDay, 1, 24);
 
         await _db.SaveChangesAsync(ct);
+        await MarkVolunteerTaskDoneAsync(me.EventId, me.ParticipantId, ct);
 
         Saved = true;
         Step = 3;
         Message = "Thank you - your volunteer details are saved.";
         return Page();
+    }
+
+    // ----- Auto-task: "Complete the Volunteer sign-up" -------------------
+    private async Task EnsureVolunteerTaskExistsAsync(
+        int eventId, int participantId, CancellationToken ct)
+    {
+        var sourceKey = $"{VolunteerTaskKey}:{participantId}";
+        if (await _db.Tasks.AnyAsync(
+                t => t.EventId == eventId
+                     && t.AssignedParticipantId == participantId
+                     && t.SourceKey == sourceKey, ct)) return;
+
+        var due = await _db.Events
+            .Where(e => e.Id == eventId)
+            .Select(e => (DateOnly?)e.StartDate.AddDays(-30))
+            .FirstOrDefaultAsync(ct);
+
+        _db.Tasks.Add(new ParticipantTask
+        {
+            EventId = eventId,
+            AssignedParticipantId = participantId,
+            Title = "Complete the Volunteer shifts sign-up",
+            Description = "Pick the shifts you can cover and your preferred role. " +
+                          "Finishing the wizard marks this task Done.",
+            DueDate = due,
+            State = TaskState.Open,
+            SourceKey = sourceKey,
+            CreatedAt = _clock.GetUtcNow(),
+        });
+        await _db.SaveChangesAsync(ct);
+    }
+
+    private async Task MarkVolunteerTaskDoneAsync(
+        int eventId, int participantId, CancellationToken ct)
+    {
+        var sourceKey = $"{VolunteerTaskKey}:{participantId}";
+        var task = await _db.Tasks.FirstOrDefaultAsync(
+            t => t.EventId == eventId
+                 && t.AssignedParticipantId == participantId
+                 && t.SourceKey == sourceKey, ct);
+        if (task is null || task.State == TaskState.Done) return;
+        task.State = TaskState.Done;
+        await _db.SaveChangesAsync(ct);
     }
 
     private async Task<bool> IsEditingLockedAsync(int eventId, CancellationToken ct)

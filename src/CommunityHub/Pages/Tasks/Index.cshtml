@@ -23,7 +23,7 @@
                 }
                 else if (task.DueDate is not null)
                 {
-                    <span> &middot; due @task.DueDate</span>
+                    <span> &middot; due @task.DueDate?.ToString("dd/MM/yyyy")</span>
                 }
                 @if (!string.IsNullOrEmpty(task.Description))
                 {

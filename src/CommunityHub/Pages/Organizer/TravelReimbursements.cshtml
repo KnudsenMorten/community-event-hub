@@ -88,7 +88,7 @@
                                 <span style="color:#0a6;font-weight:600;">&#10003; Paid</span>
                                 @if (r.PaidAt is not null)
                                 {
-                                    <div style="font-size:11px;color:#8a8f9c;">@r.PaidAt?.ToString("yyyy-MM-dd")</div>
+                                    <div style="font-size:11px;color:#8a8f9c;">@r.PaidAt?.ToString("dd/MM/yyyy")</div>
                                 }
                                 @if (!string.IsNullOrWhiteSpace(r.PaidNotes))
                                 {
