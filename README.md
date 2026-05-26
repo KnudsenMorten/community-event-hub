@@ -9,23 +9,47 @@ A self-service participant portal for community-run tech events. One web app tha
 
 Built to be **evergreen and multi-community**: the codebase is generic (`CommunityHub`), the per-event data — community name, dates, venue, hostname, deadlines — lives in the `Events` table. A new edition or a different community is a new row, not a code change. Open-sourced from the **Experts Live Denmark** instance that runs the conference.
 
+![Organizer hub](docs/img/image12.png)
+
 ---
 
 ## Table of contents
 
 - [Goals](#goals)
 - [Problems to solve](#problems-to-solve)
-- [Features](#features)
-  - [End-user hubs (per role)](#end-user-hubs-per-role)
-  - [Organizer hub (event management)](#organizer-hub-event-management)
-  - [Automation (scripts)](#automation-scripts)
 - [Architecture](#architecture)
-- [Repository layout](#repository-layout)
-- [Quick start (deploy your own instance)](#quick-start-deploy-your-own-instance)
+  - [Open-source public solution](#open-source-public-solution)
+  - [Design](#design)
+  - [Deployment](#deployment)
+  - [Security — login](#security--login)
+  - [Integration](#integration)
+  - [Cost](#cost)
+- [End-user hubs (interfaces)](#end-user-hubs-interfaces)
+  - [Welcome (one-time only)](#welcome-one-time-only)
+  - [Speaker Hub](#speaker-hub)
+  - [Volunteers Hub](#volunteers-hub)
+  - [Sponsors Hub](#sponsors-hub)
+  - [Attendees Hub](#attendees-hub)
+- [Organizers Hub (event management)](#organizers-hub-event-management)
+  - [Speakers management](#speakers-management)
+  - [Sponsors management](#sponsors-management)
+  - [Volunteer management](#volunteer-management)
+  - [Organizer tasks management](#organizer-tasks-management)
+  - [Hotel management](#hotel-management)
+  - [Travel reimbursement management](#travel-reimbursement-management)
+  - [Swag management](#swag-management)
+  - [Bella group event management](#bella-group-event-management)
+  - [Group photos management](#group-photos-management)
+  - [App game sponsor participation management](#app-game-sponsor-participation-management)
+- [Automation (scripts)](#automation-scripts)
+  - [Sponsor automation](#sponsor-automation)
+  - [Attendee automation](#attendee-automation)
+  - [Sponsor sync — to-do](#sponsor-sync--to-do)
+- [Deploy your own instance](#deploy-your-own-instance)
 - [Configuration model](#configuration-model)
 - [Resilience notes](#resilience-notes)
 - [Embedding](#embedding)
-- [Cost](#cost)
+- [Repository layout](#repository-layout)
 - [Full design spec](#full-design-spec)
 - [License](#license)
 - [Status](#status)
@@ -34,6 +58,7 @@ Built to be **evergreen and multi-community**: the codebase is generic (`Communi
 
 ## Goals
 
+- Build an **open-source community event platform** that other communities can re-use — to help scale the Microsoft (and adjacent) community by automating many manual tasks. Public repo: <https://github.com/KnudsenMorten/community-event-hub>.
 - Provide a central hub for **speakers / volunteers / sponsors** to collect data and tasks — and let them see and manage their own submissions (self-service).
 - **Centralize tasks** — one overview, not five.
 - **Better change management** — hotel changes, speaker changes, etc. flow through the hub instead of email threads.
@@ -58,93 +83,208 @@ Built to be **evergreen and multi-community**: the codebase is generic (`Communi
 
 ---
 
-## Features
-
-### End-user hubs (per role)
-
-A first-time **Welcome** page is shown once per participant per edition. Then a role-specific dashboard:
-
-| Role | What they get |
-|---|---|
-| **Organizer** | Everything below, plus the full Organizer admin surface. |
-| **Speaker** | Hotel + dinner + speaker deadlines (slides, photo, bio), travel reimbursement, lunch participation (pre-day), swag (polo), speaker info form (accreditation, country, first-time speaker), per-deadline reminders. |
-| **Volunteer** | Sign-up form (unconfirmed) → on selection: congrats mail + hotel + dinner + swag + lunch (setup + pre-day) + tasks assigned with calendar-sync option. |
-| **Sponsor** | Sponsor task list + reminders (overdue only) + company info form (auto-uploaded to Zoho Backstage for exhibitors). |
-| **Attendee** | Pre-day attendees only: see confirmed master class, remove booking(s), check if a booking was made with another email. |
-| **Video / Camera** | Crew variants — hotel + dinner like staff. |
-
-Common across roles:
-- **Mandatory tasks** are listed on the front with their state (Open / In-progress / Done / Overdue) and the matching form is auto-marked Done on save (no double-bookkeeping).
-- **PIN login** to email (15 min validity) + a magic auto-login link valid 7 days.
-- **Calendar invites** (ICS) for hotel + dinner — stable UID per (participant, event), so re-saves UPDATE the existing calendar entry instead of duplicating.
-
-### Organizer hub (event management)
-
-| Area | Capabilities |
-|---|---|
-| **Speakers** | Import from Sessionize Excel → into Hub AND into Zoho Backstage; set pre-day / main-day; activate / deactivate; pending-task dashboard; bulk reminder; add / update / delete tasks with deadlines. |
-| **Sponsors** | Pending-task dashboard; add / link / delete event coordinator with automatic sync to ERP + Webshop + Hub; set default signer; add / update / delete tasks targeting `exhibitors-all`, `sponsors-all`, or `exhibitor-{gold,diamond,platinum}`. |
-| **Volunteers** | Import tasks from Excel and assign; activate / deactivate; pending-submission dashboard. |
-| **Organizer tasks** | Import / assign tasks to the ELDK leads. |
-| **Hotel** | Send Excel rooming list to the hotel; import confirmation IDs; email participants the updated calendar invite with confirmation; pending-submission dashboard. |
-| **Travel reimbursement** | Overview of claims; register payout + send confirmation email to speaker. |
-| **Swag** | Excel overview for ordering polo / awards / jackets; pending-submission dashboard. |
-| **Bella group event** | Lunch overview pre-day + main-day; appreciation dinner overview incl. allergies; tasks; book furniture (API, planned); exhibitor booth overview. |
-| **Group photos** | Register company + contact details; create / update calendar invite + send to lead with internal participants. |
-| **App-game sponsor participation** | Register the participating sponsor (gift) + send a reminder to bring the gift to the event. |
-
-### Automation (scripts)
-
-| Area | Capability |
-|---|---|
-| **Sponsors** | Automatic create / update of sponsors + exhibitors in **Zoho Backstage** from sponsor webshop orders; automatic create sponsors in **e-conomic ERP** + sync to sponsor webshop; tax-ID validation on creation; create / update customers + contacts via webhook / API; auto-set default signer / event coordinator in sponsor webshop; auto-create e-conomic orders from webshop orders; automatic currency check (today's FX) on order creation. |
-| **Attendees** | Send info if no master class chosen; send info if more than one master class booked (with self-service removal). |
-| **Sponsor sync** | Orders-only — create sponsor companies and contacts in the hub via script; link contact to company; tasks are assigned to the sponsor **company** (not the contact) so all contacts of a sponsor see all tasks. |
-
----
-
 ## Architecture
 
-ASP.NET Core 8 Razor Pages (`CommunityHub`) on Azure App Service Linux B1; reminder + import worker (`CommunityHub.Jobs`) on Azure Functions Flex Consumption (FC1); EF Core 8 against Azure SQL (Basic 5 DTU is enough for thousands of participants); Brevo SMTP for transactional email; Microsoft DataProtection for the PIN + magic-link tokens; Key Vault for every secret; Bicep templates for the whole stack in `infra/`.
+### Open-source public solution
 
-Every secret is a Key Vault reference. The App Service uses managed identity to pull them at startup — no secret ever lands in `appsettings.json`, deploy scripts, or git history.
+- Lives on GitHub as [`KnudsenMorten/community-event-hub`](https://github.com/KnudsenMorten/community-event-hub).
+- Each community (e.g. ELDK) clones / forks the public repo and customizes per event.
 
----
+### Design
 
-## Repository layout
+- Repo is 100% managed through GitHub CI/CD actions + Visual Studio Code with Claude AI integration.
+- Per-event customization via JSON file (community name, hostname, deadlines, role rules).
 
-```
-src/
-  CommunityHub/             ASP.NET Core 8 Razor Pages web app
-  CommunityHub.Core/        Domain + Data + Email + Integrations (shared)
-  CommunityHub.Jobs/        Worker for reminders + Sessionize import jobs
+### Deployment
 
-infra/
-  main.bicep                Stage-1 infra (App Service, SQL, KV, Function, Storage, Log Analytics)
-  modules/                  One Bicep per Azure resource type
-  main.{dev|prod}.parameters.json    Per-environment parameters (community fork: provide your own)
+- Automatic deployment to Azure of all components (dev + prod).
+- Components: **Azure SQL, Azure App Service, Azure Functions, Application Insights**.
+- Separate dev + prod instances per event (e.g. `rg-eldk27hub-dev`, `rg-eldk27hub-prod`).
+- DNS:
+  - dev: `dev.eldk27.eventhub.expertslive.dk`
+  - prod: `eldk27.eventhub.expertslive.dk`
 
-scripts/
-  deploy.sh                 Idempotent `az deployment group create` of infra/main.bicep
-  set-secrets.sh            Write KV secrets from environment variables
+### Security — login
 
-docs/
-  CONCEPT.md                Source-of-truth design doc (goals, hubs, organizer admin, automation)
-  RUNBOOK.md                Step-by-step "first deploy" + "operate" recipe
-  TEST_WALKTHROUGH.md       End-to-end smoke walkthrough
+- Login via email + PIN code (PIN valid for 15 minutes).
+- URL support with PIN auto-login (valid 7 days).
 
-config-examples/
-  templates/emails/         Brevo / Razor email templates (welcome, reminders)
+### Integration
 
-tools/
-  seed-dev.ps1              Seed an Event row + 5 test participants (one per role)
-```
+- iframe-embedded inside Zoho Backstage.
 
-The PRIVATE upstream repo (`eldk-community-event-hub`) holds the ELDK27 production data (event row JSON, real logo files, prod parameter files). The PUBLIC repo (this one) is a sanitized template — no event-specific data.
+### Cost
+
+- Estimated platform cost per instance: **~€25 / month** (~€50 / month for dev + prod combined).
+
+![Architecture overview](docs/img/image1.png)
+![Architecture detail](docs/img/image2.png)
 
 ---
 
-## Quick start (deploy your own instance)
+## End-user hubs (interfaces)
+
+### Welcome (one-time only)
+
+A first-time **Welcome** page is shown once per participant per edition.
+
+![Welcome landing page](docs/img/image3.png)
+
+### Speaker Hub
+
+- Tasks for speakers + overdue-only reminders — join Signal channel, deliver preview / final presentation, submit info, join Zoho Backstage.
+- Collect + maintain info:
+  - **Hotel** (incl. calendar invite)
+  - **Appreciation dinner** (incl. calendar invite)
+  - **Swag** incl. polo
+  - **Travel reimbursement claim**
+  - **Lunch participation** (pre-day)
+  - **Speaker info** — accreditation, country, first-time speaker
+
+![Speaker hub](docs/img/image4.png)
+![Speaker hub – tasks](docs/img/image5.png)
+![Speaker hub – details](docs/img/image6.png)
+
+### Volunteers Hub
+
+- Volunteer interest sign-up (unconfirmed participant) — collect availability.
+- **Confirmed-volunteers only** view: congrats mail on selection, then:
+  - **Hotel** (incl. calendar invite)
+  - **Appreciation dinner** (incl. calendar invite)
+  - **Swag** incl. polo
+  - **Lunch participation** (setup day, pre-day)
+  - **Tasks assigned** with sync-to-calendar option (button)
+
+![Volunteer hub](docs/img/image7.png)
+![Volunteer hub – tasks](docs/img/image8.png)
+![Volunteer hub – details](docs/img/image9.png)
+
+### Sponsors Hub
+
+- Tasks + overdue-only reminders.
+- Register company info — automatic upload to Zoho Backstage (exhibitors only).
+
+![Sponsor hub](docs/img/image10.png)
+
+### Attendees Hub
+
+- Pre-day attendees only:
+  - See confirmed master class.
+  - Remove master class booking(s).
+  - Check if a booking was made with a different email.
+
+![Attendee hub](docs/img/image11.png)
+
+---
+
+## Organizers Hub (event management)
+
+![Organizer hub](docs/img/image12.png)
+
+### Speakers management
+
+- Import speakers from Sessionize Excel → into Hub.
+- Import from Sessionize Excel → into Zoho Backstage.
+- Set speaker participation (pre-day / main-day) — import OR grid multi-select.
+- Activate / deactivate speakers.
+- Dashboard — overview of pending tasks.
+- Send reminders covering overdue tasks.
+- Add / update / delete tasks for speakers, incl. deadlines.
+
+### Sponsors management
+
+- Dashboard — overview of pending tasks.
+- Add (and link) extra event coordinator with automatic sync to ERP / Webshop / Hub.
+- Delete event coordinator (automatic across ERP / Webshop / Hub).
+- Set default signer / event coordinator.
+- Add / update / delete tasks for sponsors with deadlines — targeting `exhibitors-all`, `sponsors-all`, or `exhibitor-{gold,diamond,platinum}`.
+
+![Sponsor management](docs/img/image13.png)
+
+### Volunteer management
+
+- Import tasks from Excel and assign to volunteers.
+- Activate / deactivate volunteers.
+- Dashboard — pending / missing submissions.
+
+### Organizer tasks management
+
+- Import / assign tasks to the ELDK leads.
+
+### Hotel management
+
+- Send Excel rooming list to the hotel.
+- Import Excel with confirmation IDs.
+- Send email with updated calendar invite carrying the hotel confirmation.
+- Dashboard — pending / missing submissions.
+
+![Hotel management](docs/img/image14.png)
+
+### Travel reimbursement management
+
+- Overview of claims.
+- Register payout + send confirmation email to speaker.
+
+![Travel reimbursement management](docs/img/image15.png)
+
+### Swag management
+
+- Excel overview for ordering: polo, awards, jackets, etc.
+- Dashboard — pending / missing submissions.
+
+![Swag management](docs/img/image16.png)
+
+### Bella group event management
+
+- Lunch overview pre-day / main-day.
+- Appreciation dinner overview incl. allergies.
+- Tasks.
+- Book furniture — via API (planned).
+- Exhibitor booth overview.
+
+### Group photos management
+
+- Register company with contact details.
+- Create / update calendar invite + send to the lead incl. internal participants.
+
+### App game sponsor participation management
+
+- Register participating sponsor (gift).
+- Send reminder to sponsor to bring gift to event.
+
+---
+
+## Automation (scripts)
+
+![Automation pipeline](docs/img/image17.png)
+
+### Sponsor automation
+
+- Automatic create / update of sponsors + exhibitors in **Zoho Backstage** from sponsor webshop orders.
+- Automatic create sponsors in **e-conomic ERP** + sync to sponsor webshop.
+- Automatic API integration to validate company tax ID when a new sponsor is created.
+- Ability to create / update customers + contacts via webhook / API.
+- Automatic create contacts + roles in ERP (e-conomic) + sync to sponsor webshop.
+- Automatic set default signer / event coordinator in sponsor webshop.
+- Automatic create ERP (e-conomic) orders from sponsor webshop.
+- Automatic currency check on order creation (today's FX).
+
+![Sponsor automation](docs/img/image18.png)
+
+### Attendee automation
+
+- Send info if no master class has been chosen.
+- Send info if more than one master class has been booked — with ability to remove booking(s).
+
+### Sponsor sync — to-do
+
+- Orders only — create sponsor companies in the hub via script.
+- Orders only — create contacts in the hub via script and link to sponsor company.
+- Tasks are assigned to the sponsor **company** (not the individual contact). All contacts of a sponsor company see all tasks for that company.
+
+---
+
+## Deploy your own instance
 
 Prerequisites:
 
@@ -235,15 +375,42 @@ Embed snippet template lives at `tools/backstage-embed-snippet.html`.
 
 ---
 
-## Cost
+## Repository layout
 
-Estimated platform cost per instance: **~€15 / month** (≈€30 / month for dev + prod combined) on Azure SQL Basic + App Service B1 + Functions FC1 + Log Analytics free tier.
+```
+src/
+  CommunityHub/             ASP.NET Core 8 Razor Pages web app
+  CommunityHub.Core/        Domain + Data + Email + Integrations (shared)
+  CommunityHub.Jobs/        Worker for reminders + Sessionize import jobs
+
+infra/
+  main.bicep                Stage-1 infra (App Service, SQL, KV, Function, Storage, Log Analytics)
+  modules/                  One Bicep per Azure resource type
+  main.{dev|prod}.parameters.json    Per-environment parameters (community fork: provide your own)
+
+scripts/
+  deploy.sh                 Idempotent `az deployment group create` of infra/main.bicep
+  set-secrets.sh            Write KV secrets from environment variables
+
+docs/
+  CONCEPT.md                Source-of-truth design doc (goals, hubs, organizer admin, automation)
+  RUNBOOK.md                Step-by-step "first deploy" + "operate" recipe
+  TEST_WALKTHROUGH.md       End-to-end smoke walkthrough
+
+config-examples/
+  templates/emails/         Brevo / Razor email templates (welcome, reminders)
+
+tools/
+  seed-dev.ps1              Seed an Event row + 5 test participants (one per role)
+```
+
+The PRIVATE upstream repo (`eldk-community-event-hub`) holds the ELDK27 production data (event row JSON, real logo files, prod parameter files). The PUBLIC repo (this one) is a sanitized template — no event-specific data.
 
 ---
 
 ## Full design spec
 
-See **[docs/CONCEPT.md](docs/CONCEPT.md)** for the source-of-truth design document — goals, problems-solved, role-by-role hub specs, the full organizer admin surface (Speakers, Sponsors, Volunteers, Hotel, Travel reimbursement, Swag, Bella group event, Group photos, App game sponsor participation), and the automation scope (sponsor + attendee scripts). The README above is "how to deploy + features digest"; the CONCEPT doc is "what the platform is for and why" in full.
+See **[docs/CONCEPT.md](docs/CONCEPT.md)** for the source-of-truth design document. The README mirrors its chapter structure; CONCEPT is the canonical version with full prose.
 
 Other docs:
 - [`docs/RUNBOOK.md`](docs/RUNBOOK.md) — first-deploy + operate playbook
