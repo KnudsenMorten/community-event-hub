@@ -120,6 +120,30 @@
         footer { max-width: 880px; margin: 24px auto; padding: 0 16px;
             font-size: 12px; color: #6b7280; }
     </style>
+    <!-- Danish-locale date picker (Monday-first, dd/mm/yyyy).
+         Browser-native <input type="date"> ignores html lang and uses OS locale,
+         so we replace every date input with flatpickr forced to da. -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/l10n/da.js"></script>
+    <script defer>
+        document.addEventListener('DOMContentLoaded', function () {
+            if (typeof flatpickr === 'undefined') return;
+            flatpickr.localize(flatpickr.l10ns.da);
+            document.querySelectorAll('input[type="date"]').forEach(function (el) {
+                // altInput=true: flatpickr hides the original, shows a sibling
+                // input formatted dd/mm/yyyy (Danish), while the hidden one
+                // keeps the ISO yyyy-mm-dd value that DateOnly parses on POST.
+                flatpickr(el, {
+                    locale:     'da',
+                    dateFormat: 'Y-m-d',   // value posted to server (hidden)
+                    altInput:   true,
+                    altFormat:  'd/m/Y',   // value shown to user (visible)
+                    allowInput: true
+                });
+            });
+        });
+    </script>
 </head>
 <body>
     <header>
