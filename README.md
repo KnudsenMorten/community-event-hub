@@ -63,7 +63,6 @@ A first-time **Welcome** page is shown once per participant per edition. Then a 
 |---|---|
 | **Organizer** | Everything below, plus the full Organizer admin surface. |
 | **Speaker** | Hotel + dinner + speaker deadlines (slides, photo, bio), travel reimbursement, lunch participation (pre-day), swag (polo), speaker info form (accreditation, country, first-time speaker), per-deadline reminders. |
-| **MasterclassSpeaker** | Same as Speaker plus pre-day items folded into the deadlines. |
 | **Volunteer** | Sign-up form (unconfirmed) → on selection: congrats mail + hotel + dinner + swag + lunch (setup + pre-day) + tasks assigned with calendar-sync option. |
 | **Sponsor** | Sponsor task list + reminders (overdue only) + company info form (auto-uploaded to Zoho Backstage for exhibitors). |
 | **Attendee** | Pre-day attendees only: see confirmed master class, remove booking(s), check if a booking was made with another email. |
