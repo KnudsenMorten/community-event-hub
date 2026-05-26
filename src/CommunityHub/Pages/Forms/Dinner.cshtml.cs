@@ -13,6 +13,9 @@ namespace CommunityHub.Pages.Forms;
 [Authorize]
 public class DinnerModel : PageModel
 {
+    /// <summary>SourceKey prefix used for the "complete the dinner form" task.</summary>
+    public const string DinnerTaskKey = "dinner-form";
+
     private readonly CommunityHubDbContext _db;
     private readonly ICurrentParticipantAccessor _participant;
     private readonly TimeProvider _clock;
@@ -59,6 +62,7 @@ public class DinnerModel : PageModel
         Email = me.Email;
 
         IsLocked = await IsEditingLockedAsync(me.EventId, ct);
+        await EnsureDinnerTaskExistsAsync(me.EventId, me.ParticipantId, ct);
 
         var existing = await _db.DinnerSignups.FirstOrDefaultAsync(
             d => d.EventId == me.EventId && d.ParticipantId == me.ParticipantId, ct);
@@ -118,6 +122,7 @@ public class DinnerModel : PageModel
         signup.PlusOne = signup.PlusOneCount > 0;
 
         await _db.SaveChangesAsync(ct);
+        await MarkDinnerTaskDoneAsync(me.EventId, me.ParticipantId, ct);
         Message = "Your RSVP has been saved.";
 
         // Auto-send calendar invitation when a participant becomes attending.
@@ -149,6 +154,48 @@ public class DinnerModel : PageModel
         {
             if (!string.IsNullOrWhiteSpace(evt.Code)) EventCode = evt.Code;
         }
+    }
+
+    // ----- Auto-task: "Complete the Dinner form" -------------------------
+    private async Task EnsureDinnerTaskExistsAsync(
+        int eventId, int participantId, CancellationToken ct)
+    {
+        var sourceKey = $"{DinnerTaskKey}:{participantId}";
+        if (await _db.Tasks.AnyAsync(
+                t => t.EventId == eventId
+                     && t.AssignedParticipantId == participantId
+                     && t.SourceKey == sourceKey, ct)) return;
+
+        var due = await _db.Events
+            .Where(e => e.Id == eventId)
+            .Select(e => (DateOnly?)e.StartDate.AddDays(-21))
+            .FirstOrDefaultAsync(ct);
+
+        _db.Tasks.Add(new ParticipantTask
+        {
+            EventId = eventId,
+            AssignedParticipantId = participantId,
+            Title = "Complete the Appreciation Dinner RSVP",
+            Description = "RSVP yes/no (+ plus-one count + allergies). Saving the form marks this task Done.",
+            DueDate = due,
+            State = TaskState.Open,
+            SourceKey = sourceKey,
+            CreatedAt = _clock.GetUtcNow(),
+        });
+        await _db.SaveChangesAsync(ct);
+    }
+
+    private async Task MarkDinnerTaskDoneAsync(
+        int eventId, int participantId, CancellationToken ct)
+    {
+        var sourceKey = $"{DinnerTaskKey}:{participantId}";
+        var task = await _db.Tasks.FirstOrDefaultAsync(
+            t => t.EventId == eventId
+                 && t.AssignedParticipantId == participantId
+                 && t.SourceKey == sourceKey, ct);
+        if (task is null || task.State == TaskState.Done) return;
+        task.State = TaskState.Done;
+        await _db.SaveChangesAsync(ct);
     }
 
     private async Task<bool> IsEditingLockedAsync(int eventId, CancellationToken ct)

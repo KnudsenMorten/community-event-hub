@@ -17,6 +17,9 @@ namespace CommunityHub.Pages.Forms;
 [Authorize]
 public class HotelModel : PageModel
 {
+    /// <summary>SourceKey prefix used for the "complete the hotel form" task.</summary>
+    public const string HotelTaskKey = "hotel-form";
+
     private readonly CommunityHubDbContext _db;
     private readonly ICurrentParticipantAccessor _participant;
     private readonly TimeProvider _clock;
@@ -52,6 +55,7 @@ public class HotelModel : PageModel
         if (me is null) return RedirectToPage("/Login");
 
         IsLocked = await IsEditingLockedAsync(me.EventId, ct);
+        await EnsureHotelTaskExistsAsync(me.EventId, me.ParticipantId, ct);
 
         var existing = await _db.HotelBookings.FirstOrDefaultAsync(
             h => h.EventId == me.EventId && h.ParticipantId == me.ParticipantId,
@@ -105,6 +109,7 @@ public class HotelModel : PageModel
         booking.Notes = Notes;
 
         await _db.SaveChangesAsync(ct);
+        await MarkHotelTaskDoneAsync(me.EventId, me.ParticipantId, ct);
         Message = "Your hotel preference has been saved.";
 
         // Send (or refresh) the calendar invite when the participant has
@@ -146,6 +151,49 @@ public class HotelModel : PageModel
             }
         }
         return Page();
+    }
+
+    // ----- Auto-task: "Complete the Hotel form" --------------------------
+    private async Task EnsureHotelTaskExistsAsync(
+        int eventId, int participantId, CancellationToken ct)
+    {
+        var sourceKey = $"{HotelTaskKey}:{participantId}";
+        if (await _db.Tasks.AnyAsync(
+                t => t.EventId == eventId
+                     && t.AssignedParticipantId == participantId
+                     && t.SourceKey == sourceKey, ct)) return;
+
+        var due = await _db.Events
+            .Where(e => e.Id == eventId)
+            .Select(e => (DateOnly?)e.StartDate.AddDays(-30))
+            .FirstOrDefaultAsync(ct);
+
+        _db.Tasks.Add(new ParticipantTask
+        {
+            EventId = eventId,
+            AssignedParticipantId = participantId,
+            Title = "Complete the Hotel form",
+            Description = "Tell us if you need a hotel room and pick your check-in/check-out dates. " +
+                          "Saving the form marks this task Done.",
+            DueDate = due,
+            State = TaskState.Open,
+            SourceKey = sourceKey,
+            CreatedAt = _clock.GetUtcNow(),
+        });
+        await _db.SaveChangesAsync(ct);
+    }
+
+    private async Task MarkHotelTaskDoneAsync(
+        int eventId, int participantId, CancellationToken ct)
+    {
+        var sourceKey = $"{HotelTaskKey}:{participantId}";
+        var task = await _db.Tasks.FirstOrDefaultAsync(
+            t => t.EventId == eventId
+                 && t.AssignedParticipantId == participantId
+                 && t.SourceKey == sourceKey, ct);
+        if (task is null || task.State == TaskState.Done) return;
+        task.State = TaskState.Done;
+        await _db.SaveChangesAsync(ct);
     }
 
     /// <summary>True once the edition's lock date has passed.</summary>
