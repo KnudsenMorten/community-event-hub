@@ -1,0 +1,14 @@
+@page
+@model CommunityHub.Pages.Login.MagicModel
+@{
+    ViewData["Title"] = "Sign in";
+}
+
+<div class="card">
+    <h2>Sign in</h2>
+    @if (!string.IsNullOrEmpty(Model.Error))
+    {
+        <p class="error">@Model.Error</p>
+        <p><a asp-page="/Login">Go to email + PIN sign-in</a></p>
+    }
+</div>

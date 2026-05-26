@@ -1,0 +1,74 @@
+@page
+@model CommunityHub.Pages.Forms.SwagModel
+@{
+    ViewData["Title"] = "Swag preferences";
+}
+
+<div class="card">
+    <h2>Swag preferences</h2>
+
+    @if (Model.AccessDenied)
+    {
+        <p class="error">
+            The swag form is only for volunteers, speakers, master-class speakers
+            and organizers. Your role (<strong>@CommunityHub.Branding.RoleDisplay.Name(Model.Role)</strong>) does not receive swag.
+        </p>
+        <p><a asp-page="/Index">Back to hub</a></p>
+    }
+    else
+    {
+        <p>
+            Pick the polo (and jacket) size you'd like, or tell us you don't want one.
+            The organizer team confirms the final allocation closer to the event.
+        </p>
+
+        if (!string.IsNullOrEmpty(Model.Message))
+        {
+            <p class="info">@Model.Message</p>
+        }
+
+        <form method="post">
+
+        <label>Name</label>
+        <input type="text" value="@Model.FullName" readonly />
+
+        <label>Email</label>
+        <input type="text" value="@Model.Email" readonly />
+
+        <label for="PoloChoice">Polo size</label>
+        <select asp-for="PoloChoice" required>
+            <option value="">-- pick a size --</option>
+            @foreach (var size in CommunityHub.Pages.Forms.SwagModel.PoloSizes)
+            {
+                <option value="@size">@size</option>
+            }
+        </select>
+
+        <label>Extras (pre-selected — untick if you'd rather not receive them)</label>
+        <div style="display:flex; flex-direction:column; gap:6px; margin:6px 0 14px;">
+            <label style="font-weight:normal; display:flex; align-items:center; gap:8px;">
+                <input type="checkbox" asp-for="WantsGift" style="width:auto;margin:0;" />
+                Yes, I'd like the engraved appreciation award.
+            </label>
+            <label style="font-weight:normal; display:flex; align-items:center; gap:8px;">
+                <input type="checkbox" asp-for="WantsCredlyBadge" style="width:auto;margin:0;" />
+                Yes, I'd like a Credly digital badge.
+            </label>
+        </div>
+
+        <label for="Notes">Notes (optional)</label>
+        <textarea asp-for="Notes" rows="3"
+                  placeholder="Anything the organizer team should know"></textarea>
+
+            <button type="submit">Save preferences</button>
+        </form>
+
+        <p style="color:#6b7280;font-size:12px;margin-top:14px;">
+            Final quantity is set by the organizer based on your role
+            (volunteers: confirmed shift-days &middot; speakers: 1 polo &middot;
+            master class speakers: 2 polo &middot; organizers: 1 polo).
+        </p>
+
+        <p><a asp-page="/Index">Back to hub</a></p>
+    }
+</div>

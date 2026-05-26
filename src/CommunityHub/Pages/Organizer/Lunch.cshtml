@@ -1,0 +1,62 @@
+@page
+@model CommunityHub.Pages.Organizer.LunchModel
+@{
+    ViewData["Title"] = "Lunch headcount";
+}
+
+<div class="card">
+    <h2>Lunch headcount</h2>
+    @if (Model.AccessDenied)
+    {
+        <p class="error">This area is for organizers only.</p>
+    }
+    else
+    {
+        <p>Use this to cater the lunches on the days BEFORE the main conference.</p>
+
+        <div class="stat-grid" style="display:flex;flex-wrap:wrap;gap:12px;margin:12px 0 16px;">
+            <div class="stat" style="background:var(--el-grey);border-radius:8px;padding:12px 16px;min-width:160px;">
+                <div style="font-size:22px;font-weight:700;color:var(--el-darkblue);">@Model.SetupDayCount</div>
+                <div style="font-size:12px;color:#6b7280;">@Model.SetupDayLabel</div>
+            </div>
+            <div class="stat" style="background:var(--el-grey);border-radius:8px;padding:12px 16px;min-width:160px;">
+                <div style="font-size:22px;font-weight:700;color:var(--el-darkblue);">@Model.PreDayCount</div>
+                <div style="font-size:12px;color:#6b7280;">@Model.PreDayLabel</div>
+            </div>
+            <div class="stat" style="background:var(--el-grey);border-radius:8px;padding:12px 16px;min-width:160px;">
+                <div style="font-size:22px;font-weight:700;color:var(--el-darkblue);">@Model.TotalResponses</div>
+                <div style="font-size:12px;color:#6b7280;text-transform:uppercase;">Responses</div>
+            </div>
+        </div>
+
+        <div style="overflow-x:auto;">
+        <table style="border-collapse:collapse;width:100%;font-size:13px;min-width:760px;">
+            <thead>
+                <tr style="border-bottom:2px solid #ddd;text-align:left;">
+                    <th style="padding:6px;">Person</th>
+                    <th style="padding:6px;">Role</th>
+                    <th style="padding:6px;text-align:center;">Setup day</th>
+                    <th style="padding:6px;text-align:center;">Pre-day</th>
+                    <th style="padding:6px;">Notes</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var r in Model.Rows)
+                {
+                    <tr style="border-bottom:1px solid #eee;">
+                        <td style="padding:6px;">
+                            @r.Name<br/>
+                            <span style="color:#8a8f9c;font-size:11px;">@r.Email</span>
+                        </td>
+                        <td style="padding:6px;">@r.Role</td>
+                        <td style="padding:6px;text-align:center;">@(r.SetupDay ? "✓" : "")</td>
+                        <td style="padding:6px;text-align:center;">@(r.PreDay ? "✓" : "")</td>
+                        <td style="padding:6px;max-width:280px;">@r.Notes</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+        </div>
+    }
+    <p><a asp-page="/Organizer/Index">Back to organizer area</a></p>
+</div>

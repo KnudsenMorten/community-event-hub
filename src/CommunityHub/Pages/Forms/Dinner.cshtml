@@ -1,0 +1,84 @@
+@page
+@model CommunityHub.Pages.Forms.DinnerModel
+@{
+    ViewData["Title"] = "Appreciation Dinner";
+}
+
+<div class="card">
+    <h2>Appreciation Dinner</h2>
+
+    <p>
+        We appreciate that you take the time to join us for <strong>#@Model.EventCode</strong>
+        &mdash; and would like to invite all speakers, volunteers, appreciation sponsors,
+        VIP guests and organizers to our appreciation dinner on
+        <strong>@Model.DinnerDateLabel at @Model.DinnerVenue at 18:00 / 6&nbsp;pm</strong>.
+    </p>
+    <p>
+        This is the evening <strong>BEFORE</strong> the main conference day &mdash;
+        please make your travel plans accordingly.
+    </p>
+
+    @if (!string.IsNullOrEmpty(Model.Message))
+    {
+        <p class="info">@Model.Message</p>
+    }
+
+    @if (Model.IsLocked)
+    {
+        <p class="error">Editing is closed for this event.</p>
+        <p>Your RSVP: <strong>@Model.Rsvp</strong></p>
+    }
+    else
+    {
+        <form method="post">
+
+            <label>Name</label>
+            <input type="text" value="@Model.FullName" readonly />
+
+            <label>Email</label>
+            <input type="text" value="@Model.Email" readonly />
+
+            <label>Will you join us?</label>
+            <div style="display:flex; flex-direction:column; gap:8px; margin:6px 0 14px;">
+                <label style="font-weight:normal;">
+                    <input type="radio" asp-for="Rsvp"
+                           value="@((int)CommunityHub.Core.Domain.DinnerRsvp.Yes)" />
+                    <strong>YES</strong> &mdash; Count me in!
+                </label>
+                <label style="font-weight:normal;">
+                    <input type="radio" asp-for="Rsvp"
+                           value="@((int)CommunityHub.Core.Domain.DinnerRsvp.No)" />
+                    <strong>NO</strong> &mdash; I won't be able to make it.
+                </label>
+                <label style="font-weight:normal;">
+                    <input type="radio" asp-for="Rsvp"
+                           value="@((int)CommunityHub.Core.Domain.DinnerRsvp.Maybe)" />
+                    <strong>MAYBE</strong>
+                    <span style="color:#6b7280;font-size:12px;">
+                        (final Yes / No must be given no later than
+                        <strong>@Model.RsvpDeadlineLabel</strong> due to logistics planning)
+                    </span>
+                </label>
+            </div>
+
+            <label for="PlusOneCount">
+                If attending, are you bringing guests? (plus-ones, 0 if none)
+            </label>
+            <input type="number" asp-for="PlusOneCount" min="0" max="10" style="max-width:120px;" />
+
+            <label for="AllergyNotes">Allergies &mdash; please avoid this in my food!</label>
+            <textarea asp-for="AllergyNotes" rows="3"
+                      placeholder="e.g. shellfish, nuts, gluten, lactose"></textarea>
+
+            <label for="Comments">Comments (late arrival, etc.)</label>
+            <textarea asp-for="Comments" rows="3"></textarea>
+
+            <button type="submit">Save my RSVP</button>
+        </form>
+        <p style="color:#6b7280;font-size:12px;margin-top:10px;">
+            A calendar invitation (.ics) will be emailed to <strong>@Model.Email</strong>
+            as soon as you save a YES RSVP.
+        </p>
+    }
+    <p><a asp-page="/Index">Back to hub</a></p>
+</div>

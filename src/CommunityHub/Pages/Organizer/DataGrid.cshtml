@@ -1,0 +1,118 @@
+@page
+@using CommunityHub.Core.Domain
+@model CommunityHub.Pages.Organizer.DataGridModel
+@{
+    ViewData["Title"] = "Participant data grid";
+}
+
+<style>
+    /* Each editable row is a form styled as a table row, so the form is a
+       valid parent of its cells (a form cannot sit directly inside a tr). */
+    .grid { width: 100%; border-collapse: collapse; font-size: 14px; }
+    .grid .row { display: table-row; border-bottom: 1px solid #eee; }
+    .grid .row > * { display: table-cell; padding: 4px 6px; vertical-align: middle; }
+    .grid .head { display: table-row; font-weight: 600; }
+    .grid .head > * { display: table-cell; padding: 6px;
+        border-bottom: 2px solid #ddd; text-align: left; }
+    .grid input[type=date], .grid input[type=text] { margin: 2px 0; max-width: 150px; }
+</style>
+
+<div class="card">
+    <h2>Participant data grid</h2>
+
+    @if (Model.AccessDenied)
+    {
+        <p class="error">This area is for organizers only.</p>
+    }
+    else
+    {
+        @if (!string.IsNullOrEmpty(Model.Message))
+        {
+            <p class="info">@Model.Message</p>
+        }
+
+        <p style="color:#6b7280;font-size:13px;">
+            Edit active status and hotel check-in / check-out in place, then
+            Save the row. Dinner and volunteer detail are on their own pages.
+        </p>
+
+        <!-- Filters -->
+        <form method="get" style="margin-bottom:14px;">
+            <label for="RoleFilter">Roles</label>
+            <select id="RoleFilter" name="RoleFilter">
+                <option value="speakers-volunteers"
+                    selected="@(Model.RoleFilter == "speakers-volunteers")">
+                    Speakers &amp; volunteers
+                </option>
+                <option value="all" selected="@(Model.RoleFilter == "all")">All roles</option>
+                @foreach (var role in Enum.GetValues<ParticipantRole>())
+                {
+                    <option value="@role" selected="@(Model.RoleFilter == role.ToString())">@role</option>
+                }
+            </select>
+            <label for="ActiveFilter">Status</label>
+            <select id="ActiveFilter" name="ActiveFilter">
+                <option value="active" selected="@(Model.ActiveFilter == "active")">Active</option>
+                <option value="inactive" selected="@(Model.ActiveFilter == "inactive")">Inactive</option>
+                <option value="all" selected="@(Model.ActiveFilter == "all")">All</option>
+            </select>
+            <button type="submit">Apply</button>
+        </form>
+        <p>
+            <a asp-page-handler="Export"
+               asp-route-RoleFilter="@Model.RoleFilter"
+               asp-route-ActiveFilter="@Model.ActiveFilter">Export to CSV</a>
+        </p>
+
+        @if (Model.Rows.Count == 0)
+        {
+            <p>No participants match the filter.</p>
+        }
+        else
+        {
+            <p>@Model.Rows.Count participant(s).</p>
+            <div style="overflow-x:auto;">
+                <div class="grid">
+                    <div class="head">
+                        <span>Name</span><span>Role</span><span>Active</span>
+                        <span>Needs room</span><span>Check-in</span>
+                        <span>Check-out</span><span></span>
+                    </div>
+                    @foreach (var r in Model.Rows)
+                    {
+                        <form method="post" asp-page-handler="SaveRow" class="row"
+                              asp-route-RoleFilter="@Model.RoleFilter"
+                              asp-route-ActiveFilter="@Model.ActiveFilter">
+                            <input type="hidden" name="participantId" value="@r.ParticipantId" />
+                            <span>
+                                @r.FullName<br />
+                                <span style="color:#8a8f9c;font-size:12px;">@r.Email</span>
+                            </span>
+                            <span>@r.Role</span>
+                            <span>
+                                <input type="checkbox" name="isActive" value="true"
+                                       checked="@r.IsActive" />
+                            </span>
+                            <span>
+                                <input type="checkbox" name="needsRoom" value="true"
+                                       checked="@r.NeedsRoom" />
+                            </span>
+                            <span>
+                                <input type="date" name="checkInDate"
+                                       value="@(r.CheckInDate?.ToString("yyyy-MM-dd"))" />
+                            </span>
+                            <span>
+                                <input type="date" name="checkOutDate"
+                                       value="@(r.CheckOutDate?.ToString("yyyy-MM-dd"))" />
+                            </span>
+                            <span>
+                                <button type="submit" class="secondary">Save</button>
+                            </span>
+                        </form>
+                    }
+                </div>
+            </div>
+        }
+    }
+    <p><a asp-page="/Organizer/Index">Back to organizer area</a></p>
+</div>

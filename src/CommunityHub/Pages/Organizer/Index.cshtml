@@ -1,0 +1,69 @@
+@page
+@using CommunityHub.Core.Domain
+@model CommunityHub.Pages.Organizer.IndexModel
+@{
+    ViewData["Title"] = "Organizer area";
+}
+
+<div class="card">
+    <h2>Dashboard</h2>
+    <p>Live snapshot: form completion, task status, sponsor progress,
+       attendee reconciliation, volunteer coverage.</p>
+    <p><a asp-page="/Organizer/Dashboard">Open dashboard</a></p>
+</div>
+
+<div class="card">
+    <h2>Attendee reconciliation mismatches</h2>
+
+    @if (Model.AccessDenied)
+    {
+        <p class="error">This area is for organizers only.</p>
+    }
+    else if (Model.Mismatches.Count == 0)
+    {
+        <p class="info">No mismatches. Every attendee's ticket and Master
+           Class booking line up.</p>
+    }
+    else
+    {
+        <p>@Model.Mismatches.Count attendee(s) need review. The hub flags
+           these; resolve identity questions manually.</p>
+        <table style="width:100%;border-collapse:collapse;">
+            <tr style="text-align:left;border-bottom:2px solid #ddd;">
+                <th>Name</th><th>Email</th><th>Ticket</th><th>Booking</th>
+            </tr>
+            @foreach (var a in Model.Mismatches)
+            {
+                <tr style="border-bottom:1px solid #eee;">
+                    <td>@a.FirstName @a.LastName</td>
+                    <td>@a.Email</td>
+                    <td>@a.TicketStatus</td>
+                    <td>@a.BookingStatus</td>
+                </tr>
+            }
+        </table>
+    }
+    <p><a asp-page="/Index">Back to hub</a></p>
+</div>
+
+<div class="card">
+    <h2>Manage participants</h2>
+    <p>View all participants, filter by role and active/inactive status, and
+       deactivate anyone who has dropped out.</p>
+    <p><a asp-page="/Organizer/Participants">Manage participants</a></p>
+</div>
+
+<div class="card">
+    <h2>Import speakers</h2>
+    <p>Pull accepted speakers from Sessionize and add them as participants.</p>
+    <p><a asp-page="/Organizer/SessionizeImport">Import from Sessionize</a></p>
+</div>
+
+<div class="card">
+    <h2>Data grids</h2>
+    <p>Excel-like tables for managing data in place, with CSV export.</p>
+    <p><a asp-page="/Organizer/DataGrid">Participant grid</a> &mdash;
+       active status and hotel check-in / check-out per person.</p>
+    <p><a asp-page="/Organizer/TasksTable">Tasks grid</a> &mdash;
+       edit task title, due date, state and assignee.</p>
+</div>

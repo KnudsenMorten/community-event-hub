@@ -1,0 +1,97 @@
+@page
+@model CommunityHub.Pages.Organizer.SpeakerRemindersModel
+@{
+    ViewData["Title"] = "Speaker reminders";
+}
+
+<div class="card">
+    <h2>Speaker reminders</h2>
+
+    @if (Model.AccessDenied)
+    {
+        <p class="error">This area is for organizers only.</p>
+    }
+    else
+    {
+        <p>
+            One row per (speaker, task). Reminders sent to the speaker about a
+            specific task show up in <strong>Last reminder</strong> / <strong>#</strong>.
+            Hit <em>Send reminder now</em> to nudge a single speaker about a
+            single overdue task.
+        </p>
+
+        if (!string.IsNullOrEmpty(Model.Message))
+        {
+            <p class="info">@Model.Message</p>
+        }
+
+        <form method="get" style="margin:10px 0 14px;">
+            <label for="Filter" style="margin-top:0;">Filter</label>
+            <select asp-for="Filter" onchange="this.form.submit()" style="max-width:240px;">
+                <option value="open">Open / In progress only (default)</option>
+                <option value="overdue">Overdue only</option>
+                <option value="all">All (incl. Done)</option>
+            </select>
+        </form>
+
+        <p style="font-size:13px;color:#6b7280;">@Model.Rows.Count row(s) shown &middot; today is @Model.Today.</p>
+
+        <div style="overflow-x:auto;">
+            <table style="border-collapse:collapse;width:100%;font-size:13px;min-width:900px;">
+                <thead>
+                    <tr style="border-bottom:2px solid #ddd;text-align:left;">
+                        <th style="padding:6px;">Speaker</th>
+                        <th style="padding:6px;">Role</th>
+                        <th style="padding:6px;">Task</th>
+                        <th style="padding:6px;">Due</th>
+                        <th style="padding:6px;text-align:right;">Overdue (days)</th>
+                        <th style="padding:6px;">State</th>
+                        <th style="padding:6px;">Last reminder</th>
+                        <th style="padding:6px;text-align:right;">#</th>
+                        <th style="padding:6px;"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var r in Model.Rows)
+                    {
+                        var rowBg = r.DaysOverdue is > 0 ? "background:#fff5f5;" : "";
+                        <tr style="border-bottom:1px solid #eee;@(rowBg)">
+                            <td style="padding:6px;">
+                                @r.SpeakerName<br/>
+                                <span style="color:#8a8f9c;font-size:11px;">@r.SpeakerEmail</span>
+                            </td>
+                            <td style="padding:6px;">@r.Role</td>
+                            <td style="padding:6px;">@r.TaskTitle</td>
+                            <td style="padding:6px;">@(r.DueDate?.ToString("yyyy-MM-dd") ?? "-")</td>
+                            <td style="padding:6px;text-align:right;@(r.DaysOverdue is > 0 ? "color:#c0392b;font-weight:600;" : "")">
+                                @(r.DaysOverdue is null ? "-" : r.DaysOverdue.ToString())
+                            </td>
+                            <td style="padding:6px;">
+                                <span style="@(r.State == CommunityHub.Core.Domain.TaskState.Done ? "color:#0a6;font-weight:600;" : "")">
+                                    @r.State
+                                </span>
+                            </td>
+                            <td style="padding:6px;">
+                                @(r.LastRemindedAt?.ToString("yyyy-MM-dd HH:mm") ?? "(never)")
+                            </td>
+                            <td style="padding:6px;text-align:right;">@r.RemindersSent</td>
+                            <td style="padding:6px;">
+                                @if (r.State != CommunityHub.Core.Domain.TaskState.Done)
+                                {
+                                    <form method="post" asp-page-handler="Send" asp-route-Filter="@Model.Filter" style="margin:0;">
+                                        <input type="hidden" name="taskId" value="@r.TaskId" />
+                                        <button type="submit" class="secondary"
+                                                style="padding:4px 10px;font-size:12px;">
+                                            Send reminder now
+                                        </button>
+                                    </form>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+    <p><a asp-page="/Organizer/Index">Back to organizer area</a></p>
+</div>

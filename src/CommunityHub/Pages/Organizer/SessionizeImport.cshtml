@@ -1,0 +1,73 @@
+@page
+@model CommunityHub.Pages.Organizer.SessionizeImportModel
+@{
+    ViewData["Title"] = "Import speakers from Sessionize";
+}
+
+<div class="card">
+    <h2>Import speakers from Sessionize</h2>
+
+    @if (Model.AccessDenied)
+    {
+        <p class="error">This area is for organizers only.</p>
+    }
+    else
+    {
+        <p>Export the speaker list from Sessionize as an Excel file, then
+           upload it here. The first row must contain column headers; the
+           import looks for <strong>Email</strong>, <strong>First Name</strong>
+           and <strong>Last Name</strong> columns (any order).</p>
+        <p>New speakers are added with the Speaker role; existing speakers
+           (matched by email) have their name + Sessionize-imported bio /
+           social-link fields refreshed. Hub-collected fields (Accreditation,
+           First-time speaker, Country, Gender) are NEVER overwritten.
+           Nobody is deleted or deactivated by the import.</p>
+        <p class="info" style="background:#eef6ff;padding:8px 12px;border-radius:6px;">
+           This button does <strong>NOT send any emails</strong> &mdash; safe to use
+           for testing or for bulk-loading before the speaker lineup is finalised.
+           Welcome emails are sent manually from the participants page.
+        </p>
+
+        @if (Model.ValidationError is not null)
+        {
+            <p class="error">@Model.ValidationError</p>
+        }
+
+        <form method="post" asp-page-handler="Import" enctype="multipart/form-data">
+            <label for="UploadFile">Sessionize Excel file (.xlsx)</label>
+            <input type="file" id="UploadFile" name="UploadFile"
+                   accept=".xlsx,.xlsm" />
+            <button type="submit">Upload and import</button>
+        </form>
+
+        @if (Model.Result is not null)
+        {
+            if (Model.Result.Error is not null)
+            {
+                <p class="error">Import failed: @Model.Result.Error</p>
+            }
+            else
+            {
+                <p class="info">
+                    Import complete &mdash;
+                    @Model.Result.Fetched rows read,
+                    @Model.Result.Created created,
+                    @Model.Result.Updated updated,
+                    @Model.Result.Skipped unchanged.
+                </p>
+            }
+
+            @if (Model.Result.Warnings.Count > 0)
+            {
+                <p><strong>Warnings:</strong></p>
+                <ul>
+                    @foreach (var w in Model.Result.Warnings)
+                    {
+                        <li>@w</li>
+                    }
+                </ul>
+            }
+        }
+    }
+    <p><a asp-page="/Organizer/Index">Back to organizer area</a></p>
+</div>

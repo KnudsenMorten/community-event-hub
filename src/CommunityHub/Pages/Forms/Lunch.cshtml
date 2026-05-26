@@ -1,0 +1,77 @@
+@page
+@model CommunityHub.Pages.Forms.LunchModel
+@{
+    ViewData["Title"] = "Lunch logistics";
+}
+
+<div class="card">
+    <h2>Lunch logistics</h2>
+
+    @if (Model.AccessDenied)
+    {
+        <p class="error">
+            The lunch form is only for volunteers, speakers, master-class speakers
+            and organizers. Your role (<strong>@CommunityHub.Branding.RoleDisplay.Name(Model.Role)</strong>) is not in the
+            lunch headcount.
+        </p>
+        <p><a asp-page="/Index">Back to hub</a></p>
+    }
+    else
+    {
+        <p>
+            We need a headcount for the lunches on the days <strong>before</strong> the
+            main conference, so the venue can cater accordingly. Tick the days
+            you'll be on site.
+        </p>
+
+        if (!string.IsNullOrEmpty(Model.Message))
+        {
+            <p class="info">@Model.Message</p>
+        }
+
+        <form method="post">
+
+            <label>Name</label>
+            <input type="text" value="@Model.FullName" readonly />
+
+            <label>Email</label>
+            <input type="text" value="@Model.Email" readonly />
+
+            @if (Model.ShowSetupDay)
+            {
+                <label style="font-weight:normal; display:flex; align-items:flex-start; gap:8px; margin-top:8px;">
+                    <input type="checkbox" asp-for="LunchSetupDay" style="width:auto;margin:5px 0 0;" />
+                    <span>
+                        <strong>Yes, I'll be there for lunch on @Model.SetupDayLabel.</strong>
+                    </span>
+                </label>
+            }
+
+            <label style="font-weight:normal; display:flex; align-items:flex-start; gap:8px; margin:8px 0 14px;">
+                <input type="checkbox" asp-for="LunchPreDay" style="width:auto;margin:5px 0 0;" />
+                <span>
+                    <strong>Yes, I'll be there for lunch on @Model.PreDayLabel.</strong>
+                </span>
+            </label>
+
+            @if (!Model.ShowSetupDay)
+            {
+                <p style="color:#6b7280;font-size:12px;margin:-4px 0 14px;">
+                    Setup day is volunteer- and organizer-only &mdash; that's why it's not on your form.
+                </p>
+            }
+
+            <label for="Notes">Notes (allergies, late arrival, etc.)</label>
+            <textarea asp-for="Notes" rows="3"></textarea>
+
+            <button type="submit">Save my lunch preferences</button>
+        </form>
+
+        <p style="color:#6b7280;font-size:12px;margin-top:14px;">
+            The main-conference lunches are included in everyone's ticket and
+            are NOT collected here.
+        </p>
+
+        <p><a asp-page="/Index">Back to hub</a></p>
+    }
+</div>

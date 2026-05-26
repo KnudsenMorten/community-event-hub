@@ -1,0 +1,42 @@
+Subject: {{subject}}
+<!--
+  _layout.html  -  the branded shell every hub email is rendered into.
+  Email-safe: table layout + inline styles only (Outlook does not support
+  modern CSS, flexbox, grid, or <style> blocks reliably).
+  Themed from config: {{brandColor}}, {{logoUrl}}, {{communityName}} come
+  from event.<edition>.json. {{bodyContent}} is the rendered content of the
+  specific email template. {{subject}} is the content template's subject.
+  Edit this ONE file to restyle every email.
+-->
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#f2f4f7;margin:0;padding:24px 0;font-family:Arial,Helvetica,sans-serif;">
+  <tr>
+    <td align="center">
+      <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="background-color:#ffffff;border-radius:8px;overflow:hidden;max-width:600px;width:100%;">
+
+        <!-- header -->
+        <tr>
+          <td style="background-color:{{brandColor}};padding:24px 32px;" align="left">
+            <img src="{{logoUrl}}" alt="{{communityName}}" height="36" style="display:block;border:0;outline:none;text-decoration:none;height:36px;">
+          </td>
+        </tr>
+
+        <!-- body -->
+        <tr>
+          <td style="padding:32px;color:#1a1a2e;font-size:15px;line-height:1.6;">
+            {{bodyContent}}
+          </td>
+        </tr>
+
+        <!-- footer -->
+        <tr>
+          <td style="background-color:#f2f4f7;padding:20px 32px;color:#6b7280;font-size:12px;line-height:1.5;" align="left">
+            {{communityName}} &middot; {{eventDisplayName}}<br>
+            You are receiving this because you are part of the event crew.<br>
+            Questions? Contact <a href="mailto:{{supportEmail}}" style="color:{{brandColor}};">{{supportEmail}}</a>.
+          </td>
+        </tr>
+
+      </table>
+    </td>
+  </tr>
+</table>

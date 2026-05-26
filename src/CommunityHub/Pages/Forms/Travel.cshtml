@@ -1,0 +1,111 @@
+@page
+@model CommunityHub.Pages.Forms.TravelModel
+@{
+    ViewData["Title"] = "Travel reimbursement";
+}
+
+<div class="card">
+    <h2>Travel reimbursement</h2>
+
+    @if (Model.AccessDenied)
+    {
+        <p class="error">
+            The travel reimbursement form is only for speakers and master-class
+            speakers. Your role (<strong>@CommunityHub.Branding.RoleDisplay.Name(Model.Role)</strong>) is not eligible.
+        </p>
+        <p><a asp-page="/Index">Back to hub</a></p>
+    }
+    else
+    {
+        <p style="background:#eef6ff;padding:10px 14px;border-radius:6px;font-size:14px;">
+            <strong>Travel reimbursement policy</strong> &mdash;
+            for speakers travelling from outside Denmark only. Claiming is
+            <strong>optional</strong>.
+        </p>
+        <ul style="font-size:14px;">
+            <li>Economy flights only.</li>
+            <li>Up to <strong>EUR @CommunityHub.Pages.Forms.TravelModel.Cap400</strong> per speaker for single-speaker sessions.</li>
+            <li>Up to <strong>EUR @CommunityHub.Pages.Forms.TravelModel.Cap300</strong> per person for co-speaking sessions.</li>
+            <li>If neither cap fits (e.g. cheapest flight is above), choose <em>Other</em> and explain &mdash; we'll work with you.</li>
+            @if (Model.SubmitInvoiceDueDate is not null)
+            {
+                <li>Submit ticket + invoice to ELDK by <strong>@Model.SubmitInvoiceDueDate?.ToString("yyyy-MM-dd")</strong> (30 days before the event).</li>
+            }
+        </ul>
+
+        if (!string.IsNullOrEmpty(Model.Message))
+        {
+            <p class="info">@Model.Message</p>
+        }
+
+        <form method="post">
+
+            <label>Name</label>
+            <input type="text" value="@Model.FullName" readonly />
+
+            <label>Email</label>
+            <input type="text" value="@Model.Email" readonly />
+
+            <label>Do you want to claim travel reimbursement?</label>
+            <div style="display:flex; gap:18px; margin:6px 0 14px;">
+                <label style="font-weight:normal;">
+                    <input type="radio" asp-for="RequestReimbursement" value="false" id="ReqNo" />
+                    No, I'm not claiming
+                </label>
+                <label style="font-weight:normal;">
+                    <input type="radio" asp-for="RequestReimbursement" value="true" id="ReqYes" />
+                    Yes
+                </label>
+            </div>
+
+            <div id="ClaimBlock" style="@(Model.RequestReimbursement ? "" : "display:none;")">
+
+                <label for="OriginCity">Travelling from (city / country)</label>
+                <input type="text" asp-for="OriginCity" placeholder="e.g. Berlin, Germany" />
+
+                <label for="AmountChoice">Amount I'm claiming</label>
+                <select asp-for="AmountChoice" id="AmountChoice">
+                    <option value="@CommunityHub.Pages.Forms.TravelModel.ChoiceNone">-- pick an amount --</option>
+                    <option value="@CommunityHub.Pages.Forms.TravelModel.Choice400">
+                        EUR @CommunityHub.Pages.Forms.TravelModel.Cap400 (single-speaker session)
+                    </option>
+                    <option value="@CommunityHub.Pages.Forms.TravelModel.Choice300">
+                        EUR @CommunityHub.Pages.Forms.TravelModel.Cap300 (co-speaking session)
+                    </option>
+                    <option value="@CommunityHub.Pages.Forms.TravelModel.ChoiceOther">
+                        Other (please explain)
+                    </option>
+                </select>
+
+                <div id="OtherBlock" style="display:none;">
+                    <label for="OtherAmountEur">Other amount (EUR)</label>
+                    <input type="number" asp-for="OtherAmountEur" min="0" step="1" />
+                </div>
+
+                <label for="Explanation">Explanation (required if "Other")</label>
+                <textarea asp-for="Explanation" rows="3"
+                          placeholder="Cheapest flight found, route, dates, etc."></textarea>
+            </div>
+
+            <button type="submit">Save travel request</button>
+        </form>
+
+        <script>
+            (function () {
+                var reqYes = document.getElementById('ReqYes');
+                var reqNo  = document.getElementById('ReqNo');
+                var claim  = document.getElementById('ClaimBlock');
+                var pick   = document.getElementById('AmountChoice');
+                var other  = document.getElementById('OtherBlock');
+                function syncClaim() { claim.style.display = reqYes.checked ? '' : 'none'; }
+                function syncOther() { other.style.display = pick.value === 'other' ? '' : 'none'; }
+                reqYes.addEventListener('change', syncClaim);
+                reqNo.addEventListener('change', syncClaim);
+                pick.addEventListener('change', syncOther);
+                syncClaim(); syncOther();
+            })();
+        </script>
+
+        <p><a asp-page="/Index">Back to hub</a></p>
+    }
+</div>

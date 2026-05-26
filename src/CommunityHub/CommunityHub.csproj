@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <!-- ======================================================================
+       CommunityHub - the participant-facing web application (ASP.NET Core).
+       Stage 3 adds PIN authentication: the login Razor Pages, the PIN
+       services (in CommunityHub.Core), and a signed session cookie.
+       ====================================================================== -->
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>CommunityHub</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="ClosedXML" Version="0.104.*" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="8.*">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+    <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks.EntityFrameworkCore" Version="8.0.6" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="8.0.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\CommunityHub.Core\CommunityHub.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Ship the per-edition config JSON into the publish output so
+         SpeakerDeadlineSeeder + other config-driven services can read it
+         at runtime in App Service. -->
+    <Content Include="..\..\config\*.json"
+             Link="config\%(Filename)%(Extension)"
+             CopyToOutputDirectory="PreserveNewest"
+             CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

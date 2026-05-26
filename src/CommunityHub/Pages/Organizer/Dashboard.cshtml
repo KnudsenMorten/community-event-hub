@@ -1,0 +1,306 @@
+@page
+@model CommunityHub.Pages.Organizer.DashboardModel
+@{
+    ViewData["Title"] = "Dashboard";
+}
+
+<style>
+    .stat-grid { display:flex; flex-wrap:wrap; gap:12px; }
+    .stat { background:#f4f5f7; border-radius:8px; padding:14px 18px;
+        min-width:120px; flex:1; }
+    .stat .num { font-size:26px; font-weight:700; color:#1a1a2e; }
+    .stat .lbl { font-size:12px; color:#6b7280; text-transform:uppercase;
+        letter-spacing:.05em; }
+    .bar-track { background:#e6e8ee; border-radius:5px; height:18px;
+        overflow:hidden; margin:4px 0 2px; }
+    .bar-fill { background:#2d5be3; height:100%; }
+    .bar-row { margin-bottom:12px; }
+    .bar-row .cap { font-size:13px; display:flex; justify-content:space-between; }
+    .warn { color:#c0392b; font-weight:600; }
+</style>
+
+<div class="card">
+    <h2>Dashboard</h2>
+
+    @if (Model.AccessDenied)
+    {
+        <p class="error">This area is for organizers only.</p>
+    }
+    else if (Model.Report is null)
+    {
+        <p>No data.</p>
+    }
+    else
+    {
+        var r = Model.Report;
+        <p style="color:#6b7280;">@r.EventDisplayName &mdash; live snapshot</p>
+
+        <!-- Headline counts -->
+        <div class="stat-grid">
+            <div class="stat">
+                <div class="num">@r.TotalParticipants</div>
+                <div class="lbl">People</div>
+            </div>
+            <div class="stat">
+                <div class="num">@r.ActiveParticipants</div>
+                <div class="lbl">Active</div>
+            </div>
+            <div class="stat">
+                <div class="num">@r.InactiveParticipants</div>
+                <div class="lbl">Inactive</div>
+            </div>
+            <div class="stat">
+                <div class="num @(r.OverdueTasks > 0 ? "warn" : "")">@r.OverdueTasks</div>
+                <div class="lbl">Overdue tasks</div>
+            </div>
+            <div class="stat">
+                <div class="num @(r.AttendeeMismatches > 0 ? "warn" : "")">@r.AttendeeMismatches</div>
+                <div class="lbl">Attendee mismatches</div>
+            </div>
+        </div>
+    }
+</div>
+
+@if (Model.Report is not null && !Model.AccessDenied)
+{
+    var r = Model.Report;
+
+    <!-- Form completion -->
+    <div class="card">
+        <h2>Form completion</h2>
+        @foreach (var stat in new[] { r.HotelCompletion, r.DinnerCompletion, r.VolunteerCompletion })
+        {
+            <div class="bar-row">
+                <div class="cap">
+                    <span>@stat.Label</span>
+                    <span>@stat.Done / @stat.Total (@stat.Percent%)</span>
+                </div>
+                <div class="bar-track">
+                    <div class="bar-fill" style="width:@(stat.Percent)%;"></div>
+                </div>
+            </div>
+        }
+        <p style="font-size:12px;color:#6b7280;">
+            Denominator is active speakers, Master Class speakers and volunteers
+            (volunteer sign-up: active volunteers only).
+        </p>
+    </div>
+
+    <!-- People by role -->
+    <div class="card">
+        <h2>People by role</h2>
+        @{
+            var maxRole = r.ParticipantsByRole.Count > 0
+                ? r.ParticipantsByRole.Values.Max() : 1;
+        }
+        @foreach (var kv in r.ParticipantsByRole.OrderByDescending(x => x.Value))
+        {
+            var pct = maxRole == 0 ? 0 : (int)(100.0 * kv.Value / maxRole);
+            <div class="bar-row">
+                <div class="cap"><span>@kv.Key</span><span>@kv.Value</span></div>
+                <div class="bar-track">
+                    <div class="bar-fill" style="width:@(pct)%;"></div>
+                </div>
+            </div>
+        }
+    </div>
+
+    <!-- Tasks -->
+    <div class="card">
+        <h2>Tasks</h2>
+        @if (r.TaskStates.Count == 0)
+        {
+            <p>No tasks yet.</p>
+        }
+        else
+        {
+            <div class="stat-grid">
+                @foreach (var ts in r.TaskStates)
+                {
+                    <div class="stat">
+                        <div class="num">@ts.Count</div>
+                        <div class="lbl">@ts.State</div>
+                    </div>
+                }
+            </div>
+            @if (r.OverdueTasks > 0)
+            {
+                <p class="warn">@r.OverdueTasks task(s) are past their due date.</p>
+            }
+        }
+    </div>
+
+    <!-- Sponsors -->
+    <div class="card">
+        <h2>Sponsor deliverables</h2>
+        @{
+            var sPct = r.SponsorTaskTotal == 0 ? 0
+                : (int)Math.Round(100.0 * r.SponsorTaskDone / r.SponsorTaskTotal);
+        }
+        <div class="bar-row">
+            <div class="cap">
+                <span>Completed</span>
+                <span>@r.SponsorTaskDone / @r.SponsorTaskTotal (@sPct%)</span>
+            </div>
+            <div class="bar-track">
+                <div class="bar-fill" style="width:@(sPct)%;"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Attendees -->
+    <div class="card">
+        <h2>Attendees</h2>
+        <div class="stat-grid">
+            <div class="stat">
+                <div class="num">@r.AttendeeTotal</div>
+                <div class="lbl">Total attendees</div>
+            </div>
+            <div class="stat">
+                <div class="num @(r.AttendeeMismatches > 0 ? "warn" : "")">@r.AttendeeMismatches</div>
+                <div class="lbl">Reconciliation mismatches</div>
+            </div>
+        </div>
+        @if (r.AttendeeMismatches > 0)
+        {
+            <p><a asp-page="/Organizer/Index">Review mismatches</a></p>
+        }
+    </div>
+
+    <!-- Volunteer coverage -->
+    <div class="card">
+        <h2>Volunteer shift coverage</h2>
+        @if (r.ShiftCoverage.Count == 0)
+        {
+            <p>No volunteer sign-ups yet.</p>
+        }
+        else
+        {
+            var maxShift = r.ShiftCoverage.Max(s => s.VolunteerCount);
+            foreach (var sc in r.ShiftCoverage)
+            {
+                var pct = maxShift == 0 ? 0
+                    : (int)(100.0 * sc.VolunteerCount / maxShift);
+                <div class="bar-row">
+                    <div class="cap">
+                        <span>@sc.Shift</span><span>@sc.VolunteerCount volunteer(s)</span>
+                    </div>
+                    <div class="bar-track">
+                        <div class="bar-fill" style="width:@(pct)%;"></div>
+                    </div>
+                </div>
+            }
+        }
+    </div>
+
+    <!-- Speaker deadlines -->
+    <div class="card">
+        <h2>Speaker deadlines</h2>
+        <div class="stat-grid">
+            <div class="stat">
+                <div class="num">@Model.SpeakerTasksTotal</div>
+                <div class="lbl">Total speaker tasks</div>
+            </div>
+            <div class="stat">
+                <div class="num">@Model.SpeakerTasksDone</div>
+                <div class="lbl">Done</div>
+            </div>
+            <div class="stat">
+                <div class="num @(Model.SpeakerTasksOverdue > 0 ? "warn" : "")">@Model.SpeakerTasksOverdue</div>
+                <div class="lbl">Overdue</div>
+            </div>
+        </div>
+
+        @if (Model.SpeakerDeadlines.Count == 0)
+        {
+            <p>No speaker tasks yet.</p>
+        }
+        else
+        {
+            @foreach (var d in Model.SpeakerDeadlines)
+            {
+                <div class="bar-row">
+                    <div class="cap">
+                        <span>@d.Title</span>
+                        <span>@d.Done / @d.Total (@d.PercentDone%)
+                            @if (d.Overdue > 0)
+                            {
+                                <span class="warn">&middot; @d.Overdue overdue</span>
+                            }
+                        </span>
+                    </div>
+                    <div class="bar-track">
+                        <div class="bar-fill" style="width:@(d.PercentDone)%;"></div>
+                    </div>
+                </div>
+            }
+        }
+
+        @if (Model.TopOverdueSpeakers.Count > 0)
+        {
+            <h3 style="color:var(--el-darkblue);margin-top:18px;">Top overdue speakers</h3>
+            <table style="border-collapse:collapse;width:100%;font-size:14px;">
+                <thead>
+                    <tr style="border-bottom:2px solid #ddd;text-align:left;">
+                        <th style="padding:6px;">Speaker</th>
+                        <th style="padding:6px;text-align:right;">Overdue tasks</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var s in Model.TopOverdueSpeakers)
+                    {
+                        <tr style="border-bottom:1px solid #eee;">
+                            <td style="padding:6px;">@s.Name <span style="color:#8a8f9c;font-size:11px;">@s.Email</span></td>
+                            <td style="padding:6px;text-align:right;color:#c0392b;font-weight:600;">@s.OverdueCount</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+            <p style="margin-top:10px;"><a asp-page="/Organizer/SpeakerReminders" asp-route-Filter="overdue">Open Speaker reminders &rarr;</a></p>
+        }
+    </div>
+
+    <!-- Travel reimbursements -->
+    <div class="card">
+        <h2>Travel reimbursements</h2>
+        <div class="stat-grid">
+            <div class="stat">
+                <div class="num">@Model.TravelClaiming</div>
+                <div class="lbl">Speakers claiming</div>
+            </div>
+            <div class="stat">
+                <div class="num">EUR @Model.TravelClaimedEur</div>
+                <div class="lbl">Total claimed</div>
+            </div>
+            <div class="stat">
+                <div class="num" style="color:#0a6;">@Model.TravelPaid</div>
+                <div class="lbl">Paid</div>
+            </div>
+            <div class="stat">
+                <div class="num @(Model.TravelOutstandingEur > 0 ? "warn" : "")">EUR @Model.TravelOutstandingEur</div>
+                <div class="lbl">Outstanding</div>
+            </div>
+        </div>
+        <p style="margin-top:8px;"><a asp-page="/Organizer/TravelReimbursements" asp-route-Filter="outstanding">Open Travel reimbursements &rarr;</a></p>
+    </div>
+
+    <!-- Lunch headcount -->
+    <div class="card">
+        <h2>Lunch headcount</h2>
+        <div class="stat-grid">
+            <div class="stat">
+                <div class="num">@Model.LunchSetupDayCount</div>
+                <div class="lbl">@Model.LunchSetupDayLabel</div>
+            </div>
+            <div class="stat">
+                <div class="num">@Model.LunchPreDayCount</div>
+                <div class="lbl">@Model.LunchPreDayLabel</div>
+            </div>
+        </div>
+        <p style="margin-top:8px;"><a asp-page="/Organizer/Lunch">Open Lunch headcount &rarr;</a></p>
+    </div>
+
+    <div class="card">
+        <p><a asp-page="/Organizer/Index">Back to organizer area</a></p>
+    </div>
+}

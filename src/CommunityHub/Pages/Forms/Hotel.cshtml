@@ -1,0 +1,51 @@
+@page
+@model CommunityHub.Pages.Forms.HotelModel
+@{
+    ViewData["Title"] = "Hotel preference";
+}
+
+<div class="card">
+    <h2>Hotel preference</h2>
+
+    <p style="background:#eef6ff;padding:10px 14px;border-radius:6px;font-size:14px;">
+        <strong>Hotel policy:</strong> we arrange and cover
+        <strong>1 night</strong> hotel for speakers checking in the day
+        BEFORE the main conference day, and
+        <strong>2 nights</strong> for master-class speakers and speakers
+        running a workshop on the pre-day. Tick "I need a hotel room"
+        below and pick your check-in / check-out dates &mdash; we'll book
+        the covered nights based on your role.
+    </p>
+
+    @if (!string.IsNullOrEmpty(Model.Message))
+    {
+        <p class="info">@Model.Message</p>
+    }
+
+    @if (Model.IsLocked)
+    {
+        <p class="error">Editing is closed for this event. Contact the organizers for changes.</p>
+        <p>Needs room: <strong>@(Model.NeedsRoom ? "Yes" : "No")</strong></p>
+        @if (Model.NeedsRoom)
+        {
+            <p>Check-in: @Model.CheckInDate &middot; Check-out: @Model.CheckOutDate</p>
+            <p>Room share: @Model.RoomShareWith</p>
+        }
+    }
+    else
+    {
+        <form method="post">
+            <label><input type="checkbox" asp-for="NeedsRoom" /> I need a hotel room</label>
+            <label for="CheckInDate">Check-in date</label>
+            <input type="date" asp-for="CheckInDate" />
+            <label for="CheckOutDate">Check-out date</label>
+            <input type="date" asp-for="CheckOutDate" />
+            <label for="RoomShareWith">Share a room with (optional)</label>
+            <input type="text" asp-for="RoomShareWith" />
+            <label for="Notes">Notes (optional)</label>
+            <textarea asp-for="Notes" rows="3"></textarea>
+            <button type="submit">Save</button>
+        </form>
+    }
+    <p><a asp-page="/Index">Back to hub</a></p>
+</div>

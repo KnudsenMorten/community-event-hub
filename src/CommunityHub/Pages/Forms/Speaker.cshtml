@@ -1,0 +1,194 @@
+@page
+@model CommunityHub.Pages.Forms.SpeakerModel
+@{
+    ViewData["Title"] = "Speaker details";
+}
+
+<div class="card">
+    <h2>Speaker details</h2>
+
+    @if (Model.AccessDenied)
+    {
+        <p class="error">
+            The speaker form is only for speakers and master-class speakers.
+            Your role (<strong>@CommunityHub.Branding.RoleDisplay.Name(Model.Role)</strong>) does not have a speaker profile.
+        </p>
+        <p><a asp-page="/Index">Back to hub</a></p>
+    }
+    else
+    {
+        <p>
+            A few extra details we use for badges, the website, and accreditation
+            verification. Bio / social links come from the Sessionize export the
+            organizer uploads — you only need to fill the fields below.
+        </p>
+
+        if (!string.IsNullOrEmpty(Model.Message))
+        {
+            <p class="info">@Model.Message</p>
+        }
+
+        <form method="post">
+
+            <label>Name</label>
+            <input type="text" value="@Model.FullName" readonly />
+
+            <label>Email</label>
+            <input type="text" value="@Model.Email" readonly />
+
+            <label for="Accreditation">Accreditation</label>
+            <select asp-for="Accreditation">
+                <option value="">-- select --</option>
+                @foreach (var opt in CommunityHub.Pages.Forms.SpeakerModel.AccreditationOptions)
+                {
+                    <option value="@opt">@opt</option>
+                }
+            </select>
+
+            <label>Is this your first time as a speaker at this event?</label>
+            <div style="display:flex; gap:18px; margin:6px 0 14px;">
+                <label style="font-weight:normal;">
+                    <input type="radio" asp-for="IsFirstTimeSpeaker" value="true" />
+                    Yes
+                </label>
+                <label style="font-weight:normal;">
+                    <input type="radio" asp-for="IsFirstTimeSpeaker" value="false" />
+                    No
+                </label>
+            </div>
+
+            <label>Speaking days</label>
+            <div style="display:flex; flex-direction:column; gap:6px; margin:6px 0 14px;">
+                <label style="font-weight:normal; display:flex; align-items:center; gap:8px;">
+                    <input type="checkbox" asp-for="SpeakingPreDay" style="width:auto;margin:0;" />
+                    Yes, I'm speaking on the <strong>pre-day</strong> (Master Class / workshop day).
+                </label>
+                <label style="font-weight:normal; display:flex; align-items:center; gap:8px;">
+                    <input type="checkbox" asp-for="SpeakingMainDay" style="width:auto;margin:0;" />
+                    Yes, I'm speaking on the <strong>main day</strong>.
+                </label>
+            </div>
+            <p style="color:#6b7280;font-size:12px;margin:-8px 0 14px;">
+                A pre-day speaker isn't necessarily on the main day, and vice versa.
+                These flags drive polo and hotel-night allocation.
+            </p>
+
+            <label for="Country">Country</label>
+            <input type="text" asp-for="Country" placeholder="e.g. Denmark" />
+
+            <label for="Gender">Gender</label>
+            <select asp-for="Gender">
+                <option value="">-- select --</option>
+                @foreach (var opt in CommunityHub.Pages.Forms.SpeakerModel.GenderOptions)
+                {
+                    <option value="@opt">@opt</option>
+                }
+            </select>
+
+            <button type="submit">Save speaker details</button>
+        </form>
+
+        <h3 style="color:var(--el-darkblue);margin-top:24px;">From Sessionize</h3>
+        @if (Model.LastSessionizeImportAt is null)
+        {
+            <p style="color:#6b7280;font-size:13px;">
+                Your bio / social links haven't been imported from Sessionize yet.
+            </p>
+        }
+        else
+        {
+            <p style="color:#6b7280;font-size:12px;">
+                Last imported @Model.LastSessionizeImportAt?.ToString("yyyy-MM-dd HH:mm 'UTC'").
+                These fields are read-only here — edit them in Sessionize and the organizer's next import will refresh them.
+            </p>
+            <p><strong>Tagline:</strong> @(string.IsNullOrEmpty(Model.Tagline) ? "(none)" : Model.Tagline)</p>
+            <p><strong>Bio:</strong><br />@(string.IsNullOrEmpty(Model.Biography) ? "(none)" : Model.Biography)</p>
+            <p><strong>Blog:</strong> @(string.IsNullOrEmpty(Model.Blog) ? "(none)" : Model.Blog)</p>
+            <p><strong>LinkedIn:</strong> @(string.IsNullOrEmpty(Model.LinkedIn) ? "(none)" : Model.LinkedIn)</p>
+            <p><strong>X (Twitter):</strong> @(string.IsNullOrEmpty(Model.Twitter) ? "(none)" : Model.Twitter)</p>
+        }
+
+        <p><a asp-page="/Index">Back to hub</a></p>
+    }
+</div>
+
+@if (!Model.AccessDenied)
+{
+    <div class="card">
+        <h2>Speaker manual</h2>
+        <p style="background:#fff7e6;padding:8px 12px;border-radius:6px;font-size:13px;">
+            <strong>Reference sample from a sister community</strong> &mdash; until the
+            ELDK27 speaker manual is published, this is a good example of what to expect
+            (logistics, venue map, presentation guidance, social-media branding).
+        </p>
+
+        <ul style="font-size:14px;line-height:1.8;list-style:none;padding:0;">
+            <li>
+                &#128196;
+                <a href="/manuals/speaker-manual-wn-norway.pptx" target="_blank" rel="noopener">
+                    Workplace Ninja Norway 2026 &mdash; Speaker manual (PPTX)
+                </a>
+            </li>
+        </ul>
+    </div>
+
+    <div class="card">
+        <h2>Important dates / deadlines</h2>
+        <ul style="font-size:14px;line-height:1.7;">
+            <li><strong>10 Sept 2026</strong> &mdash; We start onboarding speakers into our event-system Zoho. Invitations come as an email to onboard the speaker.</li>
+            <li><strong>26 Sept 2026</strong> &mdash; Speaker must validate speaker profile on Zoho Backstage (event system).</li>
+            <li><strong>1 Oct 2026</strong> &mdash; Deadline to update your speaker profile information on Event Hub (travel, hotel, speaker dinner, polo, etc.).</li>
+            <li><strong>9 Jan 2027</strong> &mdash; Travel-reimbursement claim deadline (submit ticket + invoice).</li>
+            <li><strong>20 Jan 2027</strong> &mdash; First PPT draft due. Upload to the ELDK27 Presentations folder + send confirmation email to <a href="mailto:info@expertslive.dk">info@expertslive.dk</a>.</li>
+            <li><strong>3 Feb 2027</strong> &mdash; Final presentation must be uploaded to the ELDK27 Presentations folder so attendees can check out the slides.</li>
+            <li><strong>9 Feb 2027</strong> &mdash; Main event day.</li>
+        </ul>
+    </div>
+
+    <div class="card">
+        <h2>Session template</h2>
+        <p>
+            We encourage you to use the <strong>ELDK PowerPoint template</strong>
+            for your session, but it is optional. If you choose <em>not</em> to use
+            the template, please include the <strong>sponsor slide</strong> and the
+            <strong>session-feedback evaluation slide</strong> in your presentation.
+        </p>
+        <p>
+            <a class="button"
+               href="https://template.expertslive.dk/" target="_blank" rel="noopener"
+               style="display:inline-block;background:var(--el-blue);color:#fff;
+                      padding:9px 16px;border-radius:7px;text-decoration:none;
+                      font-size:15px;">
+               Download the ELDK PPT template
+            </a>
+        </p>
+    </div>
+
+    <div class="card">
+        <h2>Social-media promotion</h2>
+        <ul style="font-size:14px;line-height:1.7;">
+            <li>Speaker graphics are ready &mdash; click here to find your pictures to use in social-media posts.</li>
+            <li>We will also announce speakers through our social-media campaign &mdash; but you are welcome to announce it now if you want.</li>
+            <li>Please include the tags <strong>#ELDK27 #ExpertsLiveDK</strong> in your posts, and tag our company pages on LinkedIn and X / Twitter.</li>
+        </ul>
+    </div>
+
+    <div class="card">
+        <h2>Session info</h2>
+        <ul style="font-size:14px;line-height:1.7;">
+            <li><strong>Session length:</strong> 60 min &middot; <strong>language:</strong> English.</li>
+            <li>Give the audience a deep introduction to the topic with lots of demos &mdash; and time for questions (5&ndash;10 min) during the session.</li>
+            <li>Preferable level: <strong>400 (Expert)</strong> or <strong>300 (Advanced)</strong>. No level-200 (intro) sessions, please!</li>
+            <li>Keep a good 50/50 balance between slides and demos. The audience loves to see the technology through demos they can relate to &mdash; <em>"Less PowerPoint, More Demos"</em>.</li>
+        </ul>
+    </div>
+
+    <div class="card">
+        <h2>Questions?</h2>
+        <p>
+            If you have any questions, please don't hesitate to write us at
+            <a href="mailto:info@expertslive.dk">info@expertslive.dk</a>
+            or through the Signal group.
+        </p>
+    </div>
+}

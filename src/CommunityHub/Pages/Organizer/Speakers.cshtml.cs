@@ -1,0 +1,338 @@
+using ClosedXML.Excel;
+using CommunityHub.Auth;
+using CommunityHub.Core.Data;
+using CommunityHub.Core.Domain;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.RazorPages;
+using Microsoft.EntityFrameworkCore;
+
+namespace CommunityHub.Pages.Organizer;
+
+[Authorize]
+public class SpeakersModel : PageModel
+{
+    private readonly CommunityHubDbContext _db;
+    private readonly ICurrentParticipantAccessor _participant;
+    private readonly TimeProvider _clock;
+
+    public SpeakersModel(
+        CommunityHubDbContext db, ICurrentParticipantAccessor participant, TimeProvider clock)
+    {
+        _db = db;
+        _participant = participant;
+        _clock = clock;
+    }
+
+    public bool AccessDenied { get; private set; }
+    public string? Message { get; private set; }
+    public string? Error { get; private set; }
+
+    [BindProperty] public int[] SelectedIds { get; set; } = Array.Empty<int>();
+    [BindProperty] public string? EmailList { get; set; }
+    /// <summary>"preday" | "mainday".</summary>
+    [BindProperty] public string FieldToSet { get; set; } = "preday";
+    /// <summary>true = tick the flag; false = clear it.</summary>
+    [BindProperty] public bool TargetValue { get; set; } = true;
+
+    public List<Row> Rows { get; private set; } = new();
+    public record Row(
+        int Id, string Name, string Email, string Role,
+        bool SpeakingPreDay, bool SpeakingMainDay,
+        string? Accreditation, string? Country, bool? IsFirstTime, bool IsActive);
+
+    public async Task<IActionResult> OnGetAsync(CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+        await LoadAsync(me.EventId, ct);
+        return Page();
+    }
+
+    public async Task<IActionResult> OnPostBulkSelectedAsync(CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+
+        if (SelectedIds.Length == 0)
+        {
+            Error = "No speakers selected.";
+            await LoadAsync(me.EventId, ct);
+            return Page();
+        }
+
+        var affected = await ApplyToParticipantsAsync(me.EventId, SelectedIds, ct);
+        Message = $"{FieldLabel()} = {(TargetValue ? "Yes" : "No")} applied to {affected} speaker(s).";
+        await LoadAsync(me.EventId, ct);
+        return Page();
+    }
+
+    public async Task<IActionResult> OnPostBulkPasteAsync(CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+
+        if (string.IsNullOrWhiteSpace(EmailList))
+        {
+            Error = "Paste at least one email.";
+            await LoadAsync(me.EventId, ct);
+            return Page();
+        }
+
+        var emails = EmailList
+            .Split(new[] { '\n', '\r', ',', ';', ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries)
+            .Select(e => e.Trim().ToLowerInvariant())
+            .Where(e => e.Contains('@'))
+            .Distinct()
+            .ToList();
+
+        var ids = await _db.Participants
+            .Where(p => p.EventId == me.EventId && emails.Contains(p.Email)
+                        && (p.Role == ParticipantRole.Speaker
+                            || p.Role == ParticipantRole.MasterclassSpeaker))
+            .Select(p => p.Id)
+            .ToArrayAsync(ct);
+
+        var notFound = emails.Count - ids.Length;
+        var affected = await ApplyToParticipantsAsync(me.EventId, ids, ct);
+        Message = $"{FieldLabel()} = {(TargetValue ? "Yes" : "No")} applied to {affected} speaker(s)."
+                  + (notFound > 0 ? $" {notFound} email(s) did not match an active speaker and were skipped." : "");
+        await LoadAsync(me.EventId, ct);
+        return Page();
+    }
+
+    private async Task<int> ApplyToParticipantsAsync(
+        int eventId, int[] participantIds, CancellationToken ct)
+    {
+        if (participantIds.Length == 0) return 0;
+        var now = _clock.GetUtcNow();
+        var existing = await _db.SpeakerProfiles
+            .Where(sp => sp.EventId == eventId && participantIds.Contains(sp.ParticipantId))
+            .ToDictionaryAsync(sp => sp.ParticipantId, sp => sp, ct);
+
+        int n = 0;
+        foreach (var pid in participantIds)
+        {
+            if (!existing.TryGetValue(pid, out var prof))
+            {
+                prof = new SpeakerProfile
+                {
+                    EventId = eventId,
+                    ParticipantId = pid,
+                    CreatedAt = now,
+                };
+                _db.SpeakerProfiles.Add(prof);
+            }
+            if (FieldToSet == "mainday") prof.SpeakingMainDay = TargetValue;
+            else                         prof.SpeakingPreDay  = TargetValue;
+            prof.UpdatedAt = now;
+            n++;
+        }
+        await _db.SaveChangesAsync(ct);
+        return n;
+    }
+
+    private string FieldLabel() => FieldToSet == "mainday" ? "SpeakingMainDay" : "SpeakingPreDay";
+
+    /// <summary>
+    /// Download an xlsx template the organizer can fill out + upload.
+    /// Columns: Email | SpeakingPreDay | SpeakingMainDay
+    /// Empty cell = no change. Yes/Y/1/true/x = tick. No/N/0/false = untick.
+    /// </summary>
+    public IActionResult OnGetTemplate()
+    {
+        using var wb = new XLWorkbook();
+        var ws = wb.Worksheets.Add("Speakers");
+        ws.Cell(1, 1).Value = "Email";
+        ws.Cell(1, 2).Value = "SpeakingPreDay";
+        ws.Cell(1, 3).Value = "SpeakingMainDay";
+        ws.Range(1, 1, 1, 3).Style.Font.Bold = true;
+
+        ws.Cell(2, 1).Value = "alice@example.com";
+        ws.Cell(2, 2).Value = "Yes";
+        ws.Cell(2, 3).Value = "No";
+
+        ws.Cell(3, 1).Value = "bob@example.com";
+        ws.Cell(3, 2).Value = "No";
+        ws.Cell(3, 3).Value = "Yes";
+
+        ws.Cell(4, 1).Value = "carol@example.com";
+        ws.Cell(4, 2).Value = "Yes";
+        ws.Cell(4, 3).Value = "Yes";
+
+        var notes = wb.Worksheets.Add("Notes");
+        notes.Cell(1, 1).Value = "Header row is REQUIRED. Email is the match key (lower-cased, trimmed).";
+        notes.Cell(2, 1).Value = "Yes / Y / 1 / true / x  =  tick the flag.";
+        notes.Cell(3, 1).Value = "No / N / 0 / false       =  untick the flag.";
+        notes.Cell(4, 1).Value = "Empty cell                =  leave that flag unchanged.";
+        notes.Cell(5, 1).Value = "Only matching active Speakers / Master Class Speakers are updated.";
+        notes.Columns().AdjustToContents();
+        ws.Columns().AdjustToContents();
+
+        using var ms = new MemoryStream();
+        wb.SaveAs(ms);
+        return File(ms.ToArray(),
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "speakers-template.xlsx");
+    }
+
+    [BindProperty] public IFormFile? UploadFile { get; set; }
+
+    public async Task<IActionResult> OnPostImportXlsxAsync(CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+
+        if (UploadFile is null || UploadFile.Length == 0)
+        {
+            Error = "Pick a file to upload.";
+            await LoadAsync(me.EventId, ct);
+            return Page();
+        }
+        var ext = Path.GetExtension(UploadFile.FileName).ToLowerInvariant();
+        if (ext != ".xlsx" && ext != ".xlsm")
+        {
+            Error = "Upload an Excel .xlsx file (the .xls binary format is not supported).";
+            await LoadAsync(me.EventId, ct);
+            return Page();
+        }
+
+        var emailIdx = await _db.Participants
+            .Where(p => p.EventId == me.EventId
+                        && (p.Role == ParticipantRole.Speaker
+                            || p.Role == ParticipantRole.MasterclassSpeaker))
+            .ToDictionaryAsync(p => p.Email, p => p.Id, StringComparer.OrdinalIgnoreCase, ct);
+
+        var profileIdx = await _db.SpeakerProfiles
+            .Where(sp => sp.EventId == me.EventId)
+            .ToDictionaryAsync(sp => sp.ParticipantId, sp => sp, ct);
+
+        await using var stream = UploadFile.OpenReadStream();
+        using var wb = new XLWorkbook(stream);
+        var ws = wb.Worksheets.FirstOrDefault();
+        if (ws is null)
+        {
+            Error = "Workbook has no sheets.";
+            await LoadAsync(me.EventId, ct);
+            return Page();
+        }
+
+        // Locate columns by header (case-insensitive).
+        var headerRow = ws.FirstRowUsed();
+        var headers = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        if (headerRow is not null)
+        {
+            foreach (var c in headerRow.CellsUsed())
+            {
+                var k = c.GetString().Trim();
+                if (!string.IsNullOrEmpty(k)) headers[k] = c.Address.ColumnNumber;
+            }
+        }
+        if (!headers.TryGetValue("Email", out var emailCol))
+        {
+            Error = "No 'Email' column found in the header row.";
+            await LoadAsync(me.EventId, ct);
+            return Page();
+        }
+        headers.TryGetValue("SpeakingPreDay",  out var preCol);
+        headers.TryGetValue("SpeakingMainDay", out var mainCol);
+
+        int updated = 0, notMatched = 0;
+        var firstData = headerRow!.RowNumber() + 1;
+        var lastRow   = ws.LastRowUsed()?.RowNumber() ?? 0;
+        var now = _clock.GetUtcNow();
+        for (var rowNum = firstData; rowNum <= lastRow; rowNum++)
+        {
+            var row = ws.Row(rowNum);
+            var email = row.Cell(emailCol).GetString().Trim().ToLowerInvariant();
+            if (string.IsNullOrEmpty(email)) continue;
+
+            if (!emailIdx.TryGetValue(email, out var pid))
+            {
+                notMatched++;
+                continue;
+            }
+
+            if (!profileIdx.TryGetValue(pid, out var prof))
+            {
+                prof = new SpeakerProfile
+                {
+                    EventId = me.EventId,
+                    ParticipantId = pid,
+                    CreatedAt = now,
+                };
+                _db.SpeakerProfiles.Add(prof);
+                profileIdx[pid] = prof;
+            }
+
+            bool changed = false;
+            if (preCol > 0)
+            {
+                var v = ParseYesNoNull(row.Cell(preCol).GetString());
+                if (v is not null) { prof.SpeakingPreDay = v.Value; changed = true; }
+            }
+            if (mainCol > 0)
+            {
+                var v = ParseYesNoNull(row.Cell(mainCol).GetString());
+                if (v is not null) { prof.SpeakingMainDay = v.Value; changed = true; }
+            }
+            if (changed) { prof.UpdatedAt = now; updated++; }
+        }
+        await _db.SaveChangesAsync(ct);
+
+        Message = $"Updated {updated} speaker(s)."
+                  + (notMatched > 0 ? $" {notMatched} row(s) did not match any speaker email in this edition." : "");
+        await LoadAsync(me.EventId, ct);
+        return Page();
+    }
+
+    private static bool? ParseYesNoNull(string raw)
+    {
+        var s = (raw ?? "").Trim().ToLowerInvariant();
+        if (s.Length == 0) return null;
+        return s switch
+        {
+            "yes" or "y" or "1" or "true"  or "x" or "tick"    => true,
+            "no"  or "n" or "0" or "false" or "-"              => false,
+            _ => null,  // ambiguous -> leave unchanged
+        };
+    }
+
+    private async Task LoadAsync(int eventId, CancellationToken ct)
+    {
+        var rows = await _db.Participants
+            .Where(p => p.EventId == eventId
+                        && (p.Role == ParticipantRole.Speaker
+                            || p.Role == ParticipantRole.MasterclassSpeaker))
+            .Select(p => new
+            {
+                p.Id, p.FullName, p.Email, p.Role, p.IsActive,
+                Profile = _db.SpeakerProfiles
+                    .Where(sp => sp.EventId == eventId && sp.ParticipantId == p.Id)
+                    .Select(sp => new
+                    {
+                        sp.SpeakingPreDay, sp.SpeakingMainDay,
+                        sp.Accreditation, sp.Country, sp.IsFirstTimeSpeaker
+                    }).FirstOrDefault()
+            })
+            .ToListAsync(ct);
+
+        Rows = rows
+            .OrderBy(r => r.IsActive ? 0 : 1)
+            .ThenBy(r => r.FullName)
+            .Select(r => new Row(
+                r.Id, r.FullName, r.Email,
+                CommunityHub.Branding.RoleDisplay.Name(r.Role),
+                r.Profile?.SpeakingPreDay ?? false,
+                r.Profile?.SpeakingMainDay ?? false,
+                r.Profile?.Accreditation,
+                r.Profile?.Country,
+                r.Profile?.IsFirstTimeSpeaker,
+                r.IsActive))
+            .ToList();
+    }
+}

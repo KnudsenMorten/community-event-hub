@@ -1,0 +1,26 @@
+# --- .NET build output ---
+bin/
+obj/
+*.user
+
+# --- Local config that may hold secrets - NEVER commit ---
+appsettings.Development.json
+appsettings.*.Development.json
+local.settings.json
+*.local.json
+
+# --- Azure / deploy artifacts ---
+*.publishsettings
+*.pubxml.user
+
+# --- IDE ---
+.vs/
+.vscode/
+.idea/
+
+# --- OS ---
+.DS_Store
+Thumbs.db
+
+# --- Logs ---
+*.log

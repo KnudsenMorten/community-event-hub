@@ -1,0 +1,108 @@
+@page
+@model CommunityHub.Pages.Organizer.SwagModel
+@{
+    ViewData["Title"] = "Swag order";
+}
+
+<div class="card">
+    <h2>Swag order</h2>
+
+    @if (Model.AccessDenied)
+    {
+        <p class="error">This area is for organizers only.</p>
+    }
+    else
+    {
+        <p>
+            Live aggregates of participant swag preferences. Click
+            <strong>Download .xlsx</strong> to get the vendor-ready spreadsheet
+            (Polo Order &middot; Jacket Order &middot; Award Order &middot; Raw).
+        </p>
+
+        <p>
+            <a class="button" asp-page-handler="Download"
+               style="display:inline-block;background:var(--el-blue);color:#fff;
+                      padding:9px 16px;border-radius:7px;text-decoration:none;
+                      font-size:15px;">
+               Download .xlsx
+            </a>
+        </p>
+
+        <div class="stat-grid" style="display:flex;flex-wrap:wrap;gap:12px;margin:12px 0 20px;">
+            <div class="stat" style="background:var(--el-grey);border-radius:8px;padding:12px 16px;min-width:120px;">
+                <div style="font-size:24px;font-weight:700;color:var(--el-darkblue);">@Model.TotalSubmissions</div>
+                <div style="font-size:12px;color:#6b7280;text-transform:uppercase;">Submissions</div>
+            </div>
+            <div class="stat" style="background:var(--el-grey);border-radius:8px;padding:12px 16px;min-width:120px;">
+                <div style="font-size:24px;font-weight:700;color:var(--el-darkblue);">@Model.PoloYesCount</div>
+                <div style="font-size:12px;color:#6b7280;text-transform:uppercase;">Polo: Yes</div>
+            </div>
+            <div class="stat" style="background:var(--el-grey);border-radius:8px;padding:12px 16px;min-width:120px;">
+                <div style="font-size:24px;font-weight:700;color:var(--el-darkblue);">@Model.JacketYesCount</div>
+                <div style="font-size:12px;color:#6b7280;text-transform:uppercase;">Jacket: Yes</div>
+            </div>
+            <div class="stat" style="background:var(--el-grey);border-radius:8px;padding:12px 16px;min-width:120px;">
+                <div style="font-size:24px;font-weight:700;color:var(--el-darkblue);">@Model.GiftYesCount</div>
+                <div style="font-size:12px;color:#6b7280;text-transform:uppercase;">Award: Yes</div>
+            </div>
+            <div class="stat" style="background:var(--el-grey);border-radius:8px;padding:12px 16px;min-width:120px;">
+                <div style="font-size:24px;font-weight:700;color:var(--el-darkblue);">@Model.CredlyYesCount</div>
+                <div style="font-size:12px;color:#6b7280;text-transform:uppercase;">Credly: Yes</div>
+            </div>
+        </div>
+
+        <h3 style="color:var(--el-darkblue);">Polo order preview</h3>
+        @if (Model.PoloLines.Count == 0)
+        {
+            <p>No polo orders yet.</p>
+        }
+        else
+        {
+            <table style="border-collapse:collapse;width:100%;font-size:14px;">
+                <thead>
+                    <tr style="border-bottom:2px solid #ddd;text-align:left;">
+                        <th style="padding:6px;">Role</th><th style="padding:6px;">Size</th>
+                        <th style="padding:6px;text-align:right;">Count</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var p in Model.PoloLines)
+                    {
+                        <tr style="border-bottom:1px solid #eee;">
+                            <td style="padding:6px;">@p.Role</td>
+                            <td style="padding:6px;">@p.Size</td>
+                            <td style="padding:6px;text-align:right;">@p.Count</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+
+        <h3 style="color:var(--el-darkblue);margin-top:20px;">Jacket order preview</h3>
+        @if (Model.JacketLines.Count == 0)
+        {
+            <p>No jacket orders yet.</p>
+        }
+        else
+        {
+            <table style="border-collapse:collapse;width:100%;font-size:14px;">
+                <thead>
+                    <tr style="border-bottom:2px solid #ddd;text-align:left;">
+                        <th style="padding:6px;">Size</th>
+                        <th style="padding:6px;text-align:right;">Count</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var j in Model.JacketLines)
+                    {
+                        <tr style="border-bottom:1px solid #eee;">
+                            <td style="padding:6px;">@j.Size</td>
+                            <td style="padding:6px;text-align:right;">@j.Count</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+    }
+    <p><a asp-page="/Organizer/Index">Back to organizer area</a></p>
+</div>

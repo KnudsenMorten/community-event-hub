@@ -1,0 +1,131 @@
+@page
+@model CommunityHub.Pages.Organizer.TravelReimbursementsModel
+@{
+    ViewData["Title"] = "Travel reimbursements";
+}
+
+<div class="card">
+    <h2>Travel reimbursements</h2>
+    @if (Model.AccessDenied)
+    {
+        <p class="error">This area is for organizers only.</p>
+    }
+    else
+    {
+        if (!string.IsNullOrEmpty(Model.Message))
+        {
+            <p class="info">@Model.Message</p>
+        }
+
+        <div class="stat-grid" style="display:flex;flex-wrap:wrap;gap:12px;margin:12px 0 16px;">
+            <div class="stat" style="background:var(--el-grey);border-radius:8px;padding:12px 16px;min-width:140px;">
+                <div style="font-size:22px;font-weight:700;color:var(--el-darkblue);">@Model.CountRequesting</div>
+                <div style="font-size:12px;color:#6b7280;text-transform:uppercase;">Speakers claiming</div>
+            </div>
+            <div class="stat" style="background:var(--el-grey);border-radius:8px;padding:12px 16px;min-width:140px;">
+                <div style="font-size:22px;font-weight:700;color:var(--el-darkblue);">EUR @Model.TotalClaimedEur</div>
+                <div style="font-size:12px;color:#6b7280;text-transform:uppercase;">Total claimed</div>
+            </div>
+            <div class="stat" style="background:var(--el-grey);border-radius:8px;padding:12px 16px;min-width:140px;">
+                <div style="font-size:22px;font-weight:700;color:#0a6;">EUR @Model.TotalPaidEur</div>
+                <div style="font-size:12px;color:#6b7280;text-transform:uppercase;">Paid (@Model.CountPaid)</div>
+            </div>
+            <div class="stat" style="background:var(--el-grey);border-radius:8px;padding:12px 16px;min-width:140px;">
+                <div style="font-size:22px;font-weight:700;color:#c0392b;">EUR @Model.TotalOutstandingEur</div>
+                <div style="font-size:12px;color:#6b7280;text-transform:uppercase;">Outstanding</div>
+            </div>
+        </div>
+
+        <form method="get" style="margin:6px 0 14px;">
+            <label for="Filter" style="margin-top:0;">Filter</label>
+            <select asp-for="Filter" onchange="this.form.submit()" style="max-width:240px;">
+                <option value="all">All speakers (incl. opt-outs)</option>
+                <option value="requesting">Requesting only</option>
+                <option value="outstanding">Outstanding (unpaid)</option>
+                <option value="paid">Paid</option>
+            </select>
+        </form>
+
+        <div style="overflow-x:auto;">
+        <table style="border-collapse:collapse;width:100%;font-size:13px;min-width:900px;">
+            <thead>
+                <tr style="border-bottom:2px solid #ddd;text-align:left;">
+                    <th style="padding:6px;">Speaker</th>
+                    <th style="padding:6px;">Role</th>
+                    <th style="padding:6px;">Requesting?</th>
+                    <th style="padding:6px;">Origin</th>
+                    <th style="padding:6px;text-align:right;">Claim (EUR)</th>
+                    <th style="padding:6px;">Explanation</th>
+                    <th style="padding:6px;">Paid</th>
+                    <th style="padding:6px;"></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var r in Model.Rows)
+                {
+                    <tr style="border-bottom:1px solid #eee;@(r.IsPaid ? "background:#f4fbf6;" : "")">
+                        <td style="padding:6px;">
+                            @r.Name<br/>
+                            <span style="color:#8a8f9c;font-size:11px;">@r.Email</span>
+                        </td>
+                        <td style="padding:6px;">@r.Role</td>
+                        <td style="padding:6px;">
+                            @if (r.RequestReimbursement)
+                            {
+                                <span style="color:#0a6;font-weight:600;">Yes</span>
+                            }
+                            else
+                            {
+                                <span style="color:#6b7280;">No</span>
+                            }
+                        </td>
+                        <td style="padding:6px;">@r.OriginCity</td>
+                        <td style="padding:6px;text-align:right;font-weight:600;">@(r.ClaimAmountEur?.ToString("0") ?? "-")</td>
+                        <td style="padding:6px;max-width:260px;">@r.Explanation</td>
+                        <td style="padding:6px;">
+                            @if (r.IsPaid)
+                            {
+                                <span style="color:#0a6;font-weight:600;">&#10003; Paid</span>
+                                @if (r.PaidAt is not null)
+                                {
+                                    <div style="font-size:11px;color:#8a8f9c;">@r.PaidAt?.ToString("yyyy-MM-dd")</div>
+                                }
+                                @if (!string.IsNullOrWhiteSpace(r.PaidNotes))
+                                {
+                                    <div style="font-size:11px;color:#6b7280;">@r.PaidNotes</div>
+                                }
+                            }
+                            else if (r.RequestReimbursement)
+                            {
+                                <span style="color:#c0392b;font-weight:600;">Unpaid</span>
+                            }
+                            else
+                            {
+                                <span style="color:#8a8f9c;">&mdash;</span>
+                            }
+                        </td>
+                        <td style="padding:6px;">
+                            @if (r.RequestReimbursement && !r.IsPaid)
+                            {
+                                <form method="post" asp-page-handler="MarkPaid" style="margin:0;display:flex;gap:4px;align-items:center;">
+                                    <input type="hidden" name="id" value="@r.Id" />
+                                    <input type="text" name="notes" placeholder="Notes (optional)" style="font-size:11px;padding:4px;max-width:140px;" />
+                                    <button type="submit" style="padding:4px 8px;font-size:11px;">Mark paid</button>
+                                </form>
+                            }
+                            else if (r.IsPaid)
+                            {
+                                <form method="post" asp-page-handler="MarkUnpaid" style="margin:0;">
+                                    <input type="hidden" name="id" value="@r.Id" />
+                                    <button type="submit" class="secondary" style="padding:4px 8px;font-size:11px;">Revert</button>
+                                </form>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+        </div>
+    }
+    <p><a asp-page="/Organizer/Index">Back to organizer area</a></p>
+</div>

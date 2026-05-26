@@ -1,0 +1,69 @@
+@page
+@model CommunityHub.Pages.WelcomeModel
+@{
+    ViewData["Title"] = "Welcome";
+}
+
+<div class="card" style="text-align:center;padding:28px 24px;">
+    <img src="~/img/logo.png" alt="Experts Live Denmark"
+         style="height:120px;margin:8px auto 24px;display:block;" />
+
+    <h2 style="color:var(--el-darkblue);font-size:26px;margin:0 0 8px;">
+        Welcome to @Model.EventDisplayName, @Model.FirstName!
+    </h2>
+    <p style="font-size:16px;color:#1a1a2e;margin:0 0 24px;">
+        We're really happy you've joined us as a <strong>@Model.RoleName</strong>.
+        @if (Model.MainDay is not null)
+        {
+            <text>The countdown to <strong>@Model.MainDay?.ToString("dddd, d MMMM yyyy")</strong> in <strong>@(string.IsNullOrWhiteSpace(Model.VenueName) ? "Copenhagen" : Model.VenueName)</strong> has begun.</text>
+        }
+    </p>
+
+    <div style="text-align:left;max-width:640px;margin:0 auto;">
+        <h3 style="color:var(--el-darkblue);margin:18px 0 8px;">What is this Hub?</h3>
+        <p>
+            <strong>Your one-stop place</strong> for everything you need to do before
+            and during @Model.EventCode &mdash; hotel, dinner, swag, travel, lunch and
+            your personal task list. We've designed it so you never miss a deadline
+            and never have to guess what's expected.
+        </p>
+
+        <h3 style="color:var(--el-darkblue);margin:18px 0 8px;">Why we built it</h3>
+        <p>
+            We want your @Model.EventCode experience to feel <em>effortless</em>.
+            The Hub takes the back-and-forth emails out of the picture: pick your
+            polo size, RSVP to the Appreciation Dinner, declare your lunch
+            attendance &mdash; all in one place, on your own schedule.
+        </p>
+
+        <h3 style="color:var(--el-darkblue);margin:18px 0 8px;">A few things you can do right away</h3>
+        <ul style="line-height:1.8;">
+            <li>&#9989; Check off your <strong>pending tasks</strong> at the top of the hub.</li>
+            <li>&#127968; Tell us about your <strong>hotel</strong> needs.</li>
+            <li>&#127863; RSVP to the <strong>Appreciation Dinner</strong> on the evening before the conference.</li>
+            <li>&#128083; Pick your <strong>polo size</strong>.</li>
+            <li>&#9992;&#65039; Submit your <strong>travel reimbursement</strong> (speakers only).</li>
+        </ul>
+
+        <p style="margin-top:18px;">
+            Questions? Reach us any time at
+            <a href="mailto:info@expertslive.dk">info@expertslive.dk</a>.
+        </p>
+
+        <p style="font-size:14px;color:#6b7280;">
+            Cheers,<br/>
+            <strong>ELDK-team</strong>
+        </p>
+    </div>
+
+    <form method="post" asp-page-handler="Continue" style="margin-top:28px;">
+        <button type="submit" style="padding:12px 28px;font-size:16px;">
+            OK, take me to my Hub
+        </button>
+    </form>
+
+    <p style="font-size:12px;color:#8a8f9c;margin-top:14px;">
+        You'll only see this page once. You can always reach the Hub from the
+        <strong>Home</strong> link in the top nav.
+    </p>
+</div>

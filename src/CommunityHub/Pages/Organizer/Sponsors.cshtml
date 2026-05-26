@@ -1,0 +1,124 @@
+@page
+@model CommunityHub.Pages.Organizer.SponsorsModel
+@{
+    ViewData["Title"] = "Sponsors";
+}
+
+<div class="card">
+    <h2>Sponsors</h2>
+    @if (Model.AccessDenied)
+    {
+        <p class="error">This area is for organizers only.</p>
+    }
+    else
+    {
+        <p style="font-size:13px;color:#6b7280;">
+            Company name + contact details live in <strong>Company Manager (WordPress)</strong>.
+            Tasks are auto-generated from completed WooCommerce sponsor orders
+            (daily 06:00 UTC) via <code>SponsorTaskExpander</code> + <code>config/sponsor.eldk27.json</code>.
+            This page summarises the per-company state and exports the full grid.
+        </p>
+
+        <div class="stat-grid" style="display:flex;flex-wrap:wrap;gap:12px;margin:12px 0 16px;">
+            <div class="stat" style="background:var(--el-grey);border-radius:8px;padding:12px 16px;min-width:140px;">
+                <div style="font-size:22px;font-weight:700;color:var(--el-darkblue);">@Model.CompanyCount</div>
+                <div style="font-size:12px;color:#6b7280;text-transform:uppercase;">Companies</div>
+            </div>
+            <div class="stat" style="background:var(--el-grey);border-radius:8px;padding:12px 16px;min-width:140px;">
+                <div style="font-size:22px;font-weight:700;color:var(--el-darkblue);">@Model.ContactCount</div>
+                <div style="font-size:12px;color:#6b7280;text-transform:uppercase;">Sponsor contacts</div>
+            </div>
+            <div class="stat" style="background:var(--el-grey);border-radius:8px;padding:12px 16px;min-width:140px;">
+                <div style="font-size:22px;font-weight:700;color:var(--el-darkblue);">@Model.TotalTasks</div>
+                <div style="font-size:12px;color:#6b7280;text-transform:uppercase;">Tasks total</div>
+            </div>
+            <div class="stat" style="background:var(--el-grey);border-radius:8px;padding:12px 16px;min-width:140px;">
+                <div style="font-size:22px;font-weight:700;color:#0a6;">@Model.DoneTasks</div>
+                <div style="font-size:12px;color:#6b7280;text-transform:uppercase;">Done</div>
+            </div>
+            <div class="stat" style="background:var(--el-grey);border-radius:8px;padding:12px 16px;min-width:140px;">
+                <div style="font-size:22px;font-weight:700;color:#c0392b;">@Model.OverdueTasks</div>
+                <div style="font-size:12px;color:#6b7280;text-transform:uppercase;">Overdue</div>
+            </div>
+        </div>
+
+        <p>
+            <a asp-page-handler="Download"
+               style="display:inline-block;background:var(--el-blue);color:#fff;
+                      padding:9px 16px;border-radius:7px;text-decoration:none;font-size:15px;">
+                Download .xlsx (Companies + Contacts + Tasks)
+            </a>
+        </p>
+
+        @if (Model.Companies.Count == 0)
+        {
+            <p style="margin-top:16px;color:#6b7280;">
+                No sponsor companies yet. The WooCommerce pull job is daily &mdash; once an order completes, tasks will appear here.
+            </p>
+        }
+        else
+        {
+            <div style="overflow-x:auto;margin-top:14px;">
+            <table style="border-collapse:collapse;width:100%;font-size:13px;min-width:920px;">
+                <thead>
+                    <tr style="border-bottom:2px solid #ddd;text-align:left;">
+                        <th style="padding:6px;">Company id</th>
+                        <th style="padding:6px;">Contacts</th>
+                        <th style="padding:6px;text-align:right;">Open</th>
+                        <th style="padding:6px;text-align:right;">In progress</th>
+                        <th style="padding:6px;text-align:right;">Done</th>
+                        <th style="padding:6px;text-align:right;">Overdue</th>
+                        <th style="padding:6px;text-align:right;">Total</th>
+                        <th style="padding:6px;">Next due</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var c in Model.Companies)
+                    {
+                        var rowBg = c.Overdue > 0 ? "background:#fff5f5;" : "";
+                        <tr style="border-bottom:1px solid #eee;@(rowBg)">
+                            <td style="padding:6px;font-family:monospace;">@c.CompanyId</td>
+                            <td style="padding:6px;">
+                                @if (c.Contacts.Count == 0)
+                                {
+                                    <em style="color:#c0392b;">no contacts in this edition</em>
+                                }
+                                else
+                                {
+                                    @for (int i = 0; i < c.Contacts.Count; i++)
+                                    {
+                                        var cn = c.Contacts[i];
+                                        <span>@cn.Name <span style="color:#8a8f9c;font-size:11px;">&lt;@cn.Email&gt;</span></span>
+                                        @if (i < c.Contacts.Count - 1) { <br /> }
+                                    }
+                                }
+                            </td>
+                            <td style="padding:6px;text-align:right;">@c.Open</td>
+                            <td style="padding:6px;text-align:right;">@c.InProgress</td>
+                            <td style="padding:6px;text-align:right;color:#0a6;">@c.Done</td>
+                            <td style="padding:6px;text-align:right;@(c.Overdue > 0 ? "color:#c0392b;font-weight:600;" : "")">@c.Overdue</td>
+                            <td style="padding:6px;text-align:right;">@c.Total</td>
+                            <td style="padding:6px;">@(c.NextDue?.ToString("yyyy-MM-dd") ?? "-")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+            </div>
+        }
+
+        @if (Model.ContactsWithoutCompany.Count > 0)
+        {
+            <h3 style="color:#c0392b;margin-top:18px;">Sponsor contacts without a company id</h3>
+            <p style="font-size:13px;color:#6b7280;">
+                These are participants with role Sponsor but no SponsorCompanyId. They won't see any tasks until the company id is set — usually via the WooCommerce order's <code>_cm_company_id</code> or via the participants page.
+            </p>
+            <ul>
+                @foreach (var c in Model.ContactsWithoutCompany)
+                {
+                    <li>@c.Name &lt;@c.Email&gt;</li>
+                }
+            </ul>
+        }
+    }
+    <p><a asp-page="/Organizer/Index">Back to organizer area</a></p>
+</div>

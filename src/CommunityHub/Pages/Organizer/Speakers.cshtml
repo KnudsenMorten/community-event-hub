@@ -1,0 +1,126 @@
+@page
+@model CommunityHub.Pages.Organizer.SpeakersModel
+@{
+    ViewData["Title"] = "Speakers admin";
+}
+
+<div class="card">
+    <h2>Speakers</h2>
+    @if (Model.AccessDenied)
+    {
+        <p class="error">This area is for organizers only.</p>
+    }
+    else
+    {
+        if (!string.IsNullOrEmpty(Model.Error))   { <p class="error">@Model.Error</p> }
+        if (!string.IsNullOrEmpty(Model.Message)) { <p class="info">@Model.Message</p> }
+
+        <h3 style="color:var(--el-darkblue);margin-top:14px;">Bulk set: upload xlsx</h3>
+        <p style="font-size:13px;color:#6b7280;">
+            Columns: <strong>Email</strong> (required), <strong>SpeakingPreDay</strong>, <strong>SpeakingMainDay</strong>.
+            Yes/Y/1/true/x = tick &middot; No/N/0/false = untick &middot; empty = leave unchanged.
+        </p>
+        <p>
+            <a asp-page-handler="Template"
+               style="display:inline-block;background:var(--el-grey);color:var(--el-darkblue);
+                      padding:6px 12px;border-radius:6px;text-decoration:none;font-size:13px;">
+                Download xlsx template
+            </a>
+        </p>
+        <form method="post" asp-page-handler="ImportXlsx" enctype="multipart/form-data" style="margin-bottom:18px;">
+            <label for="UploadFile">Pick xlsx file</label>
+            <input type="file" name="UploadFile" id="UploadFile" accept=".xlsx,.xlsm" />
+            <button type="submit">Upload and import</button>
+        </form>
+
+        <h3 style="color:var(--el-darkblue);margin-top:14px;">Bulk set: paste a list of emails</h3>
+        <p style="font-size:13px;color:#6b7280;">
+            One email per line (commas / spaces also OK). Only matching active speakers are updated.
+        </p>
+        <form method="post" asp-page-handler="BulkPaste">
+            <label for="EmailList">Speaker emails</label>
+            <textarea asp-for="EmailList" rows="5" placeholder="alice@example.com&#10;bob@example.com"></textarea>
+
+            <label>Apply to which flag?</label>
+            <div style="display:flex; flex-direction:column; gap:6px; margin:6px 0 14px;">
+                <label style="font-weight:normal;">
+                    <input type="radio" asp-for="FieldToSet" value="preday" /> SpeakingPreDay
+                </label>
+                <label style="font-weight:normal;">
+                    <input type="radio" asp-for="FieldToSet" value="mainday" /> SpeakingMainDay
+                </label>
+            </div>
+
+            <label>Target value</label>
+            <div style="display:flex; gap:18px; margin:6px 0 14px;">
+                <label style="font-weight:normal;">
+                    <input type="radio" asp-for="TargetValue" value="true" /> Yes (tick)
+                </label>
+                <label style="font-weight:normal;">
+                    <input type="radio" asp-for="TargetValue" value="false" /> No (untick)
+                </label>
+            </div>
+
+            <button type="submit">Apply to pasted list</button>
+        </form>
+
+        <h3 style="color:var(--el-darkblue);margin-top:24px;">Multi-select grid</h3>
+        <p style="font-size:13px;color:#6b7280;">
+            Tick speakers below, set the field + target above, then click <em>Apply to selection</em>.
+        </p>
+
+        <form method="post" asp-page-handler="BulkSelected">
+            <input type="hidden" asp-for="FieldToSet" />
+            <input type="hidden" asp-for="TargetValue" />
+
+            <div style="overflow-x:auto;">
+            <table style="border-collapse:collapse;width:100%;font-size:13px;min-width:880px;">
+                <thead>
+                    <tr style="border-bottom:2px solid #ddd;text-align:left;">
+                        <th style="padding:6px;text-align:center;">
+                            <input type="checkbox" id="ToggleAll" style="width:auto;margin:0;" />
+                        </th>
+                        <th style="padding:6px;">Name</th>
+                        <th style="padding:6px;">Email</th>
+                        <th style="padding:6px;text-align:center;">Pre-day</th>
+                        <th style="padding:6px;text-align:center;">Main day</th>
+                        <th style="padding:6px;">Accreditation</th>
+                        <th style="padding:6px;">Country</th>
+                        <th style="padding:6px;text-align:center;">1st-time</th>
+                        <th style="padding:6px;text-align:center;">Active</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var r in Model.Rows)
+                    {
+                        <tr style="border-bottom:1px solid #eee;@(r.IsActive ? "" : "opacity:.5;")">
+                            <td style="padding:6px;text-align:center;">
+                                <input type="checkbox" name="SelectedIds" value="@r.Id" class="rowsel" style="width:auto;margin:0;" />
+                            </td>
+                            <td style="padding:6px;">@r.Name</td>
+                            <td style="padding:6px;color:#8a8f9c;">@r.Email</td>
+                            <td style="padding:6px;text-align:center;">@(r.SpeakingPreDay ? "✓" : "")</td>
+                            <td style="padding:6px;text-align:center;">@(r.SpeakingMainDay ? "✓" : "")</td>
+                            <td style="padding:6px;">@r.Accreditation</td>
+                            <td style="padding:6px;">@r.Country</td>
+                            <td style="padding:6px;text-align:center;">
+                                @(r.IsFirstTime is true ? "✓" : r.IsFirstTime is false ? "" : "-")
+                            </td>
+                            <td style="padding:6px;text-align:center;">@(r.IsActive ? "✓" : "")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+            </div>
+
+            <button type="submit" style="margin-top:12px;">Apply to selection</button>
+        </form>
+
+        <script>
+            document.getElementById('ToggleAll').addEventListener('change', function () {
+                document.querySelectorAll('.rowsel').forEach(c => c.checked = this.checked);
+            });
+        </script>
+    }
+    <p><a asp-page="/Organizer/Index">Back to organizer area</a></p>
+</div>

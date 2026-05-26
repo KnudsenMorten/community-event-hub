@@ -1,0 +1,55 @@
+@page
+@using CommunityHub.Core.Domain
+@model CommunityHub.Pages.Sponsor.IndexModel
+@{
+    ViewData["Title"] = "Sponsor area";
+}
+
+<div class="card">
+    <h2>Sponsor deliverables</h2>
+
+    @if (!string.IsNullOrEmpty(Model.Message))
+    {
+        <p class="info">@Model.Message</p>
+    }
+
+    @if (Model.NoCompanyLink)
+    {
+        <p class="error">Your sponsor account is not yet linked to a company,
+           so we cannot show your tasks. Please contact the organizers.</p>
+    }
+    else if (Model.SponsorTasks.Count == 0)
+    {
+        <p>No sponsor tasks yet. Tasks appear here once your order is processed.</p>
+    }
+    else
+    {
+        <p>Tick a task off when it is done. You can reopen it if needed.</p>
+        @foreach (var task in Model.SponsorTasks)
+        {
+            <div style="border-bottom:1px solid #eee;padding:10px 0;">
+                <strong>@task.Title</strong>
+                @if (task.State == TaskState.Done)
+                {
+                    <span class="info"> &check; done</span>
+                }
+                else if (task.DueDate is not null)
+                {
+                    <span> &middot; due @task.DueDate</span>
+                }
+                @if (!string.IsNullOrEmpty(task.Description))
+                {
+                    <p style="margin:4px 0;">@task.Description</p>
+                }
+                <form method="post" asp-page-handler="Toggle">
+                    <input type="hidden" name="taskId" value="@task.Id" />
+                    <button type="submit" class="secondary">
+                        @(task.State == TaskState.Done
+                            ? "Reopen task" : "Mark complete")
+                    </button>
+                </form>
+            </div>
+        }
+    }
+    <p><a asp-page="/Index">Back to hub</a></p>
+</div>

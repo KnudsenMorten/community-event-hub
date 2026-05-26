@@ -1,0 +1,113 @@
+@page
+@model CommunityHub.Pages.Forms.VolunteerWizardModel
+@{
+    ViewData["Title"] = "Volunteer sign-up";
+}
+
+<div class="card">
+    <h2>Volunteer sign-up</h2>
+
+    @if (!string.IsNullOrEmpty(Model.Message))
+    {
+        <p class="@(Model.Saved ? "info" : "error")">@Model.Message</p>
+    }
+
+    @if (Model.IsLocked)
+    {
+        <p class="error">Volunteer sign-up is closed for this event.</p>
+        <p><a asp-page="/Index">Back to hub</a></p>
+    }
+    else if (Model.Saved)
+    {
+        <p>You can return any time before the deadline to update your details.</p>
+        <p><a asp-page="/Index">Back to hub</a></p>
+    }
+    else
+    {
+        <p style="color:#6b7280;font-size:13px;">Step @Model.Step of 3</p>
+
+        @if (Model.Step == 1)
+        {
+            <!-- Step 1: shifts -->
+            <form method="post" asp-page-handler="Next">
+                <input type="hidden" name="Step" value="1" />
+                <p><strong>Which shifts can you work?</strong></p>
+                @foreach (var shift in CommunityHub.Pages.Forms.VolunteerWizardModel.ShiftCatalogue)
+                {
+                    <label>
+                        <input type="checkbox" name="SelectedShifts" value="@shift"
+                               checked="@Model.SelectedShifts.Contains(shift)" />
+                        @shift
+                    </label>
+                }
+                <button type="submit">Next</button>
+            </form>
+        }
+        else if (Model.Step == 2)
+        {
+            <!-- Step 2: role + hours -->
+            <form method="post" asp-page-handler="Next">
+                <input type="hidden" name="Step" value="2" />
+                @foreach (var shift in Model.SelectedShifts)
+                {
+                    <input type="hidden" name="SelectedShifts" value="@shift" />
+                }
+                <label for="PreferredRole">Preferred role (optional)</label>
+                <input type="text" id="PreferredRole" name="PreferredRole"
+                       value="@Model.PreferredRole" />
+                <label for="MaxHoursPerDay">Max hours per day</label>
+                <input type="text" inputmode="numeric" id="MaxHoursPerDay"
+                       name="MaxHoursPerDay" value="@Model.MaxHoursPerDay" />
+                <button type="submit">Next</button>
+            </form>
+            <form method="post" asp-page-handler="Back">
+                <input type="hidden" name="Step" value="2" />
+                @foreach (var shift in Model.SelectedShifts)
+                {
+                    <input type="hidden" name="SelectedShifts" value="@shift" />
+                }
+                <input type="hidden" name="PreferredRole" value="@Model.PreferredRole" />
+                <input type="hidden" name="MaxHoursPerDay" value="@Model.MaxHoursPerDay" />
+                <button type="submit" class="secondary">Back</button>
+            </form>
+        }
+        else
+        {
+            <!-- Step 3: review & confirm -->
+            <p><strong>Please review your details</strong></p>
+            <p>Shifts:
+                @if (Model.SelectedShifts.Count == 0)
+                {
+                    <span class="error">none selected</span>
+                }
+                else
+                {
+                    @string.Join(", ", Model.SelectedShifts)
+                }
+            </p>
+            <p>Preferred role: @(string.IsNullOrWhiteSpace(Model.PreferredRole) ? "(none)" : Model.PreferredRole)</p>
+            <p>Max hours per day: @Model.MaxHoursPerDay</p>
+
+            <form method="post" asp-page-handler="Finish">
+                <input type="hidden" name="Step" value="3" />
+                @foreach (var shift in Model.SelectedShifts)
+                {
+                    <input type="hidden" name="SelectedShifts" value="@shift" />
+                }
+                <input type="hidden" name="PreferredRole" value="@Model.PreferredRole" />
+                <input type="hidden" name="MaxHoursPerDay" value="@Model.MaxHoursPerDay" />
+                <button type="submit">Confirm &amp; submit</button>
+            </form>
+            <form method="post" asp-page-handler="Back">
+                <input type="hidden" name="Step" value="3" />
+                @foreach (var shift in Model.SelectedShifts)
+                {
+                    <input type="hidden" name="SelectedShifts" value="@shift" />
+                }
+                <input type="hidden" name="PreferredRole" value="@Model.PreferredRole" />
+                <input type="hidden" name="MaxHoursPerDay" value="@Model.MaxHoursPerDay" />
+                <button type="submit" class="secondary">Back</button>
+            </form>
+        }
+    }
+</div>

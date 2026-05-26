@@ -1,0 +1,173 @@
+@page
+@model CommunityHub.Pages.IndexModel
+@{
+    ViewData["Title"] = "Hub";
+    ViewData["CommunityName"] = Model.CommunityName;
+}
+
+@{
+    string DoneBadge() =>
+        "<span style=\"display:inline-block;background:#0a6;color:#fff;border-radius:12px;padding:2px 10px;font-size:12px;font-weight:600;\">&#10003; Submitted</span>";
+    string PendingBadge() =>
+        "<span style=\"display:inline-block;background:#fff3cd;color:#856404;border:1px solid #ffe69c;border-radius:12px;padding:2px 10px;font-size:12px;font-weight:600;\">&#9888; Pending</span>";
+}
+
+<style>
+    .status-row { display:flex; align-items:center; gap:10px; margin:6px 0 12px; flex-wrap:wrap; }
+    .task-list { list-style:none; padding:0; margin:0; }
+    .task-list li { padding:8px 12px; border-bottom:1px solid #eef0f4; display:flex; justify-content:space-between; gap:10px; align-items:center; }
+    .task-list li:last-child { border-bottom:0; }
+    .task-list .due { color:#6b7280; font-size:12px; }
+    .task-list .overdue { color:#c0392b; font-weight:600; }
+    .done-row { color:#0a6; }
+    .done-row::before { content:"\2713"; margin-right:6px; font-weight:700; }
+</style>
+
+<div class="card">
+    <h2>Welcome, @Model.Me.FirstName</h2>
+    <p>@Model.EventDisplayName &middot; signed in as <strong>@CommunityHub.Branding.RoleDisplay.Name(Model.Me.Role)</strong></p>
+    @if (Model.OpenTaskCount == 0)
+    {
+        <p><span style="color:#0a6;font-weight:600;">&#10003; All tasks complete!</span></p>
+    }
+</div>
+
+@if (Model.PendingTasks.Count > 0)
+{
+    <div class="card">
+        <h2>&#9888; Pending tasks (@Model.PendingTasks.Count)</h2>
+        <ul class="task-list">
+            @foreach (var t in Model.PendingTasks)
+            {
+                <li>
+                    <span>
+                        @if (t.Link is not null)
+                        {
+                            <a href="@t.Link" style="font-weight:600;">@t.Title &rarr;</a>
+                        }
+                        else
+                        {
+                            @t.Title
+                        }
+                    </span>
+                    <span class="due @(t.DaysOverdue is > 0 ? "overdue" : "")">
+                        @if (t.DueDate is null)
+                        {
+                            <text>no due date</text>
+                        }
+                        else if (t.DaysOverdue is > 0)
+                        {
+                            <text>overdue by @t.DaysOverdue day(s) &middot; due @t.DueDate</text>
+                        }
+                        else
+                        {
+                            <text>due @t.DueDate</text>
+                        }
+                    </span>
+                </li>
+            }
+        </ul>
+    </div>
+}
+
+@if (Model.CompletedTasks.Count > 0)
+{
+    <div class="card">
+        <h2 style="color:#0a6;">&#10003; Completed tasks (@Model.CompletedTasks.Count)</h2>
+        <ul class="task-list">
+            @foreach (var t in Model.CompletedTasks)
+            {
+                <li class="done-row"><span>@t.Title</span><span class="due">done</span></li>
+            }
+        </ul>
+    </div>
+}
+
+@if (Model.ShowHotel)
+{
+    <div class="card">
+        <h2>Hotel</h2>
+        <div class="status-row">
+            @if (Model.HotelSubmitted) { @Html.Raw(DoneBadge()) <span>Your hotel preference is on file.</span> }
+            else                       { @Html.Raw(PendingBadge()) <span>You have not submitted a hotel preference yet.</span> }
+        </div>
+        <a asp-page="/Forms/Hotel">@(Model.HotelSubmitted ? "Update" : "Submit") hotel preference</a>
+    </div>
+}
+
+@if (Model.ShowDinner)
+{
+    <div class="card">
+        <h2>Dinner / social event</h2>
+        <div class="status-row">
+            @if (Model.DinnerSubmitted) { @Html.Raw(DoneBadge()) <span>Your dinner RSVP is on file.</span> }
+            else                        { @Html.Raw(PendingBadge()) <span>Please let us know if you will attend the dinner.</span> }
+        </div>
+        <a asp-page="/Forms/Dinner">@(Model.DinnerSubmitted ? "Update" : "Submit") dinner signup</a>
+    </div>
+}
+
+@if (Model.ShowVolunteerShifts)
+{
+    <div class="card">
+        <h2>Volunteer shifts</h2>
+        <div class="status-row">
+            @if (Model.VolunteerSubmitted) { @Html.Raw(DoneBadge()) <span>Your availability is on file.</span> }
+            else                           { @Html.Raw(PendingBadge()) <span>Please submit which shifts you can work.</span> }
+        </div>
+        <a asp-page="/Forms/VolunteerWizard">@(Model.VolunteerSubmitted ? "Update" : "Start") volunteer sign-up</a>
+    </div>
+}
+
+@if (Model.ShowSpeakerDeadlines)
+{
+    <div class="card">
+        <h2>Speaker deadlines</h2>
+        <p>Your session-related deadlines appear in your task list.</p>
+        <a asp-page="/Tasks/Index">View deadlines</a>
+    </div>
+}
+
+@if (Model.ShowSponsorPipeline)
+{
+    <div class="card">
+        <h2>Sponsor deliverables</h2>
+        <p>Your sponsor onboarding tasks and deadlines.</p>
+        <a asp-page="/Sponsor/Index">Open sponsor area</a>
+    </div>
+}
+
+@if (Model.ShowAttendeeArea)
+{
+    <div class="card">
+        <h2>Your Master Class</h2>
+        @if (Model.AttendeeBookingStatus == CommunityHub.Core.Domain.MasterClassBookingStatus.Booked)
+        {
+            <p class="info">You have reserved a Master Class seat.</p>
+        }
+        else if (Model.AttendeeBookingStatus == CommunityHub.Core.Domain.MasterClassBookingStatus.MultipleBookings)
+        {
+            <p class="error">You have more than one Master Class booking - please keep one and cancel the others.</p>
+        }
+        else
+        {
+            <p class="error">You have not reserved a Master Class seat yet.</p>
+        }
+        <a asp-page="/Attendee/Index">Open attendee area</a>
+    </div>
+}
+
+@if (Model.ShowOrganizerTools)
+{
+    <div class="card">
+        <h2>Organizer tools</h2>
+        <p>Attendee reconciliation, sponsor orders, and task management.</p>
+        <a asp-page="/Organizer/Index">Open organizer area</a>
+    </div>
+}
+
+<div class="card">
+    <form method="post" asp-page="/Logout">
+        <button type="submit" class="secondary">Sign out</button>
+    </form>
+</div>

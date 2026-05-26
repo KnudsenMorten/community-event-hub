@@ -1,0 +1,41 @@
+@page
+@model CommunityHub.Pages.LoginModel
+@{
+    ViewData["Title"] = "Sign in";
+}
+
+<div class="card">
+    <h2>Sign in</h2>
+
+    @if (!string.IsNullOrEmpty(Model.Message))
+    {
+        <p class="@(Model.IsError ? "error" : "info")">@Model.Message</p>
+    }
+
+    @if (Model.Step == "email")
+    {
+        <!-- Step 1: request a PIN by email -->
+        <form method="post" asp-page-handler="RequestPin">
+            <label for="Email">Your email</label>
+            <input type="email" id="Email" name="Email" value="@Model.Email"
+                   required autocomplete="email" />
+            <button type="submit">Send my sign-in code</button>
+        </form>
+    }
+    else
+    {
+        <!-- Step 2: enter the PIN -->
+        <form method="post" asp-page-handler="VerifyPin" style="margin-bottom:14px;">
+            <input type="hidden" name="Email" value="@Model.Email" />
+            <input type="hidden" name="Step" value="pin" />
+            <label for="Pin">Enter the 6-digit code we emailed you</label>
+            <input type="text" id="Pin" name="Pin" inputmode="numeric"
+                   pattern="[0-9]{6}" maxlength="6" required autocomplete="one-time-code" />
+            <button type="submit">Sign in</button>
+        </form>
+        <form method="post" asp-page-handler="RequestPin" style="margin-top:14px;">
+            <input type="hidden" name="Email" value="@Model.Email" />
+            <button type="submit" class="secondary">Send a new code</button>
+        </form>
+    }
+</div>

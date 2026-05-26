@@ -1,0 +1,65 @@
+@page
+@model CommunityHub.Pages.Organizer.SendInvitationsModel
+@{
+    ViewData["Title"] = "Send invitations";
+}
+
+<div class="card">
+    <h2>Send invitations</h2>
+
+    @if (Model.AccessDenied)
+    {
+        <p class="error">This area is for organizers only.</p>
+    }
+    else
+    {
+        <p>
+            Sends a one-tap sign-in email to every <strong>active</strong> participant
+            who hasn't been invited yet. Each email contains a 14-day magic-link
+            personalised to the recipient &mdash; one tap to land in their Event Hub.
+        </p>
+        <p style="background:#fff7e6;padding:8px 12px;border-radius:6px;font-size:13px;">
+            <strong>Idempotent:</strong> running this again will only mail people who
+            haven't already received an invitation. To re-invite someone, ask a developer to
+            clear their <em>SentReminder</em> row for type <em>invitation</em>.
+        </p>
+
+        if (!string.IsNullOrEmpty(Model.Message))
+        {
+            <p class="info">@Model.Message</p>
+        }
+
+        <table style="border-collapse:collapse;width:100%;font-size:14px;margin:10px 0 16px;">
+            <thead>
+                <tr style="border-bottom:2px solid #ddd;text-align:left;">
+                    <th style="padding:6px;">Role</th>
+                    <th style="padding:6px;text-align:right;">Active</th>
+                    <th style="padding:6px;text-align:right;">Already invited</th>
+                    <th style="padding:6px;text-align:right;">Pending</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var r in Model.ByRole)
+                {
+                    <tr style="border-bottom:1px solid #eee;">
+                        <td style="padding:6px;">@r.Role</td>
+                        <td style="padding:6px;text-align:right;">@r.Active</td>
+                        <td style="padding:6px;text-align:right;">@r.AlreadySent</td>
+                        <td style="padding:6px;text-align:right;"><strong>@r.Pending</strong></td>
+                    </tr>
+                }
+                <tr style="border-top:2px solid #ddd;font-weight:600;">
+                    <td style="padding:6px;">Total</td>
+                    <td style="padding:6px;text-align:right;">@Model.ActiveCount</td>
+                    <td style="padding:6px;text-align:right;">@Model.AlreadySentCount</td>
+                    <td style="padding:6px;text-align:right;">@(Model.ActiveCount - Model.AlreadySentCount)</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <form method="post" asp-page-handler="Send">
+            <button type="submit">Send invitations to @(Model.ActiveCount - Model.AlreadySentCount) pending</button>
+        </form>
+    }
+    <p><a asp-page="/Organizer/Index">Back to organizer area</a></p>
+</div>

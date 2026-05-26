@@ -1,0 +1,66 @@
+@page "{id:int?}"
+@model CommunityHub.Pages.Organizer.EditParticipantModel
+@{
+    ViewData["Title"] = Model.IsNew ? "Add participant" : "Edit participant";
+}
+
+<div class="card">
+    <h2>@(Model.IsNew ? "Add participant" : $"Edit participant #{Model.Id}")</h2>
+
+    @if (Model.AccessDenied)
+    {
+        <p class="error">This area is for organizers only.</p>
+    }
+    else
+    {
+        if (!string.IsNullOrEmpty(Model.Error))
+        {
+            <p class="error">@Model.Error</p>
+        }
+        if (!string.IsNullOrEmpty(Model.Message))
+        {
+            <p class="info">@Model.Message</p>
+        }
+
+        <form method="post">
+            <label for="Email">Email (unique within this edition)</label>
+            <input type="email" asp-for="Email" required autocomplete="email" />
+
+            <label for="FullName">Full name</label>
+            <input type="text" asp-for="FullName" required />
+
+            <label for="Phone">Phone (optional)</label>
+            <input type="text" asp-for="Phone" />
+
+            <label for="Role">Role</label>
+            <select asp-for="Role">
+                @foreach (var r in Enum.GetValues<CommunityHub.Core.Domain.ParticipantRole>())
+                {
+                    <option value="@((int)r)">@r</option>
+                }
+            </select>
+
+            <label style="font-weight:normal; display:flex; align-items:center; gap:8px;">
+                <input type="checkbox" asp-for="IsActive" style="width:auto;margin:0;" />
+                Active (can sign in)
+            </label>
+
+            <div style="display:flex; gap:10px; margin-top:14px;">
+                <button type="submit">@(Model.IsNew ? "Create participant" : "Save changes")</button>
+                <a asp-page="/Organizer/Participants" class="secondary"
+                   style="background:var(--el-grey);color:var(--el-darkblue);padding:9px 16px;border-radius:7px;text-decoration:none;font-size:15px;">
+                    Cancel
+                </a>
+            </div>
+        </form>
+
+        @if (!Model.IsNew)
+        {
+            <p style="margin-top:18px;font-size:13px;color:#6b7280;">
+                Tip: to edit hotel dates / dinner / swag answers on behalf of this person,
+                use <a asp-page="/Organizer/DataGrid">the participant data grid</a>.
+            </p>
+        }
+    }
+    <p><a asp-page="/Organizer/Participants">Back to participants</a></p>
+</div>

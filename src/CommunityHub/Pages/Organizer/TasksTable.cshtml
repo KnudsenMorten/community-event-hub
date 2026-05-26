@@ -1,0 +1,115 @@
+@page
+@using CommunityHub.Core.Domain
+@model CommunityHub.Pages.Organizer.TasksTableModel
+@{
+    ViewData["Title"] = "Tasks table";
+}
+
+<style>
+    /* Each editable row is a form styled as a table row - a form is not a
+       valid direct child of a tr, so the grid is built with display:table. */
+    .grid { width: 100%; border-collapse: collapse; font-size: 14px; }
+    .grid .row { display: table-row; border-bottom: 1px solid #eee; }
+    .grid .row > * { display: table-cell; padding: 4px 6px; vertical-align: middle; }
+    .grid .head { display: table-row; font-weight: 600; }
+    .grid .head > * { display: table-cell; padding: 6px;
+        border-bottom: 2px solid #ddd; text-align: left; }
+    .grid input[type=date], .grid input[type=text] { margin: 2px 0; }
+</style>
+
+<div class="card">
+    <h2>Tasks</h2>
+
+    @if (Model.AccessDenied)
+    {
+        <p class="error">This area is for organizers only.</p>
+    }
+    else
+    {
+        @if (!string.IsNullOrEmpty(Model.Message))
+        {
+            <p class="info">@Model.Message</p>
+        }
+
+        <!-- Filter + sort -->
+        <form method="get" style="margin-bottom:14px;">
+            <label for="StateFilter">State</label>
+            <select id="StateFilter" name="StateFilter">
+                <option value="">All</option>
+                @foreach (var st in Enum.GetValues<TaskState>())
+                {
+                    <option value="@st" selected="@(Model.StateFilter == st)">@st</option>
+                }
+            </select>
+            <label for="Sort">Sort by</label>
+            <select id="Sort" name="Sort">
+                <option value="due" selected="@(Model.Sort == "due")">Due date</option>
+                <option value="title" selected="@(Model.Sort == "title")">Title</option>
+                <option value="state" selected="@(Model.Sort == "state")">State</option>
+            </select>
+            <button type="submit">Apply</button>
+        </form>
+        <p>
+            <a asp-page-handler="Export"
+               asp-route-Sort="@Model.Sort"
+               asp-route-StateFilter="@Model.StateFilter">Export to CSV</a>
+        </p>
+
+        @if (Model.Tasks.Count == 0)
+        {
+            <p>No tasks match the filter.</p>
+        }
+        else
+        {
+            <p>@Model.Tasks.Count task(s). Edit a row and click Save.</p>
+            <div style="overflow-x:auto;">
+                <div class="grid">
+                    <div class="head">
+                        <span>Title</span><span>Due date</span><span>State</span>
+                        <span>Assignee</span><span></span>
+                    </div>
+                    @foreach (var t in Model.Tasks)
+                    {
+                        <form method="post" asp-page-handler="SaveRow" class="row"
+                              asp-route-Sort="@Model.Sort"
+                              asp-route-StateFilter="@Model.StateFilter">
+                            <input type="hidden" name="taskId" value="@t.Id" />
+                            <span>
+                                <input type="text" name="title" value="@t.Title"
+                                       style="max-width:280px;" />
+                            </span>
+                            <span>
+                                <input type="date" name="dueDate"
+                                       value="@(t.DueDate?.ToString("yyyy-MM-dd"))" />
+                            </span>
+                            <span>
+                                <select name="state">
+                                    @foreach (var st in Enum.GetValues<TaskState>())
+                                    {
+                                        <option value="@st" selected="@(t.State == st)">@st</option>
+                                    }
+                                </select>
+                            </span>
+                            <span>
+                                <select name="assigneeId">
+                                    <option value="">(unassigned)</option>
+                                    @foreach (var a in Model.Assignees)
+                                    {
+                                        <option value="@a.Id"
+                                            selected="@(t.AssignedParticipantId == a.Id)">
+                                            @a.FullName
+                                        </option>
+                                    }
+                                </select>
+                            </span>
+                            <span>
+                                <button type="submit" class="secondary">Save</button>
+                            </span>
+                        </form>
+                    }
+                </div>
+            </div>
+        }
+    }
+    <p><a asp-page="/Organizer/Index">Back to organizer area</a></p>
+</div>

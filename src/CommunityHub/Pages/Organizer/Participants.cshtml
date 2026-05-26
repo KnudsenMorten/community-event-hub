@@ -1,0 +1,80 @@
+@page
+@using CommunityHub.Core.Domain
+@model CommunityHub.Pages.Organizer.ParticipantsModel
+@{
+    ViewData["Title"] = "Participants";
+}
+
+<div class="card">
+    <h2>Participants</h2>
+
+    @if (Model.AccessDenied)
+    {
+        <p class="error">This area is for organizers only.</p>
+    }
+    else
+    {
+        <!-- Filters -->
+        <form method="get" style="margin-bottom:16px;">
+            <label for="ActiveFilter">Status</label>
+            <select id="ActiveFilter" name="ActiveFilter">
+                <option value="active" selected="@(Model.ActiveFilter == "active")">Active only</option>
+                <option value="inactive" selected="@(Model.ActiveFilter == "inactive")">Inactive only</option>
+                <option value="all" selected="@(Model.ActiveFilter == "all")">All</option>
+            </select>
+            <label for="RoleFilter">Role</label>
+            <select id="RoleFilter" name="RoleFilter">
+                <option value="">All roles</option>
+                @foreach (var role in Enum.GetValues<ParticipantRole>())
+                {
+                    <option value="@role" selected="@(Model.RoleFilter == role)">@role</option>
+                }
+            </select>
+            <button type="submit">Apply</button>
+        </form>
+
+        @if (Model.Participants.Count == 0)
+        {
+            <p>No participants match the filter.</p>
+        }
+        else
+        {
+            <p>@Model.Participants.Count participant(s).</p>
+            <table style="width:100%;border-collapse:collapse;">
+                <tr style="text-align:left;border-bottom:2px solid #ddd;">
+                    <th>Name</th><th>Email</th><th>Role</th>
+                    <th>Status</th><th></th>
+                </tr>
+                @foreach (var p in Model.Participants)
+                {
+                    <tr style="border-bottom:1px solid #eee;">
+                        <td>@p.FullName</td>
+                        <td>@p.Email</td>
+                        <td>@p.Role</td>
+                        <td>
+                            @if (p.IsActive)
+                            {
+                                <span class="info">Active</span>
+                            }
+                            else
+                            {
+                                <span class="error">Inactive</span>
+                            }
+                        </td>
+                        <td>
+                            <form method="post" asp-page-handler="ToggleActive"
+                                  asp-route-ActiveFilter="@Model.ActiveFilter"
+                                  asp-route-RoleFilter="@Model.RoleFilter">
+                                <input type="hidden" name="participantId" value="@p.Id" />
+                                <button type="submit" class="secondary">
+                                    @(p.IsActive ? "Deactivate" : "Reactivate")
+                                </button>
+                            </form>
+                        </td>
+                    </tr>
+                }
+            </table>
+        }
+    }
+    <p><a asp-page="/Organizer/Index">Back to organizer area</a></p>
+</div>
