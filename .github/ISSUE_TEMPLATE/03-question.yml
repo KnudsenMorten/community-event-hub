@@ -1,0 +1,31 @@
+name: Question / help
+description: How do I do X? Why does Y behave like that? When should I use Z?
+title: "[Question] "
+labels: ["question", "needs triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For open-ended questions or anything you'd like the community to chime
+        in on, please prefer **Discussions** -- this issue tracker is best for
+        questions that have a specific, answerable answer (configuration,
+        setup, deployment specifics).
+
+  - type: textarea
+    id: question
+    attributes:
+      label: What do you want to do?
+    validations:
+      required: true
+
+  - type: textarea
+    id: tried
+    attributes:
+      label: What have you tried?
+      description: Helps avoid suggesting things you've already ruled out.
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: Anything relevant -- the event you're organising, your team size, why the default doesn't work for you, etc.

@@ -1,0 +1,14 @@
+blank_issues_enabled: false
+
+contact_links:
+  - name: Discussions
+    url: https://github.com/KnudsenMorten/community-event-hub/discussions
+    about: Questions, ideas, show-and-tell, or general chat about running an event with this project.
+
+  - name: Read the README
+    url: https://github.com/KnudsenMorten/community-event-hub/blob/main/README.md
+    about: Project overview, screenshots, how the pieces fit together.
+
+  - name: Security disclosure
+    url: https://github.com/KnudsenMorten/community-event-hub/security/advisories/new
+    about: Found a security issue? Please report it privately via GitHub Security Advisories instead of opening a public issue.

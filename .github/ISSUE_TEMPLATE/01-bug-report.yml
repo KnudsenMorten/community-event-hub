@@ -1,0 +1,83 @@
+name: Bug report
+description: Something broken that you can reproduce locally or in your deployed instance.
+title: "[Bug] "
+labels: ["bug", "needs triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing! The Community Event Hub is an open-source template
+        used by multiple events. A concrete repro is the fastest path to a fix.
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Numbered list. Include the URL, the page name, what you clicked, what you typed.
+      placeholder: |
+        1. Sign in as a Speaker
+        2. Open /Forms/Dinner
+        3. Tick "Vegan" and click Save
+        4. Reload the page
+        5. The Vegan tick is gone
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual
+      description: Screenshots help -- drag-drop into the text area.
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version / commit
+      placeholder: "0.4.1, or 75f89a8, or 'latest main'"
+
+  - type: dropdown
+    id: env
+    attributes:
+      label: Environment
+      options:
+        - Local dev (dotnet run)
+        - Azure App Service
+        - Docker container
+        - Other (describe in details)
+
+  - type: textarea
+    id: env-details
+    attributes:
+      label: Environment details
+      description: Browser + version, OS, .NET SDK version, anything you customised in config.
+      placeholder: |
+        - Browser: Edge 132 on Windows 11
+        - .NET: 8.0.404
+        - DB: Azure SQL S0
+        - Custom config: changed defaultDurationHours from 1 to 8
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / errors
+      description: Server log, browser console, exception stack. Strip any personal data.
+      render: text
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Pre-flight
+      options:
+        - label: I searched existing open + closed issues for duplicates
+          required: true
+        - label: I'm running a recent commit / release (not a forked / heavily-modified version)
+          required: false

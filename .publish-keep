@@ -1,0 +1,19 @@
+# Files in THIS public repo that the publish-to-public.ps1 sync script must
+# preserve when force-mirroring from KnudsenMorten/eldk-community-event-hub.
+#
+# Anything matching a pattern below survives the publish even though it does
+# NOT exist in the private source. Use this for files that are deliberately
+# public-only (issue templates with community-facing language, PR template
+# without internal references, GitHub config that only makes sense in the
+# public repo, etc.).
+#
+# Pattern syntax: PowerShell -like wildcards against the relative path from
+# the public repo root, using forward slashes.
+
+# Issue + PR templates -- worded for community contributors, distinct from
+# the private repo's team-internal versions.
+.github/ISSUE_TEMPLATE/*
+.github/pull_request_template.md
+
+# This file itself.
+.publish-keep

@@ -1,0 +1,39 @@
+name: Feature request
+description: An idea for new functionality or an improvement.
+title: "[Feature] "
+labels: ["enhancement", "needs triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For early-stage ideas, consider opening a **Discussion** instead --
+        the conversation can shape into a more concrete issue later.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: Who is affected and what's painful today? Lead with the use case.
+      placeholder: |
+        As an event organizer, I want a one-click "send reminder to everyone with status=Pending" button,
+        so I don't have to filter the table + write the email + bcc the list manually for each event.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Sketch the UX / API / schema. Screenshots, mockups, or pseudo-code welcome.
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope
+      options:
+        - label: I'd be willing to send a PR for this (no obligation -- helps prioritisation)
