@@ -47,13 +47,21 @@
     .survey-body { padding: 20px 24px 24px 24px; }
 
     .stepbar { display: flex; gap: 8px; margin: 0 0 22px 0; flex-wrap: wrap; }
+    /* All three pills now share the same shape + visible edge. Previously
+       the inactive state was `background: #eef0f5` + `border: 1px solid
+       transparent`, which against the white card body looked like a faint
+       blob with no edge -- step 2 in particular seemed to disappear into
+       the background (reported 2026-06-10). New baseline: a slightly
+       darker grey fill + a visible 1px border on every pill, so all three
+       read as "buttons" regardless of state. The active pill still wins
+       the eye via the brand blue. */
     .stepbar .pill {
         flex: 1 1 0; min-width: 110px; padding: 9px 12px; border-radius: 999px;
-        background: #eef0f5; color: #4a5160; font-size: 13px; font-weight: 600;
-        text-align: center; border: 1px solid transparent;
+        background: #dde1ec; color: #2f3640; font-size: 13px; font-weight: 600;
+        text-align: center; border: 1px solid #c4c8d4;
     }
     .stepbar .pill.active { background: var(--el-blue, #008BD2); color: #fff; border-color: var(--el-darkblue, #1D3380); }
-    .stepbar .pill.done   { background: #d8f3d6; color: #1b5e20; }
+    .stepbar .pill.done   { background: #d8f3d6; color: #1b5e20; border-color: #a8d6a4; }
 
     .step-section { display: none; }
     .step-section.active { display: block; }
@@ -196,7 +204,7 @@
                     <a href="/survey/@Model.Slug/results"><strong>&rarr; @Model.Survey.ResultsLinkLabel</strong></a>
                 </p>
                 <p style="margin-top:18px; font-size:13px; color:#1b5e3a;">
-                    The ELDK27 organizer team:
+                    Thank you from the ELDK27 organizer team:
                 </p>
                 <ul style="margin:4px 0 0 0; padding-left:18px; font-size:13px; color:#166534;">
                     <li><a href="https://www.linkedin.com/in/knudsenmorten/" target="_blank" rel="noopener">Morten Knudsen</a></li>
