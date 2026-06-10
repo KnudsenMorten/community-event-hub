@@ -6,7 +6,11 @@ namespace CommunityHub.Core.Integrations;
 public sealed record SponsorTask(
     string Title,
     DateOnly? DueDate,
-    string DeadlineRuleName);
+    string DeadlineRuleName,
+    string Description,
+    BoothTier Tier,
+    bool Mandatory,
+    SponsorTaskUploadDefinition? Upload);
 
 /// <summary>
 /// Expands a classified sponsor product into the concrete task list, using the
@@ -91,7 +95,7 @@ public sealed class SponsorTaskExpander
 
                 var due = ResolveDeadline(
                     def.Deadline, rules, eventDate, firstOrderDate, today);
-                tasks.Add(new SponsorTask(def.Title, due, def.Deadline));
+                tasks.Add(new SponsorTask(def.Title, due, def.Deadline, def.Description, cls.Tier, def.Mandatory, def.Upload));
             }
         }
 

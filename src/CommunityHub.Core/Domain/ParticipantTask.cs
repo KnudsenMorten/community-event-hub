@@ -39,6 +39,17 @@ public class ParticipantTask
     public TaskState State { get; set; } = TaskState.Open;
 
     /// <summary>
+    /// Mandatory vs optional. Mandatory tasks are part of the agreed
+    /// deliverables (logo upload, booth layout, session description, etc.);
+    /// optional ones are paid add-ons / nice-to-haves (attendee-bag insert,
+    /// TV rental, app-game prize, etc.). UI surfaces an "Optional" badge
+    /// when false; reminder cadence may differ in future. Default true so
+    /// pre-existing tasks (which never had this flag) keep the safer
+    /// "treat as deliverable" semantics.
+    /// </summary>
+    public bool IsMandatory { get; set; } = true;
+
+    /// <summary>
     /// Optional source tag, e.g. which task-set generated it ("allSponsors",
     /// "boothPlatinum", a volunteer import). Useful for idempotent re-runs.
     /// </summary>

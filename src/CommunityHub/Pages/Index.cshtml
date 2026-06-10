@@ -160,10 +160,15 @@
 
 @if (Model.ShowSponsorPipeline)
 {
+    @await Html.PartialAsync("_KeyDates", Model.EventDates)
+
     <div class="card">
-        <h2>Sponsor deliverables</h2>
-        <p>Your sponsor onboarding tasks and deadlines.</p>
-        <a asp-page="/Sponsor/Index">Open sponsor area</a>
+        <h2>Sponsor area</h2>
+        <p>Your company's onboarding tasks appear in the Pending / Completed lists above. The two pages below give you the full view + the inline edit forms.</p>
+        <p style="display:flex;gap:10px;flex-wrap:wrap;margin-top:8px;">
+            <a class="task-link-btn" asp-page="/Sponsor/Index">Open Sponsor Engagement Details</a>
+            <a class="task-link-btn" asp-page="/Sponsor/Tasks">Open Sponsor Tasks</a>
+        </p>
     </div>
 }
 

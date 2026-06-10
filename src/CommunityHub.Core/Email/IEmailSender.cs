@@ -59,4 +59,22 @@ public sealed class EmailOptions
     /// in dev (via app setting Email__RedirectAllTo). Leave empty in prod.
     /// </summary>
     public string RedirectAllTo { get; set; } = string.Empty;
+
+    /// <summary>
+    /// PRODUCTION-SAFE ALLOWLIST. When non-empty, outbound mail is sent only if
+    /// the (post-redirect) recipient matches an entry; non-matching recipients
+    /// are silently DROPPED (logged at Information). Empty = no allowlist =
+    /// every recipient gets mail (normal PROD behaviour).
+    ///
+    /// Format: comma- or semicolon-separated list of either:
+    ///   - exact addresses     "mok@expertslive.dk"
+    ///   - domain wildcards    "@2linkit.net"           (any address at this domain)
+    ///
+    /// Use case: deploy new functionality to PROD with allowlist set to
+    /// internal staff only, smoke-test against real PROD data without spamming
+    /// external recipients, then clear the setting once happy. ALWAYS remove
+    /// (or leave empty) for normal operation -- otherwise the hub silently
+    /// drops mail to sponsors / volunteers / speakers.
+    /// </summary>
+    public string OnlySendTo { get; set; } = string.Empty;
 }

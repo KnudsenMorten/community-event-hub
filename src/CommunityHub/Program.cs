@@ -74,6 +74,12 @@ builder.Services.AddScoped<SessionizeImportService>();
 // --- Reporting / dashboard -------------------------------------------------
 builder.Services.AddScoped<CommunityHub.Core.Reporting.ReportingService>();
 
+// --- Surveys (definitions in JSON under App_Data/Surveys/) ----------------
+// Definitions are read from disk on first request per slug then cached for
+// the app lifetime. Restart picks up edits. Responses persist to the DB
+// (SurveyResponse + SurveyResponsePick).
+builder.Services.AddSingleton<CommunityHub.Surveys.SurveyDefinitionProvider>();
+
 // --- Session cookie --------------------------------------------------------
 //  SameSite=None + Secure so the cookie survives inside the cross-site
 //  Backstage iframe (CONTEXT.md 5a). Without this the browser drops it and
@@ -110,6 +116,34 @@ builder.Configuration
     .Bind(speakerDeadlineOptions);
 builder.Services.AddSingleton(speakerDeadlineOptions);
 builder.Services.AddScoped<CommunityHub.Core.Config.SpeakerDeadlineSeeder>();
+
+// --- Company Manager (sponsor-side company + contacts source of truth) ----
+// Used by /Sponsor/Index to render a read-only "Sponsor details" card
+// pulled from the webshop (company name, website, LinkedIn, X) with a
+// button back to the configurator for updates.
+var cmOptions = new CommunityHub.Core.Integrations.CompanyManagerOptions();
+builder.Configuration.GetSection(CommunityHub.Core.Integrations.CompanyManagerOptions.SectionName).Bind(cmOptions);
+builder.Services.AddSingleton(cmOptions);
+builder.Services.AddHttpClient<CommunityHub.Core.Integrations.CompanyManagerClient>();
+
+// --- WooCommerce (sponsor orders, displayed on /Sponsor/Index) ------------
+// Web-side WooCommerce client renders the "Sponsor orders" section on
+// /Sponsor/Index. Same shape as the Jobs / OneShot wiring.
+var wooOptions = new CommunityHub.Core.Integrations.WooCommerceOptions();
+builder.Configuration.GetSection(CommunityHub.Core.Integrations.WooCommerceOptions.SectionName).Bind(wooOptions);
+builder.Services.AddSingleton(wooOptions);
+builder.Services.AddHttpClient<CommunityHub.Core.Integrations.WooCommerceClient>();
+// In-memory cache for sponsor-orders rendering: WooCommerce + products
+// enrichment is ~2-3 seconds and the same sponsor will refresh the page
+// repeatedly. 5-minute TTL keyed on company id.
+builder.Services.AddMemoryCache();
+
+// Event-edition facts + cross-cutting placeholders ({{configuratorUrl}}
+// etc.) for rendering the "update this data in the webshop" link.
+var eventConfigOptions = new CommunityHub.Core.Config.EventConfigOptions();
+builder.Configuration.GetSection(CommunityHub.Core.Config.EventConfigOptions.SectionName).Bind(eventConfigOptions);
+builder.Services.AddSingleton(eventConfigOptions);
+builder.Services.AddSingleton<CommunityHub.Core.Config.EventEditionConfigLoader>();
 
 // --- Current-participant accessor (Stage 4) --------------------------------
 builder.Services.AddHttpContextAccessor();

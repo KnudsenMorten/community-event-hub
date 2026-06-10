@@ -35,4 +35,17 @@
     </None>
   </ItemGroup>
 
+  <!-- Ship the per-edition config (event.<ed>.json, sponsor.<ed>.json,
+       integrations.<ed>.json, ...) into the published Functions bundle so
+       SponsorOrderPullService / SponsorUploadWatchService can find them at
+       runtime. Without this the watcher in Azure cannot resolve
+       config/event.eldk27.json -> the sharepoint block -> site/drive/root. -->
+  <ItemGroup>
+    <None Include="..\..\config\*.json">
+      <Link>config\%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>Always</CopyToPublishDirectory>
+    </None>
+  </ItemGroup>
+
 </Project>

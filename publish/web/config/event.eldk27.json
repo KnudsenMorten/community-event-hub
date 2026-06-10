@@ -1,0 +1,125 @@
+{
+  "_schema": "eldk-hub/event-config@1",
+  "_doc": "One file per event edition. Everything community- and edition-specific lives here so the application code stays generic and reusable. Copy this file, rename per edition (e.g. event.eldk27.json), and edit. NOTHING in the app code should hardcode any value that appears in this file.",
+
+  "edition": {
+    "code": "ELDK27",
+    "eventName": "Experts Live Denmark",
+    "displayName": "ELDK27 Crew Hub",
+    "isActive": true,
+    "expectedAttendees": 1250,
+    "_expectedAttendeesNote": "Approximate registered-attendee count for the edition. Substituted into task descriptions, email templates, and forecasts via the {{expectedAttendees}} placeholder. Update per edition.",
+    "_doc": "code is the unique edition key. isActive marks the edition the hub currently serves; exactly one edition should be active."
+  },
+
+  "community": {
+    "name": "Experts Live Denmark",
+    "organizerEmail": "info@expertslive.dk",
+    "senderName": "Experts Live Denmark",
+    "senderEmail": "info@expertslive.dk",
+    "supportEmail": "info@expertslive.dk",
+    "brandColor": "#0a3d62",
+    "logoUrl": "",
+    "_doc": "Identity of the community running this edition. A different community changes only this block (and the rest of the file) - never the code."
+  },
+
+  "dates": {
+    "preDay": "2027-02-08",
+    "day1": "2027-02-09",
+    "day2": "2027-02-10",
+    "timezone": "Europe/Copenhagen",
+    "lockDate": "2027-01-20",
+    "_doc": "lockDate: after this date, edits to hotel/dinner/shift records notify organizers as [LATE CHANGE]. preDay is the master-class / setup day."
+  },
+
+  "venue": {
+    "name": "Bella Center Copenhagen",
+    "address": "Center Boulevard 5, 2300 Copenhagen, Denmark",
+    "mapUrl": ""
+  },
+
+  "formDeadlines": {
+    "speakerProfile": "2027-01-15",
+    "volunteerProfile": "2027-01-15",
+    "hotel": "2027-01-20",
+    "dinner": "2027-01-20",
+    "_doc": "Per-form 'respond by' dates. Drive the incomplete-form chaser emails."
+  },
+
+  "crewDays": [
+    { "key": "setup", "label": "Setup day", "date": "2027-02-08" },
+    { "key": "preday", "label": "Pre-day (master class)", "date": "2027-02-09" },
+    { "key": "mainday", "label": "Main conference day", "date": "2027-02-10" },
+    {
+      "_doc": "Crew days for volunteer availability. label/date/key are per-edition. CONFIRM the calendar: 8 Feb 2027 is a Monday; the original ELDK pattern was Setup-Mon + Pre-day + Main. Reconcile against day1/day2 above before go-live."
+    }
+  ],
+
+  "roles": [
+    { "key": "organizer", "label": "Organizer", "isAdmin": true },
+    { "key": "speaker", "label": "Speaker", "isAdmin": false },
+    { "key": "volunteer", "label": "Volunteer", "isAdmin": false },
+    { "key": "sponsor", "label": "Sponsor", "isAdmin": false },
+    { "key": "speaker-sponsor", "label": "Speaker-Sponsor", "isAdmin": false },
+    { "key": "video", "label": "Video", "isAdmin": false },
+    { "key": "photography", "label": "Photography", "isAdmin": false },
+    { "key": "vip", "label": "VIP", "isAdmin": false },
+    {
+      "_doc": "The crew roles. Each person has exactly one. isAdmin grants the organizer dashboard. A different community can add/remove roles here; the per-role hub layout is keyed on these."
+    }
+  ],
+
+  "auth": {
+    "pinLength": 6,
+    "pinTtlMinutes": 15,
+    "pinMaxRequestsPerHour": 5,
+    "_doc": "PIN-by-email auth. pinTtlMinutes is the 15-minute validity window. pinMaxRequestsPerHour rate-limits requests per email."
+  },
+
+  "sharepoint": {
+    "_doc": "SharePoint Online host + path for pre-creating per-sponsor upload folders. Auth lives in Key Vault (sharepoint-tenant-id / sharepoint-client-id / sharepoint-client-secret). Tenant admin must grant the SPN Sites.Selected, and site admin must grant Write on this specific site (PnP: Grant-PnPAzureADAppSitePermission, or Graph: POST /sites/{site-id}/permissions). Per-task upload subfolders + notification recipients live on the TASK itself (sponsor.<edition>.json -> taskSets.*[].upload) -- this block only configures WHERE the folders go and HOW to authenticate. Leave any field empty to disable the integration; engine then falls back to {{uploadPortalUrl}} in task descriptions.",
+    "siteUrl": "https://expertslivedk.sharepoint.com/sites/ExpertsLiveDK",
+    "driveName": "",
+    "_driveNameDoc": "Empty = default drive ('Documents' / 'Shared Documents' library). Set when uploads land in a non-default library.",
+    "rootFolderPath": "General/Events/ELDK 2027/Sponsor Info/Sponsor Upload"
+  },
+
+  "placeholders": {
+    "_doc": "Shared text-substitution map. Any key here is replaced in sponsor task descriptions (and later, email templates) wherever it appears as {{key}}. Keys starting with underscore are documentation only and are NEVER substituted. ELDK-specific URLs / emails / addresses live here so a different community using this codebase fills in their own (e.g. another community without the 'sponsor webshop' simply leaves those keys empty and the {{...}} markers vanish from rendered text).",
+    "uploadPortalUrl": "https://upload.sponsor.expertslive.dk",
+    "_uploadPortalNote": "Where sponsors upload logo + wall artwork. ELDK uses a custom WP-driven OneDrive bridge; another community without this would point to their file-share or remove the upload-portal sentences from sponsor task descriptions.",
+    "configuratorUrl": "https://expertslive.dk/sponsor",
+    "_configuratorNote": "Sponsor self-service webshop / contract signer. ELDK-custom (WordPress + WooCommerce + URL-by-Coupon plugin). Other communities that do not run this are expected to drop the configurator-related steps from their sponsor task descriptions.",
+    "eventSiteUrl": "https://eldk27.expertslive.dk",
+    "exhibitorSpaceUrl": "https://eldk27.expertslive.dk/#/exhibitor-dashboard/overview?lang=en",
+    "_exhibitorSpaceUrlNote": "Deep link straight into the Zoho Backstage Exhibitor Space (skips the homepage + user-icon menu). Sponsors still need to be signed in via PIN/OTP first.",
+    "exhibitorProfileUrl": "https://eldk27.expertslive.dk/#/exhibitor-dashboard/booth-info?lang=en",
+    "_exhibitorProfileUrlNote": "Deep link straight into the Exhibitor Profile edit form (booth-info) for company name / logo / banner / description fields.",
+    "boothMembersUrl": "https://eldk27.expertslive.dk/#/exhibitor-dashboard/booth-members?lang=en",
+    "_boothMembersUrlNote": "Deep link straight into the Booth Members management form in the Exhibitor Dashboard (invite booth staff, manage their access).",
+    "boothMaterialsUrl": "https://eldk27.expertslive.dk/#/exhibitor-dashboard/booth-materials?lang=en",
+    "_boothMaterialsUrlNote": "Deep link straight into the Booth Materials section in the Exhibitor Dashboard (collateral PDFs, videos, downloadable materials).",
+    "leadsListUrl": "https://eldk27.expertslive.dk/#/exhibitor-dashboard/lead-list?lang=en",
+    "_leadsListUrlNote": "Deep link straight into the Leads list (badges scanned by booth members during the event -- the post-event sales-follow-up source of truth).",
+    "inquiriesListUrl": "https://eldk27.expertslive.dk/#/exhibitor-dashboard/inquiry-list?lang=en",
+    "_inquiriesListUrlNote": "Deep link straight into the Inquiries list (questions attendees submitted to the exhibitor through the event app / website).",
+    "venueFloorPlanUrl": "https://eldk27.expertslive.dk/#/venue?lang=en",
+    "_venueFloorPlanUrlNote": "Public link to the venue / floor plan page. Surfaced as a button in the Sponsor Logistics menu.",
+    "bookingsUrl": "",
+    "_bookingsUrlNote": "Microsoft Bookings link for sponsors to request a Teams meeting with the sponsor lead. Leave EMPTY to hide the 'Request Teams meeting' button on /Sponsor/Contact.",
+    "exhibitorGuideUrl": "https://exhibitorguide.expertslive.dk",
+    "_exhibitorGuideUrlNote": "Public link to the latest exhibitor guide PDF (Wi-Fi password, break times, lead-scanning instructions, badge pickup, etc.). Update target per edition.",
+    "supportEmail": "info@expertslive.dk",
+    "wallContactName": "Sabine Bangly",
+    "wallContactEmail": "sb@expertslive.dk",
+    "leadContactName": "Morten Knudsen",
+    "leadContactEmail": "mok@expertslive.dk",
+    "shippingAddressBags": "Peter Knudsen Lagerudlejning, Dons Landevej 177, 6000 Kolding, Denmark",
+    "shippingAddressDsv": "DSV Solutions A/S, c/o Bella Center, Emma Gads Vej 11 (Loading Area E), DK-2300 Copenhagen S",
+    "freightContactPhone": "+45 4320 3850",
+    "freightContactEmail": "expo@dk.dsv.com",
+    "attendeeBagPriceEur": "500",
+    "tvRentalPriceEur": "600",
+    "extraBoothStaffPriceEur": "100"
+  }
+}

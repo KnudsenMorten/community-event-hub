@@ -151,9 +151,11 @@ public sealed class ReportingService
             && t.DueDate != null
             && t.DueDate.Value < today);
 
-        // Sponsor tasks = tasks sourced from the WooCommerce pull.
+        // Sponsor tasks = company-keyed sponsor pipeline tasks (SourceKey
+        // shape "sponsor:{companyId}:{slug}"). The legacy "woo:" prefix is
+        // no longer emitted (tasks are now per-company, not per-order).
         var sponsorTasks = tasks
-            .Where(t => t.SourceKey != null && t.SourceKey.StartsWith("woo:"))
+            .Where(t => t.SourceKey != null && t.SourceKey.StartsWith("sponsor:"))
             .ToList();
         report.SponsorTaskTotal = sponsorTasks.Count;
         report.SponsorTaskDone = sponsorTasks.Count(t => t.State == TaskState.Done);

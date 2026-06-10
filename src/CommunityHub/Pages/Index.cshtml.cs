@@ -22,19 +22,27 @@ public class IndexModel : PageModel
     private readonly CommunityHubDbContext _db;
     private readonly ICurrentParticipantAccessor _participant;
     private readonly SpeakerDeadlineSeeder _speakerDeadlines;
+    private readonly EventEditionConfigLoader _eventConfigLoader;
+    private readonly EventConfigOptions _eventConfigOptions;
     private readonly ILogger<IndexModel> _logger;
 
     public IndexModel(
         CommunityHubDbContext db,
         ICurrentParticipantAccessor participant,
         SpeakerDeadlineSeeder speakerDeadlines,
+        EventEditionConfigLoader eventConfigLoader,
+        EventConfigOptions eventConfigOptions,
         ILogger<IndexModel> logger)
     {
         _db = db;
         _participant = participant;
         _speakerDeadlines = speakerDeadlines;
+        _eventConfigLoader = eventConfigLoader;
+        _eventConfigOptions = eventConfigOptions;
         _logger = logger;
     }
+
+    public CommunityHub.Core.Config.EditionDates? EventDates { get; private set; }
 
     public CurrentParticipant Me { get; private set; } = null!;
     public string CommunityName { get; private set; } = "Community Hub";
@@ -115,6 +123,14 @@ public class IndexModel : PageModel
 
         ApplyRoleVisibility(me.Role);
         await LoadSectionDataAsync(me, ct);
+
+        // Key-dates panel data -- loaded for everyone (the card shows the
+        // edition's preDay / day1 / day2 / lockDate). Returns null when the
+        // dates section is missing from event.<edition>.json.
+        try { EventDates = _eventConfigLoader.Load(_eventConfigOptions.EventConfigPath).Dates; }
+        catch (Exception ex)
+        { _logger.LogWarning(ex, "Index: failed to load event dates from {Path}", _eventConfigOptions.EventConfigPath); }
+
         return Page();
     }
 
@@ -163,9 +179,21 @@ public class IndexModel : PageModel
         // matching Done task rows.
         await BackfillFormAutoTasksAsync(me, ct);
 
+        // Sponsor tasks are COMPANY-scoped (AssignedParticipantId=null,
+        // SponsorCompanyId set) per the sponsor-pull design -- without this
+        // OR-branch the front page would say "All tasks complete!" while
+        // /Sponsor/Tasks shows 12 pending. Same EF query so the unified
+        // list + counter cover both cases.
+        var mySponsorCompanyId = await _db.Participants
+            .Where(p => p.Id == me.ParticipantId)
+            .Select(p => p.SponsorCompanyId)
+            .FirstOrDefaultAsync(ct);
+
         var allMyTasks = await _db.Tasks
             .Where(t => t.EventId == me.EventId
-                        && t.AssignedParticipantId == me.ParticipantId)
+                        && (t.AssignedParticipantId == me.ParticipantId
+                            || (mySponsorCompanyId != null
+                                && t.SponsorCompanyId == mySponsorCompanyId)))
             .Select(t => new { t.Id, t.Title, t.DueDate, t.State, t.SourceKey })
             .ToListAsync(ct);
 
@@ -244,6 +272,10 @@ public class IndexModel : PageModel
         if (sourceKey.StartsWith("volunteer-form:",               StringComparison.Ordinal)) return "/Forms/VolunteerWizard";
         if (sourceKey.StartsWith("speaker-form:",                 StringComparison.Ordinal)) return "/Forms/Speaker";
         if (sourceKey.StartsWith("speakerdl:",                    StringComparison.Ordinal)) return "/Tasks";
+        // Sponsor-pull tasks are scoped per company; the sponsor area is
+        // where they get marked complete and where the inline upload-info
+        // form lives.
+        if (sourceKey.StartsWith("sponsor:",                      StringComparison.Ordinal)) return "/Sponsor/Tasks";
         return null;
     }
 

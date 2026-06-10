@@ -33,6 +33,10 @@ public class CommunityHubDbContext : DbContext
     public DbSet<TravelReimbursement> TravelReimbursements => Set<TravelReimbursement>();
     public DbSet<OrganizerActionItem> OrganizerActionItems => Set<OrganizerActionItem>();
     public DbSet<SponsorInfo> SponsorInfos => Set<SponsorInfo>();
+    public DbSet<SponsorUploadLocation> SponsorUploadLocations => Set<SponsorUploadLocation>();
+    public DbSet<SponsorUploadFile> SponsorUploadFiles => Set<SponsorUploadFile>();
+    public DbSet<SurveyResponse> SurveyResponses => Set<SurveyResponse>();
+    public DbSet<SurveyResponsePick> SurveyResponsePicks => Set<SurveyResponsePick>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -268,6 +272,49 @@ public class CommunityHubDbContext : DbContext
             e.HasIndex(x => new { x.EventId, x.SponsorCompanyId }).IsUnique();
         });
 
+        // --- SponsorUploadLocation ------------------------------------------
+        b.Entity<SponsorUploadLocation>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.SponsorCompanyId).IsRequired().HasMaxLength(64);
+            e.Property(x => x.CompanyName).IsRequired().HasMaxLength(200);
+            e.Property(x => x.FolderKey).IsRequired().HasMaxLength(64);
+            e.Property(x => x.Subfolder).IsRequired().HasMaxLength(120);
+            e.Property(x => x.FolderPath).IsRequired().HasMaxLength(1000);
+            e.Property(x => x.EditLinkUrl).HasMaxLength(2000);
+            e.Property(x => x.NotifyEmailsCsv).HasMaxLength(1000);
+            e.Property(x => x.NotifySubject).HasMaxLength(400);
+
+            e.HasOne(x => x.Event).WithMany()
+                .HasForeignKey(x => x.EventId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // One row per (event, company, folder kind). Re-runs of the pull
+            // engine UPSERT this row (refresh link / recipient list) instead
+            // of duplicating.
+            e.HasIndex(x => new { x.EventId, x.SponsorCompanyId, x.FolderKey })
+                .IsUnique();
+        });
+
+        // --- SponsorUploadFile ----------------------------------------------
+        b.Entity<SponsorUploadFile>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.FileName).IsRequired().HasMaxLength(400);
+            e.Property(x => x.GraphItemId).IsRequired().HasMaxLength(128);
+            e.Property(x => x.ETag).HasMaxLength(128);
+
+            e.HasOne(x => x.Location)
+                .WithMany(l => l.Files)
+                .HasForeignKey(x => x.SponsorUploadLocationId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // Graph driveItem id is the stable identity within a folder; the
+            // watcher upserts by (location, GraphItemId).
+            e.HasIndex(x => new { x.SponsorUploadLocationId, x.GraphItemId })
+                .IsUnique();
+        });
+
         // --- OrganizerActionItem --------------------------------------------
         b.Entity<OrganizerActionItem>(e =>
         {
@@ -324,6 +371,45 @@ public class CommunityHubDbContext : DbContext
                 .OnDelete(DeleteBehavior.Restrict);
 
             e.HasIndex(x => new { x.EventId, x.ParticipantId }).IsUnique();
+        });
+
+        // --- SurveyResponse + SurveyResponsePick ----------------------------
+        // Anonymous responses to survey wizards (e.g. ELDK27 Topics). The
+        // survey catalog (tracks / topics / level examples) lives in JSON
+        // under CommunityHub/App_Data/Surveys/<slug>.json -- only the
+        // responses are persisted. SurveySlug + TopicId are string keys
+        // referencing the JSON; no FKs to a catalog table.
+        b.Entity<SurveyResponse>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.SurveySlug).IsRequired().HasMaxLength(80);
+            e.Property(x => x.SelectedTrackId).IsRequired().HasMaxLength(80);
+            e.Property(x => x.Comment).HasMaxLength(2000);
+            e.Property(x => x.IpHash).HasMaxLength(64);
+
+            // Dashboard aggregations filter by survey slug.
+            e.HasIndex(x => new { x.SurveySlug, x.SubmittedAt });
+            // Track-distribution aggregation.
+            e.HasIndex(x => new { x.SurveySlug, x.SelectedTrackId });
+        });
+
+        b.Entity<SurveyResponsePick>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.TopicId).IsRequired().HasMaxLength(80);
+            e.Property(x => x.DesiredLevel).HasConversion<int>();
+
+            e.HasOne(x => x.Response)
+                .WithMany(r => r.Picks)
+                .HasForeignKey(x => x.SurveyResponseId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // One pick per (response, rank) and per (response, topic) -- a
+            // respondent can't rank the same topic twice nor have two #1s.
+            e.HasIndex(x => new { x.SurveyResponseId, x.Rank }).IsUnique();
+            e.HasIndex(x => new { x.SurveyResponseId, x.TopicId }).IsUnique();
+            // Topic-popularity aggregation.
+            e.HasIndex(x => x.TopicId);
         });
 
         // --- VolunteerAvailability ------------------------------------------

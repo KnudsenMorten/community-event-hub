@@ -462,6 +462,9 @@ namespace CommunityHub.Core.Migrations
                     b.Property<int>("EventId")
                         .HasColumnType("int");
 
+                    b.Property<bool>("IsMandatory")
+                        .HasColumnType("bit");
+
                     b.Property<string>("SourceKey")
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
@@ -662,6 +665,183 @@ namespace CommunityHub.Core.Migrations
                         .IsUnique();
 
                     b.ToTable("SponsorInfos");
+                });
+
+            modelBuilder.Entity("CommunityHub.Core.Domain.SponsorUploadFile", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("ETag")
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<string>("FileName")
+                        .IsRequired()
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)");
+
+                    b.Property<DateTimeOffset>("FirstSeenAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("GraphItemId")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<DateTimeOffset?>("LastModifiedUtc")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<DateTimeOffset?>("LastNotifiedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("SponsorUploadLocationId")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SponsorUploadLocationId", "GraphItemId")
+                        .IsUnique();
+
+                    b.ToTable("SponsorUploadFiles");
+                });
+
+            modelBuilder.Entity("CommunityHub.Core.Domain.SponsorUploadLocation", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("CompanyName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("EditLinkUrl")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<int>("EventId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("FolderKey")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("FolderPath")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("NotifyEmailsCsv")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("NotifySubject")
+                        .IsRequired()
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)");
+
+                    b.Property<string>("SponsorCompanyId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("Subfolder")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("nvarchar(120)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("EventId", "SponsorCompanyId", "FolderKey")
+                        .IsUnique();
+
+                    b.ToTable("SponsorUploadLocations");
+                });
+
+            modelBuilder.Entity("CommunityHub.Core.Domain.SurveyResponse", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Comment")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<string>("IpHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("SelectedTrackId")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("nvarchar(80)");
+
+                    b.Property<DateTimeOffset>("SubmittedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("SurveySlug")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("nvarchar(80)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SurveySlug", "SelectedTrackId");
+
+                    b.HasIndex("SurveySlug", "SubmittedAt");
+
+                    b.ToTable("SurveyResponses");
+                });
+
+            modelBuilder.Entity("CommunityHub.Core.Domain.SurveyResponsePick", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("DesiredLevel")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Rank")
+                        .HasColumnType("int");
+
+                    b.Property<int>("SurveyResponseId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("TopicId")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("nvarchar(80)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TopicId");
+
+                    b.HasIndex("SurveyResponseId", "Rank")
+                        .IsUnique();
+
+                    b.HasIndex("SurveyResponseId", "TopicId")
+                        .IsUnique();
+
+                    b.ToTable("SurveyResponsePicks");
                 });
 
             modelBuilder.Entity("CommunityHub.Core.Domain.SwagPreference", b =>
@@ -985,6 +1165,39 @@ namespace CommunityHub.Core.Migrations
                     b.Navigation("Event");
                 });
 
+            modelBuilder.Entity("CommunityHub.Core.Domain.SponsorUploadFile", b =>
+                {
+                    b.HasOne("CommunityHub.Core.Domain.SponsorUploadLocation", "Location")
+                        .WithMany("Files")
+                        .HasForeignKey("SponsorUploadLocationId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Location");
+                });
+
+            modelBuilder.Entity("CommunityHub.Core.Domain.SponsorUploadLocation", b =>
+                {
+                    b.HasOne("CommunityHub.Core.Domain.Event", "Event")
+                        .WithMany()
+                        .HasForeignKey("EventId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Event");
+                });
+
+            modelBuilder.Entity("CommunityHub.Core.Domain.SurveyResponsePick", b =>
+                {
+                    b.HasOne("CommunityHub.Core.Domain.SurveyResponse", "Response")
+                        .WithMany("Picks")
+                        .HasForeignKey("SurveyResponseId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Response");
+                });
+
             modelBuilder.Entity("CommunityHub.Core.Domain.SwagPreference", b =>
                 {
                     b.HasOne("CommunityHub.Core.Domain.Event", "Event")
@@ -1054,6 +1267,16 @@ namespace CommunityHub.Core.Migrations
                     b.Navigation("AssignedTasks");
 
                     b.Navigation("LoginPins");
+                });
+
+            modelBuilder.Entity("CommunityHub.Core.Domain.SponsorUploadLocation", b =>
+                {
+                    b.Navigation("Files");
+                });
+
+            modelBuilder.Entity("CommunityHub.Core.Domain.SurveyResponse", b =>
+                {
+                    b.Navigation("Picks");
                 });
 #pragma warning restore 612, 618
         }

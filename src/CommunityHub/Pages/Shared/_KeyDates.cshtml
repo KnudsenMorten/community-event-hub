@@ -1,0 +1,55 @@
+@model CommunityHub.Core.Config.EditionDates
+@{
+    if (Model is null) { return; }
+
+    DateTime? Parse(string s) => DateTime.TryParse(s, out var d) ? d : null;
+    var pre  = Parse(Model.PreDay);
+    var d1   = Parse(Model.Day1);
+    var d2   = Parse(Model.Day2);
+    var lk   = Parse(Model.LockDate);
+
+    // Don't render an empty panel when the JSON is blank.
+    if (pre is null && d1 is null && d2 is null && lk is null) { return; }
+}
+
+<div class="card" style="background:#f8fafc;border-left:4px solid var(--el-blue);">
+    <h2 style="margin-top:0;">Key dates</h2>
+    <table style="width:100%;border-collapse:collapse;font-size:14px;">
+        <tbody>
+        @if (pre is not null)
+        {
+            <tr style="border-bottom:1px solid #e5e7eb;">
+                <td style="padding:6px 8px;width:55%;">Pre-day / master class</td>
+                <td style="padding:6px 8px;font-weight:600;">@pre.Value.ToString("dddd dd MMM yyyy")</td>
+            </tr>
+        }
+        @if (d1 is not null)
+        {
+            <tr style="border-bottom:1px solid #e5e7eb;">
+                <td style="padding:6px 8px;">Main conference day 1</td>
+                <td style="padding:6px 8px;font-weight:600;">@d1.Value.ToString("dddd dd MMM yyyy")</td>
+            </tr>
+        }
+        @if (d2 is not null)
+        {
+            <tr style="border-bottom:1px solid #e5e7eb;">
+                <td style="padding:6px 8px;">Main conference day 2</td>
+                <td style="padding:6px 8px;font-weight:600;">@d2.Value.ToString("dddd dd MMM yyyy")</td>
+            </tr>
+        }
+        @if (lk is not null)
+        {
+            <tr>
+                <td style="padding:6px 8px;color:#7a5b00;">Edit lock date</td>
+                <td style="padding:6px 8px;font-weight:600;color:#7a5b00;">@lk.Value.ToString("dddd dd MMM yyyy")
+                    <span style="font-weight:400;color:#6b7280;font-size:12px;">— after this, changes notify organizers as [LATE CHANGE]</span>
+                </td>
+            </tr>
+        }
+        </tbody>
+    </table>
+    @if (!string.IsNullOrEmpty(Model.Timezone))
+    {
+        <p style="margin:8px 0 0;font-size:12px;color:#6b7280;">All times: @Model.Timezone</p>
+    }
+</div>

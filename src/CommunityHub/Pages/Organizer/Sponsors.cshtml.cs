@@ -69,7 +69,7 @@ public class SponsorsModel : PageModel
         var tasks = await _db.Tasks
             .Where(t => t.EventId == me.EventId
                         && (t.SponsorCompanyId != null
-                            || (t.SourceKey != null && t.SourceKey.StartsWith("woo:"))))
+                            || (t.SourceKey != null && t.SourceKey.StartsWith("sponsor:"))))
             .Select(t => new
             {
                 t.Id, t.SponsorCompanyId, t.Title, t.DueDate, t.State,
@@ -171,7 +171,7 @@ public class SponsorsModel : PageModel
         var tasks = await _db.Tasks
             .Where(t => t.EventId == eventId
                         && (t.SponsorCompanyId != null
-                            || (t.SourceKey != null && t.SourceKey.StartsWith("woo:"))))
+                            || (t.SourceKey != null && t.SourceKey.StartsWith("sponsor:"))))
             .Select(t => new { t.SponsorCompanyId, t.DueDate, t.State })
             .ToListAsync(ct);
 

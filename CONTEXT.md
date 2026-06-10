@@ -736,6 +736,31 @@ Built in response to follow-up requests, all to documented defaults:
   routes coordinator email to mok@2linkit.net. When TESTMODE is off the real
   coordinator email is mok@expertslive.dk. Set `testMode.enabled=false` and
   configure `defaultBoothCategoryId` before go-live.
+- **Public anonymous volunteer signup [BUILT]** — `/volunteer/signup` (Razor Page
+  `Pages/Volunteer/Signup.cshtml`). `[AllowAnonymous]` form for the wider
+  community; submits to the currently-active Event. Creates a `Participant`
+  row with `Role=Volunteer` and `IsActive=false` — the "applicant pending
+  review" flag. Organizer dashboard surfaces pending applicants in a
+  dedicated card (Approve flips `IsActive=true`, Decline hard-deletes the
+  inactive row, safe because nothing has been wired up yet). Honeypot field,
+  plausible-email check, and `(EventId, Email)` dedup are at the form level.
+- **Public anonymous surveys [BUILT]** — `/survey/{slug}` + `/survey/{slug}/results`
+  (Razor Pages `Pages/Survey/Index.cshtml` + `Results.cshtml`). Survey
+  catalog (tracks → topics → category groupings → Introduction/Advanced/Expert
+  examples) lives in JSON under `src/CommunityHub/App_Data/Surveys/<slug>.json`,
+  loaded + cached by `SurveyDefinitionProvider`; editing the JSON does NOT
+  require a code change or a DB migration. Only responses persist to the DB
+  (`SurveyResponses` + `SurveyResponsePicks`, FK + cascade). Wizard is 3 steps:
+  (1) pick one track, (2) rank 3 topic picks within that track, (3) pick a
+  desired level per topic with per-track example copy. Single POST on submit,
+  honeypot field, server-side validation that picks belong to the selected
+  track + are distinct. Public results dashboard aggregates: track popularity,
+  Top-15 weighted topics overall (rank 1 = 3pts, rank 2 = 2pts, rank 3 = 1pt),
+  per-track expandable breakdown, level-distribution totals — designed to be
+  shared with prospective speakers (Call for Speakers). First instance is
+  `/survey/eldk27-topics` (7 tracks, ~8 topics each). Organizer dashboard
+  surfaces a card with response count, top track, and a link to the public
+  dashboard.
 NOTE: all statically reviewed, not compiled — run `dotnet build`.
 
 ## 10. Confirmed event facts (seed data for the ELDK27 Event row)
@@ -869,6 +894,37 @@ ELDK26 roster's per-night columns spanned 21–28 Feb 2026 (that event was late
 February). ELDK27 is 8–10 Feb 2027, so the stay window in
 `hotel.<edition>.json → roomNightForecast.stayWindow` (currently 7–11 Feb 2027
 as a placeholder) must be confirmed against the real arrival/departure pattern.
+
+## 11b.1. Legacy reference material — **READ THIS BEFORE EDITORIAL CLAIMS**
+
+The user's prior-year automation + design material lives at **`C:\tmp\ceh\`** on
+the dev machine. Any session that's about to add / drop / reword a sponsor task,
+a speaker task, a reminder cadence, a sponsor product classification, or any
+editorial behaviour MUST consult this directory first. Don't invent items; don't
+take `sponsor.<edition>.json` (or any `*.eldk27.json`) at face value as
+ground truth — the JSON was hand-written and has been wrong before. The source
+material wins.
+
+### Directory map
+
+| Path | What's in it | When to read |
+|---|---|---|
+| `C:\tmp\ceh\automation\` | 13 production PowerShell scripts the team ran for ELDK26/27 + `zoho-mapping.eldk27.json` + `Secrets.psm1`. NO sponsor-task tracking lives here — these are integration sync (ERP ↔ Webshop ↔ Backstage, attendee reconciliation, webhook handlers). | Before claiming an integration "should exist as a hub task" — check whether the legacy script already does it automatically (e.g. `Sync-Webshop-Sponsors-to-Zoho-Backstage.ps1` already creates the Backstage sponsor + exhibitor records, so "Zoho Backstage event system onboarding" is NOT a sponsor task). |
+| `C:\tmp\ceh\docs\Experts Live Community Event Hub.docx` | The Word design doc (~1000 paragraphs). Sections: Goals, Hub features per role, Organizers Hub features, Automation (scripts), and a "Sponsors to-do" page that explicitly states "**assigns tasks to sponsor company (not contact). Contacts must see all tasks for sponsor company.**" | Before declaring any feature "done" or any task list "final". The docx is .docx — extract text with `unzip -p ... word/document.xml \| sed 's/<[^>]*>/ /g'` (no pandoc on this machine). |
+| `C:\tmp\ceh\hotel\Confirmed_Hotel_Information-v3.xls` | The hotel's group confirmation list — Title, First/Last name, Email, Confirmation Number, Cancellation Number, Guests, Rooms. Group code "4040 ELDK 2026". | Before specifying hotel data import / confirmation flows. |
+| `C:\tmp\ceh\sessionize\experts-live-denmark-2026 flattened accepted sessions - exported 2026-05-25.xlsx` | Real Sessionize speaker export, flattened. | Before specifying Sessionize import column shape. |
+| `C:\tmp\ceh\speakermanual\*.pdf, *.pptx` | Reference speaker manuals from prior events / sibling communities (ELDK26, WPN Norway). | Before drafting speaker-deadline text or instructions. |
+| `C:\tmp\ceh\sponsor\ELDK27 products.csv` | The actual ELDK27 sponsor product catalogue with Categories / Name (~30 booth products + tier packages + branded features + addons). | Before editing `sponsor.<edition>.json -> productClassification.rules` or claiming a product type doesn't exist. |
+
+### Concrete rules this section enforces
+
+1. **A sponsor task that maps to an existing legacy automation is NOT a sponsor task.** The Webshop → Backstage sponsor / exhibitor sync, ERP customer/contact sync, webhook flows, currency check, master-class reconciliation — all of these run automatically. Don't surface them as hub tasks for the sponsor to "complete."
+2. **The sponsor task LIST is editorial, not derived.** `sponsor.<edition>.json -> taskSets` is hand-curated. There is no canonical source list. When editing, default to the docx's narrative + the user's stated intent, NOT to whatever the JSON already says.
+3. **Tasks are per-company.** Per docx "Sponsors to-do": *"assigns tasks to sponsor company (not contact). Contacts must see all tasks for sponsor company."* Never embed an order id, product name, or contact email in a task's Description.
+4. **`zoho-mapping.eldk27.json` is the source of truth for tier classification rules.** When changing `sponsor.<edition>.json -> productClassification.rules`, the two must stay aligned (or the legacy PS and the hub will classify differently).
+5. **The webshop sales-window cutoff is 2026-05-01 (ELDK27 kick-off).** Hardcoded in `Sync-Webshop-Sponsors-to-Zoho-Backstage.ps1:24` (`$OrdersAfter`). Any hub-side date-filter logic must match.
+
+If `C:\tmp\ceh\` is not present on a given machine, ask the user where the reference material lives — don't proceed without it.
 
 ## 11c. Scheduled jobs — how reminders get sent
 

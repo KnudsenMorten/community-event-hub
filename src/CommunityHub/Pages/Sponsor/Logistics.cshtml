@@ -1,0 +1,38 @@
+@page
+@model CommunityHub.Pages.Sponsor.LogisticsModel
+@{
+    ViewData["Title"] = "Logistics";
+}
+
+<div class="card">
+    <h2>On-site logistics</h2>
+    <p>Practical links you need before and during the event.</p>
+
+    @if (!string.IsNullOrEmpty(Model.ExhibitorGuideUrl))
+    {
+        <h3 style="margin-top:18px;">Exhibitor guide</h3>
+        <p>Wi-Fi password, break times, badge pickup, lead-scanning tips and other on-site practicalities. Forward to every booth member before the event.</p>
+        <p><a href="@Model.ExhibitorGuideUrl" target="_blank" rel="noopener noreferrer" class="task-link-btn">Open exhibitor guide (PDF)</a></p>
+    }
+
+    @if (!string.IsNullOrEmpty(Model.VenueFloorPlanUrl))
+    {
+        <h3 style="margin-top:18px;">Venue + floor plan</h3>
+        <p>Find your stand, the speaker rooms, lounges, and registration desks on the venue page.</p>
+        <p><a href="@Model.VenueFloorPlanUrl" target="_blank" rel="noopener noreferrer" class="task-link-btn">Open venue floor plan</a></p>
+    }
+
+    @if (!string.IsNullOrEmpty(Model.ShippingAddressDsv))
+    {
+        <h3 style="margin-top:18px;">Freight + shipping</h3>
+        <p style="margin:6px 0;">Ship to:</p>
+        <pre style="background:#f8fafc;border:1px solid #e5e7eb;padding:10px;border-radius:6px;font-family:inherit;white-space:pre-wrap;">@Model.ShippingAddressDsv</pre>
+        @if (!string.IsNullOrEmpty(Model.FreightContactPhone) || !string.IsNullOrEmpty(Model.FreightContactEmail))
+        {
+            <p>DSV Fairs &amp; Events:
+                @if (!string.IsNullOrEmpty(Model.FreightContactPhone)) { <span> Tel @Model.FreightContactPhone</span> }
+                @if (!string.IsNullOrEmpty(Model.FreightContactEmail)) { <span> &middot; <a href="mailto:@Model.FreightContactEmail" class="task-link-btn">@Model.FreightContactEmail</a></span> }
+            </p>
+        }
+    }
+</div>

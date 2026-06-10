@@ -1,0 +1,109 @@
+{
+  "_schema": "eldk-hub/integrations-config@1",
+  "_doc": "External integrations for one edition. Every integration is OPTIONAL and individually toggleable, so a community with no webshop (or a different webshop) can run the hub with all of this disabled. The app must treat every integration as off unless explicitly enabled here. Secrets are NEVER in this file - only the non-secret settings. Secret values (API keys, SMTP password) live in Azure Key Vault and are referenced here by their Key Vault secret name.",
+  "woocommerce": {
+    "enabled": true,
+    "_doc": "WooCommerce order pull, used to drive the sponsor pipeline. Set enabled:false for any community that does not use WooCommerce - the sponsor module then works purely from manual CSV import or hand entry, with no API.",
+    "baseUrl": "https://expertslive.dk/wp-json/wc/v3",
+    "consumerKeySecretName": "woocommerce-consumer-key",
+    "consumerSecretSecretName": "woocommerce-consumer-secret",
+    "orderStatus": "completed",
+    "pageSize": 100,
+    "ordersAfter": "2026-05-01",
+    "ordersBefore": "2027-02-09",
+    "_ordersWindowNote": "ISO date window passed to the WooCommerce REST API as ?after= / ?before= so the pull only returns orders inside [ordersAfter, ordersBefore). Both ends should match THIS edition's webshop sales window. ordersAfter = the day the edition's webshop opened (everything before is a previous-edition order and must not generate tasks for the current edition). ordersBefore = the day of the event (strictly-before semantics per WooCommerce REST - 2027-02-09 means orders up to and including 2027-02-08). For ELDK27: webshop opened 1 May 2026, event starts 9 Feb 2027 - so the window is 2026-05-01 .. 2027-02-08 inclusive. Leave a field blank to disable that end of the window (NOT recommended - legacy orders pollute the task list).",
+    "_secretsNote": "consumerKeySecretName / consumerSecretSecretName are the NAMES of secrets in Azure Key Vault, not the values. Generate a READ-ONLY WooCommerce REST API key (WooCommerce > Settings > Advanced > REST API). The app reads orders only; it never writes to the webshop.",
+    "_scheduleNote": "The daily pull cadence is configured under scheduledJobs.woocommercePull below, not here.",
+    "_scopeNote": "Pulls the WooCommerce orders API only (order, line items, billing company/contact). It does NOT replicate the old PowerShell's WordPress approver-meta enrichment - that was slow and fragile. Add later only if a community specifically needs the announcement-name correlation."
+  },
+  "companyManager": {
+    "enabled": true,
+    "_doc": "Company Manager is a custom WordPress plugin on expertslive.dk that owns sponsor COMPANIES, their CONTACTS, and contact ROLES. The hub reads this as the source of truth for sponsor company/contact/role data (see CONTEXT.md 11g). Set enabled:false for a community without it - the hub then manages sponsor contacts itself.",
+    "baseUrl": "https://expertslive.dk/wp-json/company-manager/v1",
+    "authType": "wordpress-application-password",
+    "usernameSecretName": "company-manager-wp-user",
+    "passwordSecretName": "company-manager-wp-app-password",
+    "_secretsNote": "HTTP Basic auth with a WordPress application password. Both values in Azure Key Vault; only the secret names appear here.",
+    "roleIds": {
+      "signer": 1,
+      "eventCoordinator": 2,
+      "_doc": "Company Manager's real role IDs. Role 1 = Signer (a company's default_signer_id). Role 2 = Event Coordinator (event_coordination_default_contact_id). Reminders target role 2, never role 1."
+    },
+    "orderCompanyLinkMetaKey": "_cm_company_id",
+    "_orderLinkNote": "WooCommerce orders carry this meta key linking the order to a Company Manager company - used by the sponsor order pull to attach orders to the right company. Orders without it are legacy and skipped."
+  },
+  "zoho": {
+    "enabled": true,
+    "_doc": "Zoho integration for the attendee area (CONTEXT.md 9z). Reconciles Zoho Backstage ticket orders against Zoho Bookings Master Class appointments. Optional - set enabled:false for a community not using Zoho. EU data centre.",
+    "apiDomain": "https://www.zohoapis.eu",
+    "tokenEndpoint": "https://accounts.zoho.eu/oauth/v2/token",
+    "backstagePortalId": "REPLACE_WITH_PORTAL_ID",
+    "backstageEventId": "REPLACE_WITH_EVENT_ID",
+    "_idsNote": "Backstage portal + event IDs - from the Zoho Backstage admin. Placeholders until confirmed.",
+    "bookingServiceNameRegex": "(?i)master\\s*class",
+    "twoDayTicketNameRegex": "(?i)\\b2-day\\b",
+    "_regexNote": "How the reconciliation recognises a Master Class booking service and a 2-day ticket class, by name. Same patterns as the source PowerShell script.",
+    "masterClassDate": "2027-02-09",
+    "_dateNote": "Pre-day / Master Class date - the Bookings fetch window is this day 00:00:00-23:59:59.",
+    "clientIdSecretName": "zoho-client-id",
+    "clientSecretSecretName": "zoho-client-secret",
+    "refreshTokenSecretName": "zoho-refresh-token",
+    "_secretsNote": "OAuth refresh-token flow. All three values in Key Vault; only the secret names appear here. The script's existing credentials are compromised - rotate before use."
+  },
+  "email": {
+    "enabled": true,
+    "_doc": "Outbound email - PIN codes, reminders, summaries. Required for the hub to function (PIN auth needs it). provider selects the mechanism.",
+    "provider": "smtp",
+    "_providerOptions": "smtp | azure-communication-services",
+    "fromName": "Experts Live Denmark",
+    "fromEmail": "info@expertslive.dk",
+    "_fromNote": "fromEmail must be a sender address verified/authenticated in Brevo (domain or single-sender verification). Brevo will reject mail from an unverified sender.",
+    "smtp": {
+      "host": "smtp-relay.brevo.com",
+      "port": 587,
+      "useStartTls": true,
+      "usernameSecretName": "brevo-smtp-username",
+      "passwordSecretName": "brevo-smtp-key",
+      "_doc": "Brevo SMTP relay. IMPORTANT: the SMTP username is NOT info@expertslive.dk - it is the Brevo-issued SMTP login (typically like 8xxxxxx@smtp-brevo.com), and the password is a Brevo SMTP key, not the Brevo account password. Both are stored in Azure Key Vault under the secret names above; only the names appear here. host/port/useStartTls are non-secret. Find the SMTP login + key in Brevo: SMTP & API > SMTP."
+    },
+    "azureCommunicationServices": {
+      "connectionStringSecretName": "acs-connection-string",
+      "_doc": "Alternative provider, unused while provider is 'smtp'. Kept for portability - another community could switch here."
+    }
+  },
+  "calendar": {
+    "icsEnabled": true,
+    "_doc": "Generate .ics calendar invites for hotel confirmations and shifts. Pure generation, no external service - safe to leave on."
+  },
+  "scheduledJobs": {
+    "_doc": "Timer-driven background jobs. Run by an Azure Functions timer-triggered app (see CONTEXT.md section 11c). cron is a 6-field NCRONTAB expression in UTC. Each job is idempotent - it re-evaluates current state each run and records what it sent, so a missed run is caught next time and nothing is sent twice.",
+    "reminderJob": {
+      "enabled": true,
+      "cron": "0 0 6 * * *",
+      "_doc": "The reminder job WAKES once a day at 06:00 UTC, but it does NOT send everything daily. It applies the per-audience cadences in content config -> reminders: speaker pending-task digests and sponsor overdue chases go WEEKLY (on their configured weekday), milestone reminders fire relative to deadline dates. The daily wake is just so weekly/milestone rules can be evaluated each day; actual sends follow the cadence."
+    },
+    "woocommercePull": {
+      "enabled": true,
+      "cron": "0 0 3 * * *",
+      "_doc": "Once daily at 03:00 UTC. Pulls new completed orders from WooCommerce and expands them into sponsor tasks. Ignored when integrations.woocommerce.enabled is false."
+    }
+  },
+  "testMode": {
+    "_doc": "TESTMODE. When enabled=true, integrations make NO real outbound writes/sends: the Backstage exhibitor sync makes no Zoho calls and coordinator emails go ONLY to testCoordinatorEmail. Exercise the full flow with the test sponsor before going live. Set enabled=false for production.",
+    "enabled": true,
+    "testSponsorName": "2LINKIT",
+    "testSponsorCompanyId": "test-2linkit",
+    "testSponsorEmail": "mok@2linkit.net",
+    "testCoordinatorEmail": "mok@2linkit.net"
+  },
+  "backstageSync": {
+    "_doc": "Backstage exhibitor sync. Derives sponsors from completed WooCommerce orders, checks each against Zoho Backstage, creates missing ones (when the Backstage write API is confirmed) and emails the coordinator. NOTE: the Backstage exhibitor-creation endpoint is NOT yet confirmed - until then the sync records 'would-create' and notifies the coordinator.",
+    "enabled": false,
+    "coordinatorEmail": "mok@expertslive.dk"
+  },
+  "backstageExhibitor": {
+    "_doc": "Live Zoho Backstage exhibitor API settings. Uses the v3 Add-exhibitor-request endpoint (POST .../exhibitor_requests). Reuses zoho.backstagePortalId and zoho.backstageEventId. The Zoho refresh token must include the OAuth scope zohobackstage.exhibitor.CREATE. defaultBoothCategoryId: get this id from the event's booth categories in Backstage - creation is disabled until it is set.",
+    "defaultBoothCategoryId": "REPLACE_WITH_BACKSTAGE_BOOTH_CATEGORY_ID",
+    "language": "en"
+  }
+}

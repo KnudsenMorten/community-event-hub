@@ -1,0 +1,294 @@
+{
+  "_schema": "eldk-hub/sponsor-config@1",
+  "_doc": "Sponsor task-automation rules for one edition. Source content imported from C:\\tmp\\ceh\\sponsor\\Sponsor_Onboarding_Automation.ps1 -- THE canonical prior-year reference (CONTEXT.md 11b.1). Task titles + descriptions are 1:1 with the legacy Planner tasks; community-specific text (URLs, emails, shipping addresses, prices) is replaced with {{placeholder}} markers resolved from event.<edition>.json -> placeholders. A community without the ELDK sponsor webshop simply edits/empties those placeholders in event.<edition>.json without touching this file. If integrations.woocommerce.enabled is false, sponsor orders come from manual CSV import instead, but these rules still drive task generation.",
+  "deadlineRules": {
+    "_doc": "Named deadline rules, 1:1 with Sponsor_Onboarding_Automation.ps1 lines 58-71. basis 'eventMinus' = main event date minus N days. basis 'contractPlus' = the sponsor's first-order date plus N days, with fallbackNowPlus used when no order date is known.",
+    "logo": {
+      "basis": "contractPlus",
+      "days": 7,
+      "fallbackNowPlus": 7
+    },
+    "sponsorDescription": {
+      "basis": "contractPlus",
+      "days": 7,
+      "fallbackNowPlus": 7
+    },
+    "wallDesign": {
+      "basis": "eventMinus",
+      "days": 120
+    },
+    "wallUpload": {
+      "basis": "eventMinus",
+      "days": 71
+    },
+    "boothLayout": {
+      "basis": "eventMinus",
+      "days": 71
+    },
+    "registerBoothMembers": {
+      "basis": "eventMinus",
+      "days": 40
+    },
+    "leadAppBoothMembers": {
+      "basis": "eventMinus",
+      "days": 7
+    },
+    "appGameSignUp": {
+      "basis": "eventMinus",
+      "days": 55
+    },
+    "tvRequest": {
+      "basis": "eventMinus",
+      "days": 50
+    },
+    "attendeeBagSignUp": {
+      "basis": "eventMinus",
+      "days": 70
+    },
+    "attendeeBagShipment": {
+      "basis": "eventMinus",
+      "days": 30
+    },
+    "session": {
+      "basis": "eventMinus",
+      "days": 135
+    },
+    "boothShipment": {
+      "basis": "eventMinus",
+      "days": 7
+    }
+  },
+  "taskSets": {
+    "_doc": "Task sets by classified type. Mirrors the legacy script's $desiredTasks array (lines 1224-1520). Every sponsor gets allSponsors. Booth sponsors ALSO get the booth set. Session sponsors ALSO get the session set. There are NO tier-specific task SETS (Platinum/Diamond/Gold) -- tier shows up via {{wallSpecUrl}} in the wall task description, not as separate tasks. Editing a task here is the only knob -- new sponsors pick it up on the next pull; existing rows keep their description until the task is deleted + recreated.",
+    "allSponsors": [
+      {
+        "title": "Upload company logo",
+        "deadline": "logo",
+        "mandatory": true,
+        "upload": {
+          "subfolder": "LOGO",
+          "placeholder": "logoFolderUrl",
+          "notifyEmails": ["mok@expertslive.dk"],
+          "notifySubject": "[ELDK27] Sponsor logo uploaded/updated by {{companyName}}"
+        },
+        "description": "Click the link below to open YOUR private upload folder for {{companyName}}. From there you can upload, overwrite, or delete files.\n\nOpen: {{logoFolderUrl}}\n\nUpload BOTH file formats:\n* Vector format (.EPS or .AI) -- used for print: banners, rollups, sponsor wall\n* PNG -- used for social-media posts + Zoho event system\n\nIf you are unable to delete an existing file, just upload the new version (give it a clear name like 'logo-v2.png') and email {{supportEmail}} so we know which file is the current one."
+      },
+      {
+        "title": "Upload Company information",
+        "deadline": "sponsorDescription",
+        "mandatory": true,
+        "description": "Please send us your company profile information:\n\n* Company description - max 1000 chars\n* Company description (short) - max 80 chars\n* Social media company intro - max 600 chars. Consider bullets to make it easy to read!\n\nPlease send the information to {{supportEmail}}"
+      },
+      {
+        "title": "Brochures, competition flyer or swags in {{expectedAttendees}} attendee bags",
+        "deadline": "attendeeBagShipment",
+        "mandatory": false,
+        "description": "Each attendee ({{expectedAttendees}} total) receives an attendee bag when checking in at the conference.\n\nAs a sponsor, you have the option to include a brochure, competition flyer, swag, or similar items in all attendee bags. This is an excellent way to drive traffic to your booth.\n\nThe cost is EURO {{attendeeBagPriceEur}} (excl. tax), which includes packing your materials into all {{expectedAttendees}} attendee bags.\n\nIf you want to include items in the attendee bag, please follow these steps:\n\n1) Log in to the sponsor configurator portal: {{configuratorUrl}}\n2) Go to the shop and search for 'Attendee Bag Content Packaging - {{editionCode}}', then add it to your cart.\n3) Select 'Proceed to Checkout'.\n4) You can either save the contract as a PDF and sign it using your preferred method, or scroll down and digitally sign directly in the configurator.\n\nShip the items to: {{shippingAddressBags}} — they must arrive by the due date so we have time to pack them.\n\nNote: Payments are not handled through the portal. We will arrange payment with you separately."
+      },
+      {
+        "title": "Event App Game - Extra Exposure Opportunity",
+        "deadline": "appGameSignUp",
+        "mandatory": false,
+        "description": "Increase your visibility and engage attendees before the conference even begins by becoming an Event Game Sponsor.\n\nOur event app includes a popular attendee game where participants earn points by completing activities such as downloading exhibitor collateral, submitting exhibitor inquiries, meeting with exhibitors, adding exhibitors to their favorites, and more. The game launches approximately six weeks before the conference, creating early engagement and providing sponsors with additional opportunities to generate leads ahead of the event.\n\nAttendees compete throughout the event period, with a live leaderboard displayed in the app. This has consistently driven strong participation and interaction among attendees.\n\nAs an Event Game Sponsor, you can contribute a prize for the competition winners. The top 15 attendees receive prizes donated by participating sponsors. Popular prize examples include LEGO sets, GoPro cameras, technology gadgets, gift packages, or other items of your choice.\n\nIn return for your prize contribution, your company will receive additional exposure as an Event Game Sponsor, including:\n\n* Recognition on the event website\n* Visibility within event communications related to the game\n* Acknowledgment during the Welcome Keynote\n* Association with one of the most engaging attendee activities at the conference\n\nThis sponsorship opportunity provides a cost-effective way to increase brand awareness, encourage attendee interaction, and generate additional leads before and during the event.\n\nIf you would like to participate, please contact us at {{supportEmail}} so we can add your logo to the Event Game Sponsor section. You may bring the prize with you when arriving at your booth (we will collect it), or ship it to us in advance."
+      }
+    ],
+    "session": [
+      {
+        "title": "Submit session description",
+        "deadline": "session",
+        "mandatory": true,
+        "description": "Submit session description for your session. Send it to {{supportEmail}}\n\nWe also need a picture, first- and lastname of speaker, title + LinkedIn URL of speaker(s)."
+      }
+    ],
+    "booth": [
+      {
+        "title": "Upload sponsor wall design in vector format",
+        "deadline": "wallUpload",
+        "mandatory": true,
+        "upload": {
+          "subfolder": "SPONSORWALL",
+          "placeholder": "wallFolderUrl",
+          "notifyEmails": ["sb@expertslive.dk", "mok@expertslive.dk"],
+          "notifySubject": "[ELDK27] Sponsor wall design uploaded/updated by {{companyName}}"
+        },
+        "description": "Your booth includes a custom-printed fabric wall ({{wallSize}}). We use the artwork you upload here to print the fabric well before the event, so timing matters — please send the design in good time.\n\nDESIGN REQUIREMENTS\n• File format: vector — .EPS, .SVG, or .AI\n• Size, template + bleed: follow the spec PDF for your tier\n• Spec PDF: {{wallSpecUrl}}\n\nQuestions about layout, dimensions, bleed, fonts, or anything else? Email {{wallContactName}} at {{wallContactEmail}} BEFORE you start designing — it is much faster than fixing things after upload.\n\nUPLOAD INSTRUCTIONS\nClick the link below to open YOUR private wall-design folder for {{companyName}}. From there you can upload, overwrite, or delete files.\n\nOpen: {{wallFolderUrl}}\n\nIf you are unable to delete an existing file, just upload the new version (give it a clear name like 'wall-v2.eps') and email {{supportEmail}} so we know which file is the current one.\n\nNOTE: {{wallContactName}} is notified automatically when you upload or replace a file — so you don't need to send a separate heads-up email."
+      },
+      {
+        "title": "Choose your booth layout (table, chairs)",
+        "deadline": "boothLayout",
+        "mandatory": true,
+        "description": "You need to choose your booth layout (table, chairs).\n\nAs each sponsor has specific booth layout requirements, you have been assigned a coupon code with a designated value based on your booth category. You may use this voucher to select your preferred furniture items. If the total cost of your selected furniture exceeds the value of the coupon, the additional amount will be invoiced separately.\n\n{{furnitureSpec}}\n\nOrdering will happen through our sponsor configurator portal, where you can see pictures of chairs, tables, etc.\n\n1) Log in to the sponsor configurator portal: {{configuratorUrl}}\n2) Go to the shop and search for chair, table, etc., then add it to your cart. You can adjust the quantity if needed.\n3) Inside the Cart, enter the coupon code (click on Apply)\n4) Select 'Proceed to Checkout' to confirm the ordering of the furniture\n5) You can either save the contract as a PDF and sign it using your preferred method, or scroll down and digitally sign directly in the configurator.\n\nNote: Payments are not handled through the portal. We will arrange payment with you separately."
+      },
+      {
+        "title": "Register booth members in Zoho event-system",
+        "deadline": "registerBoothMembers",
+        "mandatory": true,
+        "description": "You must register all booth staff in the Zoho event system. This is required so they can scan attendee badges (leads).\n\nHow to access:\n1) Sign in via {{eventSiteUrl}} (enter your email and the temporary password / OTP you receive by mail).\n2) Open the Exhibitor Space directly: {{exhibitorSpaceUrl}}\n3) Open \"Booth Members\" in the left sidebar.\n4) Click \"Invite\" and add each of your booth members.\n\nYou can buy extra people at your booth for a discounted price of EURO {{extraBoothStaffPriceEur}}:\n1) Log in to the sponsor configurator portal: {{configuratorUrl}}\n2) Go to the shop and search for 'Discounted Tickets for Extra Exhibitor Staff {{editionCode}}', then add it to your cart. You can adjust the quantity if needed.\n3) Select 'Proceed to Checkout'.\n\nIf you are the event coordinator and will not be physically present at the booth, we will increase the allowed number of booth members by +1 to fulfill the agreed number.\nIn that case, please email {{leadContactName}} at {{leadContactEmail}} and ask to get an increase in the booth member limit."
+      },
+      {
+        "title": "Update Exhibitor Profile in Zoho Backstage",
+        "deadline": "registerBoothMembers",
+        "mandatory": true,
+        "description": "Configure your exhibitor profile in Zoho Backstage so attendees can find your company, browse your collateral, and contact you.\n\nHow to open the form:\n1) Sign in via {{eventSiteUrl}} (enter your email and the temporary password / OTP you receive by mail).\n2) Open the Exhibitor Profile edit form directly: {{exhibitorProfileUrl}}\n   (If you land somewhere else, use {{exhibitorSpaceUrl}} and pick \"Exhibitor Profile\" / \"EDIT EXHIBITOR PROFILE\" from there.)\n\nFields to fill in:\n* Logo — up to 5 MB, optimal 200x140 px, JPG / JPEG / PNG / GIF / WEBP\n* Banner image — up to 5 MB, optimal 1200x400 px, same formats\n* Company name (required) + website URL\n* Company social pages — LinkedIn, X, etc. (click 'Add More' for additional networks)\n* Company short description — max 80 chars\n* Company overview — max 1000 chars\n* Exhibitor Collaterals — upload videos + downloadable collateral PDFs\n\nFrom the Exhibitor Space sidebar you can also manage Booth Members, Booth Materials, Promotional Banner, Leads, Inquiries, and Meetings.\n\nThis is the profile attendees see in the event app and on the event site. The more complete it is, the more booth traffic + scanned leads you get.\n\nQuestions? Contact {{leadContactName}} at {{leadContactEmail}}."
+      },
+      {
+        "title": "Pre-Event Shipment of packages to stand in Expo",
+        "deadline": "boothShipment",
+        "mandatory": false,
+        "description": "If you need to ship packages to your stand, Bella Center uses the freight company DSV for storage, handling and delivery to stand in Expo.\n\nOrdering will happen through our sponsor configurator portal, where you can choose pre-event/post-event handling, storage, customs clearance, etc.\n\n1) Log in to the sponsor configurator portal: {{configuratorUrl}}\n2) Go to the shop, filter on 'Package Handling' and select the needed services, then add it to your cart. You can adjust the quantity if needed.\n3) Select 'Proceed to Checkout' to confirm the order.\n4) You can either save the contract as a PDF and sign it using your preferred method, or scroll down and digitally sign directly in the configurator.\n\nNote: Payments are not handled through the portal. We will arrange payment with you separately.\n----------------------------\nPlease ship the items to the address below with clear markings:\n\n{{editionCode}} / <StandNumber as informed by {{leadContactName}}> / {{companyName}}\n{{shippingAddressDsv}}\nMark: 1 of ... / 2 of ... / 3 of ... etc.\n\nQuestions to ordering can be directed to {{leadContactName}} - {{leadContactEmail}}\n\nQuestions to freight company, DSV Fairs & Events:\nTel: {{freightContactPhone}}\nEmail: {{freightContactEmail}}\n\nFor Shipments outside the EU we require the following documents for customs clearance:\n* 3 originals of proforma invoice / packing list in English, showing weights, sizes, values, description of content and Harmonized Codes\n* Separate invoices for temporary goods (Exhibits / Standfittings) and final importation (consumables / advertising materials) or send temporary goods by ATA Carnet\n* If necessary: Certificate of Origin (Form A / EUR.1) / Special certificates (Health / veterinary)"
+      },
+      {
+        "title": "Validate booth members have lead scan app + exhibitor guide",
+        "deadline": "leadAppBoothMembers",
+        "mandatory": true,
+        "description": "You must ensure that each booth member has installed the lead scanning app, 'Zoho Backstage for Attendees'.\nThey must log in using the email address you created for them when you onboarded them as booth members in Zoho.\n\nYou also need to confirm that they have received the exhibitor guide, which we will send to you in advance.\nThe guide covers important information such as how to scan leads, the Wi-Fi password, event break times, and more."
+      },
+      {
+        "title": "TV Rental for Booth (Demos, Presentations, etc.)",
+        "deadline": "tvRequest",
+        "mandatory": false,
+        "description": "If you want to use a TV for demonstrations or similar activities at your booth, you can either bring your own or let Experts Live Denmark arrange one for you.\n\nWe offer a complete rental package that includes a 50\" screen with an HDMI cable. The TV will be mounted and ready for use when you check in at your booth, and we will also handle the dismantling after the event.\n\nThe cost is EURO {{tvRentalPriceEur}} (excl. tax) and includes shipping, insurance, mounting, manpower, testing, and related services.\n\nCheck your current contract to see whether you have already booked a TV through us. If you are unsure, we are happy to confirm it for you.\n\nIf you need to rent a TV, please follow these steps:\n1) Log in to the sponsor configurator portal: {{configuratorUrl}}\n2) Go to the shop and search for 'TV Screen Exhibitor Booth {{editionCode}}', then add it to your cart. You can adjust the quantity if needed.\n3) Select 'Proceed to Checkout'.\n4) You can either save the contract as a PDF and sign it using your preferred method, or scroll down and digitally sign directly in the configurator.\n\nNote: Payments are not handled through the portal. We will arrange payment with you separately."
+      }
+    ],
+    "brandedFeature": [],
+    "preday": []
+  },
+  "orderImport": {
+    "_doc": "Column mapping for the webshop order export (used for manual CSV import, and mirrors what the WooCommerce pull produces). Sponsor identity keys on email.",
+    "columns": [
+      "Order_Number",
+      "Order_Date",
+      "Sponsor_Name",
+      "Sponsor_Email",
+      "Product_Number",
+      "Product_Name",
+      "Quantity"
+    ],
+    "sponsorKey": "Sponsor_Email"
+  },
+  "sponsorContacts": {
+    "_doc": "A sponsor is a COMPANY with multiple contacts and roles. When the Company Manager integration is enabled (integrations.companyManager), companies, contacts and roles come FROM Company Manager - it is the source of truth - and the 'roles' list below is just a local label map onto Company Manager's role IDs. When Company Manager is disabled, the hub manages contacts itself using these roles. Either way, reminderTargeting governs who gets reminders.",
+    "roles": [
+      {
+        "key": "coordinator",
+        "label": "Event Coordinator",
+        "companyManagerRoleId": 2,
+        "canManage": true,
+        "_doc": "Company Manager role 2. Receives all sponsor reminders. Can assign tasks."
+      },
+      {
+        "key": "signer",
+        "label": "Signer / Approver",
+        "companyManagerRoleId": 1,
+        "canManage": false,
+        "_doc": "Company Manager role 1. NEVER receives task reminders. Record/contact only."
+      },
+      {
+        "key": "booth",
+        "label": "Booth Staff",
+        "companyManagerRoleId": null,
+        "canManage": false,
+        "_doc": "Hub-only role (no Company Manager equivalent). Reminded only for a task assigned to them."
+      }
+    ],
+    "reminderTargeting": {
+      "_doc": "How sponsor task reminders pick recipients. ASSIGNED task: the assigned contact is primary, all coordinators are CC'd. UNASSIGNED task: all coordinators are primary. Signers NEVER receive reminders. This implements the rule 'all reminders go to anyone in the Event Coordinator role, not the signer/approver'.",
+      "assignedTaskPrimary": "assignee",
+      "assignedTaskCc": "all-coordinators",
+      "unassignedTaskPrimary": "all-coordinators",
+      "neverRemind": [
+        "signer"
+      ]
+    }
+  },
+  "productClassification": {
+    "_doc": "ELDK27 changed the webshop model: each booth is now its OWN product (Platinum E-1..E-21, Diamond E-6..E-11, Gold E-12..E-30 - ~30 booth products), so a fixed product-ID list no longer works. Instead the hub classifies each ordered product by its WooCommerce 'Categories' string and/or its name. A product can match multiple types; each matched type's task set is added. New booths next year need NO config change - they appear under the same category. The CSV has empty IDs; the hub matches live products from the WooCommerce API, where IDs exist - so this config is RULES, never a static ID list.",
+    "rules": [
+      {
+        "type": "booth",
+        "_doc": "Booth/wall packages. Any product whose category contains 'Tier Packages With Exhibitor Booth' (covers Platinum, Diamond, Gold, shared-Startup, Upgrade-from-Silver, and Pre-day track sponsors which include a Gold booth), OR whose name contains a booth code like 'Booth E-NN' (covers Lounge/Appreciation feature packages that bundle a booth).",
+        "matchCategoryContains": [
+          "Tier Packages With Exhibitor Booth"
+        ],
+        "matchNameRegex": "Booth E-\\d+",
+        "_tierDoc": "Booth tier is read from the category suffix: '...Exhibitor Booth, Platinum' -> platinum; ', Diamond' -> diamond; ', Gold' -> gold. Shared-Startup / Upgrade-from-Silver / Pre-day track booths have no tier suffix -> default 'gold' (4m booth).",
+        "tierFromCategorySuffix": {
+          "Platinum": "platinum",
+          "Diamond": "diamond",
+          "Gold": "gold"
+        },
+        "defaultTier": "gold",
+        "_featureTierNote": "If a product matches 'booth' only via matchNameRegex (a 'Booth E-NN' name) AND its category is a Branded Feature Package rather than a Tier Package, its tier is 'feature' (3m wall) - see boothWallSpecs.tiers.feature."
+      },
+      {
+        "type": "session",
+        "_doc": "Sponsor session products (Morning 50min, Long 60min, Expo Intro 20min, all timeslots; also Pre-day lunch session).",
+        "matchCategoryContains": [
+          "Sessions"
+        ]
+      },
+      {
+        "type": "brandedFeature",
+        "_doc": "Branded feature sponsorships without their own booth - Fruit, Popcorn, Coffee, Breakfast&Lunch, Cake&Snack, Name Badge, Keyhanger, Attendee Bag, Keynote Video, Pre-day, Swag, Founding Partner, Thermo Bottle, Logo-on-polo, etc. The 'Tier Packages Without Booth (Digital Only)' entry catches Silver Sponsors here so they still get the allSponsors baseline (logo, descriptions, app game) -- they have no booth/session/tier-specific deliverables, so the brandedFeature task set (currently empty) is the right channel.",
+        "matchCategoryContains": [
+          "Branded Feature Packages",
+          "Attendee Experience Sponsors",
+          "Hospitality & Comfort",
+          "Content & Program",
+          "Community & Appreciation",
+          "Tier Packages Without Booth"
+        ]
+      },
+      {
+        "type": "preday",
+        "_doc": "Pre-day master-class track sponsors. Note these ALSO match 'booth' (they include a Gold booth) - both task sets apply.",
+        "matchCategoryContains": [
+          "Pre-day"
+        ]
+      },
+      {
+        "type": "addon",
+        "_doc": "Logistics add-ons - NOT sponsorships. Booth furniture, package handling/customs, extra staff tickets, TV screen, bag-content packing. These generate NO task set.",
+        "matchCategoryContains": [
+          "Booth Options",
+          "Package Handling",
+          "Options",
+          "Addons",
+          "Uncategorized"
+        ],
+        "generatesTasks": false
+      }
+    ],
+    "_silverNote": "Silver Sponsor is category 'Tier Packages Without Booth (Digital Only)' - it matches none of the booth/session rules, so it correctly gets only the baseline (allSponsors) task set."
+  },
+  "boothWallSpecs": {
+    "_doc": "Per booth tier: the wall-design spec PDF, the webshop coupon, AND the furniture-allowance block. Substituted into booth tasks via {{wallSpecUrl}} (upload task), {{couponCode}} (any task), and {{furnitureSpec}} (layout task) based on the company's classified tier. furnitureSpec is substituted FIRST so nested {{couponCode}} inside it gets resolved by the same pass. ELDK27 has one product per booth, so the hub selects by TIER (from the category suffix - see productClassification). Wall-spec PDF URLs are reused from ELDK26 (confirmed unchanged for ELDK27); coupon codes updated to eldk27 prefix.",
+    "tiers": {
+      "platinum": {
+        "wallSize": "6m x 2.3m",
+        "specUrl": "https://expertslive.dk/wp-content/uploads/2025/09/Sponsor-Wall-600x230-Platinum.pdf",
+        "coupon": "eldk27-platinum-booth-included",
+        "furnitureSpec": "Tier: Platinum\nCoupon code: {{couponCode}}\nCoupon value: 239 EURO (the chairs + table below add up to the coupon value).\n\nHigh-chair bar chairs – choose 6 (all the same model):\n  • Booth: Chair, Tolix Stool Outdoor, black (W31, D31, H75) – EURO 35\n    – or –\n  • Booth: Bar stool, white. Industrial Bar Stool (W31, D31, H75) – EURO 35\n\nHigh-chair bar table – choose 1:\n  • Booth: Table, white, Lasa Bar Table (Ø60, H110) – EURO 29"
+      },
+      "diamond": {
+        "wallSize": "5m x 2.3m",
+        "specUrl": "https://expertslive.dk/wp-content/uploads/2025/09/Sponsor-Wall-500x230-Diamond.pdf",
+        "coupon": "eldk27-diamond-booth-included",
+        "furnitureSpec": "Tier: Diamond\nCoupon code: {{couponCode}}\nCoupon value: 169 EURO (the chairs + table below add up to the coupon value).\n\nHigh-chair bar chairs – choose 4 (all the same model):\n  • Booth: Chair, Tolix Stool Outdoor, black (W31, D31, H75) – EURO 35\n    – or –\n  • Booth: Bar stool, white. Industrial Bar Stool (W31, D31, H75) – EURO 35\n\nHigh-chair bar table – choose 1:\n  • Booth: Table, white, Lasa Bar Table (Ø60, H110) – EURO 29"
+      },
+      "gold": {
+        "wallSize": "4m x 2.3m",
+        "specUrl": "https://expertslive.dk/wp-content/uploads/2025/09/Sponsor-Wall-400x230-Gold.pdf",
+        "coupon": "eldk27-gold-booth-included",
+        "furnitureSpec": "Tier: Gold\nCoupon code: {{couponCode}}\nCoupon value: 99 EURO (the chairs + table below add up to the coupon value).\n\nHigh-chair bar chairs – choose 2 (all the same model):\n  • Booth: Chair, Tolix Stool Outdoor, black (W31, D31, H75) – EURO 35\n    – or –\n  • Booth: Bar stool, white. Industrial Bar Stool (W31, D31, H75) – EURO 35\n\nHigh-chair bar table – choose 1:\n  • Booth: Table, white, Lasa Bar Table (Ø60, H110) – EURO 29"
+      },
+      "feature": {
+        "_doc": "Feature-size booth - the Lounge / Appreciation packages that bundle a smaller booth (name matches 'Booth E-NN' but category is a Branded Feature Package, not a Tier Package).",
+        "wallSize": "3m x 2.3m",
+        "specUrl": "https://expertslive.dk/wp-content/uploads/2025/09/Sponsor-Wall-300x230-Feature.pdf",
+        "coupon": "eldk27-feature-booth-included",
+        "furnitureSpec": "Tier: Feature\nCoupon code: {{couponCode}}\nCoupon value: 99 EURO (the chairs + table below add up to the coupon value).\n\nHigh-chair bar chairs – choose 2 (all the same model):\n  • Booth: Chair, Tolix Stool Outdoor, black (W31, D31, H75) – EURO 35\n    – or –\n  • Booth: Bar stool, white. Industrial Bar Stool (W31, D31, H75) – EURO 35\n\nHigh-chair bar table – choose 1:\n  • Booth: Table, white, Lasa Bar Table (Ø60, H110) – EURO 29"
+      }
+    }
+  }
+}

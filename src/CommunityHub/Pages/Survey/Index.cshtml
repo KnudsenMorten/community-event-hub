@@ -1,0 +1,506 @@
+@page "/survey/{slug}"
+@model CommunityHub.Pages.Survey.IndexModel
+@{
+    Layout = "_Layout";
+    ViewData["Title"] = Model.Survey?.Title ?? "Survey";
+}
+
+@if (Model.Survey is null)
+{
+    <div class="card"><h2>Survey not found</h2><p>No survey is configured at this URL.</p></div>
+    return;
+}
+
+<style>
+    /* Centered title bar -- sits flush at the top of the card. The parent
+       .card carries inline `padding: 0` + `overflow: hidden`, so the hero
+       no longer needs negative margins to escape card padding. The previous
+       `margin: -20px -20px 0 -20px` left the negative TOP margin in place,
+       which pulled the hero 20px above the card and let overflow:hidden
+       clip it -- but the flex centering still calculated against the
+       FULL (uncropped) hero box, so on mobile the title appeared in the
+       top half of the visible blue band instead of the geometric centre.
+       Fixed 2026-06-10: zero top margin, symmetric padding, robust flex
+       centering. Padding is also slightly larger top/bottom on mobile so
+       a 2-line title wraps without crowding the subtitle. */
+    .survey-hero {
+        background: var(--el-darkblue, #1D3380); color: #fff;
+        padding: 22px 22px; border-radius: 10px 10px 0 0; margin: 0;
+        text-align: center;
+        min-height: 80px;
+        display: flex; flex-direction: column;
+        align-items: center; justify-content: center;
+    }
+    .survey-hero h1 { margin: 0; font-size: 22px; font-weight: 700; line-height: 1.25; }
+    .survey-hero .meta { font-size: 13.5px; opacity: .92; margin-top: 8px; line-height: 1.35; }
+    @@media (max-width: 600px) {
+        .survey-hero { padding: 18px 16px; min-height: 70px; }
+        .survey-hero h1 { font-size: 19px; }
+        .survey-hero .meta { font-size: 12.5px; margin-top: 6px; }
+    }
+
+    /* Intro block: main + italic disclaimer + thank-you motivator. */
+    .survey-intro p { color: #4a5160; font-size: 14px; line-height: 1.55; margin: 0 0 12px 0; }
+    .survey-intro p.disclaimer { font-style: italic; color: #5a6170; }
+    .survey-intro p.thankyou { color: var(--el-darkblue, #1D3380); font-weight: 600; }
+
+    .survey-body { padding: 20px 24px 24px 24px; }
+
+    .stepbar { display: flex; gap: 8px; margin: 0 0 22px 0; flex-wrap: wrap; }
+    .stepbar .pill {
+        flex: 1 1 0; min-width: 110px; padding: 9px 12px; border-radius: 999px;
+        background: #eef0f5; color: #4a5160; font-size: 13px; font-weight: 600;
+        text-align: center; border: 1px solid transparent;
+    }
+    .stepbar .pill.active { background: var(--el-blue, #008BD2); color: #fff; border-color: var(--el-darkblue, #1D3380); }
+    .stepbar .pill.done   { background: #d8f3d6; color: #1b5e20; }
+
+    .step-section { display: none; }
+    .step-section.active { display: block; }
+
+    .step-section h3 { margin: 0 0 6px 0; color: var(--el-darkblue, #1D3380); font-size: 20px; }
+    .step-section p.lead { color: #4a5160; font-size: 14px; margin: 0 0 16px 0; }
+
+    /* Photo strip from previous Experts Live Denmark editions -- makes
+       the wizard feel like a real event survey, not a generic form. */
+    .step-photo {
+        position: relative; height: 260px; margin: -4px 0 18px 0;
+        border-radius: 10px; overflow: hidden; background-size: cover;
+        background-color: #1D3380;
+        /* background-position set INLINE per step -- each photo crops differently. */
+    }
+    .step-photo::after {
+        content: ""; position: absolute; inset: 0;
+        background: linear-gradient(180deg, rgba(29,51,128,.15) 0%, rgba(29,51,128,.55) 100%);
+    }
+    .step-photo .caption {
+        position: absolute; left: 14px; bottom: 10px; right: 14px;
+        color: #fff; font-size: 12.5px; font-weight: 600;
+        z-index: 1; text-shadow: 0 1px 3px rgba(0,0,0,.4);
+    }
+    @@media (max-width: 600px) { .step-photo { height: 180px; } }
+
+    .track-grid { display: grid; gap: 10px; grid-template-columns: 1fr; }
+    @@media (min-width: 720px) { .track-grid { grid-template-columns: 1fr 1fr; } }
+    .track-card {
+        display: block; padding: 14px 16px; border: 1.5px solid var(--el-darkblue, #1D3380); border-radius: 10px;
+        cursor: pointer; background: var(--el-darkblue, #1D3380); color: #fff;
+        transition: background .12s, box-shadow .12s, transform .12s;
+    }
+    .track-card:hover { background: var(--el-blue, #008BD2); border-color: var(--el-blue, #008BD2); transform: translateY(-1px); }
+    .track-card.selected { background: var(--el-blue, #008BD2); border-color: #fff; box-shadow: 0 0 0 3px rgba(0,139,210,.4); }
+    .track-card input[type=radio] { position: absolute; left: -9999px; }
+    .track-card .name { font-weight: 700; color: #fff; font-size: 15px; }
+    .track-card .tag  { font-size: 12.5px; color: rgba(255,255,255,.88); margin-top: 4px; }
+
+    .topic-cat-head { font-size: 12px; font-weight: 700; color: #4a5160; text-transform: uppercase;
+        letter-spacing: .05em; margin: 14px 0 6px 0; }
+    .topic-row {
+        display: flex; align-items: center; gap: 12px; padding: 10px 12px;
+        border: 1.5px solid var(--el-darkblue, #1D3380); border-radius: 8px; margin-bottom: 8px;
+        background: var(--el-darkblue, #1D3380); color: #fff;
+    }
+    .topic-row:hover { background: var(--el-blue, #008BD2); border-color: var(--el-blue, #008BD2); }
+    .topic-row.picked { background: var(--el-blue, #008BD2); border-color: #fff; box-shadow: 0 0 0 3px rgba(0,139,210,.4); }
+    .topic-row .rank-btns { display: flex; gap: 6px; flex: 0 0 auto; }
+    .topic-row .rank-btn {
+        min-width: 48px; height: 30px; border-radius: 15px; border: 1.5px solid #c4c8d4; background: #fff;
+        font-weight: 700; font-size: 12px; cursor: pointer; color: #4a5160; padding: 0 10px;
+        letter-spacing: .02em;
+    }
+    .topic-row .rank-btn:hover { border-color: var(--el-blue, #008BD2); }
+    .topic-row .rank-btn.rank-1 { background: #1D3380; color: #fff; border-color: #1D3380; }
+    .topic-row .rank-btn.rank-2 { background: #008BD2; color: #fff; border-color: #008BD2; }
+    .topic-row .rank-btn.rank-3 { background: #67b7e3; color: #fff; border-color: #67b7e3; }
+    .topic-row .body { flex: 1 1 auto; min-width: 0; }
+    .topic-row .title { font-weight: 700; color: #fff; font-size: 14.5px; }
+    .topic-row .summary { font-size: 12.5px; color: rgba(255,255,255,.88); margin-top: 2px; }
+
+    .picks-status {
+        font-size: 13px; color: #4a5160; background: #f5f6f8; padding: 8px 12px;
+        border-radius: 6px; margin: 10px 0 6px 0;
+    }
+    .picks-status .done { color: #1b5e20; font-weight: 600; }
+
+    /* Step 3 cards: light-grey outer card (contrast vs the page), dark-blue
+       option buttons with white text (sharp contrast vs the grey card). */
+    .level-card {
+        border: 1px solid #d6dae2; border-radius: 10px;
+        padding: 14px 16px; margin-bottom: 12px;
+        background: #f5f7fa; color: #1a1a2e;
+    }
+    .level-card .picked-title { font-weight: 700; color: var(--el-darkblue, #1D3380); font-size: 15px; }
+    .level-card .picked-summary { font-size: 13px; color: #4a5160; margin: 3px 0 12px 0; }
+    .level-options { display: grid; gap: 8px; grid-template-columns: 1fr; }
+    @@media (min-width: 720px) { .level-options { grid-template-columns: 1fr 1fr 1fr; } }
+    .level-opt { position: relative; }
+    .level-opt input { position: absolute; left: -9999px; }
+    .level-opt label {
+        display: block; padding: 10px 12px; border: 1.5px solid var(--el-darkblue, #1D3380); border-radius: 8px;
+        background: var(--el-darkblue, #1D3380); cursor: pointer; height: 100%; box-sizing: border-box;
+        color: #fff;
+        transition: background .12s, box-shadow .12s, transform .12s;
+    }
+    .level-opt label:hover { background: var(--el-blue, #008BD2); border-color: var(--el-blue, #008BD2); transform: translateY(-1px); }
+    .level-opt input:checked + label {
+        background: var(--el-blue, #008BD2); border-color: #fff;
+        box-shadow: 0 0 0 3px rgba(0,139,210,.4);
+    }
+    .level-opt .lvl-name { font-weight: 700; font-size: 13.5px; color: #fff; }
+    .level-opt .lvl-example { font-size: 12.5px; color: rgba(255,255,255,.92); margin-top: 3px; line-height: 1.4; }
+
+    .wizard-actions { display: flex; justify-content: space-between; align-items: center; margin-top: 20px; gap: 12px; }
+    .wizard-actions .right { display: flex; gap: 10px; }
+    .wizard-actions button {
+        background: var(--el-blue, #008BD2); color: #fff; border: 0; padding: 10px 18px;
+        border-radius: 7px; font-size: 14px; font-weight: 600; cursor: pointer;
+    }
+    .wizard-actions button.secondary { background: #fff; color: var(--el-darkblue, #1D3380); border: 1.5px solid var(--el-darkblue, #1D3380); }
+    .wizard-actions button:disabled { opacity: .4; cursor: not-allowed; }
+
+    .vol-error { padding: 12px 14px; background: #fff3f3; border-left: 4px solid #c0392b;
+        border-radius: 6px; color: #c0392b; margin-bottom: 14px; font-size: 13.5px; }
+    .vol-success { padding: 20px 22px; background: #f0fdf4; border-left: 4px solid #16a34a;
+        border-radius: 6px; margin: 0 0 16px 0; }
+    .vol-success h3 { margin: 0 0 8px 0; color: #166534; font-size: 18px; }
+    .vol-success p  { margin: 6px 0 0 0; color: #166534; font-size: 13.5px; line-height: 1.55; }
+    .vol-hp { position: absolute; left: -9999px; height: 0; width: 0; overflow: hidden; }
+
+    .comment-field textarea {
+        width: 100%; box-sizing: border-box; padding: 9px 12px; font-size: 14px;
+        border: 1px solid #c4c8d4; border-radius: 6px; min-height: 70px; font-family: inherit; resize: vertical;
+    }
+    .comment-field label { display: block; font-weight: 600; font-size: 13px; color: #24292f; margin-bottom: 4px; }
+</style>
+
+<div class="card" style="padding: 0; overflow: hidden;">
+    <div class="survey-hero">
+        <h1>@Model.Survey.Title</h1>
+        @if (!string.IsNullOrWhiteSpace(Model.Survey.Subtitle))
+        {
+            <div class="meta">@Model.Survey.Subtitle</div>
+        }
+    </div>
+
+    <div class="survey-body">
+        @* Intro is now rendered INSIDE step-1 only -- once the user moves
+           to Step 2 / 3 it's gone, so they're not staring at the same
+           paragraph for the whole wizard. *@
+
+        @if (Model.SubmittedOk)
+        {
+            <div class="vol-success">
+                <h3>@Model.Survey.ThanksTitle</h3>
+                <p>@Model.Survey.ThanksBody</p>
+                <p style="margin-top:14px;">
+                    <a href="/survey/@Model.Slug/results"><strong>&rarr; @Model.Survey.ResultsLinkLabel</strong></a>
+                </p>
+                <p style="margin-top:18px; font-size:13px; color:#1b5e3a;">
+                    The ELDK27 organizer team:
+                </p>
+                <ul style="margin:4px 0 0 0; padding-left:18px; font-size:13px; color:#166534;">
+                    <li><a href="https://www.linkedin.com/in/knudsenmorten/" target="_blank" rel="noopener">Morten Knudsen</a></li>
+                    <li><a href="https://www.linkedin.com/in/byskov" target="_blank" rel="noopener">Martin Byskov</a></li>
+                    <li><a href="https://www.linkedin.com/in/morten-leth-hedegaard-37756820/" target="_blank" rel="noopener">Morten Leth Hedegaard</a></li>
+                    <li><a href="https://www.linkedin.com/in/kentagerlund" target="_blank" rel="noopener">Kent Agerlund</a></li>
+                </ul>
+            </div>
+        }
+        else
+        {
+            @if (!string.IsNullOrEmpty(Model.ErrorMessage))
+            {
+                <div class="vol-error">@Model.ErrorMessage</div>
+            }
+
+            <div class="stepbar">
+                <div class="pill active" data-step-pill="1">1 &middot; Pick a track</div>
+                <div class="pill"        data-step-pill="2">2 &middot; Pick your top 3 topics</div>
+                <div class="pill"        data-step-pill="3">3 &middot; Pick your level per topic</div>
+            </div>
+
+            <form method="post" id="surveyForm" novalidate>
+                @* Honeypot — invisible to humans, irresistible to bots. *@
+                <div class="vol-hp" aria-hidden="true">
+                    <label for="Website">Website (do not fill)</label>
+                    <input type="text" name="Website" id="Website" tabindex="-1" autocomplete="off" />
+                </div>
+
+                @* ------------- Step 1: track ------------- *@
+                <section class="step-section active" data-step="1">
+                    <div class="survey-intro">
+                        <p>@Model.Survey.Intro</p>
+                        @if (!string.IsNullOrWhiteSpace(Model.Survey.IntroDisclaimer))
+                        {
+                            <p class="disclaimer"><strong>Disclaimer:</strong> @Model.Survey.IntroDisclaimer</p>
+                        }
+                        @if (!string.IsNullOrWhiteSpace(Model.Survey.IntroThankYou))
+                        {
+                            <p class="thankyou">@Model.Survey.IntroThankYou</p>
+                        }
+                    </div>
+                    <div class="step-photo" style="background-image:url('/img/survey-step1.jpg'); background-position:center 30%;">
+                        <div class="caption">A previous Experts Live Denmark — your input shapes the next one.</div>
+                    </div>
+                    <h3>Which technical track excites you most?</h3>
+                    <p class="lead">Pick one. We'll show you topic options for that track in the next step.</p>
+                    <div class="track-grid">
+                        @foreach (var track in Model.Survey.Tracks)
+                        {
+                            <label class="track-card" data-track-id="@track.Id">
+                                <input type="radio" name="SelectedTrackId" value="@track.Id" required />
+                                <div class="name">@track.Name</div>
+                                <div class="tag">@track.Tagline</div>
+                            </label>
+                        }
+                    </div>
+                </section>
+
+                @* ------------- Step 2: pick top 3 topics ------------- *@
+                <section class="step-section" data-step="2">
+                    <div class="step-photo" style="background-image:url('/img/survey-step2.jpg'); background-position:center 50%;">
+                        <div class="caption">Speakers shape the agenda. Your top three tell them what to pitch.</div>
+                    </div>
+                    <h3>Pick your top three topics</h3>
+                    <p class="lead">Tap <strong>Top</strong> next to your most-wanted topic, then <strong>2nd</strong> for your second-favorite, then <strong>3rd</strong>. Tap again to clear. We're asking what <em>topics</em> you'd love to learn about — not yet about specific sessions.</p>
+                    <p class="ai-note" style="font-size:12.5px; color:#5a6170; background:#fff8e1; border-left:3px solid #f4b400; padding:8px 12px; border-radius:4px; margin:4px 0 14px 0; line-height:1.5;">
+                        <strong>Heads-up:</strong> The topic titles + summaries below are <em>AI-generated samples</em> to give you a feel for the shape of each track. Expect the occasional odd phrasing, an unexpectedly funny summary, or a topic that reads like it was dreamt up at 3am. Pick the topics whose <em>direction</em> excites you most — the speakers will refine the exact session titles + angles during the Call for Speakers.
+                    </p>
+                    <div class="picks-status" id="picksStatus">Pick three to continue.</div>
+
+                    @foreach (var track in Model.Survey.Tracks)
+                    {
+                        <div class="topic-set" data-track-set="@track.Id" style="display:none;">
+                            @foreach (var byCat in track.Topics.GroupBy(t => t.Category))
+                            {
+                                <div class="topic-cat-head">@byCat.Key</div>
+                                @foreach (var topic in byCat)
+                                {
+                                    <div class="topic-row" data-topic-id="@topic.Id" data-track="@track.Id">
+                                        <div class="rank-btns">
+                                            <button type="button" class="rank-btn" data-rank="1" title="Make this my Top pick">Top</button>
+                                            <button type="button" class="rank-btn" data-rank="2" title="Make this my 2nd pick">2nd</button>
+                                            <button type="button" class="rank-btn" data-rank="3" title="Make this my 3rd pick">3rd</button>
+                                        </div>
+                                        <div class="body">
+                                            <div class="title">@topic.Title</div>
+                                            <div class="summary">@topic.Summary</div>
+                                        </div>
+                                    </div>
+                                }
+                            }
+                        </div>
+                    }
+
+                    <input type="hidden" asp-for="Pick1TopicId" id="Pick1TopicId" />
+                    <input type="hidden" asp-for="Pick2TopicId" id="Pick2TopicId" />
+                    <input type="hidden" asp-for="Pick3TopicId" id="Pick3TopicId" />
+                </section>
+
+                @* ------------- Step 3: levels ------------- *@
+                <section class="step-section" data-step="3">
+                    <div class="step-photo" style="background-image:url('/img/survey-step3.jpg'); background-position:center top;">
+                        <div class="caption">Honest "I can…" answers help speakers pitch the room right.</div>
+                    </div>
+                    <h3>For each of your three picks, what fits you?</h3>
+                    <p class="lead">Pick the "I can…" statement that feels closest to you. There's no wrong answer — the goal is to help speakers pitch the right depth for our audience.</p>
+                    <p class="ai-note" style="font-size:12.5px; color:#5a6170; background:#fff8e1; border-left:3px solid #f4b400; padding:8px 12px; border-radius:4px; margin:4px 0 14px 0; line-height:1.5;">
+                        <strong>Heads-up:</strong> The "I can…" level statements are also <em>AI-generated samples</em>. Funny phrasing, oddly-specific examples, and the occasional eyebrow-raising claim may appear. Match the <em>spirit</em> of the level you're closest to — close enough is good enough; the goal is to help speakers pitch the right depth, not to grade you.
+                    </p>
+                    <div id="levelHost"></div>
+
+                    <div class="comment-field" style="margin-top:18px;">
+                        <label for="Comment">Anything else we should know? (optional)</label>
+                        <textarea asp-for="Comment" id="Comment" maxlength="2000"
+                                  placeholder="Your role, what you're building right now, topics we didn't list, etc."></textarea>
+                    </div>
+                </section>
+
+                <div class="wizard-actions">
+                    <button type="button" class="secondary" id="prevBtn" style="visibility:hidden;">&larr; Back</button>
+                    <div class="right">
+                        <button type="button" id="nextBtn" disabled>Next &rarr;</button>
+                        <button type="submit" id="submitBtn" style="display:none;" disabled>Send my input</button>
+                    </div>
+                </div>
+            </form>
+
+            <script>
+                (function() {
+                    var form        = document.getElementById('surveyForm');
+                    var pills       = form.parentNode.querySelectorAll('.stepbar .pill');
+                    var sections    = form.querySelectorAll('.step-section');
+                    var prevBtn     = document.getElementById('prevBtn');
+                    var nextBtn     = document.getElementById('nextBtn');
+                    var submitBtn   = document.getElementById('submitBtn');
+                    var picksStatus = document.getElementById('picksStatus');
+                    var levelHost   = document.getElementById('levelHost');
+                    var picks       = [null, null, null]; // index = rank-1
+                    var current     = 1;
+
+                    // ---------- level-example copy: per-track default ------
+                    var levelExamples = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(
+                        Model.Survey.Tracks.ToDictionary(
+                            t => t.Id,
+                            t => new { advanced = t.LevelExamples.Advanced, expert = t.LevelExamples.Expert, blackBelt = t.LevelExamples.BlackBelt })));
+                    // ---------- topic lookup -- includes per-topic level
+                    //            example OVERRIDE when set in JSON (null = inherit track) -
+                    var topicLookup = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(
+                        Model.Survey.Tracks.SelectMany(t => t.Topics.Select(tp => new { track = t.Id, tp })).ToDictionary(
+                            x => x.tp.Id,
+                            x => new {
+                                title = x.tp.Title, summary = x.tp.Summary, category = x.tp.Category, track = x.track,
+                                levels = x.tp.LevelExamples == null ? null : new { advanced = x.tp.LevelExamples.Advanced, expert = x.tp.LevelExamples.Expert, blackBelt = x.tp.LevelExamples.BlackBelt }
+                            })));
+
+                    function setStep(n) {
+                        current = n;
+                        sections.forEach(function(s) { s.classList.toggle('active', s.dataset.step === String(n)); });
+                        pills.forEach(function(p) {
+                            var pn = parseInt(p.dataset.stepPill, 10);
+                            p.classList.toggle('active', pn === n);
+                            p.classList.toggle('done', pn < n);
+                        });
+                        prevBtn.style.visibility = (n === 1) ? 'hidden' : 'visible';
+                        nextBtn.style.display    = (n === 3) ? 'none' : '';
+                        submitBtn.style.display  = (n === 3) ? '' : 'none';
+                        refreshButtons();
+                        if (n === 3) renderLevels();
+                    }
+
+                    // ---------- step 1: track radios ----------------------
+                    form.querySelectorAll('input[name=SelectedTrackId]').forEach(function(r) {
+                        r.addEventListener('change', function() {
+                            form.querySelectorAll('.track-card').forEach(function(c) { c.classList.remove('selected'); });
+                            r.closest('.track-card').classList.add('selected');
+                            // reset picks if changing track
+                            picks = [null, null, null];
+                            ['Pick1TopicId','Pick2TopicId','Pick3TopicId'].forEach(function(id) { document.getElementById(id).value = ''; });
+                            // show only the in-track topic set on step 2
+                            form.querySelectorAll('.topic-set').forEach(function(set) {
+                                set.style.display = (set.dataset.trackSet === r.value) ? '' : 'none';
+                            });
+                            // clear rank buttons across all sets
+                            form.querySelectorAll('.rank-btn').forEach(function(b) { b.classList.remove('rank-1','rank-2','rank-3'); });
+                            form.querySelectorAll('.topic-row').forEach(function(row) { row.classList.remove('picked'); });
+                            refreshButtons();
+                            updatePicksStatus();
+                        });
+                    });
+
+                    // ---------- step 2: rank buttons ----------------------
+                    form.addEventListener('click', function(ev) {
+                        var btn = ev.target.closest('.rank-btn');
+                        if (!btn) return;
+                        var row = btn.closest('.topic-row');
+                        var rank = parseInt(btn.dataset.rank, 10);
+                        var topicId = row.dataset.topicId;
+
+                        // toggle: if this row already has this rank, clear it
+                        var existingIdx = picks.indexOf(topicId);
+                        if (existingIdx !== -1 && existingIdx + 1 === rank) {
+                            picks[existingIdx] = null;
+                        } else {
+                            // remove this topic from anywhere else it lives
+                            if (existingIdx !== -1) picks[existingIdx] = null;
+                            // bump out whatever currently holds this rank
+                            picks[rank - 1] = topicId;
+                        }
+
+                        // repaint
+                        form.querySelectorAll('.rank-btn').forEach(function(b) { b.classList.remove('rank-1','rank-2','rank-3'); });
+                        form.querySelectorAll('.topic-row').forEach(function(r) { r.classList.remove('picked'); });
+                        picks.forEach(function(tid, i) {
+                            if (!tid) return;
+                            var thisRow = form.querySelector('.topic-row[data-topic-id="' + tid + '"]');
+                            if (!thisRow) return;
+                            thisRow.classList.add('picked');
+                            var thisBtn = thisRow.querySelector('.rank-btn[data-rank="' + (i + 1) + '"]');
+                            if (thisBtn) thisBtn.classList.add('rank-' + (i + 1));
+                        });
+
+                        document.getElementById('Pick1TopicId').value = picks[0] || '';
+                        document.getElementById('Pick2TopicId').value = picks[1] || '';
+                        document.getElementById('Pick3TopicId').value = picks[2] || '';
+
+                        updatePicksStatus();
+                        refreshButtons();
+                    });
+
+                    function updatePicksStatus() {
+                        var filled = picks.filter(function(p) { return !!p; }).length;
+                        if (filled < 3) {
+                            picksStatus.innerHTML = 'Pick ' + (3 - filled) + ' more to continue.';
+                            picksStatus.classList.remove('done');
+                        } else {
+                            picksStatus.innerHTML = '<span class="done">All three picks ranked. Tap "Next" to choose levels.</span>';
+                        }
+                    }
+
+                    // ---------- step 3: level pickers (built dynamically) -
+                    // Per-pick the level examples are:
+                    //   topic.levels (if set in JSON)  >>  track-wide default
+                    // So a topic that wants its own bespoke "I can..." copy
+                    // overrides the per-track generic.
+                    var rankLabels = { 1: 'My top pick', 2: 'My 2nd pick', 3: 'My 3rd pick' };
+                    function renderLevels() {
+                        var trackId = (form.querySelector('input[name=SelectedTrackId]:checked') || {}).value;
+                        if (!trackId) { levelHost.innerHTML = ''; return; }
+                        var trackEx = levelExamples[trackId] || { advanced: '', expert: '', master: '' };
+                        var html = '';
+                        picks.forEach(function(tid, i) {
+                            if (!tid) return;
+                            var t = topicLookup[tid] || { title: '(unknown)', summary: '' };
+                            var rank = i + 1;
+                            var ex = (t.levels && t.levels.advanced) ? t.levels : trackEx;
+                            html += '<div class="level-card">'
+                                +   '<div class="picked-title">' + rankLabels[rank] + ' &middot; ' + escapeHtml(t.title) + '</div>'
+                                +   '<div class="picked-summary">' + escapeHtml(t.summary) + '</div>'
+                                +   '<div class="level-options">'
+                                +     levelOpt(rank, 'Advanced (300)',   1, ex.advanced)
+                                +     levelOpt(rank, 'Expert (400)',     2, ex.expert)
+                                +     levelOpt(rank, 'Black Belt (500)', 3, ex.blackBelt)
+                                +   '</div>'
+                                + '</div>';
+                        });
+                        levelHost.innerHTML = html;
+                        levelHost.querySelectorAll('input[type=radio]').forEach(function(r) {
+                            r.addEventListener('change', refreshButtons);
+                        });
+                    }
+                    function levelOpt(rank, name, val, example) {
+                        var id = 'Pick' + rank + 'Level_' + val;
+                        return '<div class="level-opt">'
+                            +   '<input type="radio" name="Pick' + rank + 'Level" id="' + id + '" value="' + val + '" />'
+                            +   '<label for="' + id + '">'
+                            +     '<div class="lvl-name">' + name + '</div>'
+                            +     '<div class="lvl-example">' + escapeHtml(example) + '</div>'
+                            +   '</label>'
+                            + '</div>';
+                    }
+                    function escapeHtml(s) { return (s || '').replace(/[&<>"']/g, function(c) {
+                        return { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c];
+                    }); }
+
+                    function refreshButtons() {
+                        if (current === 1) {
+                            nextBtn.disabled = !form.querySelector('input[name=SelectedTrackId]:checked');
+                        } else if (current === 2) {
+                            nextBtn.disabled = picks.filter(function(p) { return !!p; }).length !== 3;
+                        } else if (current === 3) {
+                            var ok = ['Pick1Level','Pick2Level','Pick3Level'].every(function(n) {
+                                return !!form.querySelector('input[name=' + n + ']:checked');
+                            });
+                            submitBtn.disabled = !ok;
+                        }
+                    }
+
+                    prevBtn.addEventListener('click', function() { if (current > 1) setStep(current - 1); });
+                    nextBtn.addEventListener('click', function() { if (current < 3) setStep(current + 1); });
+
+                    refreshButtons();
+                })();
+            </script>
+        }
+    </div>
+</div>

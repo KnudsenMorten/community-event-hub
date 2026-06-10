@@ -17,6 +17,21 @@
     .bar-row { margin-bottom:12px; }
     .bar-row .cap { font-size:13px; display:flex; justify-content:space-between; }
     .warn { color:#c0392b; font-weight:600; }
+    /* Pending volunteer applications -- review table on the dashboard. */
+    .vol-pending { width:100%; border-collapse:collapse; margin-top:8px; }
+    .vol-pending th, .vol-pending td { padding:8px 10px; text-align:left; border-bottom:1px solid #e6e8ee; font-size:13.5px; }
+    .vol-pending th { font-size:12px; text-transform:uppercase; letter-spacing:.05em; color:#6b7280; background:#f9fafb; }
+    .vol-pending tr:last-child td { border-bottom:0; }
+    .vol-pending td.actions { text-align:right; white-space:nowrap; }
+    .vol-pending td.actions form { display:inline; margin:0; }
+    .vol-pending button.approve { background:#16a34a; color:#fff; border:0; border-radius:5px; padding:6px 11px; font-size:12.5px; font-weight:600; cursor:pointer; }
+    .vol-pending button.approve:hover { background:#15803d; }
+    .vol-pending button.reject  { background:#ffffff; color:#c0392b; border:1px solid #f1a8a8; border-radius:5px; padding:6px 11px; font-size:12.5px; font-weight:600; cursor:pointer; margin-left:6px; }
+    .vol-pending button.reject:hover  { background:#fff3f3; }
+    .vol-empty { color:#6b7280; font-style:italic; font-size:13px; }
+    .vol-notice { padding:10px 12px; background:#eef2ff; border-left:3px solid #6366f1; border-radius:5px; font-size:13px; color:#312e81; margin-bottom:10px; }
+    .vol-when { color:#6b7280; font-size:12px; }
+    .pending-badge { display:inline-block; background:#fde68a; color:#92400e; font-size:11px; font-weight:600; padding:2px 8px; border-radius:10px; margin-left:8px; vertical-align:middle; }
 </style>
 
 <div class="card">
@@ -64,6 +79,119 @@
 @if (Model.Report is not null && !Model.AccessDenied)
 {
     var r = Model.Report;
+
+    <!-- Pending volunteer applications -- from /volunteer/signup. Surfaces
+         immediately so applicants don't sit unreviewed. Approve flips
+         IsActive=true; Decline removes the row. -->
+    <div class="card">
+        <h2>
+            Volunteer applications
+            @if (Model.PendingVolunteers.Count > 0)
+            {
+                <span class="pending-badge">@Model.PendingVolunteers.Count pending</span>
+            }
+        </h2>
+        @if (!string.IsNullOrEmpty(Model.PendingActionMessage))
+        {
+            <div class="vol-notice">@Model.PendingActionMessage</div>
+        }
+        <p style="font-size:13px;color:#6b7280;margin-bottom:8px;">
+            Anyone with a copy of the public sign-up URL
+            (<code>/volunteer/signup</code>) can submit; submissions land here as inactive
+            applicants. Approve to grant access, Decline to remove.
+        </p>
+        @if (Model.PendingVolunteers.Count == 0)
+        {
+            <p class="vol-empty">No volunteer applications pending. Share <code>/volunteer/signup</code> to invite more.</p>
+        }
+        else
+        {
+            <table class="vol-pending">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Email</th>
+                        <th>Phone</th>
+                        <th>Submitted</th>
+                        <th class="actions">Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var v in Model.PendingVolunteers)
+                    {
+                        var ago = (DateTimeOffset.UtcNow - v.SubmittedAt);
+                        var agoText = ago.TotalDays >= 1
+                            ? $"{(int)ago.TotalDays}d ago"
+                            : ago.TotalHours >= 1
+                                ? $"{(int)ago.TotalHours}h ago"
+                                : $"{Math.Max(1, (int)ago.TotalMinutes)}m ago";
+                        <tr>
+                            <td>@v.Name</td>
+                            <td><a href="mailto:@v.Email">@v.Email</a></td>
+                            <td>@(string.IsNullOrEmpty(v.Phone) ? "-" : v.Phone)</td>
+                            <td><span class="vol-when" title="@v.SubmittedAt.UtcDateTime.ToString("u")">@agoText</span></td>
+                            <td class="actions">
+                                <form method="post" asp-page-handler="ApproveVolunteer" asp-route-id="@v.Id">
+                                    <button type="submit" class="approve" title="Set IsActive=true">Approve</button>
+                                </form>
+                                <form method="post" asp-page-handler="RejectVolunteer" asp-route-id="@v.Id"
+                                      onsubmit="return confirm('Decline @v.Name and delete the application?');">
+                                    <button type="submit" class="reject" title="Delete the inactive Participant row">Decline</button>
+                                </form>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+    </div>
+
+    <!-- Survey responses (ELDK27 Topics) -- aggregate at a glance; the
+         full public dashboard lives at /survey/eldk27-topics/results so
+         organizers + prospective speakers share one link. -->
+    <div class="card">
+        <h2>
+            ELDK27 — Technical Session Topics survey
+            @if (Model.SurveyTotalResponses > 0)
+            {
+                <span class="pending-badge" style="background:#1D3380;">@Model.SurveyTotalResponses responses</span>
+            }
+        </h2>
+        <p style="font-size:13px;color:#6b7280;margin-bottom:8px;">
+            Anonymous public survey at <code>/survey/@CommunityHub.Pages.Organizer.DashboardModel.SurveySlug</code> —
+            attendees rank session topics + level. Share the
+            <a href="/survey/@CommunityHub.Pages.Organizer.DashboardModel.SurveySlug/results"><strong>live results dashboard</strong></a>
+            with prospective speakers (Call for Speakers) so they can align abstracts to demand.
+        </p>
+        @if (Model.SurveyTotalResponses == 0)
+        {
+            <p class="vol-empty">No survey responses yet.
+                Share <code>/survey/@CommunityHub.Pages.Organizer.DashboardModel.SurveySlug</code> on social, in newsletters, and on the event site.</p>
+        }
+        else
+        {
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-top:10px;">
+                <div style="background:#f5f7fa;border:1px solid #e2e6ee;border-radius:8px;padding:10px 12px;">
+                    <div style="font-size:11px;font-weight:700;color:#5a6170;text-transform:uppercase;letter-spacing:.05em;">Total responses</div>
+                    <div style="font-size:24px;font-weight:800;color:#1D3380;">@Model.SurveyTotalResponses</div>
+                </div>
+                <div style="background:#f5f7fa;border:1px solid #e2e6ee;border-radius:8px;padding:10px 12px;">
+                    <div style="font-size:11px;font-weight:700;color:#5a6170;text-transform:uppercase;letter-spacing:.05em;">Top track so far</div>
+                    <div style="font-size:14px;font-weight:700;color:#1D3380;">@(string.IsNullOrEmpty(Model.SurveyTopTrackName) ? "—" : Model.SurveyTopTrackName)</div>
+                    <div style="font-size:11px;color:#5a6170;">@Model.SurveyTopTrackCount respondents</div>
+                </div>
+                <div style="background:#f5f7fa;border:1px solid #e2e6ee;border-radius:8px;padding:10px 12px;">
+                    <div style="font-size:11px;font-weight:700;color:#5a6170;text-transform:uppercase;letter-spacing:.05em;">Latest response</div>
+                    <div style="font-size:14px;font-weight:700;color:#1D3380;">@(Model.SurveyLatestAt?.ToString("d MMM HH:mm") ?? "—")</div>
+                    <div style="font-size:11px;color:#5a6170;">UTC</div>
+                </div>
+            </div>
+            <p style="margin-top:10px;font-size:13px;">
+                &rarr; <a href="/survey/@CommunityHub.Pages.Organizer.DashboardModel.SurveySlug/results"><strong>Open live results dashboard</strong></a>
+                &middot; <a href="/survey/@CommunityHub.Pages.Organizer.DashboardModel.SurveySlug">Preview the public survey</a>
+            </p>
+        }
+    </div>
 
     <!-- Form completion -->
     <div class="card">

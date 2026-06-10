@@ -32,6 +32,16 @@ public class DashboardModel : PageModel
     public bool AccessDenied { get; private set; }
     public DashboardReport? Report { get; private set; }
 
+    // --- Pending volunteer applications (Role=Volunteer, IsActive=false) --
+    // Fed by the public anonymous /volunteer/signup page. Each row here is
+    // an applicant awaiting organizer review. Approving flips IsActive=true
+    // (the person can then PIN-log-in + use the volunteer-availability form).
+    // Rejecting deletes the row outright -- nothing in the system depends
+    // on a rejected applicant since they were never an active Participant.
+    public List<PendingVolunteer> PendingVolunteers { get; private set; } = new();
+    public string? PendingActionMessage { get; private set; }
+    public record PendingVolunteer(int Id, string Name, string Email, string? Phone, DateTimeOffset SubmittedAt);
+
     // --- Speaker-deadline graphics ----------------------------------------
     public List<DeadlineStat> SpeakerDeadlines { get; private set; } = new();
     public List<OverdueSpeaker> TopOverdueSpeakers { get; private set; } = new();
@@ -52,6 +62,16 @@ public class DashboardModel : PageModel
     public string LunchSetupDayLabel { get; private set; } = "Setup day";
     public string LunchPreDayLabel { get; private set; } = "Pre-day";
 
+    // --- Surveys (ELDK27 Topics) ----------------------------------------
+    // Aggregate counts only -- the full breakdown lives at the public
+    // dashboard at /survey/eldk27-topics/results so organizers + speakers
+    // can share one link.
+    public int SurveyTotalResponses { get; private set; }
+    public DateTimeOffset? SurveyLatestAt { get; private set; }
+    public string? SurveyTopTrackName { get; private set; }
+    public int SurveyTopTrackCount { get; private set; }
+    public const string SurveySlug = "eldk27-topics";
+
     public async Task<IActionResult> OnGetAsync(CancellationToken ct)
     {
         var me = _participant.Current;
@@ -61,7 +81,103 @@ public class DashboardModel : PageModel
         Report = await _reporting.BuildAsync(me.EventId, ct);
         await LoadSpeakerDeadlineGraphicsAsync(me.EventId, ct);
         await LoadTravelAndLunchGraphicsAsync(me.EventId, ct);
+        await LoadPendingVolunteersAsync(me.EventId, ct);
+        await LoadSurveyStatsAsync(ct);
         return Page();
+    }
+
+    private async Task LoadSurveyStatsAsync(CancellationToken ct)
+    {
+        // Survey responses are NOT scoped to EventId -- the survey is
+        // its own anonymous artefact (the slug is the event tie-in).
+        // Track-popularity peek so the card shows "top track so far".
+        var responses = await _db.SurveyResponses
+            .Where(r => r.SurveySlug == SurveySlug)
+            .Select(r => new { r.SubmittedAt, r.SelectedTrackId })
+            .ToListAsync(ct);
+        SurveyTotalResponses = responses.Count;
+        SurveyLatestAt = responses.Count == 0 ? null : responses.Max(r => r.SubmittedAt);
+        var top = responses
+            .GroupBy(r => r.SelectedTrackId, StringComparer.OrdinalIgnoreCase)
+            .OrderByDescending(g => g.Count())
+            .FirstOrDefault();
+        if (top is not null)
+        {
+            SurveyTopTrackName = top.Key;
+            SurveyTopTrackCount = top.Count();
+        }
+    }
+
+    /// <summary>
+    /// Approve a volunteer applicant: flip IsActive=true so they can
+    /// PIN-log-in and access the volunteer-availability form. Re-renders
+    /// the dashboard so the row disappears from the pending list.
+    /// </summary>
+    public async Task<IActionResult> OnPostApproveVolunteerAsync(int id, CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+
+        var applicant = await _db.Participants.FirstOrDefaultAsync(
+            p => p.Id == id && p.EventId == me.EventId
+                 && p.Role == ParticipantRole.Volunteer && !p.IsActive, ct);
+        if (applicant is not null)
+        {
+            applicant.IsActive = true;
+            await _db.SaveChangesAsync(ct);
+            PendingActionMessage = $"Approved {applicant.FullName} ({applicant.Email}). They can now sign in.";
+        }
+        else
+        {
+            PendingActionMessage = "That applicant was not found (or was already processed).";
+        }
+        return RedirectToPage(new { msg = PendingActionMessage });
+    }
+
+    /// <summary>
+    /// Reject a volunteer applicant: hard-delete the inactive row. Safe
+    /// because the row never had AssignedTasks / LoginPins / etc. (those
+    /// are only created after the person actually engages with the hub).
+    /// </summary>
+    public async Task<IActionResult> OnPostRejectVolunteerAsync(int id, CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+
+        var applicant = await _db.Participants.FirstOrDefaultAsync(
+            p => p.Id == id && p.EventId == me.EventId
+                 && p.Role == ParticipantRole.Volunteer && !p.IsActive, ct);
+        if (applicant is not null)
+        {
+            _db.Participants.Remove(applicant);
+            await _db.SaveChangesAsync(ct);
+            PendingActionMessage = $"Declined {applicant.FullName} ({applicant.Email}). Row removed.";
+        }
+        else
+        {
+            PendingActionMessage = "That applicant was not found (or was already processed).";
+        }
+        return RedirectToPage(new { msg = PendingActionMessage });
+    }
+
+    [BindProperty(SupportsGet = true)]
+    public string? Msg { get; set; }
+
+    private async Task LoadPendingVolunteersAsync(int eventId, CancellationToken ct)
+    {
+        PendingVolunteers = await _db.Participants
+            .Where(p => p.EventId == eventId
+                        && p.Role == ParticipantRole.Volunteer
+                        && !p.IsActive)
+            .OrderByDescending(p => p.CreatedAt)
+            .Select(p => new PendingVolunteer(p.Id, p.FullName, p.Email, p.Phone, p.CreatedAt))
+            .ToListAsync(ct);
+        if (!string.IsNullOrEmpty(Msg))
+        {
+            PendingActionMessage = Msg;
+        }
     }
 
     private async Task LoadTravelAndLunchGraphicsAsync(int eventId, CancellationToken ct)

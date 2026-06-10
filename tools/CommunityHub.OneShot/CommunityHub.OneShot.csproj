@@ -1,0 +1,45 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- ======================================================================
+       CommunityHub.OneShot - on-demand DEV runner for the sponsor pipeline.
+       Hosts the same SponsorOrderPullService the Function App's
+       WooCommercePullJob hosts; lets the operator invoke a pull once from
+       the CLI without deploying the Azure Function. Argument-driven so
+       additional jobs (reminders, attendee reconcile) can be exposed the
+       same way as they're needed for local verification.
+       ====================================================================== -->
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>CommunityHub.OneShot</RootNamespace>
+    <AssemblyName>communityhub-oneshot</AssemblyName>
+    <UserSecretsId>communityhub-oneshot-dev</UserSecretsId>
+    <!-- No native apphost .exe; invoke via 'dotnet run' or 'dotnet <dll>'.
+         Avoids Windows Defender / sandbox blocking the .exe wrapper. -->
+    <UseAppHost>false</UseAppHost>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="8.0.1" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.UserSecrets" Version="8.0.1" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.EnvironmentVariables" Version="8.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Http" Version="8.0.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\CommunityHub.Core\CommunityHub.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="appsettings.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Update="appsettings.Development.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+</Project>

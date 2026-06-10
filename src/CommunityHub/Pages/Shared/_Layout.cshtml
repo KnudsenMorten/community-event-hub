@@ -22,7 +22,7 @@
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>@ViewData["Title"] - @communityName (@ProductShortName)</title>
+    <title>@ViewData["Title"] - @communityName</title>
     <style>
         /* Experts Live brand palette:
              --el-darkblue #1D3380  -- header background, headings
@@ -42,10 +42,30 @@
         header {
             background: var(--el-darkblue); color: #fff;
             padding: 14px 20px;
-            display: flex; align-items: center; gap: 16px;
+            display: flex; align-items: center; gap: 20px;
             flex-wrap: wrap;
             border-bottom: 4px solid var(--el-blue);
+            justify-content: center;     /* center the logo pair */
+            position: relative;          /* user-tools floats right via abs pos */
         }
+        /* Thin announcement bar above the logo header -- ticket-sale info
+           + event-site button, visible to everyone (anonymous + logged-in). */
+        .topbar {
+            background: var(--el-blue); color: #fff;
+            padding: 8px 20px;
+            font-size: 13px;
+            display: flex; align-items: center; justify-content: center;
+            gap: 16px; flex-wrap: wrap; text-align: center;
+        }
+        .topbar .ticket-info { font-weight: 600; }
+        .topbar a.eventsite-btn {
+            display: inline-block;
+            background: #fff; color: var(--el-darkblue);
+            padding: 4px 14px; border-radius: 999px;
+            font-weight: 700; font-size: 12.5px;
+            text-decoration: none; white-space: nowrap;
+        }
+        .topbar a.eventsite-btn:hover { background: var(--el-grey); }
         header .brand img { height: 56px; display: block; }
         header .product-mark {
             font-size: 30px; font-weight: 700; letter-spacing: .01em;
@@ -53,11 +73,12 @@
         }
         header .titles { flex: 1 1 220px; min-width: 0; display: flex;
             align-items: baseline; gap: 16px; }
-        header h1 { margin: 0; font-size: 16px; font-weight: 400;
-            opacity: .85; white-space: nowrap; overflow: hidden;
+        header h1 { margin: 0; font-size: 22px; font-weight: 600;
+            opacity: 1; white-space: nowrap; overflow: hidden;
             text-overflow: ellipsis; }
         header .user-tools { display: flex; align-items: center; gap: 10px;
-            font-size: 13px; flex: 0 0 auto; margin-left: auto; }
+            font-size: 13px; flex: 0 0 auto;
+            position: absolute; right: 16px; top: 50%; transform: translateY(-50%); }
         header .user-tools .who { opacity: .85; white-space: nowrap; }
         @@media (max-width: 700px) {
             header .user-tools { flex-basis: 100%; margin-left: 0;
@@ -89,7 +110,7 @@
             padding: 20px; margin-bottom: 16px;
             box-shadow: 0 1px 3px rgba(0,0,0,.08);
         }
-        .card h2 { margin-top: 0; font-size: 17px; color: var(--el-darkblue); }
+        .card h2 { margin-top: 0; font-size: 22px; font-weight: 700; color: var(--el-darkblue); }
         .info { color: #0a6; }
         .error { color: #c0392b; }
         button, input[type=submit] {
@@ -117,6 +138,27 @@
             display: block; margin-top: 10px; }
         a { color: var(--el-blue); }
         a:hover { color: var(--el-darkblue); }
+        /* URL / email auto-buttons rendered inside task descriptions.
+           Sized to match the form action buttons (Mark complete, etc.) so
+           the click target is the same and inline buttons read as primary
+           actions rather than tiny inline pills. */
+        a.task-link-btn {
+            display: inline-block;
+            background: var(--el-blue);
+            color: #fff !important;
+            padding: 8px 18px;
+            border-radius: 6px;
+            text-decoration: none;
+            font-size: 14px;
+            font-weight: 600;
+            margin: 4px 4px;
+            word-break: break-all;
+            line-height: 1.2;
+        }
+        a.task-link-btn:hover {
+            background: var(--el-darkblue);
+            color: #fff !important;
+        }
         footer { max-width: 880px; margin: 24px auto; padding: 0 16px;
             font-size: 12px; color: #6b7280; }
     </style>
@@ -146,14 +188,17 @@
     </script>
 </head>
 <body>
+    <div class="topbar">
+        <span class="ticket-info">Ticket sale starts 11 Aug 2028 at 08:00</span>
+        <a class="eventsite-btn" href="https://eldk27.expertslive.dk/" target="_blank" rel="noopener">Visit event site &rarr;</a>
+    </div>
     <header>
         <a class="brand" href="/" aria-label="@communityName">
-            <img src="~/img/logo-white.png" alt="@communityName logo" />
+            <img src="~/img/logo-experts-live-denmark-white.png" alt="Experts Live Denmark" style="height:48px; display:block;" />
         </a>
-        <span class="product-mark">Event Hub</span>
-        <div class="titles">
-            <h1>@(ViewData["Title"] ?? "")</h1>
-        </div>
+        <a class="brand" href="/" aria-label="ELDK27 event logo" style="background:#fff; padding:6px 8px; border-radius:8px;">
+            <img src="~/img/logo-eldk27-event.png" alt="ELDK27" style="height:48px; display:block;" />
+        </a>
         @if (isLoggedIn)
         {
             <div class="user-tools">
@@ -168,7 +213,13 @@
     {
         <nav class="primary">
             <a href="/">Home</a>
-            <a href="/Tasks">My tasks</a>
+            @* Sponsors do NOT see the generic /Tasks list -- their tasks are
+               company-shared (not assigned-to-me), so /Sponsor/Tasks is the
+               correct entry point. Other roles keep the generic 'My tasks'. *@
+            @if (role != CommunityHub.Core.Domain.ParticipantRole.Sponsor)
+            {
+                <a href="/Tasks">My tasks</a>
+            }
             @if (role == CommunityHub.Core.Domain.ParticipantRole.Organizer
                  || role == CommunityHub.Core.Domain.ParticipantRole.Speaker
                  || role == CommunityHub.Core.Domain.ParticipantRole.MasterclassSpeaker
@@ -204,8 +255,10 @@
             }
             @if (role == CommunityHub.Core.Domain.ParticipantRole.Sponsor)
             {
-                <a href="/Sponsor">Sponsor area</a>
-                <a href="/Sponsor/Info">Sponsor info upload</a>
+                <a href="/Sponsor">Sponsor Engagement Details</a>
+                <a href="/Sponsor/Tasks">Sponsor Tasks</a>
+                <a href="/Sponsor/Logistics">Logistics</a>
+                <a href="/Sponsor/Contact">Contact</a>
             }
             @if (role == CommunityHub.Core.Domain.ParticipantRole.Organizer)
             {
@@ -225,12 +278,17 @@
     <main>
         @RenderBody()
     </main>
-    <footer>
-        @ProductName (@ProductShortName)
-        <br/>
-        Built on the open-source
-        <a href="https://github.com/KnudsenMorten/community-event-hub" target="_blank" rel="noopener">Community Event Hub</a>
-        by Microsoft MVP Morten Knudsen (<a href="https://aka.ms/morten" target="_blank" rel="noopener">aka.ms/morten</a>) &middot; free for any community to use.
+    <footer style="text-align:center;">
+        <div>
+            Community Event Hub (CEH) &mdash; Built as open-source by Morten Knudsen
+            (<a href="https://aka.ms/morten" target="_blank" rel="noopener">aka.ms/morten</a>)
+            &middot; free for any community to use.
+        </div>
+        <div style="margin-top:4px;">
+            <a href="https://github.com/KnudsenMorten/community-event-hub" target="_blank" rel="noopener">GitHub</a>
+            &middot;
+            <a href="https://github.com/KnudsenMorten/community-event-hub/issues" target="_blank" rel="noopener">Submit a bug</a>
+        </div>
     </footer>
 </body>
 </html>

@@ -65,7 +65,6 @@ var host = new HostBuilder()
         var wooOptions = new WooCommerceOptions();
         config.GetSection(WooCommerceOptions.SectionName).Bind(wooOptions);
         services.AddSingleton(wooOptions);
-        services.AddSingleton<SponsorProductClassifier>();
         services.AddHttpClient<WooCommerceClient>();
 
         // --- Sponsor task config (JSON-driven task expansion) ---------------
@@ -74,6 +73,29 @@ var host = new HostBuilder()
             .Bind(sponsorConfigOptions);
         services.AddSingleton(sponsorConfigOptions);
         services.AddSingleton<SponsorConfigLoader>();
+
+        // --- Event-edition facts + placeholders (substituted into tasks) ----
+        var eventConfigOptions = new EventConfigOptions();
+        config.GetSection(EventConfigOptions.SectionName).Bind(eventConfigOptions);
+        services.AddSingleton(eventConfigOptions);
+        services.AddSingleton<EventEditionConfigLoader>();
+
+        // --- Company Manager (sponsor contact source of truth) -------------
+        var cmOptions = new CompanyManagerOptions();
+        config.GetSection(CompanyManagerOptions.SectionName).Bind(cmOptions);
+        services.AddSingleton(cmOptions);
+        services.AddHttpClient<CompanyManagerClient>();
+        services.AddScoped<SponsorContactSyncService>();
+
+        // --- SharePoint (per-sponsor upload folders + change watcher) ------
+        var sharePointOptions = new SharePointUploadOptions();
+        config.GetSection(SharePointUploadOptions.SectionName).Bind(sharePointOptions);
+        services.AddSingleton(sharePointOptions);
+        services.AddHttpClient<SharePointUploadClient>();
+        services.AddScoped<SponsorUploadWatchService>();
+
+        // The single sponsor-pull engine, shared with CommunityHub.OneShot.
+        services.AddScoped<SponsorOrderPullService>();
 
         // --- Zoho (attendee reconciliation, CONTEXT.md 9z) ------------------
         var zohoOptions = new ZohoOptions();

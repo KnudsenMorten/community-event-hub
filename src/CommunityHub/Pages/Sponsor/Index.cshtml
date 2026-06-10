@@ -2,54 +2,203 @@
 @using CommunityHub.Core.Domain
 @model CommunityHub.Pages.Sponsor.IndexModel
 @{
-    ViewData["Title"] = "Sponsor area";
+    ViewData["Title"] = "Sponsor Engagement Details";
 }
 
-<div class="card">
-    <h2>Sponsor deliverables</h2>
-
-    @if (!string.IsNullOrEmpty(Model.Message))
-    {
-        <p class="info">@Model.Message</p>
-    }
-
-    @if (Model.NoCompanyLink)
-    {
+@if (Model.NoCompanyLink)
+{
+    <div class="card">
+        <h2>Sponsor Engagement Details</h2>
         <p class="error">Your sponsor account is not yet linked to a company,
-           so we cannot show your tasks. Please contact the organizers.</p>
-    }
-    else if (Model.SponsorTasks.Count == 0)
+           so we cannot show your details. Please contact the organizers.</p>
+        <p><a asp-page="/Index">Back to hub</a></p>
+    </div>
+}
+else
+{
+    @if (!string.IsNullOrEmpty(Model.AssignedBoothNumber))
     {
-        <p>No sponsor tasks yet. Tasks appear here once your order is processed.</p>
+        <div class="card" style="background:#eef6ff;border-left:4px solid var(--el-darkblue);">
+            <h2 style="margin-top:0;">Your booth: @Model.AssignedBoothNumber</h2>
+            <p style="margin:6px 0;">Find your stand on the venue floor plan, and use the deep link to manage booth members.</p>
+            <p style="display:flex;gap:10px;flex-wrap:wrap;">
+                <a class="task-link-btn" href="https://eldk27.expertslive.dk/#/venue?lang=en" target="_blank" rel="noopener noreferrer">Open venue floor plan</a>
+                <a class="task-link-btn" href="https://eldk27.expertslive.dk/#/exhibitor-dashboard/booth-members?lang=en" target="_blank" rel="noopener noreferrer">Open Booth Members</a>
+            </p>
+        </div>
     }
-    else
-    {
-        <p>Tick a task off when it is done. You can reopen it if needed.</p>
-        @foreach (var task in Model.SponsorTasks)
+
+    <div class="card">
+        <h2>Sponsor Engagement Details</h2>
+
+        @if (Model.CompanyDetails is not null)
         {
-            <div style="border-bottom:1px solid #eee;padding:10px 0;">
-                <strong>@task.Title</strong>
-                @if (task.State == TaskState.Done)
+            var cd = Model.CompanyDetails;
+            var displayName = !string.IsNullOrWhiteSpace(cd.PublicName) ? cd.PublicName : cd.Name;
+            <p style="margin:4px 0 14px;color:#555;font-size:14px;">
+                These details come from the sponsor webshop (Company Manager).
+                To change anything below, log in to the sponsor configurator and update it there &mdash;
+                the hub picks up the new values automatically on the next sync.
+            </p>
+            <table style="border-collapse:collapse;font-size:15px;">
+                <tr>
+                    <td style="padding:4px 14px 4px 0;font-weight:600;vertical-align:top;">Public name</td>
+                    <td style="padding:4px 0;vertical-align:top;">@displayName</td>
+                </tr>
+                @if (!string.IsNullOrWhiteSpace(cd.Name) && cd.Name != displayName)
                 {
-                    <span class="info"> &check; done</span>
+                    <tr>
+                        <td style="padding:4px 14px 4px 0;font-weight:600;vertical-align:top;">Legal name</td>
+                        <td style="padding:4px 0;vertical-align:top;">@cd.Name</td>
+                    </tr>
                 }
-                else if (task.DueDate is not null)
-                {
-                    <span> &middot; due @task.DueDate?.ToString("dd/MM/yyyy")</span>
-                }
-                @if (!string.IsNullOrEmpty(task.Description))
-                {
-                    <p style="margin:4px 0;">@task.Description</p>
-                }
-                <form method="post" asp-page-handler="Toggle">
-                    <input type="hidden" name="taskId" value="@task.Id" />
-                    <button type="submit" class="secondary">
-                        @(task.State == TaskState.Done
-                            ? "Reopen task" : "Mark complete")
-                    </button>
-                </form>
-            </div>
+                <tr>
+                    <td style="padding:4px 14px 4px 0;font-weight:600;vertical-align:top;">Website</td>
+                    <td style="padding:4px 0;vertical-align:top;">
+                        @if (!string.IsNullOrWhiteSpace(cd.WebsiteUrl))
+                        {
+                            <a class="task-link-btn" href="@cd.WebsiteUrl" target="_blank" rel="noopener noreferrer">@cd.WebsiteUrl</a>
+                        }
+                        else
+                        {
+                            <span style="color:#888;font-style:italic;">(not set)</span>
+                        }
+                    </td>
+                </tr>
+                <tr>
+                    <td style="padding:4px 14px 4px 0;font-weight:600;vertical-align:top;">LinkedIn</td>
+                    <td style="padding:4px 0;vertical-align:top;">
+                        @if (!string.IsNullOrWhiteSpace(cd.LinkedInUrl))
+                        {
+                            <a class="task-link-btn" href="@cd.LinkedInUrl" target="_blank" rel="noopener noreferrer">@cd.LinkedInUrl</a>
+                        }
+                        else
+                        {
+                            <span style="color:#888;font-style:italic;">(not set)</span>
+                        }
+                    </td>
+                </tr>
+                <tr>
+                    <td style="padding:4px 14px 4px 0;font-weight:600;vertical-align:top;">X / Twitter</td>
+                    <td style="padding:4px 0;vertical-align:top;">
+                        @if (!string.IsNullOrWhiteSpace(cd.TwitterUrl))
+                        {
+                            <a class="task-link-btn" href="@cd.TwitterUrl" target="_blank" rel="noopener noreferrer">@cd.TwitterUrl</a>
+                        }
+                        else
+                        {
+                            <span style="color:#888;font-style:italic;">(not set)</span>
+                        }
+                    </td>
+                </tr>
+            </table>
+
+            @if (!string.IsNullOrWhiteSpace(Model.ConfiguratorUrl))
+            {
+                <p style="margin:16px 0 4px;">
+                    <a class="task-link-btn" href="@Model.ConfiguratorUrl" target="_blank" rel="noopener noreferrer">
+                        Update in webshop &rarr;
+                    </a>
+                </p>
+            }
         }
-    }
-    <p><a asp-page="/Index">Back to hub</a></p>
-</div>
+        else
+        {
+            <p style="color:#888;font-style:italic;">
+                We could not load your company snapshot from the webshop right now.
+                Try refreshing in a moment, or contact the organizers if it persists.
+            </p>
+        }
+
+        @* --- Sponsor orders (filtered to this company, inside the date window) --- *@
+        <h3 style="font-size:17px;color:var(--el-darkblue);margin:22px 0 8px;">Sponsor orders</h3>
+        <p style="margin:0 0 10px;color:#555;font-size:14px;">
+            Completed orders we have on file for your company in the current sales window.
+            If something is missing, log in to the sponsor configurator and check the order status there.
+        </p>
+        @if (Model.SponsorOrders.Count == 0)
+        {
+            <p style="color:#888;font-style:italic;">No completed orders in scope yet.</p>
+        }
+        else
+        {
+            <table style="border-collapse:collapse;font-size:15px;width:100%;">
+                <thead>
+                    <tr>
+                        <th style="text-align:left;padding:4px 14px 4px 0;border-bottom:2px solid var(--el-blue);">Order</th>
+                        <th style="text-align:left;padding:4px 14px 4px 0;border-bottom:2px solid var(--el-blue);">Date</th>
+                        <th style="text-align:left;padding:4px 0;border-bottom:2px solid var(--el-blue);">Products</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var o in Model.SponsorOrders)
+                    {
+                        <tr>
+                            <td style="padding:6px 14px 6px 0;vertical-align:top;white-space:nowrap;">#@o.OrderId</td>
+                            <td style="padding:6px 14px 6px 0;vertical-align:top;white-space:nowrap;">
+                                @(o.CreatedAt?.ToString("dd/MM/yyyy") ?? "—")
+                            </td>
+                            <td style="padding:6px 0;vertical-align:top;">
+                                @if (o.LineItems.Count == 0)
+                                {
+                                    <span style="color:#888;">(no line items)</span>
+                                }
+                                else
+                                {
+                                    <ul style="margin:0;padding-left:18px;">
+                                        @foreach (var li in o.LineItems)
+                                        {
+                                            <li>@li.ProductName</li>
+                                        }
+                                    </ul>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+
+        @* --- Linked contacts --- *@
+        <h3 style="font-size:17px;color:var(--el-darkblue);margin:22px 0 8px;">Linked contacts</h3>
+        <p style="margin:0 0 10px;color:#555;font-size:14px;">
+            Anyone listed here can sign in to the hub and manage the shared task list for your company.
+            To add or remove a contact, update the sponsor webshop &mdash; the hub syncs on the next pull.
+        </p>
+        @if (Model.LinkedContacts.Count == 0)
+        {
+            <p style="color:#888;font-style:italic;">No linked contacts yet.</p>
+        }
+        else
+        {
+            <table style="border-collapse:collapse;font-size:15px;">
+                <thead>
+                    <tr>
+                        <th style="text-align:left;padding:4px 14px 4px 0;border-bottom:2px solid var(--el-blue);">Name</th>
+                        <th style="text-align:left;padding:4px 14px 4px 0;border-bottom:2px solid var(--el-blue);">Email</th>
+                        <th style="text-align:left;padding:4px 0;border-bottom:2px solid var(--el-blue);">Phone</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var c in Model.LinkedContacts)
+                    {
+                        <tr>
+                            <td style="padding:6px 14px 6px 0;vertical-align:top;">@c.FullName</td>
+                            <td style="padding:6px 14px 6px 0;vertical-align:top;">
+                                <a class="task-link-btn" href="mailto:@c.Email">@c.Email</a>
+                            </td>
+                            <td style="padding:6px 0;vertical-align:top;color:#444;">
+                                @(string.IsNullOrWhiteSpace(c.Phone) ? "—" : c.Phone)
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+
+        <p style="margin-top:18px;">
+            <a asp-page="/Sponsor/Tasks">Sponsor Tasks &rarr;</a> &middot;
+            <a asp-page="/Index">Back to hub</a>
+        </p>
+    </div>
+}

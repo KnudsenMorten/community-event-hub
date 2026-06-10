@@ -1,0 +1,210 @@
+@page "/volunteer/signup"
+@model CommunityHub.Pages.Volunteer.SignupModel
+@{
+    Layout = "_Layout";
+    ViewData["Title"] = string.IsNullOrEmpty(Model.EventDisplayName)
+        ? "Become a volunteer"
+        : $"Volunteer at {Model.EventDisplayName}";
+}
+
+<style>
+    /* Brand hero band -- matches /survey + /survey/results so the public
+       attendee-facing pages feel like one product, not three. */
+    .volunteer-hero {
+        background: var(--el-darkblue, #1D3380);
+        color: #ffffff;
+        padding: 0 22px;
+        border-radius: 10px 10px 0 0;
+        margin: -20px -20px 0 -20px;
+        text-align: center;
+        min-height: 90px;
+        display: flex; flex-direction: column;
+        align-items: center; justify-content: center;
+    }
+    .volunteer-hero h1 {
+        margin: 0;
+        font-size: 22px;
+        font-weight: 700;
+        line-height: 1.2;
+    }
+    .volunteer-hero p {
+        margin: 8px 0 0 0;
+        font-size: 13.5px;
+        opacity: 0.92;
+        line-height: 1.45;
+    }
+    .volunteer-card {
+        padding: 24px 22px 22px 22px;
+    }
+    .vol-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 14px 18px;
+    }
+    .vol-grid .full { grid-column: 1 / -1; }
+    .vol-grid label {
+        display: block;
+        font-weight: 600;
+        font-size: 13px;
+        color: #24292f;
+        margin-top: 6px;
+        margin-bottom: 4px;
+    }
+    .vol-grid input[type=text],
+    .vol-grid input[type=email],
+    .vol-grid input[type=tel],
+    .vol-grid select,
+    .vol-grid textarea {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 8px 10px;
+        font-size: 14px;
+        border: 1px solid #c4c8d4;
+        border-radius: 6px;
+        background: #ffffff;
+        font-family: inherit;
+    }
+    .vol-grid textarea { min-height: 80px; resize: vertical; }
+    .vol-grid input:focus, .vol-grid select:focus, .vol-grid textarea:focus {
+        outline: none;
+        border-color: var(--el-blue, #008BD2);
+        box-shadow: 0 0 0 2px rgba(0, 139, 210, 0.18);
+    }
+    .vol-actions {
+        margin-top: 18px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 12px;
+    }
+    .vol-actions button {
+        background: var(--el-blue, #008BD2);
+        color: #ffffff;
+        border: 0;
+        border-radius: 6px;
+        padding: 11px 22px;
+        font-size: 14px;
+        font-weight: 600;
+        cursor: pointer;
+    }
+    .vol-actions button:hover { background: var(--el-darkblue, #1D3380); }
+    .vol-fineprint { font-size: 12px; color: #6e7681; }
+    .vol-success {
+        padding: 20px 22px;
+        background: #f0fdf4;
+        border-left: 4px solid #16a34a;
+        border-radius: 6px;
+        margin: 18px 0;
+    }
+    .vol-success h3 { margin: 0 0 8px 0; color: #166534; font-size: 17px; }
+    .vol-success p { margin: 6px 0 0 0; color: #166534; font-size: 13.5px; }
+    .vol-error {
+        padding: 12px 14px;
+        background: #fff3f3;
+        border-left: 4px solid #c0392b;
+        border-radius: 6px;
+        color: #c0392b;
+        margin-bottom: 14px;
+        font-size: 13.5px;
+    }
+    /* Honeypot -- invisible to humans, irresistible to bots */
+    .vol-hp { position: absolute; left: -9999px; height: 0; width: 0; overflow: hidden; }
+</style>
+
+<div class="card" style="padding: 0; overflow: hidden;">
+    <div class="volunteer-hero">
+        <h1>Volunteer at @(string.IsNullOrEmpty(Model.EventDisplayName) ? "our community event" : Model.EventDisplayName)</h1>
+        <p>
+            Want to help run the show? Tell us a bit about yourself and we&rsquo;ll be in touch.
+            Volunteering is hands-on, social, and the best way to learn the inside of a community conference.
+        </p>
+    </div>
+
+    <div class="volunteer-card">
+
+        @if (Model.NoActiveEvent)
+        {
+            <div class="vol-error">
+                <strong>Sign-ups are closed right now.</strong>
+                There&rsquo;s no active event accepting volunteer applications. Please check back when the next edition is announced.
+            </div>
+        }
+        else if (Model.SubmittedOk)
+        {
+            <div class="vol-success">
+                <h3>Thanks @Model.SubmittedName &mdash; your application is in!</h3>
+                <p>
+                    We&rsquo;ve recorded your interest for <strong>@Model.EventDisplayName</strong>.
+                    An organizer will review applications and reach out to selected volunteers by email.
+                </p>
+                <p style="margin-top:10px;">
+                    Status: <strong>Pending review</strong>. You&rsquo;ll hear from us at <strong>@Model.SubmittedEmail</strong>.
+                </p>
+            </div>
+            <p><a href="/">&larr; Back to the hub</a></p>
+        }
+        else
+        {
+            @if (!string.IsNullOrEmpty(Model.ErrorMessage))
+            {
+                <div class="vol-error">@Model.ErrorMessage</div>
+            }
+
+            <form method="post" autocomplete="on" novalidate>
+                @* Honeypot field. Real humans cannot see this; bots fill every field. *@
+                <div class="vol-hp" aria-hidden="true">
+                    <label for="Website">Website (do not fill)</label>
+                    <input type="text" name="Website" id="Website" tabindex="-1" autocomplete="off" />
+                </div>
+
+                <div class="vol-grid">
+                    <div>
+                        <label for="FullName">Full name <span style="color:#c0392b;">*</span></label>
+                        <input type="text" id="FullName" asp-for="FullName" required maxlength="200" autocomplete="name" />
+                    </div>
+                    <div>
+                        <label for="Email">Email <span style="color:#c0392b;">*</span></label>
+                        <input type="email" id="Email" asp-for="Email" required maxlength="320" autocomplete="email" />
+                    </div>
+
+                    <div>
+                        <label for="Phone">Phone (optional)</label>
+                        <input type="tel" id="Phone" asp-for="Phone" maxlength="40" autocomplete="tel" />
+                    </div>
+                    <div>
+                        <label for="Country">Country (optional)</label>
+                        <input type="text" id="Country" asp-for="Country" maxlength="60" autocomplete="country-name" />
+                    </div>
+
+                    <div class="full">
+                        <label for="Interests">What would you most enjoy helping with? (optional)</label>
+                        <select id="Interests" asp-for="Interests">
+                            <option value="">Pick one (or leave blank, we&rsquo;ll find a spot for you)</option>
+                            <option value="Registration desk">Registration desk &mdash; greeting attendees</option>
+                            <option value="Session room">Session room &mdash; A/V + speaker support</option>
+                            <option value="Sponsor area">Sponsor area &mdash; helping exhibitors</option>
+                            <option value="Setup / teardown">Setup / teardown &mdash; physical work</option>
+                            <option value="Photo / video">Photo / video</option>
+                            <option value="Social media">Social media / on-site reporting</option>
+                            <option value="Anywhere needed">Anywhere needed &mdash; flex</option>
+                        </select>
+                    </div>
+
+                    <div class="full">
+                        <label for="Motivation">Anything else we should know? (optional)</label>
+                        <textarea id="Motivation" asp-for="Motivation" maxlength="1000"
+                                  placeholder="Languages you speak, prior community work, dietary requirements, accessibility needs, T-shirt size, etc."></textarea>
+                    </div>
+                </div>
+
+                <div class="vol-actions">
+                    <span class="vol-fineprint">
+                        We&rsquo;ll only use your details to evaluate your application and contact you about the event.
+                    </span>
+                    <button type="submit">Send my application</button>
+                </div>
+            </form>
+        }
+    </div>
+</div>

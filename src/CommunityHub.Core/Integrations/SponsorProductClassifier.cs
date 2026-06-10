@@ -1,3 +1,6 @@
+using System.Text.RegularExpressions;
+using CommunityHub.Core.Config;
+
 namespace CommunityHub.Core.Integrations;
 
 /// <summary>The kind of thing a sponsor ordered.</summary>
@@ -25,93 +28,139 @@ public enum BoothTier
 public sealed record SponsorProductClass(
     SponsorProductKind Kind,
     BoothTier Tier,
-    bool GeneratesTasks);
+    bool GeneratesTasks,
+    string? BoothNumber = null);
 
 /// <summary>
-/// Classifies a WooCommerce product into a sponsor product kind + booth tier,
-/// using its category text (falling back to the product name). This replaces
-/// the obsolete fixed product-ID lists from the source PowerShell: the ELDK27
-/// webshop makes every booth its own product, so classification must be
-/// rule-based (CONTEXT.md - sponsor product classification).
-///
-/// The rules here are the documented defaults; in the full config wiring they
-/// come from sponsor.&lt;edition&gt;.json -&gt; productClassification.
+/// Classifies a WooCommerce product into a sponsor product kind + booth tier
+/// using rules from <c>sponsor.&lt;edition&gt;.json -&gt; productClassification</c>.
+/// Walks the rules in declaration order; the first rule whose
+/// <c>matchCategoryContains</c> OR <c>matchNameRegex</c> hits wins. This
+/// matches the JSON's own semantics ("a product can match multiple types;
+/// each matched type's task set is added" - in practice the order in the
+/// file puts the more-specific rule first, so first-match-wins behaves the
+/// same for our line items). The hardcoded fallbacks the previous version
+/// used (substring "branded" / "feature" / "session" / "pre-day") are gone -
+/// editing the JSON is now the only knob.
 /// </summary>
 public sealed class SponsorProductClassifier
 {
+    private readonly IReadOnlyList<CompiledRule> _rules;
+
+    public SponsorProductClassifier(SponsorConfig config)
+    {
+        var raw = config.ProductClassification?.Rules ?? new List<ProductClassificationRule>();
+        var compiled = new List<CompiledRule>();
+        foreach (var r in raw)
+        {
+            Regex? regex = null;
+            if (!string.IsNullOrWhiteSpace(r.MatchNameRegex))
+            {
+                regex = new Regex(r.MatchNameRegex,
+                    RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+            }
+
+            compiled.Add(new CompiledRule(
+                Kind: MapKind(r.Type),
+                CategoryNeedles: r.MatchCategoryContains
+                    .Where(s => !string.IsNullOrWhiteSpace(s))
+                    .Select(s => s.ToLowerInvariant())
+                    .ToArray(),
+                NameRegex: regex,
+                TierFromSuffix: r.TierFromCategorySuffix
+                    .ToDictionary(
+                        kv => kv.Key.ToLowerInvariant(),
+                        kv => MapTier(kv.Value),
+                        StringComparer.OrdinalIgnoreCase),
+                DefaultTier: r.DefaultTier is null ? BoothTier.None : MapTier(r.DefaultTier),
+                GeneratesTasks: r.GeneratesTasks));
+        }
+        _rules = compiled;
+    }
+
+    // Booth-number extractor: matches "E-1" through "E-99" anywhere in
+    // the product name (case-insensitive). Drives the {{boothNumber}}
+    // placeholder substituted into the shipping task so the sponsor's
+    // actual booth code shows up next to the DSV address.
+    private static readonly Regex BoothNumberRegex = new(
+        @"\bE-(\d{1,3})\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
     public SponsorProductClass Classify(string categoriesText, string productName)
     {
         var cats = (categoriesText ?? string.Empty).ToLowerInvariant();
         var name = (productName ?? string.Empty).ToLowerInvariant();
-        var hay = cats + " " + name;
 
-        // Booth: a tier package with an exhibitor booth, or a "Booth E-NN".
-        if (cats.Contains("tier packages with exhibitor booth")
-            || ContainsBoothCode(name))
+        foreach (var rule in _rules)
         {
-            return new SponsorProductClass(
-                SponsorProductKind.Booth, DetectTier(hay), GeneratesTasks: true);
+            var matchByCat = rule.CategoryNeedles.Any(n => cats.Contains(n));
+            var matchByName = rule.NameRegex is not null && rule.NameRegex.IsMatch(name);
+            if (!matchByCat && !matchByName) continue;
+
+            var tier = BoothTier.None;
+            string? boothNumber = null;
+            if (rule.Kind == SponsorProductKind.Booth)
+            {
+                tier = DetectBoothTier(rule, cats, name, matchedByCategory: matchByCat);
+                var bnm = BoothNumberRegex.Match(productName ?? string.Empty);
+                if (bnm.Success) boothNumber = "E-" + bnm.Groups[1].Value;
+            }
+            return new SponsorProductClass(rule.Kind, tier, rule.GeneratesTasks, boothNumber);
         }
 
-        // Silver: tier package without a booth -> baseline only, no booth tasks.
-        if (cats.Contains("tier packages without booth")
-            || cats.Contains("digital only"))
-        {
-            return new SponsorProductClass(
-                SponsorProductKind.Booth, BoothTier.None, GeneratesTasks: false);
-        }
-
-        if (hay.Contains("pre-day") || hay.Contains("preday"))
-        {
-            return new SponsorProductClass(
-                SponsorProductKind.PreDay, BoothTier.None, GeneratesTasks: true);
-        }
-
-        if (cats.Contains("sessions") || hay.Contains("session"))
-        {
-            return new SponsorProductClass(
-                SponsorProductKind.Session, BoothTier.None, GeneratesTasks: true);
-        }
-
-        if (hay.Contains("branded") || hay.Contains("feature"))
-        {
-            return new SponsorProductClass(
-                SponsorProductKind.BrandedFeature, BoothTier.None, GeneratesTasks: true);
-        }
-
-        // Booth options / package handling / add-ons - no tasks generated.
-        if (cats.Contains("booth options")
-            || cats.Contains("package handling")
-            || cats.Contains("options")
-            || cats.Contains("addons")
-            || cats.Contains("uncategorized"))
-        {
-            return new SponsorProductClass(
-                SponsorProductKind.Addon, BoothTier.None, GeneratesTasks: false);
-        }
-
-        // Unknown - treat as a non-task addon so it never silently creates work.
+        // Nothing matched: treat as a non-task addon so it never silently
+        // creates work for an unknown SKU.
         return new SponsorProductClass(
             SponsorProductKind.Addon, BoothTier.None, GeneratesTasks: false);
     }
 
-    /// <summary>A booth product whose category gives no tier defaults to Gold.</summary>
-    private static BoothTier DetectTier(string hay)
+    /// <summary>
+    /// Booth tier resolution: first try category-suffix overrides
+    /// ("...Exhibitor Booth, Platinum" -&gt; platinum), else fall back to the
+    /// rule's default. A product matching booth ONLY via the name regex
+    /// (e.g. "Booth E-NN" inside a Branded Feature Package category) is
+    /// classified as the Feature tier per the config's own _featureTierNote.
+    /// </summary>
+    private static BoothTier DetectBoothTier(
+        CompiledRule rule, string cats, string name, bool matchedByCategory)
     {
-        if (hay.Contains("platinum")) return BoothTier.Platinum;
-        if (hay.Contains("diamond")) return BoothTier.Diamond;
-        if (hay.Contains("feature")) return BoothTier.Feature;
-        if (hay.Contains("gold")) return BoothTier.Gold;
-        return BoothTier.Gold; // documented default
+        foreach (var (suffix, tier) in rule.TierFromSuffix)
+        {
+            if (cats.Contains(suffix)) return tier;
+        }
+        if (!matchedByCategory && rule.NameRegex is not null && rule.NameRegex.IsMatch(name))
+        {
+            // Matched booth purely by the "Booth E-NN" name regex - this is
+            // a Lounge / Appreciation feature pack that bundles a smaller wall.
+            return BoothTier.Feature;
+        }
+        return rule.DefaultTier;
     }
 
-    /// <summary>Matches a booth code like "booth e-1" / "e-21".</summary>
-    private static bool ContainsBoothCode(string name)
+    private static SponsorProductKind MapKind(string type) => type?.ToLowerInvariant() switch
     {
-        // Look for "e-" followed by a digit.
-        var idx = name.IndexOf("e-", StringComparison.Ordinal);
-        return idx >= 0
-               && idx + 2 < name.Length
-               && char.IsDigit(name[idx + 2]);
-    }
+        "booth"          => SponsorProductKind.Booth,
+        "session"        => SponsorProductKind.Session,
+        "brandedfeature" => SponsorProductKind.BrandedFeature,
+        "preday"         => SponsorProductKind.PreDay,
+        "addon"          => SponsorProductKind.Addon,
+        _                => SponsorProductKind.Unknown,
+    };
+
+    private static BoothTier MapTier(string tier) => tier?.ToLowerInvariant() switch
+    {
+        "gold"     => BoothTier.Gold,
+        "diamond"  => BoothTier.Diamond,
+        "platinum" => BoothTier.Platinum,
+        "feature"  => BoothTier.Feature,
+        _          => BoothTier.None,
+    };
+
+    private sealed record CompiledRule(
+        SponsorProductKind Kind,
+        string[] CategoryNeedles,
+        Regex? NameRegex,
+        Dictionary<string, BoothTier> TierFromSuffix,
+        BoothTier DefaultTier,
+        bool GeneratesTasks);
 }

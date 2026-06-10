@@ -175,6 +175,25 @@ A first-time **Welcome** page is shown once per participant per edition.
 
 ![Attendee hub](docs/img/image11.png)
 
+### Surveys (public)
+
+Anonymous, no-login mini-surveys for the wider community — driven entirely
+from JSON config files under `src/CommunityHub/App_Data/Surveys/<slug>.json`,
+so adding or editing a survey is a config change, not a code change or
+DB migration. Each survey ships two public URLs:
+
+- `/survey/{slug}` — 3-step wizard (pick a track → rank three topics → pick a level per topic). One submit, no account, ~2 minutes for the respondent.
+- `/survey/{slug}/results` — live aggregated dashboard for the same survey. Designed to be shared with prospective speakers (Call for Speakers) so they can align abstracts to attendee demand.
+
+First instance is **`/survey/eldk27-topics`** — the ELDK27 Technical
+Session Topics survey. Seven tracks (Security / Intune / Identity / Azure /
+Microsoft 365 / AI low-code / AI development), each with ~8 session topics
+grouped by category, and Introduction/Advanced/Expert examples written per
+track. Responses are persisted to `SurveyResponses` + `SurveyResponsePicks`;
+the survey content lives in JSON. Organizer dashboard surfaces a
+**ELDK27 Technical Session Topics** card with response count, top track,
+and a link to the public results dashboard.
+
 ---
 
 ## Organizers Hub (event management)

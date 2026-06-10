@@ -1,0 +1,259 @@
+@page "/survey/{slug}/results"
+@model CommunityHub.Pages.Survey.ResultsModel
+@{
+    Layout = "_Layout";
+    ViewData["Title"] = (Model.Survey?.Title ?? "Survey") + " — Results";
+}
+
+@if (Model.Survey is null)
+{
+    <div class="card"><h2>Survey not found</h2><p>No survey is configured at this URL.</p></div>
+    return;
+}
+
+<style>
+    .res-hero {
+        background: var(--el-darkblue, #1D3380); color: #fff;
+        padding: 18px 22px; border-radius: 10px 10px 0 0; margin: -20px -20px 0 -20px;
+        text-align: center;
+        min-height: 60px;
+        display: flex; flex-direction: column;
+        align-items: center; justify-content: center;
+    }
+    .res-hero h1 { margin: 0; font-size: 22px; font-weight: 700; line-height: 1.25; }
+    .res-hero .meta { font-size: 13.5px; opacity: .92; margin-top: 6px; line-height: 1.35; }
+    @@media (max-width: 600px) {
+        .res-hero { padding: 14px 16px; min-height: 50px; }
+        .res-hero h1 { font-size: 19px; }
+        .res-hero .meta { font-size: 12.5px; }
+    }
+
+    .kpi-row { display: grid; gap: 12px; grid-template-columns: 1fr 1fr; margin: 0 0 18px 0; }
+    @@media (min-width: 720px) { .kpi-row { grid-template-columns: repeat(4, 1fr); } }
+    .kpi {
+        background: #fff; border: 1px solid #e2e6ee; border-radius: 10px;
+        padding: 14px 16px; text-align: left;
+    }
+    .kpi .label { font-size: 12px; color: #5a6170; text-transform: uppercase;
+        letter-spacing: .05em; font-weight: 700; }
+    .kpi .value { font-size: 28px; font-weight: 800; color: var(--el-darkblue, #1D3380); margin-top: 4px; }
+    .kpi .sub { font-size: 12px; color: #5a6170; margin-top: 4px; }
+
+    .section { background: #fff; border: 1px solid #e2e6ee; border-radius: 10px;
+        padding: 18px 20px; margin-bottom: 18px; }
+    .section h3 { margin: 0 0 12px 0; color: var(--el-darkblue, #1D3380); font-size: 18px; }
+    .section .lead { font-size: 13.5px; color: #5a6170; margin: -6px 0 14px 0; }
+
+    .bar-row { display: grid; grid-template-columns: 220px 1fr 60px; gap: 10px; align-items: center;
+        margin-bottom: 6px; font-size: 13.5px; }
+    .bar-row .name { font-weight: 600; color: #1a1a2e; }
+    .bar-row .count { text-align: right; font-variant-numeric: tabular-nums; color: #5a6170; }
+    .bar-track { background: #eef0f5; height: 18px; border-radius: 6px; overflow: hidden; }
+    .bar-fill { background: linear-gradient(90deg, var(--el-blue, #008BD2), var(--el-darkblue, #1D3380));
+        height: 100%; border-radius: 6px; }
+
+    .topic-card {
+        border: 1px solid #e2e6ee; border-radius: 10px; padding: 12px 14px; margin-bottom: 10px;
+        background: #fafbfc;
+    }
+    .topic-card .top { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+    .topic-card .ttl { font-weight: 700; color: var(--el-darkblue, #1D3380); font-size: 15px; flex: 1 1 auto; min-width: 0; }
+    .topic-card .cat { font-size: 11.5px; color: #5a6170; text-transform: uppercase; letter-spacing: .05em; font-weight: 700; }
+    .topic-card .score-pill { background: var(--el-darkblue, #1D3380); color: #fff;
+        font-size: 12px; padding: 2px 8px; border-radius: 999px; font-weight: 700; }
+    .topic-card .picks-pill { background: #eef4fb; color: var(--el-darkblue, #1D3380);
+        font-size: 12px; padding: 2px 8px; border-radius: 999px; font-weight: 600; }
+    .topic-card .levels { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; font-size: 12px; }
+    .topic-card .levels span {
+        background: #eef0f5; border-radius: 4px; padding: 2px 7px; color: #4a5160; font-weight: 600;
+    }
+    .topic-card .levels .lvl-adv { background: #e3f2fd; color: #0d47a1; }
+    .topic-card .levels .lvl-exp { background: #e8f5e9; color: #1b5e20; }
+    .topic-card .levels .lvl-mst { background: #fce4ec; color: #880e4f; }
+
+    .lvl-totals { display: flex; gap: 10px; flex-wrap: wrap; }
+    .lvl-totals .lt {
+        flex: 1 1 0; border: 1px solid #e2e6ee; border-radius: 10px; padding: 12px 14px;
+        background: #fff;
+    }
+    .lvl-totals .lt .name { font-weight: 700; font-size: 14px; }
+    .lvl-totals .lt .pct { font-size: 22px; font-weight: 800; margin-top: 4px; color: var(--el-darkblue, #1D3380); }
+    .lvl-totals .lt .ct { font-size: 12px; color: #5a6170; }
+
+    .empty-state {
+        padding: 40px 20px; text-align: center; color: #5a6170; background: #fafbfc;
+        border: 1px dashed #d0d4dd; border-radius: 10px;
+    }
+
+    details.track-block { margin-bottom: 12px; border: 1px solid #e2e6ee; border-radius: 10px;
+        background: #fff; padding: 0; }
+    details.track-block > summary { padding: 12px 16px; cursor: pointer; font-weight: 700;
+        color: var(--el-darkblue, #1D3380); list-style: none; display: flex;
+        justify-content: space-between; align-items: center; gap: 8px; }
+    details.track-block > summary::-webkit-details-marker { display: none; }
+    details.track-block > summary::after {
+        content: "▸"; margin-left: 10px; font-size: 14px;
+        transition: transform .15s ease;
+        color: var(--el-blue, #008BD2);
+    }
+    details.track-block[open] > summary::after { transform: rotate(90deg); }
+    details.track-block[open] > summary { border-bottom: 1px solid #e2e6ee; }
+    details.track-block:hover { border-color: var(--el-blue, #008BD2); }
+    details.track-block .inner { padding: 14px 16px; }
+
+    .share-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; font-size: 13px; color: #4a5160; margin-top: 8px; }
+    .share-btn {
+        display: inline-block; background: var(--el-darkblue, #1D3380); color: #fff;
+        padding: 10px 18px; border-radius: 8px; text-decoration: none;
+        font-weight: 700; font-size: 14px;
+        transition: background .12s, transform .12s;
+    }
+    .share-btn:hover { background: var(--el-blue, #008BD2); transform: translateY(-1px); }
+</style>
+
+<div class="card" style="padding: 0; overflow: hidden;">
+    <div class="res-hero">
+        <h1>@Model.Survey.Title — live results</h1>
+        <div class="meta">@Model.Survey.EventName &middot; @Model.Survey.EventDate</div>
+    </div>
+
+    <div style="padding: 20px 22px 22px 22px;">
+
+        <div class="kpi-row">
+            <div class="kpi">
+                <div class="label">Responses</div>
+                <div class="value">@Model.TotalResponses</div>
+                <div class="sub">All-time, anonymous</div>
+            </div>
+            <div class="kpi">
+                <div class="label">Tracks covered</div>
+                <div class="value">@Model.TrackStats.Count(t => t.ResponseCount > 0) / @Model.TrackStats.Count</div>
+                <div class="sub">At least 1 vote</div>
+            </div>
+            <div class="kpi">
+                <div class="label">Most-picked track</div>
+                <div class="value" style="font-size: 17px; line-height: 1.25;">@(Model.TrackStats.FirstOrDefault()?.Name ?? "—")</div>
+                <div class="sub">@(Model.TrackStats.FirstOrDefault()?.ResponseCount ?? 0) responses</div>
+            </div>
+            <div class="kpi">
+                <div class="label">Latest response</div>
+                <div class="value" style="font-size: 17px; line-height: 1.25;">@(Model.LatestResponseAt?.ToString("d MMM yyyy") ?? "—")</div>
+                <div class="sub">@(Model.LatestResponseAt?.ToString("HH:mm 'UTC'") ?? "")</div>
+            </div>
+        </div>
+
+        @if (Model.TotalResponses == 0)
+        {
+            <div class="empty-state">
+                <p>No responses yet. Be the first — <a href="/survey/@Model.Slug">open the survey</a>.</p>
+                <div class="share-row" style="justify-content:center;">
+                    <span>Share the survey:</span>
+                    <code>@Url.PageLink(pageName: "/Survey/Index", values: new { slug = Model.Slug })</code>
+                </div>
+            </div>
+        }
+        else
+        {
+            <div class="section">
+                <h3>Track popularity (step 1)</h3>
+                <p class="lead">How responses split across the seven technical tracks.</p>
+                @foreach (var t in Model.TrackStats)
+                {
+                    <div class="bar-row">
+                        <div class="name">@t.Name</div>
+                        <div class="bar-track"><div class="bar-fill" style="width:@(t.Percent)%;"></div></div>
+                        <div class="count">@t.ResponseCount  &middot;  @t.Percent%</div>
+                    </div>
+                }
+            </div>
+
+            <div class="section">
+                <h3>Most-wanted topics overall (ranked)</h3>
+                <p class="lead">Top 15 across all tracks, ranked by aggregate favorites. A respondent's top pick counts more than their 2nd, which counts more than their 3rd — so this list reflects what attendees most want to attend.</p>
+                @{ var overallRank = 0; }
+                @foreach (var s in Model.TopTopicsOverall.Where(x => x.PickCount > 0))
+                {
+                    overallRank++;
+                    <div class="topic-card">
+                        <div class="top">
+                            <span class="cat">@s.TrackName &middot; @s.Category</span>
+                            <span class="ttl">@s.Title</span>
+                            <span class="score-pill">#@overallRank</span>
+                            <span class="picks-pill">@s.PickCount favorite@(s.PickCount == 1 ? "" : "s")</span>
+                        </div>
+                        <div class="levels">
+                            <span class="lvl-adv">Advanced (300): @s.AdvancedCount</span>
+                            <span class="lvl-exp">Expert (400): @s.ExpertCount</span>
+                            <span class="lvl-mst">Black Belt (500): @s.BlackBeltCount</span>
+                        </div>
+                    </div>
+                }
+            </div>
+
+            <div class="section">
+                <h3>Self-assessed level (step 3)</h3>
+                <p class="lead">Helps us pick the right topics and helps speakers pitch the right depth in their Call-for-Speakers proposals.</p>
+                <div class="lvl-totals">
+                    @{
+                        var totalPicks = Model.LevelTotals.Values.Sum();
+                        int pct(int n) => totalPicks == 0 ? 0 : (int)Math.Round(100.0 * n / totalPicks);
+                    }
+                    <div class="lt"><div class="name">Advanced (level 300)</div><div class="pct">@pct(Model.LevelTotals[CommunityHub.Core.Domain.SurveyLevel.Advanced])%</div><div class="ct">@Model.LevelTotals[CommunityHub.Core.Domain.SurveyLevel.Advanced] picks</div></div>
+                    <div class="lt"><div class="name">Expert (level 400)</div><div class="pct">@pct(Model.LevelTotals[CommunityHub.Core.Domain.SurveyLevel.Expert])%</div><div class="ct">@Model.LevelTotals[CommunityHub.Core.Domain.SurveyLevel.Expert] picks</div></div>
+                    <div class="lt"><div class="name">Black Belt (level 500)</div><div class="pct">@pct(Model.LevelTotals[CommunityHub.Core.Domain.SurveyLevel.BlackBelt])%</div><div class="ct">@Model.LevelTotals[CommunityHub.Core.Domain.SurveyLevel.BlackBelt] picks</div></div>
+                </div>
+            </div>
+
+            <div class="section">
+                <h3>Per-track favorite topics</h3>
+                <p class="lead">Tap a track to expand its ranked favorites. Useful for speakers who already know their lane.</p>
+                @foreach (var track in Model.Survey.Tracks)
+                {
+                    var trackTotal = Model.TrackStats.FirstOrDefault(t => t.TrackId == track.Id)?.ResponseCount ?? 0;
+                    var topicsForTrack = Model.TopicsByTrack.TryGetValue(track.Id, out var lst) ? lst : new();
+                    var anyVotes = topicsForTrack.Any(t => t.PickCount > 0);
+                    var totalFavoritesInTrack = topicsForTrack.Sum(t => t.PickCount);
+                    <details class="track-block">
+                        <summary>
+                            <span>@track.Name</span>
+                            <span style="font-size:13px; color:#5a6170; font-weight:600;">@trackTotal track-pickers &middot; @totalFavoritesInTrack favorite@(totalFavoritesInTrack == 1 ? "" : "s")</span>
+                        </summary>
+                        <div class="inner">
+                            @if (!anyVotes)
+                            {
+                                <p style="color:#5a6170; font-size:13px;">No picks yet in this track.</p>
+                            }
+                            else
+                            {
+                                var inTrackRank = 0;
+                                foreach (var s in topicsForTrack.Where(x => x.PickCount > 0))
+                                {
+                                    inTrackRank++;
+                                    <div class="topic-card">
+                                        <div class="top">
+                                            <span class="cat">@s.Category</span>
+                                            <span class="ttl">@s.Title</span>
+                                            <span class="score-pill">#@inTrackRank in @track.Name</span>
+                                            <span class="picks-pill">@s.PickCount favorite@(s.PickCount == 1 ? "" : "s")</span>
+                                        </div>
+                                        <div class="levels">
+                                            <span class="lvl-adv">Advanced: @s.AdvancedCount</span>
+                                            <span class="lvl-exp">Expert: @s.ExpertCount</span>
+                                            <span class="lvl-mst">Black Belt (500): @s.BlackBeltCount</span>
+                                        </div>
+                                    </div>
+                                }
+                            }
+                        </div>
+                    </details>
+                }
+            </div>
+
+            <div class="share-row" style="justify-content:center; margin-top:8px;">
+                <a class="share-btn" href="@Url.PageLink(pageName: "/Survey/Results", values: new { slug = Model.Slug })"
+                   target="_blank" rel="noopener">Share this dashboard with prospective speakers &rarr;</a>
+            </div>
+        }
+
+    </div>
+</div>

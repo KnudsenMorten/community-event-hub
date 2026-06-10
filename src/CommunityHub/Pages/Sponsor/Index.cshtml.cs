@@ -1,132 +1,162 @@
 using CommunityHub.Auth;
+using CommunityHub.Core.Config;
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
+using CommunityHub.Core.Integrations;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Logging;
 
 namespace CommunityHub.Pages.Sponsor;
 
 /// <summary>
-/// The sponsor area (CONTEXT.md section 9 / 11g). Shows the signed-in sponsor
-/// contact their company's onboarding tasks and lets them mark a task
-/// complete or reopen it.
-///
-/// Tasks are scoped to the contact's company: a sponsor task carries the
-/// WooCommerce order's company id (_cm_company_id) and the contact's
-/// Participant row carries the same SponsorCompanyId. A sponsor therefore
-/// sees and edits ONLY their own company's tasks - not other sponsors'.
-/// Any contact of a company may complete/reopen any of that company's tasks
-/// (the WooCommerce pull creates them unassigned - they are company-level).
+/// The sponsor's "details" page -- everything ABOUT the sponsor company
+/// (company facts from Company Manager, orders, linked contacts) but NOT
+/// the task list. Task list lives at /Sponsor/Tasks as its own nav item.
 /// </summary>
 [Authorize]
 public class IndexModel : PageModel
 {
     private readonly CommunityHubDbContext _db;
     private readonly ICurrentParticipantAccessor _participant;
-    private readonly TimeProvider _clock;
+    private readonly CompanyManagerClient _cm;
+    private readonly CompanyManagerOptions _cmOptions;
+    private readonly WooCommerceClient _woo;
+    private readonly WooCommerceOptions _wooOptions;
+    private readonly IMemoryCache _cache;
+    private readonly EventEditionConfigLoader _eventConfigLoader;
+    private readonly EventConfigOptions _eventConfigOptions;
+    private readonly ILogger<IndexModel> _log;
 
     public IndexModel(
         CommunityHubDbContext db,
         ICurrentParticipantAccessor participant,
-        TimeProvider clock)
+        CompanyManagerClient cm,
+        CompanyManagerOptions cmOptions,
+        WooCommerceClient woo,
+        WooCommerceOptions wooOptions,
+        IMemoryCache cache,
+        EventEditionConfigLoader eventConfigLoader,
+        EventConfigOptions eventConfigOptions,
+        ILogger<IndexModel> log)
     {
         _db = db;
         _participant = participant;
-        _clock = clock;
+        _cm = cm;
+        _cmOptions = cmOptions;
+        _woo = woo;
+        _wooOptions = wooOptions;
+        _cache = cache;
+        _eventConfigLoader = eventConfigLoader;
+        _eventConfigOptions = eventConfigOptions;
+        _log = log;
     }
 
-    public List<ParticipantTask> SponsorTasks { get; private set; } = new();
-    public string? Message { get; private set; }
-
-    /// <summary>True when this sponsor has no company id set (see the view).</summary>
     public bool NoCompanyLink { get; private set; }
+    public CompanyManagerCompany? CompanyDetails { get; private set; }
+    public List<Participant> LinkedContacts { get; private set; } = new();
+    public string ConfiguratorUrl { get; private set; } = string.Empty;
+    public List<WooOrder> SponsorOrders { get; private set; } = new();
+
+    /// <summary>Resolved booth code (e.g. "E-29") for booth sponsors; null for non-exhibitor sponsors.</summary>
+    public string? AssignedBoothNumber { get; private set; }
 
     public async Task<IActionResult> OnGetAsync(CancellationToken ct)
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
 
-        await LoadAsync(me, ct);
-        return Page();
-    }
+        try
+        {
+            var facts = _eventConfigLoader.Load(_eventConfigOptions.EventConfigPath);
+            if (facts.Placeholders.TryGetValue("configuratorUrl", out var url))
+            {
+                ConfiguratorUrl = url ?? string.Empty;
+            }
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex, "Sponsor/Index: failed to load event-edition config for configuratorUrl.");
+        }
 
-    /// <summary>Mark one of this company's sponsor tasks done, or reopen it.</summary>
-    public async Task<IActionResult> OnPostToggleAsync(
-        int taskId, CancellationToken ct)
-    {
-        var me = _participant.Current;
-        if (me is null) return RedirectToPage("/Login");
-
-        var companyId = await GetCompanyIdAsync(me.ParticipantId, ct);
+        var companyId = await _db.Participants
+            .Where(p => p.Id == me.ParticipantId)
+            .Select(p => p.SponsorCompanyId)
+            .FirstOrDefaultAsync(ct);
         if (companyId is null)
         {
             NoCompanyLink = true;
-            await LoadAsync(me, ct);
             return Page();
         }
 
-        // The task must be in this edition, sponsor-sourced (woo:), and belong
-        // to THIS contact's company. This guard means a sponsor can never
-        // alter a non-sponsor task or another company's task, even by
-        // tampering with the posted taskId.
-        var task = await _db.Tasks.FirstOrDefaultAsync(
-            t => t.Id == taskId
-                 && t.EventId == me.EventId
-                 && t.SourceKey != null
-                 && t.SourceKey.StartsWith("woo:")
-                 && t.SponsorCompanyId == companyId,
-            ct);
+        LinkedContacts = await _db.Participants
+            .Where(p => p.EventId == me.EventId
+                        && p.SponsorCompanyId == companyId
+                        && p.Role == ParticipantRole.Sponsor
+                        && p.IsActive)
+            .OrderBy(p => p.FullName)
+            .ToListAsync(ct);
 
-        if (task is not null)
+        if (_cmOptions.Enabled && int.TryParse(companyId, out var companyIdInt))
         {
-            if (task.State == TaskState.Done)
+            try
             {
-                task.State = TaskState.Open;
-                task.CompletedAt = null;
-                Message = "Task reopened.";
+                CompanyDetails = await _cm.GetCompanyAsync(companyIdInt, ct);
             }
-            else
+            catch (Exception ex)
             {
-                task.State = TaskState.Done;
-                task.CompletedAt = _clock.GetUtcNow();
-                Message = "Task marked complete.";
+                _log.LogWarning(ex, "Sponsor/Index: Company Manager lookup failed for company {Co}.", companyIdInt);
             }
-            await _db.SaveChangesAsync(ct);
         }
 
-        await LoadAsync(me, ct);
+        if (_wooOptions.Enabled)
+        {
+            try
+            {
+                var allOrders = await _cache.GetOrCreateAsync(
+                    "woo:completed-orders",
+                    async entry =>
+                    {
+                        entry.AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(5);
+                        return await _woo.GetOrdersAsync("completed", ct);
+                    }) ?? new List<WooOrder>();
+
+                SponsorOrders = allOrders
+                    .Where(o => string.Equals(o.CompanyId, companyId, StringComparison.OrdinalIgnoreCase))
+                    .OrderByDescending(o => o.CreatedAt)
+                    .ToList();
+
+                // Resolve the assigned booth code from the first matching
+                // line item across all of this company's orders. Same regex
+                // as SponsorProductClassifier.BoothNumberRegex (kept in sync
+                // intentionally -- this is a render-time read of the same
+                // data the classifier uses to drive {{boothNumber}}).
+                foreach (var ord in SponsorOrders)
+                {
+                    foreach (var item in ord.LineItems)
+                    {
+                        var m = System.Text.RegularExpressions.Regex.Match(
+                            item.ProductName ?? string.Empty,
+                            @"\bE-(\d{1,3})\b",
+                            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                        if (m.Success)
+                        {
+                            AssignedBoothNumber = "E-" + m.Groups[1].Value;
+                            break;
+                        }
+                    }
+                    if (AssignedBoothNumber is not null) break;
+                }
+            }
+            catch (Exception ex)
+            {
+                _log.LogWarning(ex, "Sponsor/Index: WooCommerce orders fetch failed for company {Co}.", companyId);
+            }
+        }
+
         return Page();
     }
-
-    private async Task LoadAsync(CurrentParticipant me, CancellationToken ct)
-    {
-        var companyId = await GetCompanyIdAsync(me.ParticipantId, ct);
-        if (companyId is null)
-        {
-            // The contact has no company link yet - show nothing rather than
-            // every sponsor's tasks. The view explains how to fix it.
-            NoCompanyLink = true;
-            SponsorTasks = new List<ParticipantTask>();
-            return;
-        }
-
-        SponsorTasks = await _db.Tasks
-            .Where(t => t.EventId == me.EventId
-                        && t.SourceKey != null
-                        && t.SourceKey.StartsWith("woo:")
-                        && t.SponsorCompanyId == companyId)
-            .OrderBy(t => t.State)
-            .ThenBy(t => t.DueDate)
-            .ToListAsync(ct);
-    }
-
-    /// <summary>The signed-in sponsor's company id, or null if not set.</summary>
-    private async Task<string?> GetCompanyIdAsync(
-        int participantId, CancellationToken ct) =>
-        await _db.Participants
-            .Where(p => p.Id == participantId)
-            .Select(p => p.SponsorCompanyId)
-            .FirstOrDefaultAsync(ct);
 }

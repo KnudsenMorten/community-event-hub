@@ -1,0 +1,23 @@
+{
+  "_doc": "Speaker deadlines for the edition. Each becomes a dated task on every active speaker / Master Class speaker, created by SpeakerDeadlineSeeder. The reminder job then sends reminders for them automatically (14/7/3/1 days before due). daysBeforeEvent is counted back from the event start date (ELDK27 = 2027-02-09).",
+  "deadlines": [
+    {
+      "title": "Update your speaker profile information on Event Hub",
+      "description": "Travel, hotel, speaker dinner, polo, jacket, gift, country, gender, accreditation, first-time-speaker flag -- all the speaker-side fields under Speaker / Travel / Hotel / Dinner / Swag / Lunch must be filled in.",
+      "daysBeforeEvent": 131,
+      "includesMasterclass": true
+    },
+    {
+      "title": "First PPT draft due",
+      "description": "Upload your first presentation draft to the ELDK27 Presentations folder, then send a confirmation email to info@expertslive.dk.",
+      "daysBeforeEvent": 20,
+      "includesMasterclass": true
+    },
+    {
+      "title": "Final presentation upload",
+      "description": "Upload the FINAL presentation to the ELDK27 Presentations folder so attendees can check out the slides.",
+      "daysBeforeEvent": 6,
+      "includesMasterclass": true
+    }
+  ]
+}

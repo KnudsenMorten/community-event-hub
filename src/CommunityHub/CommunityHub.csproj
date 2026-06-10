@@ -35,6 +35,14 @@
              Link="config\%(Filename)%(Extension)"
              CopyToOutputDirectory="PreserveNewest"
              CopyToPublishDirectory="PreserveNewest" />
+    <!-- Survey definitions read at runtime by SurveyDefinitionProvider via
+         {ContentRoot}\App_Data\Surveys\<slug>.json. Editing the JSON
+         changes survey copy without a code change or DB migration.
+         SDK already auto-includes the JSON as Content; we only need to
+         flip the copy-to-output flags via Update. -->
+    <Content Update="App_Data\Surveys\*.json"
+             CopyToOutputDirectory="PreserveNewest"
+             CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

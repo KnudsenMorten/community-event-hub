@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Mail;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 namespace CommunityHub.Core.Email;
@@ -12,11 +13,23 @@ namespace CommunityHub.Core.Email;
 public sealed class BrevoEmailSender : IEmailSender
 {
     private readonly EmailOptions _options;
+    private readonly ILogger<BrevoEmailSender>? _log;
+    private readonly string[] _allowlist;
 
-    public BrevoEmailSender(IOptions<EmailOptions> options)
+    public BrevoEmailSender(IOptions<EmailOptions> options, ILogger<BrevoEmailSender>? log = null)
     {
         _options = options.Value;
+        _log = log;
+        _allowlist = ParseAllowlist(_options.OnlySendTo);
     }
+
+    private static string[] ParseAllowlist(string raw) =>
+        string.IsNullOrWhiteSpace(raw)
+            ? Array.Empty<string>()
+            : raw.Split(new[] { ',', ';' },
+                        StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                 .Select(e => e.ToLowerInvariant())
+                 .ToArray();
 
     // Test-mode redirect: if Email:RedirectAllTo is set (dev only), swap the
     // recipient and prefix the subject so the original target is preserved.
@@ -27,6 +40,29 @@ public sealed class BrevoEmailSender : IEmailSender
             return (toEmail, subject);
         }
         return (_options.RedirectAllTo, $"[TEST -> {toEmail}] {subject}");
+    }
+
+    // Production-safe allowlist. Empty list = no gating (normal PROD behaviour).
+    // Each entry is either an exact address ("mok@expertslive.dk") or a domain
+    // wildcard starting with @ ("@2linkit.net"). Matches are case-insensitive.
+    // Returns false -> the caller drops the send silently.
+    private bool IsAllowedByAllowlist(string actualTo)
+    {
+        if (_allowlist.Length == 0) return true;
+        var addr = (actualTo ?? string.Empty).Trim().ToLowerInvariant();
+        if (addr.Length == 0) return false;
+        foreach (var entry in _allowlist)
+        {
+            if (entry.StartsWith("@", StringComparison.Ordinal))
+            {
+                if (addr.EndsWith(entry, StringComparison.Ordinal)) return true;
+            }
+            else if (string.Equals(addr, entry, StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+        return false;
     }
 
     public async Task SendAsync(
@@ -41,6 +77,14 @@ public sealed class BrevoEmailSender : IEmailSender
         }
 
         var (actualTo, finalSubject) = ApplyRedirect(toEmail, subject);
+
+        if (!IsAllowedByAllowlist(actualTo))
+        {
+            _log?.LogInformation(
+                "Email allowlist DROP: original={Original} actual={Actual} subject='{Subject}' (OnlySendTo='{List}')",
+                toEmail, actualTo, subject, _options.OnlySendTo);
+            return;
+        }
 
         using var message = new MailMessage
         {
@@ -76,6 +120,14 @@ public sealed class BrevoEmailSender : IEmailSender
         }
 
         var (actualTo, finalSubject) = ApplyRedirect(toEmail, subject);
+
+        if (!IsAllowedByAllowlist(actualTo))
+        {
+            _log?.LogInformation(
+                "Email allowlist DROP (ics): original={Original} actual={Actual} subject='{Subject}' (OnlySendTo='{List}')",
+                toEmail, actualTo, subject, _options.OnlySendTo);
+            return;
+        }
 
         using var message = new MailMessage
         {

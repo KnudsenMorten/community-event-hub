@@ -1,0 +1,185 @@
+using System.Text.RegularExpressions;
+using CommunityHub.Core.Data;
+using CommunityHub.Core.Domain;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.RazorPages;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
+
+namespace CommunityHub.Pages.Volunteer;
+
+/// <summary>
+/// PUBLIC (anonymous) volunteer-application form. Anyone with the URL can
+/// submit their interest in volunteering at the currently-active event. The
+/// submission creates a <see cref="Participant"/> row with
+/// <c>Role = ParticipantRole.Volunteer</c> and <c>IsActive = false</c> --
+/// that combination is the "applicant pending review" flag. An organizer
+/// later approves them via the Organizer dashboard (flip IsActive to true),
+/// after which the person can PIN-log-in and use the volunteer-availability
+/// form to pick shifts.
+///
+/// URL: published as /volunteer/signup so it can be linked from social /
+/// the conference website without needing /Forms/* slug knowledge.
+/// </summary>
+[AllowAnonymous]
+public class SignupModel : PageModel
+{
+    private readonly CommunityHubDbContext _db;
+    private readonly TimeProvider _clock;
+    private readonly ILogger<SignupModel> _log;
+
+    public SignupModel(CommunityHubDbContext db, TimeProvider clock, ILogger<SignupModel> log)
+    {
+        _db = db;
+        _clock = clock;
+        _log = log;
+    }
+
+    // --- Bound form fields --------------------------------------------------
+    [BindProperty] public string FullName   { get; set; } = string.Empty;
+    [BindProperty] public string Email      { get; set; } = string.Empty;
+    [BindProperty] public string? Phone     { get; set; }
+    [BindProperty] public string? Country   { get; set; }
+    [BindProperty] public string? Interests { get; set; }
+    [BindProperty] public string? Motivation { get; set; }
+
+    /// <summary>
+    /// Honeypot. Hidden CSS-off-screen on the page. Humans cannot see it; bots
+    /// fill every input. Any non-empty value -> silent 200 OK (no DB write).
+    /// </summary>
+    [BindProperty] public string? Website { get; set; }
+
+    // --- View-side state ----------------------------------------------------
+    public string? EventDisplayName { get; private set; }
+    public bool NoActiveEvent { get; private set; }
+    public bool SubmittedOk { get; private set; }
+    public string? SubmittedName { get; private set; }
+    public string? SubmittedEmail { get; private set; }
+    public string? ErrorMessage { get; private set; }
+
+    public async Task<IActionResult> OnGetAsync(CancellationToken ct)
+    {
+        var active = await GetActiveEventAsync(ct);
+        if (active is null) { NoActiveEvent = true; return Page(); }
+        EventDisplayName = active.DisplayName;
+        return Page();
+    }
+
+    public async Task<IActionResult> OnPostAsync(CancellationToken ct)
+    {
+        // Honeypot. Pretend success without writing anything -- attackers don't
+        // learn that their probe was detected, real users never trigger this.
+        if (!string.IsNullOrWhiteSpace(Website))
+        {
+            _log.LogInformation("Volunteer signup honeypot tripped from {Ip}", HttpContext.Connection.RemoteIpAddress);
+            SubmittedOk = true;
+            SubmittedName = "there";
+            SubmittedEmail = "(no email recorded)";
+            EventDisplayName = "the event";
+            return Page();
+        }
+
+        var active = await GetActiveEventAsync(ct);
+        if (active is null) { NoActiveEvent = true; return Page(); }
+        EventDisplayName = active.DisplayName;
+
+        // --- Validate inputs -------------------------------------------------
+        var fullName = (FullName ?? string.Empty).Trim();
+        var email    = (Email    ?? string.Empty).Trim().ToLowerInvariant();
+        var phone    = string.IsNullOrWhiteSpace(Phone)   ? null : Phone.Trim();
+
+        if (fullName.Length < 2)
+        {
+            ErrorMessage = "Please enter your full name.";
+            return Page();
+        }
+        if (!IsPlausibleEmail(email))
+        {
+            ErrorMessage = "Please enter a valid email address.";
+            return Page();
+        }
+
+        // --- Dedup: same email applying twice to the same edition ----------
+        // The Participant table has a unique (EventId, Email) index. If an
+        // entry already exists, we surface a friendly message instead of a
+        // crash. Two flavours:
+        //   1) existing entry is an active participant       -> "you're already in"
+        //   2) existing entry is a pending applicant         -> "got your earlier application"
+        //   3) existing entry is some other inactive role    -> generic "contact organizer"
+        var existing = await _db.Participants.FirstOrDefaultAsync(
+            p => p.EventId == active.Id && p.Email == email, ct);
+        if (existing is not null)
+        {
+            if (existing.IsActive)
+            {
+                ErrorMessage = $"Looks like {email} is already registered for this event. If you forgot how to sign in, request a PIN at the Sign in page.";
+            }
+            else if (existing.Role == ParticipantRole.Volunteer)
+            {
+                SubmittedOk    = true;
+                SubmittedName  = string.IsNullOrWhiteSpace(existing.FullName) ? fullName : existing.FullName;
+                SubmittedEmail = existing.Email;
+                return Page();
+            }
+            else
+            {
+                ErrorMessage = $"{email} is already on file for this event. Please contact the organizer team.";
+            }
+            return Page();
+        }
+
+        // --- Create the applicant -----------------------------------------
+        var applicant = new Participant
+        {
+            EventId   = active.Id,
+            Email     = email,
+            FullName  = fullName,
+            Phone     = phone,
+            Role      = ParticipantRole.Volunteer,
+            IsActive  = false,                 // <-- "applicant, not yet selected"
+            CreatedAt = _clock.GetUtcNow(),
+        };
+        _db.Participants.Add(applicant);
+
+        try
+        {
+            await _db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException ex)
+        {
+            _log.LogWarning(ex, "Volunteer signup DB write failed for {Email}", email);
+            ErrorMessage = "We hit a problem saving your application. Please try again in a moment.";
+            return Page();
+        }
+
+        _log.LogInformation(
+            "New volunteer applicant: id={Id} email={Email} name={Name} event={EventId} country={Country} interests={Interests}",
+            applicant.Id, email, fullName, active.Id, Country ?? "(none)", Interests ?? "(none)");
+
+        SubmittedOk    = true;
+        SubmittedName  = fullName.Split(' ').First();
+        SubmittedEmail = email;
+        return Page();
+    }
+
+    // ------- Helpers --------------------------------------------------------
+
+    private async Task<Event?> GetActiveEventAsync(CancellationToken ct)
+    {
+        return await _db.Events
+            .Where(e => e.IsActive)
+            .OrderByDescending(e => e.Id)
+            .FirstOrDefaultAsync(ct);
+    }
+
+    private static readonly Regex EmailShape = new(
+        @"^[^@\s]+@[^@\s]+\.[^@\s]+$", RegexOptions.Compiled);
+
+    private static bool IsPlausibleEmail(string s)
+    {
+        if (string.IsNullOrWhiteSpace(s)) return false;
+        if (s.Length > 320) return false;
+        return EmailShape.IsMatch(s);
+    }
+}
