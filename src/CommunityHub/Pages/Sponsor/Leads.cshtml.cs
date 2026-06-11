@@ -34,15 +34,18 @@ public class LeadsModel : PageModel
     private readonly CommunityHubDbContext _db;
     private readonly ICurrentParticipantAccessor _participant;
     private readonly ISponsorApiKeyService _keys;
+    private readonly IDeterministicSponsorTokenService _detTokens;
 
     public LeadsModel(
         CommunityHubDbContext db,
         ICurrentParticipantAccessor participant,
-        ISponsorApiKeyService keys)
+        ISponsorApiKeyService keys,
+        IDeterministicSponsorTokenService detTokens)
     {
         _db = db;
         _participant = participant;
         _keys = keys;
+        _detTokens = detTokens;
     }
 
     public bool AccessDenied { get; private set; }
@@ -53,6 +56,10 @@ public class LeadsModel : PageModel
     public DateTimeOffset? IssuedAt  { get; private set; }
     public string? IssuedByEmail     { get; private set; }
     public string  BaseUrl           { get; private set; } = "";
+
+    /// <summary>Current deterministic token shown in clear to the sponsor (their own data only).</summary>
+    public string? DeterministicToken { get; private set; }
+    public int? TokenVersion         { get; private set; }
 
     public async Task<IActionResult> OnGetAsync(CancellationToken ct)
     {
@@ -86,6 +93,22 @@ public class LeadsModel : PageModel
             KeyPrefix     = key.KeyPrefix;
             IssuedAt      = key.IssuedAt;
             IssuedByEmail = key.IssuedByEmail;
+        }
+        // Deterministic token: derived from (EventId, SponsorCompanyId,
+        // TokenVersion, GlobalSecret). Shown in clear here -- this is
+        // the sponsor's own data, and the token is recoverable any time
+        // by re-deriving (no "lost key" panic). If it leaks, ask the
+        // organizer to bump the version on the admin page.
+        try
+        {
+            DeterministicToken = await _detTokens.DeriveAsync(me.EventId, SponsorCompanyId!, ct);
+            TokenVersion       = await _detTokens.GetVersionAsync(me.EventId, SponsorCompanyId!, ct);
+        }
+        catch
+        {
+            // Falls through with null DeterministicToken if the global
+            // secret isn't configured yet -- friendly UI tells the
+            // sponsor to ask the organizer to finish setup.
         }
         return Page();
     }

@@ -106,9 +106,17 @@ builder.Services.AddSingleton<CommunityHub.Auth.MagicLinkService>();
 builder.Services.AddScoped<CommunityHub.Core.Reminders.OrganizerActionItemService>();
 builder.Services.AddScoped<CommunityHub.Notify.HotelCalendarInviter>();
 
-// Sponsor leads API key service. SCAFFOLD: in-memory implementation --
-// keys evaporate on App Service restart. Swap to a DbSet-backed
-// implementation once the EF migration for SponsorApiKey lands.
+// Sponsor leads API auth: deterministic per-sponsor token derived from
+// (EventId, SponsorCompanyId, TokenVersion, GlobalSecret). The
+// in-memory impl persists version bumps in process memory until the
+// DbSet<SponsorTokenVersion> EF migration lands.
+builder.Services.AddSingleton<
+    CommunityHub.Core.Integrations.Sponsors.IDeterministicSponsorTokenService,
+    CommunityHub.Core.Integrations.Sponsors.InMemoryDeterministicSponsorTokenService>();
+
+// Legacy issued-key path -- kept registered so existing tokens still
+// validate during the transition; will be removed once every sponsor
+// is on the deterministic path.
 builder.Services.AddSingleton<
     CommunityHub.Core.Integrations.Sponsors.ISponsorApiKeyService,
     CommunityHub.Core.Integrations.Sponsors.InMemorySponsorApiKeyService>();

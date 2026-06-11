@@ -40,12 +40,17 @@ namespace CommunityHub.Api;
 public sealed class SponsorLeadsController : ControllerBase
 {
     private readonly CommunityHubDbContext _db;
-    private readonly ISponsorApiKeyService _keys;
+    private readonly ISponsorApiKeyService _issuedKeys;
+    private readonly IDeterministicSponsorTokenService _detTokens;
 
-    public SponsorLeadsController(CommunityHubDbContext db, ISponsorApiKeyService keys)
+    public SponsorLeadsController(
+        CommunityHubDbContext db,
+        ISponsorApiKeyService issuedKeys,
+        IDeterministicSponsorTokenService detTokens)
     {
         _db = db;
-        _keys = keys;
+        _issuedKeys = issuedKeys;
+        _detTokens = detTokens;
     }
 
     // Column set surfaced to sponsors. When the Zoho pull lands, expand
@@ -181,7 +186,12 @@ public sealed class SponsorLeadsController : ControllerBase
             .FirstOrDefaultAsync(ct);
         if (eventId == 0) return false;
 
-        return await _keys.ValidateAsync(eventId, sponsorCompanyId, raw, ct);
+        // 2026-06-11 (v1.2.0): try the deterministic token first (the
+        // new default per Option B), fall back to the legacy issued-key
+        // path so existing sponsor scripts written against the old key
+        // still work during the transition.
+        if (await _detTokens.ValidateAsync(eventId, sponsorCompanyId, raw, ct)) return true;
+        return await _issuedKeys.ValidateAsync(eventId, sponsorCompanyId, raw, ct);
     }
 
     private Task<List<LeadRow>> GetLeadsAsync(string sponsorCompanyId, CancellationToken ct)

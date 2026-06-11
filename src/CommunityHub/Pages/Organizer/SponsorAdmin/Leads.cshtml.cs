@@ -37,15 +37,18 @@ public class LeadsModel : PageModel
     private readonly CommunityHubDbContext _db;
     private readonly ICurrentParticipantAccessor _participant;
     private readonly ISponsorApiKeyService _keys;
+    private readonly IDeterministicSponsorTokenService _detTokens;
 
     public LeadsModel(
         CommunityHubDbContext db,
         ICurrentParticipantAccessor participant,
-        ISponsorApiKeyService keys)
+        ISponsorApiKeyService keys,
+        IDeterministicSponsorTokenService detTokens)
     {
         _db = db;
         _participant = participant;
         _keys = keys;
+        _detTokens = detTokens;
     }
 
     public bool AccessDenied { get; private set; }
@@ -54,7 +57,7 @@ public class LeadsModel : PageModel
     [TempData] public string? FreshKeyForSponsor { get; set; }
     [TempData] public string? FreshKeyValue      { get; set; }
 
-    public record SponsorKeyRow(string SponsorCompanyId, string? KeyPrefix, DateTimeOffset? IssuedAt, string? IssuedByEmail);
+    public record SponsorKeyRow(string SponsorCompanyId, string? KeyPrefix, DateTimeOffset? IssuedAt, string? IssuedByEmail, string DeterministicToken, int TokenVersion);
 
     public List<SponsorKeyRow> SponsorKeys { get; private set; } = new();
     public int  TotalLeads     { get; private set; }
@@ -88,7 +91,20 @@ public class LeadsModel : PageModel
         foreach (var cid in sponsorCompanyIds)
         {
             var row = await _keys.GetCurrentAsync(me.EventId, cid, ct);
-            SponsorKeys.Add(new SponsorKeyRow(cid, row?.KeyPrefix, row?.IssuedAt, row?.IssuedByEmail));
+            string detTok = "";
+            int detVer = 1;
+            try
+            {
+                detTok = await _detTokens.DeriveAsync(me.EventId, cid, ct);
+                detVer = await _detTokens.GetVersionAsync(me.EventId, cid, ct);
+            }
+            catch
+            {
+                // Global secret not configured -- leave deterministic
+                // columns blank so the page surfaces the misconfig
+                // without crashing.
+            }
+            SponsorKeys.Add(new SponsorKeyRow(cid, row?.KeyPrefix, row?.IssuedAt, row?.IssuedByEmail, detTok, detVer));
         }
 
         // Pipeline counters: placeholder until DbSet<SponsorLead> exists.
@@ -120,6 +136,24 @@ public class LeadsModel : PageModel
 
         await _keys.RevokeAsync(me.EventId, sponsorCompanyId, me.Email, ct);
         TempData["Notice"] = $"Revoked API key for sponsor '{sponsorCompanyId}'.";
+        return RedirectToPage();
+    }
+
+    /// <summary>
+    /// Bump the sponsor's deterministic-token version. The previous
+    /// derived token immediately stops validating; the next page render
+    /// shows the new one. Use when a sponsor reports their token has
+    /// leaked or their primary contact changed and you want to invalidate
+    /// whatever value the old contact had.
+    /// </summary>
+    public async Task<IActionResult> OnPostBumpTokenVersionAsync(string sponsorCompanyId, CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+        if (me.Role != ParticipantRole.Organizer) return Forbid();
+
+        var newVersion = await _detTokens.BumpVersionAsync(me.EventId, sponsorCompanyId, me.Email, ct);
+        TempData["Notice"] = $"Bumped deterministic-token version for '{sponsorCompanyId}' to v{newVersion}. Previous token is now invalid.";
         return RedirectToPage();
     }
 

@@ -29,8 +29,31 @@
 
 @if (!Model.AccessDenied && !Model.NoCompanyLink)
 {
+    <div class="card" style="background:#f0fdf4;border-left:4px solid #16a34a;">
+        <h2>Your access token (deterministic)</h2>
+        @if (Model.DeterministicToken is null)
+        {
+            <p class="error">The deterministic-token global secret hasn't been configured for this environment yet. Ask the organizers to finish setup.</p>
+        }
+        else
+        {
+            <p>This token authenticates you to the leads endpoints. It's
+               derived from your sponsor id + a global secret + a version
+               counter, so it never disappears: if you misplace it, just
+               revisit this page and copy it again. If it leaks, ask the
+               organizers to <strong>bump the version</strong> &mdash; the
+               old token immediately stops working and the new one shows
+               up here.</p>
+            <p style="margin-top:8px;">Current version: <strong>v@Model.TokenVersion</strong></p>
+            <pre style="background:#fff;border:1px solid #c4c8d4;border-radius:6px;padding:10px 12px;overflow-x:auto;user-select:all;">@Model.DeterministicToken</pre>
+            <p style="font-size:12.5px;color:#5a6170;margin:6px 0 0 0;">
+                Use this as the <code>Authorization: Bearer ...</code> header in your scripts (samples further down).
+            </p>
+        }
+    </div>
+
     <div class="card">
-        <h2>Your API key</h2>
+        <h2>Legacy issued API key</h2>
         <table style="width:100%;border-collapse:collapse;max-width:680px;">
             <tr style="border-bottom:1px solid #eee;"><td>Sponsor company id</td><td><code>@Model.SponsorCompanyId</code></td></tr>
             <tr style="border-bottom:1px solid #eee;"><td>Current key</td><td>@(Model.KeyPrefix is null ? "(not issued yet)" : Model.KeyPrefix + "...")</td></tr>
