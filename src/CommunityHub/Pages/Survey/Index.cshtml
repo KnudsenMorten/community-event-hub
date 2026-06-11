@@ -117,9 +117,15 @@
         letter-spacing: .02em;
     }
     .topic-row .rank-btn:hover { border-color: var(--el-blue, #008BD2); }
-    .topic-row .rank-btn.rank-1 { background: #1D3380; color: #fff; border-color: #1D3380; }
-    .topic-row .rank-btn.rank-2 { background: #008BD2; color: #fff; border-color: #008BD2; }
-    .topic-row .rank-btn.rank-3 { background: #67b7e3; color: #fff; border-color: #67b7e3; }
+    /* All three picked-rank states use the same brand blue so the buttons
+       read as "the same widget in three positions" instead of "three
+       widgets with three different colors". Differentiation is by the
+       label (1st / 2nd / 3rd) and by which row the button sits in, not
+       by hue. (Earlier dark-blue/medium-blue/light-blue gradient was
+       confusing -- reported 2026-06-11.) */
+    .topic-row .rank-btn.rank-1,
+    .topic-row .rank-btn.rank-2,
+    .topic-row .rank-btn.rank-3 { background: var(--el-blue, #008BD2); color: #fff; border-color: var(--el-blue, #008BD2); }
     .topic-row .body { flex: 1 1 auto; min-width: 0; }
     .topic-row .title { font-weight: 700; color: #fff; font-size: 14.5px; }
     .topic-row .summary { font-size: 12.5px; color: rgba(255,255,255,.88); margin-top: 2px; }
@@ -270,7 +276,7 @@
                         <div class="caption">Speakers shape the agenda. Your top three tell them what to pitch.</div>
                     </div>
                     <h3>Pick your top three topics</h3>
-                    <p class="lead">Tap <strong>Top</strong> next to your most-wanted topic, then <strong>2nd</strong> for your second-favorite, then <strong>3rd</strong>. Tap again to clear. We're asking what <em>topics</em> you'd love to learn about — not yet about specific sessions.</p>
+                    <p class="lead">Tap <strong>1st</strong> next to your most-wanted topic, then <strong>2nd</strong> for your second-favorite, then <strong>3rd</strong>. Tap again to clear. We're asking what <em>topics</em> you'd love to learn about — not yet about specific sessions.</p>
                     <p class="ai-note" style="font-size:12.5px; color:#5a6170; background:#fff8e1; border-left:3px solid #f4b400; padding:8px 12px; border-radius:4px; margin:4px 0 14px 0; line-height:1.5;">
                         <strong>Heads-up:</strong> The topic titles + summaries below are <em>AI-generated samples</em> to give you a feel for the shape of each track. Expect the occasional odd phrasing, an unexpectedly funny summary, or a topic that reads like it was dreamt up at 3am. Pick the topics whose <em>direction</em> excites you most — the speakers will refine the exact session titles + angles during the Call for Speakers.
                     </p>
@@ -286,7 +292,7 @@
                                 {
                                     <div class="topic-row" data-topic-id="@topic.Id" data-track="@track.Id">
                                         <div class="rank-btns">
-                                            <button type="button" class="rank-btn" data-rank="1" title="Make this my Top pick">Top</button>
+                                            <button type="button" class="rank-btn" data-rank="1" title="Make this my 1st pick">1st</button>
                                             <button type="button" class="rank-btn" data-rank="2" title="Make this my 2nd pick">2nd</button>
                                             <button type="button" class="rank-btn" data-rank="3" title="Make this my 3rd pick">3rd</button>
                                         </div>
@@ -450,7 +456,7 @@
                     //   topic.levels (if set in JSON)  >>  track-wide default
                     // So a topic that wants its own bespoke "I can..." copy
                     // overrides the per-track generic.
-                    var rankLabels = { 1: 'My top pick', 2: 'My 2nd pick', 3: 'My 3rd pick' };
+                    var rankLabels = { 1: 'My 1st pick', 2: 'My 2nd pick', 3: 'My 3rd pick' };
                     function renderLevels() {
                         var trackId = (form.querySelector('input[name=SelectedTrackId]:checked') || {}).value;
                         if (!trackId) { levelHost.innerHTML = ''; return; }
