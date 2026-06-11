@@ -117,15 +117,19 @@
         letter-spacing: .02em;
     }
     .topic-row .rank-btn:hover { border-color: var(--el-blue, #008BD2); }
-    /* All three picked-rank states use the same brand blue so the buttons
-       read as "the same widget in three positions" instead of "three
-       widgets with three different colors". Differentiation is by the
-       label (1st / 2nd / 3rd) and by which row the button sits in, not
-       by hue. (Earlier dark-blue/medium-blue/light-blue gradient was
-       confusing -- reported 2026-06-11.) */
+    /* Picked-rank buttons must CONTRAST with the picked row: the row turns
+       brand blue (--el-blue) when picked, and the previous picked-button
+       fill was the SAME brand blue -- the selection became invisible
+       (reported 2026-06-11). Picked buttons are now dark blue with a white
+       ring, so they read as a clear badge on top of the blue row. All three
+       ranks share the same treatment; differentiation stays in the label. */
     .topic-row .rank-btn.rank-1,
     .topic-row .rank-btn.rank-2,
-    .topic-row .rank-btn.rank-3 { background: var(--el-blue, #008BD2); color: #fff; border-color: var(--el-blue, #008BD2); }
+    .topic-row .rank-btn.rank-3 {
+        background: var(--el-darkblue, #1D3380); color: #fff;
+        border: 2px solid #fff;
+        box-shadow: 0 0 0 2px var(--el-darkblue, #1D3380);
+    }
     .topic-row .body { flex: 1 1 auto; min-width: 0; }
     .topic-row .title { font-weight: 700; color: #fff; font-size: 14.5px; }
     .topic-row .summary { font-size: 12.5px; color: rgba(255,255,255,.88); margin-top: 2px; }
@@ -216,7 +220,7 @@
                 <ul style="margin:4px 0 0 0; padding-left:18px; font-size:13px; color:#166534; line-height:1.7;">
                     @foreach (var t in Model.Survey.Tracks)
                     {
-                        <li><a href="/survey/@Model.Slug/results#@t.Id" style="color:#166534;text-decoration:underline;">@t.Name &rarr; results page, jumps to the @t.Name section</a></li>
+                        <li><a href="/survey/@Model.Slug/results#@t.Id" style="color:#166534;text-decoration:underline;">@t.Name</a></li>
                     }
                 </ul>
 
