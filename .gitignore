@@ -24,3 +24,6 @@ Thumbs.db
 
 # --- Logs ---
 *.log
+
+# timestamped deploy artifacts kept for rollback (deploy-app.ps1)
+deploy-artifacts/

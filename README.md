@@ -103,6 +103,15 @@ Built to be **evergreen and multi-community**: the codebase is generic (`Communi
 - DNS:
   - dev: `dev.eldk27.eventhub.expertslive.dk`
   - prod: `eldk27.eventhub.expertslive.dk`
+- **App-code deploys are scripted** (`tools/deploy-app.ps1 -Env dev|prod`):
+  build &rarr; timestamped artifact (last 10 kept) &rarr; deploy &rarr; health
+  check. `tools/rollback-app.ps1` redeploys any kept artifact &mdash; or, once
+  `tools/enable-slot-deploys.ps1` has been run (one-time S1 upgrade + staging
+  slot + slot-identity Key Vault grant), deploys become deploy-to-slot &rarr;
+  warm-up &rarr; **swap** (near-zero downtime) and rollback becomes an instant
+  swap-back. Gotcha baked into the tooling: zips must carry forward-slash
+  entry names &mdash; PS 5.1 `Compress-Archive` writes backslashes, which the
+  Linux Kudu rejects with a blind HTTP 400.
 
 ### Security — login
 
@@ -111,6 +120,11 @@ Built to be **evergreen and multi-community**: the codebase is generic (`Communi
 
 - Login via email + PIN code (PIN valid for 15 minutes).
 - URL support with PIN auto-login (valid 7 days).
+- **NEW in v1.2.x: deterministic per-sponsor API tokens** — the sponsor leads
+  API accepts a token derived as SHA256(EventId + SponsorCompanyId +
+  TokenVersion + GlobalSecret), so tokens can be re-issued deterministically
+  and revoked by bumping the per-sponsor TokenVersion. Standard
+  `Authorization: Bearer` is accepted alongside `X-Sponsor-Api-Key` / `?key=`.
 
 ### Integration
 
@@ -199,6 +213,13 @@ track. Responses are persisted to `SurveyResponses` + `SurveyResponsePicks`;
 the survey content lives in JSON. Organizer dashboard surfaces a
 **ELDK27 Technical Session Topics** card with response count, top track,
 and a link to the public results dashboard.
+
+Survey UX details: each track section on the results page has a stable
+anchor, and the thank-you page links straight to each track's results.
+The 1st/2nd/3rd ranking buttons render as a dark-blue badge with a white
+ring when picked, so the selection stays clearly visible on the blue
+topic rows (fixed after operator feedback — the picked state previously
+matched the row color and disappeared).
 
 ---
 

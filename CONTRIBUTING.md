@@ -340,20 +340,36 @@ PROD: same command with PROD env vars + PROD SQL firewall opened.
 
 ### Deploy to DEV / PROD
 
-There is **no auto-deploy** from `main`. Deploys are explicit:
+There is **no auto-deploy** from `main`. Deploys are explicit, via the
+deploy script (build + timestamped artifact + deploy + health check):
 
 ```powershell
-# Build + publish + zip + push to App Service
+.\tools\deploy-app.ps1 -Env dev     # always first
+.\tools\deploy-app.ps1 -Env prod    # only after DEV smoke-tested
+```
+
+**Downtime:** on the current B1 plan a direct deploy restarts the app
+(~1-2 min). For near-zero-downtime deploys run the one-time
+`.\tools\enable-slot-deploys.ps1` (upgrades the prod plan to S1 --
+costs more -- creates a `staging` slot and grants its managed identity
+Key Vault access). After that, `deploy-app.ps1` automatically switches to
+deploy-to-slot &rarr; warm-up &rarr; swap, and production traffic moves in
+seconds.
+
+**Rollback:**
+
+```powershell
+.\tools\rollback-app.ps1 -Env prod          # previous build (instant swap-back when slots are on)
+.\tools\rollback-app.ps1 -Env prod -List    # list kept artifacts (last 10)
+```
+
+The raw commands (what the script wraps) remain:
+
+```powershell
 dotnet publish src/CommunityHub/CommunityHub.csproj -c Release -o publish-out
 Compress-Archive -Path 'publish-out\*' -DestinationPath 'publish-out.zip' -Force
-
-# DEV
-az webapp deploy -g rg-eldk27hub-dev -n eldk27hub-web-devz237e `
-  --src-path publish-out.zip --type zip
-
-# PROD (only after DEV smoke-tested)
-az webapp deploy -g rg-eldk27hub-prod -n eldk27hub-web-prodpdrq `
-  --src-path publish-out.zip --type zip
+az webapp deploy -g rg-eldk27hub-dev  -n eldk27hub-web-devz237e  --src-path publish-out.zip --type zip
+az webapp deploy -g rg-eldk27hub-prod -n eldk27hub-web-prodpdrq --src-path publish-out.zip --type zip
 ```
 
 ### Tail an App Service log

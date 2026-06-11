@@ -103,7 +103,9 @@ for (const { name, baseUrl } of TARGETS) {
             // Step 2: rank the first 3 topics in the visible (in-track) set.
             const topicSet = page.locator('.topic-set').filter({ has: page.locator('.topic-row') }).first();
             const rows = topicSet.locator('.topic-row');
-            const ranks = ['Top', '2nd', '3rd'];
+            // Button labels are 1st / 2nd / 3rd (renamed from 'Top' -- this
+            // spec went stale and failed on every device until 2026-06-11).
+            const ranks = ['1st', '2nd', '3rd'];
             for (let i = 0; i < 3; i++) {
                 const row = rows.nth(i);
                 await row.scrollIntoViewIfNeeded();
@@ -117,8 +119,13 @@ for (const { name, baseUrl } of TARGETS) {
             const cards = page.locator('.level-card');
             await expect(cards).toHaveCount(3);
             for (let i = 0; i < 3; i++) {
-                // Pick "Expert (400)" for each -- middle option.
-                await cards.nth(i).locator('input[type=radio]').nth(1).click({ force: true });
+                // Pick the middle level for each. The radio inputs are
+                // visually hidden (left:-9999px) -- the styled LABEL is the
+                // real tap target, so click that (clicking the input fails
+                // with 'outside of the viewport').
+                const opt = cards.nth(i).locator('.level-opt label').nth(1);
+                await opt.scrollIntoViewIfNeeded();
+                await opt.click();
             }
             const submit = page.locator('#submitBtn');
             await expect(submit).toBeVisible();
