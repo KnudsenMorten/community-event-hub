@@ -206,19 +206,39 @@
 
             <div class="section">
                 <h3>Per-track favorite topics</h3>
-                <p class="lead">Tap a track to expand its ranked favorites. Useful for speakers who already know their lane.</p>
+                <p class="lead">Tap a track to expand its ranked favorites &mdash; or share the per-track deep-link with a speaker so they land directly on their lane.</p>
+
+                <div style="display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 16px 0;">
+                    <span style="font-size:13px;color:#5a6170;font-weight:600;align-self:center;">Jump to track:</span>
+                    @foreach (var track in Model.Survey.Tracks)
+                    {
+                        var jumpCount = Model.TrackStats.FirstOrDefault(t => t.TrackId == track.Id)?.ResponseCount ?? 0;
+                        <a href="#@track.Id"
+                           style="font-size:12.5px;font-weight:600;color:#1D3380;background:#eef0f5;border:1px solid #c4c8d4;border-radius:999px;padding:4px 10px;text-decoration:none;">@track.Name <span style="color:#5a6170;font-weight:500;">(@jumpCount)</span></a>
+                    }
+                </div>
+
                 @foreach (var track in Model.Survey.Tracks)
                 {
                     var trackTotal = Model.TrackStats.FirstOrDefault(t => t.TrackId == track.Id)?.ResponseCount ?? 0;
                     var topicsForTrack = Model.TopicsByTrack.TryGetValue(track.Id, out var lst) ? lst : new();
                     var anyVotes = topicsForTrack.Any(t => t.PickCount > 0);
                     var totalFavoritesInTrack = topicsForTrack.Sum(t => t.PickCount);
-                    <details class="track-block">
+                    var trackAdvanced  = topicsForTrack.Sum(t => t.AdvancedCount);
+                    var trackExpert    = topicsForTrack.Sum(t => t.ExpertCount);
+                    var trackBlackBelt = topicsForTrack.Sum(t => t.BlackBeltCount);
+                    <details class="track-block" id="@track.Id" open>
                         <summary>
                             <span>@track.Name</span>
-                            <span style="font-size:13px; color:#5a6170; font-weight:600;">@trackTotal track-pickers &middot; @totalFavoritesInTrack favorite@(totalFavoritesInTrack == 1 ? "" : "s")</span>
+                            <span style="font-size:13px; color:#5a6170; font-weight:600;">@trackTotal interest &middot; @totalFavoritesInTrack favorite@(totalFavoritesInTrack == 1 ? "" : "s")</span>
                         </summary>
                         <div class="inner">
+                            <div class="levels" style="display:flex;gap:6px;flex-wrap:wrap;font-size:12.5px;margin:0 0 12px 0;">
+                                <span class="lvl-adv" style="padding:4px 10px;border-radius:999px;background:#e3f2fd;color:#0d47a1;font-weight:700;">Advanced (300): @trackAdvanced</span>
+                                <span class="lvl-exp" style="padding:4px 10px;border-radius:999px;background:#e8f5e9;color:#1b5e20;font-weight:700;">Expert (400): @trackExpert</span>
+                                <span class="lvl-mst" style="padding:4px 10px;border-radius:999px;background:#fce4ec;color:#880e4f;font-weight:700;">Black Belt (500): @trackBlackBelt</span>
+                                <span style="padding:4px 10px;border-radius:999px;background:#fff4e1;color:#7a5a00;font-weight:700;">Interest: @trackTotal respondent@(trackTotal == 1 ? "" : "s") picked this track</span>
+                            </div>
                             @if (!anyVotes)
                             {
                                 <p style="color:#5a6170; font-size:13px;">No picks yet in this track.</p>
@@ -247,6 +267,23 @@
                         </div>
                     </details>
                 }
+            </div>
+
+            <div class="section">
+                <h3>Direct per-track URLs (share these)</h3>
+                <p class="lead">Paste these in Slack / email to send a prospective speaker straight to their track's section of this dashboard.</p>
+                <ul style="font-size:13px; line-height:1.7; padding-left:18px;">
+                    @{
+                        var resultsUrl = Url.PageLink(pageName: "/Survey/Results", values: new { slug = Model.Slug });
+                    }
+                    @foreach (var t in Model.Survey.Tracks)
+                    {
+                        <li>
+                            <strong>@t.Name:</strong>
+                            <a href="@(resultsUrl)#@t.Id" target="_blank" rel="noopener">@(resultsUrl)#@t.Id</a>
+                        </li>
+                    }
+                </ul>
             </div>
 
             <div class="share-row" style="justify-content:center; margin-top:8px;">

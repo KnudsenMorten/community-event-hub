@@ -209,6 +209,17 @@
                 <p style="margin-top:14px;">
                     <a href="/survey/@Model.Slug/results"><strong>&rarr; @Model.Survey.ResultsLinkLabel</strong></a>
                 </p>
+
+                <p style="margin-top:18px; font-size:13px; color:#1b5e3a;">
+                    Or jump directly to a track's results:
+                </p>
+                <ul style="margin:4px 0 0 0; padding-left:18px; font-size:13px; color:#166534; line-height:1.7;">
+                    @foreach (var t in Model.Survey.Tracks)
+                    {
+                        <li><a href="/survey/@Model.Slug/results#@t.Id" style="color:#166534;text-decoration:underline;">@t.Name &rarr; results page, jumps to the @t.Name section</a></li>
+                    }
+                </ul>
+
                 <p style="margin-top:18px; font-size:13px; color:#1b5e3a;">
                     Thank you from the ELDK27 organizer team:
                 </p>
