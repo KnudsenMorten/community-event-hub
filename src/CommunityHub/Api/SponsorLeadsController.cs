@@ -118,12 +118,34 @@ public sealed class SponsorLeadsController : ControllerBase
 
     private async Task<bool> AuthAsync(string sponsorCompanyId, string? queryKey, CancellationToken ct)
     {
-        // Header preferred (no risk of ending up in browser history /
-        // server access logs); query-string fallback so the browser
-        // direct-download flow still works for non-technical sponsors.
-        var raw = Request.Headers.TryGetValue("X-Sponsor-Api-Key", out var headerKey) && headerKey.Count > 0
-            ? headerKey[0]
-            : queryKey;
+        // Three accepted ways to present the key, in precedence order
+        // (most-secure first):
+        //   1. `Authorization: Bearer <key>` -- the standard. Works with
+        //      every HTTP client + tool out of the box; the form a
+        //      typical API consumer reaches for first.
+        //   2. `X-Sponsor-Api-Key: <key>` -- legacy custom header kept
+        //      working so sponsors who've already wired this up don't
+        //      have to change anything.
+        //   3. `?key=<key>` query string -- browser-friendly form for
+        //      the direct-download CSV URL (when a non-technical sponsor
+        //      pastes the URL into the address bar). Discouraged for
+        //      automated scripts because URLs end up in access logs +
+        //      browser history.
+        string? raw = null;
+        if (Request.Headers.TryGetValue("Authorization", out var authHeader) && authHeader.Count > 0)
+        {
+            var v = authHeader[0];
+            if (!string.IsNullOrWhiteSpace(v) && v.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+                raw = v.Substring("Bearer ".Length).Trim();
+        }
+        if (string.IsNullOrWhiteSpace(raw) && Request.Headers.TryGetValue("X-Sponsor-Api-Key", out var customHeader) && customHeader.Count > 0)
+        {
+            raw = customHeader[0];
+        }
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            raw = queryKey;
+        }
         if (string.IsNullOrWhiteSpace(raw)) return false;
 
         // Bind the validate call to the active edition. The hub is
