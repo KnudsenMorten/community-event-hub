@@ -85,6 +85,28 @@ public sealed class SponsorLeadsController : ControllerBase
         return new JsonResult(new { sponsor = sponsorCompanyId, count = rows.Count, leads = rows });
     }
 
+    /// <summary>
+    /// Filename-in-path variant: <c>GET /api/v1/sponsors/{cid}/leads/leads-2026-06-11.csv</c>
+    /// (or any *.csv name the caller chooses). The route segment is purely
+    /// cosmetic -- the filename in the URL controls what wget / curl /
+    /// browser saves the file as. The actual content + auth are identical
+    /// to the canonical <c>leads.csv</c> endpoint. Useful for sponsors
+    /// whose download tooling derives the saved name from the URL path
+    /// rather than the Content-Disposition header (older PowerShell,
+    /// some shell wrappers, etc).
+    /// </summary>
+    [HttpGet("leads/{fileName}.csv")]
+    public Task<IActionResult> GetCsvNamedAsync(
+        string sponsorCompanyId,
+        string fileName,
+        [FromQuery(Name = "key")] string? queryKey,
+        CancellationToken ct)
+    {
+        // Delegate to the canonical handler; the {fileName} part is just
+        // for the caller's benefit + audit logs.
+        return GetCsvAsync(sponsorCompanyId, queryKey, ct);
+    }
+
     [HttpGet("leads.csv")]
     public async Task<IActionResult> GetCsvAsync(
         string sponsorCompanyId,

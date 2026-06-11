@@ -73,19 +73,26 @@
 
     <div class="card">
         <h2>Endpoints</h2>
-        <p>Both endpoints accept the key in either the
-           <code>X-Sponsor-Api-Key</code> header (preferred) or a
-           <code>?key=</code> query parameter (browser-friendly for the
-           direct download URL).</p>
-        <table style="width:100%;border-collapse:collapse;">
-            <tr style="text-align:left;border-bottom:2px solid #ddd;"><th>Endpoint</th><th>Returns</th></tr>
+        <p>All three accept your key in any of these forms (in priority order):</p>
+        <ul style="margin-top:6px;">
+            <li><strong><code>Authorization: Bearer &lt;key&gt;</code></strong> request header &mdash; the standard, works with curl / Postman / PowerShell out of the box.</li>
+            <li><code>X-Sponsor-Api-Key: &lt;key&gt;</code> custom header &mdash; legacy.</li>
+            <li><code>?key=&lt;key&gt;</code> query parameter &mdash; only for the browser direct-download URL; avoid in automation.</li>
+        </ul>
+
+        <table style="width:100%;border-collapse:collapse;margin-top:10px;">
+            <tr style="text-align:left;border-bottom:2px solid #ddd;"><th>Use case</th><th>URL</th></tr>
             <tr style="border-bottom:1px solid #eee;">
+                <td><strong>Webhook / GET API</strong><br/><span style="font-size:12px;color:#5a6170;">JSON, machine-readable</span></td>
                 <td><code>GET @(Model.BaseUrl)/api/v1/sponsors/@Model.SponsorCompanyId/leads.json</code></td>
-                <td>JSON array of your leads (incl. EventName + OrganizerName)</td>
+            </tr>
+            <tr style="border-bottom:1px solid #eee;">
+                <td><strong>CSV download</strong><br/><span style="font-size:12px;color:#5a6170;">browser-click or Invoke-WebRequest</span></td>
+                <td><code>GET @(Model.BaseUrl)/api/v1/sponsors/@Model.SponsorCompanyId/leads.csv</code></td>
             </tr>
             <tr>
-                <td><code>GET @(Model.BaseUrl)/api/v1/sponsors/@Model.SponsorCompanyId/leads.csv</code></td>
-                <td>CSV file; browser-click downloads directly</td>
+                <td><strong>CSV with custom filename</strong><br/><span style="font-size:12px;color:#5a6170;">filename controls the saved name when your tool uses URL path</span></td>
+                <td><code>GET @(Model.BaseUrl)/api/v1/sponsors/@Model.SponsorCompanyId/leads/leads-@(Model.SponsorCompanyId)-@(DateTimeOffset.UtcNow.ToString("yyyy-MM-dd")).csv</code></td>
             </tr>
         </table>
     </div>
