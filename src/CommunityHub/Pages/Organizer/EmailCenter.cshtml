@@ -1,0 +1,134 @@
+@page
+@model CommunityHub.Pages.Organizer.EmailCenterModel
+@{
+    ViewData["Title"] = "Email center";
+}
+
+<div class="card">
+    <h2>Email center</h2>
+
+    @if (Model.AccessDenied)
+    {
+        <p class="error">This area is for organizers only.</p>
+    }
+    else
+    {
+        <p>Preview every branded email exactly as the reminder engine renders
+           it, send yourself a test copy, and see what has actually been
+           delivered. If a template is broken or missing from the deployment,
+           it fails <em>here</em> instead of silently at 06:00.</p>
+
+        @if (!string.IsNullOrEmpty(Model.ActionMessage))
+        {
+            <p class="@(Model.ActionMessage.StartsWith("Test mail") ? "info" : "error")">@Model.ActionMessage</p>
+        }
+
+        <form method="get" style="margin-bottom:8px;">
+            <label for="Template">Template</label>
+            <select id="Template" name="Template" onchange="this.form.submit()">
+                <option value="">Pick a template&hellip;</option>
+                @foreach (var t in Model.TemplateNames)
+                {
+                    <option value="@t" selected="@(Model.Template == t)">@t</option>
+                }
+            </select>
+            <noscript><button type="submit">Preview</button></noscript>
+        </form>
+
+        @if (Model.PreviewError is not null)
+        {
+            <p class="error">Render failed: @Model.PreviewError</p>
+        }
+        else if (Model.PreviewHtml is not null)
+        {
+            <p style="margin:4px 0;"><strong>Subject:</strong> @Model.PreviewSubject</p>
+            @if (Model.PreviewTokens.Count > 0)
+            {
+                <p style="margin:4px 0 10px;color:#6b7280;font-size:13px;">
+                    Tokens: @string.Join(", ", Model.PreviewTokens)
+                    (preview uses sample values)</p>
+            }
+            <!-- sandboxed: the preview is rendered template HTML, never allowed
+                 to run script or navigate the admin page -->
+            <iframe sandbox="" srcdoc="@Model.PreviewHtml"
+                    style="width:100%;height:480px;border:1px solid #d6d8e0;border-radius:8px;background:#fff;"></iframe>
+
+            <form method="post" asp-page-handler="TestSend" style="margin-top:10px;">
+                <input type="hidden" name="Template" value="@Model.Template" />
+                <input type="hidden" name="TypeFilter" value="@Model.TypeFilter" />
+                <input type="hidden" name="EmailFilter" value="@Model.EmailFilter" />
+                <button type="submit">Send test copy to me</button>
+            </form>
+        }
+    }
+</div>
+
+@if (!Model.AccessDenied)
+{
+    <div class="card">
+        <h2>Sent in the last 7 days</h2>
+        @if (Model.WeekPulse.Count == 0)
+        {
+            <p class="info">Nothing sent in the last 7 days.</p>
+        }
+        else
+        {
+            <div style="display:flex;flex-wrap:wrap;gap:10px;">
+                @foreach (var (type, count) in Model.WeekPulse)
+                {
+                    <div style="flex:1 1 140px;background:#f8f9fb;border-radius:8px;padding:12px;text-align:center;">
+                        <div style="font-size:26px;font-weight:700;">@count</div>
+                        <div style="font-size:13px;color:#6b7280;word-break:break-word;">@type</div>
+                    </div>
+                }
+            </div>
+        }
+    </div>
+
+    <div class="card">
+        <h2>Delivery ledger</h2>
+        <p style="color:#6b7280;font-size:14px;">The reminder engine's
+           idempotency ledger &mdash; one row per email actually delivered.
+           Latest 100 shown.</p>
+
+        <form method="get">
+            <input type="hidden" name="Template" value="@Model.Template" />
+            <label for="TypeFilter">Type</label>
+            <select id="TypeFilter" name="TypeFilter">
+                <option value="">All types</option>
+                @foreach (var t in Model.LedgerTypes)
+                {
+                    <option value="@t" selected="@(Model.TypeFilter == t)">@t</option>
+                }
+            </select>
+            <label for="EmailFilter">Recipient contains</label>
+            <input type="text" id="EmailFilter" name="EmailFilter" value="@Model.EmailFilter" />
+            <button type="submit">Apply</button>
+        </form>
+
+        @if (Model.Ledger.Count == 0)
+        {
+            <p class="info" style="margin-top:12px;">No rows match.</p>
+        }
+        else
+        {
+            <div style="overflow-x:auto;margin-top:12px;">
+                <table style="width:100%;border-collapse:collapse;min-width:560px;">
+                    <tr style="text-align:left;border-bottom:2px solid #ddd;">
+                        <th>Sent (UTC)</th><th>Recipient</th><th>Type</th><th>Occasion</th>
+                    </tr>
+                    @foreach (var s in Model.Ledger)
+                    {
+                        <tr style="border-bottom:1px solid #eee;">
+                            <td style="white-space:nowrap;">@s.SentAt.UtcDateTime.ToString("dd MMM HH:mm")</td>
+                            <td style="word-break:break-all;">@s.RecipientEmail</td>
+                            <td>@s.ReminderType</td>
+                            <td style="word-break:break-all;color:#6b7280;font-size:13px;">@s.OccasionKey</td>
+                        </tr>
+                    }
+                </table>
+            </div>
+        }
+        <p><a asp-page="/Organizer/Index">Back to organizer area</a></p>
+    </div>
+}

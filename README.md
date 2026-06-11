@@ -105,13 +105,36 @@ Built to be **evergreen and multi-community**: the codebase is generic (`Communi
   - prod: `eldk27.eventhub.expertslive.dk`
 - **App-code deploys are scripted** (`tools/deploy-app.ps1 -Env dev|prod`):
   build &rarr; timestamped artifact (last 10 kept) &rarr; deploy &rarr; health
-  check. `tools/rollback-app.ps1` redeploys any kept artifact &mdash; or, once
-  `tools/enable-slot-deploys.ps1` has been run (one-time S1 upgrade + staging
-  slot + slot-identity Key Vault grant), deploys become deploy-to-slot &rarr;
-  warm-up &rarr; **swap** (near-zero downtime) and rollback becomes an instant
-  swap-back. Gotcha baked into the tooling: zips must carry forward-slash
-  entry names &mdash; PS 5.1 `Compress-Archive` writes backslashes, which the
-  Linux Kudu rejects with a blind HTTP 400.
+  check. `tools/rollback-app.ps1` redeploys any kept artifact.
+- **Zero-downtime prod deploys (live since v1.2.4):** the prod plan runs
+  **S1** with a `staging` deployment slot (`tools/enable-slot-deploys.ps1`
+  did the one-time upgrade: S1 + slot + slot-identity Key Vault grant), so
+  `deploy-app.ps1 -Env prod` automatically does deploy-to-slot &rarr;
+  warm-up &rarr; **swap**; production users never see the restart, and
+  rollback is an instant swap-back. Dev intentionally stays on **B1**
+  (direct deploy, short restart is fine there). Gotcha baked into the
+  tooling: zips must carry forward-slash entry names &mdash; PS 5.1
+  `Compress-Archive` writes backslashes, which the Linux Kudu rejects with
+  a blind HTTP 400.
+
+### Testing
+
+- **Playwright mobile suites** under `tests/playwright/` run against real
+  DEV + PROD deployments on three device profiles (iPhone 13 / Pixel 5 /
+  iPhone SE 375&nbsp;px — the viewport that historically caught layout
+  clips):
+  - `survey-mobile.spec.ts` — public survey wizard end-to-end (no login).
+  - `admin-mobile.spec.ts` — organizer admin pages behind a **real PIN
+    login**: `tools/plant-test-pins.ps1` plants short-lived known-PIN rows
+    in the DEV database (PBKDF2-hashed, future-dated so they outrank
+    form-requested PINs, self-expiring, single-use), then the suite signs
+    in and exercises the Attendees browser + Email Center, including an
+    actual test-send through Brevo. DEV-only; skips itself unless
+    `ADMIN_PIN` is set.
+- DEV redirects ALL outbound email to the operator inbox
+  (`Email__RedirectAllTo`); PROD supports a temporary `Email__OnlySendTo`
+  allowlist for smoke-testing new functionality against production data
+  without mailing real participants.
 
 ### Security — login
 
@@ -132,7 +155,11 @@ Built to be **evergreen and multi-community**: the codebase is generic (`Communi
 
 ### Cost
 
-- Estimated platform cost per instance: **~€25 / month** (~€50 / month for dev + prod combined).
+- Estimated platform cost per instance: **~€25 / month** on the B1 tier.
+- The prod instance was upgraded to **S1** for zero-downtime slot-swap
+  deploys (B1 has no slots), which adds roughly **€50 / month** to the prod
+  instance; dev stays on B1. App memory peaks around 270&nbsp;MB against
+  S1's 1.75&nbsp;GB, so there is no pressure to go higher than S1.
 
 ![Architecture overview](docs/img/image1.png)
 ![Architecture detail](docs/img/image2.png)
@@ -224,6 +251,28 @@ matched the row color and disappeared).
 ---
 
 ## Organizers Hub (event management)
+
+> **NEW in v1.2.4: Attendees browser + Email Center.**
+>
+> 1. **Attendees** (*Organizers → Attendees*) — the full reconciled
+>    attendee set (Zoho Backstage tickets + Zoho Bookings Master Class
+>    seats, synced nightly), with summary tiles (total / 2-day tickets /
+>    booked / mismatches), free-text search, ticket + booking + mismatch
+>    filters, and a **CSV export of the current filter** (UTF-8 BOM so
+>    Excel handles Danish names). Read-only by design: attendees are owned
+>    by the reconcile job; fixes happen at the Zoho source.
+> 2. **Email Center** (*Organizers → Email center*) — renders every
+>    branded email template through the SAME provider + layout the
+>    reminder engine uses, with realistic sample tokens and a sandboxed
+>    live preview, so a broken or missing template fails *visibly here*
+>    instead of silently in a 06:00 Function run. One click sends a test
+>    copy to the signed-in organizer. Below it: a **7-day delivery pulse**
+>    (sent count per reminder type) and the **delivery ledger** (the
+>    reminder engine's idempotency table — one row per email actually
+>    delivered) filterable by type and recipient.
+>
+> Both pages are organizer-gated, mobile-tested (Playwright PIN-login
+> suite at 375 px), and covered by `tests/playwright/admin-mobile.spec.ts`.
 
 > **NEW in v1.1.x: Sponsor Admin sub-area.** A single Organizer-gated
 > hub (under *Organizers → Sponsor Admin*) carrying three pages:
@@ -466,11 +515,21 @@ docs/
   RUNBOOK.md                Step-by-step "first deploy" + "operate" recipe
   TEST_WALKTHROUGH.md       End-to-end smoke walkthrough
 
+templates/
+  emails/                   Branded email templates (layout + per-type content);
+                            packaged into BOTH publish bundles (web + jobs) by
+                            the csproj files — the apps render from this folder
+                            at runtime, so it is first-class code, not an example
+
 config-examples/
-  templates/emails/         Brevo / Razor email templates (welcome, reminders)
+  templates/emails/         Historical copies kept for the community fork docs
 
 tools/
   seed-dev.ps1              Seed an Event row + 5 test participants (one per role)
+  deploy-app.ps1            Build + zip (forward-slash entries) + deploy web; slot-swap on prod
+  rollback-app.ps1          Instant slot swap-back / artifact redeploy
+  enable-slot-deploys.ps1   One-time S1 + staging-slot + slot-MSI Key Vault grant (done for prod)
+  plant-test-pins.ps1       DEV-only: plant known-PIN LoginPin rows for the Playwright admin suite
 ```
 
 The PRIVATE upstream repo (`eldk-community-event-hub`) holds the ELDK27 production data (event row JSON, real logo files, prod parameter files). The PUBLIC repo (this one) is a sanitized template — no event-specific data.

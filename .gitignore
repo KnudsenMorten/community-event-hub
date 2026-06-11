@@ -27,3 +27,11 @@ Thumbs.db
 
 # timestamped deploy artifacts kept for rollback (deploy-app.ps1)
 deploy-artifacts/
+
+# local publish staging (dotnet publish output; never ship via git)
+publish-deploy/
+publish-deploy.zip
+publish-out/
+publish-out.zip
+publish-jobs-out/
+publish-jobs-out.zip

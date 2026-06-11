@@ -43,6 +43,16 @@
     <Content Update="App_Data\Surveys\*.json"
              CopyToOutputDirectory="PreserveNewest"
              CopyToPublishDirectory="PreserveNewest" />
+    <!-- Branded email templates (shared repo-root folder). The web app
+         renders them too (welcome mail on invitations / Sessionize import,
+         Email Center preview + test-send); without this block the publish
+         bundle ships no templates and EmailTemplateProvider throws
+         FileNotFoundException in App Service. Mirrors CommunityHub.Jobs. -->
+    <None Include="..\..\templates\emails\*.html">
+      <Link>templates\emails\%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>Always</CopyToPublishDirectory>
+    </None>
   </ItemGroup>
 
 </Project>

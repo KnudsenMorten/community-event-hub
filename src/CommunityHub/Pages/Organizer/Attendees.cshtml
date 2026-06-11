@@ -1,0 +1,118 @@
+@page
+@using CommunityHub.Core.Domain
+@model CommunityHub.Pages.Organizer.AttendeesModel
+@{
+    ViewData["Title"] = "Attendees";
+}
+
+<div class="card">
+    <h2>Attendees</h2>
+
+    @if (Model.AccessDenied)
+    {
+        <p class="error">This area is for organizers only.</p>
+    }
+    else
+    {
+        <p>Reconciled nightly from Zoho Backstage (tickets) and Zoho Bookings
+           (Master Class seats). Read-only here &mdash; fix issues at the
+           source; the next sync picks them up.
+           @if (Model.LastSyncedAt is not null)
+           {
+               <br /><span style="color:#6b7280;">Last sync:
+               @Model.LastSyncedAt.Value.UtcDateTime.ToString("ddd d MMM yyyy HH:mm") UTC</span>
+           }
+        </p>
+
+        <!-- Summary tiles: wrap on phones (min 140px each) -->
+        <div style="display:flex;flex-wrap:wrap;gap:10px;margin:0 0 16px;">
+            <div style="flex:1 1 140px;background:#f8f9fb;border-radius:8px;padding:12px;text-align:center;">
+                <div style="font-size:26px;font-weight:700;">@Model.TotalCount</div>
+                <div style="font-size:13px;color:#6b7280;">attendees</div>
+            </div>
+            <div style="flex:1 1 140px;background:#f8f9fb;border-radius:8px;padding:12px;text-align:center;">
+                <div style="font-size:26px;font-weight:700;">@Model.TwoDayCount</div>
+                <div style="font-size:13px;color:#6b7280;">2-day tickets</div>
+            </div>
+            <div style="flex:1 1 140px;background:#f8f9fb;border-radius:8px;padding:12px;text-align:center;">
+                <div style="font-size:26px;font-weight:700;">@Model.BookedCount</div>
+                <div style="font-size:13px;color:#6b7280;">Master Class booked</div>
+            </div>
+            <div style="flex:1 1 140px;background:@(Model.MismatchCount > 0 ? "#fdecea" : "#f8f9fb");border-radius:8px;padding:12px;text-align:center;">
+                <div style="font-size:26px;font-weight:700;color:@(Model.MismatchCount > 0 ? "#c0392b" : "inherit");">@Model.MismatchCount</div>
+                <div style="font-size:13px;color:#6b7280;">mismatches</div>
+            </div>
+        </div>
+
+        <form method="get" style="margin-bottom:16px;">
+            <label for="Search">Search (name, email, Master Class)</label>
+            <input type="text" id="Search" name="Search" value="@Model.Search" />
+
+            <label for="Ticket">Ticket</label>
+            <select id="Ticket" name="Ticket">
+                <option value="">All</option>
+                @foreach (var t in Enum.GetValues<TicketStatus>())
+                {
+                    <option value="@t" selected="@(Model.Ticket == t.ToString())">@t</option>
+                }
+            </select>
+
+            <label for="Booking">Master Class booking</label>
+            <select id="Booking" name="Booking">
+                <option value="">All</option>
+                @foreach (var b in Enum.GetValues<MasterClassBookingStatus>())
+                {
+                    <option value="@b" selected="@(Model.Booking == b.ToString())">@b</option>
+                }
+            </select>
+
+            <label style="display:flex;align-items:center;gap:8px;margin:10px 0 14px;">
+                <input type="checkbox" name="MismatchOnly" value="true"
+                       checked="@Model.MismatchOnly" style="width:auto;margin:0;" />
+                Mismatches only
+            </label>
+
+            <button type="submit">Apply</button>
+            <a asp-page="/Organizer/Attendees" asp-page-handler="Export"
+               asp-route-Ticket="@Model.Ticket" asp-route-Booking="@Model.Booking"
+               asp-route-MismatchOnly="@Model.MismatchOnly" asp-route-Search="@Model.Search"
+               style="margin-left:10px;">Export CSV (current filter)</a>
+        </form>
+
+        @if (Model.Attendees.Count == 0)
+        {
+            <p class="info">No attendees match the filter.</p>
+        }
+        else
+        {
+            <p>@Model.Attendees.Count attendee(s) shown.</p>
+            <!-- overflow-x so the table scrolls sideways on phones instead of
+                 blowing the 360px layout -->
+            <div style="overflow-x:auto;">
+                <table style="width:100%;border-collapse:collapse;min-width:640px;">
+                    <tr style="text-align:left;border-bottom:2px solid #ddd;">
+                        <th>Name</th><th>Email</th><th>Ticket</th>
+                        <th>Booking</th><th>Master Class</th><th></th>
+                    </tr>
+                    @foreach (var a in Model.Attendees)
+                    {
+                        <tr style="border-bottom:1px solid #eee;@(a.HasReconciliationMismatch ? "background:#fdf3f2;" : "")">
+                            <td>@a.FirstName @a.LastName</td>
+                            <td style="word-break:break-all;">@a.Email</td>
+                            <td>@a.TicketStatus@(a.TicketClassName is null ? "" : $" ({a.TicketClassName})")</td>
+                            <td>@a.BookingStatus</td>
+                            <td>@a.MasterClassName</td>
+                            <td>
+                                @if (a.HasReconciliationMismatch)
+                                {
+                                    <span class="error" style="font-size:13px;font-weight:600;">mismatch</span>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </table>
+            </div>
+        }
+    }
+    <p><a asp-page="/Organizer/Index">Back to organizer area</a></p>
+</div>

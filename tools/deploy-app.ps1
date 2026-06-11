@@ -111,6 +111,17 @@ if ($slots -contains 'staging') {
     [void](Invoke-Az @('webapp','deployment','slot','swap','-g',$t.rg,'-n',$t.app,'--slot','staging','--target-slot','production','--output','none'))
     if ($script:AzExit -ne 0) { throw "swap failed." }
     Write-Host ">> Swap complete. Rollback = .\tools\rollback-app.ps1 -Env $Env (swaps back instantly)." -ForegroundColor Green
+
+    # Post-swap warm-up of the REAL production URL. The swap restarts the
+    # incoming worker while applying production config, so the pre-swap slot
+    # warm-up does not carry over; without this the first real visitor pays
+    # ~15s of JIT + EF-model + SQL-pool warm-up (seen 2026-06-11 as a
+    # Playwright goto timeout). WEBSITE_SWAP_WARMUP_PING_PATH=/health gates
+    # the pointer switch; these hits warm the hot paths behind it.
+    Write-Host ">> Warming production hot paths ..." -ForegroundColor Cyan
+    foreach ($path in '/', '/survey/eldk27-topics', '/Login') {
+        try { [void](Invoke-WebRequest "$($t.url.TrimEnd('/'))$path" -UseBasicParsing -TimeoutSec 60) } catch { }
+    }
 } else {
     Write-Host ">> No staging slot (B1 doesn't support slots; see tools/enable-slot-deploys.ps1). Direct deploy -- expect a short outage." -ForegroundColor Yellow
     [void](Invoke-Az @('webapp','deploy','-g',$t.rg,'-n',$t.app,'--src-path',$zip,'--type','zip','--output','none'))
