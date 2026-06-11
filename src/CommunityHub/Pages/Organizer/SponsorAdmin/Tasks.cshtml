@@ -13,9 +13,13 @@
     }
     else
     {
-        <p>Catalog of tasks every sponsor company has to complete. Add a new
-           one, remove obsolete entries, or shift a deadline when a milestone
-           moves.</p>
+        <p>Every distinct task across the @Model.SponsorCompanies sponsor
+           compan@(Model.SponsorCompanies == 1 ? "y" : "ies") of the active event,
+           aggregated by title. <strong>Catalog</strong> tasks are generated nightly
+           from <code>sponsor.&lt;edition&gt;.json</code> task sets (edit that file to
+           change their definition); <strong>ad-hoc</strong> tasks are created on this
+           page and fanned out to every sponsor company. Deadline shifts stick for
+           both kinds.</p>
         <p><a asp-page="/Organizer/SponsorAdmin/Index">&larr; Back to Sponsor Admin</a></p>
 
         @if (TempData["Notice"] is string notice)
@@ -28,36 +32,54 @@
 @if (!Model.AccessDenied)
 {
     <div class="card">
-        <h2>Current catalog (@Model.Tasks.Count tasks)</h2>
+        <h2>Current tasks (@Model.Tasks.Count distinct)</h2>
+        @if (Model.Tasks.Count == 0)
+        {
+            <p>No sponsor tasks yet — they appear after the first WooCommerce
+               order pull, or create one below.</p>
+        }
+        else
+        {
         <table style="width:100%;border-collapse:collapse;">
             <tr style="text-align:left;border-bottom:2px solid #ddd;">
-                <th>Id</th><th>Title</th><th>Deadline</th><th>Notes</th><th style="width:230px;">Actions</th>
+                <th>Title</th><th>Source</th><th>Companies</th><th>Done</th><th>Overdue</th><th>Deadline</th><th style="width:250px;">Actions</th>
             </tr>
             @foreach (var t in Model.Tasks)
             {
                 <tr style="border-bottom:1px solid #eee;">
-                    <td><code>@t.Id</code></td>
-                    <td>@t.Title</td>
-                    <td>@(t.Deadline?.ToString("yyyy-MM-dd") ?? "-")</td>
-                    <td style="font-size:13px;color:#5a6170;">@t.Notes</td>
+                    <td>@t.Title @(t.Mandatory ? "" : " (optional)")</td>
+                    <td>
+                        @if (t.IsAdhoc)
+                        { <span style="background:#ddf4ff;color:#0969da;border-radius:10px;padding:1px 8px;font-size:12px;">ad-hoc</span> }
+                        else
+                        { <span style="background:#eef0f5;color:#57606a;border-radius:10px;padding:1px 8px;font-size:12px;">catalog</span> }
+                    </td>
+                    <td>@t.Companies</td>
+                    <td>@t.Done</td>
+                    <td style="color:@(t.Overdue > 0 ? "#c0392b" : "inherit");">@t.Overdue</td>
+                    <td>@(t.DueDate?.ToString("yyyy-MM-dd") ?? "-")</td>
                     <td>
                         <form method="post" asp-page-handler="ChangeDeadline" style="display:inline-flex;gap:4px;align-items:center;">
-                            <input type="hidden" name="id" value="@t.Id" />
-                            <input type="date" name="deadline" value="@(t.Deadline?.ToString("yyyy-MM-dd"))" required />
-                            <button type="submit">Save</button>
+                            <input type="hidden" name="title" value="@t.Title" />
+                            <input type="date" name="deadline" value="@(t.DueDate?.ToString("yyyy-MM-dd"))" required />
+                            <button type="submit">Shift</button>
                         </form>
-                        <form method="post" asp-page-handler="Delete" style="display:inline;" onsubmit="return confirm('Delete task @t.Id ?');">
-                            <input type="hidden" name="id" value="@t.Id" />
-                            <button type="submit" class="secondary">Delete</button>
-                        </form>
+                        @if (t.IsAdhoc)
+                        {
+                            <form method="post" asp-page-handler="Delete" style="display:inline;" onsubmit="return confirm('Delete '@t.Title' for all @t.Companies companies?');">
+                                <input type="hidden" name="title" value="@t.Title" />
+                                <button type="submit" class="secondary">Delete</button>
+                            </form>
+                        }
                     </td>
                 </tr>
             }
         </table>
+        }
     </div>
 
     <div class="card">
-        <h2>Add a new task</h2>
+        <h2>Add a task for all sponsor companies</h2>
         <form method="post" asp-page-handler="Create" style="display:grid;grid-template-columns:120px 1fr;gap:8px 12px;max-width:680px;align-items:center;">
             <label for="title">Title</label>
             <input id="title" name="title" type="text" required maxlength="160" />
@@ -65,18 +87,20 @@
             <label for="deadline">Deadline</label>
             <input id="deadline" name="deadline" type="date" />
 
-            <label for="notes">Notes</label>
-            <input id="notes" name="notes" type="text" maxlength="400" placeholder="Optional context shown next to the task" />
+            <label for="notes">Description</label>
+            <input id="notes" name="notes" type="text" maxlength="400" placeholder="Shown to the sponsor under the task title" />
+
+            <label for="mandatory">Mandatory</label>
+            <input id="mandatory" name="mandatory" type="checkbox" value="true" checked style="justify-self:start;" />
 
             <div></div>
-            <div><button type="submit">Add task</button></div>
+            <div><button type="submit">Create for @Model.SponsorCompanies compan@(Model.SponsorCompanies == 1 ? "y" : "ies")</button></div>
         </form>
         <p style="font-size:12.5px;color:#5a6170;margin-top:14px;">
-            <strong>Note:</strong> create / delete / change-deadline are scaffolded on
-            this page but write to a stub list -- the catalog is currently
-            sourced from <code>SponsorTaskExpander</code> config. A
-            follow-up commit promotes the catalog to a DbSet so changes
-            persist.
+            Creates one task row per sponsor company (idempotent — re-submitting
+            the same title only fills in companies that don't have it yet, e.g.
+            late-onboarded sponsors). To change the standard catalog every future
+            sponsor gets, edit the task sets in <code>sponsor.&lt;edition&gt;.json</code>.
         </p>
     </div>
 }

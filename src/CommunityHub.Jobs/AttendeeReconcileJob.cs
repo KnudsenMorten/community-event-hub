@@ -1,5 +1,6 @@
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
+using CommunityHub.Core.Email;
 using CommunityHub.Core.Integrations;
 using CommunityHub.Core.Reminders;
 using Microsoft.Azure.Functions.Worker;
@@ -22,6 +23,7 @@ public sealed class AttendeeReconcileJob
     private readonly ZohoOptions _options;
     private readonly AttendeeReconciler _reconciler;
     private readonly ReminderEngine _engine;
+    private readonly EmailTemplateProvider _templates;
     private readonly TimeProvider _clock;
     private readonly ILogger<AttendeeReconcileJob> _log;
 
@@ -31,6 +33,7 @@ public sealed class AttendeeReconcileJob
         ZohoOptions options,
         AttendeeReconciler reconciler,
         ReminderEngine engine,
+        EmailTemplateProvider templates,
         TimeProvider clock,
         ILogger<AttendeeReconcileJob> log)
     {
@@ -39,6 +42,7 @@ public sealed class AttendeeReconcileJob
         _options = options;
         _reconciler = reconciler;
         _engine = engine;
+        _templates = templates;
         _clock = clock;
         _log = log;
     }
@@ -55,16 +59,16 @@ public sealed class AttendeeReconcileJob
             return;
         }
 
-        var activeEventId = await _db.Events
+        var activeEvent = await _db.Events
             .Where(e => e.IsActive)
-            .Select(e => (int?)e.Id)
+            .Select(e => new { e.Id, e.DisplayName })
             .FirstOrDefaultAsync(ct);
-        if (activeEventId is null)
+        if (activeEvent is null)
         {
             _log.LogWarning("AttendeeReconcileJob: no active event.");
             return;
         }
-        var eventId = activeEventId.Value;
+        var eventId = activeEvent.Id;
 
         var token = await _zoho.GetAccessTokenAsync(ct);
         if (token is null)
@@ -92,7 +96,7 @@ public sealed class AttendeeReconcileJob
                 bookingStatus, mismatch, now, ct);
 
             // Build whichever chaser applies.
-            var chaser = BuildChaser(r, ticketStatus, bookingStatus);
+            var chaser = BuildChaser(r, ticketStatus, bookingStatus, activeEvent.DisplayName);
             if (chaser is not null)
             {
                 due.Add(chaser);
@@ -167,52 +171,50 @@ public sealed class AttendeeReconcileJob
     /// <summary>
     /// The chaser for this attendee, or null if nothing to chase. The
     /// OccasionKey is stable per mismatch type so the engine dedups.
+    /// Rendered through the branded EmailTemplateProvider (CONTEXT.md 11d)
+    /// like every other reminder type — the inline-HTML bodies this method
+    /// used to build were the last emails bypassing the template system.
     /// </summary>
-    private static ReminderMessage? BuildChaser(
+    private ReminderMessage? BuildChaser(
         AttendeeReconResult r,
         TicketStatus ticketStatus,
-        MasterClassBookingStatus bookingStatus)
+        MasterClassBookingStatus bookingStatus,
+        string eventDisplayName)
     {
-        var first = string.IsNullOrWhiteSpace(r.FirstName) ? "there" : r.FirstName;
+        string? template = null;
+        string? occasion = null;
+
+        var tokens = _templates.NewTokenSet();
+        tokens["firstName"] = Enc(string.IsNullOrWhiteSpace(r.FirstName) ? "there" : r.FirstName);
+        tokens["eventDisplayName"] = Enc(eventDisplayName);
 
         // 3. Duplicate booking.
         if (bookingStatus == MasterClassBookingStatus.MultipleBookings)
         {
-            var list = string.Join(", ", r.MasterClassNames);
-            return new ReminderMessage(
-                r.Email, "attendee-duplicate-booking", $"dup:{r.Email}",
-                "Issue detected with your Master Class booking",
-                $"<p>Hi {Enc(first)},</p><p>You are registered for more than " +
-                $"one Master Class: {Enc(list)}. Please keep one and cancel " +
-                "the others in Zoho Bookings.</p>");
+            template = "attendee-duplicate-booking";
+            occasion = $"dup:{r.Email}";
+            tokens["masterClassList"] = Enc(string.Join(", ", r.MasterClassNames));
         }
-
         // 1. Has 2-day ticket, no booking.
-        if (ticketStatus == TicketStatus.TwoDay
-            && bookingStatus == MasterClassBookingStatus.NotBooked)
+        else if (ticketStatus == TicketStatus.TwoDay
+                 && bookingStatus == MasterClassBookingStatus.NotBooked)
         {
-            return new ReminderMessage(
-                r.Email, "attendee-missing-booking", $"nobooking:{r.Email}",
-                "Reserve your Master Class seat",
-                $"<p>Hi {Enc(first)},</p><p>You have a 2-day ticket but have " +
-                "not yet reserved a Master Class seat. Seats are first-come, " +
-                "first-served - please book soon.</p>");
+            template = "attendee-missing-booking";
+            occasion = $"nobooking:{r.Email}";
         }
-
         // 2. Has a booking, no 2-day ticket.
-        if (bookingStatus != MasterClassBookingStatus.NotBooked
-            && ticketStatus != TicketStatus.TwoDay)
+        else if (bookingStatus != MasterClassBookingStatus.NotBooked
+                 && ticketStatus != TicketStatus.TwoDay)
         {
-            return new ReminderMessage(
-                r.Email, "attendee-missing-ticket", $"noticket:{r.Email}",
-                "Complete your 2-day ticket purchase",
-                $"<p>Hi {Enc(first)},</p><p>You reserved a Master Class seat " +
-                "but we have no 2-day ticket for this email. A 2-day ticket " +
-                "is required to attend. If you bought it under a different " +
-                "email, please contact us.</p>");
+            template = "attendee-missing-ticket";
+            occasion = $"noticket:{r.Email}";
         }
 
-        return null;
+        if (template is null) return null;
+
+        var rendered = _templates.Render(template, tokens);
+        return new ReminderMessage(
+            r.Email, template, occasion!, rendered.Subject, rendered.HtmlBody);
     }
 
     private static string Enc(string s) => System.Net.WebUtility.HtmlEncode(s);

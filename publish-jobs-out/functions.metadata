@@ -1,0 +1,92 @@
+[
+  {
+    "name": "AttendeeReconcileJob",
+    "scriptFile": "CommunityHub.Jobs.dll",
+    "entryPoint": "CommunityHub.Jobs.AttendeeReconcileJob.Run",
+    "language": "dotnet-isolated",
+    "properties": {
+      "IsCodeless": false
+    },
+    "bindings": [
+      {
+        "name": "timer",
+        "direction": "In",
+        "type": "timerTrigger",
+        "schedule": "0 0 7 * * *",
+        "properties": {}
+      }
+    ]
+  },
+  {
+    "name": "BackstageSyncJob",
+    "scriptFile": "CommunityHub.Jobs.dll",
+    "entryPoint": "CommunityHub.Jobs.BackstageSyncJob.Run",
+    "language": "dotnet-isolated",
+    "properties": {
+      "IsCodeless": false
+    },
+    "bindings": [
+      {
+        "name": "timer",
+        "direction": "In",
+        "type": "timerTrigger",
+        "schedule": "0 30 6 * * *",
+        "properties": {}
+      }
+    ]
+  },
+  {
+    "name": "ReminderJob",
+    "scriptFile": "CommunityHub.Jobs.dll",
+    "entryPoint": "CommunityHub.Jobs.ReminderJob.Run",
+    "language": "dotnet-isolated",
+    "properties": {
+      "IsCodeless": false
+    },
+    "bindings": [
+      {
+        "name": "timer",
+        "direction": "In",
+        "type": "timerTrigger",
+        "schedule": "0 0 8 * * *",
+        "properties": {}
+      }
+    ]
+  },
+  {
+    "name": "SponsorUploadWatchJob",
+    "scriptFile": "CommunityHub.Jobs.dll",
+    "entryPoint": "CommunityHub.Jobs.SponsorUploadWatchJob.Run",
+    "language": "dotnet-isolated",
+    "properties": {
+      "IsCodeless": false
+    },
+    "bindings": [
+      {
+        "name": "timer",
+        "direction": "In",
+        "type": "timerTrigger",
+        "schedule": "0 */15 * * * *",
+        "properties": {}
+      }
+    ]
+  },
+  {
+    "name": "WooCommercePullJob",
+    "scriptFile": "CommunityHub.Jobs.dll",
+    "entryPoint": "CommunityHub.Jobs.WooCommercePullJob.Run",
+    "language": "dotnet-isolated",
+    "properties": {
+      "IsCodeless": false
+    },
+    "bindings": [
+      {
+        "name": "timer",
+        "direction": "In",
+        "type": "timerTrigger",
+        "schedule": "0 0 3 * * *",
+        "properties": {}
+      }
+    ]
+  }
+]

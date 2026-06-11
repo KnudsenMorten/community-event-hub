@@ -48,4 +48,18 @@
     </None>
   </ItemGroup>
 
+  <!-- Ship the branded email templates (templates/emails/_layout.html +
+       per-type content fragments). EmailTemplateProvider resolves the
+       relative default "templates/emails" against the app root; before
+       this Include the folder was simply absent from the published bundle,
+       so EVERY templated reminder render threw FileNotFoundException in
+       Azure (found 2026-06-12). -->
+  <ItemGroup>
+    <None Include="..\..\templates\emails\*.html">
+      <Link>templates\emails\%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>Always</CopyToPublishDirectory>
+    </None>
+  </ItemGroup>
+
 </Project>

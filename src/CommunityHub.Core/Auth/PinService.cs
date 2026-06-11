@@ -23,9 +23,12 @@ public sealed class PinService
         // rejected so the result is uniform.
         uint limit = uint.MaxValue - (uint.MaxValue % max);
         uint value;
+        // stackalloc OUTSIDE the rejection loop (CA2014): each loop-body
+        // stackalloc grows the frame and rejection can iterate, so the old
+        // in-loop form was a theoretical stack overflow.
+        Span<byte> bytes = stackalloc byte[4];
         do
         {
-            Span<byte> bytes = stackalloc byte[4];
             RandomNumberGenerator.Fill(bytes);
             value = BitConverter.ToUInt32(bytes);
         }
