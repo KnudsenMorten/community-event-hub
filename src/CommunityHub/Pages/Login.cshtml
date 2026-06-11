@@ -31,6 +31,18 @@
             <label for="Pin">Enter the 6-digit code we emailed you</label>
             <input type="text" id="Pin" name="Pin" inputmode="numeric"
                    pattern="[0-9]{6}" maxlength="6" required autocomplete="one-time-code" />
+
+            <label for="RememberFor" style="display:block;margin-top:12px;font-size:13px;color:#4a5160;">Stay signed in for</label>
+            <select id="RememberFor" name="RememberFor" style="width:100%;padding:8px 10px;border:1px solid #c4c8d4;border-radius:6px;font-size:14px;margin-top:4px;">
+                <option value="day">1 day (next morning)</option>
+                <option value="week" selected>1 week (default)</option>
+                <option value="month">1 month</option>
+                <option value="persistent">Until I sign out</option>
+            </select>
+            <p style="font-size:11.5px;color:#5a6170;margin:4px 0 12px 0;">
+                Use a shorter option on shared devices; "Until I sign out" is convenient on a personal phone / laptop.
+            </p>
+
             <button type="submit">Sign in</button>
         </form>
         <form method="post" asp-page-handler="RequestPin" style="margin-top:14px;">

@@ -106,6 +106,9 @@ Built to be **evergreen and multi-community**: the codebase is generic (`Communi
 
 ### Security — login
 
+- PIN-by-email (no passwords; PIN is single-use and short-lived).
+- **NEW in v1.1.x: user-picked session length**. Login form now has a "Stay signed in for" dropdown — 1 day / 1 week (default) / 1 month / Until I sign out — so people don't have to redo PIN every visit. Cookie is `IsPersistent + ExpiresUtc` set to match the choice; sliding refresh keeps active sessions alive past the picked window.
+
 - Login via email + PIN code (PIN valid for 15 minutes).
 - URL support with PIN auto-login (valid 7 days).
 
@@ -163,6 +166,9 @@ A first-time **Welcome** page is shown once per participant per edition.
 
 - Tasks + overdue-only reminders.
 - Register company info — automatic upload to Zoho Backstage (exhibitors only).
+- **NEW in v1.1.x: Sponsor leads API**. Each sponsor company gets a personal API key issued by the organizer team. The sponsor sees the key metadata + their company id + a JSON endpoint + a CSV endpoint + 3 PowerShell samples + a browser-direct download URL on the new **Your Leads API** page. The raw key is shown ONCE at issue time (SHA256-hashed in the DB) so a regenerate is the only way back if the sponsor loses it.
+- **NEW in v1.1.x: per-sponsor lead status + AI screen**. Statuses are Open / Processed / Interest / Ignore / Junk — nothing is hard-deleted, so the AI screen model can learn from operator overrides over time.
+- **NEW in v1.1.x: delta notifications**. Sponsors can opt-in to a daily digest (or real-time) of new leads since the last notification, with an optional skip-junk filter.
 
 ![Sponsor hub](docs/img/image10.png)
 
@@ -197,6 +203,29 @@ and a link to the public results dashboard.
 ---
 
 ## Organizers Hub (event management)
+
+> **NEW in v1.1.x: Sponsor Admin sub-area.** A single Organizer-gated
+> hub (under *Organizers → Sponsor Admin*) carrying three pages:
+>
+> 1. **Sponsor tasks** — manage the canonical task catalog every sponsor
+>    company has to complete (create, delete, shift deadlines).
+> 2. **Sponsor leads** — view the per-sponsor pipeline status, issue /
+>    rotate / revoke per-sponsor API keys (raw key shown once, only the
+>    SHA256 hash is stored), surface 3 PowerShell + 1 browser-direct
+>    download samples, manage per-sponsor notification preferences
+>    (digest cadence + recipients + skip-junk flag), and act on
+>    individual leads via Reply / Mark Processed / Interest / Ignore /
+>    Junk buttons. Nothing is hard-deleted; soft-status preserves rows
+>    so the AI screen can learn from operator overrides.
+> 3. **Sponsor status dashboard** — per-company row of task done /
+>    overdue counters + leads volume + last Zoho sync timestamp, sorted
+>    by overdue first.
+>
+> **NEW: Contributors page** at `/Contributors` (link in the global
+> footer). Credits the Experts Live Denmark organizer team
+> (Morten Knudsen / Martin Byskov / Morten Leth Hedegaard / Kent
+> Agerlund) plus external contributors starting with Laura Gulbe
+> (Software Central).
 
 ![Organizer hub](docs/img/image12.png)
 
