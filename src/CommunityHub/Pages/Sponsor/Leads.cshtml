@@ -1,0 +1,130 @@
+@page
+@model CommunityHub.Pages.Sponsor.LeadsModel
+@{
+    ViewData["Title"] = "Your leads API";
+}
+
+<div class="card">
+    <h2>Your leads API</h2>
+    @if (Model.AccessDenied)
+    {
+        <p class="error">This area is for sponsor contacts (and organizers).</p>
+        <p><a asp-page="/Index">Back to hub</a></p>
+    }
+    else if (Model.NoCompanyLink)
+    {
+        <p class="error">Your sponsor account is not yet linked to a company,
+           so we cannot wire up your leads API. Please contact the organizers.</p>
+        <p><a asp-page="/Index">Back to hub</a></p>
+    }
+    else
+    {
+        <p>Leads, inquiries, and booth-meeting requests captured at the
+           event are exposed to you via a JSON / CSV API and via a
+           pre-generated CSV drop. Both paths require your per-company
+           API key.</p>
+        <p><a asp-page="/Sponsor/Index">&larr; Back to Sponsor Engagement</a></p>
+    }
+</div>
+
+@if (!Model.AccessDenied && !Model.NoCompanyLink)
+{
+    <div class="card">
+        <h2>Your API key</h2>
+        <table style="width:100%;border-collapse:collapse;max-width:680px;">
+            <tr style="border-bottom:1px solid #eee;"><td>Sponsor company id</td><td><code>@Model.SponsorCompanyId</code></td></tr>
+            <tr style="border-bottom:1px solid #eee;"><td>Current key</td><td>@(Model.KeyPrefix is null ? "(not issued yet)" : Model.KeyPrefix + "...")</td></tr>
+            <tr style="border-bottom:1px solid #eee;"><td>Issued</td><td>@(Model.IssuedAt?.ToString("u") ?? "-")</td></tr>
+            <tr><td>Issued by</td><td>@(Model.IssuedByEmail ?? "-")</td></tr>
+        </table>
+
+        @if (Model.KeyPrefix is null)
+        {
+            <p style="margin-top:14px;background:#fff8e1;border-left:3px solid #f4b400;padding:10px 12px;border-radius:4px;">
+                <strong>No API key has been issued for your company yet.</strong>
+                Ask the organizer team to issue one &mdash; they hand it to
+                you in person / over a secure channel. After that, paste it
+                into the samples below.
+            </p>
+        }
+        else
+        {
+            <p style="margin-top:14px;font-size:12.5px;color:#5a6170;">
+                The hub stores only the SHA256 hash of your key &mdash; not
+                even the organizer can retrieve the raw value. If you've
+                lost your key, ask the organizer to <strong>regenerate</strong>
+                (which revokes the previous one and hands you a fresh
+                value).
+            </p>
+        }
+    </div>
+
+    <div class="card">
+        <h2>Endpoints</h2>
+        <p>Both endpoints accept the key in either the
+           <code>X-Sponsor-Api-Key</code> header (preferred) or a
+           <code>?key=</code> query parameter (browser-friendly for the
+           direct download URL).</p>
+        <table style="width:100%;border-collapse:collapse;">
+            <tr style="text-align:left;border-bottom:2px solid #ddd;"><th>Endpoint</th><th>Returns</th></tr>
+            <tr style="border-bottom:1px solid #eee;">
+                <td><code>GET @(Model.BaseUrl)/api/v1/sponsors/@Model.SponsorCompanyId/leads.json</code></td>
+                <td>JSON array of your leads (incl. EventName + OrganizerName)</td>
+            </tr>
+            <tr>
+                <td><code>GET @(Model.BaseUrl)/api/v1/sponsors/@Model.SponsorCompanyId/leads.csv</code></td>
+                <td>CSV file; browser-click downloads directly</td>
+            </tr>
+        </table>
+    </div>
+
+    <div class="card">
+        <h2>Download samples (PowerShell)</h2>
+
+        <h3>A. Download CSV to file</h3>
+<pre style="background:#0d1117;color:#c9d1d9;padding:12px 14px;border-radius:6px;overflow-x:auto;">
+$key     = 'PASTE-YOUR-SPONSOR-API-KEY-HERE'
+$outFile = "$env:USERPROFILE\Downloads\leads-@Model.SponsorCompanyId-$(Get-Date -Format yyyy-MM-dd).csv"
+
+Invoke-WebRequest -Uri "@(Model.BaseUrl)/api/v1/sponsors/@Model.SponsorCompanyId/leads.csv" `
+                  -Headers @@{ 'X-Sponsor-Api-Key' = $key } `
+                  -OutFile $outFile
+Write-Host "Saved $outFile"
+</pre>
+
+        <h3>B. Fetch JSON, pipe into your own pipeline</h3>
+<pre style="background:#0d1117;color:#c9d1d9;padding:12px 14px;border-radius:6px;overflow-x:auto;">
+$key = 'PASTE-YOUR-SPONSOR-API-KEY-HERE'
+
+$resp = Invoke-RestMethod -Uri "@(Model.BaseUrl)/api/v1/sponsors/@Model.SponsorCompanyId/leads.json" `
+                          -Headers @@{ 'X-Sponsor-Api-Key' = $key }
+
+"$($resp.count) leads for @Model.SponsorCompanyId"
+$resp.leads | Where-Object { $_.LeadKind -eq 'Meeting' } |
+              Select-Object FullName, Company, Email, CapturedAt
+</pre>
+
+        <h3>C. Scheduled task (daily, 06:30 local)</h3>
+<pre style="background:#0d1117;color:#c9d1d9;padding:12px 14px;border-radius:6px;overflow-x:auto;">
+# Save as Download-Leads.ps1, then register the scheduled task.
+$key     = $env:SPONSOR_API_KEY      # set once in scheduled-task env
+$outDir  = "$env:USERPROFILE\Downloads\sponsor-leads"
+$null    = New-Item -ItemType Directory -Force -Path $outDir
+$outFile = Join-Path $outDir "leads-@Model.SponsorCompanyId-$(Get-Date -Format yyyy-MM-dd).csv"
+
+Invoke-WebRequest -Uri "@(Model.BaseUrl)/api/v1/sponsors/@Model.SponsorCompanyId/leads.csv" `
+                  -Headers @@{ 'X-Sponsor-Api-Key' = $key } `
+                  -OutFile $outFile
+
+# Register the task (one-shot, run from an elevated PowerShell):
+#   schtasks /create /tn "Download sponsor leads" /sc daily /st 06:30 /rl LIMITED `
+#            /tr "powershell -NoProfile -File C:\path\Download-Leads.ps1"
+</pre>
+
+        <h3>D. Browser direct download (no PowerShell)</h3>
+        <p>Paste this URL into your browser address bar. The CSV lands
+           in your Downloads folder. Avoid bookmarking the URL with the
+           key in it &mdash; it ends up in browser history.</p>
+<pre style="background:#0d1117;color:#c9d1d9;padding:12px 14px;border-radius:6px;overflow-x:auto;">@(Model.BaseUrl)/api/v1/sponsors/@Model.SponsorCompanyId/leads.csv?key=PASTE-API-KEY-HERE</pre>
+    </div>
+}
