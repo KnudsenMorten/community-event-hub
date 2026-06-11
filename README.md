@@ -274,6 +274,18 @@ matched the row color and disappeared).
 > Both pages are organizer-gated, mobile-tested (Playwright PIN-login
 > suite at 375 px), and covered by `tests/playwright/admin-mobile.spec.ts`.
 
+> **NEW in v1.2.5: Broadcast email** (*Organizers → Broadcast*) — compose
+> one plain-text message and the hub sends it individually (branded
+> layout, personal "Hi {firstName}") to every **active** participant in
+> the selected role groups, optionally plus the reconciled attendees.
+> Preview shows the exact recipient count before sending; every delivery
+> is recorded in the `SentReminder` ledger keyed per subject, so a retry
+> or double-click only reaches people who have not received that subject
+> yet (resume-safe, never double-mails). Per-recipient failures are
+> counted, logged and never abort the run. Deploy tooling also gained
+> `tools/deploy-app.ps1 -App jobs` so the Functions app ships the same
+> scripted way as the web app.
+
 > **NEW in v1.1.x: Sponsor Admin sub-area.** A single Organizer-gated
 > hub (under *Organizers → Sponsor Admin*) carrying three pages:
 >

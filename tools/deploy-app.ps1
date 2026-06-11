@@ -19,13 +19,21 @@
 .PARAMETER Env
     dev | prod
 
+.PARAMETER App
+    web (default) | jobs. 'jobs' publishes CommunityHub.Jobs and pushes it to
+    the Functions app via config-zip (no slots on Flex Consumption; the
+    Functions host restarts in seconds and timers self-heal, so direct deploy
+    is fine there).
+
 .EXAMPLE
     .\tools\deploy-app.ps1 -Env dev
     .\tools\deploy-app.ps1 -Env prod
+    .\tools\deploy-app.ps1 -Env prod -App jobs
 #>
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)][ValidateSet('dev','prod')][string]$Env
+    [Parameter(Mandatory)][ValidateSet('dev','prod')][string]$Env,
+    [ValidateSet('web','jobs')][string]$App = 'web'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -53,19 +61,22 @@ function Invoke-Az {
 }
 
 $apps = @{
-    dev  = @{ rg = 'rg-eldk27hub-dev';  app = 'eldk27hub-web-devz237e';  url = 'https://dev.eldk27.eventhub.expertslive.dk' }
-    prod = @{ rg = 'rg-eldk27hub-prod'; app = 'eldk27hub-web-prodpdrq';  url = 'https://eldk27.eventhub.expertslive.dk' }
+    dev  = @{ rg = 'rg-eldk27hub-dev';  app = 'eldk27hub-web-devz237e';  fn = 'eldk27hub-fn-devz237e';  url = 'https://dev.eldk27.eventhub.expertslive.dk' }
+    prod = @{ rg = 'rg-eldk27hub-prod'; app = 'eldk27hub-web-prodpdrq'; fn = 'eldk27hub-fn-prodpdrq'; url = 'https://eldk27.eventhub.expertslive.dk' }
 }
 $t = $apps[$Env]
 
-Write-Host ">> Building (Release)..." -ForegroundColor Cyan
-dotnet publish (Join-Path $repo 'src/CommunityHub/CommunityHub.csproj') -c Release -o (Join-Path $repo 'publish-out') | Out-Null
+$proj   = if ($App -eq 'jobs') { 'src/CommunityHub.Jobs/CommunityHub.Jobs.csproj' } else { 'src/CommunityHub/CommunityHub.csproj' }
+$outDir = if ($App -eq 'jobs') { 'publish-jobs-out' } else { 'publish-out' }
+
+Write-Host ">> Building $App (Release)..." -ForegroundColor Cyan
+dotnet publish (Join-Path $repo $proj) -c Release -o (Join-Path $repo $outDir) | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed." }
 
 $artDir = Join-Path $repo 'deploy-artifacts'
 New-Item -ItemType Directory -Force $artDir | Out-Null
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
-$zip = Join-Path $artDir ("web-{0}-{1}.zip" -f $Env, $stamp)
+$zip = Join-Path $artDir ("{0}-{1}-{2}.zip" -f $App, $Env, $stamp)
 
 # NB: do NOT use Compress-Archive here. Under Windows PowerShell 5.1 it
 # writes BACKSLASH entry names (App_Data\Surveys\...) and the App Service
@@ -73,7 +84,7 @@ $zip = Join-Path $artDir ("web-{0}-{1}.zip" -f $Env, $stamp)
 # an evening on 2026-06-11). Build the zip with explicit forward-slash
 # entry names so it deploys from any PowerShell host.
 Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
-$src = Join-Path $repo 'publish-out'
+$src = Join-Path $repo $outDir
 if (Test-Path $zip) { Remove-Item $zip -Force }
 $archive = [System.IO.Compression.ZipFile]::Open($zip, [System.IO.Compression.ZipArchiveMode]::Create)
 try {
@@ -84,8 +95,17 @@ try {
 } finally { $archive.Dispose() }
 Write-Host ">> Artifact: $zip" -ForegroundColor Cyan
 
-# retention: keep last 10 per env
-Get-ChildItem $artDir -Filter ("web-{0}-*.zip" -f $Env) | Sort-Object Name -Descending | Select-Object -Skip 10 | Remove-Item -Force -ErrorAction SilentlyContinue
+# retention: keep last 10 per env per app
+Get-ChildItem $artDir -Filter ("{0}-{1}-*.zip" -f $App, $Env) | Sort-Object Name -Descending | Select-Object -Skip 10 | Remove-Item -Force -ErrorAction SilentlyContinue
+
+# --- jobs (Functions app): direct config-zip deploy, then done -------------
+if ($App -eq 'jobs') {
+    Write-Host ">> Deploying jobs to $($t.fn) ..." -ForegroundColor Cyan
+    [void](Invoke-Az @('functionapp','deployment','source','config-zip','-g',$t.rg,'-n',$t.fn,'--src',$zip,'--output','none'))
+    if ($script:AzExit -ne 0) { throw "functions deploy failed." }
+    Write-Host ">> $Env jobs deployed." -ForegroundColor Green
+    return
+}
 
 # Slot present? -> zero-downtime swap path.
 $slots = Invoke-Az @('webapp','deployment','slot','list','-g',$t.rg,'-n',$t.app,'--query','[].name','-o','tsv')

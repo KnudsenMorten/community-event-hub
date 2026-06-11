@@ -1,0 +1,79 @@
+@page
+@using CommunityHub.Core.Domain
+@model CommunityHub.Pages.Organizer.BroadcastModel
+@{
+    ViewData["Title"] = "Broadcast";
+}
+
+<div class="card">
+    <h2>Broadcast email</h2>
+
+    @if (Model.AccessDenied)
+    {
+        <p class="error">This area is for organizers only.</p>
+    }
+    else
+    {
+        <p>One message, sent individually (branded layout, personal greeting)
+           to every <strong>active</strong> participant in the groups you
+           pick. Deliveries are recorded in the ledger per subject &mdash;
+           re-sending the same subject only reaches people who have not
+           received it yet, so a retry never double-mails.</p>
+
+        @if (!string.IsNullOrEmpty(Model.ActionMessage))
+        {
+            <p class="@(Model.ActionIsError ? "error" : "info")">@Model.ActionMessage</p>
+        }
+
+        <form method="post">
+            <label>Recipient groups</label>
+            <div style="display:flex;flex-wrap:wrap;gap:6px 18px;margin:6px 0 4px;">
+                @foreach (var role in Enum.GetValues<ParticipantRole>())
+                {
+                    <label style="display:flex;align-items:center;gap:6px;font-weight:400;margin:0;">
+                        <input type="checkbox" name="Roles" value="@role"
+                               checked="@Model.Roles.Contains(role)" style="width:auto;margin:0;" />
+                        @role
+                    </label>
+                }
+                <label style="display:flex;align-items:center;gap:6px;font-weight:400;margin:0;">
+                    <input type="checkbox" name="IncludeAttendees" value="true"
+                           checked="@Model.IncludeAttendees" style="width:auto;margin:0;" />
+                    Attendees (reconciled from Zoho)
+                </label>
+            </div>
+
+            <label for="Subject">Subject</label>
+            <input type="text" id="Subject" name="Subject" value="@Model.Subject" maxlength="150" />
+
+            <label for="Message">Message (plain text; blank line = new paragraph)</label>
+            <textarea id="Message" name="Message" rows="8" style="max-width:640px;">@Model.Message</textarea>
+
+            <button type="submit" asp-page-handler="Preview" class="secondary">Preview + count recipients</button>
+
+            @if (Model.RecipientCount is not null)
+            {
+                <p style="margin:14px 0 6px;">
+                    <strong>@Model.RecipientCount recipient(s)</strong> match this selection.
+                    @if (Model.AlreadySentCount > 0)
+                    {
+                        <span class="info">@Model.AlreadySentCount already received this
+                        subject and will be skipped.</span>
+                    }
+                </p>
+                <button type="submit" asp-page-handler="Send"
+                        onclick="return confirm('Send to @Model.RecipientCount recipient(s) now?');">
+                    Send broadcast
+                </button>
+            }
+        </form>
+
+        @if (Model.PreviewHtml is not null)
+        {
+            <p style="margin:16px 0 6px;"><strong>Preview</strong> (sample first name):</p>
+            <iframe sandbox="" srcdoc="@Model.PreviewHtml"
+                    style="width:100%;height:420px;border:1px solid #d6d8e0;border-radius:8px;background:#fff;"></iframe>
+        }
+    }
+    <p><a asp-page="/Organizer/Index">Back to organizer area</a></p>
+</div>
