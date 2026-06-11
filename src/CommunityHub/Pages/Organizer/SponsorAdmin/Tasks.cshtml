@@ -1,0 +1,82 @@
+@page
+@model CommunityHub.Pages.Organizer.SponsorAdmin.TasksModel
+@{
+    ViewData["Title"] = "Sponsor tasks";
+}
+
+<div class="card">
+    <h2>Sponsor tasks</h2>
+    @if (Model.AccessDenied)
+    {
+        <p class="error">This area is for organizers only.</p>
+        <p><a asp-page="/Index">Back to hub</a></p>
+    }
+    else
+    {
+        <p>Catalog of tasks every sponsor company has to complete. Add a new
+           one, remove obsolete entries, or shift a deadline when a milestone
+           moves.</p>
+        <p><a asp-page="/Organizer/SponsorAdmin/Index">&larr; Back to Sponsor Admin</a></p>
+
+        @if (TempData["Notice"] is string notice)
+        {
+            <p class="info">@notice</p>
+        }
+    }
+</div>
+
+@if (!Model.AccessDenied)
+{
+    <div class="card">
+        <h2>Current catalog (@Model.Tasks.Count tasks)</h2>
+        <table style="width:100%;border-collapse:collapse;">
+            <tr style="text-align:left;border-bottom:2px solid #ddd;">
+                <th>Id</th><th>Title</th><th>Deadline</th><th>Notes</th><th style="width:230px;">Actions</th>
+            </tr>
+            @foreach (var t in Model.Tasks)
+            {
+                <tr style="border-bottom:1px solid #eee;">
+                    <td><code>@t.Id</code></td>
+                    <td>@t.Title</td>
+                    <td>@(t.Deadline?.ToString("yyyy-MM-dd") ?? "-")</td>
+                    <td style="font-size:13px;color:#5a6170;">@t.Notes</td>
+                    <td>
+                        <form method="post" asp-page-handler="ChangeDeadline" style="display:inline-flex;gap:4px;align-items:center;">
+                            <input type="hidden" name="id" value="@t.Id" />
+                            <input type="date" name="deadline" value="@(t.Deadline?.ToString("yyyy-MM-dd"))" required />
+                            <button type="submit">Save</button>
+                        </form>
+                        <form method="post" asp-page-handler="Delete" style="display:inline;" onsubmit="return confirm('Delete task @t.Id ?');">
+                            <input type="hidden" name="id" value="@t.Id" />
+                            <button type="submit" class="secondary">Delete</button>
+                        </form>
+                    </td>
+                </tr>
+            }
+        </table>
+    </div>
+
+    <div class="card">
+        <h2>Add a new task</h2>
+        <form method="post" asp-page-handler="Create" style="display:grid;grid-template-columns:120px 1fr;gap:8px 12px;max-width:680px;align-items:center;">
+            <label for="title">Title</label>
+            <input id="title" name="title" type="text" required maxlength="160" />
+
+            <label for="deadline">Deadline</label>
+            <input id="deadline" name="deadline" type="date" />
+
+            <label for="notes">Notes</label>
+            <input id="notes" name="notes" type="text" maxlength="400" placeholder="Optional context shown next to the task" />
+
+            <div></div>
+            <div><button type="submit">Add task</button></div>
+        </form>
+        <p style="font-size:12.5px;color:#5a6170;margin-top:14px;">
+            <strong>Note:</strong> create / delete / change-deadline are scaffolded on
+            this page but write to a stub list -- the catalog is currently
+            sourced from <code>SponsorTaskExpander</code> config. A
+            follow-up commit promotes the catalog to a DbSet so changes
+            persist.
+        </p>
+    </div>
+}

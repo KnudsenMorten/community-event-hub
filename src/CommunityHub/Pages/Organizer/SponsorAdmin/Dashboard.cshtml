@@ -1,0 +1,70 @@
+@page
+@model CommunityHub.Pages.Organizer.SponsorAdmin.DashboardModel
+@{
+    ViewData["Title"] = "Sponsor status dashboard";
+}
+
+<div class="card">
+    <h2>Sponsor status dashboard</h2>
+    @if (Model.AccessDenied)
+    {
+        <p class="error">This area is for organizers only.</p>
+        <p><a asp-page="/Index">Back to hub</a></p>
+    }
+    else
+    {
+        <p>Per-sponsor view of task completion and lead volume. Sorted by
+           overdue tasks first.</p>
+        <p><a asp-page="/Organizer/SponsorAdmin/Index">&larr; Back to Sponsor Admin</a></p>
+
+        @if (Model.ZohoPipelinePending)
+        {
+            <p class="info" style="background:#fff8e1;border-left:3px solid #f4b400;padding:8px 12px;border-radius:4px;">
+                <strong>Zoho pipeline not yet configured.</strong>
+                The lead counters render as zero until the Zoho sync job is wired up
+                (Zoho OAuth + DB migration + storage SAS). See the
+                <a asp-page="/Organizer/SponsorAdmin/Leads">Leads page</a> for the
+                full checklist.
+            </p>
+        }
+    }
+</div>
+
+@if (!Model.AccessDenied)
+{
+    <div class="card">
+        <h2>Sponsors (@Model.Rows.Count)</h2>
+        @if (Model.Rows.Count == 0)
+        {
+            <p class="info">No sponsor companies have participants with tasks yet.</p>
+        }
+        else
+        {
+            <table style="width:100%;border-collapse:collapse;">
+                <tr style="text-align:left;border-bottom:2px solid #ddd;">
+                    <th>Company id</th>
+                    <th style="text-align:right;">Contacts</th>
+                    <th style="text-align:right;">Tasks done</th>
+                    <th style="text-align:right;">Total tasks</th>
+                    <th style="text-align:right;">Overdue</th>
+                    <th style="text-align:right;">Leads</th>
+                    <th style="text-align:right;">Leads 7d</th>
+                    <th>Last Zoho sync</th>
+                </tr>
+                @foreach (var r in Model.Rows)
+                {
+                    <tr style="border-bottom:1px solid #eee; @(r.TasksOverdue > 0 ? "background:#fff5f5;" : "")">
+                        <td>@r.CompanyId</td>
+                        <td style="text-align:right;">@r.Contacts</td>
+                        <td style="text-align:right;">@r.TasksDone</td>
+                        <td style="text-align:right;">@r.TasksTotal</td>
+                        <td style="text-align:right;@(r.TasksOverdue > 0 ? "color:#c0392b;font-weight:700;" : "")">@r.TasksOverdue</td>
+                        <td style="text-align:right;">@r.LeadsTotal</td>
+                        <td style="text-align:right;">@r.LeadsLast7d</td>
+                        <td>@(r.LastZohoSync?.ToString("u") ?? "-")</td>
+                    </tr>
+                }
+            </table>
+        }
+    </div>
+}

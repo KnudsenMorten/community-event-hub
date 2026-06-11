@@ -106,6 +106,18 @@ builder.Services.AddSingleton<CommunityHub.Auth.MagicLinkService>();
 builder.Services.AddScoped<CommunityHub.Core.Reminders.OrganizerActionItemService>();
 builder.Services.AddScoped<CommunityHub.Notify.HotelCalendarInviter>();
 
+// Sponsor leads API key service. SCAFFOLD: in-memory implementation --
+// keys evaporate on App Service restart. Swap to a DbSet-backed
+// implementation once the EF migration for SponsorApiKey lands.
+builder.Services.AddSingleton<
+    CommunityHub.Core.Integrations.Sponsors.ISponsorApiKeyService,
+    CommunityHub.Core.Integrations.Sponsors.InMemorySponsorApiKeyService>();
+
+// API routing (the SponsorLeadsController under /api/v1/sponsors/{id}/...).
+// AddControllers is additive on top of AddRazorPages, so the existing
+// page surface keeps working.
+builder.Services.AddControllers();
+
 // SpeakerDeadlineSeeder: web-side invocation so a speaker's deadline tasks
 // appear on their first hub visit, not only when the Functions ReminderJob
 // runs. The seeder is idempotent (SourceKey-keyed), so calling it from
@@ -204,5 +216,6 @@ app.Use(async (context, next) =>
 
 app.MapHealthChecks("/health");
 app.MapRazorPages();
+app.MapControllers();
 
 app.Run();

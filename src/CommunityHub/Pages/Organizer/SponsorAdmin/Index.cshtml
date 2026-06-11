@@ -1,0 +1,49 @@
+@page
+@model CommunityHub.Pages.Organizer.SponsorAdmin.IndexModel
+@{
+    ViewData["Title"] = "Sponsor Admin";
+}
+
+<div class="card">
+    <h2>Sponsor Admin</h2>
+    @if (Model.AccessDenied)
+    {
+        <p class="error">This area is for organizers only.</p>
+        <p><a asp-page="/Index">Back to hub</a></p>
+    }
+    else
+    {
+        <p>One stop for sponsor-facing operations: manage the task catalog,
+           review and export leads that came in via Zoho, and watch the
+           per-sponsor status dashboard.</p>
+        <p><a asp-page="/Organizer/Index">&larr; Back to Organizer area</a></p>
+    }
+</div>
+
+@if (!Model.AccessDenied)
+{
+    <div class="card">
+        <h2>1. Sponsor tasks</h2>
+        <p>Catalog of tasks every sponsor company has to complete (logo
+           upload, attendee list, dinner pick, etc). Create new ones,
+           delete obsolete ones, or shift the deadline when a milestone
+           moves.</p>
+        <p><a asp-page="/Organizer/SponsorAdmin/Tasks">Manage sponsor tasks</a></p>
+    </div>
+
+    <div class="card">
+        <h2>2. Sponsor leads</h2>
+        <p>Leads, inquiries, and booth-meeting requests pulled daily from
+           Zoho CRM. View per sponsor; download as CSV (also auto-exported
+           to each sponsor's storage drop daily).</p>
+        <p><a asp-page="/Organizer/SponsorAdmin/Leads">Manage sponsor leads</a></p>
+    </div>
+
+    <div class="card">
+        <h2>3. Sponsor status dashboard</h2>
+        <p>Per-sponsor view of: tasks done vs open, overdue items, lead
+           volume this week / since start, last Zoho sync. Sortable; click
+           a row for the per-sponsor detail.</p>
+        <p><a asp-page="/Organizer/SponsorAdmin/Dashboard">Open dashboard</a></p>
+    </div>
+}

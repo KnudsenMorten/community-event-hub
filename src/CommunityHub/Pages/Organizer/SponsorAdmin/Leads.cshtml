@@ -1,0 +1,232 @@
+﻿@page
+@model CommunityHub.Pages.Organizer.SponsorAdmin.LeadsModel
+@{
+    ViewData["Title"] = "Sponsor leads";
+}
+
+<div class="card">
+    <h2>Sponsor leads</h2>
+    @if (Model.AccessDenied)
+    {
+        <p class="error">This area is for organizers only.</p>
+        <p><a asp-page="/Index">Back to hub</a></p>
+    }
+    else
+    {
+        <p>Leads, inquiries, and booth-meeting requests pulled daily from
+           Zoho CRM. View per sponsor; per-sponsor API keys + download
+           samples + notification preferences live in the sections
+           below.</p>
+        <p><a asp-page="/Organizer/SponsorAdmin/Index">&larr; Back to Sponsor Admin</a></p>
+
+        @if (TempData["Notice"] is string notice)
+        {
+            <p class="info">@notice</p>
+        }
+    }
+</div>
+
+@if (!Model.AccessDenied)
+{
+    <div class="card">
+        <h2>1. Pipeline status</h2>
+        <table style="width:100%;border-collapse:collapse;max-width:560px;">
+            <tr style="border-bottom:1px solid #eee;"><td>Total leads in DB</td><td><strong>@Model.TotalLeads</strong></td></tr>
+            <tr style="border-bottom:1px solid #eee;"><td>New in last 7 days</td><td><strong>@Model.LeadsLast7d</strong></td></tr>
+            <tr><td>Last Zoho sync</td><td><strong>@(Model.LastZohoSyncAt?.ToString("u") ?? "(never &mdash;” pipeline not configured yet)")</strong></td></tr>
+        </table>
+        <p style="margin-top:14px;">
+            <form method="post" asp-page-handler="SyncNow" style="display:inline;">
+                <button type="submit">Run Zoho sync now</button>
+            </form>
+        </p>
+    </div>
+
+    <div class="card">
+        <h2>2. Per-sponsor API keys + download</h2>
+        <p>Every sponsor company gets its own API key. The key authenticates
+           two endpoints (JSON + CSV) that return that sponsor's leads
+           only. The key is shown ONCE at issue time &mdash;” copy it and hand
+           it to the sponsor immediately; the hub stores only its SHA256
+           hash.</p>
+
+        @if (Model.FreshKeyForSponsor is string freshSponsor && Model.FreshKeyValue is string freshKey)
+        {
+            <div style="background:#fff8e1;border-left:3px solid #f4b400;padding:12px 14px;border-radius:4px;margin:12px 0;">
+                <strong>New key issued for sponsor '@freshSponsor':</strong>
+                <pre style="background:#fff;border:1px solid #d0d7de;border-radius:4px;padding:8px 10px;margin:8px 0 0 0;overflow-x:auto;user-select:all;">@freshKey</pre>
+                <p style="margin:8px 0 0 0;font-size:12.5px;color:#5a6170;">
+                    Hand this to the sponsor NOW &mdash;” it's not retrievable after you leave the page.
+                </p>
+            </div>
+        }
+
+        <table style="width:100%;border-collapse:collapse;">
+            <tr style="text-align:left;border-bottom:2px solid #ddd;">
+                <th>Sponsor company id</th>
+                <th>Current key</th>
+                <th>Issued</th>
+                <th>Issued by</th>
+                <th style="width:260px;">Actions</th>
+            </tr>
+            @foreach (var s in Model.SponsorKeys)
+            {
+                <tr style="border-bottom:1px solid #eee;">
+                    <td><code>@s.SponsorCompanyId</code></td>
+                    <td>@(s.KeyPrefix is null ? "(no active key)" : s.KeyPrefix + "...")</td>
+                    <td>@(s.IssuedAt?.ToString("u") ?? "-")</td>
+                    <td>@(s.IssuedByEmail ?? "-")</td>
+                    <td>
+                        <form method="post" asp-page-handler="IssueKey" style="display:inline;">
+                            <input type="hidden" name="sponsorCompanyId" value="@s.SponsorCompanyId" />
+                            <button type="submit">@(s.KeyPrefix is null ? "Issue key" : "Regenerate")</button>
+                        </form>
+                        @if (s.KeyPrefix is not null)
+                        {
+                            <form method="post" asp-page-handler="RevokeKey" style="display:inline;" onsubmit="return confirm('Revoke @s.SponsorCompanyId key?');">
+                                <input type="hidden" name="sponsorCompanyId" value="@s.SponsorCompanyId" />
+                                <button type="submit" class="secondary">Revoke</button>
+                            </form>
+                        }
+                    </td>
+                </tr>
+            }
+        </table>
+
+        <h3 style="margin-top:24px;">Download samples</h3>
+        <p>Sponsors call these endpoints with their API key in either the
+           <code>X-Sponsor-Api-Key</code> request header (preferred) or
+           a <code>?key=</code> query parameter (browser-friendly).</p>
+
+        <h4>A. PowerShell &mdash;” download CSV to file</h4>
+<pre style="background:#0d1117;color:#c9d1d9;padding:12px 14px;border-radius:6px;overflow-x:auto;">
+$key       = 'PASTE-YOUR-SPONSOR-API-KEY-HERE'
+$cid       = 'YOUR-SPONSOR-COMPANY-ID'
+$outFile   = "$env:USERPROFILE\Downloads\leads-$cid-$(Get-Date -Format yyyy-MM-dd).csv"
+
+Invoke-WebRequest -Uri "@(Model.BaseUrl)/api/v1/sponsors/$cid/leads.csv" `
+                  -Headers @@{ 'X-Sponsor-Api-Key' = $key } `
+                  -OutFile $outFile
+Write-Host "Saved $outFile"
+</pre>
+
+        <h4>B. PowerShell &mdash;” fetch JSON, pipe into your own pipeline</h4>
+<pre style="background:#0d1117;color:#c9d1d9;padding:12px 14px;border-radius:6px;overflow-x:auto;">
+$key = 'PASTE-YOUR-SPONSOR-API-KEY-HERE'
+$cid = 'YOUR-SPONSOR-COMPANY-ID'
+
+$resp = Invoke-RestMethod -Uri "@(Model.BaseUrl)/api/v1/sponsors/$cid/leads.json" `
+                          -Headers @@{ 'X-Sponsor-Api-Key' = $key }
+
+"$($resp.count) leads for $cid"
+$resp.leads | Where-Object { $_.LeadKind -eq 'Meeting' } |
+              Select-Object FullName, Company, Email, CapturedAt
+</pre>
+
+        <h4>C. PowerShell &mdash;” scheduled task (daily, 06:30 local)</h4>
+<pre style="background:#0d1117;color:#c9d1d9;padding:12px 14px;border-radius:6px;overflow-x:auto;">
+# Save as Download-Leads.ps1, then register the task.
+$key     = $env:SPONSOR_API_KEY      # set once in scheduled-task env
+$cid     = 'YOUR-SPONSOR-COMPANY-ID'
+$outDir  = "$env:USERPROFILE\Downloads\sponsor-leads"
+$null    = New-Item -ItemType Directory -Force -Path $outDir
+$outFile = Join-Path $outDir "leads-$cid-$(Get-Date -Format yyyy-MM-dd).csv"
+Invoke-WebRequest -Uri "@(Model.BaseUrl)/api/v1/sponsors/$cid/leads.csv" `
+                  -Headers @@{ 'X-Sponsor-Api-Key' = $key } `
+                  -OutFile $outFile
+
+# Register the task (one-shot, run from an elevated PowerShell):
+#   schtasks /create /tn "Download sponsor leads" /sc daily /st 06:30 /rl LIMITED `
+#            /tr "powershell -NoProfile -File C:\path\Download-Leads.ps1"
+</pre>
+
+        <h4>D. Browser direct download (no PowerShell)</h4>
+        <p>Paste this URL into the address bar &mdash;” the browser downloads
+           <code>leads-&lt;sponsor&gt;-&lt;date&gt;.csv</code> into the
+           Downloads folder. The query-string key form is only intended
+           for this manual case (avoid embedding in bookmarks since URLs
+           land in browser history):</p>
+<pre style="background:#0d1117;color:#c9d1d9;padding:12px 14px;border-radius:6px;overflow-x:auto;">@(Model.BaseUrl)/api/v1/sponsors/YOUR-SPONSOR-COMPANY-ID/leads.csv?key=PASTE-API-KEY-HERE</pre>
+    </div>
+
+    <div class="card">
+        <h2>3. Notification preferences (per sponsor)</h2>
+        <p>Sponsors can opt-in to a delta digest of new leads since the
+           last notification. SCAFFOLD: form submits land in the
+           <em>SaveNotifyPrefs</em> handler stub; persistence pending
+           the <code>SponsorLeadNotificationPref</code> EF migration.</p>
+
+        @foreach (var s in Model.SponsorKeys)
+        {
+            <details style="margin:10px 0;padding:8px 12px;border:1px solid #d0d7de;border-radius:6px;">
+                <summary><strong>@s.SponsorCompanyId</strong></summary>
+                <form method="post" asp-page-handler="SaveNotifyPrefs" style="display:grid;grid-template-columns:160px 1fr;gap:8px 12px;max-width:680px;align-items:center;margin-top:10px;">
+                    <input type="hidden" name="sponsorCompanyId" value="@s.SponsorCompanyId" />
+
+                    <label>Enabled</label>
+                    <label><input type="checkbox" name="enabled" value="true" /> Send digest of new leads</label>
+
+                    <label>Cadence</label>
+                    <select name="cadence">
+                        <option value="Daily">Daily (06:00 UTC)</option>
+                        <option value="RealTime">Real-time (~30 min)</option>
+                    </select>
+
+                    <label>Recipients</label>
+                    <input name="recipients" type="text" placeholder="comma-separated emails" />
+
+                    <label>Skip junk</label>
+                    <label><input type="checkbox" name="skipJunk" value="true" checked /> Exclude leads the AI screen marked as junk</label>
+
+                    <div></div>
+                    <div><button type="submit">Save preferences</button></div>
+                </form>
+            </details>
+        }
+    </div>
+
+    <div class="card">
+        <h2>4. Recent leads + actions</h2>
+        <p>SCAFFOLD: empty grid until <code>DbSet&lt;SponsorLead&gt;</code>
+           is added and the Zoho pull runs. The actions below the empty
+           table demonstrate the per-lead flow that will be enabled
+           once leads are present.</p>
+
+        <table style="width:100%;border-collapse:collapse;">
+            <tr style="text-align:left;border-bottom:2px solid #ddd;">
+                <th>Captured</th><th>Sponsor</th><th>Type</th><th>Name</th><th>Company</th><th>Email</th><th>AI</th><th>Status</th><th style="width:340px;">Actions</th>
+            </tr>
+            <tr>
+                <td colspan="9" class="info" style="padding:14px;">No leads yet &mdash;” once Zoho pipeline lands, rows appear here with per-lead Reply / Mark Processed / Mark Junk / Delete buttons + an AI screen badge.</td>
+            </tr>
+        </table>
+    </div>
+
+    <div class="card">
+        <h2>What still needs to go live</h2>
+        <ol>
+            <li><strong>Zoho OAuth credentials</strong> in
+                <code>config/integrations.eldk27.json</code> under a new
+                <code>Zoho</code> block (clientId + clientSecret +
+                refreshToken + region).</li>
+            <li><strong>EF migration</strong> adding
+                <code>SponsorLead</code> + <code>SponsorApiKey</code> +
+                <code>SponsorLeadNotificationPref</code> +
+                <code>ZohoSyncCheckpoint</code> tables. Once applied,
+                swap the in-memory key store for a DbSet-backed one.</li>
+            <li><strong>Storage container</strong> with one folder per
+                sponsor for the daily CSV drop (alternative to the API
+                pull path). Per-sponsor SAS is recommended; rotated
+                alongside the API key.</li>
+            <li><strong>Hangfire / cron registration</strong> of
+                <code>ZohoLeadsSyncJob</code>,
+                <code>SponsorLeadsExportJob</code>, and
+                <code>SponsorLeadNotifyJob</code> (digest delta).</li>
+            <li><strong>AI screen</strong> wired against your preferred
+                LLM (Azure OpenAI deployment id +
+                <code>SponsorLeadAiScreenService</code>). Per-lead
+                runner can be the same job or a separate one.</li>
+        </ol>
+    </div>
+}
+

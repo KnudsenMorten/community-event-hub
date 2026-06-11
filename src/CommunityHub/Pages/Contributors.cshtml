@@ -1,0 +1,63 @@
+@page
+@model CommunityHub.Pages.ContributorsModel
+@{
+    ViewData["Title"] = "Contributors";
+}
+
+<div class="card">
+    <h2>Contributors</h2>
+    <p>The Community Event Hub is shaped by a team of organizers and a
+       growing list of external contributors. This page exists to credit
+       every one of them &mdash; the event would not run without them.</p>
+    <p>Want to contribute? Open an issue or a pull request on
+       <a href="https://github.com/KnudsenMorten/community-event-hub" target="_blank" rel="noopener">GitHub</a>,
+       or reach out via the event site. Code, design, content, sponsor
+       outreach, dinner logistics &mdash; all of it counts.</p>
+</div>
+
+<div class="card">
+    <h2>Organizer team</h2>
+    <p>The people running Experts Live Denmark year-round.</p>
+    <ul style="list-style:none;padding:0;margin:0;">
+        @foreach (var c in Model.Organizers)
+        {
+            <li style="padding:10px 0;border-bottom:1px solid #eee;">
+                <div style="font-weight:700;font-size:15px;">
+                    @if (c.LinkedIn is not null)
+                    {
+                        <a href="@c.LinkedIn" target="_blank" rel="noopener">@c.Name</a>
+                    }
+                    else
+                    {
+                        @c.Name
+                    }
+                </div>
+                <div style="font-size:13px;color:#5a6170;">@c.Role</div>
+            </li>
+        }
+    </ul>
+</div>
+
+<div class="card">
+    <h2>Contributors</h2>
+    <p>External help on code, design, content, sponsor coordination, and
+       everything in between.</p>
+    <ul style="list-style:none;padding:0;margin:0;">
+        @foreach (var c in Model.Contributors)
+        {
+            <li style="padding:10px 0;border-bottom:1px solid #eee;">
+                <div style="font-weight:700;font-size:15px;">
+                    @if (c.LinkedIn is not null)
+                    {
+                        <a href="@c.LinkedIn" target="_blank" rel="noopener">@c.Name</a>
+                    }
+                    else
+                    {
+                        @c.Name
+                    }
+                </div>
+                <div style="font-size:13px;color:#5a6170;">@c.Role</div>
+            </li>
+        }
+    </ul>
+</div>
