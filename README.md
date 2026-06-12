@@ -371,6 +371,16 @@ matched the row color and disappeared).
 >   `tools/deploy-app.ps1` now warms every anonymous page post-swap so
 >   no real visitor ever pays that cost.
 
+> **NEW in v1.2.11: speaker + volunteer mobile sweeps.** The portal
+> Playwright suite gained two more roles: it now also logs in as a real
+> **speaker** (PIN flow, Role 1) sweeping the logged-in hub front page,
+> `/Tasks` and every speaker-visible form (Hotel, Dinner, Speaker,
+> Travel, Swag, Lunch), and as a real **volunteer** (Role 3) sweeping
+> the volunteer signup forms + wizard — all clean on first run. With
+> organizer, sponsor, speaker, volunteer and attendee sweeps plus the
+> anonymous public sweep, **every page in the hub is now covered by a
+> mobile-overflow test**.
+
 > **NEW in v1.1.x: Sponsor Admin sub-area.** A single Organizer-gated
 > hub (under *Organizers → Sponsor Admin*) carrying three pages:
 >

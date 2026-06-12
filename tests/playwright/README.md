@@ -10,7 +10,7 @@ Three suites:
 |---|---|---|---|
 | Survey (public) | `survey-mobile.spec.ts` | DEV + PROD | none |
 | Organizer admin | `admin-mobile.spec.ts` | DEV only | real PIN login (see below) |
-| Sponsor + attendee portals | `portal-mobile.spec.ts` | DEV only | real PIN login per role |
+| Sponsor / speaker / volunteer / attendee portals | `portal-mobile.spec.ts` | DEV only | real PIN login per role |
 
 ## What the survey suite covers
 
@@ -87,13 +87,14 @@ Notes:
 ## What the portal suite covers
 
 `portal-mobile.spec.ts` is the participant-facing counterpart of the
-organizer sweep: it logs in as a **sponsor contact** (ParticipantRole 4)
-and as an **attendee** (Role 5) via the same real PIN flow and sweeps
-their areas (`/Sponsor`, `/Sponsor/Tasks`, `/Sponsor/Leads`,
-`/Sponsor/Logistics`, `/Sponsor/Contact`, `/Attendee`) asserting
-HTTP 200, no bounce back to `/Login`, and no horizontal overflow.
-Read-only — it never submits forms. Its first run caught a real
-overflow on `/Sponsor/Leads` (unwrapped endpoint + key tables).
+organizer sweep: it logs in as a **sponsor contact** (ParticipantRole 4),
+a **speaker** (Role 1), a **volunteer** (Role 3) and an **attendee**
+(Role 5) via the same real PIN flow and sweeps their areas (`/Sponsor*`;
+the logged-in hub front page + `/Tasks` + every `/Forms/*` form the
+role sees; `/Attendee`) asserting HTTP 200, no bounce back to `/Login`,
+and no horizontal overflow. Read-only — it never submits forms. Its
+first run caught a real overflow on `/Sponsor/Leads` (unwrapped
+endpoint + key tables).
 
 `plant-test-pins.ps1 -Role` selects which participant role the PIN rows
 are planted for. Each describe-block self-skips when its env vars are
@@ -103,6 +104,10 @@ missing:
 cd tests\playwright
 $env:SPONSOR_EMAIL  = '<sponsor-contact-email>'        # any active Role-4 contact in DEV
 $env:SPONSOR_PIN    = & ..\..\tools\plant-test-pins.ps1 -OrganizerEmail $env:SPONSOR_EMAIL -Role 4 -Count 2
+$env:SPEAKER_EMAIL  = '<speaker-email>'                # any active Role-1 participant in DEV
+$env:SPEAKER_PIN    = & ..\..\tools\plant-test-pins.ps1 -OrganizerEmail $env:SPEAKER_EMAIL -Role 1 -Count 2
+$env:VOLUNTEER_EMAIL = '<volunteer-email>'             # any active Role-3 participant in DEV
+$env:VOLUNTEER_PIN   = & ..\..\tools\plant-test-pins.ps1 -OrganizerEmail $env:VOLUNTEER_EMAIL -Role 3 -Count 2
 $env:ATTENDEE_EMAIL = '<attendee-email>'               # any active Role-5 participant in DEV
 $env:ATTENDEE_PIN   = & ..\..\tools\plant-test-pins.ps1 -OrganizerEmail $env:ATTENDEE_EMAIL -Role 5 -Count 2
 npx playwright test portal-mobile --reporter=list

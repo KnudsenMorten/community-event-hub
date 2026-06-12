@@ -79,6 +79,47 @@ test.describe('DEV sponsor portal (mobile)', () => {
     });
 });
 
+test.describe('DEV speaker portal (mobile)', () => {
+    const EMAIL = process.env.SPEAKER_EMAIL ?? '';
+    const PIN = process.env.SPEAKER_PIN ?? '';
+    test.skip(!EMAIL || !PIN,
+        'SPEAKER_EMAIL/SPEAKER_PIN not set - plant with tools/plant-test-pins.ps1 -Role 1');
+    test.beforeEach(({ }, testInfo) => {
+        test.skip(!testInfo.project.name.includes('iPhone SE'),
+            'portal sweep runs on the narrowest viewport only');
+    });
+
+    test('mobile sweep: hub + every speaker form renders without horizontal overflow', async ({ page }) => {
+        await login(page, EMAIL, PIN);
+        await sweep(page, [
+            '/',                      // logged-in hub front page (pending tasks)
+            '/Tasks',
+            '/Forms/Hotel', '/Forms/Dinner', '/Forms/Speaker',
+            '/Forms/Travel', '/Forms/Swag', '/Forms/Lunch',
+        ]);
+    });
+});
+
+test.describe('DEV volunteer portal (mobile)', () => {
+    const EMAIL = process.env.VOLUNTEER_EMAIL ?? '';
+    const PIN = process.env.VOLUNTEER_PIN ?? '';
+    test.skip(!EMAIL || !PIN,
+        'VOLUNTEER_EMAIL/VOLUNTEER_PIN not set - plant with tools/plant-test-pins.ps1 -Role 3');
+    test.beforeEach(({ }, testInfo) => {
+        test.skip(!testInfo.project.name.includes('iPhone SE'),
+            'portal sweep runs on the narrowest viewport only');
+    });
+
+    test('mobile sweep: volunteer forms render without horizontal overflow', async ({ page }) => {
+        await login(page, EMAIL, PIN);
+        await sweep(page, [
+            '/', '/Tasks',
+            '/Forms/Volunteer', '/Forms/VolunteerWizard',
+            '/Forms/Dinner', '/Forms/Swag', '/Forms/Lunch',
+        ]);
+    });
+});
+
 test.describe('DEV attendee portal (mobile)', () => {
     const EMAIL = process.env.ATTENDEE_EMAIL ?? '';
     const PIN = process.env.ATTENDEE_PIN ?? '';
