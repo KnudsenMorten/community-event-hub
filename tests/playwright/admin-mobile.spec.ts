@@ -177,6 +177,59 @@ test.describe('DEV organizer admin (mobile)', () => {
         expect(bad.status()).toBe(401);
     });
 
+    test('group photos: register + schedule + send calendar invite', async ({ page }) => {
+        await login(page);
+
+        await page.goto(`${BASE}/Organizer/GroupPhotos`, { waitUntil: 'domcontentloaded' });
+        await expect(page.locator('h2', { hasText: 'Group photos' })).toBeVisible();
+        await assertNoHorizontalScroll(page);
+
+        // Register a company with a slot (idempotent-ish: unique name per run).
+        const company = `PW Photo Co ${Date.now()}`;
+        await page.locator('summary', { hasText: 'Register a company' }).click();
+        const form = page.locator('form[action*="Create"]').first();
+        await form.locator('input[name="companyName"]').fill(company);
+        await form.locator('input[name="contactName"]').fill('Lena Larsen');
+        await form.locator('input[name="contactEmail"]').fill('lena.larsen@contoso-example.dk');
+        await form.locator('input[name="scheduledLocal"]').fill('2027-02-10T11:30');
+        await form.getByRole('button', { name: 'Register' }).click();
+        await expect(page.locator('.info', { hasText: `Registered '${company}'` })).toBeVisible();
+
+        // Send the calendar invite (DEV redirect catches the real ICS mail).
+        const row = page.locator('details', { hasText: company });
+        await row.locator('summary').click();
+        await row.getByRole('button', { name: /calendar invite/ }).click();
+        await expect(page.locator('.info', { hasText: /Invite for '.*': 1 sent/ })).toBeVisible({ timeout: 20_000 });
+        await assertNoHorizontalScroll(page);
+    });
+
+    test('app game: register sponsor + send gift reminder', async ({ page }) => {
+        await login(page);
+
+        await page.goto(`${BASE}/Organizer/AppGame`, { waitUntil: 'domcontentloaded' });
+        await expect(page.locator('h2', { hasText: 'App game' })).toBeVisible();
+        await assertNoHorizontalScroll(page);
+
+        // Register sponsor company 10 if not already on the board.
+        const already = await page.locator('details', { hasText: 'PW Game Sponsor' }).count();
+        if (already === 0) {
+            await page.locator('summary', { hasText: 'Register a sponsor' }).click();
+            const form = page.locator('form[action*="Create"]').first();
+            await form.locator('select[name="sponsorCompanyId"]').selectOption('10');
+            await form.locator('input[name="companyName"]').fill('PW Game Sponsor');
+            await form.locator('input[name="giftDescription"]').fill('Lego Technic set');
+            await form.getByRole('button', { name: 'Register' }).click();
+            await expect(page.locator('.info', { hasText: /Registered 'PW Game Sponsor'/ })).toBeVisible();
+        }
+
+        // Send the gift reminder to the company's contacts (DEV-redirected).
+        const row = page.locator('details', { hasText: 'PW Game Sponsor' });
+        await row.locator('summary').click();
+        await row.getByRole('button', { name: 'Send gift reminder' }).click();
+        await expect(page.locator('.info', { hasText: /Gift reminder for 'PW Game Sponsor': \d+ sent/ })).toBeVisible({ timeout: 20_000 });
+        await assertNoHorizontalScroll(page);
+    });
+
     test('email center: test-send delivers (DEV redirect catches it)', async ({ page }) => {
         await login(page);
 

@@ -1,0 +1,98 @@
+@page
+@model CommunityHub.Pages.Organizer.GroupPhotosModel
+@{
+    ViewData["Title"] = "Group photos";
+}
+
+<div class="card">
+    <h2>Group photos</h2>
+
+    @if (Model.AccessDenied)
+    {
+        <p class="error">This area is for organizers only.</p>
+    }
+    else
+    {
+        <p>Register each company's group photo session, schedule the slot,
+           and send a calendar invite to the lead contact plus internal
+           participants. Re-sending after a slot move <strong>updates</strong>
+           the recipients' existing calendar entry (stable invite id).</p>
+
+        @if (!string.IsNullOrEmpty(Model.Notice))
+        {
+            <p class="info">@Model.Notice</p>
+        }
+
+        <details style="margin:10px 0;padding:8px 12px;border:1px solid #d0d7de;border-radius:6px;">
+            <summary><strong>+ Register a company</strong></summary>
+            <form method="post" asp-page-handler="Create" style="margin-top:10px;max-width:480px;">
+                <label>Company name</label>
+                <input type="text" name="companyName" required />
+                <label>Lead contact name</label>
+                <input type="text" name="contactName" />
+                <label>Lead contact email</label>
+                <input type="email" name="contactEmail" required />
+                <label>Internal participants (comma-separated emails)</label>
+                <input type="text" name="internalParticipants" />
+                <label>Slot (Danish local time)</label>
+                <input type="datetime-local" name="scheduledLocal" />
+                <label>Location</label>
+                <input type="text" name="location" placeholder="e.g. main stage backdrop" />
+                <label>Notes</label>
+                <input type="text" name="notes" />
+                <button type="submit">Register</button>
+            </form>
+        </details>
+
+        @if (Model.Registrations.Count == 0)
+        {
+            <p class="info">No registrations yet.</p>
+        }
+        else
+        {
+            @foreach (var r in Model.Registrations)
+            {
+                <details style="margin:10px 0;padding:8px 12px;border:1px solid #d0d7de;border-radius:6px;@(r.ScheduledAtUtc is null ? "border-left:3px solid #f4b400;" : "")">
+                    <summary>
+                        <strong>@r.CompanyName</strong>
+                        @if (r.ScheduledAtUtc is not null)
+                        {
+                            <span style="color:#6b7280;font-size:13px;">&mdash; @TimeZoneInfo.ConvertTimeFromUtc(r.ScheduledAtUtc.Value.UtcDateTime, TimeZoneInfo.FindSystemTimeZoneById("Europe/Copenhagen")).ToString("ddd d MMM HH:mm") (local)</span>
+                        }
+                        else
+                        {
+                            <span style="color:#b45309;font-size:13px;">&mdash; not scheduled</span>
+                        }
+                        @if (r.InviteLastSentAt is not null)
+                        {
+                            <span class="info" style="font-size:13px;">&middot; invite sent @r.InviteLastSentAt.Value.UtcDateTime.ToString("dd MMM HH:mm") UTC</span>
+                        }
+                    </summary>
+                    <form method="post" asp-page-handler="Update" style="margin-top:10px;max-width:480px;">
+                        <input type="hidden" name="id" value="@r.Id" />
+                        <label>Lead contact name</label>
+                        <input type="text" name="contactName" value="@r.ContactName" />
+                        <label>Lead contact email</label>
+                        <input type="email" name="contactEmail" value="@r.ContactEmail" required />
+                        <label>Internal participants</label>
+                        <input type="text" name="internalParticipants" value="@r.InternalParticipants" />
+                        <label>Slot (Danish local time)</label>
+                        <input type="datetime-local" name="scheduledLocal"
+                               value="@(r.ScheduledAtUtc is null ? "" : TimeZoneInfo.ConvertTimeFromUtc(r.ScheduledAtUtc.Value.UtcDateTime, TimeZoneInfo.FindSystemTimeZoneById("Europe/Copenhagen")).ToString("yyyy-MM-ddTHH:mm"))" />
+                        <label>Location</label>
+                        <input type="text" name="location" value="@r.Location" />
+                        <label>Notes</label>
+                        <input type="text" name="notes" value="@r.Notes" />
+                        <div style="display:flex;flex-wrap:wrap;gap:8px;">
+                            <button type="submit">Save</button>
+                            <button type="submit" asp-page-handler="SendInvite" formnovalidate>Send / update calendar invite</button>
+                            <button type="submit" asp-page-handler="Delete" class="secondary" formnovalidate
+                                    onclick="return confirm('Remove the @r.CompanyName registration?');">Remove</button>
+                        </div>
+                    </form>
+                </details>
+            }
+        }
+    }
+    <p><a asp-page="/Organizer/Index">Back to organizer area</a></p>
+</div>

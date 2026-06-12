@@ -1,0 +1,90 @@
+@page
+@model CommunityHub.Pages.Organizer.AppGameModel
+@{
+    ViewData["Title"] = "App game";
+}
+
+<div class="card">
+    <h2>App game &mdash; sponsor participation</h2>
+
+    @if (Model.AccessDenied)
+    {
+        <p class="error">This area is for organizers only.</p>
+    }
+    else
+    {
+        <p>Register which sponsors take part in the attendee app game and the
+           gift they committed. The reminder button mails every contact of
+           the sponsor company a branded "remember to bring the gift" note.</p>
+
+        @if (!string.IsNullOrEmpty(Model.Notice))
+        {
+            <p class="info">@Model.Notice</p>
+        }
+
+        <details style="margin:10px 0;padding:8px 12px;border:1px solid #d0d7de;border-radius:6px;">
+            <summary><strong>+ Register a sponsor</strong></summary>
+            <form method="post" asp-page-handler="Create" style="margin-top:10px;max-width:480px;">
+                <label>Sponsor company</label>
+                <select name="sponsorCompanyId" required>
+                    <option value="">Pick a company id&hellip;</option>
+                    @foreach (var (id, name) in Model.SponsorCompanies)
+                    {
+                        <option value="@id">@name</option>
+                    }
+                </select>
+                <label>Display name (used in mails)</label>
+                <input type="text" name="companyName" required placeholder="e.g. Contoso ApS" />
+                <label>Gift</label>
+                <input type="text" name="giftDescription" placeholder="e.g. Lego Technic set (~500 DKK)" />
+                <label>Notes</label>
+                <input type="text" name="notes" />
+                <button type="submit">Register</button>
+            </form>
+        </details>
+
+        @if (Model.Participations.Count == 0)
+        {
+            <p class="info">No sponsors registered for the app game yet.</p>
+        }
+        else
+        {
+            @foreach (var p in Model.Participations)
+            {
+                <details style="margin:10px 0;padding:8px 12px;border:1px solid #d0d7de;border-radius:6px;@(p.GiftConfirmed ? "" : "border-left:3px solid #f4b400;")">
+                    <summary>
+                        <strong>@p.CompanyName</strong>
+                        <span style="color:#6b7280;font-size:13px;">&mdash; @(string.IsNullOrWhiteSpace(p.GiftDescription) ? "(gift not described)" : p.GiftDescription)</span>
+                        @if (p.GiftConfirmed)
+                        {
+                            <span class="info" style="font-size:13px;">&middot; confirmed</span>
+                        }
+                        @if (p.ReminderLastSentAt is not null)
+                        {
+                            <span style="color:#6b7280;font-size:13px;">&middot; reminded @p.ReminderLastSentAt.Value.UtcDateTime.ToString("dd MMM")</span>
+                        }
+                    </summary>
+                    <form method="post" asp-page-handler="Update" style="margin-top:10px;max-width:480px;">
+                        <input type="hidden" name="id" value="@p.Id" />
+                        <label>Gift</label>
+                        <input type="text" name="giftDescription" value="@p.GiftDescription" />
+                        <label style="display:flex;align-items:center;gap:8px;">
+                            <input type="checkbox" name="giftConfirmed" value="true"
+                                   checked="@p.GiftConfirmed" style="width:auto;margin:0;" />
+                            Gift confirmed / handed over
+                        </label>
+                        <label>Notes</label>
+                        <input type="text" name="notes" value="@p.Notes" />
+                        <div style="display:flex;flex-wrap:wrap;gap:8px;">
+                            <button type="submit">Save</button>
+                            <button type="submit" asp-page-handler="SendReminder" formnovalidate>Send gift reminder</button>
+                            <button type="submit" asp-page-handler="Delete" class="secondary" formnovalidate
+                                    onclick="return confirm('Remove @p.CompanyName from the app game?');">Remove</button>
+                        </div>
+                    </form>
+                </details>
+            }
+        }
+    }
+    <p><a asp-page="/Organizer/Index">Back to organizer area</a></p>
+</div>

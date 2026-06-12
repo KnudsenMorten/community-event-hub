@@ -41,6 +41,8 @@ public class CommunityHubDbContext : DbContext
     public DbSet<SponsorLeadNotificationPref> SponsorLeadNotificationPrefs => Set<SponsorLeadNotificationPref>();
     public DbSet<SponsorApiKey> SponsorApiKeys => Set<SponsorApiKey>();
     public DbSet<SponsorTokenVersion> SponsorTokenVersions => Set<SponsorTokenVersion>();
+    public DbSet<GroupPhotoRegistration> GroupPhotoRegistrations => Set<GroupPhotoRegistration>();
+    public DbSet<AppGameParticipation> AppGameParticipations => Set<AppGameParticipation>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -476,6 +478,41 @@ public class CommunityHubDbContext : DbContext
 
             // Validate/GetCurrent look up the newest non-revoked key per pair.
             e.HasIndex(x => new { x.EventId, x.SponsorCompanyId, x.RevokedAt });
+        });
+
+        // --- GroupPhotoRegistration --------------------------------------------
+        b.Entity<GroupPhotoRegistration>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.CompanyName).IsRequired().HasMaxLength(200);
+            e.Property(x => x.ContactName).HasMaxLength(200);
+            e.Property(x => x.ContactEmail).IsRequired().HasMaxLength(320);
+            e.Property(x => x.InternalParticipants).HasMaxLength(1000);
+            e.Property(x => x.Location).HasMaxLength(200);
+            e.Property(x => x.Notes).HasMaxLength(1000);
+
+            e.HasOne(x => x.Event).WithMany()
+                .HasForeignKey(x => x.EventId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            e.HasIndex(x => new { x.EventId, x.ScheduledAtUtc });
+        });
+
+        // --- AppGameParticipation ----------------------------------------------
+        b.Entity<AppGameParticipation>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.SponsorCompanyId).IsRequired().HasMaxLength(64);
+            e.Property(x => x.CompanyName).IsRequired().HasMaxLength(200);
+            e.Property(x => x.GiftDescription).HasMaxLength(500);
+            e.Property(x => x.Notes).HasMaxLength(1000);
+
+            e.HasOne(x => x.Event).WithMany()
+                .HasForeignKey(x => x.EventId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // One participation row per sponsor per edition.
+            e.HasIndex(x => new { x.EventId, x.SponsorCompanyId }).IsUnique();
         });
 
         // --- SponsorTokenVersion -----------------------------------------------

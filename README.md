@@ -409,13 +409,24 @@ matched the row color and disappeared).
 
 ### Group photos management
 
+*(Live since v1.2.7 at **Organizers → Group photos**.)*
+
 - Register company with contact details.
-- Create / update calendar invite + send to the lead incl. internal participants.
+- Schedule the photo slot (Danish wall-clock; stored as UTC).
+- Create / update calendar invite + send to the lead incl. internal
+  participants — the ICS UID is stable per registration, so re-sending
+  after a slot move **updates** the recipients' existing calendar entry
+  instead of duplicating it.
 
 ### App game sponsor participation management
 
-- Register participating sponsor (gift).
-- Send reminder to sponsor to bring gift to event.
+*(Live since v1.2.7 at **Organizers → App game**.)*
+
+- Register participating sponsor (gift) — one row per sponsor company,
+  gift description + confirmed flag + notes.
+- Send reminder to sponsor to bring gift to event — branded template
+  (`app-game-gift-reminder.html`) mailed to every active contact of the
+  sponsor company; last-sent timestamp tracked on the row.
 
 ---
 
