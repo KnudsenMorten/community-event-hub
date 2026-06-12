@@ -54,12 +54,14 @@
 
     <div class="card">
         <h2>Legacy issued API key</h2>
-        <table style="width:100%;border-collapse:collapse;max-width:680px;">
+        <div style="overflow-x:auto;">
+        <table style="width:100%;border-collapse:collapse;max-width:680px;min-width:320px;">
             <tr style="border-bottom:1px solid #eee;"><td>Sponsor company id</td><td><code>@Model.SponsorCompanyId</code></td></tr>
             <tr style="border-bottom:1px solid #eee;"><td>Current key</td><td>@(Model.KeyPrefix is null ? "(not issued yet)" : Model.KeyPrefix + "...")</td></tr>
             <tr style="border-bottom:1px solid #eee;"><td>Issued</td><td>@(Model.IssuedAt?.ToString("u") ?? "-")</td></tr>
             <tr><td>Issued by</td><td>@(Model.IssuedByEmail ?? "-")</td></tr>
         </table>
+        </div>
 
         @if (Model.KeyPrefix is null)
         {
@@ -103,7 +105,8 @@
             <li><code>?key=&lt;key&gt;</code> query parameter &mdash; only for the browser direct-download URL; avoid in automation.</li>
         </ul>
 
-        <table style="width:100%;border-collapse:collapse;margin-top:10px;">
+        <div style="overflow-x:auto;">
+        <table style="width:100%;border-collapse:collapse;margin-top:10px;min-width:560px;">
             <tr style="text-align:left;border-bottom:2px solid #ddd;"><th>Use case</th><th>URL</th></tr>
             <tr style="border-bottom:1px solid #eee;">
                 <td><strong>Webhook / GET API</strong><br/><span style="font-size:12px;color:#5a6170;">JSON, machine-readable</span></td>
@@ -118,6 +121,7 @@
                 <td><code>GET @(Model.BaseUrl)/api/v1/sponsors/@Model.SponsorCompanyId/leads/leads-@(Model.SponsorCompanyId)-@(DateTimeOffset.UtcNow.ToString("yyyy-MM-dd")).csv</code></td>
             </tr>
         </table>
+        </div>
     </div>
 
     <div class="card">

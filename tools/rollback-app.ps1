@@ -1,10 +1,10 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Roll back the Community Hub web app.
+    Roll back the Community Hub web app or the jobs Functions app.
 
 .DESCRIPTION
-    Two modes, picked automatically:
+    WEB (-App web, default) -- two modes, picked automatically:
 
     SLOT MODE (staging slot exists -- S1+): the previous production build is
     still sitting in the staging slot after the last swap, so rollback is a
@@ -14,14 +14,20 @@
     deploy-app.ps1 under deploy-artifacts/ and redeploys the one you pick
     (default: the previous one). Same short outage as a normal deploy.
 
+    JOBS (-App jobs) -- always artifact mode: redeploys a kept
+    jobs-<env>-*.zip to the Functions app via config-zip (no slots there;
+    the host restarts in seconds and timers self-heal).
+
 .EXAMPLE
-    .\tools\rollback-app.ps1 -Env prod              # previous build
+    .\tools\rollback-app.ps1 -Env prod              # previous web build
     .\tools\rollback-app.ps1 -Env prod -List        # show available artifacts
     .\tools\rollback-app.ps1 -Env prod -Artifact web-prod-20260611-2030.zip
+    .\tools\rollback-app.ps1 -Env prod -App jobs    # previous jobs build
 #>
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)][ValidateSet('dev','prod')][string]$Env,
+    [ValidateSet('web','jobs')][string]$App = 'web',
     [string]$Artifact,
     [switch]$List
 )
@@ -37,13 +43,14 @@ function Invoke-Az {
 }
 $repo = Split-Path -Parent $PSScriptRoot
 $apps = @{
-    dev  = @{ rg = 'rg-eldk27hub-dev';  app = 'eldk27hub-web-devz237e' }
-    prod = @{ rg = 'rg-eldk27hub-prod'; app = 'eldk27hub-web-prodpdrq' }
+    dev  = @{ rg = 'rg-eldk27hub-dev';  app = 'eldk27hub-web-devz237e';  fn = 'eldk27hub-fn-devz237e'  }
+    prod = @{ rg = 'rg-eldk27hub-prod'; app = 'eldk27hub-web-prodpdrq'; fn = 'eldk27hub-fn-prodpdrq' }
 }
 $t = $apps[$Env]
 $artDir = Join-Path $repo 'deploy-artifacts'
 
-$slots = Invoke-Az @('webapp','deployment','slot','list','-g',$t.rg,'-n',$t.app,'--query','[].name','-o','tsv')
+# Slot swap-back only applies to the web app; jobs is always artifact mode.
+$slots = if ($App -eq 'web') { Invoke-Az @('webapp','deployment','slot','list','-g',$t.rg,'-n',$t.app,'--query','[].name','-o','tsv') } else { @() }
 if ($slots -contains 'staging' -and -not $Artifact -and -not $List) {
     Write-Host ">> Slot mode: swapping staging back into production (the slot holds the previous build)..." -ForegroundColor Cyan
     [void](Invoke-Az @('webapp','deployment','slot','swap','-g',$t.rg,'-n',$t.app,'--slot','staging','--target-slot','production','--output','none'))
@@ -52,9 +59,9 @@ if ($slots -contains 'staging' -and -not $Artifact -and -not $List) {
     return
 }
 
-$zips = @(Get-ChildItem $artDir -Filter ("web-{0}-*.zip" -f $Env) -ErrorAction SilentlyContinue | Sort-Object Name -Descending)
+$zips = @(Get-ChildItem $artDir -Filter ("{0}-{1}-*.zip" -f $App, $Env) -ErrorAction SilentlyContinue | Sort-Object Name -Descending)
 if ($List -or -not $zips) {
-    if (-not $zips) { Write-Host "No artifacts for '$Env' under $artDir. Artifacts are created by deploy-app.ps1." -ForegroundColor Yellow; return }
+    if (-not $zips) { Write-Host "No '$App' artifacts for '$Env' under $artDir. Artifacts are created by deploy-app.ps1." -ForegroundColor Yellow; return }
     $zips | ForEach-Object { $_.Name }
     return
 }
@@ -62,6 +69,14 @@ if ($List -or -not $zips) {
 $target = if ($Artifact) { $zips | Where-Object { $_.Name -eq $Artifact } | Select-Object -First 1 }
           else { $zips | Select-Object -Skip 1 -First 1 }   # previous build
 if (-not $target) { throw "Artifact not found. Use -List to see what's available." }
+
+if ($App -eq 'jobs') {
+    Write-Host ">> Redeploying $($target.Name) to Functions app $($t.fn) ..." -ForegroundColor Cyan
+    [void](Invoke-Az @('functionapp','deployment','source','config-zip','-g',$t.rg,'-n',$t.fn,'--src',$target.FullName,'--output','none'))
+    if ($script:AzExit -ne 0) { throw "jobs rollback deploy failed." }
+    Write-Host ">> Jobs rollback deployed." -ForegroundColor Green
+    return
+}
 
 Write-Host ">> Redeploying $($target.Name) to $Env ..." -ForegroundColor Cyan
 [void](Invoke-Az @('webapp','deploy','-g',$t.rg,'-n',$t.app,'--src-path',$target.FullName,'--type','zip','--output','none'))

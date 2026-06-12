@@ -22,11 +22,17 @@
     $pin = .\tools\plant-test-pins.ps1
     $env:ADMIN_PIN = $pin
     npx playwright test admin-mobile
+
+.EXAMPLE
+    # Plant for a sponsor contact (Role 4) so the sponsor-area sweep can log in:
+    $pin = .\tools\plant-test-pins.ps1 -OrganizerEmail sponsor@example.com -Role 4 -Count 2
 #>
 [CmdletBinding()]
 param(
     [string]$OrganizerEmail = 'mok@expertslive.dk',
-    [int]$Count = 4
+    [int]$Count = 4,
+    # ParticipantRole filter: 0=Organizer (default), 4=Sponsor, 5=Attendee...
+    [int]$Role = 0
 )
 $ErrorActionPreference = 'Stop'
 
@@ -62,8 +68,8 @@ try {
     $cmd.CommandText = @"
 DECLARE @pid INT = (SELECT TOP 1 p.Id FROM Participants p
                     JOIN Events e ON e.Id = p.EventId AND e.IsActive = 1
-                    WHERE p.Email = @email AND p.IsActive = 1 AND p.Role = 0);
-IF @pid IS NULL THROW 50000, 'organizer participant not found', 1;
+                    WHERE p.Email = @email AND p.IsActive = 1 AND p.Role = @role);
+IF @pid IS NULL THROW 50000, 'participant not found for that email + role', 1;
 DECLARE @i INT = 0;
 WHILE @i < @count
 BEGIN
@@ -79,8 +85,9 @@ SELECT @pid;
     [void]$cmd.Parameters.AddWithValue('@email', $OrganizerEmail)
     [void]$cmd.Parameters.AddWithValue('@hash', $hash)
     [void]$cmd.Parameters.AddWithValue('@count', $Count)
+    [void]$cmd.Parameters.AddWithValue('@role', $Role)
     $participantId = $cmd.ExecuteScalar()
-    Write-Host "Planted $Count PIN row(s) for participant $participantId ($OrganizerEmail) on DEV." -ForegroundColor Green
+    Write-Host "Planted $Count PIN row(s) for participant $participantId ($OrganizerEmail, role $Role) on DEV." -ForegroundColor Green
     Write-Host "PIN (valid ~14 min, single-use each):" -ForegroundColor Green
 }
 finally { $conn.Close() }

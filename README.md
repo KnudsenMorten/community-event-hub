@@ -341,6 +341,23 @@ matched the row color and disappeared).
 >   overflow; the first run caught (and this release fixes) overflow on
 >   Participants, Sponsor status dashboard and Sponsor tasks.
 
+> **NEW in v1.2.9: sponsor/attendee mobile sweep + ops polish.**
+>
+> - **Portal mobile sweep** — a third Playwright suite
+>   (`tests/playwright/portal-mobile.spec.ts`) logs in as a real sponsor
+>   contact and a real attendee (PIN login, no auth bypass) and sweeps
+>   their areas at 375 px; its first run caught (and this release fixes)
+>   a horizontal overflow on the sponsor *Your leads API* page.
+> - **`plant-test-pins.ps1 -Role`** — the PIN-planting helper can now
+>   target any participant role (0 organizer, 4 sponsor, 5 attendee...),
+>   enabling role-based browser tests without mailbox access.
+> - **Jobs rollback** — `tools/rollback-app.ps1 -App jobs` redeploys a
+>   kept `jobs-<env>-*.zip` artifact to the Functions app, completing
+>   the rollback story (web already had slot swap-back + artifact mode).
+> - **Dead scaffolding removed** — the retired in-memory sponsor
+>   API-key / deterministic-token scaffold classes are deleted from the
+>   codebase (the DB-backed services shipped in v1.2.6).
+
 > **NEW in v1.1.x: Sponsor Admin sub-area.** A single Organizer-gated
 > hub (under *Organizers → Sponsor Admin*) carrying three pages:
 >
