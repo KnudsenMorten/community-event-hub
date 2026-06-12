@@ -24,6 +24,10 @@ Three suites:
   level → submit button enables. Does NOT actually submit (avoids
   polluting the DB on each run).
 - Rank buttons hit Apple HIG-ish 44 × 28 tap-target size.
+- **Public pages sweep** — every page reachable without a login
+  (`/`, `/Contributors`, `/volunteer/signup`,
+  `/survey/eldk27-topics/results`) renders HTTP 200 with no horizontal
+  overflow, on both DEV and PROD.
 
 ## What the admin suite covers
 

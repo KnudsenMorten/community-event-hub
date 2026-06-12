@@ -133,6 +133,35 @@ for (const { name, baseUrl } of TARGETS) {
             // We DO NOT actually submit -- avoid polluting the DB on each test run.
         });
 
+        test('public pages sweep: no horizontal overflow', async ({ page }) => {
+            // Every page reachable WITHOUT a login. The participant /
+            // organizer areas have their own authenticated sweeps
+            // (admin-mobile / portal-mobile, DEV-only); this one runs on
+            // both environments because it needs no credentials.
+            const paths = [
+                '/',                              // login (anonymous landing)
+                '/Contributors',
+                '/volunteer/signup',
+                '/survey/eldk27-topics/results',
+            ];
+            const failures: string[] = [];
+            for (const path of paths) {
+                const resp = await page.goto(`${baseUrl}${path}`, { waitUntil: 'domcontentloaded' });
+                if (!resp || resp.status() !== 200) {
+                    failures.push(`${path}: HTTP ${resp?.status()}`);
+                    continue;
+                }
+                const overflow = await page.evaluate(() => ({
+                    scrollWidth: document.documentElement.scrollWidth,
+                    clientWidth: document.documentElement.clientWidth,
+                }));
+                if (overflow.scrollWidth > overflow.clientWidth + 1) {
+                    failures.push(`${path}: ${overflow.scrollWidth}px wide on a ${overflow.clientWidth}px viewport`);
+                }
+            }
+            expect(failures, failures.join('\n')).toEqual([]);
+        });
+
         test('rank-button tap target is at least 44px x 30px (HIG-ish)', async ({ page }) => {
             // Navigate to step 2 so the rank buttons are visible.
             await page.locator('.track-card').first().click();

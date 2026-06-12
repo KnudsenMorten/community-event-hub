@@ -358,6 +358,19 @@ matched the row color and disappeared).
 >   API-key / deterministic-token scaffold classes are deleted from the
 >   codebase (the DB-backed services shipped in v1.2.6).
 
+> **NEW in v1.2.10: public-pages sweep + cold-path warm-up.**
+>
+> - **Public pages sweep** — the survey Playwright suite now also sweeps
+>   every anonymous page (`/`, `/Contributors`, `/volunteer/signup`,
+>   survey results) on both DEV and PROD for HTTP 200 + no horizontal
+>   overflow at mobile viewports.
+> - **Deploy warm-up covers all anonymous pages** — the first sweep run
+>   measured a 40-second first-visitor hit on `/volunteer/signup` after
+>   a PROD slot swap (first-touch page initialization was only being
+>   paid up-front for `/`, the survey and `/Login`).
+>   `tools/deploy-app.ps1` now warms every anonymous page post-swap so
+>   no real visitor ever pays that cost.
+
 > **NEW in v1.1.x: Sponsor Admin sub-area.** A single Organizer-gated
 > hub (under *Organizers → Sponsor Admin*) carrying three pages:
 >

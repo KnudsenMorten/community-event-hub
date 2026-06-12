@@ -139,8 +139,11 @@ if ($slots -contains 'staging') {
     # Playwright goto timeout). WEBSITE_SWAP_WARMUP_PING_PATH=/health gates
     # the pointer switch; these hits warm the hot paths behind it.
     Write-Host ">> Warming production hot paths ..." -ForegroundColor Cyan
-    foreach ($path in '/', '/survey/eldk27-topics', '/Login') {
-        try { [void](Invoke-WebRequest "$($t.url.TrimEnd('/'))$path" -UseBasicParsing -TimeoutSec 60) } catch { }
+    # Every anonymous page: a path missing here costs its first visitor the
+    # full first-touch warm-up (measured 40s on /volunteer/signup 2026-06-12).
+    foreach ($path in '/', '/survey/eldk27-topics', '/survey/eldk27-topics/results',
+                      '/Login', '/volunteer/signup', '/Contributors') {
+        try { [void](Invoke-WebRequest "$($t.url.TrimEnd('/'))$path" -UseBasicParsing -TimeoutSec 90) } catch { }
     }
 } else {
     Write-Host ">> No staging slot (B1 doesn't support slots; see tools/enable-slot-deploys.ps1). Direct deploy -- expect a short outage." -ForegroundColor Yellow
