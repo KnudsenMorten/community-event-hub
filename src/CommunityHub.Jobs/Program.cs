@@ -104,6 +104,10 @@ var host = new HostBuilder()
         services.AddSingleton<AttendeeReconciler>();
         services.AddHttpClient<ZohoClient>();
 
+        // --- Sponsor leads pipeline (nightly CRM pull + delta digests) ------
+        services.AddSingleton<CommunityHub.Core.Integrations.Sponsors.SponsorLeadScreeningService>();
+        services.AddScoped<CommunityHub.Core.Integrations.Sponsors.SponsorLeadSyncService>();
+
         // --- TESTMODE -------------------------------------------------------
         var testModeOptions = new TestModeOptions();
         config.GetSection(TestModeOptions.SectionName).Bind(testModeOptions);

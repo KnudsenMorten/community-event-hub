@@ -34,7 +34,39 @@ public sealed class ZohoOptions
     public string ClientId { get; set; } = string.Empty;
     public string ClientSecret { get; set; } = string.Empty;
     public string RefreshToken { get; set; } = string.Empty;
+
+    // ---- Zoho CRM leads pull (sponsor leads pipeline) -------------------
+    // Off by default: enabling requires the refresh token to carry the
+    // ZohoCRM.modules.READ scope and the CRM to tag each record with the
+    // sponsor company id (custom field named by CrmSponsorCompanyIdField).
+
+    /// <summary>Master switch for the CRM lead pull. Default off.</summary>
+    public bool CrmEnabled { get; set; }
+
+    /// <summary>Comma-separated CRM modules to pull (Leads, Contacts, ...).</summary>
+    public string CrmModules { get; set; } = "Leads";
+
+    /// <summary>CRM field (API name) holding the sponsor company id each lead belongs to.</summary>
+    public string CrmSponsorCompanyIdField { get; set; } = "Sponsor_Company_Id";
 }
+
+/// <summary>One Zoho CRM record, flattened for the sponsor-leads sync.</summary>
+public sealed record ZohoCrmLead(
+    string ZohoRecordId,
+    string Module,
+    string SponsorCompanyId,
+    string FirstName,
+    string LastName,
+    string FullName,
+    string Email,
+    string Phone,
+    string Company,
+    string JobTitle,
+    string City,
+    string Country,
+    string Source,
+    string Notes,
+    DateTimeOffset CreatedTime);
 
 /// <summary>
 /// Zoho client (CONTEXT.md 9z) - the C# port of the source PowerShell
@@ -213,6 +245,89 @@ public sealed class ZohoClient
         }
 
         return appointments;
+    }
+
+    /// <summary>
+    /// Pull every record from one Zoho CRM module (standard v2 REST paging).
+    /// Records without a value in the sponsor-company-id field are skipped —
+    /// a lead the CRM hasn't attributed to a sponsor can't be routed.
+    /// </summary>
+    public async Task<IReadOnlyList<ZohoCrmLead>> GetCrmLeadsAsync(
+        string accessToken, string module, CancellationToken ct = default)
+    {
+        var leads = new List<ZohoCrmLead>();
+        var page = 1;
+
+        while (true)
+        {
+            var url = $"{_options.ApiDomain}/crm/v2/{module}?page={page}&per_page=200";
+            using var req = new HttpRequestMessage(HttpMethod.Get, url);
+            req.Headers.Add("Authorization", $"Zoho-oauthtoken {accessToken}");
+
+            using var resp = await _http.SendAsync(req, ct);
+            // 204 = module empty; anything non-200 ends the page loop.
+            if (resp.StatusCode != System.Net.HttpStatusCode.OK)
+            {
+                break;
+            }
+
+            await using var stream = await resp.Content.ReadAsStreamAsync(ct);
+            using var doc = await JsonDocument.ParseAsync(stream, default, ct);
+            if (!doc.RootElement.TryGetProperty("data", out var data)
+                || data.ValueKind != JsonValueKind.Array
+                || data.GetArrayLength() == 0)
+            {
+                break;
+            }
+
+            foreach (var rec in data.EnumerateArray())
+            {
+                var sponsorId = GetString(rec, _options.CrmSponsorCompanyIdField);
+                if (string.IsNullOrWhiteSpace(sponsorId)) continue;
+
+                var first = GetString(rec, "First_Name");
+                var last  = GetString(rec, "Last_Name");
+                var full  = GetString(rec, "Full_Name");
+                if (string.IsNullOrWhiteSpace(full))
+                {
+                    full = $"{first} {last}".Trim();
+                }
+
+                DateTimeOffset created = DateTimeOffset.UtcNow;
+                var createdRaw = GetString(rec, "Created_Time");
+                if (!string.IsNullOrWhiteSpace(createdRaw)
+                    && DateTimeOffset.TryParse(createdRaw, out var parsed))
+                {
+                    created = parsed;
+                }
+
+                leads.Add(new ZohoCrmLead(
+                    ZohoRecordId: GetString(rec, "id"),
+                    Module: module,
+                    SponsorCompanyId: sponsorId.Trim(),
+                    FirstName: first,
+                    LastName: last,
+                    FullName: full,
+                    Email: Lower(GetString(rec, "Email")),
+                    Phone: GetString(rec, "Phone"),
+                    Company: GetString(rec, "Company"),
+                    JobTitle: GetString(rec, "Designation"),
+                    City: GetString(rec, "City"),
+                    Country: GetString(rec, "Country"),
+                    Source: GetString(rec, "Lead_Source"),
+                    Notes: GetString(rec, "Description"),
+                    CreatedTime: created));
+            }
+
+            // CRM "info.more_records" is authoritative; fall back to page size.
+            var more = doc.RootElement.TryGetProperty("info", out var info)
+                       && info.TryGetProperty("more_records", out var mr)
+                       && mr.ValueKind == JsonValueKind.True;
+            if (!more) break;
+            page++;
+        }
+
+        return leads;
     }
 
     private static bool TryGetReturnData(JsonElement root, out JsonElement data)

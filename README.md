@@ -286,6 +286,41 @@ matched the row color and disappeared).
 > `tools/deploy-app.ps1 -App jobs` so the Functions app ships the same
 > scripted way as the web app.
 
+> **NEW in v1.2.6: the sponsor leads pipeline is fully DB-backed.** What
+> v1.1.x introduced as UI + scaffolding is now real end to end:
+>
+> - **Durable stores** — `SponsorLead`, `SponsorLeadNotificationPref`,
+>   `SponsorApiKey` and `SponsorTokenVersion` EF tables (migration
+>   `SponsorLeadsPipeline`). Issued API keys and deterministic-token
+>   version bumps (= revocations) survive restarts and slot swaps; the
+>   previous in-memory scaffolds are retired.
+> - **Live leads grid + actions** — the Leads admin page shows real rows
+>   with per-lead Reply (sends branded mail + records the audit on the
+>   row), Mark Processed / Interest / Ignore / Junk. Nothing hard-deletes;
+>   Ignore/Junk rows are preserved (and hidden from sponsor feeds) so
+>   operator overrides keep training the screen. Pipeline counters and
+>   last-sync timestamp are live.
+> - **Sponsor feed serves real data** — `leads.json` / `leads.csv` return
+>   the sponsor's leads (junk/ignored excluded), stamped with the live
+>   event + community names.
+> - **Delta digests** — `SponsorLeadsJob` (hourly at :15) sends each
+>   opted-in sponsor the leads captured since their `LastDeltaSentAt`
+>   cursor: Daily cadence at 06:15 UTC, RealTime on every hourly run;
+>   skip-junk honored; cursor advances only after a successful send so a
+>   failed delivery retries the same window. Recipients default to all
+>   sponsor contacts when the pref list is blank.
+> - **Zoho CRM pull** — nightly at 05:15 UTC + the admin "Sync now"
+>   button, idempotent by Zoho record id (content columns re-sync, hub
+>   workflow columns never overwritten). Config-gated by
+>   `Zoho__CrmEnabled` (default off) until the refresh token carries the
+>   `ZohoCRM.modules.READ` scope and CRM records carry the sponsor
+>   company id field (`Zoho__CrmSponsorCompanyIdField`).
+> - **AI screen, heuristic baseline** — every synced lead gets a 0-100
+>   score + label (looks-legit / incomplete / unreachable / test-entry);
+>   only unmistakable test entries are auto-junked, everything else is
+>   advisory. Operator status overrides are the training data for a
+>   future model-based screen.
+
 > **NEW in v1.1.x: Sponsor Admin sub-area.** A single Organizer-gated
 > hub (under *Organizers → Sponsor Admin*) carrying three pages:
 >

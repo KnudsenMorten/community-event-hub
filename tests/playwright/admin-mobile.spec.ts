@@ -119,6 +119,64 @@ test.describe('DEV organizer admin (mobile)', () => {
         ).toBeVisible({ timeout: 30_000 });
     });
 
+    test('sponsor leads admin: counters, grid, status action + prefs save', async ({ page }) => {
+        await login(page);
+
+        await page.goto(`${BASE}/Organizer/SponsorAdmin/Leads`, { waitUntil: 'domcontentloaded' });
+        await expect(page.locator('h2', { hasText: 'Pipeline status' })).toBeVisible();
+        await assertNoHorizontalScroll(page);
+
+        // Counters are live (seeded rows exist in DEV).
+        const totalCell = page.locator('tr', { hasText: 'Total leads in DB' }).locator('strong');
+        await expect(totalCell).not.toHaveText('0');
+
+        // The seeded looks-legit lead renders in the grid with its AI badge.
+        const leadRow = page.locator('tr', { hasText: 'Lena Larsen' });
+        await expect(leadRow).toBeVisible();
+        await expect(leadRow.locator('span', { hasText: 'looks-legit' })).toBeVisible();
+
+        // Junk rows are hidden by default (seeded test-entry is junked).
+        await expect(page.locator('tr', { hasText: 'Test Test' })).toHaveCount(0);
+
+        // Status action: Interest -> notice + status cell updates.
+        await leadRow.getByRole('button', { name: 'Interest' }).click();
+        await expect(page.locator('.info', { hasText: /set to Interest/ })).toBeVisible();
+        await expect(page.locator('tr', { hasText: 'Lena Larsen' })).toContainText('Interest');
+
+        // Notification prefs persist (form round-trips a save).
+        const firstPref = page.locator('details').filter({ has: page.locator('form[action*="SaveNotifyPrefs"]') }).first();
+        await firstPref.locator('summary').click();
+        await firstPref.locator('input[name="enabled"]').check();
+        await firstPref.locator('input[name="recipients"]').fill('mok@expertslive.dk');
+        await firstPref.getByRole('button', { name: 'Save preferences' }).click();
+        await expect(page.locator('.info', { hasText: /Notification prefs saved/ })).toBeVisible();
+    });
+
+    test('sponsor leads API: deterministic token serves seeded lead, junk excluded', async ({ page, request }) => {
+        await login(page);
+
+        // Pull the deterministic token for sponsor 10 off the admin page.
+        await page.goto(`${BASE}/Organizer/SponsorAdmin/Leads`, { waitUntil: 'domcontentloaded' });
+        const row = page.locator('tr', { has: page.locator('code', { hasText: /^10$/ }) }).first();
+        const token = (await row.locator('td').nth(1).innerText()).trim().split(/\s/)[0];
+        expect(token).toMatch(/^[0-9a-f]{32}$/);
+
+        const resp = await request.get(
+            `${BASE}/api/v1/sponsors/10/leads.json`,
+            { headers: { Authorization: `Bearer ${token}` } });
+        expect(resp.status()).toBe(200);
+        const body = await resp.json();
+        const emails = body.leads.map((l: any) => l.email ?? l.Email);
+        expect(emails).toContain('lena.larsen@contoso-example.dk'); // real lead served
+        expect(emails).not.toContain('test@example.com');           // junk excluded
+
+        // Wrong token -> 401.
+        const bad = await request.get(
+            `${BASE}/api/v1/sponsors/10/leads.json`,
+            { headers: { Authorization: 'Bearer 00000000000000000000000000000000' } });
+        expect(bad.status()).toBe(401);
+    });
+
     test('email center: test-send delivers (DEV redirect catches it)', async ({ page }) => {
         await login(page);
 

@@ -61,7 +61,10 @@
             </div>
         }
 
-        <table style="width:100%;border-collapse:collapse;">
+        <!-- overflow-x wrapper: the 32-char tokens blow a 360px phone
+             viewport otherwise (caught by the admin mobile suite) -->
+        <div style="overflow-x:auto;">
+        <table style="width:100%;border-collapse:collapse;min-width:760px;">
             <tr style="text-align:left;border-bottom:2px solid #ddd;">
                 <th>Sponsor company id</th>
                 <th>Deterministic token (current)</th>
@@ -101,6 +104,7 @@
                 </tr>
             }
         </table>
+        </div>
 
         <h3 style="margin-top:24px;">Download samples</h3>
         <p>Sponsors call these endpoints with their API key in either the
@@ -161,34 +165,50 @@ Invoke-WebRequest -Uri "@(Model.BaseUrl)/api/v1/sponsors/$cid/leads.csv" `
     <div class="card">
         <h2>3. Notification preferences (per sponsor)</h2>
         <p>Sponsors can opt-in to a delta digest of new leads since the
-           last notification. SCAFFOLD: form submits land in the
-           <em>SaveNotifyPrefs</em> handler stub; persistence pending
-           the <code>SponsorLeadNotificationPref</code> EF migration.</p>
+           last notification (daily at 06:15 UTC, or real-time on the
+           hourly run). Recipients left blank = all sponsor contacts of
+           the company. Saved per company; the SponsorLeadsJob reads
+           these on every run.</p>
 
         @foreach (var s in Model.SponsorKeys)
         {
+            var pref = Model.NotifyPrefs.TryGetValue(s.SponsorCompanyId, out var p0) ? p0 : null;
             <details style="margin:10px 0;padding:8px 12px;border:1px solid #d0d7de;border-radius:6px;">
-                <summary><strong>@s.SponsorCompanyId</strong></summary>
+                <summary><strong>@s.SponsorCompanyId</strong>
+                    @if (pref?.Enabled == true)
+                    {
+                        <span class="info" style="font-size:13px;">(@pref.Cadence digest on)</span>
+                    }
+                </summary>
                 <form method="post" asp-page-handler="SaveNotifyPrefs" style="display:grid;grid-template-columns:160px 1fr;gap:8px 12px;max-width:680px;align-items:center;margin-top:10px;">
                     <input type="hidden" name="sponsorCompanyId" value="@s.SponsorCompanyId" />
 
                     <label>Enabled</label>
-                    <label><input type="checkbox" name="enabled" value="true" /> Send digest of new leads</label>
+                    <label><input type="checkbox" name="enabled" value="true"
+                                  checked="@(pref?.Enabled == true)" /> Send digest of new leads</label>
 
                     <label>Cadence</label>
                     <select name="cadence">
-                        <option value="Daily">Daily (06:00 UTC)</option>
-                        <option value="RealTime">Real-time (~30 min)</option>
+                        <option value="Daily" selected="@(pref is null || pref.Cadence == SponsorLeadNotifyCadence.Daily)">Daily (06:15 UTC)</option>
+                        <option value="RealTime" selected="@(pref?.Cadence == SponsorLeadNotifyCadence.RealTime)">Real-time (hourly delta)</option>
                     </select>
 
                     <label>Recipients</label>
-                    <input name="recipients" type="text" placeholder="comma-separated emails" />
+                    <input name="recipients" type="text" placeholder="comma-separated emails (blank = all company contacts)"
+                           value="@pref?.Recipients" />
 
                     <label>Skip junk</label>
-                    <label><input type="checkbox" name="skipJunk" value="true" checked /> Exclude leads the AI screen marked as junk</label>
+                    <label><input type="checkbox" name="skipJunk" value="true"
+                                  checked="@(pref is null || pref.SkipJunk)" /> Exclude leads the AI screen marked as junk</label>
 
                     <div></div>
-                    <div><button type="submit">Save preferences</button></div>
+                    <div><button type="submit">Save preferences</button>
+                        @if (pref?.LastDeltaSentAt is not null)
+                        {
+                            <span style="color:#6b7280;font-size:13px;margin-left:8px;">Last digest:
+                            @pref.LastDeltaSentAt.Value.UtcDateTime.ToString("dd MMM HH:mm") UTC</span>
+                        }
+                    </div>
                 </form>
             </details>
         }
@@ -196,45 +216,118 @@ Invoke-WebRequest -Uri "@(Model.BaseUrl)/api/v1/sponsors/$cid/leads.csv" `
 
     <div class="card">
         <h2>4. Recent leads + actions</h2>
-        <p>SCAFFOLD: empty grid until <code>DbSet&lt;SponsorLead&gt;</code>
-           is added and the Zoho pull runs. The actions below the empty
-           table demonstrate the per-lead flow that will be enabled
-           once leads are present.</p>
+        <p>Latest 200 leads. Nothing here hard-deletes &mdash; Ignore and
+           Junk hide the row from the sponsor feed and this default view
+           but preserve it (the AI screen learns from your overrides).</p>
 
-        <table style="width:100%;border-collapse:collapse;">
-            <tr style="text-align:left;border-bottom:2px solid #ddd;">
-                <th>Captured</th><th>Sponsor</th><th>Type</th><th>Name</th><th>Company</th><th>Email</th><th>AI</th><th>Status</th><th style="width:340px;">Actions</th>
-            </tr>
-            <tr>
-                <td colspan="9" class="info" style="padding:14px;">No leads yet &mdash;” once Zoho pipeline lands, rows appear here with per-lead Reply / Mark Processed / Mark Junk / Delete buttons + an AI screen badge.</td>
-            </tr>
-        </table>
+        <form method="get" style="margin-bottom:10px;">
+            <label style="display:inline-flex;align-items:center;gap:8px;font-weight:400;">
+                <input type="checkbox" name="ShowHidden" value="true"
+                       checked="@Model.ShowHidden" style="width:auto;margin:0;"
+                       onchange="this.form.submit()" /> Show ignored / junk rows
+            </label>
+            <select name="SponsorFilter" onchange="this.form.submit()" style="display:inline-block;width:auto;margin-left:14px;">
+                <option value="">All sponsors</option>
+                @foreach (var s in Model.SponsorKeys)
+                {
+                    <option value="@s.SponsorCompanyId" selected="@(Model.SponsorFilter == s.SponsorCompanyId)">@s.SponsorCompanyId</option>
+                }
+            </select>
+        </form>
+
+        @if (Model.Leads.Count == 0)
+        {
+            <p class="info">No leads match. Leads land here from the nightly
+               Zoho CRM pull (05:15 UTC) or the <strong>Sync now</strong>
+               button at the top &mdash; both require <code>Zoho__CrmEnabled=true</code>.</p>
+        }
+        else
+        {
+            <div style="overflow-x:auto;">
+            <table style="width:100%;border-collapse:collapse;min-width:900px;">
+                <tr style="text-align:left;border-bottom:2px solid #ddd;">
+                    <th>Captured</th><th>Sponsor</th><th>Type</th><th>Name</th><th>Company</th><th>Email</th><th>AI</th><th>Status</th><th style="width:300px;">Actions</th>
+                </tr>
+                @foreach (var l in Model.Leads)
+                {
+                    <tr style="border-bottom:1px solid #eee;@(l.Status is SponsorLeadStatus.Ignore or SponsorLeadStatus.Junk ? "opacity:.55;" : "")">
+                        <td style="white-space:nowrap;">@l.CapturedAt.UtcDateTime.ToString("dd MMM HH:mm")</td>
+                        <td>@l.SponsorCompanyId</td>
+                        <td>@l.LeadKind</td>
+                        <td>@l.FullName
+                            @if (!string.IsNullOrWhiteSpace(l.JobTitle))
+                            {
+                                <br /><span style="color:#6b7280;font-size:12px;">@l.JobTitle</span>
+                            }
+                        </td>
+                        <td>@l.Company</td>
+                        <td style="word-break:break-all;">@l.Email</td>
+                        <td>
+                            @if (l.AiScreenScore is not null)
+                            {
+                                <span title="@l.AiScreenLabel"
+                                      style="display:inline-block;padding:2px 8px;border-radius:999px;font-size:12px;font-weight:600;background:@(l.AiScreenScore >= 60 ? "#dafbe1" : l.AiScreenScore >= 30 ? "#fff8c5" : "#ffebe9");">
+                                    @l.AiScreenScore @l.AiScreenLabel</span>
+                            }
+                        </td>
+                        <td>@l.Status
+                            @if (l.LastReplyAt is not null)
+                            {
+                                <br /><span style="color:#6b7280;font-size:12px;">replied @l.LastReplyAt.Value.UtcDateTime.ToString("dd MMM")</span>
+                            }
+                        </td>
+                        <td>
+                            <div style="display:flex;flex-wrap:wrap;gap:4px;">
+                                <form method="post" asp-page-handler="MarkLeadProcessed" asp-route-ShowHidden="@Model.ShowHidden" asp-route-SponsorFilter="@Model.SponsorFilter" style="display:inline;">
+                                    <input type="hidden" name="leadId" value="@l.Id" />
+                                    <button type="submit" class="secondary" style="font-size:12px;padding:4px 9px;">Processed</button>
+                                </form>
+                                <form method="post" asp-page-handler="MarkLeadInterest" asp-route-ShowHidden="@Model.ShowHidden" asp-route-SponsorFilter="@Model.SponsorFilter" style="display:inline;">
+                                    <input type="hidden" name="leadId" value="@l.Id" />
+                                    <button type="submit" class="secondary" style="font-size:12px;padding:4px 9px;">Interest</button>
+                                </form>
+                                <form method="post" asp-page-handler="MarkLeadIgnore" asp-route-ShowHidden="@Model.ShowHidden" asp-route-SponsorFilter="@Model.SponsorFilter" style="display:inline;">
+                                    <input type="hidden" name="leadId" value="@l.Id" />
+                                    <button type="submit" class="secondary" style="font-size:12px;padding:4px 9px;">Ignore</button>
+                                </form>
+                                <form method="post" asp-page-handler="MarkLeadJunk" asp-route-ShowHidden="@Model.ShowHidden" asp-route-SponsorFilter="@Model.SponsorFilter" style="display:inline;">
+                                    <input type="hidden" name="leadId" value="@l.Id" />
+                                    <button type="submit" class="secondary" style="font-size:12px;padding:4px 9px;">Junk</button>
+                                </form>
+                            </div>
+                            @if (!string.IsNullOrWhiteSpace(l.Email))
+                            {
+                                <details style="margin-top:4px;">
+                                    <summary style="font-size:12px;color:#0969da;cursor:pointer;">Reply&hellip;</summary>
+                                    <form method="post" asp-page-handler="ReplyLead" asp-route-ShowHidden="@Model.ShowHidden" asp-route-SponsorFilter="@Model.SponsorFilter" style="margin-top:6px;">
+                                        <input type="hidden" name="leadId" value="@l.Id" />
+                                        <input name="subject" type="text" placeholder="Subject" style="margin:0 0 6px;max-width:280px;" />
+                                        <textarea name="body" rows="3" placeholder="Message (plain text)" style="margin:0 0 6px;max-width:280px;"></textarea>
+                                        <button type="submit" style="font-size:12px;padding:5px 12px;">Send reply</button>
+                                    </form>
+                                </details>
+                            }
+                        </td>
+                    </tr>
+                }
+            </table>
+            </div>
+        }
     </div>
 
     <div class="card">
-        <h2>What still needs to go live</h2>
+        <h2>Going live checklist</h2>
         <ol>
-            <li><strong>Zoho OAuth credentials</strong> in
-                <code>config/integrations.eldk27.json</code> under a new
-                <code>Zoho</code> block (clientId + clientSecret +
-                refreshToken + region).</li>
-            <li><strong>EF migration</strong> adding
-                <code>SponsorLead</code> + <code>SponsorApiKey</code> +
-                <code>SponsorLeadNotificationPref</code> +
-                <code>ZohoSyncCheckpoint</code> tables. Once applied,
-                swap the in-memory key store for a DbSet-backed one.</li>
-            <li><strong>Storage container</strong> with one folder per
-                sponsor for the daily CSV drop (alternative to the API
-                pull path). Per-sponsor SAS is recommended; rotated
-                alongside the API key.</li>
-            <li><strong>Hangfire / cron registration</strong> of
-                <code>ZohoLeadsSyncJob</code>,
-                <code>SponsorLeadsExportJob</code>, and
-                <code>SponsorLeadNotifyJob</code> (digest delta).</li>
-            <li><strong>AI screen</strong> wired against your preferred
-                LLM (Azure OpenAI deployment id +
-                <code>SponsorLeadAiScreenService</code>). Per-lead
-                runner can be the same job or a separate one.</li>
+            <li><strong>Zoho OAuth refresh token</strong> with the
+                <code>ZohoCRM.modules.READ</code> scope (the existing token
+                covers Backstage + Bookings only).</li>
+            <li><strong>CRM field</strong> holding the sponsor company id on
+                each lead record &mdash; name it in
+                <code>Zoho__CrmSponsorCompanyIdField</code>
+                (default <code>Sponsor_Company_Id</code>).</li>
+            <li>Flip <strong><code>Zoho__CrmEnabled=true</code></strong> on the
+                web + Functions apps. Everything else (tables, sync job at
+                05:15 UTC, digests, feed, this grid) is already live.</li>
         </ol>
     </div>
 }

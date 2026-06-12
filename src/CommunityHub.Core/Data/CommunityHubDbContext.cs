@@ -37,6 +37,10 @@ public class CommunityHubDbContext : DbContext
     public DbSet<SponsorUploadFile> SponsorUploadFiles => Set<SponsorUploadFile>();
     public DbSet<SurveyResponse> SurveyResponses => Set<SurveyResponse>();
     public DbSet<SurveyResponsePick> SurveyResponsePicks => Set<SurveyResponsePick>();
+    public DbSet<SponsorLead> SponsorLeads => Set<SponsorLead>();
+    public DbSet<SponsorLeadNotificationPref> SponsorLeadNotificationPrefs => Set<SponsorLeadNotificationPref>();
+    public DbSet<SponsorApiKey> SponsorApiKeys => Set<SponsorApiKey>();
+    public DbSet<SponsorTokenVersion> SponsorTokenVersions => Set<SponsorTokenVersion>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -410,6 +414,78 @@ public class CommunityHubDbContext : DbContext
             e.HasIndex(x => new { x.SurveyResponseId, x.TopicId }).IsUnique();
             // Topic-popularity aggregation.
             e.HasIndex(x => x.TopicId);
+        });
+
+        // --- SponsorLead ------------------------------------------------------
+        // The leads pipeline store (CONTEXT.md sponsor leads). Zoho stays the
+        // source of truth for CONTENT; the hub layers processing status, AI
+        // screen verdicts and reply audit on top. NOTHING is hard-deleted.
+        b.Entity<SponsorLead>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.SponsorCompanyId).IsRequired().HasMaxLength(64);
+            e.Property(x => x.ZohoRecordId).HasMaxLength(64);
+            e.Property(x => x.LeadKind).HasConversion<int>();
+            e.Property(x => x.FirstName).HasMaxLength(200);
+            e.Property(x => x.LastName).HasMaxLength(200);
+            e.Property(x => x.FullName).HasMaxLength(400);
+            e.Property(x => x.Email).HasMaxLength(320);
+            e.Property(x => x.Phone).HasMaxLength(60);
+            e.Property(x => x.Company).HasMaxLength(300);
+            e.Property(x => x.JobTitle).HasMaxLength(200);
+            e.Property(x => x.City).HasMaxLength(120);
+            e.Property(x => x.Country).HasMaxLength(120);
+            e.Property(x => x.Source).HasMaxLength(120);
+            e.Property(x => x.Notes).HasMaxLength(4000);
+            e.Property(x => x.Status).HasConversion<int>();
+            e.Property(x => x.StatusNote).HasMaxLength(500);
+            e.Property(x => x.StatusChangedByEmail).HasMaxLength(320);
+            e.Property(x => x.AiScreenLabel).HasMaxLength(60);
+            e.Property(x => x.LastReplyByEmail).HasMaxLength(320);
+
+            // Idempotent sync: re-pulling the same Zoho row updates in place.
+            // Filtered unique so hub-local rows (no Zoho id) don't collide.
+            e.HasIndex(x => new { x.EventId, x.ZohoRecordId })
+                .IsUnique()
+                .HasFilter("[ZohoRecordId] <> ''");
+            // Per-sponsor grid + feed + digest queries.
+            e.HasIndex(x => new { x.EventId, x.SponsorCompanyId, x.CapturedAt });
+            e.HasIndex(x => new { x.EventId, x.SponsorCompanyId, x.Status });
+        });
+
+        // --- SponsorLeadNotificationPref --------------------------------------
+        b.Entity<SponsorLeadNotificationPref>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.SponsorCompanyId).IsRequired().HasMaxLength(64);
+            e.Property(x => x.Recipients).HasMaxLength(1000);
+            e.Property(x => x.Cadence).HasConversion<int>();
+
+            e.HasIndex(x => new { x.EventId, x.SponsorCompanyId }).IsUnique();
+        });
+
+        // --- SponsorApiKey -----------------------------------------------------
+        b.Entity<SponsorApiKey>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.SponsorCompanyId).IsRequired().HasMaxLength(64);
+            e.Property(x => x.KeyHash).IsRequired().HasMaxLength(64);
+            e.Property(x => x.KeyPrefix).IsRequired().HasMaxLength(16);
+            e.Property(x => x.Label).HasMaxLength(300);
+            e.Property(x => x.IssuedByEmail).HasMaxLength(320);
+
+            // Validate/GetCurrent look up the newest non-revoked key per pair.
+            e.HasIndex(x => new { x.EventId, x.SponsorCompanyId, x.RevokedAt });
+        });
+
+        // --- SponsorTokenVersion -----------------------------------------------
+        b.Entity<SponsorTokenVersion>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.SponsorCompanyId).IsRequired().HasMaxLength(64);
+            e.Property(x => x.BumpedByEmail).HasMaxLength(320);
+
+            e.HasIndex(x => new { x.EventId, x.SponsorCompanyId }).IsUnique();
         });
 
         // --- VolunteerAvailability ------------------------------------------

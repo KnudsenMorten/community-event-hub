@@ -1,0 +1,18 @@
+Subject: {{eventDisplayName}}: {{leadCount}} new lead(s) for {{sponsorCompany}}
+<h2 style="margin:0 0 16px;font-size:20px;color:#1a1a2e;">New leads for {{sponsorCompany}}</h2>
+<p style="margin:0 0 16px;">{{leadCount}} new lead(s) were captured for your company at {{eventDisplayName}} since your last update:</p>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 20px;border-collapse:collapse;">
+  <tr>
+    <th align="left" style="padding:8px 10px;border-bottom:2px solid {{brandColor}};font-size:13px;">Who</th>
+    <th align="left" style="padding:8px 10px;border-bottom:2px solid {{brandColor}};font-size:13px;">Contact</th>
+    <th align="left" style="padding:8px 10px;border-bottom:2px solid {{brandColor}};font-size:13px;">Captured (UTC)</th>
+  </tr>
+  {{leadListHtml}}
+</table>
+<p style="margin:0 0 24px;">The full list (including these) is always available through your leads feed &mdash; the CSV / JSON endpoints and PowerShell samples are on the <strong>Your Leads API</strong> page in the hub.</p>
+<table role="presentation" cellpadding="0" cellspacing="0"><tr>
+  <td style="background-color:{{brandColor}};border-radius:6px;">
+    <a href="{{hubUrl}}" style="display:inline-block;padding:12px 28px;color:#ffffff;font-size:15px;font-weight:bold;text-decoration:none;">Open the hub</a>
+  </td>
+</tr></table>
+<p style="margin:24px 0 0;color:#6b7280;font-size:13px;">You receive this because lead notifications are enabled for your company. Ask the organizer team ({{supportEmail}}) to change cadence or recipients.</p>

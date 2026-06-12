@@ -107,19 +107,31 @@ builder.Services.AddScoped<CommunityHub.Core.Reminders.OrganizerActionItemServic
 builder.Services.AddScoped<CommunityHub.Notify.HotelCalendarInviter>();
 
 // Sponsor leads API auth: deterministic per-sponsor token derived from
-// (EventId, SponsorCompanyId, TokenVersion, GlobalSecret). The
-// in-memory impl persists version bumps in process memory until the
-// DbSet<SponsorTokenVersion> EF migration lands.
-builder.Services.AddSingleton<
+// (EventId, SponsorCompanyId, TokenVersion, GlobalSecret). Durable since
+// v1.2.6: token-version bumps (= revocations) persist in
+// DbSet<SponsorTokenVersion> and survive restarts / slot swaps. Scoped
+// because the implementation needs the per-request DbContext.
+builder.Services.AddScoped<
     CommunityHub.Core.Integrations.Sponsors.IDeterministicSponsorTokenService,
-    CommunityHub.Core.Integrations.Sponsors.InMemoryDeterministicSponsorTokenService>();
+    CommunityHub.Core.Integrations.Sponsors.DbDeterministicSponsorTokenService>();
 
 // Legacy issued-key path -- kept registered so existing tokens still
-// validate during the transition; will be removed once every sponsor
-// is on the deterministic path.
-builder.Services.AddSingleton<
+// validate during the transition; durable since v1.2.6
+// (DbSet<SponsorApiKey>; the in-memory scaffold lost keys on restart).
+builder.Services.AddScoped<
     CommunityHub.Core.Integrations.Sponsors.ISponsorApiKeyService,
-    CommunityHub.Core.Integrations.Sponsors.InMemorySponsorApiKeyService>();
+    CommunityHub.Core.Integrations.Sponsors.DbSponsorApiKeyService>();
+
+// --- Zoho + sponsor leads pipeline (web side) ------------------------------
+// The Leads admin page's "Sync now" fires the same CRM pull the nightly job
+// runs. Gated by Zoho__Enabled + Zoho__CrmEnabled (both default false), so
+// registering it is inert until the CRM integration is switched on.
+var zohoWebOptions = new CommunityHub.Core.Integrations.ZohoOptions();
+builder.Configuration.GetSection(CommunityHub.Core.Integrations.ZohoOptions.SectionName).Bind(zohoWebOptions);
+builder.Services.AddSingleton(zohoWebOptions);
+builder.Services.AddHttpClient<CommunityHub.Core.Integrations.ZohoClient>();
+builder.Services.AddSingleton<CommunityHub.Core.Integrations.Sponsors.SponsorLeadScreeningService>();
+builder.Services.AddScoped<CommunityHub.Core.Integrations.Sponsors.SponsorLeadSyncService>();
 
 // API routing (the SponsorLeadsController under /api/v1/sponsors/{id}/...).
 // AddControllers is additive on top of AddRazorPages, so the existing

@@ -29,11 +29,10 @@ namespace CommunityHub.Api;
 ///       Content-Disposition: attachment so browser-click drops the file
 ///       into the user's Downloads folder.
 ///
-/// SCAFFOLD STATE: the endpoints validate the API key correctly + emit
-/// proper CSV / JSON shape, but return an EMPTY list of leads until the
-/// Zoho pipeline lands. That keeps the contract stable for sponsors who
-/// wire up their PowerShell scripts now -- when leads start flowing,
-/// the same scripts pick them up with zero changes.
+/// Backed by DbSet&lt;SponsorLead&gt; since v1.2.6. Rows the organizer (or
+/// the AI screen) marked Ignore / Junk are excluded from the sponsor feed
+/// by design — the rows stay in the DB (nothing is hard-deleted) but the
+/// sponsor only sees actionable leads.
 /// </summary>
 [ApiController]
 [Route("api/v1/sponsors/{sponsorCompanyId}")]
@@ -75,9 +74,6 @@ public sealed class SponsorLeadsController : ControllerBase
         "EventName",
         "OrganizerName",
     };
-
-    private const string EventName     = "Experts Live Denmark 2027";
-    private const string OrganizerName = "Experts Live Denmark";
 
     [HttpGet("leads.json")]
     public async Task<IActionResult> GetJsonAsync(
@@ -131,7 +127,7 @@ public sealed class SponsorLeadsController : ControllerBase
                 Csv(r.Email), Csv(r.Phone), Csv(r.Company), Csv(r.JobTitle), Csv(r.City), Csv(r.Country),
                 Csv(r.Source), Csv(r.Notes),
                 Csv(r.CapturedAt.ToString("u", CultureInfo.InvariantCulture)),
-                Csv(EventName), Csv(OrganizerName)
+                Csv(r.EventName), Csv(r.OrganizerName)
             }));
             sb.Append("\r\n");
         }
@@ -194,17 +190,30 @@ public sealed class SponsorLeadsController : ControllerBase
         return await _issuedKeys.ValidateAsync(eventId, sponsorCompanyId, raw, ct);
     }
 
-    private Task<List<LeadRow>> GetLeadsAsync(string sponsorCompanyId, CancellationToken ct)
+    private async Task<List<LeadRow>> GetLeadsAsync(string sponsorCompanyId, CancellationToken ct)
     {
-        // SCAFFOLD: empty list until Zoho pipeline lands + DbSet<SponsorLead> exists.
-        // When the persistence + sync are wired, this becomes:
-        //
-        //     return await _db.SponsorLeads
-        //         .Where(l => l.SponsorCompanyId == sponsorCompanyId && l.EventId == eventId)
-        //         .OrderByDescending(l => l.CapturedAt)
-        //         .Select(l => new LeadRow(...))
-        //         .ToListAsync(ct);
-        return Task.FromResult(new List<LeadRow>());
+        var evt = await _db.Events
+            .Where(e => e.IsActive)
+            .Select(e => new { e.Id, e.DisplayName, e.CommunityName })
+            .FirstOrDefaultAsync(ct);
+        if (evt is null) return new List<LeadRow>();
+
+        // Ignore / Junk stay in the DB (audit + AI-screen training data)
+        // but never reach the sponsor's CRM import.
+        return await _db.SponsorLeads
+            .Where(l => l.EventId == evt.Id
+                        && l.SponsorCompanyId == sponsorCompanyId
+                        && l.Status != Core.Domain.SponsorLeadStatus.Ignore
+                        && l.Status != Core.Domain.SponsorLeadStatus.Junk)
+            .OrderByDescending(l => l.CapturedAt)
+            .Select(l => new LeadRow(
+                l.ZohoRecordId != "" ? l.ZohoRecordId : l.Id.ToString(),
+                l.LeadKind.ToString(),
+                l.FullName, l.FirstName, l.LastName,
+                l.Email, l.Phone, l.Company, l.JobTitle, l.City, l.Country,
+                l.Source, l.Notes, l.CapturedAt,
+                evt.DisplayName, evt.CommunityName))
+            .ToListAsync(ct);
     }
 
     private static string Csv(string? value)
@@ -230,5 +239,7 @@ public sealed class SponsorLeadsController : ControllerBase
         string Country,
         string Source,
         string Notes,
-        DateTimeOffset CapturedAt);
+        DateTimeOffset CapturedAt,
+        string EventName,
+        string OrganizerName);
 }
