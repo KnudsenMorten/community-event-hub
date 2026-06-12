@@ -230,6 +230,42 @@ test.describe('DEV organizer admin (mobile)', () => {
         await assertNoHorizontalScroll(page);
     });
 
+    test('mobile sweep: every organizer page renders without horizontal overflow', async ({ page }) => {
+        await login(page);
+
+        // Every organizer-gated page in the app. A page that blows the
+        // 375px viewport (like the leads keys table did) fails here with
+        // its path in the error message.
+        const pages = [
+            '/Organizer', '/Organizer/Dashboard', '/Organizer/Attendees',
+            '/Organizer/EmailCenter', '/Organizer/Broadcast',
+            '/Organizer/GroupPhotos', '/Organizer/AppGame',
+            '/Organizer/Participants', '/Organizer/Speakers',
+            '/Organizer/Sponsors', '/Organizer/Swag', '/Organizer/Lunch',
+            '/Organizer/TravelReimbursements', '/Organizer/DataGrid',
+            '/Organizer/TasksTable', '/Organizer/SendInvitations',
+            '/Organizer/SpeakerReminders', '/Organizer/SessionizeImport',
+            '/Organizer/SponsorAdmin/Index', '/Organizer/SponsorAdmin/Dashboard',
+            '/Organizer/SponsorAdmin/Tasks', '/Organizer/SponsorAdmin/Leads',
+        ];
+        const failures: string[] = [];
+        for (const path of pages) {
+            const resp = await page.goto(`${BASE}${path}`, { waitUntil: 'domcontentloaded' });
+            if (!resp || resp.status() !== 200) {
+                failures.push(`${path}: HTTP ${resp?.status()}`);
+                continue;
+            }
+            const overflow = await page.evaluate(() => ({
+                scrollWidth: document.documentElement.scrollWidth,
+                clientWidth: document.documentElement.clientWidth,
+            }));
+            if (overflow.scrollWidth > overflow.clientWidth + 1) {
+                failures.push(`${path}: ${overflow.scrollWidth}px wide on a ${overflow.clientWidth}px viewport`);
+            }
+        }
+        expect(failures, failures.join('\n')).toEqual([]);
+    });
+
     test('email center: test-send delivers (DEV redirect catches it)', async ({ page }) => {
         await login(page);
 

@@ -321,6 +321,26 @@ matched the row color and disappeared).
 >   advisory. Operator status overrides are the training data for a
 >   future model-based screen.
 
+> **NEW in v1.2.8: hotel rooming list + dashboard pipeline cards.**
+>
+> - **Rooming list export** (*Organizers → Data grid → "Rooming list
+>   (Excel, for the hotel)"*) — a hotel-grade `.xlsx` of every
+>   participant flagged NeedsRoom: name, email, phone, check-in /
+>   check-out, room type, share-with and hotel confirmation columns,
+>   ready to mail to the hotel as-is. Closes the "Send Excel rooming
+>   list to the hotel" item below.
+> - **Organizer dashboard cards** — two new at-a-glance cards: *Sponsor
+>   leads* (total / new last 7 days / open) and *Event prep* (photo
+>   sessions + unscheduled, app-game sponsors, gifts unconfirmed), all
+>   counted live from the DB on every load.
+> - **Sponsor status dashboard leads columns are live** — leads total /
+>   last-7-days / last Zoho sync per company now read from the
+>   `SponsorLead` store (they were placeholder zeroes).
+> - **Mobile sweep test** — the Playwright admin suite now logs in and
+>   visits **every** organizer page at 375 px asserting no horizontal
+>   overflow; the first run caught (and this release fixes) overflow on
+>   Participants, Sponsor status dashboard and Sponsor tasks.
+
 > **NEW in v1.1.x: Sponsor Admin sub-area.** A single Organizer-gated
 > hub (under *Organizers → Sponsor Admin*) carrying three pages:
 >
@@ -378,7 +398,8 @@ matched the row color and disappeared).
 
 ### Hotel management
 
-- Send Excel rooming list to the hotel.
+- Send Excel rooming list to the hotel — *(live since v1.2.8: download
+  at **Organizers → Data grid → Rooming list**)*.
 - Import Excel with confirmation IDs.
 - Send email with updated calendar invite carrying the hotel confirmation.
 - Dashboard — pending / missing submissions.

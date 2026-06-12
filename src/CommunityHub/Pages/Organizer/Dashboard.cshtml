@@ -276,6 +276,50 @@
         </div>
     </div>
 
+    <!-- Sponsor leads + event-prep pipelines (v1.2.8) -->
+    <div class="card">
+        <h2>Sponsor leads</h2>
+        <div class="stat-grid">
+            <div class="stat">
+                <div class="num">@Model.LeadsTotal</div>
+                <div class="lbl">Total leads</div>
+            </div>
+            <div class="stat">
+                <div class="num">@Model.LeadsLast7d</div>
+                <div class="lbl">New last 7 days</div>
+            </div>
+            <div class="stat">
+                <div class="num @(Model.LeadsOpen > 0 ? "warn" : "")">@Model.LeadsOpen</div>
+                <div class="lbl">Open (unprocessed)</div>
+            </div>
+        </div>
+        <p><a asp-page="/Organizer/SponsorAdmin/Leads">Open leads admin</a></p>
+    </div>
+
+    <div class="card">
+        <h2>Event prep</h2>
+        <div class="stat-grid">
+            <div class="stat">
+                <div class="num">@Model.PhotoRegs</div>
+                <div class="lbl">Group photo sessions</div>
+            </div>
+            <div class="stat">
+                <div class="num @(Model.PhotoUnscheduled > 0 ? "warn" : "")">@Model.PhotoUnscheduled</div>
+                <div class="lbl">Photos unscheduled</div>
+            </div>
+            <div class="stat">
+                <div class="num">@Model.AppGameSponsors</div>
+                <div class="lbl">App game sponsors</div>
+            </div>
+            <div class="stat">
+                <div class="num @(Model.AppGameUnconfirmed > 0 ? "warn" : "")">@Model.AppGameUnconfirmed</div>
+                <div class="lbl">Gifts unconfirmed</div>
+            </div>
+        </div>
+        <p><a asp-page="/Organizer/GroupPhotos">Group photos</a> &middot;
+           <a asp-page="/Organizer/AppGame">App game</a></p>
+    </div>
+
     <!-- Attendees -->
     <div class="card">
         <h2>Attendees</h2>

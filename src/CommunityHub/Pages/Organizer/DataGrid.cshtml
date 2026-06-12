@@ -62,6 +62,8 @@
             <a asp-page-handler="Export"
                asp-route-RoleFilter="@Model.RoleFilter"
                asp-route-ActiveFilter="@Model.ActiveFilter">Export to CSV</a>
+            &nbsp;&middot;&nbsp;
+            <a asp-page-handler="RoomingList">Rooming list (Excel, for the hotel)</a>
         </p>
 
         @if (Model.Rows.Count == 0)

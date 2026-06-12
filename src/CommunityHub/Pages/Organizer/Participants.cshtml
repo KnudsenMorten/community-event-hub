@@ -40,7 +40,8 @@
         else
         {
             <p>@Model.Participants.Count participant(s).</p>
-            <table style="width:100%;border-collapse:collapse;">
+            <div style="overflow-x:auto;">
+            <table style="width:100%;border-collapse:collapse;min-width:560px;">
                 <tr style="text-align:left;border-bottom:2px solid #ddd;">
                     <th>Name</th><th>Email</th><th>Role</th>
                     <th>Status</th><th></th>
@@ -74,6 +75,7 @@
                     </tr>
                 }
             </table>
+            </div>
         }
     }
     <p><a asp-page="/Organizer/Index">Back to organizer area</a></p>

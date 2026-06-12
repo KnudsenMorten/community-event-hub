@@ -96,23 +96,40 @@ public class DashboardModel : PageModel
             .GroupBy(p => p.SponsorCompanyId!)
             .ToDictionary(g => g.Key, g => g.Count());
 
+        // Leads pipeline columns (live since v1.2.8; were zero-stubs while
+        // DbSet<SponsorLead> didn't exist).
+        var weekAgo = _clock.GetUtcNow().AddDays(-7);
+        var leadAgg = (await _db.SponsorLeads
+            .Where(l => l.EventId == me.EventId)
+            .Select(l => new { l.SponsorCompanyId, l.CapturedAt, l.LastSyncedAt })
+            .ToListAsync(ct))
+            .GroupBy(l => l.SponsorCompanyId)
+            .ToDictionary(g => g.Key, g => new
+            {
+                Total  = g.Count(),
+                Last7d = g.Count(l => l.CapturedAt >= weekAgo),
+                LastSync = (DateTimeOffset?)g.Max(l => l.LastSyncedAt),
+            });
+
         var allCompanyIds = new HashSet<string>(taskAgg.Keys);
         foreach (var cid in contactsByCompany.Keys) allCompanyIds.Add(cid);
+        foreach (var cid in leadAgg.Keys) allCompanyIds.Add(cid);
 
         Rows = allCompanyIds
             .Select(cid =>
             {
                 taskAgg.TryGetValue(cid, out var ta);
                 contactsByCompany.TryGetValue(cid, out var contactCount);
+                leadAgg.TryGetValue(cid, out var la);
                 return new SponsorRow(
                     CompanyId:    cid,
                     Contacts:     contactCount,
                     TasksTotal:   ta?.TasksTotal   ?? 0,
                     TasksDone:    ta?.TasksDone    ?? 0,
                     TasksOverdue: ta?.TasksOverdue ?? 0,
-                    LeadsTotal:   0,
-                    LeadsLast7d:  0,
-                    LastZohoSync: null);
+                    LeadsTotal:   la?.Total  ?? 0,
+                    LeadsLast7d:  la?.Last7d ?? 0,
+                    LastZohoSync: la?.LastSync);
             })
             .OrderByDescending(r => r.TasksOverdue)
             .ThenBy(r => r.CompanyId)

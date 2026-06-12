@@ -72,6 +72,15 @@ public class DashboardModel : PageModel
     public int SurveyTopTrackCount { get; private set; }
     public const string SurveySlug = "eldk27-topics";
 
+    // --- Sponsor leads + group photos + app game (v1.2.8) -----------------
+    public int LeadsTotal { get; private set; }
+    public int LeadsLast7d { get; private set; }
+    public int LeadsOpen { get; private set; }
+    public int PhotoRegs { get; private set; }
+    public int PhotoUnscheduled { get; private set; }
+    public int AppGameSponsors { get; private set; }
+    public int AppGameUnconfirmed { get; private set; }
+
     public async Task<IActionResult> OnGetAsync(CancellationToken ct)
     {
         var me = _participant.Current;
@@ -83,7 +92,25 @@ public class DashboardModel : PageModel
         await LoadTravelAndLunchGraphicsAsync(me.EventId, ct);
         await LoadPendingVolunteersAsync(me.EventId, ct);
         await LoadSurveyStatsAsync(ct);
+        await LoadPipelineStatsAsync(me.EventId, ct);
         return Page();
+    }
+
+    private async Task LoadPipelineStatsAsync(int eventId, CancellationToken ct)
+    {
+        var weekAgo = _clock.GetUtcNow().AddDays(-7);
+        var leads = _db.SponsorLeads.Where(l => l.EventId == eventId);
+        LeadsTotal  = await leads.CountAsync(ct);
+        LeadsLast7d = await leads.CountAsync(l => l.CapturedAt >= weekAgo, ct);
+        LeadsOpen   = await leads.CountAsync(l => l.Status == SponsorLeadStatus.Open, ct);
+
+        var photos = _db.GroupPhotoRegistrations.Where(g => g.EventId == eventId);
+        PhotoRegs        = await photos.CountAsync(ct);
+        PhotoUnscheduled = await photos.CountAsync(g => g.ScheduledAtUtc == null, ct);
+
+        var game = _db.AppGameParticipations.Where(a => a.EventId == eventId);
+        AppGameSponsors    = await game.CountAsync(ct);
+        AppGameUnconfirmed = await game.CountAsync(a => !a.GiftConfirmed, ct);
     }
 
     private async Task LoadSurveyStatsAsync(CancellationToken ct)

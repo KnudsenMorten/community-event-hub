@@ -161,6 +161,76 @@ public class DataGridModel : PageModel
         return File(Encoding.UTF8.GetBytes(csv), "text/csv", "participants.csv");
     }
 
+    /// <summary>
+    /// The Excel rooming list the hotel receives (README: Hotel management).
+    /// Everyone with NeedsRoom=true, full booking detail, sorted by name.
+    /// xlsx (not CSV) because that's the format hotels expect to receive
+    /// and import.
+    /// </summary>
+    public async Task<IActionResult> OnGetRoomingListAsync(CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+        if (me.Role != ParticipantRole.Organizer) return Forbid();
+
+        var bookings = await _db.HotelBookings
+            .Where(h => h.EventId == me.EventId && h.NeedsRoom)
+            .Join(_db.Participants,
+                h => h.ParticipantId, p => p.Id,
+                (h, p) => new
+                {
+                    p.FullName, p.Email, p.Phone, p.IsActive,
+                    h.CheckInDate, h.CheckOutDate, h.RoomType, h.RoomShareWith,
+                    h.ConfirmationState, h.ConfirmationNumber, h.Notes,
+                })
+            .Where(x => x.IsActive)
+            .OrderBy(x => x.FullName)
+            .ToListAsync(ct);
+
+        using var wb = new ClosedXML.Excel.XLWorkbook();
+        var ws = wb.Worksheets.Add("Rooming list");
+        var headers = new[]
+        {
+            "Name", "Email", "Phone", "Check-in", "Check-out",
+            "Room type", "Share with", "Confirmation no", "Status", "Notes",
+        };
+        for (var c = 0; c < headers.Length; c++) ws.Cell(1, c + 1).Value = headers[c];
+        ws.Range(1, 1, 1, headers.Length).Style.Font.Bold = true;
+
+        var row = 2;
+        foreach (var b in bookings)
+        {
+            ws.Cell(row, 1).Value = b.FullName;
+            ws.Cell(row, 2).Value = b.Email;
+            ws.Cell(row, 3).Value = b.Phone ?? "";
+            if (b.CheckInDate is not null)
+            {
+                ws.Cell(row, 4).Value = b.CheckInDate.Value.ToDateTime(TimeOnly.MinValue);
+                ws.Cell(row, 4).Style.DateFormat.Format = "dd/mm/yyyy";
+            }
+            if (b.CheckOutDate is not null)
+            {
+                ws.Cell(row, 5).Value = b.CheckOutDate.Value.ToDateTime(TimeOnly.MinValue);
+                ws.Cell(row, 5).Style.DateFormat.Format = "dd/mm/yyyy";
+            }
+            ws.Cell(row, 6).Value = b.RoomType ?? "";
+            ws.Cell(row, 7).Value = b.RoomShareWith ?? "";
+            ws.Cell(row, 8).Value = b.ConfirmationNumber ?? "";
+            ws.Cell(row, 9).Value = b.ConfirmationState.ToString();
+            ws.Cell(row, 10).Value = b.Notes ?? "";
+            row++;
+        }
+        ws.Columns().AdjustToContents();
+        ws.SheetView.FreezeRows(1);
+
+        using var ms = new MemoryStream();
+        wb.SaveAs(ms);
+        var stamp = _clock.GetUtcNow().ToString("yyyy-MM-dd");
+        return File(ms.ToArray(),
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            $"rooming-list-{stamp}.xlsx");
+    }
+
     private async Task LoadAsync(int eventId, CancellationToken ct)
     {
         var query = _db.Participants.Where(p => p.EventId == eventId);
