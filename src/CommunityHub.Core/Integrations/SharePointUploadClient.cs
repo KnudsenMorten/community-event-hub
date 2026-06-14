@@ -3,6 +3,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
+using CommunityHub.Core.Security;
 
 namespace CommunityHub.Core.Integrations;
 
@@ -24,7 +25,24 @@ public sealed class SharePointUploadOptions
 
     public string TenantId { get; set; } = string.Empty;
     public string ClientId { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Legacy client-secret. The ELDK SPNs are certificate-only (secrets were
+    /// deleted), so this is normally empty; certificate auth (<see cref="CertificateThumbprint"/>)
+    /// is preferred. Kept only for non-ELDK / local-dev fallback.
+    /// </summary>
     public string ClientSecret { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Thumbprint of the SPN's certificate in the machine certificate store
+    /// (<c>LocalMachine\My</c>, then <c>CurrentUser\My</c>). When set, the client
+    /// authenticates to Microsoft Graph with a signed client-assertion (JWT)
+    /// instead of a client secret — the ELDK Code-Management SPN model.
+    /// </summary>
+    public string CertificateThumbprint { get; set; } = string.Empty;
+
+    /// <summary>True when configured for certificate auth (preferred).</summary>
+    public bool UsesCertificate => !string.IsNullOrWhiteSpace(CertificateThumbprint);
 
     /// <summary>Days after which the anonymous edit links expire. 0 = no expiry.</summary>
     public int LinkExpiryDays { get; set; } = 365;
@@ -74,12 +92,13 @@ public sealed class SharePointUploadClient
         _options = options;
     }
 
-    /// <summary>True when SPN credentials are present. Site URL / path are passed per-call.</summary>
+    /// <summary>True when SPN credentials are present. Site URL / path are passed per-call.
+    /// Certificate auth (preferred) or a legacy client secret satisfies the credential check.</summary>
     public bool IsConfigured =>
         _options.Enabled
         && !string.IsNullOrWhiteSpace(_options.TenantId)
         && !string.IsNullOrWhiteSpace(_options.ClientId)
-        && !string.IsNullOrWhiteSpace(_options.ClientSecret);
+        && (_options.UsesCertificate || !string.IsNullOrWhiteSpace(_options.ClientSecret));
 
     /// <summary>
     /// Ensure a folder exists at <c>{rootFolderPath}/{relativePath}</c> on the
@@ -134,46 +153,55 @@ public sealed class SharePointUploadClient
         var driveId = await GetDriveIdAsync(siteUrl, driveName, ct);
         var encoded = EncodePath(folderPath);
 
-        // Single page is enough for the volumes we expect (~handful of files
-        // per sponsor folder). If a folder ever grows past one Graph page,
-        // add @odata.nextLink pagination here.
-        var resp = await GraphGetOrNullAsync($"/drives/{driveId}/root:/{encoded}:/children?$top=200", ct);
-        if (resp is null) return Array.Empty<SharePointFileSnapshot>();
-
+        // Page through every child. Graph returns at most $top items per page and
+        // an @odata.nextLink (an absolute URL) when more remain; follow it until
+        // exhausted so folders with more than one page are listed completely.
         var results = new List<SharePointFileSnapshot>();
-        if (!resp.Value.TryGetProperty("value", out var arr) || arr.ValueKind != JsonValueKind.Array)
+        string? nextUrl = GraphRoot + $"/drives/{driveId}/root:/{encoded}:/children?$top=200";
+
+        while (nextUrl is not null)
         {
-            return results;
-        }
+            var resp = await GraphGetAbsoluteOrNullAsync(nextUrl, ct);
+            if (resp is null) return results;   // folder missing => stop, tolerate
 
-        foreach (var item in arr.EnumerateArray())
-        {
-            // Skip sub-folders -- we only notify on file uploads.
-            if (item.TryGetProperty("folder", out _)) continue;
-
-            var id   = item.TryGetProperty("id", out var idEl) ? idEl.GetString() : null;
-            var name = item.TryGetProperty("name", out var nEl) ? nEl.GetString() : null;
-            if (string.IsNullOrEmpty(id) || string.IsNullOrEmpty(name)) continue;
-
-            string? etag = null;
-            if (item.TryGetProperty("eTag", out var et) && et.ValueKind == JsonValueKind.String)
+            if (resp.Value.TryGetProperty("value", out var arr) && arr.ValueKind == JsonValueKind.Array)
             {
-                etag = et.GetString();
-            }
-            else if (item.TryGetProperty("cTag", out var ct2) && ct2.ValueKind == JsonValueKind.String)
-            {
-                etag = ct2.GetString();
+                foreach (var item in arr.EnumerateArray())
+                {
+                    // Skip sub-folders -- we only notify on file uploads.
+                    if (item.TryGetProperty("folder", out _)) continue;
+
+                    var id   = item.TryGetProperty("id", out var idEl) ? idEl.GetString() : null;
+                    var name = item.TryGetProperty("name", out var nEl) ? nEl.GetString() : null;
+                    if (string.IsNullOrEmpty(id) || string.IsNullOrEmpty(name)) continue;
+
+                    string? etag = null;
+                    if (item.TryGetProperty("eTag", out var et) && et.ValueKind == JsonValueKind.String)
+                    {
+                        etag = et.GetString();
+                    }
+                    else if (item.TryGetProperty("cTag", out var ct2) && ct2.ValueKind == JsonValueKind.String)
+                    {
+                        etag = ct2.GetString();
+                    }
+
+                    DateTimeOffset? lastMod = null;
+                    if (item.TryGetProperty("lastModifiedDateTime", out var lm)
+                        && lm.ValueKind == JsonValueKind.String
+                        && DateTimeOffset.TryParse(lm.GetString(), out var lmParsed))
+                    {
+                        lastMod = lmParsed;
+                    }
+
+                    results.Add(new SharePointFileSnapshot(id!, name!, etag, lastMod));
+                }
             }
 
-            DateTimeOffset? lastMod = null;
-            if (item.TryGetProperty("lastModifiedDateTime", out var lm)
-                && lm.ValueKind == JsonValueKind.String
-                && DateTimeOffset.TryParse(lm.GetString(), out var lmParsed))
-            {
-                lastMod = lmParsed;
-            }
-
-            results.Add(new SharePointFileSnapshot(id!, name!, etag, lastMod));
+            // Follow @odata.nextLink (absolute URL) if there is another page.
+            nextUrl = resp.Value.TryGetProperty("@odata.nextLink", out var nl)
+                      && nl.ValueKind == JsonValueKind.String
+                ? nl.GetString()
+                : null;
         }
 
         return results;
@@ -189,15 +217,30 @@ public sealed class SharePointUploadClient
         }
 
         var tokenUrl = $"https://login.microsoftonline.com/{_options.TenantId}/oauth2/v2.0/token";
+
+        var form = new Dictionary<string, string>
+        {
+            ["client_id"]  = _options.ClientId,
+            ["scope"]      = "https://graph.microsoft.com/.default",
+            ["grant_type"] = "client_credentials",
+        };
+
+        if (_options.UsesCertificate)
+        {
+            // Certificate auth (preferred, ELDK Code-Management): sign a JWT
+            // client-assertion with the SPN's private key — no secret on the wire.
+            using var cert = CertificateLoader.LoadByThumbprint(_options.CertificateThumbprint);
+            form["client_assertion_type"] = "urn:ietf:params:oauth:client-assertion-type:jwt-bearer";
+            form["client_assertion"]      = ClientAssertionJwt.Build(_options.ClientId, tokenUrl, cert);
+        }
+        else
+        {
+            form["client_secret"] = _options.ClientSecret;
+        }
+
         using var req = new HttpRequestMessage(HttpMethod.Post, tokenUrl)
         {
-            Content = new FormUrlEncodedContent(new Dictionary<string, string>
-            {
-                ["client_id"]     = _options.ClientId,
-                ["client_secret"] = _options.ClientSecret,
-                ["scope"]         = "https://graph.microsoft.com/.default",
-                ["grant_type"]    = "client_credentials",
-            }),
+            Content = new FormUrlEncodedContent(form),
         };
 
         using var resp = await _http.SendAsync(req, ct);
@@ -358,9 +401,16 @@ public sealed class SharePointUploadClient
         return JsonDocument.Parse(raw).RootElement.Clone();
     }
 
-    private async Task<JsonElement?> GraphGetOrNullAsync(string path, CancellationToken ct)
+    private Task<JsonElement?> GraphGetOrNullAsync(string path, CancellationToken ct)
+        => GraphGetAbsoluteOrNullAsync(GraphRoot + path, ct);
+
+    /// <summary>
+    /// GET an absolute Graph URL (used both for a composed path and for an
+    /// @odata.nextLink, which Graph returns as a fully-qualified URL).
+    /// </summary>
+    private async Task<JsonElement?> GraphGetAbsoluteOrNullAsync(string url, CancellationToken ct)
     {
-        using var req = new HttpRequestMessage(HttpMethod.Get, GraphRoot + path);
+        using var req = new HttpRequestMessage(HttpMethod.Get, url);
         req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", await GetAccessTokenAsync(ct));
         using var resp = await _http.SendAsync(req, ct);
         if (resp.StatusCode == HttpStatusCode.NotFound) return null;
@@ -368,7 +418,7 @@ public sealed class SharePointUploadClient
         if (!resp.IsSuccessStatusCode)
         {
             throw new SharePointUploadException(
-                $"Graph GET {path} failed (HTTP {(int)resp.StatusCode}): {Truncate(raw, 400)}");
+                $"Graph GET {url} failed (HTTP {(int)resp.StatusCode}): {Truncate(raw, 400)}");
         }
         return JsonDocument.Parse(raw).RootElement.Clone();
     }

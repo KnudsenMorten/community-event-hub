@@ -272,46 +272,48 @@ public class TasksModel : PageModel
                 companyId);
         }
 
-        // TODO(zoho-push): PATCH the Zoho Backstage exhibitor profile so
-        // company_overview (and, for booth sponsors, company_short_description)
-        // are pre-filled. Needs the v3 update endpoint + zohobackstage.exhibitor.UPDATE
-        // scope on the OAuth token. Until then, log the intended payload so
-        // the operator can paste it manually.
+        // The Zoho Backstage exhibitor profile is NOT auto-updated from here.
+        // IBackstageExhibitorApi only exposes Exists/Create of an exhibitor
+        // *request* -- there is no update/PATCH contract for the
+        // company_overview / company_short_description fields, and the
+        // Backstage v3 update endpoint + zohobackstage.exhibitor.UPDATE scope
+        // are not wired. Rather than fabricate a push that silently does
+        // nothing, we record an explicit "not available" warning and tell the
+        // sponsor plainly that the organizer mirrors the text into Backstage.
         var isExhibitor = await _db.Tasks.AnyAsync(
             t => t.EventId == me.EventId
                  && t.SponsorCompanyId == companyId
                  && t.SourceKey != null
                  && t.SourceKey.Contains(":upload-sponsor-wall-design"), ct);
-        _log.LogInformation(
-            "Tasks: Zoho Backstage push (STUB) -- company={Co}, isExhibitor={Ex}, "
-            + "company_overview_len={OvLen}, company_short_description_len={ShLen}. "
-            + "TODO: implement actual PATCH once the endpoint + UPDATE scope are confirmed.",
+        _log.LogWarning(
+            "Tasks: Zoho Backstage profile auto-push is NOT available (no update "
+            + "endpoint/scope wired). Company info saved + emailed for manual "
+            + "entry. company={Co}, isExhibitor={Ex}, company_overview_len={OvLen}, "
+            + "company_short_description_len={ShLen}.",
             companyId, isExhibitor,
             (info.CompanyDescription ?? "").Length,
             (info.CompanyDescriptionShort ?? "").Length);
 
-        Message = "Company information saved. The organizer team has been notified.";
+        Message = "Company information saved and sent to the organizer team. "
+            + "The text is not pushed to Zoho Backstage automatically yet -- the "
+            + "organizers will mirror it into your Backstage exhibitor profile.";
         await LoadAsync(me, ct);
         return Page();
     }
 
     private async Task<string> ResolveCompanyDisplayNameAsync(int eventId, string companyId, CancellationToken ct)
     {
-        // Use the company name embedded in any of this company's pull-generated
-        // tasks (they were rendered with the resolved Public Company Name).
-        // Fall back to the raw id when nothing matches.
-        var task = await _db.Tasks
-            .Where(t => t.EventId == eventId && t.SponsorCompanyId == companyId)
-            .OrderBy(t => t.Id)
+        // SponsorUploadLocation.CompanyName is the display name SponsorOrderPullService
+        // already resolved through the canonical Company Manager chain (public name ->
+        // legal name -> billing) and persisted per (event, company). Reuse that rather
+        // than re-resolving here. Fall back to the raw id only when nothing resolved.
+        var resolved = await _db.SponsorUploadLocations
+            .Where(l => l.EventId == eventId && l.SponsorCompanyId == companyId
+                        && l.CompanyName != string.Empty)
+            .OrderBy(l => l.Id)
+            .Select(l => l.CompanyName)
             .FirstOrDefaultAsync(ct);
-        if (task is null) return $"Company {companyId}";
-        // The booth-shipment task title is "Pre-Event Shipment of packages..."
-        // and doesn't carry the name -- safer to read from a Participant row.
-        var p = await _db.Participants
-            .Where(x => x.EventId == eventId && x.SponsorCompanyId == companyId)
-            .Select(x => x.FullName)
-            .FirstOrDefaultAsync(ct);
-        return string.IsNullOrWhiteSpace(p) ? $"Company {companyId}" : $"Company {companyId}";
+        return string.IsNullOrWhiteSpace(resolved) ? $"Company {companyId}" : resolved;
     }
 
     private static string BuildCompanyInfoEmailBody(string companyName, SponsorInfo info, string submitter)

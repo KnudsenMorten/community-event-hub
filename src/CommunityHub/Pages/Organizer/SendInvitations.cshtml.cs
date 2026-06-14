@@ -18,6 +18,7 @@ public class SendInvitationsModel : PageModel
     private readonly ICurrentParticipantAccessor _participant;
     private readonly MagicLinkService _magic;
     private readonly IEmailSender _emailSender;
+    private readonly EmailTemplateProvider _templates;
     private readonly CommunityHub.Branding.ActiveEventNameProvider _activeEvent;
     private readonly TimeProvider _clock;
 
@@ -26,6 +27,7 @@ public class SendInvitationsModel : PageModel
         ICurrentParticipantAccessor participant,
         MagicLinkService magic,
         IEmailSender emailSender,
+        EmailTemplateProvider templates,
         CommunityHub.Branding.ActiveEventNameProvider activeEvent,
         TimeProvider clock)
     {
@@ -33,6 +35,7 @@ public class SendInvitationsModel : PageModel
         _participant = participant;
         _magic = magic;
         _emailSender = emailSender;
+        _templates = templates;
         _activeEvent = activeEvent;
         _clock = clock;
     }
@@ -93,9 +96,17 @@ public class SendInvitationsModel : PageModel
             {
                 var token = _magic.CreateToken(p.Id);
                 var link = $"{origin}/Login/Magic?token={Uri.EscapeDataString(token)}";
-                var html = BuildInvitationHtml(p.FullName, p.Role, link, eventCode, communityName);
-                var subject = $"{eventCode} Event Hub - your one-tap sign-in link";
-                await _emailSender.SendAsync(p.Email, subject, html, ct);
+                var firstName = string.IsNullOrWhiteSpace(p.FullName) ? "there" : p.FullName.Split(' ')[0];
+
+                var tokens = _templates.NewTokenSet();
+                tokens["firstName"] = firstName;
+                tokens["roleName"] = p.Role.ToString();
+                tokens["communityName"] = communityName;
+                tokens["eventCode"] = eventCode;
+                tokens["magicLink"] = link;
+
+                var rendered = _templates.Render("invitation", tokens);
+                await _emailSender.SendAsync(p.Email, rendered.Subject, rendered.HtmlBody, ct);
 
                 _db.SentReminders.Add(new SentReminder
                 {
@@ -146,29 +157,4 @@ public class SendInvitationsModel : PageModel
             .ToList();
     }
 
-    private static string BuildInvitationHtml(
-        string fullName, ParticipantRole role, string link, string eventCode, string communityName)
-    {
-        var firstName = string.IsNullOrWhiteSpace(fullName) ? "there" : fullName.Split(' ')[0];
-        var encName   = System.Net.WebUtility.HtmlEncode(firstName);
-        var encComm   = System.Net.WebUtility.HtmlEncode(communityName);
-        var encCode   = System.Net.WebUtility.HtmlEncode(eventCode);
-        var encRole   = System.Net.WebUtility.HtmlEncode(role.ToString());
-
-        return $@"<p>Hi {encName},</p>
-<p>You have been added as a <strong>{encRole}</strong> for <strong>{encComm}</strong> ({encCode}).</p>
-<p>Tap the button below to sign in to your Event Hub — no PIN, no password.</p>
-<p>
-  <a href=""{link}""
-     style=""display:inline-block;background:#008BD2;color:#fff;
-            padding:11px 20px;border-radius:7px;text-decoration:none;
-            font-weight:bold;font-size:15px;"">
-    Open my Event Hub
-  </a>
-</p>
-<p style=""color:#6b7280;font-size:13px;"">
-  The link is valid for 14 days. If it expires you can always sign in with your email + a one-time PIN.
-</p>
-<p>Cheers,<br/>ELDK-team</p>";
-    }
 }

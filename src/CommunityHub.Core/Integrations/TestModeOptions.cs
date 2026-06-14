@@ -16,18 +16,22 @@ public sealed class TestModeOptions
     /// <summary>Master switch. Default true - safe until explicitly disabled.</summary>
     public bool Enabled { get; set; } = true;
 
-    /// <summary>The test sponsor company name used in TESTMODE.</summary>
-    public string TestSponsorName { get; set; } = "2LINKIT";
+    /// <summary>The test sponsor company name used in TESTMODE. Generic default;
+    /// the real per-environment value is supplied via <c>TestMode__TestSponsorName</c>.</summary>
+    public string TestSponsorName { get; set; } = "Test Sponsor Co";
 
-    /// <summary>The test sponsor's company id (matches a WooCommerce order's _cm_company_id).</summary>
-    public string TestSponsorCompanyId { get; set; } = "test-2linkit";
+    /// <summary>The test sponsor's company id (matches a WooCommerce order's _cm_company_id).
+    /// Generic default; overridden per environment via <c>TestMode__TestSponsorCompanyId</c>.</summary>
+    public string TestSponsorCompanyId { get; set; } = "test-sponsor";
 
-    /// <summary>The test sponsor's contact email.</summary>
-    public string TestSponsorEmail { get; set; } = "mok@2linkit.net";
+    /// <summary>The test sponsor's contact email. Generic placeholder; the real
+    /// per-environment value is supplied via <c>TestMode__TestSponsorEmail</c>.</summary>
+    public string TestSponsorEmail { get; set; } = "test-sponsor@example.com";
 
     /// <summary>
     /// In TESTMODE every coordinator notification goes here only - never to a
-    /// real event-coordinator address.
+    /// real event-coordinator address. Generic placeholder; overridden per
+    /// environment via <c>TestMode__TestCoordinatorEmail</c>.
     /// </summary>
-    public string TestCoordinatorEmail { get; set; } = "mok@2linkit.net";
+    public string TestCoordinatorEmail { get; set; } = "test-coordinator@example.com";
 }

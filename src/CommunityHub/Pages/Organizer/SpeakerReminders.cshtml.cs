@@ -17,17 +17,20 @@ public class SpeakerRemindersModel : PageModel
     private readonly CommunityHubDbContext _db;
     private readonly ICurrentParticipantAccessor _participant;
     private readonly IEmailSender _emailSender;
+    private readonly EmailTemplateProvider _templates;
     private readonly TimeProvider _clock;
 
     public SpeakerRemindersModel(
         CommunityHubDbContext db,
         ICurrentParticipantAccessor participant,
         IEmailSender emailSender,
+        EmailTemplateProvider templates,
         TimeProvider clock)
     {
         _db = db;
         _participant = participant;
         _emailSender = emailSender;
+        _templates = templates;
         _clock = clock;
     }
 
@@ -104,11 +107,10 @@ public class SpeakerRemindersModel : PageModel
             .Select(e => e.Code)
             .FirstOrDefaultAsync(ct) ?? "Event Hub";
 
-        var html = BuildReminderHtml(p.FullName, task.Title, task.Description, task.DueDate, eventCode);
-        var subject = $"{eventCode} Event Hub - reminder: {task.Title}";
+        var rendered = BuildReminderEmail(p.FullName, task.Title, task.Description, task.DueDate, eventCode);
         try
         {
-            await _emailSender.SendAsync(p.Email, subject, html, ct);
+            await _emailSender.SendAsync(p.Email, rendered.Subject, rendered.HtmlBody, ct);
             _db.SentReminders.Add(new SentReminder
             {
                 EventId = me.EventId,
@@ -198,21 +200,25 @@ public class SpeakerRemindersModel : PageModel
             .ToList();
     }
 
-    private static string BuildReminderHtml(
+    private RenderedEmail BuildReminderEmail(
         string fullName, string taskTitle, string? description, DateOnly? due, string eventCode)
     {
         var firstName = string.IsNullOrWhiteSpace(fullName) ? "there" : fullName.Split(' ')[0];
         var dueText = due is null
             ? "no fixed due date"
             : $"due <strong>{due:dd/MM/yyyy}</strong>";
-        var encDesc = string.IsNullOrWhiteSpace(description)
+        var descriptionBlock = string.IsNullOrWhiteSpace(description)
             ? string.Empty
-            : $"<p>{System.Net.WebUtility.HtmlEncode(description)}</p>";
+            : $"<p style=\"margin:0 0 16px;\">{System.Net.WebUtility.HtmlEncode(description)}</p>";
 
-        return $@"<p>Hi {System.Net.WebUtility.HtmlEncode(firstName)},</p>
-<p>Quick reminder from the {eventCode} team about the task <strong>{System.Net.WebUtility.HtmlEncode(taskTitle)}</strong> ({dueText}).</p>
-{encDesc}
-<p>Sign in to your Event Hub to mark it Done or update progress.</p>
-<p>Cheers,<br/>ELDK-team</p>";
+        var tokens = _templates.NewTokenSet();
+        tokens["firstName"] = firstName;
+        tokens["eventCode"] = eventCode;
+        tokens["taskTitle"] = taskTitle;
+        tokens["taskTitleHtml"] = System.Net.WebUtility.HtmlEncode(taskTitle);
+        tokens["dueText"] = dueText;
+        tokens["descriptionBlock"] = descriptionBlock;
+
+        return _templates.Render("task-manual-reminder", tokens);
     }
 }

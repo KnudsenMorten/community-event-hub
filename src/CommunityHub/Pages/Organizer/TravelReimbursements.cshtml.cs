@@ -16,17 +16,23 @@ public class TravelReimbursementsModel : PageModel
     private readonly ICurrentParticipantAccessor _participant;
     private readonly TimeProvider _clock;
     private readonly IEmailSender _emailSender;
+    private readonly EmailTemplateProvider _templates;
+    private readonly CommunityHub.Branding.ActiveEventNameProvider _activeEvent;
     private readonly ILogger<TravelReimbursementsModel> _logger;
 
     public TravelReimbursementsModel(
         CommunityHubDbContext db, ICurrentParticipantAccessor participant,
         TimeProvider clock, IEmailSender emailSender,
+        EmailTemplateProvider templates,
+        CommunityHub.Branding.ActiveEventNameProvider activeEvent,
         ILogger<TravelReimbursementsModel> logger)
     {
         _db = db;
         _participant = participant;
         _clock = clock;
         _emailSender = emailSender;
+        _templates = templates;
+        _activeEvent = activeEvent;
         _logger = logger;
     }
 
@@ -89,16 +95,19 @@ public class TravelReimbursementsModel : PageModel
 
                     var firstName = string.IsNullOrWhiteSpace(p.FullName) ? "there" : p.FullName.Split(' ')[0];
                     var amount = row.ClaimAmountEur?.ToString("0") ?? "";
-                    var subject = $"{eventCode} Event Hub - your travel reimbursement has been paid";
                     var notesBlock = string.IsNullOrWhiteSpace(row.PaidNotes)
                         ? ""
-                        : $"<p>Organizer note: {System.Net.WebUtility.HtmlEncode(row.PaidNotes)}</p>";
-                    var html =
-                        $"<p>Hi {System.Net.WebUtility.HtmlEncode(firstName)},</p>" +
-                        $"<p>Your {eventCode} travel reimbursement of <strong>EUR {amount}</strong> has been processed and transferred today.</p>" +
-                        notesBlock +
-                        "<p>Cheers,<br/>ELDK-team</p>";
-                    await _emailSender.SendAsync(p.Email, subject, html, ct);
+                        : $"<p style=\"margin:0 0 16px;\">Organizer note: {System.Net.WebUtility.HtmlEncode(row.PaidNotes)}</p>";
+
+                    var tokens = _templates.NewTokenSet();
+                    tokens["firstName"] = firstName;
+                    tokens["eventCode"] = eventCode;
+                    tokens["amount"] = amount;
+                    tokens["notesBlock"] = notesBlock;
+                    tokens["communityName"] = _activeEvent.GetCommunityName();
+
+                    var rendered = _templates.Render("travel-reimbursement-paid", tokens);
+                    await _emailSender.SendAsync(p.Email, rendered.Subject, rendered.HtmlBody, ct);
                     Message = $"Marked claim #{id} as paid and notified {p.Email}.";
                 }
                 catch (Exception ex)

@@ -29,9 +29,17 @@ Thumbs.db
 deploy-artifacts/
 
 # local publish staging (dotnet publish output; never ship via git)
+# NB: these dirs contain a COPY of config/*.eldk*.json (live event data) + build
+# DLLs — they must never be tracked or mirrored to the public repo.
 publish-deploy/
 publish-deploy.zip
 publish-out/
 publish-out.zip
 publish-jobs-out/
 publish-jobs-out.zip
+publish/
+publish-dev/
+publish-prod/
+publish-prod-deploy/
+publish-*/
+publish-*.zip

@@ -1,6 +1,7 @@
 using CommunityHub.Auth;
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
+using CommunityHub.Core.Integrations;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
@@ -25,19 +26,29 @@ public class DashboardModel : PageModel
     private readonly CommunityHubDbContext _db;
     private readonly ICurrentParticipantAccessor _participant;
     private readonly TimeProvider _clock;
+    private readonly ZohoOptions _zoho;
 
     public DashboardModel(
         CommunityHubDbContext db,
         ICurrentParticipantAccessor participant,
-        TimeProvider clock)
+        TimeProvider clock,
+        ZohoOptions zoho)
     {
         _db = db;
         _participant = participant;
         _clock = clock;
+        _zoho = zoho;
     }
 
     public bool AccessDenied { get; private set; }
-    public bool ZohoPipelinePending { get; private set; } = true;
+
+    /// <summary>
+    /// True only when the leads pipeline is genuinely unconfigured: the Zoho
+    /// CRM pull is off AND no SponsorLead rows exist for the event. Once the
+    /// CRM integration is switched on, or any lead has landed, the banner
+    /// stands down. Computed in OnGetAsync -- not a static default.
+    /// </summary>
+    public bool ZohoPipelinePending { get; private set; }
 
     public record SponsorRow(
         string CompanyId,
@@ -110,6 +121,10 @@ public class DashboardModel : PageModel
                 Last7d = g.Count(l => l.CapturedAt >= weekAgo),
                 LastSync = (DateTimeOffset?)g.Max(l => l.LastSyncedAt),
             });
+
+        // Banner state: "pending" only when the CRM pull is off AND no leads
+        // have ever landed for this event. Either condition clears it.
+        ZohoPipelinePending = !(_zoho.CrmEnabled || leadAgg.Count > 0);
 
         var allCompanyIds = new HashSet<string>(taskAgg.Keys);
         foreach (var cid in contactsByCompany.Keys) allCompanyIds.Add(cid);

@@ -37,7 +37,7 @@ public class MagicModel : PageModel
 
         var participant = await _db.Participants
             .Where(p => p.Id == participantId && p.IsActive)
-            .Select(p => new { p.Id, p.Email, p.FullName, p.Role })
+            .Select(p => new { p.Id, p.Email, p.FullName, p.Role, p.EventId })
             .FirstOrDefaultAsync(ct);
         if (participant is null)
         {
@@ -51,6 +51,7 @@ public class MagicModel : PageModel
             new(ClaimTypes.Email, participant.Email),
             new(ClaimTypes.Name, participant.FullName),
             new(ClaimTypes.Role, participant.Role.ToString()),
+            new("EventId", participant.EventId.ToString()),
         };
         var identity = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
         await HttpContext.SignInAsync(
