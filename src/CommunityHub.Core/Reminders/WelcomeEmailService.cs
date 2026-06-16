@@ -52,7 +52,17 @@ public sealed class WelcomeEmailService
             return false;
         }
 
-        // Idempotency: one welcome per participant, ever.
+        // Route to the speaker's effective address (override ?? Sessionize).
+        // Non-speakers / no override resolve to the participant's own address.
+        var overrideEmail = await _db.SpeakerProfiles
+            .Where(sp => sp.ParticipantId == participant.Id)
+            .Select(sp => sp.ContactEmailOverride)
+            .FirstOrDefaultAsync(ct);
+        var toEmail = Domain.SpeakerProfile.EffectiveEmailFor(
+            participant.Email, overrideEmail);
+
+        // Idempotency: one welcome per participant, ever. Keyed on the IDENTITY
+        // address so changing the override later never re-welcomes the speaker.
         var occasionKey = $"welcome:{participant.Id}";
         var already = await _db.SentReminders.AnyAsync(
             s => s.EventId == participant.EventId
@@ -78,7 +88,7 @@ public sealed class WelcomeEmailService
 
         var rendered = _templates.Render(TemplateName, tokens);
         await _emailSender.SendAsync(
-            participant.Email, rendered.Subject, rendered.HtmlBody, ct);
+            toEmail, rendered.Subject, rendered.HtmlBody, ct);
 
         // Record it so a re-import does not re-send.
         _db.SentReminders.Add(new SentReminder

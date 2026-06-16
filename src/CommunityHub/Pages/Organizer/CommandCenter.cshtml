@@ -1,0 +1,219 @@
+@page
+@using CommunityHub.Core.Organizer
+@using CommunityHub.Core.Email
+@model CommunityHub.Pages.Organizer.CommandCenterModel
+@{
+    ViewData["Title"] = Localizer["Cc.Title"].Value;
+
+    // Resolve a tile's localized label from its stable key.
+    string TileLabel(string key) => Localizer[$"Cc.Tile.{key}"].Value;
+    // Resolve a persona's localized label.
+    string PersonaLabel(PersonaGroup p) => Localizer[$"Cc.Persona.{p}"].Value;
+    // Bar colour mirrors the Overview page: green >=80, blue >=40, amber below.
+    string BarClass(int pct) => pct >= 80 ? "bar-good" : pct >= 40 ? "bar-mid" : "bar-low";
+}
+
+<style>
+    .cc-sub { color:#6b7280; margin:0 0 4px; }
+    .cc-updated { color:#6b7280; font-size:12.5px; margin:0 0 10px; }
+    /* Mobile-first stat grid: two columns on phones, wrapping row on wider screens. */
+    .cc-stats { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+    @@media (min-width:560px) { .cc-stats { grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); } }
+    /* A tile is a link; keep it block + reset link colour so the whole card is the target. */
+    a.cc-tile { display:block; text-decoration:none; color:inherit;
+        border-radius:8px; padding:12px 14px; border:1px solid #e6e8ee; background:#f4f5f7;
+        transition:box-shadow .12s ease, transform .12s ease; }
+    a.cc-tile:hover, a.cc-tile:focus-visible { box-shadow:0 2px 10px rgba(0,0,0,.12); transform:translateY(-1px); }
+    a.cc-tile .num { font-size:26px; font-weight:700; color:#1a1a2e; line-height:1.1; }
+    a.cc-tile .lbl { font-size:12.5px; color:#374151; margin-top:3px; }
+    a.cc-tile .go { font-size:11.5px; color:var(--el-blue); margin-top:6px; font-weight:600; }
+    /* Needs-attention tiles: warn while > 0, calm at 0 (honest empty state). */
+    a.cc-tile.is-warn { background:#fef2f2; border-color:#fca5a5; }
+    a.cc-tile.is-warn .num { color:#b91c1c; }
+    a.cc-tile.is-ok { background:#f0fdf4; border-color:#bbf7d0; }
+    a.cc-tile.is-ok .num { color:#15803d; }
+    .cc-allclear { background:#f0fdf4; border:1px solid #bbf7d0; color:#15803d;
+        border-radius:8px; padding:12px 14px; font-weight:600; }
+    /* Onboarding bars. */
+    .bar-row { margin-bottom:12px; }
+    .bar-cap { font-size:13px; display:flex; justify-content:space-between; gap:8px; margin-bottom:3px; }
+    .bar-cap .n { color:#6b7280; white-space:nowrap; }
+    .bar-track { background:#e6e8ee; border-radius:5px; height:16px; overflow:hidden; }
+    .bar-fill { height:100%; }
+    .bar-good { background:#16a34a; } .bar-mid { background:#2d5be3; } .bar-low { background:#d97706; }
+    table.cc-tbl { width:100%; border-collapse:collapse; }
+    .cc-tbl th, .cc-tbl td { padding:8px 10px; text-align:left; border-bottom:1px solid #e6e8ee; font-size:13.5px; }
+    .cc-tbl th { font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:#6b7280; background:#f9fafb; }
+    .cc-overdue { color:#b91c1c; font-weight:600; }
+    .cc-empty { color:#6b7280; font-style:italic; font-size:13px; }
+</style>
+
+<div class="card">
+    <h2>@Localizer["Cc.Title"]</h2>
+
+    @if (Model.AccessDenied)
+    {
+        <p class="error" role="alert">@Localizer["Cc.AccessDenied"]</p>
+    }
+    else if (Model.Snapshot is null)
+    {
+        <p class="cc-empty">@Localizer["Cc.NoTasks"]</p>
+    }
+    else
+    {
+        var s = Model.Snapshot;
+        <p class="cc-sub">@s.EventDisplayName &mdash; @Localizer["Cc.Subtitle"]</p>
+        <p class="cc-updated">@string.Format(Localizer["Cc.LastUpdated"].Value, s.GeneratedAtUtc.UtcDateTime.ToString("yyyy-MM-dd HH:mm") + " UTC")</p>
+
+        <div class="cc-stats">
+            <a class="cc-tile" asp-page="/Organizer/Participants">
+                <div class="num">@s.TotalParticipants</div>
+                <div class="lbl">@Localizer["Cc.Registrations"]</div>
+                <div class="go">@Localizer["Cc.OpenGrid"] &rarr;</div>
+            </a>
+            <a class="cc-tile" asp-page="/Organizer/Participants" asp-route-ActiveFilter="active">
+                <div class="num">@s.ActiveParticipants</div>
+                <div class="lbl">@Localizer["Cc.Active"]</div>
+                <div class="go">@Localizer["Cc.OpenGrid"] &rarr;</div>
+            </a>
+            <a class="cc-tile" asp-page="/Organizer/Attendees">
+                <div class="num">@s.TotalAttendees</div>
+                <div class="lbl">@Localizer["Cc.Attendees"]</div>
+                <div class="go">@Localizer["Cc.OpenGrid"] &rarr;</div>
+            </a>
+            <a class="cc-tile" asp-page="/Organizer/Onboarding">
+                <div class="num">@s.OnboardingOverallPercent%</div>
+                <div class="lbl">@Localizer["Cc.OnboardingOverall"]</div>
+                <div class="go">@Localizer["Cc.OpenGrid"] &rarr;</div>
+            </a>
+        </div>
+    }
+</div>
+
+@if (Model.Snapshot is not null && !Model.AccessDenied)
+{
+    var s = Model.Snapshot;
+
+    <!-- Needs attention: each tile links to the grid filtered to exactly its rows. -->
+    <div class="card">
+        <h2 id="cc-attn-h">@Localizer["Cc.NeedsAttention"]</h2>
+        @if (s.AllClear)
+        {
+            <p class="cc-allclear" role="status">@Localizer["Cc.AllClear"]</p>
+        }
+        <div class="cc-stats" role="list" aria-labelledby="cc-attn-h">
+            @foreach (var tile in s.AttentionTiles)
+            {
+                var cls = tile.Count > 0 ? "is-warn" : "is-ok";
+                <a class="cc-tile @cls" role="listitem"
+                   asp-page="@tile.LinkPage" asp-all-route-data="@(tile.LinkQuery?.ToDictionary(kv => kv.Key, kv => kv.Value ?? string.Empty))"
+                   aria-label="@TileLabel(tile.Key): @tile.Count">
+                    <div class="num">@tile.Count</div>
+                    <div class="lbl">@TileLabel(tile.Key)</div>
+                    <div class="go">@Localizer["Cc.OpenGrid"] &rarr;</div>
+                </a>
+            }
+        </div>
+    </div>
+
+    <!-- Onboarding completion per persona: who hasn't done what. -->
+    <div class="card">
+        <h2>@Localizer["Cc.Onboarding"]</h2>
+        @if (s.OnboardingByPersona.Count == 0)
+        {
+            <p class="cc-empty">@Localizer["Cc.OnboardingNone"]</p>
+        }
+        else
+        {
+            foreach (var pc in s.OnboardingByPersona)
+            {
+                <div class="bar-row">
+                    <div class="bar-cap">
+                        <a asp-page="/Organizer/Onboarding" asp-route-Persona="@pc.Persona">@PersonaLabel(pc.Persona)</a>
+                        <span class="n">@pc.Completed / @pc.Total (@pc.Percent%) &middot; @string.Format(Localizer["Cc.OutstandingPeople"].Value, pc.Outstanding)</span>
+                    </div>
+                    <div class="bar-track" role="progressbar" aria-label="@PersonaLabel(pc.Persona)"
+                         aria-valuenow="@pc.Percent" aria-valuemin="0" aria-valuemax="100">
+                        <div class="bar-fill @BarClass(pc.Percent)" style="width:@pc.Percent%"></div>
+                    </div>
+                </div>
+            }
+        }
+    </div>
+
+    <!-- Headcounts: hotel / swag / lunch / dinner. Each links to its admin grid. -->
+    <div class="card">
+        <h2>@Localizer["Cc.Headcounts"]</h2>
+        <div class="cc-stats">
+            @foreach (var h in s.Headcounts)
+            {
+                <a class="cc-tile" asp-page="@h.LinkPage">
+                    <div class="num">@h.Count</div>
+                    <div class="lbl">@Localizer[$"Cc.Head.{h.Key}"]</div>
+                    <div class="go">@Localizer["Cc.OpenGrid"] &rarr;</div>
+                </a>
+            }
+        </div>
+    </div>
+
+    <!-- Sessions + sponsors status. -->
+    <div class="card">
+        <h2>@Localizer["Cc.SessionsSponsors"]</h2>
+        <div class="cc-stats">
+            <a class="cc-tile" asp-page="/Organizer/Sessions">
+                <div class="num">@s.SessionsScheduled / @s.SessionsTotal</div>
+                <div class="lbl">@Localizer["Cc.SessionsScheduled"]</div>
+                <div class="go">@Localizer["Cc.OpenGrid"] &rarr;</div>
+            </a>
+            <a class="cc-tile @(s.SessionsUnscheduled > 0 ? "is-warn" : "is-ok")" asp-page="/Organizer/Sessions">
+                <div class="num">@s.SessionsUnscheduled</div>
+                <div class="lbl">@Localizer["Cc.SessionsUnscheduled"]</div>
+                <div class="go">@Localizer["Cc.OpenGrid"] &rarr;</div>
+            </a>
+            <a class="cc-tile" asp-page="/Organizer/Sponsors">
+                <div class="num">@s.SponsorsTotal</div>
+                <div class="lbl">@Localizer["Cc.Sponsors"]</div>
+                <div class="go">@Localizer["Cc.OpenGrid"] &rarr;</div>
+            </a>
+            <a class="cc-tile" asp-page="/Organizer/Sponsors">
+                <div class="num">@s.SponsorTasksPercent%</div>
+                <div class="lbl">@Localizer["Cc.SponsorTasks"]</div>
+                <div class="go">@Localizer["Cc.OpenGrid"] &rarr;</div>
+            </a>
+        </div>
+    </div>
+
+    <!-- Today's + overdue tasks: the literal "what do I do next" list. -->
+    <div class="card">
+        <h2>@Localizer["Cc.TodaysTasks"]</h2>
+        @if (s.OverdueAndTodayTasks.Count == 0)
+        {
+            <p class="cc-empty">@Localizer["Cc.NoTasks"]</p>
+        }
+        else
+        {
+            <table class="cc-tbl">
+                <thead>
+                    <tr>
+                        <th scope="col">@Localizer["Cc.TaskCol.Title"]</th>
+                        <th scope="col">@Localizer["Cc.TaskCol.Assignee"]</th>
+                        <th scope="col">@Localizer["Cc.TaskCol.Due"]</th>
+                    </tr>
+                </thead>
+                <tbody>
+                @foreach (var t in s.OverdueAndTodayTasks)
+                {
+                    <tr>
+                        <td>@t.Title</td>
+                        <td>@(string.IsNullOrWhiteSpace(t.Assignee) ? Localizer["Cc.TaskUnassigned"].Value : t.Assignee)</td>
+                        <td class="@(t.IsOverdue ? "cc-overdue" : "")">@(t.DueDate?.ToString("yyyy-MM-dd"))</td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+            <p style="margin-top:10px;"><a asp-page="/Organizer/TasksTable" asp-route-StateFilter="Open" asp-route-Sort="due">@Localizer["Cc.OpenGrid"] &rarr;</a></p>
+        }
+    </div>
+
+    <p><a asp-page="/Organizer/Index">&larr; @Localizer["Nav.OrgArea"]</a></p>
+}

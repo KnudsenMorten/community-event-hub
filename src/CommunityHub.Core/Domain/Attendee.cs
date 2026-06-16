@@ -84,6 +84,16 @@ public class Attendee
     /// </summary>
     public bool HasReconciliationMismatch { get; set; }
 
+    // --- Self check-in ------------------------------------------------------
+    /// <summary>
+    /// When the attendee self-checked-in from their "My Event" dashboard, or
+    /// null if they have not checked in. Self-service only: the attendee taps
+    /// "I'm here" on-site (the hub never re-implements turnstiles or badge
+    /// scanning - this is a lightweight presence signal the attendee owns).
+    /// Set once; tapping again is a no-op (idempotent).
+    /// </summary>
+    public DateTimeOffset? CheckedInAt { get; set; }
+
     // --- Sync bookkeeping ---------------------------------------------------
     /// <summary>When this row was last refreshed by the reconciliation job.</summary>
     public DateTimeOffset LastSyncedAt { get; set; } = DateTimeOffset.UtcNow;

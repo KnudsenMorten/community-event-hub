@@ -1,0 +1,94 @@
+@page "/MasterClass/{slug}"
+@model CommunityHub.Pages.MasterClass.IndexModel
+@{
+    Layout = "_Layout";
+    ViewData["Title"] = Model.View is null ? "Master Class" : $"{Model.View.Title} — Logistics";
+}
+
+@if (Model.View is null)
+{
+    <div class="card"><h2>Master class not found</h2><p>This logistics page is not available.</p></div>
+    return;
+}
+
+<style>
+    .mc-hero {
+        background: var(--el-darkblue, #1D3380); color: #fff;
+        padding: 22px; border-radius: 10px 10px 0 0; margin: 0; text-align: center;
+    }
+    .mc-hero h1 { margin: 0; font-size: 22px; font-weight: 700; line-height: 1.25; }
+    .mc-hero .meta { font-size: 13.5px; opacity: .92; margin-top: 8px; line-height: 1.4; }
+    .mc-body { padding: 18px 16px; }
+    .mc-logistics { white-space: pre-wrap; line-height: 1.5; font-size: 15px; }
+    .mc-empty { color: #555; font-style: italic; }
+    .mc-edit textarea {
+        width: 100%; min-height: 180px; font: inherit; padding: 10px;
+        border: 1px solid #c4c4c4; border-radius: 6px; box-sizing: border-box;
+    }
+    /* Flash banners now use the shared _Flash component (.ceh-flash-*). */
+    .mc-updated { font-size: 12.5px; color: #666; margin-top: 10px; }
+    .sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px;
+        overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
+</style>
+
+<div class="card" style="padding:0; overflow:hidden; max-width:760px; margin:0 auto;">
+    <div class="mc-hero">
+        <h1>@Model.View.Title</h1>
+        <div class="meta">
+            Master Class logistics &amp; setup
+            @if (!string.IsNullOrWhiteSpace(Model.View.Room)) { <text>· Room @Model.View.Room</text> }
+            @if (Model.View.Speakers.Count > 0)
+            {
+                <br /><text>Presented by @string.Join(", ", Model.View.Speakers)</text>
+            }
+        </div>
+    </div>
+
+    <div class="mc-body">
+        @* Shared flash toast (REQUIREMENTS §21) — generalised from the original
+           bespoke mc-flash-* markup so this page uses the same component as the
+           rest of the app. Success and error both flow through _Flash. *@
+        @if (!string.IsNullOrEmpty(Model.Message))
+        {
+            <partial name="_Flash" model='new CommunityHub.Pages.Shared.FlashModel(Model.Message, "success")' />
+        }
+        @if (!string.IsNullOrEmpty(Model.Error))
+        {
+            <partial name="_Flash" model='new CommunityHub.Pages.Shared.FlashModel(Model.Error, "error")' />
+        }
+
+        <section aria-labelledby="mc-logistics-h">
+            <h2 id="mc-logistics-h" style="font-size:17px;margin:0 0 10px;">Before you arrive</h2>
+            @if (string.IsNullOrWhiteSpace(Model.View.LogisticsText))
+            {
+                <p class="mc-empty">No logistics have been published yet. Please check back closer to the event.</p>
+            }
+            else
+            {
+                <div class="mc-logistics">@Model.View.LogisticsText</div>
+            }
+            @if (Model.View.UpdatedAt is not null)
+            {
+                <p class="mc-updated">Last updated @Model.View.UpdatedAt.Value.ToString("yyyy-MM-dd HH:mm") UTC</p>
+            }
+        </section>
+
+        @if (Model.CanEdit)
+        {
+            <hr style="margin:18px 0;border:0;border-top:1px solid #e2e2e2;" />
+            <section class="mc-edit" aria-labelledby="mc-edit-h">
+                <h2 id="mc-edit-h" style="font-size:16px;margin:0 0 8px;">Edit logistics (you are an involved speaker / organizer)</h2>
+                <form method="post">
+                    <label for="EditLogisticsText" class="sr-only">Logistics &amp; setup instructions</label>
+                    <textarea id="EditLogisticsText" name="EditLogisticsText"
+                              placeholder="e.g. Bring your laptop fully charged. Install Docker Desktop beforehand. Pre-pull the sample images (see link)..."
+                              aria-describedby="mc-edit-help">@Model.EditLogisticsText</textarea>
+                    <p id="mc-edit-help" style="font-size:12.5px;color:#666;margin:6px 0 10px;">
+                        Plain text. This is public — do not include anything sensitive.
+                    </p>
+                    <button type="submit" class="btn">Save logistics</button>
+                </form>
+            </section>
+        }
+    </div>
+</div>

@@ -1,0 +1,159 @@
+@page
+@using CommunityHub.Core.Domain
+@model CommunityHub.Pages.Organizer.SessionizeEndpointSettingsModel
+@{
+    ViewData["Title"] = "Sessionize endpoint settings";
+}
+
+<div class="card">
+    <h2>Sessionize endpoint settings</h2>
+
+    @if (Model.AccessDenied)
+    {
+        <p class="error">This area is for organizers only.</p>
+    }
+    else
+    {
+        <p>Set the Sessionize <strong>endpoint id</strong> for this edition &mdash;
+           the <code>&lt;your-event-id&gt;</code> segment of the v2 view URL
+           (<code>https://sessionize.com/api/v2/<strong>&lt;your-event-id&gt;</strong>/view/Speakers</code>).
+           This is ordinary operator configuration, <strong>not a secret</strong>.</p>
+        <p class="info" style="background:#eef6ff;padding:8px 12px;border-radius:6px;">
+            Saving here only <strong>configures</strong> the endpoint &mdash; it does
+            <strong>not run an import</strong>. Run imports from the
+            <a asp-page="/Organizer/SessionizeImport">Import from Sessionize</a> page.
+        </p>
+
+        @if (Model.ValidationError is not null)
+        {
+            <p class="error" role="alert">@Model.ValidationError</p>
+        }
+        @if (Model.SavedMessage is not null)
+        {
+            <p class="info" role="status">@Model.SavedMessage</p>
+        }
+
+        <p style="font-size:13px;color:#374151;">
+            <strong>Currently in effect:</strong>
+            @if (string.IsNullOrWhiteSpace(Model.EffectiveEndpointId))
+            {
+                <em>none configured</em>
+            }
+            else
+            {
+                <code>@Model.EffectiveEndpointId</code>
+            }
+            @if (Model.Setting?.EndpointLastChangedAt is not null)
+            {
+                <br />
+                <span>Last changed @Model.Setting.EndpointLastChangedAt:u
+                    @if (!string.IsNullOrWhiteSpace(Model.Setting.PreviousEndpointId))
+                    {
+                        <text>(from <code>@Model.Setting.PreviousEndpointId</code>)</text>
+                    }
+                </span>
+            }
+        </p>
+
+        <form method="post" asp-page-handler="Save">
+            <div style="margin-bottom:14px;">
+                <label for="EndpointId">Sessionize endpoint id</label>
+                <input type="text" id="EndpointId" name="EndpointId"
+                       value="@Model.EndpointId"
+                       autocomplete="off" spellcheck="false"
+                       aria-describedby="endpointHelp"
+                       style="max-width:100%;width:28rem;" />
+                <p id="endpointHelp" style="color:#6b7280;font-size:12px;margin-top:4px;">
+                    Leave blank to fall back to the deployment's configured default.
+                    Enter only the id, not the full URL.
+                </p>
+            </div>
+            <div style="margin-bottom:14px;">
+                <label for="View">View</label>
+                <select id="View" name="View" style="max-width:100%;">
+                    @foreach (var v in new[] { "Speakers", "All", "Sessions", "SpeakerWall", "GridSmart" })
+                    {
+                        <option value="@v" selected="@(string.Equals(Model.View, v, StringComparison.OrdinalIgnoreCase))">@v</option>
+                    }
+                </select>
+                <p style="color:#6b7280;font-size:12px;margin-top:4px;">
+                    Which Sessionize view to pull. <code>Speakers</code> for speakers
+                    only; <code>All</code> brings speakers and their sessions in one pull.
+                </p>
+            </div>
+            <button type="submit">Save endpoint settings</button>
+        </form>
+
+        @if (Model.AwaitingChoice)
+        {
+            <hr />
+            <div role="region" aria-labelledby="changeHeading"
+                 style="border:2px solid #b45309;border-radius:8px;padding:12px 14px;background:#fff7ed;">
+                <h3 id="changeHeading" style="margin-top:0;">Endpoint changed &mdash; choose what to do</h3>
+                <p>The endpoint id for this edition changed. Choose how the
+                   already-imported speakers should be handled. This records your
+                   choice; you then run the matching import from the import page.</p>
+
+                <form method="post" asp-page-handler="ChooseMode">
+                    <fieldset style="border:1px solid #e5e7eb;border-radius:6px;padding:10px 12px;">
+                        <legend style="font-weight:600;">Re-import mode</legend>
+
+                        <div style="margin-bottom:10px;">
+                            <label style="display:flex;gap:8px;align-items:flex-start;">
+                                <input type="radio" name="ChosenMode"
+                                       value="@((int)SessionizeChangeMode.Replace)" required />
+                                <span>
+                                    <strong>Replace</strong> &mdash; replace the existing data and
+                                    re-import accepted speakers from the new endpoint
+                                    <em>(normal production path)</em>. Force-refreshes every
+                                    bio field and clears speaker edits &mdash; runs as a
+                                    <strong>Full import</strong>.
+                                </span>
+                            </label>
+                        </div>
+                        <div style="margin-bottom:10px;">
+                            <label style="display:flex;gap:8px;align-items:flex-start;">
+                                <input type="radio" name="ChosenMode"
+                                       value="@((int)SessionizeChangeMode.Merge)" required />
+                                <span>
+                                    <strong>Merge</strong> &mdash; merge with the existing data
+                                    <em>(testing only)</em>. Adds new speakers and fills only
+                                    empty fields; <strong>never flushes a speaker's own edits</strong>
+                                    &mdash; runs as a <strong>delta sync</strong>.
+                                </span>
+                            </label>
+                        </div>
+
+                        <button type="submit" style="background:#b45309;">Record choice</button>
+                    </fieldset>
+                </form>
+            </div>
+        }
+        else if (Model.Setting?.PendingChangeMode is SessionizeChangeMode.Replace or SessionizeChangeMode.Merge)
+        {
+            <hr />
+            <div role="status" style="border:1px solid #16a34a;border-radius:8px;padding:12px 14px;background:#f0fdf4;">
+                <h3 style="margin-top:0;">Re-import choice recorded</h3>
+                @if (Model.Setting!.PendingChangeMode == SessionizeChangeMode.Replace)
+                {
+                    <p><strong>Replace</strong> was chosen &mdash; this maps to a
+                       <strong>Full import</strong>. Run
+                       <a asp-page="/Organizer/SessionizeImport">&ldquo;Full import from Sessionize&rdquo;</a>
+                       to re-import accepted speakers from the new endpoint.</p>
+                }
+                else
+                {
+                    <p><strong>Merge</strong> was chosen <em>(testing)</em> &mdash; this maps to a
+                       <strong>delta sync</strong>. Run
+                       <a asp-page="/Organizer/SessionizeImport">&ldquo;Sync new speakers (delta)&rdquo;</a>
+                       to merge without flushing speaker edits.</p>
+                }
+                @if (Model.Setting.ChangeModeChosenAt is not null)
+                {
+                    <p style="color:#6b7280;font-size:12px;">Chosen @Model.Setting.ChangeModeChosenAt:u.</p>
+                }
+            </div>
+        }
+    }
+    <p><a asp-page="/Organizer/Index">Back to organizer area</a></p>
+</div>

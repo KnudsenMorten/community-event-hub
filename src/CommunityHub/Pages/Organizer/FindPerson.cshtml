@@ -1,0 +1,115 @@
+@page
+@using CommunityHub.Core.Domain
+@using CommunityHub.Core.Organizer
+@model CommunityHub.Pages.Organizer.FindPersonModel
+@{
+    ViewData["Title"] = Localizer["Find.Title"].Value;
+}
+
+<div class="card">
+    <h2>@Localizer["Find.Title"]</h2>
+
+    @if (Model.AccessDenied)
+    {
+        <p class="error" role="alert">@Localizer["Common.OrganizersOnly"]</p>
+        <p><a asp-page="/Index">@Localizer["Common.BackToHub"]</a></p>
+    }
+    else
+    {
+        <p>@Localizer["Find.Intro"]</p>
+
+        <!-- Single global-search box. GET so a hit is shareable/bookmarkable and
+             the back button works. Mobile-first: the field + button stack on a
+             phone (flex-wrap) and sit inline on wider screens. -->
+        <form method="get" role="search" aria-label="@Localizer["Find.Title"]"
+              style="display:flex;flex-wrap:wrap;gap:8px;align-items:end;margin-bottom:16px;">
+            <span style="display:flex;flex-direction:column;gap:2px;flex:1 1 220px;min-width:0;">
+                <label for="Q">@Localizer["Find.Label"]</label>
+                <input type="search" id="Q" name="Q" value="@Model.Q"
+                       autofocus inputmode="search" autocomplete="off"
+                       placeholder="@Localizer["OrgGrid.Col.Name"] / @Localizer["OrgGrid.Col.Email"]"
+                       style="width:100%;padding:8px;" />
+            </span>
+            <button type="submit" style="flex:0 0 auto;">@Localizer["OrgGrid.Search"]</button>
+        </form>
+
+        <!-- Live result region: announced to assistive tech as it updates. -->
+        <div role="status" aria-live="polite">
+            @if (Model.Searched && Model.Hits.Count == 0)
+            {
+                <p>@Localizer["Find.NoMatch"]</p>
+            }
+            else if (Model.Hits.Count > 0)
+            {
+                <p>@Localizer["Find.Found", Model.Hits.Count]</p>
+            }
+            else
+            {
+                <p>@Localizer["Find.Prompt"]</p>
+            }
+        </div>
+
+        @if (Model.Hits.Count > 0)
+        {
+            <div style="overflow-x:auto;">
+            <table style="width:100%;border-collapse:collapse;min-width:520px;">
+                <caption class="sr-only">@Localizer["Find.ResultsCaption"]</caption>
+                <thead>
+                    <tr style="text-align:left;border-bottom:2px solid #ddd;">
+                        <th scope="col">@Localizer["OrgGrid.Col.Name"]</th>
+                        <th scope="col">@Localizer["OrgGrid.Col.Email"]</th>
+                        <th scope="col">@Localizer["OrgGrid.Col.Persona"]</th>
+                        <th scope="col">@Localizer["OrgGrid.Col.Status"]</th>
+                        <th scope="col">@Localizer["Find.Open"]</th>
+                    </tr>
+                </thead>
+                <tbody>
+                @foreach (var h in Model.Hits)
+                {
+                    <tr style="border-bottom:1px solid #eee;">
+                        <td>@h.FullName</td>
+                        <td>@h.Email</td>
+                        <td>
+                            @h.Role
+                            @if (h.Role == ParticipantRole.Sponsor && !string.IsNullOrWhiteSpace(h.SponsorCompanyId))
+                            {
+                                <br /><span style="font-size:0.85em;color:#555;">@CommunityHub.Pages.Organizer.FindPersonModel.CompanyDisplayName(h.SponsorCompanyId)</span>
+                            }
+                        </td>
+                        <td>
+                            @if (h.IsActive)
+                            {
+                                <span class="info">@Localizer["Find.Active"]</span>
+                            }
+                            else
+                            {
+                                <span class="error">@Localizer["Find.Inactive"]</span>
+                            }
+                        </td>
+                        <td>
+                            <a class="secondary"
+                               style="text-decoration:none;padding:6px 10px;border:1px solid #c4c8d4;border-radius:6px;"
+                               asp-page="/Organizer/EditParticipant" asp-route-id="@h.ParticipantId">
+                                @Localizer["Find.Open"]
+                            </a>
+                        </td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+            </div>
+
+            <p style="margin-top:12px;">
+                <a asp-page="/Organizer/Participants" asp-route-Search="@Model.Q" asp-route-ActiveFilter="all">
+                    @Localizer["Find.OpenInGrid"]
+                </a>
+            </p>
+        }
+    }
+
+    <p>
+        <a asp-page="/Organizer/People">&larr; @Localizer["Common.BackToOrganizerArea"]</a>
+        &nbsp;·&nbsp;
+        <a asp-page="/Organizer/Participants">@Localizer["Nav.OrgParticipants"]</a>
+    </p>
+</div>

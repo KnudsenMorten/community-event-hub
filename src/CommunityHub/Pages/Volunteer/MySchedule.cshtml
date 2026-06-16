@@ -1,0 +1,174 @@
+@page "/volunteer/myschedule"
+@using CommunityHub.Core.Domain
+@model CommunityHub.Pages.Volunteer.MyScheduleModel
+@{
+    ViewData["Title"] = Localizer["MySchedule.Title"].Value;
+    var jsCopied = System.Text.Encodings.Web.JavaScriptEncoder.Default.Encode(Localizer["Hub.Copied"].Value);
+    var jsCopyLink = System.Text.Encodings.Web.JavaScriptEncoder.Default.Encode(Localizer["Hub.CopyLink"].Value);
+}
+
+<style>
+    .ms-entry { background:#f6f8fb; border-radius:8px; padding:12px 14px; margin:10px 0; font-size:13.5px; }
+    .ms-entry h3 { margin:0 0 4px; font-size:15.5px; color:var(--el-darkblue,#1D3380); }
+    .ms-when { display:flex; flex-wrap:wrap; gap:6px 12px; color:#374151; font-size:13px; margin:0 0 6px; }
+    .ms-when .ms-pill { background:#e6effa; color:#1D3380; border-radius:12px; padding:2px 10px; font-weight:600; }
+    .ms-when .ms-overdue { background:#fde2e1; color:#b42318; }
+    .ms-meta { color:#6e7681; font-size:12.5px; margin:2px 0; }
+    .ms-goto { color:#374151; font-size:12.5px; margin:0 0 6px; }
+    .ms-detail { color:#4b5563; font-size:12.5px; margin:4px 0; }
+    .ms-form { display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin-top:8px; }
+    .ms-form select, .ms-form input[type=text], .ms-form textarea {
+        flex:1 1 160px; min-width:0; box-sizing:border-box; padding:8px 10px;
+        font-size:13.5px; border:1px solid #c4c8d4; border-radius:6px; font-family:inherit; }
+    .ms-form button { background:#008BD2; color:#fff; border:0; border-radius:6px;
+        padding:9px 16px; font-size:13px; font-weight:600; cursor:pointer; white-space:nowrap; }
+    .ms-form button.help { background:#ea580c; }
+    .ms-dl { display:inline-block; margin-top:6px; font-size:12.5px; color:#2563eb; text-decoration:none; }
+    .ms-helprow { font-size:12.5px; color:#6e7681; margin-top:6px; padding-left:10px; border-left:3px solid #d1d5db; }
+    .ms-helprow .reply { color:#166534; }
+    .ms-note { background:#f0fdf4; border-left:4px solid #16a34a; padding:10px 12px;
+        border-radius:6px; margin-bottom:14px; font-size:13.5px; color:#166534; }
+    .cal-url-row { display:flex; gap:8px; flex-wrap:wrap; align-items:stretch; margin:8px 0; }
+    .cal-url-row input { flex:1 1 200px; min-width:0; padding:10px 12px; font-size:14px;
+        border:1px solid #cbd2d9; border-radius:8px; font-family:monospace; }
+    .cal-btn { display:inline-block; padding:10px 14px; border-radius:8px; font-size:14px;
+        font-weight:600; border:0; cursor:pointer; text-align:center; text-decoration:none; }
+    .cal-btn-primary { background:#2563eb; color:#fff; }
+    .cal-btn-ghost { background:#eef2ff; color:#2563eb; border:1px solid #c7d2fe; }
+    @@media (max-width: 600px) {
+        .ms-form select, .ms-form input, .ms-form textarea, .ms-form button { flex:1 1 100%; }
+        .cal-url-row input, .cal-btn { flex-basis:100%; }
+    }
+</style>
+
+<div class="card">
+    <h2>@Localizer["MySchedule.Title"]</h2>
+    <p>@Localizer["MySchedule.Intro"]</p>
+
+    @if (!string.IsNullOrEmpty(Model.Notice))
+    {
+        <div class="ms-note" role="status">@Model.Notice</div>
+    }
+
+    @if (Model.Schedule.IsEmpty)
+    {
+        <p class="info">@Localizer["MySchedule.Empty"]</p>
+    }
+</div>
+
+@if (!string.IsNullOrEmpty(Model.CalendarWebcalUrl))
+{
+    <div class="card">
+        <h2>&#128197; @Localizer["MySchedule.AddToCalendar"]</h2>
+        <p style="color:#4b5563;margin:0 0 4px;">@Localizer["MySchedule.CalendarIntro"]</p>
+        <div class="cal-url-row">
+            <input type="text" readonly aria-label="@Localizer["MySchedule.AddToCalendar"]"
+                   id="ms-cal-url" value="@Model.CalendarWebcalUrl" />
+            <button type="button" class="cal-btn cal-btn-primary"
+                    onclick="msCopyCal()" id="ms-cal-copy">@Localizer["Hub.CopyLink"]</button>
+            <a class="cal-btn cal-btn-ghost" href="@Model.CalendarWebcalUrl">@Localizer["Hub.Subscribe"]</a>
+        </div>
+    </div>
+    <script>
+        function msCopyCal() {
+            var el = document.getElementById('ms-cal-url');
+            var btn = document.getElementById('ms-cal-copy');
+            el.select(); el.setSelectionRange(0, 99999);
+            var done = function () { btn.textContent = '@Html.Raw(jsCopied)'; setTimeout(function () { btn.textContent = '@Html.Raw(jsCopyLink)'; }, 1500); };
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(el.value).then(done, function () { try { document.execCommand('copy'); done(); } catch (e) { } });
+            } else { try { document.execCommand('copy'); done(); } catch (e) { } }
+        }
+    </script>
+}
+
+@{
+    var today = DateOnly.FromDateTime(DateTime.UtcNow);
+}
+@foreach (var e in Model.Schedule.Entries)
+{
+    var overdue = e.Due is not null && e.Due < today && e.Status != VolunteerTaskStatus.Done;
+    <div class="card ms-entry">
+        <h3>@e.Title</h3>
+        <div class="ms-when">
+            @if (e.Due is not null)
+            {
+                <span class="ms-pill @(overdue ? "ms-overdue" : "")">
+                    @Localizer["MySchedule.When"]: @e.Due.Value.ToString("dd-MM-yyyy")
+                    @if (overdue) { <text> &middot; @Localizer["Hub.Overdue"]</text> }
+                </span>
+            }
+            @if (!string.IsNullOrWhiteSpace(e.Shift))
+            {
+                <span class="ms-pill">
+                    @e.Shift@(string.IsNullOrWhiteSpace(e.TimeEnd) ? "" : $"–{e.TimeEnd}")
+                </span>
+            }
+            <span class="ms-pill">@e.Status</span>
+        </div>
+
+        <p class="ms-meta">@e.Bucket @(string.IsNullOrWhiteSpace(e.Subcategory) ? "" : $"· {e.Subcategory}")</p>
+
+        <p class="ms-goto">
+            @Localizer["MySchedule.GoTo"]:
+            <strong>@(string.IsNullOrWhiteSpace(e.Supervisors) ? Localizer["MySchedule.YourSupervisor"].Value : e.Supervisors)</strong>
+            @if (!string.IsNullOrWhiteSpace(e.EldkLeadName))
+            {
+                <text> &middot; @Localizer["MySchedule.EldkLead"]: <strong>@e.EldkLeadName</strong></text>
+            }
+        </p>
+
+        @if (!string.IsNullOrWhiteSpace(e.Instructions))
+        {
+            <p class="ms-detail"><strong>@Localizer["MySchedule.Instructions"]:</strong> @e.Instructions</p>
+        }
+        @if (!string.IsNullOrWhiteSpace(e.Prerequisites))
+        {
+            <p class="ms-detail"><strong>@Localizer["MySchedule.Prereq"]:</strong> @e.Prerequisites</p>
+        }
+        @if (!string.IsNullOrWhiteSpace(e.Expectations))
+        {
+            <p class="ms-detail"><strong>@Localizer["MySchedule.Expectations"]:</strong> @e.Expectations</p>
+        }
+
+        <form method="post" asp-page-handler="SetStatus" class="ms-form">
+            <input type="hidden" name="taskId" value="@e.TaskId" />
+            <label class="visually-hidden" for="status-@e.TaskId">@Localizer["MySchedule.UpdateProgress"]</label>
+            <select name="status" id="status-@e.TaskId">
+                @foreach (var st in Enum.GetValues<VolunteerTaskStatus>())
+                {
+                    if (st == e.Status) { <option value="@((int)st)" selected>@st</option> }
+                    else { <option value="@((int)st)">@st</option> }
+                }
+            </select>
+            <button type="submit">@Localizer["MySchedule.UpdateProgress"]</button>
+        </form>
+
+        <form method="post" asp-page-handler="RaiseHelp" class="ms-form">
+            <input type="hidden" name="taskId" value="@e.TaskId" />
+            <label class="visually-hidden" for="help-@e.TaskId">@Localizer["MySchedule.AskForHelp"]</label>
+            <input type="text" id="help-@e.TaskId" name="message"
+                   placeholder="@Localizer["MySchedule.AskForHelpPlaceholder"]" maxlength="2000" required />
+            <button type="submit" class="help">@Localizer["MySchedule.AskForHelp"]</button>
+        </form>
+
+        @if (e.Due is not null)
+        {
+            <a class="ms-dl" asp-page-handler="CalendarItem" asp-route-taskId="@e.TaskId"
+               title="@Localizer["Hub.DownloadIcs"]">&#128197; @Localizer["Hub.DownloadIcs"]</a>
+        }
+
+        @foreach (var h in Model.Schedule.MyHelp.Where(h => h.TaskId == e.TaskId))
+        {
+            <div class="ms-helprow">
+                @Localizer["MySchedule.Help"] (@h.Status): @h.Message
+                @if (!string.IsNullOrWhiteSpace(h.Response))
+                {
+                    <span class="reply"> — @Localizer["MySchedule.Reply"]: @h.Response</span>
+                }
+            </div>
+        }
+    </div>
+}
+
+<div class="card"><p><a asp-page="/Index">@Localizer["Common.BackToHub"]</a></p></div>

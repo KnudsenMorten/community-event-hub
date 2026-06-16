@@ -1,0 +1,118 @@
+@page
+@model CommunityHub.Pages.Speaker.QuestionsModel
+@{
+    ViewData["Title"] = "Questions for my sessions";
+}
+
+@if (Model.AccessDenied)
+{
+    <div class="card">
+        <h2>Questions for my sessions</h2>
+        <p class="error">
+            This area is for speakers
+            (<strong>@CommunityHub.Branding.RoleDisplay.Name(Model.Role)</strong>).
+        </p>
+        <p><a asp-page="/Index">Back to hub</a></p>
+    </div>
+    return;
+}
+
+<style>
+    /* Mobile-first: single-column threads, full-width controls at ~360px. */
+    .sq-sess { border:1px solid #d7dbe4; border-radius:10px; margin:0 0 16px 0; overflow:hidden; }
+    .sq-sess-head { background:var(--el-darkblue,#1D3380); color:#fff; padding:12px 14px; }
+    .sq-sess-head h3 { margin:0; font-size:16.5px; line-height:1.3; }
+    .sq-sess-head .meta { font-size:12.5px; opacity:.92; margin-top:4px; line-height:1.5; }
+    .sq-body { padding:12px 14px; }
+    .sq-q { background:#f6f8fb; border-radius:8px; padding:10px 12px; margin:8px 0; }
+    .sq-q .ask { font-size:14px; color:#1a1a2e; white-space:pre-wrap; }
+    .sq-q .who { color:#6e7681; font-size:12px; margin-top:4px; }
+    .sq-resp { background:#eef6ff; border-left:3px solid #008BD2; border-radius:0 6px 6px 0;
+        padding:8px 10px; margin:8px 0 4px 0; font-size:13.5px; color:#1f3a5f; white-space:pre-wrap; }
+    .sq-resp .by { color:#5a6170; font-size:11.5px; margin-top:4px; }
+    .sq-badge { display:inline-block; border-radius:10px; padding:2px 9px; font-size:11px; font-weight:700; }
+    .sq-badge.open { background:#fff3cd; color:#8a6d00; }
+    .sq-badge.answered { background:#d8f3d6; color:#1b5e20; }
+    .sq-badge.closed { background:#e3e6ec; color:#555; }
+    .sq-form { display:flex; flex-wrap:wrap; gap:6px; align-items:flex-start; margin-top:8px; }
+    .sq-form textarea { flex:1 1 220px; min-width:0; box-sizing:border-box; padding:8px 10px;
+        font-size:13.5px; border:1px solid #c4c8d4; border-radius:6px; min-height:44px; resize:vertical; font-family:inherit; }
+    .sq-form button { background:#008BD2; color:#fff; border:0; border-radius:6px;
+        padding:9px 14px; font-size:13px; font-weight:600; cursor:pointer; white-space:nowrap; }
+    .sq-form button:hover { filter:brightness(.95); }
+    .sq-note { background:#f0fdf4; border-left:4px solid #16a34a; padding:10px 12px;
+        border-radius:6px; margin-bottom:14px; font-size:13.5px; color:#166534; }
+    @@media (max-width: 600px) { .sq-form textarea, .sq-form button { flex:1 1 100%; } }
+</style>
+
+<div class="card">
+    <h2>Questions for my sessions</h2>
+    <p>Attendees can ask questions for your session(s) before the event. They are private to
+       you, your <strong>co-speakers on the same session</strong>, and the organizers. Reply here
+       &mdash; your reply is visible to your co-speakers too.</p>
+
+    @if (!string.IsNullOrEmpty(Model.Notice))
+    {
+        <div class="sq-note" role="status">@Model.Notice</div>
+    }
+
+    @if (Model.Threads.Count == 0)
+    {
+        <p>You have no linked sessions with questions yet.</p>
+    }
+
+    @foreach (var t in Model.Threads)
+    {
+        <div class="sq-sess">
+            <div class="sq-sess-head">
+                <h3>@t.Session.Title</h3>
+                @if (t.SpeakerNames.Count > 1)
+                {
+                    <div class="meta">Co-speakers: @string.Join(", ", t.SpeakerNames)</div>
+                }
+            </div>
+            <div class="sq-body">
+                @if (t.Questions.Count == 0)
+                {
+                    <p style="color:#6e7681;font-size:13.5px;margin:4px 0;">No questions for this session yet.</p>
+                }
+                @foreach (var q in t.Questions)
+                {
+                    var badge = q.Status switch
+                    {
+                        SessionQuestionStatus.Answered => ("answered", "Answered"),
+                        SessionQuestionStatus.Closed => ("closed", "Closed"),
+                        _ => ("open", "Open"),
+                    };
+                    <div class="sq-q">
+                        <span class="sq-badge @badge.Item1">@badge.Item2</span>
+                        <div class="ask">@q.QuestionText</div>
+                        <div class="who">
+                            @(string.IsNullOrWhiteSpace(q.AskerName) ? "Anonymous attendee" : q.AskerName)
+                            &middot; @q.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm")
+                        </div>
+
+                        @if (!string.IsNullOrWhiteSpace(q.ResponseText))
+                        {
+                            <div class="sq-resp">
+                                @q.ResponseText
+                                <div class="by">&mdash; @(q.RespondedByParticipant?.FullName ?? q.RespondedByEmail), @q.RespondedAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</div>
+                            </div>
+                        }
+
+                        @if (q.Status != SessionQuestionStatus.Closed)
+                        {
+                            <form method="post" asp-page-handler="Respond" class="sq-form">
+                                <input type="hidden" name="questionId" value="@q.Id" />
+                                <label class="sr-only" for="resp-@q.Id">Response to this question</label>
+                                <textarea id="resp-@q.Id" name="responseText" maxlength="2000" required
+                                          placeholder="Reply (your co-speakers + organizers can see this)…"></textarea>
+                                <button type="submit">@(string.IsNullOrWhiteSpace(q.ResponseText) ? "Send reply" : "Update reply")</button>
+                            </form>
+                        }
+                    </div>
+                }
+            </div>
+        </div>
+    }
+</div>

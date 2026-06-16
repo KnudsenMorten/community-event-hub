@@ -1,46 +1,47 @@
 @page
 @model CommunityHub.Pages.Forms.VolunteerWizardModel
 @{
-    ViewData["Title"] = "Volunteer sign-up";
+    ViewData["Title"] = Localizer["VolWiz.Title"].Value;
 }
 
 <div class="card">
-    <h2>Volunteer sign-up</h2>
+    <h2>@Localizer["VolWiz.Title"]</h2>
 
-    @if (!string.IsNullOrEmpty(Model.Message))
-    {
-        <p class="@(Model.Saved ? "info" : "error")">@Model.Message</p>
-    }
+    @* Shared success/error toast (REQUIREMENTS §21): success when a step/finish
+       saved, error when editing is locked. role=status/alert, dismissable. *@
+    <partial name="_Flash" model='new CommunityHub.Pages.Shared.FlashModel(Model.Message, Model.IsLocked ? "error" : "success")' />
 
     @if (Model.IsLocked)
     {
-        <p class="error">Volunteer sign-up is closed for this event.</p>
-        <p><a asp-page="/Index">Back to hub</a></p>
+        <p class="error">@Localizer["VolWiz.Closed"]</p>
+        <p><a asp-page="/Index">@Localizer["Common.BackToHub"]</a></p>
     }
     else if (Model.Saved)
     {
-        <p>You can return any time before the deadline to update your details.</p>
-        <p><a asp-page="/Index">Back to hub</a></p>
+        <p>@Localizer["VolWiz.SavedNote"]</p>
+        <p><a asp-page="/Index">@Localizer["Common.BackToHub"]</a></p>
     }
     else
     {
-        <p style="color:#6b7280;font-size:13px;">Step @Model.Step of 3</p>
+        <p style="color:#6b7280;font-size:13px;">@Localizer["VolWiz.StepOf", Model.Step]</p>
 
         @if (Model.Step == 1)
         {
             <!-- Step 1: shifts -->
             <form method="post" asp-page-handler="Next">
                 <input type="hidden" name="Step" value="1" />
-                <p><strong>Which shifts can you work?</strong></p>
-                @foreach (var shift in CommunityHub.Pages.Forms.VolunteerWizardModel.ShiftCatalogue)
-                {
-                    <label>
-                        <input type="checkbox" name="SelectedShifts" value="@shift"
-                               checked="@Model.SelectedShifts.Contains(shift)" />
-                        @shift
-                    </label>
-                }
-                <button type="submit">Next</button>
+                <fieldset style="border:0;padding:0;margin:0;">
+                    <legend style="font-weight:700;font-size:15px;margin-bottom:6px;">@Localizer["VolWiz.ShiftsLegend"]</legend>
+                    @foreach (var shift in CommunityHub.Pages.Forms.VolunteerWizardModel.ShiftCatalogue)
+                    {
+                        <label style="font-weight:normal;display:flex;align-items:center;gap:8px;">
+                            <input type="checkbox" name="SelectedShifts" value="@shift" style="width:auto;margin:0;"
+                                   checked="@Model.SelectedShifts.Contains(shift)" />
+                            @shift
+                        </label>
+                    }
+                </fieldset>
+                <button type="submit">@Localizer["Common.Next"]</button>
             </form>
         }
         else if (Model.Step == 2)
@@ -52,13 +53,13 @@
                 {
                     <input type="hidden" name="SelectedShifts" value="@shift" />
                 }
-                <label for="PreferredRole">Preferred role (optional)</label>
+                <label for="PreferredRole">@Localizer["VolWiz.PreferredRole"]</label>
                 <input type="text" id="PreferredRole" name="PreferredRole"
                        value="@Model.PreferredRole" />
-                <label for="MaxHoursPerDay">Max hours per day</label>
+                <label for="MaxHoursPerDay">@Localizer["VolWiz.MaxHours"]</label>
                 <input type="text" inputmode="numeric" id="MaxHoursPerDay"
                        name="MaxHoursPerDay" value="@Model.MaxHoursPerDay" />
-                <button type="submit">Next</button>
+                <button type="submit">@Localizer["Common.Next"]</button>
             </form>
             <form method="post" asp-page-handler="Back">
                 <input type="hidden" name="Step" value="2" />
@@ -68,25 +69,25 @@
                 }
                 <input type="hidden" name="PreferredRole" value="@Model.PreferredRole" />
                 <input type="hidden" name="MaxHoursPerDay" value="@Model.MaxHoursPerDay" />
-                <button type="submit" class="secondary">Back</button>
+                <button type="submit" class="secondary">@Localizer["Common.Back"]</button>
             </form>
         }
         else
         {
             <!-- Step 3: review & confirm -->
-            <p><strong>Please review your details</strong></p>
-            <p>Shifts:
+            <p><strong>@Localizer["VolWiz.ReviewHeading"]</strong></p>
+            <p>@Localizer["VolWiz.ShiftsLabel"]
                 @if (Model.SelectedShifts.Count == 0)
                 {
-                    <span class="error">none selected</span>
+                    <span class="error">@Localizer["VolWiz.NoneSelected"]</span>
                 }
                 else
                 {
                     @string.Join(", ", Model.SelectedShifts)
                 }
             </p>
-            <p>Preferred role: @(string.IsNullOrWhiteSpace(Model.PreferredRole) ? "(none)" : Model.PreferredRole)</p>
-            <p>Max hours per day: @Model.MaxHoursPerDay</p>
+            <p>@Localizer["VolWiz.PreferredRoleLabel"] @(string.IsNullOrWhiteSpace(Model.PreferredRole) ? Localizer["Common.None"].Value : Model.PreferredRole)</p>
+            <p>@Localizer["VolWiz.MaxHoursLabel"] @Model.MaxHoursPerDay</p>
 
             <form method="post" asp-page-handler="Finish">
                 <input type="hidden" name="Step" value="3" />
@@ -96,7 +97,7 @@
                 }
                 <input type="hidden" name="PreferredRole" value="@Model.PreferredRole" />
                 <input type="hidden" name="MaxHoursPerDay" value="@Model.MaxHoursPerDay" />
-                <button type="submit">Confirm &amp; submit</button>
+                <button type="submit">@Localizer["VolWiz.Confirm"]</button>
             </form>
             <form method="post" asp-page-handler="Back">
                 <input type="hidden" name="Step" value="3" />
@@ -106,7 +107,7 @@
                 }
                 <input type="hidden" name="PreferredRole" value="@Model.PreferredRole" />
                 <input type="hidden" name="MaxHoursPerDay" value="@Model.MaxHoursPerDay" />
-                <button type="submit" class="secondary">Back</button>
+                <button type="submit" class="secondary">@Localizer["Common.Back"]</button>
             </form>
         }
     }

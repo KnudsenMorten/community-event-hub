@@ -1,0 +1,119 @@
+@page "/Sponsors"
+@model CommunityHub.Pages.Sponsors.IndexModel
+@{
+    Layout = "_Layout";
+    ViewData["Title"] = Model.View is null
+        ? Localizer["Sponsors.Title"].Value
+        : $"{Localizer["Sponsors.Title"].Value} — {Model.View.EventDisplayName}";
+}
+
+<style>
+    /* Mobile-first: single column, readable at ~360px. */
+    .spo-head {
+        background: var(--el-darkblue, #1D3380); color: #fff;
+        padding: 22px; border-radius: 10px 10px 0 0; margin: 0;
+    }
+    .spo-head h1 { margin: 0; font-size: 22px; font-weight: 700; line-height: 1.25; }
+    .spo-head .meta { font-size: 13.5px; opacity: .92; margin-top: 6px; }
+    .spo-body { padding: 18px 16px 22px; }
+
+    .spo-count { font-size: 13px; color: #4a5160; margin: 0 0 14px; }
+
+    .spo-tier { margin: 0 0 22px; }
+    .spo-tier h2 {
+        font-size: 15px; color: #1D3380; margin: 0 0 12px;
+        padding-bottom: 6px; border-bottom: 2px solid var(--el-blue, #008BD2);
+    }
+    .spo-grid {
+        display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 0; padding: 0; list-style: none;
+    }
+    .spo-card {
+        border: 1px solid #e4e7ee; border-radius: 10px; padding: 16px 12px; background: #fff;
+        display: flex; flex-direction: column; align-items: center; text-align: center; gap: 10px;
+    }
+    .spo-logo, .spo-mono {
+        width: 120px; height: 70px; object-fit: contain;
+    }
+    .spo-mono {
+        display: flex; align-items: center; justify-content: center;
+        background: var(--el-blue, #008BD2); color: #fff;
+        font-weight: 700; font-size: 26px; letter-spacing: .5px; border-radius: 8px;
+    }
+    .spo-card .spo-name { font-size: 14px; font-weight: 600; color: #24292f; line-height: 1.3; word-break: break-word; }
+    .spo-card .spo-link { font-size: 12.5px; font-weight: 600; color: var(--el-blue, #008BD2); text-decoration: none; }
+    .spo-card .spo-link:hover, .spo-card .spo-link:focus { text-decoration: underline; }
+
+    .spo-empty { color: #555; padding: 8px 4px 18px; }
+    .spo-empty .big { font-size: 16px; font-weight: 600; color: #1D3380; display: block; margin-bottom: 6px; }
+
+    @@media (min-width: 560px) {
+        .spo-grid { grid-template-columns: repeat(3, 1fr); }
+    }
+    @@media (min-width: 820px) {
+        .spo-grid { grid-template-columns: repeat(4, 1fr); }
+    }
+</style>
+
+<div class="card" style="padding:0; overflow:hidden; max-width:980px; margin:0 auto;">
+    <div class="spo-head">
+        <h1>@Localizer["Sponsors.Title"]</h1>
+        @if (Model.View is not null)
+        {
+            <div class="meta">@Model.View.EventDisplayName</div>
+        }
+    </div>
+
+    <div class="spo-body">
+        @if (Model.NoActiveEvent || Model.View is null)
+        {
+            <p class="spo-empty">@Localizer["Public.NoLiveEvent"]</p>
+            return;
+        }
+        @{ var view = Model.View; }
+
+        @if (view.TotalCount == 0)
+        {
+            <p class="spo-empty">
+                <span class="big">@Localizer["Sponsors.ComingSoonTitle"]</span>
+                @Localizer["Sponsors.ComingSoonBody"]
+            </p>
+        }
+        else
+        {
+            <p class="spo-count" role="status" aria-live="polite">
+                @Localizer["Sponsors.Count", view.TotalCount]
+            </p>
+
+            @foreach (var g in view.Groups)
+            {
+                <section class="spo-tier" aria-label="@g.DisplayName">
+                    <h2>@g.DisplayName</h2>
+                    <ul class="spo-grid">
+                        @foreach (var sp in g.Sponsors)
+                        {
+                            <li class="spo-card">
+                                @if (!string.IsNullOrWhiteSpace(sp.LogoPath))
+                                {
+                                    <img class="spo-logo" src="@sp.LogoPath"
+                                         alt="@Localizer["Sponsors.LogoAlt", sp.Name]"
+                                         loading="lazy" />
+                                }
+                                else
+                                {
+                                    <span class="spo-mono" aria-hidden="true">@sp.Initials</span>
+                                }
+                                <span class="spo-name">@sp.Name</span>
+                                @if (!string.IsNullOrWhiteSpace(sp.WebsiteUrl))
+                                {
+                                    <a class="spo-link" href="@sp.WebsiteUrl" target="_blank" rel="noopener noreferrer">
+                                        @Localizer["Sponsors.VisitSite"]<span class="visually-hidden">@Localizer["Common.OpensNewTab"]</span>
+                                    </a>
+                                }
+                            </li>
+                        }
+                    </ul>
+                </section>
+            }
+        }
+    </div>
+</div>

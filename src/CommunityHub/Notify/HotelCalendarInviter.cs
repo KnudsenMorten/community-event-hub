@@ -33,56 +33,42 @@ public sealed class HotelCalendarInviter
         string? roomType,
         int participantId,
         int eventId,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        string? hotelName = null,
+        string? hotelAddress = null,
+        string? hotelConfirmationNumber = null)
     {
         // All-day events: DTSTART = check-in date (midnight UTC), DTEND = day after check-out.
         var startUtc = new DateTimeOffset(checkInDate.Year, checkInDate.Month, checkInDate.Day, 0, 0, 0, TimeSpan.Zero);
         var endUtc   = new DateTimeOffset(checkOutDate.Year, checkOutDate.Month, checkOutDate.Day, 0, 0, 0, TimeSpan.Zero).AddDays(1);
 
-        var venue = "AC Hotel Bella Sky Copenhagen, Center Boulevard 5, 2300 Copenhagen S";
-        var stateTag = confirmed ? "[CONFIRMED]" : "[NOT CONFIRMED]";
-        var summary  = $"{stateTag} {eventCode} Hotel - AC Hotel Bella Sky";
-
-        var confLine = confirmed
-            ? $"Hotel confirmation: {confirmationNumber ?? "(pending vendor)"} - Room type: {roomType ?? "(per vendor)"}\n"
-            : "Status: Not yet confirmed by hotel. We'll update this entry once the hotel returns the confirmation number.\n";
-
-        var description =
-            $"Your hotel reservation at AC Hotel Bella Sky Copenhagen for {eventCode}.\n\n" +
-            $"Check-in:  {checkInDate:dd/MM/yyyy}\n" +
-            $"Check-out: {checkOutDate:dd/MM/yyyy}\n" +
-            confLine + "\n" +
-            "Questions: info@expertslive.dk\n\nCheers,\nELDK-team";
+        // Build the email + calendar text via the pure Core builder (unit-tested):
+        // it folds the organizer-assigned hotel name + address + the per-person
+        // confirmation number into the venue/subject/body (multi-hotel placement).
+        var content = HotelEmailContentBuilder.Build(
+            eventCode: eventCode,
+            fullName: fullName,
+            checkInDate: checkInDate,
+            checkOutDate: checkOutDate,
+            vendorConfirmed: confirmed,
+            vendorConfirmationNumber: confirmationNumber,
+            roomType: roomType,
+            hotelName: hotelName,
+            hotelAddress: hotelAddress,
+            hotelConfirmationNumber: hotelConfirmationNumber);
 
         var uid = $"hotel-{eventId}-{participantId}@eventhub.expertslive.dk";
         var ics = IcsCalendarBuilder.BuildVEvent(
             uid: uid,
-            summary: summary,
-            description: description,
-            location: venue,
+            summary: content.Subject,
+            description: content.IcsDescription,
+            location: content.Location,
             startUtc: startUtc,
             endUtc: endUtc,
             organizerEmail: _emailOptions.FromAddress,
             organizerName: _emailOptions.FromDisplayName);
 
-        var firstName = string.IsNullOrWhiteSpace(fullName) ? "there" : fullName.Split(' ')[0];
-        var encName   = System.Net.WebUtility.HtmlEncode(firstName);
-
-        var subject = summary;
-        var htmlBody =
-            $"<p>Hi {encName},</p>" +
-            (confirmed
-                ? $"<p>Your hotel reservation at <strong>AC Hotel Bella Sky Copenhagen</strong> for {eventCode} is now <strong>CONFIRMED</strong>.</p>"
-                : $"<p>Thanks for submitting your hotel preference for {eventCode}. We've added a placeholder calendar invitation to your inbox.</p>") +
-            $"<p><strong>Check-in:</strong> {checkInDate:dd/MM/yyyy}<br/>" +
-            $"<strong>Check-out:</strong> {checkOutDate:dd/MM/yyyy}<br/>" +
-            (confirmed
-                ? $"<strong>Confirmation number:</strong> {System.Net.WebUtility.HtmlEncode(confirmationNumber ?? "")}<br/>" +
-                  $"<strong>Room type:</strong> {System.Net.WebUtility.HtmlEncode(roomType ?? "")}</p>"
-                : "<strong>Status:</strong> Awaiting hotel confirmation &mdash; we'll update this entry once the hotel returns the confirmation number.</p>") +
-            "<p>Cheers,<br/>ELDK-team</p>";
-
         await _emailSender.SendWithIcsAsync(
-            toEmail, subject, htmlBody, ics, "hotel.ics", ct);
+            toEmail, content.Subject, content.HtmlBody, ics, "hotel.ics", ct);
     }
 }

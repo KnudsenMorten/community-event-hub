@@ -7,7 +7,7 @@
 
 @if (Model.Survey is null)
 {
-    <div class="card"><h2>Survey not found</h2><p>No survey is configured at this URL.</p></div>
+    <div class="card"><h2>@Localizer["Survey.NotFound"]</h2><p>@Localizer["Survey.NotConfigured"]</p></div>
     return;
 }
 
@@ -113,7 +113,7 @@
 
 <div class="card" style="padding: 0; overflow: hidden;">
     <div class="res-hero">
-        <h1>@Model.Survey.Title — live results</h1>
+        <h1>@Localizer["Results.LiveResults", Model.Survey.Title]</h1>
         <div class="meta">@Model.Survey.EventName &middot; @Model.Survey.EventDate</div>
     </div>
 
@@ -121,22 +121,22 @@
 
         <div class="kpi-row">
             <div class="kpi">
-                <div class="label">Responses</div>
+                <div class="label">@Localizer["Results.Responses"]</div>
                 <div class="value">@Model.TotalResponses</div>
-                <div class="sub">All-time, anonymous</div>
+                <div class="sub">@Localizer["Results.AllTimeAnon"]</div>
             </div>
             <div class="kpi">
-                <div class="label">Tracks covered</div>
+                <div class="label">@Localizer["Results.TracksCovered"]</div>
                 <div class="value">@Model.TrackStats.Count(t => t.ResponseCount > 0) / @Model.TrackStats.Count</div>
-                <div class="sub">At least 1 vote</div>
+                <div class="sub">@Localizer["Results.AtLeastOneVote"]</div>
             </div>
             <div class="kpi">
-                <div class="label">Most-picked track</div>
+                <div class="label">@Localizer["Results.MostPickedTrack"]</div>
                 <div class="value" style="font-size: 17px; line-height: 1.25;">@(Model.TrackStats.FirstOrDefault()?.Name ?? "—")</div>
-                <div class="sub">@(Model.TrackStats.FirstOrDefault()?.ResponseCount ?? 0) responses</div>
+                <div class="sub">@Localizer["Results.NResponses", Model.TrackStats.FirstOrDefault()?.ResponseCount ?? 0]</div>
             </div>
             <div class="kpi">
-                <div class="label">Latest response</div>
+                <div class="label">@Localizer["Results.LatestResponse"]</div>
                 <div class="value" style="font-size: 17px; line-height: 1.25;">@(Model.LatestResponseAt?.ToString("d MMM yyyy") ?? "—")</div>
                 <div class="sub">@(Model.LatestResponseAt?.ToString("HH:mm 'UTC'") ?? "")</div>
             </div>
@@ -145,9 +145,9 @@
         @if (Model.TotalResponses == 0)
         {
             <div class="empty-state">
-                <p>No responses yet. Be the first — <a href="/survey/@Model.Slug">open the survey</a>.</p>
+                <p>@Localizer["Results.NoResponsesYet"] <a href="/survey/@Model.Slug">@Localizer["Results.OpenSurvey"]</a>.</p>
                 <div class="share-row" style="justify-content:center;">
-                    <span>Share the survey:</span>
+                    <span>@Localizer["Results.ShareSurvey"]</span>
                     <code>@Url.PageLink(pageName: "/Survey/Index", values: new { slug = Model.Slug })</code>
                 </div>
             </div>
@@ -155,8 +155,8 @@
         else
         {
             <div class="section">
-                <h3>Track popularity (step 1)</h3>
-                <p class="lead">How responses split across the seven technical tracks.</p>
+                <h3>@Localizer["Results.TrackPopularity"]</h3>
+                <p class="lead">@Localizer["Results.TrackPopularityLead"]</p>
                 @foreach (var t in Model.TrackStats)
                 {
                     <div class="bar-row">
@@ -168,8 +168,8 @@
             </div>
 
             <div class="section">
-                <h3>Most-wanted topics overall (ranked)</h3>
-                <p class="lead">Top 15 across all tracks, ranked by aggregate favorites. A respondent's top pick counts more than their 2nd, which counts more than their 3rd — so this list reflects what attendees most want to attend.</p>
+                <h3>@Localizer["Results.MostWanted"]</h3>
+                <p class="lead">@Localizer["Results.MostWantedLead"]</p>
                 @{ var overallRank = 0; }
                 @foreach (var s in Model.TopTopicsOverall.Where(x => x.PickCount > 0))
                 {
@@ -179,37 +179,37 @@
                             <span class="cat">@s.TrackName &middot; @s.Category</span>
                             <span class="ttl">@s.Title</span>
                             <span class="score-pill">#@overallRank</span>
-                            <span class="picks-pill">@s.PickCount favorite@(s.PickCount == 1 ? "" : "s")</span>
+                            <span class="picks-pill">@s.PickCount @(s.PickCount == 1 ? Localizer["Results.Favorite"] : Localizer["Results.Favorites"])</span>
                         </div>
                         <div class="levels">
-                            <span class="lvl-adv">Advanced (300): @s.AdvancedCount</span>
-                            <span class="lvl-exp">Expert (400): @s.ExpertCount</span>
-                            <span class="lvl-mst">Black Belt (500): @s.BlackBeltCount</span>
+                            <span class="lvl-adv">@Localizer["Results.Advanced300"] @s.AdvancedCount</span>
+                            <span class="lvl-exp">@Localizer["Results.Expert400"] @s.ExpertCount</span>
+                            <span class="lvl-mst">@Localizer["Results.BlackBelt500"] @s.BlackBeltCount</span>
                         </div>
                     </div>
                 }
             </div>
 
             <div class="section">
-                <h3>Self-assessed level (step 3)</h3>
-                <p class="lead">Helps us pick the right topics and helps speakers pitch the right depth in their Call-for-Speakers proposals.</p>
+                <h3>@Localizer["Results.SelfLevel"]</h3>
+                <p class="lead">@Localizer["Results.SelfLevelLead"]</p>
                 <div class="lvl-totals">
                     @{
                         var totalPicks = Model.LevelTotals.Values.Sum();
                         int pct(int n) => totalPicks == 0 ? 0 : (int)Math.Round(100.0 * n / totalPicks);
                     }
-                    <div class="lt"><div class="name">Advanced (level 300)</div><div class="pct">@pct(Model.LevelTotals[CommunityHub.Core.Domain.SurveyLevel.Advanced])%</div><div class="ct">@Model.LevelTotals[CommunityHub.Core.Domain.SurveyLevel.Advanced] picks</div></div>
-                    <div class="lt"><div class="name">Expert (level 400)</div><div class="pct">@pct(Model.LevelTotals[CommunityHub.Core.Domain.SurveyLevel.Expert])%</div><div class="ct">@Model.LevelTotals[CommunityHub.Core.Domain.SurveyLevel.Expert] picks</div></div>
-                    <div class="lt"><div class="name">Black Belt (level 500)</div><div class="pct">@pct(Model.LevelTotals[CommunityHub.Core.Domain.SurveyLevel.BlackBelt])%</div><div class="ct">@Model.LevelTotals[CommunityHub.Core.Domain.SurveyLevel.BlackBelt] picks</div></div>
+                    <div class="lt"><div class="name">@Localizer["Results.AdvancedLevel"]</div><div class="pct">@pct(Model.LevelTotals[CommunityHub.Core.Domain.SurveyLevel.Advanced])%</div><div class="ct">@Model.LevelTotals[CommunityHub.Core.Domain.SurveyLevel.Advanced] @Localizer["Results.Picks"]</div></div>
+                    <div class="lt"><div class="name">@Localizer["Results.ExpertLevel"]</div><div class="pct">@pct(Model.LevelTotals[CommunityHub.Core.Domain.SurveyLevel.Expert])%</div><div class="ct">@Model.LevelTotals[CommunityHub.Core.Domain.SurveyLevel.Expert] @Localizer["Results.Picks"]</div></div>
+                    <div class="lt"><div class="name">@Localizer["Results.BlackBeltLevel"]</div><div class="pct">@pct(Model.LevelTotals[CommunityHub.Core.Domain.SurveyLevel.BlackBelt])%</div><div class="ct">@Model.LevelTotals[CommunityHub.Core.Domain.SurveyLevel.BlackBelt] @Localizer["Results.Picks"]</div></div>
                 </div>
             </div>
 
             <div class="section">
-                <h3>Per-track favorite topics</h3>
-                <p class="lead">Tap a track to expand its ranked favorites &mdash; or share the per-track deep-link with a speaker so they land directly on their lane.</p>
+                <h3>@Localizer["Results.PerTrackFavorites"]</h3>
+                <p class="lead">@Localizer["Results.PerTrackLead"]</p>
 
                 <div style="display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 16px 0;">
-                    <span style="font-size:13px;color:#5a6170;font-weight:600;align-self:center;">Jump to track:</span>
+                    <span style="font-size:13px;color:#5a6170;font-weight:600;align-self:center;">@Localizer["Results.JumpToTrack"]</span>
                     @foreach (var track in Model.Survey.Tracks)
                     {
                         var jumpCount = Model.TrackStats.FirstOrDefault(t => t.TrackId == track.Id)?.ResponseCount ?? 0;
@@ -230,18 +230,18 @@
                     <details class="track-block" id="@track.Id" open>
                         <summary>
                             <span>@track.Name</span>
-                            <span style="font-size:13px; color:#5a6170; font-weight:600;">@trackTotal interest &middot; @totalFavoritesInTrack favorite@(totalFavoritesInTrack == 1 ? "" : "s")</span>
+                            <span style="font-size:13px; color:#5a6170; font-weight:600;">@trackTotal @Localizer["Results.Interest"] &middot; @totalFavoritesInTrack @(totalFavoritesInTrack == 1 ? Localizer["Results.Favorite"] : Localizer["Results.Favorites"])</span>
                         </summary>
                         <div class="inner">
                             <div class="levels" style="display:flex;gap:6px;flex-wrap:wrap;font-size:12.5px;margin:0 0 12px 0;">
-                                <span class="lvl-adv" style="padding:4px 10px;border-radius:999px;background:#e3f2fd;color:#0d47a1;font-weight:700;">Advanced (300): @trackAdvanced</span>
-                                <span class="lvl-exp" style="padding:4px 10px;border-radius:999px;background:#e8f5e9;color:#1b5e20;font-weight:700;">Expert (400): @trackExpert</span>
-                                <span class="lvl-mst" style="padding:4px 10px;border-radius:999px;background:#fce4ec;color:#880e4f;font-weight:700;">Black Belt (500): @trackBlackBelt</span>
-                                <span style="padding:4px 10px;border-radius:999px;background:#fff4e1;color:#7a5a00;font-weight:700;">Interest: @trackTotal respondent@(trackTotal == 1 ? "" : "s") picked this track</span>
+                                <span class="lvl-adv" style="padding:4px 10px;border-radius:999px;background:#e3f2fd;color:#0d47a1;font-weight:700;">@Localizer["Results.Advanced300"] @trackAdvanced</span>
+                                <span class="lvl-exp" style="padding:4px 10px;border-radius:999px;background:#e8f5e9;color:#1b5e20;font-weight:700;">@Localizer["Results.Expert400"] @trackExpert</span>
+                                <span class="lvl-mst" style="padding:4px 10px;border-radius:999px;background:#fce4ec;color:#880e4f;font-weight:700;">@Localizer["Results.BlackBelt500"] @trackBlackBelt</span>
+                                <span style="padding:4px 10px;border-radius:999px;background:#fff4e1;color:#7a5a00;font-weight:700;">@Localizer["Results.InterestLabel"] @trackTotal @(trackTotal == 1 ? Localizer["Results.RespondentPicked"] : Localizer["Results.RespondentsPicked"])</span>
                             </div>
                             @if (!anyVotes)
                             {
-                                <p style="color:#5a6170; font-size:13px;">No picks yet in this track.</p>
+                                <p style="color:#5a6170; font-size:13px;">@Localizer["Results.NoPicksTrack"]</p>
                             }
                             else
                             {
@@ -253,13 +253,13 @@
                                         <div class="top">
                                             <span class="cat">@s.Category</span>
                                             <span class="ttl">@s.Title</span>
-                                            <span class="score-pill">#@inTrackRank in @track.Name</span>
-                                            <span class="picks-pill">@s.PickCount favorite@(s.PickCount == 1 ? "" : "s")</span>
+                                            <span class="score-pill">#@inTrackRank @track.Name</span>
+                                            <span class="picks-pill">@s.PickCount @(s.PickCount == 1 ? Localizer["Results.Favorite"] : Localizer["Results.Favorites"])</span>
                                         </div>
                                         <div class="levels">
-                                            <span class="lvl-adv">Advanced: @s.AdvancedCount</span>
-                                            <span class="lvl-exp">Expert: @s.ExpertCount</span>
-                                            <span class="lvl-mst">Black Belt (500): @s.BlackBeltCount</span>
+                                            <span class="lvl-adv">@Localizer["Results.Advanced"] @s.AdvancedCount</span>
+                                            <span class="lvl-exp">@Localizer["Results.Expert"] @s.ExpertCount</span>
+                                            <span class="lvl-mst">@Localizer["Results.BlackBelt500"] @s.BlackBeltCount</span>
                                         </div>
                                     </div>
                                 }
@@ -270,8 +270,8 @@
             </div>
 
             <div class="section">
-                <h3>Direct per-track URLs (share these)</h3>
-                <p class="lead">Paste these in Slack / email to send a prospective speaker straight to their track's section of this dashboard.</p>
+                <h3>@Localizer["Results.DirectUrls"]</h3>
+                <p class="lead">@Localizer["Results.DirectUrlsLead"]</p>
                 <ul style="font-size:13px; line-height:1.7; padding-left:18px;">
                     @{
                         var resultsUrl = Url.PageLink(pageName: "/Survey/Results", values: new { slug = Model.Slug });
@@ -288,7 +288,7 @@
 
             <div class="share-row" style="justify-content:center; margin-top:8px;">
                 <a class="share-btn" href="@Url.PageLink(pageName: "/Survey/Results", values: new { slug = Model.Slug })"
-                   target="_blank" rel="noopener">Share this dashboard with prospective speakers &rarr;</a>
+                   target="_blank" rel="noopener">@Localizer["Results.ShareDashboard"]</a>
             </div>
         }
 

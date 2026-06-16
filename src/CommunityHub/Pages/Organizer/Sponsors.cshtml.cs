@@ -2,6 +2,7 @@ using ClosedXML.Excel;
 using CommunityHub.Auth;
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
+using CommunityHub.Core.Organizer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
@@ -34,6 +35,22 @@ public class SponsorsModel : PageModel
 
     public List<CompanyRow> Companies { get; private set; } = new();
     public List<Contact> ContactsWithoutCompany { get; private set; } = new();
+
+    // --- Search / sort / paging (GET-bound so links/bookmarks keep state).
+    //     Mirrors the Participants / Speakers / Attendees grids (REQUIREMENTS §20/§21).
+    //     The roster is grouped per company; we filter + sort + page that derived
+    //     set (one edition's sponsors is a small, bounded set). ------------------
+    [BindProperty(SupportsGet = true)] public string? Search { get; set; }
+    /// <summary>Sort column key: company | contacts | open | done | overdue | total | nextdue. Default company.</summary>
+    [BindProperty(SupportsGet = true)] public string Sort { get; set; } = "company";
+    [BindProperty(SupportsGet = true)] public bool Desc { get; set; }
+    [BindProperty(SupportsGet = true)] public int PageNo { get; set; } = 1;
+
+    public GridPage Paging { get; private set; }
+
+    public bool NextDescFor(string col) => Sort == col && !Desc;
+    public string SortIndicator(string col) => Sort != col ? "" : (Desc ? " ▼" : " ▲");
+    public string AriaSort(string col) => Sort != col ? "none" : (Desc ? "descending" : "ascending");
 
     public record CompanyRow(
         string CompanyId,
@@ -190,7 +207,7 @@ public class SponsorsModel : PageModel
             .OrderBy(c => c, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
-        Companies = allCompanyIds.Select(cid =>
+        var allCompanies = allCompanyIds.Select(cid =>
         {
             var co = contacts
                 .Where(c => string.Equals(c.SponsorCompanyId, cid, StringComparison.OrdinalIgnoreCase))
@@ -206,13 +223,47 @@ public class SponsorsModel : PageModel
             return new CompanyRow(cid, co, open, ip, done, ovr, t.Count, nxt);
         }).ToList();
 
+        // Free-text search over the company id + any contact name/email.
+        if (!string.IsNullOrWhiteSpace(Search))
+        {
+            var s = Search.Trim();
+            allCompanies = allCompanies
+                .Where(r => r.CompanyId.Contains(s, StringComparison.OrdinalIgnoreCase)
+                            || r.Contacts.Any(c => c.Name.Contains(s, StringComparison.OrdinalIgnoreCase)
+                                                   || c.Email.Contains(s, StringComparison.OrdinalIgnoreCase)))
+                .ToList();
+        }
+
+        // Deterministic ordering (company id tiebreak) for the chosen column.
+        Func<CompanyRow, object> key = Sort switch
+        {
+            "contacts" => r => r.Contacts.Count,
+            "open"     => r => r.Open,
+            "done"     => r => r.Done,
+            "overdue"  => r => r.Overdue,
+            "total"    => r => r.Total,
+            "nextdue"  => r => r.NextDue ?? DateOnly.MaxValue,
+            _          => r => r.CompanyId,
+        };
+        var ordered = (Desc
+            ? allCompanies.OrderByDescending(key)
+            : allCompanies.OrderBy(key))
+            .ThenBy(r => r.CompanyId, StringComparer.OrdinalIgnoreCase);
+
+        var sortedCompanies = ordered.ToList();
+
+        Paging = GridPaging.Resolve(PageNo, GridPaging.DefaultPageSize, sortedCompanies.Count);
+        Companies = sortedCompanies
+            .Skip(Paging.Skip).Take(Paging.PageSize)
+            .ToList();
+
         ContactsWithoutCompany = contacts
             .Where(c => string.IsNullOrWhiteSpace(c.SponsorCompanyId))
             .OrderBy(c => c.FullName)
             .Select(c => new Contact(c.Id, c.FullName, c.Email, c.IsActive))
             .ToList();
 
-        CompanyCount = Companies.Count;
+        CompanyCount = allCompanyIds.Count;
         ContactCount = contacts.Count;
     }
 }

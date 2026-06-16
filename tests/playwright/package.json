@@ -8,11 +8,17 @@
     "test": "playwright test",
     "test:dev": "TARGET=DEV playwright test",
     "test:prod": "TARGET=PROD playwright test",
+    "test:gui": "playwright test --grep @gui --project=\"iPhone SE (narrow viewport)\"",
+    "test:gui:anon": "playwright test feature-signin feature-surveys feature-forms --grep @gui --project=\"iPhone SE (narrow viewport)\"",
+    "validate": "playwright test comprehensive-validation --grep @validate --project=\"iPhone SE (narrow viewport)\"",
+    "validate:anon": "playwright test comprehensive-validation --grep \"@validate.*anonymous\" --project=\"iPhone SE (narrow viewport)\"",
+    "test:a11y": "playwright test a11y --grep @a11y",
     "test:headed": "playwright test --headed",
     "test:ui": "playwright test --ui",
     "report": "playwright show-report"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.10.0",
     "@playwright/test": "^1.48.0",
     "typescript": "^5.5.0"
   }

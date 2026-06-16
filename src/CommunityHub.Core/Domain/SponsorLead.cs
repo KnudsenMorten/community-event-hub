@@ -42,6 +42,23 @@ public class SponsorLead
     /// <summary>When the hub last pulled this record from Zoho.</summary>
     public DateTimeOffset LastSyncedAt { get; set; }
 
+    // ---- Capture provenance -------------------------------------------
+
+    /// <summary>
+    /// How this lead entered the hub. Zoho-pulled leads carry a
+    /// <see cref="ZohoRecordId"/>; booth-captured leads are entered by a
+    /// sponsor contact in the hub and have an empty Zoho id (so the
+    /// filtered-unique index does not collide).
+    /// </summary>
+    public SponsorLeadCaptureMethod CaptureMethod { get; set; } = SponsorLeadCaptureMethod.ZohoSync;
+
+    /// <summary>
+    /// Email of the booth-staff sponsor contact who captured a manual lead.
+    /// Null for Zoho-synced leads. Used for provenance / audit only — it is
+    /// NOT exposed on the sponsor download feed.
+    /// </summary>
+    public string? CapturedByEmail { get; set; }
+
     // ---- Hub-local processing state -----------------------------------
 
     public SponsorLeadStatus Status { get; set; } = SponsorLeadStatus.Open;
@@ -80,6 +97,18 @@ public enum SponsorLeadKind
     Lead       = 0,
     Inquiry    = 1,
     Meeting    = 2,
+}
+
+/// <summary>
+/// How a <see cref="SponsorLead"/> entered the hub.
+/// </summary>
+public enum SponsorLeadCaptureMethod
+{
+    /// <summary>Pulled from Zoho CRM by the nightly sync (the default).</summary>
+    ZohoSync   = 0,
+
+    /// <summary>Entered by a sponsor's booth staff directly in the hub.</summary>
+    ManualBooth = 1,
 }
 
 /// <summary>

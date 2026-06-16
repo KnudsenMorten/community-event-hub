@@ -15,13 +15,16 @@ public sealed class SpeakerDeadlineDefinition
     [JsonPropertyName("description")]
     public string? Description { get; set; }
 
-    /// <summary>Days before the event start date this is due.</summary>
-    [JsonPropertyName("daysBeforeEvent")]
-    public int DaysBeforeEvent { get; set; }
+    /// <summary>Absolute date (yyyy-MM-dd) this deadline is due. Not event-relative.</summary>
+    [JsonPropertyName("dueDate")]
+    public DateOnly DueDate { get; set; }
 
-    /// <summary>If true, also applies to Master Class speakers' pre-day.</summary>
-    [JsonPropertyName("includesMasterclass")]
-    public bool IncludesMasterclass { get; set; } = true;
+    /// <summary>
+    /// If true, this deadline applies ONLY to Master Class speakers
+    /// (plain session speakers do not get it). Default false = all speakers.
+    /// </summary>
+    [JsonPropertyName("masterclassOnly")]
+    public bool MasterclassOnly { get; set; }
 }
 
 /// <summary>The speaker-deadlines config file.</summary>
@@ -43,9 +46,10 @@ public sealed class SpeakerDeadlineOptions
 /// <summary>
 /// Seeds speaker-deadline tasks (CONTEXT.md - speaker deadlines). For each
 /// active speaker / Master Class speaker, creates one ParticipantTask per
-/// configured deadline, dated from the event start date. Idempotent: each task
-/// has a SourceKey "speakerdl:{participantId}:{slug}", so re-running never
-/// duplicates. New speakers (e.g. a later Sessionize import) get their
+/// configured deadline, dated from the deadline's absolute dueDate. A deadline
+/// flagged masterclassOnly is seeded for Master Class speakers only. Idempotent:
+/// each task has a SourceKey "speakerdl:{participantId}:{slug}", so re-running
+/// never duplicates. New speakers (e.g. a later Sessionize import) get their
 /// deadline tasks the next time this runs.
 ///
 /// The reminder job (Stage 6) then picks these dated tasks up automatically -
@@ -87,11 +91,8 @@ public sealed class SpeakerDeadlineSeeder
             return 0;
         }
 
-        var ev = await _db.Events
-            .Where(e => e.Id == eventId)
-            .Select(e => new { e.StartDate })
-            .FirstOrDefaultAsync(ct);
-        if (ev is null)
+        var eventExists = await _db.Events.AnyAsync(e => e.Id == eventId, ct);
+        if (!eventExists)
         {
             return 0;
         }
@@ -111,11 +112,11 @@ public sealed class SpeakerDeadlineSeeder
         {
             foreach (var dl in config.Deadlines)
             {
-                // A Master-Class-only deadline is skipped for plain speakers.
-                if (!dl.IncludesMasterclass
-                    && speaker.Role == ParticipantRole.MasterclassSpeaker)
+                // A masterclass-only deadline is skipped for plain session speakers.
+                if (dl.MasterclassOnly
+                    && speaker.Role != ParticipantRole.MasterclassSpeaker)
                 {
-                    // (deadline applies to everyone unless flagged otherwise)
+                    continue;
                 }
 
                 var sourceKey = $"speakerdl:{speaker.Id}:{Slug(dl.Title)}";
@@ -132,7 +133,7 @@ public sealed class SpeakerDeadlineSeeder
                     AssignedParticipantId = speaker.Id,
                     Title = dl.Title,
                     Description = dl.Description,
-                    DueDate = ev.StartDate.AddDays(-dl.DaysBeforeEvent),
+                    DueDate = dl.DueDate,
                     State = TaskState.Open,
                     SourceKey = sourceKey,
                     CreatedAt = now,

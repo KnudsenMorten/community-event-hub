@@ -2,28 +2,36 @@
 @using CommunityHub.Core.Domain
 @model CommunityHub.Pages.Tasks.IndexModel
 @{
-    ViewData["Title"] = "My tasks";
+    ViewData["Title"] = Localizer["Tasks.Title"].Value;
 }
 
+@* Unified "what's still needed" checklist (Top-8 #7) — the same shared component
+   the Hub home and attendee My-event render, so this page is one consistent
+   "what do I still owe" view with overdue badges rather than a competing list. *@
+@await Html.PartialAsync("Shared/_ChecklistCard", Model.Checklist)
+
 <div class="card">
-    <h2>My tasks</h2>
+    <h2>@Localizer["Tasks.Title"]</h2>
     @if (Model.Tasks.Count == 0)
     {
-        <p>You have no tasks.</p>
+        <p>@Localizer["Tasks.NoTasks"]</p>
     }
     else
     {
         foreach (var task in Model.Tasks)
         {
+            var toggleLabel = task.State == TaskState.Done
+                ? Localizer["Tasks.MarkNotDone"].Value
+                : Localizer["Tasks.MarkDone"].Value;
             <div style="border-bottom:1px solid #eee;padding:10px 0;">
                 <strong>@task.Title</strong>
                 @if (task.State == TaskState.Done)
                 {
-                    <span class="info"> &check; done</span>
+                    <span class="info"> &check; @Localizer["Common.Done"]</span>
                 }
                 else if (task.DueDate is not null)
                 {
-                    <span> &middot; due @task.DueDate?.ToString("dd/MM/yyyy")</span>
+                    <span> &middot; @Localizer["Tasks.Due"] @task.DueDate?.ToString("dd/MM/yyyy")</span>
                 }
                 @if (!string.IsNullOrEmpty(task.Description))
                 {
@@ -31,12 +39,13 @@
                 }
                 <form method="post" asp-page-handler="Toggle">
                     <input type="hidden" name="taskId" value="@task.Id" />
-                    <button type="submit" class="secondary">
-                        @(task.State == TaskState.Done ? "Mark not done" : "Mark done")
+                    <button type="submit" class="secondary"
+                            aria-label="@(toggleLabel): @task.Title">
+                        @toggleLabel
                     </button>
                 </form>
             </div>
         }
     }
-    <p><a asp-page="/Index">Back to hub</a></p>
+    <p><a asp-page="/Index">@Localizer["Common.BackToHub"]</a></p>
 </div>

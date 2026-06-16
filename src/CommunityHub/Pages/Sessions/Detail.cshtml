@@ -1,0 +1,156 @@
+@page "/Sessions/{id:int}"
+@using CommunityHub.Core.Domain
+@model CommunityHub.Pages.Sessions.DetailModel
+@{
+    Layout = "_Layout";
+    ViewData["Title"] = Model.Session is null
+        ? Localizer["Nav.Sessions"].Value
+        : Model.Session.Title;
+}
+
+<style>
+    /* Mobile-first: single column, readable at ~360px. */
+    .sd-head {
+        background: var(--el-darkblue, #1D3380); color: #fff;
+        padding: 22px; border-radius: 10px 10px 0 0; margin: 0;
+    }
+    .sd-head h1 { margin: 0; font-size: 22px; font-weight: 700; line-height: 1.3; }
+    .sd-head .meta { font-size: 13.5px; opacity: .92; margin-top: 6px; }
+    .sd-body { padding: 18px 16px 24px; }
+
+    .sd-back { display: inline-block; font-size: 13px; font-weight: 600;
+        color: var(--el-blue, #008BD2); text-decoration: none; margin: 0 0 14px; }
+    .sd-back:hover, .sd-back:focus { text-decoration: underline; }
+
+    .sd-tags { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 12px; }
+    .sd-tag {
+        font-size: 11.5px; font-weight: 600; padding: 3px 9px; border-radius: 999px;
+        background: #eef1f7; color: #344; white-space: nowrap;
+    }
+    .sd-tag.type-mc { background: #ece6fb; color: #4527a0; }
+    .sd-tag.type-sponsor { background: #fdeede; color: #8a4b00; }
+
+    .sd-when { font-size: 13.5px; color: #5a6270; margin: 0 0 14px; }
+
+    .sd-section { margin: 0 0 18px; }
+    .sd-section h2 { font-size: 14px; color: #1D3380; margin: 0 0 8px; }
+    .sd-abstract { font-size: 14px; color: #2c333f; line-height: 1.6; margin: 0;
+        white-space: pre-wrap; }
+
+    .sd-speakers { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+    .sd-speakers li { font-size: 14px; color: #24292f; }
+    .sd-speakers a { color: var(--el-blue, #008BD2); text-decoration: none; font-weight: 600; }
+    .sd-speakers a:hover, .sd-speakers a:focus { text-decoration: underline; }
+
+    .sd-links { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 6px; }
+    .sd-links a {
+        font-size: 13.5px; font-weight: 600; color: #fff; background: var(--el-blue, #008BD2);
+        text-decoration: none; padding: 9px 16px; border-radius: 7px; display: inline-block;
+    }
+    .sd-links a.secondary { background: #e4e7ee; color: #24292f; }
+    .sd-links a:hover, .sd-links a:focus { filter: brightness(.96); }
+
+    .sd-empty { color: #555; font-style: italic; padding: 18px 4px; }
+</style>
+
+<div class="card" style="padding:0; overflow:hidden; max-width:760px; margin:0 auto;">
+    @if (Model.Session is null)
+    {
+        <div class="sd-head"><h1>@Localizer["Nav.Sessions"]</h1></div>
+        <div class="sd-body"><p class="sd-empty">@Localizer["Public.NoLiveEvent"]</p></div>
+        return;
+    }
+    @{ var s = Model.Session; }
+    @{
+        var typeClass = s.Type == SessionType.CommunityMasterClass ? "type-mc"
+            : s.Type == SessionType.SponsorSession ? "type-sponsor" : "";
+    }
+
+    <div class="sd-head">
+        <h1>@s.Title</h1>
+        <div class="meta">@s.EventDisplayName</div>
+    </div>
+
+    <div class="sd-body">
+        <a class="sd-back" href="/Sessions">&larr; @Localizer["SessionDetail.BackToSessions"]</a>
+
+        <div class="sd-tags">
+            <span class="sd-tag @typeClass">@CommunityHub.Pages.Sessions.DetailModel.Display(s.Type)</span>
+            <span class="sd-tag">@CommunityHub.Pages.Sessions.DetailModel.Display(s.Length)</span>
+            @if (!string.IsNullOrWhiteSpace(s.Room))
+            {
+                <span class="sd-tag">@Localizer["SessionDetail.Room", s.Room]</span>
+            }
+            @if (!string.IsNullOrWhiteSpace(s.Track))
+            {
+                <span class="sd-tag">@s.Track</span>
+            }
+        </div>
+
+        @if (s.StartsAt is not null)
+        {
+            <p class="sd-when">
+                @s.StartsAt.Value.ToString("dddd dd MMMM yyyy, HH:mm")@(s.EndsAt is not null ? $"–{s.EndsAt.Value.ToString("HH:mm")}" : "")
+            </p>
+        }
+
+        @if (s.Speakers.Count > 0)
+        {
+            <div class="sd-section">
+                <h2>@Localizer["SessionDetail.SpeakersHeading"]</h2>
+                <ul class="sd-speakers">
+                    @foreach (var sp in s.Speakers)
+                    {
+                        <li>
+                            @* Cross-link only to a PUBLISHED speaker (the hard gate);
+                               an unpublished co-speaker shows as plain text. *@
+                            @if (sp.IsPublished)
+                            {
+                                <a href="/Speakers/@sp.ParticipantId">@sp.Name</a>
+                            }
+                            else
+                            {
+                                <span>@sp.Name</span>
+                            }
+                        </li>
+                    }
+                </ul>
+            </div>
+        }
+
+        @if (!string.IsNullOrWhiteSpace(s.Abstract))
+        {
+            <div class="sd-section">
+                <h2>@Localizer["SessionDetail.AbstractHeading"]</h2>
+                <p class="sd-abstract">@s.Abstract</p>
+            </div>
+        }
+
+        @if ((s.Type == SessionType.CommunityMasterClass && !string.IsNullOrWhiteSpace(s.PublicSlug))
+             || !string.IsNullOrWhiteSpace(s.AskToken)
+             || s.StartsAt is not null)
+        {
+            <div class="sd-section">
+                <div class="sd-links">
+                    @if (s.Type == SessionType.CommunityMasterClass && !string.IsNullOrWhiteSpace(s.PublicSlug))
+                    {
+                        <a href="/MasterClass/@s.PublicSlug">@Localizer["SessionDetail.MasterClassLink"]</a>
+                    }
+                    @if (s.StartsAt is not null)
+                    {
+                        @* Public per-session .ics — only when the talk is scheduled
+                           (an unscheduled talk has nothing to put on a calendar). *@
+                        <a class="secondary" href="/Sessions/@(s.Id).ics" rel="nofollow"
+                           download="session-@(s.Id).ics" aria-label="@Localizer["SessionDetail.AddToCalendar"]">
+                            @Localizer["SessionDetail.AddToCalendar"]
+                        </a>
+                    }
+                    @if (!string.IsNullOrWhiteSpace(s.AskToken))
+                    {
+                        <a class="secondary" href="/sessions/@s.AskToken/ask">@Localizer["SessionDetail.AskLink"]</a>
+                    }
+                </div>
+            </div>
+        }
+    </div>
+</div>

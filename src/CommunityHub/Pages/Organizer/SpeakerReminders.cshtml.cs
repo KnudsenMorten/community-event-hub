@@ -93,7 +93,16 @@ public class SpeakerRemindersModel : PageModel
 
         var p = await _db.Participants
             .Where(x => x.Id == task.AssignedParticipantId && x.IsActive)
-            .Select(x => new { x.Id, x.Email, x.FullName })
+            .Select(x => new
+            {
+                x.Id,
+                x.Email,
+                x.FullName,
+                ContactEmailOverride = _db.SpeakerProfiles
+                    .Where(sp => sp.ParticipantId == x.Id)
+                    .Select(sp => sp.ContactEmailOverride)
+                    .FirstOrDefault(),
+            })
             .FirstOrDefaultAsync(ct);
         if (p is null)
         {
@@ -101,6 +110,9 @@ public class SpeakerRemindersModel : PageModel
             await LoadRowsAsync(me.EventId, ct);
             return Page();
         }
+
+        // ALL speaker mail goes to the effective address (override ?? Sessionize).
+        var toEmail = SpeakerProfile.EffectiveEmailFor(p.Email, p.ContactEmailOverride);
 
         var eventCode = await _db.Events
             .Where(e => e.Id == me.EventId)
@@ -110,21 +122,23 @@ public class SpeakerRemindersModel : PageModel
         var rendered = BuildReminderEmail(p.FullName, task.Title, task.Description, task.DueDate, eventCode);
         try
         {
-            await _emailSender.SendAsync(p.Email, rendered.Subject, rendered.HtmlBody, ct);
+            await _emailSender.SendAsync(toEmail, rendered.Subject, rendered.HtmlBody, ct);
             _db.SentReminders.Add(new SentReminder
             {
                 EventId = me.EventId,
+                // Ledger keys on the IDENTITY address so reminder history stays
+                // stable across override changes (LoadRowsAsync matches on it).
                 RecipientEmail = p.Email,
                 ReminderType = ReminderType,
                 OccasionKey = $"manual:task-{task.Id}:{_clock.GetUtcNow().UtcDateTime:yyyyMMddHHmmss}",
                 SentAt = _clock.GetUtcNow(),
             });
             await _db.SaveChangesAsync(ct);
-            Message = $"Reminder sent to {p.Email}.";
+            Message = $"Reminder sent to {toEmail}.";
         }
         catch (Exception ex)
         {
-            Message = $"Could not send reminder to {p.Email}: {ex.Message}";
+            Message = $"Could not send reminder to {toEmail}: {ex.Message}";
         }
 
         await LoadRowsAsync(me.EventId, ct);

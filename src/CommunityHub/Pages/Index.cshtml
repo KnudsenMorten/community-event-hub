@@ -12,6 +12,95 @@
         "<span style=\"display:inline-block;background:#fff3cd;color:#856404;border:1px solid #ffe69c;border-radius:12px;padding:2px 10px;font-size:12px;font-weight:600;\">&#9888; Pending</span>";
 }
 
+@* ===================================================================
+   PUBLIC LANDING (anonymous visitor). Renders the active edition's
+   facts + a sign-in / visit-event CTA + links into the public pages.
+   Returns early so the authed hub markup below never runs for guests.
+   =================================================================== *@
+@if (Model.IsAnonymous)
+{
+    <style>
+        .lp { max-width: 880px; margin: 0 auto; }
+        .lp-hero {
+            background: var(--el-darkblue, #1D3380); color: #fff;
+            padding: 32px 24px; border-radius: 12px; text-align: center;
+        }
+        .lp-hero h1 { margin: 0 0 8px; font-size: 26px; font-weight: 800; line-height: 1.25; }
+        .lp-hero .lp-dates { font-size: 15px; opacity: .95; margin: 0 0 4px; }
+        .lp-hero .lp-venue { font-size: 13.5px; opacity: .85; margin: 0; }
+        .lp-hero .lp-blurb { font-size: 15px; line-height: 1.6; margin: 14px auto 0; max-width: 560px; opacity: .96; }
+        .lp-cta { display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; margin: 22px 0 0; }
+        .lp-cta a {
+            display: inline-block; padding: 12px 22px; border-radius: 8px;
+            font-size: 15px; font-weight: 700; text-decoration: none;
+        }
+        .lp-cta a.primary { background: #fff; color: var(--el-darkblue, #1D3380); }
+        .lp-cta a.secondary { background: rgba(255,255,255,.16); color: #fff; border: 1px solid rgba(255,255,255,.5); }
+        .lp-cta a:hover, .lp-cta a:focus { filter: brightness(.96); }
+
+        .lp-cards { display: grid; grid-template-columns: 1fr; gap: 14px; margin: 22px 0 0; }
+        .lp-card {
+            display: block; border: 1px solid #e4e7ee; border-radius: 10px;
+            padding: 18px 18px; background: #fff; text-decoration: none; color: inherit;
+        }
+        .lp-card:hover, .lp-card:focus { border-color: var(--el-blue, #008BD2); box-shadow: 0 1px 6px rgba(0,0,0,.06); }
+        .lp-card h2 { margin: 0 0 6px; font-size: 17px; color: #1D3380; }
+        .lp-card p { margin: 0; font-size: 13.5px; color: #4a5160; line-height: 1.5; }
+        .lp-card .lp-arrow { color: var(--el-blue, #008BD2); font-weight: 700; }
+
+        .lp-empty { text-align: center; color: #444; padding: 8px 4px 4px; }
+
+        @@media (min-width: 620px) {
+            .lp-cards { grid-template-columns: repeat(2, 1fr); }
+        }
+    </style>
+
+    <div class="lp">
+        <section class="lp-hero">
+            @if (Model.Landing is not null)
+            {
+                <h1>@Model.Landing.EventDisplayName</h1>
+                <p class="lp-dates">@CommunityHub.Pages.IndexModel.FormatDateRange(Model.Landing.StartDate, Model.Landing.EndDate)</p>
+                @if (!string.IsNullOrWhiteSpace(Model.Landing.VenueName))
+                {
+                    <p class="lp-venue">@Model.Landing.VenueName</p>
+                }
+                <p class="lp-blurb">@Localizer["Landing.Blurb"]</p>
+            }
+            else
+            {
+                <h1>@Localizer["Speakers.Title"]</h1>
+                <p class="lp-empty">@Localizer["Public.NoLiveEvent"]</p>
+            }
+            <div class="lp-cta">
+                <a class="primary" href="https://eldk27.expertslive.dk/" target="_blank" rel="noopener">@Localizer["Layout.VisitEventSite"] &rarr;<span class="visually-hidden">@Localizer["Common.OpensNewTab"]</span></a>
+                <a class="secondary" href="/Login">@Localizer["Login.Title"]</a>
+            </div>
+        </section>
+
+        <div class="lp-cards">
+            <a class="lp-card" href="/Sessions">
+                <h2>@Localizer["Nav.Sessions"] <span class="lp-arrow">&rarr;</span></h2>
+                <p>@Localizer["Landing.SessionsBlurb"]</p>
+            </a>
+            <a class="lp-card" href="/Speakers">
+                <h2>@Localizer["Nav.Speakers"] <span class="lp-arrow">&rarr;</span></h2>
+                <p>@Localizer["Landing.SpeakersBlurb"]</p>
+            </a>
+            <a class="lp-card" href="/Sponsors">
+                <h2>@Localizer["Nav.Sponsors"] <span class="lp-arrow">&rarr;</span></h2>
+                <p>@Localizer["Landing.SponsorsBlurb"]</p>
+            </a>
+            <a class="lp-card" href="/Sessions?FilterType=CommunityMasterClass">
+                <h2>@Localizer["Landing.MasterClassTitle"] <span class="lp-arrow">&rarr;</span></h2>
+                <p>@Localizer["Landing.MasterClassBlurb"]</p>
+            </a>
+        </div>
+    </div>
+
+    return;
+}
+
 <style>
     .status-row { display:flex; align-items:center; gap:10px; margin:6px 0 12px; flex-wrap:wrap; }
     .task-list { list-style:none; padding:0; margin:0; }
@@ -21,140 +110,186 @@
     .task-list .overdue { color:#c0392b; font-weight:600; }
     .done-row { color:#0a6; }
     .done-row::before { content:"\2713"; margin-right:6px; font-weight:700; }
+
+    /* Calendar sync — mobile-first (~360px): everything wraps, full-width controls */
+    .cal-url-row { display:flex; gap:8px; flex-wrap:wrap; align-items:stretch; margin:8px 0; }
+    .cal-url-row input { flex:1 1 200px; min-width:0; padding:10px 12px; font-size:14px;
+        border:1px solid #cbd2d9; border-radius:8px; font-family:monospace; }
+    .cal-btn { display:inline-block; padding:10px 14px; border-radius:8px; font-size:14px;
+        font-weight:600; border:0; cursor:pointer; text-align:center; text-decoration:none; }
+    .cal-btn-primary { background:#2563eb; color:#fff; }
+    .cal-btn-ghost { background:#eef2ff; color:#2563eb; border:1px solid #c7d2fe; }
+    .cal-help { margin:10px 0 0; padding:0; }
+    .cal-help summary { cursor:pointer; font-weight:600; color:#374151; }
+    .cal-help ul { margin:8px 0 0 18px; padding:0; color:#4b5563; font-size:14px; line-height:1.5; }
+    .cal-dl-link { font-size:12px; color:#2563eb; white-space:nowrap; }
+    @@media (max-width: 380px) {
+        .cal-url-row input, .cal-btn { flex-basis:100%; }
+    }
+
+    /* Task tables — mobile-first. The fixed date/status column widths plus the
+       no-wrap "Overdue (N days)" cells pushed the table to ~336px, overflowing
+       below the 360px baseline (it only fit on the 375px iPhone-SE the suite
+       used). Let the table lay out within the viewport: it may shrink columns,
+       the date/status cells wrap instead of forcing a min-width, and the long
+       task-title link breaks rather than reserving its full width. */
+    .task-table { table-layout:fixed; }
+    .task-table th, .task-table td { overflow-wrap:anywhere; word-break:break-word; }
+    @@media (max-width: 480px) {
+        /* drop the rigid 120/130px columns and let the no-wrap cells wrap so
+           the whole table fits a 320px phone with no horizontal scroll. */
+        .task-table col, .task-table th[style*="width"] { width:auto !important; }
+        .task-table td[style*="nowrap"], .task-table th[style*="width"] { white-space:normal !important; }
+        .task-table th, .task-table td { padding-left:4px !important; padding-right:4px !important; }
+    }
 </style>
 
 <div class="card">
-    <h2>Welcome, @Model.Me.FirstName</h2>
-    <p>@Model.EventDisplayName &middot; signed in as <strong>@CommunityHub.Branding.RoleDisplay.Name(Model.Me.Role)</strong></p>
+    <h2>@Localizer["Hub.Welcome", Model.Me.FirstName]</h2>
+    <p>@Model.EventDisplayName &middot; @Localizer["Hub.SignedInAs"] <strong>@CommunityHub.Branding.RoleDisplay.Name(Model.Me.Role)</strong></p>
     @if (Model.OpenTaskCount == 0)
     {
-        <p><span style="color:#0a6;font-weight:600;">&#10003; All tasks complete!</span></p>
+        <p><span style="color:#0a6;font-weight:600;">&#10003; @Localizer["Hub.AllTasksComplete"]</span></p>
     }
 </div>
 
-@if (Model.PendingTasks.Count > 0)
+@{
+    // "Add to my calendar" applies to roles with time-bound items: speakers
+    // (milestone deadlines), volunteers (shifts/tasks), organizers (tasks).
+    var showCalendar = !string.IsNullOrEmpty(Model.CalendarToken)
+        && (Model.Me.Role == CommunityHub.Core.Domain.ParticipantRole.Speaker
+            || Model.Me.Role == CommunityHub.Core.Domain.ParticipantRole.MasterclassSpeaker
+            || Model.Me.Role == CommunityHub.Core.Domain.ParticipantRole.Volunteer
+            || Model.Me.Role == CommunityHub.Core.Domain.ParticipantRole.Organizer);
+}
+@{
+    // JS-safe localized labels for the copy-link button's dynamic text swap.
+    var jsCopied  = System.Text.Encodings.Web.JavaScriptEncoder.Default.Encode(Localizer["Hub.Copied"].Value);
+    var jsCopyLink = System.Text.Encodings.Web.JavaScriptEncoder.Default.Encode(Localizer["Hub.CopyLink"].Value);
+}
+@if (showCalendar)
 {
     <div class="card">
-        <h2>&#9888; Pending tasks (@Model.PendingTasks.Count)</h2>
-        <table class="task-table" style="width:100%; border-collapse:collapse;">
-            <thead>
-                <tr style="text-align:left; color:#6b7280; font-size:12px; border-bottom:1px solid #e5e7eb;">
-                    <th style="padding:8px 6px;">Task</th>
-                    <th style="padding:8px 6px; width:130px;">Due date</th>
-                    <th style="padding:8px 6px; width:120px;">Status</th>
-                </tr>
-            </thead>
-            <tbody>
-                @foreach (var t in Model.PendingTasks)
-                {
-                    <tr style="border-bottom:1px solid #f3f4f6;">
-                        <td style="padding:10px 6px;">
-                            @if (t.Link is not null)
-                            {
-                                <a href="@t.Link" style="font-weight:600;">@t.Title &rarr;</a>
-                            }
-                            else
-                            {
-                                @t.Title
-                            }
-                        </td>
-                        <td style="padding:10px 6px; white-space:nowrap;">
-                            @(t.DueDate?.ToString("dd/MM/yyyy") ?? "-")
-                        </td>
-                        <td style="padding:10px 6px; white-space:nowrap;
-                                   color:@(t.DaysOverdue is > 0 ? "#c0392b" : "#6b7280");
-                                   font-weight:@(t.DaysOverdue is > 0 ? "600" : "400");">
-                            @if (t.DaysOverdue is > 0)
-                            {
-                                <text>Overdue (@t.DaysOverdue day@(t.DaysOverdue == 1 ? "" : "s"))</text>
-                            }
-                            else
-                            {
-                                <text>Pending</text>
-                            }
-                        </td>
-                    </tr>
-                }
-            </tbody>
-        </table>
+        <h2>&#128197; @Localizer["Hub.AddToCalendar"]</h2>
+        <p style="color:#4b5563;margin:0 0 4px;">
+            @Localizer["Hub.CalendarIntro"]
+        </p>
+        <div class="cal-url-row">
+            <input type="text" readonly aria-label="@Localizer["Hub.AddToCalendar"]"
+                   id="cal-url" value="@Model.CalendarWebcalUrl" />
+            <button type="button" class="cal-btn cal-btn-primary"
+                    onclick="cehCopyCal()" id="cal-copy">@Localizer["Hub.CopyLink"]</button>
+            <a class="cal-btn cal-btn-ghost" href="@Model.CalendarWebcalUrl">@Localizer["Hub.Subscribe"]</a>
+        </div>
+        <details class="cal-help">
+            <summary>@Localizer["Hub.CalendarHowTo"]</summary>
+            <ul>
+                <li><strong>Outlook (web/desktop):</strong> Calendar &rarr; Add calendar
+                    &rarr; Subscribe from web &rarr; paste the link.</li>
+                <li><strong>Google Calendar:</strong> Other calendars &rarr; From URL
+                    &rarr; paste the link (use the
+                    <a href="@Model.CalendarHttpsUrl">https link</a>).</li>
+                <li><strong>Apple Calendar (iPhone/Mac):</strong> tap <em>Subscribe</em>
+                    above, or File &rarr; New Calendar Subscription &rarr; paste the link.</li>
+            </ul>
+            <p style="font-size:12px;color:#6b7280;margin:8px 0 0;">
+                This link is private to you. If you ever shared it by mistake, an
+                organizer can reset it.
+            </p>
+        </details>
     </div>
+    <script>
+        function cehCopyCal() {
+            var el = document.getElementById('cal-url');
+            var btn = document.getElementById('cal-copy');
+            el.select(); el.setSelectionRange(0, 99999);
+            var done = function () { btn.textContent = '@Html.Raw(jsCopied)'; setTimeout(function () { btn.textContent = '@Html.Raw(jsCopyLink)'; }, 1500); };
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(el.value).then(done, function () { try { document.execCommand('copy'); done(); } catch (e) { } });
+            } else { try { document.execCommand('copy'); done(); } catch (e) { } }
+        }
+    </script>
 }
 
-@if (Model.CompletedTasks.Count > 0)
-{
-    <div class="card">
-        <h2 style="color:#0a6;">&#10003; Completed tasks (@Model.CompletedTasks.Count)</h2>
-        <table class="task-table" style="width:100%; border-collapse:collapse;">
-            <thead>
-                <tr style="text-align:left; color:#6b7280; font-size:12px; border-bottom:1px solid #e5e7eb;">
-                    <th style="padding:8px 6px;">Task</th>
-                    <th style="padding:8px 6px; width:120px;">Status</th>
-                </tr>
-            </thead>
-            <tbody>
-                @foreach (var t in Model.CompletedTasks)
-                {
-                    <tr style="border-bottom:1px solid #f3f4f6;">
-                        <td style="padding:10px 6px;">
-                            @if (t.Link is not null)
-                            {
-                                <a href="@t.Link" style="color:#0a6;">@t.Title</a>
-                            }
-                            else
-                            {
-                                @t.Title
-                            }
-                        </td>
-                        <td style="padding:10px 6px; color:#0a6; font-weight:600;">&#10003; Done</td>
-                    </tr>
-                }
-            </tbody>
-        </table>
-    </div>
-}
+@* Unified "what's still needed" checklist — shared component (Top-8 #7).
+   The Hub passes the CalendarItem page-handler so dated pending rows offer .ics. *@
+@{ ViewData["ChecklistIcsHandler"] = "CalendarItem"; }
+@await Html.PartialAsync("Shared/_ChecklistCard", Model.Checklist)
 
 @if (Model.ShowHotel)
 {
     <div class="card">
-        <h2>Hotel</h2>
+        <h2>@Localizer["Hub.HotelTitle"]</h2>
         <div class="status-row">
-            @if (Model.HotelSubmitted) { @Html.Raw(DoneBadge()) <span>Your hotel preference is on file.</span> }
-            else                       { @Html.Raw(PendingBadge()) <span>You have not submitted a hotel preference yet.</span> }
+            @if (Model.HotelSubmitted) { @Html.Raw(DoneBadge()) <span>@Localizer["Hub.HotelOnFile"]</span> }
+            else                       { @Html.Raw(PendingBadge()) <span>@Localizer["Hub.HotelNotYet"]</span> }
         </div>
-        <a asp-page="/Forms/Hotel">@(Model.HotelSubmitted ? "Update" : "Submit") hotel preference</a>
+        <a asp-page="/Forms/Hotel">@(Model.HotelSubmitted ? Localizer["Hub.HotelUpdateLink"] : Localizer["Hub.HotelSubmitLink"])</a>
     </div>
 }
 
 @if (Model.ShowDinner)
 {
     <div class="card">
-        <h2>Dinner / social event</h2>
+        <h2>@Localizer["Hub.DinnerTitle"]</h2>
         <div class="status-row">
-            @if (Model.DinnerSubmitted) { @Html.Raw(DoneBadge()) <span>Your dinner RSVP is on file.</span> }
-            else                        { @Html.Raw(PendingBadge()) <span>Please let us know if you will attend the dinner.</span> }
+            @if (Model.DinnerSubmitted) { @Html.Raw(DoneBadge()) <span>@Localizer["Hub.DinnerOnFile"]</span> }
+            else                        { @Html.Raw(PendingBadge()) <span>@Localizer["Hub.DinnerNotYet"]</span> }
         </div>
-        <a asp-page="/Forms/Dinner">@(Model.DinnerSubmitted ? "Update" : "Submit") dinner signup</a>
+        <a asp-page="/Forms/Dinner">@(Model.DinnerSubmitted ? Localizer["Hub.DinnerUpdateLink"] : Localizer["Hub.DinnerSubmitLink"])</a>
     </div>
 }
 
 @if (Model.ShowVolunteerShifts)
 {
     <div class="card">
-        <h2>Volunteer shifts</h2>
+        <h2>@Localizer["Hub.VolShiftsTitle"]</h2>
         <div class="status-row">
-            @if (Model.VolunteerSubmitted) { @Html.Raw(DoneBadge()) <span>Your availability is on file.</span> }
-            else                           { @Html.Raw(PendingBadge()) <span>Please submit which shifts you can work.</span> }
+            @if (Model.VolunteerSubmitted) { @Html.Raw(DoneBadge()) <span>@Localizer["Hub.VolShiftsOnFile"]</span> }
+            else                           { @Html.Raw(PendingBadge()) <span>@Localizer["Hub.VolShiftsNotYet"]</span> }
         </div>
-        <a asp-page="/Forms/VolunteerWizard">@(Model.VolunteerSubmitted ? "Update" : "Start") volunteer sign-up</a>
+        <a asp-page="/Forms/VolunteerWizard">@(Model.VolunteerSubmitted ? Localizer["Hub.VolShiftsUpdateLink"] : Localizer["Hub.VolShiftsStartLink"])</a>
+    </div>
+}
+
+@if (Model.ShowVolunteerWork)
+{
+    <div class="card">
+        <h2>@Localizer["Hub.VolWorkTitle"]</h2>
+        <div class="status-row">
+            @if (Model.MyVolunteerTaskCount > 0)
+            {
+                @Html.Raw(DoneBadge())
+                <span>@Localizer["Hub.VolWorkAssigned", Model.MyVolunteerTaskCount]</span>
+            }
+            else
+            {
+                @Html.Raw(PendingBadge())
+                <span>@Localizer["Hub.VolWorkNone"]</span>
+            }
+        </div>
+        <a asp-page="/Volunteer/MySchedule">@Localizer["Hub.VolWorkMySchedule"]</a>
+        <span> &middot; </span>
+        <a asp-page="/Volunteer/MyShifts">@Localizer["Hub.VolWorkMyShifts"]</a>
+        <span> &middot; </span>
+        <a asp-page="/Volunteer/MyTasks">@Localizer["Hub.VolWorkMyTasks"]</a>
+        @if (Model.IsCategorySupervisor)
+        {
+            <span> &middot; </span>
+            <a asp-page="/Volunteer/Supervisor">@Localizer["Hub.VolWorkSupervisor"]</a>
+        }
     </div>
 }
 
 @if (Model.ShowSpeakerDeadlines)
 {
     <div class="card">
-        <h2>Speaker deadlines</h2>
-        <p>Your session-related deadlines appear in your task list.</p>
-        <a asp-page="/Tasks/Index">View deadlines</a>
+        <h2>@Localizer["Speaker.Title"]</h2>
+        <p>@Localizer["Speaker.JourneyIntro"]</p>
+        <p style="display:flex;gap:10px;flex-wrap:wrap;margin-top:8px;">
+            <a class="task-link-btn" asp-page="/Speaker/Index">@Localizer["Speaker.Title"]</a>
+            <a class="task-link-btn" asp-page="/Tasks/Index">@Localizer["Speaker.AllMyTasks"]</a>
+        </p>
     </div>
 }
 
@@ -163,12 +298,13 @@
     @await Html.PartialAsync("_KeyDates", Model.EventDates)
 
     <div class="card">
-        <h2>Sponsor area</h2>
-        <p>Your company's onboarding tasks appear in the Pending / Completed lists above. The two pages below give you the full view + the inline edit forms.</p>
+        <h2>@Localizer["Hub.SponsorAreaTitle"]</h2>
+        <p>@Localizer["Hub.SponsorAreaIntro"]</p>
         <p style="display:flex;gap:10px;flex-wrap:wrap;margin-top:8px;">
-            <a class="task-link-btn" asp-page="/Sponsor/Index">Open Sponsor Engagement Details</a>
-            <a class="task-link-btn" asp-page="/Sponsor/Tasks">Open Sponsor Tasks</a>
-            <a class="task-link-btn" asp-page="/Sponsor/Leads">Your Leads API + download</a>
+            <a class="task-link-btn" asp-page="/Sponsor/Index">@Localizer["Hub.SponsorOpenEngagement"]</a>
+            <a class="task-link-btn" asp-page="/Sponsor/Tasks">@Localizer["Hub.SponsorOpenTasks"]</a>
+            <a class="task-link-btn" asp-page="/Sponsor/CaptureLead">@Localizer["Hub.SponsorCaptureLead"]</a>
+            <a class="task-link-btn" asp-page="/Sponsor/Leads">@Localizer["Hub.SponsorLeadsApi"]</a>
         </p>
     </div>
 }
@@ -176,34 +312,37 @@
 @if (Model.ShowAttendeeArea)
 {
     <div class="card">
-        <h2>Your Master Class</h2>
+        <h2>@Localizer["MyEvent.YourMasterClass"]</h2>
         @if (Model.AttendeeBookingStatus == CommunityHub.Core.Domain.MasterClassBookingStatus.Booked)
         {
-            <p class="info">You have reserved a Master Class seat.</p>
+            <p class="info">@Localizer["Hub.AttendeeReserved"]</p>
         }
         else if (Model.AttendeeBookingStatus == CommunityHub.Core.Domain.MasterClassBookingStatus.MultipleBookings)
         {
-            <p class="error">You have more than one Master Class booking - please keep one and cancel the others.</p>
+            <p class="error">@Localizer["Hub.AttendeeMultiple"]</p>
         }
         else
         {
-            <p class="error">You have not reserved a Master Class seat yet.</p>
+            <p class="error">@Localizer["Hub.AttendeeNone"]</p>
         }
-        <a asp-page="/Attendee/Index">Open attendee area</a>
+        <p style="display:flex;gap:10px;flex-wrap:wrap;margin-top:8px;">
+            <a class="task-link-btn" asp-page="/Attendee/MyEvent">@Localizer["MyEvent.Title"]</a>
+            <a asp-page="/Attendee/Index">@Localizer["Hub.AttendeeMcDetails"]</a>
+        </p>
     </div>
 }
 
 @if (Model.ShowOrganizerTools)
 {
     <div class="card">
-        <h2>Organizer tools</h2>
-        <p>Attendee reconciliation, sponsor orders, and task management.</p>
-        <a asp-page="/Organizer/Index">Open organizer area</a>
+        <h2>@Localizer["Hub.OrganizerToolsTitle"]</h2>
+        <p>@Localizer["Hub.OrganizerToolsIntro"]</p>
+        <a asp-page="/Organizer/Index">@Localizer["Hub.OrganizerToolsLink"]</a>
     </div>
 }
 
 <div class="card">
     <form method="post" asp-page="/Logout">
-        <button type="submit" class="secondary">Sign out</button>
+        <button type="submit" class="secondary">@Localizer["Common.SignOut"]</button>
     </form>
 </div>

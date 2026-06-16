@@ -1,0 +1,40 @@
+@page
+@model CommunityHub.Pages.Organizer.SetupModel
+@{
+    ViewData["Title"] = Localizer["OrgSetup.Title"].Value;
+}
+
+<div class="card">
+    <h2>@Localizer["OrgSetup.Title"]</h2>
+    @if (Model.AccessDenied)
+    {
+        <p class="error">@Localizer["Common.OrganizersOnly"]</p>
+        <p><a asp-page="/Index">@Localizer["Common.BackToHub"]</a></p>
+    }
+    else
+    {
+        <p>@Localizer["OrgSetup.Intro"]</p>
+        <p><a asp-page="/Organizer/Index">&larr; @Localizer["Common.BackToOrganizerArea"]</a></p>
+    }
+</div>
+
+@if (!Model.AccessDenied)
+{
+    <div class="card">
+        <h2>@Localizer["Nav.OrgCalendarSettings"]</h2>
+        <p>@Localizer["OrgSetup.Calendar"]</p>
+        <p><a asp-page="/Organizer/CalendarSettings">@Localizer["Nav.OrgCalendarSettings"]</a></p>
+    </div>
+
+    <div class="card">
+        <h2>@Localizer["Nav.OrgSessionizeEndpoint"]</h2>
+        <p>@Localizer["OrgSetup.Sessionize"]</p>
+        <p><a asp-page="/Organizer/SessionizeEndpointSettings">@Localizer["Nav.OrgSessionizeEndpoint"]</a></p>
+    </div>
+
+    <div class="card">
+        <h2>@Localizer["Nav.OrgSoMeSettings"]</h2>
+        <p>@Localizer["OrgSetup.SoMe"]</p>
+        <p><a asp-page="/Organizer/SoMeSettings">@Localizer["Nav.OrgSoMeSettings"]</a></p>
+    </div>
+}

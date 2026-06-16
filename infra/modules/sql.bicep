@@ -21,12 +21,24 @@ param sqlDatabaseName string
 @description('Tags applied to the resources.')
 param tags object
 
-@description('SQL administrator login name.')
-param sqlAdminLogin string
+@description('SQL administrator login name. Optional: the server now authenticates app traffic via Entra managed identity (AAD-only). A SQL login is only needed if Azure-AD-only auth is disabled.')
+param sqlAdminLogin string = 'communityhubadmin'
 
-@description('SQL administrator password. Passed at deploy time from Key Vault or a secure parameter - never hard-coded.')
+@description('SQL administrator password. Optional: only required when azureADOnlyAuthentication is false. Passed at deploy time from Key Vault or a secure parameter - never hard-coded.')
 @secure()
-param sqlAdminPassword string
+param sqlAdminPassword string = ''
+
+@description('Entra (Azure AD) admin group for the SQL server. Members can connect as SQL admin via Entra auth. Defaults to the ELDK SQL Admins group.')
+param aadAdminLogin string = 'ELDK SQL Admins'
+
+@description('Object id (sid) of the Entra admin group.')
+param aadAdminObjectId string = '27338212-954e-41c4-95ce-71c2778991e9'
+
+@description('Entra tenant id the admin principal belongs to.')
+param aadAdminTenantId string = subscription().tenantId
+
+@description('Enforce Entra-only (Azure AD-only) authentication on the SQL server - disables SQL login+password. The app + Functions authenticate passwordlessly via their managed identities.')
+param azureADOnlyAuthentication bool = true
 
 @description('Database SKU. Defaults to a small General Purpose serverless tier suitable for a low-traffic crew portal.')
 param databaseSku object = {
@@ -39,12 +51,36 @@ resource sqlServer 'Microsoft.Sql/servers@2023-08-01-preview' = {
   location: location
   tags: tags
   properties: {
-    administratorLogin: sqlAdminLogin
-    administratorLoginPassword: sqlAdminPassword
+    // SQL login is only populated when AAD-only auth is OFF. With AAD-only ON
+    // (the default) the app + Functions authenticate via managed identity and
+    // no SQL password exists.
+    administratorLogin: azureADOnlyAuthentication ? null : sqlAdminLogin
+    administratorLoginPassword: azureADOnlyAuthentication ? null : sqlAdminPassword
     version: '12.0'
     minimalTlsVersion: '1.2'
     // No public endpoint exposure beyond the explicit firewall rule below.
     publicNetworkAccess: 'Enabled'
+    // Entra (Azure AD) admin: the ELDK SQL Admins group. Set inline so the
+    // admin exists at create time (avoids a separate apply ordering issue).
+    administrators: {
+      administratorType: 'ActiveDirectory'
+      principalType: 'Group'
+      login: aadAdminLogin
+      sid: aadAdminObjectId
+      tenantId: aadAdminTenantId
+      azureADOnlyAuthentication: azureADOnlyAuthentication
+    }
+  }
+}
+
+// Explicit Azure-AD-only authentication child resource. Redundant with the
+// inline `administrators.azureADOnlyAuthentication` above but kept so the
+// setting is unambiguous and survives a server-properties-only update.
+resource sqlAadOnly 'Microsoft.Sql/servers/azureADOnlyAuthentications@2023-08-01-preview' = if (azureADOnlyAuthentication) {
+  parent: sqlServer
+  name: 'Default'
+  properties: {
+    azureADOnlyAuthentication: true
   }
 }
 

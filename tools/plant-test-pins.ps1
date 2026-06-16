@@ -38,8 +38,6 @@ $ErrorActionPreference = 'Stop'
 
 $server = 'eldk27hub-sql-devz237e.database.windows.net'
 $dbName = 'eldk27hub-db'
-$user   = 'eldk27hubadmin'
-$vault  = 'kveldk27hubdevz237e'
 
 # --- Generate the PIN + PBKDF2 hash (mirrors PinService.HashPin) ----------
 $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
@@ -55,13 +53,18 @@ $pbkdf2 = New-Object System.Security.Cryptography.Rfc2898DeriveBytes(
 $hash = "$([Convert]::ToBase64String($salt)):$([Convert]::ToBase64String($pbkdf2.GetBytes(32)))"
 
 # --- Insert the rows --------------------------------------------------------
+# The DEV SQL server is Azure-AD-only (SQL admin login is disabled), so we
+# authenticate with an AAD access token for the caller's identity (the same
+# identity used to deploy / run az). That identity must be a DB user with
+# INSERT on LoginPins (the deploy SPN / your account). No password app setting.
 $eap = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
-$pw = az keyvault secret show --vault-name $vault -n sql-admin-password --query value -o tsv 2>$null
+$token = az account get-access-token --resource https://database.windows.net/ --query accessToken -o tsv 2>$null
 $ErrorActionPreference = $eap
-if (-not $pw) { throw "could not read sql-admin-password from $vault" }
+if (-not $token) { throw "could not get an AAD access token for SQL (run 'az login' as a DB-authorized identity)." }
 
-$cs = "Server=tcp:$server,1433;Database=$dbName;User ID=$user;Password=$pw;Encrypt=True;Connection Timeout=30;"
-$conn = New-Object System.Data.SqlClient.SqlConnection($cs)
+$conn = New-Object System.Data.SqlClient.SqlConnection
+$conn.ConnectionString = "Server=tcp:$server,1433;Database=$dbName;Encrypt=True;Connection Timeout=30;"
+$conn.AccessToken = $token
 $conn.Open()
 try {
     $cmd = $conn.CreateCommand()

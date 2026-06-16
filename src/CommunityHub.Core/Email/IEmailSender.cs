@@ -19,6 +19,34 @@ public interface IEmailSender
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Send a single HTML email with optional CC recipients (e.g. a participant's
+    /// secondary email). Each CC is subject to the same redirect/allowlist gating
+    /// as the primary recipient. The 4-arg <see cref="SendAsync(string,string,string,CancellationToken)"/>
+    /// overload is just this with no CC.
+    /// </summary>
+    Task SendAsync(
+        string toEmail,
+        string subject,
+        string htmlBody,
+        IReadOnlyCollection<string>? cc,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Send an email carrying BOTH an HTML body and a plain-text alternative
+    /// (a <c>multipart/alternative</c>): clients that prefer plain text (or
+    /// strip HTML) render <paramref name="textBody"/>, the rest render
+    /// <paramref name="htmlBody"/>. Used by the welcome-with-login email, whose
+    /// requirement is HTML + plain-text. The same redirect/allowlist gating as
+    /// <see cref="SendAsync(string,string,string,CancellationToken)"/> applies.
+    /// </summary>
+    Task SendAsync(
+        string toEmail,
+        string subject,
+        string htmlBody,
+        string textBody,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Send an HTML email with one inline iCalendar (.ics) attachment.
     /// Used for RSVP confirmations that add the event to the participant's calendar.
     /// </summary>

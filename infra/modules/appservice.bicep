@@ -43,6 +43,9 @@ param backstageEmbedOrigin string = ''
 @description('Custom hostname the operator will bind post-deploy (e.g. test.hub.eldk27.expertslive.dk). Surfaced as the Hub__CustomDomain app setting so the running app can emit it in absolute URLs / cookie domain hints. Binding itself is manual -- see docs/RUNBOOK.md §4.2.')
 param customDomain string = ''
 
+@description('SAFE outbound-email allowlist FLOOR persisted in infra so a redeploy can never re-open mail to real recipients (operator directive 2026-06-16: never mail anyone outside the allowlist, dev AND prod). Defaults to the @expertslive.dk organiser domain only; the operator''s personal test addresses are added on top as a LIVE app setting (never committed here, public mirror). The app fails closed if this is empty.')
+param emailOnlySendTo string = '@expertslive.dk'
+
 @description('TEST MODE master switch -- when true, integrations perform NO real outbound writes (no Zoho Backstage / Booking calls, no WooCommerce writes, coordinator notifications routed to TestCoordinatorEmail). Surfaced as the TestMode__Enabled app setting; the .NET app binds this via TestModeOptions. Defaults are set in main.bicep based on environmentName (true for dev, false for prod).')
 param testModeEnabled bool
 
@@ -81,6 +84,19 @@ resource webApp 'Microsoft.Web/sites@2023-12-01' = {
           name: 'ASPNETCORE_ENVIRONMENT'
           value: 'Production'
         }
+        // Outbound-email safety (operator directive 2026-06-16): allowlist is the
+        // SOLE gate, redirect is OFF, and the app fails closed on an empty list.
+        // Persisted here so a redeploy can't drop them and re-open mail to real
+        // speakers / sponsors / volunteers. Personal test addresses are layered
+        // on as a live app setting (not committed -- public mirror).
+        {
+          name: 'Email__OnlySendTo'
+          value: emailOnlySendTo
+        }
+        {
+          name: 'Email__RedirectAllTo'
+          value: ''
+        }
         {
           name: 'KeyVault__Uri'
           value: keyVaultUri
@@ -97,12 +113,13 @@ resource webApp 'Microsoft.Web/sites@2023-12-01' = {
           name: 'APPLICATIONINSIGHTS_CONNECTION_STRING'
           value: appInsightsConnectionString
         }
-        // Secrets are referenced by NAME via Key Vault references. The values
-        // live only in Key Vault. The app's managed identity resolves them.
-        {
-          name: 'Sql__AdminPassword'
-          value: '@Microsoft.KeyVault(VaultName=${last(split(keyVaultUri, '/'))};SecretName=sql-admin-password)'
-        }
+        // NOTE: no Sql__AdminPassword is emitted. The app authenticates to
+        // Azure SQL passwordlessly via its system-assigned managed identity
+        // (the connection string in Program.cs appends
+        // `Authentication=Active Directory Managed Identity;` when no SQL
+        // password is configured). The MI is granted db_datareader /
+        // db_datawriter / db_ddladmin on the database. SQL login+password is a
+        // local-dev-only fallback and never set in Azure.
         // The Backstage origin allowed to embed the hub. The app uses this to
         // emit `Content-Security-Policy: frame-ancestors <origin>` and to
         // issue the session cookie as SameSite=None inside that embed. See

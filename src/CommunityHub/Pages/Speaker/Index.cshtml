@@ -1,0 +1,335 @@
+@page
+@model CommunityHub.Pages.Speaker.IndexModel
+@{
+    ViewData["Title"] = Localizer["Speaker.Title"].Value;
+}
+
+@if (Model.AccessDenied)
+{
+    <div class="card">
+        <h2>@Localizer["Speaker.Title"]</h2>
+        <p class="error">
+            @Localizer["Speaker.AccessDenied"]
+            (<strong>@CommunityHub.Branding.RoleDisplay.Name(Model.Role)</strong>)
+        </p>
+        <p><a asp-page="/Index">@Localizer["Common.BackToHub"]</a></p>
+    </div>
+    return;
+}
+
+@{
+    var p = Model.Progress;
+    string barColor = p.OverdueCount > 0 ? "#c0392b" : (p.AllDone ? "#0a6" : "var(--el-blue)");
+    // Localized aria-label prefixes for the per-milestone toggle buttons.
+    var reopenLabel   = Localizer["Speaker.Reopen"].Value;
+    var markDoneLabel = Localizer["Speaker.MarkDone"].Value;
+}
+
+<style>
+    /* Mobile-first: single-column cards stack and stay readable at ~360px. */
+    .sp-progress-wrap { background:#eef0f4; border-radius:999px; height:14px; overflow:hidden; margin:10px 0 6px; }
+    .sp-progress-bar  { height:100%; border-radius:999px; transition:width .3s ease; }
+    .sp-progress-meta { display:flex; flex-wrap:wrap; gap:8px 16px; font-size:13px; color:#374151; }
+    .sp-progress-meta strong { color:var(--el-darkblue); }
+
+    .ms-list { list-style:none; padding:0; margin:0; }
+    .ms-item {
+        border:1px solid #e5e7eb; border-radius:10px;
+        padding:14px; margin:10px 0;
+        display:flex; flex-wrap:wrap; gap:10px 14px; align-items:flex-start;
+    }
+    .ms-item.done    { background:#f3fbf6; border-color:#c7ead7; }
+    .ms-item.overdue { background:#fdf3f2; border-color:#f1c4bf; }
+    .ms-main { flex:1 1 220px; min-width:0; }
+    .ms-title { font-weight:700; color:var(--el-darkblue); font-size:16px; }
+    .ms-item.done .ms-title { color:#0a6; }
+    .ms-desc { color:#4b5563; font-size:13px; margin-top:4px; }
+    .ms-due  { color:#6b7280; font-size:12px; margin-top:6px; }
+    .ms-badge {
+        display:inline-block; border-radius:999px; padding:2px 10px;
+        font-size:12px; font-weight:700; white-space:nowrap;
+    }
+    .ms-badge.due    { background:#fff3cd; color:#856404; border:1px solid #ffe69c; }
+    .ms-badge.soon   { background:#e6f3fb; color:#055f86; border:1px solid #bfe2f4; }
+    .ms-badge.late   { background:#fdecea; color:#9b261a; border:1px solid #f3b6ae; }
+    .ms-badge.ok     { background:#0a6; color:#fff; }
+    .ms-action { flex:0 0 auto; }
+    /* The action column drops below the text on a narrow phone so the button
+       gets a full-width tap target instead of squeezing the title. */
+    .ms-action form { margin:0; }
+    @@media (max-width: 460px) {
+        .ms-action { flex-basis:100%; }
+        .ms-action button { width:100%; }
+    }
+</style>
+
+<div class="card">
+    <h2>@Localizer["Speaker.JourneyHeading", Model.FirstName]</h2>
+    <p>
+        @Localizer["Speaker.JourneyIntro"]
+    </p>
+
+    @if (p.Total == 0)
+    {
+        <p class="info">@Localizer["Speaker.NoMilestones"]</p>
+    }
+    else
+    {
+        <div class="sp-progress-wrap" role="progressbar"
+             aria-valuemin="0" aria-valuemax="100" aria-valuenow="@p.PercentComplete">
+            <div class="sp-progress-bar"
+                 style="width:@(p.PercentComplete)%; background:@barColor;"></div>
+        </div>
+        <div class="sp-progress-meta">
+            <span><strong>@p.DoneCount of @p.Total</strong> done (@p.PercentComplete%)</span>
+            @if (p.OpenCount > 0) { <span>@p.OpenCount open</span> }
+            @if (p.OverdueCount > 0) { <span style="color:#c0392b;font-weight:600;">@p.OverdueCount overdue</span> }
+        </div>
+
+        @if (p.AllDone)
+        {
+            <p class="info" style="margin-top:10px;font-weight:600;">&#10003; @Localizer["Speaker.AllComplete"]</p>
+        }
+        else if (p.NextUp is { } next)
+        {
+            <p style="margin-top:10px;font-size:13px;color:#374151;">
+                <strong>@Localizer["Speaker.NextUp"]</strong> @next.Title
+                @if (next.DueDate is { } d)
+                {
+                    <text>— due @d.ToString("dd MMM yyyy")</text>
+                    @if (next.DaysUntilDue is { } du && du >= 0)
+                    {
+                        <text> (@(du == 0 ? "today" : du + " day" + (du == 1 ? "" : "s") + " to go"))</text>
+                    }
+                }
+            </p>
+        }
+    }
+</div>
+
+@if (p.Total > 0)
+{
+    <div class="card">
+        <h2>@Localizer["Speaker.Milestones"]</h2>
+        <ul class="ms-list">
+            @foreach (var m in p.Milestones)
+            {
+                var cls = m.Done ? "done" : (m.Overdue ? "overdue" : "");
+                <li class="ms-item @cls">
+                    <div class="ms-main">
+                        <div class="ms-title">
+                            @(m.Done ? "✓ " : "")@m.Title
+                        </div>
+                        @if (!string.IsNullOrWhiteSpace(m.Description))
+                        {
+                            <div class="ms-desc">@m.Description</div>
+                        }
+                        <div class="ms-due">
+                            @if (m.DueDate is { } d)
+                            {
+                                <text>Due @d.ToString("dd MMM yyyy")</text>
+                            }
+                            else
+                            {
+                                <text>No fixed date</text>
+                            }
+                            &nbsp;
+                            @if (m.Done)
+                            {
+                                <span class="ms-badge ok">&#10003; @Localizer["Common.Done"]</span>
+                            }
+                            else if (m.Overdue)
+                            {
+                                <span class="ms-badge late">@Localizer["Hub.Overdue"] @m.DaysOverdue day@(m.DaysOverdue == 1 ? "" : "s")</span>
+                            }
+                            else if (m.DueToday)
+                            {
+                                <span class="ms-badge due">Due today</span>
+                            }
+                            else if (m.DaysUntilDue is { } du)
+                            {
+                                <span class="ms-badge soon">@du day@(du == 1 ? "" : "s") to go</span>
+                            }
+                        </div>
+                    </div>
+                    <div class="ms-action">
+                        <form method="post" asp-page-handler="Toggle">
+                            <input type="hidden" name="taskId" value="@m.TaskId" />
+                            @if (m.Done)
+                            {
+                                <button type="submit" class="secondary" aria-label="@(reopenLabel): @m.Title">@Localizer["Speaker.Reopen"]</button>
+                            }
+                            else
+                            {
+                                <button type="submit" aria-label="@(markDoneLabel): @m.Title">@Localizer["Speaker.MarkDone"]</button>
+                            }
+                        </form>
+                    </div>
+                </li>
+            }
+        </ul>
+    </div>
+}
+
+@if (Model.MySessions.Count > 0)
+{
+    <div class="card">
+        <h2>@Localizer["Speaker.MySessions"]</h2>
+        <p style="font-size:13.5px;color:#555;margin-top:0;">@Localizer["Speaker.MySessionsIntro"]</p>
+        <ul style="list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:12px;">
+            @foreach (var s in Model.MySessions)
+            {
+                <li style="border:1px solid #e5e7eb;border-radius:10px;padding:14px;">
+                    <div style="font-weight:700;color:var(--el-darkblue);font-size:16px;">
+                        @s.Title
+                        @if (s.IsMasterClass)
+                        {
+                            <span class="ms-badge soon" style="margin-left:6px;">@Localizer["Speaker.MasterClassBadge"]</span>
+                        }
+                    </div>
+
+                    <div style="color:#4b5563;font-size:13px;margin-top:6px;display:flex;flex-wrap:wrap;gap:4px 16px;">
+                        @if (s.IsScheduled && s.StartsAt is { } start)
+                        {
+                            <span>
+                                &#128197;
+                                @start.ToString("ddd dd MMM, HH:mm")@(s.EndsAt is { } end ? "–" + end.ToString("HH:mm") : "")
+                            </span>
+                        }
+                        else
+                        {
+                            <span style="color:#6b7280;">@Localizer["Speaker.NotScheduledYet"]</span>
+                        }
+                        @if (!string.IsNullOrWhiteSpace(s.Room))
+                        {
+                            <span>&#128205; @s.Room</span>
+                        }
+                        else if (s.IsScheduled)
+                        {
+                            <span style="color:#6b7280;">@Localizer["Speaker.RoomTbd"]</span>
+                        }
+                    </div>
+
+                    @if (s.CoSpeakerNames.Count > 0)
+                    {
+                        <div style="color:#6b7280;font-size:12.5px;margin-top:6px;">
+                            @Localizer["Speaker.WithCoSpeakers", string.Join(", ", s.CoSpeakerNames)]
+                        </div>
+                    }
+
+                    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;">
+                        @if (Model.PublicProfileLive)
+                        {
+                            <a class="task-link-btn" href="/Sessions/@s.SessionId">@Localizer["Speaker.ViewPublicSession"]</a>
+                        }
+                        <a class="task-link-btn" asp-page="/Speaker/Questions">
+                            @Localizer["Speaker.AttendeeQuestions"]
+                            @if (s.OpenQuestionCount > 0)
+                            {
+                                <span class="ms-badge due" style="margin-left:4px;">@s.OpenQuestionCount</span>
+                            }
+                        </a>
+                    </div>
+                </li>
+            }
+        </ul>
+    </div>
+}
+
+<div class="card">
+    <h2>@Localizer["Speaker.PublicPreviewHeading"]</h2>
+    @if (Model.PublicProfileLive && !string.IsNullOrEmpty(Model.PublicPreviewUrl))
+    {
+        <p style="font-size:13.5px;color:#374151;margin-top:0;">@Localizer["Speaker.PublicPreviewLive"]</p>
+        <p>
+            <a class="task-link-btn" href="@Model.PublicPreviewUrl" target="_blank" rel="noopener">
+                &#128065; @Localizer["Speaker.ViewPublicProfile"]
+            </a>
+            <a class="task-link-btn" asp-page="/Forms/Speaker">@Localizer["Speaker.EditBio"]</a>
+        </p>
+    }
+    else
+    {
+        <p style="font-size:13.5px;color:#374151;margin-top:0;">@Localizer["Speaker.PublicPreviewPending"]</p>
+        <p>
+            <a class="task-link-btn" asp-page="/Forms/Speaker">@Localizer["Speaker.EditBio"]</a>
+        </p>
+    }
+</div>
+
+@if (!string.IsNullOrEmpty(Model.CalendarWebcalUrl))
+{
+    <div class="card">
+        <h2>&#128197; @Localizer["Speaker.CalendarHeading"]</h2>
+        <p style="color:#4b5563;margin:0 0 8px;">@Localizer["Speaker.CalendarIntro"]</p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+            <input type="text" readonly aria-label="@Localizer["Speaker.CalendarHeading"]"
+                   id="sp-cal-url" value="@Model.CalendarWebcalUrl"
+                   onclick="this.select()"
+                   style="flex:1 1 220px;min-width:0;font-size:12.5px;background:#f3f4f6;box-sizing:border-box;" />
+            <button type="button" onclick="spCopyCal()" id="sp-cal-copy">@Localizer["Hub.CopyLink"]</button>
+            <a class="task-link-btn" href="@Model.CalendarWebcalUrl">@Localizer["Hub.Subscribe"]</a>
+        </div>
+    </div>
+    <script>
+        function spCopyCal() {
+            var el = document.getElementById('sp-cal-url');
+            el.select(); el.setSelectionRange(0, 99999);
+            navigator.clipboard.writeText(el.value).then(function () {
+                var b = document.getElementById('sp-cal-copy');
+                var t = b.textContent; b.textContent = '@Localizer["Hub.Copied"]';
+                setTimeout(function () { b.textContent = t; }, 1500);
+            });
+        }
+    </script>
+}
+
+<div class="card">
+    <h2>@Localizer["Speaker.Details"]</h2>
+    <div class="sp-progress-meta" style="margin-bottom:8px;">
+        @if (Model.SpeakerDetailsSubmitted)
+        {
+            <span class="ms-badge ok">&#10003; @Localizer["Common.Submitted"]</span>
+            <span>@Localizer["Speaker.DetailsOnFile"]</span>
+        }
+        else
+        {
+            <span class="ms-badge due">&#9888; @Localizer["Common.Pending"]</span>
+            <span>@Localizer["Speaker.DetailsPending"]</span>
+        }
+    </div>
+    <p style="display:flex;gap:10px;flex-wrap:wrap;margin-top:8px;">
+        <a class="task-link-btn" asp-page="/Forms/Speaker">@(Model.SpeakerDetailsSubmitted ? Localizer["Speaker.UpdateDetails"] : Localizer["Speaker.CompleteDetails"])</a>
+        <a class="task-link-btn" asp-page="/Forms/Travel">@Localizer["Speaker.TravelReimbursement"]</a>
+    </p>
+</div>
+
+@if (Model.MasterClasses.Count > 0)
+{
+    <div class="card">
+        <h2>My master classes</h2>
+        <p style="font-size:13.5px;color:#555;margin-top:0;">
+            Each master class has a <strong>public logistics page</strong> where you (or an organizer)
+            publish setup instructions for attendees (e.g. "bring your laptop charged"). Share the
+            public link or reference it from the Backstage session description.
+        </p>
+        <ul style="list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:12px;">
+            @foreach (var mc in Model.MasterClasses)
+            {
+                <li style="border:1px solid #e5e7eb;border-radius:8px;padding:12px;">
+                    <strong>@mc.Title</strong>
+                    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:8px;">
+                        <a class="task-link-btn" asp-page="/MasterClass/Index" asp-route-slug="@mc.Slug">Edit / view logistics</a>
+                    </div>
+                    <label for="mc-link-@mc.SessionId" style="display:block;font-size:12.5px;color:#6b7280;margin-top:10px;">Public link (share with attendees)</label>
+                    <input id="mc-link-@mc.SessionId" type="text" readonly value="@mc.PublicLink"
+                           onclick="this.select()" style="width:100%;font-size:12.5px;background:#f3f4f6;box-sizing:border-box;" />
+                </li>
+            }
+        </ul>
+    </div>
+}
+
+<div class="card">
+    <p><a asp-page="/Index">&larr; @Localizer["Common.BackToHub"]</a> &middot; <a asp-page="/Tasks/Index">@Localizer["Speaker.AllMyTasks"]</a></p>
+</div>

@@ -16,9 +16,24 @@
     var me = CurrentParticipant.Current;
     var isLoggedIn = me is not null;
     var role = me?.Role;
+
+    // i18n: the active UI culture drives both the <html lang> attribute and the
+    // resource lookups behind @Localizer. It is negotiated per request from the
+    // language-switcher cookie / Accept-Language / the en default (Program.cs).
+    var uiCulture = System.Globalization.CultureInfo.CurrentUICulture;
+    // BCP-47 tag for the lang attribute ("en", "da-DK"); two-letter for the
+    // switcher's active-state check.
+    var langTag = uiCulture.Name;
+    var twoLetter = uiCulture.TwoLetterISOLanguageName;
+    // Round-trip the current path so the switcher returns the user to where they were.
+    var switchReturn = Context.Request.Path.Value ?? "/";
 }
 <!DOCTYPE html>
-<html lang="da-DK">
+@* lang now reflects the negotiated UI culture (en default, da-DK when the user
+   picks Danish) so a screen reader announces the copy with the correct
+   pronunciation rules (WCAG 3.1.1). The date PICKER stays Danish-formatted via
+   flatpickr (dd/mm/yyyy, Monday-first); the value posted is ISO regardless. *@
+<html lang="@langTag">
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -38,6 +53,32 @@
             font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
             margin: 0; background: var(--el-grey); color: #1a1a2e;
             line-height: 1.5;
+        }
+        /* Visible keyboard focus on every interactive element (WCAG 2.4.7).
+           :focus-visible keeps the ring for keyboard users without drawing it
+           on mouse clicks, so the existing look is untouched for pointer use. */
+        a:focus-visible, button:focus-visible, input:focus-visible,
+        select:focus-visible, textarea:focus-visible, summary:focus-visible,
+        [tabindex]:focus-visible {
+            outline: 3px solid var(--el-blue);
+            outline-offset: 2px;
+            border-radius: 4px;
+        }
+        /* Skip-to-content link: off-screen until focused, then pinned top-left
+           so a keyboard/screen-reader user can jump past the header + nav. */
+        .skip-link {
+            position: absolute; left: 8px; top: -48px;
+            background: var(--el-darkblue); color: #fff;
+            padding: 10px 16px; border-radius: 0 0 8px 8px;
+            text-decoration: none; font-weight: 600; z-index: 1000;
+            transition: top .15s ease;
+        }
+        .skip-link:focus { top: 0; color: #fff; }
+        /* Screen-reader-only text: present in the accessibility tree, not on screen. */
+        .visually-hidden {
+            position: absolute !important; width: 1px; height: 1px;
+            padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0);
+            white-space: nowrap; border: 0;
         }
         header {
             background: var(--el-darkblue); color: #fff;
@@ -66,6 +107,22 @@
             text-decoration: none; white-space: nowrap;
         }
         .topbar a.eventsite-btn:hover { background: var(--el-grey); }
+        /* Language switcher: a tiny inline form of two buttons. Lives in the
+           topbar so it is reachable on every page (incl. anonymous Login),
+           mobile-first (wraps with the rest of the topbar at ~360px). */
+        .lang-switch { display: inline-flex; align-items: center; gap: 6px; }
+        .lang-switch .lang-label { opacity: .85; }
+        .lang-switch form { margin: 0; display: inline; }
+        .lang-switch button {
+            background: transparent; color: #fff;
+            border: 1px solid rgba(255,255,255,.55);
+            padding: 2px 9px; border-radius: 999px;
+            font-size: 12px; font-weight: 600; cursor: pointer;
+        }
+        .lang-switch button:hover { background: rgba(255,255,255,.15); }
+        .lang-switch button[aria-pressed="true"] {
+            background: #fff; color: var(--el-blue); border-color: #fff;
+        }
         header .brand img { height: 56px; display: block; }
         header .product-mark {
             font-size: 30px; font-weight: 700; letter-spacing: .01em;
@@ -103,7 +160,88 @@
             font-size: 14px; font-weight: 500;
         }
         nav.primary a:hover { background: var(--el-grey); }
-        nav.primary a.active { background: var(--el-darkblue); color: #fff; }
+        nav.primary a.active,
+        nav.primary a[aria-current="page"] { background: var(--el-darkblue); color: #fff; }
+        /* Second-level management bar: a distinct strip below the participant
+           nav so organizer tools read as a separate group, not mixed in. */
+        nav.manage-bar {
+            background: #eef0f6; border-bottom: 1px solid #d6d8e0;
+            padding: 6px 24px;
+        }
+        /* Organizer-area dropdown (native <details>/<summary> — no JS). */
+        details.org-menu { position: relative; display: inline-block; }
+        details.org-menu > summary {
+            list-style: none; cursor: pointer; user-select: none;
+            display: inline-flex; align-items: center; gap: 6px;
+            padding: 7px 14px; border-radius: 6px;
+            color: var(--el-darkblue); font-size: 14px; font-weight: 600;
+            background: #fff; border: 1px solid #c4c8d4;
+        }
+        details.org-menu > summary::-webkit-details-marker { display: none; }
+        details.org-menu > summary:hover { background: var(--el-grey); }
+        details.org-menu[open] > summary {
+            background: var(--el-darkblue); color: #fff; border-color: var(--el-darkblue);
+        }
+        .org-menu-caret { transition: transform .15s ease; font-size: 11px; }
+        details.org-menu[open] .org-menu-caret { transform: rotate(180deg); }
+        /* Desktop: float the items as a panel under the toggle. */
+        .org-menu-items {
+            display: flex; flex-direction: column; gap: 2px;
+            position: absolute; left: 0; top: calc(100% + 4px); z-index: 50;
+            min-width: 220px; max-height: 70vh; overflow-y: auto;
+            background: #fff; border: 1px solid #c4c8d4; border-radius: 8px;
+            padding: 6px; box-shadow: 0 6px 18px rgba(0,0,0,.14);
+        }
+        .org-menu-items a {
+            display: block; padding: 8px 12px; border-radius: 6px;
+            text-decoration: none; color: var(--el-darkblue);
+            font-size: 14px; font-weight: 500; white-space: nowrap;
+        }
+        .org-menu-items a:hover { background: var(--el-grey); }
+        .org-menu-items a[aria-current="page"] { background: var(--el-darkblue); color: #fff; }
+        /* REQUIREMENTS §21 — nested, collapsible section sub-groups inside the
+           organizer menu (People / Sessions / Comms / Sponsors / Volunteers /
+           Logistics). Native <details>/<summary>: no JS, keyboard-operable, a
+           labelled disclosure per group. The leading prominent links (Organizer
+           home / Command center / Dashboard) render before the first section, so a
+           thin divider above the first section separates them. */
+        .org-section { display: block; }
+        .org-section + .org-section { margin-top: 2px; }
+        .org-menu-items > .org-section:first-of-type {
+            margin-top: 6px; padding-top: 6px; border-top: 1px solid #e1e3ec;
+        }
+        .org-section > summary {
+            list-style: none; cursor: pointer; user-select: none;
+            display: flex; align-items: center; justify-content: space-between;
+            gap: 8px; padding: 7px 12px; border-radius: 6px;
+            color: var(--el-darkblue); font-size: 12.5px; font-weight: 700;
+            text-transform: uppercase; letter-spacing: .03em;
+        }
+        .org-section > summary::-webkit-details-marker { display: none; }
+        .org-section > summary:hover { background: var(--el-grey); }
+        .org-section-caret { transition: transform .15s ease; font-size: 10px; opacity: .7; }
+        .org-section[open] > summary > .org-section-caret { transform: rotate(180deg); }
+        /* Section links sit slightly indented so they read as children of the
+           group heading above them. */
+        .org-section-items { display: flex; flex-direction: column; gap: 2px; padding-left: 8px; }
+        .org-section-items a {
+            display: block; padding: 8px 12px; border-radius: 6px;
+            text-decoration: none; color: var(--el-darkblue);
+            font-size: 14px; font-weight: 500; white-space: nowrap;
+        }
+        .org-section-items a:hover { background: var(--el-grey); }
+        .org-section-items a[aria-current="page"] { background: var(--el-darkblue); color: #fff; }
+        /* Mobile (~360px): the toggle spans the bar and the panel flows inline
+           (static, full width) so the long admin list scrolls with the page
+           instead of overflowing a fixed dropdown off the small viewport. */
+        @@media (max-width: 700px) {
+            details.org-menu { display: block; }
+            details.org-menu > summary { display: flex; justify-content: space-between; }
+            .org-menu-items {
+                position: static; min-width: 0; width: 100%;
+                box-shadow: none; margin-top: 4px; max-height: none;
+            }
+        }
         main { max-width: 880px; margin: 24px auto; padding: 0 16px; }
         .card {
             background: #fff; border-radius: 10px;
@@ -161,6 +299,103 @@
         }
         footer { max-width: 880px; margin: 24px auto; padding: 0 16px;
             font-size: 12px; color: #6b7280; }
+        /* Visually hidden but available to screen readers. */
+        .sr-only { position: absolute; width: 1px; height: 1px; padding: 0;
+            margin: -1px; overflow: hidden; clip: rect(0,0,0,0);
+            white-space: nowrap; border: 0; }
+
+        /* ============================================================
+           SHARED UX COMPONENTS (REQUIREMENTS §21) — reusable repo-wide
+           1. Flash toast  (_Flash.cshtml)
+           2. Field validation  (asp-validation-for / .ceh-field-error)
+           3. Confirmation modal  (_ConfirmModal.cshtml)
+           ============================================================ */
+
+        /* 1. Flash toast — success/error banner after a POST. Mobile-first:
+              full-width, wraps at ~360px, large tap targets. */
+        .ceh-flash {
+            display: flex; align-items: flex-start; gap: 10px;
+            padding: 12px 14px; border-radius: 8px; margin: 0 0 16px;
+            font-size: 14.5px; line-height: 1.4; border: 1px solid transparent;
+        }
+        .ceh-flash--success {
+            background: #e7f6ec; border-color: #b6e0c4; color: #1b5e34;
+        }
+        .ceh-flash--error {
+            background: #fcebec; border-color: #f3c2c6; color: #8a1f28;
+        }
+        .ceh-flash--info {
+            background: #eaf1fb; border-color: #c2d4f3; color: #1f3f6b;
+        }
+        .ceh-flash__icon { font-weight: 700; flex: 0 0 auto; font-size: 16px; line-height: 1.3; }
+        .ceh-flash__text { flex: 1 1 auto; min-width: 0; }
+        .ceh-flash__close {
+            flex: 0 0 auto; background: transparent; color: inherit;
+            border: 0; font-size: 22px; line-height: 1; cursor: pointer;
+            padding: 0 4px; min-width: 32px; min-height: 32px; border-radius: 6px;
+        }
+        .ceh-flash__close:hover { background: rgba(0,0,0,.08); }
+
+        /* 2. Inline form validation — field-level error message + an invalid
+              field outline. Works with the tag helpers (asp-validation-for /
+              asp-validation-summary) which emit .field-validation-error /
+              .input-validation-error, and with manual .ceh-field-error spans. */
+        .ceh-field-error,
+        .field-validation-error,
+        span.field-validation-valid { display: block; }
+        .ceh-field-error,
+        .field-validation-error {
+            color: #8a1f28; font-size: 13px; font-weight: 600;
+            margin: -8px 0 12px;
+        }
+        .ceh-field-error::before,
+        .field-validation-error::before { content: "⚠ "; }
+        /* Red outline on the offending input (tag-helper adds the class). */
+        input.input-validation-error, select.input-validation-error,
+        textarea.input-validation-error, .ceh-input-invalid {
+            border-color: #c0392b !important;
+            outline-color: #c0392b;
+        }
+        /* Error summary box at the top of a form. */
+        .ceh-validation-summary {
+            background: #fcebec; border: 1px solid #f3c2c6; color: #8a1f28;
+            padding: 10px 14px; border-radius: 8px; margin: 0 0 16px; font-size: 14px;
+        }
+        .ceh-validation-summary ul { margin: 6px 0 0; padding-left: 20px; }
+        .ceh-validation-summary p { margin: 0; font-weight: 700; }
+        .ceh-validation-summary:empty { display: none; }
+
+        /* 3. Confirmation modal — accessible dialog for destructive/bulk/send
+              actions. Centred overlay, scrolls on small screens, focus-trapped
+              by the shared JS. */
+        .ceh-modal-backdrop {
+            position: fixed; inset: 0; background: rgba(15,18,40,.55);
+            display: none; align-items: center; justify-content: center;
+            padding: 16px; z-index: 2000;
+        }
+        .ceh-modal-backdrop[data-open] { display: flex; }
+        .ceh-modal {
+            background: #fff; border-radius: 12px; max-width: 460px; width: 100%;
+            max-height: calc(100vh - 32px); overflow-y: auto;
+            box-shadow: 0 12px 40px rgba(0,0,0,.3); padding: 22px 22px 18px;
+        }
+        .ceh-modal h2 { margin: 0 0 10px; font-size: 19px; color: var(--el-darkblue); }
+        .ceh-modal__body { font-size: 14.5px; line-height: 1.5; color: #1a1a2e; }
+        .ceh-modal__count {
+            display: inline-block; font-weight: 700; background: var(--el-grey);
+            color: var(--el-darkblue); padding: 2px 10px; border-radius: 999px;
+        }
+        .ceh-modal__actions {
+            display: flex; flex-wrap: wrap; gap: 10px; justify-content: flex-end;
+            margin-top: 20px;
+        }
+        .ceh-modal__actions button { min-width: 110px; }
+        .ceh-modal--danger .ceh-modal__confirm { background: #c0392b; }
+        .ceh-modal--danger .ceh-modal__confirm:hover { background: #962d22; }
+        @@media (max-width: 480px) {
+            .ceh-modal__actions { flex-direction: column-reverse; }
+            .ceh-modal__actions button { width: 100%; }
+        }
     </style>
     <!-- Danish-locale date picker (Monday-first, dd/mm/yyyy).
          Browser-native <input type="date"> ignores html lang and uses OS locale,
@@ -188,9 +423,11 @@
     </script>
 </head>
 <body>
+    <a class="skip-link" href="#main">@Localizer["Layout.SkipToContent"]</a>
     <div class="topbar">
-        <span class="ticket-info">ELDK27 ticket sale starts 11 Aug 2028 at 08:00</span>
-        <a class="eventsite-btn" href="https://eldk27.expertslive.dk/" target="_blank" rel="noopener">Visit event site &rarr;</a>
+        <span class="ticket-info">@Localizer["Layout.TicketInfo"]</span>
+        <a class="eventsite-btn" href="https://eldk27.expertslive.dk/" target="_blank" rel="noopener">@Localizer["Layout.VisitEventSite"] &rarr;<span class="visually-hidden">@Localizer["Common.OpensNewTab"]</span></a>
+        @* Language switcher removed — the hub is English-only. *@
     </div>
     <header>
         <a class="brand" href="/" aria-label="@communityName">
@@ -204,96 +441,279 @@
             <div class="user-tools">
                 <span class="who">@me!.FullName &middot; @CommunityHub.Branding.RoleDisplay.Name(role!.Value)</span>
                 <form method="post" asp-page="/Logout">
-                    <button type="submit" class="signout">Sign out</button>
+                    <button type="submit" class="signout">@Localizer["Common.SignOut"]</button>
                 </form>
             </div>
         }
     </header>
+    @{
+        // Mark the nav entry that matches the page being viewed so screen
+        // readers announce "current page" (WCAG 2.4.8 / aria-current). Matched
+        // on the request path; "/" only counts as current for the exact root.
+        var currentPath = (Context.Request.Path.Value ?? "/").TrimEnd('/');
+        if (string.IsNullOrEmpty(currentPath)) { currentPath = "/"; }
+        Func<string, string?> ariaCurrent = href =>
+        {
+            var h = href.TrimEnd('/');
+            if (string.IsNullOrEmpty(h)) { h = "/"; }
+            var match = h == "/"
+                ? currentPath == "/"
+                : currentPath.Equals(h, StringComparison.OrdinalIgnoreCase);
+            return match ? "page" : null;
+        };
+    }
+    @{
+        // Resolve a NavItem's visible label: a resx key when present (so the
+        // i18n pass owns the copy), else the literal fallback. Keeps i18n in the
+        // view while the route/grouping/gating decision lives in Core.NavBuilder.
+        Func<NavItem, Microsoft.AspNetCore.Html.IHtmlContent> navLabel = item =>
+            item.LabelKey is not null
+                ? Localizer[item.LabelKey]
+                : new Microsoft.AspNetCore.Html.HtmlString(
+                      System.Net.WebUtility.HtmlEncode(item.FallbackLabel ?? item.Href));
+    }
     @if (isLoggedIn)
     {
-        <nav class="primary">
-            <a href="/">Home</a>
-            @* Sponsors do NOT see the generic /Tasks list -- their tasks are
-               company-shared (not assigned-to-me), so /Sponsor/Tasks is the
-               correct entry point. Other roles keep the generic 'My tasks'. *@
-            @if (role != CommunityHub.Core.Domain.ParticipantRole.Sponsor)
+        @* Two clearly separated, role-gated nav groups (REQUIREMENTS §11 nav/IA):
+             1. the participant / "My event" group — always visible;
+             2. the organizer / "Organizer area" group — emitted by NavBuilder
+                ONLY for an Organizer, so a non-organizer never receives the
+                management links at all (server-side gate, not a CSS hide).
+           NavBuilder is unit-tested (NavBuilderTests). *@
+        var nav = NavBuilder.Build(role!.Value);
+        var participant = nav.Groups[0];
+        var management = nav.ManagementGroup;
+        <nav class="primary" aria-label="@Localizer["Nav.MyEvent"]">
+            @foreach (var item in participant.Items)
             {
-                <a href="/Tasks">My tasks</a>
-            }
-            @if (role == CommunityHub.Core.Domain.ParticipantRole.Organizer
-                 || role == CommunityHub.Core.Domain.ParticipantRole.Speaker
-                 || role == CommunityHub.Core.Domain.ParticipantRole.MasterclassSpeaker
-                 || role == CommunityHub.Core.Domain.ParticipantRole.Volunteer
-                 || role == CommunityHub.Core.Domain.ParticipantRole.Video
-                 || role == CommunityHub.Core.Domain.ParticipantRole.Camera)
-            {
-                <a href="/Forms/Hotel">Hotel</a>
-                <a href="/Forms/Dinner">Dinner</a>
-            }
-            @if (role == CommunityHub.Core.Domain.ParticipantRole.Speaker
-                 || role == CommunityHub.Core.Domain.ParticipantRole.MasterclassSpeaker)
-            {
-                <a href="/Forms/Speaker">Speaker</a>
-                <a href="/Forms/Travel">Travel</a>
-            }
-            @if (role == CommunityHub.Core.Domain.ParticipantRole.Volunteer
-                 || role == CommunityHub.Core.Domain.ParticipantRole.Speaker
-                 || role == CommunityHub.Core.Domain.ParticipantRole.MasterclassSpeaker
-                 || role == CommunityHub.Core.Domain.ParticipantRole.Organizer)
-            {
-                <a href="/Forms/Lunch">Lunch</a>
-                <a href="/Forms/Swag">Swag</a>
-            }
-            @if (role == CommunityHub.Core.Domain.ParticipantRole.Volunteer
-                 || role == CommunityHub.Core.Domain.ParticipantRole.Organizer)
-            {
-                <a href="/Forms/VolunteerWizard">Volunteer shifts</a>
-            }
-            @if (role == CommunityHub.Core.Domain.ParticipantRole.Attendee)
-            {
-                <a href="/Attendee">My attendance</a>
-            }
-            @if (role == CommunityHub.Core.Domain.ParticipantRole.Sponsor)
-            {
-                <a href="/Sponsor">Sponsor Engagement Details</a>
-                <a href="/Sponsor/Tasks">Sponsor Tasks</a>
-                <a href="/Sponsor/Logistics">Logistics</a>
-                <a href="/Sponsor/Contact">Contact</a>
-            }
-            @if (role == CommunityHub.Core.Domain.ParticipantRole.Organizer)
-            {
-                <a href="/Organizer">Organizer area</a>
-                <a href="/Organizer/Dashboard">Dashboard</a>
-                <a href="/Organizer/Attendees">Attendees</a>
-                <a href="/Organizer/EmailCenter">Email center</a>
-                <a href="/Organizer/Broadcast">Broadcast</a>
-                <a href="/Organizer/Swag">Swag order</a>
-                <a href="/Organizer/SessionizeImport">Sessionize import</a>
-                <a href="/Organizer/SendInvitations">Send invitations</a>
-                <a href="/Organizer/SpeakerReminders">Speaker reminders</a>
-                <a href="/Organizer/Speakers">Speakers</a>
-                <a href="/Organizer/Sponsors">Sponsors</a>
-                <a href="/Organizer/TravelReimbursements">Travel</a>
-                <a href="/Organizer/Lunch">Lunch headcount</a>
+                <a href="@item.Href" aria-current="@ariaCurrent(item.Href)">@navLabel(item)</a>
             }
         </nav>
+        @if (management is not null)
+        {
+            @* Organizer/management group as a collapsible disclosure. <details>/
+               <summary> gives a working dropdown with NO JavaScript, native
+               aria-expanded, and keyboard operability; it collapses to a single
+               control on ~360px so the long admin list never floods the phone
+               nav. A distinct second-level bar visually separates management
+               tools from the participant nav above. *@
+            <nav class="manage-bar" aria-label="@Localizer["Nav.OrgAreaMenu"]">
+                <details class="org-menu">
+                    <summary aria-label="@Localizer["Nav.OrgAreaMenuToggle"]">
+                        <span class="org-menu-label">@Localizer["Nav.OrgAreaMenu"]</span>
+                        <span class="org-menu-caret" aria-hidden="true">&#9662;</span>
+                    </summary>
+                    @* REQUIREMENTS §21 "Group the organizer nav": the management
+                       hubs are bucketed into named, collapsible sub-groups
+                       (People / Sessions / Comms / Sponsors / Volunteers /
+                       Logistics) instead of one flat list, so the menu is
+                       scannable. Each section is a nested native <details> (no JS,
+                       keyboard-operable, aria via summary). The leading
+                       null-heading section (Organizer home / Command center /
+                       Dashboard) renders as plain prominent links with no
+                       disclosure. Every existing route is still present — this is
+                       pure information architecture (NavBuilder owns the grouping;
+                       NavBuilderTests assert no link is dropped). A section that
+                       contains the current page is rendered open so aria-current is
+                       visible without a click. *@
+                    <div class="org-menu-items">
+                        @foreach (var section in management.Sections())
+                        {
+                            if (section.HeadingKey is null)
+                            {
+                                @* Prominent, ungrouped entries — no disclosure. *@
+                                foreach (var item in section.Items)
+                                {
+                                    <a href="@item.Href" aria-current="@ariaCurrent(item.Href)">@navLabel(item)</a>
+                                }
+                            }
+                            else
+                            {
+                                var sectionOpen = section.Items.Any(i => ariaCurrent(i.Href) == "page");
+                                <details class="org-section" open="@(sectionOpen ? "open" : null)">
+                                    <summary>
+                                        <span class="org-section-label">@Localizer[section.HeadingKey]</span>
+                                        <span class="org-section-caret" aria-hidden="true">&#9662;</span>
+                                    </summary>
+                                    <div class="org-section-items">
+                                        @foreach (var item in section.Items)
+                                        {
+                                            <a href="@item.Href" aria-current="@ariaCurrent(item.Href)">@navLabel(item)</a>
+                                        }
+                                    </div>
+                                </details>
+                            }
+                        }
+                    </div>
+                </details>
+            </nav>
+        }
     }
-    <main>
+    else
+    {
+        @* Public nav for anonymous visitors — the sessions / speakers / sponsors
+           overviews are public, so they are reachable without signing in (next to the
+           Login entry already in the topbar). *@
+        <nav class="primary" aria-label="@Localizer["Nav.Primary"]">
+            <a href="/Sessions" aria-current="@ariaCurrent("/Sessions")">@Localizer["Nav.Sessions"]</a>
+            <a href="/Speakers" aria-current="@ariaCurrent("/Speakers")">@Localizer["Nav.Speakers"]</a>
+            <a href="/Sponsors" aria-current="@ariaCurrent("/Sponsors")">@Localizer["Nav.Sponsors"]</a>
+        </nav>
+    }
+    @if (me is not null && me.IsActingAs)
+    {
+        @* Acting-as banner: unmistakable that this is an organizer/secretary
+           operating ON BEHALF of someone, with a one-click way back. role=alert
+           so assistive tech announces the elevated context immediately. *@
+        <div role="alert"
+             style="background:#fde68a;color:#7c2d12;border-bottom:2px solid #b45309;
+                    padding:10px 16px;display:flex;flex-wrap:wrap;gap:10px;align-items:center;
+                    justify-content:space-between;font-weight:600;">
+            <span>
+                @if (me.ActingAs!.Kind == CommunityHub.Core.Domain.ImpersonationActorKind.SecretaryToken)
+                {
+                    <text>Secure-link mode — you are filling in tasks on behalf of <strong>@me.FullName</strong>. Your access is limited to this person.</text>
+                }
+                else
+                {
+                    <text>You are acting as <strong>@me.FullName</strong> (started by @me.ActingAs!.ActorLabel). Changes you make are on this person's behalf.</text>
+                }
+            </span>
+            @if (me.ActingAs!.Kind == CommunityHub.Core.Domain.ImpersonationActorKind.Organizer)
+            {
+                <form method="post" asp-page="/Organizer/ReturnToOrganizer" style="margin:0;">
+                    <button type="submit" class="secondary">Return to organizer</button>
+                </form>
+            }
+        </div>
+    }
+    <main id="main" tabindex="-1">
         @RenderBody()
     </main>
     <footer style="text-align:center;">
         <div>
-            @ProductName (@ProductShortName) &mdash; Built as open-source by
-            <a href="https://aka.ms/morten" target="_blank" rel="noopener">Morten Knudsen</a>
-            &middot; free for any community to use.
+            @ProductName (@ProductShortName) &mdash; @Localizer["Layout.FooterBuiltBy"]
+            <a href="https://aka.ms/morten" target="_blank" rel="noopener">Morten Knudsen<span class="visually-hidden">@Localizer["Common.OpensNewTab"]</span></a>
+            &middot; @Localizer["Layout.FooterFree"]
         </div>
         <div style="margin-top:4px;">
-            <a href="https://github.com/KnudsenMorten/community-event-hub" target="_blank" rel="noopener">GitHub</a>
+            <a href="https://github.com/KnudsenMorten/community-event-hub" target="_blank" rel="noopener">@Localizer["Layout.GitHub"]<span class="visually-hidden">@Localizer["Common.OpensNewTab"]</span></a>
             &middot;
-            <a href="https://github.com/KnudsenMorten/community-event-hub/issues" target="_blank" rel="noopener">Submit a bug</a>
+            <a href="https://github.com/KnudsenMorten/community-event-hub/issues" target="_blank" rel="noopener">@Localizer["Layout.SubmitBug"]<span class="visually-hidden">@Localizer["Common.OpensNewTab"]</span></a>
             &middot;
-            <a asp-page="/Contributors">Contributors</a>
+            <a asp-page="/Contributors">@Localizer["Layout.Contributors"]</a>
         </div>
     </footer>
+    @* ----------------------------------------------------------------------
+       Shared UX component behaviour (REQUIREMENTS §21). Progressive
+       enhancement only: with JS disabled the flash stays visible and the
+       confirm modal falls back to a native confirm() (see _ConfirmModal).
+       ---------------------------------------------------------------------- *@
+    <script defer>
+    (function () {
+        // ---- 1. Flash toast: auto-dismiss (success) + close button ----------
+        function dismissFlash(el) {
+            if (!el) return;
+            el.style.transition = 'opacity .25s ease';
+            el.style.opacity = '0';
+            setTimeout(function () { el.remove(); }, 260);
+        }
+        document.querySelectorAll('[data-ceh-flash]').forEach(function (flash) {
+            var btn = flash.querySelector('[data-ceh-flash-close]');
+            if (btn) btn.addEventListener('click', function () { dismissFlash(flash); });
+            var ms = parseInt(flash.getAttribute('data-autodismiss') || '0', 10);
+            if (ms > 0) setTimeout(function () { dismissFlash(flash); }, ms);
+        });
+
+        // ---- 3. Confirmation modal: open/close + focus trap (role=dialog) ----
+        // A reusable accessible modal. Any element with
+        //   data-ceh-confirm="<modalId>"
+        // becomes a trigger: clicking it opens the modal instead of performing
+        // its action, and the modal's Confirm button replays the original action
+        // (submitting the trigger's form, or following its href).
+        var FOCUSABLE = 'a[href],button:not([disabled]),input:not([disabled]),' +
+                        'select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
+        var openModal = null, lastFocused = null;
+
+        function trapFocus(e) {
+            if (!openModal || e.key !== 'Tab') return;
+            var nodes = openModal.querySelectorAll(FOCUSABLE);
+            if (!nodes.length) return;
+            var first = nodes[0], last = nodes[nodes.length - 1];
+            if (e.shiftKey && document.activeElement === first) { last.focus(); e.preventDefault(); }
+            else if (!e.shiftKey && document.activeElement === last) { first.focus(); e.preventDefault(); }
+        }
+        function close() {
+            if (!openModal) return;
+            openModal.removeAttribute('data-open');
+            document.removeEventListener('keydown', onKey, true);
+            openModal = null;
+            if (lastFocused) { lastFocused.focus(); lastFocused = null; }
+        }
+        function onKey(e) {
+            if (e.key === 'Escape') { e.preventDefault(); close(); }
+            else trapFocus(e);
+        }
+        function open(modal, trigger) {
+            lastFocused = trigger || document.activeElement;
+            openModal = modal;
+            // Fill in the per-action count/summary the trigger declares.
+            var countEl = modal.querySelector('[data-ceh-modal-count]');
+            if (countEl && trigger && trigger.hasAttribute('data-ceh-count')) {
+                countEl.textContent = trigger.getAttribute('data-ceh-count');
+            }
+            var sumEl = modal.querySelector('[data-ceh-modal-summary]');
+            if (sumEl && trigger && trigger.hasAttribute('data-ceh-summary')) {
+                sumEl.textContent = trigger.getAttribute('data-ceh-summary');
+            }
+            // Wire the Confirm button to the originating action.
+            var confirmBtn = modal.querySelector('[data-ceh-modal-confirm]');
+            if (confirmBtn) {
+                confirmBtn.onclick = function () {
+                    close();
+                    if (trigger && trigger.tagName === 'A' && trigger.href) {
+                        window.location.href = trigger.href;
+                    } else if (trigger) {
+                        // A submit button: replay it on its own form so its
+                        // name/value (asp-page-handler etc.) is included.
+                        var form = trigger.form || trigger.closest('form');
+                        if (form) {
+                            if (trigger.name) {
+                                var hidden = document.createElement('input');
+                                hidden.type = 'hidden';
+                                hidden.name = trigger.name;
+                                hidden.value = trigger.value || '';
+                                form.appendChild(hidden);
+                            }
+                            if (form.requestSubmit) form.requestSubmit(); else form.submit();
+                        }
+                    }
+                };
+            }
+            modal.setAttribute('data-open', '');
+            document.addEventListener('keydown', onKey, true);
+            var firstFocus = modal.querySelector('[data-ceh-modal-confirm]') ||
+                             modal.querySelector(FOCUSABLE);
+            if (firstFocus) firstFocus.focus();
+        }
+        document.querySelectorAll('[data-ceh-confirm]').forEach(function (trigger) {
+            trigger.addEventListener('click', function (e) {
+                var modal = document.getElementById(trigger.getAttribute('data-ceh-confirm'));
+                if (!modal) return; // no modal => let the native action proceed
+                e.preventDefault();
+                open(modal, trigger);
+            });
+        });
+        document.querySelectorAll('.ceh-modal-backdrop').forEach(function (backdrop) {
+            // Click on the backdrop (outside the dialog) closes it.
+            backdrop.addEventListener('click', function (e) {
+                if (e.target === backdrop) close();
+            });
+            backdrop.querySelectorAll('[data-ceh-modal-cancel]').forEach(function (c) {
+                c.addEventListener('click', close);
+            });
+        });
+    })();
+    </script>
 </body>
 </html>

@@ -1,0 +1,223 @@
+@page "/Sessions"
+@using CommunityHub.Core.Domain
+@model CommunityHub.Pages.Sessions.IndexModel
+@{
+    Layout = "_Layout";
+    ViewData["Title"] = Model.View is null ? "Sessions" : $"Sessions — {Model.View.EventDisplayName}";
+}
+
+<style>
+    /* Mobile-first: single column, readable at ~360px. */
+    .so-head {
+        background: var(--el-darkblue, #1D3380); color: #fff;
+        padding: 22px; border-radius: 10px 10px 0 0; margin: 0;
+    }
+    .so-head h1 { margin: 0; font-size: 22px; font-weight: 700; line-height: 1.25; }
+    .so-head .meta { font-size: 13.5px; opacity: .92; margin-top: 6px; }
+    .so-body { padding: 18px 16px 22px; }
+
+    /* Filter bar */
+    .so-filters {
+        display: grid; grid-template-columns: 1fr; gap: 12px;
+        background: #f6f7fa; border: 1px solid #e4e7ee; border-radius: 8px;
+        padding: 14px; margin: 0 0 16px;
+    }
+    .so-filters .f-field { display: flex; flex-direction: column; }
+    .so-filters label { font-weight: 600; font-size: 12.5px; color: #24292f; margin-bottom: 4px; }
+    .so-filters select, .so-filters input[type="search"] {
+        width: 100%; box-sizing: border-box; padding: 9px 11px; font-size: 14px;
+        border: 1px solid #c4c8d4; border-radius: 7px; font-family: inherit; background: #fff;
+    }
+    .so-filters select:focus, .so-filters input:focus {
+        outline: 2px solid var(--el-blue, #008BD2); outline-offset: 1px; border-color: var(--el-blue, #008BD2);
+    }
+    .so-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+    .so-actions button, .so-actions a.btn-reset {
+        background: var(--el-blue, #008BD2); color: #fff; border: 0; padding: 10px 18px;
+        border-radius: 7px; font-size: 14px; font-weight: 600; cursor: pointer; text-decoration: none;
+        display: inline-block;
+    }
+    .so-actions a.btn-reset { background: #e4e7ee; color: #24292f; }
+
+    .so-count { font-size: 13px; color: #4a5160; margin: 0 0 12px; }
+
+    /* Session cards (mobile) */
+    .so-list { display: grid; grid-template-columns: 1fr; gap: 12px; }
+    .so-card {
+        border: 1px solid #e4e7ee; border-radius: 9px; padding: 14px 15px; background: #fff;
+    }
+    .so-card h2 { margin: 0 0 6px; font-size: 16px; line-height: 1.3; color: #1D3380; }
+    .so-card h2 a { color: #1D3380; text-decoration: none; }
+    .so-card h2 a:hover, .so-card h2 a:focus { text-decoration: underline; }
+    .so-card .so-speakers a { color: var(--el-blue, #008BD2); text-decoration: none; }
+    .so-card .so-speakers a:hover, .so-card .so-speakers a:focus { text-decoration: underline; }
+    .so-tags { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 8px; }
+    .so-tag {
+        font-size: 11.5px; font-weight: 600; padding: 3px 9px; border-radius: 999px;
+        background: #eef1f7; color: #344; white-space: nowrap;
+    }
+    .so-tag.type-mc { background: #ece6fb; color: #4527a0; }
+    .so-tag.type-sponsor { background: #fdeede; color: #8a4b00; }
+    .so-card .so-when { font-size: 12.5px; color: #5a6270; margin: 0 0 6px; }
+    .so-card .so-speakers { font-size: 13px; color: #24292f; margin: 0 0 8px; }
+    .so-card .so-speakers .lbl { color: #6a7280; }
+    .so-card .so-abstract { font-size: 13px; color: #4a5160; line-height: 1.5; margin: 0 0 10px; }
+    .so-card .so-links { display: flex; flex-wrap: wrap; gap: 12px; }
+    .so-card .so-links a {
+        font-size: 13px; font-weight: 600; color: var(--el-blue, #008BD2); text-decoration: none;
+    }
+    .so-card .so-links a:hover, .so-card .so-links a:focus { text-decoration: underline; }
+
+    .so-empty { color: #555; font-style: italic; padding: 18px 4px; }
+
+    .sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px;
+        overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
+
+    @@media (min-width: 640px) {
+        .so-filters { grid-template-columns: repeat(2, 1fr); align-items: end; }
+        .so-filters .f-search, .so-filters .f-actions { grid-column: 1 / -1; }
+        .so-filters .f-actions { display: flex; }
+    }
+</style>
+
+<div class="card" style="padding:0; overflow:hidden; max-width:880px; margin:0 auto;">
+    <div class="so-head">
+        <h1>Sessions</h1>
+        @if (Model.View is not null)
+        {
+            <div class="meta">@Model.View.EventDisplayName</div>
+        }
+    </div>
+
+    <div class="so-body">
+        @if (Model.NoActiveEvent || Model.View is null)
+        {
+            <p class="so-empty">There is no live event right now. Please check back soon.</p>
+            return;
+        }
+        @{ var view = Model.View; }
+
+        <form method="get" class="so-filters" role="search" aria-label="Filter sessions">
+            <div class="f-field">
+                <label for="FilterType">Type</label>
+                <select id="FilterType" name="FilterType" asp-for="FilterType"
+                        asp-items="Html.GetEnumSelectList<SessionType>()">
+                    <option value="">All types</option>
+                </select>
+            </div>
+            <div class="f-field">
+                <label for="FilterLength">Length</label>
+                <select id="FilterLength" name="FilterLength" asp-for="FilterLength"
+                        asp-items="Html.GetEnumSelectList<SessionLength>()">
+                    <option value="">Any length</option>
+                </select>
+            </div>
+            @if (view.Rooms.Count > 0)
+            {
+                <div class="f-field">
+                    <label for="FilterRoom">Room</label>
+                    <select id="FilterRoom" name="FilterRoom" asp-for="FilterRoom">
+                        <option value="">All rooms</option>
+                        @foreach (var r in view.Rooms)
+                        {
+                            <option value="@r" selected="@(string.Equals(Model.FilterRoom, r, StringComparison.OrdinalIgnoreCase))">@r</option>
+                        }
+                    </select>
+                </div>
+            }
+            <div class="f-field f-search">
+                <label for="Search">Search</label>
+                <input type="search" id="Search" name="Search" asp-for="Search"
+                       placeholder="Title, speaker, room…" autocomplete="off" />
+            </div>
+            <div class="f-field f-actions so-actions">
+                <button type="submit">Apply filters</button>
+                <a class="btn-reset" href="/Sessions">Reset</a>
+            </div>
+        </form>
+
+        <p class="so-count" role="status" aria-live="polite">
+            Showing @view.MatchCount of @view.TotalCount session@(view.TotalCount == 1 ? "" : "s").
+        </p>
+
+        @if (view.Sessions.Count == 0)
+        {
+            <p class="so-empty">
+                @if (view.TotalCount == 0)
+                {
+                    <text>No sessions have been published yet. Please check back closer to the event.</text>
+                }
+                else
+                {
+                    <text>No sessions match your filters. <a href="/Sessions">Clear the filters</a> to see them all.</text>
+                }
+            </p>
+        }
+        else
+        {
+            <ul class="so-list" style="list-style:none;padding:0;margin:0;">
+                @foreach (var s in view.Sessions)
+                {
+                    var typeClass = s.Type == SessionType.CommunityMasterClass ? "type-mc"
+                        : s.Type == SessionType.SponsorSession ? "type-sponsor" : "";
+                    <li class="so-card">
+                        <h2><a href="/Sessions/@s.Id">@s.Title</a></h2>
+                        <div class="so-tags">
+                            <span class="so-tag @typeClass">@CommunityHub.Pages.Sessions.IndexModel.Display(s.Type)</span>
+                            <span class="so-tag">@CommunityHub.Pages.Sessions.IndexModel.Display(s.Length)</span>
+                            @if (!string.IsNullOrWhiteSpace(s.Room))
+                            {
+                                <span class="so-tag">Room @s.Room</span>
+                            }
+                            @if (!string.IsNullOrWhiteSpace(s.Track))
+                            {
+                                <span class="so-tag">@s.Track</span>
+                            }
+                        </div>
+                        @if (s.StartsAt is not null)
+                        {
+                            <div class="so-when">
+                                @s.StartsAt.Value.ToString("ddd dd MMM, HH:mm")@(s.EndsAt is not null ? $"–{s.EndsAt.Value.ToString("HH:mm")}" : "")
+                            </div>
+                        }
+                        @if (s.Speakers.Count > 0)
+                        {
+                            <div class="so-speakers">
+                                <span class="lbl">With</span>
+                                @for (var i = 0; i < s.Speakers.Count; i++)
+                                {
+                                    var sp = s.Speakers[i];
+                                    @* Link only to a PUBLISHED speaker (the hard gate); an
+                                       unpublished co-speaker shows as plain text. *@
+                                    if (sp.IsPublished)
+                                    {
+                                        <a href="/Speakers/@sp.ParticipantId">@sp.Name</a>
+                                    }
+                                    else
+                                    {
+                                        <span>@sp.Name</span>
+                                    }
+                                    @(i < s.Speakers.Count - 1 ? ", " : "")
+                                }
+                            </div>
+                        }
+                        @if (!string.IsNullOrWhiteSpace(s.Abstract))
+                        {
+                            <p class="so-abstract">@s.Abstract</p>
+                        }
+                        <div class="so-links">
+                            @if (s.Type == SessionType.CommunityMasterClass && !string.IsNullOrWhiteSpace(s.PublicSlug))
+                            {
+                                <a href="/MasterClass/@s.PublicSlug">Master class info &amp; setup →</a>
+                            }
+                            @if (!string.IsNullOrWhiteSpace(s.AskToken))
+                            {
+                                <a href="/sessions/@s.AskToken/ask">Ask the speaker a question →</a>
+                            }
+                        </div>
+                    </li>
+                }
+            </ul>
+        }
+    </div>
+</div>

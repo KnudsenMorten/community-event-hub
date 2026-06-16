@@ -1,0 +1,280 @@
+@page
+@model CommunityHub.Pages.Organizer.ExportsModel
+@{
+    ViewData["Title"] = Localizer["Exports.Title"].Value;
+}
+
+<style>
+    /* Mobile-first: cards stack, tables scroll horizontally on a ~360px phone. */
+    .ex-intro { color:#374151; margin:0 0 6px; }
+    .ex-note { color:#6b7280; font-size:12.5px; margin:0 0 10px; }
+    .ex-actions { display:flex; flex-wrap:wrap; gap:8px; margin:8px 0 12px; }
+    .ex-btn { display:inline-block; text-decoration:none; font-weight:600; font-size:13.5px;
+        border:1px solid var(--el-blue); color:var(--el-blue); background:#fff;
+        border-radius:8px; padding:8px 12px; }
+    .ex-btn:hover, .ex-btn:focus-visible { background:var(--el-blue); color:#fff; }
+    .ex-print { border-color:#6b7280; color:#374151; }
+    .ex-print:hover, .ex-print:focus-visible { background:#374151; color:#fff; }
+    .ex-scroll { overflow-x:auto; -webkit-overflow-scrolling:touch; }
+    table.ex-tbl { width:100%; border-collapse:collapse; min-width:480px; }
+    .ex-tbl caption { text-align:left; font-weight:700; color:#1a1a2e; padding:6px 0; }
+    .ex-tbl th, .ex-tbl td { padding:7px 10px; text-align:left; border-bottom:1px solid #e6e8ee; font-size:13.5px; }
+    .ex-tbl th { font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:#6b7280; background:#f9fafb; }
+    .ex-empty { color:#6b7280; font-style:italic; font-size:13px; }
+    .ex-yes { color:#15803d; font-weight:700; }
+    .ex-qr { font-family:monospace; font-size:11.5px; word-break:break-all; }
+
+    /* Print / PDF-via-print run-sheets: hide the app chrome + the download/print
+       buttons, drop colour, and let every table flow full-width on paper. */
+    @@media print {
+        .ex-actions, .ex-no-print { display:none !important; }
+        .ex-scroll { overflow:visible; }
+        table.ex-tbl { min-width:0; page-break-inside:auto; }
+        .ex-tbl tr { page-break-inside:avoid; }
+        .ex-tbl th { background:#fff; color:#000; }
+        .card { box-shadow:none; border:none; padding:0; margin:0 0 16px; break-inside:avoid; }
+        h2 { font-size:16px; }
+        a { color:#000; text-decoration:none; }
+    }
+</style>
+
+<div class="card">
+    <h2>@Localizer["Exports.Title"]</h2>
+    @if (Model.AccessDenied)
+    {
+        <p class="error" role="alert">@Localizer["Common.OrganizersOnly"]</p>
+        <p class="ex-no-print"><a asp-page="/Index">@Localizer["Common.BackToHub"]</a></p>
+    }
+    else
+    {
+        <p class="ex-intro">@Localizer["Exports.Intro"]</p>
+        <p class="ex-note">@Localizer["Exports.PrintHint"]</p>
+        <div class="ex-actions ex-no-print">
+            <button type="button" class="ex-btn ex-print" onclick="window.print()">
+                @Localizer["Exports.PrintAll"]
+            </button>
+        </div>
+    }
+</div>
+
+@if (!Model.AccessDenied)
+{
+    <!-- Attendee list -->
+    <div class="card">
+        <h2>@Localizer["Exports.Attendees"]</h2>
+        <div class="ex-actions ex-no-print">
+            <a class="ex-btn" asp-page="/Organizer/Exports" asp-page-handler="AttendeesCsv"
+               aria-label="@Localizer["Exports.DownloadAttendees"]">@Localizer["Exports.DownloadCsv"]</a>
+        </div>
+        @if (Model.Attendees.Count == 0)
+        {
+            <p class="ex-empty">@Localizer["Exports.NoAttendees"]</p>
+        }
+        else
+        {
+            <div class="ex-scroll">
+                <table class="ex-tbl">
+                    <caption>@Localizer["Exports.Attendees"]</caption>
+                    <thead>
+                        <tr>
+                            <th scope="col">@Localizer["Exports.Col.Name"]</th>
+                            <th scope="col">@Localizer["Exports.Col.Email"]</th>
+                            <th scope="col">@Localizer["Exports.Col.Ticket"]</th>
+                            <th scope="col">@Localizer["Exports.Col.MasterClass"]</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    @foreach (var a in Model.Attendees)
+                    {
+                        <tr>
+                            <td>@a.Name</td>
+                            <td>@a.Email</td>
+                            <td>@a.TicketStatus@(string.IsNullOrWhiteSpace(a.TicketClass) ? "" : $" ({a.TicketClass})")</td>
+                            <td>@a.MasterClass</td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div>
+
+    <!-- Lunch headcount + per-person sheet -->
+    <div class="card">
+        <h2>@Localizer["Exports.Lunch"]</h2>
+        <div class="ex-actions ex-no-print">
+            <a class="ex-btn" asp-page="/Organizer/Exports" asp-page-handler="LunchCsv"
+               aria-label="@Localizer["Exports.DownloadLunch"]">@Localizer["Exports.DownloadCsv"]</a>
+        </div>
+        <div class="ex-scroll">
+            <table class="ex-tbl">
+                <caption>@Localizer["Exports.LunchHeadcount"]</caption>
+                <thead>
+                    <tr>
+                        <th scope="col">@Localizer["Exports.Col.Day"]</th>
+                        <th scope="col">@Localizer["Exports.Col.Count"]</th>
+                    </tr>
+                </thead>
+                <tbody>
+                @foreach (var h in Model.LunchHeadcount)
+                {
+                    <tr><td>@h.Day</td><td>@h.Count</td></tr>
+                }
+                </tbody>
+            </table>
+        </div>
+        @if (Model.LunchPeople.Count == 0)
+        {
+            <p class="ex-empty">@Localizer["Exports.NoLunch"]</p>
+        }
+        else
+        {
+            <div class="ex-scroll" style="margin-top:10px;">
+                <table class="ex-tbl">
+                    <caption>@Localizer["Exports.LunchWho"]</caption>
+                    <thead>
+                        <tr>
+                            <th scope="col">@Localizer["Exports.Col.Name"]</th>
+                            <th scope="col">@Localizer["Exports.Col.Role"]</th>
+                            <th scope="col">@Localizer["Exports.Col.SetupDay"]</th>
+                            <th scope="col">@Localizer["Exports.Col.PreDay"]</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    @foreach (var p in Model.LunchPeople)
+                    {
+                        <tr>
+                            <td>@p.Name</td>
+                            <td>@p.Role</td>
+                            <td>@(p.SetupDay ? Html.Raw("<span class=\"ex-yes\">&#10003;</span>") : null)</td>
+                            <td>@(p.PreDay ? Html.Raw("<span class=\"ex-yes\">&#10003;</span>") : null)</td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div>
+
+    <!-- Room / session sheets -->
+    <div class="card">
+        <h2>@Localizer["Exports.Rooms"]</h2>
+        <div class="ex-actions ex-no-print">
+            <a class="ex-btn" asp-page="/Organizer/Exports" asp-page-handler="RoomsCsv"
+               aria-label="@Localizer["Exports.DownloadRooms"]">@Localizer["Exports.DownloadCsv"]</a>
+        </div>
+        @if (Model.RoomSheets.Count == 0)
+        {
+            <p class="ex-empty">@Localizer["Exports.NoRooms"]</p>
+        }
+        else
+        {
+            <div class="ex-scroll">
+                <table class="ex-tbl">
+                    <caption>@Localizer["Exports.RoomSheets"]</caption>
+                    <thead>
+                        <tr>
+                            <th scope="col">@Localizer["Exports.Col.Room"]</th>
+                            <th scope="col">@Localizer["Exports.Col.Session"]</th>
+                            <th scope="col">@Localizer["Exports.Col.Speakers"]</th>
+                            <th scope="col">@Localizer["Exports.Col.When"]</th>
+                            <th scope="col">@Localizer["Exports.Col.Qr"]</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    @foreach (var r in Model.RoomSheets)
+                    {
+                        <tr>
+                            <td>@r.Room</td>
+                            <td>@r.Title<br /><span class="ex-empty">@r.Type &middot; @r.Length</span></td>
+                            <td>@r.Speakers</td>
+                            <td>@(r.StartsAt?.UtcDateTime.ToString("yyyy-MM-dd HH:mm"))</td>
+                            <td class="ex-qr">@(string.IsNullOrWhiteSpace(r.RoomQrUrl) ? Localizer["Exports.NoQr"].Value : r.RoomQrUrl)</td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div>
+
+    <!-- Volunteer rota -->
+    <div class="card">
+        <h2>@Localizer["Exports.VolunteerRota"]</h2>
+        <div class="ex-actions ex-no-print">
+            <a class="ex-btn" asp-page="/Organizer/Exports" asp-page-handler="VolunteerRotaCsv"
+               aria-label="@Localizer["Exports.DownloadRota"]">@Localizer["Exports.DownloadCsv"]</a>
+        </div>
+        @if (Model.VolunteerRota.Count == 0)
+        {
+            <p class="ex-empty">@Localizer["Exports.NoRota"]</p>
+        }
+        else
+        {
+            <div class="ex-scroll">
+                <table class="ex-tbl">
+                    <caption>@Localizer["Exports.VolunteerRota"]</caption>
+                    <thead>
+                        <tr>
+                            <th scope="col">@Localizer["Exports.Col.Volunteer"]</th>
+                            <th scope="col">@Localizer["Exports.Col.Bucket"]</th>
+                            <th scope="col">@Localizer["Exports.Col.Task"]</th>
+                            <th scope="col">@Localizer["Exports.Col.When"]</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    @foreach (var r in Model.VolunteerRota)
+                    {
+                        <tr>
+                            <td>@r.Volunteer</td>
+                            <td>@r.Bucket<br /><span class="ex-empty">@r.Subcategory</span></td>
+                            <td>@r.Task</td>
+                            <td>
+                                @(r.Due?.ToString("yyyy-MM-dd"))
+                                @if (!string.IsNullOrWhiteSpace(r.Shift)) { <span> @r.Shift</span> }
+                                @if (!string.IsNullOrWhiteSpace(r.TimeEnd)) { <span>&ndash;@r.TimeEnd</span> }
+                            </td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div>
+
+    <!-- Badge data -->
+    <div class="card">
+        <h2>@Localizer["Exports.Badges"]</h2>
+        <div class="ex-actions ex-no-print">
+            <a class="ex-btn" asp-page="/Organizer/Exports" asp-page-handler="BadgesCsv"
+               aria-label="@Localizer["Exports.DownloadBadges"]">@Localizer["Exports.DownloadCsv"]</a>
+        </div>
+        @if (Model.BadgeData.Count == 0)
+        {
+            <p class="ex-empty">@Localizer["Exports.NoBadges"]</p>
+        }
+        else
+        {
+            <div class="ex-scroll">
+                <table class="ex-tbl">
+                    <caption>@Localizer["Exports.Badges"]</caption>
+                    <thead>
+                        <tr>
+                            <th scope="col">@Localizer["Exports.Col.Name"]</th>
+                            <th scope="col">@Localizer["Exports.Col.Role"]</th>
+                            <th scope="col">@Localizer["Exports.Col.Company"]</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    @foreach (var b in Model.BadgeData)
+                    {
+                        <tr><td>@b.Name</td><td>@b.Role</td><td>@b.Company</td></tr>
+                    }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div>
+
+    <p class="ex-no-print"><a asp-page="/Organizer/Index">&larr; @Localizer["Nav.OrgArea"]</a></p>
+}

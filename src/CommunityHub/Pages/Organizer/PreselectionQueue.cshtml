@@ -1,0 +1,134 @@
+@page
+@using CommunityHub.Core.Domain
+@using Microsoft.AspNetCore.Mvc.Localization
+@inject IHtmlLocalizer<CommunityHub.Core.Resources.SharedResource> Localizer
+@model CommunityHub.Pages.Organizer.PreselectionQueueModel
+@{
+    ViewData["Title"] = "Pre-selection queue";
+}
+
+<div class="card">
+    <h2>Pre-selection queue</h2>
+    <p class="info" style="margin-top:0;">
+        Prospective volunteers, speakers and media-team land here from the
+        Sessionize sync and the interest form. Validate the data, then preselect
+        or activate. Only an <strong>Active</strong> row can sign in.
+    </p>
+
+    @if (Model.AccessDenied)
+    {
+        <p class="error">This area is for organizers only.</p>
+    }
+    else
+    {
+        @if (!string.IsNullOrEmpty(Model.ActionMessage))
+        {
+            <p class="info" role="status">@Model.ActionMessage</p>
+        }
+
+        <!-- Source filter -->
+        <form method="get" style="margin-bottom:16px;display:flex;flex-wrap:wrap;gap:8px;align-items:end;">
+            <span style="display:flex;flex-direction:column;gap:2px;">
+                <label for="SourceFilter">Source</label>
+                <select id="SourceFilter" name="SourceFilter">
+                    <option value="">All sources</option>
+                    @foreach (var src in Enum.GetValues<ParticipantQueueSource>())
+                    {
+                        <option value="@src" selected="@(Model.SourceFilter == src)">@src</option>
+                    }
+                </select>
+            </span>
+            <button type="submit">Apply</button>
+        </form>
+
+        @if (Model.Queue.Count == 0)
+        {
+            <p>The queue is empty — nothing waiting for review.</p>
+        }
+        else
+        {
+            <p>@Model.Queue.Count row(s) awaiting review.</p>
+
+            <!-- One form wraps the grid so ticked rows post together for a bulk
+                 action; per-row buttons target their own handler via formaction. -->
+            <form method="post">
+                <input type="hidden" name="SourceFilter" value="@Model.SourceFilter" />
+
+                <div class="bulk-bar"
+                     style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;
+                            padding:10px;margin-bottom:12px;border:1px solid #ddd;border-radius:8px;">
+                    <button type="submit" asp-page-handler="BulkPreselect" class="secondary">Preselect selected</button>
+                    <button type="submit" asp-page-handler="BulkActivate">Activate selected</button>
+                </div>
+
+                <div style="overflow-x:auto;">
+                <table style="width:100%;border-collapse:collapse;min-width:640px;">
+                    <tr style="text-align:left;border-bottom:2px solid #ddd;">
+                        <th style="width:32px;">
+                            <input type="checkbox" id="selectAll" aria-label="Select all rows"
+                                   onclick="for(const c of document.querySelectorAll('.rowChk'))c.checked=this.checked;" />
+                        </th>
+                        <th>Name</th><th>Email</th><th>Role</th>
+                        <th>Source</th><th>State</th><th></th>
+                    </tr>
+                    @foreach (var p in Model.Queue)
+                    {
+                        <tr style="border-bottom:1px solid #eee;">
+                            <td>
+                                <input class="rowChk" type="checkbox" name="SelectedIds" value="@p.Id"
+                                       aria-label="Select @p.FullName" />
+                            </td>
+                            <td>@p.FullName</td>
+                            <td>@p.Email</td>
+                            <td>@p.Role</td>
+                            <td>@p.QueueSource</td>
+                            <td>
+                                @if (p.LifecycleState == ParticipantLifecycleState.Preselected)
+                                {
+                                    <span class="info">Preselected</span>
+                                }
+                                else
+                                {
+                                    <span class="error">Inactive</span>
+                                }
+                            </td>
+                            <td style="white-space:nowrap;">
+                                @if (p.LifecycleState == ParticipantLifecycleState.Inactive)
+                                {
+                                    <button type="submit" class="secondary"
+                                            asp-page-handler="PreselectOne"
+                                            asp-route-participantId="@p.Id"
+                                            asp-route-SourceFilter="@Model.SourceFilter">Preselect</button>
+                                }
+                                <button type="submit"
+                                        asp-page-handler="ActivateOne"
+                                        asp-route-participantId="@p.Id"
+                                        asp-route-SourceFilter="@Model.SourceFilter">Activate</button>
+                                <button type="submit"
+                                        style="background:#b91c1c;"
+                                        asp-page-handler="Delete"
+                                        asp-route-participantId="@p.Id"
+                                        asp-route-SourceFilter="@Model.SourceFilter"
+                                        data-ceh-confirm="confirmDeleteQueueRow"
+                                        data-ceh-summary="@p.FullName">@Localizer["Queue.Delete"]</button>
+                            </td>
+                        </tr>
+                    }
+                </table>
+                </div>
+            </form>
+
+            @* Shared accessible confirm modal (§21) — gates removing a duplicate /
+               spam queue row. Queue rows have not engaged, so this hard-deletes a
+               clean row (or safely deactivates one with linked data). *@
+            <partial name="_ConfirmModal" model='new CommunityHub.Pages.Shared.ConfirmModalModel(
+                Id: "confirmDeleteQueueRow",
+                Title: Localizer["Queue.DeleteConfirmTitle"].Value,
+                Body: "This removes a prospective (not-yet-active) person from the pre-selection queue. If they somehow have linked data they are deactivated instead. This cannot be undone.",
+                ConfirmLabel: Localizer["Queue.Delete"].Value,
+                CancelLabel: "Cancel",
+                Danger: true)' />
+        }
+    }
+    <p><a asp-page="/Organizer/Index">Back to organizer area</a></p>
+</div>

@@ -72,7 +72,10 @@ public sealed class PinLoginService
             .FirstOrDefaultAsync(
                 p => p.EventId == eventId
                      && p.Email == normalizedEmail
-                     && p.IsActive,
+                     && p.IsActive
+                     // Onboarding gate: a not-yet-activated queue entry cannot
+                     // sign in (login requires IsActive AND lifecycle Active).
+                     && p.LifecycleState == ParticipantLifecycleState.Active,
                 cancellationToken);
 
         // Unknown / inactive email: return the same "ok" message so the

@@ -138,6 +138,10 @@ public class SignupModel : PageModel
             Phone     = phone,
             Role      = ParticipantRole.Volunteer,
             IsActive  = false,                 // <-- "applicant, not yet selected"
+            // Onboarding pre-selection queue: lands inactive, from the interest
+            // form. An organizer validates + activates it in the queue.
+            LifecycleState = ParticipantLifecycleState.Inactive,
+            QueueSource    = ParticipantQueueSource.VolunteerInterestForm,
             CreatedAt = _clock.GetUtcNow(),
         };
         _db.Participants.Add(applicant);

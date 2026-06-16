@@ -1,93 +1,106 @@
 @page
 @model CommunityHub.Pages.Forms.TravelModel
 @{
-    ViewData["Title"] = "Travel reimbursement";
+    ViewData["Title"] = Localizer["Travel.Title"].Value;
 }
 
 <div class="card">
-    <h2>Travel reimbursement</h2>
+    <h2>@Localizer["Travel.Title"]</h2>
 
     @if (Model.AccessDenied)
     {
         <p class="error">
-            The travel reimbursement form is only for speakers and master-class
-            speakers. Your role (<strong>@CommunityHub.Branding.RoleDisplay.Name(Model.Role)</strong>) is not eligible.
+            @Localizer["Travel.AccessDenied", CommunityHub.Branding.RoleDisplay.Name(Model.Role)]
         </p>
-        <p><a asp-page="/Index">Back to hub</a></p>
+        <p><a asp-page="/Index">@Localizer["Common.BackToHub"]</a></p>
     }
     else
     {
         <p style="background:#eef6ff;padding:10px 14px;border-radius:6px;font-size:14px;">
-            <strong>Travel reimbursement policy</strong> &mdash;
-            for speakers travelling from outside Denmark only. Claiming is
-            <strong>optional</strong>.
+            <strong>@Localizer["Travel.PolicyLead"]</strong> @Localizer["Travel.PolicyBody"]
         </p>
         <ul style="font-size:14px;">
-            <li>Economy flights only.</li>
-            <li>Up to <strong>EUR @CommunityHub.Pages.Forms.TravelModel.Cap400</strong> per speaker for single-speaker sessions.</li>
-            <li>Up to <strong>EUR @CommunityHub.Pages.Forms.TravelModel.Cap300</strong> per person for co-speaking sessions.</li>
-            <li>If neither cap fits (e.g. cheapest flight is above), choose <em>Other</em> and explain &mdash; we'll work with you.</li>
+            <li>@Localizer["Travel.RuleEconomy"]</li>
+            <li>@Localizer["Travel.RuleSingle", CommunityHub.Pages.Forms.TravelModel.Cap400]</li>
+            <li>@Localizer["Travel.RuleCo", CommunityHub.Pages.Forms.TravelModel.Cap300]</li>
+            <li>@Localizer["Travel.RuleOther"]</li>
             @if (Model.SubmitInvoiceDueDate is not null)
             {
-                <li>Submit ticket + invoice to ELDK by <strong>@Model.SubmitInvoiceDueDate?.ToString("dd/MM/yyyy")</strong> (30 days before the event).</li>
+                <li>@Localizer["Travel.RuleSubmit", Model.SubmitInvoiceDueDate?.ToString("dd/MM/yyyy") ?? ""]</li>
             }
         </ul>
 
-        if (!string.IsNullOrEmpty(Model.Message))
-        {
-            <p class="info">@Model.Message</p>
-        }
+        @* Shared success toast (REQUIREMENTS §21): announced via role=status,
+           auto-dismisses, dismissable. Replaces the bespoke <p class="info">. *@
+        <partial name="_Flash" model='new CommunityHub.Pages.Shared.FlashModel(Model.Message, "success")' />
 
         <form method="post">
 
-            <label>Name</label>
-            <input type="text" value="@Model.FullName" readonly />
+            @* Shared inline-validation pattern: an error summary at the top of the
+               form (model-level + any field error), then field-level <span>s below
+               each input. asp-validation-summary / asp-validation-for are the
+               built-in tag helpers; the .ceh-validation-summary styling is shared. *@
+            <div asp-validation-summary="All" class="ceh-validation-summary"></div>
 
-            <label>Email</label>
-            <input type="text" value="@Model.Email" readonly />
+            <label for="TravelName">@Localizer["Common.Name"]</label>
+            <input type="text" id="TravelName" value="@Model.FullName" readonly />
 
-            <label>Do you want to claim travel reimbursement?</label>
-            <div style="display:flex; gap:18px; margin:6px 0 14px;">
-                <label style="font-weight:normal;">
-                    <input type="radio" asp-for="RequestReimbursement" value="false" id="ReqNo" />
-                    No, I'm not claiming
-                </label>
-                <label style="font-weight:normal;">
-                    <input type="radio" asp-for="RequestReimbursement" value="true" id="ReqYes" />
-                    Yes
-                </label>
-            </div>
+            <label for="TravelEmail">@Localizer["Common.Email"]</label>
+            <input type="text" id="TravelEmail" value="@Model.Email" readonly />
+
+            <fieldset style="border:0;padding:0;margin:0;">
+                <legend style="font-weight:600;font-size:14px;margin-top:10px;">@Localizer["Travel.ClaimLegend"]</legend>
+                <div style="display:flex; gap:18px; margin:6px 0 14px;">
+                    <label style="font-weight:normal;">
+                        <input type="radio" asp-for="RequestReimbursement" value="false" id="ReqNo" />
+                        @Localizer["Travel.ClaimNo"]
+                    </label>
+                    <label style="font-weight:normal;">
+                        <input type="radio" asp-for="RequestReimbursement" value="true" id="ReqYes" />
+                        @Localizer["Common.Yes"]
+                    </label>
+                </div>
+            </fieldset>
 
             <div id="ClaimBlock" style="@(Model.RequestReimbursement ? "" : "display:none;")">
 
-                <label for="OriginCity">Travelling from (city / country)</label>
-                <input type="text" asp-for="OriginCity" placeholder="e.g. Berlin, Germany" />
+                <label for="OriginCity">@Localizer["Travel.OriginCity"]</label>
+                <input type="text" asp-for="OriginCity" placeholder="@Localizer["Travel.OriginPlaceholder"]" />
 
-                <label for="AmountChoice">Amount I'm claiming</label>
+                <label for="AmountChoice">@Localizer["Travel.AmountLabel"]</label>
                 <select asp-for="AmountChoice" id="AmountChoice">
-                    <option value="@CommunityHub.Pages.Forms.TravelModel.ChoiceNone">-- pick an amount --</option>
+                    <option value="@CommunityHub.Pages.Forms.TravelModel.ChoiceNone">@Localizer["Travel.PickAmount"]</option>
                     <option value="@CommunityHub.Pages.Forms.TravelModel.Choice400">
-                        EUR @CommunityHub.Pages.Forms.TravelModel.Cap400 (single-speaker session)
+                        @Localizer["Travel.AmountSingle", CommunityHub.Pages.Forms.TravelModel.Cap400]
                     </option>
                     <option value="@CommunityHub.Pages.Forms.TravelModel.Choice300">
-                        EUR @CommunityHub.Pages.Forms.TravelModel.Cap300 (co-speaking session)
+                        @Localizer["Travel.AmountCo", CommunityHub.Pages.Forms.TravelModel.Cap300]
                     </option>
                     <option value="@CommunityHub.Pages.Forms.TravelModel.ChoiceOther">
-                        Other (please explain)
+                        @Localizer["Travel.AmountOther"]
                     </option>
                 </select>
+                <span asp-validation-for="AmountChoice" class="ceh-field-error"></span>
 
-                <div id="OtherBlock" style="display:none;">
-                    <label for="OtherAmountEur">Other amount (EUR)</label>
+                @{
+                    // Keep the "Other amount" block visible on a re-render that
+                    // failed validation while "Other" was chosen, so the inline
+                    // error is shown next to the field the user must fix.
+                    var otherChosen = Model.AmountChoice == CommunityHub.Pages.Forms.TravelModel.ChoiceOther;
+                }
+                <div id="OtherBlock" style="@(otherChosen ? "" : "display:none;")">
+                    <label for="OtherAmountEur">@Localizer["Travel.OtherAmount"]</label>
                     <input type="number" asp-for="OtherAmountEur" min="0" step="1" />
+                    <span asp-validation-for="OtherAmountEur" class="ceh-field-error"></span>
                 </div>
 
-                <label for="Explanation">Explanation (required if "Other")</label>
+                <label for="Explanation">@Localizer["Travel.Explanation"]</label>
                 <textarea asp-for="Explanation" rows="3"
-                          placeholder="Cheapest flight found, route, dates, etc."></textarea>
+                          placeholder="@Localizer["Travel.ExplanationPlaceholder"]"></textarea>
+                <span asp-validation-for="Explanation" class="ceh-field-error"></span>
             </div>
 
-            <button type="submit">Save travel request</button>
+            <button type="submit">@Localizer["Travel.Save"]</button>
         </form>
 
         <script>
@@ -97,15 +110,41 @@
                 var claim  = document.getElementById('ClaimBlock');
                 var pick   = document.getElementById('AmountChoice');
                 var other  = document.getElementById('OtherBlock');
+                var amount = document.getElementById('OtherAmountEur');
+                var form   = pick ? pick.closest('form') : null;
                 function syncClaim() { claim.style.display = reqYes.checked ? '' : 'none'; }
                 function syncOther() { other.style.display = pick.value === 'other' ? '' : 'none'; }
                 reqYes.addEventListener('change', syncClaim);
                 reqNo.addEventListener('change', syncClaim);
                 pick.addEventListener('change', syncOther);
                 syncClaim(); syncOther();
+
+                // Client-side mirror of the server field validation (the shared
+                // pattern: client + server field-level messages). HTML5 custom
+                // validity gives an inline message without leaving the page; the
+                // server re-checks regardless, so JS-off users are still safe.
+                if (form) {
+                    form.addEventListener('submit', function (e) {
+                        if (!reqYes.checked) return;            // not claiming: skip
+                        if (pick.value === 'other') {
+                            var v = parseFloat(amount.value);
+                            if (!(v > 0)) {
+                                amount.setCustomValidity(
+                                    '@Html.Raw(Localizer["Travel.ErrOtherAmount"].Value.Replace("'", "\\'"))');
+                                amount.reportValidity();
+                                amount.classList.add('ceh-input-invalid');
+                                e.preventDefault();
+                            }
+                        }
+                    });
+                    amount.addEventListener('input', function () {
+                        amount.setCustomValidity('');
+                        amount.classList.remove('ceh-input-invalid');
+                    });
+                }
             })();
         </script>
 
-        <p><a asp-page="/Index">Back to hub</a></p>
+        <p><a asp-page="/Index">@Localizer["Common.BackToHub"]</a></p>
     }
 </div>

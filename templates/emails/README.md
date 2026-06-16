@@ -47,6 +47,11 @@ Beautiful, manageable email - without fighting email clients.
   `{{boothCoupon}}`. These come from `sponsor.<edition>.json → boothWallSpecs`,
   resolved by the sponsor's booth tier. A non-booth sponsor leaves them blank.
 - **Incomplete-form chaser**: `{{formName}}`, `{{formDeadline}}`.
+- **Welcome with auto-login** (`welcome-login`, DEV-only): `{{eventCode}}`,
+  `{{roleName}}` (friendly role noun, e.g. "speaker" / "sponsor contact"),
+  `{{roleLine}}` (the one role-specific sentence), and `{{loginUrl}}` (the real
+  magic-link `/Login/Magic?token=…` that signs the recipient in automatically).
+  Sent as HTML + a plain-text alternative; single CTA "Open my Event Hub".
 
 ## Rules
 

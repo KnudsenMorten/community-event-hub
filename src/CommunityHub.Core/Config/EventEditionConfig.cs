@@ -43,6 +43,73 @@ public sealed class EventEditionConfig
     /// </summary>
     [JsonIgnore]
     public EditionDates? Dates { get; set; }
+
+    /// <summary>
+    /// Optional <c>resources</c> block loaded from
+    /// <c>event.&lt;edition&gt;.json -&gt; resources</c> (a SIBLING of
+    /// <c>edition</c>). Drives the shared, read-only <c>/Resources</c> page —
+    /// the practical-info / links / downloads organizers maintain entirely in
+    /// config (no schema, no migration). Empty when the section is absent, so
+    /// the page renders a friendly "nothing here yet" state instead of crashing.
+    /// </summary>
+    [JsonIgnore]
+    public ResourcesConfig Resources { get; set; } = new();
+}
+
+/// <summary>
+/// The shared-resources content for an edition (<c>/Resources</c>). A small,
+/// flat, editorial structure: an optional intro paragraph plus an ordered list
+/// of grouped link/download sections. Organizers edit this in
+/// <c>event.&lt;edition&gt;.json</c>; nothing here is a secret and nothing is a
+/// database row.
+/// </summary>
+public sealed class ResourcesConfig
+{
+    /// <summary>Optional lead paragraph shown above the sections. May be empty.</summary>
+    [JsonPropertyName("intro")]
+    public string Intro { get; set; } = string.Empty;
+
+    /// <summary>Ordered content sections. Empty list = render the empty state.</summary>
+    [JsonPropertyName("sections")]
+    public List<ResourceSection> Sections { get; set; } = new();
+
+    /// <summary>True when there is no displayable content at all.</summary>
+    [JsonIgnore]
+    public bool IsEmpty =>
+        string.IsNullOrWhiteSpace(Intro)
+        && (Sections is null || Sections.TrueForAll(s => s is null || s.Links.Count == 0));
+}
+
+/// <summary>One titled group of resource links on the <c>/Resources</c> page.</summary>
+public sealed class ResourceSection
+{
+    [JsonPropertyName("title")]
+    public string Title { get; set; } = string.Empty;
+
+    /// <summary>Optional one-line description under the section title.</summary>
+    [JsonPropertyName("description")]
+    public string Description { get; set; } = string.Empty;
+
+    [JsonPropertyName("links")]
+    public List<ResourceLink> Links { get; set; } = new();
+}
+
+/// <summary>A single practical link or download on the <c>/Resources</c> page.</summary>
+public sealed class ResourceLink
+{
+    [JsonPropertyName("label")]
+    public string Label { get; set; } = string.Empty;
+
+    [JsonPropertyName("url")]
+    public string Url { get; set; } = string.Empty;
+
+    /// <summary>Optional short note shown next to the link.</summary>
+    [JsonPropertyName("note")]
+    public string Note { get; set; } = string.Empty;
+
+    /// <summary>True = a downloadable file (PDF etc.); false = a web link. Cosmetic only.</summary>
+    [JsonPropertyName("isDownload")]
+    public bool IsDownload { get; set; }
 }
 
 /// <summary>Per-edition date facts pulled from <c>event.&lt;edition&gt;.json -&gt; dates</c>.</summary>
@@ -140,6 +207,29 @@ public sealed class EventEditionConfigLoader
             && d.ValueKind == JsonValueKind.Object)
         {
             cfg.Dates = d.Deserialize<EditionDates>(Options);
+        }
+
+        // Pull the SIBLING "resources" object that drives the shared
+        // /Resources page. Defensively drop empty/garbage entries so the page
+        // never renders a blank "•" with no label or a dead empty-href link.
+        if (doc.RootElement.TryGetProperty("resources", out var r)
+            && r.ValueKind == JsonValueKind.Object)
+        {
+            var res = r.Deserialize<ResourcesConfig>(Options) ?? new ResourcesConfig();
+            res.Sections = (res.Sections ?? new List<ResourceSection>())
+                .Where(s => s is not null)
+                .Select(s =>
+                {
+                    s.Links = (s.Links ?? new List<ResourceLink>())
+                        .Where(l => l is not null
+                                    && !string.IsNullOrWhiteSpace(l.Label)
+                                    && !string.IsNullOrWhiteSpace(l.Url))
+                        .ToList();
+                    return s;
+                })
+                .Where(s => !string.IsNullOrWhiteSpace(s.Title) || s.Links.Count > 0)
+                .ToList();
+            cfg.Resources = res;
         }
 
         return cfg;

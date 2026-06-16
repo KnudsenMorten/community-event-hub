@@ -2,13 +2,13 @@
 @using CommunityHub.Core.Domain
 @model CommunityHub.Pages.Sponsor.TasksModel
 @{
-    ViewData["Title"] = "Sponsor Tasks";
+    ViewData["Title"] = Localizer["SponsorTasks.Title"].Value;
 }
 
 @await Html.PartialAsync("_KeyDates", Model.EventDates)
 
 <div class="card">
-    <h2>Sponsor Tasks</h2>
+    <h2>@Localizer["SponsorTasks.Title"]</h2>
 
     @if (!string.IsNullOrEmpty(Model.Message))
     {
@@ -17,20 +17,19 @@
 
     @if (Model.NoCompanyLink)
     {
-        <p class="error">Your sponsor account is not yet linked to a company,
-           so we cannot show your tasks. Please contact the organizers.</p>
+        <p class="error">@Localizer["SponsorTasks.NoCompany"]</p>
     }
     else if (Model.SponsorTasks.Count == 0)
     {
-        <p>No sponsor tasks yet. Tasks appear here once your order is processed.</p>
+        <p>@Localizer["SponsorTasks.NoTasks"]</p>
     }
     else
     {
-        <p>Tick a task off when it is done. You can reopen it if needed.</p>
+        <p>@Localizer["SponsorTasks.Intro"]</p>
         @if (Model.LinkedContacts.Count > 0)
         {
             <p style="margin:6px 0 14px;color:#555;font-size:14px;">
-                Tasks can be managed by any of these contacts:
+                @Localizer["SponsorTasks.ManagedBy"]
                 @for (var i = 0; i < Model.LinkedContacts.Count; i++)
                 {
                     var c = Model.LinkedContacts[i];
@@ -46,10 +45,10 @@
         var pendingTasks   = Model.SponsorTasks.Where(t => t.State != TaskState.Done).ToList();
         var completedTasks = Model.SponsorTasks.Where(t => t.State == TaskState.Done).ToList();
 
-        <h3 style="margin:18px 0 8px;color:var(--el-darkblue);">Pending Tasks (@pendingTasks.Count)</h3>
+        <h3 style="margin:18px 0 8px;color:var(--el-darkblue);">@Localizer["SponsorTasks.Pending", pendingTasks.Count]</h3>
         @if (pendingTasks.Count == 0)
         {
-            <p style="color:#1f6d3a;">All caught up — no pending tasks.</p>
+            <p style="color:#1f6d3a;">@Localizer["SponsorTasks.AllCaughtUp"]</p>
         }
         @foreach (var task in pendingTasks)
         {
@@ -60,8 +59,8 @@
         {
             <details style="margin-top:28px;border-top:2px solid var(--el-blue);padding-top:14px;">
                 <summary style="font-size:18px;font-weight:700;color:var(--el-darkblue);cursor:pointer;">
-                    Completed Tasks (@completedTasks.Count)
-                    <span style="font-size:13px;font-weight:400;color:#666;margin-left:6px;">— click to show / hide</span>
+                    @Localizer["SponsorTasks.Completed", completedTasks.Count]
+                    <span style="font-size:13px;font-weight:400;color:#666;margin-left:6px;">@Localizer["SponsorTasks.ClickToToggle"]</span>
                 </summary>
                 <div style="margin-top:8px;">
                     @foreach (var task in completedTasks)
@@ -73,7 +72,7 @@
         }
     }
     <p style="margin-top:14px;">
-        <a asp-page="/Sponsor/Index">&larr; Sponsor Engagement Details</a> &middot;
-        <a asp-page="/Index">Back to hub</a>
+        <a asp-page="/Sponsor/Index">@Localizer["SponsorTasks.BackEngagement"]</a> &middot;
+        <a asp-page="/Index">@Localizer["Common.BackToHub"]</a>
     </p>
 </div>

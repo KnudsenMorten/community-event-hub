@@ -53,6 +53,16 @@ public class Event
     /// <summary>Date after which participant records lock (no further self-service edits).</summary>
     public DateOnly? LockDate { get; set; }
 
+    /// <summary>
+    /// Organizer master switch for calendar sync (REQUIREMENTS §5). When false,
+    /// the per-user iCal feed (<c>GET /cal/{token}.ics</c> and
+    /// <c>/calendar/{token}.ics</c>) returns 404, the hub's "Add to my calendar"
+    /// card is hidden, and no .ics invite is attached to activation emails — for
+    /// the whole edition. Defaults <b>true</b> (sync on) so existing editions keep
+    /// working; an organizer can disable it on <c>/Organizer/CalendarSettings</c>.
+    /// </summary>
+    public bool CalendarSyncEnabled { get; set; } = true;
+
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 
     // --- Navigation ---------------------------------------------------------

@@ -65,6 +65,11 @@ public sealed class TaskReminderBuilder
                 t.Title,
                 DueDate = t.DueDate!.Value,
                 Participant = t.AssignedParticipant!,
+                // Speaker contact-email override (null for non-speakers / unset).
+                ContactEmailOverride = _db.SpeakerProfiles
+                    .Where(sp => sp.ParticipantId == t.AssignedParticipantId)
+                    .Select(sp => sp.ContactEmailOverride)
+                    .FirstOrDefault(),
             })
             .ToListAsync(ct);
 
@@ -104,13 +109,31 @@ public sealed class TaskReminderBuilder
 
             var rendered = _templates.Render(TemplateName, tokens);
 
+            // Persona-aware reminder (10a-4): the persona group is derived from the
+            // assigned participant's role so the send is categorised per persona
+            // (volunteer / speaker / media / sponsor / organizer) in the log. The
+            // participant's secondary email rides along as CC (10a-5).
+            var persona = Email.OnboardingEmailSets.PersonaFor(t.Participant.Role)
+                .ToString();
+            var cc = string.IsNullOrWhiteSpace(t.Participant.SecondaryEmail)
+                ? null
+                : new[] { t.Participant.SecondaryEmail!.Trim() };
+
             var occasionKey = $"task:{t.Id}:m{milestone}";
             messages.Add(new ReminderMessage(
                 RecipientEmail: t.Participant.Email,
                 ReminderType: "task-deadline",
                 OccasionKey: occasionKey,
                 Subject: rendered.Subject,
-                HtmlBody: rendered.HtmlBody));
+                HtmlBody: rendered.HtmlBody,
+                // Deliver to the effective address (override ?? Sessionize);
+                // the dedup key above stays the identity address.
+                DeliverToEmail: SpeakerProfile.EffectiveEmailFor(
+                    t.Participant.Email, t.ContactEmailOverride),
+                Persona: persona,
+                ParticipantId: t.Participant.Id,
+                RecipientName: t.Participant.FullName,
+                Cc: cc));
         }
 
         return messages;

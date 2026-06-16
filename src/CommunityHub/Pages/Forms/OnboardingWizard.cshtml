@@ -1,0 +1,141 @@
+@page
+@using CommunityHub.Core.Organizer
+@model CommunityHub.Pages.Forms.OnboardingWizardModel
+@{
+    ViewData["Title"] = Localizer["Onboard.Title"].Value;
+}
+
+<div class="card">
+    <h2>@Localizer["Onboard.Heading"]</h2>
+    <p class="info" style="margin-top:0;">@Localizer["Onboard.Intro"]</p>
+
+    @if (Model.StepCount > 0)
+    {
+        <!-- Progress: numbered chips for THIS persona's steps, wrap on a phone. -->
+        <ol aria-label="@Localizer["Onboard.StepsLabel"].Value"
+            style="display:flex;flex-wrap:wrap;gap:6px;list-style:none;padding:0;margin:0 0 16px;">
+            @for (var i = 0; i < Model.Steps.Count; i++)
+            {
+                var n = i + 1;
+                var done = Model.Completed.Length > i && Model.Completed[i];
+                var current = Model.Step == n;
+                <li aria-current="@(current ? "step" : null)"
+                    style="padding:4px 10px;border-radius:14px;font-size:0.85em;
+                           border:1px solid @(current ? "#2e7d32" : "#ccc");
+                           background:@(done ? "#e8f5e9" : (current ? "#f1f8e9" : "#fff"));">
+                    @n. @OnboardingService.LabelFor(Model.Steps[i]) @(done ? "✓" : "")
+                </li>
+            }
+        </ol>
+    }
+
+    @* Shared success toast (REQUIREMENTS §21): per-step "saved" confirmation.
+       role=status, auto-dismiss, dismissable. *@
+    <partial name="_Flash" model='new CommunityHub.Pages.Shared.FlashModel(Model.Message, "success")' />
+
+    @if (Model.Finished || Model.StepCount == 0)
+    {
+        <p class="info">@Localizer["Onboard.AllSet"] <a asp-page="/Index">@Localizer["Onboard.GoToHub"]</a>.</p>
+    }
+    else
+    {
+        var stepNo = Model.Step;
+        var step = Model.CurrentStep;
+        <form method="post">
+            <input type="hidden" name="Step" value="@Model.Step" />
+
+            @if (step == OnboardingStep.Bio)
+            {
+                <h3>@Localizer["Onboard.StepBio", stepNo]</h3>
+                <p>
+                    <label for="Tagline">@Localizer["Onboard.Tagline"]</label><br />
+                    <input type="text" id="Tagline" name="Tagline" value="@Model.Tagline"
+                           maxlength="500" style="width:100%;max-width:520px;" />
+                </p>
+                <p>
+                    <label for="Biography">@Localizer["Onboard.Biography"]</label><br />
+                    <textarea id="Biography" name="Biography" rows="6" maxlength="4000"
+                              style="width:100%;max-width:520px;">@Model.Biography</textarea>
+                </p>
+            }
+            else if (step == OnboardingStep.Picture)
+            {
+                <h3>@Localizer["Onboard.StepPicture", stepNo]</h3>
+                <p>
+                    <label for="PhotoUrl">@Localizer["Onboard.PictureUrl"]</label><br />
+                    <input type="url" id="PhotoUrl" name="PhotoUrl" value="@Model.PhotoUrl"
+                           maxlength="1000" style="width:100%;max-width:520px;"
+                           placeholder="https://…" />
+                </p>
+                @if (!string.IsNullOrWhiteSpace(Model.PhotoUrl))
+                {
+                    <img src="@Model.PhotoUrl" alt="@Localizer["Onboard.PictureAlt"].Value"
+                         style="max-width:160px;height:auto;border-radius:8px;" />
+                }
+            }
+            else if (step == OnboardingStep.Hotel)
+            {
+                <h3>@Localizer["Onboard.StepHotel", stepNo]</h3>
+                <p>
+                    <label>
+                        <input type="checkbox" name="NeedsRoom" value="true" @(Model.NeedsRoom ? "checked" : "") />
+                        @Localizer["Onboard.NeedsRoom"]
+                    </label>
+                </p>
+                <p>
+                    <label for="HotelNotes">@Localizer["Common.NotesOptional"]</label><br />
+                    <textarea id="HotelNotes" name="HotelNotes" rows="3" maxlength="1000"
+                              style="width:100%;max-width:520px;">@Model.HotelNotes</textarea>
+                </p>
+            }
+            else if (step == OnboardingStep.Appreciation)
+            {
+                <h3>@Localizer["Onboard.StepAppreciation", stepNo]</h3>
+                <p>
+                    <label>
+                        <input type="checkbox" name="WantsAppreciationAward" value="true"
+                               @(Model.WantsAppreciationAward ? "checked" : "") />
+                        @Localizer["Onboard.WantsAward"]
+                    </label>
+                </p>
+                <p>
+                    <label>
+                        <input type="checkbox" name="WantsCredlyBadge" value="true"
+                               @(Model.WantsCredlyBadge ? "checked" : "") />
+                        @Localizer["Onboard.WantsCredly"]
+                    </label>
+                </p>
+            }
+            else if (step == OnboardingStep.Swag)
+            {
+                <h3>@Localizer["Onboard.StepSwag", stepNo]</h3>
+                <p>
+                    <label>
+                        <input type="checkbox" name="WantsPolo" value="true" @(Model.WantsPolo ? "checked" : "") />
+                        @Localizer["Onboard.WantsPolo"]
+                    </label><br />
+                    <label for="PoloSize">@Localizer["Swag.PoloSize"]</label>
+                    <input type="text" id="PoloSize" name="PoloSize" value="@Model.PoloSize" maxlength="60" />
+                </p>
+                <p>
+                    <label>
+                        <input type="checkbox" name="WantsJacket" value="true" @(Model.WantsJacket ? "checked" : "") />
+                        @Localizer["Onboard.WantsJacket"]
+                    </label><br />
+                    <label for="JacketSize">@Localizer["Onboard.JacketSize"]</label>
+                    <input type="text" id="JacketSize" name="JacketSize" value="@Model.JacketSize" maxlength="60" />
+                </p>
+            }
+
+            <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:14px;">
+                @if (Model.Step > 1)
+                {
+                    <button type="submit" asp-page-handler="Back" class="secondary">@Localizer["Common.Back"]</button>
+                }
+                <button type="submit" asp-page-handler="CompleteStep">
+                    @(Model.Step < Model.StepCount ? Localizer["Onboard.SaveContinue"] : Localizer["Onboard.Finish"])
+                </button>
+            </div>
+        </form>
+    }
+</div>

@@ -1,0 +1,144 @@
+@page
+@using CommunityHub.Core.Domain
+@model CommunityHub.Pages.Sponsor.CaptureLeadModel
+@{
+    ViewData["Title"] = Localizer["Lead.Title"].Value;
+}
+
+@* Mobile-first: a single-column form + recent list that work at ~360px.
+   The form fields stack and stretch full-width; the recent list uses a
+   wrapping card layout rather than a wide table so it never overflows a
+   phone screen. Desktop just gets more breathing room from the page chrome. *@
+
+<div class="card">
+    <h2>@Localizer["Lead.Title"]</h2>
+
+    @if (Model.AccessDenied)
+    {
+        <p class="error">@Localizer["Lead.AccessDenied"]</p>
+        <p><a asp-page="/Index">@Localizer["Common.BackToHub"]</a></p>
+    }
+    else if (Model.NoCompanyLink)
+    {
+        <p class="error">@Localizer["Lead.NoCompany"]</p>
+        <p><a asp-page="/Index">@Localizer["Common.BackToHub"]</a></p>
+    }
+    else
+    {
+        <p style="color:#555;font-size:14px;margin-top:0;">
+            @Localizer["Lead.Intro"]
+        </p>
+
+        @if (!string.IsNullOrEmpty(Model.Message))
+        {
+            <p class="info" role="status" style="background:#f0fdf4;border-left:4px solid #16a34a;padding:10px 12px;border-radius:4px;">@Model.Message</p>
+        }
+        @if (!string.IsNullOrEmpty(Model.Error))
+        {
+            <p class="error" role="alert">@Model.Error</p>
+        }
+
+        <form method="post" style="display:flex;flex-direction:column;gap:12px;max-width:520px;">
+            <label style="display:flex;flex-direction:column;gap:4px;font-size:14px;font-weight:600;">
+                @Localizer["Lead.FirstName"]
+                <input asp-for="FirstName" maxlength="200" autocomplete="off"
+                       style="padding:10px;font-size:16px;border:1px solid #c4c8d4;border-radius:6px;" />
+            </label>
+            <label style="display:flex;flex-direction:column;gap:4px;font-size:14px;font-weight:600;">
+                @Localizer["Lead.LastName"]
+                <input asp-for="LastName" maxlength="200" autocomplete="off"
+                       style="padding:10px;font-size:16px;border:1px solid #c4c8d4;border-radius:6px;" />
+            </label>
+            <label style="display:flex;flex-direction:column;gap:4px;font-size:14px;font-weight:600;">
+                @Localizer["Common.Email"]
+                <input asp-for="Email" type="email" inputmode="email" maxlength="320" autocomplete="off"
+                       style="padding:10px;font-size:16px;border:1px solid #c4c8d4;border-radius:6px;" />
+            </label>
+            <label style="display:flex;flex-direction:column;gap:4px;font-size:14px;font-weight:600;">
+                @Localizer["Lead.Phone"]
+                <input asp-for="Phone" type="tel" inputmode="tel" maxlength="60" autocomplete="off"
+                       style="padding:10px;font-size:16px;border:1px solid #c4c8d4;border-radius:6px;" />
+            </label>
+            <label style="display:flex;flex-direction:column;gap:4px;font-size:14px;font-weight:600;">
+                @Localizer["Lead.Company"]
+                <input asp-for="Company" maxlength="300" autocomplete="off"
+                       style="padding:10px;font-size:16px;border:1px solid #c4c8d4;border-radius:6px;" />
+            </label>
+            <label style="display:flex;flex-direction:column;gap:4px;font-size:14px;font-weight:600;">
+                @Localizer["Lead.JobTitle"]
+                <input asp-for="JobTitle" maxlength="200" autocomplete="off"
+                       style="padding:10px;font-size:16px;border:1px solid #c4c8d4;border-radius:6px;" />
+            </label>
+            <label style="display:flex;flex-direction:column;gap:4px;font-size:14px;font-weight:600;">
+                @Localizer["Lead.NotesLabel"]
+                <textarea asp-for="Notes" maxlength="4000" rows="3"
+                          style="padding:10px;font-size:16px;border:1px solid #c4c8d4;border-radius:6px;resize:vertical;"></textarea>
+            </label>
+            <button type="submit"
+                    style="padding:14px;font-size:16px;font-weight:700;color:#fff;background:var(--el-darkblue);border:none;border-radius:6px;cursor:pointer;">
+                @Localizer["Lead.Save"]
+            </button>
+        </form>
+
+        <p style="margin-top:16px;font-size:13px;">
+            <a asp-page="/Sponsor/Leads">@Localizer["Lead.DownloadApi"]</a> &middot;
+            <a asp-page="/Sponsor/Index">@Localizer["Lead.SponsorEngagement"]</a> &middot;
+            <a asp-page="/Index">@Localizer["Common.BackToHub"]</a>
+        </p>
+    }
+</div>
+
+@if (!Model.AccessDenied && !Model.NoCompanyLink)
+{
+    <div class="card">
+        <h2>@Localizer["Lead.RecentTitle"]</h2>
+        @if (Model.RecentLeads.Count == 0)
+        {
+            <p style="color:#888;font-style:italic;">@Localizer["Lead.RecentEmpty"]</p>
+        }
+        else
+        {
+            <p style="color:#555;font-size:13px;margin-top:0;">
+                @Localizer["Lead.RecentIntro"]
+            </p>
+            <div style="display:flex;flex-direction:column;gap:10px;">
+                @foreach (var l in Model.RecentLeads)
+                {
+                    var display = !string.IsNullOrWhiteSpace(l.FullName)
+                        ? l.FullName
+                        : (!string.IsNullOrWhiteSpace(l.Company) ? l.Company : Localizer["Lead.Unnamed"].Value);
+                    <div style="border:1px solid #e3e6ee;border-radius:8px;padding:12px 14px;">
+                        <div style="font-weight:700;font-size:15px;">@display</div>
+                        @if (!string.IsNullOrWhiteSpace(l.JobTitle) || !string.IsNullOrWhiteSpace(l.Company))
+                        {
+                            <div style="color:#555;font-size:13px;">
+                                @l.JobTitle@(string.IsNullOrWhiteSpace(l.JobTitle) || string.IsNullOrWhiteSpace(l.Company) ? "" : " · ")@l.Company
+                            </div>
+                        }
+                        <div style="font-size:13px;margin-top:4px;display:flex;flex-wrap:wrap;gap:6px 14px;">
+                            @if (!string.IsNullOrWhiteSpace(l.Email))
+                            {
+                                <a href="mailto:@l.Email" style="color:var(--el-darkblue);">@l.Email</a>
+                            }
+                            @if (!string.IsNullOrWhiteSpace(l.Phone))
+                            {
+                                <span style="color:#444;">@l.Phone</span>
+                            }
+                        </div>
+                        @if (!string.IsNullOrWhiteSpace(l.Notes))
+                        {
+                            <div style="font-size:13px;color:#444;margin-top:6px;white-space:pre-wrap;">@l.Notes</div>
+                        }
+                        <div style="font-size:11.5px;color:#8a90a0;margin-top:6px;">
+                            @l.CapturedAt.ToLocalTime().ToString("ddd dd MMM HH:mm")
+                            @if (l.Status == SponsorLeadStatus.Junk)
+                            {
+                                <span style="color:#b91c1c;">@Localizer["Lead.FlaggedJunk"]</span>
+                            }
+                        </div>
+                    </div>
+                }
+            </div>
+        }
+    </div>
+}

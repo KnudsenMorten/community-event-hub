@@ -207,6 +207,101 @@ public sealed class SharePointUploadClient
         return results;
     }
 
+    /// <summary>
+    /// Upload (create or REPLACE) a small file's bytes at
+    /// <c>{rootFolderPath}/{relativePath}</c> on the site, returning the stored
+    /// path + a download/web URL + the Graph driveItem id. Replacing an existing
+    /// path keeps the same item / URL (the overrule contract for SoMe graphics).
+    /// Intermediate folders are created as needed. Uses the simple PUT upload
+    /// (fine for graphics PNGs, well under the 4&#160;MB simple-upload limit).
+    /// </summary>
+    public async Task<(string Path, string WebUrl, string ItemId)> UploadFileAsync(
+        string siteUrl,
+        string driveName,
+        string rootFolderPath,
+        string relativePath,
+        byte[] content,
+        string contentType,
+        CancellationToken ct = default)
+    {
+        if (!IsConfigured)
+        {
+            throw new SharePointUploadException("SharePoint integration is not fully configured.");
+        }
+
+        var driveId = await GetDriveIdAsync(siteUrl, driveName, ct);
+        var fullPath = JoinPath(rootFolderPath, relativePath);
+
+        // Ensure the parent folder chain exists so the PUT lands.
+        var lastSlash = fullPath.LastIndexOf('/');
+        if (lastSlash > 0)
+        {
+            await EnsureFolderAsync(driveId, fullPath[..lastSlash], ct);
+        }
+
+        var encoded = EncodePath(fullPath);
+        var url = GraphRoot + $"/drives/{driveId}/root:/{encoded}:/content";
+
+        using var req = new HttpRequestMessage(HttpMethod.Put, url)
+        {
+            Content = new ByteArrayContent(content),
+        };
+        req.Content.Headers.ContentType = new MediaTypeHeaderValue(contentType);
+        req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", await GetAccessTokenAsync(ct));
+
+        using var resp = await _http.SendAsync(req, ct);
+        var raw = await resp.Content.ReadAsStringAsync(ct);
+        if (!resp.IsSuccessStatusCode)
+        {
+            throw new SharePointUploadException(
+                $"Graph PUT content {fullPath} failed (HTTP {(int)resp.StatusCode}): {Truncate(raw, 400)}");
+        }
+
+        using var doc = JsonDocument.Parse(raw);
+        var item = doc.RootElement;
+        var itemId = item.GetProperty("id").GetString()
+            ?? throw new SharePointUploadException("Upload response missing id.");
+        var webUrl = item.TryGetProperty("webUrl", out var w) && w.ValueKind == JsonValueKind.String
+            ? w.GetString() ?? string.Empty
+            : string.Empty;
+
+        return (fullPath, webUrl, itemId);
+    }
+
+    /// <summary>
+    /// Delete the file at <c>{rootFolderPath}/{relativePath}</c>. Idempotent — a
+    /// 404 (already gone) is treated as success so callers can delete freely.
+    /// </summary>
+    public async Task DeleteFileAsync(
+        string siteUrl,
+        string driveName,
+        string rootFolderPath,
+        string relativePath,
+        CancellationToken ct = default)
+    {
+        if (!IsConfigured)
+        {
+            throw new SharePointUploadException("SharePoint integration is not fully configured.");
+        }
+
+        var driveId = await GetDriveIdAsync(siteUrl, driveName, ct);
+        var fullPath = JoinPath(rootFolderPath, relativePath);
+        var encoded = EncodePath(fullPath);
+
+        using var req = new HttpRequestMessage(
+            HttpMethod.Delete, GraphRoot + $"/drives/{driveId}/root:/{encoded}");
+        req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", await GetAccessTokenAsync(ct));
+
+        using var resp = await _http.SendAsync(req, ct);
+        if (resp.StatusCode == HttpStatusCode.NotFound) return; // already gone — idempotent
+        if (!resp.IsSuccessStatusCode)
+        {
+            var raw = await resp.Content.ReadAsStringAsync(ct);
+            throw new SharePointUploadException(
+                $"Graph DELETE {fullPath} failed (HTTP {(int)resp.StatusCode}): {Truncate(raw, 400)}");
+        }
+    }
+
     // ----- internals -------------------------------------------------------
 
     private async Task<string> GetAccessTokenAsync(CancellationToken ct)

@@ -1,0 +1,117 @@
+@page
+@model CommunityHub.Pages.Speaker.GraphicsModel
+@{
+    ViewData["Title"] = "My share graphics";
+}
+
+@if (Model.AccessDenied)
+{
+    <div class="card">
+        <h2>My share graphics</h2>
+        <p class="error" role="alert">
+            This page is for speakers
+            (<strong>@CommunityHub.Branding.RoleDisplay.Name(Model.Role)</strong>).
+        </p>
+        <p><a asp-page="/Index">Back to hub</a></p>
+    </div>
+    return;
+}
+
+<style>
+    .btn { background:#008BD2; color:#fff; border:0; border-radius:6px;
+           padding:8px 14px; font-size:14px; cursor:pointer; text-decoration:none; }
+    .btn:hover { background:#0079b8; }
+    .gfx-list { list-style:none; padding:0; margin:0; }
+    .gfx-item {
+        border:1px solid #e5e7eb; border-radius:10px;
+        padding:14px; margin:10px 0;
+        display:flex; flex-wrap:wrap; gap:10px 14px; align-items:flex-start;
+    }
+    .gfx-main { flex:1 1 220px; min-width:0; }
+    .gfx-kind { font-weight:700; color:var(--el-darkblue); font-size:16px; }
+    .gfx-title { color:#4b5563; font-size:14px; margin-top:4px; word-break:break-word; }
+    .gfx-actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; }
+    .gfx-actions a.btn { display:inline-block; }
+    .gfx-empty { color:#6b7280; }
+    @@media (max-width: 460px) {
+        .gfx-actions a.btn { flex:1 1 100%; text-align:center; }
+    }
+</style>
+
+<div class="card">
+    <h2>My share graphics</h2>
+    <p>
+        Pre-made social graphics for you to share. Download the image or open a
+        ready-to-edit draft on LinkedIn or X — you finalize and post it yourself.
+        @if (!Model.CanPost)
+        {
+            <span> (We never post on your behalf.)</span>
+        }
+    </p>
+</div>
+
+@* The "I'm speaking at ELDK27" announcement draft. Builds a LinkedIn DRAFT only. *@
+@if (Model.AnnouncementDraft is not null)
+{
+    <div class="card">
+        <h3>Announce you're speaking</h3>
+        <p>Create a LinkedIn draft saying you're speaking at @Model.EventDisplayName.
+           Includes the date and ticket link — review it and post when you're ready.</p>
+        <label for="announce-text"><strong>Draft text</strong></label>
+        <textarea id="announce-text" rows="4" readonly aria-label="Draft post text"
+                  style="width:100%; box-sizing:border-box;">@Model.AnnouncementDraft.Text</textarea>
+        <p style="margin-top:8px;">
+            <a class="btn" href="@Model.AnnouncementDraft.IntentUrl" target="_blank" rel="noopener noreferrer">
+                Open LinkedIn draft (opens in a new tab)
+            </a>
+        </p>
+    </div>
+}
+
+<div class="card">
+    <h3>Your graphics</h3>
+    @if (Model.Cards.Count == 0)
+    {
+        <p class="gfx-empty">
+            No graphics have been released to you yet. Once the organizers review and
+            release your graphics, they'll appear here.
+        </p>
+    }
+    else
+    {
+        <ul class="gfx-list">
+            @foreach (var c in Model.Cards)
+            {
+                <li class="gfx-item">
+                    <div class="gfx-main">
+                        <div class="gfx-kind">@c.Kind</div>
+                        @if (!string.IsNullOrWhiteSpace(c.Title))
+                        {
+                            <div class="gfx-title">@c.Title</div>
+                        }
+                        <div class="gfx-actions">
+                            @if (c.HasStoredFile)
+                            {
+                                <a class="btn" href="@c.DownloadUrl" target="_blank" rel="noopener noreferrer">
+                                    Download PNG (opens in a new tab)
+                                </a>
+                            }
+                            else
+                            {
+                                <span class="gfx-empty">Image not yet stored.</span>
+                            }
+                            <a class="btn" href="@c.LinkedInDraft.IntentUrl" target="_blank" rel="noopener noreferrer">
+                                Share on LinkedIn (draft)
+                            </a>
+                            <a class="btn" href="@c.XDraft.IntentUrl" target="_blank" rel="noopener noreferrer">
+                                Share on X (draft)
+                            </a>
+                        </div>
+                    </div>
+                </li>
+            }
+        </ul>
+    }
+</div>
+
+<p><a asp-page="/Index">Back to hub</a></p>

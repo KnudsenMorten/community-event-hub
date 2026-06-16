@@ -4,10 +4,15 @@
     Layout = "_Layout";
     ViewData["Title"] = Model.Survey?.Title ?? "Survey";
 }
+@functions {
+    // JS-encoded localized string for safe inlining inside the wizard <script>.
+    string SurveyJs(string key) =>
+        System.Text.Encodings.Web.JavaScriptEncoder.Default.Encode(Localizer[key].Value);
+}
 
 @if (Model.Survey is null)
 {
-    <div class="card"><h2>Survey not found</h2><p>No survey is configured at this URL.</p></div>
+    <div class="card"><h2>@Localizer["Survey.NotFound"]</h2><p>@Localizer["Survey.NotConfigured"]</p></div>
     return;
 }
 
@@ -215,7 +220,7 @@
                 </p>
 
                 <p style="margin-top:18px; font-size:13px; color:#1b5e3a;">
-                    Or jump directly to a track's results:
+                    @Localizer["Survey.JumpToTrackResults"]
                 </p>
                 <ul style="margin:4px 0 0 0; padding-left:18px; font-size:13px; color:#166534; line-height:1.7;">
                     @foreach (var t in Model.Survey.Tracks)
@@ -225,7 +230,7 @@
                 </ul>
 
                 <p style="margin-top:18px; font-size:13px; color:#1b5e3a;">
-                    Thank you from the ELDK27 organizer team:
+                    @Localizer["Survey.ThankYouTeam"]
                 </p>
                 <ul style="margin:4px 0 0 0; padding-left:18px; font-size:13px; color:#166534;">
                     <li><a href="https://www.linkedin.com/in/knudsenmorten/" target="_blank" rel="noopener">Morten Knudsen</a></li>
@@ -239,19 +244,19 @@
         {
             @if (!string.IsNullOrEmpty(Model.ErrorMessage))
             {
-                <div class="vol-error">@Model.ErrorMessage</div>
+                <div class="vol-error" role="alert">@Model.ErrorMessage</div>
             }
 
-            <div class="stepbar">
-                <div class="pill active" data-step-pill="1">1 &middot; Pick a track</div>
-                <div class="pill"        data-step-pill="2">2 &middot; Pick your top 3 topics</div>
-                <div class="pill"        data-step-pill="3">3 &middot; Pick your level per topic</div>
-            </div>
+            <ol class="stepbar" aria-label="@Localizer["Survey.Progress"]" style="list-style:none;padding:0;">
+                <li class="pill active" data-step-pill="1" aria-current="step">@Localizer["Survey.Step1Pill"]</li>
+                <li class="pill"        data-step-pill="2">@Localizer["Survey.Step2Pill"]</li>
+                <li class="pill"        data-step-pill="3">@Localizer["Survey.Step3Pill"]</li>
+            </ol>
 
             <form method="post" id="surveyForm" novalidate>
                 @* Honeypot — invisible to humans, irresistible to bots. *@
                 <div class="vol-hp" aria-hidden="true">
-                    <label for="Website">Website (do not fill)</label>
+                    <label for="Website">@Localizer["Survey.HoneypotLabel"]</label>
                     <input type="text" name="Website" id="Website" tabindex="-1" autocomplete="off" />
                 </div>
 
@@ -261,7 +266,7 @@
                         <p>@Model.Survey.Intro</p>
                         @if (!string.IsNullOrWhiteSpace(Model.Survey.IntroDisclaimer))
                         {
-                            <p class="disclaimer"><strong>Disclaimer:</strong> @Model.Survey.IntroDisclaimer</p>
+                            <p class="disclaimer"><strong>@Localizer["Survey.Disclaimer"]</strong> @Model.Survey.IntroDisclaimer</p>
                         }
                         @if (!string.IsNullOrWhiteSpace(Model.Survey.IntroThankYou))
                         {
@@ -269,10 +274,10 @@
                         }
                     </div>
                     <div class="step-photo" style="background-image:url('/img/survey-step1.jpg'); background-position:center 30%;">
-                        <div class="caption">A previous Experts Live Denmark — your input shapes the next one.</div>
+                        <div class="caption">@Localizer["Survey.Step1Caption"]</div>
                     </div>
-                    <h3>Which technical track excites you most?</h3>
-                    <p class="lead">Pick one. We'll show you topic options for that track in the next step.</p>
+                    <h3>@Localizer["Survey.Step1Heading"]</h3>
+                    <p class="lead">@Localizer["Survey.Step1Lead"]</p>
                     <div class="track-grid">
                         @foreach (var track in Model.Survey.Tracks)
                         {
@@ -288,14 +293,14 @@
                 @* ------------- Step 2: pick top 3 topics ------------- *@
                 <section class="step-section" data-step="2">
                     <div class="step-photo" style="background-image:url('/img/survey-step2.jpg'); background-position:center 50%;">
-                        <div class="caption">Speakers shape the agenda. Your top three tell them what to pitch.</div>
+                        <div class="caption">@Localizer["Survey.Step2Caption"]</div>
                     </div>
-                    <h3>Pick your top three topics</h3>
-                    <p class="lead">Tap <strong>1st</strong> next to your most-wanted topic, then <strong>2nd</strong> for your second-favorite, then <strong>3rd</strong>. Tap again to clear. We're asking what <em>topics</em> you'd love to learn about — not yet about specific sessions.</p>
+                    <h3>@Localizer["Survey.Step2Heading"]</h3>
+                    <p class="lead">@Localizer["Survey.Step2Lead"]</p>
                     <p class="ai-note" style="font-size:12.5px; color:#5a6170; background:#fff8e1; border-left:3px solid #f4b400; padding:8px 12px; border-radius:4px; margin:4px 0 14px 0; line-height:1.5;">
-                        <strong>Heads-up:</strong> The topic titles + summaries below are <em>AI-generated samples</em> to give you a feel for the shape of each track. Expect the occasional odd phrasing, an unexpectedly funny summary, or a topic that reads like it was dreamt up at 3am. Pick the topics whose <em>direction</em> excites you most — the speakers will refine the exact session titles + angles during the Call for Speakers.
+                        @Localizer["Survey.AiNote2"]
                     </p>
-                    <div class="picks-status" id="picksStatus">Pick three to continue.</div>
+                    <div class="picks-status" id="picksStatus" role="status" aria-live="polite">@Localizer["Survey.PickThree"]</div>
 
                     @foreach (var track in Model.Survey.Tracks)
                     {
@@ -306,10 +311,10 @@
                                 @foreach (var topic in byCat)
                                 {
                                     <div class="topic-row" data-topic-id="@topic.Id" data-track="@track.Id">
-                                        <div class="rank-btns">
-                                            <button type="button" class="rank-btn" data-rank="1" title="Make this my 1st pick">1st</button>
-                                            <button type="button" class="rank-btn" data-rank="2" title="Make this my 2nd pick">2nd</button>
-                                            <button type="button" class="rank-btn" data-rank="3" title="Make this my 3rd pick">3rd</button>
+                                        <div class="rank-btns" role="group" aria-label="Rank @topic.Title">
+                                            <button type="button" class="rank-btn" data-rank="1" aria-pressed="false" aria-label="Make &quot;@topic.Title&quot; my 1st pick">1st</button>
+                                            <button type="button" class="rank-btn" data-rank="2" aria-pressed="false" aria-label="Make &quot;@topic.Title&quot; my 2nd pick">2nd</button>
+                                            <button type="button" class="rank-btn" data-rank="3" aria-pressed="false" aria-label="Make &quot;@topic.Title&quot; my 3rd pick">3rd</button>
                                         </div>
                                         <div class="body">
                                             <div class="title">@topic.Title</div>
@@ -329,33 +334,40 @@
                 @* ------------- Step 3: levels ------------- *@
                 <section class="step-section" data-step="3">
                     <div class="step-photo" style="background-image:url('/img/survey-step3.jpg'); background-position:center top;">
-                        <div class="caption">Honest "I can…" answers help speakers pitch the room right.</div>
+                        <div class="caption">@Localizer["Survey.Step3Caption"]</div>
                     </div>
-                    <h3>For each of your three picks, what fits you?</h3>
-                    <p class="lead">Pick the "I can…" statement that feels closest to you. There's no wrong answer — the goal is to help speakers pitch the right depth for our audience.</p>
+                    <h3>@Localizer["Survey.Step3Heading"]</h3>
+                    <p class="lead">@Localizer["Survey.Step3Lead"]</p>
                     <p class="ai-note" style="font-size:12.5px; color:#5a6170; background:#fff8e1; border-left:3px solid #f4b400; padding:8px 12px; border-radius:4px; margin:4px 0 14px 0; line-height:1.5;">
-                        <strong>Heads-up:</strong> The "I can…" level statements are also <em>AI-generated samples</em>. Funny phrasing, oddly-specific examples, and the occasional eyebrow-raising claim may appear. Match the <em>spirit</em> of the level you're closest to — close enough is good enough; the goal is to help speakers pitch the right depth, not to grade you.
+                        @Localizer["Survey.AiNote3"]
                     </p>
                     <div id="levelHost"></div>
 
                     <div class="comment-field" style="margin-top:18px;">
-                        <label for="Comment">Anything else we should know? (optional)</label>
+                        <label for="Comment">@Localizer["Survey.CommentLabel"]</label>
                         <textarea asp-for="Comment" id="Comment" maxlength="2000"
-                                  placeholder="Your role, what you're building right now, topics we didn't list, etc."></textarea>
+                                  placeholder="@Localizer["Survey.CommentPlaceholder"]"></textarea>
                     </div>
                 </section>
 
                 <div class="wizard-actions">
-                    <button type="button" class="secondary" id="prevBtn" style="visibility:hidden;">&larr; Back</button>
+                    <button type="button" class="secondary" id="prevBtn" style="visibility:hidden;">@Localizer["Survey.BackBtn"]</button>
                     <div class="right">
-                        <button type="button" id="nextBtn" disabled>Next &rarr;</button>
-                        <button type="submit" id="submitBtn" style="display:none;" disabled>Send my input</button>
+                        <button type="button" id="nextBtn" disabled>@Localizer["Survey.NextBtn"]</button>
+                        <button type="submit" id="submitBtn" style="display:none;" disabled>@Localizer["Survey.SubmitBtn"]</button>
                     </div>
                 </div>
             </form>
 
             <script>
                 (function() {
+                    var i18n = {
+                        pickMoreTpl: '@Html.Raw(SurveyJs("Survey.JsPickMore"))',
+                        allRanked:   '@Html.Raw(SurveyJs("Survey.JsAllRanked"))',
+                        rank: { 1: '@Html.Raw(SurveyJs("Survey.JsRank1"))', 2: '@Html.Raw(SurveyJs("Survey.JsRank2"))', 3: '@Html.Raw(SurveyJs("Survey.JsRank3"))' },
+                        advanced: '@Html.Raw(SurveyJs("Survey.JsAdvanced"))', expert: '@Html.Raw(SurveyJs("Survey.JsExpert"))', blackBelt: '@Html.Raw(SurveyJs("Survey.JsBlackBelt"))',
+                        unknown: '@Html.Raw(SurveyJs("Survey.JsUnknown"))'
+                    };
                     var form        = document.getElementById('surveyForm');
                     var pills       = form.parentNode.querySelectorAll('.stepbar .pill');
                     var sections    = form.querySelectorAll('.step-section');
@@ -387,8 +399,13 @@
                         sections.forEach(function(s) { s.classList.toggle('active', s.dataset.step === String(n)); });
                         pills.forEach(function(p) {
                             var pn = parseInt(p.dataset.stepPill, 10);
-                            p.classList.toggle('active', pn === n);
+                            var isActive = pn === n;
+                            p.classList.toggle('active', isActive);
                             p.classList.toggle('done', pn < n);
+                            // aria-current="step" tells a screen reader which
+                            // wizard step is showing; removed from the others.
+                            if (isActive) { p.setAttribute('aria-current', 'step'); }
+                            else { p.removeAttribute('aria-current'); }
                         });
                         prevBtn.style.visibility = (n === 1) ? 'hidden' : 'visible';
                         nextBtn.style.display    = (n === 3) ? 'none' : '';
@@ -410,7 +427,7 @@
                                 set.style.display = (set.dataset.trackSet === r.value) ? '' : 'none';
                             });
                             // clear rank buttons across all sets
-                            form.querySelectorAll('.rank-btn').forEach(function(b) { b.classList.remove('rank-1','rank-2','rank-3'); });
+                            form.querySelectorAll('.rank-btn').forEach(function(b) { b.classList.remove('rank-1','rank-2','rank-3'); b.setAttribute('aria-pressed', 'false'); });
                             form.querySelectorAll('.topic-row').forEach(function(row) { row.classList.remove('picked'); });
                             refreshButtons();
                             updatePicksStatus();
@@ -437,7 +454,10 @@
                         }
 
                         // repaint
-                        form.querySelectorAll('.rank-btn').forEach(function(b) { b.classList.remove('rank-1','rank-2','rank-3'); });
+                        form.querySelectorAll('.rank-btn').forEach(function(b) {
+                            b.classList.remove('rank-1','rank-2','rank-3');
+                            b.setAttribute('aria-pressed', 'false');
+                        });
                         form.querySelectorAll('.topic-row').forEach(function(r) { r.classList.remove('picked'); });
                         picks.forEach(function(tid, i) {
                             if (!tid) return;
@@ -445,7 +465,7 @@
                             if (!thisRow) return;
                             thisRow.classList.add('picked');
                             var thisBtn = thisRow.querySelector('.rank-btn[data-rank="' + (i + 1) + '"]');
-                            if (thisBtn) thisBtn.classList.add('rank-' + (i + 1));
+                            if (thisBtn) { thisBtn.classList.add('rank-' + (i + 1)); thisBtn.setAttribute('aria-pressed', 'true'); }
                         });
 
                         document.getElementById('Pick1TopicId').value = picks[0] || '';
@@ -459,10 +479,10 @@
                     function updatePicksStatus() {
                         var filled = picks.filter(function(p) { return !!p; }).length;
                         if (filled < 3) {
-                            picksStatus.innerHTML = 'Pick ' + (3 - filled) + ' more to continue.';
+                            picksStatus.innerHTML = i18n.pickMoreTpl.replace('{0}', (3 - filled));
                             picksStatus.classList.remove('done');
                         } else {
-                            picksStatus.innerHTML = '<span class="done">All three picks ranked. Tap "Next" to choose levels.</span>';
+                            picksStatus.innerHTML = '<span class="done">' + i18n.allRanked + '</span>';
                         }
                     }
 
@@ -471,7 +491,7 @@
                     //   topic.levels (if set in JSON)  >>  track-wide default
                     // So a topic that wants its own bespoke "I can..." copy
                     // overrides the per-track generic.
-                    var rankLabels = { 1: 'My 1st pick', 2: 'My 2nd pick', 3: 'My 3rd pick' };
+                    var rankLabels = i18n.rank;
                     function renderLevels() {
                         var trackId = (form.querySelector('input[name=SelectedTrackId]:checked') || {}).value;
                         if (!trackId) { levelHost.innerHTML = ''; return; }
@@ -479,16 +499,16 @@
                         var html = '';
                         picks.forEach(function(tid, i) {
                             if (!tid) return;
-                            var t = topicLookup[tid] || { title: '(unknown)', summary: '' };
+                            var t = topicLookup[tid] || { title: i18n.unknown, summary: '' };
                             var rank = i + 1;
                             var ex = (t.levels && t.levels.advanced) ? t.levels : trackEx;
                             html += '<div class="level-card">'
                                 +   '<div class="picked-title">' + rankLabels[rank] + ' &middot; ' + escapeHtml(t.title) + '</div>'
                                 +   '<div class="picked-summary">' + escapeHtml(t.summary) + '</div>'
                                 +   '<div class="level-options">'
-                                +     levelOpt(rank, 'Advanced (300)',   1, ex.advanced)
-                                +     levelOpt(rank, 'Expert (400)',     2, ex.expert)
-                                +     levelOpt(rank, 'Black Belt (500)', 3, ex.blackBelt)
+                                +     levelOpt(rank, i18n.advanced,  1, ex.advanced)
+                                +     levelOpt(rank, i18n.expert,    2, ex.expert)
+                                +     levelOpt(rank, i18n.blackBelt, 3, ex.blackBelt)
                                 +   '</div>'
                                 + '</div>';
                         });

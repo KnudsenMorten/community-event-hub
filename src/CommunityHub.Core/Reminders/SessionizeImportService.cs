@@ -12,7 +12,35 @@ public sealed record SessionizeImportResult(
     int Updated,
     int Skipped,
     IReadOnlyList<string> Warnings,
-    string? Error);
+    string? Error,
+    // The companion SESSIONS import result, when the run also imported sessions
+    // (the combined API pull). Null for the Excel upload (speakers only).
+    SessionImportResult? Sessions = null);
+
+/// <summary>
+/// How a Sessionize import treats the speaker bio fields (Tagline, Biography,
+/// Blog, LinkedIn, Twitter, PhotoUrl), which are seeded from Sessionize but
+/// OWNED by the speaker once they edit them in the hub.
+/// </summary>
+public enum SessionizeImportMode
+{
+    /// <summary>
+    /// Add NEW speakers and fill only bio fields that are genuinely empty AND
+    /// have NOT been edited by the speaker. Never overwrites a speaker's own
+    /// edit. This is the scheduled / auto-sync default — a re-import preserves
+    /// every change a speaker made on their own page.
+    /// </summary>
+    Delta,
+
+    /// <summary>
+    /// Force-refresh ALL bio fields from Sessionize for a complete re-seed and
+    /// clear each speaker's "edited" set — the deliberate organizer override
+    /// ("Full import from Sessionize"). Still matches on email, never changes
+    /// the role, never deletes, never touches the hub-collected fields or the
+    /// ContactEmailOverride.
+    /// </summary>
+    Full,
+}
 
 /// <summary>
 /// Imports Sessionize speakers from an uploaded Excel file as
@@ -57,7 +85,8 @@ public sealed class SessionizeImportService
         int eventId,
         Stream excelStream,
         CancellationToken ct = default,
-        bool sendWelcome = true)
+        bool sendWelcome = true,
+        SessionizeImportMode mode = SessionizeImportMode.Delta)
     {
         var parsed = _parser.Parse(excelStream);
         if (parsed.Error is not null)
@@ -65,6 +94,29 @@ public sealed class SessionizeImportService
             return new SessionizeImportResult(
                 0, 0, 0, 0, parsed.Warnings, parsed.Error);
         }
+
+        return await ImportSpeakersAsync(
+            eventId, parsed.Speakers, parsed.Warnings, ct, sendWelcome, mode);
+    }
+
+    /// <summary>
+    /// Run the import for an edition from an already-parsed speaker list. This
+    /// is the shared core used by BOTH the Excel upload path (above) and the
+    /// Sessionize API path (<c>SessionizeApiImportService</c>): the upsert /
+    /// match-on-email / never-change-role / never-delete semantics live here
+    /// once, so the two sources behave identically. <paramref name="warnings"/>
+    /// from the source (e.g. rows skipped for a missing email) are carried
+    /// through into the result.
+    /// </summary>
+    public async Task<SessionizeImportResult> ImportSpeakersAsync(
+        int eventId,
+        IReadOnlyList<SessionizeSpeaker> speakers,
+        IReadOnlyList<string> warnings,
+        CancellationToken ct = default,
+        bool sendWelcome = true,
+        SessionizeImportMode mode = SessionizeImportMode.Delta)
+    {
+        var parsed = new SessionizeParseResult(speakers, warnings, null);
 
         // Existing speakers for this edition, by email.
         var existing = await _db.Participants
@@ -119,9 +171,17 @@ public sealed class SessionizeImportService
 
         await _db.SaveChangesAsync(ct);
 
-        // Upsert SpeakerProfile rows with Sessionize-imported fields only.
-        // Hub-collected fields (Accreditation, IsFirstTimeSpeaker, Country,
-        // Gender) are NEVER touched by the import.
+        // Upsert SpeakerProfile rows with the speaker bio fields. Hub-collected
+        // fields (Accreditation, IsFirstTimeSpeaker, Country, Gender,
+        // ContactEmailOverride) are NEVER touched by the import.
+        //
+        // The bio fields (Tagline, Biography, Blog, LinkedIn, Twitter, PhotoUrl)
+        // are seeded from Sessionize but OWNED by the speaker once edited:
+        //  - Delta mode (scheduled / auto): fill a field only when it is empty
+        //    AND the speaker has NOT edited it — a re-import never flushes a
+        //    speaker's own change.
+        //  - Full mode (organizer "Full import" override): force-refresh every
+        //    field from Sessionize and clear the speaker-edited set.
         foreach (var p in (await _db.Participants
                      .Where(x => x.EventId == eventId)
                      .ToListAsync(ct)))
@@ -138,11 +198,31 @@ public sealed class SessionizeImportService
                 };
                 _db.SpeakerProfiles.Add(prof);
             }
-            prof.Tagline   = s.TagLine   ?? prof.Tagline;
-            prof.Biography = s.Biography ?? prof.Biography;
-            prof.Blog      = s.Blog      ?? prof.Blog;
-            prof.LinkedIn  = s.LinkedIn  ?? prof.LinkedIn;
-            prof.Twitter   = s.Twitter   ?? prof.Twitter;
+
+            if (mode == SessionizeImportMode.Full)
+            {
+                // Operator override: re-seed from Sessionize and drop the dirty
+                // set so the profile tracks Sessionize again. A blank value in
+                // the source clears the field (a true full refresh).
+                prof.Tagline   = s.TagLine;
+                prof.Biography = s.Biography;
+                prof.Blog      = s.Blog;
+                prof.LinkedIn  = s.LinkedIn;
+                prof.Twitter   = s.Twitter;
+                prof.PhotoUrl  = s.ProfilePictureUrl;
+                prof.ClearSpeakerEdited();
+            }
+            else
+            {
+                // Delta: only fill genuinely-empty, never-speaker-edited fields.
+                prof.Tagline   = FillIfUntouched(prof, SpeakerProfile.BioFields.Tagline,   prof.Tagline,   s.TagLine);
+                prof.Biography = FillIfUntouched(prof, SpeakerProfile.BioFields.Biography, prof.Biography, s.Biography);
+                prof.Blog      = FillIfUntouched(prof, SpeakerProfile.BioFields.Blog,      prof.Blog,      s.Blog);
+                prof.LinkedIn  = FillIfUntouched(prof, SpeakerProfile.BioFields.LinkedIn,  prof.LinkedIn,  s.LinkedIn);
+                prof.Twitter   = FillIfUntouched(prof, SpeakerProfile.BioFields.Twitter,   prof.Twitter,   s.Twitter);
+                prof.PhotoUrl  = FillIfUntouched(prof, SpeakerProfile.BioFields.PhotoUrl,  prof.PhotoUrl,  s.ProfilePictureUrl);
+            }
+
             prof.UpdatedAt = now;
             prof.LastSessionizeImportAt = now;
         }
@@ -167,5 +247,19 @@ public sealed class SessionizeImportService
         return new SessionizeImportResult(
             parsed.Speakers.Count, created, updated, skipped,
             parsed.Warnings, null);
+    }
+
+    /// <summary>
+    /// Delta-merge a single bio field: keep the current value when the speaker
+    /// has edited this field OR a value is already present; otherwise take the
+    /// incoming Sessionize value (which may itself be null). This is what makes
+    /// the scheduled sync "add NEW + fill empty, never flush speaker edits".
+    /// </summary>
+    private static string? FillIfUntouched(
+        SpeakerProfile prof, string field, string? current, string? incoming)
+    {
+        if (prof.IsSpeakerEdited(field)) return current;          // speaker owns it
+        if (!string.IsNullOrWhiteSpace(current)) return current;  // already populated
+        return incoming;                                          // genuinely empty
     }
 }

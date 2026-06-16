@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- ======================================================================
+       CommunityHub.Web.Tests - handler-level tests for the ASP.NET web layer
+       (Razor Page models in CommunityHub) that cannot be reached from the
+       Core test project. Drives the real page-model handlers over a fake
+       HttpContext (a capturing IAuthenticationService stands in for the cookie
+       handler) so the acting-as session re-issue + landing + return round-trip
+       is asserted deterministically, with no live server / SQL / secrets.
+       ====================================================================== -->
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+    <!-- The web project floats EFCore.Design to 8.* (resolves to 8.0.28) while
+         Core pins EF 8.0.6, so referencing the web project surfaces a benign
+         EF assembly-unification notice (MSB3277). EFCore.Design is PrivateAssets
+         in the web project and never used at runtime here, so demote just this
+         one notice to a message to keep the build 0-warning. Drop this when the
+         web project's EF versions are aligned. -->
+    <MSBuildWarningsAsMessages>MSB3277</MSBuildWarningsAsMessages>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" Version="8.0.6" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The web project carries the page-model handlers under test
+         (ParticipantsModel.OnPostSwitchToUserAsync, ReturnToOrganizerModel). -->
+    <ProjectReference Include="..\..\src\CommunityHub\CommunityHub.csproj" />
+  </ItemGroup>
+
+</Project>

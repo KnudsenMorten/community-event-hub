@@ -13,7 +13,15 @@ public sealed record CompanyManagerCompany(
     string LinkedInUrl,
     string TwitterUrl,
     int DefaultSignerUserId,
-    int EventCoordinationDefaultContactUserId);
+    int EventCoordinationDefaultContactUserId,
+    // --- ERP / billing fields (DESIGN §6; used by the e-conomic ERP sync) ----
+    // company tax-id (CVR); currency + VAT zone; the existing e-conomic
+    // customer number when the company is already in the ERP. All optional --
+    // empty when the operator hasn't filled the Webshop Data fields.
+    string CorporateIdentificationNumber = "",
+    string Currency = "",
+    string VatZone = "",
+    string ErpCustomerNumber = "");
 
 /// <summary>One user linked to a Company Manager company.</summary>
 public sealed record CompanyManagerUser(
@@ -91,7 +99,11 @@ public sealed class CompanyManagerClient
             LinkedInUrl: GetString(o, "linkedin_url"),
             TwitterUrl: GetString(o, "twitter_url"),
             DefaultSignerUserId: GetInt(o, "default_signer_id"),
-            EventCoordinationDefaultContactUserId: GetInt(o, "event_coordination_default_contact_id"));
+            EventCoordinationDefaultContactUserId: GetInt(o, "event_coordination_default_contact_id"),
+            CorporateIdentificationNumber: GetString(o, "corporate_identification_number"),
+            Currency: GetString(o, "currency"),
+            VatZone: GetString(o, "vat_zone"),
+            ErpCustomerNumber: GetString(o, "erp_customer_number"));
     }
 
     /// <summary>

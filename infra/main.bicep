@@ -34,12 +34,12 @@ param location string = 'westeurope'
 @description('Short base name for resources. Keep lowercase, no spaces.')
 param baseName string = 'communityhub'
 
-@description('SQL administrator login name.')
-param sqlAdminLogin string = 'communityhubadmin'
-
-@description('SQL administrator password. Supply at deploy time (deploy.sh prompts / reads it); never commit a value.')
-@secure()
-param sqlAdminPassword string
+// SQL admin login + password parameters were removed: the SQL server is
+// Azure-AD-only (managed-identity auth) and no SQL login or password is
+// provisioned. sql.bicep keeps optional, defaulted sqlAdminLogin/Password
+// params only as a fallback for azureADOnlyAuthentication=false, which this
+// template never enables. Emitting a Sql__Admin* app setting made the app take
+// the SQL-auth path and Migrate() failed 500 against the AAD-only server.
 
 @description('Zoho Backstage origin allowed to embed the hub in an iframe (e.g. https://eldk27.expertslive.dk). Empty until confirmed - see CONTEXT.md 5a / open question 13.')
 param backstageEmbedOrigin string = ''
@@ -113,8 +113,9 @@ module sql 'modules/sql.bicep' = {
     sqlServerName:    names.sqlServer
     sqlDatabaseName:  names.sqlDatabase
     tags:             tags
-    sqlAdminLogin:    sqlAdminLogin
-    sqlAdminPassword: sqlAdminPassword
+    // No sqlAdminLogin / sqlAdminPassword passed: the server is Azure-AD-only
+    // and authenticates app traffic via managed identity. sql.bicep's optional
+    // login/password params stay defaulted (unused while azureADOnlyAuthentication=true).
   }
 }
 

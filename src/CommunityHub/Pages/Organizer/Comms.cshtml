@@ -1,0 +1,295 @@
+@page
+@using CommunityHub.Core.Organizer
+@model CommunityHub.Pages.Organizer.CommsModel
+@{
+    ViewData["Title"] = Localizer["OrgComms.Title"].Value;
+
+    string OutcomeLabel(CommsOutcome o) => o switch
+    {
+        CommsOutcome.Sent => Localizer["Comms.Sent"].Value,
+        CommsOutcome.Failed => Localizer["Comms.Failed"].Value,
+        CommsOutcome.Dropped => Localizer["Comms.Dropped"].Value,
+        _ => Localizer["Comms.Scheduled"].Value,
+    };
+    string OutcomeColor(CommsOutcome o) => o switch
+    {
+        CommsOutcome.Sent => "#137333",
+        CommsOutcome.Failed => "#a50e0e",
+        CommsOutcome.Dropped => "#9a6700",
+        _ => "#1a73e8",
+    };
+    string ChannelLabel(CommsChannel c) =>
+        c == CommsChannel.SoMe ? Localizer["Comms.ChannelSoMe"].Value : Localizer["Comms.ChannelEmail"].Value;
+}
+
+<div class="card">
+    <h2>@Localizer["OrgComms.Title"]</h2>
+    @if (Model.AccessDenied)
+    {
+        <p class="error" role="alert">@Localizer["Common.OrganizersOnly"]</p>
+        <p><a asp-page="/Index">@Localizer["Common.BackToHub"]</a></p>
+    }
+    else
+    {
+        <p>@Localizer["Comms.CockpitIntro"]</p>
+        <p><a asp-page="/Organizer/Index">&larr; @Localizer["Common.BackToOrganizerArea"]</a></p>
+    }
+</div>
+
+@if (!Model.AccessDenied && Model.Snapshot is { } snap)
+{
+    @if (!string.IsNullOrWhiteSpace(Model.Msg))
+    {
+        <div class="card" role="status" aria-live="polite"
+             style="border-left:4px solid #137333;">
+            <p style="margin:0;">@Model.Msg</p>
+        </div>
+    }
+
+    <!-- Headline counters: real outcomes only, never optimistic. -->
+    <div class="card">
+        <h2>@Localizer["Comms.AtAGlance"]</h2>
+        <div role="status" aria-live="polite"
+             style="display:flex;flex-wrap:wrap;gap:12px;">
+            <div style="flex:1 1 140px;min-width:140px;">
+                <div style="font-size:28px;font-weight:700;">@snap.EmailsSent</div>
+                <div style="color:#6b7280;font-size:13px;">@Localizer["Comms.EmailsSent"]</div>
+            </div>
+            <div style="flex:1 1 140px;min-width:140px;">
+                <div style="font-size:28px;font-weight:700;color:@(snap.EmailsDropped > 0 ? "#9a6700" : "inherit");">@snap.EmailsDropped</div>
+                <div style="color:#6b7280;font-size:13px;">@Localizer["Comms.EmailsDropped"]</div>
+            </div>
+            <div style="flex:1 1 140px;min-width:140px;">
+                <div style="font-size:28px;font-weight:700;color:@(snap.EmailsFailed > 0 ? "#a50e0e" : "inherit");">@snap.EmailsFailed</div>
+                <div style="color:#6b7280;font-size:13px;">@Localizer["Comms.EmailsFailed"]</div>
+            </div>
+            <div style="flex:1 1 140px;min-width:140px;">
+                <div style="font-size:28px;font-weight:700;">@snap.SoMeScheduled</div>
+                <div style="color:#6b7280;font-size:13px;">@Localizer["Comms.SoMeScheduled"]</div>
+            </div>
+            <div style="flex:1 1 140px;min-width:140px;">
+                <div style="font-size:28px;font-weight:700;">@snap.SoMePublished</div>
+                <div style="color:#6b7280;font-size:13px;">@Localizer["Comms.SoMePublished"]</div>
+            </div>
+        </div>
+        @if (snap.AllDelivered)
+        {
+            <p class="info" role="status" style="margin-top:10px;">@Localizer["Comms.AllDelivered"]</p>
+        }
+    </div>
+
+    <!-- Resend: undelivered participant mail, one click to send again. -->
+    <div class="card">
+        <h2>@Localizer["Comms.ResendHeading"]</h2>
+        <p>@Localizer["Comms.ResendIntro"]</p>
+        @if (snap.ResendCandidates.Count == 0)
+        {
+            <p class="info" role="status">@Localizer["Comms.NoResend"]</p>
+        }
+        else
+        {
+            <div style="overflow-x:auto;">
+                <table style="width:100%;border-collapse:collapse;min-width:560px;">
+                    <caption class="sr-only">@Localizer["Comms.ResendHeading"]</caption>
+                    <thead>
+                        <tr style="text-align:left;border-bottom:2px solid #ddd;">
+                            <th scope="col">@Localizer["Comms.ColRecipient"]</th>
+                            <th scope="col">@Localizer["Comms.ColSubject"]</th>
+                            <th scope="col">@Localizer["Comms.ColOutcome"]</th>
+                            <th scope="col">@Localizer["Comms.ColAction"]</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var r in snap.ResendCandidates)
+                        {
+                            <tr style="border-bottom:1px solid #eee;">
+                                <td style="word-break:break-all;">
+                                    <div>@r.Name</div>
+                                    <div style="color:#6b7280;font-size:13px;">@r.Email</div>
+                                </td>
+                                <td style="word-break:break-word;">
+                                    <div>@r.Subject</div>
+                                    <div style="color:#6b7280;font-size:12px;">@r.Category</div>
+                                </td>
+                                <td>
+                                    <span style="color:@OutcomeColor(r.Outcome);" title="@r.Error">@OutcomeLabel(r.Outcome)</span>
+                                </td>
+                                <td>
+                                    <form method="post" asp-page-handler="Resend"
+                                          style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;">
+                                        <input type="hidden" name="participantId" value="@r.ParticipantId" />
+                                        <label class="sr-only" for="tpl-@r.ParticipantId">@Localizer["Comms.ResendTemplateLabel"]</label>
+                                        <select id="tpl-@r.ParticipantId" name="template" style="max-width:200px;">
+                                            <option value="welcome-login">welcome-login</option>
+                                            <option value="onboarding-getting-started">onboarding-getting-started</option>
+                                            <option value="onboarding-your-tasks">onboarding-your-tasks</option>
+                                            <option value="invitation">invitation</option>
+                                        </select>
+                                        <button type="submit">@Localizer["Comms.Resend"]</button>
+                                    </form>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+            <p style="color:#6b7280;font-size:13px;margin-top:8px;">@Localizer["Comms.ResendHint"]</p>
+        }
+    </div>
+
+    <!-- Upcoming: the next things going out (scheduled SoMe posts). -->
+    <div class="card">
+        <h2>@Localizer["Comms.UpcomingHeading"]</h2>
+        @if (snap.UpcomingScheduled.Count == 0)
+        {
+            <p class="info" role="status">@Localizer["Comms.NoUpcoming"]</p>
+        }
+        else
+        {
+            <ul style="padding-left:18px;">
+                @foreach (var u in snap.UpcomingScheduled)
+                {
+                    <li style="margin-bottom:6px;">
+                        <strong>@u.When.UtcDateTime.ToString("dd MMM HH:mm")</strong> &middot;
+                        <span style="color:#6b7280;">@ChannelLabel(u.Channel)</span> &middot;
+                        @u.Title
+                    </li>
+                }
+            </ul>
+        }
+    </div>
+
+    <!-- Who-got-what: per recipient, the real EmailLog outcome. -->
+    <div class="card">
+        <h2>@Localizer["Comms.WhoGotWhat"]</h2>
+        <p>@Localizer["Comms.WhoGotWhatIntro"]</p>
+        @if (snap.WhoGotWhat.Count == 0)
+        {
+            <p class="info" role="status">@Localizer["Comms.NoEmails"]</p>
+        }
+        else
+        {
+            <div style="overflow-x:auto;">
+                <table style="width:100%;border-collapse:collapse;min-width:600px;">
+                    <caption class="sr-only">@Localizer["Comms.WhoGotWhat"]</caption>
+                    <thead>
+                        <tr style="text-align:left;border-bottom:2px solid #ddd;">
+                            <th scope="col">@Localizer["Comms.ColRecipient"]</th>
+                            <th scope="col">@Localizer["Comms.Sent"]</th>
+                            <th scope="col">@Localizer["Comms.Dropped"]</th>
+                            <th scope="col">@Localizer["Comms.Failed"]</th>
+                            <th scope="col">@Localizer["Comms.ColLast"]</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var w in snap.WhoGotWhat)
+                        {
+                            <tr style="border-bottom:1px solid #eee;">
+                                <td style="word-break:break-all;">
+                                    @if (!string.IsNullOrWhiteSpace(w.Name)) { <div>@w.Name</div> }
+                                    <div style="color:#6b7280;font-size:13px;">@w.Email</div>
+                                </td>
+                                <td>@w.Sent</td>
+                                <td style="color:@(w.Dropped > 0 ? "#9a6700" : "inherit");">@w.Dropped</td>
+                                <td style="color:@(w.Failed > 0 ? "#a50e0e" : "inherit");">@w.Failed</td>
+                                <td style="white-space:nowrap;color:#6b7280;font-size:13px;">@w.LastAt.UtcDateTime.ToString("dd MMM HH:mm")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div>
+
+    <!-- Per-campaign delivery view. -->
+    <div class="card">
+        <h2>@Localizer["Comms.Campaigns"]</h2>
+        @if (snap.Campaigns.Count == 0)
+        {
+            <p class="info" role="status">@Localizer["Comms.NoEmails"]</p>
+        }
+        else
+        {
+            <div style="overflow-x:auto;">
+                <table style="width:100%;border-collapse:collapse;min-width:520px;">
+                    <caption class="sr-only">@Localizer["Comms.Campaigns"]</caption>
+                    <thead>
+                        <tr style="text-align:left;border-bottom:2px solid #ddd;">
+                            <th scope="col">@Localizer["Comms.ColCampaign"]</th>
+                            <th scope="col">@Localizer["Comms.Sent"]</th>
+                            <th scope="col">@Localizer["Comms.Dropped"]</th>
+                            <th scope="col">@Localizer["Comms.Failed"]</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var c in snap.Campaigns)
+                        {
+                            <tr style="border-bottom:1px solid #eee;">
+                                <td>@c.Category</td>
+                                <td>@c.Sent</td>
+                                <td style="color:@(c.Dropped > 0 ? "#9a6700" : "inherit");">@c.Dropped</td>
+                                <td style="color:@(c.Failed > 0 ? "#a50e0e" : "inherit");">@c.Failed</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div>
+
+    <!-- Unified timeline: email + SoMe, one chronological feed. -->
+    <div class="card">
+        <h2>@Localizer["Comms.Timeline"]</h2>
+        <p>@Localizer["Comms.TimelineIntro"]</p>
+        @if (snap.Timeline.Count == 0)
+        {
+            <p class="info" role="status">@Localizer["Comms.NoTimeline"]</p>
+        }
+        else
+        {
+            <div style="overflow-x:auto;">
+                <table style="width:100%;border-collapse:collapse;min-width:640px;">
+                    <caption class="sr-only">@Localizer["Comms.Timeline"]</caption>
+                    <thead>
+                        <tr style="text-align:left;border-bottom:2px solid #ddd;">
+                            <th scope="col">@Localizer["Comms.ColWhen"]</th>
+                            <th scope="col">@Localizer["Comms.ColChannel"]</th>
+                            <th scope="col">@Localizer["Comms.ColSubject"]</th>
+                            <th scope="col">@Localizer["Comms.ColRecipient"]</th>
+                            <th scope="col">@Localizer["Comms.ColOutcome"]</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var i in snap.Timeline)
+                        {
+                            <tr style="border-bottom:1px solid #eee;@(i.IsFuture ? "background:#f5f9ff;" : "")">
+                                <td style="white-space:nowrap;">@i.When.UtcDateTime.ToString("dd MMM HH:mm")</td>
+                                <td>@ChannelLabel(i.Channel)</td>
+                                <td style="word-break:break-word;">
+                                    <div>@i.Title</div>
+                                    <div style="color:#6b7280;font-size:12px;">@i.Category</div>
+                                </td>
+                                <td style="word-break:break-all;color:#6b7280;font-size:13px;">@i.Recipient</td>
+                                <td><span style="color:@OutcomeColor(i.Outcome);" title="@i.Error">@OutcomeLabel(i.Outcome)</span></td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div>
+
+    <!-- The existing comms tools this cockpit consolidates (fan-out, not duplication). -->
+    <div class="card">
+        <h2>@Localizer["Comms.ToolsHeading"]</h2>
+        <p>
+            <a asp-page="/Organizer/EmailCenter">@Localizer["Nav.OrgEmailCenter"]</a> &middot;
+            <a asp-page="/Organizer/EmailLog">@Localizer["Nav.OrgEmailLog"]</a> &middot;
+            <a asp-page="/Organizer/Broadcast">@Localizer["Nav.OrgBroadcast"]</a> &middot;
+            <a asp-page="/Organizer/SendInvitations">@Localizer["Nav.OrgSendInvitations"]</a> &middot;
+            <a asp-page="/Organizer/SendWelcomeLogin">@Localizer["Nav.OrgSendWelcome"]</a> &middot;
+            <a asp-page="/Organizer/SpeakerReminders">@Localizer["Nav.OrgSpeakerReminders"]</a> &middot;
+            <a asp-page="/Organizer/SoMeQueue">@Localizer["Nav.OrgSoMeQueue"]</a>
+        </p>
+    </div>
+}

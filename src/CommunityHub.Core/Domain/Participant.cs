@@ -25,6 +25,19 @@ public class Participant
     /// <summary>Optional - phone, for organizer contact only.</summary>
     public string? Phone { get; set; }
 
+    /// <summary>
+    /// Optional EXTRA address for this person. When set, every email the hub
+    /// sends to this participant also goes here as a <b>CC</b> (a colleague's
+    /// inbox, a shared team alias, a personal backup address …). It is purely
+    /// ADDITIVE: the primary recipient is still the effective address
+    /// (a speaker's <see cref="SpeakerProfile.ContactEmailOverride"/> ?? this
+    /// <see cref="Email"/> identity), and this is layered on top as CC. Distinct
+    /// from the speaker override (#24), which CHANGES the primary To — this never
+    /// changes the primary, it only adds a copy. Addable at onboarding (organizer)
+    /// or later by the person in their hub profile. Null/blank = no extra CC.
+    /// </summary>
+    public string? SecondaryEmail { get; set; }
+
     // --- Role ---------------------------------------------------------------
     /// <summary>Admin-set. Drives the personalized hub. One role per person.</summary>
     public ParticipantRole Role { get; set; }
@@ -41,11 +54,126 @@ public class Participant
 
     /// <summary>
     /// False = the person cannot log in (e.g. withdrew). Login checks this.
+    /// This stays the deactivation / cancellation switch — orthogonal to
+    /// <see cref="LifecycleState"/> (the onboarding pre-selection gate).
     /// </summary>
     public bool IsActive { get; set; } = true;
 
+    // --- Onboarding lifecycle (pre-selection gate) --------------------------
+    /// <summary>
+    /// The onboarding pre-selection state: <c>Inactive → Preselected → Active</c>
+    /// (default <see cref="ParticipantLifecycleState.Inactive"/>). A person lands
+    /// in the pre-selection queue inactive/preselected; an organizer validates +
+    /// activates them. <b>Login requires BOTH <see cref="IsActive"/> AND
+    /// <see cref="LifecycleState"/> == Active</b>, so a not-yet-activated queue
+    /// entry cannot sign in. Distinct from <see cref="IsActive"/>, which is the
+    /// withdrawal/cancellation switch.
+    /// </summary>
+    public ParticipantLifecycleState LifecycleState { get; set; }
+        = ParticipantLifecycleState.Inactive;
+
+    /// <summary>
+    /// Where this participant row entered the hub (organizer / Sessionize sync /
+    /// volunteer interest form / media-team sign-up). Drives the pre-selection
+    /// queue's source column + filter. Default <see cref="ParticipantQueueSource.Manual"/>.
+    /// </summary>
+    public ParticipantQueueSource QueueSource { get; set; }
+        = ParticipantQueueSource.Manual;
+
+    // --- Onboarding wizard per-step completion flags ------------------------
+    /// <summary>Onboarding step (a): the participant verified / updated their bio.</summary>
+    public bool OnboardingCompleted_Bio { get; set; }
+
+    /// <summary>Onboarding step (b): the participant updated / replaced their bio picture.</summary>
+    public bool OnboardingCompleted_Picture { get; set; }
+
+    /// <summary>Onboarding step (c): the participant completed the hotel form.</summary>
+    public bool OnboardingCompleted_Hotel { get; set; }
+
+    /// <summary>Onboarding step (d): the participant completed the appreciation form.</summary>
+    public bool OnboardingCompleted_Appreciation { get; set; }
+
+    /// <summary>Onboarding step (e): the participant completed the swag form.</summary>
+    public bool OnboardingCompleted_Swag { get; set; }
+
+    // --- Per-step completed-at timestamps -----------------------------------
+    // When each onboarding step was last marked complete (null = not done).
+    // Stamped by OnboardingService.MarkStepCompleteAsync alongside the bit, and
+    // cleared back to null when an organizer re-opens the step. Gives the admin
+    // overview an honest "when did they finish this" signal without inferring it
+    // from a separate audit table.
+    /// <summary>When step (a) bio was completed (null = not done).</summary>
+    public DateTimeOffset? OnboardingCompleted_BioAt { get; set; }
+
+    /// <summary>When step (b) picture was completed (null = not done).</summary>
+    public DateTimeOffset? OnboardingCompleted_PictureAt { get; set; }
+
+    /// <summary>When step (c) hotel was completed (null = not done).</summary>
+    public DateTimeOffset? OnboardingCompleted_HotelAt { get; set; }
+
+    /// <summary>When step (d) appreciation was completed (null = not done).</summary>
+    public DateTimeOffset? OnboardingCompleted_AppreciationAt { get; set; }
+
+    /// <summary>When step (e) swag was completed (null = not done).</summary>
+    public DateTimeOffset? OnboardingCompleted_SwagAt { get; set; }
+
+    /// <summary>
+    /// True only when EVERY onboarding step bit is set. Convenience for the raw
+    /// "all five steps" count. <b>NOTE:</b> persona-aware completion (a persona
+    /// only needs ITS required steps) is computed by
+    /// <c>OnboardingStepSets.IsComplete</c> / <c>OnboardingService</c>, not here —
+    /// this property is the all-steps superset and is not persisted.
+    /// </summary>
+    public bool IsFullyOnboarded =>
+        OnboardingCompleted_Bio
+        && OnboardingCompleted_Picture
+        && OnboardingCompleted_Hotel
+        && OnboardingCompleted_Appreciation
+        && OnboardingCompleted_Swag;
+
+    // --- Multi-hotel placement ---------------------------------------------
+    /// <summary>
+    /// The <see cref="Hotel"/> this participant has been placed in by an
+    /// organizer (null = not yet assigned to any hotel). Because room blocks are
+    /// split across several hotels, organizers assign each person to one hotel
+    /// and then view/manage everyone grouped by hotel. Distinct from
+    /// <see cref="HotelBooking"/>, which is the person's own room-need / dates
+    /// preference; this is the physical venue they are placed in.
+    /// </summary>
+    public int? HotelId { get; set; }
+    public Hotel? Hotel { get; set; }
+
+    /// <summary>
+    /// The per-person hotel confirmation / reservation number, set by an
+    /// organizer once the hotel returns it. Surfaced to the participant in their
+    /// hotel/onboarding email alongside the assigned hotel name + address. Null =
+    /// not yet confirmed. Distinct from <see cref="HotelBooking.ConfirmationNumber"/>
+    /// (the legacy single-vendor field); this travels with the multi-hotel
+    /// placement model.
+    /// </summary>
+    public string? HotelConfirmationNumber { get; set; }
+
+    /// <summary>
+    /// True = this row is test/dummy data, not a real participant. Lets go-live
+    /// cleanup delete or deactivate everything WHERE IsTestUser = true without
+    /// touching real registrations. Default false (real participant).
+    /// </summary>
+    public bool IsTestUser { get; set; }
+
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? LastLoginAt { get; set; }
+
+    /// <summary>
+    /// Per-participant secret for the subscribable iCal calendar feed
+    /// (<c>GET /calendar/{token}.ics</c>). Unguessable, URL-safe; a calendar
+    /// client fetches the feed with this token instead of a login session, so
+    /// it is a bearer secret scoped to exactly this participant's own items.
+    /// Null = the participant has never opened the calendar section (the token
+    /// is minted lazily on first view). Regenerating it (revoke) replaces the
+    /// value so a previously-shared URL stops resolving. Stored unique so a
+    /// token resolves to exactly one participant.
+    /// </summary>
+    public string? CalendarFeedToken { get; set; }
 
     /// <summary>
     /// When the participant first saw (and acknowledged) the welcome landing
@@ -54,6 +182,17 @@ public class Participant
     /// they click "Continue" on /Welcome.
     /// </summary>
     public DateTimeOffset? WelcomeShownAt { get; set; }
+
+    /// <summary>
+    /// When the role-aware <b>welcome email with one-click auto-login</b> was
+    /// last sent to this participant (DEV-only sender — see
+    /// <c>WelcomeWithLoginEmailService</c>). Null = it has never been sent.
+    /// Unlike the legacy once-ever welcome (recorded in <c>SentReminder</c>),
+    /// this send is deliberately <b>re-sendable for testing</b>: each send
+    /// overwrites this stamp, so the column records <i>that</i> and <i>when</i>
+    /// it was last sent (the "who was sent" audit) without gating a re-send.
+    /// </summary>
+    public DateTimeOffset? WelcomeWithLoginSentAt { get; set; }
 
     // --- Navigation ---------------------------------------------------------
     public ICollection<ParticipantTask> AssignedTasks { get; set; } = new List<ParticipantTask>();

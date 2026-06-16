@@ -1,0 +1,141 @@
+@page
+@model CommunityHub.Pages.Organizer.GraphicsModel
+@{
+    ViewData["Title"] = "SoMe graphics";
+}
+
+@if (Model.AccessDenied)
+{
+    <div class="card">
+        <h2>SoMe graphics</h2>
+        <p class="error" role="alert">This page is for organizers.</p>
+        <p><a asp-page="/Index">Back to hub</a></p>
+    </div>
+    return;
+}
+
+<style>
+    .btn { background:#008BD2; color:#fff; border:0; border-radius:6px;
+           padding:6px 12px; font-size:14px; cursor:pointer; text-decoration:none; }
+    .btn:hover { background:#0079b8; }
+    .og-table { width:100%; border-collapse:collapse; }
+    .og-table th, .og-table td { text-align:left; padding:8px; border-bottom:1px solid #eee; vertical-align:top; }
+    .og-badge { display:inline-block; border-radius:999px; padding:2px 10px; font-size:12px; font-weight:700; }
+    .og-badge.gen { background:#fff3cd; color:#856404; }
+    .og-badge.rel { background:#0a6; color:#fff; }
+    .og-badge.ovr { background:#e6f3fb; color:#055f86; }
+    .og-actions form { display:inline; margin:0 4px 4px 0; }
+    @@media (max-width: 600px) {
+        .og-table, .og-table tbody, .og-table tr, .og-table td { display:block; width:100%; box-sizing:border-box; }
+        .og-table thead { display:none; }
+        .og-table td { border:none; padding:4px 8px; }
+        .og-table tr { border:1px solid #e5e7eb; border-radius:10px; margin:10px 0; padding:8px; }
+    }
+</style>
+
+@if (Model.Message is not null)
+{
+    <div class="card"><p role="status" style="color:#0a6;">@Model.Message</p></div>
+}
+@if (Model.Error is not null)
+{
+    <div class="card"><p role="alert" class="error">@Model.Error</p></div>
+}
+
+<div class="card">
+    <h2>SoMe graphics — review &amp; release</h2>
+    <p>
+        Generated speaker and session graphics wait here until you release them.
+        A speaker cannot see a graphic until you release it. You can also replace a
+        generated graphic with your own design — the link to it stays the same.
+    </p>
+</div>
+
+<div class="card">
+    <h3>Review queue (speaker &amp; session graphics)</h3>
+    @if (Model.ReviewQueue.Count == 0)
+    {
+        <p>Nothing waiting for review.</p>
+    }
+    else
+    {
+        <table class="og-table">
+            <thead>
+                <tr><th>Type</th><th>Speaker</th><th>Status</th><th>Preview</th><th>Actions</th></tr>
+            </thead>
+            <tbody>
+                @foreach (var r in Model.ReviewQueue)
+                {
+                    <tr>
+                        <td data-label="Type">@r.Type</td>
+                        <td data-label="Speaker">@(r.Subject ?? "—")</td>
+                        <td data-label="Status">
+                            <span class="og-badge gen">@r.Status</span>
+                            @if (r.Overridden) { <span class="og-badge ovr">Replaced</span> }
+                        </td>
+                        <td data-label="Preview">
+                            @if (r.HasFile)
+                            {
+                                <a href="@r.Url" target="_blank" rel="noopener noreferrer">Open</a>
+                            }
+                            else { <span>Not stored</span> }
+                        </td>
+                        <td data-label="Actions" class="og-actions">
+                            <form method="post" asp-page-handler="Release">
+                                <input type="hidden" name="AssetId" value="@r.Id" />
+                                <button type="submit" class="btn">Release to speaker</button>
+                            </form>
+                            <form method="post" asp-page-handler="Overrule" enctype="multipart/form-data">
+                                <input type="hidden" name="AssetId" value="@r.Id" />
+                                <label for="rep-@r.Id" class="visually-hidden">Replacement PNG for graphic @r.Id</label>
+                                <input id="rep-@r.Id" type="file" name="Replacement" accept="image/png" />
+                                <button type="submit" class="btn">Replace</button>
+                            </form>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+</div>
+
+<div class="card">
+    <h3>Sponsor graphics (internal only)</h3>
+    <p>For your own social-media posts. These are never shown to the sponsor.</p>
+    @if (Model.SponsorGraphics.Count == 0)
+    {
+        <p>No sponsor graphics generated yet.</p>
+    }
+    else
+    {
+        <table class="og-table">
+            <thead>
+                <tr><th>Sponsor</th><th>Status</th><th>Preview</th></tr>
+            </thead>
+            <tbody>
+                @foreach (var r in Model.SponsorGraphics)
+                {
+                    <tr>
+                        <td data-label="Sponsor">@(r.Subject ?? "—")</td>
+                        <td data-label="Status">
+                            <span class="og-badge @(r.Status == "Released" ? "rel" : "gen")">@r.Status</span>
+                            @if (r.Overridden) { <span class="og-badge ovr">Replaced</span> }
+                        </td>
+                        <td data-label="Preview">
+                            @if (r.HasFile)
+                            {
+                                <a href="@r.Url" target="_blank" rel="noopener noreferrer">Open</a>
+                            }
+                            else { <span>Not stored</span> }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+</div>
+
+<p>
+    <a asp-page="/Organizer/AssetLocations">Configure SharePoint asset locations</a> ·
+    <a asp-page="/Index">Back to hub</a>
+</p>

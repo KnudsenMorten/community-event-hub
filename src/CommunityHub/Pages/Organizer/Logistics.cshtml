@@ -1,0 +1,59 @@
+@page
+@model CommunityHub.Pages.Organizer.LogisticsModel
+@{
+    ViewData["Title"] = Localizer["OrgLogistics.Title"].Value;
+}
+
+<div class="card">
+    <h2>@Localizer["OrgLogistics.Title"]</h2>
+    @if (Model.AccessDenied)
+    {
+        <p class="error">@Localizer["Common.OrganizersOnly"]</p>
+        <p><a asp-page="/Index">@Localizer["Common.BackToHub"]</a></p>
+    }
+    else
+    {
+        <p>@Localizer["OrgLogistics.Intro"]</p>
+        <p><a asp-page="/Organizer/Index">&larr; @Localizer["Common.BackToOrganizerArea"]</a></p>
+    }
+</div>
+
+@if (!Model.AccessDenied)
+{
+    <div class="card">
+        <h2>@Localizer["Nav.OrgHotels"]</h2>
+        <p>@Localizer["OrgLogistics.Hotels"]</p>
+        <p><a asp-page="/Organizer/Hotels">@Localizer["Nav.OrgHotels"]</a></p>
+        <p><a asp-page="/Organizer/HotelAssignments">@Localizer["Nav.OrgHotelAssignments"]</a></p>
+    </div>
+
+    <div class="card">
+        <h2>@Localizer["Nav.OrgSwag"]</h2>
+        <p>@Localizer["OrgLogistics.Swag"]</p>
+        <p><a asp-page="/Organizer/Swag">@Localizer["Nav.OrgSwag"]</a></p>
+    </div>
+
+    <div class="card">
+        <h2>@Localizer["Nav.OrgTravel"]</h2>
+        <p>@Localizer["OrgLogistics.Travel"]</p>
+        <p><a asp-page="/Organizer/TravelReimbursements">@Localizer["Nav.OrgTravel"]</a></p>
+    </div>
+
+    <div class="card">
+        <h2>@Localizer["Nav.OrgLunch"]</h2>
+        <p>@Localizer["OrgLogistics.Lunch"]</p>
+        <p><a asp-page="/Organizer/Lunch">@Localizer["Nav.OrgLunch"]</a></p>
+    </div>
+
+    <div class="card">
+        <h2>@Localizer["Nav.OrgGroupPhotos"]</h2>
+        <p>@Localizer["OrgLogistics.GroupPhotos"]</p>
+        <p><a asp-page="/Organizer/GroupPhotos">@Localizer["Nav.OrgGroupPhotos"]</a></p>
+    </div>
+
+    <div class="card">
+        <h2>@Localizer["Nav.OrgExports"]</h2>
+        <p>@Localizer["OrgArea.Exports"]</p>
+        <p><a asp-page="/Organizer/Exports">@Localizer["Nav.OrgExports"]</a></p>
+    </div>
+}

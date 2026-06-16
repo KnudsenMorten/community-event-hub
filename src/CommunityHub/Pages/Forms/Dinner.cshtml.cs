@@ -2,11 +2,14 @@ using CommunityHub.Auth;
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
 using CommunityHub.Core.Email;
+using CommunityHub.Core.Reminders;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Localization;
 using Microsoft.Extensions.Options;
+using CommunityHub.Core.Resources;
 
 namespace CommunityHub.Pages.Forms;
 
@@ -21,25 +24,34 @@ public class DinnerModel : PageModel
     private readonly TimeProvider _clock;
     private readonly IEmailSender _emailSender;
     private readonly EmailOptions _emailOptions;
+    private readonly OrganizerActionItemService _actions;
+    private readonly IStringLocalizer<SharedResource> _loc;
 
     public DinnerModel(
         CommunityHubDbContext db,
         ICurrentParticipantAccessor participant,
         TimeProvider clock,
         IEmailSender emailSender,
-        IOptions<EmailOptions> emailOptions)
+        IOptions<EmailOptions> emailOptions,
+        OrganizerActionItemService actions,
+        IStringLocalizer<SharedResource> loc)
     {
         _db = db;
         _participant = participant;
         _clock = clock;
         _emailSender = emailSender;
         _emailOptions = emailOptions.Value;
+        _actions = actions;
+        _loc = loc;
     }
 
     [BindProperty] public DinnerRsvp Rsvp { get; set; } = DinnerRsvp.NotAnswered;
     [BindProperty] public int PlusOneCount { get; set; }
     [BindProperty] public string? AllergyNotes { get; set; }
     [BindProperty] public string? Comments { get; set; }
+
+    /// <summary>Structured dietary/allergy capture (REQUIREMENTS §21) — shared with the Speaker form.</summary>
+    [BindProperty] public CommunityHub.Pages.Shared.DietaryInput Dietary { get; set; } = new();
 
     public string FullName { get; private set; } = string.Empty;
     public string Email { get; private set; } = string.Empty;
@@ -73,6 +85,11 @@ public class DinnerModel : PageModel
             AllergyNotes = existing.AllergyNotes;
             Comments = existing.Comments;
         }
+
+        var diet = await _db.DietaryRequirements.FirstOrDefaultAsync(
+            d => d.EventId == me.EventId && d.ParticipantId == me.ParticipantId
+                 && d.Surface == DietarySurface.Dinner, ct);
+        Dietary.LoadFrom(diet);
         return Page();
     }
 
@@ -92,10 +109,15 @@ public class DinnerModel : PageModel
             return Page();
         }
 
-        // Require an explicit pick: YES / NO / MAYBE -- not blank.
+        // Field-level validation (REQUIREMENTS §21 shared validation pattern):
+        // require an explicit pick: YES / NO / MAYBE -- not blank.
         if (Rsvp == DinnerRsvp.NotAnswered)
         {
-            Message = "Please pick YES, NO or MAYBE so we know how many to plan for.";
+            ModelState.AddModelError(nameof(Rsvp), _loc["Dinner.ErrPickRsvp"]);
+        }
+        if (!ModelState.IsValid)
+        {
+            // Re-render with field errors; nothing is persisted.
             return Page();
         }
 
@@ -128,9 +150,25 @@ public class DinnerModel : PageModel
         signup.Attending = Rsvp == DinnerRsvp.Yes;
         signup.PlusOne = signup.PlusOneCount > 0;
 
+        await SaveDietaryAsync(me.EventId, me.ParticipantId, ct);
+
         await _db.SaveChangesAsync(ct);
         await MarkDinnerTaskDoneAsync(me.EventId, me.ParticipantId, ct);
         Message = "Your RSVP has been saved.";
+
+        // Late-change alert: changing an ALREADY-submitted RSVP inside the window
+        // before the lock date affects the caterer's head-count + allergy list.
+        if (!isNew)
+        {
+            var allergyNote = string.IsNullOrWhiteSpace(signup.AllergyNotes)
+                ? "" : ", allergies updated";
+            var summary = $"Dinner RSVP changed to {signup.Rsvp}" +
+                          (signup.PlusOneCount > 0 ? $" (+{signup.PlusOneCount})" : "") +
+                          allergyNote;
+            await _actions.RaiseIfLateAsync(
+                me.EventId, OrganizerActionItemService.TypeDinnerChanged,
+                me.ParticipantId, summary, ct);
+        }
 
         // Auto-send calendar invitation when a participant becomes attending.
         if (Rsvp == DinnerRsvp.Yes)
@@ -161,6 +199,30 @@ public class DinnerModel : PageModel
         {
             if (!string.IsNullOrWhiteSpace(evt.Code)) EventCode = evt.Code;
         }
+    }
+
+    // ----- Structured dietary capture (shared with the Speaker form) -----
+    private async Task SaveDietaryAsync(int eventId, int participantId, CancellationToken ct)
+    {
+        var row = await _db.DietaryRequirements.FirstOrDefaultAsync(
+            d => d.EventId == eventId && d.ParticipantId == participantId
+                 && d.Surface == DietarySurface.Dinner, ct);
+        if (row is null)
+        {
+            row = new DietaryRequirement
+            {
+                EventId = eventId,
+                ParticipantId = participantId,
+                Surface = DietarySurface.Dinner,
+                CreatedAt = _clock.GetUtcNow(),
+            };
+            _db.DietaryRequirements.Add(row);
+        }
+        else
+        {
+            row.UpdatedAt = _clock.GetUtcNow();
+        }
+        Dietary.ApplyTo(row);
     }
 
     // ----- Auto-task: "Complete the Dinner form" -------------------------

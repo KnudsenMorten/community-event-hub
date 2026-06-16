@@ -1,3 +1,5 @@
+using CommunityHub.Core.Integrations;
+
 namespace CommunityHub.Core.Domain;
 
 /// <summary>
@@ -17,6 +19,25 @@ public class SponsorInfo
 
     /// <summary>WooCommerce / Company Manager company id.</summary>
     public string SponsorCompanyId { get; set; } = string.Empty;
+
+    /// <summary>
+    /// The sponsorship tier this company holds (the booth tier — Gold / Diamond /
+    /// Platinum / Feature, or <see cref="BoothTier.None"/> when unknown). Drives the
+    /// grouping on the PUBLIC sponsors page (<c>/Sponsors</c>), where sponsors are
+    /// listed by tier. Sponsors are public, so there is no publish gate — a company
+    /// is shown once it has a tier (or as an "other supporters" group when
+    /// <see cref="BoothTier.None"/>). Set from the product classification when a
+    /// sponsor's booth order is processed; an organizer may correct it.
+    /// </summary>
+    public BoothTier Tier { get; set; } = BoothTier.None;
+
+    /// <summary>
+    /// Optional public website URL shown as the sponsor's link on the public
+    /// sponsors page. Hub-collected (a sponsor contact / organizer can set it);
+    /// null/blank renders no link. Format is validated in the editing UI; the
+    /// public page only ever renders an absolute http(s) URL.
+    /// </summary>
+    public string? WebsiteUrl { get; set; }
 
     // --- Logos (relative paths under wwwroot, e.g. uploads/sponsors/<co>/logo.eps) -
     public string? LogoVectorPath { get; set; }

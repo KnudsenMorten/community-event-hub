@@ -29,6 +29,7 @@ public class EmailCenterModel : PageModel
     private readonly EmailTemplateProvider _templates;
     private readonly EmailTemplateOptions _templateOptions;
     private readonly IEmailSender _emailSender;
+    private readonly ParticipantEmailService _participantEmail;
     private readonly TimeProvider _clock;
 
     public EmailCenterModel(
@@ -37,6 +38,7 @@ public class EmailCenterModel : PageModel
         EmailTemplateProvider templates,
         IOptions<EmailTemplateOptions> templateOptions,
         IEmailSender emailSender,
+        ParticipantEmailService participantEmail,
         TimeProvider clock)
     {
         _db = db;
@@ -44,6 +46,7 @@ public class EmailCenterModel : PageModel
         _templates = templates;
         _templateOptions = templateOptions.Value;
         _emailSender = emailSender;
+        _participantEmail = participantEmail;
         _clock = clock;
     }
 
@@ -66,6 +69,12 @@ public class EmailCenterModel : PageModel
     [BindProperty(SupportsGet = true)] public string? EmailFilter { get; set; }
     [BindProperty(SupportsGet = true)] public string? Msg { get; set; }
 
+    // --- Send to a person (10a-2) + secondary email (10a-5) -----------------
+    public List<(int Id, string Label)> ActiveParticipants { get; private set; } = new();
+    [BindProperty] public int PersonId { get; set; }
+    [BindProperty] public string? PersonTemplate { get; set; }
+    [BindProperty] public string? SecondaryEmail { get; set; }
+
     public async Task<IActionResult> OnGetAsync(CancellationToken ct)
     {
         var me = _participant.Current;
@@ -76,7 +85,75 @@ public class EmailCenterModel : PageModel
         LoadTemplateList();
         await RenderPreviewAsync(me.EventId, ct);
         await LoadLedgerAsync(me.EventId, ct);
+        await LoadActiveParticipantsAsync(me.EventId, ct);
         return Page();
+    }
+
+    private async Task LoadActiveParticipantsAsync(int eventId, CancellationToken ct)
+    {
+        ActiveParticipants = (await _db.Participants
+            .Where(p => p.EventId == eventId
+                        && p.IsActive
+                        && p.LifecycleState == ParticipantLifecycleState.Active)
+            .OrderBy(p => p.FullName)
+            .Select(p => new { p.Id, p.FullName, p.Email })
+            .ToListAsync(ct))
+            .Select(p => (p.Id, $"{p.FullName} <{p.Email}>"))
+            .ToList();
+    }
+
+    /// <summary>Manual individual re-send (10a-2): send any template to one named
+    /// person on demand. NOT idempotency-gated. Optionally also set/clear that
+    /// person's secondary email (10a-5) before sending so the CC takes effect.</summary>
+    public async Task<IActionResult> OnPostSendToPersonAsync(CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+        if (me.Role != ParticipantRole.Organizer) return Forbid();
+
+        LoadTemplateList();
+        string msg;
+        if (PersonId <= 0)
+        {
+            msg = "Pick a person first.";
+        }
+        else if (PersonTemplate is null || !TemplateNames.Contains(PersonTemplate))
+        {
+            msg = "Pick a template first.";
+        }
+        else
+        {
+            // Apply the secondary-email change (set or clear) before sending.
+            await ApplySecondaryEmailAsync(me.EventId, PersonId, SecondaryEmail, ct);
+            try
+            {
+                var to = await _participantEmail.SendTemplateToParticipantAsync(
+                    me.EventId, PersonId, PersonTemplate, category: "manual-resend",
+                    extraTokens: null, ct);
+                msg = to is null
+                    ? "That person was not found in this edition."
+                    : $"Sent '{PersonTemplate}' to {to}.";
+            }
+            catch (Exception ex)
+            {
+                msg = $"Send failed: {ex.Message}";
+            }
+        }
+        return RedirectToPage(new { Template, TypeFilter, EmailFilter, Msg = msg });
+    }
+
+    private async Task ApplySecondaryEmailAsync(
+        int eventId, int participantId, string? secondary, CancellationToken ct)
+    {
+        var p = await _db.Participants.FirstOrDefaultAsync(
+            x => x.Id == participantId && x.EventId == eventId, ct);
+        if (p is null) return;
+        var trimmed = string.IsNullOrWhiteSpace(secondary) ? null : secondary.Trim();
+        if (p.SecondaryEmail != trimmed)
+        {
+            p.SecondaryEmail = trimmed;
+            await _db.SaveChangesAsync(ct);
+        }
     }
 
     /// <summary>Send the selected template (sample tokens) to the signed-in

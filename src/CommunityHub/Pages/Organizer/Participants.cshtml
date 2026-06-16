@@ -10,73 +10,410 @@
 
     @if (Model.AccessDenied)
     {
-        <p class="error">This area is for organizers only.</p>
+        <p class="error" role="alert">This area is for organizers only.</p>
     }
     else
     {
-        <!-- Filters -->
-        <form method="get" style="margin-bottom:16px;">
-            <label for="ActiveFilter">Status</label>
-            <select id="ActiveFilter" name="ActiveFilter">
-                <option value="active" selected="@(Model.ActiveFilter == "active")">Active only</option>
-                <option value="inactive" selected="@(Model.ActiveFilter == "inactive")">Inactive only</option>
-                <option value="all" selected="@(Model.ActiveFilter == "all")">All</option>
-            </select>
-            <label for="RoleFilter">Role</label>
-            <select id="RoleFilter" name="RoleFilter">
-                <option value="">All roles</option>
-                @foreach (var role in Enum.GetValues<ParticipantRole>())
-                {
-                    <option value="@role" selected="@(Model.RoleFilter == role)">@role</option>
-                }
-            </select>
-            <button type="submit">Apply</button>
+        @if (!string.IsNullOrEmpty(Model.ActionMessage))
+        {
+            <p class="@(Model.ActionIsError ? "error" : "info")" role="status">@Model.ActionMessage</p>
+        }
+
+        <!-- Filters: search, status (active default + show inactive/all), persona, sponsor company -->
+        <form method="get" style="margin-bottom:16px;display:flex;flex-wrap:wrap;gap:12px;align-items:end;">
+            <span style="display:flex;flex-direction:column;gap:2px;">
+                <label for="Search">@Localizer["OrgGrid.Search"]</label>
+                <input type="search" id="Search" name="Search" value="@Model.Search"
+                       placeholder="@Localizer["OrgGrid.Col.Name"] / @Localizer["OrgGrid.Col.Email"]" />
+            </span>
+            <span style="display:flex;flex-direction:column;gap:2px;">
+                <label for="ActiveFilter">Status</label>
+                <select id="ActiveFilter" name="ActiveFilter">
+                    <option value="active" selected="@(Model.ActiveFilter == "active")">Active only</option>
+                    <option value="inactive" selected="@(Model.ActiveFilter == "inactive")">Inactive only</option>
+                    <option value="all" selected="@(Model.ActiveFilter == "all")">Show inactive too (all)</option>
+                </select>
+            </span>
+            <span style="display:flex;flex-direction:column;gap:2px;">
+                <label for="RoleFilter">Persona</label>
+                <select id="RoleFilter" name="RoleFilter">
+                    <option value="">All personas</option>
+                    @foreach (var role in Enum.GetValues<ParticipantRole>())
+                    {
+                        <option value="@role" selected="@(Model.RoleFilter == role)">@role</option>
+                    }
+                </select>
+            </span>
+            <span style="display:flex;flex-direction:column;gap:2px;">
+                <label for="SponsorCompanyFilter">Sponsor company</label>
+                <select id="SponsorCompanyFilter" name="SponsorCompanyFilter">
+                    <option value="">All companies</option>
+                    @foreach (var cid in Model.SponsorCompanyIds)
+                    {
+                        <option value="@cid" selected="@(Model.SponsorCompanyFilter == cid)">
+                            @CommunityHub.Pages.Organizer.ParticipantsModel.CompanyDisplayName(cid)
+                        </option>
+                    }
+                </select>
+            </span>
+            <!-- Keep the active sort when re-filtering; a new search starts at page 1
+                 (PageNo is intentionally not carried over by the filter form). -->
+            <input type="hidden" name="Sort" value="@Model.Sort" />
+            <input type="hidden" name="Desc" value="@Model.Desc" />
+            <button type="submit">@Localizer["OrgGrid.Apply"]</button>
         </form>
 
         @if (Model.Participants.Count == 0)
         {
-            <p>No participants match the filter.</p>
+            <p>@Localizer["OrgGrid.NoMatch"]</p>
         }
         else
         {
-            <p>@Model.Participants.Count participant(s).</p>
-            <div style="overflow-x:auto;">
-            <table style="width:100%;border-collapse:collapse;min-width:560px;">
-                <tr style="text-align:left;border-bottom:2px solid #ddd;">
-                    <th>Name</th><th>Email</th><th>Role</th>
-                    <th>Status</th><th></th>
-                </tr>
-                @foreach (var p in Model.Participants)
-                {
-                    <tr style="border-bottom:1px solid #eee;">
-                        <td>@p.FullName</td>
-                        <td>@p.Email</td>
-                        <td>@p.Role</td>
-                        <td>
-                            @if (p.IsActive)
+            <p role="status">@Localizer["OrgGrid.ShowingRange", Model.Paging.FirstRowNumber, Model.Paging.LastRowNumber, Model.Paging.TotalItems]</p>
+
+            <!-- One form wraps the whole grid so ticked rows post together for a
+                 bulk action; per-row buttons target their own handler via
+                 asp-page-handler, so there are no (invalid) nested forms. -->
+            <form method="post" id="bulkForm">
+                <input type="hidden" name="ActiveFilter" value="@Model.ActiveFilter" />
+                <input type="hidden" name="RoleFilter" value="@Model.RoleFilter" />
+                <input type="hidden" name="SponsorCompanyFilter" value="@Model.SponsorCompanyFilter" />
+                <input type="hidden" name="Search" value="@Model.Search" />
+                <input type="hidden" name="Sort" value="@Model.Sort" />
+                <input type="hidden" name="Desc" value="@Model.Desc" />
+                <input type="hidden" name="PageNo" value="@Model.Paging.Page" />
+
+                <!-- Bulk action bar: stacks on a phone, goes inline on wider screens.
+                     The buttons are type=button: they open the shared confirm modal
+                     (which shows the live selected-row COUNT) and only then submit the
+                     form to the named handler. No destructive bulk op on a single click. -->
+                <div class="bulk-bar"
+                     style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;
+                            padding:10px;margin-bottom:12px;border:1px solid #ddd;border-radius:8px;">
+                    <button type="button" class="secondary js-bulk" data-handler="BulkDeactivate">Deactivate selected</button>
+                    <button type="button" class="secondary js-bulk" data-handler="BulkReactivate">Reactivate selected</button>
+                    <span style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+                        <label for="BulkRole" style="margin:0;">Change persona to</label>
+                        <select id="BulkRole" name="BulkRole">
+                            @foreach (var role in Enum.GetValues<ParticipantRole>())
                             {
-                                <span class="info">Active</span>
+                                <option value="@role">@role</option>
                             }
-                            else
-                            {
-                                <span class="error">Inactive</span>
-                            }
-                        </td>
-                        <td>
-                            <form method="post" asp-page-handler="ToggleActive"
-                                  asp-route-ActiveFilter="@Model.ActiveFilter"
-                                  asp-route-RoleFilter="@Model.RoleFilter">
-                                <input type="hidden" name="participantId" value="@p.Id" />
-                                <button type="submit" class="secondary">
-                                    @(p.IsActive ? "Deactivate" : "Reactivate")
-                                </button>
-                            </form>
-                        </td>
+                        </select>
+                        <button type="button" class="secondary js-bulk" data-handler="BulkChangeRole">Apply persona</button>
+                    </span>
+                </div>
+
+                <div style="overflow-x:auto;">
+                <table style="width:100%;border-collapse:collapse;min-width:600px;">
+                    <caption class="sr-only">Participants with per-row organizer actions</caption>
+                    <tr style="text-align:left;border-bottom:2px solid #ddd;">
+                        <th scope="col" style="width:32px;">
+                            <input type="checkbox" id="selectAll" aria-label="@Localizer["OrgGrid.SelectAll"]"
+                                   onclick="for(const c of document.querySelectorAll('.rowChk'))c.checked=this.checked;" />
+                        </th>
+                        <th scope="col" aria-sort="@Model.AriaSort("name")">
+                            <a asp-page="/Organizer/Participants"
+                               asp-route-ActiveFilter="@Model.ActiveFilter" asp-route-RoleFilter="@Model.RoleFilter"
+                               asp-route-SponsorCompanyFilter="@Model.SponsorCompanyFilter" asp-route-Search="@Model.Search"
+                               asp-route-Sort="name" asp-route-Desc="@Model.NextDescFor("name")" asp-route-PageNo="1">@Localizer["OrgGrid.Col.Name"]@Model.SortIndicator("name")</a>
+                        </th>
+                        <th scope="col" aria-sort="@Model.AriaSort("email")">
+                            <a asp-page="/Organizer/Participants"
+                               asp-route-ActiveFilter="@Model.ActiveFilter" asp-route-RoleFilter="@Model.RoleFilter"
+                               asp-route-SponsorCompanyFilter="@Model.SponsorCompanyFilter" asp-route-Search="@Model.Search"
+                               asp-route-Sort="email" asp-route-Desc="@Model.NextDescFor("email")" asp-route-PageNo="1">@Localizer["OrgGrid.Col.Email"]@Model.SortIndicator("email")</a>
+                        </th>
+                        <th scope="col" aria-sort="@Model.AriaSort("persona")">
+                            <a asp-page="/Organizer/Participants"
+                               asp-route-ActiveFilter="@Model.ActiveFilter" asp-route-RoleFilter="@Model.RoleFilter"
+                               asp-route-SponsorCompanyFilter="@Model.SponsorCompanyFilter" asp-route-Search="@Model.Search"
+                               asp-route-Sort="persona" asp-route-Desc="@Model.NextDescFor("persona")" asp-route-PageNo="1">@Localizer["OrgGrid.Col.Persona"]@Model.SortIndicator("persona")</a>
+                        </th>
+                        <th scope="col">Company</th>
+                        <th scope="col" aria-sort="@Model.AriaSort("status")">
+                            <a asp-page="/Organizer/Participants"
+                               asp-route-ActiveFilter="@Model.ActiveFilter" asp-route-RoleFilter="@Model.RoleFilter"
+                               asp-route-SponsorCompanyFilter="@Model.SponsorCompanyFilter" asp-route-Search="@Model.Search"
+                               asp-route-Sort="status" asp-route-Desc="@Model.NextDescFor("status")" asp-route-PageNo="1">@Localizer["OrgGrid.Col.Status"]@Model.SortIndicator("status")</a>
+                        </th>
+                        <th scope="col">Actions</th>
                     </tr>
-                }
-            </table>
-            </div>
+                    @foreach (var p in Model.Participants)
+                    {
+                        <tr style="border-bottom:1px solid #eee;">
+                            <td>
+                                <input class="rowChk" type="checkbox" name="SelectedIds" value="@p.Id"
+                                       aria-label="Select @p.FullName" />
+                            </td>
+                            <td>@p.FullName</td>
+                            <td>@p.Email</td>
+                            <td>@p.Role</td>
+                            <td>
+                                @if (p.Role == ParticipantRole.Sponsor && !string.IsNullOrWhiteSpace(p.SponsorCompanyId))
+                                {
+                                    @CommunityHub.Pages.Organizer.ParticipantsModel.CompanyDisplayName(p.SponsorCompanyId)
+                                }
+                            </td>
+                            <td>
+                                @if (CommunityHub.Pages.Organizer.ParticipantsModel.IsActive(p))
+                                {
+                                    <span class="info">Active</span>
+                                }
+                                else
+                                {
+                                    <span class="error">Inactive</span>
+                                }
+                            </td>
+                            <td>
+                                <div style="display:flex;flex-wrap:wrap;gap:6px;">
+                                    <!-- REAL edit: open the full participant editor (name, email,
+                                         persona, active state, sponsor company). Distinct from the
+                                         "Modify on behalf" logistics quick-edit below. -->
+                                    <a class="secondary" style="text-decoration:none;padding:6px 10px;border:1px solid #c4c8d4;border-radius:6px;"
+                                       asp-page="/Organizer/EditParticipant" asp-route-id="@p.Id"
+                                       title="Edit this person's name, email, persona and status">
+                                        Edit / Modify
+                                    </a>
+                                    <button type="submit" class="secondary"
+                                            asp-page-handler="ToggleActive"
+                                            asp-route-participantId="@p.Id"
+                                            asp-route-ActiveFilter="@Model.ActiveFilter"
+                                            asp-route-RoleFilter="@Model.RoleFilter"
+                                            asp-route-SponsorCompanyFilter="@Model.SponsorCompanyFilter">
+                                        @(p.IsActive ? "Deactivate" : "Reactivate")
+                                    </button>
+                                    <!-- PRIMARY action: full impersonation. Re-issues the
+                                         session AS this person and lands on their own hub, so
+                                         the organizer sees the WHOLE app from their seat — not
+                                         a 2-field form. Styled primary so it is unmistakably
+                                         the "switch into the user" action (the lesser
+                                         "Modify on behalf" quick-edit is a plain link below). -->
+                                    <button type="submit"
+                                            asp-page-handler="SwitchToUser"
+                                            asp-route-participantId="@p.Id"
+                                            title="Switch into this person — see and do everything as them, then Return to organizer">
+                                        Switch to user
+                                    </button>
+                                    <!-- Lesser, explicit quick-edit: change only hotel/swag FOR
+                                         the person without leaving the organizer seat. Kept as a
+                                         clearly secondary link so it is never mistaken for the
+                                         full user switch above. -->
+                                    <a class="secondary" style="text-decoration:none;padding:6px 10px;border:1px solid #c4c8d4;border-radius:6px;"
+                                       asp-page="/Organizer/EditOnBehalf" asp-route-participantId="@p.Id"
+                                       title="Quick-edit this person's hotel / swag without switching into their view">
+                                        Modify on behalf
+                                    </a>
+                                    <a class="secondary" style="text-decoration:none;padding:6px 10px;border:1px solid #c4c8d4;border-radius:6px;"
+                                       asp-page="/Organizer/SecureLink" asp-route-participantId="@p.Id">
+                                        Secure link
+                                    </a>
+                                    <!-- Per-row Delete. Opens an accessible confirmation modal
+                                         first (no destructive action on a single click). The modal
+                                         hosts the real submit button, which posts the Delete handler:
+                                         safe semantics (hard-delete only when un-engaged, else a
+                                         soft-delete fallback) live server-side. -->
+                                    <button type="button" class="js-delete-participant"
+                                            data-pid="@p.Id" data-pname="@p.FullName"
+                                            style="background:none;border:1px solid #e0b4b4;color:#b91c1c;cursor:pointer;padding:6px 10px;border-radius:6px;"
+                                            aria-haspopup="dialog">
+                                        Delete
+                                    </button>
+                                </div>
+                            </td>
+                        </tr>
+                    }
+                </table>
+                </div>
+            </form>
+
+            @if (Model.Paging.TotalPages > 1)
+            {
+                <nav aria-label="Pagination" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:14px;">
+                    @if (Model.Paging.HasPrevious)
+                    {
+                        <a asp-page="/Organizer/Participants"
+                           asp-route-ActiveFilter="@Model.ActiveFilter" asp-route-RoleFilter="@Model.RoleFilter"
+                           asp-route-SponsorCompanyFilter="@Model.SponsorCompanyFilter" asp-route-Search="@Model.Search"
+                           asp-route-Sort="@Model.Sort" asp-route-Desc="@Model.Desc" asp-route-PageNo="@(Model.Paging.Page - 1)" rel="prev"
+                           style="padding:6px 12px;border:1px solid #c4c8d4;border-radius:6px;text-decoration:none;">@Localizer["OrgGrid.Prev"]</a>
+                    }
+                    <span>@Localizer["OrgGrid.PageOf", Model.Paging.Page, Model.Paging.TotalPages]</span>
+                    @if (Model.Paging.HasNext)
+                    {
+                        <a asp-page="/Organizer/Participants"
+                           asp-route-ActiveFilter="@Model.ActiveFilter" asp-route-RoleFilter="@Model.RoleFilter"
+                           asp-route-SponsorCompanyFilter="@Model.SponsorCompanyFilter" asp-route-Search="@Model.Search"
+                           asp-route-Sort="@Model.Sort" asp-route-Desc="@Model.Desc" asp-route-PageNo="@(Model.Paging.Page + 1)" rel="next"
+                           style="padding:6px 12px;border:1px solid #c4c8d4;border-radius:6px;text-decoration:none;">@Localizer["OrgGrid.Next"]</a>
+                    }
+                </nav>
+            }
         }
     }
-    <p><a asp-page="/Organizer/Index">Back to organizer area</a></p>
+    <p>
+        <a asp-page="/Organizer/Index">Back to organizer area</a>
+        &nbsp;·&nbsp;
+        <a asp-page="/Organizer/ImpersonationLog">Acting-as audit log</a>
+    </p>
 </div>
+
+@if (!Model.AccessDenied)
+{
+    <!-- Delete confirmation modal (one shared dialog, reused for every row).
+         Its own form (outside the grid form) posts the Delete handler with the
+         chosen participant id. Soft vs hard delete is decided server-side. -->
+    @* hidden + display:none keep the fixed-position backdrop from covering the
+       page (and swallowing every grid click) while closed; openModal() switches
+       it to display:flex. A bare display:flex here would override [hidden] and
+       overlay the whole viewport at all times. *@
+    <div id="deleteModal" class="modal-backdrop" role="dialog" aria-modal="true"
+         aria-labelledby="deleteModalTitle" aria-describedby="deleteModalBody"
+         hidden
+         style="position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;
+                align-items:center;justify-content:center;padding:16px;z-index:1000;">
+        <div class="modal-card"
+             style="background:#fff;border-radius:10px;max-width:440px;width:100%;
+                    padding:20px;box-shadow:0 10px 30px rgba(0,0,0,.25);">
+            <h3 id="deleteModalTitle" style="margin-top:0;">Delete participant?</h3>
+            <p id="deleteModalBody">
+                You are about to delete <strong id="deleteModalName"></strong>.
+                If they have linked data (sessions, volunteer tasks, claims, history)
+                they will be <strong>deactivated</strong> instead of permanently
+                removed, so nothing important is lost.
+            </p>
+            <form method="post" asp-page-handler="Delete">
+                <input type="hidden" name="ActiveFilter" value="@Model.ActiveFilter" />
+                <input type="hidden" name="RoleFilter" value="@Model.RoleFilter" />
+                <input type="hidden" name="SponsorCompanyFilter" value="@Model.SponsorCompanyFilter" />
+                <input type="hidden" name="participantId" id="deleteModalPid" value="" />
+                <div style="display:flex;flex-wrap:wrap;gap:10px;justify-content:flex-end;margin-top:16px;">
+                    <button type="button" id="deleteModalCancel" class="secondary"
+                            style="padding:8px 14px;border:1px solid #c4c8d4;border-radius:6px;background:#fff;cursor:pointer;">
+                        Cancel
+                    </button>
+                    <button type="submit"
+                            style="padding:8px 14px;border:none;border-radius:6px;background:#b91c1c;color:#fff;cursor:pointer;">
+                        Delete
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+            (function () {
+                var modal = document.getElementById('deleteModal');
+                if (!modal) return;
+                var nameEl = document.getElementById('deleteModalName');
+                var pidEl = document.getElementById('deleteModalPid');
+                var cancelBtn = document.getElementById('deleteModalCancel');
+                var lastFocused = null;
+
+                function openModal(pid, pname) {
+                    pidEl.value = pid;
+                    nameEl.textContent = pname || ('participant #' + pid);
+                    modal.hidden = false;
+                    modal.style.display = 'flex';
+                    lastFocused = document.activeElement;
+                    cancelBtn.focus();
+                }
+                function closeModal() {
+                    modal.hidden = true;
+                    modal.style.display = 'none';
+                    if (lastFocused && lastFocused.focus) lastFocused.focus();
+                }
+
+                document.querySelectorAll('.js-delete-participant').forEach(function (b) {
+                    b.addEventListener('click', function () {
+                        openModal(b.getAttribute('data-pid'), b.getAttribute('data-pname'));
+                    });
+                });
+                cancelBtn.addEventListener('click', closeModal);
+                modal.addEventListener('click', function (e) {
+                    if (e.target === modal) closeModal();
+                });
+                document.addEventListener('keydown', function (e) {
+                    if (e.key === 'Escape' && !modal.hidden) closeModal();
+                });
+            })();
+        </script>
+
+    <!-- Bulk confirmation modal: shared by every bulk action on this grid. Shows
+         the COUNT of selected rows before deactivate/reactivate/change-persona runs,
+         then submits the grid form to the chosen handler. Accessible (role=dialog,
+         focus move, Esc/backdrop close). The server still re-validates the selection. -->
+    <div id="bulkModal" class="modal-backdrop" role="dialog" aria-modal="true"
+         aria-labelledby="bulkModalTitle" aria-describedby="bulkModalBody"
+         hidden
+         style="position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;
+                align-items:center;justify-content:center;padding:16px;z-index:1000;">
+        <div class="modal-card"
+             style="background:#fff;border-radius:10px;max-width:440px;width:100%;
+                    padding:20px;box-shadow:0 10px 30px rgba(0,0,0,.25);">
+            <h3 id="bulkModalTitle" style="margin-top:0;">@Localizer["OrgGrid.BulkConfirmTitle"]</h3>
+            <p id="bulkModalBody"></p>
+            <div style="display:flex;flex-wrap:wrap;gap:10px;justify-content:flex-end;margin-top:16px;">
+                <button type="button" id="bulkModalCancel" class="secondary"
+                        style="padding:8px 14px;border:1px solid #c4c8d4;border-radius:6px;background:#fff;cursor:pointer;">
+                    @Localizer["OrgGrid.Cancel"]
+                </button>
+                <button type="button" id="bulkModalConfirm"
+                        style="padding:8px 14px;border:none;border-radius:6px;background:#1f6feb;color:#fff;cursor:pointer;">
+                    @Localizer["OrgGrid.Continue"]
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        (function () {
+            var modal = document.getElementById('bulkModal');
+            var form = document.getElementById('bulkForm');
+            if (!modal || !form) return;
+            var bodyEl = document.getElementById('bulkModalBody');
+            var cancelBtn = document.getElementById('bulkModalCancel');
+            var confirmBtn = document.getElementById('bulkModalConfirm');
+            // "...{0} selected row(s)..." with a placeholder we substitute the live count into.
+            var bodyTemplate = @Html.Raw(Json.Serialize(Localizer["OrgGrid.BulkConfirmBody", "{0}"].Value));
+            var pickFirst = @Html.Raw(Json.Serialize(Localizer["OrgGrid.BulkPickFirst"].Value));
+            var pendingHandler = null;
+            var lastFocused = null;
+
+            function selectedCount() {
+                return document.querySelectorAll('.rowChk:checked').length;
+            }
+            function openModal(count) {
+                bodyEl.textContent = bodyTemplate.replace('{0}', count);
+                modal.hidden = false;
+                lastFocused = document.activeElement;
+                confirmBtn.focus();
+            }
+            function closeModal() {
+                modal.hidden = true;
+                pendingHandler = null;
+                if (lastFocused && lastFocused.focus) lastFocused.focus();
+            }
+
+            document.querySelectorAll('.js-bulk').forEach(function (b) {
+                b.addEventListener('click', function () {
+                    var count = selectedCount();
+                    if (count === 0) { alert(pickFirst); return; }
+                    pendingHandler = b.getAttribute('data-handler');
+                    openModal(count);
+                });
+            });
+            confirmBtn.addEventListener('click', function () {
+                if (!pendingHandler) { closeModal(); return; }
+                // Razor Pages handler selection: post ?handler=<name>.
+                form.setAttribute('action', '?handler=' + encodeURIComponent(pendingHandler));
+                form.submit();
+            });
+            cancelBtn.addEventListener('click', closeModal);
+            modal.addEventListener('click', function (e) { if (e.target === modal) closeModal(); });
+            document.addEventListener('keydown', function (e) {
+                if (e.key === 'Escape' && !modal.hidden) closeModal();
+            });
+        })();
+    </script>
+}

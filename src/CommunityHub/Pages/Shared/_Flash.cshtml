@@ -1,0 +1,67 @@
+@*
+    Shared success/error TOAST (flash) — REQUIREMENTS §21 (shared UX components).
+
+    A single, accessible "✓ Saved" / error banner that ANY page can show after a
+    POST, driven by TempData so the message survives the post-redirect-get and is
+    consumed exactly once. Generalises the bespoke MasterClass mc-flash-* markup.
+
+    HOW TO USE (page model, after a successful POST that redirects):
+        TempData["Flash"]      = "Your changes have been saved.";
+        TempData["FlashKind"]  = "success";   // "success" (default) | "error"
+        return RedirectToPage();              // PRG: avoids a re-POST on refresh
+
+    HOW TO USE (page that re-renders Page() instead of redirecting — set a model
+    Message/Error and pass it in directly):
+        <partial name="_Flash" model='new FlashModel(Model.Message, "success")' />
+
+    HOW TO RENDER (anywhere inside the page body, typically just below the <h2>):
+        <partial name="_Flash" />                 (reads TempData)
+
+    Accessibility:
+      - role="status" (polite) for success, role="alert" (assertive) for errors,
+        so a screen reader announces the outcome of the action without a focus move.
+      - aria-live mirrors the role; the banner is in the DOM only when there is a
+        message, so nothing is announced on a fresh page load.
+      - Auto-dismiss for SUCCESS after ~6s (errors persist — the user must act on
+        them). A keyboard-reachable Dismiss button is always present.
+      - Mobile-first: full-width banner, wraps at ~360px, large tap target.
+
+    No JS framework — a tiny inline progressive-enhancement script does auto-dismiss
+    and the close button. With JS off the banner simply stays visible (still fine).
+*@
+@using Microsoft.AspNetCore.Mvc.Localization
+@inject IHtmlLocalizer<CommunityHub.Core.Resources.SharedResource> Localizer
+@model CommunityHub.Pages.Shared.FlashModel?
+@{
+    // Prefer an explicitly-passed model; otherwise read the one-shot TempData set
+    // by a redirecting POST. Either source yields (message, kind).
+    var message = Model?.Message;
+    var kind = Model?.Kind;
+    if (string.IsNullOrWhiteSpace(message))
+    {
+        message = TempData["Flash"] as string;
+        kind = TempData["FlashKind"] as string;
+    }
+}
+@if (!string.IsNullOrWhiteSpace(message))
+{
+    // Three honest kinds: success (green ✓), error (red ⚠), info (blue ℹ — a
+    // no-op / nothing-to-do, visibly NOT a green "done"). REQUIREMENTS §21.
+    var isError = string.Equals(kind, "error", StringComparison.OrdinalIgnoreCase);
+    var isInfo = string.Equals(kind, "info", StringComparison.OrdinalIgnoreCase);
+    var cls = isError
+        ? "ceh-flash ceh-flash--error"
+        : isInfo ? "ceh-flash ceh-flash--info" : "ceh-flash ceh-flash--success";
+    // Errors + no-ops need the user to read them, so announce assertively and do
+    // not auto-dismiss; a real success is polite + auto-dismisses.
+    var role = (isError || isInfo) ? "alert" : "status";
+    var live = (isError || isInfo) ? "assertive" : "polite";
+    var icon = isError ? "⚠" : isInfo ? "ℹ" : "✓";
+    var autodismiss = (isError || isInfo) ? "0" : "6000";
+    <div class="@cls" role="@role" aria-live="@live" data-ceh-flash data-autodismiss="@autodismiss">
+        <span class="ceh-flash__icon" aria-hidden="true">@icon</span>
+        <span class="ceh-flash__text">@message</span>
+        <button type="button" class="ceh-flash__close" data-ceh-flash-close
+                aria-label="@Localizer["Common.Dismiss"]">&times;</button>
+    </div>
+}

@@ -4,13 +4,86 @@ True browser-driven tests for the CEH pages. Complements the fast
 Pester smoke test (`../Survey-Mobile.Tests.ps1`) by actually rendering
 the pages in headless Chromium / WebKit at mobile viewports.
 
-Three suites:
+Suites:
 
-| Suite | File | Targets | Auth |
+| Suite | File(s) | Targets | Auth |
 |---|---|---|---|
 | Survey (public) | `survey-mobile.spec.ts` | DEV + PROD | none |
 | Organizer admin | `admin-mobile.spec.ts` | DEV only | real PIN login (see below) |
 | Sponsor / speaker / volunteer / attendee portals | `portal-mobile.spec.ts` | DEV only | real PIN login per role |
+| **GUI feature suite** (every FEATURES.md feature) | `feature-*.spec.ts` (+ `support/hub.ts`) | DEV (auth) / DEV+PROD (anon) | real PIN login per role; self-skips without it |
+| **Comprehensive post-deploy validation** (every route alive) | `comprehensive-validation.spec.ts` (+ `../../tools/run-post-deploy-validation.ps1`) | DEV+PROD (anon) / DEV (deep) | none (anon layer) / real PIN per role (deep, self-skips) |
+
+## GUI feature suite — `feature-*.spec.ts`
+
+A `@gui`-tagged, browser-driven test for **every released feature** in
+[`docs/FEATURES.md`](../../docs/FEATURES.md), organized one spec per FEATURES.md
+chapter. The full spec ↔ feature mapping is in
+[`COVERAGE.md`](COVERAGE.md).
+
+- **Shared harness:** `support/hub.ts` provides the single real PIN login flow
+  (no auth bypass), the canonical DEV test users (read from env, sensible
+  defaults), the `narrowOnly()` viewport guard, `assertNoHorizontalScroll`, and a
+  read-only `sweep()`. Every authenticated `describe` self-skips when its planted
+  PIN is absent, so a contributor with no DEV DB still gets a green (mostly
+  skipped) run.
+- **Auth = real PIN, DEV-only:** identical model to the admin/portal suites —
+  plant single-use PINs with `tools/plant-test-pins.ps1` immediately before a run.
+  All "real send" actions are caught by the DEV `Email:RedirectAllTo` inbox.
+- **Anonymous specs run anywhere:** the sign-in contract, public survey + results
+  dashboard, and the public volunteer signup need no login and run on DEV + PROD.
+- **No duplication:** where `admin-mobile` / `portal-mobile` / `survey-mobile`
+  already own a flow (leads API + grid, group photos, app game, real email
+  sends, the survey wizard), the feature suite references them rather than
+  re-running them. See COVERAGE.md "What's intentionally NOT duplicated".
+
+### Running
+
+```powershell
+# One command — plants PINs for every role, runs the whole @gui suite on DEV:
+./tests/playwright/run-gui-suite.ps1
+#   (requires az CLI with Key Vault + DEV SQL access; blocks whose plant fails
+#    self-skip. If DEV SQL is AAD-only the planter can't run — use -Anonymous.)
+
+# No DB needed (sign-in contract + public survey/signup, DEV + PROD):
+./tests/playwright/run-gui-suite.ps1 -Anonymous
+```
+```bash
+cd tests/playwright
+npm run test:gui        # whole @gui suite on the narrow viewport (needs PINs in env)
+npm run test:gui:anon   # anonymous @gui specs only — no DB, always runnable
+```
+
+To run the authenticated parts manually, export the same env vars the other
+suites use (`ADMIN_PIN`, `SPEAKER_EMAIL`/`SPEAKER_PIN`,
+`VOLUNTEER_EMAIL`/`VOLUNTEER_PIN`, `ATTENDEE_EMAIL`/`ATTENDEE_PIN`,
+`SPONSOR_EMAIL`/`SPONSOR_PIN`, optionally `ORGANIZER_EMAIL`/`CEH_BASE_URL`) then
+`npm run test:gui`.
+
+## Comprehensive post-deploy validation — `comprehensive-validation.spec.ts`
+
+The **breadth gate**: one data-driven sweep over EVERY key route asserting each
+page is alive (renders / not 404 / not 5xx / not a blank-or-dead page), with no
+console error, mobile (~360px) layout, a11y landmarks (`main`/`header`/`footer`
++ `html lang`), real content or an honest empty state, the anonymous→`/Login`
+auth contract on every guarded route, and negative role-gating (a non-organizer
+is refused the Organizer area). Tag: `@validate`. Read-only; does not duplicate
+the depth suites — it is the "is every route up?" layer they assume.
+
+Built to run **after a deploy** (CLAUDE.md → Release flow):
+
+```powershell
+./tools/run-post-deploy-validation.ps1                # anonymous gate vs DEV
+./tools/run-post-deploy-validation.ps1 -Deep          # full DEV gate (plants PINs)
+./tools/run-post-deploy-validation.ps1 -Target PROD   # anonymous gate vs PROD (post-swap)
+```
+```bash
+cd tests/playwright
+npm run validate          # full @validate suite (authed layer needs PINs in env)
+npm run validate:anon     # anonymous layer only — no DB, always runnable
+```
+
+Full details + the per-route list are in [`docs/TESTS.md`](../../docs/TESTS.md) §5.4b.
 
 ## What the survey suite covers
 

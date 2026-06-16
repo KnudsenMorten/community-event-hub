@@ -1,10 +1,12 @@
 using CommunityHub.Auth;
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
+using CommunityHub.Core.Resources;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Localization;
 
 namespace CommunityHub.Pages.Forms;
 
@@ -14,15 +16,18 @@ public class SwagModel : PageModel
     private readonly CommunityHubDbContext _db;
     private readonly ICurrentParticipantAccessor _participant;
     private readonly TimeProvider _clock;
+    private readonly IStringLocalizer<SharedResource> _loc;
 
     public SwagModel(
         CommunityHubDbContext db,
         ICurrentParticipantAccessor participant,
-        TimeProvider clock)
+        TimeProvider clock,
+        IStringLocalizer<SharedResource> loc)
     {
         _db = db;
         _participant = participant;
         _clock = clock;
+        _loc = loc;
     }
 
     /// <summary>SourceKey prefix used for the "complete the swag form" task.</summary>
@@ -37,27 +42,13 @@ public class SwagModel : PageModel
         ParticipantRole.Organizer,
     };
 
-    /// <summary>17 polo size options. The last option means "no polo".</summary>
-    public const string NoPoloLabel = "I wear my own clothes";
-    public static readonly string[] PoloSizes =
-    {
-        "XS (men)", "S (men)", "M (men)", "L (men)",
-        "XL (men)", "XXL (men)", "3XL (men)", "4XL (men)",
-        "XS (women)", "S (women)", "M (women)", "L (women)",
-        "XL (women)", "XXL (women)", "3XL (women)", "4XL (women)",
-        NoPoloLabel,
-    };
+    /// <summary>17 polo size options (shared catalog). The last option means "no polo".</summary>
+    public const string NoPoloLabel = SwagOptions.NoPoloLabel;
+    public static readonly string[] PoloSizes = SwagOptions.PoloSizes;
 
     /// <summary>Same size set is reused for the jacket. Same "no jacket" sentinel.</summary>
-    public const string NoJacketLabel = "I don't want a jacket";
-    public static readonly string[] JacketSizes =
-    {
-        "XS (men)", "S (men)", "M (men)", "L (men)",
-        "XL (men)", "XXL (men)", "3XL (men)", "4XL (men)",
-        "XS (women)", "S (women)", "M (women)", "L (women)",
-        "XL (women)", "XXL (women)", "3XL (women)", "4XL (women)",
-        NoJacketLabel,
-    };
+    public const string NoJacketLabel = SwagOptions.NoJacketLabel;
+    public static readonly string[] JacketSizes = SwagOptions.JacketSizes;
 
     [BindProperty] public string? PoloChoice { get; set; }
     [BindProperty] public string? JacketChoice { get; set; }
@@ -111,6 +102,18 @@ public class SwagModel : PageModel
         if (!EligibleRoles.Contains(me.Role))
         {
             AccessDenied = true;
+            return Page();
+        }
+
+        // Field-level validation (REQUIREMENTS §21 shared validation pattern):
+        // require an explicit polo choice — a size OR the "no polo" sentinel.
+        if (string.IsNullOrWhiteSpace(PoloChoice))
+        {
+            ModelState.AddModelError(nameof(PoloChoice), _loc["Swag.ErrPickPolo"]);
+        }
+        if (!ModelState.IsValid)
+        {
+            // Re-render with field errors; nothing is persisted.
             return Page();
         }
 

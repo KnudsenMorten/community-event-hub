@@ -7,13 +7,29 @@ namespace CommunityHub.Core.Reminders;
 
 /// <summary>
 /// One reminder the engine wants to send.
+///
+/// <see cref="RecipientEmail"/> is the IDENTITY address — it is the idempotency
+/// key (together with type + occasion) and what the ledger records, so it must
+/// stay stable. <see cref="DeliverToEmail"/> is where the mail is actually sent:
+/// a speaker's <c>EffectiveEmail</c> (override ?? Sessionize). When a builder
+/// does not set it, delivery falls back to the identity address.
 /// </summary>
 public sealed record ReminderMessage(
     string RecipientEmail,
     string ReminderType,
     string OccasionKey,
     string Subject,
-    string HtmlBody);
+    string HtmlBody,
+    string? DeliverToEmail = null,
+    string? Persona = null,
+    int? ParticipantId = null,
+    string? RecipientName = null,
+    IReadOnlyCollection<string>? Cc = null)
+{
+    /// <summary>The address the mail is actually sent to: override ?? identity.</summary>
+    public string EffectiveRecipient =>
+        string.IsNullOrWhiteSpace(DeliverToEmail) ? RecipientEmail : DeliverToEmail;
+}
 
 /// <summary>
 /// The reminder-sending engine (CONTEXT.md section 11c-e). It is deliberately
@@ -31,15 +47,18 @@ public sealed class ReminderEngine
     private readonly CommunityHubDbContext _db;
     private readonly IEmailSender _emailSender;
     private readonly TimeProvider _clock;
+    private readonly IEmailContextAccessor? _emailContext;
 
     public ReminderEngine(
         CommunityHubDbContext db,
         IEmailSender emailSender,
-        TimeProvider clock)
+        TimeProvider clock,
+        IEmailContextAccessor? emailContext = null)
     {
         _db = db;
         _emailSender = emailSender;
         _clock = clock;
+        _emailContext = emailContext;
     }
 
     /// <summary>
@@ -79,8 +98,19 @@ public sealed class ReminderEngine
 
             try
             {
-                await _emailSender.SendAsync(
-                    msg.RecipientEmail, msg.Subject, msg.HtmlBody, ct);
+                // Dedup keys on the identity address (msg.RecipientEmail); the
+                // mail itself goes to the effective address (override ?? id).
+                // The persona-aware category + participant flow into the EmailLog
+                // (10a-4); the secondary email rides along as CC.
+                var category = string.IsNullOrWhiteSpace(msg.Persona)
+                    ? msg.ReminderType
+                    : $"{msg.ReminderType}:{msg.Persona}";
+                using (_emailContext?.Set(new EmailContext(
+                    category, eventId, msg.ParticipantId, msg.RecipientName)))
+                {
+                    await _emailSender.SendAsync(
+                        msg.EffectiveRecipient, msg.Subject, msg.HtmlBody, msg.Cc, ct);
+                }
             }
             catch
             {

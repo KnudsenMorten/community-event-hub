@@ -21,10 +21,25 @@
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
+    <!-- DataProtection abstractions only: the magic-link token factory
+         (Auth/MagicLinkTokenFactory) signs/validates the auto-login token via
+         IDataProtectionProvider. The concrete key-management implementation is
+         provided by the ASP.NET host (web app registers it by default). -->
+    <PackageReference Include="Microsoft.AspNetCore.DataProtection.Abstractions" Version="8.0.6" />
     <PackageReference Include="Microsoft.Extensions.Configuration.Abstractions" Version="8.0.0" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="8.0.1" />
     <PackageReference Include="Microsoft.Extensions.Options" Version="8.0.2" />
     <PackageReference Include="ClosedXML" Version="0.102.2" />
+    <!-- SoMe graphics compositing (REQUIREMENTS §18). Cross-platform, pure
+         managed — NO System.Drawing (needs libgdiplus on Linux App Service).
+         ImageSharp.Drawing carries the text/font + shape drawing used to merge
+         a speaker photo / sponsor logo + name onto a template background PNG.
+         Pinned to the 3.1.x / 2.1.x line: it is Apache-2.0 (the 3.2+/4.0 line
+         switched to the commercial Six Labors Split License, which would need a
+         license key and is unsuitable for the public community mirror). 3.1.12
+         carries the security-advisory fixes (GHSA-2cmq-823j-5qj8 et al). -->
+    <PackageReference Include="SixLabors.ImageSharp" Version="3.1.12" />
+    <PackageReference Include="SixLabors.ImageSharp.Drawing" Version="2.1.7" />
   </ItemGroup>
 
 </Project>

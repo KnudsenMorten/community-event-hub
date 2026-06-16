@@ -12,6 +12,12 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tools", "tools", "{2AE6FB7D
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CommunityHub.OneShot", "tools\CommunityHub.OneShot\CommunityHub.OneShot.csproj", "{A3327396-0DAB-44A3-A4F6-B47BBC88D9E7}"
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{01DF07D3-E745-4DEC-97F1-C7DF6B9F3134}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CommunityHub.Core.Tests", "tests\CommunityHub.Core.Tests\CommunityHub.Core.Tests.csproj", "{7979BBC4-8201-438E-A1AF-7C26B3F6F11F}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CommunityHub.Web.Tests", "tests\CommunityHub.Web.Tests\CommunityHub.Web.Tests.csproj", "{1F6FDD9E-EB6C-4DD8-8838-07324AAA03B5}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -34,8 +40,18 @@ Global
 		{A3327396-0DAB-44A3-A4F6-B47BBC88D9E7}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{A3327396-0DAB-44A3-A4F6-B47BBC88D9E7}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{A3327396-0DAB-44A3-A4F6-B47BBC88D9E7}.Release|Any CPU.Build.0 = Release|Any CPU
+		{7979BBC4-8201-438E-A1AF-7C26B3F6F11F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{7979BBC4-8201-438E-A1AF-7C26B3F6F11F}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{7979BBC4-8201-438E-A1AF-7C26B3F6F11F}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{7979BBC4-8201-438E-A1AF-7C26B3F6F11F}.Release|Any CPU.Build.0 = Release|Any CPU
+		{1F6FDD9E-EB6C-4DD8-8838-07324AAA03B5}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{1F6FDD9E-EB6C-4DD8-8838-07324AAA03B5}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{1F6FDD9E-EB6C-4DD8-8838-07324AAA03B5}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{1F6FDD9E-EB6C-4DD8-8838-07324AAA03B5}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{A3327396-0DAB-44A3-A4F6-B47BBC88D9E7} = {2AE6FB7D-8485-41F2-B2D2-0F16B56E073E}
+		{7979BBC4-8201-438E-A1AF-7C26B3F6F11F} = {01DF07D3-E745-4DEC-97F1-C7DF6B9F3134}
+		{1F6FDD9E-EB6C-4DD8-8838-07324AAA03B5} = {01DF07D3-E745-4DEC-97F1-C7DF6B9F3134}
 	EndGlobalSection
 EndGlobal

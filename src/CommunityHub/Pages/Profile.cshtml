@@ -1,0 +1,43 @@
+@page
+@model CommunityHub.Pages.ProfileModel
+@{
+    ViewData["Title"] = "My profile";
+}
+
+<div class="card">
+    <h2>My profile</h2>
+
+    @if (!string.IsNullOrEmpty(Model.Message))
+    {
+        <p class="@(Model.Saved ? "info" : "error")" role="@(Model.Saved ? "status" : "alert")">@Model.Message</p>
+    }
+
+    <p style="background:#eef6ff;padding:10px 14px;border-radius:6px;font-size:14px;">
+        Update the basics other crew and the organizers see. Your
+        <strong>email</strong> is your sign-in identity and your
+        <strong>role</strong> is set by the organizers &mdash; contact them if
+        either needs to change.
+    </p>
+
+    <form method="post">
+        <label for="FullName">Full name</label>
+        <input type="text" asp-for="FullName" autocomplete="name" maxlength="200" />
+
+        <label for="Phone">Phone <span style="font-weight:400;color:#6b7280;">(optional)</span></label>
+        <input type="tel" asp-for="Phone" autocomplete="tel" maxlength="40" />
+
+        <label for="SecondaryEmail">Secondary email <span style="font-weight:400;color:#6b7280;">(optional &mdash; also CC'd on every email to you)</span></label>
+        <input type="email" asp-for="SecondaryEmail" autocomplete="email" maxlength="320"
+               placeholder="blank = no extra copy" />
+
+        <label for="ProfileEmail">Email <span style="font-weight:400;color:#6b7280;">(sign-in identity &mdash; read-only)</span></label>
+        <input type="email" id="ProfileEmail" value="@Model.Email" disabled />
+
+        <label for="ProfileRole">Role <span style="font-weight:400;color:#6b7280;">(set by organizers &mdash; read-only)</span></label>
+        <input type="text" id="ProfileRole" value="@CommunityHub.Branding.RoleDisplay.Name(Model.Role)" disabled />
+
+        <button type="submit">Save</button>
+    </form>
+
+    <p><a asp-page="/Index">Back to hub</a></p>
+</div>

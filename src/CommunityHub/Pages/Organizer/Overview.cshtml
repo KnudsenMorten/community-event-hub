@@ -1,0 +1,240 @@
+@page
+@model CommunityHub.Pages.Organizer.OverviewModel
+@{
+    ViewData["Title"] = "Event overview";
+}
+
+@functions {
+    // Render a labelled, accessible progress bar (WCAG: role=progressbar with
+    // aria-valuenow/min/max + a visible numeric caption, never colour alone).
+    static string BarClass(int pct) => pct >= 80 ? "bar-good" : pct >= 40 ? "bar-mid" : "bar-low";
+}
+
+<style>
+    .ov-sub { color:#6b7280; margin:0 0 4px; }
+    /* Mobile-first stat grid: single column, grows to a wrapping row on wider screens. */
+    .ov-stats { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+    @@media (min-width:560px) { .ov-stats { grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); } }
+    .ov-stat { background:#f4f5f7; border-radius:8px; padding:12px 14px; }
+    .ov-stat .num { font-size:24px; font-weight:700; color:#1a1a2e; line-height:1.1; }
+    .ov-stat .lbl { font-size:12px; color:#6b7280; text-transform:uppercase; letter-spacing:.04em; margin-top:2px; }
+    /* Needs-attention tiles: warn when > 0, calm when clear. */
+    .ov-attn { display:grid; grid-template-columns:1fr; gap:10px; }
+    @@media (min-width:560px) { .ov-attn { grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); } }
+    .ov-tile { border-radius:8px; padding:12px 14px; border:1px solid #e6e8ee; }
+    .ov-tile.is-warn { background:#fef2f2; border-color:#fca5a5; }
+    .ov-tile.is-ok { background:#f0fdf4; border-color:#bbf7d0; }
+    .ov-tile .num { font-size:24px; font-weight:700; }
+    .ov-tile.is-warn .num { color:#b91c1c; }
+    .ov-tile.is-ok .num { color:#15803d; }
+    .ov-tile .lbl { font-size:13px; color:#374151; margin-top:2px; }
+    /* Progress rows. */
+    .bar-row { margin-bottom:12px; }
+    .bar-cap { font-size:13px; display:flex; justify-content:space-between; gap:8px; margin-bottom:3px; }
+    .bar-cap .n { color:#6b7280; white-space:nowrap; }
+    .bar-track { background:#e6e8ee; border-radius:5px; height:16px; overflow:hidden; }
+    .bar-fill { height:100%; }
+    .bar-good { background:#16a34a; }
+    .bar-mid { background:#2d5be3; }
+    .bar-low { background:#d97706; }
+    .ov-overdue { color:#b91c1c; font-weight:600; }
+    table.ov-tbl { width:100%; border-collapse:collapse; }
+    .ov-tbl th, .ov-tbl td { padding:8px 10px; text-align:left; border-bottom:1px solid #e6e8ee; font-size:13.5px; }
+    .ov-tbl th { font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:#6b7280; background:#f9fafb; }
+    .ov-tbl td.r, .ov-tbl th.r { text-align:right; }
+    .ov-empty { color:#6b7280; font-style:italic; font-size:13px; }
+</style>
+
+<div class="card">
+    <h2>Event overview</h2>
+
+    @if (Model.AccessDenied)
+    {
+        <p class="error" role="alert">This area is for organizers only.</p>
+    }
+    else if (Model.Report is null)
+    {
+        <p class="ov-empty">No data.</p>
+    }
+    else
+    {
+        var r = Model.Report;
+        <p class="ov-sub">@r.EventDisplayName &mdash; live cross-role snapshot (read-only).</p>
+
+        <div class="ov-stats">
+            <div class="ov-stat"><div class="num">@r.TotalPeople</div><div class="lbl">People</div></div>
+            <div class="ov-stat"><div class="num">@r.ActivePeople</div><div class="lbl">Active</div></div>
+            <div class="ov-stat"><div class="num">@r.TaskOverall.Percent%</div><div class="lbl">Tasks done</div></div>
+            <div class="ov-stat"><div class="num">@r.AttendeeCheckedIn / @r.AttendeeTotal</div><div class="lbl">Checked in</div></div>
+        </div>
+    }
+</div>
+
+@if (Model.Report is not null && !Model.AccessDenied)
+{
+    var r = Model.Report;
+
+    <!-- Needs attention: open items an organizer should act on. role=status so a
+         screen reader announces the section; each tile says its number in text. -->
+    <div class="card">
+        <h2 id="ov-attn-h">Needs attention</h2>
+        <div class="ov-attn" role="status" aria-labelledby="ov-attn-h">
+            <div class="ov-tile @(r.OverdueTasks > 0 ? "is-warn" : "is-ok")">
+                <div class="num">@r.OverdueTasks</div>
+                <div class="lbl">Overdue tasks</div>
+            </div>
+            <div class="ov-tile @(r.UnassignedVolunteerTasks > 0 ? "is-warn" : "is-ok")">
+                <div class="num">@r.UnassignedVolunteerTasks</div>
+                <div class="lbl">Unassigned volunteer tasks</div>
+            </div>
+            <div class="ov-tile @(r.OpenHelpRequests > 0 ? "is-warn" : "is-ok")">
+                <div class="num">@r.OpenHelpRequests</div>
+                <div class="lbl">Open help requests</div>
+            </div>
+            <div class="ov-tile @(r.PendingVolunteerApplications > 0 ? "is-warn" : "is-ok")">
+                <div class="num">@r.PendingVolunteerApplications</div>
+                <div class="lbl">Pending volunteer applications</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Participation by role -->
+    <div class="card">
+        <h2>Participation by role</h2>
+        @if (r.RolesBreakdown.Count == 0)
+        {
+            <p class="ov-empty">No participants yet.</p>
+        }
+        else
+        {
+            <table class="ov-tbl">
+                <thead>
+                    <tr><th scope="col">Role</th><th scope="col" class="r">Active</th><th scope="col" class="r">Inactive</th><th scope="col" class="r">Total</th></tr>
+                </thead>
+                <tbody>
+                @foreach (var rc in r.RolesBreakdown)
+                {
+                    <tr>
+                        <th scope="row" style="font-weight:600;">@rc.Role</th>
+                        <td class="r">@rc.Active</td>
+                        <td class="r">@rc.Inactive</td>
+                        <td class="r">@rc.Total</td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+        }
+    </div>
+
+    <!-- Task completion: overall, by role, by category -->
+    <div class="card">
+        <h2>Task completion</h2>
+        @{
+            void Bar(string label, int done, int total, int pct)
+            {
+                <div class="bar-row">
+                    <div class="bar-cap">
+                        <span>@label</span>
+                        <span class="n">@done / @total (@pct%)</span>
+                    </div>
+                    <div class="bar-track" role="progressbar" aria-label="@(label) completion"
+                         aria-valuenow="@pct" aria-valuemin="0" aria-valuemax="100">
+                        <div class="bar-fill @BarClass(pct)" style="width:@pct%"></div>
+                    </div>
+                </div>
+            }
+        }
+
+        @{ Bar(r.TaskOverall.Label, r.TaskOverall.Done, r.TaskOverall.Total, r.TaskOverall.Percent); }
+
+        <h3 style="font-size:14px;margin:14px 0 6px;color:#374151;">By role</h3>
+        @if (r.TasksByRole.Count == 0)
+        {
+            <p class="ov-empty">No tasks.</p>
+        }
+        else
+        {
+            foreach (var c in r.TasksByRole) { Bar(c.Label, c.Done, c.Total, c.Percent); }
+        }
+
+        <h3 style="font-size:14px;margin:14px 0 6px;color:#374151;">By category</h3>
+        @if (r.TasksByCategory.Count == 0)
+        {
+            <p class="ov-empty">No tasks.</p>
+        }
+        else
+        {
+            foreach (var c in r.TasksByCategory) { Bar(c.Label, c.Done, c.Total, c.Percent); }
+        }
+    </div>
+
+    <!-- Speaker milestone-deadline progress -->
+    <div class="card">
+        <h2>Speaker milestone progress</h2>
+        @if (r.SpeakerMilestones.Count == 0)
+        {
+            <p class="ov-empty">No speaker deadlines yet.</p>
+        }
+        else
+        {
+            <table class="ov-tbl">
+                <thead>
+                    <tr><th scope="col">Milestone</th><th scope="col" class="r">Done</th><th scope="col" class="r">Overdue</th><th scope="col" class="r">Of speakers</th></tr>
+                </thead>
+                <tbody>
+                @foreach (var m in r.SpeakerMilestones)
+                {
+                    <tr>
+                        <th scope="row" style="font-weight:600;">@m.Milestone</th>
+                        <td class="r">@m.Done (@m.Percent%)</td>
+                        <td class="r @(m.Overdue > 0 ? "ov-overdue" : "")">@m.Overdue</td>
+                        <td class="r">@m.Total</td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+        }
+    </div>
+
+    <!-- Volunteer-structure coverage -->
+    <div class="card">
+        <h2>Volunteer coverage</h2>
+        <p class="ov-sub">@r.VolunteerTasksAssigned assigned &middot; @r.VolunteerTasksOpen open of @r.VolunteerTasksTotal tasks.</p>
+        @if (r.VolunteerCoverageByCategory.Count == 0)
+        {
+            <p class="ov-empty">No volunteer tasks defined yet.</p>
+        }
+        else
+        {
+            <table class="ov-tbl">
+                <thead>
+                    <tr><th scope="col">Category</th><th scope="col" class="r">Assigned</th><th scope="col" class="r">Open</th><th scope="col" class="r">Coverage</th></tr>
+                </thead>
+                <tbody>
+                @foreach (var v in r.VolunteerCoverageByCategory)
+                {
+                    <tr>
+                        <th scope="row" style="font-weight:600;">@v.Category</th>
+                        <td class="r">@v.Assigned</td>
+                        <td class="r @(v.Open > 0 ? "ov-overdue" : "")">@v.Open</td>
+                        <td class="r">@v.Percent%</td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+        }
+    </div>
+
+    <!-- Sponsors + attendees -->
+    <div class="card">
+        <h2>Sponsors &amp; attendees</h2>
+        <div class="ov-stats">
+            <div class="ov-stat"><div class="num">@r.SponsorTaskDone / @r.SponsorTaskTotal</div><div class="lbl">Sponsor tasks done</div></div>
+            <div class="ov-stat"><div class="num">@r.SponsorLeadTotal</div><div class="lbl">Sponsor leads</div></div>
+            <div class="ov-stat"><div class="num">@r.SponsorLeadOpen</div><div class="lbl">Leads open</div></div>
+            <div class="ov-stat"><div class="num">@r.AttendeeCheckedIn / @r.AttendeeTotal</div><div class="lbl">Attendees checked in</div></div>
+        </div>
+    </div>
+
+    <p><a asp-page="/Organizer/Index">Back to organizer area</a></p>
+}

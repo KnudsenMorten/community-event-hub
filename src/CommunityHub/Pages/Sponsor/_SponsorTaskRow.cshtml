@@ -10,15 +10,15 @@
         @Model.Title
         @if (!Model.IsMandatory)
         {
-            <span style="display:inline-block;margin-left:8px;padding:2px 9px;font-size:0.72em;background:#f4f1ea;color:#7a6b3e;border:1px solid #d8c98a;border-radius:9px;vertical-align:middle;font-weight:600;">Optional</span>
+            <span style="display:inline-block;margin-left:8px;padding:2px 9px;font-size:0.72em;background:#f4f1ea;color:#7a6b3e;border:1px solid #d8c98a;border-radius:9px;vertical-align:middle;font-weight:600;">@Localizer["Common.Optional"]</span>
         }
         @if (Model.State == TaskState.Done)
         {
-            <span style="display:inline-block;margin-left:8px;padding:2px 10px;font-size:0.72em;background:#d6f3e0;color:#1f6d3a;border:1px solid #87cda0;border-radius:9px;vertical-align:middle;font-weight:700;">&check; done</span>
+            <span style="display:inline-block;margin-left:8px;padding:2px 10px;font-size:0.72em;background:#d6f3e0;color:#1f6d3a;border:1px solid #87cda0;border-radius:9px;vertical-align:middle;font-weight:700;">&check; @Localizer["TaskRow.Done"]</span>
         }
         else if (Model.DueDate is not null)
         {
-            <span style="display:inline-block;margin-left:8px;padding:2px 10px;font-size:0.78em;background:#fff3cd;color:#7a5b00;border:1px solid #f0d878;border-radius:9px;vertical-align:middle;font-weight:700;">due @Model.DueDate?.ToString("dd/MM/yyyy")</span>
+            <span style="display:inline-block;margin-left:8px;padding:2px 10px;font-size:0.78em;background:#fff3cd;color:#7a5b00;border:1px solid #f0d878;border-radius:9px;vertical-align:middle;font-weight:700;">@Localizer["TaskRow.Due", Model.DueDate?.ToString("dd/MM/yyyy") ?? ""]</span>
         }
     </div>
     @if (!string.IsNullOrWhiteSpace(Model.Description))
@@ -31,7 +31,7 @@
         <form method="post" asp-page-handler="UploadCompanyInfo"
               style="margin-top:14px;padding:16px;background:#f8fafc;border:1px solid #cbd5e0;border-radius:6px;">
             <label for="CompanyDescription" style="display:block;font-weight:600;margin-bottom:4px;">
-                Company description (max @CommunityHub.Pages.Sponsor.TasksModel.MaxDesc chars)
+                @Localizer["TaskRow.CompanyDesc", CommunityHub.Pages.Sponsor.TasksModel.MaxDesc]
             </label>
             <textarea name="CompanyDescription" id="CompanyDescription" rows="6"
                       maxlength="@CommunityHub.Pages.Sponsor.TasksModel.MaxDesc"
@@ -42,7 +42,7 @@
             </p>
 
             <label for="CompanyDescriptionShort" style="display:block;font-weight:600;margin-bottom:4px;">
-                Short description (max @CommunityHub.Pages.Sponsor.TasksModel.MaxShort chars)
+                @Localizer["TaskRow.ShortDesc", CommunityHub.Pages.Sponsor.TasksModel.MaxShort]
             </label>
             <textarea name="CompanyDescriptionShort" id="CompanyDescriptionShort" rows="2"
                       maxlength="@CommunityHub.Pages.Sponsor.TasksModel.MaxShort"
@@ -53,7 +53,7 @@
             </p>
 
             <label for="SocialMediaIntro" style="display:block;font-weight:600;margin-bottom:4px;">
-                Social-media company intro (max @CommunityHub.Pages.Sponsor.TasksModel.MaxSocial chars — bullets fine)
+                @Localizer["TaskRow.SocialIntro", CommunityHub.Pages.Sponsor.TasksModel.MaxSocial]
             </label>
             <textarea name="SocialMediaIntro" id="SocialMediaIntro" rows="4"
                       maxlength="@CommunityHub.Pages.Sponsor.TasksModel.MaxSocial"
@@ -65,10 +65,10 @@
 
             <button type="submit"
                     style="background:#198754;color:#fff;border:1px solid #198754;padding:8px 18px;border-radius:6px;font-weight:600;cursor:pointer;">
-                Save &amp; mark complete
+                @Localizer["TaskRow.SaveComplete"]
             </button>
             <span style="color:#555;font-size:13px;font-style:italic;margin-left:10px;">
-                Saving sends a copy to info@expertslive.dk and mlh@expertslive.dk.
+                @Localizer["TaskRow.EmailCopyNote"]
             </span>
         </form>
     }
@@ -79,26 +79,26 @@
                 <input type="hidden" name="taskId" value="@Model.Id" />
                 @if (Model.State == TaskState.Done)
                 {
-                    <button type="submit" class="secondary">Reopen task</button>
+                    <button type="submit" class="secondary">@Localizer["TaskRow.Reopen"]</button>
                 }
                 else
                 {
                     <button type="submit"
                             style="background:#198754;color:#fff;border:1px solid #198754;padding:8px 18px;border-radius:6px;font-weight:600;cursor:pointer;">
-                        Mark complete
+                        @Localizer["TaskRow.MarkComplete"]
                     </button>
                 }
             </form>
             @if (Model.DueDate is not null)
             {
                 <a class="task-link-btn" asp-page-handler="Ics" asp-route-taskId="@Model.Id" style="background:#475569;">
-                    Add to calendar
+                    @Localizer["TaskRow.AddToCalendar"]
                 </a>
             }
             @if (Model.State != TaskState.Done)
             {
                 <span style="color:#555;font-size:13px;font-style:italic;">
-                    Please complete before the due date. If not, you will receive reminder emails.
+                    @Localizer["TaskRow.CompleteBeforeDue"]
                 </span>
             }
         </div>

@@ -19,23 +19,38 @@ public class IndexModel : PageModel
     private readonly CommunityHubDbContext _db;
     private readonly ICurrentParticipantAccessor _participant;
     private readonly TimeProvider _clock;
+    private readonly CommunityHub.Core.Participants.ParticipantChecklistBuilder _checklist;
 
     public IndexModel(
         CommunityHubDbContext db,
         ICurrentParticipantAccessor participant,
-        TimeProvider clock)
+        TimeProvider clock,
+        CommunityHub.Core.Participants.ParticipantChecklistBuilder checklist)
     {
         _db = db;
         _participant = participant;
         _clock = clock;
+        _checklist = checklist;
     }
 
     public List<ParticipantTask> Tasks { get; private set; } = new();
+
+    /// <summary>
+    /// The unified "what's still needed" checklist (REQUIREMENTS Top-8 #7) — the
+    /// SAME shared component the Hub home and attendee My-event render, so the
+    /// Tasks page no longer competes as a separate landing surface. Built by the
+    /// shared <see cref="CommunityHub.Core.Participants.ParticipantChecklistBuilder"/>.
+    /// </summary>
+    public CommunityHub.Core.Participants.ParticipantChecklist Checklist { get; private set; } =
+        new(System.Array.Empty<CommunityHub.Core.Participants.ChecklistRow>(),
+            System.Array.Empty<CommunityHub.Core.Participants.ChecklistRow>());
 
     public async Task<IActionResult> OnGetAsync(CancellationToken ct)
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
+
+        Checklist = await _checklist.BuildAsync(me.EventId, me.ParticipantId, ct);
 
         Tasks = await _db.Tasks
             .Where(t => t.EventId == me.EventId

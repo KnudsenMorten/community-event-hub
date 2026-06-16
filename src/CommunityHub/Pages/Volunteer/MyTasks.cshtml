@@ -1,0 +1,119 @@
+@page "/volunteer/mytasks"
+@model CommunityHub.Pages.Volunteer.MyTasksModel
+@{
+    ViewData["Title"] = "My volunteer tasks";
+}
+
+<style>
+    .mt-cat h3 { margin:16px 0 6px; font-size:17px; color:var(--el-darkblue,#1D3380); }
+    .mt-sub h4 { margin:8px 0 4px; font-size:14px; color:#24292f; }
+    .mt-task { background:#f6f8fb; border-radius:8px; padding:10px 12px; margin:8px 0; font-size:13.5px; }
+    .mt-task .meta { color:#6e7681; font-size:12px; }
+    .mt-form { display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin-top:8px; }
+    .mt-form input[type=text], .mt-form select, .mt-form textarea {
+        flex:1 1 160px; min-width:0; box-sizing:border-box; padding:8px 10px;
+        font-size:13.5px; border:1px solid #c4c8d4; border-radius:6px; font-family:inherit; }
+    .mt-form button { background:#008BD2; color:#fff; border:0; border-radius:6px;
+        padding:9px 16px; font-size:13px; font-weight:600; cursor:pointer; white-space:nowrap; }
+    .mt-form button.help { background:#ea580c; }
+    .mt-note { background:#f0fdf4; border-left:4px solid #16a34a; padding:10px 12px;
+        border-radius:6px; margin-bottom:14px; font-size:13.5px; color:#166534; }
+    .mt-helprow { font-size:12.5px; color:#6e7681; margin-top:6px; }
+    .mt-helprow .reply { color:#166534; }
+    @@media (max-width: 600px) {
+        .mt-form input, .mt-form select, .mt-form textarea, .mt-form button { flex:1 1 100%; }
+    }
+</style>
+
+<div class="card">
+    <h2>My volunteer tasks</h2>
+    <p>The tasks you&rsquo;ve been assigned, grouped by category. Update your
+       progress, and if you&rsquo;re stuck, ask your category&rsquo;s supervisor
+       for help.</p>
+
+    @if (!string.IsNullOrEmpty(Model.Notice))
+    {
+        <div class="mt-note">@Model.Notice</div>
+    }
+
+    @if (Model.Groups.Count == 0)
+    {
+        <p class="info">You have no volunteer tasks yet. When a supervisor or
+           organizer assigns you to one, it&rsquo;ll appear here.</p>
+    }
+</div>
+
+@foreach (var cat in Model.Groups)
+{
+    <div class="card mt-cat">
+        <h3>@cat.Category</h3>
+        <p class="meta" style="color:#6e7681;font-size:12.5px;margin:0 0 6px;">
+            Bucket go-to: <strong>@cat.Supervisors</strong>
+            @if (!string.IsNullOrWhiteSpace(cat.EldkLeadName))
+            {
+                <text> &middot; ELDK lead: <strong>@cat.EldkLeadName</strong></text>
+            }
+        </p>
+        @foreach (var sub in cat.Subs)
+        {
+            <div class="mt-sub">
+                <h4>@sub.Subcategory</h4>
+                @foreach (var t in sub.Tasks)
+                {
+                    <div class="mt-task">
+                        <strong>@t.Title</strong>
+                        <span class="meta">
+                            &middot; @t.Status
+                            @if (t.Due is not null) { <text>&middot; due @t.Due.Value.ToString("dd-MM-yyyy")</text> }
+                            @if (!string.IsNullOrWhiteSpace(t.Shift)) { <text>&middot; @t.Shift</text> }
+                        </span>
+
+                        @if (!string.IsNullOrWhiteSpace(t.Instructions))
+                        {
+                            <div class="meta" style="margin-top:6px;"><strong>Instructions:</strong> @t.Instructions</div>
+                        }
+                        @if (!string.IsNullOrWhiteSpace(t.Prerequisites))
+                        {
+                            <div class="meta"><strong>Pre-req:</strong> @t.Prerequisites</div>
+                        }
+                        @if (!string.IsNullOrWhiteSpace(t.Expectations))
+                        {
+                            <div class="meta"><strong>Expectations:</strong> @t.Expectations</div>
+                        }
+
+                        <form method="post" asp-page-handler="SetStatus" class="mt-form">
+                            <input type="hidden" name="taskId" value="@t.Id" />
+                            <select name="status">
+                                @foreach (var st in Enum.GetValues<CommunityHub.Core.Domain.VolunteerTaskStatus>())
+                                {
+                                    if (st == t.Status) { <option value="@((int)st)" selected>@st</option> }
+                                    else { <option value="@((int)st)">@st</option> }
+                                }
+                            </select>
+                            <button type="submit">Update my progress</button>
+                        </form>
+
+                        <form method="post" asp-page-handler="RaiseHelp" class="mt-form">
+                            <input type="hidden" name="taskId" value="@t.Id" />
+                            <input type="text" name="message" placeholder="Ask @t.SupervisorName for help…" maxlength="2000" required />
+                            <button type="submit" class="help">Ask for help</button>
+                        </form>
+
+                        @foreach (var h in Model.MyHelp.Where(h => h.TaskId == t.Id))
+                        {
+                            <div class="mt-helprow">
+                                Help (@h.Status): @h.Message
+                                @if (!string.IsNullOrWhiteSpace(h.Response))
+                                {
+                                    <span class="reply"> — reply: @h.Response</span>
+                                }
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+        }
+    </div>
+}
+
+<div class="card"><p><a asp-page="/Index">Back to the hub</a></p></div>

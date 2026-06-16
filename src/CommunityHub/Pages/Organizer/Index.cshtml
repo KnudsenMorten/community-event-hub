@@ -2,113 +2,121 @@
 @using CommunityHub.Core.Domain
 @model CommunityHub.Pages.Organizer.IndexModel
 @{
-    ViewData["Title"] = "Organizer area";
+    ViewData["Title"] = Localizer["OrgArea.Title"].Value;
 }
 
 <div class="card">
-    <h2>Dashboard</h2>
-    <p>Live snapshot: form completion, task status, sponsor progress,
-       attendee reconciliation, volunteer coverage.</p>
-    <p><a asp-page="/Organizer/Dashboard">Open dashboard</a></p>
-</div>
-
-<div class="card">
-    <h2>Attendee reconciliation mismatches</h2>
-
+    <h2>@Localizer["OrgArea.Title"]</h2>
     @if (Model.AccessDenied)
     {
-        <p class="error">This area is for organizers only.</p>
-    }
-    else if (Model.Mismatches.Count == 0)
-    {
-        <p class="info">No mismatches. Every attendee's ticket and Master
-           Class booking line up.</p>
+        <p class="error">@Localizer["Common.OrganizersOnly"]</p>
+        <p><a asp-page="/Index">@Localizer["Common.BackToHub"]</a></p>
     }
     else
     {
-        <p>@Model.Mismatches.Count attendee(s) need review. The hub flags
-           these; resolve identity questions manually.</p>
-        <table style="width:100%;border-collapse:collapse;">
-            <tr style="text-align:left;border-bottom:2px solid #ddd;">
-                <th>Name</th><th>Email</th><th>Ticket</th><th>Booking</th>
-            </tr>
-            @foreach (var a in Model.Mismatches)
-            {
-                <tr style="border-bottom:1px solid #eee;">
-                    <td>@a.FirstName @a.LastName</td>
-                    <td>@a.Email</td>
-                    <td>@a.TicketStatus</td>
-                    <td>@a.BookingStatus</td>
-                </tr>
-            }
-        </table>
+        <p>@Localizer["OrgArea.Intro"]</p>
     }
-    <p><a asp-page="/Index">Back to hub</a></p>
 </div>
 
-<div class="card">
-    <h2>Attendees</h2>
-    <p>Browse the full reconciled attendee list (Zoho tickets + Master Class
-       bookings) with filters, search and CSV export.</p>
-    <p><a asp-page="/Organizer/Attendees">Browse attendees</a></p>
-</div>
+@if (!Model.AccessDenied)
+{
+    <div class="card">
+        <h2>@Localizer["Nav.OrgCommandCenter"]</h2>
+        <p>@Localizer["OrgArea.CommandCenter"]</p>
+        <p><a asp-page="/Organizer/CommandCenter">@Localizer["Nav.OrgCommandCenter"]</a></p>
+    </div>
 
-<div class="card">
-    <h2>Email center</h2>
-    <p>Preview every branded email template, send yourself a test copy, and
-       browse the delivery ledger (what the reminder engine actually sent).</p>
-    <p><a asp-page="/Organizer/EmailCenter">Open email center</a></p>
-</div>
+    <div class="card">
+        <h2>@Localizer["Nav.OrgDashboard"]</h2>
+        <p>@Localizer["OrgArea.Dashboard"]</p>
+        <p><a asp-page="/Organizer/Dashboard">@Localizer["Nav.OrgDashboard"]</a></p>
+        @if (Model.OpenActionItems > 0)
+        {
+            <p><a asp-page="/Organizer/ActionQueue">
+                <span style="display:inline-block;font-size:13px;font-weight:700;background:#fee2e2;color:#991b1b;border-radius:999px;padding:2px 10px;">@Model.OpenActionItems</span>
+                @Localizer["OrgArea.OpenActions"]</a></p>
+        }
+    </div>
 
-<div class="card">
-    <h2>Broadcast email</h2>
-    <p>Send one branded message to whole role groups (speakers, volunteers,
-       sponsors, attendees) with per-subject dedup so retries never
-       double-mail.</p>
-    <p><a asp-page="/Organizer/Broadcast">Compose broadcast</a></p>
-</div>
+    <div class="card">
+        <h2>@Localizer["Nav.OrgPeople"]</h2>
+        <p>@Localizer["OrgPeople.Intro"]</p>
+        <p><a asp-page="/Organizer/People">@Localizer["Nav.OrgPeople"]</a></p>
+    </div>
 
-<div class="card">
-    <h2>Manage participants</h2>
-    <p>View all participants, filter by role and active/inactive status, and
-       deactivate anyone who has dropped out.</p>
-    <p><a asp-page="/Organizer/Participants">Manage participants</a></p>
-</div>
+    <div class="card">
+        <h2>@Localizer["Nav.OrgComms"]</h2>
+        <p>@Localizer["OrgComms.Intro"]</p>
+        <p><a asp-page="/Organizer/Comms">@Localizer["Nav.OrgComms"]</a></p>
+    </div>
 
-<div class="card">
-    <h2>Import speakers</h2>
-    <p>Pull accepted speakers from Sessionize and add them as participants.</p>
-    <p><a asp-page="/Organizer/SessionizeImport">Import from Sessionize</a></p>
-</div>
+    <div class="card">
+        <h2>@Localizer["Nav.OrgSessionsHub"]</h2>
+        <p>@Localizer["OrgContent.Intro"]</p>
+        <p><a asp-page="/Organizer/Content">@Localizer["Nav.OrgSessionsHub"]</a></p>
+    </div>
 
-<div class="card">
-    <h2>Data grids</h2>
-    <p>Excel-like tables for managing data in place, with CSV export.</p>
-    <p><a asp-page="/Organizer/DataGrid">Participant grid</a> &mdash;
-       active status and hotel check-in / check-out per person.</p>
-    <p><a asp-page="/Organizer/TasksTable">Tasks grid</a> &mdash;
-       edit task title, due date, state and assignee.</p>
-</div>
+    <div class="card">
+        <h2>@Localizer["Nav.OrgSponsorsHub"]</h2>
+        <p>@Localizer["OrgArea.Sponsors"]</p>
+        <p><a asp-page="/Organizer/SponsorAdmin/Index">@Localizer["Nav.OrgSponsorsHub"]</a></p>
+    </div>
 
-<div class="card">
-    <h2>Group photos</h2>
-    <p>Register company photo sessions, schedule slots, and send calendar
-       invites to the lead contact + internal participants (re-sends update
-       the existing calendar entry).</p>
-    <p><a asp-page="/Organizer/GroupPhotos">Manage group photos</a></p>
-</div>
+    <div class="card">
+        <h2>@Localizer["Nav.OrgVolunteers"]</h2>
+        <p>@Localizer["OrgVolunteers.Intro"]</p>
+        <p><a asp-page="/Organizer/Volunteers">@Localizer["Nav.OrgVolunteers"]</a></p>
+    </div>
 
-<div class="card">
-    <h2>App game</h2>
-    <p>Track which sponsors take part in the attendee app game, the gift
-       they committed, and send bring-the-gift reminders.</p>
-    <p><a asp-page="/Organizer/AppGame">Manage app game</a></p>
-</div>
+    <div class="card">
+        <h2>@Localizer["Nav.OrgLogistics"]</h2>
+        <p>@Localizer["OrgLogistics.Intro"]</p>
+        <p><a asp-page="/Organizer/Logistics">@Localizer["Nav.OrgLogistics"]</a></p>
+    </div>
 
-<div class="card">
-    <h2>Sponsor Admin</h2>
-    <p>Manage the sponsor task catalog (create / delete / shift deadline),
-       review leads pulled from Zoho with per-sponsor CSV / JSON download
-       endpoints, and watch the per-sponsor status dashboard.</p>
-    <p><a asp-page="/Organizer/SponsorAdmin/Index">Open Sponsor Admin</a></p>
-</div>
+    <div class="card">
+        <h2>@Localizer["Nav.OrgExports"]</h2>
+        <p>@Localizer["OrgArea.Exports"]</p>
+        <p><a asp-page="/Organizer/Exports">@Localizer["Nav.OrgExports"]</a></p>
+    </div>
+
+    <div class="card">
+        <h2>@Localizer["Nav.OrgSoMe"]</h2>
+        <p>@Localizer["OrgSoMe.Intro"]</p>
+        <p><a asp-page="/Organizer/SoMe">@Localizer["Nav.OrgSoMe"]</a></p>
+    </div>
+
+    <div class="card">
+        <h2>@Localizer["Nav.OrgSetup"]</h2>
+        <p>@Localizer["OrgSetup.Intro"]</p>
+        <p><a asp-page="/Organizer/Setup">@Localizer["Nav.OrgSetup"]</a></p>
+    </div>
+
+    <div class="card">
+        <h2>@Localizer["Nav.OrgImpersonationLog"]</h2>
+        <p>@Localizer["OrgArea.Audit"]</p>
+        <p><a asp-page="/Organizer/ImpersonationLog">@Localizer["Nav.OrgImpersonationLog"]</a></p>
+    </div>
+
+    @if (Model.Mismatches.Count > 0)
+    {
+        <div class="card">
+            <h2>@Localizer["OrgArea.MismatchesTitle"]</h2>
+            <p>@Model.Mismatches.Count @Localizer["OrgArea.MismatchesNeedReview"]</p>
+            <table style="width:100%;border-collapse:collapse;">
+                <tr style="text-align:left;border-bottom:2px solid #ddd;">
+                    <th>@Localizer["OrgArea.ColName"]</th><th>@Localizer["OrgArea.ColEmail"]</th><th>@Localizer["OrgArea.ColTicket"]</th><th>@Localizer["OrgArea.ColBooking"]</th>
+                </tr>
+                @foreach (var a in Model.Mismatches)
+                {
+                    <tr style="border-bottom:1px solid #eee;">
+                        <td>@a.FirstName @a.LastName</td>
+                        <td>@a.Email</td>
+                        <td>@a.TicketStatus</td>
+                        <td>@a.BookingStatus</td>
+                    </tr>
+                }
+            </table>
+        </div>
+    }
+}

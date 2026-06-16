@@ -1,0 +1,103 @@
+@page
+@model CommunityHub.Pages.Organizer.EmailLogModel
+@{
+    ViewData["Title"] = "Email log";
+}
+
+<div class="card">
+    <h2>Email log</h2>
+
+    @if (Model.AccessDenied)
+    {
+        <p class="error" role="alert">This area is for organizers only.</p>
+    }
+    else
+    {
+        <p>Every outbound email the hub has sent for this edition &mdash; welcome,
+           sign-in codes, reminders, broadcasts, onboarding and manual re-sends.
+           Filter by a person's <strong>name or email</strong> to see exactly what
+           reached them.</p>
+
+        <form method="get" role="search" aria-label="Filter the email log">
+            <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;">
+                <div style="flex:1 1 220px;">
+                    <label for="Filter">Name or email contains</label>
+                    <input type="text" id="Filter" name="Filter" value="@Model.Filter"
+                           style="width:100%;" autocomplete="off" />
+                </div>
+                <div style="flex:0 1 200px;">
+                    <label for="Category">Category</label>
+                    <select id="Category" name="Category" style="width:100%;">
+                        <option value="">All categories</option>
+                        @foreach (var c in Model.Categories)
+                        {
+                            <option value="@c" selected="@(Model.Category == c)">@c</option>
+                        }
+                    </select>
+                </div>
+                <div>
+                    <button type="submit">Apply</button>
+                </div>
+            </div>
+        </form>
+
+        <p role="status" style="margin-top:12px;color:#6b7280;font-size:14px;">
+            @Model.TotalCount email(s) match. Showing the latest @(Model.Rows.Count).
+        </p>
+
+        @if (Model.Rows.Count == 0)
+        {
+            <p class="info">No emails match.</p>
+        }
+        else
+        {
+            <div style="overflow-x:auto;margin-top:8px;">
+                <table style="width:100%;border-collapse:collapse;min-width:680px;">
+                    <caption class="sr-only">Outbound emails for this edition, newest first</caption>
+                    <thead>
+                        <tr style="text-align:left;border-bottom:2px solid #ddd;">
+                            <th scope="col">Sent (UTC)</th>
+                            <th scope="col">Recipient</th>
+                            <th scope="col">CC</th>
+                            <th scope="col">Category</th>
+                            <th scope="col">Subject</th>
+                            <th scope="col">Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var e in Model.Rows)
+                        {
+                            <tr style="border-bottom:1px solid #eee;">
+                                <td style="white-space:nowrap;">@e.SentAt.UtcDateTime.ToString("dd MMM HH:mm")</td>
+                                <td style="word-break:break-all;">
+                                    @if (!string.IsNullOrWhiteSpace(e.RecipientName))
+                                    {
+                                        <div>@e.RecipientName</div>
+                                    }
+                                    <div style="color:#6b7280;font-size:13px;">@e.ToEmail</div>
+                                </td>
+                                <td style="word-break:break-all;color:#6b7280;font-size:13px;">@e.CcEmails</td>
+                                <td>@e.Category</td>
+                                <td style="word-break:break-word;">@e.Subject</td>
+                                <td>
+                                    @if (e.Success)
+                                    {
+                                        <span style="color:#137333;">Sent</span>
+                                    }
+                                    else
+                                    {
+                                        <span style="color:#a50e0e;" title="@e.Error">Failed</span>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+        <p style="margin-top:12px;">
+            <a asp-page="/Organizer/EmailCenter">Email center</a> &middot;
+            <a asp-page="/Organizer/Index">Back to organizer area</a>
+        </p>
+    }
+</div>

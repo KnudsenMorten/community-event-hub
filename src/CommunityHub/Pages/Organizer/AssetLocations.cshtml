@@ -1,0 +1,92 @@
+@page
+@model CommunityHub.Pages.Organizer.AssetLocationsModel
+@{
+    ViewData["Title"] = "Asset locations";
+}
+
+@if (Model.AccessDenied)
+{
+    <div class="card">
+        <h2>Asset locations</h2>
+        <p class="error" role="alert">This page is for organizers.</p>
+        <p><a asp-page="/Index">Back to hub</a></p>
+    </div>
+    return;
+}
+
+<style>
+    .btn { background:#008BD2; color:#fff; border:0; border-radius:6px;
+           padding:8px 14px; font-size:14px; cursor:pointer; text-decoration:none; }
+    .btn:hover { background:#0079b8; }
+    .al-card { margin:10px 0; }
+    .al-grid { display:grid; grid-template-columns:1fr; gap:8px; }
+    .al-grid label { font-weight:600; }
+    .al-grid input, .al-grid textarea { width:100%; box-sizing:border-box; }
+    .al-current { color:#4b5563; font-size:14px; }
+    .al-current code { word-break:break-all; }
+</style>
+
+@if (Model.Message is not null)
+{
+    <div class="card"><p role="status" style="color:#0a6;">@Model.Message</p></div>
+}
+
+<div class="card">
+    <h2>SharePoint asset locations</h2>
+    <p>
+        Tell the hub where each group's bio details and files live on SharePoint.
+        Enter the real site / folder links for your tenant — these are stored as
+        pointers only (no credentials).
+    </p>
+</div>
+
+@foreach (var r in Model.Rows)
+{
+    <div class="card al-card">
+        <h3>@r.GroupName</h3>
+        @if (!string.IsNullOrWhiteSpace(r.BrowseUrl) || !string.IsNullOrWhiteSpace(r.SiteUrl))
+        {
+            <p class="al-current">
+                Current:
+                @if (!string.IsNullOrWhiteSpace(r.BrowseUrl))
+                {
+                    <a href="@r.BrowseUrl" target="_blank" rel="noopener noreferrer">Open folder</a>
+                    <span> · </span>
+                }
+                <code>@(r.SiteUrl ?? "(no site set)")</code>
+                @if (!string.IsNullOrWhiteSpace(r.RootFolderPath)) { <text> / </text><code>@r.RootFolderPath</code> }
+            </p>
+        }
+        else
+        {
+            <p class="al-current">Not configured yet.</p>
+        }
+
+        <form method="post" class="al-grid">
+            <input type="hidden" name="Group" value="@r.Group" />
+
+            <label for="site-@r.Group">SharePoint site URL</label>
+            <input id="site-@r.Group" name="SiteUrl" type="url"
+                   value="@r.SiteUrl" placeholder="https://contoso.sharepoint.com/sites/EventTeam" />
+
+            <label for="drive-@r.Group">Document library / drive (optional)</label>
+            <input id="drive-@r.Group" name="DriveName" type="text"
+                   value="@r.DriveName" placeholder="Documents" />
+
+            <label for="root-@r.Group">Root folder path</label>
+            <input id="root-@r.Group" name="RootFolderPath" type="text"
+                   value="@r.RootFolderPath" placeholder="/Graphics/@r.GroupName" />
+
+            <label for="browse-@r.Group">Browse link (folder URL organizers can open)</label>
+            <input id="browse-@r.Group" name="BrowseUrl" type="url"
+                   value="@r.BrowseUrl" placeholder="https://contoso.sharepoint.com/.../@r.GroupName" />
+
+            <label for="notes-@r.Group">Notes (optional)</label>
+            <textarea id="notes-@r.Group" name="Notes" rows="2">@r.Notes</textarea>
+
+            <div><button type="submit" class="btn">Save @r.GroupName</button></div>
+        </form>
+    </div>
+}
+
+<p><a asp-page="/Organizer/Graphics">Back to SoMe graphics</a> · <a asp-page="/Index">Back to hub</a></p>

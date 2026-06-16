@@ -1,0 +1,129 @@
+@using CommunityHub.Core.Domain
+@using CommunityHub.Core.Participants
+@model ParticipantChecklist
+@inject Microsoft.AspNetCore.Mvc.Localization.IHtmlLocalizer<CommunityHub.Core.Resources.SharedResource> L
+@*
+    Shared unified "what do I still owe" checklist (REQUIREMENTS Top-8 #7 / §21).
+    ONE component the Hub home, the Tasks page and the attendee My-event surface all
+    render so the pending/completed split + overdue badges look + behave the same
+    everywhere. Pure render over a ParticipantChecklist (built by
+    ParticipantChecklistBuilder).
+
+    Optional ViewData:
+      ChecklistIcsHandler — a page-handler name (e.g. "CalendarItem"). When set, each
+        DATED pending row gets a "Download .ics" link to that handler with route
+        taskId. Omitted when the host page has no such handler.
+*@
+@{
+    var icsHandler = ViewData["ChecklistIcsHandler"] as string;
+    var today = DateOnly.FromDateTime(DateTime.UtcNow);
+}
+
+@* Self-contained styles so the component looks identical wherever it is rendered
+   (Hub home / Tasks / My-event) without depending on the host page's CSS. *@
+<style>
+    .ceh-checklist .task-table { table-layout:fixed; }
+    .ceh-checklist .task-table th, .ceh-checklist .task-table td { overflow-wrap:anywhere; word-break:break-word; }
+    .ceh-checklist .cal-dl-link { font-size:12px; color:#2563eb; white-space:nowrap; text-decoration:none; }
+    @@media (max-width: 480px) {
+        .ceh-checklist .task-table col, .ceh-checklist .task-table th[style*="width"] { width:auto !important; }
+        .ceh-checklist .task-table td[style*="nowrap"], .ceh-checklist .task-table th[style*="width"] { white-space:normal !important; }
+        .ceh-checklist .task-table th, .ceh-checklist .task-table td { padding-left:4px !important; padding-right:4px !important; }
+    }
+</style>
+
+@if (Model.Pending.Count == 0 && Model.Completed.Count == 0)
+{
+    <div class="card ceh-checklist">
+        <p><span style="color:#0a6;font-weight:600;">&#10003; @L["Hub.AllTasksComplete"]</span></p>
+    </div>
+}
+
+@if (Model.Pending.Count > 0)
+{
+    <div class="card ceh-checklist">
+        <h2>&#9888; @L["Hub.PendingTasks"] (@Model.Pending.Count)</h2>
+        <table class="task-table" style="width:100%; border-collapse:collapse;">
+            <thead>
+                <tr style="text-align:left; color:#6b7280; font-size:12px; border-bottom:1px solid #e5e7eb;">
+                    <th style="padding:8px 6px;">@L["Hub.ColTask"]</th>
+                    <th style="padding:8px 6px; width:130px;">@L["Hub.ColDueDate"]</th>
+                    <th style="padding:8px 6px; width:120px;">@L["Hub.ColStatus"]</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var t in Model.Pending)
+                {
+                    <tr style="border-bottom:1px solid #f3f4f6;">
+                        <td style="padding:10px 6px;">
+                            @if (t.Link is not null)
+                            {
+                                <a href="@t.Link" style="font-weight:600;">@t.Title &rarr;</a>
+                            }
+                            else
+                            {
+                                @t.Title
+                            }
+                        </td>
+                        <td style="padding:10px 6px; white-space:nowrap;">
+                            @(t.DueDate?.ToString("dd/MM/yyyy") ?? "-")
+                            @if (t.DueDate is not null && !string.IsNullOrEmpty(icsHandler))
+                            {
+                                <br />
+                                <a class="cal-dl-link" asp-page-handler="@icsHandler"
+                                   asp-route-taskId="@t.Id" title="@L["Hub.DownloadIcs"]">
+                                    &#128197; @L["Hub.DownloadIcs"]
+                                </a>
+                            }
+                        </td>
+                        <td style="padding:10px 6px; white-space:nowrap;
+                                   color:@(t.DaysOverdue is > 0 ? "#c0392b" : "#6b7280");
+                                   font-weight:@(t.DaysOverdue is > 0 ? "600" : "400");">
+                            @if (t.DaysOverdue is > 0)
+                            {
+                                <text>@L["Hub.Overdue"] (@t.DaysOverdue day@(t.DaysOverdue == 1 ? "" : "s"))</text>
+                            }
+                            else
+                            {
+                                <text>@L["Common.Pending"]</text>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@if (Model.Completed.Count > 0)
+{
+    <div class="card ceh-checklist">
+        <h2 style="color:#0a6;">&#10003; @L["Hub.CompletedTasks"] (@Model.Completed.Count)</h2>
+        <table class="task-table" style="width:100%; border-collapse:collapse;">
+            <thead>
+                <tr style="text-align:left; color:#6b7280; font-size:12px; border-bottom:1px solid #e5e7eb;">
+                    <th style="padding:8px 6px;">@L["Hub.ColTask"]</th>
+                    <th style="padding:8px 6px; width:120px;">@L["Hub.ColStatus"]</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var t in Model.Completed)
+                {
+                    <tr style="border-bottom:1px solid #f3f4f6;">
+                        <td style="padding:10px 6px;">
+                            @if (t.Link is not null)
+                            {
+                                <a href="@t.Link" style="color:#0a6;">@t.Title</a>
+                            }
+                            else
+                            {
+                                @t.Title
+                            }
+                        </td>
+                        <td style="padding:10px 6px; color:#0a6; font-weight:600;">&#10003; @L["Common.Done"]</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}

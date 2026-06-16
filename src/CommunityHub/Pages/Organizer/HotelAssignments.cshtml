@@ -1,0 +1,103 @@
+@page
+@model CommunityHub.Pages.Organizer.HotelAssignmentsModel
+@{
+    ViewData["Title"] = Localizer["OrgHotelAssign.Title"].Value;
+}
+
+<div class="card">
+    <h2>@Localizer["OrgHotelAssign.Title"]</h2>
+    @if (Model.AccessDenied)
+    {
+        <p class="error">@Localizer["Common.OrganizersOnly"]</p>
+    }
+    else
+    {
+        <p>@Localizer["OrgHotelAssign.Intro"]</p>
+        @if (!string.IsNullOrEmpty(Model.Message)) { <p class="info">@Model.Message</p> }
+
+        @if (Model.AllHotels.Count == 0)
+        {
+            <p class="info">@Localizer["OrgHotelAssign.NoHotels"]
+                <a asp-page="/Organizer/Hotels">@Localizer["OrgHotels.Title"]</a>.</p>
+        }
+
+        @foreach (var g in Model.Groups)
+        {
+            var heading = g.Hotel is null ? Localizer["OrgHotelAssign.NotAssigned"].Value : g.Hotel.Name;
+            <section style="margin:18px 0;border:1px solid #e5e7eb;border-radius:8px;padding:10px 12px;">
+                <h3 style="margin:0 0 4px;">
+                    @heading
+                    <span style="font-size:13px;font-weight:400;color:#6b7280;">
+                        (@g.Count @Localizer["OrgHotelAssign.People"], @g.Confirmed @Localizer["OrgHotelAssign.Confirmed"])
+                    </span>
+                </h3>
+                @if (g.Hotel?.Address is { Length: > 0 } addr)
+                {
+                    <p style="margin:0 0 8px;color:#6b7280;font-size:12px;">@addr</p>
+                }
+
+                @if (g.Count == 0)
+                {
+                    <p style="color:#9ca3af;font-size:12px;">@Localizer["OrgHotelAssign.GroupEmpty"]</p>
+                }
+                else
+                {
+                    <div style="overflow-x:auto;">
+                    <table style="border-collapse:collapse;width:100%;font-size:13px;min-width:720px;">
+                        <thead>
+                            <tr style="border-bottom:2px solid #ddd;text-align:left;">
+                                <th style="padding:6px;">@Localizer["OrgHotelAssign.Person"]</th>
+                                <th style="padding:6px;">@Localizer["OrgHotelAssign.Role"]</th>
+                                <th style="padding:6px;text-align:center;">@Localizer["OrgHotelAssign.NeedsRoom"]</th>
+                                <th style="padding:6px;">@Localizer["OrgHotelAssign.Hotel"]</th>
+                                <th style="padding:6px;">@Localizer["OrgHotelAssign.ConfirmationNumber"]</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var o in g.Occupants)
+                            {
+                                <tr style="border-bottom:1px solid #eee;">
+                                    <td style="padding:6px;">@o.FullName<br/><span style="color:#8a8f9c;font-size:11px;">@o.Email</span></td>
+                                    <td style="padding:6px;">@o.Role</td>
+                                    <td style="padding:6px;text-align:center;">@(o.NeedsRoom ? "✓" : "")</td>
+                                    <td style="padding:6px;">
+                                        <form method="post" asp-page-handler="Assign" style="display:flex;gap:4px;align-items:center;">
+                                            <input type="hidden" name="ParticipantId" value="@o.ParticipantId" />
+                                            <select name="HotelId" aria-label="@Localizer["OrgHotelAssign.Hotel"]">
+                                                <option value="">@Localizer["OrgHotelAssign.NotAssigned"]</option>
+                                                @foreach (var h in Model.AllHotels)
+                                                {
+                                                    if (h.Id == o.HotelId)
+                                                    {
+                                                        <option value="@h.Id" selected>@h.Name</option>
+                                                    }
+                                                    else
+                                                    {
+                                                        <option value="@h.Id">@h.Name</option>
+                                                    }
+                                                }
+                                            </select>
+                                            <button type="submit">@Localizer["Common.Save"]</button>
+                                        </form>
+                                    </td>
+                                    <td style="padding:6px;">
+                                        <form method="post" asp-page-handler="Confirm" style="display:flex;gap:4px;align-items:center;">
+                                            <input type="hidden" name="ParticipantId" value="@o.ParticipantId" />
+                                            <input type="text" name="ConfirmationNumber" value="@o.HotelConfirmationNumber"
+                                                   maxlength="64" aria-label="@Localizer["OrgHotelAssign.ConfirmationNumber"]" style="width:140px;" />
+                                            <button type="submit">@Localizer["Common.Save"]</button>
+                                        </form>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                    </div>
+                }
+            </section>
+        }
+
+        <p style="margin-top:16px;"><a asp-page="/Organizer/Hotels">@Localizer["OrgHotelAssign.ManageHotels"]</a></p>
+    }
+    <p><a asp-page="/Organizer/Index">@Localizer["Common.BackToOrganizer"]</a></p>
+</div>

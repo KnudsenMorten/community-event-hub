@@ -1,0 +1,157 @@
+@page
+@using CommunityHub.Core.Email
+@using CommunityHub.Core.Organizer
+@model CommunityHub.Pages.Organizer.OnboardingModel
+@{
+    ViewData["Title"] = "Onboarding dashboard";
+}
+
+<div class="card">
+    <h2>Onboarding dashboard</h2>
+
+    @if (Model.AccessDenied)
+    {
+        <p class="error">This area is for organizers only.</p>
+    }
+    else
+    {
+        @if (!string.IsNullOrEmpty(Model.ActionMessage))
+        {
+            <p class="info" role="status">@Model.ActionMessage</p>
+        }
+
+        <!-- Persona filter -->
+        <form method="get" style="margin-bottom:16px;">
+            <fieldset style="border:1px solid #ddd;border-radius:8px;padding:10px;">
+                <legend>Filter by persona</legend>
+                <label for="persona" class="sr-only">Persona</label>
+                <select id="persona" name="persona" onchange="this.form.submit()"
+                        style="max-width:100%;padding:6px;">
+                    <option value="">All personas</option>
+                    @foreach (var p in CommunityHub.Pages.Organizer.OnboardingModel.FilterablePersonas)
+                    {
+                        if (Model.Persona == p)
+                        {
+                            <option value="@p" selected>@CommunityHub.Pages.Organizer.OnboardingModel.PersonaLabel(p)</option>
+                        }
+                        else
+                        {
+                            <option value="@p">@CommunityHub.Pages.Organizer.OnboardingModel.PersonaLabel(p)</option>
+                        }
+                    }
+                </select>
+                <noscript><button type="submit" class="secondary">Apply</button></noscript>
+            </fieldset>
+        </form>
+
+        <p>
+            <strong>@Model.Overview.FullyOnboarded</strong> of
+            <strong>@Model.Overview.TotalParticipants</strong> participant(s)
+            @(Model.Persona is null ? "" : "(" + CommunityHub.Pages.Organizer.OnboardingModel.PersonaLabel(Model.Persona.Value) + ") ")
+            have completed every required onboarding step
+            (<strong>@Model.Overview.OverallPercent%</strong>).
+        </p>
+
+        <!-- Stage tiles: Pre-selected / Invited / In progress / Completed -->
+        <div role="status" aria-label="Count by onboarding stage"
+             style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:18px;">
+            @foreach (var s in Model.Overview.StageStats)
+            {
+                <div style="flex:1 1 120px;min-width:120px;padding:12px;
+                            border:1px solid #ddd;border-radius:8px;text-align:center;">
+                    <div style="font-size:1.6em;font-weight:700;">@s.Count</div>
+                    <div style="font-size:0.9em;color:#555;">@OnboardingService.LabelFor(s.Stage)</div>
+                </div>
+            }
+        </div>
+
+        <!-- Per-step progress tiles (only people who REQUIRE that step). -->
+        <h3 style="margin-bottom:8px;">Step completion</h3>
+        <div role="status" aria-label="Per-step completion"
+             style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:18px;">
+            @foreach (var s in Model.Overview.StepStats)
+            {
+                <div style="flex:1 1 140px;min-width:140px;padding:10px;
+                            border:1px solid #ddd;border-radius:8px;">
+                    <div style="font-weight:600;">@OnboardingService.LabelFor(s.Step)</div>
+                    <div>@s.Done / @s.Total done</div>
+                    <div role="progressbar" aria-valuemin="0" aria-valuemax="100"
+                         aria-valuenow="@s.Percent"
+                         aria-label="@OnboardingService.LabelFor(s.Step) completion"
+                         style="height:8px;background:#eee;border-radius:4px;margin-top:6px;overflow:hidden;">
+                        <div style="height:100%;width:@(s.Percent)%;background:#2e7d32;"></div>
+                    </div>
+                    <div style="font-size:0.85em;color:#555;">@s.Percent%</div>
+                </div>
+            }
+        </div>
+
+        @if (Model.Overview.Rows.Count == 0)
+        {
+            <p>No participants in the onboarding pipeline yet — activate people from the pre-selection queue first.</p>
+        }
+        else
+        {
+            <h3 style="margin-bottom:8px;">People</h3>
+            <div style="overflow-x:auto;">
+            <table style="width:100%;border-collapse:collapse;min-width:760px;">
+                <caption class="sr-only">Onboarding progress per participant</caption>
+                <thead>
+                <tr style="text-align:left;border-bottom:2px solid #ddd;">
+                    <th scope="col">Name</th><th scope="col">Persona</th><th scope="col">Stage</th>
+                    <th scope="col">Bio</th><th scope="col">Picture</th><th scope="col">Hotel</th>
+                    <th scope="col">Appreciation</th><th scope="col">Swag</th><th scope="col">Progress</th>
+                </tr>
+                </thead>
+                <tbody>
+                @foreach (var r in Model.Overview.Rows)
+                {
+                    <tr style="border-bottom:1px solid #eee;">
+                        <td>@r.FullName<br /><span style="font-size:0.85em;color:#555;">@r.Email</span></td>
+                        <td>@CommunityHub.Pages.Organizer.OnboardingModel.PersonaLabel(r.Persona)</td>
+                        <td>@OnboardingService.LabelFor(r.Stage)</td>
+                        @{
+                            var allSteps = new[]
+                            {
+                                OnboardingStep.Bio, OnboardingStep.Picture, OnboardingStep.Hotel,
+                                OnboardingStep.Appreciation, OnboardingStep.Swag,
+                            };
+                        }
+                        @foreach (var step in allSteps)
+                        {
+                            <td style="text-align:center;">
+                                @if (!r.Requires(step))
+                                {
+                                    <span style="color:#aaa;" aria-label="Not required for this persona">n/a</span>
+                                }
+                                else if (r.DoneOf(step))
+                                {
+                                    <!-- Done + "re-open" (flip to 0) hand-off button. -->
+                                    <form method="post" style="margin:0;">
+                                        <input type="hidden" name="participantId" value="@r.ParticipantId" />
+                                        <input type="hidden" name="step" value="@step" />
+                                        <input type="hidden" name="persona" value="@(Model.Persona?.ToString())" />
+                                        <span class="info" aria-hidden="true">✓</span>
+                                        <button type="submit" asp-page-handler="ResetStep" class="secondary"
+                                                style="font-size:0.8em;padding:2px 6px;"
+                                                title="Re-open this step and remind @r.FullName">
+                                            Re-open
+                                        </button>
+                                    </form>
+                                }
+                                else
+                                {
+                                    <span class="error" aria-label="Not done">—</span>
+                                }
+                            </td>
+                        }
+                        <td>@r.DoneCount / @r.RequiredCount (@r.Percent%)</td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+            </div>
+        }
+    }
+    <p><a asp-page="/Organizer/Index">Back to organizer area</a></p>
+</div>

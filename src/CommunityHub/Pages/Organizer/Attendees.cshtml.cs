@@ -2,6 +2,7 @@ using System.Text;
 using CommunityHub.Auth;
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
+using CommunityHub.Core.Organizer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
@@ -46,6 +47,25 @@ public class AttendeesModel : PageModel
     [BindProperty(SupportsGet = true)] public bool MismatchOnly { get; set; }
     [BindProperty(SupportsGet = true)] public string? Search { get; set; }
 
+    // --- Sort + paging (GET-bound) ---------------------------------------
+    /// <summary>Sort column key: name | email | ticket | booking. Default name.</summary>
+    [BindProperty(SupportsGet = true)] public string Sort { get; set; } = "name";
+    /// <summary>true = descending. Default false (A→Z).</summary>
+    [BindProperty(SupportsGet = true)] public bool Desc { get; set; }
+    [BindProperty(SupportsGet = true)] public int PageNo { get; set; } = 1;
+
+    public GridPage Paging { get; private set; }
+
+    /// <summary>Direction the link for <paramref name="col"/> should request:
+    /// flip when this column is already the active ascending sort, else ascending.</summary>
+    public bool NextDescFor(string col) => Sort == col && !Desc;
+
+    /// <summary>Little ▲/▼ glyph appended to the active sort header.</summary>
+    public string SortIndicator(string col) => Sort != col ? "" : (Desc ? " ▼" : " ▲");
+
+    /// <summary>ARIA <c>aria-sort</c> value for a column header.</summary>
+    public string AriaSort(string col) => Sort != col ? "none" : (Desc ? "descending" : "ascending");
+
     public async Task<IActionResult> OnGetAsync(CancellationToken ct)
     {
         var me = _participant.Current;
@@ -53,10 +73,29 @@ public class AttendeesModel : PageModel
         if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
 
         await LoadSummaryAsync(me.EventId, ct);
-        Attendees = await BuildQuery(me.EventId)
-            .OrderBy(a => a.LastName).ThenBy(a => a.FirstName)
+
+        var filtered = BuildQuery(me.EventId);
+        var matched = await filtered.CountAsync(ct);
+        Paging = GridPaging.Resolve(PageNo, GridPaging.DefaultPageSize, matched);
+
+        Attendees = await ApplySort(filtered)
+            .Skip(Paging.Skip).Take(Paging.PageSize)
             .ToListAsync(ct);
         return Page();
+    }
+
+    /// <summary>Stable, deterministic ordering for the chosen sort column.</summary>
+    private IQueryable<Core.Domain.Attendee> ApplySort(IQueryable<Core.Domain.Attendee> q)
+    {
+        IOrderedQueryable<Core.Domain.Attendee> ordered = Sort switch
+        {
+            "email"   => Desc ? q.OrderByDescending(a => a.Email)         : q.OrderBy(a => a.Email),
+            "ticket"  => Desc ? q.OrderByDescending(a => a.TicketStatus)  : q.OrderBy(a => a.TicketStatus),
+            "booking" => Desc ? q.OrderByDescending(a => a.BookingStatus) : q.OrderBy(a => a.BookingStatus),
+            _         => Desc ? q.OrderByDescending(a => a.LastName)      : q.OrderBy(a => a.LastName),
+        };
+        // Id tiebreak so paging is deterministic across calls.
+        return ordered.ThenBy(a => a.Id);
     }
 
     /// <summary>CSV export of the CURRENT filter selection (not always-all,

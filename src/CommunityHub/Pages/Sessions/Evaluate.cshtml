@@ -1,0 +1,165 @@
+@page "/sessions/{token}/evaluate"
+@model CommunityHub.Pages.Sessions.EvaluateModel
+@{
+    Layout = "_Layout";
+    ViewData["Title"] = Model.Session is null ? "Rate this session" : $"Rate: {Model.Session.Title}";
+}
+
+@if (Model.Session is null)
+{
+    <div class="card"><h2>Session not found</h2><p>This evaluation link is not valid.</p></div>
+    return;
+}
+
+@{
+    // 1–5 smiley scale: value, emoji, label (very unhappy … very happy).
+    var scale = new (int Value, string Emoji, string Label)[]
+    {
+        (1, "😞", "Very unhappy"),
+        (2, "🙁", "Unhappy"),
+        (3, "😐", "Neutral"),
+        (4, "🙂", "Happy"),
+        (5, "😀", "Very happy"),
+    };
+}
+
+<style>
+    /* Mobile-first: single column, readable at ~360px. */
+    .ev-hero {
+        background: var(--el-darkblue, #1D3380); color: #fff;
+        padding: 22px 22px; border-radius: 10px 10px 0 0; margin: 0;
+    }
+    .ev-hero .eyebrow { font-size: 12.5px; text-transform: uppercase; letter-spacing: .06em; opacity: .85; }
+    .ev-hero h1 { margin: 6px 0 0 0; font-size: 21px; font-weight: 700; line-height: 1.25; }
+    .ev-hero .speakers { font-size: 13.5px; opacity: .92; margin-top: 8px; line-height: 1.4; }
+    .ev-body { padding: 20px 22px 24px 22px; }
+    .ev-intro { color: #24292f; font-size: 14px; line-height: 1.55; margin: 0 0 18px 0; }
+
+    .ev-scale { border: 0; padding: 0; margin: 0 0 8px 0; }
+    .ev-scale legend { font-weight: 600; font-size: 13px; color: #24292f; margin-bottom: 10px; padding: 0; }
+    .ev-faces { display: flex; gap: 8px; justify-content: space-between; }
+    /* The radio input itself is visually hidden but keyboard-focusable. */
+    .ev-faces input[type="radio"] {
+        position: absolute; opacity: 0; width: 1px; height: 1px;
+    }
+    .ev-faces label {
+        flex: 1 1 0; display: flex; flex-direction: column; align-items: center; gap: 4px;
+        padding: 12px 4px; border: 2px solid #d7dbe6; border-radius: 12px; cursor: pointer;
+        background: #fff; transition: border-color .12s, background .12s, transform .06s;
+        text-align: center;
+    }
+    .ev-faces label .face { font-size: 30px; line-height: 1; }
+    .ev-faces label .txt  { font-size: 10.5px; color: #6a7280; line-height: 1.2; }
+    .ev-faces label:hover { border-color: var(--el-blue, #008BD2); }
+    .ev-faces label:active { transform: scale(.96); }
+    /* Selected + keyboard-focus states. */
+    .ev-faces input[type="radio"]:checked + label {
+        border-color: var(--el-blue, #008BD2); background: #eaf6fd;
+    }
+    .ev-faces input[type="radio"]:focus-visible + label {
+        outline: 3px solid var(--el-blue, #008BD2); outline-offset: 2px;
+    }
+
+    .ev-field { margin-top: 18px; }
+    .ev-field label { display: block; font-weight: 600; font-size: 13px; color: #24292f; margin-bottom: 4px; }
+    .ev-field .hint { font-weight: 400; color: #6a7280; font-size: 12px; }
+    .ev-field textarea {
+        width: 100%; box-sizing: border-box; padding: 10px 12px; font-size: 15px;
+        border: 1px solid #c4c8d4; border-radius: 7px; font-family: inherit;
+        min-height: 90px; resize: vertical;
+    }
+    .ev-field textarea:focus {
+        outline: 2px solid var(--el-blue, #008BD2); outline-offset: 1px; border-color: var(--el-blue, #008BD2);
+    }
+
+    .ev-actions { margin-top: 20px; }
+    .ev-actions button {
+        background: var(--el-blue, #008BD2); color: #fff; border: 0; padding: 13px 22px;
+        border-radius: 8px; font-size: 16px; font-weight: 600; cursor: pointer; width: 100%;
+    }
+    @@media (min-width: 600px) { .ev-actions button { width: auto; } }
+
+    .ev-error { padding: 12px 14px; background: #fff3f3; border-left: 4px solid #c0392b;
+        border-radius: 6px; color: #c0392b; margin-bottom: 14px; font-size: 13.5px; }
+    .ev-success { padding: 22px; background: #f0fdf4; border-left: 4px solid #16a34a; border-radius: 6px; }
+    .ev-success .big { font-size: 42px; line-height: 1; margin-bottom: 8px; }
+    .ev-success h2 { margin: 0 0 8px 0; color: #166534; font-size: 19px; }
+    .ev-success p  { margin: 6px 0 0 0; color: #166534; font-size: 14px; line-height: 1.55; }
+
+    /* Honeypot — invisible to humans, irresistible to bots. */
+    .ev-hp { position: absolute; left: -9999px; height: 0; width: 0; overflow: hidden; }
+</style>
+
+<div class="card" style="padding: 0; overflow: hidden;">
+    <div class="ev-hero">
+        <div class="eyebrow">@Model.Session.Event?.DisplayName</div>
+        <h1>@Model.Session.Title</h1>
+        @if (Model.SpeakerNames.Count > 0)
+        {
+            <div class="speakers">with @string.Join(", ", Model.SpeakerNames)</div>
+        }
+    </div>
+
+    <div class="ev-body">
+        @if (Model.SubmittedOk)
+        {
+            <div class="ev-success" role="status">
+                @{
+                    var picked = Model.SubmittedRating is int r && r >= 1 && r <= 5 ? scale[r - 1].Emoji : "🎉";
+                }
+                <div class="big" aria-hidden="true">@picked</div>
+                <h2>Thanks for your feedback!</h2>
+                <p>
+                    Your rating helps the speaker(s) and organizers make the next session even
+                    better. You can close this page.
+                </p>
+            </div>
+        }
+        else
+        {
+            <p class="ev-intro">
+                How was this session? Tap a face below — and add a comment if you like. It takes a
+                second and it is completely anonymous.
+            </p>
+
+            @if (!string.IsNullOrEmpty(Model.ErrorMessage))
+            {
+                <div class="ev-error" role="alert">@Model.ErrorMessage</div>
+            }
+
+            <form method="post" novalidate>
+                @* Honeypot *@
+                <div class="ev-hp" aria-hidden="true">
+                    <label for="Website">Leave this field empty</label>
+                    <input type="text" asp-for="Website" id="Website" tabindex="-1" autocomplete="off" />
+                </div>
+
+                <fieldset class="ev-scale">
+                    <legend>Your rating <span class="hint">(required)</span></legend>
+                    <div class="ev-faces" role="radiogroup" aria-label="Rate this session from 1 to 5">
+                        @foreach (var step in scale)
+                        {
+                            var id = $"rating-{step.Value}";
+                            <input type="radio" asp-for="Rating" id="@id" value="@step.Value"
+                                   aria-label="@step.Value — @step.Label" />
+                            <label for="@id">
+                                <span class="face" aria-hidden="true">@step.Emoji</span>
+                                <span class="txt">@step.Label</span>
+                            </label>
+                        }
+                    </div>
+                </fieldset>
+
+                <div class="ev-field">
+                    <label for="Comment">Comment <span class="hint">(optional)</span></label>
+                    <textarea asp-for="Comment" id="Comment" maxlength="2000"
+                              placeholder="Anything you'd like the speaker(s) to know?"></textarea>
+                </div>
+
+                <div class="ev-actions">
+                    <button type="submit">Send my rating</button>
+                </div>
+            </form>
+        }
+    </div>
+</div>

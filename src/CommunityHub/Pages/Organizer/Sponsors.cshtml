@@ -50,26 +50,59 @@
             </a>
         </p>
 
+        <!-- ---- Search (company id or contact) ----------------------------- -->
+        <form method="get" style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;margin:14px 0 4px;">
+            <div style="flex:2 1 240px;min-width:160px;">
+                <label for="Search">@Localizer["OrgGrid.Search"] (company, contact name / email)</label>
+                <input type="text" id="Search" name="Search" value="@Model.Search" />
+            </div>
+            @* keep the current sort; reset to page 1 on a new search *@
+            <input type="hidden" name="Sort" value="@Model.Sort" />
+            <input type="hidden" name="Desc" value="@Model.Desc" />
+            <div style="flex:0 0 auto;">
+                <button type="submit">@Localizer["OrgGrid.Apply"]</button>
+                <a asp-page="/Organizer/Sponsors" style="margin-left:8px;font-size:13px;">Clear</a>
+            </div>
+        </form>
+
         @if (Model.Companies.Count == 0)
         {
             <p style="margin-top:16px;color:#6b7280;">
-                No sponsor companies yet. The WooCommerce pull job is daily &mdash; once an order completes, tasks will appear here.
+                @Localizer["OrgGrid.NoMatch"] The WooCommerce pull job is daily &mdash; once an order completes, tasks will appear here.
             </p>
         }
         else
         {
-            <div style="overflow-x:auto;margin-top:14px;">
+            <p role="status" style="margin-top:8px;">
+                @Localizer["OrgGrid.ShowingRange", Model.Paging.FirstRowNumber, Model.Paging.LastRowNumber, Model.Paging.TotalItems]
+            </p>
+            <div style="overflow-x:auto;margin-top:6px;">
             <table style="border-collapse:collapse;width:100%;font-size:13px;min-width:920px;">
+                <caption class="sr-only">Sponsor companies for this edition</caption>
                 <thead>
                     <tr style="border-bottom:2px solid #ddd;text-align:left;">
-                        <th style="padding:6px;">Company id</th>
-                        <th style="padding:6px;">Contacts</th>
-                        <th style="padding:6px;text-align:right;">Open</th>
-                        <th style="padding:6px;text-align:right;">In progress</th>
-                        <th style="padding:6px;text-align:right;">Done</th>
-                        <th style="padding:6px;text-align:right;">Overdue</th>
-                        <th style="padding:6px;text-align:right;">Total</th>
-                        <th style="padding:6px;">Next due</th>
+                        <th scope="col" style="padding:6px;" aria-sort="@Model.AriaSort("company")">
+                            <a asp-page="/Organizer/Sponsors" asp-route-Search="@Model.Search" asp-route-Sort="company" asp-route-Desc="@Model.NextDescFor("company")" asp-route-PageNo="1">Company id@Model.SortIndicator("company")</a>
+                        </th>
+                        <th scope="col" style="padding:6px;" aria-sort="@Model.AriaSort("contacts")">
+                            <a asp-page="/Organizer/Sponsors" asp-route-Search="@Model.Search" asp-route-Sort="contacts" asp-route-Desc="@Model.NextDescFor("contacts")" asp-route-PageNo="1">Contacts@Model.SortIndicator("contacts")</a>
+                        </th>
+                        <th scope="col" style="padding:6px;text-align:right;" aria-sort="@Model.AriaSort("open")">
+                            <a asp-page="/Organizer/Sponsors" asp-route-Search="@Model.Search" asp-route-Sort="open" asp-route-Desc="@Model.NextDescFor("open")" asp-route-PageNo="1">Open@Model.SortIndicator("open")</a>
+                        </th>
+                        <th scope="col" style="padding:6px;text-align:right;">In progress</th>
+                        <th scope="col" style="padding:6px;text-align:right;" aria-sort="@Model.AriaSort("done")">
+                            <a asp-page="/Organizer/Sponsors" asp-route-Search="@Model.Search" asp-route-Sort="done" asp-route-Desc="@Model.NextDescFor("done")" asp-route-PageNo="1">Done@Model.SortIndicator("done")</a>
+                        </th>
+                        <th scope="col" style="padding:6px;text-align:right;" aria-sort="@Model.AriaSort("overdue")">
+                            <a asp-page="/Organizer/Sponsors" asp-route-Search="@Model.Search" asp-route-Sort="overdue" asp-route-Desc="@Model.NextDescFor("overdue")" asp-route-PageNo="1">Overdue@Model.SortIndicator("overdue")</a>
+                        </th>
+                        <th scope="col" style="padding:6px;text-align:right;" aria-sort="@Model.AriaSort("total")">
+                            <a asp-page="/Organizer/Sponsors" asp-route-Search="@Model.Search" asp-route-Sort="total" asp-route-Desc="@Model.NextDescFor("total")" asp-route-PageNo="1">Total@Model.SortIndicator("total")</a>
+                        </th>
+                        <th scope="col" style="padding:6px;" aria-sort="@Model.AriaSort("nextdue")">
+                            <a asp-page="/Organizer/Sponsors" asp-route-Search="@Model.Search" asp-route-Sort="nextdue" asp-route-Desc="@Model.NextDescFor("nextdue")" asp-route-PageNo="1">Next due@Model.SortIndicator("nextdue")</a>
+                        </th>
                     </tr>
                 </thead>
                 <tbody>
@@ -77,7 +110,14 @@
                     {
                         var rowBg = c.Overdue > 0 ? "background:#fff5f5;" : "";
                         <tr style="border-bottom:1px solid #eee;@(rowBg)">
-                            <td style="padding:6px;font-family:monospace;">@c.CompanyId</td>
+                            <td style="padding:6px;font-family:monospace;">
+                                @* Drill down to this company's sponsor contacts on the Participants grid. *@
+                                <a asp-page="/Organizer/Participants"
+                                   asp-route-SponsorCompanyFilter="@c.CompanyId"
+                                   asp-route-RoleFilter="Sponsor"
+                                   asp-route-ActiveFilter="all"
+                                   title="View this company's participants">@c.CompanyId</a>
+                            </td>
                             <td style="padding:6px;">
                                 @if (c.Contacts.Count == 0)
                                 {
@@ -104,6 +144,27 @@
                 </tbody>
             </table>
             </div>
+
+            @if (Model.Paging.TotalPages > 1)
+            {
+                <nav aria-label="Pagination" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:14px;">
+                    @if (Model.Paging.HasPrevious)
+                    {
+                        <a asp-page="/Organizer/Sponsors" asp-route-Search="@Model.Search"
+                           asp-route-Sort="@Model.Sort" asp-route-Desc="@Model.Desc"
+                           asp-route-PageNo="@(Model.Paging.Page - 1)" rel="prev"
+                           style="padding:6px 12px;border:1px solid #c4c8d4;border-radius:6px;text-decoration:none;">@Localizer["OrgGrid.Prev"]</a>
+                    }
+                    <span>@Localizer["OrgGrid.PageOf", Model.Paging.Page, Model.Paging.TotalPages]</span>
+                    @if (Model.Paging.HasNext)
+                    {
+                        <a asp-page="/Organizer/Sponsors" asp-route-Search="@Model.Search"
+                           asp-route-Sort="@Model.Sort" asp-route-Desc="@Model.Desc"
+                           asp-route-PageNo="@(Model.Paging.Page + 1)" rel="next"
+                           style="padding:6px 12px;border:1px solid #c4c8d4;border-radius:6px;text-decoration:none;">@Localizer["OrgGrid.Next"]</a>
+                    }
+                </nav>
+            }
         }
 
         @if (Model.ContactsWithoutCompany.Count > 0)

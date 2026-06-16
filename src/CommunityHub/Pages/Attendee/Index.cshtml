@@ -2,20 +2,19 @@
 @using CommunityHub.Core.Domain
 @model CommunityHub.Pages.Attendee.IndexModel
 @{
-    ViewData["Title"] = "Your Master Class";
+    ViewData["Title"] = Localizer["Attendee.Title"].Value;
 }
 
 <div class="card">
-    <h2>Your Master Class</h2>
+    <h2>@Localizer["Attendee.Title"]</h2>
 
     @if (Model.Record is null)
     {
-        <p>We have no ticket or booking record for your email yet.
-           If you have just purchased, please check back later.</p>
+        <p>@Localizer["Attendee.NoRecord"]</p>
     }
     else
     {
-        <p>Ticket: <strong>@Model.Record.TicketStatus</strong>
+        <p>@Localizer["Attendee.Ticket"] <strong>@Model.Record.TicketStatus</strong>
            @if (!string.IsNullOrEmpty(Model.Record.TicketClassName))
            {
                <span>(@Model.Record.TicketClassName)</span>
@@ -24,21 +23,19 @@
 
         @if (Model.Record.BookingStatus == MasterClassBookingStatus.Booked)
         {
-            <p class="info">You have reserved: <strong>@Model.Record.MasterClassName</strong></p>
+            <p class="info">@Localizer["Attendee.Reserved", Model.Record.MasterClassName ?? ""]</p>
         }
         else if (Model.Record.BookingStatus == MasterClassBookingStatus.MultipleBookings)
         {
-            <p class="error">You have more than one Master Class booking:
-               @Model.Record.MasterClassName.
-               Please keep one and cancel the others.</p>
+            <p class="error">@Localizer["Attendee.Multiple", Model.Record.MasterClassName ?? ""]</p>
         }
         else
         {
-            <p class="error">You have not reserved a Master Class seat yet.</p>
+            <p class="error">@Localizer["Attendee.NotReserved"]</p>
         }
 
         <p><a href="@Model.BookingUrl" target="_blank" rel="noopener">
-            Manage your Master Class booking in Zoho Bookings</a></p>
+            @Localizer["Attendee.ManageBooking"]</a></p>
     }
-    <p><a asp-page="/Index">Back to hub</a></p>
+    <p><a asp-page="/Index">@Localizer["Common.BackToHub"]</a></p>
 </div>

@@ -81,18 +81,44 @@
 
         @if (Model.Attendees.Count == 0)
         {
-            <p class="info">No attendees match the filter.</p>
+            <p class="info">@Localizer["OrgGrid.NoMatch"]</p>
         }
         else
         {
-            <p>@Model.Attendees.Count attendee(s) shown.</p>
+            <p role="status">
+                @Localizer["OrgGrid.ShowingRange", Model.Paging.FirstRowNumber, Model.Paging.LastRowNumber, Model.Paging.TotalItems]
+            </p>
             <!-- overflow-x so the table scrolls sideways on phones instead of
                  blowing the 360px layout -->
             <div style="overflow-x:auto;">
                 <table style="width:100%;border-collapse:collapse;min-width:640px;">
+                    <caption class="sr-only">@Localizer["OrgAttendees.Title"]</caption>
                     <tr style="text-align:left;border-bottom:2px solid #ddd;">
-                        <th>Name</th><th>Email</th><th>Ticket</th>
-                        <th>Booking</th><th>Master Class</th><th></th>
+                        <th scope="col" aria-sort="@Model.AriaSort("name")">
+                            <a asp-page="/Organizer/Attendees"
+                               asp-route-Ticket="@Model.Ticket" asp-route-Booking="@Model.Booking"
+                               asp-route-MismatchOnly="@Model.MismatchOnly" asp-route-Search="@Model.Search"
+                               asp-route-Sort="name" asp-route-Desc="@Model.NextDescFor("name")" asp-route-PageNo="1">@Localizer["OrgGrid.Col.Name"]@Model.SortIndicator("name")</a>
+                        </th>
+                        <th scope="col" aria-sort="@Model.AriaSort("email")">
+                            <a asp-page="/Organizer/Attendees"
+                               asp-route-Ticket="@Model.Ticket" asp-route-Booking="@Model.Booking"
+                               asp-route-MismatchOnly="@Model.MismatchOnly" asp-route-Search="@Model.Search"
+                               asp-route-Sort="email" asp-route-Desc="@Model.NextDescFor("email")" asp-route-PageNo="1">@Localizer["OrgGrid.Col.Email"]@Model.SortIndicator("email")</a>
+                        </th>
+                        <th scope="col" aria-sort="@Model.AriaSort("ticket")">
+                            <a asp-page="/Organizer/Attendees"
+                               asp-route-Ticket="@Model.Ticket" asp-route-Booking="@Model.Booking"
+                               asp-route-MismatchOnly="@Model.MismatchOnly" asp-route-Search="@Model.Search"
+                               asp-route-Sort="ticket" asp-route-Desc="@Model.NextDescFor("ticket")" asp-route-PageNo="1">@Localizer["OrgAttendees.Col.Ticket"]@Model.SortIndicator("ticket")</a>
+                        </th>
+                        <th scope="col" aria-sort="@Model.AriaSort("booking")">
+                            <a asp-page="/Organizer/Attendees"
+                               asp-route-Ticket="@Model.Ticket" asp-route-Booking="@Model.Booking"
+                               asp-route-MismatchOnly="@Model.MismatchOnly" asp-route-Search="@Model.Search"
+                               asp-route-Sort="booking" asp-route-Desc="@Model.NextDescFor("booking")" asp-route-PageNo="1">@Localizer["OrgAttendees.Col.Booking"]@Model.SortIndicator("booking")</a>
+                        </th>
+                        <th scope="col">@Localizer["OrgAttendees.Col.MasterClass"]</th><th scope="col"></th>
                     </tr>
                     @foreach (var a in Model.Attendees)
                     {
@@ -112,6 +138,31 @@
                     }
                 </table>
             </div>
+
+            @if (Model.Paging.TotalPages > 1)
+            {
+                <nav aria-label="Pagination" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:14px;">
+                    @if (Model.Paging.HasPrevious)
+                    {
+                        <a asp-page="/Organizer/Attendees"
+                           asp-route-Ticket="@Model.Ticket" asp-route-Booking="@Model.Booking"
+                           asp-route-MismatchOnly="@Model.MismatchOnly" asp-route-Search="@Model.Search"
+                           asp-route-Sort="@Model.Sort" asp-route-Desc="@Model.Desc"
+                           asp-route-PageNo="@(Model.Paging.Page - 1)" rel="prev"
+                           style="padding:6px 12px;border:1px solid #c4c8d4;border-radius:6px;text-decoration:none;">@Localizer["OrgGrid.Prev"]</a>
+                    }
+                    <span>@Localizer["OrgGrid.PageOf", Model.Paging.Page, Model.Paging.TotalPages]</span>
+                    @if (Model.Paging.HasNext)
+                    {
+                        <a asp-page="/Organizer/Attendees"
+                           asp-route-Ticket="@Model.Ticket" asp-route-Booking="@Model.Booking"
+                           asp-route-MismatchOnly="@Model.MismatchOnly" asp-route-Search="@Model.Search"
+                           asp-route-Sort="@Model.Sort" asp-route-Desc="@Model.Desc"
+                           asp-route-PageNo="@(Model.Paging.Page + 1)" rel="next"
+                           style="padding:6px 12px;border:1px solid #c4c8d4;border-radius:6px;text-decoration:none;">@Localizer["OrgGrid.Next"]</a>
+                    }
+                </nav>
+            }
         }
     }
     <p><a asp-page="/Organizer/Index">Back to organizer area</a></p>

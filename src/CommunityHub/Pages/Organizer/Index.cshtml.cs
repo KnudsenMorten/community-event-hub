@@ -1,6 +1,7 @@
 using CommunityHub.Auth;
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
+using CommunityHub.Core.Reminders;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
@@ -18,16 +19,20 @@ public class IndexModel : PageModel
 {
     private readonly CommunityHubDbContext _db;
     private readonly ICurrentParticipantAccessor _participant;
+    private readonly OrganizerActionItemService _actions;
 
     public IndexModel(
         CommunityHubDbContext db,
-        ICurrentParticipantAccessor participant)
+        ICurrentParticipantAccessor participant,
+        OrganizerActionItemService actions)
     {
         _db = db;
         _participant = participant;
+        _actions = actions;
     }
 
     public List<Core.Domain.Attendee> Mismatches { get; private set; } = new();
+    public int OpenActionItems { get; private set; }
     public bool AccessDenied { get; private set; }
 
     public async Task<IActionResult> OnGetAsync(CancellationToken ct)
@@ -46,6 +51,7 @@ public class IndexModel : PageModel
             .Where(a => a.EventId == me.EventId && a.HasReconciliationMismatch)
             .OrderBy(a => a.LastName)
             .ToListAsync(ct);
+        OpenActionItems = await _actions.CountOpenAsync(me.EventId, ct);
         return Page();
     }
 }

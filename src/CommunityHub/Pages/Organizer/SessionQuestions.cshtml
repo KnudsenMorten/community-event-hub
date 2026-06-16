@@ -1,0 +1,137 @@
+@page
+@model CommunityHub.Pages.Organizer.SessionQuestionsModel
+@{
+    ViewData["Title"] = "Session questions";
+}
+
+<style>
+    /* Mobile-first: cards stack, controls go full-width and wrap at ~360px. */
+    .sq-sess { border:1px solid #d7dbe4; border-radius:10px; margin:0 0 16px 0; overflow:hidden; }
+    .sq-sess-head { background:var(--el-darkblue,#1D3380); color:#fff; padding:12px 14px; }
+    .sq-sess-head h3 { margin:0; font-size:16.5px; line-height:1.3; }
+    .sq-sess-head .meta { font-size:12.5px; opacity:.92; margin-top:4px; line-height:1.5; }
+    .sq-sess-head .link { font-size:12px; margin-top:8px; word-break:break-all; }
+    .sq-sess-head .link a { color:#cfe8fb; }
+    .sq-body { padding:12px 14px; }
+    .sq-q { background:#f6f8fb; border-radius:8px; padding:10px 12px; margin:8px 0; }
+    .sq-q .ask { font-size:14px; color:#1a1a2e; white-space:pre-wrap; }
+    .sq-q .who { color:#6e7681; font-size:12px; margin-top:4px; }
+    .sq-resp { background:#eef6ff; border-left:3px solid #008BD2; border-radius:0 6px 6px 0;
+        padding:8px 10px; margin:8px 0 4px 0; font-size:13.5px; color:#1f3a5f; white-space:pre-wrap; }
+    .sq-resp .by { color:#5a6170; font-size:11.5px; margin-top:4px; }
+    .sq-badge { display:inline-block; border-radius:10px; padding:2px 9px; font-size:11px; font-weight:700; }
+    .sq-badge.open { background:#fff3cd; color:#8a6d00; }
+    .sq-badge.answered { background:#d8f3d6; color:#1b5e20; }
+    .sq-badge.closed { background:#e3e6ec; color:#555; }
+    .sq-form { display:flex; flex-wrap:wrap; gap:6px; align-items:flex-start; margin-top:8px; }
+    .sq-form textarea { flex:1 1 220px; min-width:0; box-sizing:border-box; padding:8px 10px;
+        font-size:13.5px; border:1px solid #c4c8d4; border-radius:6px; min-height:44px; resize:vertical; font-family:inherit; }
+    .sq-form button { background:#008BD2; color:#fff; border:0; border-radius:6px;
+        padding:9px 14px; font-size:13px; font-weight:600; cursor:pointer; white-space:nowrap; }
+    .sq-form button.secondary { background:#fff; color:#1D3380; border:1.5px solid #1D3380; }
+    .sq-form button:hover { filter:brightness(.95); }
+    .sq-note { background:#f0fdf4; border-left:4px solid #16a34a; padding:10px 12px;
+        border-radius:6px; margin-bottom:14px; font-size:13.5px; color:#166534; }
+    .sq-stats { color:#374151; font-size:13.5px; margin:6px 0 16px 0; }
+    .sq-stats strong { color:var(--el-darkblue,#1D3380); }
+    @@media (max-width: 600px) {
+        .sq-form textarea, .sq-form button { flex:1 1 100%; }
+    }
+</style>
+
+<div class="card">
+    <h2>Session questions</h2>
+    <p>Questions attendees asked for a session before the event (via each session&rsquo;s public
+       ask link). They are <strong>hub-only</strong> &mdash; never shown publicly. Organizers see
+       <strong>all</strong> of them; each session&rsquo;s speaker(s) see and answer their own.</p>
+
+    @if (Model.AccessDenied)
+    {
+        <p class="error">This area is for organizers only.</p>
+        <p><a asp-page="/Index">Back to hub</a></p>
+        return;
+    }
+
+    @if (!string.IsNullOrEmpty(Model.Notice))
+    {
+        <div class="sq-note" role="status">@Model.Notice</div>
+    }
+
+    <div class="sq-stats">
+        <strong>@Model.OpenCount</strong> open &middot; <strong>@Model.TotalCount</strong> total
+    </div>
+
+    @if (Model.Groups.Count == 0)
+    {
+        <p>No questions yet. Share a session&rsquo;s public ask link with attendees to start collecting them.</p>
+    }
+
+    @foreach (var grp in Model.Groups)
+    {
+        <div class="sq-sess">
+            <div class="sq-sess-head">
+                <h3>@grp.Session.Title</h3>
+                @if (grp.SpeakerNames.Count > 0)
+                {
+                    <div class="meta">with @string.Join(", ", grp.SpeakerNames)</div>
+                }
+                <div class="link">
+                    @if (grp.PublicAskPath is not null)
+                    {
+                        <span>Public ask link: <a href="@grp.PublicAskPath" target="_blank" rel="noopener">@grp.PublicAskPath</a></span>
+                    }
+                    else
+                    {
+                        <form method="post" asp-page-handler="GenerateLink" style="display:inline;">
+                            <input type="hidden" name="sessionId" value="@grp.Session.Id" />
+                            <button type="submit" style="background:none;border:0;color:#cfe8fb;text-decoration:underline;cursor:pointer;padding:0;font-size:12px;">Generate public ask link</button>
+                        </form>
+                    }
+                </div>
+            </div>
+            <div class="sq-body">
+                @foreach (var q in grp.Questions)
+                {
+                    var badge = q.Status switch
+                    {
+                        SessionQuestionStatus.Answered => ("answered", "Answered"),
+                        SessionQuestionStatus.Closed => ("closed", "Closed"),
+                        _ => ("open", "Open"),
+                    };
+                    <div class="sq-q">
+                        <span class="sq-badge @badge.Item1">@badge.Item2</span>
+                        <div class="ask">@q.QuestionText</div>
+                        <div class="who">
+                            @(string.IsNullOrWhiteSpace(q.AskerName) ? "Anonymous attendee" : q.AskerName)
+                            &middot; @q.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm")
+                            @if (!string.IsNullOrWhiteSpace(q.AskerEmail)) { <text>&middot; @q.AskerEmail</text> }
+                        </div>
+
+                        @if (!string.IsNullOrWhiteSpace(q.ResponseText))
+                        {
+                            <div class="sq-resp">
+                                @q.ResponseText
+                                <div class="by">&mdash; @(q.RespondedByParticipant?.FullName ?? q.RespondedByEmail), @q.RespondedAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</div>
+                            </div>
+                        }
+
+                        @if (q.Status != SessionQuestionStatus.Closed)
+                        {
+                            <form method="post" asp-page-handler="Respond" class="sq-form">
+                                <input type="hidden" name="questionId" value="@q.Id" />
+                                <label class="sr-only" for="resp-@q.Id">Response to this question</label>
+                                <textarea id="resp-@q.Id" name="responseText" maxlength="2000" required
+                                          placeholder="Write a response (visible to this session's speakers + organizers)…"></textarea>
+                                <button type="submit">Send response</button>
+                            </form>
+                            <form method="post" asp-page-handler="Close" class="sq-form" style="margin-top:4px;">
+                                <input type="hidden" name="questionId" value="@q.Id" />
+                                <button type="submit" class="secondary">Close</button>
+                            </form>
+                        }
+                    </div>
+                }
+            </div>
+        </div>
+    }
+</div>

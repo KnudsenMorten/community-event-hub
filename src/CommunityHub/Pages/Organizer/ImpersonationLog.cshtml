@@ -1,0 +1,49 @@
+@page
+@using CommunityHub.Core.Domain
+@model CommunityHub.Pages.Organizer.ImpersonationLogModel
+@{
+    ViewData["Title"] = "Acting-as audit log";
+}
+<div class="card">
+    <h2>Acting-as audit log</h2>
+
+    @if (Model.AccessDenied)
+    {
+        <p class="error" role="alert">This area is for organizers only.</p>
+    }
+    else
+    {
+        <p>Every "switch to user", secure-link token entry, "return to organizer", and
+           on-behalf change is recorded here (most recent first).</p>
+
+        @if (Model.Entries.Count == 0)
+        {
+            <p>No acting-as activity has been recorded yet.</p>
+        }
+        else
+        {
+            <div style="overflow-x:auto;">
+            <table style="width:100%;border-collapse:collapse;min-width:600px;">
+                <caption class="sr-only">Acting-as audit entries</caption>
+                <tr style="text-align:left;border-bottom:2px solid #ddd;">
+                    <th scope="col">When (UTC)</th><th scope="col">Mechanism</th>
+                    <th scope="col">Actor</th><th scope="col">Target #</th>
+                    <th scope="col">Action</th><th scope="col">Detail</th>
+                </tr>
+                @foreach (var e in Model.Entries)
+                {
+                    <tr style="border-bottom:1px solid #eee;">
+                        <td>@e.CreatedAt.UtcDateTime.ToString("yyyy-MM-dd HH:mm:ss")</td>
+                        <td>@(e.ActorKind == ImpersonationActorKind.SecretaryToken ? "Secure link" : "Organizer")</td>
+                        <td>@e.ActorLabel</td>
+                        <td>@e.TargetParticipantId</td>
+                        <td>@e.Action</td>
+                        <td>@e.Detail</td>
+                    </tr>
+                }
+            </table>
+            </div>
+        }
+        <p style="margin-top:20px;"><a asp-page="/Organizer/Participants">Back to participants</a></p>
+    }
+</div>

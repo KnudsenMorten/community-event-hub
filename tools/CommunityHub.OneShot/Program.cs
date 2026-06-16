@@ -2,6 +2,7 @@ using CommunityHub.Core.Config;
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Email;
 using CommunityHub.Core.Integrations;
+using CommunityHub.Core.Reminders;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -35,6 +36,7 @@ var knownCommands = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
 {
     "pull-sponsors",
     "watch-uploads",
+    "import-speakers",
 };
 
 if (args.Length == 0 || args[0] is "-h" or "--help" || !knownCommands.Contains(args[0]))
@@ -47,6 +49,7 @@ if (args.Length == 0 || args[0] is "-h" or "--help" || !knownCommands.Contains(a
     Console.Error.WriteLine("Commands:");
     Console.Error.WriteLine("  pull-sponsors    Run the WooCommerce sponsor-order pull once.");
     Console.Error.WriteLine("  watch-uploads    Poll provisioned SharePoint upload folders + email recipients on file changes.");
+    Console.Error.WriteLine("  import-speakers  Pull speakers from the Sessionize v2 view API into the active edition.");
     return 1;
 }
 
@@ -131,6 +134,20 @@ services.AddScoped<SponsorUploadWatchService>();
 
 services.AddScoped<SponsorOrderPullService>();
 
+// ---------------------------------------------------------------------------
+// Sessionize speaker import via the v2 view API - same wiring as the Jobs app.
+// ---------------------------------------------------------------------------
+var sessionizeOptions = new SessionizeApiOptions();
+config.GetSection(SessionizeApiOptions.SectionName).Bind(sessionizeOptions);
+services.AddSingleton(sessionizeOptions);
+services.AddHttpClient<SessionizeApiClient>();
+services.AddSingleton<SessionizeExcelParser>();
+services.AddScoped<WelcomeEmailService>();
+services.AddScoped<SessionizeImportService>();
+// Sessions are pulled from the same v2 view API and linked to speakers.
+services.AddScoped<SessionImportService>();
+services.AddScoped<SessionizeApiImportService>();
+
 using var host = builder.Build();
 var logger = host.Services.GetRequiredService<ILoggerFactory>()
     .CreateLogger("OneShot");
@@ -166,6 +183,39 @@ switch (command)
                 result.LocationsChecked, result.FilesObserved, result.FilesNew,
                 result.FilesChanged, result.NotificationsSent, result.Errors);
             return 0;
+        }
+
+    case "import-speakers":
+        {
+            using var scope = host.Services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<CommunityHubDbContext>();
+            var activeEventId = await db.Events
+                .Where(e => e.IsActive)
+                .Select(e => (int?)e.Id)
+                .FirstOrDefaultAsync(CancellationToken.None);
+            if (activeEventId is null)
+            {
+                logger.LogWarning("import-speakers: no active event in DB.");
+                return 2;
+            }
+
+            var svc = scope.ServiceProvider.GetRequiredService<SessionizeApiImportService>();
+            // sendWelcome:false -- DEV pull never emails speakers.
+            var result = await svc.ImportAsync(
+                activeEventId.Value, CancellationToken.None, sendWelcome: false);
+            logger.LogInformation(
+                "import-speakers result: fetched={Fetched}, created={Created}, updated={Updated}, skipped={Skipped}, warnings={Warn}, error={Err}",
+                result.Fetched, result.Created, result.Updated, result.Skipped,
+                result.Warnings.Count, result.Error ?? "<none>");
+            foreach (var w in result.Warnings) logger.LogWarning("  {Warning}", w);
+            if (result.Sessions is { } sx)
+            {
+                logger.LogInformation(
+                    "import-speakers sessions: fetched={Fetched}, created={Created}, updated={Updated}, links=+{LinksCreated}/-{LinksRemoved}, error={Err}",
+                    sx.Fetched, sx.Created, sx.Updated, sx.LinksCreated, sx.LinksRemoved, sx.Error ?? "<none>");
+                foreach (var w in sx.Warnings) logger.LogWarning("  {Warning}", w);
+            }
+            return result.Error is null ? 0 : 2;
         }
 
     default:

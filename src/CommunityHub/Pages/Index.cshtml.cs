@@ -10,13 +10,23 @@ using Microsoft.EntityFrameworkCore;
 namespace CommunityHub.Pages;
 
 /// <summary>
-/// The role-personalized hub landing page (CONTEXT.md section 4). Every role
-/// sees a tailored set of sections: a section is shown only if it applies to
-/// the participant's <see cref="ParticipantRole"/>. The page model resolves
-/// the participant from the session cookie and loads their per-edition data
-/// (tasks, form status) so the view can render each section's state.
+/// The site root (<c>/</c>). It serves TWO audiences from one route:
+///  - <b>Anonymous visitors</b> get the PUBLIC landing page (REQUIREMENTS §21
+///    PUBLIC): the active edition's name/dates/venue + a sign-in / visit-event
+///    CTA and links into the public Sessions / Speakers / Sponsors / Master Class
+///    pages. No redirect to Login — the landing renders in place so the public
+///    pages are reachable + shareable (SEO). <see cref="Landing"/> is set and the
+///    view renders the landing branch.
+///  - <b>Signed-in participants</b> get the role-personalized hub (CONTEXT.md §4):
+///    a section is shown only if it applies to the participant's
+///    <see cref="ParticipantRole"/>. The model loads their per-edition data
+///    (tasks, form status) for the view.
+///
+/// The page is <see cref="AllowAnonymousAttribute">AllowAnonymous</see> so the
+/// landing is reachable signed-out; the hub branch still requires a resolved
+/// participant (genuinely-gated hub data redirects to Login as before).
 /// </summary>
-[Authorize]
+[AllowAnonymous]
 public class IndexModel : PageModel
 {
     private readonly CommunityHubDbContext _db;
@@ -24,6 +34,10 @@ public class IndexModel : PageModel
     private readonly SpeakerDeadlineSeeder _speakerDeadlines;
     private readonly EventEditionConfigLoader _eventConfigLoader;
     private readonly EventConfigOptions _eventConfigOptions;
+    private readonly CommunityHub.Core.Reminders.CalendarFeedTokenService _calendarTokens;
+    private readonly CommunityHub.Core.Reminders.ParticipantCalendarBuilder _calendarBuilder;
+    private readonly CommunityHub.Core.Reminders.PublicLandingService _landing;
+    private readonly CommunityHub.Core.Participants.ParticipantChecklistBuilder _checklist;
     private readonly ILogger<IndexModel> _logger;
 
     public IndexModel(
@@ -32,6 +46,10 @@ public class IndexModel : PageModel
         SpeakerDeadlineSeeder speakerDeadlines,
         EventEditionConfigLoader eventConfigLoader,
         EventConfigOptions eventConfigOptions,
+        CommunityHub.Core.Reminders.CalendarFeedTokenService calendarTokens,
+        CommunityHub.Core.Reminders.ParticipantCalendarBuilder calendarBuilder,
+        CommunityHub.Core.Reminders.PublicLandingService landing,
+        CommunityHub.Core.Participants.ParticipantChecklistBuilder checklist,
         ILogger<IndexModel> logger)
     {
         _db = db;
@@ -39,7 +57,37 @@ public class IndexModel : PageModel
         _speakerDeadlines = speakerDeadlines;
         _eventConfigLoader = eventConfigLoader;
         _eventConfigOptions = eventConfigOptions;
+        _calendarTokens = calendarTokens;
+        _calendarBuilder = calendarBuilder;
+        _landing = landing;
+        _checklist = checklist;
         _logger = logger;
+    }
+
+    /// <summary>
+    /// Non-null when the request is anonymous: the view renders the PUBLIC landing
+    /// branch instead of the authed hub. Null for a signed-in participant (the hub).
+    /// </summary>
+    public CommunityHub.Core.Reminders.PublicLandingView? Landing { get; private set; }
+
+    /// <summary>True for an anonymous visitor (drives the view's landing-vs-hub split).</summary>
+    public bool IsAnonymous { get; private set; }
+
+    /// <summary>
+    /// Human-friendly edition date range for the landing hero, localized via the
+    /// current UI culture. Collapses same-month ranges ("9–10 Feb 2027") and
+    /// renders a single day when start == end.
+    /// </summary>
+    public static string FormatDateRange(DateOnly start, DateOnly end)
+    {
+        // Explicit "day-month-year" parts (not the culture's short-date pattern) so
+        // a same-month range collapses cleanly to "9–10 Feb 2027" in any culture.
+        if (start == end) return start.ToString("d MMM yyyy");
+        if (start.Year == end.Year && start.Month == end.Month)
+            return $"{start:%d}–{end:d MMM yyyy}";
+        if (start.Year == end.Year)
+            return $"{start:d MMM}–{end:d MMM yyyy}";
+        return $"{start:d MMM yyyy}–{end:d MMM yyyy}";
     }
 
     public CommunityHub.Core.Config.EditionDates? EventDates { get; private set; }
@@ -52,6 +100,14 @@ public class IndexModel : PageModel
     public bool ShowHotel { get; private set; }
     public bool ShowDinner { get; private set; }
     public bool ShowVolunteerShifts { get; private set; }
+    /// <summary>Show the "Volunteer work" card (assigned tasks + help): volunteers
+    /// (and organizers, who also see the structure tools).</summary>
+    public bool ShowVolunteerWork { get; private set; }
+    /// <summary>True if the signed-in volunteer supervises at least one category —
+    /// drives the supervisor-dashboard link.</summary>
+    public bool IsCategorySupervisor { get; private set; }
+    /// <summary>How many volunteer tasks the participant is assigned to.</summary>
+    public int MyVolunteerTaskCount { get; private set; }
     public bool ShowSpeakerDeadlines { get; private set; }
     public bool ShowSponsorPipeline { get; private set; }
     public bool ShowAttendeeArea { get; private set; }
@@ -64,16 +120,42 @@ public class IndexModel : PageModel
     public bool VolunteerSubmitted { get; private set; }
     public MasterClassBookingStatus? AttendeeBookingStatus { get; private set; }
 
-    public List<TaskRow> PendingTasks { get; private set; } = new();
-    public List<TaskRow> CompletedTasks { get; private set; } = new();
-    public record TaskRow(int Id, string Title, DateOnly? DueDate, TaskState State, int? DaysOverdue, string? Link);
+    /// <summary>
+    /// The unified participant checklist (REQUIREMENTS Top-8 #7) — the SAME shape
+    /// the Tasks page and attendee My-event render via the shared
+    /// <c>_ChecklistCard</c> partial, built by the shared
+    /// <see cref="CommunityHub.Core.Participants.ParticipantChecklistBuilder"/>.
+    /// </summary>
+    public CommunityHub.Core.Participants.ParticipantChecklist Checklist { get; private set; } =
+        new(System.Array.Empty<CommunityHub.Core.Participants.ChecklistRow>(),
+            System.Array.Empty<CommunityHub.Core.Participants.ChecklistRow>());
+
+    // --- Calendar sync ------------------------------------------------------
+    /// <summary>The participant's iCal feed token (minted on first hub view).</summary>
+    public string CalendarToken { get; private set; } = string.Empty;
+    /// <summary>https://host/cal/{token}.ics — the subscribe/download URL.</summary>
+    public string CalendarHttpsUrl { get; private set; } = string.Empty;
+    /// <summary>webcal://host/cal/{token}.ics — one-click subscribe URL.</summary>
+    public string CalendarWebcalUrl { get; private set; } = string.Empty;
+    /// <summary>
+    /// Whether the organizer has calendar sync enabled for this edition
+    /// (<see cref="Event.CalendarSyncEnabled"/>). When false the "Add to my
+    /// calendar" card is hidden — the feed itself also 404s.
+    /// </summary>
+    public bool CalendarSyncEnabled { get; private set; }
 
     public async Task<IActionResult> OnGetAsync(CancellationToken ct)
     {
         var me = _participant.Current;
         if (me is null)
         {
-            return RedirectToPage("/Login");
+            // Anonymous visitor: render the PUBLIC landing page in place (no Login
+            // redirect) so the public Sessions / Speakers / Sponsors pages are
+            // reachable + shareable. Landing == null only if there is no active
+            // event, which the view handles with a friendly empty state.
+            IsAnonymous = true;
+            Landing = await _landing.BuildAsync(ct);
+            return Page();
         }
 
         // First-time-after-login welcome: redirect once, then never again.
@@ -92,12 +174,13 @@ public class IndexModel : PageModel
 
         var ev = await _db.Events
             .Where(e => e.Id == me.EventId)
-            .Select(e => new { e.CommunityName, e.DisplayName })
+            .Select(e => new { e.CommunityName, e.DisplayName, e.CalendarSyncEnabled })
             .FirstOrDefaultAsync(ct);
         if (ev is not null)
         {
             CommunityName = ev.CommunityName;
             EventDisplayName = ev.DisplayName;
+            CalendarSyncEnabled = ev.CalendarSyncEnabled;
         }
 
         // Auto-seed speaker-deadline tasks on every visit by a speaker /
@@ -131,7 +214,51 @@ public class IndexModel : PageModel
         catch (Exception ex)
         { _logger.LogWarning(ex, "Index: failed to load event dates from {Path}", _eventConfigOptions.EventConfigPath); }
 
+        // Calendar sync: mint (idempotently) the participant's feed token and
+        // build the subscribe/download URLs from the current request host so the
+        // base URL is per-environment (dev vs prod) with no extra config. Skipped
+        // entirely when the organizer has disabled calendar sync for the edition
+        // (CalendarSyncEnabled) — the feed itself 404s, and the card stays hidden.
+        if (CalendarSyncEnabled)
+        {
+            try
+            {
+                CalendarToken = await _calendarTokens.EnsureTokenAsync(me.ParticipantId, ct);
+                var host = Request.Host.Value ?? string.Empty;
+                CalendarHttpsUrl = $"{Request.Scheme}://{host}/cal/{CalendarToken}.ics";
+                // webcal:// makes Outlook/Apple offer "Subscribe" directly; it is the
+                // same path over the same TLS endpoint, just a scheme the OS handles.
+                CalendarWebcalUrl = $"webcal://{host}/cal/{CalendarToken}.ics";
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "Index: failed to ensure calendar feed token for participant {Pid}",
+                    me.ParticipantId);
+            }
+        }
+
         return Page();
+    }
+
+    /// <summary>
+    /// One-off "Download .ics" for a single task (its own VEVENT, same stable
+    /// UID as the feed so a later subscribe does not duplicate it). Scoped to
+    /// the signed-in participant's own (or their sponsor company's) task.
+    /// </summary>
+    public async Task<IActionResult> OnGetCalendarItemAsync(int taskId, CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+
+        var host = Request.Host.Value ?? "communityhub";
+        var ics = await _calendarBuilder.BuildSingleTaskAsync(me.ParticipantId, taskId, host, ct);
+        if (ics is null) return NotFound();
+
+        return File(
+            System.Text.Encoding.UTF8.GetBytes(ics),
+            "text/calendar; charset=utf-8",
+            $"task-{taskId}.ics");
     }
 
     /// <summary>
@@ -159,6 +286,7 @@ public class IndexModel : PageModel
                 break;
             case ParticipantRole.Volunteer:
                 ShowHotel = ShowDinner = ShowVolunteerShifts = true;
+                ShowVolunteerWork = true;
                 break;
             case ParticipantRole.Sponsor:
                 ShowSponsorPipeline = true;
@@ -179,46 +307,14 @@ public class IndexModel : PageModel
         // matching Done task rows.
         await BackfillFormAutoTasksAsync(me, ct);
 
-        // Sponsor tasks are COMPANY-scoped (AssignedParticipantId=null,
-        // SponsorCompanyId set) per the sponsor-pull design -- without this
-        // OR-branch the front page would say "All tasks complete!" while
-        // /Sponsor/Tasks shows 12 pending. Same EF query so the unified
-        // list + counter cover both cases.
-        var mySponsorCompanyId = await _db.Participants
-            .Where(p => p.Id == me.ParticipantId)
-            .Select(p => p.SponsorCompanyId)
-            .FirstOrDefaultAsync(ct);
-
-        var allMyTasks = await _db.Tasks
-            .Where(t => t.EventId == me.EventId
-                        && (t.AssignedParticipantId == me.ParticipantId
-                            || (mySponsorCompanyId != null
-                                && t.SponsorCompanyId == mySponsorCompanyId)))
-            .Select(t => new { t.Id, t.Title, t.DueDate, t.State, t.SourceKey })
-            .ToListAsync(ct);
-
-        var today = DateOnly.FromDateTime(DateTime.UtcNow);
-        TaskRow ToRow(dynamic t)
-        {
-            int? overdue = (t.DueDate is not null && t.DueDate < today && t.State != TaskState.Done)
-                ? today.DayNumber - ((DateOnly)t.DueDate).DayNumber
-                : (int?)null;
-            return new TaskRow(t.Id, t.Title, t.DueDate, t.State, overdue,
-                LinkForSourceKey((string?)t.SourceKey));
-        }
-        PendingTasks = allMyTasks
-            .Where(t => t.State != TaskState.Done)
-            .OrderByDescending(t => t.DueDate is not null && t.DueDate < today)
-            .ThenBy(t => t.DueDate)
-            .ThenBy(t => t.Title)
-            .Select(t => ToRow(t))
-            .ToList();
-        CompletedTasks = allMyTasks
-            .Where(t => t.State == TaskState.Done)
-            .OrderBy(t => t.Title)
-            .Select(t => ToRow(t))
-            .ToList();
-        OpenTaskCount = PendingTasks.Count;
+        // The unified checklist (pending/completed + overdue + form deep-links) is
+        // built by the SHARED ParticipantChecklistBuilder so the Hub, the Tasks page
+        // and attendee My-event all show the same "what's still needed" view. It
+        // already covers sponsor company-scoped tasks (AssignedParticipantId=null,
+        // SponsorCompanyId set), so the Hub no longer says "all complete" while
+        // /Sponsor/Tasks shows pending work.
+        Checklist = await _checklist.BuildAsync(me.EventId, me.ParticipantId, ct);
+        OpenTaskCount = Checklist.OpenCount;
 
         if (ShowHotel)
         {
@@ -247,6 +343,16 @@ public class IndexModel : PageModel
                      && v.ParticipantId == me.ParticipantId, ct);
         }
 
+        if (ShowVolunteerWork)
+        {
+            MyVolunteerTaskCount = await _db.VolunteerTaskAssignments
+                .CountAsync(a => a.EventId == me.EventId
+                                 && a.ParticipantId == me.ParticipantId, ct);
+            IsCategorySupervisor = await _db.VolunteerCategories
+                .AnyAsync(c => c.EventId == me.EventId
+                               && c.SupervisorParticipantId == me.ParticipantId, ct);
+        }
+
         if (ShowAttendeeArea)
         {
             AttendeeBookingStatus = await _db.Attendees
@@ -254,29 +360,6 @@ public class IndexModel : PageModel
                 .Select(a => (MasterClassBookingStatus?)a.BookingStatus)
                 .FirstOrDefaultAsync(ct);
         }
-    }
-
-    /// <summary>
-    /// Map a ParticipantTask.SourceKey to the page that completes it,
-    /// so the hub landing can deep-link each pending task to its form.
-    /// Returns null when no specific form is known; UI falls back to /Tasks.
-    /// </summary>
-    private static string? LinkForSourceKey(string? sourceKey)
-    {
-        if (string.IsNullOrWhiteSpace(sourceKey)) return null;
-        if (sourceKey.StartsWith("lunch-form:",                   StringComparison.Ordinal)) return "/Forms/Lunch";
-        if (sourceKey.StartsWith("swag-form:",                    StringComparison.Ordinal)) return "/Forms/Swag";
-        if (sourceKey.StartsWith("travel:submit-ticket-invoice:", StringComparison.Ordinal)) return "/Forms/Travel";
-        if (sourceKey.StartsWith("hotel-form:",                   StringComparison.Ordinal)) return "/Forms/Hotel";
-        if (sourceKey.StartsWith("dinner-form:",                  StringComparison.Ordinal)) return "/Forms/Dinner";
-        if (sourceKey.StartsWith("volunteer-form:",               StringComparison.Ordinal)) return "/Forms/VolunteerWizard";
-        if (sourceKey.StartsWith("speaker-form:",                 StringComparison.Ordinal)) return "/Forms/Speaker";
-        if (sourceKey.StartsWith("speakerdl:",                    StringComparison.Ordinal)) return "/Tasks";
-        // Sponsor-pull tasks are scoped per company; the sponsor area is
-        // where they get marked complete and where the inline upload-info
-        // form lives.
-        if (sourceKey.StartsWith("sponsor:",                      StringComparison.Ordinal)) return "/Sponsor/Tasks";
-        return null;
     }
 
     /// <summary>

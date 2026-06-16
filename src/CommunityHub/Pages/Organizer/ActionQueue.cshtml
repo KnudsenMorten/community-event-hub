@@ -1,0 +1,149 @@
+@page
+@model CommunityHub.Pages.Organizer.ActionQueueModel
+@{
+    ViewData["Title"] = "Action queue";
+}
+
+<style>
+    /* Mobile-first: each item is a stacked card. The action row wraps so it
+       never overflows a ~360px screen. */
+    .aq-item { border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px;
+        margin-bottom: 10px; }
+    .aq-item.resolved { opacity: .7; }
+    .aq-type { display: inline-block; font-size: 12px; font-weight: 600;
+        background: #eef2ff; color: #3730a3; border-radius: 999px;
+        padding: 2px 10px; margin-bottom: 6px; }
+    .aq-who { font-weight: 600; }
+    .aq-email { color: #8a8f9c; font-size: 12px; word-break: break-all; }
+    .aq-summary { margin: 6px 0; }
+    .aq-meta { color: #6b7280; font-size: 12px; }
+    .aq-actions { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 8px;
+        align-items: center; }
+    .aq-actions input[type=text] { flex: 1 1 160px; min-width: 0; }
+    .chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0 14px; }
+    .chip { display: inline-block; font-size: 13px; padding: 4px 12px;
+        border-radius: 999px; border: 1px solid #d1d5db; text-decoration: none;
+        color: #374151; }
+    .chip.active { background: #3730a3; color: #fff; border-color: #3730a3; }
+    .chip .n { font-weight: 700; }
+    @@media (min-width: 640px) {
+        .aq-item { display: grid; grid-template-columns: 1fr auto;
+            grid-template-areas: "body actions"; align-items: start; }
+        .aq-body { grid-area: body; }
+        .aq-actions { grid-area: actions; margin-top: 0; justify-content: flex-end; }
+    }
+</style>
+
+<div class="card">
+    <h2>Action queue</h2>
+
+    @if (Model.AccessDenied)
+    {
+        <p class="error">This area is for organizers only.</p>
+    }
+    else
+    {
+        @if (!string.IsNullOrEmpty(Model.Message))
+        {
+            <p class="info">@Model.Message</p>
+        }
+
+        <p style="color:#6b7280;font-size:13px;">
+            Late changes participants made to an already-submitted hotel booking
+            or dinner RSVP (within the final stretch before the lock date). Each
+            one likely needs re-confirming with the vendor. Mark it resolved once
+            you have actioned it.
+        </p>
+
+        <!-- Type filter chips (open counts) -->
+        <div class="chips">
+            <a class="chip @(string.IsNullOrEmpty(Model.TypeFilter) ? "active" : "")"
+               asp-page-handler="" asp-route-TypeFilter="">
+                All <span class="n">@Model.OpenItems.Count</span>
+            </a>
+            @foreach (var t in Model.TypeCounts)
+            {
+                <a class="chip @(Model.TypeFilter == t.Code ? "active" : "")"
+                   asp-route-TypeFilter="@t.Code">
+                    @t.Label <span class="n">@t.Count</span>
+                </a>
+            }
+        </div>
+
+        @if (Model.OpenItems.Count > 0)
+        {
+            <p>
+                <a asp-page-handler="Export" asp-route-TypeFilter="@Model.TypeFilter">
+                    Export open items to CSV
+                </a>
+            </p>
+        }
+
+        <form method="post" asp-page-handler="SendStepResets" style="margin-bottom:12px;">
+            <button type="submit">Send onboarding-step-reset reminders now</button>
+            <span style="color:#6b7280;font-size:13px;margin-left:6px;">
+                Emails each person whose wizard step was re-opened, then resolves the item
+                (the nightly job does this automatically).
+            </span>
+        </form>
+
+        <h3>Open (@Model.OpenItems.Count)</h3>
+        @if (Model.OpenItems.Count == 0)
+        {
+            <p class="info">Nothing to action. No late changes are waiting.</p>
+        }
+        else
+        {
+            foreach (var r in Model.OpenItems)
+            {
+                <div class="aq-item">
+                    <div class="aq-body">
+                        <span class="aq-type">@r.TypeLabel</span>
+                        <div class="aq-who">@r.Who</div>
+                        @if (!string.IsNullOrEmpty(r.Email))
+                        {
+                            <div class="aq-email">@r.Email</div>
+                        }
+                        <div class="aq-summary">@r.Summary</div>
+                        <div class="aq-meta">Last change @r.LastActivity.ToLocalTime().ToString("ddd d MMM, HH:mm")</div>
+                    </div>
+                    <form method="post" asp-page-handler="Resolve"
+                          asp-route-TypeFilter="@Model.TypeFilter" class="aq-actions">
+                        <input type="hidden" name="id" value="@r.Id" />
+                        <input type="text" name="notes" placeholder="Note (optional)"
+                               maxlength="500" />
+                        <button type="submit">Mark resolved</button>
+                    </form>
+                </div>
+            }
+        }
+
+        @if (Model.ResolvedItems.Count > 0)
+        {
+            <h3 style="margin-top:24px;">Recently resolved</h3>
+            foreach (var r in Model.ResolvedItems)
+            {
+                <div class="aq-item resolved">
+                    <div class="aq-body">
+                        <span class="aq-type">@r.TypeLabel</span>
+                        <div class="aq-who">@r.Who</div>
+                        <div class="aq-summary">@r.Summary</div>
+                        <div class="aq-meta">
+                            Resolved @(r.ResolvedAt?.ToLocalTime().ToString("ddd d MMM, HH:mm"))
+                            @if (!string.IsNullOrWhiteSpace(r.ResolvedNotes))
+                            {
+                                <text> — @r.ResolvedNotes</text>
+                            }
+                        </div>
+                    </div>
+                    <form method="post" asp-page-handler="Reopen"
+                          asp-route-TypeFilter="@Model.TypeFilter" class="aq-actions">
+                        <input type="hidden" name="id" value="@r.Id" />
+                        <button type="submit" class="secondary">Re-open</button>
+                    </form>
+                </div>
+            }
+        }
+    }
+    <p style="margin-top:16px;"><a asp-page="/Organizer/Index">Back to organizer area</a></p>
+</div>

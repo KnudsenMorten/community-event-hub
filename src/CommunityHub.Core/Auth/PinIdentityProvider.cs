@@ -1,4 +1,5 @@
 using CommunityHub.Core.Data;
+using CommunityHub.Core.Domain;
 using Microsoft.EntityFrameworkCore;
 
 namespace CommunityHub.Core.Auth;
@@ -53,7 +54,10 @@ public sealed class PinIdentityProvider : IIdentityProvider
             .FirstOrDefaultAsync(
                 p => p.EventId == eventId
                      && p.Email == email
-                     && p.IsActive,
+                     && p.IsActive
+                     // Onboarding gate: a not-yet-activated queue entry cannot
+                     // sign in (login requires IsActive AND lifecycle Active).
+                     && p.LifecycleState == ParticipantLifecycleState.Active,
                 cancellationToken);
 
         if (participant is null)

@@ -1,0 +1,44 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- ======================================================================
+       CommunityHub.Core.Tests - unit tests for CommunityHub.Core services.
+       Uses the EF Core in-memory provider (no SQL Server needed) so the suite
+       runs in CI and on a dev box with `dotnet test`.
+       ====================================================================== -->
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+    <!-- EF in-memory provider: lets the scenario tests stand up a full DbContext
+         with seeded data and exercise the real services / EF queries offline,
+         with no SQLEXPRESS / secrets. -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" Version="8.0.6" />
+    <!-- EF SQLite provider: a RELATIONAL provider (same query-translation pipeline
+         as SQL Server) used by the public-sessions translation regression test. The
+         in-memory provider never translates LINQ to SQL, so it cannot catch a query
+         shape SQL Server rejects; SQLite reproduces the relational translation path
+         offline (no SQLEXPRESS / secrets), guarding /Sessions + /Attendee/MyEvent. -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="8.0.6" />
+    <!-- Standalone DataProtection provider for the magic-link token round-trip
+         test (DataProtectionProvider.Create(DirectoryInfo)). The .Extensions
+         package carries the convenience factory used outside an ASP.NET host. -->
+    <PackageReference Include="Microsoft.AspNetCore.DataProtection.Extensions" Version="8.0.6" />
+    <!-- Localization: lets LocalizationResourcesTests stand up a real
+         ResourceManagerStringLocalizerFactory against the SharedResource .resx
+         satellites (en + da-DK) that ship in CommunityHub.Core. -->
+    <PackageReference Include="Microsoft.Extensions.Localization" Version="8.0.6" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\CommunityHub.Core\CommunityHub.Core.csproj" />
+  </ItemGroup>
+
+</Project>

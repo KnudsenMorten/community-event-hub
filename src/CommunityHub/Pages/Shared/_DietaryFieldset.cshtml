@@ -1,0 +1,63 @@
+@*
+    Shared structured dietary / allergy capture (REQUIREMENTS §21 Participant [H]).
+
+    Renders, for the bound DietaryInput:
+      - a diet-lifestyle dropdown (None / Vegetarian / Vegan / …),
+      - a fieldset of the 14 common EU allergens as checkboxes (a11y: fieldset +
+        legend groups them for screen readers; each checkbox has its own <label>),
+      - a free-text "other" box for the long tail.
+
+    Used identically on /Forms/Dinner and /Forms/Speaker so structured catering
+    data is captured the same way on both. Mobile-first: the allergen grid wraps
+    to a single column at ~360px. The checkbox field name == the entity property
+    name == the aggregation key (see DietaryInput / DietaryAggregator).
+
+    HOW TO USE (in a form, with a [BindProperty] public DietaryInput Dietary):
+        <partial name="_DietaryFieldset" model="Model.Dietary" />
+*@
+@using Microsoft.AspNetCore.Mvc.Localization
+@using CommunityHub.Core.Domain
+@inject IHtmlLocalizer<CommunityHub.Core.Resources.SharedResource> Localizer
+@model CommunityHub.Pages.Shared.DietaryInput
+
+<style>
+    /* Allergen checkbox grid — two columns on a phone-friendly width, single
+       column under ~360px. Scoped class names; no global override. */
+    .ceh-diet-allergens {
+        display: grid; grid-template-columns: 1fr 1fr; gap: 4px 18px;
+        margin: 6px 0 12px; padding: 0; border: 0;
+    }
+    .ceh-diet-allergens label {
+        display: flex; align-items: center; gap: 8px;
+        font-weight: normal; font-size: 14px; margin: 2px 0;
+    }
+    .ceh-diet-allergens input[type=checkbox] { width: auto; margin: 0; }
+    @@media (max-width: 380px) {
+        .ceh-diet-allergens { grid-template-columns: 1fr; }
+    }
+</style>
+
+<label for="Dietary_DietChoice">@Localizer["Diet.DietChoiceLabel"]</label>
+<select asp-for="DietChoice" id="Dietary_DietChoice" name="Dietary.DietChoice">
+    <option value="">@Localizer["Diet.DietChoiceNone"]</option>
+    @foreach (var choice in DietaryRequirement.DietChoices)
+    {
+        <option value="@choice">@Localizer[$"Diet.Choice.{choice}"]</option>
+    }
+</select>
+
+<fieldset class="ceh-diet-allergens">
+    <legend style="font-weight:600;font-size:14px;margin-top:6px;">@Localizer["Diet.AllergensLegend"]</legend>
+    @foreach (var (token, isSet) in Model.Allergens())
+    {
+        var id = $"Dietary_{token}";
+        <label for="@id">
+            <input type="checkbox" id="@id" name="Dietary.@token" value="true" @(isSet ? "checked" : "") />
+            @Localizer[$"Diet.Allergen.{token}"]
+        </label>
+    }
+</fieldset>
+
+<label for="Dietary_OtherAllergens">@Localizer["Diet.OtherLabel"]</label>
+<textarea id="Dietary_OtherAllergens" name="Dietary.OtherAllergens" rows="2"
+          placeholder="@Localizer["Diet.OtherPlaceholder"]">@Model.OtherAllergens</textarea>

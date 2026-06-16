@@ -215,38 +215,74 @@ Invoke-WebRequest -Uri "@(Model.BaseUrl)/api/v1/sponsors/$cid/leads.csv" `
     </div>
 
     <div class="card">
-        <h2>4. Recent leads + actions</h2>
-        <p>Latest 200 leads. Nothing here hard-deletes &mdash; Ignore and
-           Junk hide the row from the sponsor feed and this default view
-           but preserve it (the AI screen learns from your overrides).</p>
+        <h2>4. Leads + actions</h2>
+        <p>Search, sort and page the captured leads. Nothing here hard-deletes
+           &mdash; Ignore and Junk hide the row from the sponsor feed and this
+           default view but preserve it (the AI screen learns from your overrides).</p>
 
-        <form method="get" style="margin-bottom:10px;">
-            <label style="display:inline-flex;align-items:center;gap:8px;font-weight:400;">
+        <form method="get" style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;margin-bottom:10px;">
+            <div style="flex:2 1 220px;min-width:160px;">
+                <label for="Search">@Localizer["OrgGrid.Search"] (name, email, sponsor)</label>
+                <input type="text" id="Search" name="Search" value="@Model.Search" />
+            </div>
+            <div style="flex:1 1 160px;min-width:140px;">
+                <label for="SponsorFilter">Sponsor</label>
+                <select id="SponsorFilter" name="SponsorFilter">
+                    <option value="">All sponsors</option>
+                    @foreach (var s in Model.SponsorKeys)
+                    {
+                        <option value="@s.SponsorCompanyId" selected="@(Model.SponsorFilter == s.SponsorCompanyId)">@s.SponsorCompanyId</option>
+                    }
+                </select>
+            </div>
+            <label style="display:inline-flex;align-items:center;gap:8px;font-weight:400;flex:0 0 auto;margin-bottom:8px;">
                 <input type="checkbox" name="ShowHidden" value="true"
-                       checked="@Model.ShowHidden" style="width:auto;margin:0;"
-                       onchange="this.form.submit()" /> Show ignored / junk rows
+                       checked="@Model.ShowHidden" style="width:auto;margin:0;" /> Show ignored / junk rows
             </label>
-            <select name="SponsorFilter" onchange="this.form.submit()" style="display:inline-block;width:auto;margin-left:14px;">
-                <option value="">All sponsors</option>
-                @foreach (var s in Model.SponsorKeys)
-                {
-                    <option value="@s.SponsorCompanyId" selected="@(Model.SponsorFilter == s.SponsorCompanyId)">@s.SponsorCompanyId</option>
-                }
-            </select>
+            @* keep the current sort; reset to page 1 on a new filter *@
+            <input type="hidden" name="Sort" value="@Model.Sort" />
+            <input type="hidden" name="Desc" value="@Model.Desc" />
+            <div style="flex:0 0 auto;">
+                <button type="submit">@Localizer["OrgGrid.Apply"]</button>
+            </div>
         </form>
 
         @if (Model.Leads.Count == 0)
         {
-            <p class="info">No leads match. Leads land here from the nightly
+            <p class="info">@Localizer["OrgGrid.NoMatch"] Leads land here from the nightly
                Zoho CRM pull (05:15 UTC) or the <strong>Sync now</strong>
                button at the top &mdash; both require <code>Zoho__CrmEnabled=true</code>.</p>
         }
         else
         {
+            <p role="status">
+                @Localizer["OrgGrid.ShowingRange", Model.Paging.FirstRowNumber, Model.Paging.LastRowNumber, Model.Paging.TotalItems]
+            </p>
             <div style="overflow-x:auto;">
             <table style="width:100%;border-collapse:collapse;min-width:900px;">
+                <caption class="sr-only">Sponsor leads for this edition</caption>
                 <tr style="text-align:left;border-bottom:2px solid #ddd;">
-                    <th>Captured</th><th>Sponsor</th><th>Type</th><th>Name</th><th>Company</th><th>Email</th><th>AI</th><th>Status</th><th style="width:300px;">Actions</th>
+                    <th scope="col" aria-sort="@Model.AriaSort("captured")">
+                        <a asp-page-handler="" asp-route-ShowHidden="@Model.ShowHidden" asp-route-SponsorFilter="@Model.SponsorFilter"
+                           asp-route-Search="@Model.Search" asp-route-Sort="captured" asp-route-Desc="@Model.NextDescFor("captured")" asp-route-PageNo="1">Captured@Model.SortIndicator("captured")</a>
+                    </th>
+                    <th scope="col" aria-sort="@Model.AriaSort("company")">
+                        <a asp-page-handler="" asp-route-ShowHidden="@Model.ShowHidden" asp-route-SponsorFilter="@Model.SponsorFilter"
+                           asp-route-Search="@Model.Search" asp-route-Sort="company" asp-route-Desc="@Model.NextDescFor("company")" asp-route-PageNo="1">Sponsor@Model.SortIndicator("company")</a>
+                    </th>
+                    <th scope="col">Type</th>
+                    <th scope="col" aria-sort="@Model.AriaSort("name")">
+                        <a asp-page-handler="" asp-route-ShowHidden="@Model.ShowHidden" asp-route-SponsorFilter="@Model.SponsorFilter"
+                           asp-route-Search="@Model.Search" asp-route-Sort="name" asp-route-Desc="@Model.NextDescFor("name")" asp-route-PageNo="1">@Localizer["OrgGrid.Col.Name"]@Model.SortIndicator("name")</a>
+                    </th>
+                    <th scope="col">Company</th>
+                    <th scope="col">@Localizer["OrgGrid.Col.Email"]</th>
+                    <th scope="col">AI</th>
+                    <th scope="col" aria-sort="@Model.AriaSort("status")">
+                        <a asp-page-handler="" asp-route-ShowHidden="@Model.ShowHidden" asp-route-SponsorFilter="@Model.SponsorFilter"
+                           asp-route-Search="@Model.Search" asp-route-Sort="status" asp-route-Desc="@Model.NextDescFor("status")" asp-route-PageNo="1">@Localizer["OrgGrid.Col.Status"]@Model.SortIndicator("status")</a>
+                    </th>
+                    <th scope="col" style="width:300px;">Actions</th>
                 </tr>
                 @foreach (var l in Model.Leads)
                 {
@@ -278,19 +314,19 @@ Invoke-WebRequest -Uri "@(Model.BaseUrl)/api/v1/sponsors/$cid/leads.csv" `
                         </td>
                         <td>
                             <div style="display:flex;flex-wrap:wrap;gap:4px;">
-                                <form method="post" asp-page-handler="MarkLeadProcessed" asp-route-ShowHidden="@Model.ShowHidden" asp-route-SponsorFilter="@Model.SponsorFilter" style="display:inline;">
+                                <form method="post" asp-page-handler="MarkLeadProcessed" asp-route-ShowHidden="@Model.ShowHidden" asp-route-SponsorFilter="@Model.SponsorFilter" asp-route-Search="@Model.Search" asp-route-Sort="@Model.Sort" asp-route-Desc="@Model.Desc" asp-route-PageNo="@Model.PageNo" style="display:inline;">
                                     <input type="hidden" name="leadId" value="@l.Id" />
                                     <button type="submit" class="secondary" style="font-size:12px;padding:4px 9px;">Processed</button>
                                 </form>
-                                <form method="post" asp-page-handler="MarkLeadInterest" asp-route-ShowHidden="@Model.ShowHidden" asp-route-SponsorFilter="@Model.SponsorFilter" style="display:inline;">
+                                <form method="post" asp-page-handler="MarkLeadInterest" asp-route-ShowHidden="@Model.ShowHidden" asp-route-SponsorFilter="@Model.SponsorFilter" asp-route-Search="@Model.Search" asp-route-Sort="@Model.Sort" asp-route-Desc="@Model.Desc" asp-route-PageNo="@Model.PageNo" style="display:inline;">
                                     <input type="hidden" name="leadId" value="@l.Id" />
                                     <button type="submit" class="secondary" style="font-size:12px;padding:4px 9px;">Interest</button>
                                 </form>
-                                <form method="post" asp-page-handler="MarkLeadIgnore" asp-route-ShowHidden="@Model.ShowHidden" asp-route-SponsorFilter="@Model.SponsorFilter" style="display:inline;">
+                                <form method="post" asp-page-handler="MarkLeadIgnore" asp-route-ShowHidden="@Model.ShowHidden" asp-route-SponsorFilter="@Model.SponsorFilter" asp-route-Search="@Model.Search" asp-route-Sort="@Model.Sort" asp-route-Desc="@Model.Desc" asp-route-PageNo="@Model.PageNo" style="display:inline;">
                                     <input type="hidden" name="leadId" value="@l.Id" />
                                     <button type="submit" class="secondary" style="font-size:12px;padding:4px 9px;">Ignore</button>
                                 </form>
-                                <form method="post" asp-page-handler="MarkLeadJunk" asp-route-ShowHidden="@Model.ShowHidden" asp-route-SponsorFilter="@Model.SponsorFilter" style="display:inline;">
+                                <form method="post" asp-page-handler="MarkLeadJunk" asp-route-ShowHidden="@Model.ShowHidden" asp-route-SponsorFilter="@Model.SponsorFilter" asp-route-Search="@Model.Search" asp-route-Sort="@Model.Sort" asp-route-Desc="@Model.Desc" asp-route-PageNo="@Model.PageNo" style="display:inline;">
                                     <input type="hidden" name="leadId" value="@l.Id" />
                                     <button type="submit" class="secondary" style="font-size:12px;padding:4px 9px;">Junk</button>
                                 </form>
@@ -299,7 +335,7 @@ Invoke-WebRequest -Uri "@(Model.BaseUrl)/api/v1/sponsors/$cid/leads.csv" `
                             {
                                 <details style="margin-top:4px;">
                                     <summary style="font-size:12px;color:#0969da;cursor:pointer;">Reply&hellip;</summary>
-                                    <form method="post" asp-page-handler="ReplyLead" asp-route-ShowHidden="@Model.ShowHidden" asp-route-SponsorFilter="@Model.SponsorFilter" style="margin-top:6px;">
+                                    <form method="post" asp-page-handler="ReplyLead" asp-route-ShowHidden="@Model.ShowHidden" asp-route-SponsorFilter="@Model.SponsorFilter" asp-route-Search="@Model.Search" asp-route-Sort="@Model.Sort" asp-route-Desc="@Model.Desc" asp-route-PageNo="@Model.PageNo" style="margin-top:6px;">
                                         <input type="hidden" name="leadId" value="@l.Id" />
                                         <input name="subject" type="text" placeholder="Subject" style="margin:0 0 6px;max-width:280px;" />
                                         <textarea name="body" rows="3" placeholder="Message (plain text)" style="margin:0 0 6px;max-width:280px;"></textarea>

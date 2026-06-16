@@ -1,0 +1,63 @@
+@*
+    Shared CONFIRMATION MODAL — REQUIREMENTS §21 (shared UX components).
+
+    A reusable, accessible dialog shown before a destructive / bulk / send action.
+    It states what will happen and shows a COUNT, so the user confirms with full
+    context instead of via a bare native confirm().
+
+    Accessibility:
+      - role="dialog" + aria-modal="true" + aria-labelledby (the title).
+      - Esc, backdrop click, and the Cancel button all close it.
+      - Focus moves to the Confirm button on open and is TRAPPED inside the dialog
+        (Tab/Shift+Tab cycle), restored to the trigger on close. (Layout JS.)
+      - Mobile-first: full-width on small screens, buttons stack.
+
+    HOW TO USE — render the modal once on the page, then point a trigger at it:
+
+        (the modal — place anywhere in the page body)
+        partial name="_ConfirmModal" model='new ConfirmModalModel(
+            Id: "confirmSend",
+            Title: "Send broadcast?",
+            Body: "This will email {count} recipient(s) now. This cannot be undone.",
+            ConfirmLabel: "Send now",
+            CancelLabel: "Cancel",
+            Danger: true,
+            DefaultCount: Model.RecipientCount.ToString())
+
+        (the trigger — a submit button OR a link; data-ceh-count fills {count})
+        button type="submit" asp-page-handler="Send"
+               data-ceh-confirm="confirmSend"
+               data-ceh-count="Model.RecipientCount"  ... Send broadcast /button
+
+    Progressive enhancement: with JS disabled the trigger performs its native
+    action directly (the modal markup is inert), so the flow still works.
+*@
+@using Microsoft.AspNetCore.Mvc.Localization
+@inject IHtmlLocalizer<CommunityHub.Core.Resources.SharedResource> Localizer
+@model CommunityHub.Pages.Shared.ConfirmModalModel
+@{
+    // Split the body around the {count} token so the count renders as a styled
+    // pill; the layout JS updates that pill from the trigger's data-ceh-count.
+    const string token = "{count}";
+    var idx = Model.Body.IndexOf(token, StringComparison.Ordinal);
+    var before = idx >= 0 ? Model.Body.Substring(0, idx) : Model.Body;
+    var after = idx >= 0 ? Model.Body.Substring(idx + token.Length) : null;
+    var modalCls = Model.Danger ? "ceh-modal ceh-modal--danger" : "ceh-modal";
+    var titleId = Model.Id + "-title";
+}
+<div class="ceh-modal-backdrop" id="@Model.Id">
+    <div class="@modalCls" role="dialog" aria-modal="true" aria-labelledby="@titleId">
+        <h2 id="@titleId">@Model.Title</h2>
+        <div class="ceh-modal__body">
+            @before@if (idx >= 0)
+            {
+                <span class="ceh-modal__count" data-ceh-modal-count>@(Model.DefaultCount ?? "")</span>
+            }@if (after is not null){<text>@after</text>}
+            <span data-ceh-modal-summary class="sr-only"></span>
+        </div>
+        <div class="ceh-modal__actions">
+            <button type="button" class="secondary" data-ceh-modal-cancel>@Model.CancelLabel</button>
+            <button type="button" class="ceh-modal__confirm" data-ceh-modal-confirm>@Model.ConfirmLabel</button>
+        </div>
+    </div>
+</div>

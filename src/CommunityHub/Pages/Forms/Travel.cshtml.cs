@@ -1,10 +1,12 @@
 using CommunityHub.Auth;
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
+using CommunityHub.Core.Resources;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Localization;
 
 namespace CommunityHub.Pages.Forms;
 
@@ -14,15 +16,18 @@ public class TravelModel : PageModel
     private readonly CommunityHubDbContext _db;
     private readonly ICurrentParticipantAccessor _participant;
     private readonly TimeProvider _clock;
+    private readonly IStringLocalizer<SharedResource> _loc;
 
     public TravelModel(
         CommunityHubDbContext db,
         ICurrentParticipantAccessor participant,
-        TimeProvider clock)
+        TimeProvider clock,
+        IStringLocalizer<SharedResource> loc)
     {
         _db = db;
         _participant = participant;
         _clock = clock;
+        _loc = loc;
     }
 
     public static readonly ParticipantRole[] EligibleRoles =
@@ -106,6 +111,37 @@ public class TravelModel : PageModel
         }
 
         SubmitInvoiceDueDate = await GetInvoiceDueDateAsync(me.EventId, ct);
+
+        // ---- Field-level validation (REQUIREMENTS §21 shared validation pattern).
+        // Only meaningful when the user IS claiming; the opt-out path needs none.
+        // This closes the known "Other"-blank bug: previously selecting "Other"
+        // with an empty amount silently saved a NULL claim (no error shown). Now
+        // it fails validation against the specific field, re-renders the form with
+        // an inline message, and persists nothing.
+        if (RequestReimbursement)
+        {
+            if (string.IsNullOrEmpty(AmountChoice))
+            {
+                ModelState.AddModelError(nameof(AmountChoice), _loc["Travel.ErrPickAmount"]);
+            }
+            else if (AmountChoice == ChoiceOther)
+            {
+                if (OtherAmountEur is not > 0)
+                {
+                    ModelState.AddModelError(nameof(OtherAmountEur), _loc["Travel.ErrOtherAmount"]);
+                }
+                if (string.IsNullOrWhiteSpace(Explanation))
+                {
+                    ModelState.AddModelError(nameof(Explanation), _loc["Travel.ErrOtherExplanation"]);
+                }
+            }
+        }
+
+        if (!ModelState.IsValid)
+        {
+            // Re-render with the field errors; do not touch the database.
+            return Page();
+        }
 
         var row = await _db.TravelReimbursements.FirstOrDefaultAsync(
             t => t.EventId == me.EventId && t.ParticipantId == me.ParticipantId, ct);

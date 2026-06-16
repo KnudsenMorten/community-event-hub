@@ -1,0 +1,62 @@
+@page
+@model CommunityHub.Pages.Organizer.EditOnBehalfModel
+@{
+    ViewData["Title"] = "Modify on behalf";
+}
+<div class="card">
+    <h2>Modify on behalf</h2>
+
+    @if (Model.AccessDenied)
+    {
+        <p class="error" role="alert">This area is for organizers only.</p>
+    }
+    else if (Model.NotFound_)
+    {
+        <p class="error" role="alert">That participant could not be found in this event.</p>
+        <p><a asp-page="/Organizer/Participants">Back to participants</a></p>
+    }
+    else
+    {
+        <p>Changing logistics for <strong>@Model.TargetName</strong> (@Model.TargetEmail).
+           These edits write to the same records the person sees on their own pages, so the
+           change shows up on their view immediately.</p>
+
+        @if (!string.IsNullOrEmpty(Model.Message))
+        {
+            <p class="@(Model.IsError ? "error" : "info")" role="status">@Model.Message</p>
+        }
+
+        <fieldset style="margin-bottom:20px;">
+            <legend><strong>Hotel</strong></legend>
+            <form method="post" asp-page-handler="Hotel">
+                <input type="hidden" name="ParticipantId" value="@Model.ParticipantId" />
+                <label>
+                    <input type="checkbox" name="NeedsRoom" value="true" checked="@Model.NeedsRoom" />
+                    This person needs a hotel room
+                </label>
+                <div style="margin-top:10px;">
+                    <button type="submit">Save hotel preference</button>
+                </div>
+            </form>
+        </fieldset>
+
+        <fieldset>
+            <legend><strong>Swag — polo size</strong></legend>
+            <form method="post" asp-page-handler="Swag">
+                <input type="hidden" name="ParticipantId" value="@Model.ParticipantId" />
+                <label for="PoloChoice">Polo size</label>
+                <select id="PoloChoice" name="PoloChoice">
+                    @foreach (var size in Model.PoloSizes)
+                    {
+                        <option value="@size" selected="@(Model.PoloChoice == size)">@size</option>
+                    }
+                </select>
+                <div style="margin-top:10px;">
+                    <button type="submit">Save polo size</button>
+                </div>
+            </form>
+        </fieldset>
+
+        <p style="margin-top:20px;"><a asp-page="/Organizer/Participants">Back to participants</a></p>
+    }
+</div>

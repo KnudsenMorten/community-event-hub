@@ -20,8 +20,12 @@
 
         @if (!string.IsNullOrEmpty(Model.ActionMessage))
         {
-            <p class="@(Model.ActionMessage.StartsWith("Test mail") ? "info" : "error")">@Model.ActionMessage</p>
+            var ok = Model.ActionMessage.StartsWith("Test mail")
+                     || Model.ActionMessage.StartsWith("Sent ");
+            <p class="@(ok ? "info" : "error")" role="status">@Model.ActionMessage</p>
         }
+
+        <p style="margin:4px 0 12px;"><a asp-page="/Organizer/EmailLog">View the full email log &rarr;</a></p>
 
         <form method="get" style="margin-bottom:8px;">
             <label for="Template">Template</label>
@@ -62,6 +66,53 @@
         }
     }
 </div>
+
+@if (!Model.AccessDenied)
+{
+    <div class="card">
+        <h2>Send to a person</h2>
+        <p>Re-send any branded template to a single named person on demand. You can
+           also set or clear their optional <strong>secondary email</strong> &mdash;
+           when set, every email to this person is also copied (CC) to that address.</p>
+
+        <form method="post" asp-page-handler="SendToPerson">
+            <fieldset style="border:1px solid #e3e4ea;border-radius:8px;padding:14px;">
+                <legend>Manual send</legend>
+                <div style="display:flex;flex-wrap:wrap;gap:12px;">
+                    <div style="flex:1 1 240px;">
+                        <label for="PersonId">Person</label>
+                        <select id="PersonId" name="PersonId" style="width:100%;" required>
+                            <option value="">Pick a person&hellip;</option>
+                            @foreach (var (id, lbl) in Model.ActiveParticipants)
+                            {
+                                <option value="@id">@lbl</option>
+                            }
+                        </select>
+                    </div>
+                    <div style="flex:1 1 200px;">
+                        <label for="PersonTemplate">Template</label>
+                        <select id="PersonTemplate" name="PersonTemplate" style="width:100%;" required>
+                            <option value="">Pick a template&hellip;</option>
+                            @foreach (var t in Model.TemplateNames)
+                            {
+                                <option value="@t">@t</option>
+                            }
+                        </select>
+                    </div>
+                    <div style="flex:1 1 220px;">
+                        <label for="SecondaryEmail">Secondary email (optional CC)</label>
+                        <input type="email" id="SecondaryEmail" name="SecondaryEmail"
+                               style="width:100%;" autocomplete="off"
+                               placeholder="blank = no extra CC" />
+                    </div>
+                </div>
+                <div style="margin-top:12px;">
+                    <button type="submit">Send to this person</button>
+                </div>
+            </fieldset>
+        </form>
+    </div>
+}
 
 @if (!Model.AccessDenied)
 {

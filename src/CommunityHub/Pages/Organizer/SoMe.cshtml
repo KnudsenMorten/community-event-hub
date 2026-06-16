@@ -1,0 +1,46 @@
+@page
+@model CommunityHub.Pages.Organizer.SoMeModel
+@{
+    ViewData["Title"] = Localizer["OrgSoMe.Title"].Value;
+}
+
+<div class="card">
+    <h2>@Localizer["OrgSoMe.Title"]</h2>
+    @if (Model.AccessDenied)
+    {
+        <p class="error">@Localizer["Common.OrganizersOnly"]</p>
+        <p><a asp-page="/Index">@Localizer["Common.BackToHub"]</a></p>
+    }
+    else
+    {
+        <p>@Localizer["OrgSoMe.Intro"]</p>
+        <p><a asp-page="/Organizer/Index">&larr; @Localizer["Common.BackToOrganizerArea"]</a></p>
+    }
+</div>
+
+@if (!Model.AccessDenied)
+{
+    <div class="card">
+        <h2>@Localizer["Nav.OrgGraphics"]</h2>
+        <p>@Localizer["OrgSoMe.Graphics"]</p>
+        <p><a asp-page="/Organizer/Graphics">@Localizer["Nav.OrgGraphics"]</a></p>
+    </div>
+
+    <div class="card">
+        <h2>@Localizer["Nav.OrgSoMeQueue"]</h2>
+        <p>@Localizer["OrgSoMe.Queue"]</p>
+        <p><a asp-page="/Organizer/SoMeQueue">@Localizer["Nav.OrgSoMeQueue"]</a></p>
+    </div>
+
+    <div class="card">
+        <h2>@Localizer["Nav.OrgSoMeSettings"]</h2>
+        <p>@Localizer["OrgSoMe.Settings"]</p>
+        <p><a asp-page="/Organizer/SoMeSettings">@Localizer["Nav.OrgSoMeSettings"]</a></p>
+    </div>
+
+    <div class="card">
+        <h2>@Localizer["Nav.OrgAssetLocations"]</h2>
+        <p>@Localizer["OrgSoMe.AssetLocations"]</p>
+        <p><a asp-page="/Organizer/AssetLocations">@Localizer["Nav.OrgAssetLocations"]</a></p>
+    </div>
+}

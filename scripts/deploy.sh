@@ -3,8 +3,8 @@
 #  deploy.sh  -  Deploy the Community Hub Azure infrastructure (Stage 1)
 # ---------------------------------------------------------------------------
 #  Creates the resource group and deploys infra/main.bicep into it.
-#  The SQL admin password is NEVER stored in a file - it is read from the
-#  ELDKHUB_SQL_ADMIN_PASSWORD environment variable, or prompted for if unset.
+#  No SQL admin password is needed: the SQL server is Azure-AD-only and the app
+#  + Functions authenticate via their managed identities (passwordless).
 #
 #  Usage:
 #     ./scripts/deploy.sh dev          # deploy the dev environment
@@ -101,17 +101,10 @@ if [[ ! -f "$PARAM_FILE" ]]; then
   exit 1
 fi
 
-# --- SQL admin password (never stored on disk) -----------------------------
-
-if [[ -z "${ELDKHUB_SQL_ADMIN_PASSWORD:-}" ]]; then
-  echo "ELDKHUB_SQL_ADMIN_PASSWORD is not set."
-  read -r -s -p "Enter the SQL administrator password for '${ENVIRONMENT}': " ELDKHUB_SQL_ADMIN_PASSWORD
-  echo
-  if [[ -z "$ELDKHUB_SQL_ADMIN_PASSWORD" ]]; then
-    echo "ERROR: a SQL admin password is required." >&2
-    exit 1
-  fi
-fi
+# --- SQL admin password: not required -------------------------------------
+#  The SQL server is Azure-AD-only; the app + Functions authenticate via their
+#  managed identities. No SQL login or password is provisioned, so main.bicep
+#  no longer takes a sqlAdminPassword parameter and nothing is prompted here.
 
 # --- Summary ---------------------------------------------------------------
 
@@ -143,8 +136,7 @@ if [[ "$WHATIF_FLAG" == "--whatif" ]]; then
     --resource-group "$RESOURCE_GROUP" \
     --name "$DEPLOYMENT_NAME" \
     --template-file "$TEMPLATE" \
-    --parameters "@${PARAM_FILE}" \
-    --parameters sqlAdminPassword="$ELDKHUB_SQL_ADMIN_PASSWORD"
+    --parameters "@${PARAM_FILE}"
   exit 0
 fi
 
@@ -154,7 +146,6 @@ az deployment group create \
   --name "$DEPLOYMENT_NAME" \
   --template-file "$TEMPLATE" \
   --parameters "@${PARAM_FILE}" \
-  --parameters sqlAdminPassword="$ELDKHUB_SQL_ADMIN_PASSWORD" \
   --output table
 
 # --- Show key outputs ------------------------------------------------------

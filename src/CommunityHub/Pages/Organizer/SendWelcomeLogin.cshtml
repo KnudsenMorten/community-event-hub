@@ -1,0 +1,78 @@
+@page
+@model CommunityHub.Pages.Organizer.SendWelcomeLoginModel
+@{
+    ViewData["Title"] = "Send welcome (auto-login)";
+}
+
+<div class="card">
+    <h2>Send welcome email (one-click auto-login)</h2>
+
+    @if (Model.AccessDenied)
+    {
+        <p class="error">This area is for organizers only.</p>
+    }
+    else
+    {
+        <p>
+            Sends the <strong>welcome email</strong> to every <strong>active</strong>
+            participant, with a one-click <strong>auto-login</strong> link that signs them
+            in and drops them straight into their role hub. The copy is tailored per role
+            and explains how the Event Hub fits alongside Zoho Backstage.
+        </p>
+
+        @if (!Model.IsDev)
+        {
+            <p class="error" style="background:#fdecea;padding:10px 12px;border-radius:6px;">
+                <strong>DEV-only.</strong> The current environment is
+                <strong>@Model.EnvironmentName</strong>, so this email cannot be sent from here.
+                It is intended for development testing while the hub is brand-new.
+            </p>
+        }
+        else
+        {
+            <p style="background:#e8f5e9;padding:8px 12px;border-radius:6px;font-size:13px;">
+                <strong>DEV environment.</strong> All outbound mail is redirected to the DEV
+                test inbox. This send is <strong>re-sendable</strong> &mdash; running it again
+                re-sends to everyone and updates the "last sent" stamp.
+            </p>
+        }
+
+        @if (!string.IsNullOrEmpty(Model.Message))
+        {
+            <p class="@(Model.IsError ? "error" : "info")">@Model.Message</p>
+        }
+
+        <table style="border-collapse:collapse;width:100%;font-size:14px;margin:10px 0 16px;">
+            <thead>
+                <tr style="border-bottom:2px solid #ddd;text-align:left;">
+                    <th style="padding:6px;">Role</th>
+                    <th style="padding:6px;text-align:right;">Active</th>
+                    <th style="padding:6px;text-align:right;">Welcome sent before</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var r in Model.ByRole)
+                {
+                    <tr style="border-bottom:1px solid #eee;">
+                        <td style="padding:6px;">@r.Role</td>
+                        <td style="padding:6px;text-align:right;">@r.Active</td>
+                        <td style="padding:6px;text-align:right;">@r.EverSent</td>
+                    </tr>
+                }
+                <tr style="border-top:2px solid #ddd;font-weight:600;">
+                    <td style="padding:6px;">Total</td>
+                    <td style="padding:6px;text-align:right;">@Model.ActiveCount</td>
+                    <td style="padding:6px;text-align:right;">@Model.EverSentCount</td>
+                </tr>
+            </tbody>
+        </table>
+
+        @if (Model.IsDev)
+        {
+            <form method="post" asp-page-handler="Send">
+                <button type="submit">Send welcome (auto-login) to all @Model.ActiveCount active participants</button>
+            </form>
+        }
+    }
+    <p><a asp-page="/Organizer/Index">Back to organizer area</a></p>
+</div>

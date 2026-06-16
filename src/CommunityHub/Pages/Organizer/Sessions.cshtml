@@ -1,0 +1,391 @@
+@page
+@using Microsoft.AspNetCore.Mvc.Localization
+@inject IHtmlLocalizer<CommunityHub.Core.Resources.SharedResource> Localizer
+@model CommunityHub.Pages.Organizer.SessionsModel
+@{
+    ViewData["Title"] = "Sessions admin";
+}
+@* Re-post the grid's search/sort/page state so an inline POST that returns
+   Page() keeps the organizer on the same filtered/sorted page. *@
+@{
+    void GridStateFields()
+    {
+        <input type="hidden" name="Search" value="@Model.Search" />
+        <input type="hidden" name="FilterType" value="@Model.FilterType" />
+        <input type="hidden" name="FilterLength" value="@Model.FilterLength" />
+        <input type="hidden" name="Sort" value="@Model.Sort" />
+        <input type="hidden" name="Desc" value="@Model.Desc" />
+        <input type="hidden" name="PageNo" value="@Model.PageNo" />
+    }
+}
+
+<div class="card">
+    <h2>Sessions</h2>
+    @if (Model.AccessDenied)
+    {
+        <p class="error">This area is for organizers only.</p>
+    }
+    else
+    {
+        @* Honest send / QR-provisioning confirmation via the shared accessible toast
+           (REQUIREMENTS §21): success (green ✓, time + url/count), no-op (blue ℹ,
+           reason — never a faked success) or failure (red ⚠, reason). *@
+        if (Model.Result is not null)
+        {
+            <partial name="_Flash" model='new CommunityHub.Pages.Shared.FlashModel(Model.Result.Message, Model.Result.FlashKindString)' />
+        }
+        if (!string.IsNullOrEmpty(Model.Error))   { <p class="error" role="alert">@Model.Error</p> }
+        if (!string.IsNullOrEmpty(Model.Message)) { <p class="info" role="status">@Model.Message</p> }
+
+        <p style="font-size:13px;color:#6b7280;margin:0 0 10px;" role="status">
+            <strong>@Model.TotalCount</strong> session(s) &middot;
+            <strong>@Model.HubAddedCount</strong> added in the hub.
+        </p>
+
+        <!-- ---- Filters (Search + Type + Length) --------------------------- -->
+        <h3 style="color:var(--el-darkblue);margin-top:14px;">Filter</h3>
+        <form method="get" style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;margin-bottom:18px;">
+            <div style="flex:2 1 220px;min-width:160px;">
+                <label for="Search">@Localizer["OrgGrid.Search"] (title, room, speaker)</label>
+                <input type="text" asp-for="Search" id="Search" />
+            </div>
+            <div style="flex:1 1 160px;min-width:140px;">
+                <label for="FilterType">Type</label>
+                <select asp-for="FilterType" id="FilterType"
+                        asp-items="Model.TypeOptions">
+                    <option value="">All types</option>
+                </select>
+            </div>
+            <div style="flex:1 1 160px;min-width:140px;">
+                <label for="FilterLength">Length</label>
+                <select asp-for="FilterLength" id="FilterLength"
+                        asp-items="Model.LengthOptions">
+                    <option value="">All lengths</option>
+                </select>
+            </div>
+            <!-- Reset to page 1 + keep current sort whenever the filter changes. -->
+            <input type="hidden" asp-for="Sort" />
+            <input type="hidden" asp-for="Desc" />
+            <div style="flex:0 0 auto;">
+                <button type="submit">@Localizer["OrgGrid.Apply"]</button>
+                <a asp-page="Sessions" style="margin-left:8px;font-size:13px;">Clear</a>
+            </div>
+        </form>
+
+        <!-- ---- Add a hub-only session ------------------------------------- -->
+        <h3 style="color:var(--el-darkblue);margin-top:14px;">Add a hub session</h3>
+        <p style="font-size:13px;color:#6b7280;">
+            Add a session that is <strong>not</strong> from Sessionize (e.g. a sponsor
+            session), alongside the imported ones. A re-import never touches or deletes it.
+        </p>
+        <form method="post" asp-page-handler="Add" style="display:flex;flex-direction:column;gap:10px;margin-bottom:22px;">
+            @* keep the grid's search/sort/page position after the post returns Page() *@
+            @{ GridStateFields(); }
+            <div>
+                <label for="NewTitle">Title</label>
+                <input asp-for="NewTitle" id="NewTitle" required maxlength="400"
+                       placeholder="e.g. Sponsor showcase" />
+            </div>
+            <div style="display:flex;flex-wrap:wrap;gap:12px;">
+                <div style="flex:1 1 160px;min-width:140px;">
+                    <label for="NewType">Type</label>
+                    <select asp-for="NewType" id="NewType" asp-items="Model.TypeOptions"></select>
+                </div>
+                <div style="flex:1 1 160px;min-width:140px;">
+                    <label for="NewLength">Length</label>
+                    <select asp-for="NewLength" id="NewLength" asp-items="Model.LengthOptions"></select>
+                </div>
+                <div style="flex:1 1 160px;min-width:140px;">
+                    <label for="NewRoom">Room</label>
+                    <input asp-for="NewRoom" id="NewRoom" maxlength="200" placeholder="e.g. Room A" />
+                </div>
+            </div>
+            <div>
+                <label for="NewAbstract">Abstract (optional)</label>
+                <textarea asp-for="NewAbstract" id="NewAbstract" rows="2" maxlength="8000"></textarea>
+            </div>
+            <div><button type="submit">Add session</button></div>
+        </form>
+
+        <!-- ---- Provision a room QR ----------------------------------------- -->
+        <h3 style="color:var(--el-darkblue);margin-top:14px;">Provision a room QR code</h3>
+        <p style="font-size:13px;color:#6b7280;">
+            Each physical room gets one QR linked to the room. The QR image is stored on
+            SharePoint and its URL is stamped onto every session in that room, so each
+            speaker can download it (drop into their PowerPoint).
+            <em>SharePoint storage is operator-configured; until it is wired this reports
+            that no QR was generated rather than faking a link.</em>
+        </p>
+        <form method="post" asp-page-handler="ProvisionQr" style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;margin-bottom:22px;">
+            @{ GridStateFields(); }
+            <div style="flex:1 1 160px;min-width:140px;">
+                <label for="QrRoom">Room</label>
+                <input asp-for="QrRoom" id="QrRoom" maxlength="200" placeholder="e.g. Room A" required />
+            </div>
+            <div style="flex:2 1 260px;min-width:200px;">
+                <label for="QrTargetUrl">Room link the QR points to</label>
+                <input asp-for="QrTargetUrl" id="QrTargetUrl" type="url" maxlength="2000"
+                       placeholder="https://…" required />
+            </div>
+            <div style="flex:0 0 auto;"><button type="submit">Provision QR</button></div>
+        </form>
+
+        <!-- ---- Session list ------------------------------------------------ -->
+        <h3 style="color:var(--el-darkblue);margin-top:14px;">All sessions</h3>
+        @if (Model.Rows.Count == 0)
+        {
+            <p style="color:#6b7280;">@Localizer["OrgGrid.NoMatch"]</p>
+        }
+        else
+        {
+            <p role="status">
+                @Localizer["OrgGrid.ShowingRange", Model.Paging.FirstRowNumber, Model.Paging.LastRowNumber, Model.Paging.TotalItems]
+            </p>
+            <div style="overflow-x:auto;">
+            <table>
+                <caption style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);">Sessions for this edition</caption>
+                <thead>
+                    <tr>
+                        <th scope="col" aria-sort="@Model.AriaSort("title")">
+                            <a asp-page="Sessions" asp-route-FilterType="@Model.FilterType" asp-route-FilterLength="@Model.FilterLength"
+                               asp-route-Search="@Model.Search" asp-route-Sort="title" asp-route-Desc="@Model.NextDescFor("title")" asp-route-PageNo="1">Title@Model.SortIndicator("title")</a>
+                        </th>
+                        <th scope="col" aria-sort="@Model.AriaSort("type")">
+                            <a asp-page="Sessions" asp-route-FilterType="@Model.FilterType" asp-route-FilterLength="@Model.FilterLength"
+                               asp-route-Search="@Model.Search" asp-route-Sort="type" asp-route-Desc="@Model.NextDescFor("type")" asp-route-PageNo="1">Type@Model.SortIndicator("type")</a>
+                        </th>
+                        <th scope="col" aria-sort="@Model.AriaSort("length")">
+                            <a asp-page="Sessions" asp-route-FilterType="@Model.FilterType" asp-route-FilterLength="@Model.FilterLength"
+                               asp-route-Search="@Model.Search" asp-route-Sort="length" asp-route-Desc="@Model.NextDescFor("length")" asp-route-PageNo="1">Length@Model.SortIndicator("length")</a>
+                        </th>
+                        <th scope="col" aria-sort="@Model.AriaSort("room")">
+                            <a asp-page="Sessions" asp-route-FilterType="@Model.FilterType" asp-route-FilterLength="@Model.FilterLength"
+                               asp-route-Search="@Model.Search" asp-route-Sort="room" asp-route-Desc="@Model.NextDescFor("room")" asp-route-PageNo="1">Room@Model.SortIndicator("room")</a>
+                        </th>
+                        <th scope="col">Speakers</th>
+                        <th scope="col">QR</th>
+                        <th scope="col">Evaluation</th>
+                    </tr>
+                </thead>
+                <tbody>
+                @foreach (var r in Model.Rows)
+                {
+                    <tr>
+                        <td>
+                            @r.Title
+                            @if (r.IsHubAdded)
+                            {
+                                <span title="Added in the hub"
+                                      style="font-size:11px;background:#eef6ff;color:#1d4ed8;border-radius:4px;padding:1px 5px;margin-left:4px;">hub</span>
+                            }
+                        </td>
+                        <td>@CommunityHub.Pages.Organizer.SessionsModel.Display(r.Type)</td>
+                        <td>@CommunityHub.Pages.Organizer.SessionsModel.Display(r.Length)</td>
+                        <td>@(r.Room ?? "—")</td>
+                        <td>@(r.Speakers.Count == 0 ? "—" : string.Join(", ", r.Speakers))</td>
+                        <td>
+                            @if (!string.IsNullOrWhiteSpace(r.RoomQrUrl))
+                            {
+                                <a asp-page-handler="DownloadQr" asp-route-id="@r.Id">Download QR</a>
+                            }
+                            else
+                            {
+                                <span style="color:#9ca3af;">none</span>
+                            }
+                        </td>
+                        <td>
+                            @if (r.EvaluationEmailedAt is not null)
+                            {
+                                <span style="color:#059669;">emailed</span>
+                            }
+                            else
+                            {
+                                <span style="color:#9ca3af;">—</span>
+                            }
+                        </td>
+                    </tr>
+                    <!-- Edit row (Type/Length/Room/eval form) -->
+                    <tr>
+                        <td colspan="7" style="background:#fafafa;">
+                            <details>
+                                <summary style="cursor:pointer;font-size:13px;">Edit &amp; evaluation</summary>
+                                <div style="display:flex;flex-wrap:wrap;gap:18px;padding:10px 0;">
+                                    <form method="post" asp-page-handler="Edit"
+                                          style="flex:1 1 280px;min-width:240px;display:flex;flex-direction:column;gap:8px;">
+                                        <input type="hidden" name="SessionId" value="@r.Id" />
+                                        @{ GridStateFields(); }
+                                        <div style="display:flex;flex-wrap:wrap;gap:8px;">
+                                            <div style="flex:1 1 120px;">
+                                                <label for="EditType_@r.Id">Type</label>
+                                                <select id="EditType_@r.Id" name="EditType" asp-items="Model.TypeOptions"></select>
+                                            </div>
+                                            <div style="flex:1 1 120px;">
+                                                <label for="EditLength_@r.Id">Length</label>
+                                                <select id="EditLength_@r.Id" name="EditLength" asp-items="Model.LengthOptions"></select>
+                                            </div>
+                                        </div>
+                                        <label for="EditRoom_@r.Id">Room</label>
+                                        <input id="EditRoom_@r.Id" name="EditRoom" maxlength="200" value="@r.Room" />
+                                        <label for="EditEval_@r.Id">QR-code evaluation form URL</label>
+                                        <input id="EditEval_@r.Id" name="EditEvaluationFormUrl" type="url"
+                                               maxlength="2000" value="@r.EvaluationFormUrl" placeholder="https://…" />
+                                        <div><button type="submit">Save</button></div>
+                                    </form>
+                                    <form method="post" asp-page-handler="EmailEval"
+                                          style="flex:1 1 280px;min-width:240px;display:flex;flex-direction:column;gap:8px;">
+                                        <input type="hidden" name="SessionId" value="@r.Id" />
+                                        @{ GridStateFields(); }
+                                        <label for="EvalResults_@r.Id">HappyOrNot results (paste, then email to speakers)</label>
+                                        <textarea id="EvalResults_@r.Id" name="EvalResultsText" rows="3"
+                                                  placeholder="e.g. 86% happy (42 votes)"></textarea>
+                                        <div><button type="submit">Email results to speakers</button></div>
+                                    </form>
+                                </div>
+
+                                <!-- ---- Public attendee evaluate link (room QR target) ---- -->
+                                <div style="border-top:1px solid #e5e7eb;padding-top:12px;margin-top:4px;">
+                                    <strong style="color:var(--el-darkblue);font-size:13px;">Attendee evaluation (QR)</strong>
+                                    <div style="padding-top:8px;display:flex;flex-direction:column;gap:6px;max-width:520px;">
+                                        <span style="font-size:12.5px;color:#6b7280;">
+                                            Public, no-login rating page for attendees (1–5 smiley + comment).
+                                            Point this room's QR here, or share the link directly. Results roll up in
+                                            <a href="/Organizer/SessionEvaluations">Session evaluations</a>.
+                                        </span>
+                                        <form method="post" asp-page-handler="ShowEvaluateLink">
+                                            <input type="hidden" name="SessionId" value="@r.Id" />
+                                        @{ GridStateFields(); }
+                                            <button type="submit">Show evaluate link</button>
+                                        </form>
+                                        @if (Model.EvaluateLinkSessionId == r.Id && !string.IsNullOrWhiteSpace(Model.EvaluateLink))
+                                        {
+                                            <input type="text" readonly value="@Model.EvaluateLink"
+                                                   aria-label="Public evaluate URL (QR target)"
+                                                   onclick="this.select()"
+                                                   style="font-size:12.5px;padding:7px 9px;border:1px solid #c4c8d4;border-radius:6px;" />
+                                        }
+                                    </div>
+                                </div>
+
+                                @if (r.Type == CommunityHub.Core.Domain.SessionType.CommunityMasterClass)
+                                {
+                                    <!-- ---- Master class management (§ 6c) ---- -->
+                                    <div style="border-top:1px solid #e5e7eb;padding-top:12px;margin-top:4px;">
+                                        <strong style="color:var(--el-darkblue);font-size:13px;">Master class management</strong>
+                                        <div style="display:flex;flex-wrap:wrap;gap:18px;padding-top:8px;">
+                                            <!-- Public logistics link -->
+                                            <form method="post" asp-page-handler="ShowPublicLink"
+                                                  style="flex:1 1 280px;min-width:240px;display:flex;flex-direction:column;gap:6px;">
+                                                <input type="hidden" name="SessionId" value="@r.Id" />
+                                        @{ GridStateFields(); }
+                                                <span style="font-size:12.5px;color:#6b7280;">Public logistics page — share with attendees / link from Backstage.</span>
+                                                <div><button type="submit">Show public link</button></div>
+                                                @if (Model.PublicLinkSessionId == r.Id && !string.IsNullOrWhiteSpace(Model.PublicLink))
+                                                {
+                                                    <input type="text" readonly value="@Model.PublicLink"
+                                                           aria-label="Public logistics URL"
+                                                           onclick="this.select()"
+                                                           style="font-size:12.5px;background:#f3f4f6;" />
+                                                }
+                                                else if (!string.IsNullOrWhiteSpace(r.PublicSlug))
+                                                {
+                                                    <a asp-page="/MasterClass/Index" asp-route-slug="@r.PublicSlug"
+                                                       target="_blank" rel="noopener" style="font-size:12.5px;">Open public page ↗</a>
+                                                }
+                                            </form>
+                                            <!-- Zoho Booking endpoint + sync -->
+                                            <form method="post" asp-page-handler="BookingEndpoint"
+                                                  style="flex:1 1 280px;min-width:240px;display:flex;flex-direction:column;gap:6px;">
+                                                <input type="hidden" name="SessionId" value="@r.Id" />
+                                        @{ GridStateFields(); }
+                                                <label for="BookingEndpoint_@r.Id" style="font-size:12.5px;">Zoho Booking endpoint URI</label>
+                                                <input id="BookingEndpoint_@r.Id" name="BookingEndpointUri" type="url"
+                                                       maxlength="2000" value="@r.BookingEndpointUri" placeholder="https://…" />
+                                                <div><button type="submit">Save endpoint</button></div>
+                                            </form>
+                                            <form method="post" asp-page-handler="SyncBookings"
+                                                  style="flex:1 1 200px;min-width:180px;display:flex;flex-direction:column;gap:6px;">
+                                                <input type="hidden" name="SessionId" value="@r.Id" />
+                                        @{ GridStateFields(); }
+                                                <span style="font-size:12.5px;color:#6b7280;">
+                                                    @r.BookedCount booked
+                                                    @if (r.BookingLastSyncedAt is not null) { <text>· synced @r.BookingLastSyncedAt.Value.ToString("yyyy-MM-dd HH:mm")</text> }
+                                                </span>
+                                                <div><button type="submit">Sync bookings now</button></div>
+                                                <span style="font-size:11.5px;color:#9ca3af;">One-way Zoho Booking → hub. Reports "not configured" until the endpoint + creds are wired (no faked participants).</span>
+                                            </form>
+                                        </div>
+                                    </div>
+                                }
+
+                                <!-- ---- Delete this session (§21 CRUD gap) ---- -->
+                                <div style="border-top:1px solid #e5e7eb;padding-top:12px;margin-top:4px;">
+                                    <strong style="color:#b91c1c;font-size:13px;">@Localizer["Sessions.Delete"]</strong>
+                                    @if (r.CanDelete)
+                                    {
+                                        <p style="font-size:12.5px;color:#6b7280;margin:6px 0;">
+                                            Remove this @(r.IsHubAdded ? "hub-added" : "imported") session.
+                                            @if (!r.IsHubAdded)
+                                            {
+                                                <text>It came from Sessionize, so a re-import will recreate it unless removed there too.</text>
+                                            }
+                                        </p>
+                                        <form method="post" asp-page-handler="Delete">
+                                            <input type="hidden" name="SessionId" value="@r.Id" />
+                                            <button type="submit"
+                                                    style="background:#b91c1c;"
+                                                    data-ceh-confirm="confirmDeleteSession"
+                                                    data-ceh-summary="@r.Title">
+                                                @Localizer["Sessions.Delete"]
+                                            </button>
+                                        </form>
+                                    }
+                                    else
+                                    {
+                                        <p style="font-size:12.5px;color:#9ca3af;margin:6px 0;" role="note">
+                                            This session has attendee data
+                                            (@(r.QuestionCount) question(s), @(r.EvaluationCount) evaluation(s), @(r.TotalBookingCount) booking(s))
+                                            and cannot be deleted. Handle that data first.
+                                        </p>
+                                    }
+                                </div>
+                            </details>
+                        </td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+            </div>
+
+            @if (Model.Paging.TotalPages > 1)
+            {
+                <nav aria-label="Pagination" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:14px;">
+                    @if (Model.Paging.HasPrevious)
+                    {
+                        <a asp-page="Sessions" asp-route-FilterType="@Model.FilterType" asp-route-FilterLength="@Model.FilterLength"
+                           asp-route-Search="@Model.Search" asp-route-Sort="@Model.Sort" asp-route-Desc="@Model.Desc"
+                           asp-route-PageNo="@(Model.Paging.Page - 1)" rel="prev"
+                           style="padding:6px 12px;border:1px solid #c4c8d4;border-radius:6px;text-decoration:none;">@Localizer["OrgGrid.Prev"]</a>
+                    }
+                    <span>@Localizer["OrgGrid.PageOf", Model.Paging.Page, Model.Paging.TotalPages]</span>
+                    @if (Model.Paging.HasNext)
+                    {
+                        <a asp-page="Sessions" asp-route-FilterType="@Model.FilterType" asp-route-FilterLength="@Model.FilterLength"
+                           asp-route-Search="@Model.Search" asp-route-Sort="@Model.Sort" asp-route-Desc="@Model.Desc"
+                           asp-route-PageNo="@(Model.Paging.Page + 1)" rel="next"
+                           style="padding:6px 12px;border:1px solid #c4c8d4;border-radius:6px;text-decoration:none;">@Localizer["OrgGrid.Next"]</a>
+                    }
+                </nav>
+            }
+
+            @* Shared accessible confirm modal (§21) — gates every session delete with
+               a clear summary. The trigger's data-ceh-summary names the session. *@
+            <partial name="_ConfirmModal" model='new CommunityHub.Pages.Shared.ConfirmModalModel(
+                Id: "confirmDeleteSession",
+                Title: Localizer["Sessions.DeleteConfirmTitle"].Value,
+                Body: "This permanently removes the session and its speaker links. Sessions with attendee questions, evaluations or bookings are protected and cannot be deleted. This cannot be undone.",
+                ConfirmLabel: Localizer["Sessions.Delete"].Value,
+                CancelLabel: "Cancel",
+                Danger: true)' />
+        }
+    }
+</div>

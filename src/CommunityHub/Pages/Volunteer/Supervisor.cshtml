@@ -1,0 +1,148 @@
+@page "/volunteer/supervisor"
+@model CommunityHub.Pages.Volunteer.SupervisorModel
+@{
+    ViewData["Title"] = "Supervisor dashboard";
+}
+
+<style>
+    .sv-cat { border:1px solid #d7dbe4; border-radius:10px; margin:0 0 16px 0; overflow:hidden; }
+    .sv-head { background:var(--el-darkblue,#1D3380); color:#fff; padding:12px 14px; }
+    .sv-head h3 { margin:0; font-size:17px; }
+    .sv-body { padding:12px 14px; }
+    .sv-sub { border-left:3px solid #008BD2; padding:8px 0 8px 12px; margin:10px 0; }
+    .sv-task { background:#f6f8fb; border-radius:6px; padding:8px 10px; margin:6px 0; font-size:13.5px; }
+    .sv-help { background:#fff7ed; border-left:4px solid #ea580c; border-radius:6px; padding:10px 12px; margin:8px 0; font-size:13.5px; }
+    .sv-help.answered { background:#f0fdf4; border-left-color:#16a34a; }
+    .sv-form { display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin-top:6px; }
+    .sv-form input[type=text], .sv-form input[type=date], .sv-form select, .sv-form textarea {
+        flex:1 1 140px; min-width:0; box-sizing:border-box; padding:7px 9px;
+        font-size:13.5px; border:1px solid #c4c8d4; border-radius:6px; font-family:inherit; }
+    .sv-form button { background:#008BD2; color:#fff; border:0; border-radius:6px;
+        padding:8px 14px; font-size:13px; font-weight:600; cursor:pointer; white-space:nowrap; }
+    .sv-note { background:#f0fdf4; border-left:4px solid #16a34a; padding:10px 12px;
+        border-radius:6px; margin-bottom:14px; font-size:13.5px; color:#166534; }
+    @@media (max-width: 600px) {
+        .sv-form input, .sv-form select, .sv-form textarea, .sv-form button { flex:1 1 100%; }
+    }
+</style>
+
+<div class="card">
+    <h2>Supervisor dashboard</h2>
+    @if (Model.NotASupervisor)
+    {
+        <p class="info">You don&rsquo;t run any volunteer categories yet. If an
+           organizer appoints you as a category supervisor, this is where
+           you&rsquo;ll manage it.</p>
+        <p><a asp-page="/Index">Back to the hub</a></p>
+    }
+    else
+    {
+        <p>You run the categor@(Model.MyCategories.Count == 1 ? "y" : "ies") below.
+           Manage subcategories and tasks, assign volunteers, and answer help
+           requests from your team.</p>
+        @if (!string.IsNullOrEmpty(Model.Notice))
+        {
+            <div class="sv-note">@Model.Notice</div>
+        }
+    }
+</div>
+
+@if (!Model.NotASupervisor)
+{
+    @foreach (var cat in Model.MyCategories)
+    {
+        var help = Model.HelpByCategory.TryGetValue(cat.Id, out var hl) ? hl : new();
+        var openHelp = help.Count(h => h.Status == CommunityHub.Core.Domain.VolunteerHelpStatus.Open);
+
+        <div class="sv-cat">
+            <div class="sv-head">
+                <h3>@cat.Name</h3>
+            </div>
+            <div class="sv-body">
+
+                <h4 style="margin:4px 0 8px;">Help requests
+                    @if (openHelp > 0) { <span style="color:#ea580c;">(@openHelp open)</span> }
+                </h4>
+                @if (help.Count == 0)
+                {
+                    <p class="info" style="font-size:13px;">No help requests in this category.</p>
+                }
+                @foreach (var h in help)
+                {
+                    <div class="sv-help @(h.Status == CommunityHub.Core.Domain.VolunteerHelpStatus.Open ? "" : "answered")">
+                        <div>
+                            <strong>@(string.IsNullOrWhiteSpace(h.RequestedByParticipant?.FullName) ? h.RequestedByParticipant?.Email : h.RequestedByParticipant.FullName)</strong>
+                            on <em>@h.Task?.Title</em> &middot; @h.Status
+                        </div>
+                        <div style="margin:4px 0;">@h.Message</div>
+                        @if (!string.IsNullOrWhiteSpace(h.Response))
+                        {
+                            <div style="color:#166534;">Reply: @h.Response</div>
+                        }
+                        @if (h.Status == CommunityHub.Core.Domain.VolunteerHelpStatus.Open)
+                        {
+                            <form method="post" asp-page-handler="AnswerHelp" class="sv-form">
+                                <input type="hidden" name="helpRequestId" value="@h.Id" />
+                                <input type="text" name="response" placeholder="Your reply" maxlength="2000" required />
+                                <select name="status">
+                                    <option value="@((int)CommunityHub.Core.Domain.VolunteerHelpStatus.Answered)">Answered</option>
+                                    <option value="@((int)CommunityHub.Core.Domain.VolunteerHelpStatus.Resolved)">Resolved</option>
+                                </select>
+                                <button type="submit">Send</button>
+                            </form>
+                        }
+                    </div>
+                }
+
+                <h4 style="margin:14px 0 8px;">Work</h4>
+                @foreach (var sub in cat.Subcategories.OrderBy(s => s.Name))
+                {
+                    <div class="sv-sub">
+                        <h4 style="margin:0 0 6px;">@sub.Name</h4>
+                        @foreach (var t in sub.Tasks.OrderBy(t => t.Title))
+                        {
+                            <div class="sv-task">
+                                <strong>@t.Title</strong> &middot; @t.Status
+                                @if (!string.IsNullOrWhiteSpace(t.Shift)) { <text>&middot; @t.Shift</text> }
+                                <form method="post" asp-page-handler="Assign" class="sv-form">
+                                    <input type="hidden" name="taskId" value="@t.Id" />
+                                    <select name="volunteerParticipantId" required>
+                                        <option value="">— assign volunteer —</option>
+                                        @foreach (var v in Model.VolunteerOptions)
+                                        { <option value="@v.Value">@v.Text</option> }
+                                    </select>
+                                    <button type="submit">Assign</button>
+                                </form>
+                                <form method="post" asp-page-handler="SetTaskStatus" class="sv-form">
+                                    <input type="hidden" name="taskId" value="@t.Id" />
+                                    <select name="status">
+                                        @foreach (var st in Enum.GetValues<CommunityHub.Core.Domain.VolunteerTaskStatus>())
+                                        {
+                                            if (st == t.Status) { <option value="@((int)st)" selected>@st</option> }
+                                            else { <option value="@((int)st)">@st</option> }
+                                        }
+                                    </select>
+                                    <button type="submit">Update status</button>
+                                </form>
+                            </div>
+                        }
+                        <form method="post" asp-page-handler="CreateTask" class="sv-form">
+                            <input type="hidden" name="subcategoryId" value="@sub.Id" />
+                            <input type="text" name="title" placeholder="New task title" maxlength="300" required />
+                            <input type="date" name="due" />
+                            <input type="text" name="shift" placeholder="Shift (optional)" maxlength="200" />
+                            <button type="submit">Add task</button>
+                        </form>
+                    </div>
+                }
+
+                <form method="post" asp-page-handler="CreateSubcategory" class="sv-form">
+                    <input type="hidden" name="categoryId" value="@cat.Id" />
+                    <input type="text" name="name" placeholder="New subcategory name" maxlength="200" required />
+                    <button type="submit">Add subcategory</button>
+                </form>
+            </div>
+        </div>
+    }
+    <div class="card"><p><a asp-page="/Index">Back to the hub</a></p></div>
+}

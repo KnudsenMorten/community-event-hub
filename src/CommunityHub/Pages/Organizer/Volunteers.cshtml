@@ -1,0 +1,34 @@
+@page
+@model CommunityHub.Pages.Organizer.VolunteersModel
+@{
+    ViewData["Title"] = Localizer["OrgVolunteers.Title"].Value;
+}
+
+<div class="card">
+    <h2>@Localizer["OrgVolunteers.Title"]</h2>
+    @if (Model.AccessDenied)
+    {
+        <p class="error">@Localizer["Common.OrganizersOnly"]</p>
+        <p><a asp-page="/Index">@Localizer["Common.BackToHub"]</a></p>
+    }
+    else
+    {
+        <p>@Localizer["OrgVolunteers.Intro"]</p>
+        <p><a asp-page="/Organizer/Index">&larr; @Localizer["Common.BackToOrganizerArea"]</a></p>
+    }
+</div>
+
+@if (!Model.AccessDenied)
+{
+    <div class="card">
+        <h2>@Localizer["Nav.OrgVolunteerStructure"]</h2>
+        <p>@Localizer["OrgVolunteers.Structure"]</p>
+        <p><a asp-page="/Organizer/VolunteerStructure">@Localizer["Nav.OrgVolunteerStructure"]</a></p>
+    </div>
+
+    <div class="card">
+        <h2>@Localizer["Nav.OrgBucketAllocation"]</h2>
+        <p>@Localizer["OrgVolunteers.Buckets"]</p>
+        <p><a asp-page="/Organizer/BucketAllocation">@Localizer["Nav.OrgBucketAllocation"]</a></p>
+    </div>
+}

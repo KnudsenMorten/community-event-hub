@@ -1,0 +1,96 @@
+@page
+@model CommunityHub.Pages.Organizer.HotelsModel
+@{
+    ViewData["Title"] = Localizer["OrgHotels.Title"].Value;
+}
+
+<div class="card">
+    <h2>@Localizer["OrgHotels.Title"]</h2>
+    @if (Model.AccessDenied)
+    {
+        <p class="error">@Localizer["Common.OrganizersOnly"]</p>
+    }
+    else
+    {
+        <p>@Localizer["OrgHotels.Intro"]</p>
+
+        @if (!string.IsNullOrEmpty(Model.Message)) { <p class="info">@Model.Message</p> }
+        @if (!string.IsNullOrEmpty(Model.Error)) { <p class="error">@Model.Error</p> }
+
+        <form method="post" asp-page-handler="Save" style="margin:12px 0 20px;">
+            <input type="hidden" asp-for="EditId" />
+            <fieldset style="border:1px solid #e5e7eb;border-radius:8px;padding:12px 14px;">
+                <legend style="font-weight:600;">@(Model.EditId.HasValue ? Localizer["OrgHotels.EditLegend"].Value : Localizer["OrgHotels.AddLegend"].Value)</legend>
+                <label for="Name">@Localizer["OrgHotels.Name"]</label>
+                <input asp-for="Name" required maxlength="200" autocomplete="off" />
+                <label for="Address">@Localizer["OrgHotels.Address"]</label>
+                <input asp-for="Address" maxlength="500" autocomplete="off" />
+                <label for="ContactEmail">@Localizer["OrgHotels.ContactEmail"]</label>
+                <input asp-for="ContactEmail" type="email" maxlength="320" autocomplete="off" />
+                <label for="Notes">@Localizer["Common.NotesOptional"]</label>
+                <textarea asp-for="Notes" rows="2" maxlength="1000"></textarea>
+                <button type="submit">@Localizer["Common.Save"]</button>
+                @if (Model.EditId.HasValue)
+                {
+                    <a asp-page="/Organizer/Hotels" style="margin-left:8px;">@Localizer["Common.Cancel"]</a>
+                }
+            </fieldset>
+        </form>
+
+        @if (Model.Hotels.Count == 0)
+        {
+            <p class="info">@Localizer["OrgHotels.Empty"]</p>
+        }
+        else
+        {
+            <div style="overflow-x:auto;">
+            <table style="border-collapse:collapse;width:100%;font-size:13px;min-width:640px;">
+                <thead>
+                    <tr style="border-bottom:2px solid #ddd;text-align:left;">
+                        <th style="padding:6px;">@Localizer["OrgHotels.Name"]</th>
+                        <th style="padding:6px;">@Localizer["OrgHotels.Address"]</th>
+                        <th style="padding:6px;">@Localizer["OrgHotels.ContactEmail"]</th>
+                        <th style="padding:6px;">@Localizer["Common.NotesOptional"]</th>
+                        <th style="padding:6px;"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var h in Model.Hotels)
+                    {
+                        <tr style="border-bottom:1px solid #eee;">
+                            <td style="padding:6px;font-weight:600;">@h.Name</td>
+                            <td style="padding:6px;">@h.Address</td>
+                            <td style="padding:6px;">@h.ContactEmail</td>
+                            <td style="padding:6px;max-width:240px;">@h.Notes</td>
+                            <td style="padding:6px;white-space:nowrap;">
+                                <a asp-page="/Organizer/Hotels" asp-route-EditId="@h.Id">@Localizer["Common.Edit"]</a>
+                                <form method="post" asp-page-handler="Delete" asp-route-id="@h.Id" style="display:inline;margin-left:8px;"
+                                      onsubmit="return confirm('@Localizer["OrgHotels.ConfirmDelete"]');">
+                                    <button type="submit" style="background:none;border:none;color:#b91c1c;cursor:pointer;text-decoration:underline;padding:0;">@Localizer["Common.Delete"]</button>
+                                </form>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+            </div>
+        }
+
+        <p style="margin-top:16px;"><a asp-page="/Organizer/HotelAssignments">@Localizer["OrgHotels.GoToAssignments"]</a></p>
+    }
+    <p><a asp-page="/Organizer/Index">@Localizer["Common.BackToOrganizer"]</a></p>
+</div>
+
+@section Scripts {
+    <script>
+        // Prefill the form when editing: the EditId query string is honored by the
+        // model; this just scrolls the form into view + focuses the name field.
+        (function () {
+            var p = new URLSearchParams(window.location.search);
+            if (p.get('EditId')) {
+                var n = document.getElementById('Name');
+                if (n) { n.focus(); n.scrollIntoView({ block: 'center' }); }
+            }
+        })();
+    </script>
+}

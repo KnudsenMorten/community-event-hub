@@ -8,6 +8,11 @@ appsettings.Development.json
 appsettings.*.Development.json
 local.settings.json
 *.local.json
+# custom integration config (e.g. config/sessionize.eldk27.custom.json) holds
+# the real per-edition Sessionize endpoint id (ordinary operator config, not a
+# secret) -- kept out of git so the real id never reaches the public mirror. The
+# committed *.custom.sample.json files are the safe placeholder templates.
+*.custom.json
 
 # --- Azure / deploy artifacts ---
 *.publishsettings

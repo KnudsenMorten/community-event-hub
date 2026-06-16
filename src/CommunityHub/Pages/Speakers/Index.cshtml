@@ -1,0 +1,122 @@
+@page "/Speakers"
+@model CommunityHub.Pages.Speakers.IndexModel
+@{
+    Layout = "_Layout";
+    ViewData["Title"] = Model.View is null
+        ? Localizer["Speakers.Title"].Value
+        : $"{Localizer["Speakers.Title"].Value} — {Model.View.EventDisplayName}";
+}
+
+<style>
+    /* Mobile-first: single column, readable at ~360px. */
+    .spk-head {
+        background: var(--el-darkblue, #1D3380); color: #fff;
+        padding: 22px; border-radius: 10px 10px 0 0; margin: 0;
+    }
+    .spk-head h1 { margin: 0; font-size: 22px; font-weight: 700; line-height: 1.25; }
+    .spk-head .meta { font-size: 13.5px; opacity: .92; margin-top: 6px; }
+    .spk-body { padding: 18px 16px 22px; }
+
+    .spk-count { font-size: 13px; color: #4a5160; margin: 0 0 14px; }
+
+    .spk-list { display: grid; grid-template-columns: 1fr; gap: 14px; margin: 0; padding: 0; list-style: none; }
+    .spk-card {
+        border: 1px solid #e4e7ee; border-radius: 10px; padding: 14px 15px; background: #fff;
+        display: flex; gap: 14px; align-items: flex-start;
+    }
+    .spk-photo, .spk-mono {
+        width: 64px; height: 64px; border-radius: 50%; flex: 0 0 64px;
+        object-fit: cover; background: var(--el-grey, #E3E3E3);
+    }
+    .spk-mono {
+        display: flex; align-items: center; justify-content: center;
+        background: var(--el-blue, #008BD2); color: #fff;
+        font-weight: 700; font-size: 22px; letter-spacing: .5px;
+    }
+    .spk-card .spk-main { min-width: 0; }
+    .spk-card h2 { margin: 0 0 4px; font-size: 16px; line-height: 1.3; color: #1D3380; }
+    .spk-card h2 a.spk-name-link { color: #1D3380; text-decoration: none; }
+    .spk-card h2 a.spk-name-link:hover, .spk-card h2 a.spk-name-link:focus { text-decoration: underline; }
+    .spk-card .spk-tagline { font-size: 13.5px; color: #4a5160; line-height: 1.5; margin: 0 0 8px; }
+    .spk-card .spk-sessions { font-size: 13px; color: #24292f; margin: 0; }
+    .spk-card .spk-sessions .lbl { color: #6a7280; }
+    .spk-card .spk-sessions ul { margin: 4px 0 0; padding-left: 18px; }
+    .spk-card .spk-sessions ul a { color: var(--el-blue, #008BD2); text-decoration: none; }
+    .spk-card .spk-sessions ul a:hover, .spk-card .spk-sessions ul a:focus { text-decoration: underline; }
+
+    .spk-empty { color: #555; padding: 8px 4px 18px; }
+    .spk-empty .big { font-size: 16px; font-weight: 600; color: #1D3380; display: block; margin-bottom: 6px; }
+
+    @@media (min-width: 560px) {
+        .spk-list { grid-template-columns: repeat(2, 1fr); }
+    }
+</style>
+
+<div class="card" style="padding:0; overflow:hidden; max-width:880px; margin:0 auto;">
+    <div class="spk-head">
+        <h1>@Localizer["Speakers.Title"]</h1>
+        @if (Model.View is not null)
+        {
+            <div class="meta">@Model.View.EventDisplayName</div>
+        }
+    </div>
+
+    <div class="spk-body">
+        @if (Model.NoActiveEvent || Model.View is null)
+        {
+            <p class="spk-empty">@Localizer["Public.NoLiveEvent"]</p>
+            return;
+        }
+        @{ var view = Model.View; }
+
+        @if (view.Speakers.Count == 0)
+        {
+            <p class="spk-empty">
+                <span class="big">@Localizer["Speakers.ComingSoonTitle"]</span>
+                @Localizer["Speakers.ComingSoonBody"]
+            </p>
+        }
+        else
+        {
+            <p class="spk-count" role="status" aria-live="polite">
+                @Localizer["Speakers.Count", view.Speakers.Count]
+            </p>
+            <ul class="spk-list">
+                @foreach (var s in view.Speakers)
+                {
+                    <li class="spk-card">
+                        @if (!string.IsNullOrWhiteSpace(s.PhotoUrl))
+                        {
+                            <img class="spk-photo" src="@s.PhotoUrl"
+                                 alt="@Localizer["Speakers.PhotoAlt", s.Name]"
+                                 loading="lazy" width="64" height="64" />
+                        }
+                        else
+                        {
+                            <span class="spk-mono" aria-hidden="true">@s.Initials</span>
+                        }
+                        <div class="spk-main">
+                            <h2><a class="spk-name-link" href="/Speakers/@s.ParticipantId">@s.Name</a></h2>
+                            @if (!string.IsNullOrWhiteSpace(s.Tagline))
+                            {
+                                <p class="spk-tagline">@s.Tagline</p>
+                            }
+                            @if (s.Sessions.Count > 0)
+                            {
+                                <div class="spk-sessions">
+                                    <span class="lbl">@Localizer["Speakers.SessionsLabel"]</span>
+                                    <ul>
+                                        @foreach (var t in s.Sessions)
+                                        {
+                                            <li><a href="/Sessions/@t.SessionId">@t.Title</a></li>
+                                        }
+                                    </ul>
+                                </div>
+                            }
+                        </div>
+                    </li>
+                }
+            </ul>
+        }
+    </div>
+</div>

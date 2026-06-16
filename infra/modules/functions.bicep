@@ -159,10 +159,16 @@ resource functionsApp 'Microsoft.Web/sites@2023-12-01' = {
           name: 'Sql__ConnectionStringTemplate'
           value: sqlConnectionStringTemplate
         }
-        {
-          name: 'Sql__AdminPassword'
-          value: '@Microsoft.KeyVault(VaultName=${last(split(keyVaultUri, '/'))};SecretName=sql-admin-password)'
-        }
+        // NOTE: no Sql__AdminPassword / Sql__AdminUser is emitted. The Functions
+        // app authenticates to Azure SQL passwordlessly via its system-assigned
+        // managed identity (the connection string in Program.cs appends
+        // `Authentication=Active Directory Managed Identity;` when no SQL
+        // password is configured). The MI is granted db_datareader /
+        // db_datawriter / db_ddladmin on the database. The server is Azure-AD-
+        // only (sql.bicep azureADOnlyAuthentication=true) so a SQL login+
+        // password does not exist; emitting one here makes Program.cs take the
+        // SQL-auth path and Migrate() fails 500. SQL login+password is a
+        // local-dev-only fallback and never set in Azure.
       ]
     }
   }

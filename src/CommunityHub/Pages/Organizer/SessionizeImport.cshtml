@@ -1,4 +1,6 @@
 @page
+@using Microsoft.AspNetCore.Mvc.Localization
+@inject IHtmlLocalizer<CommunityHub.Core.Resources.SharedResource> Localizer
 @model CommunityHub.Pages.Organizer.SessionizeImportModel
 @{
     ViewData["Title"] = "Import speakers from Sessionize";
@@ -33,12 +35,155 @@
             <p class="error">@Model.ValidationError</p>
         }
 
+        @if (Model.ApiEnabled)
+        {
+            <h3>Pull from the Sessionize API</h3>
+            <p>This edition is connected to a Sessionize API endpoint. Pull the
+               latest accepted speakers directly &mdash; no file needed. Same
+               rules apply (matched on email, roles never overwritten). Make sure
+               the <strong>speaker emails</strong> advanced field is enabled on
+               the Sessionize API view, or speakers will be skipped.</p>
+
+            <p style="font-size:13px;">There are two ways to pull. <strong>Preview first</strong> &mdash;
+               a dry-run shows exactly what would change (and which speaker bios would be
+               overwritten) before anything is committed.</p>
+            <div style="display:flex; flex-wrap:wrap; gap:18px; align-items:flex-start;">
+                <div style="flex:1 1 260px; min-width:260px;">
+                    <div style="display:flex;flex-wrap:wrap;gap:8px;">
+                        <form method="post" asp-page-handler="PreviewApiDelta">
+                            <button type="submit" class="secondary">@Localizer["Sezimport.PreviewDelta"]</button>
+                        </form>
+                        <form method="post" asp-page-handler="Api">
+                            <button type="submit">Sync new speakers (delta)</button>
+                        </form>
+                    </div>
+                    <p style="color:#6b7280;font-size:12px;margin-top:6px;">
+                        Adds <strong>new</strong> accepted speakers and fills only
+                        empty bio fields. <strong>Never overwrites a bio a speaker
+                        has edited</strong> in the hub. This is what the nightly
+                        auto-sync runs.
+                    </p>
+                </div>
+                <div style="flex:1 1 260px; min-width:260px;">
+                    <div style="display:flex;flex-wrap:wrap;gap:8px;">
+                        <form method="post" asp-page-handler="PreviewApi">
+                            <button type="submit" class="secondary">@Localizer["Sezimport.PreviewFull"]</button>
+                        </form>
+                        <form method="post" asp-page-handler="ApiFull">
+                            <button type="submit"
+                                    style="background:#b45309;"
+                                    data-ceh-confirm="confirmFullImport">
+                                Full import from Sessionize
+                            </button>
+                        </form>
+                    </div>
+                    <p style="color:#6b7280;font-size:12px;margin-top:6px;">
+                        Pulls <strong>all</strong> accepted speakers and
+                        <strong>all</strong> fields, force-refreshing every bio
+                        from Sessionize and <strong>discarding speaker edits</strong>.
+                        Use this for a complete re-seed only &mdash; preview it first.
+                    </p>
+                </div>
+            </div>
+
+            <partial name="_ConfirmModal" model='new CommunityHub.Pages.Shared.ConfirmModalModel(
+                Id: "confirmFullImport",
+                Title: Localizer["Sezimport.ConfirmFullTitle"].Value,
+                Body: "A full import OVERWRITES every speaker bio field with the current Sessionize data — including bios speakers have curated in the hub. Preview it first if you have not. This cannot be undone.",
+                ConfirmLabel: "Run full import",
+                CancelLabel: "Cancel",
+                Danger: true)' />
+
+            <hr />
+            <h3>Or upload an Excel export</h3>
+        }
+
         <form method="post" asp-page-handler="Import" enctype="multipart/form-data">
             <label for="UploadFile">Sessionize Excel file (.xlsx)</label>
             <input type="file" id="UploadFile" name="UploadFile"
                    accept=".xlsx,.xlsm" />
-            <button type="submit">Upload and import</button>
+            <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;">
+                <button type="submit" asp-page-handler="PreviewUpload" class="secondary">@Localizer["Sezimport.PreviewUpload"]</button>
+                <button type="submit">Upload and import</button>
+            </div>
         </form>
+
+        @if (Model.Preview is not null && Model.Preview.Error is null)
+        {
+            var pv = Model.Preview;
+            var isFull = pv.Mode == CommunityHub.Core.Reminders.SessionizeImportMode.Full;
+            var clobber = pv.RowsClobberingSpeakerEdits;
+            <div class="card" style="border:1px solid #c4c8d4;margin-top:18px;" role="region" aria-label="Import preview (dry-run)">
+                <h3 style="margin-top:0;">Preview &mdash; @(isFull ? "Full import" : "Delta sync") (dry-run, nothing was changed)</h3>
+                <p class="info" role="status">
+                    @pv.Fetched speaker(s) read &mdash;
+                    <strong>@pv.Created</strong> would be created,
+                    <strong>@pv.Updated</strong> updated,
+                    <strong>@pv.Skipped</strong> unchanged.
+                </p>
+
+                @if (isFull && pv.FieldsOverwritten > 0)
+                {
+                    <p class="@(clobber.Count > 0 ? "error" : "info")" role="alert">
+                        This full import would <strong>overwrite @pv.FieldsOverwritten bio field(s)</strong>.
+                        @if (clobber.Count > 0)
+                        {
+                            <text>
+                                <strong>@pv.SpeakerEditedFieldsOverwritten of those were edited by the speaker</strong>
+                                across @clobber.Count speaker(s) — running it discards that curated content.
+                            </text>
+                        }
+                    </p>
+
+                    <div style="overflow-x:auto;">
+                    <table>
+                        <caption style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);">Bio fields that would be overwritten</caption>
+                        <thead>
+                            <tr>
+                                <th scope="col">Speaker</th>
+                                <th scope="col">Field</th>
+                                <th scope="col">Curated by speaker?</th>
+                                <th scope="col">Current value</th>
+                                <th scope="col">Would become</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                        @foreach (var row in pv.Rows.Where(r => r.OverwrittenFields.Count > 0))
+                        {
+                            foreach (var f in row.OverwrittenFields)
+                            {
+                                <tr style="@(f.SpeakerEdited ? "background:#fef2f2;" : "")">
+                                    <td>@row.FullName<br /><span style="font-size:11px;color:#9ca3af;">@row.Email</span></td>
+                                    <td>@f.Field</td>
+                                    <td>@(f.SpeakerEdited ? "yes — speaker edit" : "no")</td>
+                                    <td style="font-size:12px;color:#6b7280;max-width:220px;">@(f.CurrentValue ?? "—")</td>
+                                    <td style="font-size:12px;color:#6b7280;max-width:220px;">@(f.IncomingValue ?? "(cleared)")</td>
+                                </tr>
+                            }
+                        }
+                        </tbody>
+                    </table>
+                    </div>
+                }
+                else if (isFull)
+                {
+                    <p class="info">No existing bio fields would be overwritten by this full import.</p>
+                }
+                else
+                {
+                    <p class="info">Delta is additive &mdash; it only fills empty, never-edited fields, so <strong>no bios would be overwritten</strong>.</p>
+                }
+
+                @if (pv.Warnings.Count > 0)
+                {
+                    <p><strong>Warnings:</strong></p>
+                    <ul>
+                        @foreach (var w in pv.Warnings) { <li>@w</li> }
+                    </ul>
+                }
+                <p style="font-size:13px;color:#6b7280;">This was a dry-run. To apply it, use the matching import button above.</p>
+            </div>
+        }
 
         @if (Model.Result is not null)
         {
@@ -49,11 +194,15 @@
             else
             {
                 <p class="info">
-                    Import complete &mdash;
+                    @(Model.ResultWasFullImport ? "Full import" : "Import") complete &mdash;
                     @Model.Result.Fetched rows read,
                     @Model.Result.Created created,
                     @Model.Result.Updated updated,
                     @Model.Result.Skipped unchanged.
+                    @if (Model.ResultWasFullImport)
+                    {
+                        <span>All bio fields were force-refreshed from Sessionize.</span>
+                    }
                 </p>
             }
 

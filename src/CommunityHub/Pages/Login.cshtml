@@ -1,26 +1,41 @@
 @page
 @model CommunityHub.Pages.LoginModel
 @{
-    ViewData["Title"] = "Sign in";
+    ViewData["Title"] = Localizer["Login.Title"].Value;
 }
 
 <div class="card">
-    <h2>Sign in</h2>
+    <h2>@Localizer["Login.Title"]</h2>
 
     @if (!string.IsNullOrEmpty(Model.Message))
     {
-        <p class="@(Model.IsError ? "error" : "info")">@Model.Message</p>
+        <p class="@(Model.IsError ? "error" : "info")" role="@(Model.IsError ? "alert" : "status")">@Model.Message</p>
     }
 
     @if (Model.Step == "email")
     {
-        <!-- Step 1: request a PIN by email -->
+        <!-- Step 1: request a PIN by email (email may be prestaged from ?email=) -->
         <form method="post" asp-page-handler="RequestPin">
-            <label for="Email">Your email</label>
+            @if (!string.IsNullOrEmpty(Model.ReturnUrl))
+            {
+                <input type="hidden" name="ReturnUrl" value="@Model.ReturnUrl" />
+            }
+            <label for="Email">@Localizer["Login.YourEmail"]</label>
             <input type="email" id="Email" name="Email" value="@Model.Email"
                    required autocomplete="email" />
-            <button type="submit">Send my sign-in code</button>
+            <button type="submit">@Localizer["Login.SendCode"]</button>
         </form>
+
+        @* Discoverability for the existing ?email= prestage: lets a user bookmark a
+           per-account link that lands here with the email already filled in, so they
+           only click "Send my sign-in code". Collapsed by default; mobile-first. *@
+        <details class="login-tip" style="margin-top:16px;font-size:13px;color:#4a5160;">
+            <summary style="cursor:pointer;font-weight:600;">@Localizer["Login.PrestageTipSummary"]</summary>
+            <p style="margin:8px 0 6px 0;">@Localizer["Login.PrestageTipBody"]</p>
+            <p style="margin:0;word-break:break-all;">
+                <code style="background:#f1f3f7;padding:2px 6px;border-radius:4px;">/Login?email=you@@example.com</code>
+            </p>
+        </details>
     }
     else
     {
@@ -28,26 +43,34 @@
         <form method="post" asp-page-handler="VerifyPin" style="margin-bottom:14px;">
             <input type="hidden" name="Email" value="@Model.Email" />
             <input type="hidden" name="Step" value="pin" />
-            <label for="Pin">Enter the 6-digit code we emailed you</label>
+            @if (!string.IsNullOrEmpty(Model.ReturnUrl))
+            {
+                <input type="hidden" name="ReturnUrl" value="@Model.ReturnUrl" />
+            }
+            <label for="Pin">@Localizer["Login.EnterCode"]</label>
             <input type="text" id="Pin" name="Pin" inputmode="numeric"
                    pattern="[0-9]{6}" maxlength="6" required autocomplete="one-time-code" />
 
-            <label for="RememberFor" style="display:block;margin-top:12px;font-size:13px;color:#4a5160;">Stay signed in for</label>
-            <select id="RememberFor" name="RememberFor" style="width:100%;padding:8px 10px;border:1px solid #c4c8d4;border-radius:6px;font-size:14px;margin-top:4px;">
-                <option value="day">1 day (next morning)</option>
-                <option value="week" selected>1 week (default)</option>
-                <option value="month">1 month</option>
-                <option value="persistent">Until I sign out</option>
+            <label for="RememberFor" style="display:block;margin-top:12px;font-size:13px;color:#4a5160;">@Localizer["Login.StaySignedIn"]</label>
+            <select id="RememberFor" name="RememberFor" aria-describedby="RememberForHelp" style="width:100%;padding:8px 10px;border:1px solid #c4c8d4;border-radius:6px;font-size:14px;margin-top:4px;">
+                <option value="day">@Localizer["Login.RememberDay"]</option>
+                <option value="week" selected>@Localizer["Login.RememberWeek"]</option>
+                <option value="month">@Localizer["Login.RememberMonth"]</option>
+                <option value="persistent">@Localizer["Login.RememberPersistent"]</option>
             </select>
-            <p style="font-size:11.5px;color:#5a6170;margin:4px 0 12px 0;">
-                Use a shorter option on shared devices; "Until I sign out" is convenient on a personal phone / laptop.
+            <p id="RememberForHelp" style="font-size:11.5px;color:#5a6170;margin:4px 0 12px 0;">
+                @Localizer["Login.RememberHelp"]
             </p>
 
-            <button type="submit">Sign in</button>
+            <button type="submit">@Localizer["Login.SignInButton"]</button>
         </form>
         <form method="post" asp-page-handler="RequestPin" style="margin-top:14px;">
             <input type="hidden" name="Email" value="@Model.Email" />
-            <button type="submit" class="secondary">Send a new code</button>
+            @if (!string.IsNullOrEmpty(Model.ReturnUrl))
+            {
+                <input type="hidden" name="ReturnUrl" value="@Model.ReturnUrl" />
+            }
+            <button type="submit" class="secondary">@Localizer["Login.SendNewCode"]</button>
         </form>
     }
 </div>

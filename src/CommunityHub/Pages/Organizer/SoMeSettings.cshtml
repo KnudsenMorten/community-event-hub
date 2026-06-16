@@ -1,0 +1,92 @@
+@page
+@model CommunityHub.Pages.Organizer.SoMeSettingsModel
+@{
+    ViewData["Title"] = "SoMe settings";
+}
+
+@if (Model.AccessDenied)
+{
+    <div class="card">
+        <h2>SoMe settings</h2>
+        <p class="error" role="alert">This page is for organizers.</p>
+        <p><a asp-page="/Index">Back to hub</a></p>
+    </div>
+    return;
+}
+
+<style>
+    .btn { background:#008BD2; color:#fff; border:0; border-radius:6px;
+           padding:8px 14px; font-size:14px; cursor:pointer; text-decoration:none; }
+    .btn:hover { background:#0079b8; }
+    .som-grid { display:grid; grid-template-columns:1fr; gap:10px; max-width:640px; }
+    .som-grid label { font-weight:600; }
+    .som-grid input[type=text], .som-grid input[type=url], .som-grid input[type=email], .som-grid textarea {
+        width:100%; box-sizing:border-box; }
+    .som-hint { color:#4b5563; font-size:13px; margin:2px 0 6px; }
+    .som-check { display:flex; align-items:center; gap:8px; }
+</style>
+
+@if (Model.Message is not null)
+{
+    <div class="card"><p role="status" style="color:#0a6;">@Model.Message</p></div>
+}
+
+<div class="card">
+    <h2>LinkedIn company-page SoMe queue — settings</h2>
+    <p>
+        Configure the scheduled posting to your event's LinkedIn <strong>company page</strong>.
+        Nothing is ever posted until posting is enabled, a company page is set, and a live
+        LinkedIn publisher is wired.
+    </p>
+    @if (!Model.PublisherWired)
+    {
+        <p role="status" style="color:#b45309;">
+            A live LinkedIn publisher is not wired yet, so the queue runs in a safe, no-post
+            mode: due posts stay queued and nothing is sent to LinkedIn. The schedule,
+            tagging, previews, pre-alerts and notifications all work — only the actual post
+            is inert until the publisher is connected.
+        </p>
+    }
+</div>
+
+<div class="card">
+    <form method="post" class="som-grid">
+        <div class="som-check">
+            <input type="checkbox" id="enabled" name="Enabled" value="true" @(Model.Enabled ? "checked" : "") />
+            <label for="enabled">Enable SoMe posting</label>
+        </div>
+        <p class="som-hint">When off, the dispatcher publishes nothing even if the publisher is wired.</p>
+
+        <label for="page">LinkedIn company page URL or organization id</label>
+        <input id="page" name="CompanyPageUrlOrOrgId" type="text"
+               value="@Model.CompanyPageUrlOrOrgId"
+               placeholder="REPLACE_WITH_YOUR_LINKEDIN_ORG_ID_OR_PAGE_URL" />
+        <p class="som-hint">
+            Operator config (not a secret). The LinkedIn OAuth <strong>access token is a secret</strong>
+            and is read from Key Vault by the publisher — never entered or stored here.
+        </p>
+
+        <label for="prealert">Speaker pre-alert organizer email</label>
+        <input id="prealert" name="SpeakerPreAlertOrganizerEmail" type="email"
+               value="@Model.SpeakerPreAlertOrganizerEmail"
+               placeholder="organizer@example.org" />
+        <p class="som-hint">
+            Gets an email ~5 minutes before each speaker post publishes, to manually insert the
+            speaker's real LinkedIn handle (the API can't tag external speakers). Blank disables it.
+        </p>
+
+        <div class="som-check">
+            <input type="checkbox" id="notify" name="NotifyOnPublish" value="true" @(Model.NotifyOnPublish ? "checked" : "") />
+            <label for="notify">Email the notification list when a post publishes</label>
+        </div>
+
+        <label for="notifylist">Publish notification email list</label>
+        <textarea id="notifylist" name="NotificationEmails" rows="3"
+                  placeholder="one@example.org, two@example.org">@Model.NotificationEmails</textarea>
+        <p class="som-hint">Comma / semicolon / newline separated. Empty = no publish notifications.</p>
+
+        <div><button type="submit" class="btn">Save settings</button></div>
+    </form>
+</div>
+
+<p><a asp-page="/Organizer/SoMeQueue">Go to the SoMe queue</a> · <a asp-page="/Index">Back to hub</a></p>

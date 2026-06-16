@@ -1,5 +1,6 @@
 @page
 @using CommunityHub.Core.Domain
+@using CommunityHub.Core.Email
 @model CommunityHub.Pages.Organizer.BroadcastModel
 @{
     ViewData["Title"] = "Broadcast";
@@ -15,45 +16,101 @@
     else
     {
         <p>One message, sent individually (branded layout, personal greeting)
-           to every <strong>active</strong> participant in the groups you
-           pick. Deliveries are recorded in the ledger per subject &mdash;
-           re-sending the same subject only reaches people who have not
-           received it yet, so a retry never double-mails.</p>
+           to everyone in the groups you pick. Start from a reusable template,
+           edit it, narrow the audience, then preview the exact recipient list
+           before sending. Deliveries are recorded per subject &mdash; re-sending
+           the same subject only reaches people who have not received it yet, so
+           a retry never double-mails.</p>
 
+        @* Honest send confirmation via the shared accessible toast (REQUIREMENTS
+           §21): success (green ✓, sent at <time> — N recipients), no-op (blue ℹ,
+           reason — never a faked success when nobody was reached) or failure (red ⚠). *@
+        @if (Model.SendResult is not null)
+        {
+            <partial name="_Flash" model='new CommunityHub.Pages.Shared.FlashModel(Model.SendResult.Message, Model.SendResult.FlashKindString)' />
+        }
         @if (!string.IsNullOrEmpty(Model.ActionMessage))
         {
-            <p class="@(Model.ActionIsError ? "error" : "info")">@Model.ActionMessage</p>
+            <p class="@(Model.ActionIsError ? "error" : "info")" role="status">@Model.ActionMessage</p>
         }
 
-        <form method="post">
-            <label>Recipient groups</label>
-            <div style="display:flex;flex-wrap:wrap;gap:6px 18px;margin:6px 0 4px;">
-                @foreach (var role in Enum.GetValues<ParticipantRole>())
-                {
-                    <label style="display:flex;align-items:center;gap:6px;font-weight:400;margin:0;">
-                        <input type="checkbox" name="Roles" value="@role"
-                               checked="@Model.Roles.Contains(role)" style="width:auto;margin:0;" />
-                        @role
-                    </label>
-                }
-                <label style="display:flex;align-items:center;gap:6px;font-weight:400;margin:0;">
-                    <input type="checkbox" name="IncludeAttendees" value="true"
-                           checked="@Model.IncludeAttendees" style="width:auto;margin:0;" />
-                    Attendees (reconciled from Zoho)
-                </label>
+        @* Load a reusable template into the editor. Its own form so picking a
+           template never carries the audience/message through validation. *@
+        <form method="post" asp-page-handler="LoadTemplate" style="margin-bottom:18px;">
+            <label for="TemplateKey">Start from a template</label>
+            <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
+                <select id="TemplateKey" name="TemplateKey" style="flex:1 1 220px;min-width:0;">
+                    @foreach (var t in Model.AvailableTemplates)
+                    {
+                        <option value="@t.Key" selected="@(Model.TemplateKey == t.Key)">@t.DisplayName</option>
+                    }
+                </select>
+                <button type="submit" class="secondary">Load template</button>
             </div>
+            <p style="margin:6px 0 0;color:#6b7280;font-size:13px;">
+                Tokens you can use in the subject or message
+                (replaced per recipient):
+                @string.Join(", ", BroadcastTemplates.TokenHelp.Keys.Select(k => "{" + k + "}"))
+            </p>
+        </form>
+
+        <form method="post">
+            <fieldset style="border:1px solid #e3e5ec;border-radius:8px;padding:12px 14px;margin:0 0 14px;">
+                <legend style="font-weight:600;padding:0 6px;">Audience</legend>
+
+                <label id="rolesLabel">Recipient groups</label>
+                <div role="group" aria-labelledby="rolesLabel"
+                     style="display:flex;flex-wrap:wrap;gap:8px 18px;margin:6px 0 12px;">
+                    @foreach (var role in Enum.GetValues<ParticipantRole>())
+                    {
+                        <label style="display:flex;align-items:center;gap:6px;font-weight:400;margin:0;">
+                            <input type="checkbox" name="Roles" value="@role"
+                                   checked="@Model.Roles.Contains(role)" style="width:auto;margin:0;" />
+                            @role
+                        </label>
+                    }
+                    <label style="display:flex;align-items:center;gap:6px;font-weight:400;margin:0;">
+                        <input type="checkbox" name="IncludeAttendees" value="true"
+                               checked="@Model.IncludeAttendees" style="width:auto;margin:0;" />
+                        Attendees (reconciled from Zoho)
+                    </label>
+                </div>
+
+                <div style="display:flex;flex-wrap:wrap;gap:14px 24px;align-items:flex-end;">
+                    <div style="flex:1 1 200px;min-width:0;">
+                        <label for="Status">Status (participant groups)</label>
+                        <select id="Status" name="Status">
+                            <option value="@BroadcastStatusFilter.ActiveOnly"
+                                    selected="@(Model.Status == BroadcastStatusFilter.ActiveOnly)">Active only</option>
+                            <option value="@BroadcastStatusFilter.InactiveOnly"
+                                    selected="@(Model.Status == BroadcastStatusFilter.InactiveOnly)">Inactive only</option>
+                            <option value="@BroadcastStatusFilter.All"
+                                    selected="@(Model.Status == BroadcastStatusFilter.All)">Active &amp; inactive</option>
+                        </select>
+                    </div>
+                    <label style="display:flex;align-items:center;gap:8px;font-weight:400;margin:0 0 4px;">
+                        <input type="checkbox" name="ExcludeTestUsers" value="true"
+                               checked="@Model.ExcludeTestUsers" style="width:auto;margin:0;" />
+                        Exclude test users
+                    </label>
+                </div>
+                <p style="margin:8px 0 0;color:#6b7280;font-size:13px;">
+                    Status applies to participant groups; attendees are always
+                    treated as active. Leave &ldquo;Exclude test users&rdquo;
+                    ticked for a real broadcast.</p>
+            </fieldset>
 
             <label for="Subject">Subject</label>
             <input type="text" id="Subject" name="Subject" value="@Model.Subject" maxlength="150" />
 
             <label for="Message">Message (plain text; blank line = new paragraph)</label>
-            <textarea id="Message" name="Message" rows="8" style="max-width:640px;">@Model.Message</textarea>
+            <textarea id="Message" name="Message" rows="9" style="max-width:640px;">@Model.Message</textarea>
 
             <button type="submit" asp-page-handler="Preview" class="secondary">Preview + count recipients</button>
 
             @if (Model.RecipientCount is not null)
             {
-                <p style="margin:14px 0 6px;">
+                <p style="margin:14px 0 6px;" role="status">
                     <strong>@Model.RecipientCount recipient(s)</strong> match this selection.
                     @if (Model.AlreadySentCount > 0)
                     {
@@ -61,17 +118,70 @@
                         subject and will be skipped.</span>
                     }
                 </p>
+
+                @if (Model.PreviewRecipients.Count > 0)
+                {
+                    <details style="margin:6px 0 12px;">
+                        <summary style="cursor:pointer;font-weight:600;">
+                            Recipient list (@Model.PreviewRecipients.Count shown)
+                        </summary>
+                        <div style="overflow-x:auto;margin-top:8px;">
+                            <table style="width:100%;border-collapse:collapse;min-width:420px;">
+                                <caption class="sr-only">Filtered broadcast recipients</caption>
+                                <thead>
+                                    <tr style="text-align:left;border-bottom:2px solid #ddd;">
+                                        <th scope="col">Email</th><th scope="col">First name</th><th scope="col">Group</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var r in Model.PreviewRecipients)
+                                    {
+                                        <tr style="border-bottom:1px solid #eee;">
+                                            <td style="word-break:break-all;">@r.Email</td>
+                                            <td>@r.FirstName</td>
+                                            <td>@(r.Role?.ToString() ?? "Attendee")@(r.IsTestUser ? " (test)" : "")</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                        @if (Model.PreviewListTruncated)
+                        {
+                            <p class="info" style="margin:8px 0 0;">List truncated for display; the
+                               full @Model.RecipientCount will be mailed.</p>
+                        }
+                    </details>
+                }
+
+                @* Shared accessible confirmation modal (REQUIREMENTS §21) — replaces
+                   the bare native confirm() so the organizer sees the recipient
+                   COUNT and a clear summary before a bulk send. Esc / backdrop /
+                   Cancel dismiss; focus is trapped; on Confirm the Send handler
+                   submits. With JS off the button submits directly. *@
                 <button type="submit" asp-page-handler="Send"
-                        onclick="return confirm('Send to @Model.RecipientCount recipient(s) now?');">
+                        data-ceh-confirm="confirmBroadcastSend"
+                        data-ceh-count="@Model.RecipientCount">
                     Send broadcast
                 </button>
             }
         </form>
 
+        @if (Model.RecipientCount is not null)
+        {
+            <partial name="_ConfirmModal" model='new CommunityHub.Pages.Shared.ConfirmModalModel(
+                Id: "confirmBroadcastSend",
+                Title: "Send broadcast now?",
+                Body: "This emails {count} recipient(s) individually. People who already received this subject are skipped, but a send cannot be recalled.",
+                ConfirmLabel: "Send now",
+                CancelLabel: "Cancel",
+                Danger: false,
+                DefaultCount: Model.RecipientCount?.ToString())' />
+        }
+
         @if (Model.PreviewHtml is not null)
         {
             <p style="margin:16px 0 6px;"><strong>Preview</strong> (sample first name):</p>
-            <iframe sandbox="" srcdoc="@Model.PreviewHtml"
+            <iframe sandbox="" srcdoc="@Model.PreviewHtml" title="Broadcast email preview"
                     style="width:100%;height:420px;border:1px solid #d6d8e0;border-radius:8px;background:#fff;"></iframe>
         }
     }

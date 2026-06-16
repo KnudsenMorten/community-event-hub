@@ -1,0 +1,125 @@
+@page "/sessions/{token}/ask"
+@model CommunityHub.Pages.Sessions.AskModel
+@{
+    Layout = "_Layout";
+    ViewData["Title"] = Model.Session is null ? "Ask a question" : $"Ask: {Model.Session.Title}";
+}
+
+@if (Model.Session is null)
+{
+    <div class="card"><h2>Session not found</h2><p>This question link is not valid.</p></div>
+    return;
+}
+
+<style>
+    /* Mobile-first: single column, readable at ~360px. */
+    .q-hero {
+        background: var(--el-darkblue, #1D3380); color: #fff;
+        padding: 22px 22px; border-radius: 10px 10px 0 0; margin: 0;
+    }
+    .q-hero .eyebrow { font-size: 12.5px; text-transform: uppercase; letter-spacing: .06em; opacity: .85; }
+    .q-hero h1 { margin: 6px 0 0 0; font-size: 21px; font-weight: 700; line-height: 1.25; }
+    .q-hero .speakers { font-size: 13.5px; opacity: .92; margin-top: 8px; line-height: 1.4; }
+    .q-body { padding: 20px 22px 24px 22px; }
+    .q-abstract { color: #4a5160; font-size: 14px; line-height: 1.55; margin: 0 0 18px 0; }
+    .q-intro { color: #24292f; font-size: 14px; line-height: 1.55; margin: 0 0 18px 0; }
+
+    .q-field { margin-bottom: 14px; }
+    .q-field label { display: block; font-weight: 600; font-size: 13px; color: #24292f; margin-bottom: 4px; }
+    .q-field .hint { font-weight: 400; color: #6a7280; font-size: 12px; }
+    .q-field input, .q-field textarea {
+        width: 100%; box-sizing: border-box; padding: 10px 12px; font-size: 15px;
+        border: 1px solid #c4c8d4; border-radius: 7px; font-family: inherit;
+    }
+    .q-field textarea { min-height: 110px; resize: vertical; }
+    .q-field input:focus, .q-field textarea:focus {
+        outline: 2px solid var(--el-blue, #008BD2); outline-offset: 1px; border-color: var(--el-blue, #008BD2);
+    }
+
+    .q-actions { margin-top: 18px; }
+    .q-actions button {
+        background: var(--el-blue, #008BD2); color: #fff; border: 0; padding: 12px 22px;
+        border-radius: 7px; font-size: 15px; font-weight: 600; cursor: pointer; width: 100%;
+    }
+    @@media (min-width: 600px) { .q-actions button { width: auto; } }
+
+    .q-error { padding: 12px 14px; background: #fff3f3; border-left: 4px solid #c0392b;
+        border-radius: 6px; color: #c0392b; margin-bottom: 14px; font-size: 13.5px; }
+    .q-success { padding: 20px 22px; background: #f0fdf4; border-left: 4px solid #16a34a;
+        border-radius: 6px; }
+    .q-success h2 { margin: 0 0 8px 0; color: #166534; font-size: 19px; }
+    .q-success p  { margin: 6px 0 0 0; color: #166534; font-size: 14px; line-height: 1.55; }
+
+    /* Honeypot — invisible to humans, irresistible to bots. */
+    .q-hp { position: absolute; left: -9999px; height: 0; width: 0; overflow: hidden; }
+</style>
+
+<div class="card" style="padding: 0; overflow: hidden;">
+    <div class="q-hero">
+        <div class="eyebrow">@Model.Session.Event?.DisplayName</div>
+        <h1>@Model.Session.Title</h1>
+        @if (Model.SpeakerNames.Count > 0)
+        {
+            <div class="speakers">with @string.Join(", ", Model.SpeakerNames)</div>
+        }
+    </div>
+
+    <div class="q-body">
+        @if (Model.SubmittedOk)
+        {
+            <div class="q-success" role="status">
+                <h2>Thanks — your question is in!</h2>
+                <p>
+                    We have sent your question to the organizers and the session's speaker(s).
+                    It is not shown publicly. You can close this page.
+                </p>
+            </div>
+        }
+        else
+        {
+            @if (!string.IsNullOrWhiteSpace(Model.Session.Abstract))
+            {
+                <p class="q-abstract">@Model.Session.Abstract</p>
+            }
+            <p class="q-intro">
+                Got something you'd like this session to cover? Ask the speaker(s) here, before the
+                event. Your question goes only to the organizers and this session's speakers — it is
+                never posted publicly.
+            </p>
+
+            @if (!string.IsNullOrEmpty(Model.ErrorMessage))
+            {
+                <div class="q-error" role="alert">@Model.ErrorMessage</div>
+            }
+
+            <form method="post" novalidate>
+                @* Honeypot *@
+                <div class="q-hp" aria-hidden="true">
+                    <label for="Website">Leave this field empty</label>
+                    <input type="text" asp-for="Website" id="Website" tabindex="-1" autocomplete="off" />
+                </div>
+
+                <div class="q-field">
+                    <label for="QuestionText">Your question <span class="hint">(required)</span></label>
+                    <textarea asp-for="QuestionText" id="QuestionText" maxlength="2000" required
+                              aria-required="true"
+                              placeholder="e.g. Could you cover migrating an existing setup?"></textarea>
+                </div>
+
+                <div class="q-field">
+                    <label for="AskerName">Your name <span class="hint">(optional)</span></label>
+                    <input type="text" asp-for="AskerName" id="AskerName" maxlength="200" autocomplete="name" />
+                </div>
+
+                <div class="q-field">
+                    <label for="AskerEmail">Your email <span class="hint">(optional — only if you'd like a follow-up)</span></label>
+                    <input type="email" asp-for="AskerEmail" id="AskerEmail" maxlength="320" autocomplete="email" />
+                </div>
+
+                <div class="q-actions">
+                    <button type="submit">Send my question</button>
+                </div>
+            </form>
+        }
+    </div>
+</div>

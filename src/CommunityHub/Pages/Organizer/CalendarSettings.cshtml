@@ -1,0 +1,50 @@
+@page
+@model CommunityHub.Pages.Organizer.CalendarSettingsModel
+@{
+    ViewData["Title"] = "Calendar sync settings";
+}
+
+<div class="card">
+    <h2>&#128197; Calendar sync settings</h2>
+
+    @if (Model.AccessDenied)
+    {
+        <p class="error" role="alert">This area is for organizers only.</p>
+    }
+    else
+    {
+        <p>Calendar sync lets speakers, volunteers and organizers <strong>subscribe their
+           own deadlines, shifts and tasks</strong> to their personal calendar (a private
+           per-user feed), and attaches an <strong>.ics invite</strong> to activation emails
+           so the event lands in their calendar.</p>
+
+        @if (Model.SavedMessage is not null)
+        {
+            <p class="info" role="status"
+               style="background:#f0fdf4;border:1px solid #16a34a;padding:8px 12px;border-radius:6px;">
+                @Model.SavedMessage
+            </p>
+        }
+
+        <form method="post">
+            <fieldset style="border:1px solid #e5e7eb;border-radius:8px;padding:12px 14px;max-width:100%;">
+                <legend style="font-weight:600;">Calendar sync for this edition</legend>
+                <label style="display:flex;gap:10px;align-items:flex-start;cursor:pointer;">
+                    <input type="checkbox" asp-for="Enabled" style="margin-top:3px;" />
+                    <span>
+                        <strong>Enable calendar sync</strong>
+                        <span style="display:block;color:#6b7280;font-size:13px;margin-top:2px;">
+                            When off, the per-user calendar feed returns nothing, the hub's
+                            &ldquo;Add to my calendar&rdquo; card is hidden, and no .ics invite
+                            is sent on activation &mdash; for the whole edition.
+                        </span>
+                    </span>
+                </label>
+                <div style="margin-top:14px;">
+                    <button type="submit">Save</button>
+                </div>
+            </fieldset>
+        </form>
+    }
+    <p style="margin-top:16px;"><a asp-page="/Organizer/Index">Back to organizer area</a></p>
+</div>

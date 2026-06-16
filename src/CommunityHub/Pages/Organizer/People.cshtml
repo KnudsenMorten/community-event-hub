@@ -1,0 +1,58 @@
+@page
+@model CommunityHub.Pages.Organizer.PeopleModel
+@{
+    ViewData["Title"] = Localizer["OrgPeople.Title"].Value;
+}
+
+<div class="card">
+    <h2>@Localizer["OrgPeople.Title"]</h2>
+    @if (Model.AccessDenied)
+    {
+        <p class="error">@Localizer["Common.OrganizersOnly"]</p>
+        <p><a asp-page="/Index">@Localizer["Common.BackToHub"]</a></p>
+    }
+    else
+    {
+        <p>@Localizer["OrgPeople.Intro"]</p>
+        <p><a asp-page="/Organizer/Index">&larr; @Localizer["Common.BackToOrganizerArea"]</a></p>
+    }
+</div>
+
+@if (!Model.AccessDenied)
+{
+    <div class="card">
+        <h2>@Localizer["Nav.OrgFindPerson"]</h2>
+        <p>@Localizer["OrgPeople.FindPerson"]</p>
+        <p><a asp-page="/Organizer/FindPerson">@Localizer["Nav.OrgFindPerson"]</a></p>
+    </div>
+
+    <div class="card">
+        <h2>@Localizer["Nav.OrgParticipants"]</h2>
+        <p>@Localizer["OrgPeople.Participants"]</p>
+        <p><a asp-page="/Organizer/Participants">@Localizer["Nav.OrgParticipants"]</a></p>
+    </div>
+
+    <div class="card">
+        <h2>@Localizer["Nav.OrgPreselectionQueue"]</h2>
+        <p>@Localizer["OrgPeople.Preselection"]</p>
+        <p><a asp-page="/Organizer/PreselectionQueue">@Localizer["Nav.OrgPreselectionQueue"]</a></p>
+    </div>
+
+    <div class="card">
+        <h2>@Localizer["Nav.OrgOnboarding"]</h2>
+        <p>@Localizer["OrgPeople.Onboarding"]</p>
+        <p><a asp-page="/Organizer/Onboarding">@Localizer["Nav.OrgOnboarding"]</a></p>
+    </div>
+
+    <div class="card">
+        <h2>@Localizer["Nav.OrgAttendees"]</h2>
+        <p>@Localizer["OrgPeople.Attendees"]</p>
+        <p><a asp-page="/Organizer/Attendees">@Localizer["Nav.OrgAttendees"]</a></p>
+    </div>
+
+    <div class="card">
+        <h2>@Localizer["Nav.OrgActionQueue"]</h2>
+        <p>@Localizer["OrgPeople.ActionQueue"]</p>
+        <p><a asp-page="/Organizer/ActionQueue">@Localizer["Nav.OrgActionQueue"]</a></p>
+    </div>
+}

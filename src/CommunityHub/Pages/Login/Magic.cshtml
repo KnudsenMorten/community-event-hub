@@ -1,14 +1,14 @@
 @page
 @model CommunityHub.Pages.Login.MagicModel
 @{
-    ViewData["Title"] = "Sign in";
+    ViewData["Title"] = Localizer["Login.Title"].Value;
 }
 
 <div class="card">
-    <h2>Sign in</h2>
+    <h2>@Localizer["Login.Title"]</h2>
     @if (!string.IsNullOrEmpty(Model.Error))
     {
-        <p class="error">@Model.Error</p>
-        <p><a asp-page="/Login">Go to email + PIN sign-in</a></p>
+        <p class="error" role="alert">@Model.Error</p>
+        <p><a asp-page="/Login">@Localizer["Login.GoToEmailPin"]</a></p>
     }
 </div>

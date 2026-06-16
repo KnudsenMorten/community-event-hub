@@ -21,15 +21,26 @@ var host = new HostBuilder()
     {
         var config = context.Configuration;
 
+        // In Azure we authenticate to SQL with the Functions app's
+        // system-assigned managed identity (passwordless). For local dev a SQL
+        // login+password can be supplied via Sql:AdminPassword as a fallback.
+        // The presence of Sql:AdminPassword decides which path is used.
         var sqlTemplate = config["Sql:ConnectionStringTemplate"]
                           ?? throw new InvalidOperationException(
                               "Sql:ConnectionStringTemplate is not configured.");
-        var sqlPassword = config["Sql:AdminPassword"]
-                          ?? throw new InvalidOperationException(
-                              "Sql:AdminPassword is not configured.");
-        var sqlUser = config["Sql:AdminUser"] ?? "communityhubadmin";
-        var connectionString =
-            $"{sqlTemplate}User ID={sqlUser};Password={sqlPassword};";
+        var sqlPassword = config["Sql:AdminPassword"];
+        string connectionString;
+        if (!string.IsNullOrWhiteSpace(sqlPassword))
+        {
+            // Local-dev fallback: SQL login + password.
+            var sqlUser = config["Sql:AdminUser"] ?? "communityhubadmin";
+            connectionString = $"{sqlTemplate}User ID={sqlUser};Password={sqlPassword};";
+        }
+        else
+        {
+            // Azure: passwordless via the app's system-assigned managed identity.
+            connectionString = $"{sqlTemplate}Authentication=Active Directory Managed Identity;";
+        }
 
         // EnableRetryOnFailure: silently retries Azure SQL Serverless cold-start
         // (error 40613) - jobs wait ~30-60s instead of failing.
@@ -44,7 +55,23 @@ var host = new HostBuilder()
 
         services.Configure<EmailOptions>(
             config.GetSection(EmailOptions.SectionName));
-        services.AddSingleton<IEmailSender, BrevoEmailSender>();
+        // Central audit-log path (10a-3): jobs send through the same
+        // LoggingEmailSender decorator as the web app so EmailLog captures
+        // scheduled reminders + step-reset reminders too.
+        services.AddSingleton<BrevoEmailSender>();
+        services.AddSingleton<IEmailContextAccessor, EmailContextAccessor>();
+        services.AddSingleton<IEmailSender>(sp => new LoggingEmailSender(
+            sp.GetRequiredService<BrevoEmailSender>(),
+            sp.GetRequiredService<IServiceScopeFactory>(),
+            sp.GetRequiredService<IEmailContextAccessor>(),
+            sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<EmailOptions>>(),
+            sp.GetRequiredService<TimeProvider>(),
+            sp.GetService<Microsoft.Extensions.Logging.ILogger<LoggingEmailSender>>()));
+
+        // --- Email system services (10a) -----------------------------------
+        services.AddScoped<ParticipantEmailService>();
+        services.AddScoped<OnboardingStepResetEmailService>();
+        services.AddScoped<OrganizerActionItemService>();
 
         // --- Email templates (branded reminder rendering) -------------------
         services.Configure<EmailTemplateOptions>(
@@ -79,6 +106,19 @@ var host = new HostBuilder()
         config.GetSection(EventConfigOptions.SectionName).Bind(eventConfigOptions);
         services.AddSingleton(eventConfigOptions);
         services.AddSingleton<EventEditionConfigLoader>();
+
+        // --- Sessionize (speaker import via v2 view API) -------------------
+        var sessionizeOptions = new SessionizeApiOptions();
+        config.GetSection(SessionizeApiOptions.SectionName).Bind(sessionizeOptions);
+        services.AddSingleton(sessionizeOptions);
+        services.AddHttpClient<SessionizeApiClient>();
+        // Excel parser + welcome path are shared with the upload route.
+        services.AddSingleton<SessionizeExcelParser>();
+        services.AddScoped<WelcomeEmailService>();
+        services.AddScoped<SessionizeImportService>();
+        // Sessions are pulled from the same v2 view API and linked to speakers.
+        services.AddScoped<SessionImportService>();
+        services.AddScoped<SessionizeApiImportService>();
 
         // --- Company Manager (sponsor contact source of truth) -------------
         var cmOptions = new CompanyManagerOptions();
@@ -137,6 +177,63 @@ var host = new HostBuilder()
                 LiveBackstageExhibitorApi>();
         }
         services.AddSingleton<BackstageSyncService>();
+
+        // --- e-conomic ERP + sponsor webshop (REQUIREMENTS §7a) -------------
+        // Customer create/sync + CVR validation + contact/role + webshop sync +
+        // order create with an FX/currency check. The ERP write client is
+        // TESTMODE or live, decided by the TESTMODE flag (same pattern as the
+        // Backstage exhibitor API). Live wiring is ◻ until e-conomic + webshop
+        // creds/endpoints are configured; until then everything records
+        // WouldCreate and never fakes a call.
+        var economicErpOptions = new CommunityHub.Core.Integrations.Erp.EconomicErpOptions();
+        config.GetSection(CommunityHub.Core.Integrations.Erp.EconomicErpOptions.SectionName)
+            .Bind(economicErpOptions);
+        services.AddSingleton(economicErpOptions);
+
+        if (testModeOptions.Enabled)
+        {
+            services.AddSingleton<CommunityHub.Core.Integrations.Erp.IEconomicErpClient,
+                CommunityHub.Core.Integrations.Erp.TestModeEconomicErpClient>();
+        }
+        else
+        {
+            services.AddHttpClient<CommunityHub.Core.Integrations.Erp.IEconomicErpClient,
+                CommunityHub.Core.Integrations.Erp.LiveEconomicErpClient>();
+        }
+
+        // External CVR register lookup (◻ disabled by default → offline gate only).
+        var cvrLookupOptions = new CommunityHub.Core.Integrations.Erp.ExternalCvrLookupOptions();
+        config.GetSection(CommunityHub.Core.Integrations.Erp.ExternalCvrLookupOptions.SectionName)
+            .Bind(cvrLookupOptions);
+        services.AddSingleton(cvrLookupOptions);
+        services.AddHttpClient<CommunityHub.Core.Integrations.Erp.IExternalCvrLookup,
+            CommunityHub.Core.Integrations.Erp.ExternalCvrLookup>();
+        services.AddSingleton<CommunityHub.Core.Integrations.Erp.ICvrValidator,
+            CommunityHub.Core.Integrations.Erp.CvrValidator>();
+
+        // FX rate provider (◻ disabled by default → known-currency gate only).
+        var fxOptions = new CommunityHub.Core.Integrations.Erp.FxRateOptions();
+        config.GetSection(CommunityHub.Core.Integrations.Erp.FxRateOptions.SectionName)
+            .Bind(fxOptions);
+        services.AddSingleton(fxOptions);
+        services.AddHttpClient<CommunityHub.Core.Integrations.Erp.IFxRateProvider,
+            CommunityHub.Core.Integrations.Erp.FxRateProvider>();
+
+        services.AddScoped<CommunityHub.Core.Integrations.Erp.EconomicCustomerSyncService>();
+        services.AddScoped<CommunityHub.Core.Integrations.Erp.EconomicOrderCreationService>();
+
+        // --- LinkedIn company-page SoMe scheduling queue (REQUIREMENTS §19) --
+        // The SoMeDispatchJob publishes due, Active, Queued posts and sends the
+        // T-5-minute speaker pre-alert. GATED: the publisher defaults to the
+        // no-op Null publisher (CanPublish=false) so nothing posts until a live
+        // publisher is wired AND posting is enabled with a company page. The
+        // company-page id is operator config (NOT a secret); the LinkedIn OAuth
+        // token is a Key Vault secret (read by the live publisher — never in the
+        // repo). Swap in a live ILinkedInPostPublisher here once wired.
+        services.AddSingleton<CommunityHub.Core.Integrations.ILinkedInPostPublisher,
+            CommunityHub.Core.Integrations.NullLinkedInPostPublisher>();
+        services.AddScoped<CommunityHub.Core.Integrations.SoMeSettingsService>();
+        services.AddScoped<CommunityHub.Core.Integrations.SoMeDispatchService>();
     })
     .Build();
 

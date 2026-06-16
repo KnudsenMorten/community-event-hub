@@ -1,0 +1,123 @@
+@page "/volunteer/myshifts"
+@using CommunityHub.Core.Domain
+@model CommunityHub.Pages.Volunteer.MyShiftsModel
+@{
+    ViewData["Title"] = Localizer["MyShifts.Title"].Value;
+}
+
+<style>
+    .sh-entry { background:#f6f8fb; border-radius:8px; padding:12px 14px; margin:10px 0; font-size:13.5px; }
+    .sh-entry h3 { margin:0 0 4px; font-size:15.5px; color:var(--el-darkblue,#1D3380); }
+    .sh-when { display:flex; flex-wrap:wrap; gap:6px 12px; color:#374151; font-size:13px; margin:0 0 6px; }
+    .sh-when .sh-pill { background:#e6effa; color:#1D3380; border-radius:12px; padding:2px 10px; font-weight:600; }
+    .sh-state { border-radius:12px; padding:2px 10px; font-weight:600; }
+    .sh-state.confirmed { background:#dcfce7; color:#166534; }
+    .sh-state.declined { background:#fde2e1; color:#b42318; }
+    .sh-state.swap { background:#fef3c7; color:#92400e; }
+    .sh-meta { color:#6e7681; font-size:12.5px; margin:2px 0; }
+    .sh-detail { color:#4b5563; font-size:12.5px; margin:4px 0; }
+    .sh-form { display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin-top:8px; }
+    .sh-form input[type=text] {
+        flex:1 1 160px; min-width:0; box-sizing:border-box; padding:8px 10px;
+        font-size:13.5px; border:1px solid #c4c8d4; border-radius:6px; font-family:inherit; }
+    .sh-btn { border:0; border-radius:6px; padding:9px 14px; font-size:13px; font-weight:600;
+        cursor:pointer; white-space:nowrap; color:#fff; }
+    .sh-btn.confirm { background:#16a34a; }
+    .sh-btn.decline { background:#dc2626; }
+    .sh-btn.swap { background:#d97706; }
+    .sh-btn.withdraw { background:#6b7280; }
+    .sh-note { background:#f0fdf4; border-left:4px solid #16a34a; padding:10px 12px;
+        border-radius:6px; margin-bottom:14px; font-size:13.5px; color:#166534; }
+    .sh-flagged { font-size:12.5px; margin-top:6px; padding-left:10px; border-left:3px solid #d1d5db; color:#6e7681; }
+    @@media (max-width: 600px) {
+        .sh-form input, .sh-btn { flex:1 1 100%; }
+    }
+</style>
+
+<div class="card">
+    <h2>@Localizer["MyShifts.Title"]</h2>
+    <p>@Localizer["MyShifts.Intro"]</p>
+
+    @if (!string.IsNullOrEmpty(Model.Notice))
+    {
+        <div class="sh-note" role="status">@Model.Notice</div>
+    }
+
+    @if (Model.Schedule.IsEmpty)
+    {
+        <p class="info">@Localizer["MyShifts.Empty"]</p>
+    }
+</div>
+
+@foreach (var e in Model.Schedule.Entries)
+{
+    <div class="card sh-entry">
+        <h3>@e.Title</h3>
+        <div class="sh-when">
+            @if (e.Due is not null)
+            {
+                <span class="sh-pill">@Localizer["MySchedule.When"]: @e.Due.Value.ToString("dd-MM-yyyy")</span>
+            }
+            @if (!string.IsNullOrWhiteSpace(e.Shift))
+            {
+                <span class="sh-pill">@e.Shift@(string.IsNullOrWhiteSpace(e.TimeEnd) ? "" : $"–{e.TimeEnd}")</span>
+            }
+            @switch (e.Decision)
+            {
+                case ShiftDecisionStatus.Confirmed:
+                    <span class="sh-state confirmed">@Localizer["MyShifts.StateConfirmed"]</span>
+                    break;
+                case ShiftDecisionStatus.Declined:
+                    <span class="sh-state declined">@Localizer["MyShifts.StateDeclined"]</span>
+                    break;
+                case ShiftDecisionStatus.SwapRequested:
+                    <span class="sh-state swap">@Localizer["MyShifts.StateSwap"]</span>
+                    break;
+            }
+        </div>
+
+        <p class="sh-meta">@e.Bucket @(string.IsNullOrWhiteSpace(e.Subcategory) ? "" : $"· {e.Subcategory}")</p>
+
+        @if (!string.IsNullOrWhiteSpace(e.Instructions))
+        {
+            <p class="sh-detail"><strong>@Localizer["MySchedule.Instructions"]:</strong> @e.Instructions</p>
+        }
+
+        @if (e.Decision is ShiftDecisionStatus.Declined or ShiftDecisionStatus.SwapRequested)
+        {
+            @if (!string.IsNullOrWhiteSpace(e.DecisionNote))
+            {
+                <div class="sh-flagged">@Localizer["MyShifts.YourNote"]: @e.DecisionNote</div>
+            }
+            <form method="post" asp-page-handler="Withdraw" class="sh-form">
+                <input type="hidden" name="taskId" value="@e.TaskId" />
+                <button type="submit" class="sh-btn withdraw">@Localizer["MyShifts.Withdraw"]</button>
+            </form>
+        }
+        else
+        {
+            <form method="post" asp-page-handler="Confirm" class="sh-form">
+                <input type="hidden" name="taskId" value="@e.TaskId" />
+                <button type="submit" class="sh-btn confirm">@Localizer["MyShifts.Confirm"]</button>
+            </form>
+
+            <form method="post" asp-page-handler="Decline" class="sh-form">
+                <input type="hidden" name="taskId" value="@e.TaskId" />
+                <label class="visually-hidden" for="decline-note-@e.TaskId">@Localizer["MyShifts.NoteLabel"]</label>
+                <input type="text" id="decline-note-@e.TaskId" name="note"
+                       placeholder="@Localizer["MyShifts.NotePlaceholder"]" maxlength="1000" />
+                <button type="submit" class="sh-btn decline">@Localizer["MyShifts.Decline"]</button>
+            </form>
+
+            <form method="post" asp-page-handler="Swap" class="sh-form">
+                <input type="hidden" name="taskId" value="@e.TaskId" />
+                <label class="visually-hidden" for="swap-note-@e.TaskId">@Localizer["MyShifts.NoteLabel"]</label>
+                <input type="text" id="swap-note-@e.TaskId" name="note"
+                       placeholder="@Localizer["MyShifts.NotePlaceholder"]" maxlength="1000" />
+                <button type="submit" class="sh-btn swap">@Localizer["MyShifts.RequestSwap"]</button>
+            </form>
+        }
+    </div>
+}
+
+<div class="card"><p><a asp-page="/Volunteer/MySchedule">@Localizer["MyShifts.BackToSchedule"]</a> &middot; <a asp-page="/Index">@Localizer["Common.BackToHub"]</a></p></div>

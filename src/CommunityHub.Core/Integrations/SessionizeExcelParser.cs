@@ -2,7 +2,7 @@ using ClosedXML.Excel;
 
 namespace CommunityHub.Core.Integrations;
 
-/// <summary>A speaker row read from a Sessionize Excel export.</summary>
+/// <summary>A speaker row read from a Sessionize Excel export or v2 view API.</summary>
 public sealed record SessionizeSpeaker(
     string Email,
     string FirstName,
@@ -12,11 +12,38 @@ public sealed record SessionizeSpeaker(
     string? Blog = null,
     string? LinkedIn = null,
     string? Twitter = null,
-    string? ProfilePictureUrl = null);
+    string? ProfilePictureUrl = null,
+    // The Sessionize speaker id (GUID) from the v2 view API. Used to link
+    // sessions to their speaker(s) by id (the Sessionize session carries a
+    // speakers id array). Empty for the Excel path, which has no speaker id.
+    string SessionizeId = "");
 
 /// <summary>The outcome of parsing a Sessionize Excel file.</summary>
 public sealed record SessionizeParseResult(
     IReadOnlyList<SessionizeSpeaker> Speakers,
+    IReadOnlyList<string> Warnings,
+    string? Error);
+
+/// <summary>
+/// A session read from the Sessionize v2 view API (the <c>All</c>/<c>Sessions</c>
+/// view, alongside speakers). <see cref="SpeakerIds"/> holds the Sessionize speaker
+/// ids the session is delivered by; the session importer resolves each to the
+/// participant the speaker import created.
+/// </summary>
+public sealed record SessionizeSession(
+    string SessionizeId,
+    string Title,
+    string? Abstract,
+    string? Room,
+    string? Track,
+    DateTimeOffset? StartsAt,
+    DateTimeOffset? EndsAt,
+    bool IsServiceSession,
+    IReadOnlyList<string> SpeakerIds);
+
+/// <summary>The outcome of parsing the Sessionize sessions view.</summary>
+public sealed record SessionizeSessionsParseResult(
+    IReadOnlyList<SessionizeSession> Sessions,
     IReadOnlyList<string> Warnings,
     string? Error);
 

@@ -220,6 +220,20 @@ Describe "2. Sign-in & embedding" {
         $blob | Should -Match '(?i)stay signed in|remember|duration|ExpiresUtc|persistent|IsPersistent|day|week|month' -Because "login must let the user choose how long to stay signed in"
     }
 
+    # FEATURE: Login email prestage — an invite link can pre-fill the email field
+    # (/Login?email=<addr>&ReturnUrl=...) so it is just-click-send.
+    # ACCEPTANCE (REQUIREMENTS §5): the Login page model reads the email query
+    # param into the bound Email field and the view renders it.
+    It "Login email prestage — /Login?email= pre-fills the email field" {
+        $login = Get-SrcText 'src/CommunityHub/Pages/Login.cshtml.cs'
+        $loginView = Get-SrcText 'src/CommunityHub/Pages/Login.cshtml'
+        $login | Should -Not -BeNullOrEmpty
+        $login | Should -Match 'OnGet\s*\(\s*string\?\s*email' -Because "the GET handler must accept the email query param"
+        $login | Should -Match 'Email\s*=\s*email' -Because "the query param must prestage the bound Email field"
+        $login | Should -Match 'ReturnUrl' -Because "the invite link carries an optional post-login ReturnUrl"
+        $loginView | Should -Match 'value="@Model\.Email"' -Because "the email field must render the prestaged value"
+    }
+
     # FEATURE: Embeds safely in your event portal (Backstage) with the right
     # security controls (frame-ancestors / CSP).
     # ACCEPTANCE (REQUIREMENTS §12 Embedding:BackstageOrigin): an embedding
@@ -255,6 +269,21 @@ Describe "3. Crew profiles & roles" {
         foreach ($role in 'Organizer','Speaker','Volunteer','Sponsor','Attendee') {
             $text | Should -Match $role -Because "role '$role' must be a defined ParticipantRole"
         }
+    }
+
+    # FEATURE: Test-data tagging — participants can be flagged IsTestUser so
+    # go-live cleanup removes/deactivates test rows without touching real ones.
+    # ACCEPTANCE (REQUIREMENTS §3/§5): an IsTestUser column on Participant plus
+    # an EF Core migration that adds it.
+    It "Test-data tagging — Participant.IsTestUser column + migration exist" {
+        $participant = Get-SrcText 'src/CommunityHub.Core/Domain/Participant.cs'
+        $participant | Should -Not -BeNullOrEmpty
+        $participant | Should -Match 'bool\s+IsTestUser' -Because "test rows must be taggable for go-live cleanup"
+        $migDir = Join-Path $script:CoreRoot 'Migrations'
+        $mig = Get-ChildItem -Path $migDir -Filter '*IsTestUser*.cs' -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -notmatch 'Designer' } | Select-Object -First 1
+        $mig | Should -Not -BeNullOrEmpty -Because "a migration must add the IsTestUser column"
+        (Get-Content -LiteralPath $mig.FullName -Raw) | Should -Match 'AddColumn<bool>\([^)]*"IsTestUser"' -Because "the migration adds the IsTestUser column"
     }
 
     # FEATURE: A complete crew profile (one per edition) with verified/packed
@@ -390,6 +419,38 @@ Describe "5. Tasks & reminders" {
     # ACCEPTANCE: a speaker-deadline reminder type / template exists.
     It "Speaker deadlines scheduled — a speaker-deadline reminder template exists" {
         (Test-Path (Join-Path $script:TplDir 'speaker-deadline-reminder.html')) | Should -BeTrue
+    }
+
+    # FEATURE: Speaker deadlines carry ABSOLUTE due dates (not an event-relative
+    # offset). REQUIREMENTS §5: the 4 milestone dates are confirmed real values.
+    # ACCEPTANCE: the config + seeder use an absolute dueDate / masterclassOnly
+    # model and the daysBeforeEvent offset is gone.
+    It "Speaker deadlines use absolute dueDate (no daysBeforeEvent offset)" {
+        $cfgPath = Join-Path $script:RepoRoot 'config/speaker-deadlines.eldk27.json'
+        (Test-Path $cfgPath) | Should -BeTrue
+        $cfgRaw = Get-Content -LiteralPath $cfgPath -Raw
+        $cfgRaw | Should -Not -Match 'daysBeforeEvent' -Because "the event-relative offset model is removed"
+        $cfg = $cfgRaw | ConvertFrom-Json
+        $cfg._needsUpdate | Should -BeFalse -Because "the milestone dates are confirmed (REQUIREMENTS §5)"
+        $titles = $cfg.deadlines.title
+        $titles | Should -Contain 'Submit title and abstract'
+        $titles | Should -Contain 'Verify Bio + Photo in hub'
+        $titles | Should -Contain 'Upload draft preview deck'
+        $titles | Should -Contain 'Upload final slide deck'
+        $titles | Should -Not -Contain 'Confirm A/V and room requirements' -Because "that deadline was deleted"
+        foreach ($dl in $cfg.deadlines) {
+            $dl.dueDate | Should -Match '^\d{4}-\d{2}-\d{2}$' -Because "every deadline carries an absolute date"
+        }
+        # The title/abstract deadline is masterclass-only.
+        $mc = $cfg.deadlines | Where-Object { $_.title -eq 'Submit title and abstract' }
+        $mc.masterclassOnly | Should -BeTrue
+        $mc.dueDate | Should -Be '2026-06-20'
+
+        $seeder = Get-SrcText 'src/CommunityHub.Core/Config/SpeakerDeadlineSeeder.cs'
+        $seeder | Should -Not -BeNullOrEmpty
+        $seeder | Should -Not -Match 'DaysBeforeEvent' -Because "the offset property is removed from the seeder"
+        $seeder | Should -Match 'DueDate\s*=\s*dl\.DueDate' -Because "tasks are dated from the absolute dueDate"
+        $seeder | Should -Match 'MasterclassOnly' -Because "the masterclass-only audience flag is honoured"
     }
 
     # FEATURE: Tuned entirely through settings — reminder cadence/text/recipients
@@ -847,5 +908,209 @@ Describe "13. Bug-fix regressions (REQUIREMENTS §13)" {
         $dash | Should -Match 'ZohoPipelinePending\s*=\s*!\(_zoho\.CrmEnabled\s*\|\|\s*leadAgg\.Count\s*>\s*0\)' -Because "the banner must reflect real CRM/leads state"
         # Guard against the regressed form coming back.
         $dash | Should -Not -Match 'ZohoPipelinePending\s*=\s*true\s*;' -Because "the hard-coded true was the bug"
+    }
+}
+
+# ===========================================================================
+# DEV -> PROD DATA PARITY + IsTestUser  (REQUIREMENTS §12 prod parity, §15
+# "don't seed prod test data" honoured by tagging, DESIGN §3/§14)
+# ---------------------------------------------------------------------------
+# The parity tooling brings any env to the same data shape from one source of
+# truth (scripts/seed-eldk27.sql): the ELDK27 Event, four real organizers
+# (IsTestUser=0), seeded sponsor+speaker tasks, and the role-coverage test
+# users (IsTestUser=1) so prod-vs-test state is distinguishable and go-live
+# cleanup can delete WHERE IsTestUser=1. The only intended dev/prod difference
+# is the email flow (config, not data). All assertions are static/offline.
+# ===========================================================================
+Describe "Dev -> Prod data parity + IsTestUser tagging" {
+
+    # FEATURE: IsTestUser column + migration (overlaps PR #6; replicated here so
+    # the parity tool can tag rows and the build stays green if PR #6 is not yet
+    # on main).
+    # ACCEPTANCE: a bool IsTestUser on Participant + an EF migration adding it,
+    # plus the model snapshot carrying the column.
+    It "IsTestUser — Participant property, EF migration, and snapshot all present" {
+        $participant = Get-SrcText 'src/CommunityHub.Core/Domain/Participant.cs'
+        $participant | Should -Not -BeNullOrEmpty
+        $participant | Should -Match 'bool\s+IsTestUser' -Because "test rows must be taggable for go-live cleanup"
+
+        $migDir = Join-Path $script:CoreRoot 'Migrations'
+        $mig = Get-ChildItem -Path $migDir -Filter '*IsTestUser*.cs' -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -notmatch 'Designer' } | Select-Object -First 1
+        $mig | Should -Not -BeNullOrEmpty -Because "a migration must add the IsTestUser column"
+        (Get-Content -LiteralPath $mig.FullName -Raw) |
+            Should -Match 'AddColumn<bool>\([^)]*"IsTestUser"' -Because "the migration adds the IsTestUser column"
+
+        $snap = Get-SrcText 'src/CommunityHub.Core/Migrations/CommunityHubDbContextModelSnapshot.cs'
+        $snap | Should -Match 'b\.Property<bool>\("IsTestUser"\)' -Because "the model snapshot must include IsTestUser (no model drift)"
+    }
+
+    # FEATURE: the design-time DbContext factory lets EF scaffold/apply
+    # migrations without a runtime connection string (needed when the parity
+    # tool applies migrations to a target env).
+    It "Design-time DbContextFactory exists for EF tooling" {
+        $factory = Get-SrcText 'src/CommunityHub.Core/Data/DesignTimeDbContextFactory.cs'
+        $factory | Should -Not -BeNullOrEmpty
+        $factory | Should -Match 'IDesignTimeDbContextFactory<CommunityHubDbContext>' -Because "EF tools need a design-time factory"
+    }
+
+    # FEATURE: a single canonical seed is the source of truth for dev==prod
+    # data, with the four real organizers as real participants (IsTestUser=0).
+    # ACCEPTANCE: seed-eldk27.sql seeds the four @expertslive.dk organizers and
+    # writes the IsTestUser column.
+    It "Canonical seed defines four real organizers (IsTestUser=0) and writes IsTestUser" {
+        $seed = Get-SrcText 'scripts/seed-eldk27.sql'
+        $seed | Should -Not -BeNullOrEmpty
+        $seed | Should -Match '\[IsTestUser\]' -Because "the seed must populate the test-user flag"
+        foreach ($org in @('mok@expertslive.dk','mb@expertslive.dk','kea@expertslive.dk','mlh@expertslive.dk')) {
+            $seed | Should -Match ([regex]::Escape($org)) -Because "organizer $org must be seeded"
+        }
+    }
+
+    # FEATURE: the role-coverage test users are seeded and tagged IsTestUser=1
+    # so prod-vs-test is distinguishable and removable at go-live. Asserted
+    # structurally (no personal-email literals in this published file): the
+    # seed's @People rows split into organizer rows flagged 0 and test rows
+    # flagged 1, and the role column covers Speaker(1)/Volunteer(3)/Sponsor(4)/
+    # Attendee(5).
+    It "Canonical seed tags the role-coverage test users IsTestUser=1 (4+ test rows, 4 organizers)" {
+        $seed = Get-SrcText 'scripts/seed-eldk27.sql'
+        # @People VALUES rows look like (N'...', N'...', <role>, <companyOrNULL>, <isTest>)
+        $rows = [regex]::Matches($seed, "\(N'[^']*@[^']*',\s*N'[^']*',\s*(?<role>\d+),\s*(?:N'[^']*'|NULL),\s*(?<test>[01])\)")
+        $rows.Count | Should -BeGreaterOrEqual 8 -Because "the seed defines the organizer + test-user roster"
+        $orgRows  = @($rows | Where-Object { $_.Groups['test'].Value -eq '0' })
+        $testRows = @($rows | Where-Object { $_.Groups['test'].Value -eq '1' })
+        $orgRows.Count  | Should -Be 4              -Because "exactly the four organizers are flagged IsTestUser=0"
+        $testRows.Count | Should -BeGreaterOrEqual 4 -Because "the role-coverage test users are flagged IsTestUser=1"
+        # The four portal roles used for the TestMode PROD sweep are present among test rows.
+        $testRoles = $testRows | ForEach-Object { $_.Groups['role'].Value } | Sort-Object -Unique
+        foreach ($r in '1','3','4','5') {
+            $testRoles | Should -Contain $r -Because "test roster must cover role $r (Speaker/Volunteer/Sponsor/Attendee)"
+        }
+    }
+
+    # FEATURE: the seed keeps the sponsor + speaker sample tasks so a sponsor /
+    # speaker area can be exercised in any env (data parity for tasks).
+    It "Canonical seed keeps the sponsor + speaker sample tasks (idempotent SourceKeys)" {
+        $seed = Get-SrcText 'scripts/seed-eldk27.sql'
+        $seed | Should -Match 'woo:seed:2linkit:logo' -Because "the sponsor sample task must exist"
+        $seed | Should -Match 'seed:speaker:abstract' -Because "the speaker sample task must exist"
+    }
+
+    # FEATURE: the parity tool is re-runnable, env-targeted, and hard-codes NO
+    # prod secret/identifier (server/db/user are params; password via KeyVault /
+    # env var). It applies the canonical seed and supports -WhatIf.
+    It "Sync-CehParity.ps1 — re-runnable, env-targeted, no hard-coded prod secrets" {
+        $tool = Get-SrcText 'tools/Sync-CehParity.ps1'
+        $tool | Should -Not -BeNullOrEmpty
+        $tool | Should -Match 'SupportsShouldProcess' -Because "it must support -WhatIf for a safe prod preview"
+        $tool | Should -Match "ValidateSet\('dev',\s*'prod'\)" -Because "it must target dev or prod explicitly"
+        $tool | Should -Match 'seed-eldk27\.sql' -Because "it applies the canonical seed (one source of truth)"
+        $tool | Should -Match 'sql-admin-password' -Because "it reads the SQL password from Key Vault by secret name"
+        # No prod connection string, password literal, or .database.windows.net host baked in.
+        $tool | Should -Not -Match 'Password=[^$;"][^;"]+' -Because "no literal SQL password may be embedded"
+        $tool | Should -Not -Match '[a-z0-9-]+\.database\.windows\.net' -Because "no concrete SQL server FQDN may be hard-coded"
+    }
+
+    # FEATURE: the only intended dev/prod difference is the email flow; the
+    # parity tool is data-only and must NOT touch RedirectAllTo / OnlySendTo.
+    It "Parity tool is data-only — does not mutate the email flow (RedirectAllTo / OnlySendTo)" {
+        $tool = Get-SrcText 'tools/Sync-CehParity.ps1'
+        # The tool must never reference the email-flow config keys at all (it is
+        # data-only); the email difference is owned by per-env app settings.
+        $tool | Should -Not -Match 'RedirectAllTo' -Because "email redirect is env config, not data parity"
+        $tool | Should -Not -Match 'OnlySendTo' -Because "the prod allowlist is env config, not data parity"
+        # Its only data write is the canonical seed (the source of truth).
+        $tool | Should -Match 'seed-eldk27\.sql' -Because "the tool's sole write is the data seed"
+    }
+}
+
+# ===========================================================================
+# CHAPTER 14 — Speaker hub (self-service milestone tracker)
+# A first-class /Speaker page that turns scattered speaker-deadline tasks +
+# the static "important dates" card into one cohesive, mobile-first speaker
+# journey: a progress bar, per-milestone countdown cards, and one-tap
+# mark-done / reopen. Reads the existing speakerdl: deadline tasks (orthogonal
+# to whatever deadline model seeds them). These assertions are offline/static.
+# ===========================================================================
+Describe "14. Speaker hub — self-service milestone tracker" {
+
+    # FEATURE: the Speaker Hub page exists and is speaker-only.
+    # ACCEPTANCE: /Speaker/Index page + model present; eligibility is gated to
+    # Speaker / MasterclassSpeaker; non-speakers see AccessDenied, not a 403.
+    It "Speaker hub page exists and is gated to speaker roles" {
+        (Test-Path (Join-Path $script:SrcRoot 'Pages/Speaker/Index.cshtml')) | Should -BeTrue -Because "the speaker hub is a first-class page"
+        $code = Get-SrcText 'src/CommunityHub/Pages/Speaker/Index.cshtml.cs'
+        $code | Should -Not -BeNullOrEmpty
+        $code | Should -Match '\[Authorize\]' -Because "the speaker hub requires sign-in"
+        $code | Should -Match 'EligibleRoles' -Because "only Speaker / MasterclassSpeaker have a journey"
+        $code | Should -Match 'ParticipantRole\.Speaker' -Because "speakers are eligible"
+        $code | Should -Match 'ParticipantRole\.MasterclassSpeaker' -Because "master-class speakers are eligible"
+        $code | Should -Match 'AccessDenied' -Because "a non-speaker gets a friendly message, not a hard 403"
+    }
+
+    # FEATURE: the milestone read-model derives countdown + progress from the
+    # speaker's seeded deadline tasks (speakerdl: SourceKey), without re-seeding
+    # or mutating on read.
+    # ACCEPTANCE: SpeakerMilestoneService reads speakerdl: tasks, scoped per
+    # (event, participant), and exposes progress (done/total/percent/overdue).
+    It "Milestone service reads speakerdl: tasks and computes progress + countdown" {
+        $svc = Get-SrcText 'src/CommunityHub.Core/Reminders/SpeakerMilestoneService.cs'
+        $svc | Should -Not -BeNullOrEmpty
+        $svc | Should -Match 'speakerdl:' -Because "the tracker is built from the seeded deadline tasks"
+        $svc | Should -Match 'StartsWith\(SourceKeyPrefix\)' -Because "it must filter to the speaker-deadline source key"
+        $svc | Should -Match 'AssignedParticipantId == participantId' -Because "milestones are scoped to the signed-in speaker"
+        $svc | Should -Match 'DaysUntilDue' -Because "each milestone carries a live countdown"
+        $svc | Should -Match 'PercentComplete' -Because "the hub shows overall progress"
+    }
+
+    # FEATURE: a speaker can mark their OWN milestone done / reopen — never
+    # another speaker's, never a non-milestone task.
+    # ACCEPTANCE: ToggleAsync re-asserts the (event, participant, speakerdl:)
+    # scope on the lookup, and the page exposes a Toggle handler.
+    It "Speaker can toggle only their own milestone (scoped flip)" {
+        $svc = Get-SrcText 'src/CommunityHub.Core/Reminders/SpeakerMilestoneService.cs'
+        $svc | Should -Match 'public async Task<bool> ToggleAsync' -Because "the hub flips milestone state"
+        $svc | Should -Match 't\.AssignedParticipantId == participantId' -Because "a speaker can only flip their own milestone"
+        $svc | Should -Match 'StartsWith\(SourceKeyPrefix\)' -Because "only deadline milestones are toggleable here, not arbitrary tasks"
+        $page = Get-SrcText 'src/CommunityHub/Pages/Speaker/Index.cshtml.cs'
+        $page | Should -Match 'OnPostToggleAsync' -Because "the view posts to a Toggle handler"
+    }
+
+    # FEATURE: the hub is wired into navigation + the front-page speaker card,
+    # so speakers reach it without hunting.
+    # ACCEPTANCE: the nav links /Speaker for speaker roles; the Index card links it.
+    It "Speaker hub is wired into nav and the front-page speaker card" {
+        $layout = Get-SrcText 'src/CommunityHub/Pages/Shared/_Layout.cshtml'
+        $layout | Should -Match 'href="/Speaker"' -Because "speakers need a nav entry to the hub"
+        $index = Get-SrcText 'src/CommunityHub/Pages/Index.cshtml'
+        $index | Should -Match '/Speaker/Index' -Because "the front-page speaker card links the new hub"
+    }
+
+    # FEATURE: mobile-first — the hub renders at ~360px (single-column cards,
+    # full-width action buttons on narrow screens).
+    # ACCEPTANCE: the view ships a responsive @@media rule (per the mobile-first
+    # constraint, REQUIREMENTS §15).
+    It "Speaker hub is mobile-first — ships a responsive media query" {
+        $view = Get-SrcText 'src/CommunityHub/Pages/Speaker/Index.cshtml'
+        $view | Should -Not -BeNullOrEmpty
+        $view | Should -Match '@media' -Because "mobile-first means a responsive breakpoint shipped with the desktop CSS"
+        $view | Should -Match 'progressbar' -Because "the progress bar is the centrepiece of the journey view"
+    }
+
+    # FEATURE: the service is registered for DI so the page resolves it.
+    # ACCEPTANCE: Program.cs registers SpeakerMilestoneService.
+    It "SpeakerMilestoneService is registered in DI" {
+        $prog = Get-SrcText 'src/CommunityHub/Program.cs'
+        $prog | Should -Match 'SpeakerMilestoneService' -Because "the page depends on the service via DI"
+    }
+
+    # FEATURE (live): the speaker hub is auth-gated (anonymous bounces to login,
+    # never serves the journey). The real authed click-through is a Playwright
+    # concern; here we assert the security contract only.
+    It "Speaker hub is auth-gated (Live)" -Tag 'Live' {
+        if (-not $script:LiveReachable) { Set-ItResult -Skipped -Because $script:LiveSkipReason }
+        $r = Get-CehPage '/Speaker'
+        $r.Status | Should -BeIn @(302, 401, 403) -Because "an unauthenticated user must be bounced from the speaker hub"
     }
 }

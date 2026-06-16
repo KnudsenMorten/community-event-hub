@@ -126,6 +126,10 @@ public class EditParticipantModel : PageModel
                 Phone = string.IsNullOrWhiteSpace(Phone) ? null : Phone.Trim(),
                 Role = Role,
                 IsActive = IsActive,
+                // Organizer hand-add bypasses the pre-selection queue: the row is
+                // activated immediately so the person can sign in right away.
+                LifecycleState = ParticipantLifecycleState.Active,
+                QueueSource = ParticipantQueueSource.Manual,
                 SponsorCompanyId = string.IsNullOrWhiteSpace(SponsorCompanyId) ? null : SponsorCompanyId.Trim(),
                 CreatedAt = _clock.GetUtcNow(),
             };

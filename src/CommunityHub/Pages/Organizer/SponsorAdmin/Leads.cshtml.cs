@@ -2,6 +2,7 @@ using CommunityHub.Auth;
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
 using CommunityHub.Core.Integrations.Sponsors;
+using CommunityHub.Core.Organizer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
@@ -76,6 +77,24 @@ public class LeadsModel : PageModel
     [BindProperty(SupportsGet = true)] public bool ShowHidden { get; set; }
     [BindProperty(SupportsGet = true)] public string? SponsorFilter { get; set; }
 
+    // --- Search / sort / paging (GET-bound; threaded through per-lead action
+    //     redirects so an action returns the organizer to the same place).
+    //     Matches the Participants / Speakers / Attendees grids (REQUIREMENTS §21). -
+    [BindProperty(SupportsGet = true)] public string? Search { get; set; }
+    /// <summary>Sort column key: captured | name | company | status. Default captured (newest first).</summary>
+    [BindProperty(SupportsGet = true)] public string Sort { get; set; } = "captured";
+    [BindProperty(SupportsGet = true)] public bool Desc { get; set; } = true;
+    [BindProperty(SupportsGet = true)] public int PageNo { get; set; } = 1;
+
+    public GridPage Paging { get; private set; }
+
+    public bool NextDescFor(string col) => Sort == col && !Desc;
+    public string SortIndicator(string col) => Sort != col ? "" : (Desc ? " ▼" : " ▲");
+    public string AriaSort(string col) => Sort != col ? "none" : (Desc ? "descending" : "ascending");
+
+    /// <summary>Route values that keep the grid's place after a per-lead action.</summary>
+    public object GridRoute => new { ShowHidden, SponsorFilter, Search, Sort, Desc, PageNo };
+
     public string BaseUrl { get; private set; } = "";
 
     public async Task<IActionResult> OnGetAsync(CancellationToken ct)
@@ -145,9 +164,34 @@ public class LeadsModel : PageModel
         {
             gridQ = gridQ.Where(l => l.SponsorCompanyId == SponsorFilter);
         }
-        Leads = await gridQ
-            .OrderByDescending(l => l.CapturedAt)
-            .Take(200)
+        // Free-text search over the lead's name, email + sponsor company id —
+        // applied in the database so the grid never loads the whole edition.
+        if (!string.IsNullOrWhiteSpace(Search))
+        {
+            var s = Search.Trim();
+            gridQ = gridQ.Where(l => l.FullName.Contains(s)
+                                     || (l.Email != null && l.Email.Contains(s))
+                                     || l.SponsorCompanyId.Contains(s));
+        }
+
+        var matched = await gridQ.CountAsync(ct);
+        Paging = GridPaging.Resolve(PageNo, GridPaging.DefaultPageSize, matched);
+
+        // Stable, deterministic ordering (Id tiebreak) for the chosen column.
+        var sorted = (Sort, Desc) switch
+        {
+            ("name", false)    => gridQ.OrderBy(l => l.FullName).ThenBy(l => l.Id),
+            ("name", true)     => gridQ.OrderByDescending(l => l.FullName).ThenByDescending(l => l.Id),
+            ("company", false) => gridQ.OrderBy(l => l.SponsorCompanyId).ThenBy(l => l.Id),
+            ("company", true)  => gridQ.OrderByDescending(l => l.SponsorCompanyId).ThenByDescending(l => l.Id),
+            ("status", false)  => gridQ.OrderBy(l => l.Status).ThenBy(l => l.Id),
+            ("status", true)   => gridQ.OrderByDescending(l => l.Status).ThenByDescending(l => l.Id),
+            ("captured", false) => gridQ.OrderBy(l => l.CapturedAt).ThenBy(l => l.Id),
+            _                  => gridQ.OrderByDescending(l => l.CapturedAt).ThenByDescending(l => l.Id),
+        };
+
+        Leads = await sorted
+            .Skip(Paging.Skip).Take(Paging.PageSize)
             .ToListAsync(ct);
 
         return Page();
@@ -261,7 +305,7 @@ public class LeadsModel : PageModel
             await _db.SaveChangesAsync(ct);
             TempData["Notice"] = $"Lead '{lead.FullName}' set to {status}.";
         }
-        return RedirectToPage(new { ShowHidden, SponsorFilter });
+        return RedirectToPage(GridRoute);
     }
 
     /// <summary>Send a reply to the lead's email + record the audit on the row.</summary>
@@ -279,12 +323,12 @@ public class LeadsModel : PageModel
             TempData["Notice"] = lead is null
                 ? $"Lead #{leadId} not found."
                 : $"Lead '{lead.FullName}' has no email address to reply to.";
-            return RedirectToPage(new { ShowHidden, SponsorFilter });
+            return RedirectToPage(GridRoute);
         }
         if (string.IsNullOrWhiteSpace(subject) || string.IsNullOrWhiteSpace(body))
         {
             TempData["Notice"] = "Reply needs both a subject and a message.";
-            return RedirectToPage(new { ShowHidden, SponsorFilter });
+            return RedirectToPage(GridRoute);
         }
 
         // Plain text -> encoded paragraphs (same convention as Broadcast).
@@ -313,7 +357,7 @@ public class LeadsModel : PageModel
         {
             TempData["Notice"] = $"Reply to {lead.Email} FAILED: {ex.Message}";
         }
-        return RedirectToPage(new { ShowHidden, SponsorFilter });
+        return RedirectToPage(GridRoute);
     }
 
     /// <summary>Fire the Zoho CRM pull on demand (config-gated).</summary>

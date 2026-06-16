@@ -39,6 +39,14 @@ public class LoginModel : PageModel
     [BindProperty]
     public string Pin { get; set; } = string.Empty;
 
+    /// <summary>
+    /// Optional local post-login redirect, carried through both PIN steps so an
+    /// invite link (/Login?email=...&amp;ReturnUrl=/Forms/Hotel) lands the user on
+    /// the intended page. Only local ("/"-prefixed) URLs are honoured.
+    /// </summary>
+    [BindProperty]
+    public string? ReturnUrl { get; set; }
+
     /// <summary>"email" = ask for email; "pin" = a PIN has been sent.</summary>
     [BindProperty]
     public string Step { get; set; } = "email";
@@ -56,9 +64,44 @@ public class LoginModel : PageModel
     public string? Message { get; set; }
     public bool IsError { get; set; }
 
-    public void OnGet()
+    /// <summary>
+    /// Prestage the email (and optional ReturnUrl) from the query string so an
+    /// invite link can be a just-click-send experience: the recipient opens
+    /// /Login?email=&lt;addr&gt;&amp;ReturnUrl=... with the email field already filled
+    /// and only has to request + enter the PIN. The link is built per-env from
+    /// each environment's own base URL, so this works in dev and prod alike.
+    /// </summary>
+    public IActionResult OnGet(string? email, string? returnUrl)
     {
+        if (!string.IsNullOrWhiteSpace(email))
+        {
+            Email = email.Trim();
+        }
+        ReturnUrl = SafeLocalReturnUrl(returnUrl);
+
+        // Already signed in? Don't show the sign-in form again — that is what made it
+        // look like the session "kept prompting to log in" (opening a prestage bookmark
+        // while still authenticated re-rendered the Login form). Send the user straight
+        // to their hub. A DIFFERENT prestaged email means they are deliberately SWITCHING
+        // accounts (one browser = one session cookie), so we still show the form then.
+        if (User?.Identity?.IsAuthenticated == true)
+        {
+            var currentEmail = User.FindFirst(ClaimTypes.Email)?.Value;
+            var switchingAccount = !string.IsNullOrWhiteSpace(Email)
+                && !string.Equals(Email, currentEmail, StringComparison.OrdinalIgnoreCase);
+            if (!switchingAccount)
+            {
+                return Redirect(ReturnUrl ?? "/");
+            }
+        }
+        return Page();
     }
+
+    /// <summary>Honour only local ("/"-prefixed, non-protocol-relative) URLs.</summary>
+    private static string? SafeLocalReturnUrl(string? url) =>
+        !string.IsNullOrWhiteSpace(url) && url.StartsWith('/') && !url.StartsWith("//")
+            ? url
+            : null;
 
     /// <summary>Step 1: the participant asked for a PIN.</summary>
     public async Task<IActionResult> OnPostRequestPinAsync(CancellationToken ct)
@@ -143,7 +186,8 @@ public class LoginModel : PageModel
             new ClaimsPrincipal(identity),
             authProps);
 
-        return RedirectToPage("/Index");
+        var safeReturn = SafeLocalReturnUrl(ReturnUrl);
+        return safeReturn is not null ? Redirect(safeReturn) : RedirectToPage("/Index");
     }
 
     /// <summary>The single active event (CONTEXT.md section 3).</summary>
