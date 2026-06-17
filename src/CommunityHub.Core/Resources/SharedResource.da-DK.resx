@@ -94,6 +94,7 @@
   <data name="Nav.OrgAreaMenu" xml:space="preserve"><value>Arrangørområde</value></data>
   <data name="Nav.OrgAreaMenuToggle" xml:space="preserve"><value>Arrangørområde-menu</value></data>
   <data name="Nav.SpeakerQuestions" xml:space="preserve"><value>Sessionsspørgsmål</value></data>
+  <data name="Nav.SpeakerEvaluations" xml:space="preserve"><value>Mine sessionsbedømmelser</value></data>
   <data name="Nav.ShareGraphics" xml:space="preserve"><value>Del grafik</value></data>
   <data name="Nav.Home" xml:space="preserve"><value>Forside</value></data>
   <data name="Nav.MyTasks" xml:space="preserve"><value>Mine opgaver</value></data>
@@ -195,6 +196,9 @@
   <data name="Speaker.AllMyTasks" xml:space="preserve"><value>Alle mine opgaver</value></data>
   <data name="Speaker.MySessions" xml:space="preserve"><value>Mine sessioner</value></data>
   <data name="Speaker.MySessionsIntro" xml:space="preserve"><value>De sessioner, du præsenterer — hvornår og hvor, samt et link til deltagernes spørgsmål til hver enkelt.</value></data>
+  <data name="Speaker.RatingsHeading" xml:space="preserve"><value>Mine sessionsbedømmelser</value></data>
+  <data name="Speaker.RatingsIntro" xml:space="preserve"><value>Se, hvordan deltagerne bedømte dine sessioner, med deres anonyme kommentarer.</value></data>
+  <data name="Speaker.RatingsCta" xml:space="preserve"><value>Se mine sessionsbedømmelser</value></data>
   <data name="Speaker.MasterClassBadge" xml:space="preserve"><value>Master class</value></data>
   <data name="Speaker.NotScheduledYet" xml:space="preserve"><value>Tidspunkt fastlægges</value></data>
   <data name="Speaker.RoomTbd" xml:space="preserve"><value>Lokale tildeles senere</value></data>
@@ -280,6 +284,11 @@
   <data name="OrgHotels.Empty" xml:space="preserve"><value>Ingen hoteller endnu. Tilføj det første ovenfor.</value></data>
   <data name="OrgHotels.ConfirmDelete" xml:space="preserve"><value>Slet dette hotel? Tildelte personer fjernes fra hotellet.</value></data>
   <data name="OrgHotels.GoToAssignments" xml:space="preserve"><value>Tildel personer til hoteller →</value></data>
+  <data name="OrgHotels.SelectRow" xml:space="preserve"><value>Vælg {0}</value></data>
+  <data name="OrgHotels.BulkDelete" xml:space="preserve"><value>Slet valgte hoteller</value></data>
+  <data name="OrgHotels.BulkDeleteHint" xml:space="preserve"><value>Markér de hoteller, der skal fjernes. Enhver, der er placeret på et slettet hotel, fjernes automatisk fra hotellet (deres deltagerpost bevares).</value></data>
+  <data name="OrgHotels.BulkDeleteConfirmTitle" xml:space="preserve"><value>Slet de valgte hoteller?</value></data>
+  <data name="OrgHotels.BulkDeleteConfirmBody" xml:space="preserve"><value>Dette fjerner permanent {0} valgte hotel(ler) og fjerner alle, der er placeret på dem, fra hotellet. Dette kan ikke fortrydes.</value></data>
   <data name="OrgHotelAssign.Title" xml:space="preserve"><value>Hotel-tildelinger</value></data>
   <data name="OrgHotelAssign.Intro" xml:space="preserve"><value>Tildel hver deltager et hotel og angiv deres bekræftelsesnummer. Personer er grupperet efter hotel, så du kan styre værelsesblokken pr. hotel.</value></data>
   <data name="OrgHotelAssign.NoHotels" xml:space="preserve"><value>Opret mindst ét hotel først på</value></data>
@@ -403,6 +412,33 @@
   <data name="Nav.OrgGroupPhotos" xml:space="preserve"><value>Gruppebilleder</value></data>
   <data name="Nav.OrgAppGame" xml:space="preserve"><value>App-spil</value></data>
   <data name="Nav.OrgImpersonationLog" xml:space="preserve"><value>Handler-som-log</value></data>
+  <data name="Nav.OrgDataFreshness" xml:space="preserve"><value>Dataaktualitet</value></data>
+
+  <!-- Organizer: data-freshness panel (REQUIREMENTS §21 "last synced at") -->
+  <data name="Fresh.Title" xml:space="preserve"><value>Dataaktualitet</value></data>
+  <data name="Fresh.Intro" xml:space="preserve"><value>Hvornår hver datakilde sidst blev opdateret. En kilde, der er mere stille end forventet, markeres, så du kan tjekke, om en synkronisering er gået i stå.</value></data>
+  <data name="Fresh.GeneratedAt" xml:space="preserve"><value>Tjekket kl. {0}</value></data>
+  <data name="Fresh.ColFeed" xml:space="preserve"><value>Datakilde</value></data>
+  <data name="Fresh.ColLast" xml:space="preserve"><value>Seneste aktivitet</value></data>
+  <data name="Fresh.ColAge" xml:space="preserve"><value>For hvor længe siden</value></data>
+  <data name="Fresh.ColState" xml:space="preserve"><value>Tilstand</value></data>
+  <data name="Fresh.NoData" xml:space="preserve"><value>Endnu ingen data</value></data>
+  <data name="Fresh.Fresh" xml:space="preserve"><value>Opdateret</value></data>
+  <data name="Fresh.Stale" xml:space="preserve"><value>Ser forældet ud</value></data>
+  <data name="Fresh.AllFresh" xml:space="preserve"><value>Alle datakilder er opdaterede.</value></data>
+  <data name="Fresh.StaleCount" xml:space="preserve"><value>{0} datakilde(r) ser forældede ud — værd at tjekke.</value></data>
+  <data name="Fresh.AgeDays" xml:space="preserve"><value>for {0} dag(e) siden</value></data>
+  <data name="Fresh.AgeHours" xml:space="preserve"><value>for {0} time(r) siden</value></data>
+  <data name="Fresh.AgeMinutes" xml:space="preserve"><value>for {0} minut(ter) siden</value></data>
+  <data name="Fresh.Feed.Email" xml:space="preserve"><value>Udgående e-mail</value></data>
+  <data name="Fresh.Feed.AttendeeSync" xml:space="preserve"><value>Deltagersynkronisering</value></data>
+  <data name="Fresh.Feed.MasterClassBookingSync" xml:space="preserve"><value>Master-class-bookinger</value></data>
+  <data name="Fresh.Feed.SponsorLeads" xml:space="preserve"><value>Sponsor-leads</value></data>
+  <data name="Fresh.Feed.SpeakerImport" xml:space="preserve"><value>Taler-import</value></data>
+  <data name="Fresh.Feed.SessionImport" xml:space="preserve"><value>Sessionsimport</value></data>
+  <data name="Fresh.Feed.SessionQuestions" xml:space="preserve"><value>Deltagerspørgsmål</value></data>
+  <data name="Fresh.Feed.SessionEvaluations" xml:space="preserve"><value>Sessionsvurderinger</value></data>
+  <data name="Fresh.Feed.SoMePublished" xml:space="preserve"><value>Opslag på sociale medier</value></data>
 
   <!-- Forms: Hotel -->
   <data name="Hotel.Title" xml:space="preserve"><value>Hotelpræference</value></data>
@@ -783,6 +819,9 @@
   <data name="Sponsors.VisitSite" xml:space="preserve"><value>Besøg websted</value></data>
   <data name="Sponsors.ComingSoonTitle" xml:space="preserve"><value>Sponsorer offentliggøres snart</value></data>
   <data name="Sponsors.ComingSoonBody" xml:space="preserve"><value>Vores sponsorer annonceres her. Vil du være sponsor? Kontakt os.</value></data>
+  <data name="Sponsors.BecomeTitle" xml:space="preserve"><value>Bliv sponsor</value></data>
+  <data name="Sponsors.BecomeBody" xml:space="preserve"><value>Nå et fokuseret publikum af community-fagfolk. Kontakt os for at drøfte sponsorpakker til dette event.</value></data>
+  <data name="Sponsors.BecomeCta" xml:space="preserve"><value>Kontakt os om sponsorat</value></data>
 
   <!-- Organizer command center (REQUIREMENTS §20) -->
   <data name="Cc.Title" xml:space="preserve"><value>Kommandocentral</value></data>
@@ -942,6 +981,10 @@
   <data name="Sessions.Delete" xml:space="preserve"><value>Slet session</value></data>
   <data name="Sessions.DeleteConfirmTitle" xml:space="preserve"><value>Slet denne session?</value></data>
   <data name="Sessions.DeleteBlocked" xml:space="preserve"><value>Denne session har deltagerdata og kan ikke slettes. Håndtér disse data først.</value></data>
+  <data name="Sessions.BulkDelete" xml:space="preserve"><value>Slet valgte sessioner</value></data>
+  <data name="Sessions.BulkDeleteHint" xml:space="preserve"><value>Kun sessioner uden deltagerdata kan vælges. Sessioner med spørgsmål, evalueringer eller bookinger er beskyttede.</value></data>
+  <data name="Sessions.BulkDeleteConfirmTitle" xml:space="preserve"><value>Slet de valgte sessioner?</value></data>
+  <data name="Sessions.BulkDeleteConfirmBody" xml:space="preserve"><value>Dette fjerner permanent {0} valgte session(er) og deres talerlinks. Importerede sessioner kommer tilbage ved næste Sessionize-import. Dette kan ikke fortrydes.</value></data>
   <data name="Queue.Delete" xml:space="preserve"><value>Fjern</value></data>
   <data name="Queue.DeleteConfirmTitle" xml:space="preserve"><value>Fjern denne kø-række?</value></data>
   <!-- Attendee My-event: personlig dagsorden / mine sessioner / genveje / spørg + evaluer (§20 Attendee) -->
@@ -1080,4 +1123,63 @@
   <data name="Comms.ColCampaign" xml:space="preserve"><value>Kampagne</value></data>
   <data name="Comms.ColWhen" xml:space="preserve"><value>Hvornår</value></data>
   <data name="Comms.ColChannel" xml:space="preserve"><value>Kanal</value></data>
+  <data name="Speakers.Remove" xml:space="preserve"><value>Fjern fra talere</value></data>
+  <data name="Speakers.OnAgenda" xml:space="preserve"><value>Stadig på programmet</value></data>
+  <data name="Speakers.RemoveConfirmTitle" xml:space="preserve"><value>Fjern fra talerlisten?</value></data>
+  <data name="Speakers.RemoveConfirmBody" xml:space="preserve"><value>Dette fjerner talerprofilen (bio, foto, akkreditering), men beholder personen som deltager. En taler, der stadig er knyttet til en session, er beskyttet. Dette kan ikke fortrydes for: </value></data>
+  <data name="Speakers.BulkRemove" xml:space="preserve"><value>Fjern valgte fra talere</value></data>
+  <data name="Speakers.BulkRemoveHint" xml:space="preserve"><value>Fjerner kun talerprofilen; personen forbliver deltager. Talere, der stadig er på programmet, er beskyttet.</value></data>
+  <data name="Speakers.BulkRemoveConfirmTitle" xml:space="preserve"><value>Fjern de valgte talere?</value></data>
+  <data name="Speakers.BulkRemoveConfirmBody" xml:space="preserve"><value>Dette fjerner talerprofilen for {0} valgte person(er); de forbliver deltagere. Enhver, der stadig er knyttet til en session, beholdes. Dette kan ikke fortrydes.</value></data>
+  <data name="SponsorFacts.OrphanHeading" xml:space="preserve"><value>Forældede virksomhedsoplysninger (ingen aktive kontakter)</value></data>
+  <data name="SponsorFacts.OrphanIntro" xml:space="preserve"><value>Disse sponsorvirksomhedsoplysninger (logo, beskrivelse, websted, niveau) driver den offentlige sponsorside, men virksomheden har ingen aktiv kontakt i denne udgave — typisk en dublet eller et forkert virksomheds-id. Slet de forældede, så de ikke længere vises offentligt.</value></data>
+  <data name="SponsorFacts.ColCompany" xml:space="preserve"><value>Virksomheds-id</value></data>
+  <data name="SponsorFacts.ColShortDesc" xml:space="preserve"><value>Kort beskrivelse</value></data>
+  <data name="SponsorFacts.Delete" xml:space="preserve"><value>Slet oplysninger</value></data>
+  <data name="SponsorFacts.DeleteConfirmTitle" xml:space="preserve"><value>Slet disse virksomhedsoplysninger?</value></data>
+  <data name="SponsorFacts.DeleteConfirmBody" xml:space="preserve"><value>Dette fjerner permanent logo, beskrivelse, websted og niveau for denne virksomhed. Det virker kun, mens virksomheden ikke har nogen aktiv kontakt. Dette kan ikke fortrydes for: </value></data>
+
+  <!-- Onboarding-dashboard "hvem mangler at blive onboardet" CSV-eksport (REQUIREMENTS §21) -->
+  <data name="OnbExport.Heading" xml:space="preserve"><value>Hvem mangler at blive onboardet</value></data>
+  <data name="OnbExport.Intro" xml:space="preserve"><value>Hent alle, der stadig er i gang med onboarding (alle, der ikke har gennemført hvert trin, deres rolle kræver), med de trin hver person stadig mangler — så du kan følge op på dem.</value></data>
+  <data name="OnbExport.PendingCount" xml:space="preserve"><value>{0} person(er) er stadig i gang med onboarding.</value></data>
+  <data name="OnbExport.Download" xml:space="preserve"><value>Hent ventelisten (CSV)</value></data>
+  <data name="OnbExport.DownloadAria" xml:space="preserve"><value>Hent listen over personer, der ikke har gennemført onboarding, som en CSV-fil</value></data>
+  <!-- Onboarding-dashboard "genåbn et trin for hele personagruppen" massehandling (REQUIREMENTS §21) -->
+  <data name="OnbReopen.Heading" xml:space="preserve"><value>Genåbn et trin for hele gruppen</value></data>
+  <data name="OnbReopen.Intro" xml:space="preserve"><value>Vælg et trin, der skal genåbnes for alle i {0}, som allerede har gennemført det — for eksempel når en frist flyttes, og hele gruppen skal bekræfte igen. Der sættes en påmindelse i kø til hver berørt person.</value></data>
+  <data name="OnbReopen.StepLabel" xml:space="preserve"><value>Trin der skal genåbnes</value></data>
+  <data name="OnbReopen.Submit" xml:space="preserve"><value>Genåbn for alle</value></data>
+  <data name="OnbReopen.SubmitAria" xml:space="preserve"><value>Genåbn det valgte trin for alle relevante personer i denne gruppe</value></data>
+  <data name="OnbReopen.Confirm" xml:space="preserve"><value>Genåbn dette trin for alle i {0}, der har gennemført det? De får hver især en påmindelse om at gøre det igen.</value></data>
+  <data name="ReqChange.Title" xml:space="preserve"><value>Anmod om en ændring</value></data>
+  <data name="ReqChange.Intro" xml:space="preserve"><value>Denne formular er lukket for redigering, men du kan stadig bede arrangørerne om at opdatere dine {0}-oplysninger. Fortæl os, hvad der skal ændres, så tager vi os af det.</value></data>
+  <data name="ReqChange.MessageLabel" xml:space="preserve"><value>Hvad ønsker du ændret omkring dine {0}-oplysninger?</value></data>
+  <data name="ReqChange.MessagePlaceholder" xml:space="preserve"><value>For eksempel: min ankomstdag er flyttet til den 8., ret venligst min indtjekning.</value></data>
+  <data name="ReqChange.MessageHelp" xml:space="preserve"><value>Vær så konkret som muligt. En arrangør læser dette og følger op med dig.</value></data>
+  <data name="ReqChange.Submit" xml:space="preserve"><value>Send min ændringsanmodning</value></data>
+  <data name="ReqChange.SentFlash" xml:space="preserve"><value>Tak — din ændringsanmodning er nået frem til arrangørerne.</value></data>
+  <data name="ReqChange.OpenHeading" xml:space="preserve"><value>Dine afventende ændringsanmodninger</value></data>
+  <data name="ReqChange.OpenIntro" xml:space="preserve"><value>Disse anmodninger er nået frem til arrangørerne og afventer behandling.</value></data>
+  <data name="ReqChange.ErrEmpty" xml:space="preserve"><value>Beskriv venligst, hvad du ønsker ændret.</value></data>
+  <data name="ReqChange.ErrTooLong" xml:space="preserve"><value>Din besked er for lang. Forkort den venligst til højst 1000 tegn.</value></data>
+  <data name="ReqChange.ErrGeneric" xml:space="preserve"><value>Beklager, din anmodning kunne ikke sendes. Prøv venligst igen.</value></data>
+  <data name="ReqChange.LockedPrompt" xml:space="preserve"><value>Skal dette ændres?</value></data>
+  <data name="ReqChange.LockedCta" xml:space="preserve"><value>Anmod om en ændring</value></data>
+  <data name="SpeakerQ.Title" xml:space="preserve"><value>Spørgsmål til mine sessioner</value></data>
+  <data name="SpeakerQ.DigestNote" xml:space="preserve"><value>Vi sender dig en mail med en oversigt, hver gang deltagerne stiller nye spørgsmål til dine sessioner, så du aldrig behøver at holde øje selv.</value></data>
+  <data name="SpeakerQ.OpenCount" xml:space="preserve"><value>{0} åbne spørgsmål venter på dit svar.</value></data>
+  <data name="SpeakerQ.AllAnswered" xml:space="preserve"><value>Ingen åbne spørgsmål lige nu — du er helt ajour.</value></data>
+  <data name="SpeakerEval.Title" xml:space="preserve"><value>Mine sessionsbedømmelser</value></data>
+  <data name="SpeakerEval.Intro" xml:space="preserve"><value>Hvordan deltagerne bedømte dine sessioner (1–5), med deres anonyme kommentarer. Bedømmelserne kommer fra den hurtige smiley-formular, som deltagerne tilgår via QR-koden i lokalet.</value></data>
+  <data name="SpeakerEval.None" xml:space="preserve"><value>Ingen deltagerbedømmelser endnu. De vises her, så snart deltagerne bedømmer dine sessioner.</value></data>
+  <data name="SpeakerEval.Overall" xml:space="preserve"><value>På tværs af alle dine sessioner:</value></data>
+  <data name="SpeakerEval.TotalCount" xml:space="preserve"><value>{0} bedømmelse(r) i alt</value></data>
+  <data name="SpeakerEval.MasterClass" xml:space="preserve"><value>Master class</value></data>
+  <data name="SpeakerEval.NoRatings" xml:space="preserve"><value>Ingen bedømmelser endnu</value></data>
+  <data name="SpeakerEval.SessionCount" xml:space="preserve"><value>{0} bedømmelse(r)</value></data>
+  <data name="SpeakerEval.SessionNone" xml:space="preserve"><value>Ingen bedømmelser for denne session endnu.</value></data>
+  <data name="SpeakerEval.NoComments" xml:space="preserve"><value>Kun bedømmelser — ingen skriftlige kommentarer til denne session.</value></data>
+  <data name="SpeakerEval.RatingAria" xml:space="preserve"><value>Bedømt {0} ud af 5</value></data>
+  <data name="SpeakerEval.NotASpeaker" xml:space="preserve"><value>Dette område er for talere ({0}).</value></data>
 </root>

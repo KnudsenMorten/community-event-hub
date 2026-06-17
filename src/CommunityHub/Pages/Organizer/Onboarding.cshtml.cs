@@ -1,3 +1,4 @@
+using System.Text;
 using CommunityHub.Auth;
 using CommunityHub.Core.Domain;
 using CommunityHub.Core.Email;
@@ -37,6 +38,15 @@ public class OnboardingModel : PageModel
     public OnboardingOverview Overview { get; private set; } = new();
     public bool AccessDenied { get; private set; }
     public string? ActionMessage { get; private set; }
+
+    /// <summary>
+    /// How many people are still onboarding (every stage except Completed) — drives
+    /// the "who hasn't onboarded yet" export card's count. Derived from the
+    /// overview's stage stats so it matches the dashboard exactly.
+    /// </summary>
+    public int PendingCount => Overview.StageStats
+        .Where(s => s.Stage != OnboardingStage.Completed)
+        .Sum(s => s.Count);
 
     /// <summary>Persona filter (null/empty = all personas).</summary>
     [BindProperty(SupportsGet = true)]
@@ -92,5 +102,55 @@ public class OnboardingModel : PageModel
             ? $"Re-opened \"{OnboardingService.LabelFor(step)}\" — a reminder has been queued."
             : "No change (that step was not completed).";
         return RedirectToPage(new { Persona, Msg = msg });
+    }
+
+    /// <summary>
+    /// Re-open one step for EVERY person in a persona who currently has it done —
+    /// the bulk sibling of the per-row "Re-open". Each affected person gets the
+    /// same email-system remind hand-off. Organizer-gated server-side; honours the
+    /// current persona filter for the redirect. Reports an honest count (or a
+    /// no-op when nobody had that step done).
+    /// </summary>
+    public async Task<IActionResult> OnPostReopenPersonaStepAsync(
+        PersonaGroup personaGroup, OnboardingStep step, CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+        if (me.Role != ParticipantRole.Organizer) return Forbid();
+
+        var result = await _onboarding.ResetStepForPersonaAsync(
+            me.EventId, personaGroup, step, ct);
+
+        var personaName = PersonaLabel(personaGroup);
+        var stepName = OnboardingService.LabelFor(step);
+        var msg = result.IsNoOp
+            ? $"No change — nobody in {personaName} had \"{stepName}\" completed."
+            : $"Re-opened \"{stepName}\" for {result.Reopened} person(s) in {personaName} — a reminder has been queued for each.";
+
+        // Keep the page filtered to the persona we just acted on so the organizer
+        // sees the result in context.
+        return RedirectToPage(new { Persona = personaGroup, Msg = msg });
+    }
+
+    /// <summary>
+    /// Download the "who hasn't onboarded yet" list as CSV — every participant in
+    /// the pipeline who has NOT completed all their persona's required steps, with
+    /// the steps still missing. Honours the current persona filter. Organizer-gated
+    /// server-side; read-only (never writes). UTF-8 with a BOM so Excel detects the
+    /// encoding for Danish names.
+    /// </summary>
+    public async Task<IActionResult> OnGetPendingCsvAsync(CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+        if (me.Role != ParticipantRole.Organizer) return Forbid();
+
+        var csv = await _onboarding.BuildPendingCsvAsync(me.EventId, Persona, ct);
+        var bytes = Encoding.UTF8.GetPreamble()
+            .Concat(Encoding.UTF8.GetBytes(csv)).ToArray();
+        var fileName = Persona is null
+            ? "onboarding-pending.csv"
+            : $"onboarding-pending-{Persona.Value.ToString().ToLowerInvariant()}.csv";
+        return File(bytes, "text/csv", fileName);
     }
 }

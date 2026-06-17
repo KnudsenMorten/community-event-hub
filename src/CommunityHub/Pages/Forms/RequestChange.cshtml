@@ -1,0 +1,57 @@
+@page
+@model CommunityHub.Pages.Forms.RequestChangeModel
+@{
+    ViewData["Title"] = Localizer["ReqChange.Title"].Value;
+}
+
+<div class="card">
+    <h2>@Localizer["ReqChange.Title"]</h2>
+
+    <p style="background:#eef6ff;padding:10px 14px;border-radius:6px;font-size:14px;">
+        @Localizer["ReqChange.Intro", Model.TopicLabel]
+    </p>
+
+    @if (Model.Submitted)
+    {
+        @* Shared success toast: role=status, auto-dismiss, dismissable. *@
+        <partial name="_Flash" model='new CommunityHub.Pages.Shared.FlashModel(Localizer["ReqChange.SentFlash"].Value, "success")' />
+    }
+
+    @if (Model.OpenRequests.Count > 0)
+    {
+        <section aria-labelledby="reqChangeOpenHeading" style="margin:14px 0;">
+            <h3 id="reqChangeOpenHeading" style="font-size:15px;">@Localizer["ReqChange.OpenHeading"]</h3>
+            <p style="font-size:13px;color:#4a5160;margin:4px 0 8px 0;">@Localizer["ReqChange.OpenIntro"]</p>
+            <ul style="padding-left:18px;margin:0;">
+                @foreach (var req in Model.OpenRequests)
+                {
+                    <li style="margin:6px 0;font-size:14px;">
+                        @req.Summary
+                        <span style="color:#6b7280;font-size:12px;">(@req.At.ToLocalTime().ToString("dd/MM/yyyy HH:mm"))</span>
+                    </li>
+                }
+            </ul>
+        </section>
+    }
+
+    <form method="post">
+        <input type="hidden" asp-for="Topic" />
+
+        @* Inline-validation summary (shared §21 pattern). *@
+        <div asp-validation-summary="All" class="ceh-validation-summary"></div>
+
+        <label for="Message">@Localizer["ReqChange.MessageLabel", Model.TopicLabel]</label>
+        <textarea asp-for="Message" id="Message" rows="5"
+                  maxlength="1000" required
+                  aria-describedby="ReqChangeHelp"
+                  placeholder="@Localizer["ReqChange.MessagePlaceholder"]"></textarea>
+        <span asp-validation-for="Message" class="ceh-field-error"></span>
+        <p id="ReqChangeHelp" style="font-size:12px;color:#5a6170;margin:4px 0 12px 0;">
+            @Localizer["ReqChange.MessageHelp"]
+        </p>
+
+        <button type="submit">@Localizer["ReqChange.Submit"]</button>
+    </form>
+
+    <p style="margin-top:16px;"><a asp-page="/Index">@Localizer["Common.BackToHub"]</a></p>
+</div>

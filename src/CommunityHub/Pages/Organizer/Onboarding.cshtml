@@ -1,6 +1,8 @@
 @page
 @using CommunityHub.Core.Email
 @using CommunityHub.Core.Organizer
+@using Microsoft.AspNetCore.Mvc.Localization
+@inject IHtmlLocalizer<CommunityHub.Core.Resources.SharedResource> Localizer
 @model CommunityHub.Pages.Organizer.OnboardingModel
 @{
     ViewData["Title"] = "Onboarding dashboard";
@@ -63,6 +65,48 @@
                     <div style="font-size:0.9em;color:#555;">@OnboardingService.LabelFor(s.Stage)</div>
                 </div>
             }
+        </div>
+
+        @* Re-open one step for a WHOLE persona (bulk sibling of the per-row Re-open).
+           Shown only when a single persona is filtered, so the target is unambiguous. *@
+        @if (Model.Persona is not null
+             && CommunityHub.Core.Organizer.OnboardingStepSets.For(Model.Persona.Value).Count > 0)
+        {
+            var reopenSteps = CommunityHub.Core.Organizer.OnboardingStepSets.For(Model.Persona.Value);
+            <div class="card" style="margin-bottom:18px;background:#fff7ed;border:1px solid #fed7aa;">
+                <h3 style="margin-top:0;margin-bottom:6px;">@Localizer["OnbReopen.Heading"]</h3>
+                <p style="margin-top:0;">@Localizer["OnbReopen.Intro", CommunityHub.Pages.Organizer.OnboardingModel.PersonaLabel(Model.Persona.Value)]</p>
+                <form method="post"
+                      onsubmit="return confirm('@Html.Raw(Localizer["OnbReopen.Confirm", CommunityHub.Pages.Organizer.OnboardingModel.PersonaLabel(Model.Persona.Value)].Value.Replace("'", "\\'"))');"
+                      style="display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end;">
+                    <input type="hidden" name="personaGroup" value="@Model.Persona.Value" />
+                    <div>
+                        <label for="reopenStep" style="display:block;font-size:0.9em;">@Localizer["OnbReopen.StepLabel"]</label>
+                        <select id="reopenStep" name="step" style="padding:6px;max-width:100%;">
+                            @foreach (var s in reopenSteps)
+                            {
+                                <option value="@s">@OnboardingService.LabelFor(s)</option>
+                            }
+                        </select>
+                    </div>
+                    <button type="submit" asp-page-handler="ReopenPersonaStep" class="secondary"
+                            aria-label="@Localizer["OnbReopen.SubmitAria"]">
+                        @Localizer["OnbReopen.Submit"]
+                    </button>
+                </form>
+            </div>
+        }
+
+        <!-- "Who hasn't onboarded yet" CSV export (honours the persona filter). -->
+        <div class="card" style="margin-bottom:18px;background:#fafafa;">
+            <h3 style="margin-top:0;margin-bottom:6px;">@Localizer["OnbExport.Heading"]</h3>
+            <p style="margin-top:0;">@Localizer["OnbExport.Intro"]</p>
+            <p role="status">@Localizer["OnbExport.PendingCount", Model.PendingCount]</p>
+            <a class="button" role="button"
+               asp-page-handler="PendingCsv" asp-route-persona="@(Model.Persona?.ToString())"
+               aria-label="@Localizer["OnbExport.DownloadAria"]">
+                @Localizer["OnbExport.Download"]
+            </a>
         </div>
 
         <!-- Per-step progress tiles (only people who REQUIRE that step). -->

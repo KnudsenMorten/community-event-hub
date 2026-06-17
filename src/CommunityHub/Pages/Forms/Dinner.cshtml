@@ -14,6 +14,8 @@
     {
         <p class="error">@Localizer["Common.EditingClosedShort"]</p>
         <p>@Localizer["Dinner.YourRsvp"] <strong>@Model.Rsvp</strong></p>
+        @* Locked dead-end → self-service "request a change" hand-off (§21). *@
+        <partial name="_RequestChangeLink" model="@("Dinner")" />
     }
     else
     {

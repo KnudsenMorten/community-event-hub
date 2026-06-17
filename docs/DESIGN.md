@@ -75,6 +75,12 @@ payments. Azure isolates the app, gives first-class Bicep IaC, and is existing h
 The private repo (`eldk-community-event-hub`) carries the real config; the public mirror
 (`community-event-hub`) is the sanitized template (§13).
 
+![Architecture overview — the web hub + Functions job host sharing one Core library and one Azure SQL database](img/image1.png)
+*Architecture overview: the ASP.NET Core web hub and the Azure Functions job host share one domain library and one Azure SQL database.*
+
+![Architecture detail — integrations, jobs and the embedded portal](img/image2.png)
+*Architecture detail: integrations (Sessionize / Zoho / webshop / SharePoint), the timer jobs, and the hub embedded inside the public event portal.*
+
 ---
 
 ## 2. Solution shape
@@ -284,14 +290,27 @@ historical staging plan lives in the source CONTEXT material and is not repeated
     flag **+ stamps the `*At` timestamp** via injected `TimeProvider`, idempotent),
     `ResetStepAsync` (organizer flip-to-0 **+ clears the timestamp**; on a real 1→0 it
     **hands off to the email system** by raising an `OrganizerActionItem` of type
-    `onboarding-step-reset` — the send itself is the email system's job), and
+    `onboarding-step-reset` — the send itself is the email system's job),
+    `ResetStepForPersonaAsync(eventId, persona, step)` (the **bulk re-open** sibling —
+    re-opens one step for EVERY active/pre-selected person of a persona who currently
+    has it done **and** whose persona requires it, looping through the single-row
+    `ResetStepAsync` so the timestamp-clearing + per-person email hand-off stay in one
+    place; people who never finished the step, or whose persona doesn't require it, are
+    untouched; idempotent + edition-scoped; returns a `PersonaResetResult(Candidates,
+    Reopened)` for an honest "Re-opened N" / no-op banner), and
     `BuildOverviewAsync(eventId, persona?)` (read-only, **persona-aware**: includes
     `Preselected` + `Active` rows, optionally filtered to one persona; derives a
     per-row `OnboardingStage` (**Preselected / Invited / In-progress / Completed**),
     and returns `OnboardingStageStat` counts, per-step `OnboardingStepStat` (counting
     only people who **require** that step), per-person `OnboardingRow` grid, and an
-    overall completion %). No new table beyond the timestamp columns; the email
-    hand-off reuses the existing `OrganizerActionItem` queue.
+    overall completion %), and `BuildPendingAsync` / `BuildPendingCsvAsync`
+    (`eventId, persona?`) — the **"who hasn't onboarded yet" export**: reuses
+    `BuildOverviewAsync`'s persona-aware projection, keeps only rows whose stage is
+    **not** `Completed`, computes each person's **missing steps** (`PendingOnboardingRow`),
+    orders least-complete-first, and renders CSV via the shared `Export.CsvWriter`
+    (columns Name/Email/Persona/Stage/Done/Required/Percent/MissingSteps). Read-only,
+    no new table beyond the timestamp columns; the email hand-off reuses the existing
+    `OrganizerActionItem` queue.
   - **UIs (mobile-first ~360px, a11y):** organizer `/Organizer/PreselectionQueue`
     (grid + select-all + bulk preselect/activate), participant
     `/Forms/OnboardingWizard` (**persona-driven** wizard — walks the participant's
@@ -300,7 +319,13 @@ historical staging plan lives in the source CONTEXT material and is not repeated
     flags/timestamps), organizer `/Organizer/Onboarding` (**by-stage count tiles** +
     **persona filter** + per-step progress tiles with `role="progressbar"` +
     per-person grid showing each person's stage/persona, with non-required steps
-    marked n/a, and a per-cell "re-open" hand-off button).
+    marked n/a, a per-cell "re-open" hand-off button, a **"who hasn't onboarded
+    yet" CSV download** (`OnGetPendingCsvAsync` handler, organizer-gated, UTF-8 BOM,
+    carries the active persona filter through `asp-route-persona`), **and — when a
+    single persona is filtered — a "re-open a step for the whole group" card**
+    (`OnPostReopenPersonaStepAsync` → `ResetStepForPersonaAsync`; a step picker scoped
+    to that persona's required steps + a count-aware confirm; redirects back filtered
+    to the persona with an honest re-opened/no-op message)).
 - **Organizer grid v2** (added 2026-06-15) — migration **`OrganizerGridV2`**, two new
   tables (no `Participant` column changes):
   - **`ParticipantSecretaryToken`** — the write-scoped secretary grant: `Token` (256-bit,
@@ -415,6 +440,9 @@ Embedding mechanics:
   `zoho.*` / `zohopublic.*` / `zohoexternal.*` domains) — **not** `X-Frame-Options: DENY`, and
   never `*`. The exact origin list is the `Embedding__BackstageOrigin` app setting (§14).
 - The session cookie is `SameSite=None; Secure` so it survives the cross-site iframe.
+
+![The public front door / sign-in, the same surface that renders inside the embedded portal iframe](img/public-landing.png)
+*The public front door + sign-in. The same surface renders inside the embedding portal's iframe — PIN login and magic-link tokens work in-frame because the cookie is `SameSite=None; Secure`.*
 
 **Acting-as sessions (organizer "switch to user" + secretary token).** Both reuse the *same* cookie
 mechanism, which is what makes "act on their behalf" and "modify-on-behalf reflects on the user's own
@@ -828,6 +856,66 @@ pattern. `DeleteAsync(eventId, sessionId)` is **edition-scoped** and:
 handler is gated by the shared `_ConfirmModal` (`Danger`, named via `data-ceh-summary`); en/da strings under
 `Sessions.Delete*`.
 
+**Bulk session + volunteer-task operations (§20 universal CRUD + bulk) — 2026-06-16.** Two pure,
+edition-scoped Core/Organizer services extend the multi-select bulk pattern (established by
+`ParticipantBulkOperationService`) to the next two high-traffic grids, applying the SAME safe semantics as
+their single-row counterparts:
+- `SessionBulkOperationService.DeleteAsync(eventId, sessionIds)` deletes a SELECTION of sessions exactly the
+  way `SessionDeletionService` deletes one: attendee-engaged rows (questions / evaluations / bookings) are
+  **left untouched and counted as `Blocked`**, clean rows are removed with their speaker links, and the count
+  of deleted **imported** (non-`IsHubAdded`) sessions is returned for the re-import warning. Engagement is
+  probed in three **set-based** queries (not per-row N+1); the whole batch is one `SaveChangesAsync`. Returns
+  `BulkResult(Matched, Deleted, Blocked, ImportedDeleted)` with a `Skipped(requested)` helper. The Sessions
+  grid offers a checkbox **only on `Row.CanDelete` rows** (engaged rows can't be ticked, keeping the bar
+  honest) and a `BulkDelete` handler gated by a live-count confirm modal; en/da strings under
+  `Sessions.BulkDelete*`.
+- `VolunteerTaskBulkOperationService` adds `ChangeStatusAsync(eventId, taskIds, status)` (idempotent — a task
+  already in that status is skipped; returns `BulkResult(Matched, Changed)`) and `DeleteAsync(eventId,
+  taskIds)` which is **linked-data-safe**: a task with `VolunteerHelpRequest` history is **kept** (counted as
+  `Blocked`) so coordination history is never lost, while clean tasks are removed with their import-state
+  `VolunteerTaskAssignment` links — one `SaveChangesAsync`. The volunteer work structure already had full
+  single-row CRUD via `VolunteerStructureService`; `/Organizer/VolunteerStructure` now adds a sticky bulk bar
+  whose checkboxes (plain — the task rows host their own forms) feed a JS-built hidden form to the
+  `BulkStatus` / `BulkDeleteTasks` handlers, confirm-modal gated. Both services are event-scoped (foreign-edition
+  ids are silently ignored) and DI-registered in `Program.cs`.
+- `HotelBulkOperationService.DeleteAsync(eventId, hotelIds)` (REQUIREMENTS §20, 2026-06-17) deletes a SELECTION
+  of hotels exactly the way `HotelManagementService.DeleteHotelAsync` deletes one: every participant placed in
+  a doomed hotel is **un-assigned first** (`Participant.HotelId` → null) in one set-based query (not per-row
+  N+1) so no foreign key dangles, then the hotels are removed in a single `SaveChangesAsync`. Unlike sessions a
+  hotel carries no attendee-supplied data to protect, so nothing is `Blocked`; the result
+  `BulkResult(Matched, Deleted, Unassigned)` (with a `Skipped(requested)` helper) reports the un-assign side
+  effect so the banner is honest. Event-scoped (foreign-edition ids silently ignored), DI-registered in
+  `Program.cs`. `/Organizer/Hotels` adds a select-all + per-row checkbox + a `BulkDelete` handler gated by a
+  live-count confirm modal; en/da strings under `OrgHotels.BulkDelete*` / `OrgHotels.SelectRow`. No schema change.
+
+**Speaker delete + sponsor company-facts delete (REQUIREMENTS §22 CRUD sweep) — 2026-06-17.** Two more pure,
+edition-scoped Core/Organizer services close the remaining delete gaps on the high-traffic organizer grids,
+both mirroring `SessionDeletionService`'s delete-safely shape (probe → refuse-on-engagement → clean →
+one `SaveChangesAsync`):
+- `SpeakerDeletionService` "un-speakers" a person: a speaker is a `Participant` (role Speaker /
+  MasterclassSpeaker) plus an optional `SpeakerProfile`, and `DeleteAsync(eventId, participantId)` removes
+  the **profile only** (bio / photo / accreditation / publish flag / contact override) so they stop being a
+  speaker, while the **participant row — identity, login, logistics — is never touched** (removing the whole
+  person stays `ParticipantDeletionService`'s job). It is **agenda-safe**: a speaker still linked to a
+  `SessionSpeaker` returns `DeletionStatus.Blocked` with the session count (the running order is never
+  silently orphaned); a clean speaker has their profile removed plus the stale `SpeakerBackstageEmailSync`
+  propagation artifact cleaned with it. `DeleteManyAsync` is the bulk counterpart (set-based session-link
+  probe, one `SaveChanges`, `BulkDeleteResult(Matched, Deleted, Blocked)` + `Skipped`), and
+  `GetBlockingSessionCountAsync` is the read-only probe driving `Row.CanRemove`. `/Organizer/Speakers` adds a
+  per-row **Remove from speakers** button (bespoke confirm modal naming the speaker) and a **bulk** remove
+  button (live-count confirm modal), each posting a hidden out-of-grid form (the grid is already wrapped in
+  the set-flag `bulkForm`, so nested forms are avoided); en/da strings under `Speakers.Remove*` /
+  `Speakers.BulkRemove*` / `Speakers.OnAgenda`.
+- `SponsorInfoDeletionService` deletes a stale `SponsorInfo` company-facts row (the one-row-per-company
+  logos/description/website/tier that drives the public `/Sponsors` page; sponsor **contacts** are
+  `Participant` rows already covered by the Participants grid). `DeleteAsync(eventId, sponsorInfoId)` is
+  **live-company-safe**: it refuses (`DeletionStatus.Blocked` + active-contact count) while the company still
+  has any **active** sponsor contact in the edition (its public card is live), and removes only a genuinely
+  orphaned row. `GetActiveContactCountAsync` is the probe; `/Organizer/Sponsors` computes the orphan set
+  (facts rows whose company id is not in the active-contact set) into a **Stale company facts** section, each
+  row deletable behind a bespoke confirm modal posting a hidden `DeleteFacts` form; en/da strings under
+  `SponsorFacts.*`. Both services are DI-registered in `Program.cs`; no schema change.
+
 **Pre-selection queue delete (REQUIREMENTS §21) — 2026-06-16.** Queue rows ARE `Participant`s (Inactive /
 Preselected lifecycle), so `/Organizer/PreselectionQueue` reuses the shared `ParticipantDeletionService`:
 `OnPostDeleteAsync` hard-deletes a clean row and **safely falls back to deactivate** if the row somehow has
@@ -957,6 +1045,18 @@ empty state). Edition-scoped. Mobile-first (2-up grid, 3-up ≥560px, 4-up ≥82
 (en "Sponsors" / da-DK "Sponsorer"). **Schema:** EF migration `SponsorPublicListing` adds
 `SponsorInfo.Tier` (a `BoothTier`, default `None`) + `SponsorInfo.WebsiteUrl` (nullable) + an
 `(EventId, Tier)` index — the only two additive columns.
+
+**"Become a sponsor" CTA (REQUIREMENTS §21) — 2026-06-17.** The same public `/Sponsors` page now renders a
+prospective-sponsor call-to-action. The href is built by the pure `BecomeSponsorCtaBuilder.Build(options,
+eventDisplayName)` (no DB/clock/I/O) from a config-bound `BecomeSponsorOptions` (`BecomeSponsor` section,
+registered via `Configure<>` in `Program.cs`, injected into `Sponsors/IndexModel` as `IOptions<>`):
+precedence is a configured external `ContactUrl` (a hosted prospectus/form, opened in a new tab) **over**
+`ContactEmail` (which yields a `mailto:` with the event name URL-encoded into a `subject` via
+`EmailSubjectFormat` / a default `"Sponsorship enquiry — {0}"`); when **neither** is set the builder returns
+`null` and the page renders **no CTA** (no dead link). It shows in both the "coming soon" and populated
+states. **No secret** (a sponsorship contact is public) but the shipped `appsettings.json` carries only a
+**blank placeholder** so no real address reaches the public mirror — operators set it per edition in private
+config. **No schema change.** Mobile-first; copy bilingual via `Sponsors.Become*` resx keys (en + da-DK).
 
 **Master-class master-class features (public logistics page + Zoho Booking participant sync) — 2026-06-15.**
 Built on `Session` + `SessionType.CommunityMasterClass`. Schema additions (migration `MasterClassFeatures`):
@@ -1229,8 +1329,8 @@ explains how the Hub fits alongside Zoho Backstage.
   Core email service can mint it without depending on the web project; the web-project
   `MagicLinkService` now delegates to it, so links minted before and after the refactor are
   byte-compatible. The welcome uses a **7-day** TTL (shorter than the invitation's 14 days). The URL
-  is built from the **per-environment base URL** (`Request.Scheme`/`Request.Host`), dev
-  `https://dev.eldk27.eventhub.expertslive.dk`.
+  is built from the **per-environment base URL** (`Request.Scheme`/`Request.Host`), e.g. dev
+  `https://dev.hub.your-event.example`.
 - **Per-role copy.** One role-specific line per recipient via `WelcomeWithLoginEmailService.RoleLine`
   — every `ParticipantRole` (Organizer / Speaker / MasterclassSpeaker / Volunteer / Sponsor /
   Attendee / Video / Camera) has a distinct, non-empty line. Plus the Backstage explanation and the
@@ -1280,7 +1380,7 @@ self, and the delivery ledger. Both are organizer-gated and event-scoped.
   one `SentReminder` row per delivery keyed `broadcast:<subject-slug>`, so re-sending the same
   subject only mails recipients not yet in the ledger, and per-recipient failures are counted without
   aborting the batch.
-- **Test-send path intact.** The DEV redirect of all mail to `mok@expertslive.dk`
+- **Test-send path intact.** The DEV redirect of all mail to a single test inbox
   (`Email:RedirectAllTo`) and the PROD `Email:OnlySendTo` allowlist apply unchanged — the broadcast
   goes through the same `IEmailSender`.
 - **Mobile-first + a11y.** The audience controls are a `<fieldset>`/`<legend>`; the role checkboxes a
@@ -1332,6 +1432,22 @@ Built on the existing center: the shared `IEmailSender` + `EmailTemplateProvider
   emails the person (`onboarding-step-reset.html`, step label parsed from the action summary), then
   **resolves** the item so it is consumed exactly once (a re-run finds nothing → idempotent). Wired into
   the nightly `ReminderJob` and exposed as a "send now" button on `/Organizer/ActionQueue`.
+- **Speaker Q&A question digest (REQUIREMENTS §21).** `SpeakerQuestionDigestService.SendPendingAsync`
+  emails each speaker a digest of the **open** (unanswered) `SessionQuestion`s on the sessions they are
+  linked to. `BuildPendingDigestsAsync` is a pure read: it joins open questions → `SessionSpeaker` →
+  active speakers (Speaker / MasterclassSpeaker), edition-scoped, and reduces to one `SpeakerDigest`
+  per speaker (open-question count, distinct-session count, and a **fingerprint** = the highest
+  open-question id). The send routes through `ParticipantEmailService.SendTemplateToParticipantAsync`
+  (`speaker-question-digest.html`) so it reuses the established effective-To + secondary-CC routing AND
+  the allowlist-gated `LoggingEmailSender` — there is **no new mail path**, and nothing reaches a real
+  speaker until their address passes the allowlist. Idempotency keys on the `SentReminder` ledger
+  (`speaker-question-digest` / `upto:{fingerprint}` on the **identity** address, mirroring
+  `CalendarInviteEmailService`): a run with the same open set is a no-op; a brand-new question raises
+  the fingerprint → a fresh occasion → one updated digest; answering/closing a question shrinks the open
+  set but never raises the fingerprint, so it never re-sends. Wired into the nightly `ReminderJob`
+  alongside the deadline reminders + step-reset consume. The speaker `/Speaker/Questions` page surfaces
+  a live open-count + a digest note (en + da-DK). **No schema change** (reuses `SessionQuestion` +
+  `SentReminder`).
 - **Schema delta.** One migration `EmailSystem`: `EmailLog` table + `Participant.SecondaryEmail`
   (nullable nvarchar(320)). `has-pending-model-changes` = none.
 - **Mobile-first + a11y.** Email Log filter is a `role="search"` form with labelled inputs, a captioned
@@ -1406,6 +1522,23 @@ The mechanism is a per-user, token-secured, read-only iCal feed — add it once 
 ---
 
 ## 8. Feature surface (hubs & organizer areas)
+
+Each role lands on a hub built around what that person needs to do. The screenshots below are
+captured headlessly against a locally-run instance seeded with synthetic demo data.
+
+| Organizer command center | Organizer dashboard |
+|---|---|
+| [![Organizer command center](img/organizer-command-center.png)](img/organizer-command-center.png) | [![Organizer dashboard](img/organizer-dashboard.png)](img/organizer-dashboard.png) |
+
+| Speaker hub | Volunteer "My schedule" |
+|---|---|
+| [![Speaker hub milestone tracker](img/speaker-hub.png)](img/speaker-hub.png) | [![Volunteer My schedule](img/volunteer-schedule.png)](img/volunteer-schedule.png) |
+
+| Sponsor portal | Attendee "My Event" |
+|---|---|
+| [![Sponsor portal](img/sponsor-portal.png)](img/sponsor-portal.png) | [![Attendee My Event](img/attendee-my-event.png)](img/attendee-my-event.png) |
+
+*The role-gated hubs: organizer command center + live dashboard, the speaker milestone tracker, the volunteer schedule, the sponsor portal, and the attendee "My Event" home.*
 
 **Navigation / information architecture — two role-gated groups.** The signed-in top nav is split
 into two clearly separated, role-gated groups instead of one flat list that mixed personal and admin
@@ -1493,7 +1626,7 @@ the flat list exactly — no link dropped or duplicated).
   effect. Mobile-first (single-column cards, full-width actions at ~360px). The service is registered in
   `Program.cs` DI.
 
-  Beyond the milestone tracker, the Speaker hub (REQUIREMENTS §20 Speaker) also surfaces three
+  Beyond the milestone tracker, the Speaker hub (REQUIREMENTS §20 Speaker) also surfaces four
   self-service blocks, all read-only and own-row scoped:
   - **"My sessions"** — a new Core `SpeakerSessionsService.GetMySessionsAsync(eventId, participantId, role)`
     returns the signed-in speaker's OWN (non-service) sessions in this edition. **Own-row scope is
@@ -1506,6 +1639,22 @@ the flat list exactly — no link dropped or duplicated).
     badge, a per-session link to the speaker's attendee-questions page (`/Speaker/Questions`, with the
     open count), and — only when the speaker is selected for publish — a link to the public session page
     (`/Sessions/{id}`).
+  - **"My session ratings"** (`/Speaker/Evaluations`, 2026-06-17) — a new Core
+    `SpeakerEvaluationsService.GetMyEvaluationsAsync(eventId, participantId, role)` projects the
+    post-session attendee evaluations (`SessionEvaluation`, the HappyOrNot-style 1–5 rating + optional
+    anonymous comment gathered via the room-QR public page) for the signed-in speaker's OWN sessions only.
+    **Own-row scope is server-enforced** with the SAME filter as "My sessions" (`EventId == eventId` AND
+    `SessionSpeakers.Any(ss => ss.ParticipantId == participantId)`, non-service sessions only); a
+    non-speaker role returns an empty result. Each session row carries the rating count, the rounded mean
+    (`null` until the first rating), the master-class flag and room, and the non-blank comments **newest
+    first**; the payload also rolls up an overall cross-session count + average. The page (linked from a
+    Speaker-hub card + the speaker nav, `Nav.SpeakerEvaluations`) shows a per-session smiley/score plus the
+    anonymous comments, mobile-first + a11y (`role="status"`, per-comment rating `aria-label`), en + da-DK.
+    The same evaluations already feed the organizer dashboard (`SessionEvaluationService.BuildDashboardAsync`)
+    and the organizer-triggered results email (`SessionEvaluationMailService`); this is the speaker's
+    always-on self-service view of the same data for their own talks. Read-only; **no schema change**
+    (projects over existing `Session` / `SessionEvaluation` fields). The comments are anonymous —
+    `SessionEvaluation` never stores attendee identity, so nothing here exposes who rated.
   - **Public-profile preview** — gated on the §6 hard gate: the hub resolves `/Speakers/{id}` (via
     `Url.Page("/Speakers/Detail")`) and shows the preview link ONLY when the speaker's
     `SpeakerProfile.SelectedForPublish` is `true` (which is exactly when `/Speakers/{id}` resolves rather
@@ -1515,8 +1664,8 @@ the flat list exactly — no link dropped or duplicated).
     → `webcal://{host}/cal/{token}.ics`, the same feed the volunteer My-schedule uses), shown only when the
     edition's `Event.CalendarSyncEnabled` is on; token-minting failures are logged and degrade gracefully.
 
-  Both services are registered in `Program.cs` DI. All three blocks are read-only and add **no schema
-  change** (they project over existing `Session` / `SpeakerProfile` / `Event` fields).
+  These services are registered in `Program.cs` DI. All four blocks are read-only and add **no schema
+  change** (they project over existing `Session` / `SpeakerProfile` / `SessionEvaluation` / `Event` fields).
 - **Volunteer** — interest sign-up (unconfirmed); a confirmed-only view (congrats mail, hotel,
   dinner, swag, lunch, assigned tasks with sync-to-calendar). The in-hub shift form is the single
   3-step `/Forms/VolunteerWizard` (shifts → role/hours → review), which writes `VolunteerAvailability`
@@ -1793,6 +1942,26 @@ landing surfaces. Two parts:
   the **Logistics hub** (`/Organizer/Logistics`) and the organizer Index (kept off the top-level nav so the
   consolidated menu stays short). Mobile-first ~360px (tables scroll horizontally; cards stack), accessible
   (captioned tables, labelled/`aria-label`'d download buttons, `role="alert"` access-denied), en + da-DK.
+- Data freshness (`/Organizer/DataFreshness`) — `CommunityHub.Core.Organizer.DataFreshnessService`
+  (REQUIREMENTS §21 Organizer [M] "last synced at"). Answers a different question than the count
+  dashboards: *is each data source still being fed, or has a sync silently stopped?* For each
+  `FreshnessFeed` (Email ← `EmailLog.SentAt`; AttendeeSync ← `Attendee.LastSyncedAt`;
+  MasterClassBookingSync ← `MasterClassParticipant.LastSyncedAt`; SponsorLeads ← the later of
+  `SponsorLead.CapturedAt` / `LastSyncedAt`; SpeakerImport ← `SpeakerProfile.LastSessionizeImportAt`;
+  SessionImport ← `Session.LastSessionizeImportAt`; SessionQuestions ← `SessionQuestion.CreatedAt`;
+  SessionEvaluations ← `SessionEvaluation.CreatedAt`; SoMePublished ← `SoMePost.PublishedAtUtc`) it
+  resolves a **single max-timestamp server-side** (one `MaxAsync` per feed — no client-side nested
+  `Select`/`OrderBy`, so it is SQL-translatable) and emits a `FreshnessRow(Feed, LastActivityUtc,
+  StaleAfter)`. The row computes its **age** relative to the snapshot's `GeneratedAtUtc` (clamped to
+  zero on clock skew) and an **`IsStale`** flag (`age > StaleAfter`); a feed with **no data** is a
+  distinct state (`HasData=false`), never flagged stale, so a fresh edition does not light up red. The
+  per-feed `StaleAfter` windows are plain constants (recency hints, not SLAs; no config/secret). The
+  snapshot rolls up `StaleFeeds` / `HasStaleFeeds` for the page banner. Read-only, **no schema change** —
+  distinct from `OrganizerOverviewService` / `CommandCenterService` (counts) and `CommsCockpitService`
+  (the comms timeline): this is the per-source recency view. Organizer-gated server-side; linked from the
+  **Logistics hub** (kept off the top-level nav so the consolidated menu stays short). Mobile-first ~360px
+  (table scrolls horizontally), accessible (captioned table, `role="status"` banner, per-row state pill),
+  en + da-DK.
 - Dashboard (`/Organizer/Dashboard`) — `ReportingService` `DashboardReport`: form-completion rates,
   participants by role, task status + overdue count, sponsor completion, attendee-mismatch count,
   volunteer shift coverage, pending volunteer applicants, survey summary. CSS bar charts, no chart
@@ -1813,6 +1982,25 @@ landing surfaces. Two parts:
   badge. No schema change was needed — the `OrganizerActionItem` table + its
   index shipped earlier (migration `20260525161523_OrgActionsAndTravelPaid`); this
   feature wired the until-now-dormant table to writes and a UI.
+- **Participant change-request after lock** (✅ 2026-06-17) — a second PRODUCER of
+  action-queue items, this time participant-initiated. Once `Event.LockDate` passes
+  the Forms/* pages are read-only; rather than leave that a dead end, a locked form
+  shows a **"Request a change"** link (shared `_RequestChangeLink` partial) to
+  `/Forms/RequestChange?topic=<topic>`. The pure `FormChangeRequestService`
+  (`src/CommunityHub.Core/Reminders/`) validates the free-text message (required,
+  ≤1000 chars) and the participant's edition membership, then upserts ONE open
+  item of type `change-requested:<topic>` (a per-topic suffix under the
+  `OrganizerActionItemService.TypeChangeRequestedPrefix` family, so each form keeps
+  its own row while `LabelFor` still labels the whole family "Change requested
+  (after lock)"). It reuses `UpsertOpenAsync`, so it is idempotent per
+  (event, participant, topic) and edition-scoped, and surfaces in the SAME Action
+  Queue grid with no organizer-side changes. **No new table, no email send** — the
+  queue IS the hand-off (organizers follow up through existing comms). The page
+  reads the participant's own open requests back via `GetOpenForParticipantAsync`
+  (a `StartsWith('change-requested:')` filter, SQL-translatable). Unlike
+  `RaiseIfLateAsync`, a change REQUEST is never window-gated — it must always go
+  through, since post-lock is exactly the dead end it fixes. The lock itself stays
+  authoritative: this is a recourse, not a self-unlock back door.
 - Domain management areas (per the concept): speakers, sponsors, volunteers, organizer tasks, hotel
   (rooming-list export + confirmation import + updated calendar invite), travel reimbursement,
   swag, Bella group event (lunch/dinner overviews, booth overview), group photos, app-game sponsor
@@ -2065,7 +2253,7 @@ integrations are shared.
 
 | Layer | dev | prod | Notes |
 |---|---|---|---|
-| Resource group | `rg-<event>hub-dev` | `rg-<event>hub-prod` | physically separate; one RG cannot affect the other |
+| Resource group | `rg-<baseName>-dev` | `rg-<baseName>-prod` | physically separate; one RG cannot affect the other (`baseName` = `communityhub` in the public template) |
 | Web app / plan | per env | per env | DEV `B1`; PROD `S1` + staging slot |
 | SQL server + DB | per env | per env | dev test data never touches prod |
 | Storage account | per env | per env | uploads separate |
@@ -2094,11 +2282,10 @@ App Service B1 (scale up before the event, down after); Functions consumption; S
 
 ## 12. Deploy, rollback & zero-downtime
 
-**Prerequisites:** Azure CLI (logged in to the ExpertsLive Denmark tenant with rights to create
-resources in the target subscription — tenant/subscription ids are kept out of this published doc;
-`deploy.sh` pins the subscription via `AZURE_SUBSCRIPTION_ID` + `az account set` so a deploy cannot
-land in the wrong sub), Bicep (bundled with recent CLI), and `jq` (reads `baseName` from the param
-file).
+**Prerequisites:** Azure CLI (logged in to your tenant with rights to create resources in the target
+subscription — set your own subscription via the `AZURE_SUBSCRIPTION_ID` env var, which `deploy.sh`
+pins with `az account set` so a deploy cannot land in the wrong sub), Bicep (bundled with recent
+CLI), and `jq` (reads `baseName` from the param file).
 
 **Deploy infra:**
 ```bash
@@ -2106,42 +2293,46 @@ file).
 ./scripts/deploy.sh dev              # deploy dev
 ./scripts/deploy.sh prod             # deploy prod
 ```
-`deploy.sh` creates the RG (`rg-<event>hub-<env>`) and deploys `main.bicep`. It asks for the SQL
-admin password (supply via `ELDK_SQL_ADMIN_PASSWORD` env var or let it prompt — never written to a
-file or committed). On success it prints the outputs (web app hostname, Functions app name, KV name,
-SQL FQDN, blob endpoint). Bicep deployments are **incremental** — re-run after any Bicep change;
-`--whatif` first.
+`deploy.sh` creates the RG (`rg-<baseName>-<env>`, where `baseName` comes from the per-env parameter
+file — `communityhub` in the public template) and deploys `main.bicep`. **No SQL admin password is
+needed**: the SQL server is Azure-AD-only and the web + Functions apps authenticate to it via their
+managed identities (passwordless), so `main.bicep` takes no `sqlAdminPassword` and nothing is
+prompted. On success it prints the outputs (web app hostname, Functions app name, KV name, SQL FQDN,
+blob endpoint). Bicep deployments are **incremental** — re-run after any Bicep change; `--whatif`
+first.
 
 **Post-deploy steps the Bicep deliberately leaves:**
 1. **Store secret values** — `./scripts/set-secrets.sh <env>` prompts for each secret and writes it
    straight to Key Vault (the Bicep provisions the vault but stores no values). Skip any unused
    integration (leave blank; keep its `enabled` flag false).
 2. **Bind the custom domain** — not in Bicep on purpose (needs a verified DNS record first). Create
-   a CNAME in zone `your-domain.example` (`dev.eldk27.eventhub` / `eldk27.eventhub` → the deploy's
+   a CNAME in your DNS zone (`dev.hub.your-event.example` / `hub.your-event.example` → the deploy's
    `webAppHostname`.azurewebsites.net), wait for propagation, then:
    ```bash
-   az webapp config hostname add --resource-group rg-<event>hub-<env> --webapp-name <webAppName> --hostname <customDomain>
-   az webapp config ssl create   --resource-group rg-<event>hub-<env> --name        <webAppName> --hostname <customDomain>
+   az webapp config hostname add --resource-group rg-<baseName>-<env> --webapp-name <webAppName> --hostname <customDomain>
+   az webapp config ssl create   --resource-group rg-<baseName>-<env> --name        <webAppName> --hostname <customDomain>
    ```
-   Both envs use App Service managed certs (auto-renew unless CNAME/TXT verification breaks). Next
-   edition (ELDK28): add `hub.yournextevent.example` / `dev.…` the same way, pointing at
-   the **same** prod/dev web apps — no redeploy.
+   Both envs use App Service managed certs (auto-renew unless CNAME/TXT verification breaks). A next
+   edition adds `hub.yournextevent.example` / `dev.…` the same way, pointing at the **same** prod/dev
+   web apps — no redeploy.
 3. **Deploy the application code** — publish + zip + deploy web and jobs:
    ```bash
    dotnet publish src/CommunityHub/CommunityHub.csproj           -c Release -o publish-out/web
    dotnet publish src/CommunityHub.Jobs/CommunityHub.Jobs.csproj -c Release -o publish-out/jobs
    # Compress-Archive each to web.zip / jobs.zip, then:
-   az webapp deploy                            -g rg-<event>hub-<env> -n <webApp> --src-path publish-out/web.zip --type zip
-   az functionapp deployment source config-zip -g rg-<event>hub-<env> -n <fnApp>  --src publish-out/jobs.zip
+   az webapp deploy                            -g rg-<baseName>-<env> -n <webApp> --src-path publish-out/web.zip --type zip
+   az functionapp deployment source config-zip -g rg-<baseName>-<env> -n <fnApp>  --src publish-out/jobs.zip
    ```
-4. **Run EF migrations** against the env's SQL (temporarily add the deploy machine IP to the SQL
-   firewall, run `dotnet ef database update`, then remove the rule).
+   (`tools/deploy-app.ps1 -Env <env>` wraps these build → zip → deploy → health-check steps.)
+4. **Run EF migrations** against the env's SQL — `dotnet ef database update`. The SQL server is
+   Azure-AD-only, so authenticate as an Entra principal that is a database user (no SQL login); if a
+   firewall rule is needed for your client IP, add it temporarily and remove it afterwards.
 5. **Seed** the env's Event row.
 
 **Zero-downtime prod:** S1 plan + a staging slot — deploy to the slot, warm it up, then swap. A bad
 deploy is rolled back by swapping the slot back.
 
-**Tear down:** `az group delete --name rg-<event>hub-<env> --yes` (KV is recoverable for 90 days via
+**Tear down:** `az group delete --name rg-<baseName>-<env> --yes` (KV is recoverable for 90 days via
 soft-delete/purge protection).
 
 ---
@@ -2271,15 +2462,19 @@ real dashboards or get counted as real attendees.
 ### 14a. Data parity tool — `tools/Sync-CehParity.ps1`
 
 A re-runnable, env-targeted tool brings any environment's **data** to the same shape from a single
-source of truth, `scripts/seed-eldk27.sql`. The seed is the canonical definition of dev≡prod data:
+source of truth, an edition seed SQL script (e.g. `scripts/seed-<edition>.sql`). The seed is the
+canonical definition of dev≡prod data:
 
-- the **ELDK27 `Event`** row,
-- the **four real organizers** (`mok` / `mb` / `kea` / `mlh` `@expertslive.dk`), tagged
+- the active **`Event`** row,
+- the **real organizer** rows (your own organizer addresses), tagged
   `IsTestUser = 0` — real participants, never removed,
 - the seeded **sponsor + speaker sample tasks** (idempotent `SourceKey`s),
-- the **role-coverage test users** — Speaker (`mok@mortenknudsen.net`), Volunteer
-  (`mortenknudsen1974@gmail.com`), Sponsor (`mok@2linkit.net`), Attendee (`attendee@example.com`),
+- the **role-coverage test users** — one per role (Speaker, Volunteer, Sponsor, Attendee), e.g.
+  `speaker@example.com` / `volunteer@example.com` / `sponsor@example.com` / `attendee@example.com`,
   plus one example masterclass speaker — all tagged `IsTestUser = 1`.
+
+> The real organizer and seed addresses live only in your private, gitignored edition seed script —
+> never in the published template. Use placeholder `@example.com` addresses in any committed sample.
 
 `IsTestUser` (a `bit` column on `Participant`, default `false`) is what makes prod-vs-test state
 distinguishable and reconciles the "don't seed prod test data" rule with keeping the role-coverage
@@ -2306,9 +2501,9 @@ string. Keep dev↔prod schema in sync by applying this migration to both enviro
 - **Telemetry / logs** — Application Insights (named in the deploy outputs) collects requests,
   exceptions, and job run history. The reminder job is idempotent — it re-evaluates what is due and
   not-yet-sent each run, so a missed run self-heals on the next.
-- **Inspect what's deployed** — `az resource list --resource-group rg-<event>hub-<env> --output table`.
+- **Inspect what's deployed** — `az resource list --resource-group rg-<baseName>-<env> --output table`.
 - **Redeploy after a Bicep change** — `./scripts/deploy.sh <env>` (incremental; `--whatif` first).
-- **Tear down an environment** — `az group delete --name rg-<event>hub-<env> --yes` (KV recoverable
+- **Tear down an environment** — `az group delete --name rg-<baseName>-<env> --yes` (KV recoverable
   90 days).
 - **Rotate compromised secrets** — any credential ever shared in PowerShell scripts/exports is
   compromised; rotate (re-issue) and store only the rotated value via `set-secrets.sh`. Never commit
@@ -2383,7 +2578,7 @@ The legacy webhook surface is served **twice** today — pick one to keep during
 
 | Path | What it is | Trigger surface | Notes |
 |---|---|---|---|
-| **VisualCron (self-hosted)** | A VisualCron instance on the automation VM hosts the scheduled syncs **and** HTTP/REST trigger jobs in the job group `EXPERTS LIVE DENMARK AUTOMATION`. | HTTP/REST triggers on local ports (e.g. 9992–9994) fronted by an Azure **Application Gateway** at the custom domain `webhook.automation.expertslive.dk`. | A watchdog (`MonitorFix-Webhook-Is-Active.ps1`) logs into the VisualCron JSON API, reactivates inactive HTTP triggers, and watches for `CLOSE_WAIT` socket leaks (alerts past a threshold rather than self-restarting). |
+| **VisualCron (self-hosted)** | A VisualCron instance on the automation VM hosts the scheduled syncs **and** HTTP/REST trigger jobs in a dedicated event-automation job group. | HTTP/REST triggers on local ports (e.g. 9992–9994) fronted by an Azure **Application Gateway** at the custom domain `webhook.automation.your-event.example`. | A watchdog (`MonitorFix-Webhook-Is-Active.ps1`) logs into the VisualCron JSON API, reactivates inactive HTTP triggers, and watches for `CLOSE_WAIT` socket leaks (alerts past a threshold rather than self-restarting). |
 | **Azure Function** (`func-eldk-webhook`) | A PowerShell-worker Function App that re-implements the same webhook endpoints. | HTTP triggers, `authLevel: anonymous`, fronted by App Gateway (the `health-probe` exists so the gateway can mark the backend healthy). | Secrets are read from **App Settings** (env vars) in `profile.ps1` — not from the legacy `Secrets.psm1`. This is the cleaner of the two and the natural keep-candidate. |
 
 ### 18.2 Webhook endpoints (Azure Function)
@@ -2395,7 +2590,7 @@ The legacy webhook surface is served **twice** today — pick one to keep during
 | `webshop/syncorders` | POST | `webhook-syncorders` | Idempotent order→invoice: resolves the order's Company Manager company → e-conomic customer, builds invoice lines (EUR with per-currency conversion), and creates an e-conomic **draft** invoice (`references.other = WebshopOrderId-<num>`); skips legacy (no `_cm_company_id`) and already-invoiced orders; Brevo success/failure email. Ported from the VM batch script during consolidation. |
 | `health` | GET | `health-probe` | Returns `200 OK` for App Gateway health checks. |
 
-Public custom domain: `https://webhook.automation.expertslive.dk/...` → App Gateway → backend (Function
+Public custom domain: `https://webhook.automation.your-event.example/...` → App Gateway → backend (Function
 App or VisualCron listener). The Function App's direct host is a generated `*.azurewebsites.net` name in
 **West Europe**.
 
@@ -2407,7 +2602,7 @@ App or VisualCron listener). The Function App's direct host is a generated `*.az
   `Status` (list registered functions), `Test` (exercise the 3 endpoints), and `Logs` (stream Kudu
   logstream). Source layout: `host.json`, `profile.ps1`, `requirements.psd1` (intentionally empty —
   built-in cmdlets only), and one folder per function with `function.json` + `run.ps1`.
-- **Hosting:** Function App in resource group `rg-eldk-automation`, West Europe; Application Insights
+- **Hosting:** Function App in a dedicated automation resource group (e.g. `rg-<event>-automation`), West Europe; Application Insights
   sampling enabled (excludes `Request`). Extension bundle `[4.*, 5.0.0)`.
 - **VisualCron deploy:** jobs are maintained in the VisualCron UI on the VM (no source-controlled export
   found in the tree); the watchdog script and the timer-style sync scripts live on the VM and are invoked
@@ -2434,7 +2629,7 @@ added to the inventory below:
 
 The watchdog's inline VisualCron password and the duplicated Zoho client-secret in
 `Get_Zoho_Access_Token.ps1` are removed and read from KV. The vault name is **operator config**
-(`$env:ELDK_KEYVAULT_NAME`), not a secret. **Rotation of the real values remains an operator step** (treat
+(an operator-set env var such as `$env:CEH_KEYVAULT_NAME`), not a secret. **Rotation of the real values remains an operator step** (treat
 all previously-plaintext values as compromised).
 
 ### 18.5 Trigger-model decision: consolidate on the Azure Function
@@ -2456,7 +2651,7 @@ VisualCron HTTP/REST triggers over time.** Rationale:
   **timer triggers** or remain VM cron until migrated.
 
 **Current state (unchanged here):** VisualCron and the Function App still run **in parallel** behind the App
-Gateway at `webhook.automation.expertslive.dk`. This PR does not flip the gateway backend or delete any
+Gateway at `webhook.automation.your-event.example`. This PR does not flip the gateway backend or delete any
 VisualCron job — that is an operator cutover step (REQUIREMENTS §7b). The watchdog and the consolidated
 `Sync-*` scripts are kept in the tree so the current VM state stays operable until the cutover happens.
 

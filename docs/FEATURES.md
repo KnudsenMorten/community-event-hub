@@ -19,6 +19,9 @@ Hosting & Reliability.
 
 ## 1. Platform — built for every edition
 
+![The public front door — event details, programme and a no-login sign-in, the same generic platform behind every edition](img/public-landing.png)
+*The public front door of an edition: event details, programme and a sign-in, with no login required. A new edition is a new configuration row, not a new build.*
+
 - **One hub, every year, every community.** The same platform powers each edition
   and each community event. Launching a new edition is a matter of configuration —
   a new event and its settings — never a rebuild. The year lives only in your web
@@ -139,6 +142,12 @@ volunteer — so the organizing team isn't the single point of contact for every
 Every volunteer gets a single mobile-first page that answers "what am I doing, and
 when?" at a glance — built for someone standing at the venue with their phone.
 
+| Volunteer "My schedule" | …on a phone |
+|---|---|
+| [![Volunteer My schedule with shifts and calendar subscribe](img/volunteer-schedule.png)](img/volunteer-schedule.png) | [![Volunteer My schedule on mobile](img/volunteer-schedule-mobile.png)](img/volunteer-schedule-mobile.png) |
+
+*A volunteer's whole day in one place — shifts time-ordered, who to ask, and one-tap calendar subscribe — and the same view on a phone at the venue.*
+
 - **All your shifts and tasks, time-ordered.** One page lists every task you're
   assigned to across all areas, sorted so dated work comes first (earliest first),
   then by shift window, with undated work last — no hunting through category groups.
@@ -258,6 +267,13 @@ place each person in the right one, then manage the room block per hotel.
 - **Organizer-defined hotels.** A simple management page to add, edit and remove the
   hotels for the edition — each with a name, address and a contact email for the
   reception/booking desk.
+- **Tidy several hotels at once.** *(✅ 2026-06-17)* As well as deleting one hotel at a
+  time, organizers can tick several and remove them in one go. A clear confirmation
+  box names exactly **how many hotels** are about to be deleted before anything
+  happens, and anyone currently placed in a removed hotel is **automatically
+  un-assigned** (their participant record is kept, just no longer pointing at the
+  now-gone hotel) — so a mis-imported or duplicated room block is quick to clean up
+  without losing anyone.
 - **Assign each person to a hotel.** From the hotel-assignments page, an organizer
   picks which hotel each participant stays in (or leaves them unassigned), in one
   click per person.
@@ -328,6 +344,14 @@ follow-up automatically.
   vegan") instead of a pile of notes. Day-catering (collected on the speaker form)
   and the Appreciation Dinner are tracked separately. Mobile-first and accessible
   (the allergen group is a labelled fieldset).
+- **Ask for a change after the deadline (✅ 2026-06-17).** Once the change deadline
+  passes, the forms become read-only — but that's no longer a dead end. A locked
+  form now shows a **"Request a change"** link that opens a short page where you
+  describe what needs updating (for example "my arrival moved to the 8th, please
+  change my check-in"). Your request goes straight to the organizers' to-do list, and
+  the page shows you which of your requests are still pending so you don't have to ask
+  twice. No more emailing around to fix a detail after the cut-off. Mobile-first,
+  available in English and Danish, and accessible.
 
 ## 5. Tasks & reminders — nothing slips, no inbox spam
 
@@ -355,6 +379,12 @@ follow-up automatically.
   a one-tap "Mark done" / "Reopen", a clear "next up" summary, and a quick link to
   finish their speaker details and travel claim — so a speaker always knows exactly
   where they stand without digging through the generic task list. *(✅ 2026-06-14)*
+
+  | Speaker hub | …on a phone |
+  |---|---|
+  | [![Speaker hub milestone tracker](img/speaker-hub.png)](img/speaker-hub.png) | [![Speaker hub on mobile](img/speaker-hub-mobile.png)](img/speaker-hub-mobile.png) |
+
+  *The speaker hub turns deadlines into a progress tracker with live countdowns, "My sessions" and a public-profile preview — mobile-first, the same on a phone.*
 - **"My sessions", right on the speaker hub.** The hub now shows each session a
   speaker is presenting — title, day and time, room (or a clear "to be scheduled" /
   "room to be assigned" when the grid isn't published yet), any co-speakers, a
@@ -362,6 +392,14 @@ follow-up automatically.
   for that session (with an open-question count), and — once they're announced — a
   link to their public session page. Speakers see exactly how and where they
   present without asking an organizer. *(✅ 2026-06-16)*
+- **See how your sessions were rated.** A speaker now has a self-service "My session
+  ratings" page: for each of their own sessions it shows how attendees rated it
+  (the quick 1–5 smiley score they leave via the room QR code), the average and
+  number of ratings, and every anonymous written comment — newest first — plus an
+  overall score across all their sessions. Speakers no longer have to wait for an
+  organizer to forward the results; they can check the feedback for their own talks
+  whenever they like. The comments are anonymous and a speaker only ever sees their
+  own sessions. *(✅ 2026-06-17)*
 - **Preview your public profile.** From the hub a speaker can preview their public
   speaker page exactly as attendees will see it — the moment the organizers select
   them for the line-up. Until then the hub explains the preview unlocks at
@@ -401,6 +439,12 @@ follow-up automatically.
   *(✅ 2026-06-15)*
 
 ## 6. Sessions & surveys — from call-for-speakers to the schedule
+
+| Public speaker line-up | Public session detail |
+|---|---|
+| [![Public speakers page](img/public-speakers.png)](img/public-speakers.png) | [![Public session detail](img/public-session-detail.png)](img/public-session-detail.png) |
+
+*The public, no-login programme: only published speakers appear (each links to their sessions), and every talk has a shareable detail page with "Add to my calendar" and "ask the speaker".*
 
 - **Pull your speakers straight from Sessionize.** Connect a Sessionize API
   endpoint and the hub pulls the **accepted**-speaker list automatically — nightly,
@@ -463,6 +507,16 @@ follow-up automatically.
   speaker links (nothing is left orphaned). If the session came from Sessionize you're
   reminded that a future import will bring it back unless it's removed there too.
   *(✅ 2026-06-16)*
+- **Remove someone from the speaker roster — safely, without deleting the person.**
+  On the speakers admin, each speaker has a **Remove from speakers** action (single,
+  behind a confirmation dialog, or in bulk for a ticked selection). It removes the
+  **speaker profile** — bio, photo, accreditation, publish flag — so the person is no
+  longer a speaker, while **keeping them as a participant** (their login, hotel,
+  travel and everything else are untouched). It is safe by design: a speaker who is
+  **still linked to a session on the agenda is protected** and won't be removed — you
+  unlink the session(s) first, so the running order is never silently orphaned. The
+  bulk action reports honestly how many were removed and how many were kept because
+  they're still on the agenda. *(✅ 2026-06-17)*
 - **Type and length on every session.** Each session carries a **type** (Community
   Master Class, Community Tech Session, or Sponsor Session) and a **length** (full
   day, 20, 50 or 60 minutes). Imported sessions get a sensible default (length from
@@ -543,6 +597,17 @@ follow-up automatically.
   - **Spam-resistant by design.** The public form carries a honeypot and a soft
     per-IP rate-limit (same approach as the public survey), so bots and floods are
     quietly dropped without bothering real attendees. *(✅ 2026-06-15)*
+  - **Speakers are told when new questions arrive — no need to keep checking.**
+    When attendees send in new questions for a speaker's session(s), the hub emails
+    that speaker a short digest ("you have N open questions across M of your
+    sessions") with one button straight to the page where they read and answer them.
+    It is sent on the hub's normal daily schedule, only counts **open** (unanswered)
+    questions, and is **smart about repeats**: a digest only goes out again once a
+    genuinely new question arrives — answering or closing questions never triggers a
+    re-send, so a speaker is never spammed about the same questions twice. Their own
+    Questions page also shows a live "N open questions awaiting your reply" line and a
+    note that the digest will reach them. Co-speakers on a shared session each get
+    their own digest. *(✅ 2026-06-17)*
 - **Or import from a spreadsheet.** Prefer files? Upload your Sessionize Excel export
   instead and the hub reads the columns in any order, with the same create/update
   rules and skip reporting. No network dependency — just the file. *(Speakers only;
@@ -612,6 +677,12 @@ follow-up automatically.
 
 ## 7. Sponsors — managed as companies, with the right tasks
 
+| Public sponsors page | Sponsor portal |
+|---|---|
+| [![Public sponsors page](img/public-sponsors.png)](img/public-sponsors.png) | [![Sponsor portal](img/sponsor-portal.png)](img/sponsor-portal.png) |
+
+*Sponsors grouped by tier on the public page (with an initials badge when no logo is uploaded), and the signed-in sponsor portal: profile, booth, deliverables checklist, leads and order status — one company's view.*
+
 - **A sponsor is a company, not a single contact.** Every contact at a sponsor
   company sees that company's shared tasks, so nothing depends on one person.
 - **Your company directory stays the source of truth.** Company and contact details,
@@ -625,6 +696,22 @@ follow-up automatically.
   company name**, and an optional **link to their website**. When a company hasn't
   uploaded a logo yet, a tidy initials badge stands in. Read-only and mobile-first,
   with a friendly empty state before sponsors are announced. *(✅ 2026-06-15)*
+- **A real "become a sponsor" call-to-action.** *(✅ 2026-06-17)* The public sponsors
+  page now offers a prospective sponsor a clear way to reach out — a prominent
+  **"Contact us about sponsoring"** button that opens either a pre-filled email (with
+  the event name already in the subject) or your hosted sponsorship page/form,
+  whichever you've set. It shows in **both** the "sponsors coming soon" state and the
+  populated page, and if you haven't set a sponsorship contact it simply doesn't
+  appear (no dead button). Mobile-first and available in English and Danish.
+- **Clean up stale sponsor entries — safely.** Sometimes a booth order is processed
+  under a wrong or later-changed company id, leaving an **orphaned company card**
+  (logo, description, website, tier) on the public sponsors page even though no one
+  from that company is in the edition any more. The sponsors admin now lists these
+  **stale company facts** (only the rows whose company has **no active contact**) and
+  lets an organizer delete them behind a confirmation dialog, so they stop showing
+  publicly. It is safe by design: the facts of a **live** sponsor — one that still has
+  an active contact — are protected and can't be deleted from here (handle the
+  contacts first). *(✅ 2026-06-17)*
 - **Booth tasks generated from what each sponsor bought.** Each booth product is
   recognized automatically and turned into the right set of tasks — shared booth
   basics plus the extras that come with each tier (Platinum / Diamond / Gold) — so
@@ -710,6 +797,12 @@ follow-up automatically.
   unmistakable test entries are auto-flagged as junk — operators stay in control.
 
 ## 9. Attendees & masterclass reconciliation — one clear picture
+
+| Attendee "My Event" | …on a phone |
+|---|---|
+| [![Attendee My Event hub](img/attendee-my-event.png)](img/attendee-my-event.png) | [![Attendee My Event on mobile](img/attendee-my-event-mobile.png)](img/attendee-my-event-mobile.png) |
+
+*The attendee hub: a live countdown, ticket and Master Class status, a personal agenda and self check-in — built phone-first for the person walking up to the venue.*
 
 - **Tickets and masterclass seats reconciled automatically.** The hub compares
   two-day tickets against masterclass bookings and surfaces the mismatches — no
@@ -818,6 +911,12 @@ follow-up automatically.
 
 ## 11. Organizer hub — run the whole event from one place
 
+| Command center | Live dashboard |
+|---|---|
+| [![Organizer command center](img/organizer-command-center.png)](img/organizer-command-center.png) | [![Organizer dashboard](img/organizer-dashboard.png)](img/organizer-dashboard.png) |
+
+*"Is the event on track, what do I do next?" — the command center triages the whole event with every number a link into the matching list; the live dashboard shows form completion, participants by role, tasks, sponsor and volunteer coverage at a glance.*
+
 - **A clearer menu that fits your role.** *(✅ 2026-06-15)* The top menu is now two
   clearly separated groups instead of one long mixed list. Everyone sees a tidy
   **"My event"** bar — Home, My profile, My tasks, Resources, and just the forms that
@@ -850,6 +949,26 @@ follow-up automatically.
   tasks, unassigned volunteer tasks, open help requests and pending volunteer
   applications. Pure aggregation over existing data: it changes nothing.
   Mobile-first and screen-reader friendly. *(✅ 2026-06-15)*
+- **Download "who hasn't onboarded yet" as a chase-list.** *(✅ 2026-06-17)* The
+  onboarding dashboard now has a one-click **CSV export** of everyone still working
+  through onboarding — anyone who hasn't finished every step their role needs. Each
+  row carries the person's name and email, where they are (pre-selected / invited /
+  in-progress), how far along they are, and — most usefully — **exactly which steps
+  they're still missing** (bio, photo, hotel, appreciation, swag), so you can follow
+  up with the right ask. The export honours the dashboard's **persona filter** (export
+  just the speakers, just the volunteers, …) and opens cleanly in Excel, with Danish
+  names intact. Read-only — it never changes anyone's data. Mobile-first, in English
+  and Danish.
+- **Re-open one onboarding step for a whole group at once.** *(✅ 2026-06-17)* When
+  something changes for everyone — a hotel-booking deadline moves, the swag order
+  re-opens — you no longer have to re-open that step person by person. Filter the
+  onboarding dashboard to a group (speakers, volunteers, …), pick the step, and
+  **re-open it for everyone in that group who had already completed it** in a single
+  action. Each affected person is automatically queued a reminder to do that step
+  again, exactly like the per-person re-open. The action only touches people who
+  actually finished the step and whose role needs it (nobody else is disturbed), it
+  tells you honestly how many were re-opened (or that nobody had it done), and you
+  confirm before it runs. Mobile-first, in English and Danish.
 - **A command-center landing — "is the event on track, what do I do next?"**
   The prominent **Command center** in your menu opens one screen that triages the
   whole event for you: how many people registered (and how many are active),
@@ -920,6 +1039,26 @@ follow-up automatically.
   deactivate, reactivate, or change their role in one action instead of one row at a
   time. Every bulk action stays inside your own event, is safe to re-run (already-in-state
   rows are skipped, not double-applied), and reports exactly how many actually changed.
+- **Bulk session clean-up.** *(✅ 2026-06-16)* Tick several sessions on the Sessions
+  grid and **delete them in one action** instead of one row at a time — ideal for
+  clearing duplicates after an import. The same safety as the single-row delete applies
+  to every row: a session that has **attendee data** (questions, evaluations or
+  master-class bookings) is **protected** — it can't even be ticked, and the result
+  banner tells you how many were kept. Clean sessions are removed together with their
+  speaker links; if any deleted session came from Sessionize you're reminded a
+  re-import will bring it back. A confirm dialog shows the live count before anything
+  is deleted, and the whole batch commits together. Mobile-first, English / Danish,
+  screen-reader friendly.
+- **Bulk volunteer-task actions.** *(✅ 2026-06-16)* When building the volunteer work
+  structure (Category → Subcategory → Task), tick **any tasks across the whole tree**
+  and either **set their status** (Open / In progress / Done / Cancelled) or **delete**
+  them in one action — so an organizer planning a rota of dozens of tasks doesn't edit
+  one row at a time. Status changes are safe to re-run (a task already in that status is
+  skipped) and report exactly how many changed; a bulk delete removes the clean tasks
+  with their volunteer assignments, while any task that already has **help-request
+  history** is **kept** (so coordination history is never lost) and counted in the
+  result. A confirm dialog shows the live count, and the batch commits together.
+  Mobile-first, English / Danish, accessible.
 - **Act as a participant — see and do their part.** *(✅ 2026-06-15)* From the
   Participants grid an organizer can **"Switch to user"** to **switch INTO** that
   person — they land on the user's **own hub home** and navigate the **whole app**
@@ -1006,6 +1145,17 @@ follow-up automatically.
   now a **link straight to that company's people** on the Participants grid (its sponsor contacts,
   pre-filtered), so you can jump from "who is this sponsor" to "show me their contacts" in one click.
   Mobile-first, keyboard-accessible, English / Danish.
+- **A data-freshness panel — see at a glance whether every sync is still running.** *(✅ 2026-06-17)*
+  A new **Data freshness** page (under the Logistics tools) answers a question that is otherwise easy
+  to miss until it bites: *is each data source still being fed, or has a sync quietly stopped?* It
+  lists each major source — outbound email, attendee sync, master-class bookings, sponsor leads,
+  speaker and session imports, attendee questions, session ratings and social-media posts — and for
+  each shows **when it last produced data**, **how long ago that was**, and a clear state: **up to
+  date**, **looks stale** (it has gone quieter than expected for that source, so it is worth a check),
+  or **no data yet** (a brand-new edition does not light up red). A summary banner at the top tells you
+  in one line whether everything is current or how many sources look stale. It is read-only — it
+  reports what already happened and never sends or changes anything. Mobile-first, keyboard-accessible,
+  English / Danish.
 
 ## 12. Hosting & reliability — production-grade by design
 
@@ -1161,8 +1311,8 @@ it's approved.
 - **Speakers share in their own context.** On a **"My share graphics"** page, speakers see their
   released graphics and can **download the PNG** or open a **ready-to-edit draft on LinkedIn or
   X** — they review and post it themselves; the hub never posts on anyone's behalf.
-- **"I'm speaking at ELDK27" button.** One click builds a **LinkedIn draft** with the event
-  dates and the ticket link (`eldk27.expertslive.dk`) and the speaker's session — the speaker
+- **"I'm speaking at &lt;event&gt;" button.** One click builds a **LinkedIn draft** with the event
+  dates, the ticket link (the edition's public event URL) and the speaker's session — the speaker
   finalizes the wording and posts when ready.
 - **Pictures are kept, not just linked.** When a speaker picture comes in (e.g. from the speaker
   import), the hub **downloads the image and stores it** in the shared file store, rather than

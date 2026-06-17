@@ -283,6 +283,98 @@ public sealed class LocalizationResourcesTests
     }
 
     [Fact]
+    public void Sessions_bulk_delete_keys_resolve_in_both_cultures()
+    {
+        // §20 universal CRUD + bulk — the Sessions grid bulk-delete bar + confirm
+        // modal strings. Each must resolve in the default resx AND differ between
+        // English and Danish (proves the da-DK satellite carries them, not a silent
+        // English fallback).
+        var loc = MakeLocalizer();
+        var keys = new[]
+        {
+            "Sessions.BulkDelete", "Sessions.BulkDeleteHint",
+            "Sessions.BulkDeleteConfirmTitle",
+        };
+
+        foreach (var key in keys)
+        {
+            var en = WithCulture("en", () => loc[key].Value);
+            var da = WithCulture("da-DK", () => loc[key].Value);
+            Assert.False(loc[key].ResourceNotFound, $"{key} missing from default resx.");
+            Assert.False(string.IsNullOrWhiteSpace(en), $"{key} has an empty English value.");
+            Assert.False(string.IsNullOrWhiteSpace(da), $"{key} has an empty Danish value.");
+            Assert.NotEqual(en, da);
+        }
+
+        // The confirm body carries a {0} count placeholder in both cultures.
+        foreach (var culture in SupportedCultures)
+        {
+            Assert.Contains("{0}", WithCulture(culture, () => loc["Sessions.BulkDeleteConfirmBody"].Value));
+        }
+    }
+
+    [Fact]
+    public void Speaker_remove_keys_resolve_in_both_cultures()
+    {
+        // §22 "Speakers delete": the per-row + bulk remove-from-speakers labels,
+        // the "still on the agenda" note, and the confirm-modal titles/bodies. Each
+        // must resolve in the default resx AND differ between English and Danish
+        // (proves the da-DK satellite carries them, not a silent English fallback).
+        var loc = MakeLocalizer();
+        var keys = new[]
+        {
+            "Speakers.Remove", "Speakers.OnAgenda",
+            "Speakers.RemoveConfirmTitle", "Speakers.RemoveConfirmBody",
+            "Speakers.BulkRemove", "Speakers.BulkRemoveHint",
+            "Speakers.BulkRemoveConfirmTitle",
+        };
+
+        foreach (var key in keys)
+        {
+            var en = WithCulture("en", () => loc[key].Value);
+            var da = WithCulture("da-DK", () => loc[key].Value);
+            Assert.False(loc[key].ResourceNotFound, $"{key} missing from default resx.");
+            Assert.False(string.IsNullOrWhiteSpace(en), $"{key} has an empty English value.");
+            Assert.False(string.IsNullOrWhiteSpace(da), $"{key} has an empty Danish value.");
+            Assert.NotEqual(en, da);
+        }
+
+        // The bulk confirm body carries a {0} count placeholder in both cultures.
+        foreach (var culture in SupportedCultures)
+        {
+            Assert.Contains("{0}",
+                WithCulture(culture, () => loc["Speakers.BulkRemoveConfirmBody"].Value));
+        }
+    }
+
+    [Fact]
+    public void Sponsor_facts_delete_keys_resolve_in_both_cultures()
+    {
+        // §22 "Sponsor contacts / facts CRUD gap": the stale company-facts section
+        // heading/intro, the column headers, the delete label, and the confirm-modal
+        // title/body. Each must resolve in the default resx AND differ between
+        // English and Danish (proves the da-DK satellite carries them).
+        var loc = MakeLocalizer();
+        var keys = new[]
+        {
+            "SponsorFacts.OrphanHeading", "SponsorFacts.OrphanIntro",
+            "SponsorFacts.ColCompany", "SponsorFacts.ColShortDesc",
+            "SponsorFacts.Delete", "SponsorFacts.DeleteConfirmTitle",
+            "SponsorFacts.DeleteConfirmBody",
+        };
+
+        foreach (var key in keys)
+        {
+            var en = WithCulture("en", () => loc[key].Value);
+            var da = WithCulture("da-DK", () => loc[key].Value);
+            Assert.False(loc[key].ResourceNotFound, $"{key} missing from default resx.");
+            Assert.False(string.IsNullOrWhiteSpace(en), $"{key} has an empty English value.");
+            Assert.False(string.IsNullOrWhiteSpace(da), $"{key} has an empty Danish value.");
+            Assert.NotEqual(en, da);
+        }
+    }
+
+    [Fact]
     public void Organizer_nav_section_heading_keys_resolve_in_both_cultures()
     {
         // REQUIREMENTS §21 "Group the organizer nav": the six collapsible
@@ -497,6 +589,104 @@ public sealed class LocalizationResourcesTests
     }
 
     [Fact]
+    public void Onboarding_pending_export_keys_resolve_in_both_cultures()
+    {
+        // §21 organizer "Onboarding: 'who hasn't onboarded' export": the export card
+        // heading / intro / download labels on the Onboarding dashboard. Each must
+        // resolve in the default resx AND differ between English and Danish (proves
+        // the da-DK satellite carries them, not a silent English fallback).
+        var loc = MakeLocalizer();
+        var keys = new[]
+        {
+            "OnbExport.Heading", "OnbExport.Intro", "OnbExport.PendingCount",
+            "OnbExport.Download", "OnbExport.DownloadAria",
+        };
+
+        foreach (var key in keys)
+        {
+            var en = WithCulture("en", () => loc[key].Value);
+            var da = WithCulture("da-DK", () => loc[key].Value);
+            Assert.False(loc[key].ResourceNotFound, $"{key} missing from default resx.");
+            Assert.False(string.IsNullOrWhiteSpace(en), $"{key} has an empty English value.");
+            Assert.False(string.IsNullOrWhiteSpace(da), $"{key} has an empty Danish value.");
+            Assert.NotEqual(en, da);
+        }
+
+        // The pending-count line carries a {0} placeholder in both cultures.
+        foreach (var culture in SupportedCultures)
+        {
+            Assert.Contains("{0}", WithCulture(culture, () => loc["OnbExport.PendingCount"].Value));
+        }
+    }
+
+    [Fact]
+    public void Onboarding_reopen_persona_keys_resolve_in_both_cultures()
+    {
+        // §21 organizer "Onboarding: re-open-all-per-persona": the bulk re-open
+        // card heading / intro / step-label / submit + confirm strings on the
+        // Onboarding dashboard. Each must resolve in the default resx AND differ
+        // between English and Danish (proves the da-DK satellite carries them,
+        // not a silent English fallback).
+        var loc = MakeLocalizer();
+        var keys = new[]
+        {
+            "OnbReopen.Heading", "OnbReopen.Intro", "OnbReopen.StepLabel",
+            "OnbReopen.Submit", "OnbReopen.SubmitAria", "OnbReopen.Confirm",
+        };
+
+        foreach (var key in keys)
+        {
+            var en = WithCulture("en", () => loc[key].Value);
+            var da = WithCulture("da-DK", () => loc[key].Value);
+            Assert.False(loc[key].ResourceNotFound, $"{key} missing from default resx.");
+            Assert.False(string.IsNullOrWhiteSpace(en), $"{key} has an empty English value.");
+            Assert.False(string.IsNullOrWhiteSpace(da), $"{key} has an empty Danish value.");
+            Assert.NotEqual(en, da);
+        }
+
+        // The intro + confirm lines carry a {0} persona placeholder in both cultures.
+        foreach (var culture in SupportedCultures)
+        {
+            Assert.Contains("{0}", WithCulture(culture, () => loc["OnbReopen.Intro"].Value));
+            Assert.Contains("{0}", WithCulture(culture, () => loc["OnbReopen.Confirm"].Value));
+        }
+    }
+
+    [Fact]
+    public void Request_change_keys_resolve_in_both_cultures()
+    {
+        // §21 Participant "request-change path once a form is deadline-locked":
+        // the /Forms/RequestChange page chrome + the per-locked-form link labels.
+        // Each must resolve in the default resx AND differ between English and
+        // Danish (proves the da-DK satellite carries them, not a silent fallback).
+        var loc = MakeLocalizer();
+        var keys = new[]
+        {
+            "ReqChange.Title", "ReqChange.MessagePlaceholder", "ReqChange.MessageHelp",
+            "ReqChange.Submit", "ReqChange.SentFlash", "ReqChange.OpenHeading",
+            "ReqChange.OpenIntro", "ReqChange.ErrEmpty", "ReqChange.ErrTooLong",
+            "ReqChange.ErrGeneric", "ReqChange.LockedPrompt", "ReqChange.LockedCta",
+        };
+
+        foreach (var key in keys)
+        {
+            var en = WithCulture("en", () => loc[key].Value);
+            var da = WithCulture("da-DK", () => loc[key].Value);
+            Assert.False(loc[key].ResourceNotFound, $"{key} missing from default resx.");
+            Assert.False(string.IsNullOrWhiteSpace(en), $"{key} has an empty English value.");
+            Assert.False(string.IsNullOrWhiteSpace(da), $"{key} has an empty Danish value.");
+            Assert.NotEqual(en, da);
+        }
+
+        // The intro + the two {0}-labels carry a topic placeholder in both cultures.
+        foreach (var culture in SupportedCultures)
+        {
+            Assert.Contains("{0}", WithCulture(culture, () => loc["ReqChange.Intro"].Value));
+            Assert.Contains("{0}", WithCulture(culture, () => loc["ReqChange.MessageLabel"].Value));
+        }
+    }
+
+    [Fact]
     public void Formatted_keys_substitute_their_argument_in_both_cultures()
     {
         // Keys that carry a {0} placeholder (status counts, dates, names) must keep
@@ -518,6 +708,192 @@ public sealed class LocalizationResourcesTests
                 var raw = WithCulture(culture, () => loc[key].Value);
                 Assert.Contains("{0}", raw);
             }
+        }
+    }
+
+    [Fact]
+    public void Hotels_bulk_delete_keys_resolve_in_both_cultures()
+    {
+        // §20 universal CRUD + bulk — the Hotels grid bulk-delete bar + confirm modal
+        // strings. Each must resolve in the default resx AND differ between English
+        // and Danish (proves the da-DK satellite carries them, not a silent fallback).
+        var loc = MakeLocalizer();
+        var keys = new[]
+        {
+            "OrgHotels.SelectRow", "OrgHotels.BulkDelete", "OrgHotels.BulkDeleteHint",
+            "OrgHotels.BulkDeleteConfirmTitle", "OrgHotels.BulkDeleteConfirmBody",
+        };
+
+        foreach (var key in keys)
+        {
+            var en = WithCulture("en", () => loc[key].Value);
+            var da = WithCulture("da-DK", () => loc[key].Value);
+            Assert.False(loc[key].ResourceNotFound, $"{key} missing from default resx.");
+            Assert.False(string.IsNullOrWhiteSpace(en), $"{key} has an empty English value.");
+            Assert.False(string.IsNullOrWhiteSpace(da), $"{key} has an empty Danish value.");
+            Assert.NotEqual(en, da);
+        }
+
+        // The select-row label + confirm body carry a {0} placeholder in both cultures.
+        foreach (var culture in SupportedCultures)
+        {
+            Assert.Contains("{0}", WithCulture(culture, () => loc["OrgHotels.SelectRow"].Value));
+            Assert.Contains("{0}", WithCulture(culture, () => loc["OrgHotels.BulkDeleteConfirmBody"].Value));
+        }
+    }
+
+    [Fact]
+    public void Speaker_question_digest_keys_resolve_in_both_cultures()
+    {
+        // §21 Participant "Speaker Q&A email digest on new questions" — the digest
+        // note + open-count summary surfaced on the speaker Questions page. Each
+        // must resolve in the default resx AND differ between English and Danish
+        // (proves the da-DK satellite carries them, not a silent English fallback).
+        var loc = MakeLocalizer();
+        var keys = new[]
+        {
+            "SpeakerQ.Title", "SpeakerQ.DigestNote",
+            "SpeakerQ.OpenCount", "SpeakerQ.AllAnswered",
+        };
+
+        foreach (var key in keys)
+        {
+            var en = WithCulture("en", () => loc[key].Value);
+            var da = WithCulture("da-DK", () => loc[key].Value);
+            Assert.False(loc[key].ResourceNotFound, $"{key} missing from default resx.");
+            Assert.False(string.IsNullOrWhiteSpace(en), $"{key} has an empty English value.");
+            Assert.False(string.IsNullOrWhiteSpace(da), $"{key} has an empty Danish value.");
+            Assert.NotEqual(en, da);
+        }
+
+        // The open-count line carries a {0} placeholder in both cultures.
+        foreach (var culture in SupportedCultures)
+        {
+            Assert.Contains("{0}", WithCulture(culture, () => loc["SpeakerQ.OpenCount"].Value));
+        }
+    }
+
+    [Fact]
+    public void Speaker_my_session_ratings_keys_resolve_in_both_cultures()
+    {
+        // §20 Speaker "My session ratings" — the self-service speaker page that
+        // surfaces the attendee evaluations (1–5 + anonymous comments) for the
+        // speaker's own sessions, plus its nav entry + Speaker-hub card. Each must
+        // resolve in the default resx AND differ between English and Danish (proves
+        // the da-DK satellite carries them, not a silent English fallback).
+        var loc = MakeLocalizer();
+        var keys = new[]
+        {
+            // Nav + Speaker-hub card
+            "Nav.SpeakerEvaluations",
+            "Speaker.RatingsHeading", "Speaker.RatingsIntro", "Speaker.RatingsCta",
+            // Page chrome + states
+            "SpeakerEval.Title", "SpeakerEval.Intro", "SpeakerEval.None",
+            "SpeakerEval.Overall", "SpeakerEval.NoRatings",
+            "SpeakerEval.SessionNone", "SpeakerEval.NoComments",
+        };
+
+        foreach (var key in keys)
+        {
+            var en = WithCulture("en", () => loc[key].Value);
+            var da = WithCulture("da-DK", () => loc[key].Value);
+            Assert.False(loc[key].ResourceNotFound, $"{key} missing from default resx.");
+            Assert.False(string.IsNullOrWhiteSpace(en), $"{key} has an empty English value.");
+            Assert.False(string.IsNullOrWhiteSpace(da), $"{key} has an empty Danish value.");
+            Assert.NotEqual(en, da);
+        }
+
+        // "Master class" is identical in en + da by design; assert resolution +
+        // non-empty only (the en != da assertion would fail, cf. the onboarding slice).
+        foreach (var key in new[] { "SpeakerEval.MasterClass" })
+        {
+            var en = WithCulture("en", () => loc[key].Value);
+            var da = WithCulture("da-DK", () => loc[key].Value);
+            Assert.False(loc[key].ResourceNotFound, $"{key} missing from default resx.");
+            Assert.False(string.IsNullOrWhiteSpace(en), $"{key} has an empty English value.");
+            Assert.False(string.IsNullOrWhiteSpace(da), $"{key} has an empty Danish value.");
+        }
+
+        // The {0}-bearing lines (totals, per-session count, rating aria, role) must
+        // keep the placeholder in both cultures so the runtime arg substitutes.
+        foreach (var culture in SupportedCultures)
+        {
+            foreach (var key in new[]
+            {
+                "SpeakerEval.TotalCount", "SpeakerEval.SessionCount",
+                "SpeakerEval.RatingAria", "SpeakerEval.NotASpeaker",
+            })
+            {
+                Assert.Contains("{0}", WithCulture(culture, () => loc[key].Value));
+            }
+        }
+    }
+
+    [Fact]
+    public void Data_freshness_keys_resolve_in_both_cultures()
+    {
+        // §21 Organizer "last synced at" — the data-freshness panel chrome, the
+        // state labels, the per-feed display names and the nav entry. Each must
+        // resolve in the default resx AND differ between English and Danish
+        // (proves the da-DK satellite carries them, not a silent English fallback).
+        var loc = MakeLocalizer();
+        var keys = new[]
+        {
+            // Chrome + columns + states
+            "Nav.OrgDataFreshness", "Fresh.Title", "Fresh.Intro",
+            "Fresh.ColFeed", "Fresh.ColLast", "Fresh.ColAge", "Fresh.ColState",
+            "Fresh.NoData", "Fresh.Fresh", "Fresh.Stale", "Fresh.AllFresh",
+            // Per-feed labels (each genuinely differs en/da)
+            "Fresh.Feed.Email", "Fresh.Feed.AttendeeSync", "Fresh.Feed.MasterClassBookingSync",
+            "Fresh.Feed.SponsorLeads", "Fresh.Feed.SpeakerImport", "Fresh.Feed.SessionImport",
+            "Fresh.Feed.SessionQuestions", "Fresh.Feed.SessionEvaluations", "Fresh.Feed.SoMePublished",
+        };
+
+        foreach (var key in keys)
+        {
+            var en = WithCulture("en", () => loc[key].Value);
+            var da = WithCulture("da-DK", () => loc[key].Value);
+            Assert.False(loc[key].ResourceNotFound, $"{key} missing from default resx.");
+            Assert.False(string.IsNullOrWhiteSpace(en), $"{key} has an empty English value.");
+            Assert.False(string.IsNullOrWhiteSpace(da), $"{key} has an empty Danish value.");
+            Assert.NotEqual(en, da);
+        }
+
+        // The {0}-bearing lines (checked-at time, stale count, relative ages) must
+        // keep the placeholder in both cultures so the runtime arg substitutes.
+        foreach (var culture in SupportedCultures)
+        {
+            foreach (var key in new[]
+            {
+                "Fresh.GeneratedAt", "Fresh.StaleCount",
+                "Fresh.AgeDays", "Fresh.AgeHours", "Fresh.AgeMinutes",
+            })
+            {
+                Assert.Contains("{0}", WithCulture(culture, () => loc[key].Value));
+            }
+        }
+    }
+
+    [Fact]
+    public void Become_a_sponsor_cta_keys_resolve_in_both_cultures()
+    {
+        // §21 public "become a sponsor" CTA — the heading / body / button on the
+        // public sponsors page. Each must resolve in the default resx AND differ
+        // between English and Danish (proves the da-DK satellite carries them).
+        var loc = MakeLocalizer();
+        var keys = new[]
+        {
+            "Sponsors.BecomeTitle", "Sponsors.BecomeBody", "Sponsors.BecomeCta",
+        };
+
+        foreach (var key in keys)
+        {
+            var en = WithCulture("en", () => loc[key].Value);
+            var da = WithCulture("da-DK", () => loc[key].Value);
+            Assert.False(loc[key].ResourceNotFound, $"{key} missing from default resx.");
+            Assert.False(string.IsNullOrWhiteSpace(en), $"{key} has an empty English value.");
+            Assert.False(string.IsNullOrWhiteSpace(da), $"{key} has an empty Danish value.");
+            Assert.NotEqual(en, da);
         }
     }
 }

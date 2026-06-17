@@ -74,6 +74,7 @@ public static class NavBuilder
         {
             items.Add(new("/Speaker", "Nav.SpeakerHub"));
             items.Add(new("/Speaker/Questions", "Nav.SpeakerQuestions"));
+            items.Add(new("/Speaker/Evaluations", "Nav.SpeakerEvaluations"));
             items.Add(new("/Forms/Speaker", "Nav.Speaker"));
             items.Add(new("/Speaker/Graphics", "Nav.ShareGraphics"));
             items.Add(new("/Forms/Travel", "Nav.Travel"));

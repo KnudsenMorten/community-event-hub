@@ -25,20 +25,35 @@ public sealed class OrganizerActionItemService
     /// <summary>A volunteer declined, or asked to swap, a shift they were assigned —
     /// a coordinator must reassign it.</summary>
     public const string TypeVolunteerShiftReassign = "volunteer-shift-needs-reassignment";
+    /// <summary>Type PREFIX for a participant change-request raised AFTER the edition
+    /// lock date (the form is read-only). The concrete type carries the form topic
+    /// (e.g. "change-requested:hotel") so each form keeps its own queue row, while
+    /// <see cref="LabelFor"/> still recognises the family. See <see cref="FormChangeRequestService"/>.</summary>
+    public const string TypeChangeRequestedPrefix = "change-requested";
 
     /// <summary>Human label for a known type code (falls back to the raw code).</summary>
-    public static string LabelFor(string type) => type switch
+    public static string LabelFor(string type)
     {
-        TypeHotelChanged   => "Hotel changed",
-        TypeDinnerChanged  => "Dinner RSVP changed",
-        TypeSwagChanged    => "Swag changed",
-        TypeTravelChanged  => "Travel claim changed",
-        TypeLunchChanged   => "Lunch changed",
-        TypeSpeakerChanged => "Speaker info changed",
-        TypeOnboardingStepReset => "Onboarding step re-opened",
-        TypeVolunteerShiftReassign => "Volunteer shift needs reassignment",
-        _                  => type,
-    };
+        // Change-requests carry a per-form topic suffix; label the whole family.
+        if (type.StartsWith(TypeChangeRequestedPrefix + ":", StringComparison.Ordinal)
+            || type == TypeChangeRequestedPrefix)
+        {
+            return "Change requested (after lock)";
+        }
+
+        return type switch
+        {
+            TypeHotelChanged   => "Hotel changed",
+            TypeDinnerChanged  => "Dinner RSVP changed",
+            TypeSwagChanged    => "Swag changed",
+            TypeTravelChanged  => "Travel claim changed",
+            TypeLunchChanged   => "Lunch changed",
+            TypeSpeakerChanged => "Speaker info changed",
+            TypeOnboardingStepReset => "Onboarding step re-opened",
+            TypeVolunteerShiftReassign => "Volunteer shift needs reassignment",
+            _                  => type,
+        };
+    }
 
     private readonly CommunityHubDbContext _db;
     private readonly TimeProvider _clock;

@@ -141,11 +141,37 @@
             <p role="status">
                 @Localizer["OrgGrid.ShowingRange", Model.Paging.FirstRowNumber, Model.Paging.LastRowNumber, Model.Paging.TotalItems]
             </p>
+            @* Bulk-select: ticked row checkboxes are plain (NOT inside a form, since
+               each row already hosts its own per-action forms — nested forms are
+               invalid). The bulk button collects the checked ids into a hidden
+               POST form built in JS and submits to the BulkDelete handler, gated by
+               the shared confirm modal (live count). The hidden form carries the
+               grid-state fields so the organizer stays on the same page. *@
+            <form method="post" id="sessionBulkForm" asp-page-handler="BulkDelete" hidden>
+                @{ GridStateFields(); }
+                <div id="sessionBulkIds"></div>
+            </form>
+            <!-- Bulk action bar (stacks on a phone, inline on wider screens). The
+                 button is type=button: it opens the confirm modal with the live
+                 selected-row count, then submits to the BulkDelete handler. No
+                 destructive bulk op on a single click; the server re-validates. -->
+            <div class="bulk-bar"
+                 style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;
+                        padding:10px;margin-bottom:12px;border:1px solid #ddd;border-radius:8px;">
+                <button type="button" id="bulkDeleteSessionsBtn"
+                        style="background:#b91c1c;color:#fff;border:none;border-radius:6px;padding:8px 14px;cursor:pointer;"
+                        aria-haspopup="dialog">@Localizer["Sessions.BulkDelete"]</button>
+                <span style="font-size:12.5px;color:#6b7280;">@Localizer["Sessions.BulkDeleteHint"]</span>
+            </div>
             <div style="overflow-x:auto;">
             <table>
                 <caption style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);">Sessions for this edition</caption>
                 <thead>
                     <tr>
+                        <th scope="col" style="width:32px;">
+                            <input type="checkbox" id="selectAllSessions" aria-label="@Localizer["OrgGrid.SelectAll"]"
+                                   onclick="for(const c of document.querySelectorAll('.sessionChk'))c.checked=this.checked;" />
+                        </th>
                         <th scope="col" aria-sort="@Model.AriaSort("title")">
                             <a asp-page="Sessions" asp-route-FilterType="@Model.FilterType" asp-route-FilterLength="@Model.FilterLength"
                                asp-route-Search="@Model.Search" asp-route-Sort="title" asp-route-Desc="@Model.NextDescFor("title")" asp-route-PageNo="1">Title@Model.SortIndicator("title")</a>
@@ -171,6 +197,16 @@
                 @foreach (var r in Model.Rows)
                 {
                     <tr>
+                        <td>
+                            @* Only offer bulk-select on rows that are SAFE to delete; a
+                               session with attendee data has no checkbox (it would be
+                               blocked anyway), keeping the bulk bar honest. *@
+                            @if (r.CanDelete)
+                            {
+                                <input class="sessionChk" type="checkbox" name="SelectedIds" value="@r.Id"
+                                       aria-label="Select @r.Title" />
+                            }
+                        </td>
                         <td>
                             @r.Title
                             @if (r.IsHubAdded)
@@ -206,7 +242,7 @@
                     </tr>
                     <!-- Edit row (Type/Length/Room/eval form) -->
                     <tr>
-                        <td colspan="7" style="background:#fafafa;">
+                        <td colspan="8" style="background:#fafafa;">
                             <details>
                                 <summary style="cursor:pointer;font-size:13px;">Edit &amp; evaluation</summary>
                                 <div style="display:flex;flex-wrap:wrap;gap:18px;padding:10px 0;">
@@ -386,6 +422,77 @@
                 ConfirmLabel: Localizer["Sessions.Delete"].Value,
                 CancelLabel: "Cancel",
                 Danger: true)' />
+
+            @* Bulk-delete confirm modal: shows the live COUNT of ticked sessions, then
+               copies the checked ids into the hidden BulkDelete form and submits.
+               Accessible (role=dialog, focus move, Esc/backdrop close). *@
+            <div id="sessionBulkModal" class="modal-backdrop" role="dialog" aria-modal="true"
+                 aria-labelledby="sessionBulkTitle" aria-describedby="sessionBulkBody" hidden
+                 style="position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;
+                        align-items:center;justify-content:center;padding:16px;z-index:1000;">
+                <div class="modal-card"
+                     style="background:#fff;border-radius:10px;max-width:440px;width:100%;
+                            padding:20px;box-shadow:0 10px 30px rgba(0,0,0,.25);">
+                    <h3 id="sessionBulkTitle" style="margin-top:0;">@Localizer["Sessions.BulkDeleteConfirmTitle"]</h3>
+                    <p id="sessionBulkBody"></p>
+                    <div style="display:flex;flex-wrap:wrap;gap:10px;justify-content:flex-end;margin-top:16px;">
+                        <button type="button" id="sessionBulkCancel" class="secondary"
+                                style="padding:8px 14px;border:1px solid #c4c8d4;border-radius:6px;background:#fff;cursor:pointer;">
+                            @Localizer["OrgGrid.Cancel"]
+                        </button>
+                        <button type="button" id="sessionBulkConfirm"
+                                style="padding:8px 14px;border:none;border-radius:6px;background:#b91c1c;color:#fff;cursor:pointer;">
+                            @Localizer["Sessions.BulkDelete"]
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <script>
+                (function () {
+                    var btn = document.getElementById('bulkDeleteSessionsBtn');
+                    var modal = document.getElementById('sessionBulkModal');
+                    var form = document.getElementById('sessionBulkForm');
+                    var idsHost = document.getElementById('sessionBulkIds');
+                    if (!btn || !modal || !form || !idsHost) return;
+                    var bodyEl = document.getElementById('sessionBulkBody');
+                    var cancelBtn = document.getElementById('sessionBulkCancel');
+                    var confirmBtn = document.getElementById('sessionBulkConfirm');
+                    var bodyTemplate = @Html.Raw(Json.Serialize(Localizer["Sessions.BulkDeleteConfirmBody", "{0}"].Value));
+                    var pickFirst = @Html.Raw(Json.Serialize(Localizer["OrgGrid.BulkPickFirst"].Value));
+                    var lastFocused = null;
+
+                    function checked() { return document.querySelectorAll('.sessionChk:checked'); }
+                    function open(count) {
+                        bodyEl.textContent = bodyTemplate.replace('{0}', count);
+                        modal.hidden = false;
+                        lastFocused = document.activeElement;
+                        confirmBtn.focus();
+                    }
+                    function close() {
+                        modal.hidden = true;
+                        if (lastFocused && lastFocused.focus) lastFocused.focus();
+                    }
+                    btn.addEventListener('click', function () {
+                        if (checked().length === 0) { alert(pickFirst); return; }
+                        open(checked().length);
+                    });
+                    confirmBtn.addEventListener('click', function () {
+                        idsHost.innerHTML = '';
+                        checked().forEach(function (c) {
+                            var h = document.createElement('input');
+                            h.type = 'hidden'; h.name = 'SelectedIds'; h.value = c.value;
+                            idsHost.appendChild(h);
+                        });
+                        form.submit();
+                    });
+                    cancelBtn.addEventListener('click', close);
+                    modal.addEventListener('click', function (e) { if (e.target === modal) close(); });
+                    document.addEventListener('keydown', function (e) {
+                        if (e.key === 'Escape' && !modal.hidden) close();
+                    });
+                })();
+            </script>
         }
     }
 </div>

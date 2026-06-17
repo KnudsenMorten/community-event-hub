@@ -1,0 +1,14 @@
+@*
+    Shared "request a change" affordance for a deadline-LOCKED form
+    (REQUIREMENTS §21 Participant). Turns the read-only dead end into a
+    self-service hand-off: links to /Forms/RequestChange?topic=<topic>, which
+    raises an organizer Action-Queue item. The model is the topic token
+    (e.g. "Hotel", "Dinner") matching CommunityHub.Core.Reminders.FormTopic.
+*@
+@model string
+@inject Microsoft.AspNetCore.Mvc.Localization.IHtmlLocalizer<CommunityHub.Core.Resources.SharedResource> Loc
+<p style="margin-top:12px;font-size:14px;">
+    @Loc["ReqChange.LockedPrompt"]
+    <a asp-page="/Forms/RequestChange" asp-route-topic="@Model" class="secondary"
+       style="font-weight:600;">@Loc["ReqChange.LockedCta"]</a>
+</p>

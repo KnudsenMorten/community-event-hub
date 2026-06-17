@@ -12,6 +12,9 @@
     }
     else
     {
+        if (!string.IsNullOrEmpty(Model.Error))   { <p class="error" role="alert">@Model.Error</p> }
+        if (!string.IsNullOrEmpty(Model.Message)) { <p class="info" role="status">@Model.Message</p> }
+
         <p style="font-size:13px;color:#6b7280;">
             Company name + contact details live in <strong>Company Manager (WordPress)</strong>.
             Tasks are auto-generated from completed WooCommerce sponsor orders
@@ -179,6 +182,118 @@
                     <li>@c.Name &lt;@c.Email&gt;</li>
                 }
             </ul>
+        }
+        @* ---- Stale / orphaned company-facts (§22 CRUD gap) ----------------- *@
+        @if (Model.OrphanedSponsorFacts.Count > 0)
+        {
+            <h3 style="color:#b45309;margin-top:22px;">@Localizer["SponsorFacts.OrphanHeading"]</h3>
+            <p style="font-size:13px;color:#6b7280;">@Localizer["SponsorFacts.OrphanIntro"]</p>
+            <div style="overflow-x:auto;">
+            <table style="border-collapse:collapse;width:100%;font-size:13px;">
+                <caption class="sr-only">@Localizer["SponsorFacts.OrphanHeading"]</caption>
+                <thead>
+                    <tr style="border-bottom:2px solid #ddd;text-align:left;">
+                        <th scope="col" style="padding:6px;">@Localizer["SponsorFacts.ColCompany"]</th>
+                        <th scope="col" style="padding:6px;">@Localizer["SponsorFacts.ColShortDesc"]</th>
+                        <th scope="col" style="padding:6px;">@Localizer["SponsorFacts.Delete"]</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var f in Model.OrphanedSponsorFacts)
+                    {
+                        <tr style="border-bottom:1px solid #eee;">
+                            <td style="padding:6px;font-family:monospace;">@f.CompanyId</td>
+                            <td style="padding:6px;color:#6b7280;">@(string.IsNullOrWhiteSpace(f.ShortDescription) ? "—" : f.ShortDescription)</td>
+                            <td style="padding:6px;">
+                                @* type=button opens the shared confirm modal, then posts
+                                   the hidden delete form with this facts-row id. *@
+                                <button type="button" class="js-delete-facts"
+                                        data-id="@f.Id" data-name="@f.CompanyId"
+                                        aria-haspopup="dialog"
+                                        style="background:#b91c1c;color:#fff;border:none;border-radius:6px;padding:5px 10px;cursor:pointer;font-size:12.5px;">
+                                    @Localizer["SponsorFacts.Delete"]
+                                </button>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+            </div>
+
+            @* Hidden form the per-row delete posts to (after the confirm modal). *@
+            <form method="post" asp-page-handler="DeleteFacts" id="deleteFactsForm" hidden>
+                <input type="hidden" name="sponsorInfoId" id="deleteFactsId" value="" />
+                <input type="hidden" name="Search" value="@Model.Search" />
+                <input type="hidden" name="Sort" value="@Model.Sort" />
+                <input type="hidden" name="Desc" value="@Model.Desc" />
+                <input type="hidden" name="PageNo" value="@Model.Paging.Page" />
+            </form>
+
+            @* Accessible confirm modal (§21) gating a single facts delete. *@
+            <div id="confirmDeleteFacts" class="modal-backdrop" role="dialog" aria-modal="true"
+                 aria-labelledby="deleteFactsTitle" aria-describedby="deleteFactsBody" hidden
+                 style="position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;
+                        align-items:center;justify-content:center;padding:16px;z-index:1000;">
+                <div class="modal-card"
+                     style="background:#fff;border-radius:10px;max-width:440px;width:100%;
+                            padding:20px;box-shadow:0 10px 30px rgba(0,0,0,.25);">
+                    <h3 id="deleteFactsTitle" style="margin-top:0;">@Localizer["SponsorFacts.DeleteConfirmTitle"]</h3>
+                    <p id="deleteFactsBody">
+                        @Localizer["SponsorFacts.DeleteConfirmBody"]
+                        <strong data-facts-summary></strong>
+                    </p>
+                    <div style="display:flex;flex-wrap:wrap;gap:10px;justify-content:flex-end;margin-top:16px;">
+                        <button type="button" data-facts-cancel class="secondary"
+                                style="padding:8px 14px;border:1px solid #c4c8d4;border-radius:6px;background:#fff;cursor:pointer;">
+                            @Localizer["OrgGrid.Cancel"]
+                        </button>
+                        <button type="button" data-facts-ok
+                                style="padding:8px 14px;border:none;border-radius:6px;background:#b91c1c;color:#fff;cursor:pointer;">
+                            @Localizer["SponsorFacts.Delete"]
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <script>
+                (function () {
+                    var form = document.getElementById('deleteFactsForm');
+                    var idInput = document.getElementById('deleteFactsId');
+                    var modal = document.getElementById('confirmDeleteFacts');
+                    if (!form || !idInput || !modal) return;
+                    var summaryEl = modal.querySelector('[data-facts-summary]');
+                    var okBtn = modal.querySelector('[data-facts-ok]');
+                    var cancelBtn = modal.querySelector('[data-facts-cancel]');
+                    var lastFocused = null;
+                    var pendingId = null;
+
+                    function open(name) {
+                        if (summaryEl) summaryEl.textContent = name;
+                        modal.hidden = false;
+                        lastFocused = document.activeElement;
+                        if (okBtn) okBtn.focus();
+                    }
+                    function close() {
+                        modal.hidden = true;
+                        if (lastFocused && lastFocused.focus) lastFocused.focus();
+                    }
+                    document.querySelectorAll('.js-delete-facts').forEach(function (b) {
+                        b.addEventListener('click', function () {
+                            pendingId = b.getAttribute('data-id');
+                            open(b.getAttribute('data-name') || '');
+                        });
+                    });
+                    if (okBtn) okBtn.addEventListener('click', function () {
+                        idInput.value = pendingId;
+                        form.submit();
+                    });
+                    if (cancelBtn) cancelBtn.addEventListener('click', close);
+                    modal.addEventListener('click', function (e) { if (e.target === modal) close(); });
+                    document.addEventListener('keydown', function (e) {
+                        if (e.key === 'Escape' && !modal.hidden) close();
+                    });
+                })();
+            </script>
         }
     }
     <p><a asp-page="/Organizer/Index">Back to organizer area</a></p>

@@ -19,6 +19,8 @@
         {
             <p>@Localizer["Hotel.CheckInOut", Model.CheckInDate?.ToString("dd/MM/yyyy") ?? "", Model.CheckOutDate?.ToString("dd/MM/yyyy") ?? ""]</p>
         }
+        @* Locked dead-end → self-service "request a change" hand-off (§21). *@
+        <partial name="_RequestChangeLink" model="@("Hotel")" />
     }
     else
     {

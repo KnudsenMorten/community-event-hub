@@ -335,7 +335,7 @@ A **live dashboard** shows form completion, participants by role, tasks and over
 
 ### 12. Hosting & reliability
 
-The full environment (database, web app, scheduled jobs, storage, secret vault, logging and monitoring) is **defined as code** (Bicep): Azure SQL, App Service, Azure Functions, Storage, Key Vault, Log Analytics + Application Insights — separate dev + prod instances per event (e.g. `rg-<event>hub-dev`, `rg-<event>hub-prod`). Background jobs handle reminders, order pulls, attendee reconciliation, portal sync, sponsor-lead delivery and upload-change watching on their own schedules, each individually switchable. **Scripted, safe deploys** build a versioned artifact, deploy and health-check, with one-command rollback; **production releases are zero-downtime** (deploy to a staging slot, warm up, then swap — dev stays on B1, prod runs S1 with a slot). The app absorbs Azure SQL cold-starts gracefully (EF retry) so it runs happily on cost-efficient, auto-pausing infrastructure (~€25/month per instance; +~€50/month for the prod S1 slot). Schema is versioned via EF migrations and **kept in sync across dev and prod every release**. Publishing to the public template runs through a controlled, allow-listed (denylist) process with a dry-run pre-flight; protected branches, required reviews and secret scanning keep the codebase safe; each environment binds its own verified custom domain with a managed certificate. **Dev mirrors prod's data** so dev is a faithful rehearsal — the only deliberate difference is that all development email is redirected to a single test address; synthetic test accounts are tagged (`IsTestUser`) so they never skew real counts.
+The full environment (database, web app, scheduled jobs, storage, secret vault, logging and monitoring) is **defined as code** (Bicep): Azure SQL, App Service, Azure Functions, Storage, Key Vault, Log Analytics + Application Insights — separate dev + prod instances per event (e.g. `rg-communityhub-dev`, `rg-communityhub-prod`). Background jobs handle reminders, order pulls, attendee reconciliation, portal sync, sponsor-lead delivery and upload-change watching on their own schedules, each individually switchable. **Scripted, safe deploys** build a versioned artifact, deploy and health-check, with one-command rollback; **production releases are zero-downtime** (deploy to a staging slot, warm up, then swap — dev stays on B1, prod runs S1 with a slot). The app absorbs Azure SQL cold-starts gracefully (EF retry) so it runs happily on cost-efficient, auto-pausing infrastructure (~€25/month per instance; +~€50/month for the prod S1 slot). Schema is versioned via EF migrations and **kept in sync across dev and prod every release**. Publishing to the public template runs through a controlled, allow-listed (denylist) process with a dry-run pre-flight; protected branches, required reviews and secret scanning keep the codebase safe; each environment binds its own verified custom domain with a managed certificate. **Dev mirrors prod's data** so dev is a faithful rehearsal — the only deliberate difference is that all development email is redirected to a single test address; synthetic test accounts are tagged (`IsTestUser`) so they never skew real counts.
 
 #### Safe-by-default outbound email (allowlist model)
 
@@ -397,22 +397,27 @@ Prerequisites:
 - A DNS zone you can add a CNAME to
 
 ```bash
-# 1. clone
+# 1. clone (then set baseName + your own subscription)
 gh repo clone KnudsenMorten/community-event-hub
 cd community-event-hub
+#   - edit infra/main.dev.parameters.json / main.prod.parameters.json (baseName, region, sizes)
+#   - export AZURE_SUBSCRIPTION_ID=<your subscription id>   # deploy.sh pins this so a deploy
+#                                                           #   can't land in the wrong sub
 
 # 2. deploy infra (App Service Plan, SQL Server + DB, Key Vault, Functions
-#    plan, Storage, Log Analytics, App Insights)
-export ELDK_SQL_ADMIN_PASSWORD='<strong password you keep>'
-./scripts/deploy.sh dev          # or `prod` (preview first with --whatif)
+#    plan, Storage, Log Analytics, App Insights). No SQL password needed:
+#    the SQL server is Azure-AD-only and the apps authenticate via managed identity.
+./scripts/deploy.sh dev --whatif   # preview first
+./scripts/deploy.sh dev            # or `prod`
 
 # 3. set secret values straight into Key Vault (Brevo SMTP, WooCommerce, Company Manager, Zoho, ...)
 ./scripts/set-secrets.sh dev
 
-# 4. apply EF migrations (temporarily add your IP to the SQL firewall first)
+# 4. apply EF migrations against the env's SQL (Azure-AD auth; add your client IP to the
+#    SQL firewall temporarily if needed, then remove it)
 dotnet ef database update --project src/CommunityHub.Core --startup-project src/CommunityHub
 
-# 5. seed your Event row + a few test participants (edit values first)
+# 5. seed your Event row + a few test participants (edit values first; use your own addresses)
 ./tools/seed-dev.ps1
 
 # 6. publish + deploy the app code (web + jobs)
@@ -420,8 +425,8 @@ dotnet ef database update --project src/CommunityHub.Core --startup-project src/
 ./tools/deploy-app.ps1 -Env dev -App jobs  # the Functions app, same scripted way
 
 # 7. bind your custom domain (after the CNAME verifies)
-az webapp config hostname add --resource-group rg-<event>hub-dev \
-  --webapp-name <webAppName> --hostname hub.yourevent.example
+az webapp config hostname add --resource-group rg-<baseName>-dev \
+  --webapp-name <webAppName> --hostname hub.your-event.example
 ```
 
 `tools/rollback-app.ps1` redeploys any kept artifact (or, on prod, an instant slot swap-back). Full step-by-step — DNS, certs, post-deploy settings, and the operate playbook — is in **[`docs/DESIGN.md` §12 (deploy)](docs/DESIGN.md#12-deploy-rollback--zero-downtime)** and **[§15 (runbook)](docs/DESIGN.md#15-operational-runbook)**.
@@ -474,7 +479,7 @@ infra/
 scripts/
   deploy.sh                 Idempotent `az deployment group create` of infra/main.bicep
   set-secrets.sh            Write KV secret values from prompts
-  seed-eldk27.sql           Example seed SQL
+  seed-<edition>.sql        Your own edition seed SQL (Event row + participants; keep it private)
 
 docs/
   FEATURES.md               Public feature catalog (delivered features)
@@ -492,14 +497,12 @@ tools/
   seed-dev.ps1              Seed an Event row + test participants (one per role)
   deploy-app.ps1            Build + zip (forward-slash entries) + deploy web/jobs; slot-swap on prod
   rollback-app.ps1          Instant slot swap-back / artifact redeploy (web + jobs)
-  enable-slot-deploys.ps1   One-time S1 + staging-slot + slot-MSI Key Vault grant (done for prod)
+  enable-slot-deploys.ps1   One-time S1 + staging-slot + slot-MSI Key Vault grant (for prod)
   plant-test-pins.ps1       DEV-only: plant known-PIN LoginPin rows for the Playwright suites
-  publish-to-public.ps1     The denylist-driven public-mirror publisher (run from maintainer's box)
-  setup-repo-governance.ps1 One-time branch protection + collaborator setup
   CommunityHub.OneShot/     Console CLI to run one job once locally
 ```
 
-The PRIVATE upstream repo holds the production data (event row, real logos, prod parameter files). The PUBLIC repo (this one) is a sanitized template — no event-specific data.
+This repo is a sanitized template — it ships generic placeholders, not event-specific data. Keep your own production data (the `Events` row, real logos, prod parameter files, edition seed SQL and per-edition `config/*.json`) in a private copy; never commit it here.
 
 ---
 

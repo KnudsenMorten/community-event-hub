@@ -71,6 +71,7 @@ var host = new HostBuilder()
         // --- Email system services (10a) -----------------------------------
         services.AddScoped<ParticipantEmailService>();
         services.AddScoped<OnboardingStepResetEmailService>();
+        services.AddScoped<SpeakerQuestionDigestService>();
         services.AddScoped<OrganizerActionItemService>();
 
         // --- Email templates (branded reminder rendering) -------------------

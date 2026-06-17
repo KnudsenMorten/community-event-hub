@@ -16,14 +16,12 @@
 #     - Bicep CLI (bundled with recent az):      az bicep version
 #
 #  Subscription:
-#     The target subscription defaults to the ExpertsLive Denmark sub
-#     (772440e1-adf8-4fbe-82f9-bb977b55bc8b, tenant
-#     7825c48b-861b-41fd-b635-ffab1aff7d13). Both dev + prod RGs live in
-#     this sub -- env separation is by RG, not by subscription. Override
-#     with AZURE_SUBSCRIPTION_ID:
-#       AZURE_SUBSCRIPTION_ID=<other-sub-id> ./scripts/deploy.sh dev
-#     The script selects the subscription explicitly, so a deploy cannot
-#     land in the wrong one by accident.
+#     The target subscription is REQUIRED via the AZURE_SUBSCRIPTION_ID env
+#     var -- there is no built-in default, so a deploy can never land in an
+#     unintended subscription. Both dev + prod RGs are expected to live in
+#     the same sub (env separation is by RG, not by subscription):
+#       AZURE_SUBSCRIPTION_ID=<your-sub-id> ./scripts/deploy.sh dev
+#     The script selects the subscription explicitly before deploying.
 #
 #  See docs/RUNBOOK.md for the full deploy + post-deploy procedure.
 # ===========================================================================
@@ -45,11 +43,15 @@ fi
 
 LOCATION="westeurope"
 
-# Target subscription. Defaults to the ExpertsLive Denmark sub (tenant
-# 7825c48b-861b-41fd-b635-ffab1aff7d13). Both dev + prod RGs live in this
-# sub -- env separation is by RG (rg-eldkhub-dev / rg-eldkhub-prod), not by
-# subscription. Override with AZURE_SUBSCRIPTION_ID env var if needed.
-AZURE_SUBSCRIPTION_ID="${AZURE_SUBSCRIPTION_ID:-772440e1-adf8-4fbe-82f9-bb977b55bc8b}"
+# Target subscription -- REQUIRED via the AZURE_SUBSCRIPTION_ID env var (no
+# default, so a deploy cannot land in the wrong subscription). Both dev + prod
+# RGs are expected in the same sub -- env separation is by RG, not by sub.
+AZURE_SUBSCRIPTION_ID="${AZURE_SUBSCRIPTION_ID:-}"
+if [[ -z "$AZURE_SUBSCRIPTION_ID" ]]; then
+  echo "ERROR: set AZURE_SUBSCRIPTION_ID to the target subscription id." >&2
+  echo "       e.g. AZURE_SUBSCRIPTION_ID=<your-sub-id> ./scripts/deploy.sh ${ENVIRONMENT}" >&2
+  exit 1
+fi
 
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 INFRA_DIR="${SCRIPT_DIR}/../infra"
@@ -84,7 +86,7 @@ if ! az account show >/dev/null 2>&1; then
 fi
 
 # Select the target subscription explicitly so the deploy cannot land in the
-# wrong one. AZURE_SUBSCRIPTION_ID defaults to the ELDK27 TEST subscription.
+# wrong one (AZURE_SUBSCRIPTION_ID was required + validated above).
 if ! az account set --subscription "$AZURE_SUBSCRIPTION_ID" 2>/dev/null; then
   echo "ERROR: could not select subscription ${AZURE_SUBSCRIPTION_ID}." >&2
   echo "       Check the id and that your account has access to it." >&2
@@ -163,6 +165,6 @@ echo "-----------------------------------------------------------------"
 echo " NEXT STEPS (see docs/RUNBOOK.md):"
 echo "   1. Store the real secret VALUES in Key Vault (Brevo, WooCommerce,"
 echo "      Company Manager, the SQL admin password just used)."
-echo "   2. Create the DNS CNAME for hub.eldk27.expertslive.dk and bind it."
+echo "   2. Create the DNS CNAME for your event hostname and bind it."
 echo "   3. Deploy the application code (Stage 2+) to the web + Functions apps."
 echo "-----------------------------------------------------------------"

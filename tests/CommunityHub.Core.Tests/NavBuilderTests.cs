@@ -279,6 +279,7 @@ public sealed class NavBuilderTests
         Assert.Contains("/Forms/Dinner", speaker);
         Assert.Contains("/Speaker", speaker);
         Assert.Contains("/Speaker/Questions", speaker);
+        Assert.Contains("/Speaker/Evaluations", speaker);
         Assert.Contains("/Forms/Speaker", speaker);
         Assert.Contains("/Speaker/Graphics", speaker);
         Assert.Contains("/Forms/Travel", speaker);

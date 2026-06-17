@@ -1,0 +1,120 @@
+@page
+@model CommunityHub.Pages.Speaker.EvaluationsModel
+@{
+    ViewData["Title"] = Localizer["SpeakerEval.Title"].Value;
+}
+
+@if (Model.AccessDenied)
+{
+    <div class="card">
+        <h2>@Localizer["SpeakerEval.Title"]</h2>
+        <p class="error">
+            @Localizer["SpeakerEval.NotASpeaker", CommunityHub.Branding.RoleDisplay.Name(Model.Role)]
+        </p>
+        <p><a asp-page="/Index">@Localizer["Common.BackToHub"]</a></p>
+    </div>
+    return;
+}
+
+<style>
+    /* Mobile-first: single-column rating cards, full-width at ~360px. */
+    .se-overall { background:#eef6ff; border-left:4px solid #008BD2; border-radius:6px;
+        padding:12px 14px; margin:0 0 16px 0; font-size:14px; color:#1f3a5f; }
+    .se-overall strong { font-size:18px; }
+    .se-sess { border:1px solid #d7dbe4; border-radius:10px; margin:0 0 16px 0; overflow:hidden; }
+    .se-sess-head { background:var(--el-darkblue,#1D3380); color:#fff; padding:12px 14px;
+        display:flex; flex-wrap:wrap; gap:8px 14px; align-items:baseline; justify-content:space-between; }
+    .se-sess-head h3 { margin:0; font-size:16.5px; line-height:1.3; flex:1 1 auto; min-width:0; }
+    .se-sess-head .score { font-weight:700; font-size:15px; white-space:nowrap; }
+    .se-sess-head .meta { flex-basis:100%; font-size:12.5px; opacity:.92; margin-top:2px; }
+    .se-body { padding:12px 14px; }
+    .se-empty { color:#6e7681; font-size:13.5px; margin:4px 0; }
+    .se-c { background:#f6f8fb; border-radius:8px; padding:10px 12px; margin:8px 0; }
+    .se-c .stars { color:#caa300; font-size:14px; letter-spacing:1px; }
+    .se-c .txt { font-size:14px; color:#1a1a2e; white-space:pre-wrap; margin-top:2px; }
+    .se-c .when { color:#6e7681; font-size:12px; margin-top:4px; }
+    .se-mcb { display:inline-block; background:#fff3cd; color:#8a6d00; border-radius:10px;
+        padding:1px 8px; font-size:11px; font-weight:700; }
+</style>
+
+@functions {
+    static string Stars(int rating)
+    {
+        rating = System.Math.Clamp(rating, 0, 5);
+        return new string('★', rating) + new string('☆', 5 - rating);
+    }
+}
+
+<div class="card">
+    <h2>@Localizer["SpeakerEval.Title"]</h2>
+    <p>@Localizer["SpeakerEval.Intro"]</p>
+
+    @if (Model.Result.TotalCount == 0)
+    {
+        <p class="se-empty" role="status">@Localizer["SpeakerEval.None"]</p>
+    }
+    else
+    {
+        <div class="se-overall" role="status">
+            @Localizer["SpeakerEval.Overall"]
+            <strong>@(Model.Result.OverallAverage?.ToString("0.0") ?? "–") / 5</strong>
+            &middot; @Localizer["SpeakerEval.TotalCount", Model.Result.TotalCount]
+        </div>
+
+        @foreach (var s in Model.Result.Sessions)
+        {
+            <div class="se-sess">
+                <div class="se-sess-head">
+                    <h3>
+                        <a href="/Sessions/@s.SessionId"
+                           style="color:#fff;text-decoration:underline;">@s.Title</a>
+                        @if (s.IsMasterClass)
+                        {
+                            <span class="se-mcb">@Localizer["SpeakerEval.MasterClass"]</span>
+                        }
+                    </h3>
+                    <span class="score">
+                        @if (s.Count == 0)
+                        {
+                            @Localizer["SpeakerEval.NoRatings"]
+                        }
+                        else
+                        {
+                            @($"{s.AverageRating?.ToString("0.0")} / 5")
+                        }
+                    </span>
+                    <div class="meta">
+                        @if (!string.IsNullOrWhiteSpace(s.Room))
+                        {
+                            <text>@s.Room &middot; </text>
+                        }
+                        @Localizer["SpeakerEval.SessionCount", s.Count]
+                    </div>
+                </div>
+                <div class="se-body">
+                    @if (s.Count == 0)
+                    {
+                        <p class="se-empty">@Localizer["SpeakerEval.SessionNone"]</p>
+                    }
+                    else if (s.Comments.Count == 0)
+                    {
+                        <p class="se-empty">@Localizer["SpeakerEval.NoComments"]</p>
+                    }
+                    else
+                    {
+                        @foreach (var c in s.Comments)
+                        {
+                            <div class="se-c">
+                                <div class="stars" aria-label="@Localizer["SpeakerEval.RatingAria", c.Rating]">@Stars(c.Rating)</div>
+                                <div class="txt">@c.Comment</div>
+                                <div class="when">@c.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</div>
+                            </div>
+                        }
+                    }
+                </div>
+            </div>
+        }
+    }
+
+    <p style="margin-top:16px;"><a asp-page="/Speaker/Index">@Localizer["Common.BackToHub"]</a></p>
+</div>

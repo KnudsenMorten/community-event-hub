@@ -43,10 +43,29 @@
         }
         else
         {
+            @* Bulk-select: ticked row checkboxes carry their hotel id; the bulk
+               button collects the checked ids into a hidden POST form built in JS and
+               submits to the BulkDelete handler, gated by the shared confirm modal
+               (live count). One destructive op never fires on a single click. *@
+            <form method="post" id="hotelBulkForm" asp-page-handler="BulkDelete" hidden>
+                <div id="hotelBulkIds"></div>
+            </form>
+            <div class="bulk-bar"
+                 style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;
+                        padding:10px;margin-bottom:12px;border:1px solid #ddd;border-radius:8px;">
+                <button type="button" id="bulkDeleteHotelsBtn"
+                        style="background:#b91c1c;color:#fff;border:none;border-radius:6px;padding:8px 14px;cursor:pointer;"
+                        aria-haspopup="dialog">@Localizer["OrgHotels.BulkDelete"]</button>
+                <span style="font-size:12.5px;color:#6b7280;">@Localizer["OrgHotels.BulkDeleteHint"]</span>
+            </div>
             <div style="overflow-x:auto;">
             <table style="border-collapse:collapse;width:100%;font-size:13px;min-width:640px;">
                 <thead>
                     <tr style="border-bottom:2px solid #ddd;text-align:left;">
+                        <th scope="col" style="padding:6px;width:32px;">
+                            <input type="checkbox" id="selectAllHotels" aria-label="@Localizer["OrgGrid.SelectAll"]"
+                                   onclick="for(const c of document.querySelectorAll('.hotelChk'))c.checked=this.checked;" />
+                        </th>
                         <th style="padding:6px;">@Localizer["OrgHotels.Name"]</th>
                         <th style="padding:6px;">@Localizer["OrgHotels.Address"]</th>
                         <th style="padding:6px;">@Localizer["OrgHotels.ContactEmail"]</th>
@@ -58,6 +77,10 @@
                     @foreach (var h in Model.Hotels)
                     {
                         <tr style="border-bottom:1px solid #eee;">
+                            <td style="padding:6px;">
+                                <input class="hotelChk" type="checkbox" name="SelectedIds" value="@h.Id"
+                                       aria-label="@Localizer["OrgHotels.SelectRow", h.Name]" />
+                            </td>
                             <td style="padding:6px;font-weight:600;">@h.Name</td>
                             <td style="padding:6px;">@h.Address</td>
                             <td style="padding:6px;">@h.ContactEmail</td>
@@ -73,6 +96,31 @@
                     }
                 </tbody>
             </table>
+            </div>
+
+            @* Bulk-delete confirm modal: shows the live COUNT of ticked hotels, then
+               copies the checked ids into the hidden BulkDelete form and submits.
+               Accessible (role=dialog, focus move, Esc/backdrop close). *@
+            <div id="hotelBulkModal" class="modal-backdrop" role="dialog" aria-modal="true"
+                 aria-labelledby="hotelBulkTitle" aria-describedby="hotelBulkBody" hidden
+                 style="position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;
+                        align-items:center;justify-content:center;padding:16px;z-index:1000;">
+                <div class="modal-card"
+                     style="background:#fff;border-radius:10px;max-width:440px;width:100%;
+                            padding:20px;box-shadow:0 10px 30px rgba(0,0,0,.25);">
+                    <h3 id="hotelBulkTitle" style="margin-top:0;">@Localizer["OrgHotels.BulkDeleteConfirmTitle"]</h3>
+                    <p id="hotelBulkBody"></p>
+                    <div style="display:flex;flex-wrap:wrap;gap:10px;justify-content:flex-end;margin-top:16px;">
+                        <button type="button" id="hotelBulkCancel" class="secondary"
+                                style="padding:8px 14px;border:1px solid #c4c8d4;border-radius:6px;background:#fff;cursor:pointer;">
+                            @Localizer["OrgGrid.Cancel"]
+                        </button>
+                        <button type="button" id="hotelBulkConfirm"
+                                style="padding:8px 14px;border:none;border-radius:6px;background:#b91c1c;color:#fff;cursor:pointer;">
+                            @Localizer["OrgHotels.BulkDelete"]
+                        </button>
+                    </div>
+                </div>
             </div>
         }
 
@@ -91,6 +139,53 @@
                 var n = document.getElementById('Name');
                 if (n) { n.focus(); n.scrollIntoView({ block: 'center' }); }
             }
+        })();
+
+        // Bulk-delete: open a count-aware confirm modal, then copy the ticked hotel
+        // ids into the hidden BulkDelete form and submit. No bulk destroy on a single
+        // click; the server re-validates the selection + edition scope.
+        (function () {
+            var btn = document.getElementById('bulkDeleteHotelsBtn');
+            var modal = document.getElementById('hotelBulkModal');
+            var form = document.getElementById('hotelBulkForm');
+            var idsHost = document.getElementById('hotelBulkIds');
+            if (!btn || !modal || !form || !idsHost) return;
+            var bodyEl = document.getElementById('hotelBulkBody');
+            var cancelBtn = document.getElementById('hotelBulkCancel');
+            var confirmBtn = document.getElementById('hotelBulkConfirm');
+            var bodyTemplate = @Html.Raw(Json.Serialize(Localizer["OrgHotels.BulkDeleteConfirmBody", "{0}"].Value));
+            var pickFirst = @Html.Raw(Json.Serialize(Localizer["OrgGrid.BulkPickFirst"].Value));
+            var lastFocused = null;
+
+            function checked() { return document.querySelectorAll('.hotelChk:checked'); }
+            function open(count) {
+                bodyEl.textContent = bodyTemplate.replace('{0}', count);
+                modal.hidden = false;
+                lastFocused = document.activeElement;
+                confirmBtn.focus();
+            }
+            function close() {
+                modal.hidden = true;
+                if (lastFocused && lastFocused.focus) lastFocused.focus();
+            }
+            btn.addEventListener('click', function () {
+                if (checked().length === 0) { alert(pickFirst); return; }
+                open(checked().length);
+            });
+            confirmBtn.addEventListener('click', function () {
+                idsHost.innerHTML = '';
+                checked().forEach(function (c) {
+                    var h = document.createElement('input');
+                    h.type = 'hidden'; h.name = 'SelectedIds'; h.value = c.value;
+                    idsHost.appendChild(h);
+                });
+                form.submit();
+            });
+            cancelBtn.addEventListener('click', close);
+            modal.addEventListener('click', function (e) { if (e.target === modal) close(); });
+            document.addEventListener('keydown', function (e) {
+                if (e.key === 'Escape' && !modal.hidden) close();
+            });
         })();
     </script>
 }

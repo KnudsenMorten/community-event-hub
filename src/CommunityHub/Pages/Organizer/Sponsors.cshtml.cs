@@ -16,16 +16,21 @@ public class SponsorsModel : PageModel
     private readonly CommunityHubDbContext _db;
     private readonly ICurrentParticipantAccessor _participant;
     private readonly TimeProvider _clock;
+    private readonly SponsorInfoDeletionService _infoDeletion;
 
     public SponsorsModel(
-        CommunityHubDbContext db, ICurrentParticipantAccessor participant, TimeProvider clock)
+        CommunityHubDbContext db, ICurrentParticipantAccessor participant, TimeProvider clock,
+        SponsorInfoDeletionService infoDeletion)
     {
         _db = db;
         _participant = participant;
         _clock = clock;
+        _infoDeletion = infoDeletion;
     }
 
     public bool AccessDenied { get; private set; }
+    public string? Message { get; private set; }
+    public string? Error { get; private set; }
 
     public int CompanyCount { get; private set; }
     public int ContactCount { get; private set; }
@@ -35,6 +40,18 @@ public class SponsorsModel : PageModel
 
     public List<CompanyRow> Companies { get; private set; } = new();
     public List<Contact> ContactsWithoutCompany { get; private set; } = new();
+
+    /// <summary>
+    /// Orphaned sponsor company-facts rows (REQUIREMENTS §22): a
+    /// <see cref="SponsorInfo"/> (logos / description / website / tier — what drives
+    /// the PUBLIC sponsors page) whose company has NO active contact in this
+    /// edition. These are the stale / duplicate records (e.g. a booth order
+    /// processed under a wrong or later-changed company id) the organizer can now
+    /// safely delete. A facts row for a LIVE company is never listed here (and the
+    /// service refuses it).
+    /// </summary>
+    public List<OrphanedFacts> OrphanedSponsorFacts { get; private set; } = new();
+    public record OrphanedFacts(int Id, string CompanyId, string? ShortDescription);
 
     // --- Search / sort / paging (GET-bound so links/bookmarks keep state).
     //     Mirrors the Participants / Speakers / Attendees grids (REQUIREMENTS §20/§21).
@@ -65,6 +82,39 @@ public class SponsorsModel : PageModel
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
         if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+        await LoadAsync(me.EventId, ct);
+        return Page();
+    }
+
+    /// <summary>
+    /// Delete a stale / orphaned sponsor company-facts row (REQUIREMENTS §22).
+    /// Safe semantics live in <see cref="SponsorInfoDeletionService"/>: a facts row
+    /// whose company still has an active sponsor contact is REFUSED (its public
+    /// card is live); only an orphaned row is removed. Organizer-only,
+    /// edition-scoped; the page's confirm modal gates the click.
+    /// </summary>
+    public async Task<IActionResult> OnPostDeleteFactsAsync(int sponsorInfoId, CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+
+        var result = await _infoDeletion.DeleteAsync(me.EventId, sponsorInfoId, ct);
+        switch (result.Status)
+        {
+            case SponsorInfoDeletionService.DeletionStatus.Deleted:
+                Message = $"Stale company-facts row for \"{result.SponsorCompanyId}\" was deleted.";
+                break;
+            case SponsorInfoDeletionService.DeletionStatus.Blocked:
+                Error = $"The facts for \"{result.SponsorCompanyId}\" were not deleted: the company "
+                        + $"still has {result.ActiveContactCount} active contact(s). Handle the "
+                        + "contacts first.";
+                break;
+            default:
+                Error = "That company-facts row could not be found in this edition.";
+                break;
+        }
+
         await LoadAsync(me.EventId, ct);
         return Page();
     }
@@ -265,5 +315,28 @@ public class SponsorsModel : PageModel
 
         CompanyCount = allCompanyIds.Count;
         ContactCount = contacts.Count;
+
+        // Orphaned company-facts (§22): a SponsorInfo whose company has NO active
+        // contact in this edition. The set of company ids WITH an active contact is
+        // the "live" set; any facts row outside it is a stale / duplicate record.
+        var liveCompanyIds = new HashSet<string>(
+            (await _db.Participants
+                .Where(p => p.EventId == eventId
+                            && p.Role == ParticipantRole.Sponsor
+                            && p.IsActive
+                            && p.SponsorCompanyId != null)
+                .Select(p => p.SponsorCompanyId!)
+                .Distinct()
+                .ToListAsync(ct)),
+            StringComparer.OrdinalIgnoreCase);
+
+        OrphanedSponsorFacts = (await _db.SponsorInfos
+                .Where(s => s.EventId == eventId)
+                .Select(s => new { s.Id, s.SponsorCompanyId, s.CompanyDescriptionShort })
+                .ToListAsync(ct))
+            .Where(s => !liveCompanyIds.Contains(s.SponsorCompanyId))
+            .OrderBy(s => s.SponsorCompanyId, StringComparer.OrdinalIgnoreCase)
+            .Select(s => new OrphanedFacts(s.Id, s.SponsorCompanyId, s.CompanyDescriptionShort))
+            .ToList();
     }
 }

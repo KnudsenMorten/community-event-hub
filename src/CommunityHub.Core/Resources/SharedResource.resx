@@ -96,6 +96,7 @@
   <data name="Nav.OrgAreaMenu" xml:space="preserve"><value>Organizer area</value></data>
   <data name="Nav.OrgAreaMenuToggle" xml:space="preserve"><value>Organizer area menu</value></data>
   <data name="Nav.SpeakerQuestions" xml:space="preserve"><value>Session questions</value></data>
+  <data name="Nav.SpeakerEvaluations" xml:space="preserve"><value>My session ratings</value></data>
   <data name="Nav.ShareGraphics" xml:space="preserve"><value>Share graphics</value></data>
   <data name="Nav.Home" xml:space="preserve"><value>Home</value></data>
   <data name="Nav.MyTasks" xml:space="preserve"><value>My tasks</value></data>
@@ -197,6 +198,9 @@
   <data name="Speaker.AllMyTasks" xml:space="preserve"><value>All my tasks</value></data>
   <data name="Speaker.MySessions" xml:space="preserve"><value>My sessions</value></data>
   <data name="Speaker.MySessionsIntro" xml:space="preserve"><value>The sessions you're presenting — when and where, plus a link to the attendee questions for each.</value></data>
+  <data name="Speaker.RatingsHeading" xml:space="preserve"><value>My session ratings</value></data>
+  <data name="Speaker.RatingsIntro" xml:space="preserve"><value>See how attendees rated your sessions, with their anonymous comments.</value></data>
+  <data name="Speaker.RatingsCta" xml:space="preserve"><value>View my session ratings</value></data>
   <data name="Speaker.MasterClassBadge" xml:space="preserve"><value>Master class</value></data>
   <data name="Speaker.NotScheduledYet" xml:space="preserve"><value>Time to be scheduled</value></data>
   <data name="Speaker.RoomTbd" xml:space="preserve"><value>Room to be assigned</value></data>
@@ -282,6 +286,11 @@
   <data name="OrgHotels.Empty" xml:space="preserve"><value>No hotels yet. Add the first one above.</value></data>
   <data name="OrgHotels.ConfirmDelete" xml:space="preserve"><value>Delete this hotel? Assigned people will be un-assigned.</value></data>
   <data name="OrgHotels.GoToAssignments" xml:space="preserve"><value>Assign people to hotels →</value></data>
+  <data name="OrgHotels.SelectRow" xml:space="preserve"><value>Select {0}</value></data>
+  <data name="OrgHotels.BulkDelete" xml:space="preserve"><value>Delete selected hotels</value></data>
+  <data name="OrgHotels.BulkDeleteHint" xml:space="preserve"><value>Tick the hotels to remove. Anyone placed in a deleted hotel is automatically un-assigned (their participant record is kept).</value></data>
+  <data name="OrgHotels.BulkDeleteConfirmTitle" xml:space="preserve"><value>Delete the selected hotels?</value></data>
+  <data name="OrgHotels.BulkDeleteConfirmBody" xml:space="preserve"><value>This permanently removes {0} selected hotel(s) and un-assigns anyone placed in them. This cannot be undone.</value></data>
   <data name="OrgHotelAssign.Title" xml:space="preserve"><value>Hotel assignments</value></data>
   <data name="OrgHotelAssign.Intro" xml:space="preserve"><value>Assign each participant to a hotel and set their confirmation number. People are grouped by hotel so you can manage the room block per hotel.</value></data>
   <data name="OrgHotelAssign.NoHotels" xml:space="preserve"><value>Define at least one hotel first on</value></data>
@@ -405,6 +414,33 @@
   <data name="Nav.OrgGroupPhotos" xml:space="preserve"><value>Group photos</value></data>
   <data name="Nav.OrgAppGame" xml:space="preserve"><value>App game</value></data>
   <data name="Nav.OrgImpersonationLog" xml:space="preserve"><value>Acting-as log</value></data>
+  <data name="Nav.OrgDataFreshness" xml:space="preserve"><value>Data freshness</value></data>
+
+  <!-- Organizer: data-freshness panel (REQUIREMENTS §21 "last synced at") -->
+  <data name="Fresh.Title" xml:space="preserve"><value>Data freshness</value></data>
+  <data name="Fresh.Intro" xml:space="preserve"><value>When each data source was last fed. A source quieter than expected is flagged so you can check whether a sync stopped.</value></data>
+  <data name="Fresh.GeneratedAt" xml:space="preserve"><value>Checked at {0}</value></data>
+  <data name="Fresh.ColFeed" xml:space="preserve"><value>Data source</value></data>
+  <data name="Fresh.ColLast" xml:space="preserve"><value>Last activity</value></data>
+  <data name="Fresh.ColAge" xml:space="preserve"><value>How long ago</value></data>
+  <data name="Fresh.ColState" xml:space="preserve"><value>State</value></data>
+  <data name="Fresh.NoData" xml:space="preserve"><value>No data yet</value></data>
+  <data name="Fresh.Fresh" xml:space="preserve"><value>Up to date</value></data>
+  <data name="Fresh.Stale" xml:space="preserve"><value>Looks stale</value></data>
+  <data name="Fresh.AllFresh" xml:space="preserve"><value>Every data source is up to date.</value></data>
+  <data name="Fresh.StaleCount" xml:space="preserve"><value>{0} data source(s) look stale — worth a check.</value></data>
+  <data name="Fresh.AgeDays" xml:space="preserve"><value>{0} day(s) ago</value></data>
+  <data name="Fresh.AgeHours" xml:space="preserve"><value>{0} hour(s) ago</value></data>
+  <data name="Fresh.AgeMinutes" xml:space="preserve"><value>{0} minute(s) ago</value></data>
+  <data name="Fresh.Feed.Email" xml:space="preserve"><value>Outbound email</value></data>
+  <data name="Fresh.Feed.AttendeeSync" xml:space="preserve"><value>Attendee sync</value></data>
+  <data name="Fresh.Feed.MasterClassBookingSync" xml:space="preserve"><value>Master-class bookings</value></data>
+  <data name="Fresh.Feed.SponsorLeads" xml:space="preserve"><value>Sponsor leads</value></data>
+  <data name="Fresh.Feed.SpeakerImport" xml:space="preserve"><value>Speaker import</value></data>
+  <data name="Fresh.Feed.SessionImport" xml:space="preserve"><value>Session import</value></data>
+  <data name="Fresh.Feed.SessionQuestions" xml:space="preserve"><value>Attendee questions</value></data>
+  <data name="Fresh.Feed.SessionEvaluations" xml:space="preserve"><value>Session ratings</value></data>
+  <data name="Fresh.Feed.SoMePublished" xml:space="preserve"><value>Social-media posts</value></data>
 
   <!-- Forms: Hotel -->
   <data name="Hotel.Title" xml:space="preserve"><value>Hotel preference</value></data>
@@ -785,6 +821,9 @@
   <data name="Sponsors.VisitSite" xml:space="preserve"><value>Visit website</value></data>
   <data name="Sponsors.ComingSoonTitle" xml:space="preserve"><value>Sponsors coming soon</value></data>
   <data name="Sponsors.ComingSoonBody" xml:space="preserve"><value>Our sponsors will be announced here. Interested in sponsoring? Get in touch.</value></data>
+  <data name="Sponsors.BecomeTitle" xml:space="preserve"><value>Become a sponsor</value></data>
+  <data name="Sponsors.BecomeBody" xml:space="preserve"><value>Reach a focused audience of community professionals. Get in touch to discuss sponsorship packages for this event.</value></data>
+  <data name="Sponsors.BecomeCta" xml:space="preserve"><value>Contact us about sponsoring</value></data>
 
   <!-- Organizer command center (REQUIREMENTS §20) -->
   <data name="Cc.Title" xml:space="preserve"><value>Command center</value></data>
@@ -944,6 +983,10 @@
   <data name="Sessions.Delete" xml:space="preserve"><value>Delete session</value></data>
   <data name="Sessions.DeleteConfirmTitle" xml:space="preserve"><value>Delete this session?</value></data>
   <data name="Sessions.DeleteBlocked" xml:space="preserve"><value>This session has attendee data and cannot be deleted. Handle that data first.</value></data>
+  <data name="Sessions.BulkDelete" xml:space="preserve"><value>Delete selected sessions</value></data>
+  <data name="Sessions.BulkDeleteHint" xml:space="preserve"><value>Only sessions with no attendee data can be selected. Sessions with questions, evaluations or bookings are protected.</value></data>
+  <data name="Sessions.BulkDeleteConfirmTitle" xml:space="preserve"><value>Delete the selected sessions?</value></data>
+  <data name="Sessions.BulkDeleteConfirmBody" xml:space="preserve"><value>This permanently removes {0} selected session(s) and their speaker links. Imported sessions return on the next Sessionize import. This cannot be undone.</value></data>
   <data name="Queue.Delete" xml:space="preserve"><value>Delete</value></data>
   <data name="Queue.DeleteConfirmTitle" xml:space="preserve"><value>Remove this queue row?</value></data>
   <!-- Attendee My-event: personal schedule / my sessions / quick links / ask + evaluate (§20 Attendee) -->
@@ -1082,4 +1125,63 @@
   <data name="Comms.ColCampaign" xml:space="preserve"><value>Campaign</value></data>
   <data name="Comms.ColWhen" xml:space="preserve"><value>When</value></data>
   <data name="Comms.ColChannel" xml:space="preserve"><value>Channel</value></data>
+  <data name="Speakers.Remove" xml:space="preserve"><value>Remove from speakers</value></data>
+  <data name="Speakers.OnAgenda" xml:space="preserve"><value>Still on the agenda</value></data>
+  <data name="Speakers.RemoveConfirmTitle" xml:space="preserve"><value>Remove from the speaker roster?</value></data>
+  <data name="Speakers.RemoveConfirmBody" xml:space="preserve"><value>This removes the speaker profile (bio, photo, accreditation) but keeps the person as a participant. A speaker still linked to a session is protected. This cannot be undone for: </value></data>
+  <data name="Speakers.BulkRemove" xml:space="preserve"><value>Remove selected from speakers</value></data>
+  <data name="Speakers.BulkRemoveHint" xml:space="preserve"><value>Removes the speaker profile only; the person stays a participant. Speakers still on the agenda are protected.</value></data>
+  <data name="Speakers.BulkRemoveConfirmTitle" xml:space="preserve"><value>Remove the selected speakers?</value></data>
+  <data name="Speakers.BulkRemoveConfirmBody" xml:space="preserve"><value>This removes the speaker profile of {0} selected person(s); they stay participants. Anyone still linked to a session is kept. This cannot be undone.</value></data>
+  <data name="SponsorFacts.OrphanHeading" xml:space="preserve"><value>Stale company facts (no active contacts)</value></data>
+  <data name="SponsorFacts.OrphanIntro" xml:space="preserve"><value>These sponsor company-facts rows (logo, description, website, tier) drive the public sponsors page, but their company has no active contact in this edition — usually a duplicate or a wrong company id. Delete the stale ones so they no longer show publicly.</value></data>
+  <data name="SponsorFacts.ColCompany" xml:space="preserve"><value>Company id</value></data>
+  <data name="SponsorFacts.ColShortDesc" xml:space="preserve"><value>Short description</value></data>
+  <data name="SponsorFacts.Delete" xml:space="preserve"><value>Delete facts</value></data>
+  <data name="SponsorFacts.DeleteConfirmTitle" xml:space="preserve"><value>Delete these company facts?</value></data>
+  <data name="SponsorFacts.DeleteConfirmBody" xml:space="preserve"><value>This permanently removes the logo, description, website and tier for this company. It only works while the company has no active contact. This cannot be undone for: </value></data>
+
+  <!-- Onboarding dashboard "who hasn't onboarded yet" CSV export (REQUIREMENTS §21) -->
+  <data name="OnbExport.Heading" xml:space="preserve"><value>Who hasn't onboarded yet</value></data>
+  <data name="OnbExport.Intro" xml:space="preserve"><value>Download everyone still working through onboarding (anyone who hasn't finished every step their role needs), with the steps each person is still missing — so you can chase them down.</value></data>
+  <data name="OnbExport.PendingCount" xml:space="preserve"><value>{0} person(s) still onboarding.</value></data>
+  <data name="OnbExport.Download" xml:space="preserve"><value>Download pending list (CSV)</value></data>
+  <data name="OnbExport.DownloadAria" xml:space="preserve"><value>Download the list of people who have not finished onboarding as a CSV file</value></data>
+  <!-- Onboarding dashboard "re-open a step for the whole persona" bulk action (REQUIREMENTS §21) -->
+  <data name="OnbReopen.Heading" xml:space="preserve"><value>Re-open a step for the whole group</value></data>
+  <data name="OnbReopen.Intro" xml:space="preserve"><value>Pick a step to re-open for everyone in {0} who has already completed it — for example when a deadline moves and you need the whole group to confirm again. A reminder is queued for each affected person.</value></data>
+  <data name="OnbReopen.StepLabel" xml:space="preserve"><value>Step to re-open</value></data>
+  <data name="OnbReopen.Submit" xml:space="preserve"><value>Re-open for everyone</value></data>
+  <data name="OnbReopen.SubmitAria" xml:space="preserve"><value>Re-open the selected step for every matching person in this group</value></data>
+  <data name="OnbReopen.Confirm" xml:space="preserve"><value>Re-open this step for everyone in {0} who has completed it? Each of them will get a reminder to do it again.</value></data>
+  <data name="ReqChange.Title" xml:space="preserve"><value>Request a change</value></data>
+  <data name="ReqChange.Intro" xml:space="preserve"><value>This form is closed for editing, but you can still ask the organizers to update your {0} details. Tell us what needs changing and we will take care of it.</value></data>
+  <data name="ReqChange.MessageLabel" xml:space="preserve"><value>What would you like changed about your {0}?</value></data>
+  <data name="ReqChange.MessagePlaceholder" xml:space="preserve"><value>For example: my arrival date moved to the 8th, please change my check-in.</value></data>
+  <data name="ReqChange.MessageHelp" xml:space="preserve"><value>Be as specific as you can. An organizer will read this and follow up with you.</value></data>
+  <data name="ReqChange.Submit" xml:space="preserve"><value>Send my change request</value></data>
+  <data name="ReqChange.SentFlash" xml:space="preserve"><value>Thanks — your change request has reached the organizers.</value></data>
+  <data name="ReqChange.OpenHeading" xml:space="preserve"><value>Your pending change requests</value></data>
+  <data name="ReqChange.OpenIntro" xml:space="preserve"><value>These requests have reached the organizers and are waiting to be handled.</value></data>
+  <data name="ReqChange.ErrEmpty" xml:space="preserve"><value>Please describe what you would like changed.</value></data>
+  <data name="ReqChange.ErrTooLong" xml:space="preserve"><value>Your message is too long. Please shorten it to 1000 characters or fewer.</value></data>
+  <data name="ReqChange.ErrGeneric" xml:space="preserve"><value>Sorry, your request could not be sent. Please try again.</value></data>
+  <data name="ReqChange.LockedPrompt" xml:space="preserve"><value>Need this changed?</value></data>
+  <data name="ReqChange.LockedCta" xml:space="preserve"><value>Request a change</value></data>
+  <data name="SpeakerQ.Title" xml:space="preserve"><value>Questions for my sessions</value></data>
+  <data name="SpeakerQ.DigestNote" xml:space="preserve"><value>We will email you a digest whenever attendees send new questions for your sessions, so you never have to keep checking back.</value></data>
+  <data name="SpeakerQ.OpenCount" xml:space="preserve"><value>{0} open question(s) awaiting your reply.</value></data>
+  <data name="SpeakerQ.AllAnswered" xml:space="preserve"><value>No open questions right now — you're all caught up.</value></data>
+  <data name="SpeakerEval.Title" xml:space="preserve"><value>My session ratings</value></data>
+  <data name="SpeakerEval.Intro" xml:space="preserve"><value>How attendees rated your sessions (1–5), with their anonymous comments. Ratings come from the quick smiley form attendees reach via the room QR code.</value></data>
+  <data name="SpeakerEval.None" xml:space="preserve"><value>No attendee ratings yet. They appear here as soon as attendees rate your sessions.</value></data>
+  <data name="SpeakerEval.Overall" xml:space="preserve"><value>Across all your sessions:</value></data>
+  <data name="SpeakerEval.TotalCount" xml:space="preserve"><value>{0} rating(s) in total</value></data>
+  <data name="SpeakerEval.MasterClass" xml:space="preserve"><value>Master class</value></data>
+  <data name="SpeakerEval.NoRatings" xml:space="preserve"><value>No ratings yet</value></data>
+  <data name="SpeakerEval.SessionCount" xml:space="preserve"><value>{0} rating(s)</value></data>
+  <data name="SpeakerEval.SessionNone" xml:space="preserve"><value>No ratings for this session yet.</value></data>
+  <data name="SpeakerEval.NoComments" xml:space="preserve"><value>Ratings only — no written comments for this session.</value></data>
+  <data name="SpeakerEval.RatingAria" xml:space="preserve"><value>Rated {0} out of 5</value></data>
+  <data name="SpeakerEval.NotASpeaker" xml:space="preserve"><value>This area is for speakers ({0}).</value></data>
 </root>

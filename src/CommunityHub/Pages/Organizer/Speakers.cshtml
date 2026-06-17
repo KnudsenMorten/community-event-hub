@@ -127,12 +127,13 @@
                         <th style="padding:6px;">Country</th>
                         <th style="padding:6px;text-align:center;">1st-time</th>
                         <th style="padding:6px;text-align:center;">Active</th>
+                        <th scope="col" style="padding:6px;">@Localizer["Speakers.Remove"]</th>
                     </tr>
                 </thead>
                 <tbody>
                     @if (Model.Rows.Count == 0)
                     {
-                        <tr><td colspan="10" style="padding:10px;color:#6b7280;">@Localizer["OrgGrid.NoMatch"]</td></tr>
+                        <tr><td colspan="11" style="padding:10px;color:#6b7280;">@Localizer["OrgGrid.NoMatch"]</td></tr>
                     }
                     @foreach (var r in Model.Rows)
                     {
@@ -165,6 +166,29 @@
                                 @(r.IsFirstTime is true ? "✓" : r.IsFirstTime is false ? "" : "-")
                             </td>
                             <td style="padding:6px;text-align:center;">@(r.IsActive ? "✓" : "")</td>
+                            <td style="padding:6px;">
+                                @* "Remove from speakers" deletes the speaker PROFILE only
+                                   (the person stays a participant). Offered only when the
+                                   speaker is not on the agenda; a linked speaker shows a
+                                   note instead (the server refuses it anyway). The button
+                                   is type=button: it opens the shared confirm modal, then
+                                   posts the hidden single-remove form. *@
+                                @if (r.CanRemove)
+                                {
+                                    <button type="button" class="js-remove-speaker"
+                                            data-id="@r.Id" data-name="@r.Name"
+                                            aria-haspopup="dialog"
+                                            style="background:#b91c1c;color:#fff;border:none;border-radius:6px;padding:5px 10px;cursor:pointer;font-size:12.5px;">
+                                        @Localizer["Speakers.Remove"]
+                                    </button>
+                                }
+                                else
+                                {
+                                    <span style="font-size:11.5px;color:#9ca3af;" role="note">
+                                        @Localizer["Speakers.OnAgenda"]
+                                    </span>
+                                }
+                            </td>
                         </tr>
                     }
                 </tbody>
@@ -174,6 +198,35 @@
             <!-- type=button: opens the shared confirm modal showing the selected
                  COUNT, then submits this form. No bulk write on a single click. -->
             <button type="button" id="bulkApply" class="js-bulk" style="margin-top:12px;">Apply to selection</button>
+            <!-- Bulk REMOVE-from-speakers: type=button opens its own confirm modal
+                 (live count), then copies the checked ids into the hidden remove
+                 form and submits it. Destructive, so it is visually distinct. -->
+            <button type="button" id="bulkRemoveSpeakers" aria-haspopup="dialog"
+                    style="margin-top:12px;margin-left:8px;background:#b91c1c;color:#fff;border:none;border-radius:6px;padding:8px 14px;cursor:pointer;">
+                @Localizer["Speakers.BulkRemove"]
+            </button>
+            <span style="font-size:12.5px;color:#6b7280;margin-left:6px;">@Localizer["Speakers.BulkRemoveHint"]</span>
+        </form>
+
+        @* Hidden form for a SINGLE remove-from-speakers (the per-row button posts
+           here via JS after the confirm modal). Outside bulkForm — nested forms are
+           invalid. Carries the grid-state so the organizer stays on the same page. *@
+        <form method="post" asp-page-handler="RemoveSpeaker" id="removeSpeakerForm" hidden>
+            <input type="hidden" name="participantId" id="removeSpeakerId" value="" />
+            <input type="hidden" name="Search" value="@Model.Search" />
+            <input type="hidden" name="Sort" value="@Model.Sort" />
+            <input type="hidden" name="Desc" value="@Model.Desc" />
+            <input type="hidden" name="PageNo" value="@Model.Paging.Page" />
+        </form>
+
+        @* Hidden form for the BULK remove-from-speakers (JS fills it with the
+           checked ids). *@
+        <form method="post" asp-page-handler="BulkRemove" id="bulkRemoveForm" hidden>
+            <input type="hidden" name="Search" value="@Model.Search" />
+            <input type="hidden" name="Sort" value="@Model.Sort" />
+            <input type="hidden" name="Desc" value="@Model.Desc" />
+            <input type="hidden" name="PageNo" value="@Model.Paging.Page" />
+            <div id="bulkRemoveIds"></div>
         </form>
 
         @if (Model.Paging.TotalPages > 1)
@@ -218,10 +271,151 @@
             </div>
         </div>
 
+        @* Accessible confirm modal (§21) gating a SINGLE remove-from-speakers. The
+           per-row button's data-name is copied into the summary via JS. (Bespoke,
+           matching the bulk modals on this page, so the per-row data-name fills the
+           summary without colliding with the shared trigger-driven modal JS.) *@
+        <div id="confirmRemoveSpeaker" class="modal-backdrop" role="dialog" aria-modal="true"
+             aria-labelledby="removeSpeakerTitle" aria-describedby="removeSpeakerBody" hidden
+             style="position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;
+                    align-items:center;justify-content:center;padding:16px;z-index:1000;">
+            <div class="modal-card"
+                 style="background:#fff;border-radius:10px;max-width:440px;width:100%;
+                        padding:20px;box-shadow:0 10px 30px rgba(0,0,0,.25);">
+                <h3 id="removeSpeakerTitle" style="margin-top:0;">@Localizer["Speakers.RemoveConfirmTitle"]</h3>
+                <p id="removeSpeakerBody">
+                    @Localizer["Speakers.RemoveConfirmBody"]
+                    <strong data-remove-summary></strong>
+                </p>
+                <div style="display:flex;flex-wrap:wrap;gap:10px;justify-content:flex-end;margin-top:16px;">
+                    <button type="button" data-remove-cancel class="secondary"
+                            style="padding:8px 14px;border:1px solid #c4c8d4;border-radius:6px;background:#fff;cursor:pointer;">
+                        @Localizer["OrgGrid.Cancel"]
+                    </button>
+                    <button type="button" data-remove-ok
+                            style="padding:8px 14px;border:none;border-radius:6px;background:#b91c1c;color:#fff;cursor:pointer;">
+                        @Localizer["Speakers.Remove"]
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        @* Bulk remove-from-speakers confirm modal: shows the live COUNT of ticked
+           speakers, then copies the checked ids into the hidden remove form and
+           submits. Accessible (role=dialog, focus move, Esc/backdrop close). *@
+        <div id="bulkRemoveModal" class="modal-backdrop" role="dialog" aria-modal="true"
+             aria-labelledby="bulkRemoveTitle" aria-describedby="bulkRemoveBody" hidden
+             style="position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;
+                    align-items:center;justify-content:center;padding:16px;z-index:1000;">
+            <div class="modal-card"
+                 style="background:#fff;border-radius:10px;max-width:440px;width:100%;
+                        padding:20px;box-shadow:0 10px 30px rgba(0,0,0,.25);">
+                <h3 id="bulkRemoveTitle" style="margin-top:0;">@Localizer["Speakers.BulkRemoveConfirmTitle"]</h3>
+                <p id="bulkRemoveBody"></p>
+                <div style="display:flex;flex-wrap:wrap;gap:10px;justify-content:flex-end;margin-top:16px;">
+                    <button type="button" id="bulkRemoveCancel" class="secondary"
+                            style="padding:8px 14px;border:1px solid #c4c8d4;border-radius:6px;background:#fff;cursor:pointer;">
+                        @Localizer["OrgGrid.Cancel"]
+                    </button>
+                    <button type="button" id="bulkRemoveConfirm"
+                            style="padding:8px 14px;border:none;border-radius:6px;background:#b91c1c;color:#fff;cursor:pointer;">
+                        @Localizer["Speakers.BulkRemove"]
+                    </button>
+                </div>
+            </div>
+        </div>
+
         <script>
             document.getElementById('ToggleAll').addEventListener('change', function () {
                 document.querySelectorAll('.rowsel').forEach(c => c.checked = this.checked);
             });
+
+            // --- Single remove-from-speakers: per-row button -> shared confirm
+            //     modal -> hidden single-remove form. ---------------------------
+            (function () {
+                var removeForm = document.getElementById('removeSpeakerForm');
+                var removeIdInput = document.getElementById('removeSpeakerId');
+                var modal = document.getElementById('confirmRemoveSpeaker');
+                if (!removeForm || !removeIdInput || !modal) return;
+                var summaryEl = modal.querySelector('[data-remove-summary]');
+                var confirmBtn = modal.querySelector('[data-remove-ok]');
+                var cancelBtn = modal.querySelector('[data-remove-cancel]');
+                var lastFocused = null;
+                var pendingId = null, pendingName = '';
+
+                function openModal() {
+                    if (summaryEl) summaryEl.textContent = pendingName;
+                    modal.hidden = false;
+                    lastFocused = document.activeElement;
+                    if (confirmBtn) confirmBtn.focus();
+                }
+                function closeModal() {
+                    modal.hidden = true;
+                    if (lastFocused && lastFocused.focus) lastFocused.focus();
+                }
+                document.querySelectorAll('.js-remove-speaker').forEach(function (b) {
+                    b.addEventListener('click', function () {
+                        pendingId = b.getAttribute('data-id');
+                        pendingName = b.getAttribute('data-name') || '';
+                        openModal();
+                    });
+                });
+                if (confirmBtn) confirmBtn.addEventListener('click', function () {
+                    removeIdInput.value = pendingId;
+                    removeForm.submit();
+                });
+                if (cancelBtn) cancelBtn.addEventListener('click', closeModal);
+                modal.addEventListener('click', function (e) { if (e.target === modal) closeModal(); });
+                document.addEventListener('keydown', function (e) {
+                    if (e.key === 'Escape' && !modal.hidden) closeModal();
+                });
+            })();
+
+            // --- Bulk remove-from-speakers: collect checked ids -> confirm modal
+            //     (live count) -> hidden bulk-remove form. ----------------------
+            (function () {
+                var btn = document.getElementById('bulkRemoveSpeakers');
+                var modal = document.getElementById('bulkRemoveModal');
+                var form = document.getElementById('bulkRemoveForm');
+                var idsHost = document.getElementById('bulkRemoveIds');
+                if (!btn || !modal || !form || !idsHost) return;
+                var bodyEl = document.getElementById('bulkRemoveBody');
+                var cancelBtn = document.getElementById('bulkRemoveCancel');
+                var confirmBtn = document.getElementById('bulkRemoveConfirm');
+                var bodyTemplate = @Html.Raw(Json.Serialize(Localizer["Speakers.BulkRemoveConfirmBody", "{0}"].Value));
+                var pickFirst = @Html.Raw(Json.Serialize(Localizer["OrgGrid.BulkPickFirst"].Value));
+                var lastFocused = null;
+
+                function checked() { return document.querySelectorAll('.rowsel:checked'); }
+                function open(count) {
+                    bodyEl.textContent = bodyTemplate.replace('{0}', count);
+                    modal.hidden = false;
+                    lastFocused = document.activeElement;
+                    confirmBtn.focus();
+                }
+                function close() {
+                    modal.hidden = true;
+                    if (lastFocused && lastFocused.focus) lastFocused.focus();
+                }
+                btn.addEventListener('click', function () {
+                    if (checked().length === 0) { alert(pickFirst); return; }
+                    open(checked().length);
+                });
+                confirmBtn.addEventListener('click', function () {
+                    idsHost.innerHTML = '';
+                    checked().forEach(function (c) {
+                        var h = document.createElement('input');
+                        h.type = 'hidden'; h.name = 'SelectedIds'; h.value = c.value;
+                        idsHost.appendChild(h);
+                    });
+                    form.submit();
+                });
+                cancelBtn.addEventListener('click', close);
+                modal.addEventListener('click', function (e) { if (e.target === modal) close(); });
+                document.addEventListener('keydown', function (e) {
+                    if (e.key === 'Escape' && !modal.hidden) close();
+                });
+            })();
             (function () {
                 var modal = document.getElementById('bulkModal');
                 var form = document.getElementById('bulkForm');

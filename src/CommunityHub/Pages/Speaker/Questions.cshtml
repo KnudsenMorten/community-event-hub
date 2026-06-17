@@ -45,11 +45,26 @@
     @@media (max-width: 600px) { .sq-form textarea, .sq-form button { flex:1 1 100%; } }
 </style>
 
+@{
+    var openQuestions = Model.Threads.Sum(t =>
+        t.Questions.Count(q => q.Status == SessionQuestionStatus.Open));
+}
+
 <div class="card">
-    <h2>Questions for my sessions</h2>
+    <h2>@Localizer["SpeakerQ.Title"]</h2>
     <p>Attendees can ask questions for your session(s) before the event. They are private to
        you, your <strong>co-speakers on the same session</strong>, and the organizers. Reply here
        &mdash; your reply is visible to your co-speakers too.</p>
+
+    <p class="sq-digest" style="background:#eef6ff;border-left:4px solid #008BD2;padding:10px 12px;border-radius:6px;font-size:13.5px;color:#1f3a5f;">
+        @Localizer["SpeakerQ.DigestNote"]
+    </p>
+
+    <p role="status" style="font-weight:600;font-size:14px;margin:4px 0 12px 0;">
+        @(openQuestions > 0
+            ? Localizer["SpeakerQ.OpenCount", openQuestions].Value
+            : Localizer["SpeakerQ.AllAnswered"].Value)
+    </p>
 
     @if (!string.IsNullOrEmpty(Model.Notice))
     {

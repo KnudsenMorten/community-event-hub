@@ -18,11 +18,16 @@ public class HotelsModel : PageModel
 {
     private readonly ICurrentParticipantAccessor _participant;
     private readonly HotelManagementService _hotels;
+    private readonly HotelBulkOperationService _bulk;
 
-    public HotelsModel(ICurrentParticipantAccessor participant, HotelManagementService hotels)
+    public HotelsModel(
+        ICurrentParticipantAccessor participant,
+        HotelManagementService hotels,
+        HotelBulkOperationService bulk)
     {
         _participant = participant;
         _hotels = hotels;
+        _bulk = bulk;
     }
 
     public bool AccessDenied { get; private set; }
@@ -30,6 +35,9 @@ public class HotelsModel : PageModel
     public string? Error { get; private set; }
 
     public IReadOnlyList<Hotel> Hotels { get; private set; } = Array.Empty<Hotel>();
+
+    /// <summary>The hotel ids ticked in the bulk-select grid (posted form field).</summary>
+    [BindProperty] public List<int> SelectedIds { get; set; } = new();
 
     [BindProperty(SupportsGet = true)] public int? EditId { get; set; }
     [BindProperty] public string? Name { get; set; }
@@ -100,6 +108,50 @@ public class HotelsModel : PageModel
 
         var ok = await _hotels.DeleteHotelAsync(me.EventId, id, ct);
         Message = ok ? "Hotel deleted (assigned people were un-assigned)." : "Hotel not found.";
+        await LoadAsync(me.EventId, ct);
+        return Page();
+    }
+
+    /// <summary>
+    /// Bulk-delete the ticked hotels (REQUIREMENTS §20 universal CRUD + bulk). The
+    /// safe semantics are the single-row ones applied row by row in
+    /// <see cref="HotelBulkOperationService"/>: every placed participant is
+    /// un-assigned first so no foreign key dangles, then the hotels are removed in
+    /// one transaction. The honest banner reports deleted / un-assigned / not-found.
+    /// Organizer-only, edition-scoped; the page's confirm modal (live count) gates
+    /// the click.
+    /// </summary>
+    public async Task<IActionResult> OnPostBulkDeleteAsync(CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+
+        var requested = SelectedIds.Where(id => id > 0).Distinct().Count();
+        if (requested == 0)
+        {
+            Error = "Pick at least one hotel first.";
+            await LoadAsync(me.EventId, ct);
+            return Page();
+        }
+
+        var result = await _bulk.DeleteAsync(me.EventId, SelectedIds, ct);
+        var skipped = result.Skipped(requested);
+
+        if (result.Deleted == 0)
+        {
+            Error = "No matching hotels were found in this edition.";
+        }
+        else
+        {
+            Message = $"{result.Deleted} hotel(s) deleted"
+                + (result.Unassigned > 0
+                    ? $" ({result.Unassigned} person(s) were un-assigned)"
+                    : string.Empty)
+                + (skipped > 0 ? $", {skipped} not found" : string.Empty)
+                + ".";
+        }
+
         await LoadAsync(me.EventId, ct);
         return Page();
     }

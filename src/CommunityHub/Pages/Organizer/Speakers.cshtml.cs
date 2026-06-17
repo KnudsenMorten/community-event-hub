@@ -16,13 +16,16 @@ public class SpeakersModel : PageModel
     private readonly CommunityHubDbContext _db;
     private readonly ICurrentParticipantAccessor _participant;
     private readonly TimeProvider _clock;
+    private readonly SpeakerDeletionService _deletion;
 
     public SpeakersModel(
-        CommunityHubDbContext db, ICurrentParticipantAccessor participant, TimeProvider clock)
+        CommunityHubDbContext db, ICurrentParticipantAccessor participant, TimeProvider clock,
+        SpeakerDeletionService deletion)
     {
         _db = db;
         _participant = participant;
         _clock = clock;
+        _deletion = deletion;
     }
 
     public bool AccessDenied { get; private set; }
@@ -55,7 +58,16 @@ public class SpeakersModel : PageModel
         int Id, string Name, string Email, string Role,
         bool SpeakingPreDay, bool SpeakingMainDay,
         string? Accreditation, string? Country, bool? IsFirstTime, bool IsActive,
-        IReadOnlyList<string> Sessions);
+        IReadOnlyList<string> Sessions)
+    {
+        /// <summary>
+        /// True when this speaker can be removed from the roster with no agenda
+        /// orphaning — i.e. they are not linked to any session. Drives whether the
+        /// grid offers a "remove from speakers" affordance or a "still on the
+        /// agenda" note. Matches <see cref="CommunityHub.Core.Organizer.SpeakerDeletionService"/>.
+        /// </summary>
+        public bool CanRemove => Sessions.Count == 0;
+    }
 
     /// <summary>Total sessions imported for the edition (header stat).</summary>
     public int SessionCount { get; private set; }
@@ -119,6 +131,82 @@ public class SpeakersModel : PageModel
         var affected = await ApplyToParticipantsAsync(me.EventId, ids, ct);
         Message = $"{FieldLabel()} = {(TargetValue ? "Yes" : "No")} applied to {affected} speaker(s)."
                   + (notFound > 0 ? $" {notFound} email(s) did not match an active speaker and were skipped." : "");
+        await LoadAsync(me.EventId, ct);
+        return Page();
+    }
+
+    /// <summary>
+    /// Remove a single person from the speaker roster (REQUIREMENTS §22 "Speakers
+    /// delete"). Safe semantics live in <see cref="SpeakerDeletionService"/>: a
+    /// speaker still linked to a session is refused with a reason (the agenda is
+    /// never silently orphaned); a clean speaker has their speaker profile removed
+    /// while the participant row (identity / login / logistics) is untouched.
+    /// Organizer-only, edition-scoped; the page's confirm modal gates the click.
+    /// </summary>
+    public async Task<IActionResult> OnPostRemoveSpeakerAsync(int participantId, CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+
+        var result = await _deletion.DeleteAsync(me.EventId, participantId, ct);
+        switch (result.Status)
+        {
+            case SpeakerDeletionService.DeletionStatus.Deleted:
+                Message = $"\"{result.Name}\" was removed from the speaker roster "
+                          + "(the person stays as a participant).";
+                break;
+            case SpeakerDeletionService.DeletionStatus.Blocked:
+                Error = $"\"{result.Name}\" was not removed because they are still linked to "
+                        + $"{result.SessionCount} session(s). Unlink the session(s) first.";
+                break;
+            default:
+                Error = "That speaker could not be found in this edition.";
+                break;
+        }
+
+        await LoadAsync(me.EventId, ct);
+        return Page();
+    }
+
+    /// <summary>
+    /// Bulk-remove the ticked people from the speaker roster (§20 universal CRUD +
+    /// bulk). Applies the single-row safe semantics row by row in
+    /// <see cref="SpeakerDeletionService"/>: speakers still on the agenda are left
+    /// untouched and reported; clean speakers have their profile removed; the
+    /// honest banner reports removed / kept / not-found. Organizer-only,
+    /// edition-scoped; the page's confirm modal (live count) gates the click.
+    /// </summary>
+    public async Task<IActionResult> OnPostBulkRemoveAsync(CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+
+        var requested = SelectedIds.Where(id => id > 0).Distinct().Count();
+        if (requested == 0)
+        {
+            Error = "Pick at least one speaker first.";
+            await LoadAsync(me.EventId, ct);
+            return Page();
+        }
+
+        var result = await _deletion.DeleteManyAsync(me.EventId, SelectedIds, ct);
+        var skipped = result.Skipped(requested);
+
+        if (result.Deleted == 0 && result.Blocked > 0)
+        {
+            Error = $"{result.Blocked} speaker(s) are still linked to a session and were not "
+                    + "removed. Unlink those session(s) first.";
+        }
+        else
+        {
+            Message = $"{result.Deleted} speaker(s) removed from the roster"
+                + (result.Blocked > 0 ? $", {result.Blocked} kept (still on the agenda)" : string.Empty)
+                + (skipped > 0 ? $", {skipped} not found" : string.Empty)
+                + ".";
+        }
+
         await LoadAsync(me.EventId, ct);
         return Page();
     }

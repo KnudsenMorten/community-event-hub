@@ -33,6 +33,7 @@ public class SessionsModel : PageModel
     private readonly CommunityHub.Core.Integrations.MasterClassBookingSyncService _bookingSync;
     private readonly CommunityHub.Core.Domain.SessionEvaluationService _eval;
     private readonly CommunityHub.Core.Organizer.SessionDeletionService _deletion;
+    private readonly CommunityHub.Core.Organizer.SessionBulkOperationService _bulk;
     private readonly TimeProvider _clock;
     private readonly IStringLocalizer<SharedResource> _loc;
 
@@ -45,6 +46,7 @@ public class SessionsModel : PageModel
         CommunityHub.Core.Integrations.MasterClassBookingSyncService bookingSync,
         CommunityHub.Core.Domain.SessionEvaluationService eval,
         CommunityHub.Core.Organizer.SessionDeletionService deletion,
+        CommunityHub.Core.Organizer.SessionBulkOperationService bulk,
         TimeProvider clock,
         IStringLocalizer<SharedResource> loc)
     {
@@ -56,9 +58,13 @@ public class SessionsModel : PageModel
         _bookingSync = bookingSync;
         _eval = eval;
         _deletion = deletion;
+        _bulk = bulk;
         _clock = clock;
         _loc = loc;
     }
+
+    /// <summary>The session ids ticked in the bulk-select grid (posted form field).</summary>
+    [BindProperty] public List<int> SelectedIds { get; set; } = new();
 
     public bool AccessDenied { get; private set; }
     public string? Message { get; private set; }
@@ -257,6 +263,54 @@ public class SessionsModel : PageModel
             default:
                 Error = "That session could not be found in this edition.";
                 break;
+        }
+
+        await LoadAsync(me.EventId, ct);
+        return Page();
+    }
+
+    /// <summary>
+    /// Bulk-delete the ticked sessions (§20 universal CRUD + bulk). The safe
+    /// semantics are the single-row ones applied row by row in
+    /// <see cref="CommunityHub.Core.Organizer.SessionBulkOperationService"/>:
+    /// sessions with attendee engagement (questions / evaluations / bookings) are
+    /// left untouched and reported; clean sessions are removed with their speaker
+    /// links; the honest result banner reports deleted / blocked / not-found and
+    /// the re-import caveat. Organizer-only, edition-scoped; the page's confirm
+    /// modal (live count) gates the click.
+    /// </summary>
+    public async Task<IActionResult> OnPostBulkDeleteAsync(CancellationToken ct)
+    {
+        var me = Guard();
+        if (me is null) return AccessDenied ? Page() : RedirectToPage("/Login");
+
+        var requested = SelectedIds.Where(id => id > 0).Distinct().Count();
+        if (requested == 0)
+        {
+            Error = "Pick at least one session first.";
+            await LoadAsync(me.EventId, ct);
+            return Page();
+        }
+
+        var result = await _bulk.DeleteAsync(me.EventId, SelectedIds, ct);
+        var skipped = result.Skipped(requested);
+
+        if (result.Deleted == 0 && result.Blocked > 0)
+        {
+            Error = $"{result.Blocked} session(s) have attendee data (questions / "
+                    + "evaluations / bookings) and were not deleted. Handle that data first.";
+        }
+        else
+        {
+            Message = $"{result.Deleted} session(s) deleted"
+                + (result.ImportedDeleted > 0
+                    ? $" ({result.ImportedDeleted} from Sessionize — a re-import will recreate them unless removed there too)"
+                    : string.Empty)
+                + (result.Blocked > 0
+                    ? $", {result.Blocked} kept (have attendee data)"
+                    : string.Empty)
+                + (skipped > 0 ? $", {skipped} not found" : string.Empty)
+                + ".";
         }
 
         await LoadAsync(me.EventId, ct);

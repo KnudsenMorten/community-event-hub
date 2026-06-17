@@ -1,6 +1,7 @@
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
 using CommunityHub.Core.Email;
+using CommunityHub.Core.Export;
 using CommunityHub.Core.Reminders;
 using Microsoft.EntityFrameworkCore;
 
@@ -91,6 +92,26 @@ public sealed record OnboardingRow(
     public int Percent =>
         RequiredCount == 0 ? 100 : (int)Math.Round(100.0 * DoneCount / RequiredCount);
 }
+
+/// <summary>
+/// One line of the "who hasn't onboarded yet" export — a participant who is in
+/// the onboarding pipeline but has NOT completed every step their persona
+/// requires (stage Pre-selected / Invited / In-progress, i.e. NOT Completed).
+/// Carries the per-persona progress plus the human list of the steps still
+/// MISSING for that person, so an organizer can chase them down. A flat,
+/// read-only projection — never a persisted entity.
+/// </summary>
+public sealed record PendingOnboardingRow(
+    int ParticipantId,
+    string FullName,
+    string Email,
+    ParticipantRole Role,
+    PersonaGroup Persona,
+    OnboardingStage Stage,
+    int DoneCount,
+    int RequiredCount,
+    int Percent,
+    IReadOnlyList<OnboardingStep> MissingSteps);
 
 /// <summary>Per-step completion totals for the admin dashboard tiles.</summary>
 public sealed record OnboardingStepStat(OnboardingStep Step, int Done, int Total)
@@ -241,6 +262,78 @@ public sealed class OnboardingService
     }
 
     /// <summary>
+    /// The outcome of a per-persona bulk step re-open: how many people in the
+    /// persona currently HAD the step done (the candidates) versus how many were
+    /// actually re-opened (a 1 → 0 flip that raised a remind hand-off). They are
+    /// equal in practice — a candidate is by definition currently done — but the
+    /// pair makes the organizer banner honest ("Re-opened X of Y") and lets a
+    /// no-op (nobody had it done) report distinctly.
+    /// </summary>
+    public sealed record PersonaResetResult(int Candidates, int Reopened)
+    {
+        /// <summary>True when nobody in the persona had that step done (no change).</summary>
+        public bool IsNoOp => Reopened == 0;
+    }
+
+    /// <summary>
+    /// Organizer "re-open this step for everyone in a persona" — the bulk sibling
+    /// of <see cref="ResetStepAsync"/>. Re-opens the given step for EVERY active or
+    /// pre-selected participant of <paramref name="persona"/> who currently has it
+    /// done AND whose persona actually requires it, raising the same per-person
+    /// <see cref="OrganizerActionItemService.TypeOnboardingStepReset"/> email
+    /// hand-off for each (one open item per person, deduped by the upsert). People
+    /// who never finished the step, or whose persona does not require it, are
+    /// untouched. Edition-scoped + idempotent: a re-run after everyone is already
+    /// re-opened flips nothing and raises nothing (returns a no-op result).
+    ///
+    /// Use case: a catering or swag deadline moves and the organizer wants the
+    /// whole persona to re-confirm that step. Returns the candidate / re-opened
+    /// counts for an honest confirmation banner.
+    /// </summary>
+    public async Task<PersonaResetResult> ResetStepForPersonaAsync(
+        int eventId, PersonaGroup persona, OnboardingStep step,
+        CancellationToken ct = default)
+    {
+        // The step only applies if the persona requires it — otherwise no row is a
+        // candidate and this is a clean no-op (never re-opens an irrelevant step).
+        if (!OnboardingStepSets.Requires(persona, step))
+            return new PersonaResetResult(0, 0);
+
+        // Resolve the candidate ids up front (SQL-translatable: the persona match
+        // is a role-set the DB can filter; the step-done bit is a column). We then
+        // re-open each via the single-row path so the email hand-off + timestamp
+        // clearing stay in ONE place (no duplicated reset logic).
+        var roles = RolesForPersona(persona);
+        var inPipeline = await _db.Participants
+            .Where(p => p.EventId == eventId
+                        && roles.Contains(p.Role)
+                        && (p.LifecycleState == ParticipantLifecycleState.Active
+                            || p.LifecycleState == ParticipantLifecycleState.Preselected))
+            .Select(p => p.Id)
+            .ToListAsync(ct);
+
+        int candidates = 0;
+        int reopened = 0;
+        foreach (var id in inPipeline)
+        {
+            // ResetStepAsync is a no-op (returns false) when the step is not done,
+            // so it self-filters to the people who actually had it complete.
+            var flipped = await ResetStepAsync(eventId, id, step, ct);
+            if (flipped) { candidates++; reopened++; }
+        }
+
+        return new PersonaResetResult(candidates, reopened);
+    }
+
+    /// <summary>The participant roles that map to a persona group (the inverse of
+    /// <see cref="OnboardingEmailSets.PersonaFor"/>), resolved once so the bulk
+    /// query filters on a concrete role set the database can translate.</summary>
+    private static IReadOnlyList<ParticipantRole> RolesForPersona(PersonaGroup persona) =>
+        Enum.GetValues<ParticipantRole>()
+            .Where(r => OnboardingEmailSets.PersonaFor(r) == persona)
+            .ToList();
+
+    /// <summary>
     /// Build the onboarding admin overview for an edition: counts by STAGE
     /// (Preselected / Invited / In-progress / Completed) with completion %,
     /// per-step done/total stats, and a per-participant grid — optionally
@@ -293,6 +386,57 @@ public sealed class OnboardingService
         }
 
         return overview;
+    }
+
+    /// <summary>
+    /// The "who hasn't onboarded yet" list for an edition: every participant in
+    /// the onboarding pipeline whose persona-required steps are NOT all done
+    /// (stage != Completed), with the steps still missing. Optionally filtered to
+    /// one persona group. Read-only — reuses the same persona-aware projection as
+    /// <see cref="BuildOverviewAsync"/> so the export matches the dashboard.
+    ///
+    /// Ordered by persona, then by least-complete first (fewest steps done), then
+    /// by name — so the people needing the most chasing surface at the top.
+    /// </summary>
+    public async Task<IReadOnlyList<PendingOnboardingRow>> BuildPendingAsync(
+        int eventId, PersonaGroup? persona = null, CancellationToken ct = default)
+    {
+        var overview = await BuildOverviewAsync(eventId, persona, ct);
+
+        return overview.Rows
+            .Where(r => r.Stage != OnboardingStage.Completed)
+            .OrderBy(r => r.Persona)
+            .ThenBy(r => r.DoneCount)
+            .ThenBy(r => r.FullName, StringComparer.OrdinalIgnoreCase)
+            .Select(r => new PendingOnboardingRow(
+                r.ParticipantId, r.FullName, r.Email, r.Role, r.Persona, r.Stage,
+                r.DoneCount, r.RequiredCount, r.Percent,
+                r.RequiredSteps.Where(step => !r.DoneOf(step)).ToList()))
+            .ToList();
+    }
+
+    /// <summary>
+    /// CSV of the "who hasn't onboarded yet" list (UTF-8 written by the caller).
+    /// Columns: Name, Email, Persona, Stage, Done, Required, Percent, MissingSteps
+    /// (the missing-steps cell is a "; "-joined list of human step labels).
+    /// </summary>
+    public async Task<string> BuildPendingCsvAsync(
+        int eventId, PersonaGroup? persona = null, CancellationToken ct = default)
+    {
+        var rows = await BuildPendingAsync(eventId, persona, ct);
+        return CsvWriter.Write(
+            new[] { "Name", "Email", "Persona", "Stage", "Done", "Required", "Percent", "MissingSteps" },
+            rows.Select(r => (IReadOnlyList<string>)new[]
+            {
+                string.IsNullOrWhiteSpace(r.FullName) ? r.Email : r.FullName,
+                r.Email,
+                r.Persona.ToString(),
+                LabelFor(r.Stage),
+                r.DoneCount.ToString(),
+                r.RequiredCount.ToString(),
+                r.Percent + "%",
+                string.Join("; ", r.MissingSteps.Select(LabelFor)),
+            }));
     }
 
     /// <summary>

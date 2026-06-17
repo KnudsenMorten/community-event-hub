@@ -1,0 +1,122 @@
+@page
+@using CommunityHub.Core.Organizer
+@model CommunityHub.Pages.Organizer.DataFreshnessModel
+@{
+    ViewData["Title"] = Localizer["Fresh.Title"].Value;
+
+    // Resolve a feed's localized display name from its stable enum key.
+    string FeedLabel(FreshnessFeed f) => Localizer[$"Fresh.Feed.{f}"].Value;
+
+    // A human, localized "how long ago" from an age TimeSpan.
+    string AgeText(TimeSpan age)
+    {
+        if (age.TotalDays >= 1)
+            return string.Format(Localizer["Fresh.AgeDays"].Value, (int)Math.Floor(age.TotalDays));
+        if (age.TotalHours >= 1)
+            return string.Format(Localizer["Fresh.AgeHours"].Value, (int)Math.Floor(age.TotalHours));
+        return string.Format(Localizer["Fresh.AgeMinutes"].Value, Math.Max(0, (int)Math.Floor(age.TotalMinutes)));
+    }
+}
+
+<style>
+    .fr-sub { color:#6b7280; margin:0 0 4px; }
+    .fr-updated { color:#6b7280; font-size:12.5px; margin:0 0 12px; }
+    .fr-banner { border-radius:8px; padding:11px 14px; margin:0 0 14px; font-weight:600; }
+    .fr-banner.ok { background:#f0fdf4; border:1px solid #bbf7d0; color:#15803d; }
+    .fr-banner.warn { background:#fef2f2; border:1px solid #fca5a5; color:#b91c1c; }
+    /* Mobile-first: the table scrolls horizontally inside its card on narrow phones. */
+    .fr-scroll { overflow-x:auto; -webkit-overflow-scrolling:touch; }
+    table.fr-tbl { width:100%; border-collapse:collapse; min-width:520px; }
+    .fr-tbl th, .fr-tbl td { padding:9px 11px; text-align:left; border-bottom:1px solid #e6e8ee; font-size:13.5px; vertical-align:top; }
+    .fr-tbl th { font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:#6b7280; background:#f9fafb; }
+    .fr-tbl tr.is-stale td { background:#fef2f2; }
+    .fr-feed { font-weight:600; color:#1a1a2e; }
+    .fr-when { color:#374151; white-space:nowrap; }
+    .fr-age { color:#6b7280; white-space:nowrap; }
+    .fr-pill { display:inline-block; border-radius:999px; padding:2px 10px; font-size:12px; font-weight:600; }
+    .fr-pill.ok { background:#dcfce7; color:#15803d; }
+    .fr-pill.stale { background:#fee2e2; color:#b91c1c; }
+    .fr-pill.none { background:#eef0f4; color:#6b7280; }
+</style>
+
+<div class="card">
+    <h2>@Localizer["Fresh.Title"]</h2>
+
+    @if (Model.AccessDenied)
+    {
+        <p class="error" role="alert">@Localizer["Cc.AccessDenied"]</p>
+    }
+    else if (Model.Snapshot is null)
+    {
+        <p class="fr-age">@Localizer["Fresh.AllFresh"]</p>
+    }
+    else
+    {
+        var s = Model.Snapshot;
+        var now = s.GeneratedAtUtc;
+        <p class="fr-sub">@Localizer["Fresh.Intro"]</p>
+        <p class="fr-updated">@string.Format(Localizer["Fresh.GeneratedAt"].Value, now.UtcDateTime.ToString("yyyy-MM-dd HH:mm") + " UTC")</p>
+
+        @if (s.HasStaleFeeds)
+        {
+            <div class="fr-banner warn" role="status">
+                @string.Format(Localizer["Fresh.StaleCount"].Value, s.StaleFeeds.Count)
+            </div>
+        }
+        else
+        {
+            <div class="fr-banner ok" role="status">@Localizer["Fresh.AllFresh"]</div>
+        }
+
+        <div class="fr-scroll">
+            <table class="fr-tbl">
+                <caption class="sr-only">@Localizer["Fresh.Title"]</caption>
+                <thead>
+                    <tr>
+                        <th scope="col">@Localizer["Fresh.ColFeed"]</th>
+                        <th scope="col">@Localizer["Fresh.ColLast"]</th>
+                        <th scope="col">@Localizer["Fresh.ColAge"]</th>
+                        <th scope="col">@Localizer["Fresh.ColState"]</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var row in s.Feeds)
+                    {
+                        var stale = row.IsStale(now);
+                        var age = row.AgeFor(now);
+                        <tr class="@(stale ? "is-stale" : null)">
+                            <td class="fr-feed">@FeedLabel(row.Feed)</td>
+                            <td class="fr-when">
+                                @if (row.LastActivityUtc is not null)
+                                {
+                                    @(row.LastActivityUtc.Value.UtcDateTime.ToString("yyyy-MM-dd HH:mm") + " UTC")
+                                }
+                                else
+                                {
+                                    <span class="fr-age">&mdash;</span>
+                                }
+                            </td>
+                            <td class="fr-age">
+                                @if (age is not null) { @AgeText(age.Value) } else { <text>&mdash;</text> }
+                            </td>
+                            <td>
+                                @if (!row.HasData)
+                                {
+                                    <span class="fr-pill none">@Localizer["Fresh.NoData"]</span>
+                                }
+                                else if (stale)
+                                {
+                                    <span class="fr-pill stale">@Localizer["Fresh.Stale"]</span>
+                                }
+                                else
+                                {
+                                    <span class="fr-pill ok">@Localizer["Fresh.Fresh"]</span>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</div>

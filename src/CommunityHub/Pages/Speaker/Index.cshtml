@@ -237,6 +237,14 @@
 }
 
 <div class="card">
+    <h2>&#11088; @Localizer["Speaker.RatingsHeading"]</h2>
+    <p style="font-size:13.5px;color:#374151;margin-top:0;">@Localizer["Speaker.RatingsIntro"]</p>
+    <p>
+        <a class="task-link-btn" asp-page="/Speaker/Evaluations">@Localizer["Speaker.RatingsCta"]</a>
+    </p>
+</div>
+
+<div class="card">
     <h2>@Localizer["Speaker.PublicPreviewHeading"]</h2>
     @if (Model.PublicProfileLive && !string.IsNullOrEmpty(Model.PublicPreviewUrl))
     {

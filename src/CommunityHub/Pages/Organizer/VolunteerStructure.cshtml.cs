@@ -24,16 +24,25 @@ public class VolunteerStructureModel : PageModel
     private readonly CommunityHubDbContext _db;
     private readonly ICurrentParticipantAccessor _participant;
     private readonly VolunteerStructureService _svc;
+    private readonly CommunityHub.Core.Organizer.VolunteerTaskBulkOperationService _bulk;
 
     public VolunteerStructureModel(
         CommunityHubDbContext db,
         ICurrentParticipantAccessor participant,
-        VolunteerStructureService svc)
+        VolunteerStructureService svc,
+        CommunityHub.Core.Organizer.VolunteerTaskBulkOperationService bulk)
     {
         _db = db;
         _participant = participant;
         _svc = svc;
+        _bulk = bulk;
     }
+
+    /// <summary>The task ids ticked in the bulk-select grid (posted form field).</summary>
+    [BindProperty] public List<int> SelectedTaskIds { get; set; } = new();
+
+    /// <summary>The status a bulk change-status applies (posted form field).</summary>
+    [BindProperty] public VolunteerTaskStatus BulkStatus { get; set; }
 
     public bool AccessDenied { get; private set; }
     public string? Notice { get; private set; }
@@ -109,6 +118,54 @@ public class VolunteerStructureModel : PageModel
 
     public Task<IActionResult> OnPostUnassignAsync(int taskId, int volunteerParticipantId, CancellationToken ct)
         => RunAsync(async a => { await _svc.UnassignVolunteerAsync(a, taskId, volunteerParticipantId, ct); return "Volunteer unassigned."; });
+
+    /// <summary>
+    /// BULK change-status across the ticked tasks (§20 universal CRUD + bulk). The
+    /// safe semantics live in
+    /// <see cref="CommunityHub.Core.Organizer.VolunteerTaskBulkOperationService"/>:
+    /// event-scoped, idempotent, honest change-count. Organizer-only (page-gated);
+    /// the page's confirm modal (live count) gates the click.
+    /// </summary>
+    public async Task<IActionResult> OnPostBulkStatusAsync(CancellationToken ct)
+    {
+        var actor = Actor();
+        if (actor is null) return Forbid();
+
+        var requested = SelectedTaskIds.Where(id => id > 0).Distinct().Count();
+        if (requested == 0)
+            return RedirectToPage(new { Msg = "Pick at least one task first." });
+
+        var result = await _bulk.ChangeStatusAsync(actor.Value.EventId, SelectedTaskIds, BulkStatus, ct);
+        var skipped = result.Skipped(requested);
+        var msg = $"{result.Changed} task(s) set to {BulkStatus}"
+            + (result.Matched - result.Changed > 0 ? $", {result.Matched - result.Changed} already in that status" : string.Empty)
+            + (skipped > 0 ? $", {skipped} not found" : string.Empty)
+            + ".";
+        return RedirectToPage(new { Msg = msg });
+    }
+
+    /// <summary>
+    /// BULK delete across the ticked tasks. Linked-data-safe: tasks with help-request
+    /// history are left untouched and reported; clean tasks (with their import-state
+    /// assignments) are removed in one transaction. Organizer-only; confirm-gated.
+    /// </summary>
+    public async Task<IActionResult> OnPostBulkDeleteTasksAsync(CancellationToken ct)
+    {
+        var actor = Actor();
+        if (actor is null) return Forbid();
+
+        var requested = SelectedTaskIds.Where(id => id > 0).Distinct().Count();
+        if (requested == 0)
+            return RedirectToPage(new { Msg = "Pick at least one task first." });
+
+        var result = await _bulk.DeleteAsync(actor.Value.EventId, SelectedTaskIds, ct);
+        var skipped = result.Skipped(requested);
+        var msg = $"{result.Deleted} task(s) deleted"
+            + (result.Blocked > 0 ? $", {result.Blocked} kept (have help-request history)" : string.Empty)
+            + (skipped > 0 ? $", {skipped} not found" : string.Empty)
+            + ".";
+        return RedirectToPage(new { Msg = msg });
+    }
 
     private async Task LoadAsync(int eventId, CancellationToken ct)
     {

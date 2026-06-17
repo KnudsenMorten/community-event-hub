@@ -46,6 +46,20 @@
     .spo-empty { color: #555; padding: 8px 4px 18px; }
     .spo-empty .big { font-size: 16px; font-weight: 600; color: #1D3380; display: block; margin-bottom: 6px; }
 
+    /* "Become a sponsor" CTA — full-width, prominent, mobile-first. */
+    .spo-cta {
+        margin: 8px 0 0; padding: 18px 16px; border-radius: 10px;
+        background: #f3f6ff; border: 1px solid #d6def8; text-align: center;
+    }
+    .spo-cta h2 { font-size: 16px; color: #1D3380; margin: 0 0 6px; }
+    .spo-cta p { font-size: 13.5px; color: #4a5160; margin: 0 0 12px; }
+    .spo-cta a.spo-cta-btn {
+        display: inline-block; background: var(--el-blue, #008BD2); color: #fff;
+        font-weight: 700; font-size: 14px; text-decoration: none;
+        padding: 11px 20px; border-radius: 8px; min-width: 200px;
+    }
+    .spo-cta a.spo-cta-btn:hover, .spo-cta a.spo-cta-btn:focus { background: #0077b3; }
+
     @@media (min-width: 560px) {
         .spo-grid { grid-template-columns: repeat(3, 1fr); }
     }
@@ -114,6 +128,28 @@
                     </ul>
                 </section>
             }
+        }
+
+        @* "Become a sponsor" CTA (§21) — shown whenever a public sponsorship contact
+           is configured, in both the "sponsors coming soon" and the populated states,
+           so a prospective sponsor always has a real way to reach out. Hidden entirely
+           when nothing is configured (no dead link). *@
+        @if (Model.BecomeSponsor is not null)
+        {
+            <section class="spo-cta" aria-label="@Localizer["Sponsors.BecomeTitle"]">
+                <h2>@Localizer["Sponsors.BecomeTitle"]</h2>
+                <p>@Localizer["Sponsors.BecomeBody"]</p>
+                @if (Model.BecomeSponsor.IsExternal)
+                {
+                    <a class="spo-cta-btn" href="@Model.BecomeSponsor.Href" target="_blank" rel="noopener noreferrer">
+                        @Localizer["Sponsors.BecomeCta"]<span class="visually-hidden">@Localizer["Common.OpensNewTab"]</span>
+                    </a>
+                }
+                else
+                {
+                    <a class="spo-cta-btn" href="@Model.BecomeSponsor.Href">@Localizer["Sponsors.BecomeCta"]</a>
+                }
+            </section>
         }
     </div>
 </div>

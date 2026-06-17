@@ -81,6 +81,7 @@ builder.Services.AddScoped<ParticipantEmailService>();
 builder.Services.AddScoped<OnboardingEmailService>();
 builder.Services.AddScoped<OnboardingStepResetEmailService>();
 builder.Services.AddScoped<CalendarInviteEmailService>();
+builder.Services.AddScoped<SpeakerQuestionDigestService>();
 builder.Services.AddScoped<CommunityHub.Core.Organizer.ParticipantActivationService>();
 
 // --- PIN authentication ----------------------------------------------------
@@ -93,6 +94,13 @@ builder.Services.AddScoped<IIdentityProvider, PinIdentityProvider>();
 // --- Email templates + welcome email ---------------------------------------
 builder.Services.Configure<EmailTemplateOptions>(
     builder.Configuration.GetSection(EmailTemplateOptions.SectionName));
+
+// Public "become a sponsor" CTA (REQUIREMENTS §21) — a public sponsorship-contact
+// address/URL the prospective-sponsor button points at. Not a secret, but the
+// shipped config carries only a placeholder so a real address never lands in the
+// public mirror; blank ⇒ the CTA is hidden (no dead link).
+builder.Services.Configure<CommunityHub.Core.Sponsors.BecomeSponsorOptions>(
+    builder.Configuration.GetSection(CommunityHub.Core.Sponsors.BecomeSponsorOptions.SectionName));
 builder.Services.AddSingleton<EmailTemplateProvider>();
 builder.Services.AddScoped<WelcomeEmailService>();
 
@@ -253,11 +261,17 @@ builder.Services.AddRazorPages()
 builder.Services.AddSingleton<CommunityHub.Branding.ActiveEventNameProvider>();
 builder.Services.AddSingleton<CommunityHub.Auth.MagicLinkService>();
 builder.Services.AddScoped<CommunityHub.Core.Reminders.OrganizerActionItemService>();
+builder.Services.AddScoped<CommunityHub.Core.Reminders.FormChangeRequestService>();
 builder.Services.AddScoped<CommunityHub.Core.Organizer.ParticipantBulkOperationService>();
 builder.Services.AddScoped<CommunityHub.Core.Organizer.ParticipantDeletionService>();
 builder.Services.AddScoped<CommunityHub.Core.Organizer.ParticipantSearchService>();
 builder.Services.AddScoped<CommunityHub.Core.Organizer.SessionDeletionService>();
+builder.Services.AddScoped<CommunityHub.Core.Organizer.SessionBulkOperationService>();
+builder.Services.AddScoped<CommunityHub.Core.Organizer.SpeakerDeletionService>();
+builder.Services.AddScoped<CommunityHub.Core.Organizer.SponsorInfoDeletionService>();
+builder.Services.AddScoped<CommunityHub.Core.Organizer.VolunteerTaskBulkOperationService>();
 builder.Services.AddScoped<CommunityHub.Core.Organizer.OrganizerOverviewService>();
+builder.Services.AddScoped<CommunityHub.Core.Organizer.DataFreshnessService>();
 builder.Services.AddScoped<CommunityHub.Core.Organizer.PreselectionQueueService>();
 builder.Services.AddScoped<CommunityHub.Core.Organizer.OnboardingService>();
 builder.Services.AddScoped<CommunityHub.Core.Organizer.CommandCenterService>();
@@ -272,6 +286,7 @@ builder.Services.AddScoped<CommunityHub.Core.Volunteers.VolunteerShiftService>()
 builder.Services.AddScoped<CommunityHub.Core.Email.VolunteerHelpNotificationService>();
 builder.Services.AddScoped<CommunityHub.Notify.HotelCalendarInviter>();
 builder.Services.AddScoped<CommunityHub.Core.Organizer.HotelManagementService>();
+builder.Services.AddScoped<CommunityHub.Core.Organizer.HotelBulkOperationService>();
 
 // --- Volunteer Buckets: plan import, gap detection, draft->commit allocation ---
 builder.Services.AddScoped<CommunityHub.Core.Volunteers.VolunteerAllocationService>();
@@ -471,6 +486,12 @@ builder.Services.AddScoped<CommunityHub.Core.Reminders.SpeakerMilestoneService>(
 // card (room/time, master-class, attendee-questions links). Own-row scoped --
 // only the signed-in speaker's own linked sessions. Scoped (per-request DbContext).
 builder.Services.AddScoped<CommunityHub.Core.Reminders.SpeakerSessionsService>();
+
+// SpeakerEvaluationsService: the read-model behind the Speaker self-service
+// "My session ratings" page (per-session attendee evaluation count / average /
+// anonymous comments). Own-row scoped -- only the signed-in speaker's own linked
+// sessions. Read-only. Scoped (per-request DbContext).
+builder.Services.AddScoped<CommunityHub.Core.Reminders.SpeakerEvaluationsService>();
 
 // --- Company Manager (sponsor-side company + contacts source of truth) ----
 // Used by /Sponsor/Index to render a read-only "Sponsor details" card
