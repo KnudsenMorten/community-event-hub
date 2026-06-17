@@ -875,6 +875,70 @@ public sealed class LocalizationResourcesTests
     }
 
     [Fact]
+    public void Public_agenda_keys_resolve_in_both_cultures()
+    {
+        // §21 Public site "agenda/grid view" — the public day-by-day agenda page
+        // chrome + the landing-page Agenda card. Each must resolve in the default
+        // resx AND differ between English and Danish (proves the da-DK satellite
+        // carries them, not a silent English fallback).
+        var loc = MakeLocalizer();
+        var keys = new[]
+        {
+            "Agenda.Title", "Agenda.NoEvent", "Agenda.NothingScheduled",
+            "Agenda.ListView", "Agenda.TimeLabel", "Agenda.RoomTag", "Agenda.With",
+            "Landing.AgendaTitle", "Landing.AgendaBlurb",
+        };
+
+        foreach (var key in keys)
+        {
+            var en = WithCulture("en", () => loc[key].Value);
+            var da = WithCulture("da-DK", () => loc[key].Value);
+            Assert.False(loc[key].ResourceNotFound, $"{key} missing from default resx.");
+            Assert.False(string.IsNullOrWhiteSpace(en), $"{key} has an empty English value.");
+            Assert.False(string.IsNullOrWhiteSpace(da), $"{key} has an empty Danish value.");
+            Assert.NotEqual(en, da);
+        }
+
+        // The summary carries {0} (talks) + {1} (days); the unscheduled note carries
+        // {0}. The placeholders must survive in both cultures so the runtime args
+        // substitute correctly.
+        foreach (var culture in SupportedCultures)
+        {
+            var summary = WithCulture(culture, () => loc["Agenda.Summary"].Value);
+            Assert.Contains("{0}", summary);
+            Assert.Contains("{1}", summary);
+            Assert.Contains("{0}", WithCulture(culture, () => loc["Agenda.UnscheduledNote"].Value));
+        }
+    }
+
+    [Fact]
+    public void Lead_score_explanation_keys_resolve_in_both_cultures()
+    {
+        // §21 organizer "explain AI scores" — the "why this score" breakdown shown
+        // under each lead's AI-screen badge: the chrome (title / baseline / total)
+        // and the per-factor reasons. Each must resolve in the default resx AND
+        // differ between English and Danish (proves the da-DK satellite carries
+        // them, not a silent English fallback).
+        var loc = MakeLocalizer();
+        var keys = new[]
+        {
+            "LeadScore.WhyTitle", "LeadScore.BaseLine", "LeadScore.TotalLine",
+            "LeadScore.HasEmail", "LeadScore.HasName", "LeadScore.HasCompany",
+            "LeadScore.HasPhone", "LeadScore.Unreachable", "LeadScore.LooksTest",
+        };
+
+        foreach (var key in keys)
+        {
+            var en = WithCulture("en", () => loc[key].Value);
+            var da = WithCulture("da-DK", () => loc[key].Value);
+            Assert.False(loc[key].ResourceNotFound, $"{key} missing from default resx.");
+            Assert.False(string.IsNullOrWhiteSpace(en), $"{key} has an empty English value.");
+            Assert.False(string.IsNullOrWhiteSpace(da), $"{key} has an empty Danish value.");
+            Assert.NotEqual(en, da);
+        }
+    }
+
+    [Fact]
     public void Become_a_sponsor_cta_keys_resolve_in_both_cultures()
     {
         // §21 public "become a sponsor" CTA — the heading / body / button on the

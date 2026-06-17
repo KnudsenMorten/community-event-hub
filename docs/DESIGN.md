@@ -364,7 +364,15 @@ historical staging plan lives in the source CONTEXT material and is not repeated
   **hub-captured booth leads** (no Zoho id; `CaptureMethod=ManualBooth` +
   `CapturedByEmail` provenance). The Zoho unique index is filtered
   (`ZohoRecordId <> ''`) so hub-local rows never collide; both kinds share the
-  same screening + export path.
+  same screening + export path. The heuristic quality screen is split into a pure,
+  deterministic `SponsorLeadScoreExplainer.Compute(lead)` (the SINGLE source of truth
+  for the 0–100 math) and the thin `SponsorLeadScreeningService.Screen(...)` that
+  delegates to it and persists `AiScreenScore`/`AiScreenLabel`. `Compute` returns a
+  `SponsorLeadScoreBreakdown` — the starting baseline, each signed factor with a stable
+  reason key (`LeadScore.*`, localised in the UI), the raw (pre-clamp) total and the
+  final clamped score — so the organizer leads grid can render an expandable
+  "why this score" decomposition under each badge that can never drift from the number
+  the screen scored (drift-locked by a test that re-runs `Screen` and asserts equality).
 - **`SurveyResponse` / `SurveyResponsePick`** — public survey persistence (FK + cascade).
 - **`GraphicAsset`** (added 2026-06-15) — one generated/replaced SoMe graphic: `Type`
   (speaker/sponsor/session), `Status` (generated/released — the release gate), `StableKey`
@@ -1028,6 +1036,24 @@ change** — all read-only projections over existing `Event` / `Session` / `Spea
   / `PublicSpeakerDetail` sessions are `PublicSpeakerSession(SessionId, Title)` so the speaker pages link
   each session back to its detail page. All pages mobile-first + a11y; landing/detail copy is bilingual
   via `Landing.*` / `SessionDetail.*` / `SpeakerDetail.*` resx keys (en + da-DK).
+- **Public day-by-day agenda `/Agenda` (2026-06-17).** `AgendaModel` (`[AllowAnonymous]`) →
+  `PublicAgendaService.BuildAsync()` (in `CommunityHub.Core.Reminders`, same active-event resolution as
+  the other public pages). The service runs ONE flat, SQL-translatable projection of the active edition's
+  **non-service** sessions into `RawAgendaSession` rows (id/title/type/length/room/track/start/end + the
+  raw speaker-name list), then hands them to the **pure** `PublicAgendaBuilder.Build(displayName, rows)`,
+  which: drops the **unscheduled** talks (no `StartsAt` → not on a timetable) while counting them
+  (`UnscheduledCount`), groups the rest by **venue-local day** (`DateOnly.FromDateTime(StartsAt.Date)`,
+  i.e. the date in the talk's own offset, matching how Sessionize publishes the grid), orders the days
+  chronologically and, within a day, orders items by **start → room → title** (deterministic), joining +
+  alphabetising each talk's speaker names for display. Returns a `PublicAgendaView` (display name +
+  ordered `PublicAgendaDay`s + scheduled/unscheduled counts, `IsEmpty` helper) or **null** when no event
+  is active. **No schema change** — read-only over existing `Session` fields. The page renders one
+  `<section>` per day (sticky day heading) with time-labelled `<article>` slots that deep-link the title
+  to `/Sessions/{id}`; it complements (does not replace) the flat, filterable `/Sessions` list. The
+  public front door (`/`) gained an **Agenda** card linking it. Mobile-first + a11y (per-day landmarks,
+  screen-reader time label, `role="status"` summary); bilingual via `Agenda.*` / `Landing.Agenda*` resx
+  keys (en + da-DK). Keeping the day-grouping pure (no DbContext) is what makes the ordering / grouping /
+  drop-unscheduled logic directly unit-testable.
 
 **Public sponsors page — 2026-06-15.** A read-only, no-login page `/Sponsors` (`Sponsors/IndexModel`,
 `[AllowAnonymous]`) lists the active edition's sponsor companies **grouped by tier** (Platinum → Diamond →

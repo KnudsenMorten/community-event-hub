@@ -304,6 +304,30 @@ Invoke-WebRequest -Uri "@(Model.BaseUrl)/api/v1/sponsors/$cid/leads.csv" `
                                 <span title="@l.AiScreenLabel"
                                       style="display:inline-block;padding:2px 8px;border-radius:999px;font-size:12px;font-weight:600;background:@(l.AiScreenScore >= 60 ? "#dafbe1" : l.AiScreenScore >= 30 ? "#fff8c5" : "#ffebe9");">
                                     @l.AiScreenScore @l.AiScreenLabel</span>
+                                @* Re-derive the SAME breakdown the screen scored with (single
+                                   source of truth) so the organizer can see WHY this lead scored
+                                   the way it did — no opaque badge (REQUIREMENTS §21 "explain AI scores"). *@
+                                var why = CommunityHub.Core.Integrations.Sponsors.SponsorLeadScoreExplainer.Compute(l);
+                                <details style="margin-top:4px;font-size:12px;">
+                                    <summary style="cursor:pointer;color:#0969da;">@Localizer["LeadScore.WhyTitle"]</summary>
+                                    <ul style="list-style:none;margin:4px 0 0;padding:0;color:#374151;">
+                                        <li style="display:flex;justify-content:space-between;gap:10px;">
+                                            <span>@Localizer["LeadScore.BaseLine"]</span>
+                                            <span>@why.BaseScore</span>
+                                        </li>
+                                        @foreach (var f in why.Factors)
+                                        {
+                                            <li style="display:flex;justify-content:space-between;gap:10px;color:@(f.Points >= 0 ? "#1a7f37" : "#cf222e");">
+                                                <span>@Localizer[f.ReasonKey]</span>
+                                                <span>@(f.Points >= 0 ? "+" : "")@f.Points</span>
+                                            </li>
+                                        }
+                                        <li style="display:flex;justify-content:space-between;gap:10px;font-weight:600;border-top:1px solid #eee;margin-top:4px;padding-top:4px;">
+                                            <span>@Localizer["LeadScore.TotalLine"]</span>
+                                            <span>@why.FinalScore</span>
+                                        </li>
+                                    </ul>
+                                </details>
                             }
                         </td>
                         <td>@l.Status

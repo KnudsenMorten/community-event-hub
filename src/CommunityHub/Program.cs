@@ -153,6 +153,7 @@ builder.Services.AddSingleton<
 builder.Services.AddScoped<SessionManagementService>();
 builder.Services.AddScoped<SessionEvaluationMailService>();
 builder.Services.AddScoped<CommunityHub.Core.Reminders.PublicSessionsService>();
+builder.Services.AddScoped<CommunityHub.Core.Reminders.PublicAgendaService>();
 builder.Services.AddScoped<CommunityHub.Core.Reminders.PublicSpeakersService>();
 builder.Services.AddScoped<CommunityHub.Core.Reminders.PublicSponsorsService>();
 builder.Services.AddScoped<CommunityHub.Core.Reminders.PublicLandingService>();

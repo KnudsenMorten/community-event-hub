@@ -607,6 +607,17 @@
   <data name="Lead.Unnamed" xml:space="preserve"><value>(unavngivet lead)</value></data>
   <data name="Lead.FlaggedJunk" xml:space="preserve"><value>· markeret som spam</value></data>
 
+  <!-- Organizer: AI-screen score explanation on the leads grid (REQUIREMENTS §21 organizer "explain AI scores") -->
+  <data name="LeadScore.WhyTitle" xml:space="preserve"><value>Hvorfor denne score?</value></data>
+  <data name="LeadScore.BaseLine" xml:space="preserve"><value>Udgangspunkt</value></data>
+  <data name="LeadScore.TotalLine" xml:space="preserve"><value>Endelig score</value></data>
+  <data name="LeadScore.HasEmail" xml:space="preserve"><value>Har en brugbar e-mailadresse</value></data>
+  <data name="LeadScore.HasName" xml:space="preserve"><value>Har et fuldt navn</value></data>
+  <data name="LeadScore.HasCompany" xml:space="preserve"><value>Virksomhed er udfyldt</value></data>
+  <data name="LeadScore.HasPhone" xml:space="preserve"><value>Har et telefonnummer</value></data>
+  <data name="LeadScore.Unreachable" xml:space="preserve"><value>Hverken e-mail eller telefon — kan ikke kontaktes</value></data>
+  <data name="LeadScore.LooksTest" xml:space="preserve"><value>Ligner en test- eller spam-indtastning</value></data>
+
   <!-- Sponsor: portal (single self-service home, REQUIREMENTS §20) -->
   <data name="SponsorPortal.Title" xml:space="preserve"><value>Sponsorportal</value></data>
   <data name="SponsorPortal.Intro" xml:space="preserve"><value>Hej {0} — alt om dit sponsorat ét sted: din profil, stand, leads, leverancer og ordrestatus.</value></data>
@@ -1182,4 +1193,15 @@
   <data name="SpeakerEval.NoComments" xml:space="preserve"><value>Kun bedømmelser — ingen skriftlige kommentarer til denne session.</value></data>
   <data name="SpeakerEval.RatingAria" xml:space="preserve"><value>Bedømt {0} ud af 5</value></data>
   <data name="SpeakerEval.NotASpeaker" xml:space="preserve"><value>Dette område er for talere ({0}).</value></data>
+  <data name="Agenda.Title" xml:space="preserve"><value>Program</value></data>
+  <data name="Agenda.NoEvent" xml:space="preserve"><value>Der er ikke noget aktivt arrangement lige nu. Kig forbi igen snart.</value></data>
+  <data name="Agenda.NothingScheduled" xml:space="preserve"><value>Programmet er ikke offentliggjort endnu. Kig forbi igen tættere på arrangementet.</value></data>
+  <data name="Agenda.ListView" xml:space="preserve"><value>Se hele sessionslisten</value></data>
+  <data name="Agenda.Summary" xml:space="preserve"><value>{0} oplæg planlagt fordelt på {1} dag(e).</value></data>
+  <data name="Agenda.UnscheduledNote" xml:space="preserve"><value>{0} session(er) har ikke et tidspunkt endnu — find dem på sessionslisten.</value></data>
+  <data name="Agenda.TimeLabel" xml:space="preserve"><value>Starter kl. </value></data>
+  <data name="Agenda.RoomTag" xml:space="preserve"><value>Lokale</value></data>
+  <data name="Agenda.With" xml:space="preserve"><value>Med</value></data>
+  <data name="Landing.AgendaTitle" xml:space="preserve"><value>Program</value></data>
+  <data name="Landing.AgendaBlurb" xml:space="preserve"><value>Hele programmet, dag for dag, i kronologisk rækkefølge.</value></data>
 </root>

@@ -556,6 +556,15 @@ follow-up automatically.
   Master Classes** pages — so the public programme is shareable and discoverable without
   a login. Signed-in crew still go straight to their personal hub. Mobile-first,
   accessible, and bilingual (English / Danish). *(✅ 2026-06-15)*
+- **A day-by-day agenda anyone can scan.** A public, no-login page at **`/Agenda`** lays
+  the programme out as a **running order, grouped by day** and shown in start time order —
+  each talk with its **time, room, type and speaker(s)**, deep-linking to the full session
+  page. It's the "what's happening, and when" view that sits alongside the searchable
+  `/Sessions` list (the list is for finding and filtering; the agenda is for planning your
+  day). Talks that don't have a time yet are kept off the timetable (and pointed to the
+  list), and the page shows a friendly "running order coming soon" message until the
+  schedule is published. Linked from the public front door, mobile-first, accessible, and
+  bilingual (English / Danish). *(✅ 2026-06-17)*
 - **A QR code for every room — on the screen and in the slides.** Give each physical
   room a single QR code linked to that room. The hub generates it, stores the image on
   your **SharePoint**, and attaches its link to every session in the room — so each
@@ -795,6 +804,13 @@ follow-up automatically.
   company's contacts.
 - **Smart junk screening.** Each lead gets a 0–100 quality score and label, and only
   unmistakable test entries are auto-flagged as junk — operators stay in control.
+- **See *why* a lead scored the way it did.** *(✅ 2026-06-17)* The quality-score badge
+  on the leads grid now expands to a plain-language "why this score?" breakdown — the
+  starting baseline plus each factor that moved the number up or down (has a usable
+  email, has a full name, company filled in, has a phone, unreachable, or looks like a
+  test/junk entry) and the final total. The same logic that scores a lead produces the
+  explanation, so the badge and the breakdown always agree. No more guessing why a lead
+  was flagged. Available in English and Danish, phone-first.
 
 ## 9. Attendees & masterclass reconciliation — one clear picture
 

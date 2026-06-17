@@ -151,49 +151,24 @@ public sealed class SponsorLeadSyncService
 /// (status change), every other verdict is advisory (badge on the grid).
 /// Operator overrides stay in the row (Status + StatusNote), which is the
 /// training data a future model-based screen learns from.
+///
+/// The scoring math itself lives in <see cref="SponsorLeadScoreExplainer"/> —
+/// the single source of truth — so the score persisted here and the
+/// "why this score" breakdown the organizer sees can never drift apart.
 /// </summary>
 public sealed class SponsorLeadScreeningService
 {
-    private static readonly string[] TestPatterns =
-        { "test", "asdf", "qwerty", "demo", "example", "xxx" };
-
     public void Screen(SponsorLead lead, DateTimeOffset now)
     {
-        var score = 50;
-        string label;
+        var breakdown = SponsorLeadScoreExplainer.Compute(lead);
 
-        var email = (lead.Email ?? string.Empty).Trim();
-        var name  = (lead.FullName ?? string.Empty).Trim();
-
-        var hasEmail   = email.Contains('@') && email.Contains('.');
-        var hasName    = name.Length >= 3;
-        var hasCompany = !string.IsNullOrWhiteSpace(lead.Company);
-        var hasPhone   = !string.IsNullOrWhiteSpace(lead.Phone);
-        var looksTest  = TestPatterns.Any(p =>
-            name.Contains(p, StringComparison.OrdinalIgnoreCase)
-            || email.StartsWith(p, StringComparison.OrdinalIgnoreCase)
-            || email.Contains("@example.", StringComparison.OrdinalIgnoreCase));
-
-        if (hasEmail)   score += 20;
-        if (hasName)    score += 10;
-        if (hasCompany) score += 15;
-        if (hasPhone)   score += 5;
-        if (!hasEmail && !hasPhone) score -= 35; // unreachable lead
-        if (looksTest) score = Math.Min(score, 5);
-        score = Math.Clamp(score, 0, 100);
-
-        if (looksTest)                  label = "test-entry";
-        else if (!hasEmail && !hasPhone) label = "unreachable";
-        else if (!hasName)               label = "incomplete";
-        else                             label = "looks-legit";
-
-        lead.AiScreenScore = score;
-        lead.AiScreenLabel = label;
+        lead.AiScreenScore = breakdown.FinalScore;
+        lead.AiScreenLabel = breakdown.Label;
         lead.AiScreenedAt  = now;
 
         // Auto-junk ONLY the unmistakable case, and only if the operator
         // hasn't already touched the row.
-        if (looksTest && lead.Status == SponsorLeadStatus.Open && lead.StatusChangedAt is null)
+        if (breakdown.LooksTest && lead.Status == SponsorLeadStatus.Open && lead.StatusChangedAt is null)
         {
             lead.Status = SponsorLeadStatus.Junk;
             lead.StatusNote = "Auto-junked by heuristic screen (test-entry pattern).";
