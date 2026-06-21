@@ -34,6 +34,12 @@
                 @if (Model.ShowSetupDay)
                 {
                     <label style="font-weight:normal; display:flex; align-items:flex-start; gap:8px; margin-top:8px;">
+                        <input type="checkbox" asp-for="LunchEarlySetupDay" style="width:auto;margin:5px 0 0;" />
+                        <span>
+                            <strong>@Localizer["Lunch.SetupDay", Model.EarlySetupDayLabel]</strong>
+                        </span>
+                    </label>
+                    <label style="font-weight:normal; display:flex; align-items:flex-start; gap:8px; margin-top:8px;">
                         <input type="checkbox" asp-for="LunchSetupDay" style="width:auto;margin:5px 0 0;" />
                         <span>
                             <strong>@Localizer["Lunch.SetupDay", Model.SetupDayLabel]</strong>
@@ -63,7 +69,7 @@
         </form>
 
         <p style="color:#6b7280;font-size:12px;margin-top:14px;">
-            @Localizer["Lunch.MainNote"]
+            @Localizer["Lunch.MainNote", Model.MainDayLabel]
         </p>
 
         <p><a asp-page="/Index">@Localizer["Common.BackToHub"]</a></p>

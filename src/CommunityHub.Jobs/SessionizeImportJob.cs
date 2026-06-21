@@ -1,6 +1,7 @@
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Integrations;
 using CommunityHub.Core.Reminders;
+using CommunityHub.Core.Settings;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -27,24 +28,27 @@ public sealed class SessionizeImportJob
     private readonly SessionizeApiImportService _service;
     private readonly SessionizeApiOptions _options;
     private readonly CommunityHubDbContext _db;
+    private readonly FeatureGateService _gate;
     private readonly ILogger<SessionizeImportJob> _log;
 
     public SessionizeImportJob(
         SessionizeApiImportService service,
         SessionizeApiOptions options,
         CommunityHubDbContext db,
+        FeatureGateService gate,
         ILogger<SessionizeImportJob> log)
     {
         _service = service;
         _options = options;
         _db = db;
+        _gate = gate;
         _log = log;
     }
 
-    /// <summary>Daily at 02:00 UTC (matches scheduledJobs.sessionizeImport cron).</summary>
+    /// <summary>Hourly, at the top of every hour UTC (matches scheduledJobs.sessionizeImport cron).</summary>
     [Function("SessionizeImportJob")]
     public async Task Run(
-        [TimerTrigger("0 0 2 * * *")] TimerInfo timer,
+        [TimerTrigger("0 0 * * * *")] TimerInfo timer,
         CancellationToken ct)
     {
         if (!_options.Enabled)
@@ -61,6 +65,18 @@ public sealed class SessionizeImportJob
         if (activeEventId is null)
         {
             _log.LogWarning("SessionizeImportJob: no active event in DB.");
+            return;
+        }
+
+        // GATE (REQUIREMENTS §23): the Sessionize import is an advanced feature,
+        // off by default. When disabled for this edition the scheduled pull
+        // no-ops — no speakers/sessions fetched or upserted. The organizer's
+        // manual "Pull from Sessionize API" button honours the same gate.
+        if (!await _gate.IsFeatureEnabledAsync("sessionize-import", activeEventId.Value, ct))
+        {
+            _log.LogInformation(
+                "SessionizeImportJob: event {EventId} — feature 'sessionize-import' disabled, skipped.",
+                activeEventId.Value);
             return;
         }
 

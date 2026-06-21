@@ -19,7 +19,9 @@
     }
 }
 
-<div class="card">
+@* data-ceh-grid: animated loading skeleton while a filter/sort/page navigation
+   is in flight (REQUIREMENTS §21). Pure progressive enhancement. *@
+<div class="card ceh-grid" data-ceh-grid data-ceh-grid-loading="@Localizer["OrgGrid.Loading"]">
     <h2>Sessions</h2>
     @if (Model.AccessDenied)
     {

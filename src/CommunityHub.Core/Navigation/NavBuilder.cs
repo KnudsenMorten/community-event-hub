@@ -19,9 +19,16 @@ namespace CommunityHub.Core.Navigation;
 /// </summary>
 public static class NavBuilder
 {
-    public static NavModel Build(ParticipantRole role)
+    /// <param name="isVolunteerSupervisor">
+    /// True when the signed-in VOLUNTEER actually supervises at least one bucket.
+    /// The volunteer "Supervisor" dashboard item is shown ONLY to real supervisors
+    /// (a non-supervisor volunteer would otherwise hit a dead-end empty page). The
+    /// caller (the layout) computes this for volunteers only; it is ignored for
+    /// every other role.
+    /// </param>
+    public static NavModel Build(ParticipantRole role, bool isVolunteerSupervisor = false)
     {
-        var groups = new List<NavGroup> { BuildParticipantGroup(role) };
+        var groups = new List<NavGroup> { BuildParticipantGroup(role, isVolunteerSupervisor) };
 
         // Server-side management gate: only an organizer ever gets these items.
         if (role == ParticipantRole.Organizer)
@@ -37,7 +44,7 @@ public static class NavBuilder
     /// per-role visibility exactly (no route added or dropped) — Home, My tasks,
     /// My profile, Resources, then the role-specific hubs + self-service forms.
     /// </summary>
-    private static NavGroup BuildParticipantGroup(ParticipantRole role)
+    private static NavGroup BuildParticipantGroup(ParticipantRole role, bool isVolunteerSupervisor)
     {
         var items = new List<NavItem>
         {
@@ -45,23 +52,32 @@ public static class NavBuilder
         };
 
         // Sponsors use the company-shared /Sponsor/Tasks entry, not the generic
-        // assigned-to-me /Tasks list.
-        if (role != ParticipantRole.Sponsor)
+        // assigned-to-me /Tasks list. Attendees get a deliberately MINIMAL menu
+        // (Home + Master Class + Waitlist only — operator 2026-06-21), so they are
+        // excluded from My tasks / My profile / Resources / Sessions here.
+        if (role != ParticipantRole.Sponsor && role != ParticipantRole.Attendee)
         {
             items.Add(new("/Tasks", "Nav.MyTasks"));
         }
 
-        // Evergreen, every-role entries.
-        items.Add(new("/Profile", "Nav.MyProfile"));
-        items.Add(new("/Resources", "Nav.Resources"));
-        // Public sessions listing — visible to every signed-in role.
-        items.Add(new("/Sessions", "Nav.Sessions"));
+        if (role != ParticipantRole.Attendee)
+        {
+            // Evergreen entries — every role EXCEPT the minimal attendee menu.
+            items.Add(new("/Profile", "Nav.MyProfile"));
+            // Resources removed for attendees + speakers + sponsors + volunteers
+            // (operator 2026-06-21); organizer + media crew keep it.
+            if (role is not ParticipantRole.Speaker and not ParticipantRole.MasterclassSpeaker
+                     and not ParticipantRole.Sponsor and not ParticipantRole.Volunteer)
+                items.Add(new("/Resources", "Nav.Resources"));
+            // Public Sessions list removed for sponsors + volunteers (only relevant to
+            // speakers + organizers/crew).
+            if (role is not ParticipantRole.Sponsor and not ParticipantRole.Volunteer)
+                items.Add(new("/Sessions", "Nav.Sessions"));
+        }
 
-        // Hotel + Dinner: crew/speaker/organizer.
+        // Hotel + Dinner: organizer + media crew. Speakers AND volunteers get these
+        // inside their own "Event logistics" fold-out below (operator 2026-06-21).
         if (role is ParticipantRole.Organizer
-            or ParticipantRole.Speaker
-            or ParticipantRole.MasterclassSpeaker
-            or ParticipantRole.Volunteer
             or ParticipantRole.Video
             or ParticipantRole.Camera)
         {
@@ -69,58 +85,133 @@ public static class NavBuilder
             items.Add(new("/Forms/Dinner", "Nav.Dinner"));
         }
 
-        // Speaker hub + speaker self-service.
-        if (role is ParticipantRole.Speaker or ParticipantRole.MasterclassSpeaker)
-        {
-            items.Add(new("/Speaker", "Nav.SpeakerHub"));
-            items.Add(new("/Speaker/Questions", "Nav.SpeakerQuestions"));
-            items.Add(new("/Speaker/Evaluations", "Nav.SpeakerEvaluations"));
-            items.Add(new("/Forms/Speaker", "Nav.Speaker"));
-            items.Add(new("/Speaker/Graphics", "Nav.ShareGraphics"));
-            items.Add(new("/Forms/Travel", "Nav.Travel"));
-        }
-
-        // Lunch + Swag: volunteer/speaker/organizer.
-        if (role is ParticipantRole.Volunteer
-            or ParticipantRole.Speaker
-            or ParticipantRole.MasterclassSpeaker
-            or ParticipantRole.Organizer)
+        // Lunch + Swag: organizer (speakers + volunteers get these in their Event
+        // logistics fold-out below).
+        if (role is ParticipantRole.Organizer)
         {
             items.Add(new("/Forms/Lunch", "Nav.Lunch"));
             items.Add(new("/Forms/Swag", "Nav.Swag"));
         }
 
-        // Volunteer shift wizard.
-        if (role is ParticipantRole.Volunteer or ParticipantRole.Organizer)
+        // Speaker hub + speaker self-service. The speaker nav was a long flat
+        // list; group the speaker-SPECIFIC items under a "Speaker" section
+        // heading (mirrors the organizer SectionKey grouping pattern). Added
+        // LAST for speaker roles so the section's items are contiguous in the
+        // flat list — NavGroup.Sections() then preserves order exactly
+        // (loss-free). The crew-shared forms (Hotel/Dinner/Lunch/Swag) above
+        // stay ungrouped — they are not speaker-only. Pure IA: no route renamed
+        // or dropped.
+        // Speaker menu (operator 2026-06-21): the old flat "Speaker" hub is dissolved.
+        // My Sessions (the per-speaker sessions hub — also the route to attendee
+        // questions / evaluations / SoMe graphics from each session), Bio (the speaker
+        // form), a per-role Calendar, an Event-logistics fold-out, and Contact
+        // Organizers. No route dropped — Questions/Evaluations/Graphics remain reached
+        // from the My Sessions hub.
+        if (role is ParticipantRole.Speaker or ParticipantRole.MasterclassSpeaker)
+        {
+            items.Add(new("/Speaker", "Nav.MySessions"));
+            items.Add(new("/Forms/Speaker", "Nav.Bio"));
+            items.Add(new("/Calendar", "Nav.Calendar"));
+
+            const string EventLogistics = "Nav.SectionEventLogistics";
+            items.Add(new("/Forms/Hotel", "Nav.Hotel", SectionKey: EventLogistics));
+            items.Add(new("/Forms/Dinner", "Nav.Dinner", SectionKey: EventLogistics));
+            items.Add(new("/Forms/Lunch", "Nav.Lunch", SectionKey: EventLogistics));
+            items.Add(new("/Forms/Swag", "Nav.SpeakerGift", SectionKey: EventLogistics));
+            items.Add(new("/Forms/Travel", "Nav.Travel", SectionKey: EventLogistics));
+            // (No "Important dates" item here: speakers already have a prominent
+            // top-level "Calendar" entry above pointing at the same /Calendar page —
+            // a second fold-out entry to the identical route was a duplicate.)
+
+            items.Add(new("/Contact", "Nav.ContactOrganizers"));
+        }
+
+        // Volunteer shift wizard — organizer only. For volunteers the sign-up is being
+        // moved to an anonymous survey (operator 2026-06-21), so it is NOT in the
+        // volunteer menu anymore.
+        if (role is ParticipantRole.Organizer)
         {
             items.Add(new("/Forms/VolunteerWizard", "Nav.VolunteerShifts"));
         }
 
-        // Volunteer unified "My schedule" (all assigned shifts/tasks, time-ordered,
-        // with the go-to people + a personal calendar). Volunteers only — an
-        // organizer manages the schedule via the Volunteers hub, not this view.
+        // Volunteer menu (operator 2026-06-21): My schedule (now the single home for
+        // the volunteer's assigned shifts AND tasks — the separate "My shifts" /
+        // "My volunteer tasks" tabs are merged here), My Availability (per-day
+        // available/blocked the coordinators schedule against), the supervisor
+        // dashboard, and an Event-logistics fold-out. Resources + Sessions are
+        // removed (above); the shift-signup wizard is gone (becomes an anonymous
+        // survey).
         if (role == ParticipantRole.Volunteer)
         {
             items.Add(new("/volunteer/myschedule", "Nav.MySchedule"));
-            // Self-service shift management: confirm / decline / request a swap.
-            items.Add(new("/volunteer/myshifts", "Nav.MyShifts"));
+            items.Add(new("/volunteer/availability", "Nav.MyAvailability"));
+            // Supervisor dashboard: shown ONLY to volunteers who actually supervise a
+            // bucket (operator 2026-06-21). A non-supervisor volunteer would otherwise
+            // see a menu item that lands on a "you are not a supervisor" dead end.
+            if (isVolunteerSupervisor)
+                items.Add(new("/volunteer/supervisor", "Nav.VolunteerSupervisor"));
+
+            const string EventLogistics = "Nav.SectionEventLogistics";
+            items.Add(new("/Forms/Hotel", "Nav.Hotel", SectionKey: EventLogistics));
+            items.Add(new("/Forms/Dinner", "Nav.Dinner", SectionKey: EventLogistics));
+            items.Add(new("/Forms/Lunch", "Nav.Lunch", SectionKey: EventLogistics));
+            items.Add(new("/Forms/Swag", "Nav.VolunteerGift", SectionKey: EventLogistics));
+            items.Add(new("/Calendar", "Nav.ImportantDates", SectionKey: EventLogistics));
         }
 
-        // Attendee area.
+        // Attendee area — MINIMAL menu (operator 2026-06-21): Home (added at top) +
+        // Master Class + Waitlist only. The in-hub Master Class chooser lives at
+        // /Attendee (replaces the old Zoho-Bookings deep-link); the waitlist view at
+        // /Attendee/Waitlist. My Event / My Plan / Sessions / Tasks / Profile /
+        // Resources are intentionally not shown to attendees.
         if (role == ParticipantRole.Attendee)
         {
-            items.Add(new("/Attendee", "Nav.MyAttendance"));
+            items.Add(new("/Attendee", "Nav.MasterClass"));
+            // My plan: the attendee's personal saved-sessions agenda (a complete,
+            // working page that previously had no menu/link path at all — operator
+            // 2026-06-21). Sits between the Master Class chooser and the Waitlist.
+            items.Add(new("/Attendee/MyPlan", "Nav.MyPlan"));
+            items.Add(new("/Attendee/Waitlist", "Nav.Waitlist"));
         }
 
-        // Sponsor area. The portal is the single self-service home (REQUIREMENTS §20
-        // Sponsor) and leads the group; the existing pages are reached from it + here.
+        // Sponsor menu (operator 2026-06-21). The redundant Sponsor Portal + the
+        // standalone Capture-lead tab are removed; engagement details become the
+        // "Sponsor Webshop" fold-out; two new fold-outs surface the Zoho exhibitor
+        // dashboard (Exhibitor & Booth Details, Leads). Resources + Sessions removed
+        // above. NOTE: the eldk27.expertslive.dk Zoho URLs are this edition's
+        // exhibitor dashboard; for the community mirror they should move to config.
         if (role == ParticipantRole.Sponsor)
         {
-            items.Add(new("/Sponsor/Portal", "Nav.SponsorPortal"));
-            items.Add(new("/Sponsor", "Nav.SponsorEngagement"));
+            const string Zoho = "https://eldk27.expertslive.dk/#/exhibitor-dashboard/";
+
+            // Sponsor Webshop (renamed from "Engagement details"): the external
+            // webshop buy-flow + the internal hub sections for orders / linked contacts.
+            const string Webshop = "Nav.SectionSponsorWebshop";
+            items.Add(new("https://expertslive.dk/sponsor", "Nav.SponsorBuyServices", SectionKey: Webshop, External: true));
+            items.Add(new("/Sponsor#orders", "Nav.SponsorOrders", SectionKey: Webshop));
+            items.Add(new("/Sponsor#linked-contacts", "Nav.SponsorLinkedContacts", SectionKey: Webshop));
+
+            // Exhibitor & Booth Details (Zoho, external).
+            const string Booth = "Nav.SectionExhibitorBooth";
+            items.Add(new($"{Zoho}booth-info", "Nav.ExhibitorProfile", SectionKey: Booth, External: true));
+            items.Add(new($"{Zoho}booth-members", "Nav.BoothMembers", SectionKey: Booth, External: true));
+            items.Add(new($"{Zoho}booth-materials", "Nav.ExhibitorMaterials", SectionKey: Booth, External: true));
+            items.Add(new($"{Zoho}expo-promo-banner", "Nav.PromotionalBanner", SectionKey: Booth, External: true));
+
             items.Add(new("/Sponsor/Tasks", "Nav.SponsorTasks"));
-            items.Add(new("/Sponsor/Logistics", "Nav.Logistics"));
-            items.Add(new("/Sponsor/Contact", "Nav.Contact"));
+
+            // Leads (Zoho, external) + the in-hub Capture-lead failover for when Zoho is down.
+            const string Leads = "Nav.SectionLeads";
+            items.Add(new($"{Zoho}lead-list", "Nav.LeadsZoho", SectionKey: Leads, External: true));
+            items.Add(new($"{Zoho}inquiry-list", "Nav.InquiriesZoho", SectionKey: Leads, External: true));
+            items.Add(new("/Sponsor/CaptureLead", "Nav.CaptureLeadFailover", SectionKey: Leads));
+            // The in-hub leads export/API page (was an island reachable only via
+            // in-page links) — surfaced in the Leads fold-out (operator 2026-06-21).
+            items.Add(new("/Sponsor/Leads", "Nav.SponsorLeadsExport", SectionKey: Leads));
+
+            // Dedicated leaf label (was reusing the "Event logistics" SECTION key).
+            items.Add(new("/Sponsor/Logistics", "Nav.SponsorEventLogistics"));
+            items.Add(new("/Sponsor/Contact", "Nav.ContactOrganizers"));
         }
 
         // No heading on the primary group — it IS the primary nav.
@@ -159,60 +250,25 @@ public static class NavBuilder
     /// </summary>
     private static NavGroup BuildManagementGroup()
     {
-        // Section heading resx keys (REQUIREMENTS §21 organizer-nav grouping).
-        // null section = the leading "prominent" bucket (no heading).
-        const string People      = "Nav.OrgSectionPeople";
-        const string Sessions    = "Nav.OrgSectionSessions";
-        const string Comms       = "Nav.OrgSectionComms";
-        const string Sponsors    = "Nav.OrgSectionSponsors";
-        const string Volunteers  = "Nav.OrgSectionVolunteers";
-        const string Logistics   = "Nav.OrgSectionLogistics";
-
+        // Flat, hub-level menu — the feature pages live on the hub button-grids
+        // (the _HubGrid partial on each hub landing page), NOT in this menu.
         var items = new List<NavItem>
         {
-            // --- Prominent / ungrouped (render at the top, no section heading) ---
-            // Organizer home — landing root that links out to every hub below.
             new("/Organizer", "Nav.OrgArea"),
-
-            // Command center (the "what needs my attention" overview, REQUIREMENTS
-            // §20) and the Dashboard are both kept prominent as their own
-            // top-level entries. The older cross-role Overview is folded into the
-            // dashboard/home as a section, so it is no longer a separate top-level
-            // item — its route /Organizer/Overview is unchanged and still works.
             new("/Organizer/CommandCenter", "Nav.OrgCommandCenter"),
             new("/Organizer/Dashboard", "Nav.OrgDashboard"),
-
-            // Global "find a person fast" search — kept prominent (no section)
-            // because it is the single most frequent organizer action: jump from
-            // a name/email fragment straight to the right person (REQUIREMENTS §20).
             new("/Organizer/FindPerson", "Nav.OrgFindPerson"),
 
-            // --- People ---
-            new("/Organizer/People", "Nav.OrgPeople", SectionKey: People),
+            new("/Organizer/People", "Nav.OrgPeople"),
+            new("/Organizer/Content", "Nav.OrgSessionsHub"),
+            new("/Organizer/Comms", "Nav.OrgComms"),
+            new("/Organizer/SoMe", "Nav.OrgSoMe"),
+            new("/Organizer/SponsorAdmin/Index", "Nav.OrgSponsorsHub"),
+            new("/Organizer/Volunteers", "Nav.OrgVolunteers"),
+            new("/Organizer/Logistics", "Nav.OrgLogistics"),
+            new("/Organizer/Setup", "Nav.OrgSetup"),
 
-            // --- Sessions & speakers ---
-            // Hub route is /Organizer/Content so it does not collide with the
-            // existing /Organizer/Sessions feature page (which it links to).
-            new("/Organizer/Content", "Nav.OrgSessionsHub", SectionKey: Sessions),
-
-            // --- Comms (incl. marketing / SoMe) ---
-            new("/Organizer/Comms", "Nav.OrgComms", SectionKey: Comms),
-            new("/Organizer/SoMe", "Nav.OrgSoMe", SectionKey: Comms),
-
-            // --- Sponsors (points at the EXISTING SponsorAdmin hub, no new page) ---
-            new("/Organizer/SponsorAdmin/Index", "Nav.OrgSponsorsHub", SectionKey: Sponsors),
-
-            // --- Volunteers ---
-            new("/Organizer/Volunteers", "Nav.OrgVolunteers", SectionKey: Volunteers),
-
-            // --- Logistics (event ops + setup + audit) ---
-            // The Logistics hub page links to the on-site Exports & run-sheets
-            // page (REQUIREMENTS §20 Organizer) — kept off the top-level nav so
-            // the consolidated menu stays short.
-            new("/Organizer/Logistics", "Nav.OrgLogistics", SectionKey: Logistics),
-            new("/Organizer/Setup", "Nav.OrgSetup", SectionKey: Logistics),
-            // Audit lives under Logistics/ops rather than as a stray flat link.
-            new("/Organizer/ImpersonationLog", "Nav.OrgImpersonationLog", SectionKey: Logistics),
+            new("/Organizer/ImpersonationLog", "Nav.OrgImpersonationLog"),
         };
 
         return new NavGroup(HeadingKey: "Nav.OrgArea", Items: items, IsManagement: true);

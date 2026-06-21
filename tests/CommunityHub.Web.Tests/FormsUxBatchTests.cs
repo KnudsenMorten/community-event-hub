@@ -275,8 +275,10 @@ public sealed class FormsUxBatchTests
     }
 
     [Fact]
-    public async Task Speaker_save_persists_structured_dietary_with_speaker_surface()
+    public async Task Speaker_save_no_longer_persists_dietary()
     {
+        // Operator 2026-06-21: day-catering dietary was removed from the speaker form;
+        // saving it must NOT create a SpeakerCatering row (and so can't wipe one either).
         using var db = NewDb();
         var me = await SeedAsync(db);   // Speaker role
         var http = new DefaultHttpContext { User = Session(me) };
@@ -288,20 +290,19 @@ public sealed class FormsUxBatchTests
             PageContext = new PageContext { HttpContext = http },
         };
 
-        model.Dietary = new DietaryInput { DietChoice = "Vegetarian", Milk = true };
-
+        // Dietary was removed from the speaker form entirely (the property no longer
+        // exists on SpeakerModel), so a save cannot create a SpeakerCatering row.
         var result = await model.OnPostAsync(default);
 
         Assert.IsType<PageResult>(result);
-        var row = Assert.Single(await db.DietaryRequirements.ToListAsync());
-        Assert.Equal(DietarySurface.SpeakerCatering, row.Surface);
-        Assert.Equal("Vegetarian", row.DietChoice);
-        Assert.True(row.Milk);
+        Assert.Empty(await db.DietaryRequirements.ToListAsync());
     }
 
     [Fact]
-    public async Task Dinner_and_speaker_dietary_are_separate_rows_for_one_person()
+    public async Task Dinner_dietary_is_saved_and_speaker_form_no_longer_adds_one()
     {
+        // Dinner still captures dietary; the speaker form no longer does (operator
+        // 2026-06-21), so only the Dinner row exists after both are posted.
         using var db = NewDb();
         var me = await SeedAsync(db);
         var http = new DefaultHttpContext { User = Session(me) };
@@ -318,13 +319,13 @@ public sealed class FormsUxBatchTests
         {
             PageContext = new PageContext { HttpContext = http },
         };
-        speaker.Dietary = new DietaryInput { Fish = true };
+        // Speaker form no longer captures dietary (property removed), so its save adds nothing.
         await speaker.OnPostAsync(default);
 
-        var rows = await db.DietaryRequirements.OrderBy(r => r.Surface).ToListAsync();
-        Assert.Equal(2, rows.Count);
-        Assert.Contains(rows, r => r.Surface == DietarySurface.SpeakerCatering && r.Fish);
-        Assert.Contains(rows, r => r.Surface == DietarySurface.Dinner && r.Gluten);
+        var rows = await db.DietaryRequirements.ToListAsync();
+        var row = Assert.Single(rows);
+        Assert.Equal(DietarySurface.Dinner, row.Surface);
+        Assert.True(row.Gluten);
     }
 
     [Fact]

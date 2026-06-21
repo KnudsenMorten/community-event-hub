@@ -1,0 +1,87 @@
+@page
+@model CommunityHub.Pages.PartyModel
+@{
+    Layout = null;
+    var p = Model.Party;
+    string dateLine = p is null ? "" :
+        p.Date.ToDateTime(new TimeOnly(0,0)).ToString("dddd, d MMMM yyyy")
+        + $" · {p.StartHour:00}:00–{p.EndHour:00}:00";
+}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Party sign-up</title>
+    <style>
+        :root { color-scheme: light; }
+        body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin:0;
+               background:#0e1116; color:#1f2430; }
+        .wrap { max-width:480px; margin:0 auto; padding:24px 18px 48px; }
+        .card { background:#fff; border-radius:14px; padding:22px 20px; box-shadow:0 6px 24px rgba(0,0,0,.25); }
+        h1 { font-size:22px; margin:0 0 4px; }
+        .when { color:#5b636e; font-size:14px; margin:0 0 18px; }
+        label { display:block; font-weight:600; font-size:14px; margin:14px 0 5px; }
+        input[type=text], input[type=email] { width:100%; box-sizing:border-box; padding:11px 12px;
+               border:1px solid #cbd2d9; border-radius:9px; font-size:16px; }
+        .optin { display:flex; gap:10px; align-items:flex-start; margin:18px 0 4px;
+                 background:#f3f6fb; border:1px solid #dde4ee; border-radius:10px; padding:12px; }
+        .optin input { margin-top:2px; width:18px; height:18px; }
+        .optin label { margin:0; font-weight:500; }
+        button { width:100%; margin-top:20px; padding:13px; border:0; border-radius:10px;
+                 background:#1c6b35; color:#fff; font-size:16px; font-weight:600; cursor:pointer; }
+        .hp { position:absolute; left:-9999px; top:-9999px; }
+        .err { background:#fdecec; color:#b3261e; border-radius:9px; padding:10px 12px; font-size:14px; margin:12px 0; }
+        .ok h1 { color:#1c6b35; }
+    </style>
+</head>
+<body>
+    <div class="wrap">
+    @if (Model.SubmittedOk)
+    {
+        <div class="card ok">
+            <h1>You're on the list 🎉</h1>
+            <p class="when">Thanks! We've recorded your Party RSVP@(p is null ? "" : $" for {dateLine}").</p>
+            <p style="margin:16px 0;"><a href="/Party?handler=Ics"
+                style="display:inline-block;padding:11px 16px;border-radius:9px;background:#1c6b35;color:#fff;text-decoration:none;font-weight:600;">📅 Add to my calendar</a></p>
+            <p style="color:#5b636e;font-size:14px;">Change of plans? Just submit the form again with the same email.</p>
+        </div>
+    }
+    else if (p is null)
+    {
+        <div class="card"><h1>No event right now</h1>
+            <p class="when">There's no active event taking sign-ups at the moment.</p></div>
+    }
+    else
+    {
+        <div class="card">
+            <h1>@p.EventName — Party</h1>
+            <p class="when">@dateLine</p>
+
+            @if (!string.IsNullOrEmpty(Model.ErrorMessage))
+            {
+                <div class="err" role="alert">@Model.ErrorMessage</div>
+            }
+
+            <form method="post">
+                <label for="Name">Your name</label>
+                <input type="text" id="Name" name="Name" value="@Model.Name" required autocomplete="name" />
+
+                <label for="Email">Email</label>
+                <input type="email" id="Email" name="Email" value="@Model.Email" required autocomplete="email" />
+
+                <div class="optin">
+                    <input type="checkbox" id="Attending" name="Attending" value="true" checked="@Model.Attending" />
+                    <label for="Attending">Yes, I'll attend the Party (@($"{p.StartHour:00}:00–{p.EndHour:00}:00")).</label>
+                </div>
+
+                <!-- honeypot: leave empty -->
+                <div class="hp" aria-hidden="true"><label>Website<input type="text" name="Website" tabindex="-1" autocomplete="off" /></label></div>
+
+                <button type="submit">Sign me up</button>
+            </form>
+        </div>
+    }
+    </div>
+</body>
+</html>

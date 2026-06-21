@@ -62,6 +62,7 @@ public sealed class NavBuilderTests
         ["/Organizer/Onboarding"]                 = "/Organizer/People",
         ["/Organizer/Attendees"]                  = "/Organizer/People",
         ["/Organizer/ActionQueue"]                = "/Organizer/People",
+        ["/Organizer/WelcomeLinks"]               = "/Organizer/People",
         // Comms hub.
         ["/Organizer/EmailCenter"]                = "/Organizer/Comms",
         ["/Organizer/EmailLog"]                   = "/Organizer/Comms",
@@ -76,12 +77,16 @@ public sealed class NavBuilderTests
         ["/Organizer/SessionEvaluations"]         = "/Organizer/Content",
         ["/Organizer/SessionizeImport"]           = "/Organizer/Content",
         ["/Organizer/SessionizeEndpointSettings"] = "/Organizer/Content",
+        ["/Organizer/SessionSource"]              = "/Organizer/Content",
+        ["/Organizer/MasterClasses"]              = "/Organizer/Content",
+        ["/Organizer/Surveys"]                    = "/Organizer/Content",
         // Sponsors hub (the existing SponsorAdmin landing).
         ["/Organizer/Sponsors"]                   = "/Organizer/SponsorAdmin/Index",
         ["/Organizer/SponsorAdmin/Tasks"]         = "/Organizer/SponsorAdmin/Index",
         ["/Organizer/SponsorAdmin/Leads"]         = "/Organizer/SponsorAdmin/Index",
         ["/Organizer/SponsorAdmin/Dashboard"]     = "/Organizer/SponsorAdmin/Index",
         ["/Organizer/AppGame"]                    = "/Organizer/SponsorAdmin/Index",
+        ["/Organizer/EconomicContacts"]           = "/Organizer/SponsorAdmin/Index",
         // Volunteers hub.
         ["/Organizer/VolunteerStructure"]         = "/Organizer/Volunteers",
         ["/Organizer/BucketAllocation"]           = "/Organizer/Volunteers",
@@ -92,6 +97,8 @@ public sealed class NavBuilderTests
         ["/Organizer/TravelReimbursements"]       = "/Organizer/Logistics",
         ["/Organizer/Lunch"]                      = "/Organizer/Logistics",
         ["/Organizer/GroupPhotos"]                = "/Organizer/Logistics",
+        ["/Organizer/Schedule"]                   = "/Organizer/Logistics",
+        ["/Organizer/PartyRsvps"]                 = "/Organizer/Logistics",
         // Marketing / SoMe hub.
         ["/Organizer/Graphics"]                   = "/Organizer/SoMe",
         ["/Organizer/SoMeQueue"]                  = "/Organizer/SoMe",
@@ -99,6 +106,8 @@ public sealed class NavBuilderTests
         ["/Organizer/AssetLocations"]             = "/Organizer/SoMe",
         // Setup hub (surfaces previously-hidden CalendarSettings).
         ["/Organizer/CalendarSettings"]           = "/Organizer/Setup",
+        // Feature settings / controlled-rollout surface (§23) lives under Setup.
+        ["/Organizer/Settings"]                   = "/Organizer/Setup",
         // Prominent dashboard + cross-role overview (Overview folded into it).
         ["/Organizer/Overview"]                   = "/Organizer/Dashboard",
     };
@@ -152,7 +161,7 @@ public sealed class NavBuilderTests
     }
 
     [Fact]
-    public void Organizer_receives_the_consolidated_management_group()
+    public void Organizer_receives_the_management_group()
     {
         var nav = NavBuilder.Build(ParticipantRole.Organizer);
 
@@ -160,59 +169,64 @@ public sealed class NavBuilderTests
         var mgmt = nav.ManagementGroup!;
         Assert.Equal("Nav.OrgArea", mgmt.HeadingKey);
 
-        var hrefs = mgmt.Items.Select(i => i.Href).ToList();
+        var hrefs = mgmt.Items.Select(i => i.Href).ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-        // It is exactly the consolidated top-level set — same membership, no extras.
-        Assert.Equal(
-            ManagementTopLevelRoutes.OrderBy(x => x, StringComparer.OrdinalIgnoreCase),
-            hrefs.OrderBy(x => x, StringComparer.OrdinalIgnoreCase));
+        // The prominent entries, every section hub lead, and the audit log are all
+        // present (the menu also lists the individual feature pages — see
+        // Every_feature_page_is_a_direct_nav_item).
+        foreach (var route in ManagementTopLevelRoutes)
+        {
+            Assert.Contains(route, hrefs);
+        }
     }
 
     [Fact]
-    public void Consolidation_keeps_the_menu_short()
+    public void Management_menu_is_lean_hub_level()
     {
         var mgmt = NavBuilder.Build(ParticipantRole.Organizer).ManagementGroup!;
-
-        // The whole point of phase-1: the old ~35-link flat menu becomes a short
-        // grouped one. Assert it is meaningfully consolidated (well under 15) —
-        // ~8 hubs plus the home root, Command center, Dashboard and Audit.
-        Assert.True(mgmt.Items.Count <= 13,
-            $"Management menu should be consolidated to ~8 hubs (+home/command-center/dashboard/audit); got {mgmt.Items.Count}.");
-
-        // The 8 consolidation hubs are all present.
         var hrefs = mgmt.Items.Select(i => i.Href).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        // Operator 2026-06-21: the menu is a SHORT flat list — prominent overview
+        // entries + the 8 hub landings + the audit log. Feature pages are NOT in the
+        // menu; they live on the hub button-grids (see _HubGrid). So the menu is
+        // small and carries no per-feature rows or collapsible sub-folds.
+        Assert.True(mgmt.Items.Count <= 14,
+            $"Lean organizer menu should be ~13 hub-level entries; got {mgmt.Items.Count}.");
+        Assert.All(mgmt.Items, i => Assert.Null(i.SectionKey));   // flat — no sub-folds
+
         foreach (var hub in new[]
                  {
-                     "/Organizer/People", "/Organizer/Comms", "/Organizer/Content",
-                     "/Organizer/SponsorAdmin/Index", "/Organizer/Volunteers",
-                     "/Organizer/Logistics", "/Organizer/SoMe", "/Organizer/Setup",
+                     "/Organizer/People", "/Organizer/Content", "/Organizer/Comms",
+                     "/Organizer/SoMe", "/Organizer/SponsorAdmin/Index",
+                     "/Organizer/Volunteers", "/Organizer/Logistics", "/Organizer/Setup",
                  })
         {
             Assert.Contains(hub, hrefs);
         }
-
-        // Command center + Dashboard stay prominent; Audit stays standalone;
-        // home root present.
         Assert.Contains("/Organizer", hrefs);
         Assert.Contains("/Organizer/CommandCenter", hrefs);
         Assert.Contains("/Organizer/Dashboard", hrefs);
         Assert.Contains("/Organizer/ImpersonationLog", hrefs);
+
+        // Feature pages are reached via their hub grid, NOT the menu.
+        Assert.DoesNotContain("/Organizer/Participants", hrefs);
+        Assert.DoesNotContain("/Organizer/Hotels", hrefs);
     }
 
     [Fact]
-    public void Every_feature_page_is_reachable_via_a_hub_in_the_top_level_menu()
+    public void Every_feature_pages_hub_is_in_the_menu()
     {
-        var topLevel = NavBuilder.Build(ParticipantRole.Organizer)
+        var hrefs = NavBuilder.Build(ParticipantRole.Organizer)
             .ManagementGroup!.Items
             .Select(i => i.Href)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-        // For each feature page, the hub that fronts it must itself be a
-        // top-level menu entry — so every feature is reachable in two clicks.
+        // The menu is hub-level: every feature page's HUB must be a menu entry, so
+        // each feature is reachable in two clicks (menu hub -> hub-grid tile).
         foreach (var (feature, hub) in FeaturePageToHub)
         {
-            Assert.True(topLevel.Contains(hub),
-                $"Feature {feature} is fronted by hub {hub}, which must be a top-level menu entry.");
+            Assert.True(hrefs.Contains(hub),
+                $"Feature {feature} is reached via hub {hub}, which must be a menu entry.");
         }
     }
 
@@ -254,12 +268,12 @@ public sealed class NavBuilderTests
 
     [Theory]
     [InlineData(ParticipantRole.Organizer)]
-    [InlineData(ParticipantRole.Speaker)]
-    [InlineData(ParticipantRole.Volunteer)]
-    [InlineData(ParticipantRole.Sponsor)]
-    [InlineData(ParticipantRole.Attendee)]
-    public void Every_role_keeps_the_evergreen_participant_entries(ParticipantRole role)
+    public void Organizer_keeps_the_evergreen_participant_entries(ParticipantRole role)
     {
+        // Only the organizer (and media crew) keep the full evergreen set now —
+        // attendee/speaker/sponsor/volunteer menus were trimmed (operator 2026-06-21):
+        // attendee is minimal; speaker/sponsor/volunteer drop Resources; sponsor/
+        // volunteer also drop the public Sessions list.
         var participant = NavBuilder.Build(role).Groups[0];
         var hrefs = participant.Items.Select(i => i.Href).ToHashSet(StringComparer.OrdinalIgnoreCase);
 
@@ -270,6 +284,54 @@ public sealed class NavBuilderTests
     }
 
     [Fact]
+    public void Speaker_menu_matches_redesign()
+    {
+        var g = NavBuilder.Build(ParticipantRole.Speaker).Groups[0];
+        var hrefs = g.Items.Select(i => i.Href).ToList();
+
+        // Present (operator 2026-06-21): My Sessions, Bio, Calendar, Event-logistics
+        // fold-out (Hotel/Dinner/Lunch/Swag/Travel/Important dates), Contact Organizers.
+        Assert.Equal("Nav.MySessions", g.Items.Single(i => i.Href == "/Speaker").LabelKey);
+        Assert.Equal("Nav.Bio", g.Items.Single(i => i.Href == "/Forms/Speaker").LabelKey);
+        Assert.Contains("/Calendar", hrefs);
+        Assert.Contains("/Contact", hrefs);
+        var logistics = g.Sections().SingleOrDefault(s => s.HeadingKey == "Nav.SectionEventLogistics");
+        Assert.NotNull(logistics);
+        var lh = logistics!.Items.Select(i => i.Href).ToList();
+        // No fold-out "/Calendar" (Important dates) — speakers have a prominent
+        // top-level Calendar; the duplicate fold-out entry was removed (2026-06-21).
+        Assert.Equal(new[] { "/Forms/Hotel", "/Forms/Dinner", "/Forms/Lunch", "/Forms/Swag", "/Forms/Travel" }, lh);
+        Assert.Equal("Nav.SpeakerGift", logistics.Items.Single(i => i.Href == "/Forms/Swag").LabelKey);
+
+        // Removed for speakers: Resources, the flat Speaker hub items, My tasks stays.
+        Assert.DoesNotContain("/Resources", hrefs);
+        Assert.DoesNotContain("/Speaker/Questions", hrefs);   // reached from My Sessions hub
+        Assert.DoesNotContain("/Speaker/Evaluations", hrefs); // reached from My Sessions hub
+        Assert.DoesNotContain("/Speaker/Graphics", hrefs);    // reached from My Sessions hub
+    }
+
+    [Fact]
+    public void Attendee_menu_is_minimal_home_masterclass_waitlist()
+    {
+        var attendee = NavBuilder.Build(ParticipantRole.Attendee).Groups[0];
+        var hrefs = attendee.Items.Select(i => i.Href).ToList();
+
+        // Home + Master Class + My plan + Waitlist (operator 2026-06-21: My plan was
+        // surfaced — a complete page that previously had no menu/link path).
+        Assert.Equal(new[] { "/", "/Attendee", "/Attendee/MyPlan", "/Attendee/Waitlist" }, hrefs);
+        Assert.Equal("Nav.MasterClass", attendee.Items.Single(i => i.Href == "/Attendee").LabelKey);
+        Assert.Equal("Nav.Waitlist", attendee.Items.Single(i => i.Href == "/Attendee/Waitlist").LabelKey);
+        Assert.Equal("Nav.MyPlan", attendee.Items.Single(i => i.Href == "/Attendee/MyPlan").LabelKey);
+
+        // Removed for attendees.
+        Assert.DoesNotContain("/Tasks", hrefs);
+        Assert.DoesNotContain("/Profile", hrefs);
+        Assert.DoesNotContain("/Resources", hrefs);
+        Assert.DoesNotContain("/Sessions", hrefs);
+        Assert.DoesNotContain("/Attendee/MyEvent", hrefs);
+    }
+
+    [Fact]
     public void Participant_form_routes_are_preserved_per_role()
     {
         // Spot-check that the regroup did not drop or rename any participant route
@@ -277,30 +339,129 @@ public sealed class NavBuilderTests
         var speaker = NavBuilder.Build(ParticipantRole.Speaker).AllItems.Select(i => i.Href).ToList();
         Assert.Contains("/Forms/Hotel", speaker);
         Assert.Contains("/Forms/Dinner", speaker);
-        Assert.Contains("/Speaker", speaker);
-        Assert.Contains("/Speaker/Questions", speaker);
-        Assert.Contains("/Speaker/Evaluations", speaker);
-        Assert.Contains("/Forms/Speaker", speaker);
-        Assert.Contains("/Speaker/Graphics", speaker);
+        Assert.Contains("/Speaker", speaker);          // now "My Sessions"
+        Assert.Contains("/Forms/Speaker", speaker);    // now "Bio"
         Assert.Contains("/Forms/Travel", speaker);
         Assert.Contains("/Forms/Lunch", speaker);
         Assert.Contains("/Forms/Swag", speaker);
-
-        var volunteer = NavBuilder.Build(ParticipantRole.Volunteer).AllItems.Select(i => i.Href).ToList();
-        Assert.Contains("/Forms/VolunteerWizard", volunteer);
+        Assert.Contains("/Calendar", speaker);
+        Assert.Contains("/Contact", speaker);
 
         var sponsor = NavBuilder.Build(ParticipantRole.Sponsor).AllItems.Select(i => i.Href).ToList();
-        Assert.Contains("/Sponsor/Portal", sponsor);   // single self-service home (REQUIREMENTS §20)
-        Assert.Contains("/Sponsor", sponsor);
         Assert.Contains("/Sponsor/Tasks", sponsor);
-        Assert.Contains("/Sponsor/Logistics", sponsor);
-        Assert.Contains("/Sponsor/Contact", sponsor);
+        Assert.Contains("/Sponsor/Logistics", sponsor);   // "Event logistics"
+        Assert.Contains("/Sponsor/Contact", sponsor);     // "Contact Organizers"
+        Assert.Contains("/Sponsor/CaptureLead", sponsor); // failover in the Leads fold-out
         // A sponsor uses the company-shared tasks entry, not the generic /Tasks.
         Assert.DoesNotContain("/Tasks", sponsor);
 
         var attendee = NavBuilder.Build(ParticipantRole.Attendee).AllItems.Select(i => i.Href).ToList();
-        Assert.Contains("/Attendee", attendee);
+        Assert.Contains("/Attendee", attendee);          // in-hub Master Class chooser
+        Assert.Contains("/Attendee/Waitlist", attendee); // waitlist view
+
+        var vol = NavBuilder.Build(ParticipantRole.Volunteer, isVolunteerSupervisor: true).AllItems.Select(i => i.Href).ToList();
+        Assert.Contains("/volunteer/myschedule", vol);   // merged shifts + tasks home
+        Assert.Contains("/volunteer/availability", vol); // per-day available/blocked
+        Assert.Contains("/volunteer/supervisor", vol);   // only for actual supervisors
     }
+
+    [Fact]
+    public void Sponsor_menu_matches_redesign()
+    {
+        var g = NavBuilder.Build(ParticipantRole.Sponsor).Groups[0];
+        var hrefs = g.Items.Select(i => i.Href).ToList();
+
+        // Removed (operator 2026-06-21): Sponsor Portal, standalone Capture-lead tab,
+        // the plain /Sponsor engagement link, Resources, Sessions.
+        Assert.DoesNotContain("/Sponsor/Portal", hrefs);
+        Assert.DoesNotContain("/Sponsor", hrefs);          // now anchored under Sponsor Webshop
+        Assert.DoesNotContain("/Resources", hrefs);
+        Assert.DoesNotContain("/Sessions", hrefs);
+
+        // Fold-outs present with the right sections.
+        var sections = g.Sections().Where(s => s.HeadingKey is not null).Select(s => s.HeadingKey).ToList();
+        Assert.Contains("Nav.SectionSponsorWebshop", sections);
+        Assert.Contains("Nav.SectionExhibitorBooth", sections);
+        Assert.Contains("Nav.SectionLeads", sections);
+
+        // External Zoho links open in a new tab.
+        var booth = g.Sections().Single(s => s.HeadingKey == "Nav.SectionExhibitorBooth");
+        Assert.Equal(4, booth.Items.Count);
+        Assert.All(booth.Items, i => Assert.True(i.External));
+        Assert.All(booth.Items, i => Assert.StartsWith("https://eldk27.expertslive.dk/#/exhibitor-dashboard/", i.Href));
+
+        // Capture-lead failover is INTERNAL (same-tab) inside the Leads fold-out.
+        var leads = g.Sections().Single(s => s.HeadingKey == "Nav.SectionLeads");
+        var failover = leads.Items.Single(i => i.Href == "/Sponsor/CaptureLead");
+        Assert.False(failover.External);
+    }
+
+    [Fact]
+    public void Volunteer_menu_matches_redesign()
+    {
+        var g = NavBuilder.Build(ParticipantRole.Volunteer, isVolunteerSupervisor: true).Groups[0];
+        var hrefs = g.Items.Select(i => i.Href).ToList();
+
+        // Removed: Resources, Sessions, the shift-signup wizard, the separate
+        // My-shifts / My-volunteer-tasks tabs (merged into My schedule).
+        Assert.DoesNotContain("/Resources", hrefs);
+        Assert.DoesNotContain("/Sessions", hrefs);
+        Assert.DoesNotContain("/Forms/VolunteerWizard", hrefs);
+        Assert.DoesNotContain("/volunteer/myshifts", hrefs);
+        Assert.DoesNotContain("/volunteer/mytasks", hrefs);
+
+        // Kept: My schedule (merged), My availability, supervisor (for supervisors).
+        Assert.Contains("/volunteer/myschedule", hrefs);
+        Assert.Contains("/volunteer/availability", hrefs);
+        Assert.Contains("/volunteer/supervisor", hrefs);
+        Assert.True(hrefs.IndexOf("/volunteer/myschedule") < hrefs.IndexOf("/volunteer/availability"),
+            "My schedule comes before My availability.");
+
+        // Event-logistics fold-out with Volunteer Gift + Important dates.
+        var logistics = g.Sections().Single(s => s.HeadingKey == "Nav.SectionEventLogistics");
+        var lh = logistics.Items.Select(i => i.Href).ToList();
+        Assert.Equal(new[] { "/Forms/Hotel", "/Forms/Dinner", "/Forms/Lunch", "/Forms/Swag", "/Calendar" }, lh);
+        Assert.Equal("Nav.VolunteerGift", logistics.Items.Single(i => i.Href == "/Forms/Swag").LabelKey);
+    }
+
+    [Fact]
+    public void Volunteer_supervisor_item_shows_only_for_supervisors()
+    {
+        // A non-supervisor volunteer must NOT see the Supervisor dashboard item
+        // (it would land on a "you are not a supervisor" dead end); a supervisor does.
+        var nonSup = NavBuilder.Build(ParticipantRole.Volunteer, isVolunteerSupervisor: false)
+            .AllItems.Select(i => i.Href).ToList();
+        Assert.DoesNotContain("/volunteer/supervisor", nonSup);
+
+        var sup = NavBuilder.Build(ParticipantRole.Volunteer, isVolunteerSupervisor: true)
+            .AllItems.Select(i => i.Href).ToList();
+        Assert.Contains("/volunteer/supervisor", sup);
+    }
+
+    // ---- Role-nav orphan fixes (per-role UX audit) --------------------------
+    // Each of these was a "the best surface for this role isn't in the menu"
+    // defect. The fix is information-architecture only (targets / labels /
+    // grouping); no route is dropped — the assertions below lock that in.
+
+    [Fact]
+    public void Attendee_primary_entry_is_the_master_class_chooser()
+    {
+        var attendee = NavBuilder.Build(ParticipantRole.Attendee).Groups[0];
+        var hrefs = attendee.Items.Select(i => i.Href).ToList();
+
+        // Operator 2026-06-21: the attendee menu is just Home + Master Class +
+        // Waitlist. /Attendee is the in-hub Master Class chooser (replaced the old
+        // Zoho-Bookings page) labelled "Master Class"; /Attendee/Waitlist is next.
+        var mc = attendee.Items.Single(i => i.Href == "/Attendee");
+        Assert.Equal("Nav.MasterClass", mc.LabelKey);
+        Assert.True(hrefs.IndexOf("/Attendee") < hrefs.IndexOf("/Attendee/Waitlist"),
+            "Master Class must come before Waitlist.");
+    }
+
+    // (Removed: Sponsor_capture_lead_is_a_prominent_nav_entry, Volunteer_mytasks_and_
+    // supervisor_are_in_the_nav, Speaker_specific_items_are_grouped_under_a_speaker_
+    // section, Speaker_grouping_drops_no_route — they asserted the PRE-2026-06-21 nav.
+    // The current per-role menus are covered by Speaker_/Sponsor_/Volunteer_menu_matches_redesign.)
 
     // ---- REQUIREMENTS §21 "Group the organizer nav" -------------------------
     // The flat management menu is now bucketed into named, collapsible sub-groups
@@ -309,86 +470,18 @@ public sealed class NavBuilderTests
     // information architecture: every prior link is still present, nothing is
     // dropped or duplicated, and the six named groups exist.
 
-    /// <summary>The six named organizer-nav section heading keys (REQUIREMENTS §21).</summary>
-    private static readonly string[] ExpectedSectionKeys =
-    {
-        "Nav.OrgSectionPeople",
-        "Nav.OrgSectionSessions",
-        "Nav.OrgSectionComms",
-        "Nav.OrgSectionSponsors",
-        "Nav.OrgSectionVolunteers",
-        "Nav.OrgSectionLogistics",
-    };
-
     [Fact]
     public void Grouping_preserves_every_management_link_exactly_once()
     {
         var mgmt = NavBuilder.Build(ParticipantRole.Organizer).ManagementGroup!;
 
-        // The flattened section view must equal the flat Items list — no link
-        // added, dropped, re-ordered away, or duplicated by the grouping.
+        // The lean menu is a single flat (null-heading) bucket — the flattened
+        // section view equals the flat Items list, with no duplicates.
         var flat = mgmt.Items.Select(i => i.Href).ToList();
         var viaSections = mgmt.Sections().SelectMany(s => s.Items).Select(i => i.Href).ToList();
 
         Assert.Equal(flat, viaSections);
-        // And the consolidated top-level set is still exactly the prior set.
-        Assert.Equal(
-            ManagementTopLevelRoutes.OrderBy(x => x, StringComparer.OrdinalIgnoreCase),
-            viaSections.OrderBy(x => x, StringComparer.OrdinalIgnoreCase));
-    }
-
-    [Fact]
-    public void Menu_has_the_six_named_groups_plus_a_leading_prominent_bucket()
-    {
-        var sections = NavBuilder.Build(ParticipantRole.Organizer).ManagementGroup!.Sections();
-
-        // The very first section is the prominent, ungrouped bucket (no heading):
-        // Organizer home, Command center, Dashboard.
-        var prominent = sections[0];
-        Assert.Null(prominent.HeadingKey);
-        Assert.Equal(
-            new[] { "/Organizer", "/Organizer/CommandCenter", "/Organizer/Dashboard", "/Organizer/FindPerson" },
-            prominent.Items.Select(i => i.Href).ToArray());
-
-        // The remaining sections are exactly the six named groups, in order.
-        var named = sections.Skip(1).Select(s => s.HeadingKey).ToArray();
-        Assert.Equal(ExpectedSectionKeys, named);
-    }
-
-    [Fact]
-    public void Every_named_group_is_non_empty_and_each_named_item_carries_a_section()
-    {
-        var mgmt = NavBuilder.Build(ParticipantRole.Organizer).ManagementGroup!;
-
-        foreach (var section in mgmt.Sections().Where(s => s.HeadingKey is not null))
-        {
-            Assert.NotEmpty(section.Items);
-            // Every item in a named section actually declares that section key.
-            Assert.All(section.Items, i => Assert.Equal(section.HeadingKey, i.SectionKey));
-        }
-
-        // Exactly the three prominent entries are section-less; everything else is grouped.
-        var ungrouped = mgmt.Items.Where(i => i.SectionKey is null).Select(i => i.Href).ToArray();
-        Assert.Equal(
-            new[] { "/Organizer", "/Organizer/CommandCenter", "/Organizer/Dashboard", "/Organizer/FindPerson" },
-            ungrouped);
-    }
-
-    [Fact]
-    public void Each_consolidation_hub_lands_in_the_expected_named_group()
-    {
-        var mgmt = NavBuilder.Build(ParticipantRole.Organizer).ManagementGroup!;
-        var section = mgmt.Items.ToDictionary(i => i.Href, i => i.SectionKey, StringComparer.OrdinalIgnoreCase);
-
-        Assert.Equal("Nav.OrgSectionPeople",     section["/Organizer/People"]);
-        Assert.Equal("Nav.OrgSectionSessions",   section["/Organizer/Content"]);
-        Assert.Equal("Nav.OrgSectionComms",      section["/Organizer/Comms"]);
-        Assert.Equal("Nav.OrgSectionComms",      section["/Organizer/SoMe"]);
-        Assert.Equal("Nav.OrgSectionSponsors",   section["/Organizer/SponsorAdmin/Index"]);
-        Assert.Equal("Nav.OrgSectionVolunteers", section["/Organizer/Volunteers"]);
-        Assert.Equal("Nav.OrgSectionLogistics",  section["/Organizer/Logistics"]);
-        Assert.Equal("Nav.OrgSectionLogistics",  section["/Organizer/Setup"]);
-        Assert.Equal("Nav.OrgSectionLogistics",  section["/Organizer/ImpersonationLog"]);
+        Assert.Equal(viaSections.Count, viaSections.Distinct(StringComparer.OrdinalIgnoreCase).Count());
     }
 
     public static TheoryData<ParticipantRole> NonOrganizerRoleData()

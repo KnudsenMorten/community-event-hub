@@ -1,0 +1,58 @@
+@page
+@using CommunityHub.Core.Integrations.Sessions
+@model CommunityHub.Pages.Organizer.SessionSourceModel
+@{
+    ViewData["Title"] = "Session source";
+}
+
+@if (Model.AccessDenied)
+{
+    <div class="card">
+        <h2>@ViewData["Title"]</h2>
+        <p class="error" role="alert">@Localizer["Common.OrganizersOnly"]</p>
+        <p><a asp-page="/Index">@Localizer["Common.BackToHub"]</a></p>
+    </div>
+    return;
+}
+
+<style>
+    .ss-opt { border:1px solid #dfe3e8; border-radius:8px; padding:12px 14px; margin:10px 0; }
+    .ss-opt.active { border-color:#1c6b35; background:#f3fbf5; }
+    .ss-opt h3 { margin:0 0 4px; font-size:15px; }
+    .ss-note { color:#6b7280; font-size:13px; margin:4px 0 0; }
+    .ss-tag { display:inline-block; font-size:11px; font-weight:700; border-radius:999px; padding:1px 8px; margin-left:6px; vertical-align:middle; }
+    .ss-on  { background:#e7f6ec; color:#1c6b35; }
+    .ss-off { background:#fef6e7; color:#8a5a00; }
+</style>
+
+@if (!string.IsNullOrEmpty(Model.Message))
+{
+    <div class="card"><p role="status" style="color:#0a6;margin:0;">@Model.Message</p></div>
+}
+
+<div class="card">
+    <h1 style="margin-top:0;">@ViewData["Title"]</h1>
+    <p>Where this edition's <strong>sessions</strong> (the agenda — titles, rooms, times, speaker links) are
+       pulled from. Speakers are always imported from Sessionize; this setting governs only sessions.</p>
+    <p><a asp-page="/Organizer/Index">&larr; @Localizer["Common.BackToOrganizerArea"]</a></p>
+
+    @foreach (var o in Model.Options)
+    {
+        var isActive = o.Key == Model.ActiveKey;
+        <div class="ss-opt @(isActive ? "active" : "")">
+            <h3>
+                @o.Label
+                @if (isActive) { <span class="ss-tag ss-on">Active</span> }
+                @if (!o.Available) { <span class="ss-tag ss-off">Not available yet</span> }
+            </h3>
+            <p class="ss-note">@o.Note</p>
+            @if (!isActive && o.Available)
+            {
+                <form method="post" asp-page-handler="Set" style="margin-top:8px;">
+                    <input type="hidden" name="source" value="@o.Key" />
+                    <button type="submit">Use @o.Label</button>
+                </form>
+            }
+        </div>
+    }
+</div>

@@ -86,12 +86,26 @@ public sealed class SponsorContactSyncService
             return new SponsorContactSyncResult(companyId, 0, 0, 0, 0);
         }
 
+        // Company-level role pointers. Company Manager exposes NO per-user roles
+        // on the users endpoint (REQUIREMENTS §7c) -- only these two single-default
+        // pointers on the company record. So we can only flag the two default
+        // contacts (signer / event-coordinator); every other contact's role is
+        // left for an organizer to set in the hub (we never guess). A contact who
+        // is BOTH pointers gets BOTH flags.
+        var company = await _cm.GetCompanyAsync(companyId, ct);
+        var signerUserId = company?.DefaultSignerUserId ?? 0;
+        var coordinatorUserId = company?.EventCoordinationDefaultContactUserId ?? 0;
+
         var companyIdStr = companyId.ToString();
         var now = _clock.GetUtcNow();
         var created = 0; var updated = 0; var skipped = 0;
 
         foreach (var u in users)
         {
+            // Resolve this user's CM-default role flags (signer / coordinator).
+            var isSigner = signerUserId != 0 && u.UserId == signerUserId;
+            var isCoordinator = coordinatorUserId != 0 && u.UserId == coordinatorUserId;
+
             var existing = await _db.Participants
                 .FirstOrDefaultAsync(
                     p => p.EventId == eventId && p.Email == u.Email, ct);
@@ -105,6 +119,13 @@ public sealed class SponsorContactSyncService
                     FullName = ChooseName(u),
                     Role = ParticipantRole.Sponsor,
                     SponsorCompanyId = companyIdStr,
+                    // The unique-identifier contact link (REQUIREMENTS §7c): write
+                    // the CM user_id from the /companies/{id}/users response, so the
+                    // hub contact is linked to CM by id, never by name. 0 (CM omitted
+                    // it) maps to null.
+                    CmUserId = u.UserId != 0 ? u.UserId : null,
+                    IsSigner = isSigner,
+                    IsEventCoordinator = isCoordinator,
                     IsActive = true,
                     CreatedAt = now,
                 });
@@ -129,6 +150,17 @@ public sealed class SponsorContactSyncService
                 existing.SponsorCompanyId = companyIdStr;
                 changed = true;
             }
+            // Unique-identifier contact link (REQUIREMENTS §7c): write/refresh the
+            // CM user_id on update too, so a row created before this column existed
+            // (or whose CM user_id changed) is backfilled by the next sync. Linked
+            // by id, never by name. 0 (CM omitted it) is left as-is, never overwriting
+            // a previously-captured id with null.
+            var cmUserId = u.UserId != 0 ? (int?)u.UserId : null;
+            if (cmUserId is not null && existing.CmUserId != cmUserId)
+            {
+                existing.CmUserId = cmUserId;
+                changed = true;
+            }
             var preferredName = ChooseName(u);
             if (!string.Equals(existing.FullName, preferredName, StringComparison.Ordinal))
             {
@@ -138,6 +170,21 @@ public sealed class SponsorContactSyncService
             if (!existing.IsActive)
             {
                 existing.IsActive = true;
+                changed = true;
+            }
+            // Role flags are SET-only from the CM default pointers, never cleared:
+            // CM only knows the single signer / coordinator defaults, so clearing
+            // would wipe an organizer's manually-added coordinator. A contact that
+            // is the CM default signer/coordinator is flagged here; everyone else's
+            // flags are left exactly as the organizer set them (REQUIREMENTS §7c).
+            if (isSigner && !existing.IsSigner)
+            {
+                existing.IsSigner = true;
+                changed = true;
+            }
+            if (isCoordinator && !existing.IsEventCoordinator)
+            {
+                existing.IsEventCoordinator = true;
                 changed = true;
             }
             if (changed) updated++;

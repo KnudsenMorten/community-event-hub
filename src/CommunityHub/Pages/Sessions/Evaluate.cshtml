@@ -127,7 +127,7 @@
                 <div class="ev-error" role="alert">@Model.ErrorMessage</div>
             }
 
-            <form method="post" novalidate>
+            <form method="post" novalidate data-ceh-loading data-ceh-dirty>
                 @* Honeypot *@
                 <div class="ev-hp" aria-hidden="true">
                     <label for="Website">Leave this field empty</label>
@@ -153,11 +153,12 @@
                 <div class="ev-field">
                     <label for="Comment">Comment <span class="hint">(optional)</span></label>
                     <textarea asp-for="Comment" id="Comment" maxlength="2000"
+                              data-ceh-counter="@Localizer.GetString("Common.CharCount").Value"
                               placeholder="Anything you'd like the speaker(s) to know?"></textarea>
                 </div>
 
                 <div class="ev-actions">
-                    <button type="submit">Send my rating</button>
+                    <button type="submit" data-ceh-loading-text="@Localizer["Common.Sending"]">Send my rating</button>
                 </div>
             </form>
         }

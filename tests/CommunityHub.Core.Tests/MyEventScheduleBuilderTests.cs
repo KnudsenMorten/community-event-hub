@@ -151,6 +151,34 @@ public sealed class MyEventScheduleBuilderTests
     }
 
     [Fact]
+    public void Row_without_token_reports_ask_evaluate_not_available_so_the_view_shows_a_hint()
+    {
+        // Bug-fix §20: before a token is minted the attendee must see a hint, not
+        // a silent gap. AskEvaluateAvailable is the single flag the view branches on.
+        var noToken = PublicSession(8, "No Token", askToken: null, speakers: "B");
+
+        var s = MyEventScheduleBuilder.Build(new[] { noToken }, record: null);
+
+        var row = s.Agenda.Single(r => r.Id == 8);
+        Assert.False(row.AskEvaluateAvailable);   // → view renders the "opens at the session" hint
+        Assert.Null(row.AskUrl);
+        Assert.Null(row.EvaluateUrl);
+    }
+
+    [Fact]
+    public void Row_with_token_reports_ask_evaluate_available_so_the_view_shows_live_links()
+    {
+        var withToken = PublicSession(7, "Has Token", askToken: "abc123", speakers: "A");
+
+        var s = MyEventScheduleBuilder.Build(new[] { withToken }, record: null);
+
+        var row = s.Agenda.Single(r => r.Id == 7);
+        Assert.True(row.AskEvaluateAvailable);   // → view renders the active ask/evaluate links
+        Assert.Equal("/sessions/abc123/ask", row.AskUrl);
+        Assert.Equal("/sessions/abc123/evaluate", row.EvaluateUrl);
+    }
+
+    [Fact]
     public void Speakers_are_joined_for_display()
     {
         var sessions = new[] { PublicSession(1, "Talk", speakers: new[] { "Alice", "Bob" }) };

@@ -39,6 +39,14 @@ public class MyTasksModel : PageModel
         _logger = logger;
     }
 
+    /// <summary>
+    /// Statuses a volunteer may set from their own self-service surface. Cancelled
+    /// ("No longer needed") is a coordinator/supervisor-only state and is excluded
+    /// here so it never appears in — nor is accepted from — the volunteer dropdown.
+    /// </summary>
+    public static readonly IReadOnlyList<VolunteerTaskStatus> VolunteerSelectableStatuses =
+        new[] { VolunteerTaskStatus.Open, VolunteerTaskStatus.InProgress, VolunteerTaskStatus.Done };
+
     public string? Notice { get; private set; }
     [BindProperty(SupportsGet = true)] public string? Msg { get; set; }
 
@@ -69,6 +77,15 @@ public class MyTasksModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
+
+        // Defense-in-depth: a volunteer may not set Cancelled ("No longer needed")
+        // from their self-service surface — that is a coordinator/supervisor action.
+        // Reject it server-side regardless of what the posted dropdown contained.
+        if (!VolunteerSelectableStatuses.Contains(status))
+        {
+            return RedirectToPage(new { Msg = "You cannot set that status. Ask your supervisor if a task is no longer needed." });
+        }
+
         try
         {
             await _svc.SetTaskStatusAsync(Actor(me), taskId, status, ct);

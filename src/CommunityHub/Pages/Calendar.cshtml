@@ -1,0 +1,48 @@
+@page
+@model CommunityHub.Pages.CalendarModel
+@{
+    ViewData["Title"] = Localizer["Nav.Calendar"].Value;
+}
+
+<div class="card">
+    <h2>@Localizer["Nav.Calendar"]</h2>
+    <p>Key moments for your role — add the ones you want to your own calendar.</p>
+
+    @if (Model.Entries.Count == 0)
+    {
+        <p class="info">No scheduled items yet.</p>
+    }
+    else
+    {
+        <ul class="task-list">
+            @foreach (var e in Model.Entries.OrderBy(x => x.StartsAt))
+            {
+                <li>
+                    <span>
+                        <strong>@e.Title</strong>
+                        <span class="due">
+                            &middot; @e.StartsAt.ToString("ddd d MMM HH:mm")
+                            @if (!string.IsNullOrWhiteSpace(e.Location)) { <text>&middot; @e.Location</text> }
+                        </span>
+                    </span>
+                    <a class="cal-dl-link" href="/schedule/@(e.Id).ics">+ calendar</a>
+                </li>
+            }
+        </ul>
+    }
+</div>
+
+@if (Model.CalendarSyncEnabled && !string.IsNullOrEmpty(Model.WebcalUrl))
+{
+    <div class="card">
+        <h2>&#128197; @Localizer["Hub.AddToCalendar"]</h2>
+        <p style="color:#4b5563;margin:0 0 4px;">Subscribe once and everything for your role — these events plus your own sessions, tasks and shifts — stays in sync.</p>
+        <div class="cal-url-row">
+            <input type="text" readonly aria-label="@Localizer["Hub.AddToCalendar"]" id="cal-url" value="@Model.WebcalUrl" />
+            <button type="button" class="cal-btn cal-btn-primary" id="cal-copy" data-ceh-copy="cal-url"
+                    data-ceh-copied="@Localizer["Hub.Copied"]" data-ceh-copy-label="@Localizer["Hub.CopyLink"]">@Localizer["Hub.CopyLink"]</button>
+            <a class="cal-btn cal-btn-ghost" href="@Model.WebcalUrl">@Localizer["Hub.Subscribe"]</a>
+        </div>
+        <p style="font-size:12px;color:#6b7280;margin:8px 0 0;">Google Calendar: use the <a href="@Model.HttpsUrl">https link</a>.</p>
+    </div>
+}

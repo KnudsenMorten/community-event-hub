@@ -59,10 +59,22 @@ public class HotelModel : PageModel
     public bool IsLocked { get; private set; }
     public string? Message { get; private set; }
 
+    /// <summary>The signed-in participant's role — drives the role-specific hotel policy text.</summary>
+    public ParticipantRole Role { get; private set; }
+
+    /// <summary>
+    /// Hotel is arranged + covered by us for crew/speakers/organizers; sponsors and
+    /// attendees arrange their own accommodation, so the form is not shown to them.
+    /// </summary>
+    public bool HotelRelevant =>
+        Role is not (ParticipantRole.Sponsor or ParticipantRole.Attendee);
+
     public async Task<IActionResult> OnGetAsync(CancellationToken ct)
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
+        Role = me.Role;
+        if (!HotelRelevant) return Page();   // sponsors/attendees: "not relevant" view, no form
 
         IsLocked = await IsEditingLockedAsync(me.EventId, ct);
         await EnsureHotelTaskExistsAsync(me.EventId, me.ParticipantId, ct);
@@ -85,6 +97,8 @@ public class HotelModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
+        Role = me.Role;
+        if (!HotelRelevant) return Page();   // sponsors/attendees can't book through us
 
         if (await IsEditingLockedAsync(me.EventId, ct))
         {

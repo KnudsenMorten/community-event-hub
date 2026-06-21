@@ -49,7 +49,7 @@ public class HotelAssignmentsModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+        if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
 
         var ok = await _hotels.AssignParticipantAsync(me.EventId, ParticipantId, HotelId, ct);
         Message = ok ? "Hotel assignment saved." : "Participant or hotel not found.";
@@ -61,7 +61,7 @@ public class HotelAssignmentsModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+        if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
 
         var ok = await _hotels.SetConfirmationNumberAsync(me.EventId, ParticipantId, ConfirmationNumber, ct);
         Message = ok ? "Confirmation number saved." : "Participant not found.";

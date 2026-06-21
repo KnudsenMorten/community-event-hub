@@ -57,9 +57,11 @@ public class DashboardModel : PageModel
     public int TravelPaid { get; private set; }
     public decimal TravelClaimedEur { get; private set; }
     public decimal TravelOutstandingEur { get; private set; }
+    public int LunchEarlySetupDayCount { get; private set; }
     public int LunchSetupDayCount { get; private set; }
     public int LunchPreDayCount { get; private set; }
-    public string LunchSetupDayLabel { get; private set; } = "Setup day";
+    public string LunchEarlySetupDayLabel { get; private set; } = "Setup day (Sun)";
+    public string LunchSetupDayLabel { get; private set; } = "Setup day (Mon)";
     public string LunchPreDayLabel { get; private set; } = "Pre-day";
 
     // --- Surveys (ELDK27 Topics) ----------------------------------------
@@ -144,7 +146,7 @@ public class DashboardModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+        if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
 
         var applicant = await _db.Participants.FirstOrDefaultAsync(
             p => p.Id == id && p.EventId == me.EventId
@@ -171,7 +173,7 @@ public class DashboardModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+        if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
 
         var applicant = await _db.Participants.FirstOrDefaultAsync(
             p => p.Id == id && p.EventId == me.EventId
@@ -222,21 +224,22 @@ public class DashboardModel : PageModel
 
         var evt = await _db.Events
             .Where(e => e.Id == eventId)
-            .Select(e => new { e.StartDate, e.PreDayDate })
+            .Select(e => new { e.StartDate })
             .FirstOrDefaultAsync(ct);
         if (evt is not null)
         {
-            var preDay   = evt.PreDayDate ?? evt.StartDate.AddDays(-1);
-            var setupDay = preDay.AddDays(-1);
-            LunchSetupDayLabel = $"Setup day ({setupDay:dddd, MMM d})";
-            LunchPreDayLabel   = $"Pre-day ({preDay:dddd, MMM d})";
+            // StartDate IS the pre-day / Master Class; the two days before are setup.
+            LunchEarlySetupDayLabel = $"Setup day ({evt.StartDate.AddDays(-2):dddd, MMM d})";
+            LunchSetupDayLabel      = $"Setup day ({evt.StartDate.AddDays(-1):dddd, MMM d})";
+            LunchPreDayLabel        = $"Pre-day ({evt.StartDate:dddd, MMM d})";
         }
         var lunch = await _db.LunchSignups
             .Where(l => l.EventId == eventId)
-            .Select(l => new { l.LunchSetupDay, l.LunchPreDay })
+            .Select(l => new { l.LunchEarlySetupDay, l.LunchSetupDay, l.LunchPreDay })
             .ToListAsync(ct);
-        LunchSetupDayCount = lunch.Count(l => l.LunchSetupDay);
-        LunchPreDayCount   = lunch.Count(l => l.LunchPreDay);
+        LunchEarlySetupDayCount = lunch.Count(l => l.LunchEarlySetupDay);
+        LunchSetupDayCount      = lunch.Count(l => l.LunchSetupDay);
+        LunchPreDayCount        = lunch.Count(l => l.LunchPreDay);
     }
 
     private async Task LoadSpeakerDeadlineGraphicsAsync(int eventId, CancellationToken ct)

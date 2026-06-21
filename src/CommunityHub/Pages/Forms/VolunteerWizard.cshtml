@@ -57,8 +57,10 @@
                 <input type="text" id="PreferredRole" name="PreferredRole"
                        value="@Model.PreferredRole" />
                 <label for="MaxHoursPerDay">@Localizer["VolWiz.MaxHours"]</label>
-                <input type="text" inputmode="numeric" id="MaxHoursPerDay"
-                       name="MaxHoursPerDay" value="@Model.MaxHoursPerDay" />
+                <input type="number" inputmode="numeric" id="MaxHoursPerDay"
+                       name="MaxHoursPerDay" value="@Model.MaxHoursPerDay"
+                       min="1" max="24" step="1" required />
+                <p style="color:#6b7280;font-size:13px;margin:4px 0 0;">@Localizer["VolWiz.MaxHoursHint"]</p>
                 <button type="submit">@Localizer["Common.Next"]</button>
             </form>
             <form method="post" asp-page-handler="Back">
@@ -76,6 +78,10 @@
         {
             <!-- Step 3: review & confirm -->
             <p><strong>@Localizer["VolWiz.ReviewHeading"]</strong></p>
+            @if (!string.IsNullOrEmpty(Model.ValidationError))
+            {
+                <p class="error" role="alert">@Model.ValidationError</p>
+            }
             <p>@Localizer["VolWiz.ShiftsLabel"]
                 @if (Model.SelectedShifts.Count == 0)
                 {
@@ -97,7 +103,11 @@
                 }
                 <input type="hidden" name="PreferredRole" value="@Model.PreferredRole" />
                 <input type="hidden" name="MaxHoursPerDay" value="@Model.MaxHoursPerDay" />
-                <button type="submit">@Localizer["VolWiz.Confirm"]</button>
+                <button type="submit" disabled="@(Model.SelectedShifts.Count == 0)">@Localizer["VolWiz.Confirm"]</button>
+                @if (Model.SelectedShifts.Count == 0)
+                {
+                    <p style="color:#6b7280;font-size:13px;margin:4px 0 0;">@Localizer["VolWiz.ConfirmNoneHint"]</p>
+                }
             </form>
             <form method="post" asp-page-handler="Back">
                 <input type="hidden" name="Step" value="3" />

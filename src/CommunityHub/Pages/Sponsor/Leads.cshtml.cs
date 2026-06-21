@@ -2,10 +2,12 @@ using CommunityHub.Auth;
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
 using CommunityHub.Core.Integrations.Sponsors;
+using CommunityHub.Core.Resources;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Localization;
 
 namespace CommunityHub.Pages.Sponsor;
 
@@ -35,17 +37,20 @@ public class LeadsModel : PageModel
     private readonly ICurrentParticipantAccessor _participant;
     private readonly ISponsorApiKeyService _keys;
     private readonly IDeterministicSponsorTokenService _detTokens;
+    private readonly IStringLocalizer<SharedResource> _loc;
 
     public LeadsModel(
         CommunityHubDbContext db,
         ICurrentParticipantAccessor participant,
         ISponsorApiKeyService keys,
-        IDeterministicSponsorTokenService detTokens)
+        IDeterministicSponsorTokenService detTokens,
+        IStringLocalizer<SharedResource> loc)
     {
         _db = db;
         _participant = participant;
         _keys = keys;
         _detTokens = detTokens;
+        _loc = loc;
     }
 
     public bool AccessDenied { get; private set; }
@@ -60,6 +65,13 @@ public class LeadsModel : PageModel
     /// <summary>Current deterministic token shown in clear to the sponsor (their own data only).</summary>
     public string? DeterministicToken { get; private set; }
     public int? TokenVersion         { get; private set; }
+
+    /// <summary>
+    /// The sponsor's own captured leads, shaped with direct mailto:/tel: contact
+    /// links so they can be acted on in the hub with NO API key (REQUIREMENTS §20
+    /// Participant "Leads no-API-key contact link"). Junk/Ignore rows are hidden.
+    /// </summary>
+    public List<SponsorLeadContact> Contacts { get; private set; } = new();
 
     public async Task<IActionResult> OnGetAsync(CancellationToken ct)
     {
@@ -87,6 +99,26 @@ public class LeadsModel : PageModel
         }
 
         BaseUrl = $"{Request.Scheme}://{Request.Host.Value}";
+
+        // In-hub leads list with direct contact links — works WITHOUT any API
+        // key (REQUIREMENTS §20). Scoped to the sponsor's own company, newest
+        // first, Junk/Ignore hidden (the same rows the feed serves).
+        var eventName = await _db.Events
+            .Where(e => e.Id == me.EventId)
+            .Select(e => e.DisplayName)
+            .FirstOrDefaultAsync(ct) ?? string.Empty;
+        var subjectTemplate = _loc["Leads.Contact.MailSubject"].Value;
+        var myLeads = await _db.SponsorLeads
+            .Where(l => l.EventId == me.EventId
+                        && l.SponsorCompanyId == SponsorCompanyId
+                        && l.Status != SponsorLeadStatus.Junk
+                        && l.Status != SponsorLeadStatus.Ignore)
+            .OrderByDescending(l => l.CapturedAt).ThenByDescending(l => l.Id)
+            .ToListAsync(ct);
+        Contacts = myLeads
+            .Select(l => SponsorLeadContactLinkBuilder.Build(l, eventName, subjectTemplate))
+            .ToList();
+
         var key = await _keys.GetCurrentAsync(me.EventId, SponsorCompanyId!, ct);
         if (key is not null)
         {

@@ -58,6 +58,7 @@ public sealed class VolunteerMyScheduleTests
             accessor,
             new VolunteerScheduleBuilder(db, structure),
             structure,
+            shifts: null!,                     // not reached by the .ics handler
             helpNotify: null!,                 // not reached by the .ics handler
             new CalendarFeedTokenService(db),
             new ParticipantCalendarBuilder(db),
@@ -165,5 +166,62 @@ public sealed class VolunteerMyScheduleTests
         var entry = Assert.Single(model.Schedule.Entries);
         Assert.Equal("Staff the desk", entry.Title);
         Assert.False(string.IsNullOrEmpty(model.CalendarWebcalUrl));
+    }
+
+    // ---------------------------------------------------------------------
+    //  Volunteer status dropdown / server guard: Cancelled ("No longer
+    //  needed") is a coordinator/supervisor-only state and must never be
+    //  selectable by — nor accepted from — a volunteer's own surface.
+    // ---------------------------------------------------------------------
+
+    [Fact]
+    public void Volunteer_selectable_statuses_exclude_Cancelled()
+    {
+        // The dropdown in BOTH volunteer views (MySchedule + MyTasks) is built
+        // from these lists, so the rendered options can never offer Cancelled.
+        Assert.DoesNotContain(VolunteerTaskStatus.Cancelled, MyScheduleModel.VolunteerSelectableStatuses);
+        Assert.DoesNotContain(VolunteerTaskStatus.Cancelled, MyTasksModel.VolunteerSelectableStatuses);
+
+        Assert.Equal(
+            new[] { VolunteerTaskStatus.Open, VolunteerTaskStatus.InProgress, VolunteerTaskStatus.Done },
+            MyScheduleModel.VolunteerSelectableStatuses);
+        Assert.Equal(
+            new[] { VolunteerTaskStatus.Open, VolunteerTaskStatus.InProgress, VolunteerTaskStatus.Done },
+            MyTasksModel.VolunteerSelectableStatuses);
+    }
+
+    [Fact]
+    public async Task Volunteer_cannot_set_Cancelled_via_post_handler_server_side()
+    {
+        using var db = NewDb();
+        var seed = await SeedAsync(db);
+
+        var http = new DefaultHttpContext { User = Session(seed.Volunteer) };
+        var model = NewModel(db, http);
+
+        // A forged POST of Cancelled (e.g. crafted request, not from the dropdown)
+        // must be rejected before the task is touched.
+        var result = await model.OnPostSetStatusAsync(seed.TaskId, VolunteerTaskStatus.Cancelled, default);
+
+        Assert.IsType<RedirectToPageResult>(result);
+        // The task status is unchanged (still the seeded default Open).
+        var task = await db.VolunteerTasks.AsNoTracking().FirstAsync(t => t.Id == seed.TaskId);
+        Assert.Equal(VolunteerTaskStatus.Open, task.Status);
+    }
+
+    [Fact]
+    public async Task Volunteer_can_still_set_an_allowed_status_via_post_handler()
+    {
+        using var db = NewDb();
+        var seed = await SeedAsync(db);
+
+        var http = new DefaultHttpContext { User = Session(seed.Volunteer) };
+        var model = NewModel(db, http);
+
+        var result = await model.OnPostSetStatusAsync(seed.TaskId, VolunteerTaskStatus.Done, default);
+
+        Assert.IsType<RedirectToPageResult>(result);
+        var task = await db.VolunteerTasks.AsNoTracking().FirstAsync(t => t.Id == seed.TaskId);
+        Assert.Equal(VolunteerTaskStatus.Done, task.Status);
     }
 }

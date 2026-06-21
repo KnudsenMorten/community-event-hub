@@ -61,6 +61,35 @@ public sealed class MagicLinkTokenFactory : IMagicLinkTokenFactory
         }
     }
 
+    /// <summary>
+    /// Recover the ParticipantId from a cryptographically-VALID token that has
+    /// merely EXPIRED — used only to offer a smarter recovery state on the
+    /// magic-link landing page (pre-fill the recipient's email so they can
+    /// request a fresh PIN in one tap). Returns the id when the token unprotects
+    /// cleanly (i.e. it is a genuine, untampered hub token) even if past its TTL;
+    /// returns null for a tampered, malformed or alien token.
+    ///
+    /// This does NOT authenticate: signing in still requires a non-expired token
+    /// via <see cref="ValidateToken"/>. The recovered email is never trusted as
+    /// identity (the PIN flow still authenticates), so leaking "this was a real,
+    /// just-expired link" carries no more risk than the link already did.
+    /// </summary>
+    public int? PeekParticipantId(string token)
+    {
+        if (string.IsNullOrWhiteSpace(token)) return null;
+        try
+        {
+            var bytes = FromBase64Url(token);
+            var json = Encoding.UTF8.GetString(_protector.Unprotect(bytes));
+            var payload = JsonSerializer.Deserialize<Payload>(json);
+            return payload?.ParticipantId;   // ignore expiry on purpose
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     private sealed record Payload(int ParticipantId, long ExpiresAtUtcTicks, string Nonce);
 
     private static string Base64Url(byte[] bytes) =>

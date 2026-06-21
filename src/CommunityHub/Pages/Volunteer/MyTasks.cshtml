@@ -84,7 +84,9 @@
                         <form method="post" asp-page-handler="SetStatus" class="mt-form">
                             <input type="hidden" name="taskId" value="@t.Id" />
                             <select name="status">
-                                @foreach (var st in Enum.GetValues<CommunityHub.Core.Domain.VolunteerTaskStatus>())
+                                @* Cancelled ("No longer needed") is a coordinator/supervisor-only state,
+                                   so the volunteer self-service dropdown is restricted to Open/InProgress/Done. *@
+                                @foreach (var st in MyTasksModel.VolunteerSelectableStatuses)
                                 {
                                     if (st == t.Status) { <option value="@((int)st)" selected>@st</option> }
                                     else { <option value="@((int)st)">@st</option> }

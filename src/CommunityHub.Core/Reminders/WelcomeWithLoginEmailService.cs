@@ -46,16 +46,17 @@ public sealed class WelcomeWithLoginEmailService
     private const string TemplateName = "welcome-login";
 
     /// <summary>
-    /// Auto-login token lifetime for the welcome email. Short-lived relative to
-    /// the 14-day invitation default: the welcome is an onboarding nudge, so a
-    /// 7-day window is enough and limits reshare exposure.
+    /// Auto-login token lifetime for the welcome email. Short-lived (the welcome
+    /// is a one-tap onboarding nudge, not a standing credential); the default
+    /// lives on <see cref="WelcomeAutoLoginTokenService.DefaultTtl"/> so the mint
+    /// and the docs agree. A lapsed link falls back to email + a one-time code.
     /// </summary>
-    public static readonly TimeSpan TokenTtl = TimeSpan.FromDays(7);
+    public static readonly TimeSpan TokenTtl = WelcomeAutoLoginTokenService.DefaultTtl;
 
     private readonly CommunityHubDbContext _db;
     private readonly EmailTemplateProvider _templates;
     private readonly IEmailSender _emailSender;
-    private readonly IMagicLinkTokenFactory _magic;
+    private readonly IWelcomeAutoLoginTokenService _autoLogin;
     private readonly IEnvironmentInfo _env;
     private readonly TimeProvider _clock;
 
@@ -63,14 +64,14 @@ public sealed class WelcomeWithLoginEmailService
         CommunityHubDbContext db,
         EmailTemplateProvider templates,
         IEmailSender emailSender,
-        IMagicLinkTokenFactory magic,
+        IWelcomeAutoLoginTokenService autoLogin,
         IEnvironmentInfo env,
         TimeProvider clock)
     {
         _db = db;
         _templates = templates;
         _emailSender = emailSender;
-        _magic = magic;
+        _autoLogin = autoLogin;
         _env = env;
         _clock = clock;
     }
@@ -91,6 +92,26 @@ public sealed class WelcomeWithLoginEmailService
             return WelcomeWithLoginResult.RefusedNotDev(_env.EnvironmentName);
         }
 
+        return await SendCoreAsync(participantId, baseUrl, onlyIfUnsent: false, ct);
+    }
+
+    /// <summary>
+    /// Send the welcome-with-login email as part of ATTENDEE AUTO-PROVISIONING
+    /// (the 2-day-ticket sync). Unlike <see cref="SendAsync"/> this has NO DEV-only
+    /// guard — it is meant to run from the production sync job — but it is gated
+    /// upstream by the <c>attendee-welcome</c> feature flag (default OFF) and the
+    /// central email kill-switch / ring gate, and here it is IDEMPOTENT: it sends
+    /// only when the participant has never been welcomed
+    /// (<see cref="Participant.WelcomeWithLoginSentAt"/> is null), so a re-run never
+    /// re-emails an attendee.
+    /// </summary>
+    public Task<WelcomeWithLoginResult> SendForAttendeeProvisioningAsync(
+        int participantId, string baseUrl, CancellationToken ct = default)
+        => SendCoreAsync(participantId, baseUrl, onlyIfUnsent: true, ct);
+
+    private async Task<WelcomeWithLoginResult> SendCoreAsync(
+        int participantId, string baseUrl, bool onlyIfUnsent, CancellationToken ct)
+    {
         var participant = await _db.Participants
             .Include(p => p.Event)
             .FirstOrDefaultAsync(p => p.Id == participantId, ct);
@@ -99,11 +120,25 @@ public sealed class WelcomeWithLoginEmailService
             return WelcomeWithLoginResult.NoSuchParticipant();
         }
 
-        var rendered = Render(participant, baseUrl);
+        // Idempotency for the provisioning path: never re-welcome someone already
+        // welcomed (so a re-run of the sync job does not re-email attendees).
+        if (onlyIfUnsent && participant.WelcomeWithLoginSentAt is not null)
+        {
+            return new WelcomeWithLoginResult(false, "Already welcomed.");
+        }
+
+        // Mint a SINGLE-USE, short-lived, revocable, audited auto-login token
+        // (its own MagicLinkGrant row) — NOT the reusable invitation magic-link.
+        var token = await _autoLogin.CreateAsync(participant.Id, TokenTtl, ct);
+        var loginUrl = BuildLoginUrl(baseUrl, token);
+
+        var rendered = RenderForUrl(participant, loginUrl);
         await _emailSender.SendAsync(
             participant.Email, rendered.Subject, rendered.HtmlBody, rendered.TextBody, ct);
 
-        // Record the send (re-sendable: overwrite the stamp each time).
+        // Record the send. Each send mints a FRESH single-use grant, so an earlier
+        // link is left to expire / be superseded — a re-send does not resurrect a
+        // used link.
         participant.WelcomeWithLoginSentAt = _clock.GetUtcNow();
         await _db.SaveChangesAsync(ct);
 
@@ -111,19 +146,16 @@ public sealed class WelcomeWithLoginEmailService
     }
 
     /// <summary>
-    /// Render the welcome-with-login email for a participant. Public + pure
-    /// (no DB / no send / no guard) so the per-role copy and the auto-login URL
-    /// can be unit-tested directly. Also exposes the plain-text alternative on
-    /// the returned record.
+    /// Render the welcome-with-login email for a participant against an
+    /// already-built auto-login URL. Public + pure (no DB / no send / no token
+    /// mint / no guard) so the per-role copy can be unit-tested directly. Also
+    /// exposes the plain-text alternative on the returned record.
     /// </summary>
-    public RenderedWelcomeEmail Render(Participant participant, string baseUrl)
+    public RenderedWelcomeEmail RenderForUrl(Participant participant, string loginUrl)
     {
         var firstName = string.IsNullOrWhiteSpace(participant.FullName)
             ? "there"
             : participant.FullName.Split(' ')[0];
-
-        var token = _magic.CreateToken(participant.Id, TokenTtl);
-        var loginUrl = BuildLoginUrl(baseUrl, token);
 
         var tokens = _templates.NewTokenSet();
         tokens["firstName"] = firstName;

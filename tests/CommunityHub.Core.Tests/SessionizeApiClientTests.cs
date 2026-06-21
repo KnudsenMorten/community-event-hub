@@ -179,6 +179,68 @@ public sealed class SessionizeApiClientTests
         Assert.Equal("qa@example.test", only.Email);
     }
 
+    // The real ELDK27 shape: the main view carries full data but NO email (PII
+    // withheld); the token-protected SpeakersEmails side-view supplies it, keyed
+    // by the Sessionize speaker id.
+    private const string MainViewNoEmailJson = """
+    [
+      {
+        "id": "eee7c4bd-de60-428e-b5b9-6eef8aa5fd04",
+        "firstName": "Morten",
+        "lastName": "Knudsen",
+        "fullName": "Morten Knudsen",
+        "bio": "Triple MVP.",
+        "tagLine": "Architect",
+        "links": []
+      }
+    ]
+    """;
+
+    private const string EmailsViewJson = """
+    [
+      { "id": "eee7c4bd-de60-428e-b5b9-6eef8aa5fd04", "firstName": "Morten", "lastName": "Knudsen", "email": "MOK@MortenKnudsen.net" }
+    ]
+    """;
+
+    [Fact]
+    public void ParseEmailMap_maps_id_to_lowercased_email()
+    {
+        var map = SessionizeApiClient.ParseEmailMap(EmailsViewJson);
+
+        Assert.Single(map);
+        Assert.Equal("mok@mortenknudsen.net",
+            map["eee7c4bd-de60-428e-b5b9-6eef8aa5fd04"]);
+    }
+
+    [Fact]
+    public void ParseEmailMap_tolerates_bad_json()
+    {
+        Assert.Empty(SessionizeApiClient.ParseEmailMap("{ not json"));
+    }
+
+    [Fact]
+    public void Email_is_joined_from_the_emails_view_by_sessionize_id()
+    {
+        var emailById = SessionizeApiClient.ParseEmailMap(EmailsViewJson);
+
+        var result = SessionizeApiClient.ParseSpeakers(MainViewNoEmailJson, emailById);
+
+        Assert.Null(result.Error);
+        var spk = Assert.Single(result.Speakers);
+        Assert.Equal("mok@mortenknudsen.net", spk.Email);
+        Assert.Equal("Architect", spk.TagLine); // full data still from main view
+    }
+
+    [Fact]
+    public void Without_the_emails_map_a_no_email_main_view_speaker_is_skipped()
+    {
+        // No join map supplied -> falls back to the existing skip-with-warning.
+        var result = SessionizeApiClient.ParseSpeakers(MainViewNoEmailJson);
+
+        Assert.Empty(result.Speakers);
+        Assert.Single(result.Warnings);
+    }
+
     [Fact]
     public void Invalid_json_returns_error_not_throw()
     {

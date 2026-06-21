@@ -2,6 +2,7 @@
 @model CommunityHub.Pages.LoginModel
 @{
     ViewData["Title"] = Localizer["Login.Title"].Value;
+    ViewData["HidePublicNav"] = true;   // bare sign-in page — no public event nav bar
 }
 
 <div class="card">
@@ -25,17 +26,6 @@
                    required autocomplete="email" />
             <button type="submit">@Localizer["Login.SendCode"]</button>
         </form>
-
-        @* Discoverability for the existing ?email= prestage: lets a user bookmark a
-           per-account link that lands here with the email already filled in, so they
-           only click "Send my sign-in code". Collapsed by default; mobile-first. *@
-        <details class="login-tip" style="margin-top:16px;font-size:13px;color:#4a5160;">
-            <summary style="cursor:pointer;font-weight:600;">@Localizer["Login.PrestageTipSummary"]</summary>
-            <p style="margin:8px 0 6px 0;">@Localizer["Login.PrestageTipBody"]</p>
-            <p style="margin:0;word-break:break-all;">
-                <code style="background:#f1f3f7;padding:2px 6px;border-radius:4px;">/Login?email=you@@example.com</code>
-            </p>
-        </details>
     }
     else
     {

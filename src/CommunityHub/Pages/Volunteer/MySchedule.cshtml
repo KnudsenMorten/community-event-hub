@@ -3,8 +3,6 @@
 @model CommunityHub.Pages.Volunteer.MyScheduleModel
 @{
     ViewData["Title"] = Localizer["MySchedule.Title"].Value;
-    var jsCopied = System.Text.Encodings.Web.JavaScriptEncoder.Default.Encode(Localizer["Hub.Copied"].Value);
-    var jsCopyLink = System.Text.Encodings.Web.JavaScriptEncoder.Default.Encode(Localizer["Hub.CopyLink"].Value);
 }
 
 <style>
@@ -28,6 +26,16 @@
     .ms-helprow .reply { color:#166534; }
     .ms-note { background:#f0fdf4; border-left:4px solid #16a34a; padding:10px 12px;
         border-radius:6px; margin-bottom:14px; font-size:13.5px; color:#166534; }
+    .ms-state { border-radius:12px; padding:2px 10px; font-weight:600; }
+    .ms-state.confirmed { background:#dcfce7; color:#166534; }
+    .ms-state.declined { background:#fde2e1; color:#b42318; }
+    .ms-state.swap { background:#fef3c7; color:#92400e; }
+    .ms-form button.confirm { background:#16a34a; }
+    .ms-form button.decline { background:#dc2626; }
+    .ms-form button.swap { background:#d97706; }
+    .ms-form button.withdraw { background:#6b7280; }
+    .ms-flagged { font-size:12.5px; margin-top:6px; padding-left:10px;
+        border-left:3px solid #d1d5db; color:#6e7681; }
     .cal-url-row { display:flex; gap:8px; flex-wrap:wrap; align-items:stretch; margin:8px 0; }
     .cal-url-row input { flex:1 1 200px; min-width:0; padding:10px 12px; font-size:14px;
         border:1px solid #cbd2d9; border-radius:8px; font-family:monospace; }
@@ -54,6 +62,14 @@
     {
         <p class="info">@Localizer["MySchedule.Empty"]</p>
     }
+
+    @* Validate-my-availability prompt (operator 2026-06-21): coordinators schedule
+       shifts against each volunteer's per-day availability, so keep it current. *@
+    <div class="ms-note" role="note" style="background:#eef6ff;border-left-color:#1D3380;color:#1D3380;">
+        Please keep your <a asp-page="/Volunteer/Availability">availability</a> up to date so we can
+        schedule your shifts around the days and hours you can help &mdash;
+        <a asp-page="/Volunteer/Availability">validate my availability &rarr;</a>
+    </div>
 </div>
 
 @if (!string.IsNullOrEmpty(Model.CalendarWebcalUrl))
@@ -65,25 +81,28 @@
             <input type="text" readonly aria-label="@Localizer["MySchedule.AddToCalendar"]"
                    id="ms-cal-url" value="@Model.CalendarWebcalUrl" />
             <button type="button" class="cal-btn cal-btn-primary"
-                    onclick="msCopyCal()" id="ms-cal-copy">@Localizer["Hub.CopyLink"]</button>
+                    id="ms-cal-copy" data-ceh-copy="ms-cal-url"
+                    data-ceh-copied="@Localizer["Hub.Copied"]"
+                    data-ceh-copy-label="@Localizer["Hub.CopyLink"]">@Localizer["Hub.CopyLink"]</button>
             <a class="cal-btn cal-btn-ghost" href="@Model.CalendarWebcalUrl">@Localizer["Hub.Subscribe"]</a>
         </div>
     </div>
-    <script>
-        function msCopyCal() {
-            var el = document.getElementById('ms-cal-url');
-            var btn = document.getElementById('ms-cal-copy');
-            el.select(); el.setSelectionRange(0, 99999);
-            var done = function () { btn.textContent = '@Html.Raw(jsCopied)'; setTimeout(function () { btn.textContent = '@Html.Raw(jsCopyLink)'; }, 1500); };
-            if (navigator.clipboard && navigator.clipboard.writeText) {
-                navigator.clipboard.writeText(el.value).then(done, function () { try { document.execCommand('copy'); done(); } catch (e) { } });
-            } else { try { document.execCommand('copy'); done(); } catch (e) { } }
-        }
-    </script>
+    @* Copy uses the shared data-ceh-copy behaviour in _Layout (REQUIREMENTS §21). *@
 }
 
 @{
     var today = DateOnly.FromDateTime(DateTime.UtcNow);
+}
+@if (!Model.Schedule.IsEmpty)
+{
+    @* One-time explanation of the per-shift decision buttons below (shown once,
+       not repeated on every entry). *@
+    <p class="ms-meta" style="margin:0 0 6px;">
+        For each shift: <strong>Confirm</strong> = you&rsquo;ll work this shift &middot;
+        <strong>Decline</strong> = you can&rsquo;t make it &middot;
+        <strong>Request swap</strong> = you&rsquo;d like to swap it &mdash; a coordinator will follow up &middot;
+        <strong>Withdraw</strong> = undo a decline or swap request.
+    </p>
 }
 @foreach (var e in Model.Schedule.Entries)
 {
@@ -105,6 +124,18 @@
                 </span>
             }
             <span class="ms-pill">@e.Status</span>
+            @switch (e.Decision)
+            {
+                case ShiftDecisionStatus.Confirmed:
+                    <span class="ms-state confirmed">@Localizer["MyShifts.StateConfirmed"]</span>
+                    break;
+                case ShiftDecisionStatus.Declined:
+                    <span class="ms-state declined">@Localizer["MyShifts.StateDeclined"]</span>
+                    break;
+                case ShiftDecisionStatus.SwapRequested:
+                    <span class="ms-state swap">@Localizer["MyShifts.StateSwap"]</span>
+                    break;
+            }
         </div>
 
         <p class="ms-meta">@e.Bucket @(string.IsNullOrWhiteSpace(e.Subcategory) ? "" : $"· {e.Subcategory}")</p>
@@ -135,7 +166,9 @@
             <input type="hidden" name="taskId" value="@e.TaskId" />
             <label class="visually-hidden" for="status-@e.TaskId">@Localizer["MySchedule.UpdateProgress"]</label>
             <select name="status" id="status-@e.TaskId">
-                @foreach (var st in Enum.GetValues<VolunteerTaskStatus>())
+                @* Cancelled ("No longer needed") is a coordinator/supervisor-only state,
+                   so the volunteer self-service dropdown is restricted to Open/InProgress/Done. *@
+                @foreach (var st in MyScheduleModel.VolunteerSelectableStatuses)
                 {
                     if (st == e.Status) { <option value="@((int)st)" selected>@st</option> }
                     else { <option value="@((int)st)">@st</option> }
@@ -151,6 +184,44 @@
                    placeholder="@Localizer["MySchedule.AskForHelpPlaceholder"]" maxlength="2000" required />
             <button type="submit" class="help">@Localizer["MySchedule.AskForHelp"]</button>
         </form>
+
+        @* Shift confirm / decline / request-swap (merged from the old MyShifts
+           page). The participant is resolved server-side from the session, never
+           from this form — taskId only identifies which of MY shifts to stamp. *@
+        @if (e.Decision is ShiftDecisionStatus.Declined or ShiftDecisionStatus.SwapRequested)
+        {
+            @if (!string.IsNullOrWhiteSpace(e.DecisionNote))
+            {
+                <div class="ms-flagged">@Localizer["MyShifts.YourNote"]: @e.DecisionNote</div>
+            }
+            <form method="post" asp-page-handler="Withdraw" class="ms-form">
+                <input type="hidden" name="taskId" value="@e.TaskId" />
+                <button type="submit" class="withdraw">@Localizer["MyShifts.Withdraw"]</button>
+            </form>
+        }
+        else
+        {
+            <form method="post" asp-page-handler="Confirm" class="ms-form">
+                <input type="hidden" name="taskId" value="@e.TaskId" />
+                <button type="submit" class="confirm">@Localizer["MyShifts.Confirm"]</button>
+            </form>
+
+            <form method="post" asp-page-handler="Decline" class="ms-form">
+                <input type="hidden" name="taskId" value="@e.TaskId" />
+                <label class="visually-hidden" for="decline-note-@e.TaskId">@Localizer["MyShifts.NoteLabel"]</label>
+                <input type="text" id="decline-note-@e.TaskId" name="note"
+                       placeholder="@Localizer["MyShifts.NotePlaceholder"]" maxlength="1000" />
+                <button type="submit" class="decline">@Localizer["MyShifts.Decline"]</button>
+            </form>
+
+            <form method="post" asp-page-handler="RequestSwap" class="ms-form">
+                <input type="hidden" name="taskId" value="@e.TaskId" />
+                <label class="visually-hidden" for="swap-note-@e.TaskId">@Localizer["MyShifts.NoteLabel"]</label>
+                <input type="text" id="swap-note-@e.TaskId" name="note"
+                       placeholder="@Localizer["MyShifts.NotePlaceholder"]" maxlength="1000" />
+                <button type="submit" class="swap">@Localizer["MyShifts.RequestSwap"]</button>
+            </form>
+        }
 
         @if (e.Due is not null)
         {

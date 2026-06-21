@@ -37,6 +37,7 @@ var knownCommands = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     "pull-sponsors",
     "watch-uploads",
     "import-speakers",
+    "send-sample-emails",
 };
 
 if (args.Length == 0 || args[0] is "-h" or "--help" || !knownCommands.Contains(args[0]))
@@ -50,6 +51,8 @@ if (args.Length == 0 || args[0] is "-h" or "--help" || !knownCommands.Contains(a
     Console.Error.WriteLine("  pull-sponsors    Run the WooCommerce sponsor-order pull once.");
     Console.Error.WriteLine("  watch-uploads    Poll provisioned SharePoint upload folders + email recipients on file changes.");
     Console.Error.WriteLine("  import-speakers  Pull speakers from the Sessionize v2 view API into the active edition.");
+    Console.Error.WriteLine("  send-sample-emails --to <addr> [--sponsor <name>]");
+    Console.Error.WriteLine("                   Render EVERY shipped email template with sample 2LINKIT data and send each (subjects prefixed [SAMPLE]).");
     return 1;
 }
 
@@ -94,6 +97,29 @@ services.AddSingleton(TimeProvider.System);
 services.Configure<EmailOptions>(config.GetSection(EmailOptions.SectionName));
 services.AddSingleton<IEmailSender, BrevoEmailSender>();
 services.Configure<EmailTemplateOptions>(config.GetSection(EmailTemplateOptions.SectionName));
+// Resolve the email-template directory to an ABSOLUTE path that exists, walking
+// up from the CWD then the binary dir to find <root>/templates/emails. The
+// templates are NOT copied to the OneShot output, so a bare relative default
+// only works when CWD == repo root; this makes `send-sample-emails` robust to
+// being launched from anywhere. Honors an explicit EmailTemplates:TemplateDirectory.
+services.PostConfigure<EmailTemplateOptions>(o =>
+{
+    if (Directory.Exists(o.TemplateDirectory)) return;
+    foreach (var start in new[] { Directory.GetCurrentDirectory(), AppContext.BaseDirectory })
+    {
+        var dir = new DirectoryInfo(start);
+        while (dir is not null)
+        {
+            var candidate = Path.Combine(dir.FullName, "templates", "emails");
+            if (File.Exists(Path.Combine(candidate, "_layout.html")))
+            {
+                o.TemplateDirectory = candidate;
+                return;
+            }
+            dir = dir.Parent;
+        }
+    }
+});
 services.AddSingleton<EmailTemplateProvider>();
 
 // ---------------------------------------------------------------------------
@@ -173,6 +199,24 @@ switch (command)
             return result.RanToCompletion ? 0 : 2;
         }
 
+    case "send-sample-emails":
+        {
+            // CLI-ONLY review path (REQUIREMENTS §7c): render every shipped email
+            // template with sample 2LINKIT data + send each. Never runs in
+            // build/test — only when explicitly invoked here.
+            var to = GetArg(args, "--to") ?? string.Empty;
+            var sponsor = GetArg(args, "--sponsor") ?? "2LINKIT";
+
+            var templates = host.Services.GetRequiredService<EmailTemplateProvider>();
+            var sender = host.Services.GetRequiredService<IEmailSender>();
+            var templateOptions = host.Services
+                .GetRequiredService<Microsoft.Extensions.Options.IOptions<EmailTemplateOptions>>()
+                .Value;
+
+            return await CommunityHub.OneShot.SendSampleEmailsCommand.RunAsync(
+                templates, sender, templateOptions, to, sponsor, logger, CancellationToken.None);
+        }
+
     case "watch-uploads":
         {
             using var scope = host.Services.CreateScope();
@@ -224,4 +268,19 @@ switch (command)
         // knownCommands but its arm is forgotten.
         Console.Error.WriteLine($"Command '{command}' is not wired in Program.cs.");
         return 1;
+}
+
+// --- CLI helpers ------------------------------------------------------------
+// Read a "--flag value" argument (case-insensitive flag). Returns null when the
+// flag is absent or has no following value.
+static string? GetArg(string[] argv, string flag)
+{
+    for (var i = 0; i < argv.Length - 1; i++)
+    {
+        if (string.Equals(argv[i], flag, StringComparison.OrdinalIgnoreCase))
+        {
+            return argv[i + 1];
+        }
+    }
+    return null;
 }

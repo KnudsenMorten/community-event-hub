@@ -30,6 +30,20 @@ public class WelcomeWithLoginEmailServiceTests
             DataProtectionProvider.Create(
                 new DirectoryInfo(Path.Combine(Path.GetTempPath(), "ceh-dp-tests"))));
 
+    private static IDataProtectionProvider NewDpProvider() =>
+        DataProtectionProvider.Create(
+            new DirectoryInfo(Path.Combine(Path.GetTempPath(), "ceh-dp-tests")));
+
+    /// <summary>The hardened single-use welcome auto-login token service, over the test db.</summary>
+    private static WelcomeAutoLoginTokenService NewAutoLogin(CommunityHubDbContext db) =>
+        new(db, NewDpProvider(), new FixedClock());
+
+    /// <summary>A welcome service wired with the real single-use auto-login token service.</summary>
+    private static WelcomeWithLoginEmailService NewService(
+        CommunityHubDbContext db, CapturingEmailSender sender, bool isDev, string envName) =>
+        new(db, NewTemplates(), sender, NewAutoLogin(db),
+            new StubEnv(isDev, envName), new FixedClock());
+
     private static EmailTemplateProvider NewTemplates() =>
         new(Options.Create(new EmailTemplateOptions
         {
@@ -118,9 +132,7 @@ public class WelcomeWithLoginEmailServiceTests
         var participantId = await SeedOneAsync(db, ParticipantRole.Speaker);
         var sender = new CapturingEmailSender();
 
-        var svc = new WelcomeWithLoginEmailService(
-            db, NewTemplates(), sender, NewTokenFactory(),
-            new StubEnv(isDev: false, name: envName), new FixedClock());
+        var svc = NewService(db, sender, isDev: false, envName);
 
         var result = await svc.SendAsync(participantId, "https://prod.example");
 
@@ -138,9 +150,7 @@ public class WelcomeWithLoginEmailServiceTests
         var participantId = await SeedOneAsync(db, ParticipantRole.Sponsor);
         var sender = new CapturingEmailSender();
 
-        var svc = new WelcomeWithLoginEmailService(
-            db, NewTemplates(), sender, NewTokenFactory(),
-            new StubEnv(isDev: true, name: "Development"), new FixedClock());
+        var svc = NewService(db, sender, isDev: true, "Development");
 
         var result = await svc.SendAsync(
             participantId, "https://dev.eldk27.eventhub.expertslive.dk");
@@ -161,9 +171,7 @@ public class WelcomeWithLoginEmailServiceTests
         using var db = ScenarioFixture.NewDb();
         var participantId = await SeedOneAsync(db, ParticipantRole.Volunteer);
         var sender = new CapturingEmailSender();
-        var svc = new WelcomeWithLoginEmailService(
-            db, NewTemplates(), sender, NewTokenFactory(),
-            new StubEnv(isDev: true, name: "Development"), new FixedClock());
+        var svc = NewService(db, sender, isDev: true, "Development");
 
         var first = await svc.SendAsync(participantId, "https://dev.example");
         var second = await svc.SendAsync(participantId, "https://dev.example");
@@ -171,6 +179,29 @@ public class WelcomeWithLoginEmailServiceTests
         Assert.True(first.Sent);
         Assert.True(second.Sent);                         // not gated by a prior send
         Assert.Equal(2, sender.Sent.Count);               // sent twice
+        // Each re-send mints a FRESH single-use grant (so the old link can't be
+        // reused after a re-send).
+        Assert.Equal(2, await db.MagicLinkGrants.CountAsync());
+    }
+
+    [Fact]
+    public async Task Provisioning_send_works_outside_dev_and_is_idempotent()
+    {
+        using var db = ScenarioFixture.NewDb();
+        var participantId = await SeedOneAsync(db, ParticipantRole.Attendee);
+        var sender = new CapturingEmailSender();
+        // Production environment: the attendee-provisioning send path must NOT be
+        // blocked by the DEV-only guard (unlike SendAsync).
+        var svc = NewService(db, sender, isDev: false, "Production");
+
+        var first = await svc.SendForAttendeeProvisioningAsync(participantId, "https://prod.example");
+        var second = await svc.SendForAttendeeProvisioningAsync(participantId, "https://prod.example");
+
+        Assert.True(first.Sent);                          // sent despite non-DEV
+        Assert.False(second.Sent);                        // idempotent: already welcomed
+        Assert.Single(sender.Sent);                       // exactly one email ever
+        var p = await db.Participants.FindAsync(participantId);
+        Assert.Equal(Now, p!.WelcomeWithLoginSentAt);
     }
 
     // ----------------------------------------------------------------------
@@ -189,9 +220,10 @@ public class WelcomeWithLoginEmailServiceTests
     public void Every_role_renders_a_role_specific_line_and_the_cta(
         ParticipantRole role, string roleNoun)
     {
+        // RenderForUrl is pure (no DB / no mint), so a null db + token service is fine.
         var svc = new WelcomeWithLoginEmailService(
             db: null!, NewTemplates(), new CapturingEmailSender(),
-            NewTokenFactory(), new StubEnv(true, "Development"), new FixedClock());
+            autoLogin: null!, new StubEnv(true, "Development"), new FixedClock());
 
         var participant = new Participant
         {
@@ -206,11 +238,16 @@ public class WelcomeWithLoginEmailServiceTests
             },
         };
 
-        var rendered = svc.Render(participant, "https://dev.example");
+        var loginUrl = WelcomeWithLoginEmailService.BuildLoginUrl(
+            "https://dev.example", "opaque-token");
+        var rendered = svc.RenderForUrl(participant, loginUrl);
 
-        // The role-specific line appears verbatim in both HTML and plain text.
+        // The role-specific line appears in both bodies: HTML-encoded in the
+        // HTML body (the renderer encodes plain tokens at the seam,
+        // REQUIREMENTS §10c-4, so a literal " or ' becomes &quot;/&#39; and
+        // renders correctly) and verbatim in the plain-text body.
         var roleLine = WelcomeWithLoginEmailService.RoleLine(role);
-        Assert.Contains(roleLine, rendered.HtmlBody);
+        Assert.Contains(System.Net.WebUtility.HtmlEncode(roleLine), rendered.HtmlBody);
         Assert.Contains(roleLine, rendered.TextBody);
 
         // The friendly role noun is in the body.

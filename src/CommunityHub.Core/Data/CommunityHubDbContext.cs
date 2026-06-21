@@ -1,4 +1,5 @@
 using CommunityHub.Core.Domain;
+using Microsoft.AspNetCore.DataProtection.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 
 namespace CommunityHub.Core.Data;
@@ -11,12 +12,20 @@ namespace CommunityHub.Core.Data;
 /// so an edition's data is isolated and ELDK28 is just a new Event row - no
 /// schema change, no new deployment (CONTEXT.md section 3).
 /// </summary>
-public class CommunityHubDbContext : DbContext
+public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
 {
     public CommunityHubDbContext(DbContextOptions<CommunityHubDbContext> options)
         : base(options)
     {
     }
+
+    /// <summary>
+    /// The ASP.NET DataProtection key ring, persisted in SQL so it is SHARED across
+    /// deployment slots + restarts. Without a shared store the keys default to
+    /// per-slot %HOME%, so every slot-swap deploy rotated them and invalidated all
+    /// auth cookies (everyone logged out). Wired via PersistKeysToDbContext in Program.cs.
+    /// </summary>
+    public DbSet<DataProtectionKey> DataProtectionKeys => Set<DataProtectionKey>();
 
     public DbSet<Event> Events => Set<Event>();
     public DbSet<Participant> Participants => Set<Participant>();
@@ -30,6 +39,7 @@ public class CommunityHubDbContext : DbContext
     public DbSet<DinnerSignup> DinnerSignups => Set<DinnerSignup>();
     public DbSet<DietaryRequirement> DietaryRequirements => Set<DietaryRequirement>();
     public DbSet<VolunteerAvailability> VolunteerAvailabilities => Set<VolunteerAvailability>();
+    public DbSet<VolunteerDayAvailability> VolunteerDayAvailabilities => Set<VolunteerDayAvailability>();
     public DbSet<SwagPreference> SwagPreferences => Set<SwagPreference>();
     public DbSet<LunchSignup> LunchSignups => Set<LunchSignup>();
     public DbSet<SpeakerProfile> SpeakerProfiles => Set<SpeakerProfile>();
@@ -47,6 +57,7 @@ public class CommunityHubDbContext : DbContext
     public DbSet<SponsorUploadFile> SponsorUploadFiles => Set<SponsorUploadFile>();
     public DbSet<SurveyResponse> SurveyResponses => Set<SurveyResponse>();
     public DbSet<SurveyResponsePick> SurveyResponsePicks => Set<SurveyResponsePick>();
+    public DbSet<SurveyState> SurveyStates => Set<SurveyState>();
     public DbSet<SponsorLead> SponsorLeads => Set<SponsorLead>();
     public DbSet<SponsorLeadNotificationPref> SponsorLeadNotificationPrefs => Set<SponsorLeadNotificationPref>();
     public DbSet<SponsorApiKey> SponsorApiKeys => Set<SponsorApiKey>();
@@ -64,6 +75,24 @@ public class CommunityHubDbContext : DbContext
     public DbSet<ParticipantSecretaryToken> ParticipantSecretaryTokens => Set<ParticipantSecretaryToken>();
     public DbSet<ImpersonationAudit> ImpersonationAudits => Set<ImpersonationAudit>();
 
+    /// <summary>Single-use, revocable, audited welcome auto-login link grants.</summary>
+    public DbSet<MagicLinkGrant> MagicLinkGrants => Set<MagicLinkGrant>();
+
+    /// <summary>Per-edition active SESSION source (Sessionize vs Zoho Backstage).</summary>
+    public DbSet<SessionSourceSetting> SessionSourceSettings => Set<SessionSourceSetting>();
+
+    /// <summary>Hub-side role + notes for e-conomic customer contacts (no native e-conomic field).</summary>
+    public DbSet<EconomicContactAnnotation> EconomicContactAnnotations => Set<EconomicContactAnnotation>();
+
+    /// <summary>Anonymous (no-login) Party RSVPs.</summary>
+    public DbSet<PartyRsvp> PartyRsvps => Set<PartyRsvp>();
+
+    /// <summary>In-hub Master Class seat + waitlist signups (CEH-owned; replaces Zoho Bookings).</summary>
+    public DbSet<MasterClassSignup> MasterClassSignups => Set<MasterClassSignup>();
+
+    /// <summary>Per-edition Master Class signup settings (offer-hold hours + promotion mode).</summary>
+    public DbSet<MasterClassSettings> MasterClassSettings => Set<MasterClassSettings>();
+
     // --- LinkedIn company-page SoMe scheduling queue (REQUIREMENTS §19) -------
     public DbSet<SoMePost> SoMePosts => Set<SoMePost>();
     public DbSet<SoMeSettings> SoMeSettings => Set<SoMeSettings>();
@@ -77,6 +106,28 @@ public class CommunityHubDbContext : DbContext
     // Buckets feature (2026-06-15): multi-supervisor + draft→commit allocation.
     public DbSet<VolunteerBucketSupervisor> VolunteerBucketSupervisors => Set<VolunteerBucketSupervisor>();
     public DbSet<TaskAllocationDraft> TaskAllocationDrafts => Set<TaskAllocationDraft>();
+
+    // --- Attendee personal session plan ("My plan" — saved sessions) ---------
+    public DbSet<SavedSession> SavedSessions => Set<SavedSession>();
+
+    // --- Feature customization & controlled rollout (REQUIREMENTS §23) --------
+    // Per-edition kill switches for the customizable (advanced) capabilities;
+    // the catalog (CommunityHub.Core.Settings.FeatureCatalog) holds the metadata.
+    public DbSet<FeatureSetting> FeatureSettings => Set<FeatureSetting>();
+
+    // Per-edition GROUP lifecycle rings (§23a): one optional ring per feature
+    // group; features without their own override inherit their group's ring.
+    public DbSet<FeatureGroupSetting> FeatureGroupSettings => Set<FeatureGroupSetting>();
+
+    // Generic, role-tagged event SCHEDULE / key dates (move-in … party … dinner);
+    // organizer-managed, rendered role-filtered + synced to participants' calendars.
+    public DbSet<ScheduleEntry> ScheduleEntries => Set<ScheduleEntry>();
+
+    // --- Admin-editable config overrides (HYBRID config model, Phase 1) -------
+    // Per-edition partial JSON overrides for the shipped event/sponsor/
+    // integrations config files; deep-merged on top of the shipped default at
+    // runtime. No row ⇒ the shipped default applies unchanged. No secrets here.
+    public DbSet<ConfigOverride> ConfigOverrides => Set<ConfigOverride>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -115,6 +166,17 @@ public class CommunityHubDbContext : DbContext
             e.Property(x => x.LifecycleState).HasConversion<int>();
             e.Property(x => x.QueueSource).HasConversion<int>();
 
+            // Release ring (controlled rollout §23): stored as int, defaults to
+            // Broad (3) so an unassigned person sees only fully-released features
+            // and existing rows upgrade to the default with no backfill. The
+            // sentinel is Broad (the CLR default of the property) so EF uses the
+            // DB default only for an UNSET value — an explicit earlier ring
+            // (Ring0/1/2) is always persisted, never silently reset to Broad.
+            e.Property(x => x.Ring)
+                .HasConversion<int>()
+                .HasSentinel(CommunityHub.Core.Settings.Ring.Broad)
+                .HasDefaultValue(CommunityHub.Core.Settings.Ring.Broad);
+
             e.Property(x => x.HotelConfirmationNumber).HasMaxLength(64);
 
             e.HasOne(x => x.Event)
@@ -140,6 +202,18 @@ public class CommunityHubDbContext : DbContext
 
             // Pre-selection queue: filter an edition's rows by lifecycle state.
             e.HasIndex(x => new { x.EventId, x.LifecycleState });
+
+            // Sponsor-contact recipient resolution (REQUIREMENTS §7c): the shared
+            // SponsorRecipientResolver loads a company's contacts by
+            // (EventId, SponsorCompanyId) then filters by IsEventCoordinator.
+            e.HasIndex(x => new { x.EventId, x.SponsorCompanyId });
+
+            // Unique-identifier contact link (REQUIREMENTS §7c): the CM/WordPress
+            // user_id written at sync time. Correlation from CM → hub prefers this
+            // id over name/email. Indexed by (EventId, CmUserId) for the id-based
+            // lookup; the many NULLs (non-sponsor / not-yet-synced rows) sit fine in
+            // a non-unique index.
+            e.HasIndex(x => new { x.EventId, x.CmUserId });
 
             // Calendar-feed token is the bearer secret for GET /calendar/{token}.ics.
             // Unique (filtered so the many NULLs before first-view don't collide)
@@ -178,6 +252,118 @@ public class CommunityHubDbContext : DbContext
             e.HasIndex(x => x.Token).IsUnique();
             // Organizer lists a participant's grants.
             e.HasIndex(x => new { x.EventId, x.ParticipantId });
+        });
+
+        // --- MagicLinkGrant (welcome auto-login: single-use + revocable) ----
+        b.Entity<MagicLinkGrant>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Role).HasConversion<int>();
+            e.Property(x => x.Purpose).IsRequired().HasMaxLength(32);
+            // SHA-256 hex of the random token id (64 chars).
+            e.Property(x => x.TokenIdHash).IsRequired().HasMaxLength(64);
+            e.Property(x => x.RecipientEmail).HasMaxLength(320);
+
+            e.HasOne(x => x.Event)
+                .WithMany()
+                .HasForeignKey(x => x.EventId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // NoAction on the Participant FK: the Event root already cascade-deletes
+            // both Participants and these grants, so a second Participant→Grant
+            // cascade path would be a SQL Server multiple-cascade-path error (same
+            // pattern as the secretary-token table above).
+            e.HasOne(x => x.Participant)
+                .WithMany()
+                .HasForeignKey(x => x.ParticipantId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            // A presented token resolves to exactly one grant by hash.
+            e.HasIndex(x => x.TokenIdHash).IsUnique();
+            // Organizer lists / revokes a participant's grants of a kind.
+            e.HasIndex(x => new { x.EventId, x.ParticipantId, x.Purpose });
+        });
+
+        // --- SessionSourceSetting (per-edition active session source) -------
+        b.Entity<SessionSourceSetting>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Source).IsRequired().HasMaxLength(32);
+            e.Property(x => x.UpdatedByEmail).HasMaxLength(320);
+            e.HasOne(x => x.Event)
+                .WithMany()
+                .HasForeignKey(x => x.EventId)
+                .OnDelete(DeleteBehavior.Cascade);
+            // One active source per edition.
+            e.HasIndex(x => x.EventId).IsUnique();
+        });
+
+        // --- EconomicContactAnnotation (hub-side role + notes for e-conomic) -
+        b.Entity<EconomicContactAnnotation>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Role).HasConversion<int>();
+            e.Property(x => x.Notes).HasMaxLength(2000);
+            e.Property(x => x.UpdatedByEmail).HasMaxLength(320);
+            // One annotation per e-conomic (customer, contact).
+            e.HasIndex(x => new { x.CustomerNumber, x.ContactNumber }).IsUnique();
+        });
+
+        // --- PartyRsvp (anonymous party sign-up) ----------------------------
+        b.Entity<PartyRsvp>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Name).IsRequired().HasMaxLength(200);
+            e.Property(x => x.Email).IsRequired().HasMaxLength(320);
+            e.Property(x => x.IpHash).HasMaxLength(64);
+            e.HasOne(x => x.Event)
+                .WithMany()
+                .HasForeignKey(x => x.EventId)
+                .OnDelete(DeleteBehavior.Cascade);
+            // One RSVP per email per edition (upsert).
+            e.HasIndex(x => new { x.EventId, x.Email }).IsUnique();
+        });
+
+        // --- MasterClassSignup (in-hub MC seat + waitlist) ------------------
+        b.Entity<MasterClassSignup>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Status).HasConversion<int>();
+            e.HasOne(x => x.Event)
+                .WithMany()
+                .HasForeignKey(x => x.EventId)
+                .OnDelete(DeleteBehavior.Cascade);
+            // NoAction on Session + Attendee FKs: the Event root already cascade-
+            // deletes Sessions, Attendees AND these rows, so a second cascade path
+            // would be a SQL Server multiple-cascade-path error.
+            e.HasOne(x => x.Session)
+                .WithMany()
+                .HasForeignKey(x => x.SessionId)
+                .OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(x => x.Attendee)
+                .WithMany()
+                .HasForeignKey(x => x.AttendeeId)
+                .OnDelete(DeleteBehavior.NoAction);
+            // A person may hold up to TWO entries: one confirmed seat + one
+            // waitlist/offer for a DIFFERENT MC (≤1 confirmed enforced in logic),
+            // so the per-attendee index is NOT unique. One entry per
+            // (attendee, session) IS unique (no double signup to the same MC).
+            e.HasIndex(x => new { x.EventId, x.AttendeeId });
+            e.HasIndex(x => new { x.EventId, x.AttendeeId, x.SessionId }).IsUnique();
+            e.HasIndex(x => new { x.EventId, x.SessionId, x.Status });
+        });
+
+        // --- MasterClassSettings (per-edition offer-hold + promotion mode) --
+        b.Entity<MasterClassSettings>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.PromotionMode).HasConversion<int>();
+            e.Property(x => x.UpdatedByEmail).HasMaxLength(320);
+            e.HasOne(x => x.Event)
+                .WithMany()
+                .HasForeignKey(x => x.EventId)
+                .OnDelete(DeleteBehavior.Cascade);
+            e.HasIndex(x => x.EventId).IsUnique();
         });
 
         // --- ImpersonationAudit (organizer grid v2) -------------------------
@@ -303,15 +489,22 @@ public class CommunityHubDbContext : DbContext
             e.Property(x => x.MasterClassName).HasMaxLength(200);
             e.Property(x => x.TicketStatus).HasConversion<int>();
             e.Property(x => x.BookingStatus).HasConversion<int>();
+            e.Property(x => x.BackstageTicketId).HasMaxLength(128);
 
             e.HasOne(x => x.Event)
                 .WithMany()
                 .HasForeignKey(x => x.EventId)
                 .OnDelete(DeleteBehavior.Cascade);
 
-            // Email is the reconciliation key - unique within an edition, so
-            // the reconciliation job can upsert by (EventId, Email).
+            // Email unique within an edition (legacy email-keyed reconcile path).
             e.HasIndex(x => new { x.EventId, x.Email }).IsUnique();
+            // The STABLE ticket-id identity (REQUIREMENTS §6) — unique per edition
+            // where present (filtered so legacy null-ticket rows don't collide), so
+            // the ticket-keyed sync upserts by (EventId, BackstageTicketId) and a
+            // reassignment transfers the MC instead of orphaning it.
+            e.HasIndex(x => new { x.EventId, x.BackstageTicketId })
+                .IsUnique()
+                .HasFilter("[BackstageTicketId] IS NOT NULL");
             // Fast filter for the organizer mismatch view.
             e.HasIndex(x => new { x.EventId, x.HasReconciliationMismatch });
         });
@@ -677,6 +870,15 @@ public class CommunityHubDbContext : DbContext
             e.Property(x => x.LastUpdatedByEmail).HasMaxLength(320);
             e.Property(x => x.WebsiteUrl).HasMaxLength(400);
 
+            // Company default release ring (controlled rollout §23): stored as int,
+            // defaults to Broad (3) — the company default for its contacts unless a
+            // contact narrows their own ring. Existing rows upgrade with no backfill.
+            // Sentinel = Broad so an explicit earlier company ring is persisted.
+            e.Property(x => x.Ring)
+                .HasConversion<int>()
+                .HasSentinel(CommunityHub.Core.Settings.Ring.Broad)
+                .HasDefaultValue(CommunityHub.Core.Settings.Ring.Broad);
+
             e.HasOne(x => x.Event).WithMany()
                 .HasForeignKey(x => x.EventId)
                 .OnDelete(DeleteBehavior.Cascade);
@@ -826,6 +1028,21 @@ public class CommunityHubDbContext : DbContext
             e.HasIndex(x => x.TopicId);
         });
 
+        // --- SurveyState (organizer-controlled per-survey admin state) -------
+        // Open/closed gate for the public survey page. Keyed by slug (the JSON
+        // basename), NOT scoped to an Event — a survey is its own anonymous
+        // artefact (cf. SurveyResponse). A missing row means OPEN (the default).
+        b.Entity<SurveyState>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.SurveySlug).IsRequired().HasMaxLength(80);
+            e.Property(x => x.IsOpen).HasDefaultValue(true);
+            e.Property(x => x.UpdatedByEmail).HasMaxLength(320);
+
+            // One state row per survey — looked up + upserted by slug.
+            e.HasIndex(x => x.SurveySlug).IsUnique();
+        });
+
         // --- SponsorLead ------------------------------------------------------
         // The leads pipeline store (CONTEXT.md sponsor leads). Zoho stays the
         // source of truth for CONTENT; the hub layers processing status, AI
@@ -950,6 +1167,23 @@ public class CommunityHubDbContext : DbContext
                 .OnDelete(DeleteBehavior.Restrict);
 
             e.HasIndex(x => new { x.EventId, x.ParticipantId }).IsUnique();
+        });
+
+        // --- VolunteerDayAvailability ---------------------------------------
+        b.Entity<VolunteerDayAvailability>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Level).HasConversion<int>();
+            e.Property(x => x.Note).HasMaxLength(500);
+
+            e.HasOne(x => x.Event).WithMany()
+                .HasForeignKey(x => x.EventId)
+                .OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.Participant).WithMany()
+                .HasForeignKey(x => x.ParticipantId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            e.HasIndex(x => new { x.EventId, x.ParticipantId, x.Day }).IsUnique();
         });
 
         // --- VolunteerCategory ----------------------------------------------
@@ -1270,6 +1504,118 @@ public class CommunityHubDbContext : DbContext
 
             // One settings row per edition (upserted on save).
             e.HasIndex(x => x.EventId).IsUnique();
+        });
+
+        // --- FeatureSetting (per-edition kill switches, §23) ------------------
+        b.Entity<FeatureSetting>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.FeatureKey).HasMaxLength(100).IsRequired();
+            e.Property(x => x.LastUpdatedByEmail).HasMaxLength(320);
+
+            // Released-to ring (controlled rollout §23): stored as int, defaults
+            // to Broad (3) so an existing row (and an upgraded DB) keeps a feature
+            // visible to everyone until an organizer narrows its rollout. Sentinel
+            // = Broad so an explicit earlier released ring is persisted, not reset.
+            e.Property(x => x.ReleasedToRing)
+                .HasConversion<int>()
+                .HasSentinel(CommunityHub.Core.Settings.Ring.Broad)
+                .HasDefaultValue(CommunityHub.Core.Settings.Ring.Broad);
+
+            // Group-ring model (§23a): nullable per-feature ring OVERRIDE (null =
+            // inherit the group ring) + nullable per-edition GROUP override (null =
+            // catalog home group). Both stored as nullable int.
+            e.Property(x => x.ReleasedToRingOverride).HasConversion<int?>();
+            e.Property(x => x.GroupOverride).HasConversion<int?>();
+
+            e.HasOne(x => x.Event).WithMany()
+                .HasForeignKey(x => x.EventId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // One kill-switch row per (edition, feature key) — upserted on save.
+            e.HasIndex(x => new { x.EventId, x.FeatureKey }).IsUnique();
+        });
+
+        // --- FeatureGroupSetting (per-edition GROUP lifecycle ring, §23a) -----
+        b.Entity<FeatureGroupSetting>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.LastUpdatedByEmail).HasMaxLength(320);
+            e.Property(x => x.Group).HasConversion<int>();
+            e.Property(x => x.ReleasedToRing)
+                .HasConversion<int>()
+                .HasSentinel(CommunityHub.Core.Settings.Ring.Broad)
+                .HasDefaultValue(CommunityHub.Core.Settings.Ring.Broad);
+
+            e.HasOne(x => x.Event).WithMany()
+                .HasForeignKey(x => x.EventId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // One group-ring row per (edition, group) — upserted on save.
+            e.HasIndex(x => new { x.EventId, x.Group }).IsUnique();
+        });
+
+        // --- ScheduleEntry (generic role-tagged key dates / schedule) ---------
+        b.Entity<ScheduleEntry>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Title).HasMaxLength(200).IsRequired();
+            e.Property(x => x.Location).HasMaxLength(300);
+            e.Property(x => x.Roles).HasMaxLength(200).IsRequired();
+            e.Property(x => x.Notes).HasMaxLength(2000);
+            e.Property(x => x.LastUpdatedByEmail).HasMaxLength(320);
+            e.HasOne(x => x.Event).WithMany()
+                .HasForeignKey(x => x.EventId)
+                .OnDelete(DeleteBehavior.Cascade);
+            e.HasIndex(x => new { x.EventId, x.StartsAt });
+        });
+
+        // --- ConfigOverride (per-edition admin-editable config, Phase 1) ------
+        b.Entity<ConfigOverride>(e =>
+        {
+            e.HasKey(x => x.Id);
+
+            // Section stored as int (enum); a new value is just a larger int —
+            // additive, no schema change for a future section.
+            e.Property(x => x.Section).HasConversion<int>();
+
+            // The partial JSON fragment. nvarchar(max): a section override can be
+            // arbitrarily large (whole sponsor task-set tree). Never a secret.
+            e.Property(x => x.OverrideJson).IsRequired();
+
+            e.Property(x => x.UpdatedByEmail).HasMaxLength(320);
+
+            e.HasOne(x => x.Event).WithMany()
+                .HasForeignKey(x => x.EventId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // One override row per (edition, section) — upserted on save.
+            e.HasIndex(x => new { x.EventId, x.Section }).IsUnique();
+        });
+
+        // --- SavedSession (attendee personal "My plan", saved sessions) -------
+        b.Entity<SavedSession>(e =>
+        {
+            e.HasKey(x => x.Id);
+
+            e.HasOne(x => x.Event).WithMany()
+                .HasForeignKey(x => x.EventId)
+                .OnDelete(DeleteBehavior.Cascade);
+            // Participant + Session are NoAction (not Cascade): the Event already
+            // cascade-deletes the edition's participants AND its sessions, so a
+            // second cascade path to either from the same root would be ambiguous
+            // to SQL Server (same reasoning as SessionSpeaker / MasterClassParticipant).
+            e.HasOne(x => x.Participant).WithMany()
+                .HasForeignKey(x => x.ParticipantId)
+                .OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(x => x.Session).WithMany()
+                .HasForeignKey(x => x.SessionId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            // Idempotent toggle: a person saves a given session at most once.
+            e.HasIndex(x => new { x.EventId, x.ParticipantId, x.SessionId }).IsUnique();
+            // "My plan" lookup: all of a participant's saved sessions in an edition.
+            e.HasIndex(x => new { x.EventId, x.ParticipantId });
         });
     }
 }

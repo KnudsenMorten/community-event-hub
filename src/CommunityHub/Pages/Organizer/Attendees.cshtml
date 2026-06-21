@@ -5,7 +5,9 @@
     ViewData["Title"] = "Attendees";
 }
 
-<div class="card">
+@* data-ceh-grid: animated loading skeleton while a filter/sort/page navigation
+   is in flight (REQUIREMENTS §21). Pure progressive enhancement. *@
+<div class="card ceh-grid" data-ceh-grid data-ceh-grid-loading="@Localizer["OrgGrid.Loading"]">
     <h2>Attendees</h2>
 
     @if (Model.AccessDenied)
@@ -73,9 +75,12 @@
             </label>
 
             <button type="submit">Apply</button>
+            @* data-ceh-grid-skip: this is a CSV download, not a page replace, so
+               it must NOT trigger the grid loading skeleton. *@
             <a asp-page="/Organizer/Attendees" asp-page-handler="Export"
                asp-route-Ticket="@Model.Ticket" asp-route-Booking="@Model.Booking"
                asp-route-MismatchOnly="@Model.MismatchOnly" asp-route-Search="@Model.Search"
+               data-ceh-grid-skip download
                style="margin-left:10px;">Export CSV (current filter)</a>
         </form>
 

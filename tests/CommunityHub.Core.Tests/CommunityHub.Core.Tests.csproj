@@ -31,14 +31,18 @@
          test (DataProtectionProvider.Create(DirectoryInfo)). The .Extensions
          package carries the convenience factory used outside an ASP.NET host. -->
     <PackageReference Include="Microsoft.AspNetCore.DataProtection.Extensions" Version="8.0.6" />
-    <!-- Localization: lets LocalizationResourcesTests stand up a real
+    <!-- Localization: lets the localization tests stand up a real
          ResourceManagerStringLocalizerFactory against the SharedResource .resx
-         satellites (en + da-DK) that ship in CommunityHub.Core. -->
+         (English) that ships in CommunityHub.Core. -->
     <PackageReference Include="Microsoft.Extensions.Localization" Version="8.0.6" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\CommunityHub.Core\CommunityHub.Core.csproj" />
+    <!-- The §23 job-gate tests drive the timer-job Run() methods directly to prove a
+         disabled edition makes the job no-op (no integration call). The Jobs project
+         is an Azure Functions worker Exe; reference it for type access only. -->
+    <ProjectReference Include="..\..\src\CommunityHub.Jobs\CommunityHub.Jobs.csproj" />
   </ItemGroup>
 
 </Project>

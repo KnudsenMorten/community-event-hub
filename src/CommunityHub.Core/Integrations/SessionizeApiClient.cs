@@ -52,6 +52,26 @@ public sealed class SessionizeApiOptions
     /// Which view to pull speakers from. Default <see cref="SessionizeView.Speakers"/>.
     /// </summary>
     public SessionizeView View { get; set; } = SessionizeView.Speakers;
+
+    /// <summary>
+    /// Sessionize keeps speaker EMAILS off the public Speakers/All view (PII) and
+    /// exposes them only through a separate, token-protected side-view
+    /// (e.g. <c>.../view/SpeakersEmails?s=&lt;token&gt;</c>) that returns
+    /// <c>id, firstName, lastName, email</c>. When this token is set the client
+    /// pulls that view too and joins the email onto each speaker by Sessionize
+    /// <c>id</c> — so the main view supplies bio/links/sessions and this supplies
+    /// the match-key email. Blank ⇒ the client expects the email inline on the
+    /// main view (older endpoints with the "speaker emails" field enabled).
+    /// SECRET: it gates PII, so it lives in Key Vault / an app setting, never in
+    /// committed config (placeholder only).
+    /// </summary>
+    public string EmailsToken { get; set; } = string.Empty;
+
+    /// <summary>
+    /// The view name that carries emails when <see cref="EmailsToken"/> is set.
+    /// Default <c>SpeakersEmails</c> (the Sessionize standard secured-email view).
+    /// </summary>
+    public string EmailsView { get; set; } = "SpeakersEmails";
 }
 
 /// <summary>
@@ -130,7 +150,82 @@ public sealed class SessionizeApiClient
                 $"Could not reach the Sessionize API: {ex.Message}");
         }
 
-        return ParseSpeakers(json);
+        // When configured, pull the token-protected emails side-view and join the
+        // address onto each speaker by Sessionize id (the main view omits PII).
+        IReadOnlyDictionary<string, string>? emailById = null;
+        var emailWarnings = new List<string>();
+        if (!string.IsNullOrWhiteSpace(_options.EmailsToken))
+        {
+            try
+            {
+                var emailUrl = BuildEmailsUrl();
+                using var eresp = await _http.GetAsync(emailUrl, ct);
+                if (eresp.IsSuccessStatusCode)
+                {
+                    var ejson = await eresp.Content.ReadAsStringAsync(ct);
+                    emailById = ParseEmailMap(ejson);
+                }
+                else
+                {
+                    emailWarnings.Add(
+                        $"Sessionize emails view returned HTTP {(int)eresp.StatusCode} "
+                        + $"({eresp.ReasonPhrase}). Check Sessionize:EmailsToken / EmailsView; "
+                        + "speakers will be skipped without an email.");
+                }
+            }
+            catch (Exception ex)
+            {
+                emailWarnings.Add(
+                    $"Could not reach the Sessionize emails view: {ex.Message}");
+            }
+        }
+
+        var result = ParseSpeakers(json, emailById);
+        return emailWarnings.Count == 0
+            ? result
+            : result with { Warnings = result.Warnings.Concat(emailWarnings).ToList() };
+    }
+
+    /// <summary>
+    /// Build the token-protected emails view URL:
+    /// <c>{BaseUrl}/api/v2/{endpointId}/view/{EmailsView}?s={EmailsToken}</c>.
+    /// </summary>
+    public string BuildEmailsUrl() =>
+        $"{_options.BaseUrl.TrimEnd('/')}/api/v2/" +
+        $"{Uri.EscapeDataString(_options.EndpointId)}/view/" +
+        $"{Uri.EscapeDataString(_options.EmailsView)}" +
+        $"?s={Uri.EscapeDataString(_options.EmailsToken)}";
+
+    /// <summary>
+    /// Parse the Sessionize <c>SpeakersEmails</c> side-view (a top-level array of
+    /// <c>{ id, firstName, lastName, email }</c>) into a Sessionize-id → email map.
+    /// Tolerant: a bad document yields an empty map, never throws.
+    /// </summary>
+    public static IReadOnlyDictionary<string, string> ParseEmailMap(string json)
+    {
+        var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        JsonDocument doc;
+        try { doc = JsonDocument.Parse(json); }
+        catch { return map; }
+        using (doc)
+        {
+            var root = doc.RootElement;
+            JsonElement arr;
+            if (root.ValueKind == JsonValueKind.Array) arr = root;
+            else if (root.ValueKind == JsonValueKind.Object
+                     && root.TryGetProperty("speakers", out var sp)
+                     && sp.ValueKind == JsonValueKind.Array) arr = sp;
+            else return map;
+
+            foreach (var s in arr.EnumerateArray())
+            {
+                var id = GetString(s, "id").Trim();
+                var email = GetString(s, "email").Trim().ToLowerInvariant();
+                if (!string.IsNullOrEmpty(id) && !string.IsNullOrEmpty(email))
+                    map[id] = email;
+            }
+        }
+        return map;
     }
 
     /// <summary>
@@ -147,7 +242,9 @@ public sealed class SessionizeApiClient
     /// <c>speakers</c> array). Public + static so it is unit-testable without a
     /// network call.
     /// </summary>
-    public static SessionizeParseResult ParseSpeakers(string json)
+    public static SessionizeParseResult ParseSpeakers(
+        string json,
+        IReadOnlyDictionary<string, string>? emailById = null)
     {
         var speakers = new List<SessionizeSpeaker>();
         var warnings = new List<string>();
@@ -199,16 +296,26 @@ public sealed class SessionizeApiClient
                 index++;
                 var parsed = ParseOne(s);
 
+                // The main Speakers/All view omits email (PII); fill it from the
+                // token-protected emails side-view, joined on the Sessionize id.
+                if (string.IsNullOrWhiteSpace(parsed.Email)
+                    && emailById is not null
+                    && !string.IsNullOrEmpty(parsed.SessionizeId)
+                    && emailById.TryGetValue(parsed.SessionizeId, out var joinedEmail)
+                    && !string.IsNullOrWhiteSpace(joinedEmail))
+                {
+                    parsed = parsed with { Email = joinedEmail };
+                }
+
                 if (string.IsNullOrWhiteSpace(parsed.Email))
                 {
                     var name = $"{parsed.FirstName} {parsed.LastName}".Trim();
+                    var fix = "Enable the 'speaker emails' field on the Sessionize "
+                        + "endpoint, or configure Sessionize:EmailsToken so the hub "
+                        + "can read the secured SpeakersEmails view.";
                     warnings.Add(string.IsNullOrEmpty(name)
-                        ? $"Speaker #{index}: skipped - no email address. "
-                          + "Enable the 'speaker emails' advanced field on the "
-                          + "Sessionize API endpoint."
-                        : $"Speaker '{name}': skipped - no email address. "
-                          + "Enable the 'speaker emails' advanced field on the "
-                          + "Sessionize API endpoint.");
+                        ? $"Speaker #{index}: skipped - no email address. {fix}"
+                        : $"Speaker '{name}': skipped - no email address. {fix}");
                     continue;
                 }
 

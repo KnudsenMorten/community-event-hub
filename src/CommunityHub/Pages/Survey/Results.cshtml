@@ -3,6 +3,7 @@
 @{
     Layout = "_Layout";
     ViewData["Title"] = (Model.Survey?.Title ?? "Survey") + " — Results";
+    ViewData["HidePublicNav"] = true;   // standalone survey results — no public event nav bar
 }
 
 @if (Model.Survey is null)
@@ -137,14 +138,15 @@
             </div>
             <div class="kpi">
                 <div class="label">@Localizer["Results.LatestResponse"]</div>
-                <div class="value" style="font-size: 17px; line-height: 1.25;">@(Model.LatestResponseAt?.ToString("d MMM yyyy") ?? "—")</div>
-                <div class="sub">@(Model.LatestResponseAt?.ToString("HH:mm 'UTC'") ?? "")</div>
+                <div class="value" style="font-size: 17px; line-height: 1.25;">@Model.LatestResponseDateLocal</div>
+                <div class="sub">@Model.LatestResponseTimeLocal</div>
             </div>
         </div>
 
         @if (Model.TotalResponses == 0)
         {
             <div class="empty-state">
+                <h2 style="margin:0 0 8px;font-size:20px;color:var(--el-darkblue,#1D3380);">@Localizer["Results.NoResponsesHeadline"]</h2>
                 <p>@Localizer["Results.NoResponsesYet"] <a href="/survey/@Model.Slug">@Localizer["Results.OpenSurvey"]</a>.</p>
                 <div class="share-row" style="justify-content:center;">
                     <span>@Localizer["Results.ShareSurvey"]</span>

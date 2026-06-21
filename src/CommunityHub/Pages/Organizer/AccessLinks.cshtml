@@ -1,0 +1,104 @@
+@page
+@using CommunityHub.Core.Domain
+@model CommunityHub.Pages.Organizer.AccessLinksModel
+@{
+    ViewData["Title"] = "Permanent sign-in links";
+    string RoleLabel(ParticipantRole r) => CommunityHub.Branding.RoleDisplay.Name(r);
+    // Chips preserve the OTHER filter so role + ring can combine.
+    string RoleChipHref(string? role) =>
+        "/Organizer/AccessLinks?" + (role is null ? "" : $"role={role}&") + (Model.RingFilter is null ? "" : $"ring={Model.RingFilter}");
+    string RingChipHref(string? ring) =>
+        "/Organizer/AccessLinks?" + (Model.RoleFilter is null ? "" : $"role={Model.RoleFilter}&") + (ring is null ? "" : $"ring={ring}");
+}
+
+@if (Model.AccessDenied)
+{
+    <div class="card">
+        <h2>@ViewData["Title"]</h2>
+        <p class="error" role="alert">@Localizer["Common.OrganizersOnly"]</p>
+        <p><a asp-page="/Index">@Localizer["Common.BackToHub"]</a></p>
+    </div>
+    return;
+}
+
+<style>
+    .al-chips { display:flex; flex-wrap:wrap; gap:8px; margin:10px 0 16px; }
+    .al-chip { display:inline-block; padding:6px 12px; border-radius:999px; font-size:13px;
+        text-decoration:none; border:1px solid #cbd2d9; color:#374151; background:#fff; }
+    .al-chip.active { background:#008BD2; color:#fff; border-color:#008BD2; font-weight:600; }
+    .al-row { display:flex; flex-wrap:wrap; gap:8px; align-items:center; padding:10px 0; border-top:1px solid #eef0f4; }
+    .al-row:first-child { border-top:0; }
+    .al-who { flex:1 1 200px; min-width:0; }
+    .al-who .nm { font-weight:600; }
+    .al-who .em { color:#6b7280; font-size:12px; }
+    .al-who .rl { display:inline-block; font-size:11px; background:#e0f2fe; color:#075985; border-radius:999px; padding:2px 8px; margin-left:6px; }
+    .al-link { display:flex; gap:6px; flex:1 1 320px; min-width:0; }
+    .al-link input { flex:1 1 auto; min-width:0; padding:8px 10px; font-size:12px; font-family:monospace;
+        border:1px solid #cbd2d9; border-radius:6px; }
+    .al-copy { padding:8px 12px; border:0; border-radius:6px; background:#008BD2; color:#fff; font-size:13px; font-weight:600; cursor:pointer; }
+    .al-copy:hover { background:#0079b8; }
+    .al-warn { background:#fffbeb; border:1px solid #fcd34d; border-radius:6px; padding:10px 12px; font-size:13px; color:#92400e; }
+</style>
+
+<div class="card">
+    <h1 style="margin-top:0;">@ViewData["Title"]</h1>
+    <p>Each link signs that person straight into the hub <strong>main menu</strong> and keeps them
+       signed in <strong>until they sign out</strong> (a 365-day sliding session). Share a person's link
+       with them privately — they can bookmark it for one-tap access.</p>
+    <p class="al-warn"><strong>Treat these like passwords.</strong> Anyone who has a link can sign in as
+       that person until it expires (about a year). Don't post them publicly.</p>
+    <p><a asp-page="/Organizer/Index">&larr; @Localizer["Common.BackToOrganizerArea"]</a></p>
+
+    <div class="al-chips">
+        <span style="font-size:12px;color:#6b7280;align-self:center;">Role:</span>
+        <a class="al-chip @(Model.RoleFilter is null ? "active" : "")" href="@RoleChipHref(null)">All</a>
+        @foreach (var r in CommunityHub.Pages.Organizer.AccessLinksModel.RoleChips)
+        {
+            <a class="al-chip @(string.Equals(Model.RoleFilter, r.ToString(), StringComparison.OrdinalIgnoreCase) ? "active" : "")"
+               href="@RoleChipHref(r.ToString())">@RoleLabel(r)</a>
+        }
+    </div>
+    <div class="al-chips">
+        <span style="font-size:12px;color:#6b7280;align-self:center;">Ring:</span>
+        <a class="al-chip @(Model.RingFilter is null ? "active" : "")" href="@RingChipHref(null)">All</a>
+        <a class="al-chip @(Model.RingFilter == "01" ? "active" : "")" href="@RingChipHref("01")">Ring 0+1 (testers)</a>
+        <a class="al-chip @(Model.RingFilter == "0" ? "active" : "")" href="@RingChipHref("0")">Ring 0</a>
+        <a class="al-chip @(Model.RingFilter == "1" ? "active" : "")" href="@RingChipHref("1")">Ring 1</a>
+        <a class="al-chip @(Model.RingFilter == "2" ? "active" : "")" href="@RingChipHref("2")">Ring 2</a>
+    </div>
+
+    @if (Model.Rows.Count == 0)
+    {
+        <p style="color:#6b7280;">No active participants@(Model.RoleFilter is null ? "" : $" with role {Model.RoleFilter}").</p>
+    }
+    else
+    {
+        @foreach (var row in Model.Rows)
+        {
+            <div class="al-row">
+                <div class="al-who">
+                    <span class="nm">@row.FullName</span><span class="rl">@RoleLabel(row.Role)</span><span class="rl" style="background:#fef9c3;color:#854d0e;">@CommunityHub.Core.Settings.Rings.Label(row.Ring)</span>
+                    <div class="em">@row.Email</div>
+                </div>
+                <div class="al-link">
+                    <input type="text" readonly value="@row.Url"
+                           aria-label="Permanent sign-in link for @row.FullName"
+                           onfocus="this.select()" />
+                    <button type="button" class="al-copy" data-url="@row.Url">Copy</button>
+                </div>
+            </div>
+        }
+    }
+</div>
+
+<script>
+    document.querySelectorAll('.al-copy').forEach(function (b) {
+        b.addEventListener('click', function () {
+            var url = b.getAttribute('data-url');
+            navigator.clipboard.writeText(url).then(function () {
+                var t = b.textContent; b.textContent = 'Copied!';
+                setTimeout(function () { b.textContent = t; }, 1200);
+            });
+        });
+    });
+</script>

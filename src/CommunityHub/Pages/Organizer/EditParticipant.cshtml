@@ -22,7 +22,12 @@
             <p class="info">@Model.Message</p>
         }
 
-        <form method="post">
+        @* Unsaved-changes guard (data-ceh-dirty) + submit loading state
+           (data-ceh-loading): an organizer who edits a field then navigates away
+           without saving is warned, and a double-click cannot fire two posts.
+           Saving clears the guard; the Cancel link opts out via
+           data-ceh-allow-leave so leaving via Cancel never trips the prompt. *@
+        <form method="post" data-ceh-dirty data-ceh-loading>
             <label for="Email">Email (unique within this edition)</label>
             <input type="email" asp-for="Email" required autocomplete="email" />
 
@@ -62,8 +67,8 @@
             }
 
             <div style="display:flex; flex-wrap:wrap; gap:10px; margin-top:14px;">
-                <button type="submit">@(Model.IsNew ? "Create participant" : "Save changes")</button>
-                <a asp-page="/Organizer/Participants" class="secondary"
+                <button type="submit" data-ceh-loading-text="@Localizer["Common.Saving"]">@(Model.IsNew ? "Create participant" : "Save changes")</button>
+                <a asp-page="/Organizer/Participants" class="secondary" data-ceh-allow-leave
                    style="background:var(--el-grey);color:var(--el-darkblue);padding:9px 16px;border-radius:7px;text-decoration:none;font-size:15px;">
                     Cancel
                 </a>

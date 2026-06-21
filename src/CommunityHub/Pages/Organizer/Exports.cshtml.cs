@@ -84,7 +84,7 @@ public class ExportsModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) return Forbid();
+        if (!OrganizerAuth.IsRealOrganizer(me)) return Forbid();
 
         var csv = await build(me.EventId);
         // UTF-8 BOM so Excel detects the encoding (Danish names).

@@ -1,7 +1,60 @@
 @page
+@using Microsoft.Extensions.Localization
+@using CommunityHub.Core.Resources
+@inject IStringLocalizer<SharedResource> Localizer
 @model CommunityHub.Pages.Sponsor.LeadsModel
 @{
     ViewData["Title"] = "Your leads API";
+}
+
+@if (!Model.AccessDenied && !Model.NoCompanyLink)
+{
+    <div class="card">
+        <h2>@Localizer["Leads.Contact.Heading"]</h2>
+        <p>@Localizer["Leads.Contact.Intro"]</p>
+
+        @if (Model.Contacts.Count == 0)
+        {
+            <p class="info" role="status">@Localizer["Leads.Contact.Empty"]</p>
+        }
+        else
+        {
+            <ul style="list-style:none;padding:0;margin:8px 0 0 0;display:flex;flex-direction:column;gap:10px;">
+                @foreach (var c in Model.Contacts)
+                {
+                    <li style="border:1px solid #e2e5ec;border-radius:8px;padding:12px 14px;">
+                        <div style="font-weight:600;word-break:break-word;">@c.DisplayName</div>
+                        @if (!string.IsNullOrWhiteSpace(c.Company))
+                        {
+                            <div style="color:#5a6170;font-size:13px;word-break:break-word;">@c.Company</div>
+                        }
+                        <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;">
+                            @if (c.MailtoHref is not null)
+                            {
+                                <a class="task-link-btn" href="@c.MailtoHref"
+                                   style="flex:1 1 140px;text-align:center;min-width:0;word-break:break-all;"
+                                   aria-label="@(Localizer["Leads.Contact.Email"].Value + " " + c.DisplayName)">
+                                    @Localizer["Leads.Contact.Email"] &middot; @c.Email
+                                </a>
+                            }
+                            @if (c.TelHref is not null)
+                            {
+                                <a class="task-link-btn" href="@c.TelHref"
+                                   style="flex:1 1 140px;text-align:center;min-width:0;word-break:break-all;"
+                                   aria-label="@(Localizer["Leads.Contact.Call"].Value + " " + c.DisplayName)">
+                                    @Localizer["Leads.Contact.Call"] &middot; @c.Phone
+                                </a>
+                            }
+                            @if (!c.IsContactable)
+                            {
+                                <span style="color:#a50e0e;font-size:13px;">@Localizer["Leads.Contact.NoContact"]</span>
+                            }
+                        </div>
+                    </li>
+                }
+            </ul>
+        }
+    </div>
 }
 
 <div class="card">

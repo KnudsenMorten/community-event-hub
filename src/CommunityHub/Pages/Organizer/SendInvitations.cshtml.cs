@@ -61,7 +61,7 @@ public class SendInvitationsModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+        if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
 
         var participants = await _db.Participants
             .Where(p => p.EventId == me.EventId && p.IsActive)

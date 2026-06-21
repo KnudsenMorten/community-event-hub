@@ -76,7 +76,7 @@ public class CommsModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) return Forbid();
+        if (!OrganizerAuth.IsRealOrganizer(me)) return Forbid();
 
         string msg;
         if (participantId <= 0 || string.IsNullOrWhiteSpace(template))

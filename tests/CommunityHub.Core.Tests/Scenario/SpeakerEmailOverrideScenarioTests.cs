@@ -131,7 +131,9 @@ public sealed class SpeakerEmailOverrideScenarioTests
         await db.SaveChangesAsync();
 
         var templates = NewTemplates();
-        var builder = new TaskReminderBuilder(db, templates, ScenarioFixture.Clock);
+        var builder = new TaskReminderBuilder(
+            db, templates, ScenarioFixture.Clock,
+            new CommunityHub.Core.Email.SponsorRecipientResolver(db));
         var due_messages = await builder.BuildDueAsync(seed.EventId);
 
         var msg = Assert.Single(due_messages, m => m.RecipientEmail == ScenarioSeed.SpeakerOneEmail);

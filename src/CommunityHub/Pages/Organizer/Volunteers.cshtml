@@ -20,15 +20,10 @@
 
 @if (!Model.AccessDenied)
 {
-    <div class="card">
-        <h2>@Localizer["Nav.OrgVolunteerStructure"]</h2>
-        <p>@Localizer["OrgVolunteers.Structure"]</p>
-        <p><a asp-page="/Organizer/VolunteerStructure">@Localizer["Nav.OrgVolunteerStructure"]</a></p>
-    </div>
-
-    <div class="card">
-        <h2>@Localizer["Nav.OrgBucketAllocation"]</h2>
-        <p>@Localizer["OrgVolunteers.Buckets"]</p>
-        <p><a asp-page="/Organizer/BucketAllocation">@Localizer["Nav.OrgBucketAllocation"]</a></p>
-    </div>
+    var tiles = new List<CommunityHub.Pages.Shared.HubTile>
+    {
+        new("/Organizer/VolunteerStructure", Localizer["Nav.OrgVolunteerStructure"].Value, Localizer["OrgVolunteers.Structure"].Value),
+        new("/Organizer/BucketAllocation", Localizer["Nav.OrgBucketAllocation"].Value, Localizer["OrgVolunteers.Buckets"].Value),
+    };
+    <partial name="_HubGrid" model="@tiles" />
 }

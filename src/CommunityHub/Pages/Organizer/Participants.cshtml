@@ -5,7 +5,10 @@
     ViewData["Title"] = "Participants";
 }
 
-<div class="card">
+@* data-ceh-grid: while a filter/sort/page navigation is in flight the shared
+   _Layout script lays an animated skeleton over this data-heavy grid (see
+   REQUIREMENTS §21). Pure progressive enhancement. *@
+<div class="card ceh-grid" data-ceh-grid data-ceh-grid-loading="@Localizer["OrgGrid.Loading"]">
     <h2>Participants</h2>
 
     @if (Model.AccessDenied)
@@ -343,10 +346,16 @@
          the COUNT of selected rows before deactivate/reactivate/change-persona runs,
          then submits the grid form to the chosen handler. Accessible (role=dialog,
          focus move, Esc/backdrop close). The server still re-validates the selection. -->
+    @* hidden + display:none keep this fixed-position backdrop from covering the
+       page (and swallowing every grid click — it intercepted "Switch to user"
+       on the ~360px layout) while closed; openModal() switches it to display:flex,
+       exactly like deleteModal above. A bare inline display:flex would override
+       [hidden] and overlay the whole viewport at all times. The global
+       .modal-backdrop[hidden] rule in _Layout.cshtml is the belt-and-braces guard. *@
     <div id="bulkModal" class="modal-backdrop" role="dialog" aria-modal="true"
          aria-labelledby="bulkModalTitle" aria-describedby="bulkModalBody"
          hidden
-         style="position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;
+         style="position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;
                 align-items:center;justify-content:center;padding:16px;z-index:1000;">
         <div class="modal-card"
              style="background:#fff;border-radius:10px;max-width:440px;width:100%;
@@ -386,11 +395,13 @@
             function openModal(count) {
                 bodyEl.textContent = bodyTemplate.replace('{0}', count);
                 modal.hidden = false;
+                modal.style.display = 'flex';
                 lastFocused = document.activeElement;
                 confirmBtn.focus();
             }
             function closeModal() {
                 modal.hidden = true;
+                modal.style.display = 'none';
                 pendingHandler = null;
                 if (lastFocused && lastFocused.focus) lastFocused.focus();
             }

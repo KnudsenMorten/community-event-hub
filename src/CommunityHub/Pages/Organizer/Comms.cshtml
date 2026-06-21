@@ -282,14 +282,18 @@
     <!-- The existing comms tools this cockpit consolidates (fan-out, not duplication). -->
     <div class="card">
         <h2>@Localizer["Comms.ToolsHeading"]</h2>
-        <p>
-            <a asp-page="/Organizer/EmailCenter">@Localizer["Nav.OrgEmailCenter"]</a> &middot;
-            <a asp-page="/Organizer/EmailLog">@Localizer["Nav.OrgEmailLog"]</a> &middot;
-            <a asp-page="/Organizer/Broadcast">@Localizer["Nav.OrgBroadcast"]</a> &middot;
-            <a asp-page="/Organizer/SendInvitations">@Localizer["Nav.OrgSendInvitations"]</a> &middot;
-            <a asp-page="/Organizer/SendWelcomeLogin">@Localizer["Nav.OrgSendWelcome"]</a> &middot;
-            <a asp-page="/Organizer/SpeakerReminders">@Localizer["Nav.OrgSpeakerReminders"]</a> &middot;
-            <a asp-page="/Organizer/SoMeQueue">@Localizer["Nav.OrgSoMeQueue"]</a>
-        </p>
+        @{
+            var tiles = new List<CommunityHub.Pages.Shared.HubTile>
+            {
+                new("/Organizer/EmailCenter", Localizer["Nav.OrgEmailCenter"].Value, "Compose and send templated email to participants."),
+                new("/Organizer/EmailLog", Localizer["Nav.OrgEmailLog"].Value, "The full delivery log of every email sent."),
+                new("/Organizer/Broadcast", Localizer["Nav.OrgBroadcast"].Value, "Send a one-off broadcast message to a chosen audience."),
+                new("/Organizer/SendInvitations", Localizer["Nav.OrgSendInvitations"].Value, "Send the event invitation to invitees."),
+                new("/Organizer/SendWelcomeLogin", Localizer["Nav.OrgSendWelcome"].Value, "Send welcome-login emails so people can sign in."),
+                new("/Organizer/SpeakerReminders", Localizer["Nav.OrgSpeakerReminders"].Value, "Remind speakers about pending tasks and deadlines."),
+                new("/Organizer/SoMeQueue", Localizer["Nav.OrgSoMeQueue"].Value, "The queue of social posts ready to publish across channels."),
+            };
+        }
+        <partial name="_HubGrid" model="@tiles" />
     </div>
 }

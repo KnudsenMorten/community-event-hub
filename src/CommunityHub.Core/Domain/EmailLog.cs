@@ -64,5 +64,15 @@ public class EmailLog
     /// <summary>The failure / drop reason when <see cref="Success"/> is false.</summary>
     public string? Error { get; set; }
 
+    /// <summary>
+    /// The branded template this send rendered, when it came through a template
+    /// path (the per-participant <see cref="ParticipantEmailService"/>). Lets the
+    /// organizer Email Log <b>re-send a failed row</b> faithfully — same template,
+    /// same recipient, same category. Null for raw/ad-hoc sends (broadcast, PIN)
+    /// that did not originate from a named template; such rows are not resendable
+    /// from the log.
+    /// </summary>
+    public string? TemplateName { get; set; }
+
     public DateTimeOffset SentAt { get; set; } = DateTimeOffset.UtcNow;
 }

@@ -1,5 +1,9 @@
 @inject CommunityHub.Branding.ActiveEventNameProvider ActiveEvent
 @inject CommunityHub.Auth.ICurrentParticipantAccessor CurrentParticipant
+@inject System.TimeProvider Clock
+@inject CommunityHub.Core.Config.EventEditionConfigLoader EventConfigLoader
+@inject CommunityHub.Core.Config.EventConfigOptions EventConfigOptions
+@inject CommunityHub.Core.Domain.VolunteerStructureService VolunteerStructure
 @{
     // Product / tool name shown in the graphics layout. This is the display
     // name only - the codebase, namespaces, and Azure resources stay
@@ -19,20 +23,37 @@
 
     // i18n: the active UI culture drives both the <html lang> attribute and the
     // resource lookups behind @Localizer. It is negotiated per request from the
-    // language-switcher cookie / Accept-Language / the en default (Program.cs).
+    // culture cookie / Accept-Language / the en default (Program.cs); the hub is
+    // English-only, so this always resolves to "en".
     var uiCulture = System.Globalization.CultureInfo.CurrentUICulture;
-    // BCP-47 tag for the lang attribute ("en", "da-DK"); two-letter for the
-    // switcher's active-state check.
+    // BCP-47 tag for the lang attribute (e.g. "en").
     var langTag = uiCulture.Name;
-    var twoLetter = uiCulture.TwoLetterISOLanguageName;
-    // Round-trip the current path so the switcher returns the user to where they were.
-    var switchReturn = Context.Request.Path.Value ?? "/";
+
+    // Site-wide topbar ticket banner (REQUIREMENTS §10). Driven from the active
+    // edition config (event.<edition>.json -> ticketSale) instead of the old
+    // hardcoded Layout.TicketInfo resx literal, so the copy can't silently go
+    // stale and auto-switches once the sale opens. Computed against the edition
+    // timezone (dates.timezone) using the ambient TimeProvider so it's testable.
+    // Defensive: a broken/missing config must never 500 the whole site, so any
+    // failure falls back to the static literal.
+    var ticketBanner = CommunityHub.Core.Config.TicketBannerBuilder.Fallback;
+    try
+    {
+        var editionCfg = EventConfigLoader.Load(EventConfigOptions.EventConfigPath);
+        ticketBanner = CommunityHub.Core.Config.TicketBannerBuilder.Build(
+            editionCfg.TicketSale,
+            editionCfg.Dates?.Timezone,
+            Clock.GetUtcNow());
+    }
+    catch
+    {
+        // Keep the fallback — the static literal renders below.
+    }
 }
 <!DOCTYPE html>
-@* lang now reflects the negotiated UI culture (en default, da-DK when the user
-   picks Danish) so a screen reader announces the copy with the correct
-   pronunciation rules (WCAG 3.1.1). The date PICKER stays Danish-formatted via
-   flatpickr (dd/mm/yyyy, Monday-first); the value posted is ISO regardless. *@
+@* lang reflects the negotiated UI culture (en) so a screen reader announces the
+   copy with the correct pronunciation rules (WCAG 3.1.1). The date PICKER stays
+   dd/mm/yyyy (Monday-first) via flatpickr; the value posted is ISO regardless. *@
 <html lang="@langTag">
 <head>
     <meta charset="utf-8" />
@@ -99,6 +120,12 @@
             gap: 16px; flex-wrap: wrap; text-align: center;
         }
         .topbar .ticket-info { font-weight: 600; }
+        /* When the ticket banner is a link (sale open + ticketUrl set) it uses
+           the same .ticket-info class but is an <a>: keep it readable on the
+           blue bar (white, underlined) instead of inheriting default link blue.
+           No fixed height — the bar already wraps on ~360px via flex-wrap. */
+        .topbar a.ticket-info { color: #fff; text-decoration: underline; }
+        .topbar a.ticket-info:hover { text-decoration: none; }
         .topbar a.eventsite-btn {
             display: inline-block;
             background: #fff; color: var(--el-darkblue);
@@ -107,22 +134,6 @@
             text-decoration: none; white-space: nowrap;
         }
         .topbar a.eventsite-btn:hover { background: var(--el-grey); }
-        /* Language switcher: a tiny inline form of two buttons. Lives in the
-           topbar so it is reachable on every page (incl. anonymous Login),
-           mobile-first (wraps with the rest of the topbar at ~360px). */
-        .lang-switch { display: inline-flex; align-items: center; gap: 6px; }
-        .lang-switch .lang-label { opacity: .85; }
-        .lang-switch form { margin: 0; display: inline; }
-        .lang-switch button {
-            background: transparent; color: #fff;
-            border: 1px solid rgba(255,255,255,.55);
-            padding: 2px 9px; border-radius: 999px;
-            font-size: 12px; font-weight: 600; cursor: pointer;
-        }
-        .lang-switch button:hover { background: rgba(255,255,255,.15); }
-        .lang-switch button[aria-pressed="true"] {
-            background: #fff; color: var(--el-blue); border-color: #fff;
-        }
         header .brand img { height: 56px; display: block; }
         header .product-mark {
             font-size: 30px; font-weight: 700; letter-spacing: .01em;
@@ -162,6 +173,45 @@
         nav.primary a:hover { background: var(--el-grey); }
         nav.primary a.active,
         nav.primary a[aria-current="page"] { background: var(--el-darkblue); color: #fff; }
+        /* Participant-nav named section (e.g. the speaker "Speaker" group): a
+           native <details>/<summary> disclosure inside the primary bar so the
+           long speaker nav is grouped, not one flat list. No JS, keyboard-
+           operable. On desktop the panel floats under the toggle (like the
+           organizer menu); on phone it flows inline full-width. */
+        details.nav-section { position: relative; display: inline-block; }
+        details.nav-section > summary {
+            list-style: none; cursor: pointer; user-select: none;
+            display: inline-flex; align-items: center; gap: 6px;
+            padding: 8px 14px; border-radius: 6px;
+            color: var(--el-darkblue); font-size: 14px; font-weight: 600;
+        }
+        details.nav-section > summary::-webkit-details-marker { display: none; }
+        details.nav-section > summary:hover { background: var(--el-grey); }
+        details.nav-section[open] > summary { background: var(--el-grey); }
+        .nav-section-caret { transition: transform .15s ease; font-size: 11px; opacity: .7; }
+        details.nav-section[open] .nav-section-caret { transform: rotate(180deg); }
+        .nav-section-items {
+            display: flex; flex-direction: column; gap: 2px;
+            position: absolute; left: 0; top: calc(100% + 4px); z-index: 50;
+            min-width: 220px; max-height: 70vh; overflow-y: auto;
+            background: #fff; border: 1px solid #c4c8d4; border-radius: 8px;
+            padding: 6px; box-shadow: 0 6px 18px rgba(0,0,0,.14);
+        }
+        .nav-section-items a {
+            display: block; padding: 8px 12px; border-radius: 6px;
+            text-decoration: none; color: var(--el-darkblue);
+            font-size: 14px; font-weight: 500; white-space: nowrap;
+        }
+        .nav-section-items a:hover { background: var(--el-grey); }
+        .nav-section-items a[aria-current="page"] { background: var(--el-darkblue); color: #fff; }
+        @@media (max-width: 700px) {
+            details.nav-section { display: block; }
+            details.nav-section > summary { display: flex; justify-content: space-between; }
+            .nav-section-items {
+                position: static; min-width: 0; width: 100%;
+                box-shadow: none; margin-top: 4px; max-height: none;
+            }
+        }
         /* Second-level management bar: a distinct strip below the participant
            nav so organizer tools read as a separate group, not mixed in. */
         nav.manage-bar {
@@ -249,6 +299,20 @@
             box-shadow: 0 1px 3px rgba(0,0,0,.08);
         }
         .card h2 { margin-top: 0; font-size: 22px; font-weight: 700; color: var(--el-darkblue); }
+        /* Shared organizer hub button-grid (operator 2026-06-21): the hub landing
+           pages fan out to their feature pages as a responsive grid of link-tiles,
+           replacing the old one-per-feature card stacks. One definition, every hub. */
+        .hub-grid { display: grid; grid-template-columns: 1fr; gap: 12px; margin: 4px 0 8px; }
+        @@media (min-width: 560px) { .hub-grid { grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); } }
+        a.hub-tile { display: flex; flex-direction: column; text-decoration: none; color: inherit;
+            border: 1px solid #e6e8ee; background: #f7f8fa; border-radius: 10px; padding: 14px 16px;
+            transition: box-shadow .12s ease, transform .12s ease, border-color .12s ease; }
+        a.hub-tile:hover, a.hub-tile:focus-visible {
+            box-shadow: 0 2px 10px rgba(0,0,0,.12); transform: translateY(-1px);
+            border-color: var(--el-blue, #008BD2); outline: none; }
+        a.hub-tile .hub-tile-title { font-size: 15.5px; font-weight: 700; color: var(--el-darkblue, #1D3380); }
+        a.hub-tile .hub-tile-desc { font-size: 12.5px; color: #4b5563; margin-top: 4px; line-height: 1.4; }
+        a.hub-tile .hub-tile-go { font-size: 12px; font-weight: 600; color: var(--el-blue, #008BD2); margin-top: 10px; }
         .info { color: #0a6; }
         .error { color: #c0392b; }
         button, input[type=submit] {
@@ -341,13 +405,18 @@
               asp-validation-summary) which emit .field-validation-error /
               .input-validation-error, and with manual .ceh-field-error spans. */
         .ceh-field-error,
-        .field-validation-error,
-        span.field-validation-valid { display: block; }
-        .ceh-field-error,
         .field-validation-error {
+            display: block;
             color: #8a1f28; font-size: 13px; font-weight: 600;
             margin: -8px 0 12px;
         }
+        /* Show a field-error span ONLY when it actually carries an error. The static
+           .ceh-field-error class is present on every field, so without this a fresh
+           form rendered a stray "⚠" + reserved space under every input. MVC marks a
+           valid span .field-validation-valid (and leaves it empty); a manual
+           .ceh-field-error with no message is :empty -- hide both. */
+        .ceh-field-error:empty,
+        span.field-validation-valid { display: none; }
         .ceh-field-error::before,
         .field-validation-error::before { content: "⚠ "; }
         /* Red outline on the offending input (tag-helper adds the class). */
@@ -363,7 +432,12 @@
         }
         .ceh-validation-summary ul { margin: 6px 0 0; padding-left: 20px; }
         .ceh-validation-summary p { margin: 0; font-weight: 700; }
-        .ceh-validation-summary:empty { display: none; }
+        /* Hide the summary when there is NOTHING to show. :empty alone is not enough --
+           asp-validation-summary renders an empty inner <ul> when valid, so the div is
+           never truly :empty and the red bar showed on a fresh form. MVC adds
+           .validation-summary-valid when there are no errors -- key off that. */
+        .ceh-validation-summary:empty,
+        .ceh-validation-summary.validation-summary-valid { display: none; }
 
         /* 3. Confirmation modal — accessible dialog for destructive/bulk/send
               actions. Centred overlay, scrolls on small screens, focus-trapped
@@ -374,6 +448,18 @@
             padding: 16px; z-index: 2000;
         }
         .ceh-modal-backdrop[data-open] { display: flex; }
+
+        /* Page-level confirm/bulk dialogs (Participants grid etc.) mark their
+           fixed-position backdrop with .modal-backdrop and toggle the [hidden]
+           attribute to open/close. Those backdrops carry an inline display:flex,
+           which on its own OVERRIDES the UA [hidden]{display:none} rule — so a
+           "closed" backdrop stayed display:flex over the whole viewport and
+           swallowed clicks behind it (it intercepted "Switch to user" on the
+           ~360px iPhone SE layout). Force a hidden backdrop fully inert here so
+           the fix is GLOBAL to every .modal-backdrop, not per-modal: !important
+           beats the inline display, and pointer-events:none is a belt-and-braces
+           guard. Desktop is unaffected — an OPEN modal has [hidden] removed. */
+        .modal-backdrop[hidden] { display: none !important; pointer-events: none; }
         .ceh-modal {
             background: #fff; border-radius: 12px; max-width: 460px; width: 100%;
             max-height: calc(100vh - 32px); overflow-y: auto;
@@ -395,6 +481,76 @@
         @@media (max-width: 480px) {
             .ceh-modal__actions { flex-direction: column-reverse; }
             .ceh-modal__actions button { width: 100%; }
+        }
+        /* ---- Micro-polish (REQUIREMENTS §21 Participant [L]) -----------------
+           Live character counter shown under a maxlength field; the "near limit"
+           state warns before the cap is hit. A copy button's transient "copied"
+           confirmation. A form whose submit is in flight dims + shows it is busy.
+           Mobile-first: the counter is a small, wrapping block under the field. */
+        .ceh-counter {
+            display: block; margin-top: 4px; font-size: 12px; color: #6b7280;
+            text-align: right;
+        }
+        .ceh-counter--near { color: #b45309; font-weight: 600; }
+        .ceh-copied { color: #15803d; font-weight: 600; }
+        form.ceh-submitting { opacity: .7; }
+        button.ceh-busy, input.ceh-busy { cursor: progress; }
+
+        /* ---- Breadcrumb (REQUIREMENTS §21 cross-cutting) --------------------
+           The organizer back-office ancestor trail (Organizer area / Hub /
+           Page). Sits at the top of the content area. Mobile-first: the list
+           wraps at ~360px and the links keep a comfortable tap target. */
+        .ceh-breadcrumb { margin: 0 0 14px; font-size: 13.5px; }
+        .ceh-breadcrumb ol {
+            list-style: none; margin: 0; padding: 0;
+            display: flex; flex-wrap: wrap; align-items: center; gap: 2px 0;
+        }
+        .ceh-breadcrumb li { display: inline-flex; align-items: center; }
+        .ceh-breadcrumb a {
+            display: inline-block; padding: 3px 6px; border-radius: 5px;
+            text-decoration: none; color: var(--el-blue);
+        }
+        .ceh-breadcrumb a:hover { background: #fff; color: var(--el-darkblue); }
+        .ceh-breadcrumb__sep { color: #9aa0b0; padding: 0 4px; }
+        .ceh-breadcrumb [aria-current="page"] {
+            color: #4b5161; font-weight: 600; padding: 3px 6px;
+        }
+
+        /* ---- Grid loading skeleton (REQUIREMENTS §21 cross-cutting) ----------
+           Async loading/skeleton states for the data-heavy organizer grids. When
+           a grid's filter form submits, or a sort/page link inside the grid is
+           followed, the whole-page GET takes a moment to come back. While that
+           navigation is in flight the grid is given data-ceh-grid-busy: it dims
+           the stale rows and lays an animated shimmer "skeleton" over them so the
+           portal never looks frozen. Pure progressive enhancement — with JS off
+           the page just navigates as before. Mobile-first: the overlay tracks the
+           grid wrapper at any width and the shimmer bars are fluid. */
+        .ceh-grid { position: relative; }
+        .ceh-grid[data-ceh-grid-busy] > * { opacity: .45; transition: opacity .15s ease; }
+        .ceh-grid__skeleton {
+            position: absolute; inset: 0; display: none;
+            padding: 8px; box-sizing: border-box;
+            background: rgba(255, 255, 255, .55);
+            z-index: 2; pointer-events: none;
+        }
+        .ceh-grid[data-ceh-grid-busy] .ceh-grid__skeleton { display: block; }
+        .ceh-grid__bar {
+            height: 18px; margin: 0 0 12px; border-radius: 6px;
+            background: linear-gradient(90deg, #e9ecf2 25%, #f4f6fa 37%, #e9ecf2 63%);
+            background-size: 400% 100%;
+            animation: ceh-shimmer 1.2s ease-in-out infinite;
+        }
+        .ceh-grid__bar:nth-child(odd) { width: 92%; }
+        .ceh-grid__bar:nth-child(even) { width: 74%; }
+        @@keyframes ceh-shimmer {
+            0% { background-position: 100% 0; }
+            100% { background-position: 0 0; }
+        }
+        /* Respect a reduced-motion preference: keep the dim + overlay (the "busy"
+           signal) but drop the shimmer animation entirely. */
+        @@media (prefers-reduced-motion: reduce) {
+            .ceh-grid__bar { animation: none; background: #e9ecf2; }
+            .ceh-grid[data-ceh-grid-busy] > * { transition: none; }
         }
     </style>
     <!-- Danish-locale date picker (Monday-first, dd/mm/yyyy).
@@ -425,9 +581,28 @@
 <body>
     <a class="skip-link" href="#main">@Localizer["Layout.SkipToContent"]</a>
     <div class="topbar">
-        <span class="ticket-info">@Localizer["Layout.TicketInfo"]</span>
+        @* Ticket banner: config-driven (event.<edition>.json -> ticketSale).
+           - Suppressed  => render nothing (sale open + afterOpen=hide).
+           - Visible+Href => a link to the public ticket page (sale open).
+           - Visible      => plain config text (before the sale opens).
+           - otherwise    => the static resx literal (config absent/disabled). *@
+        @if (ticketBanner.Suppressed)
+        {
+            // Intentionally empty — only the event-site button shows.
+        }
+        else if (ticketBanner.Visible && !string.IsNullOrEmpty(ticketBanner.Href))
+        {
+            <a class="ticket-info" href="@ticketBanner.Href" target="_blank" rel="noopener">@ticketBanner.Message &rarr;<span class="visually-hidden">@Localizer["Common.OpensNewTab"]</span></a>
+        }
+        else if (ticketBanner.Visible)
+        {
+            <span class="ticket-info">@ticketBanner.Message</span>
+        }
+        else
+        {
+            <span class="ticket-info">@Localizer["Layout.TicketInfo"]</span>
+        }
         <a class="eventsite-btn" href="https://eldk27.expertslive.dk/" target="_blank" rel="noopener">@Localizer["Layout.VisitEventSite"] &rarr;<span class="visually-hidden">@Localizer["Common.OpensNewTab"]</span></a>
-        @* Language switcher removed — the hub is English-only. *@
     </div>
     <header>
         <a class="brand" href="/" aria-label="@communityName">
@@ -471,6 +646,10 @@
                 ? Localizer[item.LabelKey]
                 : new Microsoft.AspNetCore.Html.HtmlString(
                       System.Net.WebUtility.HtmlEncode(item.FallbackLabel ?? item.Href));
+        // Standalone pages (sign-in, magic-link, survey, etc.) opt OUT of the public
+        // event nav bar via ViewData["HidePublicNav"]=true — that nav is for the public
+        // SITE sections and does not belong on a bare auth/form page.
+        var hidePublicNav = ViewData["HidePublicNav"] as bool? ?? false;
     }
     @if (isLoggedIn)
     {
@@ -480,13 +659,50 @@
                 ONLY for an Organizer, so a non-organizer never receives the
                 management links at all (server-side gate, not a CSS hide).
            NavBuilder is unit-tested (NavBuilderTests). *@
-        var nav = NavBuilder.Build(role!.Value);
+        // Show the volunteer "Supervisor" dashboard item only to real supervisors
+        // (a cheap indexed check, run for volunteers only).
+        var isVolunteerSupervisor = false;
+        if (role == CommunityHub.Core.Domain.ParticipantRole.Volunteer && me is not null)
+        {
+            isVolunteerSupervisor = await VolunteerStructure.IsSupervisorAsync(me.EventId, me.ParticipantId);
+        }
+        var nav = NavBuilder.Build(role!.Value, isVolunteerSupervisor);
         var participant = nav.Groups[0];
         var management = nav.ManagementGroup;
         <nav class="primary" aria-label="@Localizer["Nav.MyEvent"]">
-            @foreach (var item in participant.Items)
+            @* Render the participant group by SECTION (mirrors the management
+               bar). Items with no SectionKey collapse into the leading
+               null-heading bucket and render as plain links exactly as before —
+               so non-speaker roles are visually unchanged. Speaker-specific items
+               carry SectionKey "Nav.SectionSpeaker" (NavBuilder) and render under
+               a named, collapsible "Speaker" disclosure so the long speaker nav is
+               grouped, not one flat list. Pure IA; NavBuilder owns the grouping
+               and NavBuilderTests assert no route is dropped. *@
+            @foreach (var section in participant.Sections())
             {
-                <a href="@item.Href" aria-current="@ariaCurrent(item.Href)">@navLabel(item)</a>
+                if (section.HeadingKey is null)
+                {
+                    foreach (var item in section.Items)
+                    {
+                        <a href="@item.Href" target="@(item.External ? "_blank" : null)" rel="@(item.External ? "noopener noreferrer" : null)" aria-current="@ariaCurrent(item.Href)">@navLabel(item)@if (item.External) {<span class="visually-hidden">@Localizer["Common.OpensNewTab"]</span>}</a>
+                    }
+                }
+                else
+                {
+                    var sectionOpen = section.Items.Any(i => ariaCurrent(i.Href) == "page");
+                    <details class="nav-section" open="@(sectionOpen ? "open" : null)">
+                        <summary>
+                            <span class="nav-section-label">@Localizer[section.HeadingKey]</span>
+                            <span class="nav-section-caret" aria-hidden="true">&#9662;</span>
+                        </summary>
+                        <div class="nav-section-items">
+                            @foreach (var item in section.Items)
+                            {
+                                <a href="@item.Href" target="@(item.External ? "_blank" : null)" rel="@(item.External ? "noopener noreferrer" : null)" aria-current="@ariaCurrent(item.Href)">@navLabel(item)@if (item.External) {<span class="visually-hidden">@Localizer["Common.OpensNewTab"]</span>}</a>
+                            }
+                        </div>
+                    </details>
+                }
             }
         </nav>
         @if (management is not null)
@@ -529,8 +745,13 @@
                             }
                             else
                             {
-                                var sectionOpen = section.Items.Any(i => ariaCurrent(i.Href) == "page");
-                                <details class="org-section" open="@(sectionOpen ? "open" : null)">
+                                @* Render every section OPEN by default: opening the
+                                   "Organizer area" dropdown then showed each section
+                                   still collapsed, so reaching a link took TWO expands
+                                   (dropdown + section). Open sections mean one expand
+                                   reveals all links; the carets still collapse them.
+                                   (operator 2026-06-20) *@
+                                <details class="org-section" open="open">
                                     <summary>
                                         <span class="org-section-label">@Localizer[section.HeadingKey]</span>
                                         <span class="org-section-caret" aria-hidden="true">&#9662;</span>
@@ -549,15 +770,21 @@
             </nav>
         }
     }
-    else
+    else if (!hidePublicNav)
     {
-        @* Public nav for anonymous visitors — the sessions / speakers / sponsors
-           overviews are public, so they are reachable without signing in (next to the
-           Login entry already in the topbar). *@
+        @* Public nav for anonymous visitors — the public site sections are all
+           reachable without signing in (next to the Login entry in the topbar).
+           REQUIREMENTS §21: complete the public nav (Agenda + master classes +
+           Contributors) so no public page is an orphan. "Master classes" deep-links
+           to the Sessions list pre-filtered to the master-class type (a real,
+           URL-persisted filter — no separate index page needed). *@
         <nav class="primary" aria-label="@Localizer["Nav.Primary"]">
+            <a href="/Agenda" aria-current="@ariaCurrent("/Agenda")">@Localizer["Nav.Agenda"]</a>
             <a href="/Sessions" aria-current="@ariaCurrent("/Sessions")">@Localizer["Nav.Sessions"]</a>
+            <a href="/Sessions?FilterType=CommunityMasterClass">@Localizer["Nav.MasterClasses"]</a>
             <a href="/Speakers" aria-current="@ariaCurrent("/Speakers")">@Localizer["Nav.Speakers"]</a>
             <a href="/Sponsors" aria-current="@ariaCurrent("/Sponsors")">@Localizer["Nav.Sponsors"]</a>
+            <a href="/Contributors" aria-current="@ariaCurrent("/Contributors")">@Localizer["Nav.Contributors"]</a>
         </nav>
     }
     @if (me is not null && me.IsActingAs)
@@ -588,6 +815,10 @@
         </div>
     }
     <main id="main" tabindex="-1">
+        @* Organizer back-office breadcrumb trail (REQUIREMENTS §21). The partial
+           renders nothing for non-organizer / root / unknown paths, so it is safe
+           here for every page. *@
+        <partial name="_Breadcrumb" />
         @RenderBody()
     </main>
     <footer style="text-align:center;">
@@ -713,7 +944,180 @@
                 c.addEventListener('click', close);
             });
         });
+
+        // ---- 4. Copy-to-clipboard with transient confirmation ---------------
+        // A button with data-ceh-copy="<inputId>" copies that field's value and
+        // briefly swaps its label to the localized "copied" text (data-ceh-copied),
+        // announced via aria-live. Falls back to execCommand on old browsers; with
+        // JS off the field is still selectable, so this is pure enhancement.
+        document.querySelectorAll('[data-ceh-copy]').forEach(function (btn) {
+            var target = document.getElementById(btn.getAttribute('data-ceh-copy'));
+            if (!target) return;
+            var label = btn.getAttribute('data-ceh-copy-label') || btn.textContent;
+            var copied = btn.getAttribute('data-ceh-copied') || 'Copied!';
+            var reset = null;
+            btn.addEventListener('click', function () {
+                var done = function () {
+                    btn.textContent = copied;
+                    btn.classList.add('ceh-copied');
+                    btn.setAttribute('aria-live', 'polite');
+                    if (reset) clearTimeout(reset);
+                    reset = setTimeout(function () {
+                        btn.textContent = label;
+                        btn.classList.remove('ceh-copied');
+                    }, 1500);
+                };
+                var fail = function () { try { target.select(); document.execCommand('copy'); done(); } catch (e) { } };
+                try { target.select(); target.setSelectionRange && target.setSelectionRange(0, 99999); } catch (e) { }
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    navigator.clipboard.writeText(target.value).then(done, fail);
+                } else { fail(); }
+            });
+        });
+
+        // ---- 5. Live character counter for maxlength fields -----------------
+        // Any <textarea>/<input data-ceh-counter maxlength="N"> gets a live
+        // "used / N" counter rendered just after it, announced politely; it turns
+        // "near" amber inside the last 10% so a writer sees the cap approaching.
+        document.querySelectorAll('[data-ceh-counter][maxlength]').forEach(function (field) {
+            var max = parseInt(field.getAttribute('maxlength'), 10);
+            if (!(max > 0)) return;
+            var tmpl = field.getAttribute('data-ceh-counter') || '{0} / {1}';
+            var counter = document.createElement('span');
+            counter.className = 'ceh-counter';
+            counter.setAttribute('aria-live', 'polite');
+            counter.setAttribute('aria-atomic', 'true');
+            field.insertAdjacentElement('afterend', counter);
+            var render = function () {
+                var used = (field.value || '').length;
+                counter.textContent = tmpl.replace('{0}', used).replace('{1}', max);
+                if (used >= max * 0.9) counter.classList.add('ceh-counter--near');
+                else counter.classList.remove('ceh-counter--near');
+            };
+            field.addEventListener('input', render);
+            render();
+        });
+
+        // ---- 6. Submit loading state + double-click guard -------------------
+        // A <form data-ceh-loading> disables its submit control on the FIRST
+        // submit (so a double-click can't fire two posts) and shows a busy label
+        // (data-ceh-loading-text on the button) while the navigation is in flight.
+        // The form is allowed to submit normally; we only guard re-entry. If the
+        // form fails client validation (submit cancelled), the guard self-clears.
+        document.querySelectorAll('form[data-ceh-loading]').forEach(function (form) {
+            form.addEventListener('submit', function () {
+                // Let any other submit handler (validation) run + cancel first.
+                setTimeout(function () {
+                    if (form.dataset.cehSubmitted) return;
+                    form.dataset.cehSubmitted = '1';
+                    form.classList.add('ceh-submitting');
+                    var btn = form.querySelector('[type="submit"], button:not([type="button"])');
+                    if (btn) {
+                        var busy = btn.getAttribute('data-ceh-loading-text');
+                        if (busy) {
+                            if (btn.tagName === 'INPUT') btn.value = busy; else btn.textContent = busy;
+                        }
+                        btn.classList.add('ceh-busy');
+                        btn.setAttribute('aria-busy', 'true');
+                        // Re-enabling is avoided so a slow POST can't be re-fired;
+                        // a fresh page load resets everything.
+                        btn.disabled = true;
+                    }
+                }, 0);
+            });
+        });
+
+        // ---- 7. Unsaved-changes guard ---------------------------------------
+        // A <form data-ceh-dirty> warns (native beforeunload) if the user edits a
+        // field then tries to leave WITHOUT submitting. Submitting the form (or
+        // clicking a control that opts out via data-ceh-allow-leave) clears the
+        // guard so the post itself never trips the prompt.
+        document.querySelectorAll('form[data-ceh-dirty]').forEach(function (form) {
+            var dirty = false;
+            var clear = function () { dirty = false; };
+            form.addEventListener('input', function () { dirty = true; });
+            form.addEventListener('change', function () { dirty = true; });
+            form.addEventListener('submit', clear);
+            form.querySelectorAll('[data-ceh-allow-leave]').forEach(function (el) {
+                el.addEventListener('click', clear);
+            });
+            window.addEventListener('beforeunload', function (e) {
+                if (!dirty) return;
+                e.preventDefault();
+                e.returnValue = '';   // browsers show their own generic prompt
+                return '';
+            });
+        });
+
+        // ---- 8. Grid loading skeleton --------------------------------------
+        // A container marked data-ceh-grid shows an animated skeleton overlay
+        // while the next page of a data-heavy organizer grid is being fetched.
+        // The grids navigate with a full-page GET (filter form submit, or a
+        // sort/pagination link), so there is a perceptible wait the user gets no
+        // feedback for today. We hook those navigations and flip the grid into a
+        // busy state: the stale rows dim, the shimmer skeleton lays over them and
+        // an aria-live region announces it. A fresh page load clears everything,
+        // so there is nothing to reset. Pure enhancement (JS off => unchanged).
+        document.querySelectorAll('[data-ceh-grid]').forEach(function (grid) {
+            // Build the skeleton + live region once and keep them hidden until busy.
+            var loadingText = grid.getAttribute('data-ceh-grid-loading') || 'Loading…';
+            var skeleton = document.createElement('div');
+            skeleton.className = 'ceh-grid__skeleton';
+            skeleton.setAttribute('aria-hidden', 'true'); // decorative bars
+            for (var i = 0; i < 6; i++) {
+                var bar = document.createElement('div');
+                bar.className = 'ceh-grid__bar';
+                skeleton.appendChild(bar);
+            }
+            grid.appendChild(skeleton);
+
+            var live = document.createElement('span');
+            live.className = 'sr-only';
+            live.setAttribute('role', 'status');
+            live.setAttribute('aria-live', 'polite');
+            grid.appendChild(live);
+
+            var armed = false;
+            function setBusy() {
+                if (armed) return;       // one-shot per navigation
+                armed = true;
+                grid.setAttribute('data-ceh-grid-busy', '');
+                grid.setAttribute('aria-busy', 'true');
+                live.textContent = loadingText;
+            }
+
+            // a) the grid's own GET filter form (search / status / persona...).
+            var filterForm = grid.querySelector('form[method="get"]');
+            if (filterForm) filterForm.addEventListener('submit', function () { setTimeout(setBusy, 0); });
+
+            // b) sort-header + pagination links inside the grid. Skip in-page
+            //    anchors and anything that opts out (data-ceh-grid-skip), and
+            //    ignore modified clicks (new tab / download) so we never show a
+            //    skeleton for a navigation that isn't replacing this page.
+            grid.addEventListener('click', function (e) {
+                var a = e.target.closest && e.target.closest('a[href]');
+                if (!a || !grid.contains(a)) return;
+                if (a.hasAttribute('data-ceh-grid-skip')) return;
+                if (a.target === '_blank' || a.hasAttribute('download')) return;
+                if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+                var href = a.getAttribute('href') || '';
+                if (href === '' || href.charAt(0) === '#') return;
+                setBusy();
+            });
+        });
+
+        // The browser's bfcache can restore a busy grid when the user navigates
+        // back; clear the state on pageshow so it never sticks.
+        window.addEventListener('pageshow', function () {
+            document.querySelectorAll('[data-ceh-grid][data-ceh-grid-busy]').forEach(function (g) {
+                g.removeAttribute('data-ceh-grid-busy');
+                g.removeAttribute('aria-busy');
+            });
+        });
     })();
     </script>
+    @* Render any page-defined @@section Scripts. Without this, every page that defines one
+       (e.g. Organizer/Hotels) 500s on render: "section 'Scripts' has not been rendered". *@
+    @await RenderSectionAsync("Scripts", required: false)
 </body>
 </html>

@@ -1,0 +1,154 @@
+@page
+@model CommunityHub.Pages.Organizer.MasterClassesModel
+@{
+    ViewData["Title"] = "Master Classes";
+}
+
+@if (Model.AccessDenied)
+{
+    <div class="card">
+        <h2>@ViewData["Title"]</h2>
+        <p class="error" role="alert">@Localizer["Common.OrganizersOnly"]</p>
+        <p><a asp-page="/Index">@Localizer["Common.BackToHub"]</a></p>
+    </div>
+    return;
+}
+
+<style>
+    .mc-tbl { width:100%; border-collapse:collapse; font-size:13px; }
+    .mc-tbl th, .mc-tbl td { padding:6px 8px; border-bottom:1px solid #eef0f4; text-align:left; vertical-align:top; }
+    .mc-tbl input[type=number] { width:80px; padding:5px 7px; border:1px solid #cbd2d9; border-radius:6px; }
+    .lnk { font-size:11px; color:#5b636e; word-break:break-all; }
+</style>
+
+@if (!string.IsNullOrEmpty(Model.Message))
+{
+    <div class="card"><p role="status" style="color:#0a6;margin:0;">@Model.Message</p></div>
+}
+
+<div class="card">
+    <h1 style="margin-top:0;">@ViewData["Title"]</h1>
+    <p style="color:#6b7280;">In-hub Master Class signup + waitlist (CEH-owned). Set each class's seat
+       capacity; when full, further sign-ups are waitlisted and auto-promoted (FIFO) when a seat is given up.
+       The public self-service link is <code>/MyMasterClass?t=…</code> (per attendee).</p>
+    <p><a asp-page="/Organizer/Index">&larr; @Localizer["Common.BackToOrganizerArea"]</a></p>
+
+    <table class="mc-tbl">
+        <thead><tr><th>Master Class</th><th>Capacity</th><th>Seated</th><th>Waitlist</th><th></th></tr></thead>
+        <tbody>
+        @foreach (var m in Model.MasterClasses)
+        {
+            <tr>
+                <td>@m.Title</td>
+                <td>
+                    <form method="post" asp-page-handler="Capacity" style="display:flex;gap:6px;align-items:center;">
+                        <input type="hidden" name="session" value="@m.SessionId" />
+                        <input type="number" name="capacity" min="0" value="@(m.Capacity?.ToString() ?? "")" placeholder="none" />
+                        <button type="submit">Save</button>
+                    </form>
+                </td>
+                <td>@m.Confirmed@(m.Capacity is int c ? $"/{c}" : "")</td>
+                <td>@m.Waitlisted</td>
+                <td><a asp-page="/Organizer/MasterClasses" asp-route-session="@m.SessionId">View roster &rarr;</a></td>
+            </tr>
+        }
+        @if (Model.MasterClasses.Count == 0)
+        {
+            <tr><td colspan="5" style="color:#6b7280;">No Master Class sessions yet — create the standard set below, or import them.</td></tr>
+        }
+        </tbody>
+    </table>
+    <form method="post" asp-page-handler="Seed" style="margin-top:10px;">
+        <button type="submit">Create the 8 standard ELDK27 master classes</button>
+    </form>
+</div>
+
+<div class="card">
+    <h2 style="margin-top:0;">Master Class selection invites</h2>
+    <p style="color:#6b7280;">Email 2-day-ticket attendees the "Action required: choose your Master Class" invite
+       (secure self-service link, tracked per person). Waitlist rule: when a seat frees, the next person's
+       current Master Class is automatically cancelled and replaced by the waitlisted one (they accept this when
+       they join the waitlist).</p>
+    <p>
+        <strong>@Model.InviteEligible</strong> eligible (2-day) ·
+        <strong>@Model.InviteSent</strong> invited ·
+        <strong>@Model.InviteNotSent</strong> not yet invited
+    </p>
+    <form method="post" asp-page-handler="SendInvites" onsubmit="return confirm('Send the selection invite to all not-yet-invited 2-day attendees?');">
+        <button type="submit" @(Model.InviteNotSent == 0 ? "disabled" : "")>Send invites to @Model.InviteNotSent attendee(s)</button>
+    </form>
+</div>
+
+@if (Model.SelectedSession is not null)
+{
+    <div class="card">
+        <h2 style="margin-top:0;">Roster — @Model.SelectedTitle</h2>
+
+        @if (Model.Offered.Count > 0)
+        {
+            <h3>Held offers — pending decision (@Model.Offered.Count)</h3>
+            <table class="mc-tbl">
+                <thead><tr><th>Name</th><th>Email</th><th>Offered</th><th>Self-service link</th><th></th></tr></thead>
+                <tbody>
+                @foreach (var r in Model.Offered)
+                {
+                    <tr>
+                        <td>@r.Name</td><td>@r.Email</td><td style="white-space:nowrap;">@r.When.ToString("dd MMM, HH:mm")</td><td class="lnk">@r.SelfServiceUrl</td>
+                        <td>
+                            <form method="post" asp-page-handler="Remove" onsubmit="return confirm('Remove this held offer?');">
+                                <input type="hidden" name="session" value="@Model.SelectedSession" />
+                                <input type="hidden" name="attendeeId" value="@r.AttendeeId" />
+                                <button type="submit" class="give">Remove</button>
+                            </form>
+                        </td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+        }
+
+        <h3>Confirmed seats (@Model.Seated.Count)</h3>
+        <table class="mc-tbl">
+            <thead><tr><th>Name</th><th>Email</th><th>Signed up</th><th>Self-service link</th><th></th></tr></thead>
+            <tbody>
+            @foreach (var r in Model.Seated)
+            {
+                <tr>
+                    <td>@r.Name</td><td>@r.Email</td><td style="white-space:nowrap;">@r.When.ToString("dd MMM, HH:mm")</td><td class="lnk">@r.SelfServiceUrl</td>
+                    <td>
+                        <form method="post" asp-page-handler="Remove" onsubmit="return confirm('Remove this seat? The next waitlisted attendee will be promoted + emailed.');">
+                            <input type="hidden" name="session" value="@Model.SelectedSession" />
+                            <input type="hidden" name="attendeeId" value="@r.AttendeeId" />
+                            <button type="submit" class="give">Remove</button>
+                        </form>
+                    </td>
+                </tr>
+            }
+            @if (Model.Seated.Count == 0) { <tr><td colspan="5" style="color:#6b7280;">No confirmed seats.</td></tr> }
+            </tbody>
+        </table>
+
+        <h3 style="margin-top:18px;">Waitlist (@Model.Waitlist.Count) — in order</h3>
+        <table class="mc-tbl">
+            <thead><tr><th>#</th><th>Name</th><th>Email</th><th>Joined</th><th>Self-service link</th><th></th></tr></thead>
+            <tbody>
+            @{ var pos = 0; }
+            @foreach (var r in Model.Waitlist)
+            {
+                pos++;
+                <tr>
+                    <td>@pos</td><td>@r.Name</td><td>@r.Email</td><td style="white-space:nowrap;">@r.When.ToString("dd MMM, HH:mm")</td><td class="lnk">@r.SelfServiceUrl</td>
+                    <td>
+                        <form method="post" asp-page-handler="Remove" onsubmit="return confirm('Remove this waitlist entry?');">
+                            <input type="hidden" name="session" value="@Model.SelectedSession" />
+                            <input type="hidden" name="attendeeId" value="@r.AttendeeId" />
+                            <button type="submit" class="give">Remove</button>
+                        </form>
+                    </td>
+                </tr>
+            }
+            @if (Model.Waitlist.Count == 0) { <tr><td colspan="6" style="color:#6b7280;">Nobody waiting.</td></tr> }
+            </tbody>
+        </table>
+    </div>
+}

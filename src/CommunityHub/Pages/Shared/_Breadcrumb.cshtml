@@ -1,0 +1,49 @@
+@*
+    Shared BREADCRUMB — REQUIREMENTS §21 cross-cutting ("breadcrumbs").
+
+    Renders the organizer back-office ancestor trail for the current page —
+    e.g. "Organizer area  /  People  /  Participants" — so a deep feature page
+    (reached via a single collapsed nav dropdown) always shows where it sits and
+    gives a one-click way back to its hub and the organizer root.
+
+    Source of truth: the pure, unit-tested BreadcrumbBuilder (Core), which maps
+    the request path to its ANCESTOR crumbs (root ▸ hub). The current page is NOT
+    in that list — this partial appends ViewData["Title"] as the non-linked,
+    aria-current leaf, so the leaf always matches the page title already set and
+    no per-page wiring is needed.
+
+    Accessibility:
+      - <nav aria-label> + an ordered list (semantic trail order).
+      - the current page is aria-current="page" and not a link.
+      - the "/" separators are decorative (aria-hidden).
+    Mobile-first: the trail wraps at ~360px (flex-wrap) with small tap targets.
+
+    Renders nothing when there is no trail (non-organizer pages, the organizer
+    root itself, or an unknown path), so it is safe to include on every page.
+*@
+@using Microsoft.AspNetCore.Mvc.Localization
+@using CommunityHub.Core.Navigation
+@inject IHtmlLocalizer<CommunityHub.Core.Resources.SharedResource> Localizer
+@{
+    var path = Context.Request.Path.Value;
+    var trail = BreadcrumbBuilder.Build(path);
+    var leaf = ViewData["Title"] as string;
+}
+@if (trail.Count > 0)
+{
+    <nav class="ceh-breadcrumb" aria-label="@Localizer["Breadcrumb.Label"]">
+        <ol>
+            @foreach (var crumb in trail)
+            {
+                <li>
+                    <a href="@crumb.Href">@Localizer[crumb.LabelKey]</a>
+                    <span class="ceh-breadcrumb__sep" aria-hidden="true">/</span>
+                </li>
+            }
+            @if (!string.IsNullOrWhiteSpace(leaf))
+            {
+                <li><span aria-current="page">@leaf</span></li>
+            }
+        </ol>
+    </nav>
+}

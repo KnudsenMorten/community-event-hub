@@ -1,5 +1,6 @@
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
+using CommunityHub.Core.Settings;
 using Microsoft.EntityFrameworkCore;
 
 namespace CommunityHub.Core.Email;
@@ -47,15 +48,28 @@ public sealed class SpeakerQuestionDigestService
     private readonly CommunityHubDbContext _db;
     private readonly ParticipantEmailService _participantEmail;
     private readonly TimeProvider _clock;
+    private readonly FeatureGateService? _gate;
+    private readonly RingResolver? _rings;
+
+    /// <summary>The feature key whose released-to ring gates this per-speaker send (§23).</summary>
+    public const string FeatureKey = "digest-emails";
 
     public SpeakerQuestionDigestService(
         CommunityHubDbContext db,
         ParticipantEmailService participantEmail,
-        TimeProvider clock)
+        TimeProvider clock,
+        FeatureGateService? gate = null,
+        RingResolver? rings = null)
     {
         _db = db;
         _participantEmail = participantEmail;
         _clock = clock;
+        // Optional ring-aware gate (§23). When BOTH are supplied (production DI),
+        // a speaker only receives the digest when their effective ring ≤ the
+        // released-to ring of 'digest-emails'. Left null in focused unit tests, so
+        // the existing digest behaviour is unchanged (no ring filtering).
+        _gate = gate;
+        _rings = rings;
     }
 
     /// <summary>
@@ -137,6 +151,20 @@ public sealed class SpeakerQuestionDigestService
         var p = await _db.Participants
             .FirstOrDefaultAsync(x => x.Id == digest.ParticipantId && x.EventId == eventId, ct);
         if (p is null || string.IsNullOrWhiteSpace(p.Email)) return false;
+
+        // RING GATE (§23 progressive rollout): when the ring-aware gate is wired,
+        // a speaker only receives the digest when their EFFECTIVE ring is at or
+        // below the released-to ring of this feature. A speaker still in a later
+        // (higher) ring than the rollout has reached is skipped — the SAME rule the
+        // GUI applies, so the scheduler never mails out-of-ring recipients.
+        if (_gate is not null && _rings is not null)
+        {
+            var effectiveRing = await _rings.GetEffectiveRingAsync(p.Id, ct);
+            if (!await _gate.IsFeatureActiveForRingAsync(FeatureKey, eventId, effectiveRing, ct))
+            {
+                return false;
+            }
+        }
 
         var occasion = OccasionKey(digest.Fingerprint);
 

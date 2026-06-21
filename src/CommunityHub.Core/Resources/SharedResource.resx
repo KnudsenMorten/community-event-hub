@@ -80,10 +80,23 @@
   <data name="Action.ProvisionedNoUrl" xml:space="preserve"><value>Provisioning done at {0}.</value></data>
   <data name="Action.NoOp" xml:space="preserve"><value>Nothing was sent: {0}</value></data>
   <data name="Action.Failed" xml:space="preserve"><value>Action failed: {0}</value></data>
+  <data name="EmailLog.Resend.Sent" xml:space="preserve"><value>Re-sent '{0}' to {1}.</value></data>
+  <data name="EmailLog.Resend.NotFailed" xml:space="preserve"><value>that email already sent successfully — nothing to recover.</value></data>
+  <data name="EmailLog.Resend.NotResendable" xml:space="preserve"><value>that send has no template/person on record (e.g. a broadcast or sign-in code), so it cannot be re-sent from the log.</value></data>
+  <data name="EmailLog.Resend.ParticipantGone" xml:space="preserve"><value>that person is no longer in this edition.</value></data>
+  <data name="EmailLog.Resend.NotFound" xml:space="preserve"><value>that log entry was not found in this edition.</value></data>
+  <data name="EmailLog.Resend.Failed" xml:space="preserve"><value>{0}</value></data>
+  <data name="Leads.Contact.MailSubject" xml:space="preserve"><value>Following up from {0}</value></data>
+  <data name="Leads.Contact.Heading" xml:space="preserve"><value>Your leads — contact them now</value></data>
+  <data name="Leads.Contact.Intro" xml:space="preserve"><value>Every lead, inquiry and booth meeting captured for your company. You don't need the API or a script — tap a name to email or call them straight away.</value></data>
+  <data name="Leads.Contact.Empty" xml:space="preserve"><value>No leads captured for your company yet. They'll appear here as your booth staff capture them or as they sync in.</value></data>
+  <data name="Leads.Contact.Email" xml:space="preserve"><value>Email</value></data>
+  <data name="Leads.Contact.Call" xml:space="preserve"><value>Call</value></data>
+  <data name="Leads.Contact.NoContact" xml:space="preserve"><value>No email or phone on this lead.</value></data>
 
   <!-- Layout: topbar / footer / nav -->
   <data name="Layout.SkipToContent" xml:space="preserve"><value>Skip to main content</value></data>
-  <data name="Layout.TicketInfo" xml:space="preserve"><value>ELDK27 ticket sale starts 11 Aug 2028 at 08:00</value></data>
+  <data name="Layout.TicketInfo" xml:space="preserve"><value>ELDK27 ticket sale starts 11 Aug 2026 at 08:00 (Danish time)</value></data>
   <data name="Layout.VisitEventSite" xml:space="preserve"><value>Visit event site</value></data>
   <data name="Layout.FooterBuiltBy" xml:space="preserve"><value>Built as open-source by</value></data>
   <data name="Layout.FooterFree" xml:space="preserve"><value>free for any community to use.</value></data>
@@ -103,6 +116,9 @@
   <data name="Nav.MyProfile" xml:space="preserve"><value>My profile</value></data>
   <data name="Nav.Resources" xml:space="preserve"><value>Resources</value></data>
   <data name="Nav.Sessions" xml:space="preserve"><value>Sessions</value></data>
+  <data name="Nav.Agenda" xml:space="preserve"><value>Agenda</value></data>
+  <data name="Nav.MasterClasses" xml:space="preserve"><value>Master classes</value></data>
+  <data name="Nav.Contributors" xml:space="preserve"><value>Contributors</value></data>
   <data name="Nav.Hotel" xml:space="preserve"><value>Hotel</value></data>
   <data name="Nav.Dinner" xml:space="preserve"><value>Dinner</value></data>
   <data name="Nav.SpeakerHub" xml:space="preserve"><value>Speaker hub</value></data>
@@ -112,13 +128,43 @@
   <data name="Nav.Swag" xml:space="preserve"><value>Swag</value></data>
   <data name="Nav.VolunteerShifts" xml:space="preserve"><value>Volunteer shifts</value></data>
   <data name="Nav.MySchedule" xml:space="preserve"><value>My schedule</value></data>
+  <data name="Nav.MyAvailability" xml:space="preserve"><value>My availability</value></data>
   <data name="Nav.MyShifts" xml:space="preserve"><value>My shifts</value></data>
   <data name="Nav.MyAttendance" xml:space="preserve"><value>My attendance</value></data>
+  <data name="Nav.MyPlan" xml:space="preserve"><value>My plan</value></data>
   <data name="Nav.SponsorPortal" xml:space="preserve"><value>Sponsor portal</value></data>
   <data name="Nav.SponsorEngagement" xml:space="preserve"><value>Sponsor Engagement Details</value></data>
   <data name="Nav.SponsorTasks" xml:space="preserve"><value>Sponsor Tasks</value></data>
   <data name="Nav.Logistics" xml:space="preserve"><value>Logistics</value></data>
   <data name="Nav.Contact" xml:space="preserve"><value>Contact</value></data>
+  <data name="Nav.MasterClassBooking" xml:space="preserve"><value>Master-class booking</value></data>
+  <data name="Nav.MasterClass" xml:space="preserve"><value>Master Class</value></data>
+  <data name="Nav.Waitlist" xml:space="preserve"><value>Waitlist</value></data>
+  <data name="Nav.MySessions" xml:space="preserve"><value>My Sessions</value></data>
+  <data name="Nav.Bio" xml:space="preserve"><value>Bio</value></data>
+  <data name="Nav.Calendar" xml:space="preserve"><value>Calendar</value></data>
+  <data name="Nav.SectionEventLogistics" xml:space="preserve"><value>Event logistics</value></data>
+  <data name="Nav.SpeakerGift" xml:space="preserve"><value>Speaker Gift</value></data>
+  <data name="Nav.ImportantDates" xml:space="preserve"><value>Important dates / deadlines</value></data>
+  <data name="Nav.ContactOrganizers" xml:space="preserve"><value>Contact Organizers</value></data>
+  <data name="Nav.VolunteerGift" xml:space="preserve"><value>Volunteer Gift</value></data>
+  <data name="Nav.SectionSponsorWebshop" xml:space="preserve"><value>Sponsor Webshop</value></data>
+  <data name="Nav.SponsorBuyServices" xml:space="preserve"><value>Buy extra services &amp; furniture</value></data>
+  <data name="Nav.SponsorOrders" xml:space="preserve"><value>Sponsor orders</value></data>
+  <data name="Nav.SponsorLinkedContacts" xml:space="preserve"><value>Linked contacts</value></data>
+  <data name="Nav.SectionExhibitorBooth" xml:space="preserve"><value>Exhibitor &amp; Booth Details</value></data>
+  <data name="Nav.ExhibitorProfile" xml:space="preserve"><value>Exhibitor Profile</value></data>
+  <data name="Nav.BoothMembers" xml:space="preserve"><value>Booth Members</value></data>
+  <data name="Nav.ExhibitorMaterials" xml:space="preserve"><value>Exhibitor Materials</value></data>
+  <data name="Nav.PromotionalBanner" xml:space="preserve"><value>Exhibitor Promotional Banner</value></data>
+  <data name="Nav.SectionLeads" xml:space="preserve"><value>Leads</value></data>
+  <data name="Nav.LeadsZoho" xml:space="preserve"><value>Leads</value></data>
+  <data name="Nav.InquiriesZoho" xml:space="preserve"><value>Inquiries</value></data>
+  <data name="Nav.CaptureLeadFailover" xml:space="preserve"><value>Capture leads (failover)</value></data>
+  <data name="Nav.CaptureLead" xml:space="preserve"><value>Capture lead</value></data>
+  <data name="Nav.VolunteerMyTasks" xml:space="preserve"><value>My volunteer tasks</value></data>
+  <data name="Nav.VolunteerSupervisor" xml:space="preserve"><value>Supervisor</value></data>
+  <data name="Nav.SectionSpeaker" xml:space="preserve"><value>Speaker</value></data>
 
   <!-- Login / PIN -->
   <data name="Login.Title" xml:space="preserve"><value>Sign in</value></data>
@@ -136,6 +182,10 @@
   <data name="Login.SignInButton" xml:space="preserve"><value>Sign in</value></data>
   <data name="Login.SendNewCode" xml:space="preserve"><value>Send a new code</value></data>
   <data name="Login.GoToEmailPin" xml:space="preserve"><value>Go to email + PIN sign-in</value></data>
+  <data name="Login.MagicInvalid" xml:space="preserve"><value>This sign-in link is invalid or has expired. Request a fresh sign-in code below.</value></data>
+  <data name="Login.MagicInactive" xml:space="preserve"><value>This sign-in link is no longer valid because the account is inactive. Please contact the organizers.</value></data>
+  <data name="Login.RecoverHelp" xml:space="preserve"><value>No problem — we'll take you to sign in with your email and a one-time code.</value></data>
+  <data name="Login.RequestNewCode" xml:space="preserve"><value>Request a new sign-in code</value></data>
 
   <!-- Hub (Index) -->
   <data name="Hub.Welcome" xml:space="preserve"><value>Welcome, {0}</value></data>
@@ -198,6 +248,10 @@
   <data name="Speaker.AllMyTasks" xml:space="preserve"><value>All my tasks</value></data>
   <data name="Speaker.MySessions" xml:space="preserve"><value>My sessions</value></data>
   <data name="Speaker.MySessionsIntro" xml:space="preserve"><value>The sessions you're presenting — when and where, plus a link to the attendee questions for each.</value></data>
+  <data name="Speaker.SessionTemplate" xml:space="preserve"><value>Session template</value></data>
+  <data name="Speaker.SoMePromote" xml:space="preserve"><value>SoMe promote</value></data>
+  <data name="Speaker.CalendarSync" xml:space="preserve"><value>Calendar sync</value></data>
+  <data name="Speaker.EvaluationsDownload" xml:space="preserve"><value>Evaluations</value></data>
   <data name="Speaker.RatingsHeading" xml:space="preserve"><value>My session ratings</value></data>
   <data name="Speaker.RatingsIntro" xml:space="preserve"><value>See how attendees rated your sessions, with their anonymous comments.</value></data>
   <data name="Speaker.RatingsCta" xml:space="preserve"><value>View my session ratings</value></data>
@@ -206,6 +260,7 @@
   <data name="Speaker.RoomTbd" xml:space="preserve"><value>Room to be assigned</value></data>
   <data name="Speaker.WithCoSpeakers" xml:space="preserve"><value>With {0}</value></data>
   <data name="Speaker.ViewPublicSession" xml:space="preserve"><value>View public session page</value></data>
+  <data name="Speaker.SessionNotPublicYet" xml:space="preserve"><value>Public page not available yet</value></data>
   <data name="Speaker.AttendeeQuestions" xml:space="preserve"><value>Attendee questions</value></data>
   <data name="Speaker.PublicPreviewHeading" xml:space="preserve"><value>Your public profile</value></data>
   <data name="Speaker.PublicPreviewLive" xml:space="preserve"><value>Your profile is live on the public speaker line-up. Preview exactly how attendees see your bio and photo.</value></data>
@@ -219,6 +274,10 @@
   <data name="Common.Save" xml:space="preserve"><value>Save</value></data>
   <data name="Common.Next" xml:space="preserve"><value>Next</value></data>
   <data name="Common.Back" xml:space="preserve"><value>Back</value></data>
+  <!-- Micro-polish (REQUIREMENTS §21 Participant [L]): live char counter + busy submit label -->
+  <data name="Common.CharCount" xml:space="preserve"><value>{0} / {1} characters</value></data>
+  <data name="Common.Saving" xml:space="preserve"><value>Saving…</value></data>
+  <data name="Common.Sending" xml:space="preserve"><value>Sending…</value></data>
   <data name="Common.Yes" xml:space="preserve"><value>Yes</value></data>
   <data name="Common.No" xml:space="preserve"><value>No</value></data>
   <data name="Common.None" xml:space="preserve"><value>(none)</value></data>
@@ -253,6 +312,7 @@
   <data name="OrgGrid.BulkPickFirst" xml:space="preserve"><value>Pick at least one row first.</value></data>
   <data name="OrgGrid.Cancel" xml:space="preserve"><value>Cancel</value></data>
   <data name="OrgGrid.Continue" xml:space="preserve"><value>Continue</value></data>
+  <data name="OrgGrid.Loading" xml:space="preserve"><value>Loading…</value></data>
   <!-- Global "find a person" search (REQUIREMENTS §20 Organizer) -->
   <data name="Find.Title" xml:space="preserve"><value>Find a person</value></data>
   <data name="Find.Intro" xml:space="preserve"><value>Search every participant in this edition by name or email and jump straight to them.</value></data>
@@ -381,6 +441,7 @@
 
   <!-- Organizer-area nav entries -->
   <data name="Nav.OrgArea" xml:space="preserve"><value>Organizer area</value></data>
+  <data name="Breadcrumb.Label" xml:space="preserve"><value>Breadcrumb</value></data>
   <data name="Nav.OrgCommandCenter" xml:space="preserve"><value>Command center</value></data>
   <data name="Nav.OrgDashboard" xml:space="preserve"><value>Dashboard</value></data>
   <data name="Nav.OrgAttendees" xml:space="preserve"><value>Attendees</value></data>
@@ -446,6 +507,9 @@
   <data name="Hotel.Title" xml:space="preserve"><value>Hotel preference</value></data>
   <data name="Hotel.PolicyLead" xml:space="preserve"><value>Hotel policy:</value></data>
   <data name="Hotel.PolicyBody" xml:space="preserve"><value>we arrange and cover &lt;strong&gt;1 night&lt;/strong&gt; hotel for speakers checking in the day BEFORE the main conference day, and &lt;strong&gt;2 nights&lt;/strong&gt; for master-class speakers and speakers running a workshop on the pre-day. Pick &lt;em&gt;Yes, I need a hotel room&lt;/em&gt; and your check-in / check-out dates, OR pick &lt;em&gt;No, I don't need a hotel&lt;/em&gt; — either is a valid completed answer.</value></data>
+  <data name="Hotel.PolicySpeaker" xml:space="preserve"><value>If you'd like a hotel, we'll arrange and cover it based on the response you provide in the hub form. We will cover &lt;strong&gt;two nights for masterclass speakers&lt;/strong&gt; and &lt;strong&gt;one night for technical session speakers (main day)&lt;/strong&gt;. If you'd like to stay longer, any extra nights would be at your own expense.</value></data>
+  <data name="Hotel.PolicyVolunteer" xml:space="preserve"><value>We will arrange and cover hotel, if you want it, based on your response in the hub form. Hotel coverage depends on the days where you have agreed to help us.</value></data>
+  <data name="Hotel.NotRelevant" xml:space="preserve"><value>Hotel isn't part of your participation — attendees and sponsors arrange their own accommodation.</value></data>
   <data name="Hotel.NeedsRoomLabel" xml:space="preserve"><value>Needs room:</value></data>
   <data name="Hotel.CheckInOut" xml:space="preserve"><value>Check-in: {0} · Check-out: {1}</value></data>
   <data name="Hotel.NeedRoomLegend" xml:space="preserve"><value>Do you need a hotel room?</value></data>
@@ -468,19 +532,19 @@
   <data name="Dinner.AllergyPlaceholder" xml:space="preserve"><value>e.g. shellfish, nuts, gluten, lactose</value></data>
   <data name="Dinner.CommentsLabel" xml:space="preserve"><value>Comments (late arrival, etc.)</value></data>
   <data name="Dinner.SaveRsvp" xml:space="preserve"><value>Save my RSVP</value></data>
-  <data name="Dinner.IcsNote" xml:space="preserve"><value>A calendar invitation (.ics) will be emailed to &lt;strong&gt;{0}&lt;/strong&gt; as soon as you save a YES RSVP.</value></data>
+  <data name="Dinner.IcsNote" xml:space="preserve"><value>A calendar invitation (.ics) will be emailed to &lt;strong&gt;{0}&lt;/strong&gt; as soon as you save YES.</value></data>
 
   <!-- Forms: Lunch -->
   <data name="Lunch.Title" xml:space="preserve"><value>Lunch logistics</value></data>
-  <data name="Lunch.AccessDenied" xml:space="preserve"><value>The lunch form is only for volunteers, speakers, master-class speakers and organizers. Your role ({0}) is not in the lunch headcount.</value></data>
+  <data name="Lunch.AccessDenied" xml:space="preserve"><value>The lunch form is only for volunteers, speakers, master-class speakers, organizers and media crew. Your role ({0}) is not in the lunch headcount.</value></data>
   <data name="Lunch.Intro" xml:space="preserve"><value>We need a headcount for the lunches on the days &lt;strong&gt;before&lt;/strong&gt; the main conference, so the venue can cater accordingly. Tick the days you'll be on site.</value></data>
   <data name="Lunch.WhichLegend" xml:space="preserve"><value>Which lunches will you join?</value></data>
   <data name="Lunch.SetupDay" xml:space="preserve"><value>Yes, I'll be there for lunch on {0}.</value></data>
   <data name="Lunch.PreDay" xml:space="preserve"><value>Yes, I'll be there for lunch on {0}.</value></data>
   <data name="Lunch.SetupVolNote" xml:space="preserve"><value>Setup day is volunteer- and organizer-only — that's why it's not on your form.</value></data>
-  <data name="Lunch.NotesLabel" xml:space="preserve"><value>Notes (allergies, late arrival, etc.)</value></data>
+  <data name="Lunch.NotesLabel" xml:space="preserve"><value>Comments</value></data>
   <data name="Lunch.Save" xml:space="preserve"><value>Save my lunch preferences</value></data>
-  <data name="Lunch.MainNote" xml:space="preserve"><value>The main-conference lunches are included in everyone's ticket and are NOT collected here.</value></data>
+  <data name="Lunch.MainNote" xml:space="preserve"><value>The lunch on &lt;strong&gt;{0}&lt;/strong&gt; (main day) will be booked for everyone.</value></data>
 
   <!-- Forms: Swag -->
   <data name="Swag.Title" xml:space="preserve"><value>Swag preferences</value></data>
@@ -588,6 +652,8 @@
   <data name="VolWiz.PreferredRoleLabel" xml:space="preserve"><value>Preferred role:</value></data>
   <data name="VolWiz.MaxHoursLabel" xml:space="preserve"><value>Max hours per day:</value></data>
   <data name="VolWiz.Confirm" xml:space="preserve"><value>Confirm &amp; submit</value></data>
+  <data name="VolWiz.MaxHoursHint" xml:space="preserve"><value>Whole number between 1 and 24.</value></data>
+  <data name="VolWiz.ConfirmNoneHint" xml:space="preserve"><value>Select at least one shift to enable submit.</value></data>
 
   <!-- Sponsor: Capture a booth lead -->
   <data name="Lead.Title" xml:space="preserve"><value>Capture a booth lead</value></data>
@@ -674,6 +740,8 @@
   <!-- Sponsor: task row partial -->
   <data name="TaskRow.Done" xml:space="preserve"><value>done</value></data>
   <data name="TaskRow.Due" xml:space="preserve"><value>due {0}</value></data>
+  <data name="TaskRow.OverdueDays" xml:space="preserve"><value>{0} day(s)</value></data>
+  <data name="TaskRow.WasDue" xml:space="preserve"><value>was due {0}</value></data>
   <data name="TaskRow.CompanyDesc" xml:space="preserve"><value>Company description (max {0} chars)</value></data>
   <data name="TaskRow.ShortDesc" xml:space="preserve"><value>Short description (max {0} chars)</value></data>
   <data name="TaskRow.SocialIntro" xml:space="preserve"><value>Social-media company intro (max {0} chars — bullets fine)</value></data>
@@ -721,6 +789,7 @@
   <data name="Survey.NextBtn" xml:space="preserve"><value>Next →</value></data>
   <data name="Survey.SubmitBtn" xml:space="preserve"><value>Send my input</value></data>
   <data name="Survey.HoneypotLabel" xml:space="preserve"><value>Website (do not fill)</value></data>
+  <data name="Survey.NoScriptNotice" xml:space="preserve"><value>This survey works best with JavaScript enabled, which guides you step by step. JavaScript appears to be turned off, so the whole survey is shown below as a single form — please fill in every section (track, your three topics with their levels) and use “Send my input” at the bottom. To get the guided experience instead, enable JavaScript in your browser settings and reload this page.</value></data>
   <data name="Survey.JsPickMore" xml:space="preserve"><value>Pick {0} more to continue.</value></data>
   <data name="Survey.JsAllRanked" xml:space="preserve"><value>All three picks ranked. Tap "Next" to choose levels.</value></data>
   <data name="Survey.JsRank1" xml:space="preserve"><value>My 1st pick</value></data>
@@ -730,6 +799,46 @@
   <data name="Survey.JsExpert" xml:space="preserve"><value>Expert (400)</value></data>
   <data name="Survey.JsBlackBelt" xml:space="preserve"><value>Black Belt (500)</value></data>
   <data name="Survey.JsUnknown" xml:space="preserve"><value>(unknown)</value></data>
+  <data name="Survey.ClosedTitle" xml:space="preserve"><value>This survey is closed</value></data>
+  <data name="Survey.ClosedBody" xml:space="preserve"><value>Thanks for your interest — this survey is no longer accepting responses. You can still view the results so far.</value></data>
+  <!-- Survey wizard server-side validation messages (mirrors the JS guards). -->
+  <data name="Survey.ValTrack" xml:space="preserve"><value>Pick a track in step 1 before submitting.</value></data>
+  <data name="Survey.ValRankThree" xml:space="preserve"><value>Rank three different topics in step 2 before submitting.</value></data>
+  <data name="Survey.ValPicksDistinct" xml:space="preserve"><value>Your three picks must all be different topics.</value></data>
+  <data name="Survey.ValTopicNotInTrack" xml:space="preserve"><value>One of your picks is not a topic in the selected track.</value></data>
+  <data name="Survey.ValLevel" xml:space="preserve"><value>Pick a level (Advanced / Expert / Black Belt) for each of your three picks.</value></data>
+  <data name="Survey.ValSaveFailed" xml:space="preserve"><value>We hit a problem saving your response. Please try again in a moment.</value></data>
+
+  <!-- Organizer: survey management -->
+  <data name="Nav.OrgSurveys" xml:space="preserve"><value>Surveys</value></data>
+  <data name="OrgContent.Surveys" xml:space="preserve"><value>List your surveys, share their links, open or close submissions, view results, and reset responses before a fresh send-out.</value></data>
+  <data name="OrgSurveys.Title" xml:space="preserve"><value>Surveys</value></data>
+  <data name="OrgSurveys.Intro" xml:space="preserve"><value>Manage every survey: copy its public links, open or close submissions, see the results, and reset responses before sending it out.</value></data>
+  <data name="OrgSurveys.NoneTitle" xml:space="preserve"><value>No surveys defined</value></data>
+  <data name="OrgSurveys.NoneBody" xml:space="preserve"><value>Surveys are defined as files under App_Data/Surveys/. Add one and it will appear here.</value></data>
+  <data name="OrgSurveys.ResponseCount" xml:space="preserve"><value>{0} responses</value></data>
+  <data name="OrgSurveys.StatusOpen" xml:space="preserve"><value>Open</value></data>
+  <data name="OrgSurveys.StatusClosed" xml:space="preserve"><value>Closed</value></data>
+  <data name="OrgSurveys.SubmitLink" xml:space="preserve"><value>Public survey link (to share)</value></data>
+  <data name="OrgSurveys.ResultsLink" xml:space="preserve"><value>Public results link (to share)</value></data>
+  <data name="OrgSurveys.Copy" xml:space="preserve"><value>Copy</value></data>
+  <data name="OrgSurveys.Copied" xml:space="preserve"><value>Copied!</value></data>
+  <data name="OrgSurveys.CopySubmitAria" xml:space="preserve"><value>Copy the public survey link to the clipboard</value></data>
+  <data name="OrgSurveys.CopyResultsAria" xml:space="preserve"><value>Copy the public results link to the clipboard</value></data>
+  <data name="OrgSurveys.Activate" xml:space="preserve"><value>Activate</value></data>
+  <data name="OrgSurveys.Close" xml:space="preserve"><value>Close</value></data>
+  <data name="OrgSurveys.ViewResults" xml:space="preserve"><value>View results here</value></data>
+  <data name="OrgSurveys.OpenPublicResults" xml:space="preserve"><value>Open public results</value></data>
+  <data name="OrgSurveys.ResetSummary" xml:space="preserve"><value>Reset responses (delete all)</value></data>
+  <data name="OrgSurveys.ResetHint" xml:space="preserve"><value>This permanently deletes every response for “{0}”. There is no undo. Use it to start fresh before sending the survey out.</value></data>
+  <data name="OrgSurveys.ResetConfirmLabel" xml:space="preserve"><value>Type “{0}” to confirm</value></data>
+  <data name="OrgSurveys.ResetButton" xml:space="preserve"><value>Delete all responses</value></data>
+  <data name="OrgSurveys.InlineResultsTitle" xml:space="preserve"><value>Results: {0}</value></data>
+  <data name="OrgSurveys.ColTrack" xml:space="preserve"><value>Track</value></data>
+  <data name="OrgSurveys.ColResponses" xml:space="preserve"><value>Responses</value></data>
+  <data name="OrgSurveys.ColTopic" xml:space="preserve"><value>Topic</value></data>
+  <data name="OrgSurveys.ColPicks" xml:space="preserve"><value>Picks</value></data>
+  <data name="OrgSurveys.ColScore" xml:space="preserve"><value>Score</value></data>
 
   <!-- Survey: results -->
   <data name="Results.LiveResults" xml:space="preserve"><value>{0} — live results</value></data>
@@ -740,6 +849,7 @@
   <data name="Results.MostPickedTrack" xml:space="preserve"><value>Most-picked track</value></data>
   <data name="Results.NResponses" xml:space="preserve"><value>{0} responses</value></data>
   <data name="Results.LatestResponse" xml:space="preserve"><value>Latest response</value></data>
+  <data name="Results.NoResponsesHeadline" xml:space="preserve"><value>No responses yet</value></data>
   <data name="Results.NoResponsesYet" xml:space="preserve"><value>No responses yet. Be the first —</value></data>
   <data name="Results.OpenSurvey" xml:space="preserve"><value>open the survey</value></data>
   <data name="Results.ShareSurvey" xml:space="preserve"><value>Share the survey:</value></data>
@@ -885,6 +995,8 @@
 
   <!-- Public landing page (anonymous "/" front door) -->
   <data name="Landing.Blurb" xml:space="preserve"><value>The community event for IT professionals — sessions, master classes and a great line-up of speakers. Browse the programme below, no sign-in needed.</value></data>
+  <data name="Landing.SignIn" xml:space="preserve"><value>Sign in to Event Hub</value></data>
+  <data name="Landing.TicketsProgram" xml:space="preserve"><value>Sign-in to Zoho Backstage (event system)</value></data>
   <data name="Landing.SessionsBlurb" xml:space="preserve"><value>Browse the full session programme — filter by type, length and room.</value></data>
   <data name="Landing.SpeakersBlurb" xml:space="preserve"><value>Meet this year's speakers and see what they're presenting.</value></data>
   <data name="Landing.SponsorsBlurb" xml:space="preserve"><value>The organisations that make this event possible.</value></data>
@@ -914,6 +1026,7 @@
   <data name="Nav.OrgSponsorsHub" xml:space="preserve"><value>Sponsors</value></data>
   <data name="Nav.OrgVolunteers" xml:space="preserve"><value>Volunteers</value></data>
   <data name="Nav.OrgLogistics" xml:space="preserve"><value>Logistics</value></data>
+  <data name="Nav.OrgSchedule" xml:space="preserve"><value>Schedule / key dates</value></data>
   <data name="Nav.OrgSoMe" xml:space="preserve"><value>Marketing / SoMe</value></data>
   <data name="Nav.OrgSetup" xml:space="preserve"><value>Setup</value></data>
   <data name="Nav.OrgCalendarSettings" xml:space="preserve"><value>Calendar sync</value></data>
@@ -924,6 +1037,9 @@
   <data name="Nav.OrgSectionSponsors" xml:space="preserve"><value>Sponsors</value></data>
   <data name="Nav.OrgSectionVolunteers" xml:space="preserve"><value>Volunteers</value></data>
   <data name="Nav.OrgSectionLogistics" xml:space="preserve"><value>Logistics</value></data>
+  <data name="Nav.OrgSectionSetup" xml:space="preserve"><value>Setup &amp; audit</value></data>
+  <data name="Nav.SponsorEventLogistics" xml:space="preserve"><value>Event logistics</value></data>
+  <data name="Nav.SponsorLeadsExport" xml:space="preserve"><value>My leads (export)</value></data>
   <data name="OrgArea.Title" xml:space="preserve"><value>Organizer area</value></data>
   <data name="OrgArea.Intro" xml:space="preserve"><value>Everything for running the event, grouped into hubs. Pick an area to drill in.</value></data>
   <data name="OrgArea.Dashboard" xml:space="preserve"><value>Live snapshot: form completion, task status, sponsor progress, attendee reconciliation, volunteer coverage, plus the cross-role event overview.</value></data>
@@ -980,6 +1096,114 @@
   <data name="OrgSetup.Calendar" xml:space="preserve"><value>Let participants subscribe their deadlines, shifts and tasks to their own calendar, and attach an .ics invite to activation emails.</value></data>
   <data name="OrgSetup.Sessionize" xml:space="preserve"><value>Set or change the Sessionize endpoint used to import speakers and sessions.</value></data>
   <data name="OrgSetup.SoMe" xml:space="preserve"><value>Configure the social-media channels and posting defaults.</value></data>
+  <!-- Feature customization & controlled rollout (§23) -->
+  <data name="Nav.OrgSettings" xml:space="preserve"><value>Feature settings</value></data>
+  <data name="OrgSetup.Settings" xml:space="preserve"><value>Turn the optional integrations and automation on or off for this edition, and control all outbound email.</value></data>
+  <data name="Settings.Title" xml:space="preserve"><value>Feature settings</value></data>
+  <data name="Settings.Intro" xml:space="preserve"><value>The core hub — sign-in, search, viewing and editing, the public pages — is always on. Everything below is optional: turn each capability on only when you are ready, and test it before wider use. New capabilities start switched off.</value></data>
+  <data name="Settings.Saved" xml:space="preserve"><value>Settings saved.</value></data>
+  <data name="Settings.Enabled" xml:space="preserve"><value>Enabled</value></data>
+  <data name="Settings.Disabled" xml:space="preserve"><value>Disabled</value></data>
+  <data name="Settings.Enable" xml:space="preserve"><value>Enable</value></data>
+  <data name="Settings.Disable" xml:space="preserve"><value>Disable</value></data>
+  <data name="Settings.ToggleAria" xml:space="preserve"><value>Turn {0} on or off</value></data>
+  <data name="Settings.AdvancedTag" xml:space="preserve"><value>Optional</value></data>
+  <data name="Settings.DependsOn" xml:space="preserve"><value>Needs: {0}</value></data>
+  <data name="Settings.DependencyWarning" xml:space="preserve"><value>{0} is on but its prerequisite {1} is off, so it stays inert until you enable {1}.</value></data>
+  <data name="Settings.KillSwitchHeading" xml:space="preserve"><value>Outbound email</value></data>
+  <data name="Settings.KillSwitchHelp" xml:space="preserve"><value>The master switch for all email leaving the hub. Turn it off to instantly stop every send — sign-in codes, welcomes, reminders and digests — across the web app and the background jobs. Recipients are also limited by the safe-recipient allowlist; nothing is ever sent to people outside it.</value></data>
+  <data name="Settings.AllowlistLabel" xml:space="preserve"><value>Safe-recipient allowlist (read-only)</value></data>
+  <data name="Settings.AllowlistEmpty" xml:space="preserve"><value>No allowlist configured — every send is blocked (fail-closed).</value></data>
+  <data name="Settings.RedirectLabel" xml:space="preserve"><value>Redirect all mail to (test mode)</value></data>
+  <data name="Settings.RedirectNone" xml:space="preserve"><value>No redirect (mail goes to the real recipient, if allowed).</value></data>
+  <data name="Settings.KillSwitchConfig" xml:space="preserve"><value>The master email switch is currently forced OFF by the environment configuration. Nothing will send until that is changed.</value></data>
+  <!-- §23 release rings (progressive rollout) -->
+  <data name="Settings.ReleasedToRing" xml:space="preserve"><value>Released to ring</value></data>
+  <data name="Settings.ReleasedToRingAria" xml:space="preserve"><value>Choose the release ring for {0}</value></data>
+  <data name="Settings.SetRing" xml:space="preserve"><value>Set ring</value></data>
+  <data name="Settings.RingBadge" xml:space="preserve"><value>{0} — not yet Broad</value></data>
+  <data name="Settings.RingBadgeTitle" xml:space="preserve"><value>This feature is still in controlled rollout (not released to Broad/GA). Only participants at or below this ring see it — promote it up the rings as you test, then set it to Broad to release to everyone.</value></data>
+  <data name="Settings.Group.Incubation" xml:space="preserve"><value>Incubation (test)</value></data>
+  <data name="Settings.GroupRingBadge" xml:space="preserve"><value>group: {0}</value></data>
+  <data name="Settings.GroupRingBadgeTitle" xml:space="preserve"><value>This whole group is still in controlled rollout (not Broad/GA). Features in it that have no override inherit this ring.</value></data>
+  <data name="Settings.GroupRingLabel" xml:space="preserve"><value>Group lifecycle ring</value></data>
+  <data name="Settings.GroupRingAria" xml:space="preserve"><value>Choose the lifecycle ring for the {0} group</value></data>
+  <data name="Settings.SetGroupRing" xml:space="preserve"><value>Set group ring</value></data>
+  <data name="Settings.RingOverridden" xml:space="preserve"><value>Released to {0} (per-feature override)</value></data>
+  <data name="Settings.RingInherited" xml:space="preserve"><value>Released to {0} (inherited from group)</value></data>
+  <data name="Settings.OverrideRing" xml:space="preserve"><value>Override ring</value></data>
+  <data name="Settings.AdoptGroupRing" xml:space="preserve"><value>Adopt group ring ({0})</value></data>
+  <data name="Settings.MoveToGroup" xml:space="preserve"><value>Move to group</value></data>
+  <data name="Settings.MoveToGroupAria" xml:space="preserve"><value>Move {0} to another group</value></data>
+  <data name="Settings.Move" xml:space="preserve"><value>Move</value></data>
+  <data name="Settings.AssignRingsLink" xml:space="preserve"><value>Assign a ring per person or sponsor company</value></data>
+  <!-- Admin-editable config editor (Phase 2): scalar settings GUI -->
+  <data name="ConfigEditor.Title" xml:space="preserve"><value>Configuration</value></data>
+  <data name="ConfigEditor.Intro" xml:space="preserve"><value>Edit the per-edition configuration values for this event. Each setting shows its current effective value and whether you have changed it from the shipped default. Change a value and Save, or Reset a changed value back to the default. Changes take effect immediately — no redeploy.</value></data>
+  <data name="ConfigEditor.SecretsNote" xml:space="preserve"><value>Secrets (API keys, passwords, connection strings) are never editable here — they live securely in the key vault. Lists and email templates are edited elsewhere.</value></data>
+  <data name="ConfigEditor.Saved" xml:space="preserve"><value>Setting saved.</value></data>
+  <data name="ConfigEditor.ResetDone" xml:space="preserve"><value>Setting reset to the default.</value></data>
+  <data name="ConfigEditor.Overridden" xml:space="preserve"><value>Changed</value></data>
+  <data name="ConfigEditor.Default" xml:space="preserve"><value>Default</value></data>
+  <data name="ConfigEditor.Reset" xml:space="preserve"><value>Reset to default</value></data>
+  <data name="ConfigEditor.DefaultIs" xml:space="preserve"><value>Default: {0}</value></data>
+  <data name="ConfigEditor.NoScalars" xml:space="preserve"><value>No editable settings in this section yet.</value></data>
+  <data name="ConfigEditor.Section.Event" xml:space="preserve"><value>Event</value></data>
+  <data name="ConfigEditor.Section.Sponsor" xml:space="preserve"><value>Sponsor</value></data>
+  <data name="ConfigEditor.Section.Integrations" xml:space="preserve"><value>Integrations</value></data>
+  <data name="Rings.Title" xml:space="preserve"><value>Release rings</value></data>
+  <data name="Rings.Intro" xml:space="preserve"><value>Give a person or sponsor company an early-access ring (ring 0–3). Lower rings get features earlier: a feature released to ring 1, for example, is active for anyone in ring 0 or 1. Everyone starts in ring 3 (broad), so a fully-released feature reaches all. A sponsor contact's own ring overrides their company's default ring.</value></data>
+  <data name="Rings.Saved" xml:space="preserve"><value>Ring saved.</value></data>
+  <data name="Rings.BackToSettings" xml:space="preserve"><value>Back to feature settings</value></data>
+  <data name="Rings.SponsorCompanies" xml:space="preserve"><value>Sponsor companies (default ring for their contacts)</value></data>
+  <data name="Rings.SponsorContacts" xml:space="preserve"><value>Sponsor contacts</value></data>
+  <data name="Rings.Speakers" xml:space="preserve"><value>Speakers</value></data>
+  <data name="Rings.Volunteers" xml:space="preserve"><value>Volunteers</value></data>
+  <data name="Rings.Effective" xml:space="preserve"><value>effective</value></data>
+  <data name="Rings.Set" xml:space="preserve"><value>Set</value></data>
+  <data name="Rings.SelectAria" xml:space="preserve"><value>Choose the ring for {0}</value></data>
+  <data name="Rings.NoneInGroup" xml:space="preserve"><value>None yet.</value></data>
+  <!-- §23 feature group (chapter) headings -->
+  <data name="Settings.Group.Email" xml:space="preserve"><value>Email</value></data>
+  <data name="Settings.Group.SpeakersSessions" xml:space="preserve"><value>Speakers and sessions</value></data>
+  <data name="Settings.Group.Sponsors" xml:space="preserve"><value>Sponsors and exhibitors</value></data>
+  <data name="Settings.Group.SocialMedia" xml:space="preserve"><value>Social media</value></data>
+  <data name="Settings.Group.Surveys" xml:space="preserve"><value>Surveys</value></data>
+  <data name="Settings.Group.Reminders" xml:space="preserve"><value>Reminders and digests</value></data>
+  <data name="Settings.Group.Attendees" xml:space="preserve"><value>Attendees</value></data>
+  <!-- §23 per-feature names + descriptions -->
+  <data name="Settings.Feat.OutboundEmail.Name" xml:space="preserve"><value>Outbound email (master switch)</value></data>
+  <data name="Settings.Feat.OutboundEmail.Desc" xml:space="preserve"><value>The global on/off for all email leaving the hub. Off means no send of any kind, anywhere.</value></data>
+  <data name="Settings.Feat.WelcomeEmail.Name" xml:space="preserve"><value>Welcome emails</value></data>
+  <data name="Settings.Feat.WelcomeEmail.Desc" xml:space="preserve"><value>Send each person a branded welcome when they are activated.</value></data>
+  <data name="Settings.Feat.MagicLink.Name" xml:space="preserve"><value>One-click sign-in links</value></data>
+  <data name="Settings.Feat.MagicLink.Desc" xml:space="preserve"><value>Include a magic-link button that signs the recipient in automatically.</value></data>
+  <data name="Settings.Feat.Sessionize.Name" xml:space="preserve"><value>Sessionize import</value></data>
+  <data name="Settings.Feat.Sessionize.Desc" xml:space="preserve"><value>Import accepted speakers and sessions from your Sessionize endpoint.</value></data>
+  <data name="Settings.Feat.BackstageSync.Name" xml:space="preserve"><value>Backstage / Zoho exhibitor sync</value></data>
+  <data name="Settings.Feat.BackstageSync.Desc" xml:space="preserve"><value>Mirror sponsors and exhibitors into Zoho Backstage and notify the coordinator.</value></data>
+  <data name="Settings.Feat.EconomicErp.Name" xml:space="preserve"><value>e-conomic ERP sync</value></data>
+  <data name="Settings.Feat.EconomicErp.Desc" xml:space="preserve"><value>Create and reconcile sponsor customers and orders in the e-conomic accounting system.</value></data>
+  <data name="Settings.Feat.SoMe.Name" xml:space="preserve"><value>Social-media scheduling</value></data>
+  <data name="Settings.Feat.SoMe.Desc" xml:space="preserve"><value>Schedule and publish posts on a calendar across your social channels.</value></data>
+  <data name="Settings.Feat.LinkedIn.Name" xml:space="preserve"><value>LinkedIn company-page queue</value></data>
+  <data name="Settings.Feat.LinkedIn.Desc" xml:space="preserve"><value>Publish the scheduled posts to your LinkedIn company page, with a pre-alert before speaker posts.</value></data>
+  <data name="Settings.Feat.Surveys.Name" xml:space="preserve"><value>Surveys</value></data>
+  <data name="Settings.Feat.Surveys.Desc" xml:space="preserve"><value>Collect session evaluations and event-wide survey responses from attendees.</value></data>
+  <data name="Settings.Feat.ReminderJobs.Name" xml:space="preserve"><value>Reminder jobs</value></data>
+  <data name="Settings.Feat.ReminderJobs.Desc" xml:space="preserve"><value>Run the daily background job that seeds deadlines and reminds people of upcoming tasks.</value></data>
+  <data name="Settings.Feat.DigestEmails.Name" xml:space="preserve"><value>Digest emails</value></data>
+  <data name="Settings.Feat.DigestEmails.Desc" xml:space="preserve"><value>Email speakers and organizers periodic digests (open questions, re-opened steps).</value></data>
+  <data name="Settings.Feat.SponsorOrderPull.Name" xml:space="preserve"><value>Sponsor order pull</value></data>
+  <data name="Settings.Feat.SponsorOrderPull.Desc" xml:space="preserve"><value>Pull completed sponsor and exhibitor orders from the webshop and expand their onboarding tasks.</value></data>
+  <data name="Settings.Feat.SponsorLeads.Name" xml:space="preserve"><value>Sponsor leads pipeline</value></data>
+  <data name="Settings.Feat.SponsorLeads.Desc" xml:space="preserve"><value>Pull captured leads from the CRM and send each sponsor a delta digest of their new leads.</value></data>
+  <data name="Settings.Feat.SponsorUploadWatch.Name" xml:space="preserve"><value>Sponsor upload watcher</value></data>
+  <data name="Settings.Feat.SponsorUploadWatch.Desc" xml:space="preserve"><value>Watch each sponsor's upload folder and notify the team when a file is added or replaced.</value></data>
+  <data name="Settings.Feat.AttendeeReconcile.Name" xml:space="preserve"><value>Attendee reconciliation</value></data>
+  <data name="Settings.Feat.AttendeeReconcile.Desc" xml:space="preserve"><value>Reconcile tickets and master-class bookings and chase attendees about mismatches.</value></data>
+  <data name="Settings.Feat.AttendeeWelcome.Name" xml:space="preserve"><value>Attendee welcome &amp; auto sign-in</value></data>
+  <data name="Settings.Feat.AttendeeWelcome.Desc" xml:space="preserve"><value>Auto-create a hub account for each 2-day ticket holder and email them a one-click sign-in link. Sends real email to attendees — turn on deliberately.</value></data>
   <!-- Sessionize import dry-run / preview (§21) -->
   <data name="Sezimport.PreviewDelta" xml:space="preserve"><value>Preview delta</value></data>
   <data name="Sezimport.PreviewFull" xml:space="preserve"><value>Preview full import</value></data>
@@ -1017,6 +1241,9 @@
   <data name="MyEvent.Swag" xml:space="preserve"><value>Swag</value></data>
   <data name="MyEvent.Lunch" xml:space="preserve"><value>Lunch</value></data>
   <data name="MyEvent.FullAgenda" xml:space="preserve"><value>Full agenda</value></data>
+  <data name="MyEvent.MyPlan" xml:space="preserve"><value>My plan</value></data>
+  <data name="MyEvent.AskEvaluateNotOpen" xml:space="preserve"><value>Ask &amp; rate (opens at the session)</value></data>
+  <data name="MyEvent.AskEvaluateNotOpenHint" xml:space="preserve"><value>The "ask a question" and "rate this session" links become available during the session.</value></data>
   <!-- §21 Participant [H] forms-UX batch (2026-06-16): per-form validation + structured dietary capture -->
   <data name="Dinner.ErrPickRsvp" xml:space="preserve"><value>Please pick YES, NO or MAYBE so we know how many to plan for.</value></data>
   <data name="Dinner.AllergyExtraLabel" xml:space="preserve"><value>Anything else we should know about your food?</value></data>
@@ -1196,7 +1423,6 @@
   <data name="SpeakerEval.RatingAria" xml:space="preserve"><value>Rated {0} out of 5</value></data>
   <data name="SpeakerEval.NotASpeaker" xml:space="preserve"><value>This area is for speakers ({0}).</value></data>
   <data name="Agenda.Title" xml:space="preserve"><value>Agenda</value></data>
-  <data name="Agenda.NoEvent" xml:space="preserve"><value>There is no live event right now. Please check back soon.</value></data>
   <data name="Agenda.NothingScheduled" xml:space="preserve"><value>The running order is not published yet. Please check back closer to the event.</value></data>
   <data name="Agenda.ListView" xml:space="preserve"><value>See the full session list</value></data>
   <data name="Agenda.Summary" xml:space="preserve"><value>{0} talk(s) scheduled across {1} day(s).</value></data>
@@ -1206,4 +1432,141 @@
   <data name="Agenda.With" xml:space="preserve"><value>With</value></data>
   <data name="Landing.AgendaTitle" xml:space="preserve"><value>Agenda</value></data>
   <data name="Landing.AgendaBlurb" xml:space="preserve"><value>The full programme, day by day, in running order.</value></data>
+  <!-- Email center: test-send a rendered template to any address (REQUIREMENTS §21 organizer) -->
+  <data name="EmailCenter.TestToAddressLegend" xml:space="preserve"><value>Send a test copy to any address</value></data>
+  <data name="EmailCenter.TestToAddressHelp" xml:space="preserve"><value>Type any mailbox to check it really receives mail. If the address is not on the allowlist the hub tells you it was dropped instead of sending nowhere.</value></data>
+  <data name="EmailCenter.TestToAddressLabel" xml:space="preserve"><value>Test address</value></data>
+  <data name="EmailCenter.TestToAddressSend" xml:space="preserve"><value>Send a test copy there</value></data>
+  <!-- Attendee personal session plan ("My plan" — saved sessions). -->
+  <data name="Plan.Title" xml:space="preserve"><value>My plan</value></data>
+  <data name="Plan.Intro" xml:space="preserve"><value>Save the talks you want to attend and build your own running order. This is just your personal list — it does not book a seat.</value></data>
+  <data name="Plan.MyPlanHeading" xml:space="preserve"><value>Saved talks</value></data>
+  <data name="Plan.Empty" xml:space="preserve"><value>You haven't saved any talks yet. Browse the programme below and tap Save to add one.</value></data>
+  <data name="Plan.SavedCount" xml:space="preserve"><value>{0} talk(s) in your plan.</value></data>
+  <data name="Plan.BrowseHeading" xml:space="preserve"><value>Browse the programme</value></data>
+  <data name="Plan.BrowseHelp" xml:space="preserve"><value>Tap Save to add a talk to your plan, or Remove to take it out.</value></data>
+  <data name="Plan.NothingToBrowse" xml:space="preserve"><value>No talks have been published yet. Please check back closer to the event.</value></data>
+  <data name="Plan.Save" xml:space="preserve"><value>Save</value></data>
+  <data name="Plan.SaveAria" xml:space="preserve"><value>Save {0} to my plan</value></data>
+  <data name="Plan.Remove" xml:space="preserve"><value>Remove</value></data>
+  <data name="Plan.RemoveAria" xml:space="preserve"><value>Remove {0} from my plan</value></data>
+  <data name="Plan.SavedFlag" xml:space="preserve"><value>Saved</value></data>
+  <data name="Plan.Details" xml:space="preserve"><value>Details</value></data>
+  <data name="Plan.With" xml:space="preserve"><value>With</value></data>
+  <data name="Plan.RoomTag" xml:space="preserve"><value>Room {0}</value></data>
+  <data name="Plan.TimeTba" xml:space="preserve"><value>Time to be announced</value></data>
+  <data name="Plan.IcsHeading" xml:space="preserve"><value>Add my plan to my calendar</value></data>
+  <data name="Plan.IcsHelp" xml:space="preserve"><value>Download your saved talks as a calendar file and open it in Outlook, Google or Apple Calendar. Re-download any time — your calendar updates, it never duplicates.</value></data>
+  <data name="Plan.IcsDownload" xml:space="preserve"><value>Download calendar file (.ics)</value></data>
+  <data name="Plan.IcsDownloadAria" xml:space="preserve"><value>Download my saved talks as a calendar file</value></data>
+  <data name="Plan.IcsNoneScheduled" xml:space="preserve"><value>None of your saved talks has a confirmed time yet, so there is nothing to add to a calendar. Check back once the programme is scheduled.</value></data>
+  <!-- Hotel room-block size (organizer Hotels form + grid column). -->
+  <data name="OrgHotels.RoomBlockSize" xml:space="preserve"><value>Room block (rooms reserved)</value></data>
+  <data name="OrgHotels.RoomBlockSizeHelp" xml:space="preserve"><value>How many rooms you have held here. Leave blank if you haven't agreed a block yet.</value></data>
+  <data name="OrgHotels.RoomBlockColumn" xml:space="preserve"><value>Block</value></data>
+  <!-- Organizer hotel room-block occupancy view (REQUIREMENTS §3 / §20 Logistics). -->
+  <data name="RoomBlocks.Title" xml:space="preserve"><value>Room block occupancy</value></data>
+  <data name="RoomBlocks.Intro" xml:space="preserve"><value>For each hotel, see the rooms you reserved against the people you have placed there. Only people who said they need a room count against the block.</value></data>
+  <data name="RoomBlocks.NoHotels" xml:space="preserve"><value>No hotels yet. Add a hotel first, then place people and set its room block.</value></data>
+  <data name="RoomBlocks.PlanOk" xml:space="preserve"><value>Every hotel is within its block and everyone who needs a room has a hotel.</value></data>
+  <data name="RoomBlocks.PlanWarn" xml:space="preserve"><value>Needs attention: {0} hotel(s) over their block and {1} person(s) needing a room not yet placed.</value></data>
+  <data name="RoomBlocks.RollupAria" xml:space="preserve"><value>Room block totals across all hotels</value></data>
+  <data name="RoomBlocks.TileBlock" xml:space="preserve"><value>Rooms reserved</value></data>
+  <data name="RoomBlocks.TileNeeding" xml:space="preserve"><value>Placed &amp; need a room</value></data>
+  <data name="RoomBlocks.TileRemaining" xml:space="preserve"><value>Rooms still free</value></data>
+  <data name="RoomBlocks.TileUnplaced" xml:space="preserve"><value>Need a room, not placed</value></data>
+  <data name="RoomBlocks.ColHotel" xml:space="preserve"><value>Hotel</value></data>
+  <data name="RoomBlocks.ColBlock" xml:space="preserve"><value>Block</value></data>
+  <data name="RoomBlocks.ColNeeding" xml:space="preserve"><value>Need a room</value></data>
+  <data name="RoomBlocks.ColRemaining" xml:space="preserve"><value>Free</value></data>
+  <data name="RoomBlocks.ColConfirmed" xml:space="preserve"><value>Confirmed</value></data>
+  <data name="RoomBlocks.ColState" xml:space="preserve"><value>Status</value></data>
+  <data name="RoomBlocks.StateOk" xml:space="preserve"><value>Within block</value></data>
+  <data name="RoomBlocks.StateOver" xml:space="preserve"><value>Over by {0}</value></data>
+  <data name="RoomBlocks.StateNoBlock" xml:space="preserve"><value>No block set</value></data>
+  <data name="RoomBlocks.ManageHotels" xml:space="preserve"><value>Manage hotels &amp; block sizes</value></data>
+  <data name="RoomBlocks.ManageAssignments" xml:space="preserve"><value>Assign people to hotels</value></data>
+  <data name="OrgSetup.TestData" xml:space="preserve"><value>Before the edition goes live, clear out the synthetic test cast so they never skew real counts or get real messages.</value></data>
+  <data name="Nav.OrgTestDataCleanup" xml:space="preserve"><value>Go-live test-data cleanup</value></data>
+  <data name="TestCleanup.Title" xml:space="preserve"><value>Go-live test-data cleanup</value></data>
+  <data name="TestCleanup.Intro" xml:space="preserve"><value>Everyone marked as a test user is listed below. Removing them clears the synthetic test cast so they never appear in counts, exports or emails once the edition is live. Real registrations are never touched.</value></data>
+  <data name="TestCleanup.NoneHeading" xml:space="preserve"><value>No test users to clean up</value></data>
+  <data name="TestCleanup.None" xml:space="preserve"><value>This edition has no test users — there is nothing to clean up.</value></data>
+  <data name="TestCleanup.Summary" xml:space="preserve"><value>{0} test user(s) found: {1} will be removed and {2} kept but deactivated (they picked up data during testing).</value></data>
+  <data name="TestCleanup.ColName" xml:space="preserve"><value>Name</value></data>
+  <data name="TestCleanup.ColEmail" xml:space="preserve"><value>Email</value></data>
+  <data name="TestCleanup.ColRole" xml:space="preserve"><value>Role</value></data>
+  <data name="TestCleanup.ColOutcome" xml:space="preserve"><value>What happens</value></data>
+  <data name="TestCleanup.WillDelete" xml:space="preserve"><value>Removed</value></data>
+  <data name="TestCleanup.WillDeactivate" xml:space="preserve"><value>Deactivated (kept)</value></data>
+  <data name="TestCleanup.Run" xml:space="preserve"><value>Clean up test users</value></data>
+  <data name="TestCleanup.ConfirmTitle" xml:space="preserve"><value>Clean up test users?</value></data>
+  <data name="TestCleanup.ConfirmBody" xml:space="preserve"><value>This removes or deactivates {0} test user(s) in this edition. Real participants are not affected. Continue?</value></data>
+  <data name="TestCleanup.DoneFlash" xml:space="preserve"><value>Cleanup done — {0} removed, {1} deactivated.</value></data>
+  <data name="CalPreview.Heading" xml:space="preserve"><value>Preview my calendar feed</value></data>
+  <data name="CalPreview.Intro" xml:space="preserve"><value>These are the items your own calendar feed contains right now — exactly what a calendar app shows after you subscribe. Built live from your deadlines, shifts and tasks.</value></data>
+  <data name="CalPreview.Empty" xml:space="preserve"><value>Your feed has no dated items yet — once you have deadlines, shifts or dated tasks they appear here.</value></data>
+  <data name="CalPreview.Count" xml:space="preserve"><value>{0} item(s) in your feed.</value></data>
+  <data name="CalPreview.Col.Date" xml:space="preserve"><value>Date</value></data>
+  <data name="CalPreview.Col.Item" xml:space="preserve"><value>Item</value></data>
+  <data name="CalPreview.Col.Where" xml:space="preserve"><value>Where</value></data>
+  <data name="Ov.NeedsAttention" xml:space="preserve"><value>Needs attention</value></data>
+  <data name="Ov.OverdueTasks" xml:space="preserve"><value>Overdue tasks</value></data>
+  <data name="Ov.UnassignedVolunteerTasks" xml:space="preserve"><value>Unassigned volunteer tasks</value></data>
+  <data name="Ov.OpenHelpRequests" xml:space="preserve"><value>Open help requests</value></data>
+  <data name="Ov.PendingVolunteerApplications" xml:space="preserve"><value>Pending volunteer applications</value></data>
+  <data name="Ov.OpenGrid" xml:space="preserve"><value>Open</value></data>
+  <!-- §21 Cross-cutting [M] i18n consistency: public Sessions list page (SessOv.*) -->
+  <data name="SessOv.Title" xml:space="preserve"><value>Sessions</value></data>
+  <data name="SessOv.FilterAria" xml:space="preserve"><value>Filter sessions</value></data>
+  <data name="SessOv.Type" xml:space="preserve"><value>Type</value></data>
+  <data name="SessOv.AllTypes" xml:space="preserve"><value>All types</value></data>
+  <data name="SessOv.Length" xml:space="preserve"><value>Length</value></data>
+  <data name="SessOv.AnyLength" xml:space="preserve"><value>Any length</value></data>
+  <data name="SessOv.Room" xml:space="preserve"><value>Room</value></data>
+  <data name="SessOv.AllRooms" xml:space="preserve"><value>All rooms</value></data>
+  <data name="SessOv.Search" xml:space="preserve"><value>Search</value></data>
+  <data name="SessOv.SearchPlaceholder" xml:space="preserve"><value>Title, speaker, room…</value></data>
+  <data name="SessOv.Apply" xml:space="preserve"><value>Apply filters</value></data>
+  <data name="SessOv.Reset" xml:space="preserve"><value>Reset</value></data>
+  <data name="SessOv.Showing" xml:space="preserve"><value>Showing {0} of {1} session(s).</value></data>
+  <data name="SessOv.NonePublished" xml:space="preserve"><value>No sessions have been published yet. Please check back closer to the event.</value></data>
+  <data name="SessOv.NoMatch" xml:space="preserve"><value>No sessions match your filters.</value></data>
+  <data name="SessOv.ClearFilters" xml:space="preserve"><value>Clear the filters</value></data>
+  <data name="SessOv.RoomTag" xml:space="preserve"><value>Room</value></data>
+  <data name="SessOv.With" xml:space="preserve"><value>With</value></data>
+  <data name="SessOv.MasterClassLink" xml:space="preserve"><value>Master class info &amp; setup</value></data>
+  <data name="SessOv.AskLink" xml:space="preserve"><value>Ask the speaker a question</value></data>
+  <data name="SessOv.TypeMasterClass" xml:space="preserve"><value>Community Master Class</value></data>
+  <data name="SessOv.TypeTechSession" xml:space="preserve"><value>Community Tech Session</value></data>
+  <data name="SessOv.TypeSponsor" xml:space="preserve"><value>Sponsor Session</value></data>
+  <data name="SessOv.LenFullDay" xml:space="preserve"><value>Full day</value></data>
+  <data name="SessOv.Len20" xml:space="preserve"><value>20 min</value></data>
+  <data name="SessOv.Len50" xml:space="preserve"><value>50 min</value></data>
+  <data name="SessOv.Len60" xml:space="preserve"><value>60 min</value></data>
+  <!-- §21 Cross-cutting [M] i18n consistency: public Master Class logistics page (MC.*) -->
+  <data name="MC.Title" xml:space="preserve"><value>Master Class</value></data>
+  <data name="MC.NotFoundHeading" xml:space="preserve"><value>Master class not found</value></data>
+  <data name="MC.NotFoundBody" xml:space="preserve"><value>This logistics page is not available.</value></data>
+  <data name="MC.LogisticsMeta" xml:space="preserve"><value>Master Class logistics &amp; setup</value></data>
+  <data name="MC.PresentedBy" xml:space="preserve"><value>Presented by {0}</value></data>
+  <data name="MC.BeforeYouArrive" xml:space="preserve"><value>Before you arrive</value></data>
+  <data name="MC.NoLogistics" xml:space="preserve"><value>No logistics have been published yet. Please check back closer to the event.</value></data>
+  <data name="MC.LastUpdated" xml:space="preserve"><value>Last updated {0}</value></data>
+  <data name="MC.EditHeading" xml:space="preserve"><value>Edit logistics (you are an involved speaker / organizer)</value></data>
+  <data name="MC.EditFieldLabel" xml:space="preserve"><value>Logistics &amp; setup instructions</value></data>
+  <data name="MC.EditPlaceholder" xml:space="preserve"><value>e.g. Bring your laptop fully charged. Install the required tools beforehand. Pre-download the sample files (see link)...</value></data>
+  <data name="MC.EditHelp" xml:space="preserve"><value>Plain text. This is public — do not include anything sensitive.</value></data>
+  <data name="MC.Save" xml:space="preserve"><value>Save logistics</value></data>
+  <!-- Broadcast: supported-variables legend (REQUIREMENTS §10c organizer). The tokens
+       themselves ({FirstName}/{EventName}) are NOT translated — they are literal markers
+       resolved by BroadcastTemplates.Substitute; only the surrounding UI text is localized. -->
+  <data name="Broadcast.TokensHeading" xml:space="preserve"><value>Variables you can use</value></data>
+  <data name="Broadcast.TokensIntro" xml:space="preserve"><value>Type any of these in the subject or message. Each is replaced per recipient when the email is sent. Select one to insert it where your cursor is.</value></data>
+  <data name="Broadcast.TokenInsertAria" xml:space="preserve"><value>Insert variable {0}</value></data>
+  <data name="Broadcast.TokenExampleLabel" xml:space="preserve"><value>Example</value></data>
+  <data name="Broadcast.TokenFirstNameMeaning" xml:space="preserve"><value>the recipient's first name (falls back to “there”)</value></data>
+  <data name="Broadcast.TokenFirstNameExample" xml:space="preserve"><value>Hi {FirstName}, a quick update…</value></data>
+  <data name="Broadcast.TokenEventNameMeaning" xml:space="preserve"><value>the edition's display name</value></data>
+  <data name="Broadcast.TokenEventNameExample" xml:space="preserve"><value>See you at {EventName}!</value></data>
 </root>

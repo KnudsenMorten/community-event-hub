@@ -1,4 +1,5 @@
 using CommunityHub.Auth;
+using CommunityHub.Core.Config;
 using CommunityHub.Core.Domain;
 using CommunityHub.Core.Reminders;
 using Microsoft.AspNetCore.Authorization;
@@ -28,17 +29,37 @@ public class IndexModel : PageModel
 {
     private readonly MasterClassLogisticsService _logistics;
     private readonly ICurrentParticipantAccessor _participant;
+    private readonly EventEditionConfigLoader _eventConfigLoader;
+    private readonly EventConfigOptions _eventConfigOptions;
+    private readonly ILogger<IndexModel> _logger;
 
     public IndexModel(
         MasterClassLogisticsService logistics,
-        ICurrentParticipantAccessor participant)
+        ICurrentParticipantAccessor participant,
+        EventEditionConfigLoader eventConfigLoader,
+        EventConfigOptions eventConfigOptions,
+        ILogger<IndexModel> logger)
     {
         _logistics = logistics;
         _participant = participant;
+        _eventConfigLoader = eventConfigLoader;
+        _eventConfigOptions = eventConfigOptions;
+        _logger = logger;
     }
 
     public string Slug { get; private set; } = string.Empty;
     public MasterClassLogisticsView? View { get; private set; }
+
+    /// <summary>
+    /// The edition timezone (IANA id, e.g. <c>Europe/Copenhagen</c>) so the
+    /// "last updated" stamp reads in the venue's local time, not raw UTC
+    /// (REQUIREMENTS §21). Blank ⇒ the view falls back to UTC honestly.
+    /// </summary>
+    public string? TimezoneId { get; private set; }
+
+    /// <summary>The "last updated" stamp formatted in edition-local time, with its zone.</summary>
+    public string? UpdatedLocal =>
+        View?.UpdatedAt is { } at ? EventLocalTime.Format(at, TimezoneId) : null;
 
     /// <summary>True when the signed-in viewer may edit (involved speaker / organizer).</summary>
     public bool CanEdit { get; private set; }
@@ -50,6 +71,7 @@ public class IndexModel : PageModel
     public async Task<IActionResult> OnGetAsync(string slug, CancellationToken ct)
     {
         Slug = slug ?? string.Empty;
+        LoadTimezone();
         View = await _logistics.GetPublicViewAsync(Slug, ct);
         // Unknown/expired slug: render the friendly "Master class not found" page
         // (the view handles View == null) rather than a raw 404. A public link that
@@ -64,6 +86,7 @@ public class IndexModel : PageModel
     public async Task<IActionResult> OnPostAsync(string slug, CancellationToken ct)
     {
         Slug = slug ?? string.Empty;
+        LoadTimezone();
         View = await _logistics.GetPublicViewAsync(Slug, ct);
         if (View is null) return NotFound();
 
@@ -96,6 +119,28 @@ public class IndexModel : PageModel
         await ResolveEditAsync(ct);
         EditLogisticsText = View?.LogisticsText;
         return Page();
+    }
+
+    /// <summary>
+    /// Read the edition timezone from config (best-effort; a broken/missing
+    /// config must never 500 a public page — fall back to a blank id so the
+    /// view shows UTC honestly).
+    /// </summary>
+    private void LoadTimezone()
+    {
+        try
+        {
+            TimezoneId = _eventConfigLoader
+                .Load(_eventConfigOptions.EventConfigPath)
+                .Dates?.Timezone;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "MasterClass: failed to load edition timezone from {Path}",
+                _eventConfigOptions.EventConfigPath);
+            TimezoneId = null;
+        }
     }
 
     private async Task ResolveEditAsync(CancellationToken ct)

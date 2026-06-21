@@ -38,6 +38,7 @@ public class LeadsModel : PageModel
     private readonly SponsorLeadSyncService _sync;
     private readonly CommunityHub.Core.Email.IEmailSender _emailSender;
     private readonly TimeProvider _clock;
+    private readonly CommunityHub.Core.Settings.FeatureGateService _gate;
 
     public LeadsModel(
         CommunityHubDbContext db,
@@ -46,7 +47,8 @@ public class LeadsModel : PageModel
         IDeterministicSponsorTokenService detTokens,
         SponsorLeadSyncService sync,
         CommunityHub.Core.Email.IEmailSender emailSender,
-        TimeProvider clock)
+        TimeProvider clock,
+        CommunityHub.Core.Settings.FeatureGateService gate)
     {
         _db = db;
         _participant = participant;
@@ -55,6 +57,7 @@ public class LeadsModel : PageModel
         _sync = sync;
         _emailSender = emailSender;
         _clock = clock;
+        _gate = gate;
     }
 
     public bool AccessDenied { get; private set; }
@@ -201,7 +204,7 @@ public class LeadsModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) return Forbid();
+        if (!OrganizerAuth.IsRealOrganizer(me)) return Forbid();
 
         var (raw, _) = await _keys.IssueAsync(me.EventId, sponsorCompanyId, me.Email,
             label: $"Issued {DateTimeOffset.UtcNow:yyyy-MM-dd HH:mm} UTC by {me.Email}", ct);
@@ -214,7 +217,7 @@ public class LeadsModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) return Forbid();
+        if (!OrganizerAuth.IsRealOrganizer(me)) return Forbid();
 
         await _keys.RevokeAsync(me.EventId, sponsorCompanyId, me.Email, ct);
         TempData["Notice"] = $"Revoked API key for sponsor '{sponsorCompanyId}'.";
@@ -232,7 +235,7 @@ public class LeadsModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) return Forbid();
+        if (!OrganizerAuth.IsRealOrganizer(me)) return Forbid();
 
         var newVersion = await _detTokens.BumpVersionAsync(me.EventId, sponsorCompanyId, me.Email, ct);
         TempData["Notice"] = $"Bumped deterministic-token version for '{sponsorCompanyId}' to v{newVersion}. Previous token is now invalid.";
@@ -246,7 +249,7 @@ public class LeadsModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) return Forbid();
+        if (!OrganizerAuth.IsRealOrganizer(me)) return Forbid();
 
         var pref = await _db.SponsorLeadNotificationPrefs.FirstOrDefaultAsync(
             p => p.EventId == me.EventId && p.SponsorCompanyId == sponsorCompanyId, ct);
@@ -288,7 +291,7 @@ public class LeadsModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) return Forbid();
+        if (!OrganizerAuth.IsRealOrganizer(me)) return Forbid();
 
         var lead = await _db.SponsorLeads.FirstOrDefaultAsync(
             l => l.Id == leadId && l.EventId == me.EventId, ct);
@@ -314,7 +317,7 @@ public class LeadsModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) return Forbid();
+        if (!OrganizerAuth.IsRealOrganizer(me)) return Forbid();
 
         var lead = await _db.SponsorLeads.FirstOrDefaultAsync(
             l => l.Id == leadId && l.EventId == me.EventId, ct);
@@ -365,7 +368,17 @@ public class LeadsModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) return Forbid();
+        if (!OrganizerAuth.IsRealOrganizer(me)) return Forbid();
+
+        // GATE (REQUIREMENTS §23): the manual CRM pull honours the SAME per-edition
+        // 'sponsor-leads' switch as the scheduled SponsorLeadsJob, so GUI state ==
+        // actual behaviour. Disabled ⇒ no-op with a clear "feature disabled" notice.
+        if (!await _gate.IsFeatureEnabledAsync("sponsor-leads", me.EventId, ct))
+        {
+            TempData["Notice"] = "The sponsor leads pipeline is turned off for this event. "
+                + "Enable it in Settings to pull leads.";
+            return RedirectToPage();
+        }
 
         var result = await _sync.SyncAsync(me.EventId, ct);
         TempData["Notice"] = result.Message;

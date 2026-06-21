@@ -66,7 +66,7 @@ public class ActionQueueModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+        if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
 
         var ok = await _actions.ResolveAsync(me.EventId, id, notes, ct);
         Message = ok ? "Marked resolved." : "That item was not found (or already resolved).";
@@ -78,7 +78,7 @@ public class ActionQueueModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+        if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
 
         var ok = await _actions.ReopenAsync(me.EventId, id, ct);
         Message = ok ? "Re-opened." : "That item was not found (or already open).";
@@ -94,7 +94,7 @@ public class ActionQueueModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+        if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
 
         var sent = await _stepResetEmails.SendPendingAsync(me.EventId, ct);
         Message = sent == 0
@@ -108,7 +108,7 @@ public class ActionQueueModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) return Forbid();
+        if (!OrganizerAuth.IsRealOrganizer(me)) return Forbid();
 
         var open = await _actions.GetOpenAsync(
             me.EventId, string.IsNullOrWhiteSpace(TypeFilter) ? null : TypeFilter, ct);

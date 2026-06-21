@@ -1,4 +1,5 @@
 using CommunityHub.Core.Integrations;
+using CommunityHub.Core.Settings;
 
 namespace CommunityHub.Core.Domain;
 
@@ -54,6 +55,21 @@ public class SponsorInfo
 
     /// <summary>Up to 600 chars. Social-media announcement intro (bullets fine).</summary>
     public string? SocialMediaIntro { get; set; }
+
+    // --- Release ring (company default for its contacts, REQUIREMENTS §23) ----
+    /// <summary>
+    /// This sponsor company's DEFAULT release ring — the fallback access level for
+    /// every contact of this company that has no contact-level ring of its own.
+    /// A contact's own <see cref="Participant.Ring"/> SUPERSEDES this; the
+    /// effective ring of a sponsor contact is
+    /// <c>contact.Ring ?? company.Ring ?? Broad</c> (link via
+    /// <see cref="Participant.SponsorCompanyId"/> == <see cref="SponsorCompanyId"/>).
+    ///
+    /// Defaults to <see cref="Ring.Broad"/> (general availability) so an
+    /// unassigned company behaves exactly as today (its contacts see only
+    /// fully-released features unless given an earlier ring).
+    /// </summary>
+    public Ring Ring { get; set; } = Rings.Default;
 
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? UpdatedAt { get; set; }

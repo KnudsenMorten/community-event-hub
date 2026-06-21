@@ -87,7 +87,7 @@ public class DataGridModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer)
+        if (!OrganizerAuth.IsRealOrganizer(me))
         {
             AccessDenied = true;
             return Page();
@@ -134,7 +134,7 @@ public class DataGridModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer)
+        if (!OrganizerAuth.IsRealOrganizer(me))
         {
             return Forbid();
         }
@@ -171,7 +171,7 @@ public class DataGridModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) return Forbid();
+        if (!OrganizerAuth.IsRealOrganizer(me)) return Forbid();
 
         var bookings = await _db.HotelBookings
             .Where(h => h.EventId == me.EventId && h.NeedsRoom)

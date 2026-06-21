@@ -36,6 +36,7 @@ public class SessionsModel : PageModel
     private readonly CommunityHub.Core.Organizer.SessionBulkOperationService _bulk;
     private readonly TimeProvider _clock;
     private readonly IStringLocalizer<SharedResource> _loc;
+    private readonly CommunityHub.Core.Settings.FeatureGateService _gate;
 
     public SessionsModel(
         CommunityHubDbContext db,
@@ -48,7 +49,8 @@ public class SessionsModel : PageModel
         CommunityHub.Core.Organizer.SessionDeletionService deletion,
         CommunityHub.Core.Organizer.SessionBulkOperationService bulk,
         TimeProvider clock,
-        IStringLocalizer<SharedResource> loc)
+        IStringLocalizer<SharedResource> loc,
+        CommunityHub.Core.Settings.FeatureGateService gate)
     {
         _db = db;
         _participant = participant;
@@ -61,6 +63,7 @@ public class SessionsModel : PageModel
         _bulk = bulk;
         _clock = clock;
         _loc = loc;
+        _gate = gate;
     }
 
     /// <summary>The session ids ticked in the bulk-select grid (posted form field).</summary>
@@ -399,6 +402,19 @@ public class SessionsModel : PageModel
         var me = Guard();
         if (me is null) return AccessDenied ? Page() : RedirectToPage("/Login");
 
+        // GATE (REQUIREMENTS §23): the master-class booking sync is the same Zoho
+        // attendee/booking integration the AttendeeReconcileJob runs, so it honours
+        // the 'attendee-reconcile' switch. Disabled ⇒ no-op (NOT a green success),
+        // GUI state == actual behaviour.
+        if (!await _gate.IsFeatureEnabledAsync("attendee-reconcile", me.EventId, ct))
+        {
+            Result = ActionResultSummarizer.NoOp(
+                "Attendee reconciliation is turned off for this event. "
+                + "Enable it in Settings to sync bookings.", Formats);
+            await LoadAsync(me.EventId, ct);
+            return Page();
+        }
+
         var result = await _bookingSync.SyncSessionAsync(me.EventId, SessionId, ct);
         // Honest confirmation: a real sync shows "done at <time>" + its counts; a
         // not-wired / nothing-to-do sync is a no-op (NOT a green success).
@@ -464,6 +480,10 @@ public class SessionsModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
+        // Server-enforced organizer gate — same role check the page's mutating
+        // handlers apply via Guard(). This GET handler returns a file/redirect
+        // rather than the page, so a non-organizer is denied with Forbid().
+        if (!OrganizerAuth.IsRealOrganizer(me)) return Forbid();
 
         var session = await _db.Sessions
             .FirstOrDefaultAsync(s => s.Id == id && s.EventId == me.EventId, ct);
@@ -479,7 +499,7 @@ public class SessionsModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return null;
-        if (me.Role != ParticipantRole.Organizer)
+        if (!OrganizerAuth.IsRealOrganizer(me))
         {
             AccessDenied = true;
             return null;

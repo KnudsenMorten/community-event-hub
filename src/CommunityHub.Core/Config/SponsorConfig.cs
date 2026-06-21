@@ -227,6 +227,7 @@ public sealed class SponsorConfigLoader
     /// <summary>Load and parse a sponsor config file. Throws if missing.</summary>
     public SponsorConfig Load(string path)
     {
+        path = ConfigPaths.Resolve(path);
         if (!File.Exists(path))
         {
             throw new FileNotFoundException(
@@ -234,6 +235,32 @@ public sealed class SponsorConfigLoader
         }
         var json = File.ReadAllText(path);
         return JsonSerializer.Deserialize<SponsorConfig>(json, Options)
+               ?? new SponsorConfig();
+    }
+
+    /// <summary>
+    /// Load the shipped default from <paramref name="path"/> then DEEP-MERGE a
+    /// per-edition <paramref name="overrideJson"/> fragment on top (HYBRID config
+    /// model — see <see cref="JsonDeepMerge"/>). A null/blank/invalid override is
+    /// ignored and the result is identical to <see cref="Load(string)"/>
+    /// (fail-safe to the shipped default — never throws on a bad override). Still
+    /// throws when the shipped file itself is missing, exactly as
+    /// <see cref="Load(string)"/> does (an override cannot stand in for a missing
+    /// template).
+    /// </summary>
+    public SponsorConfig Load(string path, string? overrideJson)
+    {
+        if (string.IsNullOrWhiteSpace(overrideJson))
+        {
+            return Load(path); // common path: no override, unchanged behaviour.
+        }
+        if (!File.Exists(path))
+        {
+            throw new FileNotFoundException(
+                $"Sponsor config not found: {path}");
+        }
+        var merged = JsonDeepMerge.Merge(File.ReadAllText(path), overrideJson);
+        return JsonSerializer.Deserialize<SponsorConfig>(merged, Options)
                ?? new SponsorConfig();
     }
 }

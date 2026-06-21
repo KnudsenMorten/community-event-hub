@@ -4,12 +4,43 @@
     ViewData["Title"] = Localizer["Hotel.Title"].Value;
 }
 
+@* Hotel is arranged + covered by us only for crew/speakers/organizers. Sponsors +
+   attendees arrange their own accommodation -> self-contained not-relevant card, no form. *@
+@if (!Model.HotelRelevant)
+{
+    <div class="card">
+        <h2>@Localizer["Hotel.Title"]</h2>
+        <p style="background:#eef6ff;padding:10px 14px;border-radius:6px;font-size:14px;">
+            @Localizer["Hotel.NotRelevant"]
+        </p>
+        <p><a asp-page="/Index">@Localizer["Common.BackToHub"]</a></p>
+    </div>
+    return;
+}
+
 <div class="card">
     <h2>@Localizer["Hotel.Title"]</h2>
 
-    <p style="background:#eef6ff;padding:10px 14px;border-radius:6px;font-size:14px;">
-        <strong>@Localizer["Hotel.PolicyLead"]</strong> @Localizer["Hotel.PolicyBody"]
-    </p>
+    @* Role-specific policy. Organizers see no policy (not relevant to them); the
+       lead sits on its own line above the body (two lines). *@
+    @{
+        var policyKey = Model.Role switch
+        {
+            CommunityHub.Core.Domain.ParticipantRole.Speaker
+                or CommunityHub.Core.Domain.ParticipantRole.MasterclassSpeaker => "Hotel.PolicySpeaker",
+            CommunityHub.Core.Domain.ParticipantRole.Volunteer
+                or CommunityHub.Core.Domain.ParticipantRole.Video
+                or CommunityHub.Core.Domain.ParticipantRole.Camera => "Hotel.PolicyVolunteer",
+            _ => (string?)null,   // Organizer (+ any other) -> no policy text
+        };
+    }
+    @if (policyKey is not null)
+    {
+        <p style="background:#eef6ff;padding:10px 14px;border-radius:6px;font-size:14px;">
+            <strong>@Localizer["Hotel.PolicyLead"]</strong><br />
+            @Localizer[policyKey]
+        </p>
+    }
 
     @if (Model.IsLocked)
     {

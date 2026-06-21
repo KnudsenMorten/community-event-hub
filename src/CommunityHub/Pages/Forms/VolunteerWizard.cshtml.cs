@@ -57,9 +57,21 @@ public class VolunteerWizardModel : PageModel
     [BindProperty] public string? PreferredRole { get; set; }
     [BindProperty] public int MaxHoursPerDay { get; set; } = 8;
 
+    /// <summary>Allowed range for <see cref="MaxHoursPerDay"/> (a single human's day).</summary>
+    public const int MinHoursPerDay = 1;
+    public const int MaxHoursPerDayLimit = 24;
+
     public bool IsLocked { get; private set; }
     public bool Saved { get; private set; }
     public string? Message { get; private set; }
+
+    /// <summary>
+    /// Set when the final-step POST is rejected by server-side validation
+    /// (empty availability or out-of-range hours). Rendered on the review step
+    /// so the volunteer sees WHY the submit did not go through and what the value
+    /// they typed would have become — never silently clamped behind their back.
+    /// </summary>
+    public string? ValidationError { get; private set; }
 
     public async Task<IActionResult> OnGetAsync(CancellationToken ct)
     {
@@ -118,6 +130,33 @@ public class VolunteerWizardModel : PageModel
             .Distinct()
             .ToList();
 
+        // --- Server-side validation (do NOT rely on the disabled button alone) ---
+        // 1) An empty availability is meaningless: a volunteer who "signs up" for
+        //    zero shifts has not signed up. Reject and keep them on the review step.
+        if (clean.Count == 0)
+        {
+            Step = 3;
+            ValidationError = "Pick at least one shift before you submit — you have none selected.";
+            return Page();
+        }
+
+        // 2) Hours: non-numeric input fails int model-binding (MaxHoursPerDay stays
+        //    the default) — surface that instead of silently saving the default.
+        //    Out-of-range input was previously Math.Clamp'd with no feedback, so a
+        //    volunteer who typed 40 was silently recorded as 24. Reject + tell them.
+        if (!ModelState.IsValid && ModelState[nameof(MaxHoursPerDay)]?.Errors.Count > 0)
+        {
+            Step = 3;
+            ValidationError = $"Enter a whole number of hours between {MinHoursPerDay} and {MaxHoursPerDayLimit}.";
+            return Page();
+        }
+        if (MaxHoursPerDay < MinHoursPerDay || MaxHoursPerDay > MaxHoursPerDayLimit)
+        {
+            Step = 3;
+            ValidationError = $"Max hours per day must be between {MinHoursPerDay} and {MaxHoursPerDayLimit} — you entered {MaxHoursPerDay}.";
+            return Page();
+        }
+
         var availability = await _db.VolunteerAvailabilities.FirstOrDefaultAsync(
             v => v.EventId == me.EventId && v.ParticipantId == me.ParticipantId,
             ct);
@@ -139,7 +178,9 @@ public class VolunteerWizardModel : PageModel
 
         availability.SelectedShifts = string.Join(ShiftDelimiter, clean);
         availability.PreferredRole = PreferredRole;
-        availability.MaxHoursPerDay = Math.Clamp(MaxHoursPerDay, 1, 24);
+        // Value is validated above (1..24), so what the volunteer saw on the review
+        // step is exactly what we persist — no silent clamp behind their back.
+        availability.MaxHoursPerDay = MaxHoursPerDay;
 
         await _db.SaveChangesAsync(ct);
         await MarkVolunteerTaskDoneAsync(me.EventId, me.ParticipantId, ct);

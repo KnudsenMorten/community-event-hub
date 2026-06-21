@@ -81,7 +81,7 @@ public class BucketAllocationModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) return Forbid();
+        if (!OrganizerAuth.IsRealOrganizer(me)) return Forbid();
         if (planFile is null || planFile.Length == 0)
             return RedirectToPage(new { Msg = "Please choose a plan CSV to import." });
 
@@ -156,7 +156,7 @@ public class BucketAllocationModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) return Forbid();
+        if (!OrganizerAuth.IsRealOrganizer(me)) return Forbid();
 
         var task = await _db.VolunteerTasks
             .Include(t => t.Subcategory).ThenInclude(s => s.Category)

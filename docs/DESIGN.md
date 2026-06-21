@@ -156,6 +156,20 @@ historical staging plan lives in the source CONTEXT material and is not repeated
   confirmation number** fold into the venue/subject/body, the per-person number taking priority
   over any legacy `HotelBooking.ConfirmationNumber`; routed through the gated `IEmailSender`
   (DEV-redirected). See §8 organizer area + §7 email.
+  **Room-block occupancy (added 2026-06-17):** `Hotel` gains an additive nullable
+  **`RoomBlockSize`** (EF migration `HotelRoomBlock`) recording the rooms reserved at that hotel
+  (null = not set; a negative input is clamped to 0 by `HotelManagementService`, which now takes
+  the size on create/update). The pure, read-only **`HotelRoomBlockService`** (constructor-injected
+  EF context only — no clock/I/O) builds a `HotelBlockSnapshot`: per-hotel `HotelBlockLine`
+  (block vs. **placed-and-needing-a-room** count — only `HotelBooking.NeedsRoom` placements consume
+  the block — with `Remaining`/`Over` floored at 0, an `IsOverBlock` flag, a divide-by-zero-safe
+  `Percent`, and a `Confirmed` count), plus the edition roll-up (total block, total room-needers,
+  total remaining, **room-needers not yet placed**, hotels-over-block, hotels-without-block, and a
+  `PlanLooksOk` that is true only when no block is oversubscribed AND nobody who needs a room is
+  unplaced). The hotel list is SQL-translatable; the room-need set is read once and joined in memory
+  (same shape as `GroupByHotelAsync`). Organizer page `/Organizer/HotelRoomBlocks` (read-only;
+  linked from the Logistics hub) — placement + recording the block size stay on the existing
+  Hotels / HotelAssignments pages.
 - **`DinnerSignup`**, **`VolunteerAvailability`** — the two other self-service form entities.
 - **`DietaryRequirement`** (structured dietary/allergy capture, added 2026-06-16) — own-row-scoped
   structured catering data, **one row per participant per edition PER `DietarySurface`**
@@ -374,6 +388,12 @@ historical staging plan lives in the source CONTEXT material and is not repeated
   "why this score" decomposition under each badge that can never drift from the number
   the screen scored (drift-locked by a test that re-runs `Screen` and asserts equality).
 - **`SurveyResponse` / `SurveyResponsePick`** — public survey persistence (FK + cascade).
+- **`SurveyState`** (added 2026-06-18) — organizer-controlled per-survey admin state, keyed by
+  survey **slug** (the JSON basename), **not** scoped to an `Event` (a survey is its own anonymous
+  artefact, like `SurveyResponse`). Today it carries the **open/closed** gate (`IsOpen`, default
+  `true`) read by the public `/survey/{slug}` page, plus `UpdatedAt`/`UpdatedByEmail` audit. A
+  **missing row means OPEN** so existing surveys are unaffected. Unique `(SurveySlug)`. Migration:
+  **`SurveyState`** (one table, additive). See §6 "Organizer survey management".
 - **`GraphicAsset`** (added 2026-06-15) — one generated/replaced SoMe graphic: `Type`
   (speaker/sponsor/session), `Status` (generated/released — the release gate), `StableKey`
   (edition-unique idempotency identity the SharePoint path derives from), `SharePointPath`/`Url`/
@@ -415,9 +435,52 @@ participants**.
   the endpoint cannot enumerate registered emails.
 - Verification is constant-time; PINs are single-use, expiry-enforced, and **locked after 5 wrong
   tries**. PINs are never logged in plaintext.
-- A **magic-link / PIN auto-login URL** is valid 7 days. *(Known defect: the magic-link path omits
-  the `EventId` claim — see `REQUIREMENTS.md`.)*
+- A **magic-link auto-login URL** is a DataProtection-signed, tamper-evident token (no secret in
+  the URL); the magic-link sign-in stamps the `EventId` claim like the PIN flow.
+- **Two distinct auto-login token kinds — by design.** (1) The **invitation** magic-link
+  (`IMagicLinkTokenFactory` / `MagicLinkTokenFactory`) is the existing **reusable**, 14-day,
+  DataProtection-signed stateless token used by `/Organizer/SendInvitations`. (2) The **welcome
+  auto-login** token (`IWelcomeAutoLoginTokenService` / `WelcomeAutoLoginTokenService`) is a
+  **hardened** variant for the welcome email's one-tap CTA — **single-use, short-lived (72h),
+  scoped, revocable, audited** — backed by a server-side `MagicLinkGrant` row. The URL token is a
+  DataProtection payload `{ GrantId, TokenId, ExpiresAtUtc }` on **its own purpose**
+  (`CommunityHub.WelcomeAutoLogin.v1`); the grant persists **only the SHA-256 hash** of the random
+  256-bit `TokenId`, so a DB read cannot reconstruct a usable link. `/Login/Magic` tries the welcome
+  redemption first (which **consumes** the grant — `ConsumedAt` is stamped, so a second tap or a
+  reshared link is refused); a reusable invitation token doesn't redeem on that purpose and falls
+  through to the legacy validation path. The grant is **scoped** to one participant + role in one
+  edition (a re-roled person's stale link is refused) and **revocable** (`RevokedAt`); the row is the
+  audit trail (who/when minted, consumed, revoked). The welcome send itself still goes through the
+  fail-closed allowlist + DEV redirect + kill-switch `IEmailSender` path — the token model adds
+  link-level security on top, it does **not** alter recipient gating.
+- **Magic-link recovery state** (`/Login/Magic`): when a link fails to authenticate the page is
+  **never a dead end**. `MagicModel` distinguishes an **expired/invalid link** (`Login.MagicInvalid`)
+  from a **deactivated account** (`Login.MagicInactive`) via separate localized error keys, and
+  surfaces a real "request a new sign-in code" affordance. For a *genuine-but-expired* link it calls
+  `MagicLinkService.PeekParticipantId` (Unprotects the token **ignoring expiry** — still MAC-gated, so
+  a tampered/alien token resolves to null and never recovers anything) to recover the recipient's
+  email, then builds a recovery link to the email + PIN page pre-staged with that email **and** the
+  intended local `r=` return URL (`MagicModel.RecoveryLink()`), so re-authenticating lands the person
+  where the link meant to take them. Peeking **never authenticates** — sign-in still requires a live
+  token via `ValidateToken`, and the recovered email is never trusted as identity (the PIN flow
+  authenticates). A deactivated account is told to contact the organizers (no false pre-fill, since
+  the PIN flow would also refuse it).
 - Session = a signed ASP.NET Core auth cookie carrying identity + role + an **`EventId` claim**.
+
+**DataProtection key ring persisted to the shared SQL DB (2026-06-21).** ASP.NET DataProtection
+protects both the auth cookie and the magic-link / welcome-auto-login tokens. The key ring is now
+persisted to the **shared SQL database** (`AddDataProtection().PersistKeysToDbContext<CommunityHubDbContext>()`
+with a **pinned application name** `CommunityHub-EventHub`), backed by a new `DataProtectionKeys` table
+(EF migration `AddDataProtectionKeys`, additive — one table). This fixes two things at once:
+- **Cookies + tokens survive slot-swap deploys + restarts.** Previously the keys defaulted to per-slot
+  `%HOME%`, so every slot swap brought a worker with a *different* key ring and invalidated every
+  existing cookie (everyone logged out). The pinned application name keeps the discriminator stable on
+  top of the shared store.
+- **The web app and the Functions worker share one key ring.** The attendee-welcome **Functions worker
+  mints** welcome auto-login tokens that the **web `/Login/Magic` page redeems**; because both processes
+  call the same `PersistKeysToDbContext` against the same DB, a token protected by the Jobs worker can
+  be unprotected by the web app (the Jobs `Program.cs` wires the same DataProtection + pinned name and
+  pulls in the EF DataProtection package for exactly this reason).
 
 **Request/identity flow:** cookie principal → `CurrentParticipant.Current` → every authed page does
 the `me is null → /Login` guard and scopes queries by `EventId`. Organizer pages add an in-handler
@@ -500,7 +563,7 @@ app) and Logic Apps (a separate no-code moving part) were considered and rejecte
 
 | Function | Schedule (UTC) | What it does | Gate |
 |---|---|---|---|
-| `WooCommercePullJob` | 03:00 (06:00 in some configs) | Pull completed shop orders, expand into per-product sponsor tasks | `WooCommerce:Enabled` |
+| `WooCommercePullJob` | every 30 min | Pull completed shop orders, expand into per-product sponsor tasks, and sync sponsor contacts (Company Manager users, linked by `user_id`) into the hub | `WooCommerce:Enabled` |
 | `BackstageSyncJob` | 06:30 | Derive sponsors/exhibitors from completed orders, create missing Backstage exhibitor requests, email coordinator | Zoho/TestMode |
 | `AttendeeReconcileJob` | 07:00 | Reconcile Zoho tickets vs Bookings, upsert `Attendee`, send the 3 chasers | `Zoho:Enabled` |
 | `ReminderJob` | 08:00 | Seed speaker-deadline tasks (idempotent), then send all due reminders | always |
@@ -755,6 +818,39 @@ drives a Replace-vs-Merge re-import choice. It is **config + flow only — it ne
   ("Full import from Sessionize" for Replace, "Sync new speakers (delta)" for Merge) — the deliberate
   two-step keeps the actual write under the operator's hand.
 
+#### Organizer survey management — 2026-06-18
+The organizer surface at `/Organizer/Surveys` (organizer-gated, mobile-first ≤360px, a11y) is fronted by
+the Sessions & speakers hub `/Organizer/Content` (so the consolidated nav stays short — it is a feature
+page reachable in two clicks, not a new top-level entry; `NavBuilderTests` asserts the hub fronts it).
+
+- **One service, one set of numbers.** `SurveySummaryService` (Core, scoped) owns BOTH the response
+  **aggregation** (the weighted demand math: rank-1 = 3, rank-2 = 2, rank-3 = 1; track distribution;
+  level totals) and the **admin state** (open/close, reset). The public `/survey/{slug}/results` page was
+  refactored to read this same service, so the organizer's inline results and the public dashboard can
+  never drift. The JSON catalog (tracks/topics) is passed in as a lightweight `CatalogTrack` projection
+  (web-layer `SurveyCatalog.From(SurveyDefinition)`), keeping Core free of the web survey provider.
+- **Listing surveys.** `SurveyDefinitionProvider.ListSlugs()` enumerates the `*.json` basenames under
+  `App_Data/Surveys/`; the page joins each with its response count (`CountResponsesAsync`) and open state
+  (`GetOpenStatesAsync`, one query, defaulting missing slugs to OPEN).
+- **Open / closed gate.** Persisted in `SurveyState` (keyed by slug, **not** Event-scoped; a missing row
+  = OPEN). The public `Survey/Index` page reads `IsOpenAsync` on GET (renders a friendly closed state,
+  hides the wizard) **and on POST** (rejects a hand-rolled submit — defense in depth). Results remain
+  viewable when closed. Toggling is **POST + anti-forgery**; `SetOpenAsync` upserts the single row and
+  writes an audit log line.
+- **Reset (destructive).** `ResetResponsesAsync(slug)` loads the slug's `SurveyResponse` rows **with**
+  their `Picks` and removes both (the FK cascade also covers picks; the explicit removal keeps the count
+  exact + provider-agnostic), scoped strictly to that slug. Gated by **type-to-confirm** (the typed text
+  must equal the slug exactly) on top of organizer-only + POST + anti-forgery; the deletion + count are
+  logged (`LogWarning`) as the audit trail.
+- **Shareable links.** `SubmitUrl`/`ResultsUrl` build the public `/survey/{slug}` + `/survey/{slug}/results`
+  links (absolute via the URL helper, relative fallback). The view renders each as a readonly, selectable
+  input (works JS-off) with a caret-free **Copy** button that uses the Clipboard API with a graceful
+  `execCommand` fallback — no popups, no `Start-Process`.
+- **Schema / dev↔prod sync.** EF migration **`SurveyState`** (one additive table `SurveyStates`, unique
+  `(SurveySlug)`, `IsOpen` default `true`). CEH **auto-applies migrations on startup**, so the table is
+  created on the next DEV deploy and again on the PROD deploy — keep dev↔prod in lock-step per release
+  (this migration ships with this change). Purely additive + nullable/defaulted, so it is safe to apply
+  to an existing populated DB with zero downtime.
 #### Sessionize → import dry-run / preview (REQUIREMENTS §21) — 2026-06-16
 Before committing an import, the organizer can preview exactly what would change. `SessionizeImportPreviewService`
 reads the **same source** as the real import (the v2 view API via `SessionizeApiClient`, or an uploaded `.xlsx`
@@ -797,13 +893,41 @@ hub-collected session fields to protect; the importer overwrites the imported va
 link set to exactly the current Sessionize speakers per session (stale links removed, missing added),
 which flushes nothing an organizer owns. The combined `SessionizeApiImportService` runs **speakers
 first, then sessions** in one pull (so participants exist to link to), in all three triggers — the
-scheduled `SessionizeImportJob` (daily 02:00 UTC), the organizer button on `/Organizer/SessionizeImport`,
+scheduled `SessionizeImportJob` (**hourly**, `0 0 * * * *`), the organizer button on `/Organizer/SessionizeImport`,
 and the OneShot `import-speakers` CLI; a session-fetch failure is reported but never fails the
 already-committed speaker import (speakers are the critical path). EF migration `SessionizeSessions`
 (`Sessions` + `SessionSpeakers`; `Session`↔`Participant` link uses `NoAction` on the participant FK to
 avoid a second cascade path to `Participant` from the `Event` root). The **speaker overview**
 (`/Organizer/Speakers`) shows each speaker's linked session titles + a total "Sessions imported" header
 stat (mobile-first, a11y).
+
+**Speaker-email join from the token-protected `SpeakersEmails` view — 2026-06-20.** Sessionize withholds
+speaker email (PII) from the public `Speakers`/`All` views and serves it only through a separate,
+token-gated side-view `…/view/SpeakersEmails?s=<token>` returning `{id, firstName, lastName, email}`.
+Since email is the mandatory import match key, the client joins it on: `SessionizeApiOptions` gained
+`EmailsToken` (the `s=` value) + `EmailsView` (default `SpeakersEmails`); when the token is set,
+`FetchSpeakersAsync` also pulls `BuildEmailsUrl()`, `ParseEmailMap` builds `{sessionizeId → email}`, and
+`ParseSpeakers(json, emailById)` fills each speaker's blank email by Sessionize `id` **before** the
+no-email skip — so the main view supplies bio/links/sessions and the side-view the match-key email. The
+`s=` token **gates PII, so it is a secret** (app setting `Sessionize__EmailsToken` / Key Vault, never
+committed); blank ⇒ the client expects email inline (older endpoints). The Jobs app binds the
+endpoint/token from app-settings config only (no DB override — that is web-app-only). ELDK27 endpoint
+`b0eeoqzm` is live in DEV + PROD.
+
+**Pluggable session source — Sessionize now, Zoho Backstage (full source) later (REQUIREMENTS §6, planned).**
+Today the session list + schedule come from Sessionize, where room/time are frequently blank (the
+finalized agenda lives in **Zoho Backstage**). The design goal is a switchable **session source** so we
+can move session sync to the Backstage API
+([`v3/get-all-sessions`](https://www.zoho.com/backstage/api/v3/get-all-sessions.html)) **with no
+re-architecting**. Decision (2026-06-20): **Backstage becomes the FULL source of sessions** (title,
+abstract, room, start/end, speaker links); Sessionize then provides only speaker profiles/bios. Shape:
+an `ISessionSource` abstraction with `SessionizeSessionSource` (the current `SessionizeApiClient.ParseSessions`
+path) and a future `BackstageSessionSource` (Backstage v3 sessions API), selected **per edition** by an
+**organizer Settings interface** — a Settings page where the organizer picks the active session source
+(Sessionize | Zoho Backstage), persisted per edition (alongside the existing `SessionizeEndpointSetting`
+model), so the switch is config/UI-driven, not a deploy. The importer's existing upsert-by-external-id +
+never-delete + speaker-link reconciliation semantics are reused regardless of source. **Not yet built** —
+this captures the source contract + the operator switch so the Backstage cutover is a drop-in.
 
 **Session management (hub-only sessions, type/length, room, QR, evaluation) — 2026-06-15.** Sessions are
 no longer import-only. The `Session` entity gained `Type` (`SessionType`: `CommunityMasterClass |
@@ -930,6 +1054,20 @@ Preselected lifecycle), so `/Organizer/PreselectionQueue` reuses the shared `Par
 dependent data (never orphans links) — the same semantics as the Participants grid delete. Confirm-modal
 gated; en/da strings under `Queue.Delete*`.
 
+**Go-live test-data cleanup (REQUIREMENTS §1) — 2026-06-18.** The `Participant.IsTestUser` flag (column +
+migration, 2026-06-14) is actioned by `TestDataCleanupService` (Core, edition-scoped, DI-registered).
+`PreviewAsync(eventId)` lists every `IsTestUser` row of the edition (ordered by role then name), each
+flagged `WouldHardDelete` by probing `ParticipantDeletionService.GetHardDeleteBlockersAsync` (empty
+blockers ⇒ clean ⇒ hard-delete). `CleanupAsync(eventId)` snapshots the test ids then, per row, calls
+`HardDeleteAsync` and **falls back to `DeactivateAsync`** when it returns `HardDeleteBlocked` — so a test
+row that picked up engagement during the rehearsal is kept-but-deactivated rather than destroyed, and a
+test row can never orphan real data. It is idempotent (a re-run finds only the kept/deactivated rows and
+re-applies the safe outcome) and never touches a non-test participant. The organizer page
+`/Organizer/TestDataCleanup` (`[Authorize]` + organizer-role gate, linked from the Setup hub) renders the
+preview table (name/email/role/outcome) + a count-aware `_ConfirmModal` posting the `Cleanup` handler, then
+re-reads the preview to reflect the post-cleanup state. No new deletion logic (reuses the proven
+`ParticipantDeletionService`); no schema change; en/da strings under `TestCleanup.*`.
+
 **Per-session attendee evaluation (HappyOrNot-style public rating + organizer dashboard) — 2026-06-15.**
 A quick public rating, distinct from the pre-event attendee *questions* (§ below): a new `SessionEvaluation`
 entity (EF migration `SessionEvaluations`) holds a **1–5 `Rating`**, an optional `Comment`, a soft per-attendee
@@ -1002,11 +1140,19 @@ change** — all read-only projections over existing `Event` / `Session` / `Spea
   (in `CommunityHub.Core.Reminders`, same active-event resolution) returns a `PublicLandingView` with the
   edition name/dates/`PreDayDate`/venue, the **non-service session count**, and `HasSelectedSpeakers`
   computed from the **same §6 hard gate** as the speakers page — or **null** when no event is active (the
-  view shows a friendly empty state). The view renders an event hero (name + `IndexModel.FormatDateRange`
-  + venue + blurb), a **Visit-event / Sign-in** CTA, and four cards into `/Sessions`, `/Speakers`,
-  `/Sponsors`, and `/Sessions?FilterType=CommunityMasterClass`. The `[AllowAnonymous]` is what lifts the
-  old `[Authorize]` bounce — anonymous visitors reach the landing in place rather than being redirected
-  to Login.
+  view shows a friendly empty state). **Simplified landing (2026-06-20):** the public front door is now a
+  deliberately minimal landing — the event hero (name + `IndexModel.FormatDateRange` + venue) plus exactly
+  **two buttons**: a big primary **"Sign in to Event Hub"** (`/Login`, the existing hub PIN/magic-link
+  sign-in) and below it a smaller secondary **"Tickets & programme (event site)"** linking to the public
+  Zoho Backstage event site. That secondary URL is read from the active edition config
+  (`placeholders.eventSiteUrl`, surfaced on `IndexModel.EventSiteUrl`); when the placeholder is blank the
+  button is **hidden** (no dead link). The previous public-nav clutter — the blurb and the four cards into
+  `/Sessions` / `/Speakers` / `/Sponsors` / master classes, plus the old Visit-event CTA — was **removed**
+  from the landing surface (those pages remain reachable by direct URL / from the signed-in hub; only the
+  landing was simplified). Mobile-first (~360px, full-width stacked buttons), accessible (semantic
+  heading, focusable links, visible `:focus-visible` ring, AA contrast), English-only. The
+  `[AllowAnonymous]` is what lifts the old `[Authorize]` bounce — anonymous visitors reach the landing in
+  place rather than being redirected to Login; routing/auth are otherwise unchanged.
 - **Session detail `/Sessions/{id:int}`.** `Sessions/DetailModel` (`[AllowAnonymous]`) →
   `PublicSessionsService.GetByIdAsync(id)`: resolves one non-service session **scoped to the active
   edition** (404 otherwise, so an old-edition or service-session id can't be poked), projecting a
@@ -1054,6 +1200,57 @@ change** — all read-only projections over existing `Event` / `Session` / `Spea
   screen-reader time label, `role="status"` summary); bilingual via `Agenda.*` / `Landing.Agenda*` resx
   keys (en + da-DK). Keeping the day-grouping pure (no DbContext) is what makes the ordering / grouping /
   drop-unscheduled logic directly unit-testable.
+- **Complete public nav + URL-persisted filters (2026-06-18).** The anonymous public nav in
+  `_Layout.cshtml` (the `else` branch shown to signed-out visitors) now links the whole public site —
+  **Agenda · Sessions · Master classes · Speakers · Sponsors · Contributors** — using the existing
+  `Nav.*` resx keys (added `Nav.Agenda` / `Nav.MasterClasses` / `Nav.Contributors`, en + da-DK). "Master
+  classes" is a deep-link to `/Sessions?FilterType=CommunityMasterClass` rather than a new index page:
+  the public `Sessions/IndexModel` already binds `FilterType`/`FilterLength`/`FilterRoom`/`Search` with
+  `[BindProperty(SupportsGet = true)]` and the filter `<form method="get">` re-renders selected values
+  via `asp-for`, so a filtered/searched view is **already URL-persisted** (shareable + bookmarkable) and
+  the deep-link pre-selects the master-class type on render. `/Resources` is intentionally left in the
+  signed-in nav — it is `[Authorize]` per-role practical info, not a public page. No schema change.
+- **Event-local timestamps on the public pages (2026-06-18).** A pure helper
+  `CommunityHub.Core.Config.EventLocalTime` is the single authority for showing a moment in the EVENT's
+  local time instead of raw UTC. It resolves the per-edition timezone from `event.<edition>.json →
+  dates.timezone` (surfaced on `EditionDates.Timezone`), accepting an **IANA id** (`Europe/Copenhagen`,
+  works on .NET 8 Windows via ICU and on Linux) **or** a Windows id, trying an IANA↔Windows swap before
+  giving up and **falling back to UTC** (never throwing) for a blank/unknown zone. `Format` returns
+  `local-time + zone-label` (e.g. `2027-02-03 14:00 UTC+01:00`); `ZoneLabel` shows the GMT offset or the
+  plain `UTC` label at offset zero. Wired into the **MasterClass logistics** page (`UpdatedLocal` — the
+  "last updated" stamp) and the **survey-results** page (`LatestResponseDateLocal` /
+  `LatestResponseTimeLocal` — the "latest response" KPI). Both page models load the timezone best-effort
+  (a broken/missing config logs a warning + falls back to UTC, never 500s the public page). No schema
+  change.
+- **Site-wide topbar ticket banner is event-config-driven (2026-06-19, REQUIREMENTS §10).** The topbar
+  ticket copy used to be the hardcoded `Layout.TicketInfo` resx literal, which silently went stale (it
+  read "2028" once). It is now driven from the active edition config: a new **`ticketSale`** sibling
+  block in `event.<edition>.json` (`enabled` / `opensAtLocal` / `ticketUrl` / `afterOpen`), parsed onto
+  `TicketSaleConfig` by the existing `EventEditionConfigLoader` (null when the block is absent). A pure,
+  clock-injected **`TicketBannerBuilder.Build(TicketSaleConfig?, timezoneId, now)`** turns that into a
+  `TicketBannerView (Visible, Message, Href, Suppressed)`:
+  - **Before** `opensAtLocal` → `Visible`, plain text "Tickets on sale &lt;date&gt; at &lt;time&gt;
+    (&lt;zone&gt;)" with the date/time formatted from config (no link yet).
+  - **At/after** the open moment → `Visible` "Tickets are now on sale" (an `Href` link when `ticketUrl`
+    is set), **unless** `afterOpen=hide`, which returns `Suppressed` so the topbar renders nothing.
+  - **Absent / disabled / unparseable** → the `Fallback` view (not visible, not suppressed) so
+    `_Layout` keeps its static `Layout.TicketInfo` literal — purely additive, nothing breaks.
+  `opensAtLocal` is a zone-less Danish wall time interpreted in `dates.timezone` via the existing
+  `EventLocalTime` (DST-correct — Aug = CEST/UTC+2, Feb = CET/UTC+1; **no new tz lib**). `_Layout.cshtml`
+  injects the ambient `TimeProvider` + the loader/options (same singletons the `/Resources` page uses),
+  computes the view inside a `try/catch` (a broken config can never 500 the whole site — it falls back to
+  the literal), and renders the link / text / suppressed / fallback branches. The bar is **mobile-first**
+  (the existing `.topbar` flex-wraps on ~360px; the link variant only adds white/underline styling, no
+  fixed height). English-only. No schema change.
+- **Survey-results empty-state headline + Contributors roles/photos (2026-06-18).** The survey-results
+  empty state gained a prominent `Results.NoResponsesHeadline` headline (en + da) above the existing
+  invite line. The public **Contributors** page (`ContributorsModel`) renders each credited person with
+  an **avatar** — their `PhotoUrl` image when set, otherwise their initials via the pure
+  `ContributorsModel.Initials` (first + last word, single-letter for one-word names, `"?"` for blank) —
+  plus their **role** and the existing name/LinkedIn link, in a mobile-first flex row. An optional
+  nullable `PhotoUrl` was added to the `Contributor` record so a headshot URL can be supplied later with
+  **no schema change** (none committed today, so everyone falls back to initials). The contributor list
+  remains hand-curated in the page model (it changes ~once a year).
 
 **Public sponsors page — 2026-06-15.** A read-only, no-login page `/Sponsors` (`Sponsors/IndexModel`,
 `[AllowAnonymous]`) lists the active edition's sponsor companies **grouped by tier** (Platinum → Diamond →
@@ -1071,6 +1268,18 @@ empty state). Edition-scoped. Mobile-first (2-up grid, 3-up ≥560px, 4-up ≥82
 (en "Sponsors" / da-DK "Sponsorer"). **Schema:** EF migration `SponsorPublicListing` adds
 `SponsorInfo.Tier` (a `BoothTier`, default `None`) + `SponsorInfo.WebsiteUrl` (nullable) + an
 `(EventId, Tier)` index — the only two additive columns.
+
+**Sponsor tier auto-population from the order pull (REQUIREMENTS §7) — 2026-06-18.** The public sponsors
+page groups by `SponsorInfo.Tier`; that tier is now populated automatically by the order pull rather than
+needing a manual organizer set. `SponsorOrderPullService.RunAsync` already classifies every WooCommerce
+line item to a `BoothTier` (for task expansion); per company it now tracks the **highest** booth tier seen
+and upserts it onto the company's `SponsorInfo` row. Ranking is centralised in the new pure
+`BoothTierRanking` (`Weight`/`HighestOf`: Platinum 4 → Diamond 3 → Gold 2 → Feature 1 → None 0), the SAME
+order the public page renders — one authority, no drift. The upsert is **raise-only + idempotent**: it
+creates the facts row lazily (so a sponsor shows publicly as soon as their booth order lands, before they
+open their self-service page) and otherwise only stamps when `Weight(computed) > Weight(stored)`, so an
+organizer's manual upgrade is never silently downgraded on a later pull and a re-run is a no-op; a
+`None`-tier order never creates a row. No schema change (reuses the `SponsorPublicListing` columns).
 
 **"Become a sponsor" CTA (REQUIREMENTS §21) — 2026-06-17.** The same public `/Sponsors` page now renders a
 prospective-sponsor call-to-action. The href is built by the pure `BecomeSponsorCtaBuilder.Build(options,
@@ -1312,6 +1521,30 @@ unknown token is left blank and logged, never a crash. Templates live in `templa
 Outlook-safe rules). Email images must be served from a **public Blob URL** (email can't embed repo
 files); `event.<edition>.json → community.logoUrl` points there.
 
+**Supported variables (single source of truth).** The exact, code-verified token set per template —
+which sender fills each token and at what `file:line` — lives in `templates/emails/README.md`
+("Supported variables"). Two distinct substitution layers exist and must not be confused: the branded
+**`{{token}}`** layer (this engine, every `templates/emails/*.html` file) and the organizer-authored
+**`{Token}`** layer (single-brace, broadcast subject/body only — see the broadcast section below).
+Tokens never invented in docs: there is no `{{fullName}}`/`{{senderName}}` and no booth tokens wired
+today (they resolve blank); the README marks those explicitly.
+
+**HTML-encoding contract — "encode at the seam" (REQUIREMENTS §10c-4).** The renderer is the single
+authority for token safety: when it substitutes a `{{token}}` into the **HTML body**, the value is
+**HTML-encoded** (`WebUtility.HtmlEncode`), so a person/company/task value containing `<`, `&` or `"`
+renders as readable text and can never break the markup or inject content — senders pass **raw** values
+and must **not** pre-encode (doing so would double-encode now that the seam encodes). The exception is a
+small **raw-HTML token set** whose values are deliberately sender-built HTML fragments and pass through
+verbatim: membership is by the **`Html`/`Block` naming suffix** (e.g. `leadListHtml`, `taskListHtml`,
+`messageHtml`, `descriptionBlock`, `notesBlock`) **plus the explicit set `{bodyContent, dueText}`** —
+see `EmailTemplateRenderer.RawHtmlTokens` / `IsRawHtmlToken`. Inside such a fragment the sender still
+encodes its own untrusted leaf values (e.g. `BuildLeadListHtml` HTML-encodes each lead's name/email).
+The renderer-internal `{{bodyContent}}` (the already-rendered, already-encoded content fragment) is in
+the raw set so it is not double-encoded when placed into the layout. The email **`Subject` header** is a
+text header (no HTML context) and is returned **un-encoded**; the same token can therefore appear plain
+in the `Subject:` line and encoded in the body. New fragment tokens should follow the `…Html`/`…Block`
+convention so they are raw by default; new free-text tokens get encoding for free.
+
 **Reminders are fully settings-controlled across four layers** (on/off, cadence, wording,
 recipients) with zero code changes:
 - **On/off** — each reminder type in `content.<edition>.json → reminders` has an `enabled` flag.
@@ -1346,17 +1579,20 @@ template `welcome-login.html`). It is the onboarding nudge for the brand-new Hub
 role**, mobile-first (~360px), single CTA, **HTML + plain-text** (a `multipart/alternative`), and it
 explains how the Hub fits alongside Zoho Backstage.
 
-- **Real auto-login (magic-link), not a `?email=` prefill.** The CTA — *"Open my Event Hub — signs
-  you in automatically"* — points at `/Login/Magic?token=…`, carrying a per-recipient
-  **DataProtection-signed token** (`{ParticipantId, ExpiresAtUtc, Nonce}`, URL-safe, tamper-evident,
-  no secret in the URL). Following it authenticates the recipient and the handler redirects to `/`,
-  i.e. their role hub. The token mechanism is the **same one the invitation flow already uses**,
-  factored into Core behind `IMagicLinkTokenFactory` (shipped impl `MagicLinkTokenFactory`) so the
-  Core email service can mint it without depending on the web project; the web-project
-  `MagicLinkService` now delegates to it, so links minted before and after the refactor are
-  byte-compatible. The welcome uses a **7-day** TTL (shorter than the invitation's 14 days). The URL
-  is built from the **per-environment base URL** (`Request.Scheme`/`Request.Host`), e.g. dev
-  `https://dev.hub.your-event.example`.
+- **Real auto-login (magic-link), not a `?email=` prefill — and HARDENED single-use.** The CTA —
+  *"Open my Event Hub — signs you in automatically"* — points at `/Login/Magic?token=…`, carrying a
+  per-recipient token. Unlike the reusable invitation magic-link, the welcome CTA uses the
+  **hardened** `IWelcomeAutoLoginTokenService` (shipped impl `WelcomeAutoLoginTokenService`, in Core):
+  the token is a **DataProtection-signed** payload `{ GrantId, TokenId, ExpiresAtUtc }` on its **own
+  purpose** (`CommunityHub.WelcomeAutoLogin.v1`), backed by a server-side `MagicLinkGrant` row that
+  stores **only the SHA-256 hash** of the random 256-bit `TokenId`. Following the link redeems the
+  grant at `/Login/Magic` (tried before the legacy path), which **consumes** it (`ConsumedAt` is
+  stamped) — so it is **single-use**: a reshared or re-tapped link is refused. The grant is
+  **short-lived** (default **72h**, vs the invitation's 14 days), **scoped** to one participant + role
+  in one edition (a re-roled person's stale link is refused), **revocable** (`RevokedAt`) and the row
+  is the **audit trail**. No secret travels in the URL beyond the random id, and a DB leak cannot be
+  replayed (only the hash is stored). The URL is built from the **per-environment base URL**
+  (`Request.Scheme`/`Request.Host`), e.g. dev `https://dev.hub.your-event.example`.
 - **Per-role copy.** One role-specific line per recipient via `WelcomeWithLoginEmailService.RoleLine`
   — every `ParticipantRole` (Organizer / Speaker / MasterclassSpeaker / Volunteer / Sponsor /
   Attendee / Video / Camera) has a distinct, non-empty line. Plus the Backstage explanation and the
@@ -1373,6 +1609,127 @@ explains how the Hub fits alongside Zoho Backstage.
   `SentReminder`.)
 - **Plain-text part.** `IEmailSender` gained a `SendAsync(to, subject, html, text, ct)` overload;
   `BrevoEmailSender` sends it as a true `multipart/alternative` (text + HTML `AlternateView`s).
+
+### Attendee login auto-provisioning + welcome (off by default, 2026-06-21)
+
+An **off-by-default** feature that turns synced 2-day-ticket holders into **active, login-capable
+Attendee participants** and emails each newly-created holder a one-click magic-link welcome — so an
+attendee can sign in and use their hub without an organizer hand-creating accounts. It runs as the tail
+of the Backstage attendee sync (`AttendeeBackstageSyncJob`, which keys attendees on the ticket id), not
+as a separate timer.
+
+- **Provisioning.** `AttendeeWelcomeProvisioningService.ProvisionAsync(eventId)` reads the synced
+  `Attendee` rows with `TicketStatus.TwoDay` (a non-empty email) and, for each holder that does **not**
+  already have a `Participant` in the edition (matched case-insensitively on email), creates one ACTIVE,
+  login-capable Attendee-role participant (`IsActive = true`, `LifecycleState = Active` — deliberately
+  the opposite of the legacy booking-queue `Inactive` state, which BLOCKS sign-in). It returns the ids
+  of the participants it **created**, so the caller welcomes exactly the new people.
+- **Idempotent.** A holder who already has a participant (any role) is skipped, so re-runs create
+  nothing and the welcome is **never re-sent** to an existing attendee.
+- **Welcome to new holders only.** For each newly-created id the job calls
+  `WelcomeWithLoginEmailService.SendForAttendeeProvisioningAsync(pid, baseUrl)` — the same hardened,
+  single-use magic-link welcome described above; a per-recipient send failure is logged and does not
+  abort the loop.
+- **Ring-aware by construction.** New participants are created at **Ring1**, both so the attendee can
+  see the (Ring1-released) hub features and so the central email ring-gate does not drop the welcome (an
+  unknown / Broad recipient would be dropped below the DEV release ceiling).
+- **Double-gated, deliberately opt-in.** The block runs only when the `attendee-welcome` feature is on
+  (catalog: `FeatureGroup.Attendees`, **Advanced, DefaultEnabled `false`**, `DependsOn`
+  `attendee-reconcile` + `outbound-email`, default released ring **Ring1**). Because it sends real mail
+  to real attendees *en masse*, it is never auto-enabled by a deploy — an organizer turns it on
+  deliberately — and every send still passes the central email **kill-switch + ring-gate** chokepoint
+  in `BrevoEmailSender` (§8a).
+
+### Universal sponsor-email audience rule — coordinator-only (REQUIREMENTS §7c)
+
+Every email to a sponsor company goes to **all of that company's EVENT-COORDINATOR contacts**;
+**signer-only contacts never receive sponsor mail**; a contact who is **both** signer and coordinator
+**still** receives it (because they are a coordinator). A company can have **several** coordinators and
+several signers.
+
+- **Per-contact role flags.** Two independent booleans on the mirrored sponsor `Participant`:
+  `IsSigner` and `IsEventCoordinator` (either, both, or neither). Migration
+  `SponsorContactRoleFlags` adds both `bit` columns (default `false`) plus an
+  `(EventId, SponsorCompanyId)` index for the resolver's company-scoped lookup. Schema note in
+  `infra/DEV_TO_PROD_PARITY.md`.
+- **Unique-identifier contact link (id-based, never name).** `Participant.CmUserId` (nullable `int` = the
+  Company Manager / WordPress `user_id`) is the unique identifier linking a CM contact to its hub row.
+  `SponsorContactSyncService` **writes `CmUserId` from the CM user's `user_id` on BOTH create and update** of
+  a sponsor `Participant` — mirroring the operator's external sync, which links a user by `user_id` and a
+  company by `company_id`, never by name. The `user_id` parse is tolerant (CM sends it as a string `"68"` on
+  `/companies/{id}/users`, a number on `/users/{id}`). Correlation back to CM **prefers `CmUserId`** (it is
+  surfaced on each `SponsorRecipient`); `SponsorCompanyId` (CM company id) stays the company key; **email is
+  used ONLY for the ERP→CM bridge** (e-conomic and WordPress share no common id). Migration
+  `SponsorContactCmUserId` adds the column + an `(EventId, CmUserId)` index; nullable + backfilled by the next
+  sync (no data migration). **Companies/contacts are never correlated by name.**
+- **Single shared resolver.** `SponsorRecipientResolver` (`CommunityHub.Core/Email/`) is the **one**
+  authority for "who receives this sponsor email": given a company (+ edition) it returns the active
+  coordinator contacts — signer-only excluded, both-roles included, all coordinators returned, deduped
+  by email. A pure `Select(contacts, erpCoordinatorEmails)` overload carries the whole rule (unit-tested
+  without a DB); the DB `ResolveAsync(eventId, companyId)` overload feeds it the company's
+  `Role == Sponsor` rows plus the e-conomic Role-2 set. A contact is included when it is active, has an
+  email, and **either** carries the manual `IsEventCoordinator` flag (organizer override) **or** its
+  email is in the e-conomic Role-2 set. It **only picks the audience** — `BrevoEmailSender`'s
+  redirect/allowlist still gates every actual delivery.
+- **Every sponsor email path routes through it.** Sponsor **task-deadline reminders**
+  (`TaskReminderBuilder`) fan a sponsor task's reminder out to the company's coordinators instead of to
+  whoever the task is assigned to (which could be a signer-only contact), with each coordinator deduped
+  independently (the `SentReminder` occasion key carries the address). The organizer **sponsor
+  broadcast** (`/Organizer/Broadcast`) drops non-coordinator sponsor rows before the pure audience
+  filter, so the previewed list equals the sent list. The **welcome/intro** path runs through
+  `SponsorWelcomeEmailService` (below). `sponsor-overdue` is the same engine + `SentReminder` dedup and
+  uses the resolver once wired to a sender.
+- **Per-user coordinator audience comes from e-conomic ERP roles (READ-ONLY).** Company Manager exposes
+  **no** per-user roles and **cannot be extended** to add them: `CompanyManagerClient.GetCompanyUsersAsync`
+  (`GET /companies/{id}/users`) returns only `user_id` / `user_email` / `full_name` / `display_name`, and
+  roles exist only as the company-level single-default pointers on `GET /companies/{id}`
+  (`default_signer_id`, `event_coordination_default_contact_id`). So the per-user coordinator audience is
+  resolved **read-only from e-conomic**, which holds per-contact roles. The chain (mirrors the operator's
+  external `Sync-ERP-Contacts-to-Webshop.ps1`, read side only):
+  - **`EconomicRoleClient`** (`CommunityHub.Core/Integrations/Erp/`, behind `IEconomicRoleClient`) GETs an
+    e-conomic customer's contacts (`GET /customers/{number}/contacts`, following `pagination.nextPage`) and
+    parses each contact's `notes` field (`Type:N;Role:1,2`) via the regex `Role:([0-9,\s]+)` into a role-id
+    set per email. **Role 1 = Signer, Role 2 = Event Coordinator.** Auth is the e-conomic
+    `X-AppSecretToken` + `X-AgreementGrantToken` headers (Key Vault by name on `EconomicErpOptions`; base URL
+    defaults to `https://restapi.e-conomic.com`). **STRICTLY READ-ONLY** (only GETs) and **fail-soft** (any
+    error / disabled → empty result, never throws).
+  - **`SponsorErpCoordinatorSource`** (`CommunityHub.Core/Email/`, behind `ISponsorErpCoordinatorSource`)
+    bridges the hub's `SponsorCompanyId` (the CM company id) → `erp_customer_number` (read from
+    `CompanyManagerClient.GetCompanyAsync`) → the e-conomic Role-2 email set. Returns `null` ("unavailable,
+    fall back") on any gap (disabled / company not mapped / no Role-2 contact / read error).
+  - **The resolver** treats the Role-2 set as the **primary** audience source, matched to the company's hub
+    `Participant` rows by email, with the manual `IsEventCoordinator` flag honoured as an additive organizer
+    **override**. **Fail-soft fallback:** when the ERP source is disabled or returns `null`, the resolver uses
+    the manual flags alone — which `SponsorContactSyncService` seeds **set-only** from the CM single
+    `event_coordination_default_contact_id` (signer → `IsSigner`, coordinator → `IsEventCoordinator`; never
+    clears, so an organizer's manual coordinator survives a re-sync) — so the feature still works.
+  - **Opt-in.** `EconomicRoles:Enabled` (default false). When false the DI-registered `NullEconomicRoleClient`
+    + `NullSponsorErpCoordinatorSource` are inert and the resolver behaves exactly as the flag-only fallback —
+    existing behaviour unchanged. **We never guess role data;** ERP writes stay OUT OF SCOPE (the
+    `EconomicErpClient` write methods remain `NotImplemented` — writes live in the operator's external scripts).
+    **◻ Operator step:** set `economicRoles.enabled = true` and populate the read-only e-conomic tokens
+    (`economic-app-secret-token` + `economic-agreement-grant-token`) in the CEH Key Vault.
+
+### Sponsor welcome/intro resend + reset (organizer)
+
+`SponsorWelcomeEmailService` (`CommunityHub.Core/Reminders/`) wraps the idempotent
+`WelcomeEmailService` (one welcome per contact, tracked in `SentReminder` `ReminderType="welcome"`) and
+the resolver. The organizer surface `/Organizer/SponsorAdmin/Welcome` (mobile-first, organizer-gated)
+lists each sponsor company with its coordinator count, signer-only count (informational), and how many
+coordinators have already been welcomed, and offers: **Resend** (per company) / **Resend to all
+sponsors**, and **Reset flag** (per company) / **Reset all** — Reset deletes the matching `welcome`
+`SentReminder` rows for the company's coordinators so the next Resend actually fires (no other reminder
+type is touched). Sends go only to coordinators via the resolver; delivery is still allowlist-gated.
+
+### `send-sample-emails` review command (OneShot, CLI-only)
+
+`tools/CommunityHub.OneShot` gained a `send-sample-emails --to <address> [--sponsor <name>]` command.
+It renders **every** shipped template under `templates/emails/*.html` (skipping the `_layout` partial)
+through the **real** `EmailTemplateProvider`/`EmailTemplateRenderer` with realistic 2LINKIT sample data
+(coordinator `mok@2linkit.net`), prefixes each subject with `[SAMPLE]`, and sends each via the
+configured `IEmailSender` (so the DEV redirect + allowlist apply). It runs **only** when invoked from
+the CLI — never during build or test. The template directory is resolved to an absolute path (walking
+up to `<root>/templates/emails`) so the command works regardless of launch directory.
 
 ### Organizer email center — broadcast (audience filters + reusable templates)
 
@@ -1392,7 +1749,13 @@ self, and the delivery ledger. Both are organizer-gated and event-scoped.
   and `{EventName}` (the edition display name). An unknown token is left **verbatim** (a mistyped
   `{Foo}` survives rather than vanishing). Distinct from the branded shell's own `{{token}}` layer —
   the shell still renders the greeting header, so the built-in bodies deliberately do **not** repeat
-  "Hi {FirstName},".
+  "Hi {FirstName},". The compose form carries an **inline supported-variables legend** (a `<details>`
+  listing each token with a one-line meaning, an example, and a **click-to-insert** button that drops
+  the literal `{Token}` at the caret in whichever of Subject/Message was last focused — progressive
+  enhancement, works with JS off). The legend is **driven by `BroadcastTemplates.TokenHelp`**, so it
+  can never advertise a token the send path does not resolve; the meaning/example/chrome strings are
+  en+da localized (`Broadcast.Token*` resx). `BroadcastTokenLegendTests` asserts the documented set
+  equals the engine's actual token set and that each example contains its own `{Token}` literal.
 - **Audience filters** (`BroadcastAudienceFilter.Resolve`, a pure function) narrow the candidate
   rows: by **role group** (any subset of `ParticipantRole`), optionally **attendees** (reconciled
   from Zoho — always treated as active, no role/test flag), by **status**
@@ -1474,8 +1837,39 @@ Built on the existing center: the shared `IEmailSender` + `EmailTemplateProvider
   alongside the deadline reminders + step-reset consume. The speaker `/Speaker/Questions` page surfaces
   a live open-count + a digest note (en + da-DK). **No schema change** (reuses `SessionQuestion` +
   `SentReminder`).
+- **Test-send to an arbitrary address (REQUIREMENTS §21).** Alongside the existing "send a test copy
+  to me" handler, `/Organizer/EmailCenter` has a `TestSendToAddress` handler that test-sends the
+  selected (rendered, sample-token) template to **any** address the organizer types. Because the
+  outbound path is allowlist-gated (and DEV-redirected), a naive send could silently go nowhere — so
+  the decision is made up front by the pure `EmailTestSendPlanner` (Core, `CommunityHub.Core/Email/`,
+  constructor-injected `IOptions<EmailOptions>`, no DB/clock/I/O). It validates the address (a single
+  .NET-parseable bare address — a display form like `Foo <a@b>` is rejected) and then reuses the
+  sender's own `BrevoEmailSender.ResolveDelivery` so the preview can never disagree with the send,
+  returning an `EmailTestSendPlan` with one of four honest outcomes: `InvalidAddress` (nothing sent),
+  `DroppedByAllowlist` (a **no-op** reported as such — never a green success — naming the dropped
+  target and pointing at `Email__OnlySendTo`), `WouldRedirect` (sent, but the message names the real
+  redirect mailbox so the organizer knows where to look), or `WouldDeliver` (lands as typed). The
+  handler only calls `_emailSender.SendAsync` when the plan `WillSend`; the allowlist is applied to the
+  **post-redirect** address exactly as the sender does (a redirect target outside the allowlist is
+  dropped). Organizer-gated + event-scoped like the rest of the center. **No schema change.** New UI
+  strings (`EmailCenter.TestToAddress*`) are en + da-DK.
+- **Resend-on-failure from the Email Log (REQUIREMENTS §20 Participant).** A FAILED `EmailLog` row that
+  captured a participant + a template gets a one-click **Re-send** on `/Organizer/EmailLog`.
+  `EmailResendService` (Core, `CommunityHub.Core/Email/`) loads the row edition-scoped, asserts it is a
+  failure with a `ParticipantId` AND a `TemplateName` (`IsResendable`), and re-sends through the existing
+  `ParticipantEmailService.SendTemplateToParticipantAsync` (category `manual-resend`) — so the retry
+  reuses the effective-To + secondary-CC routing AND the allowlist-gated `LoggingEmailSender`, writing
+  its **own fresh log row** (the retry is itself audited). It is **NOT** idempotency-gated (the organizer
+  explicitly chose to retry; the `SentReminder` ledger is untouched). The outcome is an honest enum
+  (`Sent` / `NotFailed` / `NotResendable` / `ParticipantGone` / `NotFound` / `Failed`) the page maps to
+  the shared `_Flash` toast via `ActionResultSummarizer` — a raw/broadcast/PIN row (no template/person)
+  is reported as not-resendable, never a fake success. To make a faithful re-send possible, the
+  `EmailContext` carries an optional `TemplateName` that `ParticipantEmailService` sets and
+  `LoggingEmailSender` records on the row (raw sends leave it null). `EmailResendService` is registered
+  scoped in `Program.cs`.
 - **Schema delta.** One migration `EmailSystem`: `EmailLog` table + `Participant.SecondaryEmail`
-  (nullable nvarchar(320)). `has-pending-model-changes` = none.
+  (nullable nvarchar(320)); plus migration `EmailLogTemplateName` adds the additive nullable
+  `EmailLog.TemplateName` for resend-on-failure (above). `has-pending-model-changes` = none.
 - **Mobile-first + a11y.** Email Log filter is a `role="search"` form with labelled inputs, a captioned
   table + `.sr-only` caption, `role="status"` count; the Email Center "send to a person" panel is a
   `<fieldset>`/`<legend>`; the Profile secondary-email field is labelled + `type="email"` validated.
@@ -1538,12 +1932,42 @@ The mechanism is a per-user, token-secured, read-only iCal feed — add it once 
   "Add to my calendar" card is hidden (`IndexModel` skips token minting); and the activation invite
   is skipped. Toggled on the organizer-gated page **`/Organizer/CalendarSettings`** (mobile-first,
   a11y; no new table — the flag lives on the edition row).
+- **Feed preview on the settings page (2026-06-18):** `ParticipantCalendarBuilder.BuildPreviewAsync`
+  returns the same dated items `BuildFeedAsync` emits (it reuses the identical `BuildItemsAsync` query),
+  flattened to a read-only `CalendarPreviewRow` (Summary / Date / AllDay / Location) ordered by date.
+  `CalendarSettingsModel.OnGetAsync` calls it for the organizer's OWN `ParticipantId`, and the page
+  renders a captioned, horizontally-scrollable preview table so an organizer can confirm what their
+  subscribable `.ics` contains before sharing the URL. Own-row scoped, never throws (empty list for an
+  unknown participant), read-only — **no schema change**.
 - **Assigned volunteer tasks now in the feed (Top-8 #8):** `ParticipantCalendarBuilder` adds a
   volunteer's **assigned** `VolunteerTask` rows (via `VolunteerTaskAssignment`) that carry a due date
   and are not `Cancelled`, as all-day VEVENTs with stable UID `voltask:{id}` (a 1-day-before VALARM;
   the free-text shift/time-end window goes in the DESCRIPTION since the catalogue is config-driven).
   `BuildSingleVolunteerTaskAsync` powers the per-shift "Download .ics" on `/volunteer/myschedule`,
   scoped to the volunteer's own assignment. No schema change.
+
+### Role-tagged schedule / key-dates (2026-06-20)
+
+A generic, organizer-editable, role-filtered event schedule that replaces the old static
+`EditionScheduleEntry` config.
+- **Data:** `ScheduleEntry` (EF migration `ScheduleEntries`) — `{EventId, StartsAt (DateTimeOffset,
+  Europe/Copenhagen), EndsAt?, AllDay, Title, Location?, Roles (CSV: `all`/`organizer`/`volunteer`/
+  `speaker`/`media`/`attendee`/`sponsor`), Notes?}`, index `(EventId, StartsAt)`. `ScheduleRoles` maps a
+  `ParticipantRole` to its keyword (`Video`+`Camera` ⇒ `media`, `Speaker`+`MasterclassSpeaker` ⇒
+  `speaker`) and `Applies(csv, role)` does the per-row filter (empty/`all` ⇒ everyone).
+- **Service:** `ScheduleService` — `GetForRoleAsync` (role-filtered), `EnsureSeededAsync` (persists a
+  6-day move-in→main default + the three pre-day timed events Party 16:00 / Group photo 17:30 [all
+  except sponsors] / Appreciation Dinner 18:00 on first organizer visit), `BuildDefault` derives the
+  matrix from the edition `Day1`/`Day2`. `EventLocal` resolves the edition timezone for the offset.
+- **Display:** `_KeyDates.cshtml` renders the viewer's role-filtered rows as a compact table (when ·
+  title+location · who · per-row **+ calendar** link to `GET /schedule/{id}.ics`, `.RequireAuthorization`,
+  scoped to the viewer's edition + `ScheduleRoles.Applies`).
+- **Sync:** `ParticipantCalendarBuilder` appends the role-matched schedule entries to the personal feed
+  (UID `sched:{id}@host`) **and** each speaker's own accepted session(s) via the `SessionSpeakers` join
+  (UID `session:{id}@host`, `My session: {title}` + room, 1-day VALARM).
+- **CRUD:** `/Organizer/Schedule` (organizer-gated; role checkboxes, all-day/timed), reached from the
+  **Logistics** hub; registered in `NavBuilderTests.FeaturePageToHub` (Schedule → Logistics) so the
+  consolidated nav stays ≤ its cap.
 
 ---
 
@@ -1570,16 +1994,14 @@ captured headlessly against a locally-run instance seeded with synthetic demo da
 into two clearly separated, role-gated groups instead of one flat list that mixed personal and admin
 items:
 1. **Participant / "My event" group** — the always-visible primary `nav` (`aria-label` `Nav.MyEvent`):
-   Home, My tasks, My profile, Resources, plus the self-service hubs/forms each role is entitled to
-   (Hotel, Dinner, Lunch, Swag, Travel, Volunteer shifts, the Speaker hub, the Sponsor/Attendee areas).
+   Home, plus a **minimal, role-targeted** set of the self-service entries each role actually needs
+   (the menu was deliberately trimmed per role — see "Per-role participant menus" below).
 2. **Organizer / "Organizer area" group** — a distinct second-level management bar (`nav.manage-bar`)
    rendered as a no-JS disclosure dropdown (native `<details>`/`<summary>`, so it carries
    `aria-expanded` for free, is keyboard-operable, and **collapses to a single toggle on ~360px** with
-   the long admin list flowing inline rather than overflowing the phone viewport). It consolidates
-   *every* organizer tool under one heading — the previously-flat links **plus** the organizer pages
-   that existed but were never in the nav (Overview, Participants, Pre-selection queue, Onboarding,
-   Action queue, Volunteer structure, Sessionize endpoint settings, Asset locations, Group photos,
-   App game, Acting-as log).
+   the admin list flowing inline rather than overflowing the phone viewport). It is now a **lean**
+   menu — a few prominent overview entries + 8 hub landings + the audit log — rather than every tool
+   inline (see "Lean organizer menu" below).
 
 The split + gating is computed server-side by the pure, unit-tested **`CommunityHub.Core.Navigation.NavBuilder`**
 (`NavModel`/`NavGroup`/`NavItem`): `Build(role)` returns the participant group for everyone and **only**
@@ -1589,21 +2011,48 @@ contains a single `/Organizer/*` item — the gate is genuine server-side compos
 resx key (`Nav.*`) so i18n stays in the view; no route is renamed or removed — links are only regrouped
 and a few existing-but-unwired organizer pages are surfaced.
 
-**Grouped organizer menu (REQUIREMENTS §21).** The management menu is a second IA layer on top of the
-consolidated hubs: each management `NavItem` carries an optional `SectionKey` (a `Nav.OrgSection*` resx
-key), and `NavGroup.Sections()` buckets the flat `Items` list into ordered, named `NavSection`s
-(first-seen order preserved, items keep their order within a section). The three most-used entries —
-Organizer home, Command center, Dashboard — have a `null` `SectionKey` and form a leading headingless
-"prominent" bucket; the rest are grouped into six named sections: **People** (`/Organizer/People`),
-**Sessions** (`/Organizer/Content`), **Comms** (`/Organizer/Comms` + `/Organizer/SoMe`), **Sponsors**
-(`/Organizer/SponsorAdmin/Index`), **Volunteers** (`/Organizer/Volunteers`) and **Logistics**
-(`/Organizer/Logistics` + `/Organizer/Setup` + `/Organizer/ImpersonationLog`). `_Layout` renders the
-prominent bucket as plain links, then each named section as a nested native `<details>/<summary>`
-disclosure (no JS, keyboard-operable, mobile-first, `.org-section*` styling) — the section containing the
-current page is rendered `open` so `aria-current` is visible without a click. This is pure information
-architecture: `Sections()` is a view-only projection of `Items`, so the menu membership, the routes, and
-the server-side organizer gate are all unchanged (`NavBuilderTests` asserts the flattened sections equal
-the flat list exactly — no link dropped or duplicated).
+**Lean organizer menu → hub landings + button-grid (2026-06-21).** The management group is now a short,
+hub-level menu instead of ~35 flat links: the prominent overview entries (Organizer home, Command
+center, Dashboard, Find person — `null` `SectionKey`) plus **8 hub landings** and the standalone
+**Acting-as / impersonation log**. The 8 hubs are **People** (`/Organizer/People`), **Sessions**
+(`/Organizer/Content`), **Comms** (`/Organizer/Comms`), **Marketing/SoMe** (`/Organizer/SoMe`),
+**Sponsors** (`/Organizer/SponsorAdmin/Index`), **Volunteers** (`/Organizer/Volunteers`),
+**Logistics** (`/Organizer/Logistics`) and **Setup** (`/Organizer/Setup`). Each hub is a thin
+card-link landing page that **fans out to its feature pages via a shared button-grid component** — the
+`_HubGrid` partial (`Pages/Shared/_HubGrid.cshtml`) rendered over an `IEnumerable<HubTile>`, where
+`HubTile(Href, Title, Description?)` (`Pages/Shared/HubTile.cs`) is pure view data: one full-card link
+per feature page with a title, a one-line description and an "Open →" affordance. The `.hub-grid` /
+`.hub-tile` styles are defined **once in `_Layout`** so every hub looks identical, and each hub page
+just declares its own tile list (e.g. People → Participants, Pre-selection queue, Onboarding,
+Attendees, Action queue). The top-level menu therefore stays short while every existing feature page is
+still reachable in two clicks; no route is renamed or removed (the deep-links all still resolve, just
+reached via their hub). `NavBuilderTests` covers the consolidated hub set + the organizer gate.
+
+**Per-role participant menus — minimal + targeted (2026-06-21).** The participant menu is no longer a
+union of every form; each role gets a deliberately trimmed list of exactly what it needs:
+- **Attendee** — a MINIMAL menu: Home + the in-hub Master Class chooser (`/Attendee`) + My plan
+  (`/Attendee/MyPlan`, the personal saved-sessions agenda) + Waitlist (`/Attendee/Waitlist`). My tasks,
+  My profile, Resources and the public Sessions list are intentionally not shown to attendees.
+- **Speaker** — My sessions (`/Speaker`, the per-speaker hub that also routes to attendee
+  questions / evaluations / SoMe graphics per session), Bio (`/Forms/Speaker`), Calendar, an
+  Event-logistics fold-out, and Contact organizers. The old long flat speaker list is dissolved.
+- **Volunteer** — My schedule (the single home for assigned shifts AND tasks), My availability
+  (`/volunteer/availability`), the Supervisor dashboard **only when the volunteer actually supervises
+  a bucket** (`isVolunteerSupervisor`, so a non-supervisor never lands on a dead-end), and an
+  Event-logistics fold-out. The shift-signup wizard moved out of the volunteer menu (it becomes an
+  anonymous survey).
+- **Sponsor** — Sponsor Webshop / Exhibitor & Booth / Leads fold-outs (the Zoho exhibitor-dashboard
+  links + the in-hub failover pages), Sponsor tasks, Sponsor event logistics and Contact organizers.
+
+Two mechanisms keep these menus tidy: **fold-out sections** — an optional `NavItem.SectionKey` (a
+`Nav.Section*` resx key, e.g. `Nav.SectionEventLogistics`) that `NavGroup.Sections()` buckets into
+ordered, named collapsible sub-groups (first-seen order preserved) so secondary entries
+(event-logistics, sponsor webshop, leads) tuck under a heading instead of crowding the top level — and
+an **`External` flag** on `NavItem` (`bool External`) that marks a link as off-site (e.g. the Zoho
+exhibitor-dashboard URLs, the sponsor buy-services webshop) so `_Layout` opens it in a **new tab** and
+the hub stays open behind it; internal hub routes leave it false (same-tab). Both are pure view data —
+no route renamed/removed; `NavBuilderTests` asserts the flattened sections equal the flat item list
+exactly (no link dropped or duplicated).
 
 **Welcome** — a one-time per-participant landing page per edition.
 
@@ -1742,6 +2191,13 @@ the flat list exactly — no link dropped or duplicated).
   aggregates company profile + raster logo (resolved public name via the shared `SponsorCompanyName`
   chain, monogram initials fallback) + booth **tier**, booth/logistics quick-links (floor-plan /
   exhibitor-guide from the event-edition config + a link to `/Sponsor/Logistics`), the shared
+  <!-- Exhibitor guide hidden 2026-06-20: placeholders.exhibitorGuideUrl set to "" in
+       event.eldk27.json, so the (already-guarded) exhibitor-guide links disappear from the Sponsor
+       Portal, Sponsor Logistics, /Resources and the booth lead-app task. The URL is an OPTIONAL
+       placeholder — nothing hard-requires it — so the operator simply re-adds the value to bring the
+       links back. The /Resources "Guides & downloads" section (whose only link was the guide) was
+       removed from config so it no longer renders an empty section. -->
+
   **deliverables checklist** (`_ChecklistCard` over `ParticipantChecklist`), a **read view of leads**
   (visible count + the most-recent few, junk excluded), and **order/invoice status** read straight from
   the ERP link entities (`ErpCustomerLink` / `ErpOrderLink`): an order with an `ErpOrderNumber` shows its
@@ -1757,7 +2213,15 @@ the flat list exactly — no link dropped or duplicated).
   `/Sponsor/CaptureLead` lets booth staff capture leads in-hub (`SponsorLeadCaptureService`
   → a `ManualBooth` `SponsorLead` row, screened on the way in, surfaced in a recent-leads list and
   out the existing leads export); mobile-first single-column form, Sponsor-role only.
-  `/Sponsor/Leads` shows the company's leads-download API/token setup.
+  `/Sponsor/Leads` shows the company's leads-download API/token setup **and** a
+  **no-API-key in-hub leads list** (REQUIREMENTS §20 Participant): the sponsor's own
+  captured leads (scoped to their `SponsorCompanyId`, Junk/Ignore hidden, newest first),
+  each with one-tap `mailto:` / `tel:` contact links so they can follow up without the
+  API or a script. The link shaping is the pure `SponsorLeadContactLinkBuilder` (Core,
+  `CommunityHub.Core/Integrations/Sponsors/`, no DB/I/O): a `mailto:` is emitted only for a
+  syntactically-plausible address with a URL-encoded, CR/LF-stripped pre-filled subject (no
+  mail-header injection); a `tel:` is reduced to dialable digits + a single leading `+`; a
+  lead with neither is rendered as uncontactable. No schema change (reuses `SponsorLead`).
 - **Attendee** — two pages. `/Attendee/Index` is the focused master-class status +
   deep-link to Zoho Bookings. `/Attendee/MyEvent` is the **"My Event" dashboard**:
   a mobile-first home consolidating a live countdown / "happening now" badge
@@ -1784,6 +2248,46 @@ the flat list exactly — no link dropped or duplicated).
   case-/whitespace-insensitively, and shapes each row's links: `/Sessions/{id}`
   (always), and `/sessions/{token}/ask` + `/sessions/{token}/evaluate` only once the
   session's public token exists. Read-only aggregation — no schema change, no write.
+  **Personal session plan — "My plan" (2026-06-17):** `/Attendee/MyPlan` lets a
+  signed-in participant curate their OWN running order by SAVING the talks they want
+  to attend across the whole agenda. Backed by a **new `SavedSession` entity** (one
+  additive table — `EventId` + `ParticipantId` + `SessionId` + `CreatedAt`; unique on
+  `(EventId, ParticipantId, SessionId)` so a save is idempotent; FKs to Participant +
+  Session are `NoAction` because the `Event` root already cascade-deletes both; EF
+  migration `AttendeeSavedSessions`). The logic lives in the pure
+  `AttendeePlanService` (`CommunityHub.Core/Attendees/`, constructor-injected
+  DbContext + `TimeProvider`): `ToggleAsync` saves/removes idempotently and **refuses
+  to save a session that is not in the participant's own edition** (or a service
+  session / unknown id), so a stale page can never create a cross-edition bookmark;
+  `GetSavedSessionIdsAsync` drives the Save/Saved toggle state; `BuildPlanAsync`
+  projects the saved talks via a translatable navigation join (so a deleted session
+  **self-heals** out of the plan) and hands them to the pure `AttendeePlanBuilder` for
+  ordering (scheduled-first by start time → room → title; unscheduled talks after).
+  **Own-row scoped + server-enforced** — every read/write filters on
+  `EventId == eventId && ParticipantId == participantId`, so one participant can never
+  see or change another's plan. The page itself reuses `PublicSessionsService.BuildAsync`
+  for the browse-and-add list. It is a private bookmark list only — it never books a
+  seat (booking stays in Zoho Bookings) and is never shown publicly. Read-only on the
+  browse side; the only writes are the participant's own save/remove. Mobile-first + a11y +
+  en/da. Covered by `AttendeePlanServiceTests` (Core) + `AttendeeMyPlanPageTests` (Web).
+
+  **My-plan calendar export (.ics) (2026-06-17):** the My plan page offers an "Add my
+  plan to my calendar" download that exports the participant's own **scheduled** saved
+  talks as an RFC 5545 `METHOD:PUBLISH` VCALENDAR. `AttendeePlanService.BuildPlanIcsAsync`
+  reuses `BuildPlanAsync` then maps each scheduled saved talk to a `CalendarItem` (title →
+  SUMMARY, room → LOCATION, speaker name(s) + the `https://{host}/Sessions/{id}` deep-link
+  → DESCRIPTION, a 1-hour fallback when no end time is set, and a single same-day pop-up
+  VALARM before the talk) and hands them to the **existing** `IcsCalendarBuilder.BuildFeed`
+  — the same builder behind the per-user feed and the per-session public `.ics`, so the
+  file validates identically. Each VEVENT carries a stable `plan-session:{id}@{host}` UID
+  so a re-download **updates** the calendar in place (a moved talk shifts, a removed talk
+  drops off) rather than duplicating. **Unscheduled** saved talks are excluded (nothing to
+  put on a calendar); when the plan has **no** scheduled talks the method returns `null`
+  and the page renders a friendly "nothing to add yet" note. Served straight from the
+  authenticated page via the `OnGetIcsAsync` (`?handler=Ics`) handler scoped to the
+  signed-in participant — **own-row scoped**, no token route and no schema change — as a
+  `text/calendar` attachment (`my-plan.ics`, `Cache-Control: no-store`). The owner
+  ORGANIZER/ATTENDEE resolves to the signed-in participant's own name + address.
 
 **Unified participant checklist** (REQUIREMENTS Top-8 #7 / §21 Participant; 2026-06-15). The Hub-home
 "what's still needed" list is now a SHARED component so the Hub home, the **Tasks page** (`/Tasks`) and
@@ -1897,8 +2401,15 @@ landing surfaces. Two parts:
   (operational form-completion + shift coverage) and the Action Queue. **No schema change** — pure
   aggregation, no new table / migration. The page is mobile-first (single-column → wrapping grids at
   ≥560px) and accessible (progress bars carry `role="progressbar"` + `aria-valuenow` with a visible
-  numeric caption — never colour alone; the "needs attention" region is `role="status"`; tables use
-  scoped header cells).
+  numeric caption — never colour alone; the "needs attention" region is `role="list"` with each tile a
+  `role="listitem"`; tables use scoped header cells). **Clickable attention tiles (2026-06-18):** the
+  four "needs attention" tiles are now anchor links that deep-link into the grid pre-filtered to exactly
+  the rows each number counts — Overdue → `/Organizer/TasksTable?StateFilter=Open&Sort=due`, Unassigned
+  volunteer tasks + Open help requests → `/Organizer/VolunteerStructure`, Pending volunteer applications
+  → `/Organizer/Participants?RoleFilter=Volunteer&ActiveFilter=inactive`. These targets mirror the
+  Command-center `AttentionTiles` link map (`CommandCenterService`, the verified source of truth), and a
+  `OverviewTileLinksTests` static guard locks the markup to those routes. Each tile carries a per-tile
+  `aria-label` with the count. **No schema change** (markup + CSS only).
 - Command center (`/Organizer/CommandCenter`) — `CommunityHub.Core.Organizer.CommandCenterService`
   builds a `CommandCenterSnapshot`: the **actionable landing** that answers "is the event on track and
   what do I do next" at one glance. Where `OrganizerOverviewService` is the exhaustive cross-role
@@ -2041,6 +2552,251 @@ the hotel.
 Approve/Decline), and `/survey/{slug}` + `/survey/{slug}/results` (JSON-defined survey catalog,
 3-step wizard, server-validated picks, public weighted-results dashboard for Call-for-Speakers).
 
+### 8a. Feature customization & controlled rollout (kill switches)
+
+The framework that makes every optional capability explicitly enable/disable-able per edition, so
+nothing non-core "just happens" and each integration can be turned on and tested independently.
+
+- **One catalog = source of truth.** `CommunityHub.Core.Settings.FeatureCatalog` is a static,
+  immutable list of `FeatureDescriptor(Key, DisplayNameKey, DescriptionKey, Group, Tier,
+  DefaultEnabled, DependsOn)`. The GUI renders it, the gate reads its defaults, and a classification
+  test asserts over it. **Core** capabilities (search / view / edit / auth / public pages) are
+  deliberately NOT listed — they are never gated. Only **advanced** capabilities (and the email
+  controls) appear. Advanced features default **OFF** (opt-in); the lone exception is the
+  outbound-email master switch, which defaults **ON** (so the hub mails on day one — turning it off
+  is the global kill). Adding a capability is a one-line catalog entry; the gate, GUI row and test
+  coverage follow.
+- **Tiers & groups.** `FeatureTier { Core, Advanced }`; `FeatureGroup { Email, SpeakersSessions,
+  Sponsors, SocialMedia, Surveys, Reminders, Attendees }` (the GUI chapters, rendered in enum order;
+  `Attendees` added 2026-06-17 for the attendee-reconcile gate).
+- **Persisted kill switch.** One `FeatureSetting(EventId, FeatureKey, Enabled, UpdatedAt,
+  LastUpdatedByEmail)` row per (edition, feature), unique-indexed, upserted. A missing row means
+  "use the catalog default", so a fresh edition behaves exactly as declared without seeding. EF
+  migration `FeatureSettings` (additive — one new table; `has-pending-model-changes` reports none;
+  the app auto-migrates on startup). No secrets here; per-feature endpoints/ids stay in their own
+  typed rows (`SoMeSettings`, `SessionizeEndpointSetting`, …).
+- **Gate service.** `FeatureGateService.IsFeatureEnabledAsync(key, eventId)` reads the persisted
+  switch then falls back to the catalog default (pure, EF-backed, SQL-translatable single-key
+  lookup). `AreAllEnabledAsync(eventId, ct, params keys)` is the combined "both must be on" helper
+  the web + jobs share (e.g. a digest needs `digest-emails` **and** `outbound-email`).
+  `FeatureSettingsService` overlays the per-edition state onto the catalog for the GUI (grouped
+  states, upsert, unmet-dependency detection).
+- **Gates live in the jobs/services AND their manual web triggers, not just the UI.** Two job
+  shapes: **edition-scoped** jobs gate per active edition inside their per-edition loop
+  (`ReminderJob` → `reminder-jobs`, with a finer `digest-emails`/`outbound-email` gate on the digest
+  sends; `SoMeDispatchJob` → `some-scheduling`; `SessionizeImportJob` → `sessionize-import`;
+  `SponsorLeadsJob` → `sponsor-leads`; `AttendeeReconcileJob` → `attendee-reconcile`), and
+  **fleet-wide** jobs whose engine is not edition-scoped run only while ≥1 active edition has the
+  feature on, else no-op (`BackstageSyncJob` → `backstage-sync`; `WooCommercePullJob` →
+  `sponsor-order-pull`; `SponsorUploadWatchJob` → `sponsor-upload-watch`). Each logs "feature X
+  disabled — skipped" and performs no work/sends. The **matching in-request web triggers honour the
+  same per-edition switch** so GUI state == actual behaviour: the organizer Sessionize Excel/API
+  import (`SessionizeImportModel` + the Speakers-grid Excel import) and the "Sync now" lead pull
+  (`LeadsModel.OnPostSyncNowAsync`) and the master-class booking sync (`SessionsModel.OnPostSyncBookingsAsync`)
+  return a clear "feature disabled" result instead of running. Dry-run *previews* on the Sessionize
+  page are left ungated (no side effects) so an organizer can preview before enabling.
+- **Email kill switch = first-class.** `EmailOptions.KillSwitch` (config / `Email__KillSwitch`) is
+  the process-wide hard stop, enforced in `BrevoEmailSender` — the single chokepoint every send
+  path (web + jobs) passes through, including the outcome `LoggingEmailSender` records. When on,
+  `ResolveDelivery` returns `allowed=false` for **every** recipient (even an allowlisted one), so
+  SMTP is never touched and the audit log records a kill-switch drop. The per-edition
+  `outbound-email` feature gate sits on top for edition-scoped control. The allowlist-only +
+  redirect safety rules (§9, fail-closed on empty allowlist) still hold underneath.
+- **Operator BCC on actually-sent mail (2026-06-20).** `EmailOptions.BccAllTo` (config /
+  `Email__BccAllTo`, default empty) adds one operator address as a **BCC on every mail that truly goes
+  out** — and only those. In `BrevoEmailSender` the bcc is added at the **dispatch tail** of each send
+  overload (plain / cc / multipart / ics), i.e. AFTER the ring gate AND the allowlist/redirect/kill-switch
+  decision have already let the mail through; a ring-dropped, allowlist-dropped, redirected-away or
+  kill-switched mail produces no send at all, so the operator never gets a copy of something that did not
+  send. The bcc recipient is the operator (organizer, ring0, allowlisted) and is added directly (not
+  re-ring/allowlist-filtered), but it never bypasses the gating of the **primary** recipient; it is
+  de-duplicated against addresses already on the message. Empty in DEV/tests ⇒ behaviour unchanged. All
+  send paths now funnel through one `protected virtual DispatchAsync(MailMessage, …)` seam (the single
+  point after gating) so a test double can capture the exact on-the-wire message without a relay.
+- **GUI.** `/Organizer/Settings` (organizer-only, server-enforced; linked from the Setup hub to
+  keep the nav short — `NavBuilder` `FeaturePageToHub`). Renders the catalog grouped into chapters;
+  each advanced feature has an Enable/Disable toggle; a disabled feature is shown **dimmed with a
+  small "Disabled" label** (never hidden). The email chapter also surfaces the (read-only,
+  infra-managed) allowlist + redirect and a config-kill-switch banner. Mobile-first (~360px), a11y,
+  en + da-DK.
+
+#### Release rings (controlled progressive rollout) — §23, 2026-06-19
+
+On top of the kill switch, a **release RING** gates every feature per resource — the same model in
+dev and prod (no environment branching; a person's ring IS their access level). Replaces the earlier
+dev/test/prod stage + `#Test=On` idea.
+
+- **`Settings.Ring` enum** `Ring0`(dev) < `Ring1`(test-internal) < `Ring2`(test-design-partner) <
+  `Broad`(=Ring3, GA). `Settings.Rings` carries `Default = Broad`, the ordered `All` list,
+  `Effective(contactRing, companyRing)` / `Effective(resourceRing)`, `IsActiveForRing(effective,
+  releasedTo) = effective ≤ releasedTo`, and `Label`.
+- **Resource ring.** `Participant.Ring` (per person) and `SponsorInfo.Ring` (company default for its
+  contacts), both `int`-mapped, DB default 3 (Broad) with `HasSentinel(Broad)` so an explicit earlier
+  ring is always persisted (never reset to Broad). **Effective ring of a sponsor contact =
+  `contact.Ring ?? company.Ring ?? Broad`** (contact supersedes; a contact on the default inherits an
+  earlier company ring); other roles = own ring or Broad.
+- **`RingResolver`** (EF-backed, SQL-translatable) is the ONE resolver the GUI, engines and
+  schedulers/jobs all call. `GetEffectiveRingAsync(participantId)` joins the sponsor company default
+  for sponsor contacts; an unknown participant fails OPEN to Broad. Pure rule exposed as
+  `EffectiveForContact(contactRing, companyRing)` for reuse + test.
+- **Feature released-to ring.** `FeatureSetting.ReleasedToRing` (per edition; DB default 3 +
+  `HasSentinel(Broad)`) + `FeatureDescriptor.DefaultReleasedToRing` (catalog default). The ring-aware
+  gate `FeatureGateService.IsFeatureActiveForRingAsync(key, eventId, effectiveRing)` =
+  `IsFeatureEnabledAsync && effectiveRing ≤ GetReleasedRingAsync`; the convenience
+  `IsFeatureActiveForParticipantAsync(key, eventId, participantId, RingResolver)` resolves the
+  effective ring first. Identical in dev + prod.
+- **OPERATOR RULES (catalog).** RULE 1: the descriptor default released ring is **Ring0** (lowest) so
+  a NEW feature never auto-exposes in prod; every EXISTING feature is explicitly pinned to **Broad**
+  (guardrail — the live site stays visible) and resource/person default is Broad. RULE 2: every
+  **outbound-email** feature (`outbound-email`, `welcome-email`, `magic-link`, `reminder-jobs`,
+  `digest-emails`) is pinned to **Ring1** (mail reaches only ring 0 + 1). RULE 3: the
+  `Email:OnlySendTo` allowlist + `RedirectAllTo` are UNCHANGED — ring-gating sits ON TOP of them; they
+  come off only after a live ring-gating proof.
+- **RINGS GATE ALL EMAIL AT THE SENDER (2026-06-19).** The ring check is enforced INSIDE
+  `BrevoEmailSender` — the single `SendAsync`/`SendWithIcsAsync` chokepoint EVERY send path funnels
+  through (Broadcast, `WelcomeWithLoginEmailService`, reminder/digest jobs, PIN, onboarding, re-send).
+  Before any send, for each recipient address (primary + every CC) it: (1) resolves
+  address→participant in the **active edition** (from the ambient `EmailContext.EventId`) via
+  `RingResolver.TryGetEffectiveRingByEmailAsync` and computes the effective ring
+  (`contact.Ring ?? company.Ring ?? Broad`); (2) reads the **email-release ring** =
+  `FeatureGateService.GetReleasedRingAsync("outbound-email", eventId)` (Ring1 today — **read, never
+  hardcoded**, so it stays configurable); (3) **DROPS + logs** (`Email RING-DROP: <addr>
+  effectiveRing=<r> > emailReleaseRing=<r>`) any KNOWN recipient whose effective ring is OUTSIDE the
+  release ring. So with email@Ring1 a ring2/ring3 sponsor/speaker is dropped at the sender even when
+  the Broadcast/WelcomeWithLogin path calls `SendAsync` directly — no path can bypass it. The sender
+  (a singleton) opens a fresh DI scope per send for the scoped `RingResolver` + `FeatureGateService`
+  (exactly as `LoggingEmailSender` does for its audit write); both `Program.cs` (web + Jobs) wire the
+  `IServiceScopeFactory` + `IEmailContextAccessor` ctor.
+- **FAIL-CLOSED, ring gate IN FRONT of the (intact) allowlist.** An **unknown** address (no
+  participant in the edition) is NOT ring-gated — it is not a participant, so it falls through to the
+  existing fail-closed `Email:OnlySendTo` allowlist floor (`@expertslive.dk` + configured `OnlySendTo`),
+  which drops strangers and still covers organizer/non-participant addresses. A **resolve error**
+  (or a missing/zero active edition→exception) FAILS CLOSED: the send is dropped (never leaks to an
+  unverified recipient) and the exception is swallowed so the send loop never crashes. The allowlist +
+  `RedirectAllTo` + kill switch are left fully intact (ring gate sits in front); the allowlist is
+  slated for removal only **after** a live ring-gating proof.
+- **Schedulers gate per resource.** A per-resource send loop resolves the resource's effective ring
+  and consults the gate, skipping out-of-ring recipients (e.g. `SpeakerQuestionDigestService` takes
+  optional `FeatureGateService` + `RingResolver`; when wired in production DI a speaker only receives
+  the `digest-emails` digest when their effective ring ≤ the released ring — null in focused unit
+  tests so legacy behaviour is unchanged).
+- **GUI.** `/Organizer/Settings` adds a per-feature "Released to ring" selector beside each kill
+  switch (`OnPostReleaseRingAsync` → `FeatureSettingsService.SetReleasedRingAsync`).
+  `/Organizer/ResourceRings` (organizer-only) assigns a ring to each sponsor company / sponsor
+  contact / speaker / volunteer (`ResourceRingService`), showing the resolved effective ring.
+  Mobile-first, a11y, en (i18n keys under `Rings.*` + `Settings.*Ring*`).
+- **EF migration `ReleaseRings`** (additive — three `int` columns `Participants.Ring`,
+  `SponsorInfos.Ring`, `FeatureSettings.ReleasedToRing`, all default 3; `has-pending-model-changes`
+  reports none; the app auto-migrates on startup). Initial ring DATA (specific people/companies) is
+  applied later in the admin, never in code/config.
+
+#### Generalized release lifecycle — groups carry the ring; one rollout GUI — §23a, 2026-06-20
+
+The per-feature ring above generalizes into ONE lifecycle model (operator-accepted 2026-06-20) that
+also covers **email templates** (by sub-group) and, later, **tasks** — surfaced on one organizer
+Rollout grid. Two axes stay strictly separate:
+
+```
+                 TWO INDEPENDENT AXES  (do NOT conflate them)
+
+   ENVIRONMENT  (where the CODE + SCHEMA live)         RING  (audience rollout WITHIN one environment)
+   ───────────────────────────────────────────        ──────────────────────────────────────────────
+        dev  ──CI/CD deploy──▶  prod                    Ring0 ─▶ Ring1 ─▶ Ring2 ─▶ Broad(GA)
+        (one build/SHA per env)                         inner    test     design   everyone
+                                                                          partner
+   Answered by the BUILD STAMP (v + git sha).          Answered by the RING DATA per (EventId,key).
+   "Is the feature's code here yet?"                    "How far is it rolled out HERE?"
+            │                                                   │
+            └────────── only per-env difference is the ─────────┘
+                        CEILING:  DEV caps at Ring1 (Email:MaxReleaseRing); PROD uncapped.
+   ⇒ NO per-feature version. Build stamp = code; ring data = rollout. (Rings are not a version ledger.)
+```
+
+**Group ring + per-feature override (the control model).** Each `FeatureGroup` carries ONE lifecycle
+ring its features inherit; a feature may override with its own special ring:
+
+```
+   GROUP                         group ring     feature                         effective ring
+   ────────────────────────────  ──────────     ────────────────────────────    ──────────────
+   Incubation (test)             Ring0          new-shiny-thing                  Ring0   (inherits)
+   Email                         Ring1          outbound-email                   Ring1   (inherits)
+                                                welcome-email   [override Ring2]  Ring2   (override)
+   Sponsors                      Broad          sponsor-leads                    Broad   (inherits)
+   Reminders                     Ring1          digest-emails                    Ring1   (inherits)
+
+   effective ring(feature) = perFeatureRingOverride ?? groupRing(effectiveGroup)
+   effective group(feature) = perEventGroupOverride ?? catalogHomeGroup
+```
+
+**Lifecycle = promote one number, or re-home one feature.**
+
+```
+   create ──▶ born in "Incubation (test)" @ Ring0  (inner / organizers only)
+                         │  test with Ring0/Ring1 participants
+                         ▼
+   GRADUATE: re-home the feature into its target group  ──▶  it ADOPTS that group's ring
+                         │   (e.g. move new-shiny-thing → Sponsors ⇒ now Broad)
+                         ▼
+   PROMOTE the whole group through the cycle:  Ring0 ─▶ Ring1 ─▶ Ring2 ─▶ Broad
+                         │
+                         ▼
+   Broad = GA  ⇒  the YELLOW "not-yet-Broad" badge disappears (quiet/normal state)
+```
+
+**The gate (engine seam, unchanged caller API).** `FeatureGateService.GetReleasedRingAsync(key,
+eventId)` now resolves `perFeatureOverride ?? groupRing(effGroup) ?? catalogGroupDefault`; every
+caller (GUI, jobs, `BrevoEmailSender`) is unchanged. `IsFeatureActiveForRingAsync` /
+`...ForParticipantAsync` still = `enabled && effectiveRing ≤ releasedRing`. Back-compat: existing
+per-feature ring settings migrate to per-feature **overrides** (zero behaviour change on deploy);
+organizers "clear override" to adopt the group ring.
+
+**Email templates by sub-group (planned increment).** The ~22 disk templates (no catalog today) fold
+into a few lifecycle sub-groups (onboarding / reminders / sponsor / broadcast / transactional), each a
+catalog feature with a ring; `BrevoEmailSender` resolves the template's sub-group from
+`EmailContext.TemplateName` and applies the same ring drop (`Email RING-DROP (template …)`) alongside
+the global `outbound-email` gate. **Tasks** ring-gating is deferred (no release key today — candidate
+units `ParticipantTask.SourceKey` / `VolunteerCategory`).
+
+**GUI (`/Organizer/Settings` → Rollout).** Per group: a group-ring selector. Per feature: enable/kill,
+a ring override (with an "inherit group" option), a group reassignment (graduate), and a **yellow
+"not-yet-Broad" badge** that shows the ring cap whenever the effective ring ≠ Broad and disappears at
+Broad/GA. A **build stamp** (`v<ver> (<sha>) · <Env>`) shows which code is deployed. Organizer-only,
+mobile-first, en. **NEW-FEATURE RULE:** a new feature must either join an existing group (adopt its
+lifecycle ring) or be its own feature with a special ring; born at Ring0 in Incubation, never Broad.
+
+### 8b. Allocation scenarios — generic stage → simulate → commit *(PLANNED, not yet built)*
+
+> **Forward-looking design.** This section describes a designed-but-unbuilt capability. The volunteer
+> **allocation-draft** primitive it builds on already ships (§3 `TaskAllocationDraft` +
+> `VolunteerAllocationService`: `AddDraftAsync`/`RemoveDraftAsync` queue, `CommitAsync` turns the queue
+> into real assignments, `DiscardAsync` resets). Allocation scenarios generalize that one-feature draft
+> queue into a reusable workflow for organizer bulk allocation.
+
+The goal is **one generic stage → simulate → commit workflow** for any organizer bulk-allocation job —
+volunteer task/shift assignment, drop-out re-planning, hotel assignment — so an organizer can plan a
+large change, *see its effect before it lands*, and apply or throw it away atomically.
+
+- **A Scenario holds staged actions, not live edits.** A `Scenario` is a named, per-organizer working
+  set of staged `assign` / `unassign` / `move` actions against the live tables (volunteer task
+  assignments, shift assignments, hotel rooms, …). Staging a change writes only to the scenario — the
+  live tables are untouched until commit, so an organizer can build up a whole re-plan over several
+  sittings without anyone being affected.
+- **Simulation is read-only.** "Simulate" validates the staged set against the live data WITHOUT
+  writing: it surfaces **coverage gaps** (a task/shift left under its needed headcount), **conflicts**
+  (a person double-booked, or assigned outside their availability), **capacity** breaches (a hotel /
+  shift over its limit), and a **before/after diff** so the organizer reads exactly what changes. This
+  is the generalization of today's `LoadCoverageAsync` → `TaskCoverage` red/green check.
+- **Commit is atomic; discard is clean.** On **commit** the staged actions are applied to the live
+  tables in **one transaction** (with an audit trail of who committed what), exactly as
+  `VolunteerAllocationService.CommitAsync` turns the draft queue into real `VolunteerTaskAssignment`
+  rows today; a failed validation blocks the commit rather than half-applying. **Discard** drops the
+  scenario without touching anything live (today's `DiscardAsync`).
+- **Why generic.** Drop-out re-planning (re-spread one person's shifts across the rest), bulk volunteer
+  task mapping, and hotel assignment are the same shape — stage a batch of moves, check coverage /
+  capacity / conflicts, commit or bin — so they share one engine + one organizer UI instead of three
+  bespoke flows. All scenario writes are organizer-only, server-enforced, edition-scoped (same gating
+  as the existing allocation pages).
+
 ---
 
 ## 9. Cross-cutting decisions
@@ -2112,6 +2868,20 @@ localization. **Resources + markup only — no schema/DB involvement, no per-req
   `Dinner.*`, `Travel.*`, `SpeakerForm.*`, `VolWiz.*`, `Lead.*`, `SponsorTasks.*`, `TaskRow.*`,
   `Attendee.*`, `Survey.*`, `Results.*`, `Nav.Org*`, `Welcome.*`, `Onboard.*`). Factual
   deadline-date bullets and event-team/social links stay as data.
+  A later i18n-consistency slice (2026-06-18) externalized the two remaining hardcoded-English
+  **public, no-login** pages: the `/Sessions` filterable list (`Sessions/Index.cshtml`, keys
+  `SessOv.*`) and the `/MasterClass/{slug}` logistics page (`MasterClass/Index.cshtml`, keys
+  `MC.*`). The public Sessions card's **type/length tags** are localized **in the view** (a small
+  `Func<SessionType,string>` / `Func<SessionLength,string>` over the localizer) rather than via the
+  static `IndexModel.Display`, which stays English for the organizer back-office that shares it — so
+  the participant-facing labels are bilingual without touching the organizer copy. Both pages reuse
+  `SessOv.RoomTag` for the "Room <n>" tag.
+  The same slice (2026-06-18) also externalized the **signed-in Hub home status chips** (`Index.cshtml`
+  `DoneBadge()` / `PendingBadge()` helpers), which had baked English ("Submitted" / "Pending") into the
+  badge markup. They now read the shared `Status.Done` / `Status.Pending` keys via the page's
+  `IHtmlLocalizer` (HTML-encoded into the helper output), the decorative ✓ / ⚠ glyph is wrapped in an
+  `aria-hidden` span, and the previously-inline chip styles moved into mobile-first `.hub-badge` /
+  `.hub-badge--done` / `.hub-badge--pending` CSS classes in the page's `<style>` block.
   Adding a culture = a new `SharedResource.<culture>.resx` + an entry in the supported-cultures list
   + a switcher button.
 - **a11y interplay.** The just-merged accessibility pass declared a static `lang="en"`; with i18n
@@ -2209,6 +2979,106 @@ when nothing actually happened. The shaping is a **pure, side-effect-free** help
    `IStringLocalizer<SharedResource>` (`Action.Sent` / `Action.Provisioned` / `Action.ProvisionedNoUrl` /
    `Action.NoOp` / `Action.Failed`); the helper's English defaults are the fallback. Covered by
    `ActionResultSummarizerTests` (13 facts) + the `Action.*` i18n case in `LocalizationResourcesTests`.
+
+**5. Micro-polish behaviours (clipboard / counter / loading / dirty-guard, 2026-06-18).** Four small
+interaction cues are defined **once** in `_Layout`'s shared script (same `data-ceh-*` opt-in,
+`.ceh-*`-prefixed CSS convention as the components above) so any page adopts them with markup only — no
+per-page JS. All are progressive enhancements (work with JS off), mobile-first, and en/da localized:
+
+   - **Copy-to-clipboard** — a button with `data-ceh-copy="<targetInputId>"` copies that field's value
+     and briefly swaps its label to `data-ceh-copied` (the localized `Hub.Copied`), reverting after
+     ~1.5s; it uses `navigator.clipboard.writeText` with an `execCommand('copy')` fallback and adds
+     `aria-live="polite"` so the confirmation is announced. This **replaced** the three bespoke per-page
+     calendar-copy scripts (`cehCopyCal` on the hub home `Index`, `spCopyCal` on the Speaker hub,
+     `msCopyCal` on the Volunteer schedule) with one shared behaviour.
+   - **Live character counter** — a `maxlength` field marked `data-ceh-counter="<template>"` gets a
+     `.ceh-counter` span injected after it showing `used / limit` (template `Common.CharCount`, with
+     `{0}`=used / `{1}`=max), `aria-live="polite"`; it turns `.ceh-counter--near` (amber) inside the last
+     10% of the cap. Adopted on the free-text fields of `/sessions/{token}/ask` + `/evaluate`,
+     `/Volunteer/Signup`, `/Forms/Speaker` (the 4000-char bio), and `/Sponsor/CaptureLead`.
+   - **Submit loading state + double-click guard** — a `<form data-ceh-loading>` sets a one-shot
+     `dataset.cehSubmitted` marker on first submit, adds `.ceh-submitting`, and disables the submit
+     control (swapping its label to `data-ceh-loading-text`, e.g. `Common.Saving`/`Common.Sending`, +
+     `aria-busy`). The button is **not** re-enabled (a fresh page load resets it) so a slow POST can't be
+     re-fired; a cancelled client-validation submit self-clears via the `setTimeout(…,0)` deferral.
+   - **Unsaved-changes guard** — a `<form data-ceh-dirty>` flips a dirty flag on the first `input`/`change`
+     and registers a `beforeunload` that prompts only when dirty; submitting (or any control marked
+     `data-ceh-allow-leave`) clears the flag, so the form's own POST never trips the prompt.
+
+   Covered by `MicroPolishWiringTests` (Web.Tests, static source guard over `_Layout` + the wired pages,
+   incl. that the old `cehCopyCal`/`spCopyCal` helpers are gone) + the `Common.CharCount`/`Common.Saving`/
+   `Common.Sending` i18n case in `LocalizationResourcesTests`.
+
+   **Unsaved-changes guard adopted on the participant editor (2026-06-18).** Beyond the public
+   self-service forms above, the full organizer participant editor `/Organizer/EditParticipant` (the
+   highest-data-loss back-office form — a whole record on one page) now opts into the same
+   `data-ceh-dirty` + `data-ceh-loading` guards: a warn-on-leave-without-save plus a busy/locked Save
+   button (`data-ceh-loading-text="Common.Saving"`). Its **Cancel** link carries `data-ceh-allow-leave`
+   so leaving via Cancel never trips the prompt. No new JS — it reuses the layout behaviour. Asserted by
+   `BreadcrumbWiringTests` (Web.Tests).
+
+### 9c. Organizer back-office breadcrumbs
+
+The organizer area is a deep hub-and-spoke tree — an `/Organizer` root → a few section hubs
+(People / Content(=Sessions) / Comms / SoMe / Volunteers / Logistics / Setup) → ~50 feature pages —
+all reached through a single collapsed nav dropdown (§9 nav grouping). A deep feature page therefore
+gave no "where am I / one click back to the parent hub" affordance. The breadcrumb fills that gap.
+
+- **`BreadcrumbBuilder` (Core, pure + unit-tested)** is the single source of truth. `Build(requestPath)`
+  returns the ordered ANCESTOR trail (`root ▸ hub`) as `BreadcrumbCrumb(Href, LabelKey)` records — the
+  current page is deliberately **not** in the trail. It reuses the SAME hub→section grouping the nav
+  uses (so the breadcrumb can never disagree with the menu) plus an explicit, case/slash-insensitive
+  feature-page→hub map; the `LabelKey`s are resx KEYS (like `NavItem`) so the view owns i18n. A section
+  hub page's trail is just the root; the organizer root and any non-organizer / unknown path return an
+  empty trail (the view renders nothing), so it is safe to call on every request. A known-but-unmapped
+  organizer page (e.g. CommandCenter/Dashboard) falls back to just the root rather than guessing a
+  section.
+- **`_Breadcrumb.cshtml` (shared partial)** is included **once** in `_Layout` inside `<main>` (above
+  `RenderBody`), so it renders on every page with **no per-page wiring**. It calls
+  `BreadcrumbBuilder.Build(Context.Request.Path.Value)` for the ancestor links and appends the page's
+  existing `ViewData["Title"]` as the non-linked leaf — so the leaf always equals the page title already
+  set (60+ organizer pages set it) and never drifts. a11y: a `<nav aria-label="Breadcrumb.Label">`
+  landmark, an ordered `<ol>` (trail order), the leaf marked `aria-current="page"` and not a link, and
+  decorative `/` separators `aria-hidden`. CSS (`.ceh-breadcrumb*`) lives in `_Layout` with the other
+  `.ceh-*` shared styles; mobile-first — the trail wraps at ~360px. en + da-DK via the one new
+  `Breadcrumb.Label` key (all crumb labels reuse existing `Nav.Org*` keys).
+- Covered by `BreadcrumbBuilderTests` (Core: ancestor chains, hub anchoring per section, root/unknown
+  empty trail, case/slash insensitivity, and that every emitted label key resolves in both cultures) +
+  `BreadcrumbWiringTests` (Web: the partial is included inside `<main>` before the body, is driven by
+  the builder + the title leaf, and carries the trail a11y semantics).
+
+### 9d. Async loading skeletons on the data-heavy grids (2026-06-18)
+
+The high-traffic organizer grids (Participants / Speakers / Attendees / Sessions / Sponsors) navigate
+with a full-page GET on every interaction — filter-form submit, sort-header link, pagination link — so
+there is a perceptible round-trip with no feedback today. A loading skeleton fills that gap as **pure
+progressive enhancement**, in the same `data-ceh-*` opt-in spirit as the §9b micro-polish behaviours
+(one shared watcher + CSS in `_Layout`, no per-page JS, no schema change).
+
+- **Opt-in marker.** Each grid's root `<div class="card ceh-grid" data-ceh-grid
+  data-ceh-grid-loading="@@Localizer[\"OrgGrid.Loading\"]">` declares it as a grid and carries the
+  localized "Loading…" announcement text. The `.card` is the natural wrapper — it already encloses the
+  filter form, the table(s) and the pagination, so a single attribute per page covers every navigation
+  out of that grid.
+- **Shared script (behaviour 8 in `_Layout`).** For each `[data-ceh-grid]` it builds (once) a hidden
+  shimmer skeleton (`aria-hidden` decorative bars) plus an `aria-live="polite"` `role="status"`
+  `.sr-only` region, then arms a **one-shot** busy flip on: (a) the grid's own `form[method="get"]`
+  submit, and (b) a delegated click on any in-grid `a[href]` (sort/page links), skipping in-page (`#…`)
+  anchors, modified clicks (Ctrl/Cmd/Shift/Alt/middle — those open a new tab, not replace the page),
+  `target="_blank"`/`download`, and anything tagged `data-ceh-grid-skip`. The flip sets
+  `data-ceh-grid-busy` (CSS dims the stale rows + shows the skeleton overlay), `aria-busy="true"`, and
+  writes the loading text into the live region. A fresh page load clears everything; a `pageshow`
+  handler also clears it on bfcache back/forward restore so it never sticks.
+- **CSS (`.ceh-grid*` in `_Layout`).** `position:relative` host; an absolutely-positioned shimmer
+  overlay shown only while busy; mobile-first (the overlay tracks the wrapper at any width, bars are
+  fluid `%` widths). `@@media (prefers-reduced-motion: reduce)` keeps the dim + overlay (the "busy"
+  signal) but drops the shimmer animation entirely.
+- **Opt-out.** The Attendees "Export CSV" link carries `data-ceh-grid-skip` + `download` so a file
+  download never flashes the skeleton.
+- Covered by `GridSkeletonWiringTests` (Web: the layout carries the CSS + script behaviour, each of the
+  five grids opts in, the busy state is `aria-busy` + announced + one-shot + bfcache-cleared + respects
+  reduced motion, and the Attendees export link opts out) + the `OrgGrid.Loading` i18n case in
+  `LocalizationResourcesTests` (resolves in en + da-DK and the two differ).
 
 ---
 

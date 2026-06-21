@@ -68,7 +68,7 @@ public class TravelReimbursementsModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+        if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
 
         var row = await _db.TravelReimbursements
             .FirstOrDefaultAsync(t => t.Id == id && t.EventId == me.EventId, ct);
@@ -129,7 +129,7 @@ public class TravelReimbursementsModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+        if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
 
         var row = await _db.TravelReimbursements
             .FirstOrDefaultAsync(t => t.Id == id && t.EventId == me.EventId, ct);

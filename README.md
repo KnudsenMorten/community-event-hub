@@ -85,10 +85,10 @@ Every screenshot below is captured **headlessly** against a locally-run instance
 | [![Organizer command center](docs/img/organizer-command-center.png)](docs/img/organizer-command-center.png) | [![Speaker hub on mobile](docs/img/speaker-hub-mobile.png)](docs/img/speaker-hub-mobile.png) |
 | *"Is the event on track, what do I do next?" — one screen triages the whole event.* | *Mobile-first throughout: a speaker's milestone tracker and sessions at ~390px.* |
 
-| Volunteer "My schedule" | Sponsor portal |
+| Volunteer "My schedule" | Sponsor self-service |
 |---|---|
-| [![Volunteer schedule](docs/img/volunteer-schedule.png)](docs/img/volunteer-schedule.png) | [![Sponsor portal](docs/img/sponsor-portal.png)](docs/img/sponsor-portal.png) |
-| *Every shift, time-ordered, with who to ask and one-tap calendar subscribe.* | *One self-service home: profile, booth, deliverables checklist, leads and order status.* |
+| [![Volunteer schedule](docs/img/volunteer-schedule.png)](docs/img/volunteer-schedule.png) | [![Sponsor self-service](docs/img/sponsor-portal.png)](docs/img/sponsor-portal.png) |
+| *Every shift, time-ordered, with who to ask and one-tap calendar subscribe.* | *The in-hub Sponsor area: company details, booth, tasks, leads and order status (screenshot refresh pending).* |
 
 | Volunteer schedule (mobile) | Attendee "My Event" (mobile) |
 |---|---|
@@ -96,6 +96,28 @@ Every screenshot below is captured **headlessly** against a locally-run instance
 | *Built for someone standing at the venue: a volunteer checks their next shift on their phone.* | *Every attendee's home — countdown, Master Class status and a personal agenda — in the palm of their hand.* |
 
 > Every persona surface is designed phone-first (~360px) and tested headlessly at that width, so the experience above is the same on a laptop at the organizer desk and a phone on the show floor.
+
+> ℹ️ The role menus were redesigned in the 2026 edition (see the menu maps below). Fresh screenshots of each redesigned menu are being captured; the maps below are the source of truth in the meantime.
+
+## Role menus (2026 redesign)
+
+Each role sees only what's theirs — a focused, mobile-first menu. `▸` marks a fold-out section; `↗` opens an external site (Zoho exhibitor dashboard / webshop) in a new tab.
+
+**Attendee** — deliberately minimal:
+`Home` · `Master Class` (in-hub chooser) · `My plan` · `Waitlist`
+
+**Speaker:**
+`Home` · `My tasks` · `My profile` · `Sessions` · `My Sessions` · `Bio` · `Calendar` · `Event logistics ▸` (Hotel · Appreciation Dinner · Lunch · Speaker Gift · Travel reimbursement) · `Contact Organizers`
+
+**Sponsor:**
+`Home` · `My profile` · `Sponsor Webshop ▸` (Buy extra services ↗ · Sponsor orders · Linked contacts) · `Exhibitor & Booth Details ▸` (Exhibitor Profile ↗ · Booth Members ↗ · Exhibitor Materials ↗ · Promotional Banner ↗) · `Sponsor Tasks` · `Leads ▸` (Leads ↗ · Inquiries ↗ · Capture leads · My leads export) · `Event logistics` · `Contact Organizers`
+
+**Volunteer:**
+`Home` · `My tasks` · `My profile` · `My schedule` (shifts + tasks, with confirm / decline / request-swap) · `My availability` (per-day full / half / blocked) · `Supervisor` (supervisors only) · `Event logistics ▸` (Hotel · Appreciation Dinner · Lunch · Volunteer Gift · Important dates)
+> Volunteers also sign up via an anonymous shift-survey link (no account needed) that captures their availability.
+
+**Organizer** — a lean hub menu; each hub opens a button-grid of its admin pages:
+`Home` · `Command center` · `Dashboard` · `Find person` · `People` · `Sessions & speakers` · `Comms` · `Social media` · `Sponsors` · `Volunteers` · `Logistics` · `Setup` · `Audit log`
 
 ---
 
@@ -263,10 +285,10 @@ A sponsor is a **company, not a single contact** — every contact at a company 
 - **A single sponsor portal at `/Sponsor`.** Signed-in sponsors get a self-service home that pulls together everything about their sponsorship: company profile and logo, booth tier, booth & logistics quick-links (floor plan, exhibitor guide), their **deliverables checklist** (the same pending/completed view used across the hub), a read view of their **leads**, and **order & invoice status** drawn from the records the hub holds (it says so plainly where invoicing isn't configured rather than inventing one). Each sponsor sees only their own company's data.
 - **Accounting that keeps itself in step (🟡 optional, off until configured).** New sponsors flow into your accounting system as customers with the right contact roles, webshop orders become accounting orders (all idempotent), a new sponsor's **tax-id is validated up front**, and foreign-currency orders get a **currency check** with today's rate when a rate source is configured. Until accounting/webshop credentials are set, it shows exactly what it *would* do and never touches a live system.
 
-| Public sponsors page | Sponsor portal |
+| Public sponsors page | Sponsor self-service |
 |---|---|
-| [![Public sponsors page](docs/img/public-sponsors.png)](docs/img/public-sponsors.png) | [![Sponsor portal](docs/img/sponsor-portal.png)](docs/img/sponsor-portal.png) |
-| *Sponsors grouped by tier, with an initials badge when no logo is uploaded.* | *Profile, booth, deliverables checklist, leads and order status — one company's view.* |
+| [![Public sponsors page](docs/img/public-sponsors.png)](docs/img/public-sponsors.png) | [![Sponsor self-service](docs/img/sponsor-portal.png)](docs/img/sponsor-portal.png) |
+| *Sponsors grouped by tier, with an initials badge when no logo is uploaded.* | *The in-hub Sponsor area — company details, booth, tasks, leads and orders (screenshot refresh pending).* |
 
 → [`docs/FEATURES.md` §7](docs/FEATURES.md#7-sponsors--managed-as-companies-with-the-right-tasks) · integrations in [`docs/DESIGN.md` §6](docs/DESIGN.md#6-integrations)
 

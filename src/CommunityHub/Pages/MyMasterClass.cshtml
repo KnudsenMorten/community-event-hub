@@ -1,0 +1,167 @@
+@page
+@using CommunityHub.Core.Domain
+@model CommunityHub.Pages.MyMasterClassModel
+@{
+    Layout = null;
+}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>My Master Class</title>
+    <style>
+        :root { --el-darkblue:#1D3380; --el-blue:#008BD2; }
+        body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin:0; background:#0e1116; color:#1f2430; }
+        .wrap { max-width:640px; margin:0 auto; padding:24px 18px 48px; }
+        .card { background:#fff; border-radius:14px; padding:0; overflow:hidden; box-shadow:0 6px 24px rgba(0,0,0,.25); margin-bottom:16px; }
+        .hero { background:var(--el-darkblue); color:#fff; padding:22px; }
+        .hero h1 { font-size:22px; margin:0; }
+        .hero p { margin:6px 0 0; color:#cdd6f5; font-size:14px; }
+        .body { padding:20px; }
+        h1 { font-size:22px; margin:0 0 4px; }
+        h3 { color:var(--el-darkblue); }
+        .muted { color:#5b636e; font-size:14px; }
+        .teaser { color:#3a4150; font-size:14px; line-height:1.5; }
+        .teaser .stat { color:var(--el-darkblue); font-weight:700; }
+        .mc { border:1px solid #dfe3e8; border-radius:10px; padding:12px 14px; margin:10px 0; }
+        .mc h3 { margin:0 0 4px; font-size:16px; }
+        .pill { display:inline-block;font-size:12px;font-weight:700;border-radius:999px;padding:2px 9px; }
+        .seat { background:#e7f6ec; color:#1c6b35; }
+        .full { background:#fef6e7; color:#8a5a00; }
+        button { padding:10px 14px; border:0; border-radius:9px; background:#1c6b35; color:#fff; font-weight:600; font-size:15px; cursor:pointer; }
+        .give { background:#fff; border:1px solid #e3a3a3; color:#b3261e; }
+        .flash { background:#eef6ff; border:1px solid #cfe2ff; border-radius:9px; padding:10px 12px; font-size:14px; margin-bottom:14px; }
+        /* Survey "topics" look — selectable track cards. */
+        .track-grid { display:grid; gap:10px; grid-template-columns:1fr; margin:14px 0; }
+        @@media (min-width:560px) { .track-grid { grid-template-columns:1fr 1fr; } }
+        .track-card { display:block; position:relative; padding:14px 16px; border:1.5px solid var(--el-darkblue); border-radius:10px; cursor:pointer; background:var(--el-darkblue); color:#fff; transition:background .12s, transform .12s; }
+        .track-card:hover { background:var(--el-blue); border-color:var(--el-blue); transform:translateY(-1px); }
+        .track-card.full { background:#6b7280; border-color:#6b7280; cursor:default; }
+        .track-card .name { font-weight:700; font-size:15px; display:block; }
+        .track-card .avail { font-size:12px; opacity:.9; margin-top:3px; display:block; }
+        .track-card:has(input:checked) { background:var(--el-blue); border-color:#fff; box-shadow:0 0 0 3px rgba(0,139,210,.4); }
+    </style>
+</head>
+<body>
+<div class="wrap">
+@if (Model.InvalidLink)
+{
+    <div class="card"><h1>Link not valid</h1>
+        <p class="muted">This Master Class link is not valid. Please use the link from your email.</p></div>
+}
+else
+{
+    @if (!string.IsNullOrEmpty(Model.Message)) { <div class="flash">@Model.Message</div> }
+    @if (!string.IsNullOrEmpty(Model.ErrorMessage)) { <div class="flash" style="background:#fdecec;border-color:#f3c2c2;color:#b3261e;">@Model.ErrorMessage</div> }
+
+    <div class="card">
+        <div class="hero">
+            <h1>Master Classes@(string.IsNullOrEmpty(Model.EventName) ? "" : $" — {Model.EventName}")</h1>
+            <p>Hi @Model.AttendeeName — choose your pre-day deep-dive below.</p>
+        </div>
+        <div class="body">
+        <p class="teaser">
+            This year we're once again offering our hugely popular master class option in our pre-day, where you
+            spend a full day deep-diving into your favourite topic.<br /><br />
+            Listen to questions from fellow attendees, ask your own — and learn directly from some of the very best
+            in the world. Master classes are led by Microsoft MVPs and the Microsoft product team (where available).<br /><br />
+            At ELDK26, <span class="stat">+700 attendees</span> joined the master classes and had a fantastic day,
+            with an amazing <span class="stat">93% score</span> on the HappyIndex.
+        </p>
+
+        @if (!Model.Eligible)
+        {
+            <p class="muted">Master Classes are available to <strong>2-day ticket</strong> holders. Our records don't show a 2-day ticket for you — if that's wrong, contact the organisers.</p>
+        }
+        else
+        {
+            @* A held OFFER takes priority — they must decide. *@
+            @if (Model.Pending is { Status: MasterClassSignupStatus.Offered } off)
+            {
+                <div class="mc" style="border-color:#1c6b35;background:#f3fbf5;">
+                    <h3>A seat opened: @off.Title</h3>
+                    <p class="muted">A seat is being held for you@(off.OfferExpiresAt is { } exp ? $" until {exp:dddd HH:mm}" : ""). You can hold only one confirmed Master Class, so to take this you'll give up <strong>@(Model.Confirmed?.Title ?? "your current class")</strong>. If you don't decide in time it switches automatically.</p>
+                    <form method="post" asp-page-handler="Accept" style="display:inline;">
+                        <input type="hidden" name="t" value="@Model.Token" />
+                        <button type="submit">Switch to @off.Title</button>
+                    </form>
+                    <form method="post" asp-page-handler="Decline" style="display:inline;margin-left:8px;">
+                        <input type="hidden" name="t" value="@Model.Token" />
+                        <button type="submit" class="give">Keep @(Model.Confirmed?.Title ?? "my current class")</button>
+                    </form>
+                </div>
+            }
+
+            @if (Model.Confirmed is { } seat)
+            {
+                <div class="mc">
+                    <h3>@seat.Title</h3>
+                    <p><span class="pill seat">Confirmed seat</span></p>
+                    <p><a href="/MyMasterClass.ics?t=@Model.Token">📅 Add to my calendar (.ics)</a></p>
+                    <form method="post" asp-page-handler="ToggleReminder" style="margin:6px 0;">
+                        <input type="hidden" name="t" value="@Model.Token" />
+                        <input type="hidden" name="wants" value="@((!Model.MonthReminderOptIn).ToString().ToLower())" />
+                        <button type="submit" style="background:#eef0f4;color:#1f2430;border:1px solid #cbd2d9;">
+                            @(Model.MonthReminderOptIn ? "✓ Calendar reminder ~1 month before (turn off)" : "Remind me ~1 month before")
+                        </button>
+                    </form>
+                    <form method="post" asp-page-handler="GiveUp" onsubmit="return confirm('Give up your seat? It goes to the next person on the waitlist.');">
+                        <input type="hidden" name="t" value="@Model.Token" />
+                        <input type="hidden" name="sessionId" value="@seat.SessionId" />
+                        <button type="submit" class="give">Give up my seat</button>
+                    </form>
+                </div>
+            }
+
+            @if (Model.Pending is { Status: MasterClassSignupStatus.Waitlisted } wl)
+            {
+                <div class="mc">
+                    <h3>@wl.Title</h3>
+                    <p><span class="pill full">Waitlist — position @wl.WaitlistPosition</span></p>
+                    <p class="muted">We'll let you know if a seat opens up.</p>
+                    <form method="post" asp-page-handler="GiveUp">
+                        <input type="hidden" name="t" value="@Model.Token" />
+                        <input type="hidden" name="sessionId" value="@wl.SessionId" />
+                        <button type="submit" class="give">Leave the waitlist</button>
+                    </form>
+                </div>
+            }
+
+            @if (Model.Confirmed is null || Model.Pending is null)
+            {
+                <h3 style="margin-top:18px;">@(Model.Confirmed is null ? "Choose your Master Class" : "Wait-list for one more")</h3>
+                <p class="muted">You can hold one confirmed seat plus a waitlist for one other.</p>
+                <form method="post" asp-page-handler="Join">
+                    <input type="hidden" name="t" value="@Model.Token" />
+                    <div class="track-grid">
+                    @foreach (var o in Model.Options)
+                    {
+                        var mine = (Model.Confirmed?.SessionId == o.SessionId) || (Model.Pending?.SessionId == o.SessionId);
+                        if (mine) { continue; }
+                        <label class="track-card @(o.IsFull ? "full" : "")">
+                            <input type="radio" name="sessionId" value="@o.SessionId" required style="position:absolute;left:-9999px;" />
+                            <span class="name">@o.Title</span>
+                            <span class="avail">
+                                @if (o.Capacity is int cap) { @(o.IsFull ? "Full — join waitlist" : $"{o.Free} of {cap} seats free") } else { <text>Open</text> }
+                            </span>
+                        </label>
+                    }
+                    </div>
+                    @if (Model.Confirmed is not null)
+                    {
+                        <label style="display:flex;gap:8px;align-items:flex-start;margin:6px 0 12px;font-size:13px;color:#5b636e;">
+                            <input type="checkbox" name="autoSwitchConsent" value="true" required style="margin-top:2px;" />
+                            I understand that if a waitlisted seat opens, my current Master Class (<strong>@Model.Confirmed.Title</strong>) will be cancelled and I'll be moved to the new one automatically.
+                        </label>
+                    }
+                    <button type="submit">Confirm my selection</button>
+                </form>
+            }
+        }
+        </div>
+    </div>
+}
+</div>
+</body>
+</html>

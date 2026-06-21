@@ -1,6 +1,7 @@
 using CommunityHub.Core.Config;
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Reminders;
+using CommunityHub.Core.Settings;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -23,6 +24,7 @@ public sealed class ReminderJob
     private readonly ReminderEngine _engine;
     private readonly CommunityHub.Core.Email.OnboardingStepResetEmailService _stepResetEmails;
     private readonly CommunityHub.Core.Email.SpeakerQuestionDigestService _speakerQuestionDigest;
+    private readonly FeatureGateService _gate;
     private readonly ILogger<ReminderJob> _log;
 
     public ReminderJob(
@@ -32,6 +34,7 @@ public sealed class ReminderJob
         ReminderEngine engine,
         CommunityHub.Core.Email.OnboardingStepResetEmailService stepResetEmails,
         CommunityHub.Core.Email.SpeakerQuestionDigestService speakerQuestionDigest,
+        FeatureGateService gate,
         ILogger<ReminderJob> log)
     {
         _db = db;
@@ -40,6 +43,7 @@ public sealed class ReminderJob
         _engine = engine;
         _stepResetEmails = stepResetEmails;
         _speakerQuestionDigest = speakerQuestionDigest;
+        _gate = gate;
         _log = log;
     }
 
@@ -56,6 +60,17 @@ public sealed class ReminderJob
 
         foreach (var eventId in activeEventIds)
         {
+            // GATE (REQUIREMENTS §23): the reminder/digest automation is an advanced
+            // feature, off by default. When disabled for this edition the job
+            // no-ops — no tasks seeded, no reminders or digests computed/sent.
+            if (!await _gate.IsFeatureEnabledAsync("reminder-jobs", eventId, ct))
+            {
+                _log.LogInformation(
+                    "ReminderJob: event {EventId} — feature 'reminder-jobs' disabled, skipped.",
+                    eventId);
+                continue;
+            }
+
             // Seed speaker-deadline tasks first - idempotent, so this only
             // creates tasks for speakers who do not yet have them.
             var seeded = await _speakerDeadlines.SeedAsync(eventId, ct);
@@ -63,14 +78,29 @@ public sealed class ReminderJob
             var due = await _taskReminders.BuildDueAsync(eventId, ct);
             var sent = await _engine.SendDueAsync(eventId, due, ct);
 
-            // Consume the onboarding flip-to-0 hand-off (10a-6): email each person
-            // whose wizard step an organizer re-opened, then resolve the action.
-            var stepResets = await _stepResetEmails.SendPendingAsync(eventId, ct);
+            // The digest/notification sends are a SECOND, finer gate ('digest-emails',
+            // which itself depends on the global outbound-email switch): an organizer
+            // can keep deadline seeding/reminders on but silence the speaker digests.
+            int stepResets = 0, questionDigests = 0;
+            var digestsOn = await _gate.AreAllEnabledAsync(
+                eventId, ct, "digest-emails", FeatureCatalog.OutboundEmailKey);
+            if (digestsOn)
+            {
+                // Consume the onboarding flip-to-0 hand-off (10a-6): email each person
+                // whose wizard step an organizer re-opened, then resolve the action.
+                stepResets = await _stepResetEmails.SendPendingAsync(eventId, ct);
 
-            // Email each speaker a digest of the OPEN audience questions on their
-            // sessions (§21). Idempotent: a digest only re-sends when a brand-new
-            // question raises the speaker's open-question fingerprint.
-            var questionDigests = await _speakerQuestionDigest.SendPendingAsync(eventId, ct);
+                // Email each speaker a digest of the OPEN audience questions on their
+                // sessions (§21). Idempotent: a digest only re-sends when a brand-new
+                // question raises the speaker's open-question fingerprint.
+                questionDigests = await _speakerQuestionDigest.SendPendingAsync(eventId, ct);
+            }
+            else
+            {
+                _log.LogInformation(
+                    "ReminderJob: event {EventId} — feature 'digest-emails' disabled — "
+                    + "no digest/step-reset emails sent.", eventId);
+            }
 
             _log.LogInformation(
                 "ReminderJob: event {EventId} - {Seeded} deadline tasks seeded, "

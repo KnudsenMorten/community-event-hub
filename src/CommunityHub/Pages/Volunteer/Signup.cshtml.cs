@@ -44,6 +44,17 @@ public class SignupModel : PageModel
     [BindProperty] public string? Interests { get; set; }
     [BindProperty] public string? Motivation { get; set; }
 
+    // --- Shift availability (the survey core) -------------------------------
+    [BindProperty] public List<string> SelectedShifts { get; set; } = new();
+    [BindProperty] public string? PreferredRole { get; set; }
+    [BindProperty] public int MaxHoursPerDay { get; set; } = 8;
+
+    /// <summary>The shift catalogue — single source shared with the logged-in wizard.</summary>
+    public static IReadOnlyList<string> ShiftCatalogue =>
+        CommunityHub.Pages.Forms.VolunteerWizardModel.ShiftCatalogue;
+
+    private const char ShiftDelimiter = '|';
+
     /// <summary>
     /// Honeypot. Hidden CSS-off-screen on the page. Humans cannot see it; bots
     /// fill every input. Any non-empty value -> silent 200 OK (no DB write).
@@ -117,6 +128,9 @@ public class SignupModel : PageModel
             }
             else if (existing.Role == ParticipantRole.Volunteer)
             {
+                // Re-submission from a pending applicant: refresh their shift
+                // availability so an updated survey overwrites the earlier one.
+                await SaveAvailabilityAsync(active.Id, existing.Id, ct);
                 SubmittedOk    = true;
                 SubmittedName  = string.IsNullOrWhiteSpace(existing.FullName) ? fullName : existing.FullName;
                 SubmittedEmail = existing.Email;
@@ -157,9 +171,12 @@ public class SignupModel : PageModel
             return Page();
         }
 
+        // Save their shift availability (the survey core) against the new applicant.
+        await SaveAvailabilityAsync(active.Id, applicant.Id, ct);
+
         _log.LogInformation(
-            "New volunteer applicant: id={Id} email={Email} name={Name} event={EventId} country={Country} interests={Interests}",
-            applicant.Id, email, fullName, active.Id, Country ?? "(none)", Interests ?? "(none)");
+            "New volunteer applicant: id={Id} email={Email} name={Name} event={EventId} country={Country} interests={Interests} shifts={Shifts}",
+            applicant.Id, email, fullName, active.Id, Country ?? "(none)", Interests ?? "(none)", SelectedShifts.Count);
 
         SubmittedOk    = true;
         SubmittedName  = fullName.Split(' ').First();
@@ -168,6 +185,45 @@ public class SignupModel : PageModel
     }
 
     // ------- Helpers --------------------------------------------------------
+
+    /// <summary>
+    /// Upsert the applicant's <see cref="VolunteerAvailability"/> from the survey's
+    /// shift selection. Tampered values are dropped against the catalogue; hours are
+    /// clamped to a sane day (1..24). No row is written when nothing valid was
+    /// picked (the person can still be a pending applicant without stated shifts).
+    /// </summary>
+    private async Task SaveAvailabilityAsync(int eventId, int participantId, CancellationToken ct)
+    {
+        var clean = (SelectedShifts ?? new List<string>())
+            .Where(s => ShiftCatalogue.Contains(s))
+            .Distinct()
+            .ToList();
+        if (clean.Count == 0) return;
+
+        var hours = Math.Clamp(MaxHoursPerDay, 1, 24);
+        var preferred = string.IsNullOrWhiteSpace(PreferredRole) ? null : PreferredRole.Trim();
+
+        var availability = await _db.VolunteerAvailabilities.FirstOrDefaultAsync(
+            v => v.EventId == eventId && v.ParticipantId == participantId, ct);
+        if (availability is null)
+        {
+            availability = new VolunteerAvailability
+            {
+                EventId = eventId,
+                ParticipantId = participantId,
+                CreatedAt = _clock.GetUtcNow(),
+            };
+            _db.VolunteerAvailabilities.Add(availability);
+        }
+        else
+        {
+            availability.UpdatedAt = _clock.GetUtcNow();
+        }
+        availability.SelectedShifts = string.Join(ShiftDelimiter, clean);
+        availability.PreferredRole = preferred;
+        availability.MaxHoursPerDay = hours;
+        await _db.SaveChangesAsync(ct);
+    }
 
     private async Task<Event?> GetActiveEventAsync(CancellationToken ct)
     {

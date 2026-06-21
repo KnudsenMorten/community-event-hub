@@ -28,7 +28,20 @@ public sealed record MyEventSessionRow(
     bool IsMine,
     string DetailUrl,
     string? AskUrl,
-    string? EvaluateUrl);
+    string? EvaluateUrl)
+{
+    /// <summary>
+    /// True once the session's public ask / evaluate token has been minted, i.e.
+    /// when <see cref="AskUrl"/> / <see cref="EvaluateUrl"/> are live links. The
+    /// ask + evaluate token is minted on demand (typically at the start of the
+    /// session), so before then these URLs are null. The attendee surface uses
+    /// this to decide whether to render the active ask/evaluate links OR a short
+    /// "available during the session" hint — never nothing — so the attendee
+    /// understands the action will appear rather than seeing a silent gap.
+    /// (Both URLs derive from the same token, so a single flag covers both.)
+    /// </summary>
+    public bool AskEvaluateAvailable => AskUrl is not null;
+}
 
 /// <summary>
 /// The attendee's personal agenda view-model: the session(s) they are registered

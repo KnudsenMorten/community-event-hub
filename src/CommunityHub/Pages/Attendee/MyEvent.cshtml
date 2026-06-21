@@ -45,6 +45,8 @@
                         padding: 1px 8px; font-size: 11px; font-weight: 700; margin-left: 6px; vertical-align: middle; }
     .me-ses .links { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 8px 14px; font-size: 14px; }
     .me-ses .links a { white-space: nowrap; }
+    /* Disabled ask/evaluate affordance shown before the session's token is minted. */
+    .me-ase-soon { white-space: nowrap; color: #9ca3af; font-style: italic; cursor: default; }
     .me-quick { display: flex; flex-wrap: wrap; gap: 8px; }
     .me-quick a { flex: 1 1 45%; box-sizing: border-box; text-align: center; text-decoration: none;
                   background: #eef2f7; color: #1f2937; border-radius: 8px; padding: 12px 10px; font-weight: 600; }
@@ -125,13 +127,17 @@
         }
         html.Append("<div class=\"links\">");
         html.Append($"<a href=\"{row.DetailUrl}\">{System.Net.WebUtility.HtmlEncode(Localizer["MyEvent.SessionDetails"].Value)} &rarr;</a>");
-        if (row.AskUrl is not null)
+        if (row.AskEvaluateAvailable)
         {
             html.Append($"<a href=\"{row.AskUrl}\">{System.Net.WebUtility.HtmlEncode(Localizer["MyEvent.AskQuestion"].Value)}</a>");
-        }
-        if (row.EvaluateUrl is not null)
-        {
             html.Append($"<a href=\"{row.EvaluateUrl}\">{System.Net.WebUtility.HtmlEncode(Localizer["MyEvent.Evaluate"].Value)}</a>");
+        }
+        else
+        {
+            // No ask/evaluate token yet (minted at the session). Show a disabled
+            // affordance + hint instead of nothing, so the attendee knows the
+            // ask/rate action will appear during the session (bug-fix §20).
+            html.Append($"<span class=\"me-ase-soon\" aria-disabled=\"true\" title=\"{System.Net.WebUtility.HtmlEncode(Localizer["MyEvent.AskEvaluateNotOpenHint"].Value)}\">{System.Net.WebUtility.HtmlEncode(Localizer["MyEvent.AskEvaluateNotOpen"].Value)}</span>");
         }
         html.Append("</div></div>");
         return new Microsoft.AspNetCore.Html.HtmlString(html.ToString());
@@ -163,10 +169,24 @@
 <div class="card">
     <h2>@Localizer["MyEvent.QuickLinks"]</h2>
     <nav class="me-quick" aria-label="@Localizer["MyEvent.QuickLinks"]">
-        <a asp-page="/Forms/Hotel">&#127976; @Localizer["MyEvent.Hotel"]</a>
-        <a asp-page="/Forms/Swag">&#127873; @Localizer["MyEvent.Swag"]</a>
-        <a asp-page="/Forms/Lunch">&#127869; @Localizer["MyEvent.Lunch"]</a>
+        @* Attendee-relevant links first — always shown. *@
         <a asp-page="/Sessions">&#128197; @Localizer["MyEvent.FullAgenda"]</a>
+        <a asp-page="/Attendee/MyPlan">&#11088; @Localizer["MyEvent.MyPlan"]</a>
+        @* Crew-only self-service forms — render ONLY when the current role is
+           actually eligible (attendees are not), so we never deep-link a role into
+           a form it would be denied on (bug-fix §20 Attendee My-event). *@
+        @if (Model.ShowHotelLink)
+        {
+            <a asp-page="/Forms/Hotel">&#127976; @Localizer["MyEvent.Hotel"]</a>
+        }
+        @if (Model.ShowSwagLink)
+        {
+            <a asp-page="/Forms/Swag">&#127873; @Localizer["MyEvent.Swag"]</a>
+        }
+        @if (Model.ShowLunchLink)
+        {
+            <a asp-page="/Forms/Lunch">&#127869; @Localizer["MyEvent.Lunch"]</a>
+        }
     </nav>
     <p class="me-muted" style="margin:10px 0 0;">@Localizer["MyEvent.QuickLinksHelp"]</p>
 </div>

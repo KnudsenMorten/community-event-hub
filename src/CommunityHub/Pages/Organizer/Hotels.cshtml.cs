@@ -45,13 +45,16 @@ public class HotelsModel : PageModel
     [BindProperty] public string? ContactEmail { get; set; }
     [BindProperty] public string? Notes { get; set; }
 
+    /// <summary>Reserved room-block size (blank = not set / clear the block).</summary>
+    [BindProperty] public int? RoomBlockSize { get; set; }
+
     public async Task<IActionResult> OnGetAsync(CancellationToken ct)
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
         if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
 
-        await LoadAsync(me.EventId, ct);
+        if (!await TryLoadAsync(me.EventId, ct)) return Page();
 
         // Prefill the form when editing an existing hotel.
         if (EditId is int id && id > 0)
@@ -63,6 +66,7 @@ public class HotelsModel : PageModel
                 Address = hotel.Address;
                 ContactEmail = hotel.ContactEmail;
                 Notes = hotel.Notes;
+                RoomBlockSize = hotel.RoomBlockSize;
             }
             else
             {
@@ -76,18 +80,20 @@ public class HotelsModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+        if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
 
         try
         {
             if (EditId is int id && id > 0)
             {
-                var ok = await _hotels.UpdateHotelAsync(me.EventId, id, Name ?? "", Address, ContactEmail, Notes, ct);
+                var ok = await _hotels.UpdateHotelAsync(
+                    me.EventId, id, Name ?? "", Address, ContactEmail, Notes, RoomBlockSize, ct);
                 Message = ok ? "Hotel updated." : "Hotel not found.";
             }
             else
             {
-                await _hotels.CreateHotelAsync(me.EventId, Name ?? "", Address, ContactEmail, Notes, ct);
+                await _hotels.CreateHotelAsync(
+                    me.EventId, Name ?? "", Address, ContactEmail, Notes, RoomBlockSize, ct);
                 Message = "Hotel added.";
             }
         }
@@ -104,7 +110,7 @@ public class HotelsModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+        if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
 
         var ok = await _hotels.DeleteHotelAsync(me.EventId, id, ct);
         Message = ok ? "Hotel deleted (assigned people were un-assigned)." : "Hotel not found.";
@@ -125,7 +131,7 @@ public class HotelsModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+        if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
 
         var requested = SelectedIds.Where(id => id > 0).Distinct().Count();
         if (requested == 0)
@@ -159,5 +165,36 @@ public class HotelsModel : PageModel
     private async Task LoadAsync(int eventId, CancellationToken ct)
     {
         Hotels = await _hotels.ListHotelsAsync(eventId, ct);
+    }
+
+    /// <summary>
+    /// Load the hotel list, but never let a data-layer failure take the whole
+    /// page down with an unhandled 500. The Hotels grid SELECTs every Hotel
+    /// column (incl. the newer <c>RoomBlockSize</c>); if the DEV/PROD schema
+    /// ever lags the deployed code (a migration not yet applied, a stale read
+    /// replica, a transient SQL blip), the bare query would throw and the page
+    /// returned HTTP 500 — which is exactly what the iPhone-SE post-deploy
+    /// validation caught on <c>/Organizer/Hotels</c>. Degrade to an honest
+    /// error banner on a 200 page instead: the organizer sees a clear message,
+    /// the route stays alive, and the auto-migrate on the next boot heals the
+    /// schema. Returns false when the load failed (caller renders the banner).
+    /// </summary>
+    private async Task<bool> TryLoadAsync(int eventId, CancellationToken ct)
+    {
+        try
+        {
+            await LoadAsync(eventId, ct);
+            return true;
+        }
+        catch (OperationCanceledException)
+        {
+            throw; // a cancelled request is not a page error — let it unwind.
+        }
+        catch (Exception)
+        {
+            Hotels = Array.Empty<Hotel>();
+            Error = "The hotel list could not be loaded right now. Please refresh in a moment.";
+            return false;
+        }
     }
 }

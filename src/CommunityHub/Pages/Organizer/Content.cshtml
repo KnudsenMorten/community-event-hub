@@ -1,7 +1,21 @@
 @page
 @model CommunityHub.Pages.Organizer.ContentModel
+@using CommunityHub.Pages.Shared
 @{
     ViewData["Title"] = Localizer["OrgContent.Title"].Value;
+
+    var tiles = new List<HubTile>
+    {
+        new HubTile("/Organizer/Speakers", Localizer["Nav.OrgSpeakers"].Value, Localizer["OrgContent.Speakers"].Value),
+        new HubTile("/Organizer/Sessions", Localizer["Nav.OrgSessions"].Value, Localizer["OrgContent.Sessions"].Value),
+        new HubTile("/Organizer/SessionQuestions", Localizer["Nav.OrgSessionQuestions"].Value, Localizer["OrgContent.SessionQuestions"].Value),
+        new HubTile("/Organizer/SessionEvaluations", Localizer["Nav.OrgSessionEvaluations"].Value, Localizer["OrgContent.SessionEvaluations"].Value),
+        new HubTile("/Organizer/SessionizeImport", Localizer["Nav.OrgSessionizeImport"].Value, Localizer["OrgContent.SessionizeImport"].Value),
+        new HubTile("/Organizer/SessionizeEndpointSettings", Localizer["Nav.OrgSessionizeEndpoint"].Value, "Configure the Sessionize API endpoint."),
+        new HubTile("/Organizer/SessionSource", "Session source", "Choose the session source (Sessionize / Backstage)."),
+        new HubTile("/Organizer/MasterClasses", "Master Classes", "Seat capacity + waitlist rosters, set capacity, and attendee self-service links."),
+        new HubTile("/Organizer/Surveys", Localizer["Nav.OrgSurveys"].Value, Localizer["OrgContent.Surveys"].Value),
+    };
 }
 
 <div class="card">
@@ -20,34 +34,5 @@
 
 @if (!Model.AccessDenied)
 {
-    <div class="card">
-        <h2>@Localizer["Nav.OrgSpeakers"]</h2>
-        <p>@Localizer["OrgContent.Speakers"]</p>
-        <p><a asp-page="/Organizer/Speakers">@Localizer["Nav.OrgSpeakers"]</a></p>
-    </div>
-
-    <div class="card">
-        <h2>@Localizer["Nav.OrgSessions"]</h2>
-        <p>@Localizer["OrgContent.Sessions"]</p>
-        <p><a asp-page="/Organizer/Sessions">@Localizer["Nav.OrgSessions"]</a></p>
-    </div>
-
-    <div class="card">
-        <h2>@Localizer["Nav.OrgSessionQuestions"]</h2>
-        <p>@Localizer["OrgContent.SessionQuestions"]</p>
-        <p><a asp-page="/Organizer/SessionQuestions">@Localizer["Nav.OrgSessionQuestions"]</a></p>
-    </div>
-
-    <div class="card">
-        <h2>@Localizer["Nav.OrgSessionEvaluations"]</h2>
-        <p>@Localizer["OrgContent.SessionEvaluations"]</p>
-        <p><a asp-page="/Organizer/SessionEvaluations">@Localizer["Nav.OrgSessionEvaluations"]</a></p>
-    </div>
-
-    <div class="card">
-        <h2>@Localizer["Nav.OrgSessionizeImport"]</h2>
-        <p>@Localizer["OrgContent.SessionizeImport"]</p>
-        <p><a asp-page="/Organizer/SessionizeImport">@Localizer["Nav.OrgSessionizeImport"]</a></p>
-        <p><a asp-page="/Organizer/SessionizeEndpointSettings">@Localizer["Nav.OrgSessionizeEndpoint"]</a></p>
-    </div>
+    <partial name="_HubGrid" model="@tiles" />
 }

@@ -1,0 +1,290 @@
+@page
+@using CommunityHub.Core.Domain
+@model CommunityHub.Pages.Organizer.SurveysModel
+@{
+    Layout = "_Layout";
+    ViewData["Title"] = Localizer["OrgSurveys.Title"].Value;
+}
+
+@if (Model.AccessDenied)
+{
+    <div class="card">
+        <h2>@Localizer["Common.OrganizersOnly"]</h2>
+        <p><a asp-page="/Index">@Localizer["Common.BackToHub"]</a></p>
+    </div>
+    return;
+}
+
+<style>
+    /* Mobile-first (~360px): stack everything; the desktop grid kicks in ≥720px. */
+    .sv-intro { color:#4a5160; font-size:14px; margin-top:4px; }
+    .sv-list { display:flex; flex-direction:column; gap:14px; }
+    .sv-card { background:#fff; border:1px solid #e2e6ee; border-radius:10px; padding:16px; }
+    .sv-head { display:flex; flex-wrap:wrap; gap:8px 12px; align-items:baseline; }
+    .sv-title { font-size:17px; font-weight:700; color:var(--el-darkblue,#1D3380); flex:1 1 auto; min-width:0; }
+    .sv-slug { font-size:12px; color:#6a7280; font-family:ui-monospace,Menlo,Consolas,monospace; }
+    .sv-badges { display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; }
+    .sv-badge { font-size:12px; font-weight:700; border-radius:999px; padding:3px 10px; }
+    .sv-badge.count { background:#eef4fb; color:#1D3380; }
+    .sv-badge.open { background:#dcfce7; color:#166534; }
+    .sv-badge.closed { background:#fee2e2; color:#991b1b; }
+
+    .sv-links { margin-top:14px; display:flex; flex-direction:column; gap:10px; }
+    .sv-link { display:flex; flex-direction:column; gap:4px; }
+    .sv-link .lbl { font-size:12px; font-weight:700; color:#24292f; }
+    .sv-link .row { display:flex; gap:8px; align-items:stretch; flex-wrap:wrap; }
+    .sv-link input[type=text] {
+        flex:1 1 220px; min-width:0; font-size:13px; padding:8px 10px;
+        border:1px solid #c4c8d4; border-radius:7px; font-family:ui-monospace,Menlo,Consolas,monospace;
+        background:#f8fafc; color:#24292f;
+    }
+    .sv-copy {
+        padding:8px 14px; border-radius:7px; font-size:13px; font-weight:600; cursor:pointer;
+        border:1px solid #c4c8d4; background:#fff; color:#24292f; white-space:nowrap;
+    }
+    .sv-copy:hover { background:#eef0f5; }
+
+    .sv-actions { margin-top:14px; display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+    .sv-btn {
+        padding:9px 16px; border-radius:7px; font-size:14px; font-weight:600; cursor:pointer;
+        border:1px solid #c4c8d4; background:#fff; color:#24292f;
+    }
+    .sv-btn.primary { background:var(--el-blue,#008BD2); color:#fff; border-color:var(--el-blue,#008BD2); }
+    .sv-btn.warn { background:#fff; color:#991b1b; border-color:#fca5a5; }
+    .sv-btn.warn:hover { background:#fee2e2; }
+    .sv-viewlink { font-size:13px; font-weight:600; color:var(--el-blue,#008BD2); text-decoration:none; }
+
+    details.sv-reset { margin-top:14px; border:1px solid #fca5a5; border-radius:8px; background:#fff7f7; }
+    details.sv-reset > summary { cursor:pointer; padding:10px 14px; font-weight:700; color:#991b1b; font-size:13.5px; }
+    details.sv-reset .body { padding:0 14px 14px 14px; }
+    details.sv-reset label { display:block; font-size:13px; color:#7f1d1d; margin:6px 0 4px; }
+    details.sv-reset input[type=text] {
+        width:100%; box-sizing:border-box; font-size:13px; padding:8px 10px;
+        border:1px solid #fca5a5; border-radius:7px; font-family:ui-monospace,Menlo,Consolas,monospace;
+    }
+    details.sv-reset .hint { font-size:12.5px; color:#7f1d1d; margin:8px 0; line-height:1.45; }
+
+    .sv-flash { border-radius:8px; padding:12px 14px; margin-bottom:16px; font-size:14px; font-weight:600; }
+    .sv-flash.ok { background:#dcfce7; color:#166534; border:1px solid #86efac; }
+    .sv-flash.err { background:#fee2e2; color:#991b1b; border:1px solid #fca5a5; }
+
+    .sv-empty { padding:24px; text-align:center; color:#6a7280; }
+
+    /* Inline results: lightweight tables that scroll on phones. */
+    .sv-results { margin-top:16px; border-top:2px solid #eef0f5; padding-top:14px; }
+    .sv-results h3 { font-size:15px; color:var(--el-darkblue,#1D3380); margin:0 0 8px; }
+    .sv-scroll { overflow-x:auto; -webkit-overflow-scrolling:touch; }
+    table.sv-table { width:100%; border-collapse:collapse; font-size:13.5px; }
+    table.sv-table th, table.sv-table td { text-align:left; padding:7px 9px; border-bottom:1px solid #eef0f5; }
+    table.sv-table th { font-size:11.5px; text-transform:uppercase; letter-spacing:.04em; color:#6a7280; }
+    table.sv-table td.num, table.sv-table th.num { text-align:right; white-space:nowrap; font-variant-numeric:tabular-nums; }
+
+    @@media (min-width:720px) {
+        .sv-head { align-items:center; }
+    }
+</style>
+
+<div class="card">
+    <h2 style="margin-top:0;">@Localizer["OrgSurveys.Title"]</h2>
+    <p class="sv-intro">@Localizer["OrgSurveys.Intro"]</p>
+    <p><a asp-page="/Organizer/Content">&larr; @Localizer["Common.BackToOrganizerArea"]</a></p>
+</div>
+
+@if (!string.IsNullOrEmpty(Model.FlashMessage))
+{
+    <div class="sv-flash @(Model.FlashIsError ? "err" : "ok")" role="@(Model.FlashIsError ? "alert" : "status")">
+        @Model.FlashMessage
+    </div>
+}
+
+<div class="card">
+    @if (Model.Surveys.Count == 0)
+    {
+        <div class="sv-empty">
+            <p><strong>@Localizer["OrgSurveys.NoneTitle"]</strong></p>
+            <p>@Localizer["OrgSurveys.NoneBody"]</p>
+        </div>
+    }
+    else
+    {
+        <div class="sv-list">
+            @foreach (var s in Model.Surveys)
+            {
+                var submitUrl = Model.SubmitUrl(s.Slug);
+                var resultsUrl = Model.ResultsUrl(s.Slug);
+                var submitId = $"submit-{s.Slug}";
+                var resultsId = $"results-{s.Slug}";
+                <section class="sv-card">
+                    <div class="sv-head">
+                        <span class="sv-title">@s.Title</span>
+                        <span class="sv-slug">@s.Slug</span>
+                    </div>
+                    <div class="sv-badges">
+                        <span class="sv-badge count">@Localizer["OrgSurveys.ResponseCount", s.ResponseCount]</span>
+                        @if (s.IsOpen)
+                        {
+                            <span class="sv-badge open">@Localizer["OrgSurveys.StatusOpen"]</span>
+                        }
+                        else
+                        {
+                            <span class="sv-badge closed">@Localizer["OrgSurveys.StatusClosed"]</span>
+                        }
+                    </div>
+
+                    @* --- Shareable links (visible URL = JS-off fallback) --- *@
+                    <div class="sv-links">
+                        <div class="sv-link">
+                            <span class="lbl" id="lbl-@submitId">@Localizer["OrgSurveys.SubmitLink"]</span>
+                            <div class="row">
+                                <input type="text" id="@submitId" value="@submitUrl" readonly
+                                       aria-labelledby="lbl-@submitId" onclick="this.select();" />
+                                <button type="button" class="sv-copy" data-copy-target="@submitId"
+                                        aria-label="@Localizer["OrgSurveys.CopySubmitAria"]">@Localizer["OrgSurveys.Copy"]</button>
+                            </div>
+                        </div>
+                        <div class="sv-link">
+                            <span class="lbl" id="lbl-@resultsId">@Localizer["OrgSurveys.ResultsLink"]</span>
+                            <div class="row">
+                                <input type="text" id="@resultsId" value="@resultsUrl" readonly
+                                       aria-labelledby="lbl-@resultsId" onclick="this.select();" />
+                                <button type="button" class="sv-copy" data-copy-target="@resultsId"
+                                        aria-label="@Localizer["OrgSurveys.CopyResultsAria"]">@Localizer["OrgSurveys.Copy"]</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    @* --- Activate / Close + view results --- *@
+                    <div class="sv-actions">
+                        <form method="post" asp-page-handler="ToggleOpen" style="margin:0;">
+                            <input type="hidden" name="slug" value="@s.Slug" />
+                            <input type="hidden" name="open" value="@((!s.IsOpen).ToString().ToLowerInvariant())" />
+                            @if (s.IsOpen)
+                            {
+                                <button type="submit" class="sv-btn warn">@Localizer["OrgSurveys.Close"]</button>
+                            }
+                            else
+                            {
+                                <button type="submit" class="sv-btn primary">@Localizer["OrgSurveys.Activate"]</button>
+                            }
+                        </form>
+
+                        <a class="sv-viewlink" asp-page="/Organizer/Surveys" asp-route-View="@s.Slug"
+                           asp-fragment="inline-@s.Slug">@Localizer["OrgSurveys.ViewResults"]</a>
+                        <a class="sv-viewlink" href="@resultsUrl" target="_blank" rel="noopener">@Localizer["OrgSurveys.OpenPublicResults"]</a>
+                    </div>
+
+                    @* --- Reset (type-to-confirm) --- *@
+                    <details class="sv-reset">
+                        <summary>@Localizer["OrgSurveys.ResetSummary"]</summary>
+                        <div class="body">
+                            <p class="hint">@Localizer["OrgSurveys.ResetHint", s.Slug]</p>
+                            <form method="post" asp-page-handler="Reset" style="margin:0;">
+                                <input type="hidden" name="slug" value="@s.Slug" />
+                                <label for="confirm-@s.Slug">@Localizer["OrgSurveys.ResetConfirmLabel", s.Slug]</label>
+                                <input type="text" id="confirm-@s.Slug" name="confirmSlug"
+                                       autocomplete="off" placeholder="@s.Slug" />
+                                <div style="margin-top:10px;">
+                                    <button type="submit" class="sv-btn warn">@Localizer["OrgSurveys.ResetButton"]</button>
+                                </div>
+                            </form>
+                        </div>
+                    </details>
+
+                    @* --- Inline results (reuses the shared aggregation) --- *@
+                    @if (Model.ViewSummary is not null && Model.ViewSurvey is not null
+                         && string.Equals(Model.View, s.Slug, StringComparison.OrdinalIgnoreCase))
+                    {
+                        var sum = Model.ViewSummary;
+                        <div class="sv-results" id="inline-@s.Slug">
+                            <h3>@Localizer["OrgSurveys.InlineResultsTitle", s.Title]</h3>
+                            @if (sum.TotalResponses == 0)
+                            {
+                                <p style="color:#6a7280;font-size:13.5px;">@Localizer["Results.NoResponsesYet"]</p>
+                            }
+                            else
+                            {
+                                <p style="color:#4a5160;font-size:13.5px;margin:0 0 10px;">
+                                    @Localizer["Results.NResponses", sum.TotalResponses]
+                                </p>
+
+                                <h3>@Localizer["Results.TrackPopularity"]</h3>
+                                <div class="sv-scroll">
+                                    <table class="sv-table">
+                                        <thead><tr>
+                                            <th scope="col">@Localizer["OrgSurveys.ColTrack"]</th>
+                                            <th scope="col" class="num">@Localizer["OrgSurveys.ColResponses"]</th>
+                                            <th scope="col" class="num">%</th>
+                                        </tr></thead>
+                                        <tbody>
+                                            @foreach (var t in sum.TrackStats)
+                                            {
+                                                <tr>
+                                                    <th scope="row" style="font-weight:600;">@t.Name</th>
+                                                    <td class="num">@t.ResponseCount</td>
+                                                    <td class="num">@t.Percent%</td>
+                                                </tr>
+                                            }
+                                        </tbody>
+                                    </table>
+                                </div>
+
+                                <h3 style="margin-top:14px;">@Localizer["Results.MostWanted"]</h3>
+                                <div class="sv-scroll">
+                                    <table class="sv-table">
+                                        <thead><tr>
+                                            <th scope="col">@Localizer["OrgSurveys.ColTopic"]</th>
+                                            <th scope="col">@Localizer["OrgSurveys.ColTrack"]</th>
+                                            <th scope="col" class="num">@Localizer["OrgSurveys.ColPicks"]</th>
+                                            <th scope="col" class="num">@Localizer["OrgSurveys.ColScore"]</th>
+                                        </tr></thead>
+                                        <tbody>
+                                            @foreach (var topic in sum.TopTopicsOverall.Where(x => x.PickCount > 0))
+                                            {
+                                                <tr>
+                                                    <th scope="row" style="font-weight:600;">@topic.Title</th>
+                                                    <td>@topic.TrackName</td>
+                                                    <td class="num">@topic.PickCount</td>
+                                                    <td class="num">@topic.WeightedScore</td>
+                                                </tr>
+                                            }
+                                        </tbody>
+                                    </table>
+                                </div>
+                            }
+                        </div>
+                    }
+                </section>
+            }
+        </div>
+    }
+</div>
+
+@section Scripts {
+    <script>
+        // Progressive enhancement: the URL is already visible + selectable in a
+        // readonly input (works with JS off). With JS on, the Copy button writes
+        // it to the clipboard and gives quick visual feedback. No popups.
+        (function () {
+            document.querySelectorAll('.sv-copy[data-copy-target]').forEach(function (btn) {
+                btn.addEventListener('click', function () {
+                    var input = document.getElementById(btn.getAttribute('data-copy-target'));
+                    if (!input) return;
+                    var done = function () {
+                        var prev = btn.textContent;
+                        btn.textContent = @Html.Raw(Json.Serialize(Localizer["OrgSurveys.Copied"].Value));
+                        setTimeout(function () { btn.textContent = prev; }, 1500);
+                    };
+                    if (navigator.clipboard && navigator.clipboard.writeText) {
+                        navigator.clipboard.writeText(input.value).then(done, function () {
+                            input.select(); document.execCommand && document.execCommand('copy'); done();
+                        });
+                    } else {
+                        input.select();
+                        try { document.execCommand('copy'); } catch (e) { }
+                        done();
+                    }
+                });
+            });
+        })();
+    </script>
+}

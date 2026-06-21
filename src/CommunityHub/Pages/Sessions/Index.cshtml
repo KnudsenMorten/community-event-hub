@@ -3,7 +3,28 @@
 @model CommunityHub.Pages.Sessions.IndexModel
 @{
     Layout = "_Layout";
-    ViewData["Title"] = Model.View is null ? "Sessions" : $"Sessions — {Model.View.EventDisplayName}";
+    ViewData["Title"] = Model.View is null
+        ? Localizer["SessOv.Title"].Value
+        : $"{Localizer["SessOv.Title"].Value} — {Model.View.EventDisplayName}";
+
+    // §21 Cross-cutting [M] i18n consistency — localize the public-facing
+    // type/length tags (the static IndexModel.Display stays English for the
+    // organizer back-office; these are the en/da participant-facing labels).
+    Func<SessionType, string> typeLabel = t => t switch
+    {
+        SessionType.CommunityMasterClass => Localizer["SessOv.TypeMasterClass"].Value,
+        SessionType.CommunityTechSession => Localizer["SessOv.TypeTechSession"].Value,
+        SessionType.SponsorSession => Localizer["SessOv.TypeSponsor"].Value,
+        _ => t.ToString(),
+    };
+    Func<SessionLength, string> lengthLabel = l => l switch
+    {
+        SessionLength.FullDay => Localizer["SessOv.LenFullDay"].Value,
+        SessionLength.TwentyMin => Localizer["SessOv.Len20"].Value,
+        SessionLength.FiftyMin => Localizer["SessOv.Len50"].Value,
+        SessionLength.SixtyMin => Localizer["SessOv.Len60"].Value,
+        _ => l.ToString(),
+    };
 }
 
 <style>
@@ -82,7 +103,7 @@
 
 <div class="card" style="padding:0; overflow:hidden; max-width:880px; margin:0 auto;">
     <div class="so-head">
-        <h1>Sessions</h1>
+        <h1>@Localizer["SessOv.Title"]</h1>
         @if (Model.View is not null)
         {
             <div class="meta">@Model.View.EventDisplayName</div>
@@ -92,32 +113,33 @@
     <div class="so-body">
         @if (Model.NoActiveEvent || Model.View is null)
         {
-            <p class="so-empty">There is no live event right now. Please check back soon.</p>
-            return;
+            <p class="so-empty">@Localizer["Public.NoLiveEvent"]</p>
         }
-        @{ var view = Model.View; }
+        else
+        {
+            var view = Model.View;
 
-        <form method="get" class="so-filters" role="search" aria-label="Filter sessions">
+            <form method="get" class="so-filters" role="search" aria-label="@Localizer["SessOv.FilterAria"]">
             <div class="f-field">
-                <label for="FilterType">Type</label>
+                <label for="FilterType">@Localizer["SessOv.Type"]</label>
                 <select id="FilterType" name="FilterType" asp-for="FilterType"
                         asp-items="Html.GetEnumSelectList<SessionType>()">
-                    <option value="">All types</option>
+                    <option value="">@Localizer["SessOv.AllTypes"]</option>
                 </select>
             </div>
             <div class="f-field">
-                <label for="FilterLength">Length</label>
+                <label for="FilterLength">@Localizer["SessOv.Length"]</label>
                 <select id="FilterLength" name="FilterLength" asp-for="FilterLength"
                         asp-items="Html.GetEnumSelectList<SessionLength>()">
-                    <option value="">Any length</option>
+                    <option value="">@Localizer["SessOv.AnyLength"]</option>
                 </select>
             </div>
             @if (view.Rooms.Count > 0)
             {
                 <div class="f-field">
-                    <label for="FilterRoom">Room</label>
+                    <label for="FilterRoom">@Localizer["SessOv.Room"]</label>
                     <select id="FilterRoom" name="FilterRoom" asp-for="FilterRoom">
-                        <option value="">All rooms</option>
+                        <option value="">@Localizer["SessOv.AllRooms"]</option>
                         @foreach (var r in view.Rooms)
                         {
                             <option value="@r" selected="@(string.Equals(Model.FilterRoom, r, StringComparison.OrdinalIgnoreCase))">@r</option>
@@ -126,18 +148,18 @@
                 </div>
             }
             <div class="f-field f-search">
-                <label for="Search">Search</label>
+                <label for="Search">@Localizer["SessOv.Search"]</label>
                 <input type="search" id="Search" name="Search" asp-for="Search"
-                       placeholder="Title, speaker, room…" autocomplete="off" />
+                       placeholder="@Localizer["SessOv.SearchPlaceholder"]" autocomplete="off" />
             </div>
             <div class="f-field f-actions so-actions">
-                <button type="submit">Apply filters</button>
-                <a class="btn-reset" href="/Sessions">Reset</a>
+                <button type="submit">@Localizer["SessOv.Apply"]</button>
+                <a class="btn-reset" href="/Sessions">@Localizer["SessOv.Reset"]</a>
             </div>
         </form>
 
         <p class="so-count" role="status" aria-live="polite">
-            Showing @view.MatchCount of @view.TotalCount session@(view.TotalCount == 1 ? "" : "s").
+            @string.Format(Localizer["SessOv.Showing"].Value, view.MatchCount, view.TotalCount)
         </p>
 
         @if (view.Sessions.Count == 0)
@@ -145,11 +167,11 @@
             <p class="so-empty">
                 @if (view.TotalCount == 0)
                 {
-                    <text>No sessions have been published yet. Please check back closer to the event.</text>
+                    <text>@Localizer["SessOv.NonePublished"]</text>
                 }
                 else
                 {
-                    <text>No sessions match your filters. <a href="/Sessions">Clear the filters</a> to see them all.</text>
+                    <text>@Localizer["SessOv.NoMatch"] <a href="/Sessions">@Localizer["SessOv.ClearFilters"]</a></text>
                 }
             </p>
         }
@@ -163,11 +185,11 @@
                     <li class="so-card">
                         <h2><a href="/Sessions/@s.Id">@s.Title</a></h2>
                         <div class="so-tags">
-                            <span class="so-tag @typeClass">@CommunityHub.Pages.Sessions.IndexModel.Display(s.Type)</span>
-                            <span class="so-tag">@CommunityHub.Pages.Sessions.IndexModel.Display(s.Length)</span>
+                            <span class="so-tag @typeClass">@typeLabel(s.Type)</span>
+                            <span class="so-tag">@lengthLabel(s.Length)</span>
                             @if (!string.IsNullOrWhiteSpace(s.Room))
                             {
-                                <span class="so-tag">Room @s.Room</span>
+                                <span class="so-tag">@Localizer["SessOv.RoomTag"] @s.Room</span>
                             }
                             @if (!string.IsNullOrWhiteSpace(s.Track))
                             {
@@ -183,7 +205,7 @@
                         @if (s.Speakers.Count > 0)
                         {
                             <div class="so-speakers">
-                                <span class="lbl">With</span>
+                                <span class="lbl">@Localizer["SessOv.With"]</span>
                                 @for (var i = 0; i < s.Speakers.Count; i++)
                                 {
                                     var sp = s.Speakers[i];
@@ -208,16 +230,17 @@
                         <div class="so-links">
                             @if (s.Type == SessionType.CommunityMasterClass && !string.IsNullOrWhiteSpace(s.PublicSlug))
                             {
-                                <a href="/MasterClass/@s.PublicSlug">Master class info &amp; setup →</a>
+                                <a href="/MasterClass/@s.PublicSlug">@Localizer["SessOv.MasterClassLink"] &rarr;</a>
                             }
                             @if (!string.IsNullOrWhiteSpace(s.AskToken))
                             {
-                                <a href="/sessions/@s.AskToken/ask">Ask the speaker a question →</a>
+                                <a href="/sessions/@s.AskToken/ask">@Localizer["SessOv.AskLink"] &rarr;</a>
                             }
                         </div>
                     </li>
                 }
             </ul>
+        }
         }
     </div>
 </div>

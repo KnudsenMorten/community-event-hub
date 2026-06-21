@@ -25,19 +25,25 @@ public class SessionizeImportModel : PageModel
     private readonly SessionizeApiImportService _apiImport;
     private readonly SessionizeImportPreviewService _preview;
     private readonly CommunityHub.Core.Integrations.SessionizeApiOptions _apiOptions;
+    private readonly CommunityHub.Core.Settings.FeatureGateService _gate;
+    private readonly CommunityHub.Core.Settings.RingResolver _rings;
 
     public SessionizeImportModel(
         ICurrentParticipantAccessor participant,
         SessionizeImportService import,
         SessionizeApiImportService apiImport,
         SessionizeImportPreviewService preview,
-        CommunityHub.Core.Integrations.SessionizeApiOptions apiOptions)
+        CommunityHub.Core.Integrations.SessionizeApiOptions apiOptions,
+        CommunityHub.Core.Settings.FeatureGateService gate,
+        CommunityHub.Core.Settings.RingResolver rings)
     {
         _participant = participant;
         _import = import;
         _apiImport = apiImport;
         _preview = preview;
         _apiOptions = apiOptions;
+        _gate = gate;
+        _rings = rings;
     }
 
     [BindProperty]
@@ -82,9 +88,21 @@ public class SessionizeImportModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer)
+        if (!OrganizerAuth.IsRealOrganizer(me))
         {
             AccessDenied = true;
+            return Page();
+        }
+
+        // GATE (REQUIREMENTS §23): the manual import honours the SAME per-edition
+        // 'sessionize-import' switch as the scheduled job, AND the same ring-aware
+        // rollout — the organizer only runs it when their effective ring ≤ the
+        // feature's released ring (GUI state == actual behaviour). Disabled / not
+        // yet released to their ring ⇒ no-op with a clear message.
+        if (!await IsSessionizeImportActiveForMeAsync(me, ct))
+        {
+            ValidationError = "Sessionize import is turned off for this event. "
+                + "Enable it in Settings to import speakers.";
             return Page();
         }
 
@@ -119,7 +137,7 @@ public class SessionizeImportModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer)
+        if (!OrganizerAuth.IsRealOrganizer(me))
         {
             AccessDenied = true;
             return Page();
@@ -148,7 +166,7 @@ public class SessionizeImportModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer)
+        if (!OrganizerAuth.IsRealOrganizer(me))
         {
             AccessDenied = true;
             return Page();
@@ -218,7 +236,7 @@ public class SessionizeImportModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer)
+        if (!OrganizerAuth.IsRealOrganizer(me))
         {
             AccessDenied = true;
             return Page();
@@ -230,9 +248,31 @@ public class SessionizeImportModel : PageModel
             return Page();
         }
 
+        // GATE (REQUIREMENTS §23): same ring-aware 'sessionize-import' gate as the
+        // scheduled pull + the Excel import above. Disabled / not released to the
+        // organizer's ring ⇒ no-op with a clear "feature disabled" message.
+        if (!await IsSessionizeImportActiveForMeAsync(me, ct))
+        {
+            ValidationError = "Sessionize import is turned off for this event. "
+                + "Enable it in Settings to pull speakers.";
+            return Page();
+        }
+
         ResultWasFullImport = mode == SessionizeImportMode.Full;
         Result = await _apiImport.ImportAsync(
             me.EventId, ct, sendWelcome: false, mode: mode);
         return Page();
     }
+
+    /// <summary>
+    /// The §23 ring-aware gate for the current organizer: the feature is active
+    /// for them only when it is enabled (not killed) AND their effective ring is
+    /// ≤ the 'sessionize-import' released ring. With nothing ring-assigned the
+    /// organizer is Ring3 and the feature is released to Ring3, so this reduces to
+    /// the plain on/off switch — behaviour unchanged.
+    /// </summary>
+    private Task<bool> IsSessionizeImportActiveForMeAsync(
+        CurrentParticipant me, CancellationToken ct) =>
+        _gate.IsFeatureActiveForParticipantAsync(
+            "sessionize-import", me.EventId, me.ParticipantId, _rings, ct);
 }

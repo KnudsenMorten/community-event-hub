@@ -1,5 +1,6 @@
 using CommunityHub.Core.Config;
 using CommunityHub.Core.Data;
+using Microsoft.AspNetCore.DataProtection;
 using CommunityHub.Core.Email;
 using CommunityHub.Core.Integrations;
 using CommunityHub.Core.Reminders;
@@ -53,13 +54,30 @@ var host = new HostBuilder()
 
         services.AddSingleton(TimeProvider.System);
 
+        // --- Feature customization & controlled rollout (REQUIREMENTS §23) ---
+        // The same gate the web app uses; the jobs consult it so a disabled
+        // advanced feature no-ops however it is triggered (timer included).
+        services.AddScoped<CommunityHub.Core.Settings.FeatureGateService>();
+        // Effective-ring resolver — schedulers/jobs gate per-resource on the same
+        // ring rule the GUI uses (a job only processes a resource whose effective
+        // ring ≤ the feature's released ring).
+        services.AddScoped<CommunityHub.Core.Settings.RingResolver>();
+
         services.Configure<EmailOptions>(
             config.GetSection(EmailOptions.SectionName));
         // Central audit-log path (10a-3): jobs send through the same
         // LoggingEmailSender decorator as the web app so EmailLog captures
         // scheduled reminders + step-reset reminders too.
-        services.AddSingleton<BrevoEmailSender>();
         services.AddSingleton<IEmailContextAccessor, EmailContextAccessor>();
+        // Ring-gate every send at the sender (REQUIREMENTS §23): opens a scope per
+        // send for RingResolver + FeatureGateService and reads the active edition
+        // from the ambient EmailContext. Covers the reminder/digest job paths too.
+        // The ring gate sits in front of the existing allowlist/redirect (intact).
+        services.AddSingleton<BrevoEmailSender>(sp => new BrevoEmailSender(
+            sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<EmailOptions>>(),
+            sp.GetRequiredService<IServiceScopeFactory>(),
+            sp.GetRequiredService<IEmailContextAccessor>(),
+            sp.GetService<Microsoft.Extensions.Logging.ILogger<BrevoEmailSender>>()));
         services.AddSingleton<IEmailSender>(sp => new LoggingEmailSender(
             sp.GetRequiredService<BrevoEmailSender>(),
             sp.GetRequiredService<IServiceScopeFactory>(),
@@ -73,6 +91,30 @@ var host = new HostBuilder()
         services.AddScoped<OnboardingStepResetEmailService>();
         services.AddScoped<SpeakerQuestionDigestService>();
         services.AddScoped<OrganizerActionItemService>();
+        // Welcome-grant housekeeping (WelcomeGrantPruneJob).
+        services.AddScoped<CommunityHub.Core.Auth.WelcomeGrantAdminService>();
+        // Master Class waitlist: offer-expiry backstop + promotion email.
+        services.AddScoped<CommunityHub.Core.Reminders.MasterClassSignupService>();
+        services.AddScoped<CommunityHub.Core.Email.MasterClassPromotionEmailService>();
+        services.AddScoped<CommunityHub.Core.Email.MasterClassEmailService>();
+        // Ticket-id-keyed attendee sync (reassignment transfers the MC; cancel frees it).
+        services.AddScoped<CommunityHub.Core.Reminders.AttendeeTicketSyncService>();
+
+        // --- Attendee welcome auto-provisioning (feature `attendee-welcome`, OFF) ---
+        // Creates active login-capable Attendee Participants for 2-day holders +
+        // sends a magic-link welcome. The auto-login token is minted HERE but
+        // redeemed by the WEB /Login/Magic page, so DataProtection MUST match the
+        // web exactly (same persisted SQL key ring + application name) or the token
+        // cannot be unprotected. IEnvironmentInfo backs the Core service's (unused-
+        // here) DEV guard; the provisioning send path bypasses it deliberately.
+        services.AddDataProtection()
+            .PersistKeysToDbContext<CommunityHubDbContext>()
+            .SetApplicationName("CommunityHub-EventHub");
+        services.AddSingleton<CommunityHub.Core.Email.IEnvironmentInfo, CommunityHub.Jobs.JobsEnvironmentInfo>();
+        services.AddScoped<CommunityHub.Core.Auth.IWelcomeAutoLoginTokenService,
+            CommunityHub.Core.Auth.WelcomeAutoLoginTokenService>();
+        services.AddScoped<CommunityHub.Core.Reminders.WelcomeWithLoginEmailService>();
+        services.AddScoped<CommunityHub.Core.Reminders.AttendeeWelcomeProvisioningService>();
 
         // --- Email templates (branded reminder rendering) -------------------
         services.Configure<EmailTemplateOptions>(
@@ -80,6 +122,16 @@ var host = new HostBuilder()
         services.AddSingleton<EmailTemplateProvider>();
 
         services.AddScoped<ReminderEngine>();
+        // Universal sponsor-email audience rule (REQUIREMENTS §7c): the shared
+        // coordinator-only recipient resolver, consumed by TaskReminderBuilder so
+        // sponsor task reminders go to coordinators (not signer-only assignees).
+        // Audience is resolved READ-ONLY from e-conomic ERP Role-2 data
+        // (ISponsorErpCoordinatorSource, registered below) with the manual flag as
+        // an additive override + fail-soft fallback to the CM default. Explicit
+        // factory so the ERP-source ctor is always chosen.
+        services.AddScoped<SponsorRecipientResolver>(sp => new SponsorRecipientResolver(
+            sp.GetRequiredService<CommunityHub.Core.Data.CommunityHubDbContext>(),
+            sp.GetService<CommunityHub.Core.Email.ISponsorErpCoordinatorSource>()));
         services.AddScoped<TaskReminderBuilder>();
 
         // --- Speaker deadline seeding ---------------------------------------
@@ -108,6 +160,17 @@ var host = new HostBuilder()
         services.AddSingleton(eventConfigOptions);
         services.AddSingleton<EventEditionConfigLoader>();
 
+        // --- Admin-editable config overrides (HYBRID config model, Phase 1) -
+        // The jobs share the same effective-config path as the web app: shipped
+        // JSON default deep-merged with the per-edition SQL ConfigOverride. No
+        // row ⇒ shipped default unchanged. IMemoryCache backs the override store.
+        services.AddMemoryCache();
+        var integrationsConfigOptions = new IntegrationsConfigOptions();
+        config.GetSection(IntegrationsConfigOptions.SectionName).Bind(integrationsConfigOptions);
+        services.AddSingleton(integrationsConfigOptions);
+        services.AddSingleton<IntegrationsConfigLoader>();
+        services.AddScoped<ConfigOverrideStore>();
+
         // --- Sessionize (speaker import via v2 view API) -------------------
         var sessionizeOptions = new SessionizeApiOptions();
         config.GetSection(SessionizeApiOptions.SectionName).Bind(sessionizeOptions);
@@ -119,6 +182,13 @@ var host = new HostBuilder()
         services.AddScoped<SessionizeImportService>();
         // Sessions are pulled from the same v2 view API and linked to speakers.
         services.AddScoped<SessionImportService>();
+        // Pluggable SESSION source (default Sessionize; Zoho Backstage when enabled).
+        services.AddScoped<CommunityHub.Core.Integrations.Sessions.ISessionSource,
+            CommunityHub.Core.Integrations.Sessions.SessionizeSessionSource>();
+        services.AddScoped<CommunityHub.Core.Integrations.Sessions.ISessionSource,
+            CommunityHub.Core.Integrations.Sessions.BackstageSessionSource>();
+        services.AddScoped<CommunityHub.Core.Integrations.Sessions.SessionSourceSettingsService>();
+        services.AddScoped<CommunityHub.Core.Integrations.Sessions.SessionSourceResolver>();
         services.AddScoped<SessionizeApiImportService>();
 
         // --- Company Manager (sponsor contact source of truth) -------------
@@ -190,6 +260,32 @@ var host = new HostBuilder()
         config.GetSection(CommunityHub.Core.Integrations.Erp.EconomicErpOptions.SectionName)
             .Bind(economicErpOptions);
         services.AddSingleton(economicErpOptions);
+
+        // Read-only e-conomic ROLE source (REQUIREMENTS §7c): resolves the
+        // sponsor-email coordinator audience from e-conomic contact role data
+        // (Role 2 = event coordinator) because Company Manager cannot hold
+        // per-user roles. Opt-in (EconomicRoles:Enabled, default false) +
+        // fail-soft: disabled/unreachable/empty falls back to the CM default
+        // coordinator. STRICTLY READ-ONLY (GETs only). When disabled the Null
+        // source returns null so the resolver uses the manual-flag fallback.
+        var economicRolesOptions = new CommunityHub.Core.Integrations.Erp.EconomicRolesOptions();
+        config.GetSection(CommunityHub.Core.Integrations.Erp.EconomicRolesOptions.SectionName)
+            .Bind(economicRolesOptions);
+        services.AddSingleton(economicRolesOptions);
+        if (economicRolesOptions.Enabled)
+        {
+            services.AddHttpClient<CommunityHub.Core.Integrations.Erp.IEconomicRoleClient,
+                CommunityHub.Core.Integrations.Erp.EconomicRoleClient>();
+            services.AddScoped<CommunityHub.Core.Email.ISponsorErpCoordinatorSource,
+                CommunityHub.Core.Email.SponsorErpCoordinatorSource>();
+        }
+        else
+        {
+            services.AddSingleton<CommunityHub.Core.Integrations.Erp.IEconomicRoleClient,
+                CommunityHub.Core.Integrations.Erp.NullEconomicRoleClient>();
+            services.AddSingleton<CommunityHub.Core.Email.ISponsorErpCoordinatorSource,
+                CommunityHub.Core.Email.NullSponsorErpCoordinatorSource>();
+        }
 
         if (testModeOptions.Enabled)
         {

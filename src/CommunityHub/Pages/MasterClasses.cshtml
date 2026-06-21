@@ -1,0 +1,73 @@
+@page
+@using CommunityHub.Core.Reminders
+@model CommunityHub.Pages.MasterClassesPublicModel
+@{
+    Layout = null;
+    string Badge(MasterClassSignupService.AvailabilityLevel a) => a switch {
+        MasterClassSignupService.AvailabilityLevel.Full => "full",
+        MasterClassSignupService.AvailabilityLevel.FillingUp => "filling",
+        _ => "ok" };
+    string Label(MasterClassSignupService.AvailabilityLevel a) => a switch {
+        MasterClassSignupService.AvailabilityLevel.Full => "Full",
+        MasterClassSignupService.AvailabilityLevel.FillingUp => "Filling up",
+        _ => "Available" };
+}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Master Class availability</title>
+    <style>
+        body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin:0; background:#0e1116; color:#1f2430; }
+        .wrap { max-width:680px; margin:0 auto; padding:24px 18px 48px; }
+        h1 { color:#fff; font-size:24px; margin:0 0 4px; }
+        .sub { color:#9aa4b2; font-size:14px; margin:0 0 18px; }
+        .mc { background:#fff; border-radius:12px; padding:16px 18px; margin:12px 0; box-shadow:0 4px 18px rgba(0,0,0,.25);
+              display:flex; justify-content:space-between; align-items:center; gap:14px; }
+        .mc h2 { font-size:17px; margin:0 0 4px; }
+        .seats { color:#5b636e; font-size:13px; }
+        .badge { white-space:nowrap; font-weight:700; font-size:13px; border-radius:999px; padding:6px 14px; }
+        .ok { background:#e7f6ec; color:#1c6b35; }
+        .filling { background:#fef6e7; color:#8a5a00; }
+        .full { background:#fdecec; color:#b3261e; }
+        .dot { display:inline-block; width:9px; height:9px; border-radius:50%; margin-right:6px; vertical-align:middle; }
+        .dok { background:#1c6b35; } .dfilling { background:#e0a200; } .dfull { background:#d33; }
+    </style>
+</head>
+<body>
+<div class="wrap">
+    <h1>Master Classes@(Model.EventName is null ? "" : $" — {Model.EventName}")</h1>
+    <p class="sub">Live availability. Green = seats available · Yellow = filling up (&lt;20% left) · Red = full.</p>
+
+    @if (Model.MasterClasses.Count == 0)
+    {
+        <div class="mc"><div>No Master Classes are open yet.</div></div>
+    }
+    else
+    {
+        foreach (var m in Model.MasterClasses)
+        {
+            var lvl = m.Availability;
+            <div class="mc">
+                <div>
+                    <h2><span class="dot d@(Badge(lvl))"></span>@m.Title</h2>
+                    <div class="seats">
+                        @if (m.Capacity is int cap)
+                        {
+                            @($"{m.Free} of {cap} seats free · {m.Confirmed} confirmed")
+                            @if (m.Waitlisted > 0) { @($" · {m.Waitlisted} on waitlist") }
+                        }
+                        else
+                        {
+                            @($"{m.Confirmed} signed up")
+                        }
+                    </div>
+                </div>
+                <span class="badge @Badge(lvl)">@Label(lvl)</span>
+            </div>
+        }
+    }
+</div>
+</body>
+</html>

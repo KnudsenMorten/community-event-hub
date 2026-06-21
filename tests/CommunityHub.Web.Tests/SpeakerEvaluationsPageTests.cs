@@ -50,7 +50,8 @@ public sealed class SpeakerEvaluationsPageTests
     private static EvaluationsModel NewModel(CommunityHubDbContext db, HttpContext http)
     {
         var accessor = new HttpCurrentParticipantAccessor(new HttpContextAccessorOver(http));
-        return new EvaluationsModel(accessor, new SpeakerEvaluationsService(db));
+        return new EvaluationsModel(
+            accessor, new SpeakerEvaluationsService(db), new PublicSessionsService(db));
     }
 
     private sealed record Seeded(int EventId, Participant Alice, Participant Bob);
@@ -159,5 +160,46 @@ public sealed class SpeakerEvaluationsPageTests
 
         var redirect = Assert.IsType<Microsoft.AspNetCore.Mvc.RedirectToPageResult>(result);
         Assert.Equal("/Login", redirect.PageName);
+    }
+
+    // BUG fix (speaker UX audit, P1): the evaluations page linked every session
+    // title to /Sessions/{id} with NO gate, so an unpublished/unscheduled session
+    // could land on a 404 / thin page. The title must link only when the session is
+    // actually publicly viewable — the SAME gate PublicSessionsService.GetByIdAsync
+    // uses (active edition + non-service session).
+    [Fact]
+    public async Task Session_title_links_when_session_publicly_viewable()
+    {
+        using var db = NewDb();
+        var s = await SeedAsync(db); // Alice's talk is in the active edition.
+        var http = new DefaultHttpContext { User = Session(s.Alice) };
+        var model = NewModel(db, http);
+
+        await model.OnGetAsync(default);
+
+        var only = Assert.Single(model.Result.Sessions);
+        Assert.Contains(only.SessionId, model.PubliclyViewableSessionIds);
+    }
+
+    [Fact]
+    public async Task Session_title_not_linked_when_session_not_publicly_viewable()
+    {
+        using var db = NewDb();
+        var s = await SeedAsync(db);
+        // Make Alice's session NOT publicly viewable using the SAME gate the public
+        // page applies: turn it into a service session (never publicly addressable).
+        var aliceTalk = await db.Sessions.FirstAsync(x => x.SessionizeId == "s-alice");
+        aliceTalk.IsServiceSession = true;
+        // Keep it in the evaluation result (the eval service would also drop a
+        // service session); instead exercise the gate via the page model's call by
+        // asserting the helper's set excludes it directly.
+        await db.SaveChangesAsync();
+
+        var http = new DefaultHttpContext { User = Session(s.Alice) };
+        var model = NewModel(db, http);
+
+        await model.OnGetAsync(default);
+
+        Assert.DoesNotContain(aliceTalk.Id, model.PubliclyViewableSessionIds);
     }
 }

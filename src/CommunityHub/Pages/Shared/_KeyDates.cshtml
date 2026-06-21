@@ -1,55 +1,65 @@
+@using CommunityHub.Core.Domain
 @model CommunityHub.Core.Config.EditionDates
+@inject CommunityHub.Auth.ICurrentParticipantAccessor Participant
+@inject CommunityHub.Core.Reminders.ScheduleService Schedule
 @{
     if (Model is null) { return; }
 
-    DateTime? Parse(string s) => DateTime.TryParse(s, out var d) ? d : null;
-    var pre  = Parse(Model.PreDay);
-    var d1   = Parse(Model.Day1);
-    var d2   = Parse(Model.Day2);
-    var lk   = Parse(Model.LockDate);
+    var me = Participant.Current;
+    DateTime? Parse(string s) => DateTime.TryParse(s, out var d) ? d : (DateTime?)null;
+    var lk = Parse(Model.LockDate);
 
-    // Don't render an empty panel when the JSON is blank.
-    if (pre is null && d1 is null && d2 is null && lk is null) { return; }
+    // Generic, role-filtered schedule from the ScheduleEntries table (or the derived
+    // default when the table is empty). Shows only the dates relevant to this role.
+    var entries = me is null
+        ? new List<ScheduleEntry>()
+        : await Schedule.GetForRoleAsync(me.EventId, me.Role);
+
+    if (entries.Count == 0 && lk is null) { return; }
+
+    string Fmt(DateTimeOffset d, bool allDay) => allDay
+        ? d.ToString("ddd dd MMM yyyy")
+        : d.ToString("ddd dd MMM yyyy, HH:mm");
 }
 
 <div class="card" style="background:#f8fafc;border-left:4px solid var(--el-blue);">
     <h2 style="margin-top:0;">Key dates</h2>
-    <table style="width:100%;border-collapse:collapse;font-size:14px;">
+    <div style="overflow-x:auto;">
+    <table style="width:100%;border-collapse:collapse;font-size:13px;">
         <tbody>
-        @if (pre is not null)
+        @foreach (var e in entries)
         {
-            <tr style="border-bottom:1px solid #e5e7eb;">
-                <td style="padding:6px 8px;width:55%;">Pre-day / master class</td>
-                <td style="padding:6px 8px;font-weight:600;">@pre.Value.ToString("dddd dd MMM yyyy")</td>
-            </tr>
-        }
-        @if (d1 is not null)
-        {
-            <tr style="border-bottom:1px solid #e5e7eb;">
-                <td style="padding:6px 8px;">Main conference day 1</td>
-                <td style="padding:6px 8px;font-weight:600;">@d1.Value.ToString("dddd dd MMM yyyy")</td>
-            </tr>
-        }
-        @if (d2 is not null)
-        {
-            <tr style="border-bottom:1px solid #e5e7eb;">
-                <td style="padding:6px 8px;">Main conference day 2</td>
-                <td style="padding:6px 8px;font-weight:600;">@d2.Value.ToString("dddd dd MMM yyyy")</td>
+            <tr style="border-bottom:1px solid #eef0f4;">
+                <td style="padding:5px 8px;white-space:nowrap;font-weight:600;">@Fmt(e.StartsAt, e.AllDay)</td>
+                <td style="padding:5px 8px;">
+                    @e.Title
+                    @if (!string.IsNullOrWhiteSpace(e.Location)) { <span style="color:#6b7280;"> &middot; @e.Location</span> }
+                </td>
+                <td style="padding:5px 8px;color:#6b7280;">@ScheduleRoles.WhoLabel(e.Roles)</td>
+                <td style="padding:5px 8px;white-space:nowrap;">
+                    @if (e.Id > 0)
+                    {
+                        <a href="/schedule/@(e.Id).ics" title="Add this to your calendar">+ calendar</a>
+                    }
+                </td>
             </tr>
         }
         @if (lk is not null)
         {
-            <tr>
-                <td style="padding:6px 8px;color:#7a5b00;">Edit lock date</td>
-                <td style="padding:6px 8px;font-weight:600;color:#7a5b00;">@lk.Value.ToString("dddd dd MMM yyyy")
-                    <span style="font-weight:400;color:#6b7280;font-size:12px;">— after this, changes notify organizers as [LATE CHANGE]</span>
-                </td>
+            <tr style="color:#7a5b00;">
+                <td style="padding:5px 8px;white-space:nowrap;font-weight:600;">@lk.Value.ToString("ddd dd MMM yyyy")</td>
+                <td style="padding:5px 8px;">Edit lock date</td>
+                <td style="padding:5px 8px;color:#6b7280;" colspan="2">after this, changes notify organizers as [LATE CHANGE]</td>
             </tr>
         }
         </tbody>
     </table>
-    @if (!string.IsNullOrEmpty(Model.Timezone))
+    </div>
+    @if (entries.Count > 0)
     {
-        <p style="margin:8px 0 0;font-size:12px;color:#6b7280;">All times: @Model.Timezone</p>
+        <p style="margin:8px 0 0;font-size:12px;color:#6b7280;">
+            &#128197; Add a single date with <strong>+ calendar</strong>, or use <strong>Calendar sync</strong> on your hub to subscribe to all of them.
+            @if (!string.IsNullOrEmpty(Model.Timezone)) { <span> &middot; All times: @Model.Timezone</span> }
+        </p>
     }
 </div>

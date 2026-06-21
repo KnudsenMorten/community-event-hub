@@ -5,7 +5,19 @@
     ViewData["Title"] = "Sessionize endpoint settings";
 }
 
-<div class="card">
+<style>
+    /* The help text embeds a long unbroken URL inside inline <code>
+       (https://sessionize.com/api/v2/<your-event-id>/view/Speakers). A browser
+       won't break a code string at its slashes by default, so on a ~320px phone
+       it pushed the page a couple of px past the viewport (the iPhone-SE
+       horizontal-overflow the post-deploy validation caught). Let long code /
+       URLs wrap anywhere so the text reflows within the card. Desktop is
+       unaffected — the string fits on one line at full width, so it never
+       breaks there. */
+    .sz-endpoint code { overflow-wrap:anywhere; word-break:break-word; }
+</style>
+
+<div class="card sz-endpoint">
     <h2>Sessionize endpoint settings</h2>
 
     @if (Model.AccessDenied)

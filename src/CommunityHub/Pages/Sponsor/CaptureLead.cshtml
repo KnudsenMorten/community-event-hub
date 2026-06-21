@@ -38,7 +38,7 @@
             <p class="error" role="alert">@Model.Error</p>
         }
 
-        <form method="post" style="display:flex;flex-direction:column;gap:12px;max-width:520px;">
+        <form method="post" data-ceh-loading data-ceh-dirty style="display:flex;flex-direction:column;gap:12px;max-width:520px;">
             <label style="display:flex;flex-direction:column;gap:4px;font-size:14px;font-weight:600;">
                 @Localizer["Lead.FirstName"]
                 <input asp-for="FirstName" maxlength="200" autocomplete="off"
@@ -72,9 +72,10 @@
             <label style="display:flex;flex-direction:column;gap:4px;font-size:14px;font-weight:600;">
                 @Localizer["Lead.NotesLabel"]
                 <textarea asp-for="Notes" maxlength="4000" rows="3"
+                          data-ceh-counter="@Localizer.GetString("Common.CharCount").Value"
                           style="padding:10px;font-size:16px;border:1px solid #c4c8d4;border-radius:6px;resize:vertical;"></textarea>
             </label>
-            <button type="submit"
+            <button type="submit" data-ceh-loading-text="@Localizer["Common.Saving"]"
                     style="padding:14px;font-size:16px;font-weight:700;color:#fff;background:var(--el-darkblue);border:none;border-radius:6px;cursor:pointer;">
                 @Localizer["Lead.Save"]
             </button>

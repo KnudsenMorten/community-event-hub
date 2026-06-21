@@ -55,8 +55,25 @@ public class IndexModel : PageModel
         _log = log;
     }
 
+    /// <summary>Set when a non-sponsor reaches the page (server-side gate, not CSS).</summary>
+    public bool AccessDenied { get; private set; }
     public bool NoCompanyLink { get; private set; }
     public CompanyManagerCompany? CompanyDetails { get; private set; }
+
+    // --- Self-service company profile (SponsorInfo, written by the Tasks
+    // "Upload Company information" form) shown on the landing card. -----------
+    /// <summary>One-liner shown above the company details (≤80 chars).</summary>
+    public string? CompanyDescriptionShort { get; private set; }
+    /// <summary>Longer company overview (≤1000 chars).</summary>
+    public string? CompanyDescription { get; private set; }
+    /// <summary>
+    /// Root-relative raster-logo URL for an &lt;img&gt;, or null when no
+    /// browser-renderable logo is on file. Source: SponsorInfo.LogoRasterPath
+    /// (vector EPS/AI/PDF are intentionally dropped — not browser-renderable),
+    /// normalised with the same rules as SponsorPortalService.NormalizeLogoPath.
+    /// </summary>
+    public string? LogoPath { get; private set; }
+
     public List<Participant> LinkedContacts { get; private set; } = new();
     public string ConfiguratorUrl { get; private set; } = string.Empty;
     public List<WooOrder> SponsorOrders { get; private set; } = new();
@@ -68,6 +85,13 @@ public class IndexModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
+
+        // Server-enforced role gate — the sponsor details page is for the Sponsor role only.
+        if (me.Role != ParticipantRole.Sponsor)
+        {
+            AccessDenied = true;
+            return Page();
+        }
 
         try
         {
@@ -99,6 +123,20 @@ public class IndexModel : PageModel
                         && p.IsActive)
             .OrderBy(p => p.FullName)
             .ToListAsync(ct);
+
+        // Self-service profile (short description + overview + raster logo) the
+        // sponsor entered via the Tasks "Upload Company information" form. One
+        // row per (event, company); null when nothing's been saved yet.
+        var info = await _db.SponsorInfos
+            .Where(s => s.EventId == me.EventId && s.SponsorCompanyId == companyId)
+            .Select(s => new { s.CompanyDescriptionShort, s.CompanyDescription, s.LogoRasterPath })
+            .FirstOrDefaultAsync(ct);
+        if (info is not null)
+        {
+            CompanyDescriptionShort = info.CompanyDescriptionShort;
+            CompanyDescription      = info.CompanyDescription;
+            LogoPath                = NormalizeLogoPath(info.LogoRasterPath);
+        }
 
         if (_cmOptions.Enabled && int.TryParse(companyId, out var companyIdInt))
         {
@@ -158,5 +196,25 @@ public class IndexModel : PageModel
         }
 
         return Page();
+    }
+
+    /// <summary>
+    /// Logo paths are stored relative to wwwroot; normalise to a root-relative
+    /// URL. Non-browser-renderable vector formats fall back to null (card shows
+    /// no image). Same rules as SponsorPortalService.NormalizeLogoPath.
+    /// </summary>
+    private static string? NormalizeLogoPath(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return null;
+        var p = path.Trim().Replace('\\', '/');
+        var ext = System.IO.Path.GetExtension(p).ToLowerInvariant();
+        if (ext is ".eps" or ".ai" or ".pdf") return null;
+        if (p.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
+            || p.StartsWith("https://", StringComparison.OrdinalIgnoreCase)
+            || p.StartsWith('/'))
+        {
+            return p;
+        }
+        return "/" + p;
     }
 }

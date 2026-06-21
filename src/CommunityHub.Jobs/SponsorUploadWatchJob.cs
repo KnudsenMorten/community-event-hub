@@ -1,5 +1,8 @@
+using CommunityHub.Core.Data;
 using CommunityHub.Core.Integrations;
+using CommunityHub.Core.Settings;
 using Microsoft.Azure.Functions.Worker;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
 namespace CommunityHub.Jobs;
@@ -15,13 +18,19 @@ namespace CommunityHub.Jobs;
 public sealed class SponsorUploadWatchJob
 {
     private readonly SponsorUploadWatchService _watch;
+    private readonly CommunityHubDbContext _db;
+    private readonly FeatureGateService _gate;
     private readonly ILogger<SponsorUploadWatchJob> _log;
 
     public SponsorUploadWatchJob(
         SponsorUploadWatchService watch,
+        CommunityHubDbContext db,
+        FeatureGateService gate,
         ILogger<SponsorUploadWatchJob> log)
     {
         _watch = watch;
+        _db = db;
+        _gate = gate;
         _log = log;
     }
 
@@ -31,6 +40,31 @@ public sealed class SponsorUploadWatchJob
         [TimerTrigger("0 */15 * * * *")] TimerInfo timer,
         CancellationToken ct)
     {
+        // GATE (REQUIREMENTS §23): the sponsor upload watcher is an advanced
+        // feature, off by default. The watcher is fleet-wide (not edition-scoped),
+        // so it runs only while at least one active edition has
+        // 'sponsor-upload-watch' enabled; when every active edition has it off the
+        // job no-ops (no SharePoint polling, no notification emails).
+        var activeEventIds = await _db.Events
+            .Where(e => e.IsActive)
+            .Select(e => e.Id)
+            .ToListAsync(ct);
+        var anyEnabled = false;
+        foreach (var id in activeEventIds)
+        {
+            if (await _gate.IsFeatureEnabledAsync("sponsor-upload-watch", id, ct))
+            {
+                anyEnabled = true;
+                break;
+            }
+        }
+        if (!anyEnabled)
+        {
+            _log.LogInformation(
+                "SponsorUploadWatchJob: feature 'sponsor-upload-watch' disabled for all active editions, skipped.");
+            return;
+        }
+
         var result = await _watch.RunAsync(ct);
         _log.LogInformation(
             "SponsorUploadWatchJob: {Loc} folders, {Obs} files, {New} new, {Chg} changed, {Sent} mails, {Err} errors.",

@@ -65,11 +65,12 @@
         @if (Model.NoActiveEvent || Model.View is null)
         {
             <p class="spk-empty">@Localizer["Public.NoLiveEvent"]</p>
-            return;
         }
-        @{ var view = Model.View; }
+        else
+        {
+            var view = Model.View;
 
-        @if (view.Speakers.Count == 0)
+            if (view.Speakers.Count == 0)
         {
             <p class="spk-empty">
                 <span class="big">@Localizer["Speakers.ComingSoonTitle"]</span>
@@ -117,6 +118,7 @@
                     </li>
                 }
             </ul>
+        }
         }
     </div>
 </div>

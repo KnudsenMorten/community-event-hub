@@ -21,13 +21,19 @@
     /* Needs-attention tiles: warn when > 0, calm when clear. */
     .ov-attn { display:grid; grid-template-columns:1fr; gap:10px; }
     @@media (min-width:560px) { .ov-attn { grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); } }
-    .ov-tile { border-radius:8px; padding:12px 14px; border:1px solid #e6e8ee; }
+    /* Each tile is a link to the grid pre-filtered to exactly the rows it counts;
+       block + inherited colour so the whole card is the click/tap target. */
+    a.ov-tile { display:block; text-decoration:none; color:inherit;
+        border-radius:8px; padding:12px 14px; border:1px solid #e6e8ee;
+        transition:box-shadow .12s ease, transform .12s ease; }
+    a.ov-tile:hover, a.ov-tile:focus-visible { box-shadow:0 2px 10px rgba(0,0,0,.12); transform:translateY(-1px); }
     .ov-tile.is-warn { background:#fef2f2; border-color:#fca5a5; }
     .ov-tile.is-ok { background:#f0fdf4; border-color:#bbf7d0; }
     .ov-tile .num { font-size:24px; font-weight:700; }
     .ov-tile.is-warn .num { color:#b91c1c; }
     .ov-tile.is-ok .num { color:#15803d; }
     .ov-tile .lbl { font-size:13px; color:#374151; margin-top:2px; }
+    .ov-tile .go { font-size:11.5px; color:var(--el-blue); margin-top:6px; font-weight:600; }
     /* Progress rows. */
     .bar-row { margin-bottom:12px; }
     .bar-cap { font-size:13px; display:flex; justify-content:space-between; gap:8px; margin-bottom:3px; }
@@ -38,11 +44,21 @@
     .bar-mid { background:#2d5be3; }
     .bar-low { background:#d97706; }
     .ov-overdue { color:#b91c1c; font-weight:600; }
+    /* Each report table can carry more columns (Role/Active/Inactive/Total etc.)
+       than fit a ~320px phone once the card padding is taken out. Wrap every
+       table in a horizontal-scroll container so a wide table scrolls WITHIN its
+       card instead of pushing the whole page wider than the viewport (the
+       iPhone-SE 320px horizontal-overflow the post-deploy validation caught).
+       Desktop is unaffected — at full width nothing overflows, so no scrollbar
+       appears. */
+    .ov-tbl-wrap { overflow-x:auto; -webkit-overflow-scrolling:touch; }
     table.ov-tbl { width:100%; border-collapse:collapse; }
     .ov-tbl th, .ov-tbl td { padding:8px 10px; text-align:left; border-bottom:1px solid #e6e8ee; font-size:13.5px; }
     .ov-tbl th { font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:#6b7280; background:#f9fafb; }
     .ov-tbl td.r, .ov-tbl th.r { text-align:right; }
     .ov-empty { color:#6b7280; font-style:italic; font-size:13px; }
+    /* Tighter card padding on phones reclaims ~16px of width for the content. */
+    @@media (max-width:560px) { .card { padding:14px; } }
 </style>
 
 <div class="card">
@@ -74,27 +90,42 @@
 {
     var r = Model.Report;
 
-    <!-- Needs attention: open items an organizer should act on. role=status so a
-         screen reader announces the section; each tile says its number in text. -->
+    <!-- Needs attention: open items an organizer should act on. Each tile is a
+         LINK to the grid pre-filtered to exactly the rows it counts, so a stat is
+         actionable, not a dead-end (REQUIREMENTS §21 Organizer "clickable stat
+         tiles → pre-filtered grid"). role=list so a screen reader announces the
+         section; each tile says its number + a "Open" cue in text. -->
     <div class="card">
-        <h2 id="ov-attn-h">Needs attention</h2>
-        <div class="ov-attn" role="status" aria-labelledby="ov-attn-h">
-            <div class="ov-tile @(r.OverdueTasks > 0 ? "is-warn" : "is-ok")">
+        <h2 id="ov-attn-h">@Localizer["Ov.NeedsAttention"]</h2>
+        <div class="ov-attn" role="list" aria-labelledby="ov-attn-h">
+            <a class="ov-tile @(r.OverdueTasks > 0 ? "is-warn" : "is-ok")" role="listitem"
+               asp-page="/Organizer/TasksTable" asp-route-StateFilter="Open" asp-route-Sort="due"
+               aria-label="@($"{Localizer["Ov.OverdueTasks"].Value}: {r.OverdueTasks}")">
                 <div class="num">@r.OverdueTasks</div>
-                <div class="lbl">Overdue tasks</div>
-            </div>
-            <div class="ov-tile @(r.UnassignedVolunteerTasks > 0 ? "is-warn" : "is-ok")">
+                <div class="lbl">@Localizer["Ov.OverdueTasks"]</div>
+                <div class="go">@Localizer["Ov.OpenGrid"] &rarr;</div>
+            </a>
+            <a class="ov-tile @(r.UnassignedVolunteerTasks > 0 ? "is-warn" : "is-ok")" role="listitem"
+               asp-page="/Organizer/VolunteerStructure"
+               aria-label="@($"{Localizer["Ov.UnassignedVolunteerTasks"].Value}: {r.UnassignedVolunteerTasks}")">
                 <div class="num">@r.UnassignedVolunteerTasks</div>
-                <div class="lbl">Unassigned volunteer tasks</div>
-            </div>
-            <div class="ov-tile @(r.OpenHelpRequests > 0 ? "is-warn" : "is-ok")">
+                <div class="lbl">@Localizer["Ov.UnassignedVolunteerTasks"]</div>
+                <div class="go">@Localizer["Ov.OpenGrid"] &rarr;</div>
+            </a>
+            <a class="ov-tile @(r.OpenHelpRequests > 0 ? "is-warn" : "is-ok")" role="listitem"
+               asp-page="/Organizer/VolunteerStructure"
+               aria-label="@($"{Localizer["Ov.OpenHelpRequests"].Value}: {r.OpenHelpRequests}")">
                 <div class="num">@r.OpenHelpRequests</div>
-                <div class="lbl">Open help requests</div>
-            </div>
-            <div class="ov-tile @(r.PendingVolunteerApplications > 0 ? "is-warn" : "is-ok")">
+                <div class="lbl">@Localizer["Ov.OpenHelpRequests"]</div>
+                <div class="go">@Localizer["Ov.OpenGrid"] &rarr;</div>
+            </a>
+            <a class="ov-tile @(r.PendingVolunteerApplications > 0 ? "is-warn" : "is-ok")" role="listitem"
+               asp-page="/Organizer/Participants" asp-route-RoleFilter="Volunteer" asp-route-ActiveFilter="inactive"
+               aria-label="@($"{Localizer["Ov.PendingVolunteerApplications"].Value}: {r.PendingVolunteerApplications}")">
                 <div class="num">@r.PendingVolunteerApplications</div>
-                <div class="lbl">Pending volunteer applications</div>
-            </div>
+                <div class="lbl">@Localizer["Ov.PendingVolunteerApplications"]</div>
+                <div class="go">@Localizer["Ov.OpenGrid"] &rarr;</div>
+            </a>
         </div>
     </div>
 
@@ -107,6 +138,7 @@
         }
         else
         {
+            <div class="ov-tbl-wrap">
             <table class="ov-tbl">
                 <thead>
                     <tr><th scope="col">Role</th><th scope="col" class="r">Active</th><th scope="col" class="r">Inactive</th><th scope="col" class="r">Total</th></tr>
@@ -123,6 +155,7 @@
                 }
                 </tbody>
             </table>
+            </div>
         }
     </div>
 
@@ -177,6 +210,7 @@
         }
         else
         {
+            <div class="ov-tbl-wrap">
             <table class="ov-tbl">
                 <thead>
                     <tr><th scope="col">Milestone</th><th scope="col" class="r">Done</th><th scope="col" class="r">Overdue</th><th scope="col" class="r">Of speakers</th></tr>
@@ -193,6 +227,7 @@
                 }
                 </tbody>
             </table>
+            </div>
         }
     </div>
 
@@ -206,6 +241,7 @@
         }
         else
         {
+            <div class="ov-tbl-wrap">
             <table class="ov-tbl">
                 <thead>
                     <tr><th scope="col">Category</th><th scope="col" class="r">Assigned</th><th scope="col" class="r">Open</th><th scope="col" class="r">Coverage</th></tr>
@@ -222,6 +258,7 @@
                 }
                 </tbody>
             </table>
+            </div>
         }
     </div>
 

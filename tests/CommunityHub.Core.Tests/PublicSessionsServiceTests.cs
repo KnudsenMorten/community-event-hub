@@ -417,4 +417,78 @@ public sealed class PublicSessionsServiceTests
         Assert.Equal(0, view.TotalCount);
         Assert.Empty(view.Rooms);
     }
+
+    // The single public-visibility signal both speaker surfaces (hub + evaluations)
+    // now reuse: GetPubliclyViewableSessionIdsAsync returns exactly the candidate
+    // ids whose /Sessions/{id} would resolve under the SAME gate GetByIdAsync uses
+    // (active edition + non-service session).
+    [Fact]
+    public async Task PubliclyViewable_ids_match_the_GetById_gate()
+    {
+        using var db = TestDb.New();
+        await SeedAsync(db);
+        var svc = new PublicSessionsService(db);
+
+        var tech = await db.Sessions.FirstAsync(s => s.SessionizeId == "sess-tech");
+        var breakSess = await db.Sessions.FirstAsync(s => s.SessionizeId == "sess-break");
+
+        var set = await svc.GetPubliclyViewableSessionIdsAsync(
+            new[] { tech.Id, breakSess.Id, 999999 });
+
+        // The real non-service session is viewable; the service session and the
+        // unknown id are not.
+        Assert.Contains(tech.Id, set);
+        Assert.DoesNotContain(breakSess.Id, set);
+        Assert.DoesNotContain(999999, set);
+
+        // Equivalence with GetByIdAsync (the gate the public page itself applies).
+        Assert.NotNull(await svc.GetByIdAsync(tech.Id));
+        Assert.Null(await svc.GetByIdAsync(breakSess.Id));
+    }
+
+    [Fact]
+    public async Task PubliclyViewable_excludes_session_outside_active_edition()
+    {
+        using var db = TestDb.New();
+        var activeEventId = await SeedAsync(db);
+
+        // A second, NON-active edition with its own session. A speaker scoped to
+        // that edition would still see this session in their own lists, but its
+        // public page 404s — so it must be excluded from the viewable set.
+        var old = new Event
+        {
+            Code = "OLD26", CommunityName = "Old", DisplayName = "Old 2026",
+            StartDate = new DateOnly(2026, 2, 9), EndDate = new DateOnly(2026, 2, 10),
+            IsActive = false,
+        };
+        db.Events.Add(old);
+        await db.SaveChangesAsync();
+        var oldSession = new Session
+        {
+            EventId = old.Id, SessionizeId = "old-sess", Title = "Last Year Talk",
+            Type = SessionType.CommunityTechSession,
+        };
+        db.Sessions.Add(oldSession);
+        await db.SaveChangesAsync();
+
+        var svc = new PublicSessionsService(db);
+        var set = await svc.GetPubliclyViewableSessionIdsAsync(new[] { oldSession.Id });
+
+        Assert.Empty(set);
+        Assert.Null(await svc.GetByIdAsync(oldSession.Id)); // same gate: 404
+        Assert.NotEqual(0, activeEventId);
+    }
+
+    [Fact]
+    public async Task PubliclyViewable_is_empty_with_no_candidates_or_no_active_event()
+    {
+        using var db = TestDb.New();
+        var svc = new PublicSessionsService(db);
+
+        // No candidates → empty (no query needed).
+        Assert.Empty(await svc.GetPubliclyViewableSessionIdsAsync(Array.Empty<int>()));
+
+        // Candidates but no active event → empty.
+        Assert.Empty(await svc.GetPubliclyViewableSessionIdsAsync(new[] { 1, 2, 3 }));
+    }
 }

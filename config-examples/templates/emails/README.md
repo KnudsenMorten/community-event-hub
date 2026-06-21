@@ -25,14 +25,18 @@ Beautiful, manageable email - without fighting email clients.
 
 ## Common tokens (every template)
 
+Every branded email auto-receives the four branding tokens plus the per-recipient
+basics. (There is no `{{fullName}}` and no `{{senderName}}` — no code fills them.)
+
 | Token | Filled with |
 |-------|-------------|
-| `{{firstName}}` / `{{fullName}}` | Recipient name |
+| `{{firstName}}` | Recipient first name (falls back to "there") |
 | `{{communityName}}` | From `event.<edition>.json` |
 | `{{eventDisplayName}}` | e.g. ELDK27 Crew Hub |
+| `{{roleName}}` | Friendly role noun (e.g. "speaker") |
 | `{{hubUrl}}` | Link to the hub |
 | `{{brandColor}}` / `{{logoUrl}}` | Brand theming (used by `_layout.html`) |
-| `{{senderName}}` / `{{supportEmail}}` | Configured sender / support address |
+| `{{supportEmail}}` | Configured support address |
 
 ## Template-specific tokens
 
@@ -40,13 +44,13 @@ Beautiful, manageable email - without fighting email clients.
   `{{taskTitle}}`, `{{dueDate}}`, `{{state}}`, `{{taskLink}}`.
 - **List digests** (`speaker-pending-tasks`, `sponsor-overdue`):
   `{{taskListHtml}}` - a pre-rendered list of the person's open/overdue tasks.
-- **Sponsor templates** also have `{{sponsorCompany}}`.
-- **Sponsor onboarding / booth templates** (a sponsor-welcome template, to be
-  added): `{{boothTier}}`, `{{boothWallSize}}`, `{{boothWallSpecUrl}}` (the
-  design-spec PDF the sponsor must design their booth wall to) and
-  `{{boothCoupon}}`. These come from `sponsor.<edition>.json → boothWallSpecs`,
-  resolved by the sponsor's booth tier. A non-booth sponsor leaves them blank.
+- **Sponsor list digest** also has `{{sponsorCompany}}`.
 - **Incomplete-form chaser**: `{{formName}}`, `{{formDeadline}}`.
+
+> The full, code-verified token set per template (and which sender fills each)
+> lives in the internal `templates/emails/README.md`. Booth tokens
+> (`{{boothTier}}` etc.) are a future idea — not wired today, so they resolve
+> blank.
 
 ## Rules
 

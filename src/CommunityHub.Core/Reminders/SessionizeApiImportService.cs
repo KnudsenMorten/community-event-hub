@@ -1,4 +1,5 @@
 using CommunityHub.Core.Integrations;
+using CommunityHub.Core.Integrations.Sessions;
 
 namespace CommunityHub.Core.Reminders;
 
@@ -19,17 +20,20 @@ public sealed class SessionizeApiImportService
     private readonly SessionizeApiOptions _options;
     private readonly SessionizeImportService _import;
     private readonly SessionImportService _sessions;
+    private readonly SessionSourceResolver _sessionSource;
 
     public SessionizeApiImportService(
         SessionizeApiClient client,
         SessionizeApiOptions options,
         SessionizeImportService import,
-        SessionImportService sessions)
+        SessionImportService sessions,
+        SessionSourceResolver sessionSource)
     {
         _client = client;
         _options = options;
         _import = import;
         _sessions = sessions;
+        _sessionSource = sessionSource;
     }
 
     /// <summary>
@@ -67,7 +71,11 @@ public sealed class SessionizeApiImportService
         //    participant). Same upsert/never-delete delta semantics as speakers.
         //    A session fetch problem is reported but never fails the (already
         //    committed) speaker import - speakers are the critical path.
-        var sessionFetch = await _client.FetchSessionsAsync(ct);
+        // SESSIONS come from the edition's ACTIVE session source (default
+        // Sessionize; switchable to Zoho Backstage per REQUIREMENTS §6). The
+        // source returns the sessions + the speaker list to link them by.
+        var source = await _sessionSource.ResolveAsync(eventId, ct);
+        var sessionFetch = await source.FetchSessionsAsync(eventId, fetched.Speakers, ct);
         SessionImportResult sessionResult;
         if (sessionFetch.Error is not null)
         {
@@ -77,7 +85,7 @@ public sealed class SessionizeApiImportService
         else
         {
             sessionResult = await _sessions.ImportSessionsAsync(
-                eventId, sessionFetch.Sessions, fetched.Speakers,
+                eventId, sessionFetch.Sessions, sessionFetch.LinkSpeakers,
                 sessionFetch.Warnings, ct);
         }
 

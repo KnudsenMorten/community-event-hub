@@ -1,41 +1,105 @@
 @page
-@using CommunityHub.Core.Domain
+@using CommunityHub.Core.Reminders
 @model CommunityHub.Pages.Attendee.IndexModel
 @{
-    ViewData["Title"] = Localizer["Attendee.Title"].Value;
+    ViewData["Title"] = Localizer["Nav.MasterClass"].Value;
 }
 
-<div class="card">
-    <h2>@Localizer["Attendee.Title"]</h2>
+<style>
+    .mc-cards { display:grid; gap:12px; margin:14px 0; }
+    .mc-card { border:1px solid #d6d8e0; border-radius:10px; padding:14px 16px; background:#fff; }
+    .mc-card h3 { margin:0 0 4px; font-size:17px; color:var(--el-darkblue); }
+    .mc-avail { font-size:13px; font-weight:600; }
+    .mc-avail.available { color:#0a7d33; }
+    .mc-avail.filling  { color:#b45309; }
+    .mc-avail.full     { color:#b91c1c; }
+    .mc-actions { display:flex; gap:10px; flex-wrap:wrap; margin-top:10px; align-items:center; }
+    .mc-consent { font-size:13px; color:#4b5563; display:flex; gap:6px; align-items:flex-start; margin-top:8px; }
+</style>
 
-    @if (Model.Record is null)
+<div class="card">
+    <h2>@Localizer["Nav.MasterClass"]</h2>
+
+    @if (!string.IsNullOrEmpty(Model.Message))
     {
-        <p>@Localizer["Attendee.NoRecord"]</p>
+        <partial name="_Flash" model='new CommunityHub.Pages.Shared.FlashModel(Model.Message!, "success")' />
+    }
+
+    @if (!Model.HasAttendeeRecord)
+    {
+        <p class="error">We couldn't match your ticket yet. If you've just registered, please check back shortly.</p>
+    }
+    else if (!Model.Eligible)
+    {
+        <p>Master Classes are part of the <strong>2-day ticket</strong> (pre-day deep-dive). Your current ticket doesn't include a Master Class.</p>
+    }
+    else if (Model.Confirmed is not null)
+    {
+        <p class="info">You're confirmed for your Master Class: <strong>@Model.Confirmed.Title</strong>.</p>
+
+        <div class="mc-actions">
+            <a class="task-link-btn" asp-page-handler="Ics">&#128197; Add to my calendar</a>
+            @if (!string.IsNullOrEmpty(Model.CommSlug))
+            {
+                <a class="task-link-btn" href="/MasterClass/@Model.CommSlug">&#128203; Master Class info &amp; what to bring</a>
+            }
+        </div>
+
+        <form method="post" asp-page-handler="ToggleReminder" style="margin-top:12px;">
+            <input type="hidden" name="wants" value="@((!Model.MonthReminderOptIn).ToString().ToLowerInvariant())" />
+            <button type="submit" class="secondary">
+                @(Model.MonthReminderOptIn ? "Turn off the ~1-month-before reminder" : "Remind me ~1 month before")
+            </button>
+        </form>
+
+        <form method="post" asp-page-handler="GiveUp" style="margin-top:12px;"
+              data-ceh-confirm="mc-giveup-modal">
+            <input type="hidden" name="sessionId" value="@Model.Confirmed.SessionId" />
+            <button type="submit" class="secondary">Give up my Master Class seat</button>
+        </form>
+        <partial name="_ConfirmModal" model='new CommunityHub.Pages.Shared.ConfirmModalModel(
+            "mc-giveup-modal", "Give up your seat?",
+            "This frees your seat for the next person on the waitlist. You can pick another Master Class afterwards if seats remain.",
+            "Give up seat", "Keep my seat", true)' />
     }
     else
     {
-        <p>@Localizer["Attendee.Ticket"] <strong>@Model.Record.TicketStatus</strong>
-           @if (!string.IsNullOrEmpty(Model.Record.TicketClassName))
-           {
-               <span>(@Model.Record.TicketClassName)</span>
-           }
-        </p>
+        <p>Choose your Master Class — a full-day, hands-on pre-day deep dive. You can hold <strong>one</strong> confirmed seat.</p>
 
-        @if (Model.Record.BookingStatus == MasterClassBookingStatus.Booked)
+        @if (Model.Options.Count == 0)
         {
-            <p class="info">@Localizer["Attendee.Reserved", Model.Record.MasterClassName ?? ""]</p>
-        }
-        else if (Model.Record.BookingStatus == MasterClassBookingStatus.MultipleBookings)
-        {
-            <p class="error">@Localizer["Attendee.Multiple", Model.Record.MasterClassName ?? ""]</p>
-        }
-        else
-        {
-            <p class="error">@Localizer["Attendee.NotReserved"]</p>
+            <p class="error">The Master Classes haven't been published yet — please check back shortly.</p>
         }
 
-        <p><a href="@Model.BookingUrl" target="_blank" rel="noopener">
-            @Localizer["Attendee.ManageBooking"]</a></p>
+        <div class="mc-cards">
+            @foreach (var o in Model.Options)
+            {
+                var cls = o.Availability == MasterClassSignupService.AvailabilityLevel.Full ? "full"
+                        : o.Availability == MasterClassSignupService.AvailabilityLevel.FillingUp ? "filling" : "available";
+                var availText = o.Availability == MasterClassSignupService.AvailabilityLevel.Full ? "Full — join the waitlist"
+                        : o.Availability == MasterClassSignupService.AvailabilityLevel.FillingUp ? "Filling up" : "Seats available";
+                <div class="mc-card">
+                    <h3>@o.Title</h3>
+                    <span class="mc-avail @cls">@availText</span>
+                    <form method="post" asp-page-handler="Join" class="mc-actions">
+                        <input type="hidden" name="sessionId" value="@o.SessionId" />
+                        @* Already hold a seat elsewhere? Joining a different one (or its waitlist) needs
+                           consent to auto-switch (you never hold 2 confirmed). *@
+                        @if (Model.Pending is not null)
+                        {
+                            <input type="hidden" name="autoSwitchConsent" value="true" />
+                        }
+                        <button type="submit">@(o.IsFull ? "Join waitlist" : "Choose this Master Class")</button>
+                    </form>
+                </div>
+            }
+        </div>
+
+        @if (Model.Pending is not null)
+        {
+            <p>You're currently on the waitlist for <strong>@Model.Pending.Title</strong>
+               (position @Model.Pending.WaitlistPosition). Manage it on
+               <a asp-page="/Attendee/Waitlist">Waitlist</a>.</p>
+        }
     }
-    <p><a asp-page="/Index">@Localizer["Common.BackToHub"]</a></p>
 </div>

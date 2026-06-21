@@ -1,5 +1,6 @@
 using CommunityHub.Auth;
 using CommunityHub.Core.Config;
+using CommunityHub.Core.Domain;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
@@ -30,6 +31,9 @@ public class ContactModel : PageModel
         _eventConfigOptions = eventConfigOptions;
     }
 
+    /// <summary>Set when a non-sponsor reaches the page (server-side gate, not CSS).</summary>
+    public bool AccessDenied { get; private set; }
+
     public string LeadName  { get; private set; } = "Morten Knudsen";
     public string LeadEmail { get; private set; } = "mok@expertslive.dk";
     public string? BookingsUrl { get; private set; }
@@ -37,7 +41,15 @@ public class ContactModel : PageModel
 
     public IActionResult OnGet()
     {
-        if (_participant.Current is null) return RedirectToPage("/Login");
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+
+        // Server-enforced role gate — the sponsor contact page is for the Sponsor role only.
+        if (me.Role != ParticipantRole.Sponsor)
+        {
+            AccessDenied = true;
+            return Page();
+        }
 
         var cfg = _eventConfigLoader.Load(_eventConfigOptions.EventConfigPath);
         EditionCode = cfg.Code ?? string.Empty;

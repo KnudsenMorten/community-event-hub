@@ -34,4 +34,11 @@ public sealed class MagicLinkService : IMagicLinkTokenFactory
     /// <summary>Verify a token. Returns the ParticipantId or null on any failure.</summary>
     public int? ValidateToken(string token) =>
         _factory.ValidateToken(token);
+
+    /// <summary>
+    /// Recover the ParticipantId from a genuine-but-EXPIRED token (recovery-state
+    /// only; never authenticates). See <see cref="MagicLinkTokenFactory.PeekParticipantId"/>.
+    /// </summary>
+    public int? PeekParticipantId(string token) =>
+        _factory.PeekParticipantId(token);
 }

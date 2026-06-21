@@ -51,7 +51,7 @@ public class SwagModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+        if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
 
         var rows = await _db.SwagPreferences
             .Where(s => s.EventId == me.EventId)

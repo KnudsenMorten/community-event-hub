@@ -1,0 +1,64 @@
+@page
+@model CommunityHub.Pages.Organizer.PartyRsvpsModel
+@{
+    ViewData["Title"] = "Party RSVPs";
+    var p = Model.Party;
+}
+
+@if (Model.AccessDenied)
+{
+    <div class="card">
+        <h2>@ViewData["Title"]</h2>
+        <p class="error" role="alert">@Localizer["Common.OrganizersOnly"]</p>
+        <p><a asp-page="/Index">@Localizer["Common.BackToHub"]</a></p>
+    </div>
+    return;
+}
+
+<div class="card">
+    <h1 style="margin-top:0;">@ViewData["Title"]</h1>
+    <p style="color:#6b7280;">
+        Anonymous sign-ups from the public form at <code>/Party</code>.
+        @if (p is not null)
+        {
+            @($"Party: {p.Date.ToDateTime(new TimeOnly(0,0)):dddd, d MMMM yyyy} · {p.StartHour:00}:00–{p.EndHour:00}:00.")
+        }
+        Share the link: <a href="/Party">/Party</a>.
+    </p>
+
+    <div style="display:flex;gap:16px;flex-wrap:wrap;margin:16px 0;">
+        <div style="background:#e7f6ec;border-radius:12px;padding:16px 22px;min-width:150px;">
+            <div style="font-size:34px;font-weight:800;color:#1c6b35;">@Model.Attending</div>
+            <div style="color:#1c6b35;font-weight:600;">attending — food count</div>
+        </div>
+        <div style="background:#eef0f4;border-radius:12px;padding:16px 22px;min-width:120px;">
+            <div style="font-size:34px;font-weight:800;color:#5b636e;">@Model.Total</div>
+            <div style="color:#5b636e;font-weight:600;">total responses</div>
+        </div>
+    </div>
+
+    <p><a href="/Organizer/PartyRsvps?handler=Csv" style="display:inline-block;padding:9px 14px;border-radius:8px;background:#1c6b35;color:#fff;text-decoration:none;font-weight:600;">⬇ Download CSV (for Bella Center)</a></p>
+    <p><a asp-page="/Organizer/Index">&larr; @Localizer["Common.BackToOrganizerArea"]</a></p>
+
+    <table style="width:100%;border-collapse:collapse;font-size:13px;margin-top:10px;">
+        <thead><tr style="text-align:left;border-bottom:2px solid #ddd;">
+            <th style="padding:6px 8px;">Name</th><th style="padding:6px 8px;">Email</th>
+            <th style="padding:6px 8px;">Attending</th><th style="padding:6px 8px;">When</th>
+        </tr></thead>
+        <tbody>
+        @foreach (var r in Model.Rows)
+        {
+            <tr style="border-bottom:1px solid #eee;">
+                <td style="padding:6px 8px;">@r.Name</td>
+                <td style="padding:6px 8px;">@r.Email</td>
+                <td style="padding:6px 8px;">@(r.Attending ? "✅ yes" : "—")</td>
+                <td style="padding:6px 8px;white-space:nowrap;">@r.UpdatedAt.ToString("dd MMM, HH:mm")</td>
+            </tr>
+        }
+        @if (Model.Rows.Count == 0)
+        {
+            <tr><td colspan="4" style="padding:6px 8px;color:#6b7280;">No RSVPs yet.</td></tr>
+        }
+        </tbody>
+    </table>
+</div>

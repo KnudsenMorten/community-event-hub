@@ -26,8 +26,16 @@
          IDataProtectionProvider. The concrete key-management implementation is
          provided by the ASP.NET host (web app registers it by default). -->
     <PackageReference Include="Microsoft.AspNetCore.DataProtection.Abstractions" Version="8.0.6" />
+    <!-- Persist the DataProtection key ring to the SHARED SQL DB so auth cookies
+         survive slot-swap deploys + restarts (per-slot %HOME% keys were rotating on
+         every swap, logging everyone out). Brings DataProtectionKey + IDataProtectionKeyContext. -->
+    <PackageReference Include="Microsoft.AspNetCore.DataProtection.EntityFrameworkCore" Version="8.0.6" />
     <PackageReference Include="Microsoft.Extensions.Configuration.Abstractions" Version="8.0.0" />
-    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="8.0.1" />
+    <!-- In-memory cache for the per-edition config-override store
+         (ConfigOverrideStore): merged effective-config fragments are cached and
+         invalidated on save so the deep-merge runs once per change, not per read. -->
+    <PackageReference Include="Microsoft.Extensions.Caching.Memory" Version="8.0.1" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="8.0.2" />
     <PackageReference Include="Microsoft.Extensions.Options" Version="8.0.2" />
     <PackageReference Include="ClosedXML" Version="0.102.2" />
     <!-- SoMe graphics compositing (REQUIREMENTS §18). Cross-platform, pure

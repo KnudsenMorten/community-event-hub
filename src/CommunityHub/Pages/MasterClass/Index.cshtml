@@ -2,12 +2,14 @@
 @model CommunityHub.Pages.MasterClass.IndexModel
 @{
     Layout = "_Layout";
-    ViewData["Title"] = Model.View is null ? "Master Class" : $"{Model.View.Title} — Logistics";
+    ViewData["Title"] = Model.View is null
+        ? Localizer["MC.Title"].Value
+        : $"{Model.View.Title} — {Localizer["MC.LogisticsMeta"].Value}";
 }
 
 @if (Model.View is null)
 {
-    <div class="card"><h2>Master class not found</h2><p>This logistics page is not available.</p></div>
+    <div class="card"><h2>@Localizer["MC.NotFoundHeading"]</h2><p>@Localizer["MC.NotFoundBody"]</p></div>
     return;
 }
 
@@ -35,11 +37,11 @@
     <div class="mc-hero">
         <h1>@Model.View.Title</h1>
         <div class="meta">
-            Master Class logistics &amp; setup
-            @if (!string.IsNullOrWhiteSpace(Model.View.Room)) { <text>· Room @Model.View.Room</text> }
+            @Localizer["MC.LogisticsMeta"]
+            @if (!string.IsNullOrWhiteSpace(Model.View.Room)) { <text>· @Localizer["SessOv.RoomTag"] @Model.View.Room</text> }
             @if (Model.View.Speakers.Count > 0)
             {
-                <br /><text>Presented by @string.Join(", ", Model.View.Speakers)</text>
+                <br /><text>@string.Format(Localizer["MC.PresentedBy"].Value, string.Join(", ", Model.View.Speakers))</text>
             }
         </div>
     </div>
@@ -57,19 +59,45 @@
             <partial name="_Flash" model='new CommunityHub.Pages.Shared.FlashModel(Model.Error, "error")' />
         }
 
+        @* Standard "what is a Master Class" explainer — the SAME copy for every
+           Master Class (operator 2026-06-21). The per-MC speaker-published logistics
+           below carry the specifics (what to bring for THIS class); this block is the
+           general orientation + the laptop / charging house rules. *@
+        <section class="mc-logistics" aria-labelledby="mc-about-h">
+            <h2 id="mc-about-h" style="font-size:17px;margin:0 0 8px;">What is an Experts Live Master Class?</h2>
+            <p>An Experts Live Master Class is a full-day, in-person learning event where people with a shared interest in a topic come together to learn from experienced professionals—mainly Microsoft MVPs and sometimes Microsoft itself.</p>
+            <p>There isn't a strict definition of what makes up a master class. Our main goal is to create a room of peers and provide honest, practical insight — the "no filter" version of what works and what doesn't.</p>
+            <p><strong>Key points:</strong></p>
+            <ul style="margin:0 0 10px 18px;line-height:1.6;">
+                <li>Open dialogue is encouraged — you can ask questions and challenge features.</li>
+                <li>Speakers choose their own format.</li>
+                <li>Some sessions include hands-on labs; others mix presentations and discussions.</li>
+                <li>It's not meant to feel like traditional school despite the word "class."</li>
+                <li>Asking questions is strongly encouraged, since much of the value comes from interaction.</li>
+            </ul>
+            <p>In short: it's an expert-led, interactive deep-dive day focused on real-world learning and peer discussion.</p>
+
+            <h3 style="font-size:15px;margin:14px 0 4px;">Do I need to bring my laptop to attend the class?</h3>
+            <p>Many attendees choose to bring their laptops so they can take notes, check email, and follow along during the sessions. Your master class may require you to bring your laptop as outlined in the logistics below.</p>
+
+            <h3 style="font-size:15px;margin:14px 0 4px;">Can I charge my laptop during the master class?</h3>
+            <p>Due to Danish fire safety regulations, we cannot provide charging facilities with cables running along the classroom table rows. However, because some attendees may need power, we have set up a charging table in each room where you can charge your laptop or phone. Each room supports up to 15 devices charging at the same time. To get the best start to your day, please arrive with your laptop fully charged for the session.</p>
+        </section>
+
+        <hr style="margin:18px 0;border:0;border-top:1px solid #e2e2e2;" />
         <section aria-labelledby="mc-logistics-h">
-            <h2 id="mc-logistics-h" style="font-size:17px;margin:0 0 10px;">Before you arrive</h2>
+            <h2 id="mc-logistics-h" style="font-size:17px;margin:0 0 10px;">@Localizer["MC.BeforeYouArrive"]</h2>
             @if (string.IsNullOrWhiteSpace(Model.View.LogisticsText))
             {
-                <p class="mc-empty">No logistics have been published yet. Please check back closer to the event.</p>
+                <p class="mc-empty">@Localizer["MC.NoLogistics"]</p>
             }
             else
             {
                 <div class="mc-logistics">@Model.View.LogisticsText</div>
             }
-            @if (Model.View.UpdatedAt is not null)
+            @if (Model.UpdatedLocal is not null)
             {
-                <p class="mc-updated">Last updated @Model.View.UpdatedAt.Value.ToString("yyyy-MM-dd HH:mm") UTC</p>
+                <p class="mc-updated">@string.Format(Localizer["MC.LastUpdated"].Value, Model.UpdatedLocal)</p>
             }
         </section>
 
@@ -77,16 +105,16 @@
         {
             <hr style="margin:18px 0;border:0;border-top:1px solid #e2e2e2;" />
             <section class="mc-edit" aria-labelledby="mc-edit-h">
-                <h2 id="mc-edit-h" style="font-size:16px;margin:0 0 8px;">Edit logistics (you are an involved speaker / organizer)</h2>
+                <h2 id="mc-edit-h" style="font-size:16px;margin:0 0 8px;">@Localizer["MC.EditHeading"]</h2>
                 <form method="post">
-                    <label for="EditLogisticsText" class="sr-only">Logistics &amp; setup instructions</label>
+                    <label for="EditLogisticsText" class="sr-only">@Localizer["MC.EditFieldLabel"]</label>
                     <textarea id="EditLogisticsText" name="EditLogisticsText"
-                              placeholder="e.g. Bring your laptop fully charged. Install Docker Desktop beforehand. Pre-pull the sample images (see link)..."
+                              placeholder="@Localizer["MC.EditPlaceholder"]"
                               aria-describedby="mc-edit-help">@Model.EditLogisticsText</textarea>
                     <p id="mc-edit-help" style="font-size:12.5px;color:#666;margin:6px 0 10px;">
-                        Plain text. This is public — do not include anything sensitive.
+                        @Localizer["MC.EditHelp"]
                     </p>
-                    <button type="submit" class="btn">Save logistics</button>
+                    <button type="submit" class="btn">@Localizer["MC.Save"]</button>
                 </form>
             </section>
         }

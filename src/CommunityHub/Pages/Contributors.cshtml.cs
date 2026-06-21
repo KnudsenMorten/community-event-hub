@@ -34,5 +34,26 @@ public class ContributorsModel : PageModel
         new("Laura Gulbe",             "Software Central",                                                "https://www.linkedin.com/in/lauragulbe/",                           "Contributor"),
     };
 
-    public record Contributor(string Name, string Role, string? LinkedIn, string Tag);
+    /// <summary>
+    /// One credited person. <paramref name="PhotoUrl"/> is optional (null = no
+    /// photo, the default for everyone today) so an organizer can later add a
+    /// headshot URL per person without a schema change; the view shows initials
+    /// when it is absent. No real photo URLs are committed here.
+    /// </summary>
+    public record Contributor(
+        string Name, string Role, string? LinkedIn, string Tag, string? PhotoUrl = null);
+
+    /// <summary>
+    /// Up-to-two-letter initials for a person, used as the avatar fallback when
+    /// no <see cref="Contributor.PhotoUrl"/> is set. First letter of the first +
+    /// last whitespace-separated word (single-word names give one letter);
+    /// returns "?" for a blank name so the avatar is never empty.
+    /// </summary>
+    public static string Initials(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return "?";
+        var parts = name.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length == 1) return parts[0][..1].ToUpperInvariant();
+        return (parts[0][..1] + parts[^1][..1]).ToUpperInvariant();
+    }
 }

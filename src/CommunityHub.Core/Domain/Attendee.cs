@@ -53,11 +53,24 @@ public class Attendee
     public Event Event { get; set; } = null!;
 
     // --- Identity (the reconciliation key) ----------------------------------
-    /// <summary>Lower-cased, trimmed. The key that links a Backstage order to a Bookings appointment.</summary>
+    /// <summary>
+    /// The STABLE Backstage ticket id — the real identity for the Master Class flow.
+    /// A company can reassign a ticket to a different person (same id, new name/email);
+    /// keying the attendee + their MC selection on this (not email) means the selection
+    /// TRANSFERS to the new holder instead of orphaning. Null on legacy email-keyed rows.
+    /// </summary>
+    public string? BackstageTicketId { get; set; }
+
+    /// <summary>Lower-cased, trimmed. A mutable attribute now (it changes on reassignment), not the key.</summary>
     public string Email { get; set; } = string.Empty;
 
     public string FirstName { get; set; } = string.Empty;
     public string LastName { get; set; } = string.Empty;
+    /// <summary>
+    /// Full name = first + last (Zoho stores only first_name + last_name separately;
+    /// this gives the combined form too, kept in sync on every Backstage sync).
+    /// </summary>
+    public string FullName { get; set; } = string.Empty;
 
     // --- Reconciled status --------------------------------------------------
     /// <summary>From Zoho Backstage orders - does this email hold a 2-day ticket?</summary>
@@ -65,6 +78,31 @@ public class Attendee
 
     /// <summary>The ticket class name as seen in Zoho, for display / audit.</summary>
     public string? TicketClassName { get; set; }
+
+    // --- Backstage attendee + order details (REQUIREMENTS §6) ---------------
+    /// <summary>The Backstage order id this ticket belongs to.</summary>
+    public string? OrderId { get; set; }
+    /// <summary>Attendee's company (Backstage contact <c>company_name</c>).</summary>
+    public string? CompanyName { get; set; }
+    /// <summary>Job title (Backstage contact <c>designation</c>).</summary>
+    public string? JobTitle { get; set; }
+    /// <summary>Phone (Backstage contact <c>mobile_no</c>).</summary>
+    public string? Phone { get; set; }
+    /// <summary>Country display name from the order billing address (e.g. "Denmark").</summary>
+    public string? Country { get; set; }
+    /// <summary>Country ISO code from the order billing address (e.g. "DK").</summary>
+    public string? CountryCode { get; set; }
+    /// <summary>City from the order billing address.</summary>
+    public string? City { get; set; }
+    /// <summary>Postcode from the order billing address.</summary>
+    public string? Postcode { get; set; }
+    /// <summary>Tax / VAT / CVR number from the order (<c>tax_registration_no</c>).</summary>
+    public string? TaxId { get; set; }
+    /// <summary>
+    /// All Backstage contact CUSTOM fields (single_choice*, multiple_choice, …) as a
+    /// JSON object, so every custom field is captured without a column per field.
+    /// </summary>
+    public string? CustomFieldsJson { get; set; }
 
     /// <summary>From Zoho Bookings - has this email reserved a Master Class seat?</summary>
     public MasterClassBookingStatus BookingStatus { get; set; } = MasterClassBookingStatus.NotBooked;
@@ -83,6 +121,20 @@ public class Attendee
     /// drives the chaser reminders. Not auto-resolved - see CONTEXT.md 9z.
     /// </summary>
     public bool HasReconciliationMismatch { get; set; }
+
+    // --- Self-service link --------------------------------------------------
+    /// <summary>
+    /// Unguessable per-attendee token for the no-password Master Class self-service
+    /// page (the emailed magic-link the attendee uses to join/leave an MC). Minted
+    /// lazily; regenerating it revokes old links. URL-safe 256-bit secret.
+    /// </summary>
+    public string? SelfServiceToken { get; set; }
+
+    /// <summary>
+    /// When the "choose your Master Class" selection-invite email was sent to this
+    /// attendee (tracked per user, sent vs not-sent). Null = not yet invited.
+    /// </summary>
+    public DateTimeOffset? MasterClassInviteSentAt { get; set; }
 
     // --- Self check-in ------------------------------------------------------
     /// <summary>

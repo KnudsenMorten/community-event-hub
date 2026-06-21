@@ -3,6 +3,14 @@
 @{
     var parentModel = ViewData["ParentModel"] as CommunityHub.Pages.Sponsor.TasksModel;
     var isCompanyInfo = Model.SourceKey != null && Model.SourceKey.EndsWith(":" + CommunityHub.Pages.Sponsor.TasksModel.CompanyInfoSlug);
+
+    // Overdue = same rule the shared _ChecklistCard uses (today vs due date, in
+    // UTC, DateOnly): an unfinished task whose due date is in the past. Mirrors
+    // the checklist card so an overdue sponsor task reads the same everywhere.
+    var today = DateOnly.FromDateTime(DateTime.UtcNow);
+    var daysOverdue = (Model.State != TaskState.Done && Model.DueDate is DateOnly due && due < today)
+        ? today.DayNumber - due.DayNumber
+        : 0;
 }
 
 <div style="border-bottom:2px solid var(--el-blue);padding:18px 0 22px;">
@@ -15,6 +23,10 @@
         @if (Model.State == TaskState.Done)
         {
             <span style="display:inline-block;margin-left:8px;padding:2px 10px;font-size:0.72em;background:#d6f3e0;color:#1f6d3a;border:1px solid #87cda0;border-radius:9px;vertical-align:middle;font-weight:700;">&check; @Localizer["TaskRow.Done"]</span>
+        }
+        else if (daysOverdue > 0)
+        {
+            <span style="display:inline-block;margin-left:8px;padding:2px 10px;font-size:0.78em;background:#fde2e1;color:#c0392b;border:1px solid #e9a8a3;border-radius:9px;vertical-align:middle;font-weight:700;">&#9888; @Localizer["Hub.Overdue"] (@Localizer["TaskRow.OverdueDays", daysOverdue]) &middot; @Localizer["TaskRow.WasDue", Model.DueDate?.ToString("dd/MM/yyyy") ?? ""]</span>
         }
         else if (Model.DueDate is not null)
         {

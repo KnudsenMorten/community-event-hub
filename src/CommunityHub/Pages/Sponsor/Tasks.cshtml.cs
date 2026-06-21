@@ -42,8 +42,6 @@ public class TasksModel : PageModel
     private readonly TimeProvider _clock;
     private readonly IEmailSender _email;
     private readonly EmailOptions _emailOptions;
-    private readonly EventEditionConfigLoader _eventConfigLoader;
-    private readonly EventConfigOptions _eventConfigOptions;
     private readonly ILogger<TasksModel> _log;
 
     public TasksModel(
@@ -52,8 +50,6 @@ public class TasksModel : PageModel
         TimeProvider clock,
         IEmailSender email,
         IOptions<EmailOptions> emailOptions,
-        EventEditionConfigLoader eventConfigLoader,
-        EventConfigOptions eventConfigOptions,
         ILogger<TasksModel> log)
     {
         _db = db;
@@ -61,12 +57,8 @@ public class TasksModel : PageModel
         _clock = clock;
         _email = email;
         _emailOptions = emailOptions.Value;
-        _eventConfigLoader = eventConfigLoader;
-        _eventConfigOptions = eventConfigOptions;
         _log = log;
     }
-
-    public EditionDates? EventDates { get; private set; }
 
     public List<ParticipantTask> SponsorTasks { get; private set; } = new();
     public List<Participant> LinkedContacts { get; private set; } = new();
@@ -164,12 +156,6 @@ public class TasksModel : PageModel
                         && p.IsActive)
             .OrderBy(p => p.FullName)
             .ToListAsync(ct);
-
-        // Key dates panel data -- the JSON loader is cheap (single read) so
-        // we hit it per page render to pick up edits live.
-        try { EventDates = _eventConfigLoader.Load(_eventConfigOptions.EventConfigPath).Dates; }
-        catch (Exception ex)
-        { _log.LogWarning(ex, "Tasks: failed to load event dates from {Path}", _eventConfigOptions.EventConfigPath); }
 
         // Prefill the inline Upload Company information form with the
         // company's current saved values (so the sponsor sees their last

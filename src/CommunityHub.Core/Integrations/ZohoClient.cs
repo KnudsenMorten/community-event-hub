@@ -8,7 +8,33 @@ public sealed record ZohoTicket(
     string Email,
     string FirstName,
     string LastName,
-    string TicketClassName);
+    string TicketClassName,
+    // The STABLE per-ticket id from Backstage — survives a company reassigning the
+    // ticket to a different person (same id, new name/email). The Master Class link
+    // keys on this so a reassignment transfers the selection instead of orphaning it.
+    string TicketId = "");
+
+/// <summary>
+/// A fully-enriched Backstage attendee: the ticket (stable id), contact details +
+/// ALL custom fields, and the order's company/country/tax. One row per ticket.
+/// </summary>
+public sealed record BackstageAttendee(
+    string TicketId,
+    string OrderId,
+    string Email,
+    string FirstName,
+    string LastName,
+    string TicketClassName,
+    bool Attending,
+    string? CompanyName,
+    string? JobTitle,
+    string? Phone,
+    string? Country,
+    string? CountryCode,
+    string? City,
+    string? Postcode,
+    string? TaxId,
+    string? CustomFieldsJson);
 
 /// <summary>A Zoho Bookings appointment, flattened.</summary>
 public sealed record ZohoAppointment(
@@ -112,6 +138,103 @@ public sealed class ZohoClient
     }
 
     /// <summary>
+    /// Fetch all Backstage attendees (v3) — one enriched row per ticket: the stable
+    /// ticket id, contact details + ALL custom fields, and the order's company /
+    /// country / tax (joined by order id). The source of truth for the attendee +
+    /// Master Class flow (keyed on ticket id).
+    /// </summary>
+    public async Task<IReadOnlyList<BackstageAttendee>> GetBackstageAttendeesAsync(
+        string accessToken, CancellationToken ct = default)
+    {
+        // Known contact keys — everything else on the contact is a CUSTOM field.
+        var known = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        { "first_name", "last_name", "email", "company_name", "designation", "mobile_no" };
+
+        // 1. Orders -> billing/company/country/tax by order id.
+        var orderInfo = new Dictionary<string, (string? Company, string? Country, string? CountryCode, string? City, string? Postcode, string? Tax)>(StringComparer.Ordinal);
+        await foreach (var order in PageV3Async("orders", "orders", accessToken, ct))
+        {
+            var id = GetString(order, "id");
+            if (id.Length == 0) continue;
+            var billing = order.TryGetProperty("billing_address", out var b) ? b : default;
+            string? country = null, code = null;
+            if (billing.ValueKind == JsonValueKind.Object && billing.TryGetProperty("country_data", out var cd) && cd.ValueKind == JsonValueKind.Object)
+            { country = NullIf(GetString(cd, "display_name")); code = NullIf(GetString(cd, "code")); }
+            var contact = order.TryGetProperty("contact", out var oc) ? oc : default;
+            orderInfo[id] = (
+                NullIf(GetString(billing, "name")),
+                country ?? NullIf(GetString(billing, "country")),
+                code,
+                NullIf(GetString(billing, "city")),
+                NullIf(GetString(billing, "zipcode")),
+                NullIf(GetString(contact, "tax_registration_no")));
+        }
+
+        // 2. Attendees -> one enriched row per ticket.
+        var list = new List<BackstageAttendee>();
+        await foreach (var a in PageV3Async("attendees", "attendees", accessToken, ct))
+        {
+            var ticketId = FirstNonEmpty(GetString(a, "ticket_id"), GetString(a, "id"));
+            if (ticketId.Length == 0) continue;
+            var orderId = GetString(a, "order_id");
+            var contact = a.TryGetProperty("contact", out var c) ? c : default;
+
+            string? customJson = null;
+            if (contact.ValueKind == JsonValueKind.Object)
+            {
+                var custom = new Dictionary<string, string>(StringComparer.Ordinal);
+                foreach (var prop in contact.EnumerateObject())
+                    if (!known.Contains(prop.Name) && prop.Value.ValueKind == JsonValueKind.String)
+                        custom[prop.Name] = prop.Value.GetString() ?? "";
+                if (custom.Count > 0) customJson = JsonSerializer.Serialize(custom);
+            }
+
+            orderInfo.TryGetValue(orderId, out var oi);
+            var statusStr = GetString(a, "status_string");
+            list.Add(new BackstageAttendee(
+                TicketId: ticketId,
+                OrderId: orderId,
+                Email: Lower(GetString(contact, "email")),
+                FirstName: GetString(contact, "first_name"),
+                LastName: GetString(contact, "last_name"),
+                TicketClassName: FirstNonEmpty(GetString(a, "ticket_name"), GetString(contact, "ticket_name")),
+                Attending: string.Equals(statusStr, "attending", StringComparison.OrdinalIgnoreCase),
+                CompanyName: NullIf(GetString(contact, "company_name")) ?? oi.Company,
+                JobTitle: NullIf(GetString(contact, "designation")),
+                Phone: NullIf(GetString(contact, "mobile_no")),
+                Country: oi.Country, CountryCode: oi.CountryCode, City: oi.City, Postcode: oi.Postcode,
+                TaxId: oi.Tax,
+                CustomFieldsJson: customJson));
+        }
+        return list;
+    }
+
+    /// <summary>Enumerate a paginated v3 Backstage collection, following pagination.nextPage.</summary>
+    private async IAsyncEnumerable<JsonElement> PageV3Async(
+        string resource, string arrayProp, string accessToken,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
+    {
+        var url = $"{_options.ApiDomain}/backstage/v3/portals/{_options.BackstagePortalId}/events/{_options.BackstageEventId}/{resource}";
+        var safety = 0;
+        while (url is not null && safety++ < 200)
+        {
+            using var req = new HttpRequestMessage(HttpMethod.Get, url);
+            req.Headers.Add("Authorization", $"Zoho-oauthtoken {accessToken}");
+            using var resp = await _http.SendAsync(req, ct);
+            if (!resp.IsSuccessStatusCode) yield break;
+            using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync(ct));
+            var root = doc.RootElement;
+            if (root.TryGetProperty(arrayProp, out var arr) && arr.ValueKind == JsonValueKind.Array)
+                foreach (var el in arr.EnumerateArray()) yield return el.Clone();
+            url = root.TryGetProperty("pagination", out var p)
+                  && p.TryGetProperty("nextPage", out var n) && n.ValueKind == JsonValueKind.String
+                  ? n.GetString() : null;
+        }
+    }
+
+    private static string? NullIf(string s) => string.IsNullOrWhiteSpace(s) ? null : s;
+
+    /// <summary>
     /// Fetch all Backstage ticket orders, flattened to one row per ticket.
     /// </summary>
     public async Task<IReadOnlyList<ZohoTicket>> GetBackstageTicketsAsync(
@@ -161,7 +284,8 @@ public sealed class ZohoClient
                         Email: Lower(GetString(contact, "email")),
                         FirstName: GetString(contact, "first_name"),
                         LastName: GetString(contact, "last_name"),
-                        TicketClassName: GetString(ticket, "ticket_name")));
+                        TicketClassName: GetString(ticket, "ticket_name"),
+                        TicketId: FirstNonEmpty(GetString(ticket, "id"), GetString(ticket, "ticket_id"), GetString(ticket, "barcode"))));
                 }
             }
 
@@ -356,6 +480,12 @@ public sealed class ZohoClient
         && v.ValueKind == JsonValueKind.String
             ? v.GetString() ?? string.Empty
             : string.Empty;
+
+    private static string FirstNonEmpty(params string[] xs)
+    {
+        foreach (var x in xs) if (!string.IsNullOrWhiteSpace(x)) return x.Trim();
+        return string.Empty;
+    }
 
     private static string Lower(string s) =>
         (s ?? string.Empty).Trim().ToLowerInvariant();

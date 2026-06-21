@@ -1,0 +1,98 @@
+@page
+@using CommunityHub.Core.Domain
+@model CommunityHub.Pages.Organizer.ScheduleModel
+@{
+    ViewData["Title"] = "Schedule / key dates";
+}
+
+@if (Model.AccessDenied)
+{
+    <div class="card">
+        <h2>@ViewData["Title"]</h2>
+        <p class="error" role="alert">@Localizer["Common.OrganizersOnly"]</p>
+        <p><a asp-page="/Index">@Localizer["Common.BackToHub"]</a></p>
+    </div>
+    return;
+}
+
+<style>
+    .sch-tbl { width:100%; border-collapse:collapse; font-size:13px; }
+    .sch-tbl th, .sch-tbl td { padding:6px 8px; border-bottom:1px solid #eef0f4; text-align:left; vertical-align:top; }
+    .sch-add label { display:block; font-size:13px; font-weight:600; margin:8px 0 2px; }
+    .sch-add input[type=text], .sch-add input[type=date], .sch-add input[type=time], .sch-add textarea {
+        width:100%; max-width:360px; padding:8px 10px; border:1px solid #cbd2d9; border-radius:6px; font-size:14px; }
+    .sch-roles { display:flex; flex-wrap:wrap; gap:10px; margin:4px 0; }
+    .sch-roles label { font-weight:normal; display:flex; align-items:center; gap:5px; }
+    .sch-del { background:#fff; border:1px solid #e3a3a3; color:#b3261e; border-radius:6px; padding:4px 10px; font-size:12px; cursor:pointer; }
+</style>
+
+@if (!string.IsNullOrEmpty(Model.Message))
+{
+    <div class="card"><p role="status" style="color:#0a6;margin:0;">@Model.Message</p></div>
+}
+
+<div class="card">
+    <h1 style="margin-top:0;">@ViewData["Title"]</h1>
+    <p>The event schedule (move-in, setup, pre-day, party, dinner, main day, …). Each entry is shown on the
+       hub <strong>Key dates</strong> panel only to the roles you tag, and syncs to those participants'
+       calendars (full subscription + a per-entry "+ calendar" download). Defaults were seeded on first visit
+       — edit by removing + re-adding.</p>
+    <p><a asp-page="/Organizer/Index">&larr; @Localizer["Common.BackToOrganizerArea"]</a></p>
+
+    <table class="sch-tbl">
+        <thead>
+            <tr><th>When</th><th>Title</th><th>Roles</th><th></th></tr>
+        </thead>
+        <tbody>
+        @foreach (var e in Model.Entries)
+        {
+            <tr>
+                <td style="white-space:nowrap;font-weight:600;">
+                    @(e.AllDay ? e.StartsAt.ToString("ddd dd MMM yyyy") : e.StartsAt.ToString("ddd dd MMM yyyy, HH:mm"))
+                    @if (e.AllDay) { <span style="color:#6b7280;font-weight:400;"> (all day)</span> }
+                </td>
+                <td>@e.Title @if (!string.IsNullOrWhiteSpace(e.Location)) { <span style="color:#6b7280;">&middot; @e.Location</span> }</td>
+                <td style="color:#6b7280;">@ScheduleRoles.WhoLabel(e.Roles)</td>
+                <td>
+                    <form method="post" asp-page-handler="Delete" onsubmit="return confirm('Remove this entry?');">
+                        <input type="hidden" name="id" value="@e.Id" />
+                        <button type="submit" class="sch-del">Remove</button>
+                    </form>
+                </td>
+            </tr>
+        }
+        </tbody>
+    </table>
+</div>
+
+<div class="card sch-add">
+    <h2 style="margin-top:0;">Add an entry</h2>
+    <form method="post" asp-page-handler="Add">
+        <label for="NewDate">Date</label>
+        <input type="date" id="NewDate" asp-for="NewDate" />
+
+        <label><input type="checkbox" asp-for="NewAllDay" style="width:auto;margin-right:6px;" /> All-day entry</label>
+
+        <label for="NewTime">Time (if not all-day)</label>
+        <input type="time" id="NewTime" asp-for="NewTime" />
+
+        <label for="NewTitle">Title</label>
+        <input type="text" id="NewTitle" asp-for="NewTitle" placeholder="e.g. Appreciation Dinner" />
+
+        <label for="NewLocation">Location (optional)</label>
+        <input type="text" id="NewLocation" asp-for="NewLocation" placeholder="e.g. AC Hotel Bella Sky" />
+
+        <label>Who is this for?</label>
+        <div class="sch-roles">
+            @foreach (var k in CommunityHub.Pages.Organizer.ScheduleModel.RoleKeywords)
+            {
+                <label><input type="checkbox" name="NewRoles" value="@k" /> @k</label>
+            }
+        </div>
+
+        <label for="NewNotes">Notes (optional)</label>
+        <textarea id="NewNotes" asp-for="NewNotes" rows="2"></textarea>
+
+        <p style="margin-top:10px;"><button type="submit">Add entry</button></p>
+    </form>
+</div>

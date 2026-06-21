@@ -1,0 +1,97 @@
+@page
+@model CommunityHub.Pages.Organizer.SponsorAdmin.WelcomeModel
+@{
+    ViewData["Title"] = "Sponsor welcome";
+}
+
+<div class="card">
+    <h2>Sponsor welcome / intro email</h2>
+    @if (Model.AccessDenied)
+    {
+        <p class="error">This area is for organizers only.</p>
+        <p><a asp-page="/Index">Back to hub</a></p>
+    }
+    else
+    {
+        <p>
+            Resend the sponsor <strong>welcome / intro</strong> email, or reset the welcome
+            flag so a resend actually fires (the welcome is otherwise sent once per contact).
+            Every send goes <strong>only to a company's event-coordinator contacts</strong> &mdash;
+            signer-only contacts never receive sponsor mail; a contact who is both signer and
+            coordinator still receives it.
+        </p>
+        <p><a asp-page="/Organizer/SponsorAdmin/Index">&larr; Back to Sponsor Admin</a></p>
+
+        @if (!string.IsNullOrEmpty(Model.Message))
+        {
+            <p class="@(Model.IsError ? "error" : "info")">@Model.Message</p>
+        }
+    }
+</div>
+
+@if (!Model.AccessDenied)
+{
+    <div class="card">
+        <h2>Sponsor companies (@Model.Rows.Count)</h2>
+
+        @if (Model.Rows.Count == 0)
+        {
+            <p class="info">No sponsor companies with contacts yet.</p>
+        }
+        else
+        {
+            <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px;">
+                <form method="post" asp-page-handler="ResendAll" style="margin:0;">
+                    <button type="submit">Resend welcome to all sponsors</button>
+                </form>
+                <form method="post" asp-page-handler="ResetAll" style="margin:0;">
+                    <button type="submit" style="background:#6c757d;"
+                            onclick="return confirm('Clear the welcome flag for every sponsor company\'s coordinators? The next resend will go out to all of them.');">
+                        Reset all welcome flags
+                    </button>
+                </form>
+            </div>
+
+            <div style="overflow-x:auto;">
+            <table style="width:100%;border-collapse:collapse;min-width:560px;">
+                <tr style="text-align:left;border-bottom:2px solid #ddd;">
+                    <th>Company id</th>
+                    <th style="text-align:right;">Coordinators</th>
+                    <th style="text-align:right;">Signer-only</th>
+                    <th style="text-align:right;">Welcome sent</th>
+                    <th>Actions</th>
+                </tr>
+                @foreach (var r in Model.Rows)
+                {
+                    <tr style="border-bottom:1px solid #eee;">
+                        <td>@r.CompanyId</td>
+                        <td style="text-align:right;">@r.Coordinators</td>
+                        <td style="text-align:right;color:#888;">@r.SignerOnly</td>
+                        <td style="text-align:right;">@r.WelcomeSent / @r.Coordinators</td>
+                        <td>
+                            <div style="display:flex;flex-wrap:wrap;gap:6px;">
+                                <form method="post" asp-page-handler="Resend" style="margin:0;">
+                                    <input type="hidden" name="companyId" value="@r.CompanyId" />
+                                    <button type="submit" @(r.Coordinators == 0 ? "disabled" : "")>Resend</button>
+                                </form>
+                                <form method="post" asp-page-handler="Reset" style="margin:0;">
+                                    <input type="hidden" name="companyId" value="@r.CompanyId" />
+                                    <button type="submit" style="background:#6c757d;"
+                                            @(r.Coordinators == 0 ? "disabled" : "")>Reset flag</button>
+                                </form>
+                            </div>
+                        </td>
+                    </tr>
+                }
+            </table>
+            </div>
+
+            <p style="font-size:13px;color:#666;margin-top:12px;">
+                <strong>Coordinators</strong> = the recipients of every sponsor email (event-coordinator
+                status, incl. contacts who are also signers). <strong>Signer-only</strong> contacts are
+                shown for reference but never receive sponsor mail. <strong>Welcome sent</strong> shows how
+                many coordinators have already been welcomed &mdash; Reset clears that so Resend re-sends.
+            </p>
+        }
+    </div>
+}

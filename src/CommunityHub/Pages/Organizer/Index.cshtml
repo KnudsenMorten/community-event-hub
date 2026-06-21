@@ -20,83 +20,23 @@
 
 @if (!Model.AccessDenied)
 {
-    <div class="card">
-        <h2>@Localizer["Nav.OrgCommandCenter"]</h2>
-        <p>@Localizer["OrgArea.CommandCenter"]</p>
-        <p><a asp-page="/Organizer/CommandCenter">@Localizer["Nav.OrgCommandCenter"]</a></p>
-    </div>
-
-    <div class="card">
-        <h2>@Localizer["Nav.OrgDashboard"]</h2>
-        <p>@Localizer["OrgArea.Dashboard"]</p>
-        <p><a asp-page="/Organizer/Dashboard">@Localizer["Nav.OrgDashboard"]</a></p>
-        @if (Model.OpenActionItems > 0)
-        {
-            <p><a asp-page="/Organizer/ActionQueue">
-                <span style="display:inline-block;font-size:13px;font-weight:700;background:#fee2e2;color:#991b1b;border-radius:999px;padding:2px 10px;">@Model.OpenActionItems</span>
-                @Localizer["OrgArea.OpenActions"]</a></p>
-        }
-    </div>
-
-    <div class="card">
-        <h2>@Localizer["Nav.OrgPeople"]</h2>
-        <p>@Localizer["OrgPeople.Intro"]</p>
-        <p><a asp-page="/Organizer/People">@Localizer["Nav.OrgPeople"]</a></p>
-    </div>
-
-    <div class="card">
-        <h2>@Localizer["Nav.OrgComms"]</h2>
-        <p>@Localizer["OrgComms.Intro"]</p>
-        <p><a asp-page="/Organizer/Comms">@Localizer["Nav.OrgComms"]</a></p>
-    </div>
-
-    <div class="card">
-        <h2>@Localizer["Nav.OrgSessionsHub"]</h2>
-        <p>@Localizer["OrgContent.Intro"]</p>
-        <p><a asp-page="/Organizer/Content">@Localizer["Nav.OrgSessionsHub"]</a></p>
-    </div>
-
-    <div class="card">
-        <h2>@Localizer["Nav.OrgSponsorsHub"]</h2>
-        <p>@Localizer["OrgArea.Sponsors"]</p>
-        <p><a asp-page="/Organizer/SponsorAdmin/Index">@Localizer["Nav.OrgSponsorsHub"]</a></p>
-    </div>
-
-    <div class="card">
-        <h2>@Localizer["Nav.OrgVolunteers"]</h2>
-        <p>@Localizer["OrgVolunteers.Intro"]</p>
-        <p><a asp-page="/Organizer/Volunteers">@Localizer["Nav.OrgVolunteers"]</a></p>
-    </div>
-
-    <div class="card">
-        <h2>@Localizer["Nav.OrgLogistics"]</h2>
-        <p>@Localizer["OrgLogistics.Intro"]</p>
-        <p><a asp-page="/Organizer/Logistics">@Localizer["Nav.OrgLogistics"]</a></p>
-    </div>
-
-    <div class="card">
-        <h2>@Localizer["Nav.OrgExports"]</h2>
-        <p>@Localizer["OrgArea.Exports"]</p>
-        <p><a asp-page="/Organizer/Exports">@Localizer["Nav.OrgExports"]</a></p>
-    </div>
-
-    <div class="card">
-        <h2>@Localizer["Nav.OrgSoMe"]</h2>
-        <p>@Localizer["OrgSoMe.Intro"]</p>
-        <p><a asp-page="/Organizer/SoMe">@Localizer["Nav.OrgSoMe"]</a></p>
-    </div>
-
-    <div class="card">
-        <h2>@Localizer["Nav.OrgSetup"]</h2>
-        <p>@Localizer["OrgSetup.Intro"]</p>
-        <p><a asp-page="/Organizer/Setup">@Localizer["Nav.OrgSetup"]</a></p>
-    </div>
-
-    <div class="card">
-        <h2>@Localizer["Nav.OrgImpersonationLog"]</h2>
-        <p>@Localizer["OrgArea.Audit"]</p>
-        <p><a asp-page="/Organizer/ImpersonationLog">@Localizer["Nav.OrgImpersonationLog"]</a></p>
-    </div>
+    var tiles = new List<CommunityHub.Pages.Shared.HubTile>
+    {
+        new("/Organizer/CommandCenter", Localizer["Nav.OrgCommandCenter"].Value, Localizer["OrgArea.CommandCenter"].Value),
+        new("/Organizer/Dashboard", Localizer["Nav.OrgDashboard"].Value, Localizer["OrgArea.Dashboard"].Value),
+        new("/Organizer/Overview", "Event overview", "A single at-a-glance read on the event — key counts and progress bars across people, sessions, sponsors and logistics."),
+        new("/Organizer/FindPerson", Localizer["Nav.OrgFindPerson"].Value, Localizer["OrgPeople.FindPerson"].Value),
+        new("/Organizer/People", Localizer["Nav.OrgPeople"].Value, Localizer["OrgPeople.Intro"].Value),
+        new("/Organizer/Content", Localizer["Nav.OrgSessionsHub"].Value, Localizer["OrgContent.Intro"].Value),
+        new("/Organizer/Comms", Localizer["Nav.OrgComms"].Value, Localizer["OrgComms.Intro"].Value),
+        new("/Organizer/SoMe", Localizer["Nav.OrgSoMe"].Value, Localizer["OrgSoMe.Intro"].Value),
+        new("/Organizer/SponsorAdmin/Index", Localizer["Nav.OrgSponsorsHub"].Value, Localizer["OrgArea.Sponsors"].Value),
+        new("/Organizer/Volunteers", Localizer["Nav.OrgVolunteers"].Value, Localizer["OrgVolunteers.Intro"].Value),
+        new("/Organizer/Logistics", Localizer["Nav.OrgLogistics"].Value, Localizer["OrgLogistics.Intro"].Value),
+        new("/Organizer/Setup", Localizer["Nav.OrgSetup"].Value, Localizer["OrgSetup.Intro"].Value),
+        new("/Organizer/ImpersonationLog", Localizer["Nav.OrgImpersonationLog"].Value, Localizer["OrgArea.Audit"].Value),
+    };
+    <partial name="_HubGrid" model="@tiles" />
 
     @if (Model.Mismatches.Count > 0)
     {

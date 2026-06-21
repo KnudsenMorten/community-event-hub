@@ -14,11 +14,43 @@ public sealed record RenderedEmail(string Subject, string HtmlBody);
 ///
 /// Editing _layout.html restyles every email; editing one content template
 /// changes only that email. No HTML is hard-coded in C#.
+///
+/// HTML-ENCODING CONTRACT (REQUIREMENTS §10c-4 — "encode at the seam").
+/// Token values are HTML-encoded by the renderer at substitution time, so a
+/// name/title containing &lt;, &amp; or " can never break the markup of a
+/// branded email — senders no longer need their own per-value Enc(...). The
+/// only exception is a small, explicit set of tokens whose values are
+/// deliberately HTML fragments built by the sender (e.g. a &lt;tr&gt; list, a
+/// pre-encoded paragraph block). Those carry the <c>Html</c>/<c>Block</c>
+/// naming suffix, plus the renderer-internal <c>bodyContent</c>; see
+/// <see cref="RawHtmlTokens"/>. The email <c>Subject</c> header is plain text
+/// and is returned un-encoded; only the HTML body is encoded.
 /// </summary>
 public sealed class EmailTemplateRenderer
 {
     private static readonly Regex TokenRx =
         new(@"\{\{(\w+)\}\}", RegexOptions.Compiled);
+
+    /// <summary>
+    /// Tokens whose values are intentional, sender-built HTML fragments and
+    /// must be inserted verbatim (NOT re-encoded). Everything else is encoded.
+    /// Membership is by exact name OR by the conventional <c>Html</c>/<c>Block</c>
+    /// suffix, so a new fragment token named e.g. <c>summaryHtml</c> is raw by
+    /// default. Keep user/event free-text OUT of this set.
+    /// </summary>
+    internal static readonly IReadOnlySet<string> RawHtmlTokens =
+        new HashSet<string>(StringComparer.Ordinal)
+        {
+            // Renderer-internal: the already-rendered content fragment.
+            "bodyContent",
+            // dueText carries a <strong>…</strong> span (its date is app-formatted).
+            "dueText",
+        };
+
+    private static bool IsRawHtmlToken(string token) =>
+        RawHtmlTokens.Contains(token)
+        || token.EndsWith("Html", StringComparison.Ordinal)
+        || token.EndsWith("Block", StringComparison.Ordinal);
 
     private readonly string _layoutTemplate;
 
@@ -49,28 +81,47 @@ public sealed class EmailTemplateRenderer
         // The content template carries its own Subject: line.
         var fragment = StripSubjectLine(contentTemplate, out var subjectLine);
 
-        var subject = Substitute(subjectLine, tokens);
-        var bodyContent = Substitute(fragment, tokens);
+        // The Subject HEADER is plain text (no HTML context), so it is
+        // substituted raw — never HTML-encoded.
+        var subject = Substitute(subjectLine, tokens, encode: false);
 
-        // The layout's {{bodyContent}} and {{subject}} are filled, then any
-        // remaining theme tokens ({{brandColor}}, {{logoUrl}}, ...) substituted.
+        // The HTML BODY is substituted with per-value HTML-encoding (the seam),
+        // except for the explicit raw-HTML token set.
+        var bodyContent = Substitute(fragment, tokens, encode: true);
+
+        // The layout's {{bodyContent}} is the already-rendered (and already
+        // encoded) fragment, so it must pass through verbatim. {{subject}} in
+        // the layout body (if any) is plain-text content and gets encoded like
+        // every other body token.
         var layoutTokens = new Dictionary<string, string>(tokens)
         {
             ["bodyContent"] = bodyContent,
             ["subject"] = subject,
         };
-        var html = Substitute(_layoutTemplate, layoutTokens);
+        var html = Substitute(_layoutTemplate, layoutTokens, encode: true);
 
         return new RenderedEmail(subject, html);
     }
 
-    /// <summary>Replace every {{token}} with its mapped value (missing =&gt; "").</summary>
+    /// <summary>
+    /// Replace every {{token}} with its mapped value (missing =&gt; "").
+    /// When <paramref name="encode"/> is true, each value is HTML-encoded at the
+    /// seam, except tokens in the raw-HTML set (see <see cref="IsRawHtmlToken"/>)
+    /// which are inserted verbatim.
+    /// </summary>
     private static string Substitute(
-        string template, IReadOnlyDictionary<string, string> tokens) =>
+        string template, IReadOnlyDictionary<string, string> tokens, bool encode) =>
         TokenRx.Replace(template, m =>
-            tokens.TryGetValue(m.Groups[1].Value, out var value)
-                ? value
-                : string.Empty);
+        {
+            var name = m.Groups[1].Value;
+            if (!tokens.TryGetValue(name, out var value))
+            {
+                return string.Empty;
+            }
+            return encode && !IsRawHtmlToken(name)
+                ? System.Net.WebUtility.HtmlEncode(value)
+                : value;
+        });
 
     /// <summary>
     /// Split a "Subject: ..." first line off a template. Returns the body and

@@ -54,6 +54,64 @@ public sealed class EventEditionConfig
     /// </summary>
     [JsonIgnore]
     public ResourcesConfig Resources { get; set; } = new();
+
+    /// <summary>
+    /// Optional <c>ticketSale</c> block loaded from
+    /// <c>event.&lt;edition&gt;.json -&gt; ticketSale</c> (a SIBLING of
+    /// <c>edition</c>). Drives the site-wide topbar ticket banner so the
+    /// "ticket sale starts &lt;date&gt; &lt;time&gt;" copy can never drift out of
+    /// the config and auto-switches once the sale opens. Null when the section
+    /// is absent — the topbar then falls back to its static resx literal.
+    /// </summary>
+    [JsonIgnore]
+    public TicketSaleConfig? TicketSale { get; set; }
+}
+
+/// <summary>
+/// The site-wide topbar ticket-banner facts pulled from
+/// <c>event.&lt;edition&gt;.json -&gt; ticketSale</c>. Pure operator config so
+/// the topbar copy (previously the hardcoded <c>Layout.TicketInfo</c> resx
+/// literal that silently went stale — read "2028" once) is driven from the
+/// active edition. The <see cref="TicketBannerBuilder"/> turns this + a clock
+/// into what the topbar renders; the timezone for "before/after open" is the
+/// edition's own (<c>dates.timezone</c>), reusing <see cref="EventLocalTime"/>.
+/// </summary>
+public sealed class TicketSaleConfig
+{
+    /// <summary>
+    /// Master on/off switch. <c>false</c> ⇒ the topbar shows nothing
+    /// config-driven (and the layout keeps its static fallback). Default true
+    /// so a present block is live unless explicitly disabled.
+    /// </summary>
+    [JsonPropertyName("enabled")]
+    public bool Enabled { get; set; } = true;
+
+    /// <summary>
+    /// When the sale opens, as an ISO-8601 local wall-clock datetime WITHOUT a
+    /// zone offset (e.g. <c>2026-08-11T08:00:00</c>). It is interpreted in the
+    /// edition timezone (<c>dates.timezone</c>) so an operator writes plain
+    /// Danish wall time and never juggles UTC. Blank ⇒ the banner can't compute
+    /// a before/after state and falls back to the static literal.
+    /// </summary>
+    [JsonPropertyName("opensAtLocal")]
+    public string OpensAtLocal { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Optional public ticket URL the banner links to once the sale is open
+    /// (e.g. the Backstage ticket page). Blank ⇒ no link is rendered.
+    /// </summary>
+    [JsonPropertyName("ticketUrl")]
+    public string TicketUrl { get; set; } = string.Empty;
+
+    /// <summary>
+    /// What the topbar does AFTER the open moment passes. <c>"onsale"</c>
+    /// (default) shows a "tickets on sale" message (a link when
+    /// <see cref="TicketUrl"/> is set); <c>"hide"</c> removes the banner once
+    /// the sale has opened (e.g. when ticketing moves entirely to the event
+    /// site). Case-insensitive; any unknown value is treated as "onsale".
+    /// </summary>
+    [JsonPropertyName("afterOpen")]
+    public string AfterOpen { get; set; } = "onsale";
 }
 
 /// <summary>
@@ -120,6 +178,9 @@ public sealed class EditionDates
     [JsonPropertyName("day2")]      public string Day2     { get; set; } = string.Empty;
     [JsonPropertyName("timezone")]  public string Timezone { get; set; } = string.Empty;
     [JsonPropertyName("lockDate")]  public string LockDate { get; set; } = string.Empty;
+    // NOTE: the role-tagged KEY-DATES / schedule now lives in the ScheduleEntries DB
+    // table (organizer-editable at /Organizer/Schedule, seeded from a 6-day default).
+    // It is no longer a static edition-config list.
 }
 
 /// <summary>SharePoint section of event.&lt;edition&gt;.json -- site / drive / root only.
@@ -160,12 +221,44 @@ public sealed class EventEditionConfigLoader
 
     public EventEditionConfig Load(string path)
     {
+        path = ConfigPaths.Resolve(path);
         if (!File.Exists(path))
         {
             return new EventEditionConfig();
         }
 
-        var json = File.ReadAllText(path);
+        return Parse(File.ReadAllText(path));
+    }
+
+    /// <summary>
+    /// Load the shipped default from <paramref name="path"/> then DEEP-MERGE a
+    /// per-edition <paramref name="overrideJson"/> fragment on top (HYBRID config
+    /// model — see <see cref="JsonDeepMerge"/>). A null/blank/invalid override is
+    /// ignored and the result is byte-for-byte identical to <see cref="Load(string)"/>
+    /// (fail-safe to the shipped default — never throws on a bad override). When
+    /// the file itself is missing the shipped default is empty and the override
+    /// (if any) is applied on top of an empty object so a fully-specified
+    /// override still produces config.
+    /// </summary>
+    public EventEditionConfig Load(string path, string? overrideJson)
+    {
+        if (string.IsNullOrWhiteSpace(overrideJson))
+        {
+            return Load(path); // common path: no override, unchanged behaviour.
+        }
+
+        path = ConfigPaths.Resolve(path);
+        var defaultJson = File.Exists(path) ? File.ReadAllText(path) : "{}";
+        return Parse(JsonDeepMerge.Merge(defaultJson, overrideJson));
+    }
+
+    /// <summary>
+    /// Parse a (possibly already override-merged) event-config JSON document into
+    /// an <see cref="EventEditionConfig"/>. The parsing/sanitization logic is the
+    /// single source shared by both <see cref="Load(string)"/> overloads.
+    /// </summary>
+    private static EventEditionConfig Parse(string json)
+    {
         using var doc = JsonDocument.Parse(json);
 
         EventEditionConfig cfg;
@@ -230,6 +323,15 @@ public sealed class EventEditionConfigLoader
                 .Where(s => !string.IsNullOrWhiteSpace(s.Title) || s.Links.Count > 0)
                 .ToList();
             cfg.Resources = res;
+        }
+
+        // Pull the SIBLING "ticketSale" object that drives the site-wide topbar
+        // ticket banner. Null when absent so the layout keeps its static
+        // fallback literal (additive — nothing breaks if the block is missing).
+        if (doc.RootElement.TryGetProperty("ticketSale", out var ts)
+            && ts.ValueKind == JsonValueKind.Object)
+        {
+            cfg.TicketSale = ts.Deserialize<TicketSaleConfig>(Options);
         }
 
         return cfg;

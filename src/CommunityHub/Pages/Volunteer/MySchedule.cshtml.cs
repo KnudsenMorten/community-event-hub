@@ -29,6 +29,7 @@ public class MyScheduleModel : PageModel
     private readonly ICurrentParticipantAccessor _participant;
     private readonly VolunteerScheduleBuilder _schedule;
     private readonly VolunteerStructureService _svc;
+    private readonly VolunteerShiftService _shifts;
     private readonly VolunteerHelpNotificationService _helpNotify;
     private readonly CalendarFeedTokenService _calendarTokens;
     private readonly ParticipantCalendarBuilder _calendarBuilder;
@@ -39,6 +40,7 @@ public class MyScheduleModel : PageModel
         ICurrentParticipantAccessor participant,
         VolunteerScheduleBuilder schedule,
         VolunteerStructureService svc,
+        VolunteerShiftService shifts,
         VolunteerHelpNotificationService helpNotify,
         CalendarFeedTokenService calendarTokens,
         ParticipantCalendarBuilder calendarBuilder,
@@ -48,11 +50,20 @@ public class MyScheduleModel : PageModel
         _participant = participant;
         _schedule = schedule;
         _svc = svc;
+        _shifts = shifts;
         _helpNotify = helpNotify;
         _calendarTokens = calendarTokens;
         _calendarBuilder = calendarBuilder;
         _logger = logger;
     }
+
+    /// <summary>
+    /// Statuses a volunteer may set from their own self-service surface. Cancelled
+    /// ("No longer needed") is a coordinator/supervisor-only state and is excluded
+    /// here so it never appears in — nor is accepted from — the volunteer dropdown.
+    /// </summary>
+    public static readonly IReadOnlyList<VolunteerTaskStatus> VolunteerSelectableStatuses =
+        new[] { VolunteerTaskStatus.Open, VolunteerTaskStatus.InProgress, VolunteerTaskStatus.Done };
 
     public VolunteerSchedule Schedule { get; private set; } =
         new(Array.Empty<VolunteerScheduleEntry>(), Array.Empty<VolunteerHelpRequest>());
@@ -82,6 +93,16 @@ public class MyScheduleModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
+
+        // Defense-in-depth: a volunteer may not set Cancelled ("No longer needed")
+        // from their self-service surface — that is a coordinator/supervisor action.
+        // Reject it server-side regardless of what the posted dropdown contained.
+        if (!VolunteerSelectableStatuses.Contains(status))
+        {
+            Notice = "You cannot set that status. Ask your supervisor if a task is no longer needed.";
+            return RedirectToPage();
+        }
+
         try
         {
             await _svc.SetTaskStatusAsync(Actor(me), taskId, status, ct);
@@ -107,6 +128,44 @@ public class MyScheduleModel : PageModel
                     "Help request {HelpId} saved but supervisor notification failed.", req.Id);
             }
             Notice = "Your supervisor has been asked for help.";
+            return RedirectToPage();
+        }
+        catch (VolunteerValidationException ex) { Notice = ex.Message; return RedirectToPage(); }
+        catch (VolunteerAccessDeniedException) { return Forbid(); }
+    }
+
+    // ----- Shift confirm / decline / request-swap (merged from the old MyShifts
+    // page, REQUIREMENTS §20). Each decision is stamped via VolunteerShiftService,
+    // which resolves the volunteer's OWN assigned shift from the session identity
+    // (the participant id is NEVER taken from the client) and raises a
+    // coordinator-visible signal on decline / swap-request. -------------------
+    public Task<IActionResult> OnPostConfirmAsync(int taskId, CancellationToken ct) =>
+        ApplyDecisionAsync(taskId, ShiftDecisionStatus.Confirmed, null, ct);
+
+    public Task<IActionResult> OnPostDeclineAsync(int taskId, string? note, CancellationToken ct) =>
+        ApplyDecisionAsync(taskId, ShiftDecisionStatus.Declined, note, ct);
+
+    public Task<IActionResult> OnPostRequestSwapAsync(int taskId, string? note, CancellationToken ct) =>
+        ApplyDecisionAsync(taskId, ShiftDecisionStatus.SwapRequested, note, ct);
+
+    public Task<IActionResult> OnPostWithdrawAsync(int taskId, CancellationToken ct) =>
+        ApplyDecisionAsync(taskId, ShiftDecisionStatus.None, null, ct);
+
+    private async Task<IActionResult> ApplyDecisionAsync(
+        int taskId, ShiftDecisionStatus decision, string? note, CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+        try
+        {
+            await _shifts.SetDecisionAsync(me.EventId, me.ParticipantId, taskId, decision, note, ct);
+            Notice = decision switch
+            {
+                ShiftDecisionStatus.Declined => "Shift declined — a coordinator will reassign it.",
+                ShiftDecisionStatus.SwapRequested => "Swap requested — a coordinator will pick it up.",
+                ShiftDecisionStatus.Confirmed => "Thanks — you're confirmed for this shift.",
+                _ => "Shift updated.",
+            };
             return RedirectToPage();
         }
         catch (VolunteerValidationException ex) { Notice = ex.Message; return RedirectToPage(); }

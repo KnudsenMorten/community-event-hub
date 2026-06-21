@@ -32,20 +32,26 @@ public class LunchModel : PageModel
         ParticipantRole.Speaker,
         ParticipantRole.MasterclassSpeaker,
         ParticipantRole.Organizer,
+        ParticipantRole.Video,
+        ParticipantRole.Camera,
     };
 
     /// <summary>
-    /// Roles whose people are on site for Setup-day (Mon) -- volunteers
-    /// (incl. video/camera crew, who are Volunteer participants) + organizers.
-    /// Speakers and Master Class speakers are NOT on site setup day; their
-    /// form only asks about Pre-day (Tue).
+    /// Crew/organizer roles that are on site for the SETUP days (Sun + Mon, before the
+    /// pre-day): volunteers, organizers and media (video/camera). They see all three
+    /// lunch days. Speakers + master-class speakers are NOT on site for setup; their
+    /// form only offers the Pre-day / Master Class lunch (Tue, StartDate).
     /// </summary>
     public static bool ShowSetupDayFor(ParticipantRole role) =>
-        role == ParticipantRole.Volunteer || role == ParticipantRole.Organizer;
+        role is ParticipantRole.Volunteer
+             or ParticipantRole.Organizer
+             or ParticipantRole.Video
+             or ParticipantRole.Camera;
 
     /// <summary>SourceKey prefix used for the "complete the lunch form" task.</summary>
     public const string LunchTaskKey = "lunch-form";
 
+    [BindProperty] public bool LunchEarlySetupDay { get; set; }
     [BindProperty] public bool LunchSetupDay { get; set; }
     [BindProperty] public bool LunchPreDay { get; set; }
     [BindProperty] public string? Notes { get; set; }
@@ -56,8 +62,10 @@ public class LunchModel : PageModel
     public bool AccessDenied { get; private set; }
     public string? Message { get; private set; }
 
-    public string SetupDayLabel { get; private set; } = "Setup day";
+    public string EarlySetupDayLabel { get; private set; } = "Setup day (Sun)";
+    public string SetupDayLabel { get; private set; } = "Setup day (Mon)";
     public string PreDayLabel { get; private set; } = "Pre-day (Master Class)";
+    public string MainDayLabel { get; private set; } = "main day";
     public bool ShowSetupDay { get; private set; }
 
     public async Task<IActionResult> OnGetAsync(CancellationToken ct)
@@ -85,6 +93,7 @@ public class LunchModel : PageModel
             l => l.EventId == me.EventId && l.ParticipantId == me.ParticipantId, ct);
         if (existing is not null)
         {
+            LunchEarlySetupDay = existing.LunchEarlySetupDay;
             LunchSetupDay = existing.LunchSetupDay;
             LunchPreDay = existing.LunchPreDay;
             Notes = existing.Notes;
@@ -127,8 +136,9 @@ public class LunchModel : PageModel
             signup.UpdatedAt = _clock.GetUtcNow();
         }
 
-        // Speakers can't sign up for Setup day -- their form doesn't ask, so
+        // Speakers can't sign up for the setup days -- their form doesn't ask, so
         // ignore any value that came through (defensive against tampering).
+        signup.LunchEarlySetupDay = ShowSetupDay && LunchEarlySetupDay;
         signup.LunchSetupDay = ShowSetupDay && LunchSetupDay;
         signup.LunchPreDay = LunchPreDay;
         signup.Notes = Notes;
@@ -196,14 +206,20 @@ public class LunchModel : PageModel
     {
         var evt = await _db.Events
             .Where(e => e.Id == eventId)
-            .Select(e => new { e.StartDate, e.PreDayDate })
+            .Select(e => new { e.StartDate, e.EndDate })
             .FirstOrDefaultAsync(ct);
         if (evt is null) return;
 
-        var preDay = evt.PreDayDate ?? evt.StartDate.AddDays(-1);
-        var setupDay = preDay.AddDays(-1);
+        // The conference StartDate IS the pre-day / Master Class day; the two days
+        // before it are setup days (crew + organizers + media). The EndDate is the
+        // main day -- its lunch is booked for everyone, so it's a note, not a choice.
+        var preDay        = evt.StartDate;
+        var setupDay      = evt.StartDate.AddDays(-1);
+        var earlySetupDay = evt.StartDate.AddDays(-2);
 
-        SetupDayLabel = $"Setup day ({setupDay:dddd, MMM d yyyy})";
-        PreDayLabel   = $"Pre-day / Master Class ({preDay:dddd, MMM d yyyy})";
+        EarlySetupDayLabel = $"Setup day ({earlySetupDay:dddd, MMM d yyyy})";
+        SetupDayLabel      = $"Setup day ({setupDay:dddd, MMM d yyyy})";
+        PreDayLabel        = $"Pre-day / Master Class ({preDay:dddd, MMM d yyyy})";
+        MainDayLabel       = $"{evt.EndDate:dddd, MMM d yyyy}";
     }
 }

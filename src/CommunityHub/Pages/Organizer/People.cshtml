@@ -1,7 +1,20 @@
 @page
 @model CommunityHub.Pages.Organizer.PeopleModel
+@using CommunityHub.Pages.Shared
 @{
     ViewData["Title"] = Localizer["OrgPeople.Title"].Value;
+
+    var tiles = new List<HubTile>
+    {
+        new HubTile("/Organizer/FindPerson", Localizer["Nav.OrgFindPerson"].Value, Localizer["OrgPeople.FindPerson"].Value),
+        new HubTile("/Organizer/Participants", Localizer["Nav.OrgParticipants"].Value, Localizer["OrgPeople.Participants"].Value),
+        new HubTile("/Organizer/PreselectionQueue", Localizer["Nav.OrgPreselectionQueue"].Value, Localizer["OrgPeople.Preselection"].Value),
+        new HubTile("/Organizer/Onboarding", Localizer["Nav.OrgOnboarding"].Value, Localizer["OrgPeople.Onboarding"].Value),
+        new HubTile("/Organizer/Attendees", Localizer["Nav.OrgAttendees"].Value, Localizer["OrgPeople.Attendees"].Value),
+        new HubTile("/Organizer/ActionQueue", Localizer["Nav.OrgActionQueue"].Value, Localizer["OrgPeople.ActionQueue"].Value),
+        new HubTile("/Organizer/WelcomeLinks", "Welcome sign-in links", "Review and revoke welcome auto-login links the hub has issued."),
+        new HubTile("/Organizer/AccessLinks", "Permanent sign-in links", "Standing one-click sign-in links."),
+    };
 }
 
 <div class="card">
@@ -20,39 +33,5 @@
 
 @if (!Model.AccessDenied)
 {
-    <div class="card">
-        <h2>@Localizer["Nav.OrgFindPerson"]</h2>
-        <p>@Localizer["OrgPeople.FindPerson"]</p>
-        <p><a asp-page="/Organizer/FindPerson">@Localizer["Nav.OrgFindPerson"]</a></p>
-    </div>
-
-    <div class="card">
-        <h2>@Localizer["Nav.OrgParticipants"]</h2>
-        <p>@Localizer["OrgPeople.Participants"]</p>
-        <p><a asp-page="/Organizer/Participants">@Localizer["Nav.OrgParticipants"]</a></p>
-    </div>
-
-    <div class="card">
-        <h2>@Localizer["Nav.OrgPreselectionQueue"]</h2>
-        <p>@Localizer["OrgPeople.Preselection"]</p>
-        <p><a asp-page="/Organizer/PreselectionQueue">@Localizer["Nav.OrgPreselectionQueue"]</a></p>
-    </div>
-
-    <div class="card">
-        <h2>@Localizer["Nav.OrgOnboarding"]</h2>
-        <p>@Localizer["OrgPeople.Onboarding"]</p>
-        <p><a asp-page="/Organizer/Onboarding">@Localizer["Nav.OrgOnboarding"]</a></p>
-    </div>
-
-    <div class="card">
-        <h2>@Localizer["Nav.OrgAttendees"]</h2>
-        <p>@Localizer["OrgPeople.Attendees"]</p>
-        <p><a asp-page="/Organizer/Attendees">@Localizer["Nav.OrgAttendees"]</a></p>
-    </div>
-
-    <div class="card">
-        <h2>@Localizer["Nav.OrgActionQueue"]</h2>
-        <p>@Localizer["OrgPeople.ActionQueue"]</p>
-        <p><a asp-page="/Organizer/ActionQueue">@Localizer["Nav.OrgActionQueue"]</a></p>
-    </div>
+    <partial name="_HubGrid" model="@tiles" />
 }

@@ -100,7 +100,7 @@ public class TasksModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) return Forbid();
+        if (!OrganizerAuth.IsRealOrganizer(me)) return Forbid();
 
         title = (title ?? string.Empty).Trim();
         if (title.Length == 0)
@@ -161,7 +161,7 @@ public class TasksModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) return Forbid();
+        if (!OrganizerAuth.IsRealOrganizer(me)) return Forbid();
 
         var rows = await SponsorTaskQuery(me.EventId)
             .Where(t => t.Title == title)
@@ -195,7 +195,7 @@ public class TasksModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) return Forbid();
+        if (!OrganizerAuth.IsRealOrganizer(me)) return Forbid();
 
         var rows = await SponsorTaskQuery(me.EventId)
             .Where(t => t.Title == title)

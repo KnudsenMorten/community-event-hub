@@ -1,9 +1,27 @@
 @page
+@using Microsoft.AspNetCore.Mvc.Localization
 @using CommunityHub.Core.Domain
 @using CommunityHub.Core.Email
+@inject IHtmlLocalizer<CommunityHub.Core.Resources.SharedResource> Localizer
 @model CommunityHub.Pages.Organizer.BroadcastModel
 @{
     ViewData["Title"] = "Broadcast";
+
+    // Per-token meaning + example strings, keyed off the SAME token set the engine
+    // resolves (BroadcastTemplates.TokenHelp). If a token is added in Core without a
+    // matching resx pair, it still lists with the engine's built-in help text as the
+    // meaning and no example — never a crash, and the legend can never advertise a
+    // token the engine does not substitute. (Verified by BroadcastTokenLegendTests.)
+    var tokenMeaning = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+    {
+        ["FirstName"] = Localizer["Broadcast.TokenFirstNameMeaning"].Value,
+        ["EventName"] = Localizer["Broadcast.TokenEventNameMeaning"].Value,
+    };
+    var tokenExample = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+    {
+        ["FirstName"] = Localizer["Broadcast.TokenFirstNameExample"].Value,
+        ["EventName"] = Localizer["Broadcast.TokenEventNameExample"].Value,
+    };
 }
 
 <div class="card">
@@ -48,9 +66,7 @@
                 <button type="submit" class="secondary">Load template</button>
             </div>
             <p style="margin:6px 0 0;color:#6b7280;font-size:13px;">
-                Tokens you can use in the subject or message
-                (replaced per recipient):
-                @string.Join(", ", BroadcastTemplates.TokenHelp.Keys.Select(k => "{" + k + "}"))
+                @Localizer["Broadcast.TokensIntro"]
             </p>
         </form>
 
@@ -105,6 +121,49 @@
 
             <label for="Message">Message (plain text; blank line = new paragraph)</label>
             <textarea id="Message" name="Message" rows="9" style="max-width:640px;">@Model.Message</textarea>
+
+            @* Supported-variables legend (REQUIREMENTS §10c). The token list is driven by
+               the engine's own BroadcastTemplates.TokenHelp, so the legend can never list a
+               token the send path does not substitute. Each entry shows meaning + example;
+               the "Insert" button (progressive enhancement — works without it) drops the
+               literal {Token} at the cursor in whichever of Subject/Message was focused last. *@
+            <details id="broadcastTokens" class="ceh-token-legend"
+                     style="margin:12px 0 16px;border:1px solid #e3e5ec;border-radius:8px;padding:0;max-width:640px;">
+                <summary style="cursor:pointer;font-weight:600;padding:10px 14px;">
+                    @Localizer["Broadcast.TokensHeading"]
+                </summary>
+                <div style="padding:4px 14px 14px;">
+                    <p style="margin:0 0 10px;color:#6b7280;font-size:13px;">
+                        @Localizer["Broadcast.TokensIntro"]</p>
+                    <ul role="list" style="list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:10px;">
+                        @foreach (var key in BroadcastTemplates.TokenHelp.Keys)
+                        {
+                            var literal = "{" + key + "}";
+                            var meaning = tokenMeaning.TryGetValue(key, out var m)
+                                ? m : BroadcastTemplates.TokenHelp[key];
+                            var hasExample = tokenExample.TryGetValue(key, out var ex)
+                                             && !string.IsNullOrWhiteSpace(ex);
+                            <li style="display:flex;flex-wrap:wrap;gap:6px 10px;align-items:baseline;">
+                                <button type="button" class="secondary ceh-token-insert"
+                                        data-token="@literal"
+                                        aria-label="@Localizer["Broadcast.TokenInsertAria", literal]"
+                                        style="flex:0 0 auto;font-family:monospace;padding:2px 8px;">@literal</button>
+                                <span style="flex:1 1 200px;min-width:0;font-size:14px;">
+                                    @meaning
+                                    @if (hasExample)
+                                    {
+                                        <br />
+                                        <span style="color:#6b7280;font-size:13px;">
+                                            <strong>@Localizer["Broadcast.TokenExampleLabel"]:</strong>
+                                            <span style="font-family:monospace;">@ex</span>
+                                        </span>
+                                    }
+                                </span>
+                            </li>
+                        }
+                    </ul>
+                </div>
+            </details>
 
             <button type="submit" asp-page-handler="Preview" class="secondary">Preview + count recipients</button>
 
@@ -187,3 +246,34 @@
     }
     <p><a asp-page="/Organizer/Index">Back to organizer area</a></p>
 </div>
+
+@* Click-to-insert for the supported-variables legend. Progressive enhancement only:
+   with JS off the legend still reads as meaning + example and an organizer types the
+   {Token} by hand. Inserts at the caret of whichever of Subject / Message was focused
+   last (defaults to Message), keeps focus + selection sane. No external dependency. *@
+<script defer>
+    (function () {
+        var legend = document.getElementById('broadcastTokens');
+        if (!legend) return;
+        var subject = document.getElementById('Subject');
+        var message = document.getElementById('Message');
+        var lastField = message;
+        [subject, message].forEach(function (el) {
+            if (!el) return;
+            el.addEventListener('focus', function () { lastField = el; });
+        });
+        legend.querySelectorAll('.ceh-token-insert').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                var token = btn.getAttribute('data-token') || '';
+                var field = lastField || message || subject;
+                if (!field) return;
+                var start = field.selectionStart != null ? field.selectionStart : field.value.length;
+                var end = field.selectionEnd != null ? field.selectionEnd : field.value.length;
+                field.value = field.value.slice(0, start) + token + field.value.slice(end);
+                var caret = start + token.length;
+                field.focus();
+                try { field.setSelectionRange(caret, caret); } catch (e) { /* non-text input */ }
+            });
+        });
+    })();
+</script>

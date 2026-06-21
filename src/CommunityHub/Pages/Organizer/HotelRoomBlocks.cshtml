@@ -1,0 +1,132 @@
+@page
+@model CommunityHub.Pages.Organizer.HotelRoomBlocksModel
+@{
+    ViewData["Title"] = Localizer["RoomBlocks.Title"].Value;
+}
+
+<style>
+    .rb-sub { color:#6b7280; margin:0 0 12px; }
+    .rb-banner { border-radius:8px; padding:11px 14px; margin:0 0 14px; font-weight:600; }
+    .rb-banner.ok { background:#f0fdf4; border:1px solid #bbf7d0; color:#15803d; }
+    .rb-banner.warn { background:#fef2f2; border:1px solid #fca5a5; color:#b91c1c; }
+    /* Roll-up tiles wrap on a ~360px phone, sit side-by-side on wider screens. */
+    .rb-tiles { display:flex; flex-wrap:wrap; gap:10px; margin:0 0 16px; }
+    .rb-tile { flex:1 1 130px; min-width:130px; border:1px solid #e6e8ee; border-radius:10px; padding:10px 12px; background:#f9fafb; }
+    .rb-tile .n { font-size:22px; font-weight:700; color:#1a1a2e; line-height:1.1; }
+    .rb-tile .l { font-size:12px; color:#6b7280; margin-top:2px; }
+    .rb-tile.warn { background:#fef2f2; border-color:#fca5a5; }
+    .rb-tile.warn .n { color:#b91c1c; }
+    /* Mobile-first: the table scrolls horizontally inside its card on narrow phones. */
+    .rb-scroll { overflow-x:auto; -webkit-overflow-scrolling:touch; }
+    table.rb-tbl { width:100%; border-collapse:collapse; min-width:560px; }
+    .rb-tbl th, .rb-tbl td { padding:9px 11px; text-align:left; border-bottom:1px solid #e6e8ee; font-size:13.5px; vertical-align:top; }
+    .rb-tbl th { font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:#6b7280; background:#f9fafb; }
+    .rb-tbl td.num, .rb-tbl th.num { text-align:right; white-space:nowrap; }
+    .rb-tbl tr.is-over td { background:#fef2f2; }
+    .rb-hotel { font-weight:600; color:#1a1a2e; }
+    .rb-pill { display:inline-block; border-radius:999px; padding:2px 10px; font-size:12px; font-weight:600; }
+    .rb-pill.ok { background:#dcfce7; color:#15803d; }
+    .rb-pill.over { background:#fee2e2; color:#b91c1c; }
+    .rb-pill.none { background:#eef0f4; color:#6b7280; }
+    .rb-links { margin-top:10px; font-size:13px; }
+    .rb-links a { margin-right:14px; }
+</style>
+
+<div class="card">
+    <h2>@Localizer["RoomBlocks.Title"]</h2>
+
+    @if (Model.AccessDenied)
+    {
+        <p class="error" role="alert">@Localizer["Cc.AccessDenied"]</p>
+        <p><a asp-page="/Organizer/Index">&larr; @Localizer["Common.BackToOrganizerArea"]</a></p>
+    }
+    else
+    {
+        var s = Model.Snapshot;
+        <p class="rb-sub">@Localizer["RoomBlocks.Intro"]</p>
+
+        @if (s.Hotels.Count == 0)
+        {
+            <p class="info">@Localizer["RoomBlocks.NoHotels"]</p>
+        }
+        else
+        {
+            @if (s.PlanLooksOk)
+            {
+                <div class="rb-banner ok" role="status">@Localizer["RoomBlocks.PlanOk"]</div>
+            }
+            else
+            {
+                <div class="rb-banner warn" role="status">
+                    @string.Format(Localizer["RoomBlocks.PlanWarn"].Value, s.HotelsOverBlock, s.UnassignedNeedingRoom)
+                </div>
+            }
+
+            <div class="rb-tiles" role="group" aria-label="@Localizer["RoomBlocks.RollupAria"]">
+                <div class="rb-tile">
+                    <div class="n">@s.TotalBlock</div>
+                    <div class="l">@Localizer["RoomBlocks.TileBlock"]</div>
+                </div>
+                <div class="rb-tile">
+                    <div class="n">@s.TotalAssignedNeedingRoom</div>
+                    <div class="l">@Localizer["RoomBlocks.TileNeeding"]</div>
+                </div>
+                <div class="rb-tile">
+                    <div class="n">@s.TotalRemaining</div>
+                    <div class="l">@Localizer["RoomBlocks.TileRemaining"]</div>
+                </div>
+                <div class="rb-tile @(s.UnassignedNeedingRoom > 0 ? "warn" : null)">
+                    <div class="n">@s.UnassignedNeedingRoom</div>
+                    <div class="l">@Localizer["RoomBlocks.TileUnplaced"]</div>
+                </div>
+            </div>
+
+            <div class="rb-scroll">
+                <table class="rb-tbl">
+                    <caption class="sr-only">@Localizer["RoomBlocks.Title"]</caption>
+                    <thead>
+                        <tr>
+                            <th scope="col">@Localizer["RoomBlocks.ColHotel"]</th>
+                            <th scope="col" class="num">@Localizer["RoomBlocks.ColBlock"]</th>
+                            <th scope="col" class="num">@Localizer["RoomBlocks.ColNeeding"]</th>
+                            <th scope="col" class="num">@Localizer["RoomBlocks.ColRemaining"]</th>
+                            <th scope="col" class="num">@Localizer["RoomBlocks.ColConfirmed"]</th>
+                            <th scope="col">@Localizer["RoomBlocks.ColState"]</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var h in s.Hotels)
+                        {
+                            <tr class="@(h.IsOverBlock ? "is-over" : null)">
+                                <td class="rb-hotel">@h.HotelName</td>
+                                <td class="num">@(h.HasBlock ? h.RoomBlockSize!.Value.ToString() : "—")</td>
+                                <td class="num">@h.AssignedNeedingRoom</td>
+                                <td class="num">@(h.Remaining is int r ? r.ToString() : "—")</td>
+                                <td class="num">@h.Confirmed</td>
+                                <td>
+                                    @if (!h.HasBlock)
+                                    {
+                                        <span class="rb-pill none">@Localizer["RoomBlocks.StateNoBlock"]</span>
+                                    }
+                                    else if (h.IsOverBlock)
+                                    {
+                                        <span class="rb-pill over">@string.Format(Localizer["RoomBlocks.StateOver"].Value, h.Over)</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="rb-pill ok">@Localizer["RoomBlocks.StateOk"]</span>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+
+            <p class="rb-links">
+                <a asp-page="/Organizer/Hotels">@Localizer["RoomBlocks.ManageHotels"]</a>
+                <a asp-page="/Organizer/HotelAssignments">@Localizer["RoomBlocks.ManageAssignments"]</a>
+            </p>
+        }
+    }
+</div>

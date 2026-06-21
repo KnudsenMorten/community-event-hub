@@ -74,7 +74,7 @@ public class PreselectionQueueModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) return Forbid();
+        if (!OrganizerAuth.IsRealOrganizer(me)) return Forbid();
 
         var result = await _activation.ActivateAndOnboardAsync(
             me.EventId, new[] { participantId }, ct);
@@ -93,7 +93,7 @@ public class PreselectionQueueModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) return Forbid();
+        if (!OrganizerAuth.IsRealOrganizer(me)) return Forbid();
 
         var requested = SelectedIds.Where(id => id > 0).Distinct().Count();
         if (requested == 0)
@@ -123,7 +123,7 @@ public class PreselectionQueueModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) return Forbid();
+        if (!OrganizerAuth.IsRealOrganizer(me)) return Forbid();
 
         var hard = await _deletion.HardDeleteAsync(me.EventId, participantId, ct);
         string msg = hard.Status switch
@@ -154,7 +154,7 @@ public class PreselectionQueueModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) return Forbid();
+        if (!OrganizerAuth.IsRealOrganizer(me)) return Forbid();
 
         var result = await _queue.AdvanceAsync(me.EventId, new[] { participantId }, target, ct);
         var msg = result.Changed == 1
@@ -169,7 +169,7 @@ public class PreselectionQueueModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) return Forbid();
+        if (!OrganizerAuth.IsRealOrganizer(me)) return Forbid();
 
         var requested = SelectedIds.Where(id => id > 0).Distinct().Count();
         if (requested == 0)

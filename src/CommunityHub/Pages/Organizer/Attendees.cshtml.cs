@@ -104,7 +104,7 @@ public class AttendeesModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) return Forbid();
+        if (!OrganizerAuth.IsRealOrganizer(me)) return Forbid();
 
         var rows = await BuildQuery(me.EventId)
             .OrderBy(a => a.LastName).ThenBy(a => a.FirstName)

@@ -98,8 +98,11 @@ public sealed class LoggingEmailSender : IEmailSender
         try
         {
             await send();
-            success = allowed;             // a silent allowlist drop is not a real delivery
-            error = allowed ? null : "Dropped by PROD allowlist (OnlySendTo).";
+            // Audience is rings-only now; ResolveDelivery's "allowed" reflects the
+            // kill switch (a ring drop is logged separately by the sender as
+            // RING-DROP). A silent kill-switch drop is not a real delivery.
+            success = allowed;
+            error = allowed ? null : "Dropped by global email kill switch (Email:KillSwitch).";
         }
         catch (Exception ex)
         {
@@ -131,6 +134,7 @@ public sealed class LoggingEmailSender : IEmailSender
                     : Trim(string.Join(", ", cc.Where(c => !string.IsNullOrWhiteSpace(c))), 1000),
                 ParticipantId = ctx?.ParticipantId,
                 RecipientName = ctx?.RecipientName is { } n ? Trim(n, 200) : null,
+                TemplateName = ctx?.TemplateName is { } t ? Trim(t, 200) : null,
                 Subject = Trim(subject, 998),
                 Success = success,
                 Error = error is null ? null : Trim(error, 2000),

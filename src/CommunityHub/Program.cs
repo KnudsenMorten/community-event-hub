@@ -66,8 +66,16 @@ builder.Services.Configure<EmailOptions>(
 // Central audit-log path (10a-3): every send flows through LoggingEmailSender,
 // which records an EmailLog row then delegates to the real Brevo sender. The
 // ambient EmailContext lets callers tag a send (category/edition/participant).
-builder.Services.AddSingleton<BrevoEmailSender>();
 builder.Services.AddSingleton<IEmailContextAccessor, EmailContextAccessor>();
+// The Brevo sender ring-gates every send (REQUIREMENTS §23): it opens a scope per
+// send for RingResolver + FeatureGateService (both scoped, registered below) and
+// reads the active edition from the ambient EmailContext. The ring gate sits in
+// front of the existing allowlist/redirect, which stay intact.
+builder.Services.AddSingleton<BrevoEmailSender>(sp => new BrevoEmailSender(
+    sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<EmailOptions>>(),
+    sp.GetRequiredService<IServiceScopeFactory>(),
+    sp.GetRequiredService<IEmailContextAccessor>(),
+    sp.GetService<Microsoft.Extensions.Logging.ILogger<BrevoEmailSender>>()));
 builder.Services.AddSingleton<IEmailSender>(sp => new LoggingEmailSender(
     sp.GetRequiredService<BrevoEmailSender>(),
     sp.GetRequiredService<IServiceScopeFactory>(),
@@ -78,11 +86,15 @@ builder.Services.AddSingleton<IEmailSender>(sp => new LoggingEmailSender(
 
 // --- Email system services (10a) -------------------------------------------
 builder.Services.AddScoped<ParticipantEmailService>();
+builder.Services.AddScoped<EmailResendService>();
 builder.Services.AddScoped<OnboardingEmailService>();
 builder.Services.AddScoped<OnboardingStepResetEmailService>();
 builder.Services.AddScoped<CalendarInviteEmailService>();
 builder.Services.AddScoped<SpeakerQuestionDigestService>();
 builder.Services.AddScoped<CommunityHub.Core.Organizer.ParticipantActivationService>();
+// Pure planner for the organizer test-send-to-an-arbitrary-address feature: it
+// reads EmailOptions so the preview matches the sender's redirect/allowlist gate.
+builder.Services.AddSingleton<EmailTestSendPlanner>();
 
 // --- PIN authentication ----------------------------------------------------
 builder.Services.AddScoped<PinService>();
@@ -104,13 +116,39 @@ builder.Services.Configure<CommunityHub.Core.Sponsors.BecomeSponsorOptions>(
 builder.Services.AddSingleton<EmailTemplateProvider>();
 builder.Services.AddScoped<WelcomeEmailService>();
 
+// Universal sponsor-email audience rule (REQUIREMENTS §7c): the single authority
+// for "which contacts at a sponsor company receive this email" — coordinators
+// only (signer-only excluded, both-roles included). The coordinator audience is
+// resolved READ-ONLY from e-conomic ERP Role-2 data (ISponsorErpCoordinatorSource,
+// registered below near Company Manager), with the manual IsEventCoordinator flag
+// as an additive override and a fail-soft fallback to the CM default. Explicit
+// factory so the ERP-source ctor is always chosen. The allowlist still gates sends.
+builder.Services.AddScoped<SponsorRecipientResolver>(sp => new SponsorRecipientResolver(
+    sp.GetRequiredService<CommunityHub.Core.Data.CommunityHubDbContext>(),
+    sp.GetService<CommunityHub.Core.Email.ISponsorErpCoordinatorSource>()));
+builder.Services.AddScoped<CommunityHub.Core.Reminders.SponsorWelcomeEmailService>();
+
 // Welcome email for all roles with one-click auto-login (DEV-only, re-sendable).
-// IEnvironmentInfo backs the Core service's DEV-only hard guard; the magic-link
-// token factory mints the same auto-login token the invitation flow uses.
+// IEnvironmentInfo backs the Core service's DEV-only hard guard. The welcome's
+// auto-login link is a SINGLE-USE, short-lived, revocable, audited token
+// (WelcomeAutoLoginTokenService + a MagicLinkGrant row), distinct from the
+// reusable invitation magic-link (IMagicLinkTokenFactory).
 builder.Services.AddSingleton<CommunityHub.Core.Email.IEnvironmentInfo,
     CommunityHub.Email.HostEnvironmentInfo>();
 builder.Services.AddSingleton<CommunityHub.Core.Auth.IMagicLinkTokenFactory>(sp =>
     sp.GetRequiredService<CommunityHub.Auth.MagicLinkService>());
+builder.Services.AddScoped<CommunityHub.Core.Auth.IWelcomeAutoLoginTokenService,
+    CommunityHub.Core.Auth.WelcomeAutoLoginTokenService>();
+// Organizer admin (list / revoke) + housekeeping (prune) for welcome grants.
+builder.Services.AddScoped<CommunityHub.Core.Auth.WelcomeGrantAdminService>();
+// Anonymous Party RSVP (public /Party form + organizer headcount).
+builder.Services.AddScoped<CommunityHub.Core.Reminders.PartyRsvpService>();
+// In-hub Master Class signup + waitlist (CEH-owned; replaces Zoho Bookings).
+builder.Services.AddScoped<CommunityHub.Core.Reminders.MasterClassSignupService>();
+// Ring-gated "you got a seat" promotion email (waitlist -> confirmed).
+builder.Services.AddScoped<CommunityHub.Core.Email.MasterClassPromotionEmailService>();
+// MC lifecycle emails (confirmed / waitlist-with-terms / cancellation) + .ics.
+builder.Services.AddScoped<CommunityHub.Core.Email.MasterClassEmailService>();
 builder.Services.AddScoped<CommunityHub.Core.Reminders.WelcomeWithLoginEmailService>();
 
 // --- Sessionize speaker import (organizer uploads an Excel export) ---------
@@ -129,6 +167,14 @@ builder.Services.AddSingleton(sessionizeApiOptions);
 builder.Services.AddHttpClient<CommunityHub.Core.Integrations.SessionizeApiClient>();
 // Sessions are pulled from the same v2 view API and linked to the speakers.
 builder.Services.AddScoped<SessionImportService>();
+// Pluggable SESSION source (default Sessionize; Zoho Backstage when enabled) —
+// REQUIREMENTS §6. The resolver picks the active source per edition from settings.
+builder.Services.AddScoped<CommunityHub.Core.Integrations.Sessions.ISessionSource,
+    CommunityHub.Core.Integrations.Sessions.SessionizeSessionSource>();
+builder.Services.AddScoped<CommunityHub.Core.Integrations.Sessions.ISessionSource,
+    CommunityHub.Core.Integrations.Sessions.BackstageSessionSource>();
+builder.Services.AddScoped<CommunityHub.Core.Integrations.Sessions.SessionSourceSettingsService>();
+builder.Services.AddScoped<CommunityHub.Core.Integrations.Sessions.SessionSourceResolver>();
 builder.Services.AddScoped<SessionizeApiImportService>();
 // Import DRY-RUN / preview: reads the same source + applies the same merge rules
 // as the real import but never writes, so the organizer sees created/updated/skipped
@@ -156,7 +202,7 @@ builder.Services.AddScoped<CommunityHub.Core.Reminders.PublicSessionsService>();
 builder.Services.AddScoped<CommunityHub.Core.Reminders.PublicAgendaService>();
 builder.Services.AddScoped<CommunityHub.Core.Reminders.PublicSpeakersService>();
 builder.Services.AddScoped<CommunityHub.Core.Reminders.PublicSponsorsService>();
-builder.Services.AddScoped<CommunityHub.Core.Reminders.PublicLandingService>();
+builder.Services.AddScoped<CommunityHub.Core.Reminders.ScheduleService>();
 builder.Services.AddScoped<CommunityHub.Core.Domain.SessionQuestionService>();
 // Per-session attendee EVALUATION (HappyOrNot-style 1–5 rating + comment): a public,
 // no-login submit page reached via the room QR (reusing the same Session.PublicToken as
@@ -188,6 +234,9 @@ builder.Services.AddScoped<CommunityHub.Core.Reporting.ReportingService>();
 // the app lifetime. Restart picks up edits. Responses persist to the DB
 // (SurveyResponse + SurveyResponsePick).
 builder.Services.AddSingleton<CommunityHub.Surveys.SurveyDefinitionProvider>();
+// Survey response aggregation + organizer admin state (open/close, reset).
+// Scoped: it uses the per-request DbContext.
+builder.Services.AddScoped<CommunityHub.Core.Domain.SurveySummaryService>();
 
 // --- Session cookie --------------------------------------------------------
 //  SameSite=None + Secure so the cookie survives inside the cross-site
@@ -217,29 +266,37 @@ builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationSc
 // re-login even when the user chose "stay signed in until I sign out". Pinning the
 // application name keeps the key ring stable across deploys/restarts, so persistent
 // sessions actually persist. (Keys themselves persist to the App Service %HOME% store.)
-builder.Services.AddDataProtection().SetApplicationName("CommunityHub-EventHub");
+// Persist the key ring to the SHARED SQL DB (PersistKeysToDbContext) so auth cookies
+// survive slot-swap deploys + restarts. Previously the keys lived in per-slot %HOME%,
+// so every swap brought a worker with a DIFFERENT key ring and all existing cookies
+// became undecryptable — users were logged out on every deploy. Both slots use the
+// same SQL connection, so the key ring is now genuinely shared. The pinned application
+// name keeps the discriminator stable on top of that.
+builder.Services.AddDataProtection()
+    .PersistKeysToDbContext<CommunityHubDbContext>()
+    .SetApplicationName("CommunityHub-EventHub");
 
 builder.Services.AddAuthorization();
 
-// --- Localization (i18n: English default + Danish) -------------------------
+// --- Localization (i18n: English only) -------------------------------------
 // Resources live in CommunityHub.Core under /Resources (SharedResource.resx =
-// en/invariant fallback, SharedResource.da-DK.resx = Danish satellite). The
-// marker type CommunityHub.Core.Resources.SharedResource sits in the matching
-// namespace, so its full type name already equals the embedded resource base
-// name — ResourcesPath stays EMPTY (a non-empty path would be inserted a second
-// time and the lookup would miss). Views resolve strings via the
+// the en/invariant resource). The marker type
+// CommunityHub.Core.Resources.SharedResource sits in the matching namespace, so
+// its full type name already equals the embedded resource base name —
+// ResourcesPath stays EMPTY (a non-empty path would be inserted a second time
+// and the lookup would miss). Views resolve strings via the
 // IStringLocalizer<SharedResource> injected as `Localizer` in _ViewImports.
-// First slice externalizes the high-traffic participant pages; deeper pages stay
-// English-only for now (tracked ◻ in REQUIREMENTS). No schema/DB involvement.
+// No schema/DB involvement.
 builder.Services.AddLocalization();
 
-// Supported cultures. en is the default + invariant fallback; da-DK is the
-// Danish satellite. Adding a culture = adding a SharedResource.<culture>.resx
-// plus an entry here (and a switcher option in _Layout).
+// Supported cultures. ENGLISH-ONLY (operator directive 2026-06-18: "we only
+// support english language, dont publish anything on danish"). The hub is never
+// served in any other language; RequestLocalization always resolves to en
+// regardless of the browser's Accept-Language. To introduce a language, add its
+// CultureInfo here + a matching SharedResource.<culture>.resx satellite.
 var supportedCultures = new[]
 {
     new CultureInfo("en"),
-    new CultureInfo("da-DK"),
 };
 var localizationOptions = new RequestLocalizationOptions
 {
@@ -247,9 +304,10 @@ var localizationOptions = new RequestLocalizationOptions
     SupportedCultures     = supportedCultures,
     SupportedUICultures   = supportedCultures,
 };
-// Negotiation order: explicit cookie (set by the language switcher) wins, then
-// the browser's Accept-Language header, then the en default. The query-string
-// provider is dropped so a stray ?culture= can't override a user's choice.
+// Negotiation order: explicit culture cookie wins, then the browser's
+// Accept-Language header, then the en default. The query-string provider is
+// dropped so a stray ?culture= can't override a user's choice. With en as the
+// only supported culture, every request resolves to English regardless.
 localizationOptions.RequestCultureProviders =
     localizationOptions.RequestCultureProviders
         .Where(p => p is not Microsoft.AspNetCore.Localization
@@ -261,6 +319,14 @@ builder.Services.AddRazorPages()
 
 builder.Services.AddSingleton<CommunityHub.Branding.ActiveEventNameProvider>();
 builder.Services.AddSingleton<CommunityHub.Auth.MagicLinkService>();
+// --- Feature customization & controlled rollout (REQUIREMENTS §23) ---------
+builder.Services.AddScoped<CommunityHub.Core.Settings.FeatureGateService>();
+builder.Services.AddScoped<CommunityHub.Core.Settings.FeatureSettingsService>();
+// Effective-ring resolver (controlled rollout §23) — the SAME resolver the GUI,
+// engines and schedulers/jobs all use to decide a resource's release ring.
+builder.Services.AddScoped<CommunityHub.Core.Settings.RingResolver>();
+// Admin surface to assign rings per resource (company / contact / speaker / volunteer).
+builder.Services.AddScoped<CommunityHub.Core.Settings.ResourceRingService>();
 builder.Services.AddScoped<CommunityHub.Core.Reminders.OrganizerActionItemService>();
 builder.Services.AddScoped<CommunityHub.Core.Reminders.FormChangeRequestService>();
 builder.Services.AddScoped<CommunityHub.Core.Organizer.ParticipantBulkOperationService>();
@@ -270,6 +336,7 @@ builder.Services.AddScoped<CommunityHub.Core.Organizer.SessionDeletionService>()
 builder.Services.AddScoped<CommunityHub.Core.Organizer.SessionBulkOperationService>();
 builder.Services.AddScoped<CommunityHub.Core.Organizer.SpeakerDeletionService>();
 builder.Services.AddScoped<CommunityHub.Core.Organizer.SponsorInfoDeletionService>();
+builder.Services.AddScoped<CommunityHub.Core.Organizer.TestDataCleanupService>();
 builder.Services.AddScoped<CommunityHub.Core.Organizer.VolunteerTaskBulkOperationService>();
 builder.Services.AddScoped<CommunityHub.Core.Organizer.OrganizerOverviewService>();
 builder.Services.AddScoped<CommunityHub.Core.Organizer.DataFreshnessService>();
@@ -288,6 +355,7 @@ builder.Services.AddScoped<CommunityHub.Core.Email.VolunteerHelpNotificationServ
 builder.Services.AddScoped<CommunityHub.Notify.HotelCalendarInviter>();
 builder.Services.AddScoped<CommunityHub.Core.Organizer.HotelManagementService>();
 builder.Services.AddScoped<CommunityHub.Core.Organizer.HotelBulkOperationService>();
+builder.Services.AddScoped<CommunityHub.Core.Organizer.HotelRoomBlockService>();
 
 // --- Volunteer Buckets: plan import, gap detection, draft->commit allocation ---
 builder.Services.AddScoped<CommunityHub.Core.Volunteers.VolunteerAllocationService>();
@@ -325,9 +393,8 @@ else
 builder.Services.AddScoped<CommunityHub.Core.Reminders.CalendarFeedTokenService>();
 builder.Services.AddScoped<CommunityHub.Core.Reminders.ParticipantCalendarBuilder>();
 builder.Services.AddScoped<CommunityHub.Core.Participants.ParticipantChecklistBuilder>();
-// Sponsor portal — single self-service home aggregate (REQUIREMENTS §20 Sponsor).
-// Read-only over existing seams (checklist builder, company-name chain, ERP links).
-builder.Services.AddScoped<CommunityHub.Core.Integrations.Sponsors.SponsorPortalService>();
+// (Sponsor Portal retired 2026-06-21 — the dead /Sponsor/Portal page + its service
+// were removed; the sponsor self-service home is /Sponsor, the company landing card.)
 
 // Speaker contact-email override -> Zoho Backstage propagation. The hub's own
 // mail/calendar already use the override; this keeps the external event system
@@ -494,6 +561,13 @@ builder.Services.AddScoped<CommunityHub.Core.Reminders.SpeakerSessionsService>()
 // sessions. Read-only. Scoped (per-request DbContext).
 builder.Services.AddScoped<CommunityHub.Core.Reminders.SpeakerEvaluationsService>();
 
+// AttendeePlanService: the read+write model behind the attendee self-service
+// "My plan" page and the "Save to my plan" toggle on the public sessions list.
+// Own-row scoped -- a participant only ever sees/changes their OWN saved
+// sessions; a personal bookmark list (never books a seat). Scoped (per-request
+// DbContext); uses the ambient TimeProvider for the saved-at stamp.
+builder.Services.AddScoped<CommunityHub.Core.Attendees.AttendeePlanService>();
+
 // --- Company Manager (sponsor-side company + contacts source of truth) ----
 // Used by /Sponsor/Index to render a read-only "Sponsor details" card
 // pulled from the webshop (company name, website, LinkedIn, X) with a
@@ -502,6 +576,43 @@ var cmOptions = new CommunityHub.Core.Integrations.CompanyManagerOptions();
 builder.Configuration.GetSection(CommunityHub.Core.Integrations.CompanyManagerOptions.SectionName).Bind(cmOptions);
 builder.Services.AddSingleton(cmOptions);
 builder.Services.AddHttpClient<CommunityHub.Core.Integrations.CompanyManagerClient>();
+
+// --- Read-only e-conomic ROLE source for the sponsor-email audience (§7c) --
+// The sponsor-email coordinator audience is resolved READ-ONLY from e-conomic
+// contact role data (Role 2 = event coordinator), because Company Manager
+// cannot be extended to hold per-user roles. Opt-in (EconomicRoles:Enabled,
+// default false) + fail-soft: when disabled/unreachable/empty the resolver
+// falls back to the manual IsEventCoordinator flags (seeded from the Company
+// Manager single default coordinator). GETs only — never an ERP write.
+var economicErpOptionsWeb = new CommunityHub.Core.Integrations.Erp.EconomicErpOptions();
+builder.Configuration.GetSection(CommunityHub.Core.Integrations.Erp.EconomicErpOptions.SectionName)
+    .Bind(economicErpOptionsWeb);
+builder.Services.AddSingleton(economicErpOptionsWeb);
+// Organizer e-conomic contact-CRUD GUI (REQUIREMENTS §6): live REST client +
+// the orchestrating service (live name/email/phone + hub-side role/notes). The
+// client self-gates on CanWrite (tokens/base URL present), so it is safe to
+// register unconditionally; the page shows "not configured" until wired.
+builder.Services.AddHttpClient<CommunityHub.Core.Integrations.Erp.IEconomicContactAdminClient,
+    CommunityHub.Core.Integrations.Erp.LiveEconomicContactAdminClient>();
+builder.Services.AddScoped<CommunityHub.Core.Integrations.Erp.EconomicContactAdminService>();
+var economicRolesOptionsWeb = new CommunityHub.Core.Integrations.Erp.EconomicRolesOptions();
+builder.Configuration.GetSection(CommunityHub.Core.Integrations.Erp.EconomicRolesOptions.SectionName)
+    .Bind(economicRolesOptionsWeb);
+builder.Services.AddSingleton(economicRolesOptionsWeb);
+if (economicRolesOptionsWeb.Enabled)
+{
+    builder.Services.AddHttpClient<CommunityHub.Core.Integrations.Erp.IEconomicRoleClient,
+        CommunityHub.Core.Integrations.Erp.EconomicRoleClient>();
+    builder.Services.AddScoped<CommunityHub.Core.Email.ISponsorErpCoordinatorSource,
+        CommunityHub.Core.Email.SponsorErpCoordinatorSource>();
+}
+else
+{
+    builder.Services.AddSingleton<CommunityHub.Core.Integrations.Erp.IEconomicRoleClient,
+        CommunityHub.Core.Integrations.Erp.NullEconomicRoleClient>();
+    builder.Services.AddSingleton<CommunityHub.Core.Email.ISponsorErpCoordinatorSource,
+        CommunityHub.Core.Email.NullSponsorErpCoordinatorSource>();
+}
 
 // --- WooCommerce (sponsor orders, displayed on /Sponsor/Index) ------------
 // Web-side WooCommerce client renders the "Sponsor orders" section on
@@ -522,11 +633,35 @@ builder.Configuration.GetSection(CommunityHub.Core.Config.EventConfigOptions.Sec
 builder.Services.AddSingleton(eventConfigOptions);
 builder.Services.AddSingleton<CommunityHub.Core.Config.EventEditionConfigLoader>();
 
+// Sponsor config file location — needed by the Phase 2 config editor so it can
+// read the shipped sponsor defaults to enumerate that section's scalar fields.
+var sponsorConfigOptions = new CommunityHub.Core.Config.SponsorConfigOptions();
+builder.Configuration.GetSection(CommunityHub.Core.Config.SponsorConfigOptions.SectionName)
+    .Bind(sponsorConfigOptions);
+builder.Services.AddSingleton(sponsorConfigOptions);
+
+// --- Admin-editable config overrides (HYBRID config model, Phase 1) --------
+// The shipped JSON files (event/sponsor/integrations) remain the default that
+// travels with each release; SQL ConfigOverride rows carry per-edition partial
+// overrides the loaders deep-merge on top at runtime. No row ⇒ shipped default
+// unchanged (additive). No UI yet (Phase 2); no ring-gate yet (Phase 4).
+var integrationsConfigOptions = new CommunityHub.Core.Config.IntegrationsConfigOptions();
+builder.Configuration.GetSection(CommunityHub.Core.Config.IntegrationsConfigOptions.SectionName)
+    .Bind(integrationsConfigOptions);
+builder.Services.AddSingleton(integrationsConfigOptions);
+builder.Services.AddSingleton<CommunityHub.Core.Config.IntegrationsConfigLoader>();
+builder.Services.AddScoped<CommunityHub.Core.Config.ConfigOverrideStore>();
+
 // --- Current-participant accessor (Stage 4) --------------------------------
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<
     CommunityHub.Auth.ICurrentParticipantAccessor,
     CommunityHub.Auth.HttpCurrentParticipantAccessor>();
+
+// Self-warm the authenticated hot path (login + hub EF queries) on every boot so
+// the first real sign-in after a restart is not slow (cold query-plan compilation
+// on small SKUs cost ~30s). Background + best-effort; never blocks readiness.
+builder.Services.AddHostedService<CommunityHub.Startup.StartupWarmupService>();
 
 var app = builder.Build();
 
@@ -577,12 +712,13 @@ if (!app.Environment.IsDevelopment())
     app.UseHsts();
 }
 
-// Request localization: negotiate the per-request culture from the cookie set
-// by the in-layout language switcher, then Accept-Language, then the en default
-// (see localizationOptions above). CurrentUICulture drives resource lookup
-// (resx) and the dynamic <html lang>; CurrentCulture drives date/number
-// formatting. The date *picker* stays Danish-formatted via flatpickr regardless
-// (dd/mm/yyyy, Monday-first) — the value posted to the server is ISO either way.
+// Request localization: negotiate the per-request culture from the culture
+// cookie, then Accept-Language, then the en default (see localizationOptions
+// above). With en the only supported culture, this always resolves to English.
+// CurrentUICulture drives resource lookup (resx) and the dynamic <html lang>;
+// CurrentCulture drives date/number formatting. The date *picker* stays
+// dd/mm/yyyy (Monday-first) via flatpickr regardless — the value posted to the
+// server is ISO either way.
 app.UseRequestLocalization(localizationOptions);
 
 app.UseHttpsRedirection();
@@ -633,11 +769,12 @@ app.Use(async (context, next) =>
 
 app.MapHealthChecks("/health");
 
-// Language switcher target. The in-layout switch posts here with the chosen
-// culture; we persist it in the standard ASP.NET Core culture cookie (read back
-// by CookieRequestCultureProvider on the next request) and redirect to where the
-// user was. POST + antiforgery-free (no auth/state change beyond the cookie) so
-// it works on anonymous pages (Login) too. `returnUrl` is treated as local-only.
+// Culture cookie endpoint. Persists a chosen culture in the standard ASP.NET
+// Core culture cookie (read back by CookieRequestCultureProvider on the next
+// request) and redirects to where the user was. The value is clamped to a
+// supported culture, so today it always resolves to en (English-only). POST +
+// antiforgery-free (no auth/state change beyond the cookie) so it works on
+// anonymous pages (Login) too. `returnUrl` is treated as local-only.
 app.MapPost("/set-language", (HttpContext http, string culture, string? returnUrl) =>
 {
     var safe = supportedCultures.Any(c =>
@@ -669,6 +806,30 @@ app.MapGet("/Organizer/SecretaryLink", (HttpContext http) =>
     var qs = http.Request.QueryString.HasValue ? http.Request.QueryString.Value : string.Empty;
     return Results.LocalRedirect($"/Organizer/SecureLink{qs}");
 });
+
+// SYNC-INDIVIDUAL: download ONE schedule entry as an .ics ("+ calendar" on the Key
+// dates panel). Authenticated + scoped to the viewer's edition and role.
+app.MapGet("/schedule/{id:int}.ics", async (
+        int id, HttpContext http,
+        CommunityHub.Core.Data.CommunityHubDbContext db,
+        CommunityHub.Auth.ICurrentParticipantAccessor pa,
+        CancellationToken ct) =>
+{
+    var me = pa.Current;
+    if (me is null) return Results.Redirect("/Login");
+    var s = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions
+        .FirstOrDefaultAsync(db.ScheduleEntries, x => x.Id == id && x.EventId == me.EventId, ct);
+    if (s is null || !CommunityHub.Core.Domain.ScheduleRoles.Applies(s.Roles, me.Role))
+        return Results.NotFound();
+
+    var host = http.Request.Host.Value ?? "communityhub";
+    var ics = CommunityHub.Core.Email.IcsCalendarBuilder.BuildFeed(
+        s.Title, me.Email, me.FullName,
+        new[] { CommunityHub.Core.Reminders.ParticipantCalendarBuilder.ToCalendarItem(s, host) });
+    var slug = new string(s.Title.Where(char.IsLetterOrDigit).ToArray());
+    return Results.File(System.Text.Encoding.UTF8.GetBytes(ics),
+        "text/calendar; charset=utf-8", $"{(string.IsNullOrEmpty(slug) ? "event" : slug)}.ics");
+}).RequireAuthorization();
 
 app.MapRazorPages();
 app.MapControllers();

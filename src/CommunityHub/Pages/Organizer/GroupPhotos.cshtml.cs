@@ -67,7 +67,7 @@ public class GroupPhotosModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) return Forbid();
+        if (!OrganizerAuth.IsRealOrganizer(me)) return Forbid();
 
         if (string.IsNullOrWhiteSpace(companyName) || string.IsNullOrWhiteSpace(contactEmail))
         {
@@ -99,7 +99,7 @@ public class GroupPhotosModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) return Forbid();
+        if (!OrganizerAuth.IsRealOrganizer(me)) return Forbid();
 
         var row = await _db.GroupPhotoRegistrations.FirstOrDefaultAsync(
             r => r.Id == id && r.EventId == me.EventId, ct);
@@ -119,7 +119,7 @@ public class GroupPhotosModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) return Forbid();
+        if (!OrganizerAuth.IsRealOrganizer(me)) return Forbid();
 
         var row = await _db.GroupPhotoRegistrations.FirstOrDefaultAsync(
             r => r.Id == id && r.EventId == me.EventId, ct);
@@ -136,7 +136,7 @@ public class GroupPhotosModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) return Forbid();
+        if (!OrganizerAuth.IsRealOrganizer(me)) return Forbid();
 
         var row = await _db.GroupPhotoRegistrations
             .Include(r => r.Event)
@@ -151,12 +151,14 @@ public class GroupPhotosModel : PageModel
         var endUtc = startUtc.AddMinutes(row.DurationMinutes);
         var slotLocal = ToLocal(startUtc);
 
+        // Token values are HTML-encoded by the renderer at the seam
+        // (EmailTemplateRenderer, REQUIREMENTS §10c-4) — pass raw text.
         var tokens = _templates.NewTokenSet();
-        tokens["contactName"] = Enc(string.IsNullOrWhiteSpace(row.ContactName) ? "there" : row.ContactName.Split(' ')[0]);
-        tokens["companyName"] = Enc(row.CompanyName);
-        tokens["eventDisplayName"] = Enc(row.Event.DisplayName);
-        tokens["slotTime"] = Enc(slotLocal.ToString("dddd d MMMM yyyy, HH:mm") + " (local)");
-        tokens["location"] = Enc(string.IsNullOrWhiteSpace(row.Location) ? row.Event.VenueName ?? "the venue" : row.Location);
+        tokens["contactName"] = string.IsNullOrWhiteSpace(row.ContactName) ? "there" : row.ContactName.Split(' ')[0];
+        tokens["companyName"] = row.CompanyName;
+        tokens["eventDisplayName"] = row.Event.DisplayName;
+        tokens["slotTime"] = slotLocal.ToString("dddd d MMMM yyyy, HH:mm") + " (local)";
+        tokens["location"] = string.IsNullOrWhiteSpace(row.Location) ? row.Event.VenueName ?? "the venue" : row.Location;
         var rendered = _templates.Render("group-photo-invite", tokens);
 
         // Stable UID per registration: a slot move + re-send UPDATES the
@@ -207,6 +209,4 @@ public class GroupPhotosModel : PageModel
 
     private static DateTime ToLocal(DateTimeOffset utc) =>
         TimeZoneInfo.ConvertTimeFromUtc(utc.UtcDateTime, DanishTz);
-
-    private static string Enc(string s) => System.Net.WebUtility.HtmlEncode(s);
 }

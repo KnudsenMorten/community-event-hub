@@ -4,9 +4,21 @@
     ViewData["Title"] = "Logistics";
 }
 
+@if (Model.AccessDenied)
+{
+    <div class="card">
+        <h2>On-site logistics</h2>
+        <p class="error">This page is for sponsors only.</p>
+        <p><a asp-page="/Index">Back to hub</a></p>
+    </div>
+    return;
+}
+
 <div class="card">
     <h2>On-site logistics</h2>
     <p>Practical links you need before and during the event.</p>
+
+    @await Html.PartialAsync("_KeyDates", Model.EventDates)
 
     @if (!string.IsNullOrEmpty(Model.ExhibitorGuideUrl))
     {

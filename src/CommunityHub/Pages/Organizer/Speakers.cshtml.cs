@@ -17,15 +17,18 @@ public class SpeakersModel : PageModel
     private readonly ICurrentParticipantAccessor _participant;
     private readonly TimeProvider _clock;
     private readonly SpeakerDeletionService _deletion;
+    private readonly CommunityHub.Core.Settings.FeatureGateService _gate;
 
     public SpeakersModel(
         CommunityHubDbContext db, ICurrentParticipantAccessor participant, TimeProvider clock,
-        SpeakerDeletionService deletion)
+        SpeakerDeletionService deletion,
+        CommunityHub.Core.Settings.FeatureGateService gate)
     {
         _db = db;
         _participant = participant;
         _clock = clock;
         _deletion = deletion;
+        _gate = gate;
     }
 
     public bool AccessDenied { get; private set; }
@@ -85,7 +88,7 @@ public class SpeakersModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+        if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
 
         if (SelectedIds.Length == 0)
         {
@@ -104,7 +107,7 @@ public class SpeakersModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+        if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
 
         if (string.IsNullOrWhiteSpace(EmailList))
         {
@@ -147,7 +150,7 @@ public class SpeakersModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+        if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
 
         var result = await _deletion.DeleteAsync(me.EventId, participantId, ct);
         switch (result.Status)
@@ -181,7 +184,7 @@ public class SpeakersModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+        if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
 
         var requested = SelectedIds.Where(id => id > 0).Distinct().Count();
         if (requested == 0)
@@ -292,7 +295,19 @@ public class SpeakersModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+        if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
+
+        // GATE (REQUIREMENTS §23): the Excel speaker import is the same speaker-import
+        // capability as the Sessionize integration, so it honours the
+        // 'sessionize-import' switch. Disabled ⇒ no-op with a clear "feature disabled"
+        // message, GUI state == actual behaviour.
+        if (!await _gate.IsFeatureEnabledAsync("sessionize-import", me.EventId, ct))
+        {
+            Error = "Speaker import is turned off for this event. "
+                + "Enable Sessionize import in Settings to upload speakers.";
+            await LoadAsync(me.EventId, ct);
+            return Page();
+        }
 
         if (UploadFile is null || UploadFile.Length == 0)
         {

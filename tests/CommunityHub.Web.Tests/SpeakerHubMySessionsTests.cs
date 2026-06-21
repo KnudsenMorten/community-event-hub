@@ -72,6 +72,7 @@ public sealed class SpeakerHubMySessionsTests
             seeder,
             new MasterClassLogisticsService(db, TimeProvider.System),
             new SpeakerSessionsService(db),
+            new PublicSessionsService(db),
             new CalendarFeedTokenService(db),
             NullLogger<IndexModel>.Instance);
 
@@ -188,5 +189,52 @@ public sealed class SpeakerHubMySessionsTests
 
         Assert.True(model.PublicProfileLive);
         Assert.False(string.IsNullOrEmpty(model.PublicPreviewUrl));
+    }
+
+    // BUG fix (speaker UX audit, P1): the per-session "view public session page"
+    // link must be gated on the SESSION's actual public visibility (the same gate
+    // PublicSessionsService.GetByIdAsync uses), NOT on the speaker's own
+    // profile-publish flag. A speaker whose profile is not yet published but whose
+    // session is in the active edition must still be able to reach its public page.
+    [Fact]
+    public async Task Session_link_shows_when_session_public_even_if_profile_unpublished()
+    {
+        using var db = NewDb();
+        // aliceSelected:false => profile NOT published, but Alice's session IS in
+        // the active edition (a non-service session) => publicly viewable.
+        var s = await SeedAsync(db, aliceSelected: false);
+        var http = new DefaultHttpContext { User = Session(s.Alice) };
+        var model = NewModel(db, http);
+
+        await model.OnGetAsync(default);
+
+        Assert.False(model.PublicProfileLive); // profile not published
+        var mine = Assert.Single(model.MySessions);
+        // Link is driven by the session's public visibility, so it SHOWS.
+        Assert.Contains(mine.SessionId, model.PubliclyViewableSessionIds);
+    }
+
+    [Fact]
+    public async Task Session_link_hidden_when_session_not_publicly_viewable()
+    {
+        using var db = NewDb();
+        var s = await SeedAsync(db, aliceSelected: true); // profile published...
+        // ...but the session is NOT publicly viewable: turn it into a service
+        // session (breaks/lunch are never publicly addressable — same gate as the
+        // public page, which 404s for these).
+        var aliceSession = await db.Sessions
+            .FirstAsync(x => x.SessionizeId == "s-alice");
+        aliceSession.IsServiceSession = true;
+        await db.SaveChangesAsync();
+
+        var http = new DefaultHttpContext { User = Session(s.Alice) };
+        var model = NewModel(db, http);
+
+        await model.OnGetAsync(default);
+
+        Assert.True(model.PublicProfileLive); // profile published, but...
+        // ...the session is not publicly viewable, so its id is NOT in the set
+        // (the view then hides the link / shows the "not public yet" hint).
+        Assert.DoesNotContain(aliceSession.Id, model.PubliclyViewableSessionIds);
     }
 }

@@ -337,6 +337,94 @@ public sealed class CalendarSyncScenarioTests
         Assert.Null(single);
     }
 
+    // ---- Organizer "preview my feed" (REQUIREMENTS §21) --------------------
+
+    [Fact]
+    public async Task Preview_lists_the_same_dated_items_the_feed_contains()
+    {
+        using var db = ScenarioFixture.NewDb();
+        var seed = await ScenarioSeed.SeedAsync(db);
+
+        db.Tasks.Add(new ParticipantTask
+        {
+            EventId = seed.EventId,
+            AssignedParticipantId = seed.OrganizerId,
+            Title = "PREVIEW-ORGANIZER-TASK",
+            DueDate = new DateOnly(2027, 1, 25),
+            State = TaskState.Open,
+            SourceKey = "preview-test:org",
+        });
+        await db.SaveChangesAsync();
+
+        var preview = await new ParticipantCalendarBuilder(db)
+            .BuildPreviewAsync(seed.OrganizerId);
+
+        var row = Assert.Single(preview, r => r.Summary == "PREVIEW-ORGANIZER-TASK");
+        Assert.Equal(new DateOnly(2027, 1, 25), row.Date);
+        Assert.True(row.AllDay);
+    }
+
+    [Fact]
+    public async Task Preview_is_scoped_to_the_participants_own_items_only()
+    {
+        using var db = ScenarioFixture.NewDb();
+        var seed = await ScenarioSeed.SeedAsync(db);
+
+        db.Tasks.Add(new ParticipantTask
+        {
+            EventId = seed.EventId,
+            AssignedParticipantId = seed.SpeakerOneId,
+            Title = "PREVIEW-SPEAKER-ONE-ONLY",
+            DueDate = new DateOnly(2027, 1, 6),
+            State = TaskState.Open,
+            SourceKey = "preview-scoping:s1",
+        });
+        await db.SaveChangesAsync();
+
+        var builder = new ParticipantCalendarBuilder(db);
+        var onePreview = await builder.BuildPreviewAsync(seed.SpeakerOneId);
+        var twoPreview = await builder.BuildPreviewAsync(seed.SpeakerTwoId);
+
+        Assert.Contains(onePreview, r => r.Summary == "PREVIEW-SPEAKER-ONE-ONLY");
+        Assert.DoesNotContain(twoPreview, r => r.Summary == "PREVIEW-SPEAKER-ONE-ONLY");
+    }
+
+    [Fact]
+    public async Task Preview_is_date_ordered_and_empty_for_an_unknown_participant()
+    {
+        using var db = ScenarioFixture.NewDb();
+        var seed = await ScenarioSeed.SeedAsync(db);
+
+        foreach (var (title, due, key) in new[]
+                 {
+                     ("PREVIEW-LATER", new DateOnly(2027, 2, 10), "preview-order:b"),
+                     ("PREVIEW-EARLIER", new DateOnly(2027, 1, 2), "preview-order:a"),
+                 })
+        {
+            db.Tasks.Add(new ParticipantTask
+            {
+                EventId = seed.EventId,
+                AssignedParticipantId = seed.OrganizerId,
+                Title = title,
+                DueDate = due,
+                State = TaskState.Open,
+                SourceKey = key,
+            });
+        }
+        await db.SaveChangesAsync();
+
+        var builder = new ParticipantCalendarBuilder(db);
+        var preview = await builder.BuildPreviewAsync(seed.OrganizerId);
+
+        var idxEarlier = preview.ToList().FindIndex(r => r.Summary == "PREVIEW-EARLIER");
+        var idxLater = preview.ToList().FindIndex(r => r.Summary == "PREVIEW-LATER");
+        Assert.True(idxEarlier >= 0 && idxLater >= 0);
+        Assert.True(idxEarlier < idxLater, "preview rows are date-ordered (earliest first)");
+
+        // Unknown participant => empty (never throws).
+        Assert.Empty(await builder.BuildPreviewAsync(999999));
+    }
+
     // ---- helpers -----------------------------------------------------------
 
     private static int CountOccurrences(string haystack, string needle)

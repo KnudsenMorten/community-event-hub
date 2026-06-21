@@ -78,7 +78,7 @@ public class AppGameModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) return Forbid();
+        if (!OrganizerAuth.IsRealOrganizer(me)) return Forbid();
 
         if (string.IsNullOrWhiteSpace(sponsorCompanyId) || string.IsNullOrWhiteSpace(companyName))
         {
@@ -110,7 +110,7 @@ public class AppGameModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) return Forbid();
+        if (!OrganizerAuth.IsRealOrganizer(me)) return Forbid();
 
         var row = await _db.AppGameParticipations.FirstOrDefaultAsync(
             p => p.Id == id && p.EventId == me.EventId, ct);
@@ -127,7 +127,7 @@ public class AppGameModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) return Forbid();
+        if (!OrganizerAuth.IsRealOrganizer(me)) return Forbid();
 
         var row = await _db.AppGameParticipations.FirstOrDefaultAsync(
             p => p.Id == id && p.EventId == me.EventId, ct);
@@ -144,7 +144,7 @@ public class AppGameModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) return Forbid();
+        if (!OrganizerAuth.IsRealOrganizer(me)) return Forbid();
 
         var row = await _db.AppGameParticipations
             .Include(p => p.Event)
@@ -168,12 +168,14 @@ public class AppGameModel : PageModel
         {
             try
             {
+                // Token values are HTML-encoded by the renderer at the seam
+                // (EmailTemplateRenderer, REQUIREMENTS §10c-4) — pass raw text.
                 var tokens = _templates.NewTokenSet();
-                tokens["firstName"] = Enc(string.IsNullOrWhiteSpace(c.FullName) ? "there" : c.FullName.Split(' ')[0]);
-                tokens["companyName"] = Enc(row.CompanyName);
-                tokens["eventDisplayName"] = Enc(row.Event.DisplayName);
-                tokens["giftDescription"] = Enc(string.IsNullOrWhiteSpace(row.GiftDescription)
-                    ? "the gift your team committed" : row.GiftDescription);
+                tokens["firstName"] = string.IsNullOrWhiteSpace(c.FullName) ? "there" : c.FullName.Split(' ')[0];
+                tokens["companyName"] = row.CompanyName;
+                tokens["eventDisplayName"] = row.Event.DisplayName;
+                tokens["giftDescription"] = string.IsNullOrWhiteSpace(row.GiftDescription)
+                    ? "the gift your team committed" : row.GiftDescription;
                 var rendered = _templates.Render("app-game-gift-reminder", tokens);
                 await _emailSender.SendAsync(c.Email, rendered.Subject, rendered.HtmlBody, ct);
                 sent++;
@@ -185,6 +187,4 @@ public class AppGameModel : PageModel
         await _db.SaveChangesAsync(ct);
         return RedirectToPage(new { Msg = $"Gift reminder for '{row.CompanyName}': {sent} sent{(failed > 0 ? $", {failed} failed" : "")}." });
     }
-
-    private static string Enc(string s) => System.Net.WebUtility.HtmlEncode(s);
 }

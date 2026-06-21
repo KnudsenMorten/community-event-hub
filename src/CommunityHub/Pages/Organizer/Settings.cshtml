@@ -1,0 +1,300 @@
+@page
+@using CommunityHub.Core.Settings
+@model CommunityHub.Pages.Organizer.SettingsModel
+@{
+    ViewData["Title"] = Localizer["Settings.Title"].Value;
+
+    // Map the FeatureGroup enum to its localized heading key.
+    string GroupHeading(FeatureGroup g) => g switch
+    {
+        FeatureGroup.Email => "Settings.Group.Email",
+        FeatureGroup.SpeakersSessions => "Settings.Group.SpeakersSessions",
+        FeatureGroup.Sponsors => "Settings.Group.Sponsors",
+        FeatureGroup.SocialMedia => "Settings.Group.SocialMedia",
+        FeatureGroup.Surveys => "Settings.Group.Surveys",
+        FeatureGroup.Reminders => "Settings.Group.Reminders",
+        FeatureGroup.Attendees => "Settings.Group.Attendees",
+        FeatureGroup.Incubation => "Settings.Group.Incubation",
+        _ => "Settings.Title",
+    };
+}
+
+@if (Model.AccessDenied)
+{
+    <div class="card">
+        <h2>@Localizer["Settings.Title"]</h2>
+        <p class="error" role="alert">@Localizer["Common.OrganizersOnly"]</p>
+        <p><a asp-page="/Index">@Localizer["Common.BackToHub"]</a></p>
+    </div>
+    return;
+}
+
+<style>
+    .set-btn { background:#008BD2; color:#fff; border:0; border-radius:6px;
+               padding:7px 13px; font-size:14px; cursor:pointer; }
+    .set-btn:hover { background:#0079b8; }
+    .set-btn.off { background:#6b7280; }
+    .set-btn.off:hover { background:#4b5563; }
+    .set-feat { display:flex; flex-wrap:wrap; align-items:flex-start;
+                gap:10px; padding:12px 0; border-top:1px solid #e5e7eb; }
+    .set-feat:first-child { border-top:0; }
+    .set-feat .set-body { flex:1 1 220px; min-width:0; }
+    .set-feat h3 { margin:0 0 2px; font-size:15px; }
+    .set-feat p { margin:0; color:#4b5563; font-size:13px; }
+    .set-feat .set-action { flex:0 0 auto; }
+    .set-tag { display:inline-block; font-size:11px; line-height:1; padding:3px 7px;
+               border-radius:999px; margin-left:6px; vertical-align:middle; }
+    .set-tag.on { background:#dcfce7; color:#166534; }
+    .set-tag.off { background:#f3f4f6; color:#6b7280; }
+    .set-tag.opt { background:#e0f2fe; color:#075985; }
+    /* YELLOW ring badge — shown only when a feature is NOT yet Broad/GA, so an
+       organizer can SEE it is still in rollout and needs testing + release.
+       Hidden entirely once released to Broad (the quiet/normal state). */
+    .set-tag.ring { background:#fef9c3; color:#854d0e; border:1px solid #fde047; font-weight:600; }
+    .set-build { font-size:12px; color:#6b7280; margin:6px 0 0; }
+    .set-build code { background:#f3f4f6; padding:1px 5px; border-radius:4px; }
+    /* A disabled feature is DIMMED (never hidden) for discoverability. */
+    .set-feat.is-disabled .set-body { opacity:0.55; }
+    .set-deps { font-size:12px; color:#6b7280; margin-top:3px; }
+    .set-warn { background:#fffbeb; border:1px solid #fcd34d; border-radius:6px;
+                padding:8px 10px; font-size:13px; color:#92400e; margin:6px 0; }
+    .set-ro { font-size:13px; color:#374151; margin:4px 0; }
+    .set-ro code { background:#f3f4f6; padding:1px 5px; border-radius:4px; }
+    /* Ring (progressive-rollout) selector — sits beside the kill switch. */
+    .set-ring { display:flex; align-items:center; gap:6px; margin-top:8px; flex-wrap:wrap; }
+    .set-ring label { font-size:12px; color:#4b5563; }
+    .set-ring select { font-size:13px; padding:4px 6px; border:1px solid #d1d5db; border-radius:6px; }
+    .set-ring .set-btn { padding:5px 11px; font-size:13px; }
+</style>
+
+@if (Model.Saved)
+{
+    <div class="card"><p role="status" style="color:#0a6;margin:0;">@Localizer["Settings.Saved"]</p></div>
+}
+
+<div class="card">
+    <h1 style="margin-top:0;">@Localizer["Settings.Title"]</h1>
+    <p>@Localizer["Settings.Intro"]</p>
+    <p><a asp-page="/Organizer/ResourceRings">@Localizer["Settings.AssignRingsLink"] &rarr;</a></p>
+    <p><a asp-page="/Organizer/Settings/Config">@Localizer["ConfigEditor.Title"] &rarr;</a></p>
+    <p><a asp-page="/Organizer/Setup">&larr; @Localizer["Common.BackToOrganizerArea"]</a></p>
+    @* Build stamp per environment — answers "which build + env" without a
+       per-feature version (REQUIREMENTS §23a). Rings show rollout; this shows code. *@
+    <p class="set-build">
+        Build <code>@Model.BuildVersion</code> &middot; <code>@Model.EnvName</code>
+        <span> — the ring shows how far a feature is rolled out HERE; the build shows which code is deployed.</span>
+    </p>
+</div>
+
+@* --- Email controls: the first-class kill switch + (read-only) safety context --- *@
+<div class="card">
+    <h2>@Localizer["Settings.KillSwitchHeading"]</h2>
+    <p>@Localizer["Settings.KillSwitchHelp"]</p>
+
+    @if (Model.EmailConfigKillSwitch)
+    {
+        <p class="set-warn" role="alert">@Localizer["Settings.KillSwitchConfig"]</p>
+    }
+
+    @{
+        var emailState = Model.Groups
+            .SelectMany(g => g)
+            .FirstOrDefault(s => s.Key == FeatureCatalog.OutboundEmailKey);
+    }
+    @if (emailState is not null)
+    {
+        <div class="set-feat @(emailState.Enabled ? "" : "is-disabled")">
+            <div class="set-body">
+                <h3>
+                    @Localizer[emailState.Descriptor.DisplayNameKey]
+                    @if (emailState.Enabled)
+                    {
+                        <span class="set-tag on">@Localizer["Settings.Enabled"]</span>
+                    }
+                    else
+                    {
+                        <span class="set-tag off">@Localizer["Settings.Disabled"]</span>
+                    }
+                    @if (emailState.ReleasedToRing != CommunityHub.Core.Settings.Ring.Broad)
+                    {
+                        <span class="set-tag ring" title="@Localizer["Settings.RingBadgeTitle"]">@Localizer["Settings.RingBadge", CommunityHub.Core.Settings.Rings.Label(emailState.ReleasedToRing)]</span>
+                    }
+                </h3>
+                <p>@Localizer[emailState.Descriptor.DescriptionKey]</p>
+            </div>
+            <div class="set-action">
+                <form method="post" asp-page-handler="Toggle">
+                    <input type="hidden" name="key" value="@emailState.Key" />
+                    <input type="hidden" name="enable" value="@((!emailState.Enabled).ToString().ToLowerInvariant())" />
+                    <button type="submit" class="set-btn @(emailState.Enabled ? "off" : "")"
+                            aria-label="@Localizer["Settings.ToggleAria", Localizer[emailState.Descriptor.DisplayNameKey].Value]">
+                        @(emailState.Enabled ? Localizer["Settings.Disable"] : Localizer["Settings.Enable"])
+                    </button>
+                </form>
+                <form method="post" asp-page-handler="ReleaseRing" class="set-ring">
+                    <input type="hidden" name="key" value="@emailState.Key" />
+                    <label for="ring-@emailState.Key">@Localizer["Settings.ReleasedToRing"]</label>
+                    <select id="ring-@emailState.Key" name="ring"
+                            aria-label="@Localizer["Settings.ReleasedToRingAria", Localizer[emailState.Descriptor.DisplayNameKey].Value]">
+                        @foreach (var r in CommunityHub.Core.Settings.Rings.All)
+                        {
+                            <option value="@r" selected="@(r == emailState.ReleasedToRing)">@CommunityHub.Core.Settings.Rings.Label(r)</option>
+                        }
+                    </select>
+                    <button type="submit" class="set-btn">@Localizer["Settings.SetRing"]</button>
+                </form>
+            </div>
+        </div>
+    }
+
+    <p class="set-ro">
+        <strong>Email ring ceiling:</strong>
+        @if (string.IsNullOrEmpty(Model.MaxReleaseRingDisplay))
+        {
+            <span>none — the feature's release ring controls the audience</span>
+        }
+        else
+        {
+            <code>@Model.MaxReleaseRingDisplay</code> <span>(caps outbound email at this ring — DEV safety so ring2+ never receive)</span>
+        }
+    </p>
+    <p class="set-ro">
+        <strong>@Localizer["Settings.RedirectLabel"]:</strong>
+        @if (string.IsNullOrEmpty(Model.RedirectDisplay))
+        {
+            <span>@Localizer["Settings.RedirectNone"]</span>
+        }
+        else
+        {
+            <code>@Model.RedirectDisplay</code>
+        }
+    </p>
+</div>
+
+@* --- Dependency warnings (enabled-but-prerequisite-off) --- *@
+@if (Model.UnmetDependencies.Count > 0)
+{
+    <div class="card">
+        @foreach (var (feat, missing) in Model.UnmetDependencies)
+        {
+            <p class="set-warn" role="alert">
+                @Localizer["Settings.DependencyWarning",
+                    Localizer[feat.DisplayNameKey].Value, Localizer[missing.DisplayNameKey].Value]
+            </p>
+        }
+    </div>
+}
+
+@* --- The catalog, grouped into chapters; email group rendered above is skipped here --- *@
+@foreach (var group in Model.Groups)
+{
+    if (group.Key == FeatureGroup.Email) { continue; }
+    var groupRing = Model.GroupRingFor(group.Key);
+
+    <div class="card">
+        <h2 style="display:flex;align-items:center;flex-wrap:wrap;gap:8px;">
+            @Localizer[GroupHeading(group.Key)]
+            @if (groupRing.Ring != Ring.Broad)
+            {
+                <span class="set-tag ring" title="@Localizer["Settings.GroupRingBadgeTitle"]">@Localizer["Settings.GroupRingBadge", Rings.Label(groupRing.Ring)]</span>
+            }
+        </h2>
+        @* GROUP lifecycle ring — the PRIMARY control; features without an override inherit it. *@
+        <form method="post" asp-page-handler="GroupRing" class="set-ring" style="margin:0 0 10px;">
+            <input type="hidden" name="group" value="@group.Key" />
+            <label for="gring-@group.Key">@Localizer["Settings.GroupRingLabel"]</label>
+            <select id="gring-@group.Key" name="ring" aria-label="@Localizer["Settings.GroupRingAria", Localizer[GroupHeading(group.Key)].Value]">
+                @foreach (var r in Rings.All)
+                {
+                    <option value="@r" selected="@(r == groupRing.Ring)">@Rings.Label(r)</option>
+                }
+            </select>
+            <button type="submit" class="set-btn">@Localizer["Settings.SetGroupRing"]</button>
+        </form>
+        @foreach (var s in group)
+        {
+            <div class="set-feat @(s.Enabled ? "" : "is-disabled")">
+                <div class="set-body">
+                    <h3>
+                        @Localizer[s.Descriptor.DisplayNameKey]
+                        <span class="set-tag opt">@Localizer["Settings.AdvancedTag"]</span>
+                        @if (s.Enabled)
+                        {
+                            <span class="set-tag on">@Localizer["Settings.Enabled"]</span>
+                        }
+                        else
+                        {
+                            <span class="set-tag off">@Localizer["Settings.Disabled"]</span>
+                        }
+                        @if (s.ReleasedToRing != Ring.Broad)
+                        {
+                            <span class="set-tag ring" title="@Localizer["Settings.RingBadgeTitle"]">@Localizer["Settings.RingBadge", Rings.Label(s.ReleasedToRing)]</span>
+                        }
+                    </h3>
+                    <p>@Localizer[s.Descriptor.DescriptionKey]</p>
+                    <p class="set-deps">
+                        @if (s.IsRingOverridden)
+                        {
+                            <span>@Localizer["Settings.RingOverridden", Rings.Label(s.ReleasedToRing)]</span>
+                        }
+                        else
+                        {
+                            <span>@Localizer["Settings.RingInherited", Rings.Label(s.ReleasedToRing)]</span>
+                        }
+                    </p>
+                    @if (s.Descriptor.DependsOn.Count > 0)
+                    {
+                        var depNames = string.Join(", ",
+                            s.Descriptor.DependsOn
+                                .Select(k => FeatureCatalog.Find(k))
+                                .Where(d => d is not null)
+                                .Select(d => Localizer[d!.DisplayNameKey].Value));
+                        <p class="set-deps">@Localizer["Settings.DependsOn", depNames]</p>
+                    }
+                </div>
+                <div class="set-action">
+                    <form method="post" asp-page-handler="Toggle">
+                        <input type="hidden" name="key" value="@s.Key" />
+                        <input type="hidden" name="enable" value="@((!s.Enabled).ToString().ToLowerInvariant())" />
+                        <button type="submit" class="set-btn @(s.Enabled ? "off" : "")"
+                                aria-label="@Localizer["Settings.ToggleAria", Localizer[s.Descriptor.DisplayNameKey].Value]">
+                            @(s.Enabled ? Localizer["Settings.Disable"] : Localizer["Settings.Enable"])
+                        </button>
+                    </form>
+                    @* Per-feature ring OVERRIDE (the "special ring" exception). *@
+                    <form method="post" asp-page-handler="ReleaseRing" class="set-ring">
+                        <input type="hidden" name="key" value="@s.Key" />
+                        <label for="ring-@s.Key">@Localizer["Settings.OverrideRing"]</label>
+                        <select id="ring-@s.Key" name="ring"
+                                aria-label="@Localizer["Settings.ReleasedToRingAria", Localizer[s.Descriptor.DisplayNameKey].Value]">
+                            @foreach (var r in Rings.All)
+                            {
+                                <option value="@r" selected="@(r == s.ReleasedToRing)">@Rings.Label(r)</option>
+                            }
+                        </select>
+                        <button type="submit" class="set-btn">@Localizer["Settings.SetRing"]</button>
+                    </form>
+                    @if (s.IsRingOverridden)
+                    {
+                        <form method="post" asp-page-handler="InheritGroupRing" class="set-ring">
+                            <input type="hidden" name="key" value="@s.Key" />
+                            <button type="submit" class="set-btn off">@Localizer["Settings.AdoptGroupRing", Rings.Label(s.GroupRing)]</button>
+                        </form>
+                    }
+                    @* GRADUATE / re-home into another group (adopts that group's ring). *@
+                    <form method="post" asp-page-handler="FeatureGroup" class="set-ring">
+                        <input type="hidden" name="key" value="@s.Key" />
+                        <label for="grp-@s.Key">@Localizer["Settings.MoveToGroup"]</label>
+                        <select id="grp-@s.Key" name="group" aria-label="@Localizer["Settings.MoveToGroupAria", Localizer[s.Descriptor.DisplayNameKey].Value]">
+                            @foreach (var g in Enum.GetValues<FeatureGroup>())
+                            {
+                                <option value="@g" selected="@(g == s.EffectiveGroup)">@Localizer[GroupHeading(g)]</option>
+                            }
+                        </select>
+                        <button type="submit" class="set-btn">@Localizer["Settings.Move"]</button>
+                    </form>
+                </div>
+            </div>
+        }
+    </div>
+}

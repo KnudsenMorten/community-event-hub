@@ -1,0 +1,91 @@
+@page
+@using CommunityHub.Core.Auth
+@model CommunityHub.Pages.Organizer.WelcomeLinksModel
+@{
+    ViewData["Title"] = "Welcome sign-in links";
+}
+
+@if (Model.AccessDenied)
+{
+    <div class="card">
+        <h2>@ViewData["Title"]</h2>
+        <p class="error" role="alert">@Localizer["Common.OrganizersOnly"]</p>
+        <p><a asp-page="/Index">@Localizer["Common.BackToHub"]</a></p>
+    </div>
+    return;
+}
+
+<style>
+    .wl-tbl { width:100%; border-collapse:collapse; font-size:13px; }
+    .wl-tbl th, .wl-tbl td { padding:6px 8px; border-bottom:1px solid #eef0f4; text-align:left; vertical-align:top; }
+    .wl-badge { display:inline-block; font-size:12px; font-weight:600; border-radius:999px; padding:2px 9px; }
+    .wl-active  { background:#e7f6ec; color:#1c6b35; }
+    .wl-used    { background:#eef0f4; color:#5b636e; }
+    .wl-revoked { background:#fdecec; color:#b3261e; }
+    .wl-expired { background:#fef6e7; color:#8a5a00; }
+    .wl-revoke  { background:#fff; border:1px solid #e3a3a3; color:#b3261e; border-radius:6px; padding:4px 10px; font-size:12px; cursor:pointer; }
+</style>
+
+@if (!string.IsNullOrEmpty(Model.Message))
+{
+    <div class="card"><p role="status" style="color:#0a6;margin:0;">@Model.Message</p></div>
+}
+
+<div class="card">
+    <h1 style="margin-top:0;">@ViewData["Title"]</h1>
+    <p>Every <strong>welcome auto-login</strong> link the hub has issued — the one-tap sign-in CTA in welcome
+       emails. Each link is single-use, short-lived and scoped to one person; if one leaks or was sent in
+       error, <strong>revoke</strong> it here and the next tap is refused. Used/expired/revoked links can't
+       sign anyone in. <strong>@Model.ActiveCount</strong> currently active.</p>
+    <p><a asp-page="/Organizer/Index">&larr; @Localizer["Common.BackToOrganizerArea"]</a></p>
+
+    @if (Model.Rows.Count == 0)
+    {
+        <p style="color:#6b7280;">No welcome links have been issued yet.</p>
+    }
+    else
+    {
+        <table class="wl-tbl">
+            <thead>
+                <tr><th>Recipient</th><th>Role</th><th>Issued</th><th>Expires</th><th>Status</th><th></th></tr>
+            </thead>
+            <tbody>
+            @foreach (var r in Model.Rows)
+            {
+                <tr>
+                    <td>@r.FullName<br><span style="color:#6b7280;">@r.RecipientEmail</span></td>
+                    <td>@r.Role</td>
+                    <td style="white-space:nowrap;">@r.CreatedAt.ToString("dd MMM yyyy, HH:mm")</td>
+                    <td style="white-space:nowrap;">@r.ExpiresAt.ToString("dd MMM yyyy, HH:mm")</td>
+                    <td>
+                        @switch (r.State)
+                        {
+                            case WelcomeGrantAdminService.GrantState.Active:
+                                <span class="wl-badge wl-active">Active</span>
+                                break;
+                            case WelcomeGrantAdminService.GrantState.Consumed:
+                                <span class="wl-badge wl-used" title="@r.ConsumedAt?.ToString("dd MMM yyyy, HH:mm")">Used</span>
+                                break;
+                            case WelcomeGrantAdminService.GrantState.Revoked:
+                                <span class="wl-badge wl-revoked" title="@r.RevokedAt?.ToString("dd MMM yyyy, HH:mm")">Revoked</span>
+                                break;
+                            default:
+                                <span class="wl-badge wl-expired">Expired</span>
+                                break;
+                        }
+                    </td>
+                    <td>
+                        @if (r.CanRevoke)
+                        {
+                            <form method="post" asp-page-handler="Revoke" onsubmit="return confirm('Revoke this sign-in link? The recipient will no longer be able to use it.');">
+                                <input type="hidden" name="id" value="@r.Id" />
+                                <button type="submit" class="wl-revoke">Revoke</button>
+                            </form>
+                        }
+                    </td>
+                </tr>
+            }
+            </tbody>
+        </table>
+    }
+</div>

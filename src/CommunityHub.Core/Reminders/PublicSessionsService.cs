@@ -302,6 +302,42 @@ public sealed class PublicSessionsService
     }
 
     /// <summary>
+    /// Given a set of candidate session ids, return the subset that are PUBLICLY
+    /// VIEWABLE — i.e. the exact same gate <see cref="GetByIdAsync"/> applies, so a
+    /// caller can decide whether a public <c>/Sessions/{id}</c> link will actually
+    /// resolve (rather than guessing from unrelated state such as the speaker's own
+    /// profile-publish flag). A session is publicly viewable iff there is an active
+    /// event AND the session is in that active edition AND it is not a service
+    /// session. Returns an empty set when there is no active event or no candidates.
+    ///
+    /// Read-only. This is intentionally a SET (not a per-id round-trip) so a list
+    /// page can resolve every row's link in one query.
+    /// </summary>
+    public async Task<HashSet<int>> GetPubliclyViewableSessionIdsAsync(
+        IEnumerable<int> candidateIds, CancellationToken ct = default)
+    {
+        var ids = candidateIds?.Distinct().ToList() ?? new List<int>();
+        if (ids.Count == 0) return new HashSet<int>();
+
+        var activeId = await _db.Events
+            .Where(e => e.IsActive)
+            .OrderByDescending(e => e.Id)
+            .Select(e => (int?)e.Id)
+            .FirstOrDefaultAsync(ct);
+        if (activeId is null) return new HashSet<int>();
+
+        // Same gate as GetByIdAsync: in the active edition, not a service session.
+        var viewable = await _db.Sessions
+            .Where(s => s.EventId == activeId.Value
+                        && !s.IsServiceSession
+                        && ids.Contains(s.Id))
+            .Select(s => s.Id)
+            .ToListAsync(ct);
+
+        return new HashSet<int>(viewable);
+    }
+
+    /// <summary>
     /// Build a single-event RFC 5545 VCALENDAR (one VEVENT, <c>METHOD:PUBLISH</c>) for
     /// one PUBLIC session, so an anonymous visitor can drop the talk straight into a
     /// personal calendar from the session-detail page. Reuses the same

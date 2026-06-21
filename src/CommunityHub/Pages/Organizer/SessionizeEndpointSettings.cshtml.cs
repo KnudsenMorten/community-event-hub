@@ -75,7 +75,7 @@ public class SessionizeEndpointSettingsModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+        if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
 
         var newId = (EndpointId ?? string.Empty).Trim();
         // The endpoint id is the <your-event-id> URL segment: a short token, no
@@ -108,7 +108,7 @@ public class SessionizeEndpointSettingsModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+        if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
 
         if (ChosenMode is not (SessionizeChangeMode.Replace or SessionizeChangeMode.Merge))
         {

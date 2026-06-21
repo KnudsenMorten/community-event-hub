@@ -1,0 +1,137 @@
+@page
+@using CommunityHub.Core.Settings
+@model CommunityHub.Pages.Organizer.ResourceRingsModel
+@{
+    ViewData["Title"] = Localizer["Rings.Title"].Value;
+}
+
+@if (Model.AccessDenied)
+{
+    <div class="card">
+        <h2>@Localizer["Rings.Title"]</h2>
+        <p class="error" role="alert">@Localizer["Common.OrganizersOnly"]</p>
+        <p><a asp-page="/Index">@Localizer["Common.BackToHub"]</a></p>
+    </div>
+    return;
+}
+
+<style>
+    .ring-btn { background:#008BD2; color:#fff; border:0; border-radius:6px;
+                padding:5px 11px; font-size:13px; cursor:pointer; }
+    .ring-btn:hover { background:#0079b8; }
+    .ring-row { display:flex; flex-wrap:wrap; align-items:center; gap:8px;
+                padding:10px 0; border-top:1px solid #e5e7eb; }
+    .ring-row:first-child { border-top:0; }
+    .ring-row .ring-name { flex:1 1 200px; min-width:0; font-size:14px; }
+    .ring-row select { font-size:13px; padding:4px 6px; border:1px solid #d1d5db; border-radius:6px; }
+    .ring-eff { font-size:12px; color:#6b7280; }
+    .ring-form { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+</style>
+
+@if (Model.Saved)
+{
+    <div class="card"><p role="status" style="color:#0a6;margin:0;">@Localizer["Rings.Saved"]</p></div>
+}
+
+<div class="card">
+    <h1 style="margin-top:0;">@Localizer["Rings.Title"]</h1>
+    <p>@Localizer["Rings.Intro"]</p>
+    <p><a asp-page="/Organizer/Settings">&larr; @Localizer["Rings.BackToSettings"]</a></p>
+</div>
+
+@functions {
+    // Build a ring <select> options list with the resource's own ring selected.
+    Microsoft.AspNetCore.Html.IHtmlContent RingOptions(Ring selected)
+    {
+        var sb = new System.Text.StringBuilder();
+        foreach (var r in Rings.All)
+        {
+            var sel = r == selected ? " selected" : string.Empty;
+            sb.Append($"<option value=\"{r}\"{sel}>{System.Net.WebUtility.HtmlEncode(Rings.Label(r))}</option>");
+        }
+        return new Microsoft.AspNetCore.Html.HtmlString(sb.ToString());
+    }
+}
+
+@* --- Sponsor companies (default ring for their contacts) --- *@
+<div class="card">
+    <h2>@Localizer["Rings.SponsorCompanies"]</h2>
+    @if (Model.SponsorCompanies.Count == 0)
+    {
+        <p class="ring-eff">@Localizer["Rings.NoneInGroup"]</p>
+    }
+    @foreach (var c in Model.SponsorCompanies)
+    {
+        <div class="ring-row">
+            <span class="ring-name">@c.DisplayName</span>
+            <form method="post" asp-page-handler="CompanyRing" class="ring-form">
+                <input type="hidden" name="companyId" value="@c.CompanyId" />
+                <select name="ring" aria-label="@Localizer["Rings.SelectAria", c.DisplayName]">@RingOptions(c.Ring)</select>
+                <button type="submit" class="ring-btn">@Localizer["Rings.Set"]</button>
+            </form>
+        </div>
+    }
+</div>
+
+@* --- Sponsor contacts (own ring supersedes company default) --- *@
+<div class="card">
+    <h2>@Localizer["Rings.SponsorContacts"]</h2>
+    @if (Model.SponsorContacts.Count == 0)
+    {
+        <p class="ring-eff">@Localizer["Rings.NoneInGroup"]</p>
+    }
+    @foreach (var p in Model.SponsorContacts)
+    {
+        <div class="ring-row">
+            <span class="ring-name">
+                @p.DisplayName
+                <span class="ring-eff">(@Localizer["Rings.Effective"]: @Rings.Label(p.EffectiveRing))</span>
+            </span>
+            <form method="post" asp-page-handler="ParticipantRing" class="ring-form">
+                <input type="hidden" name="participantId" value="@p.Id" />
+                <select name="ring" aria-label="@Localizer["Rings.SelectAria", p.DisplayName]">@RingOptions(p.Ring)</select>
+                <button type="submit" class="ring-btn">@Localizer["Rings.Set"]</button>
+            </form>
+        </div>
+    }
+</div>
+
+@* --- Speakers --- *@
+<div class="card">
+    <h2>@Localizer["Rings.Speakers"]</h2>
+    @if (Model.Speakers.Count == 0)
+    {
+        <p class="ring-eff">@Localizer["Rings.NoneInGroup"]</p>
+    }
+    @foreach (var p in Model.Speakers)
+    {
+        <div class="ring-row">
+            <span class="ring-name">@p.DisplayName</span>
+            <form method="post" asp-page-handler="ParticipantRing" class="ring-form">
+                <input type="hidden" name="participantId" value="@p.Id" />
+                <select name="ring" aria-label="@Localizer["Rings.SelectAria", p.DisplayName]">@RingOptions(p.Ring)</select>
+                <button type="submit" class="ring-btn">@Localizer["Rings.Set"]</button>
+            </form>
+        </div>
+    }
+</div>
+
+@* --- Volunteers --- *@
+<div class="card">
+    <h2>@Localizer["Rings.Volunteers"]</h2>
+    @if (Model.Volunteers.Count == 0)
+    {
+        <p class="ring-eff">@Localizer["Rings.NoneInGroup"]</p>
+    }
+    @foreach (var p in Model.Volunteers)
+    {
+        <div class="ring-row">
+            <span class="ring-name">@p.DisplayName</span>
+            <form method="post" asp-page-handler="ParticipantRing" class="ring-form">
+                <input type="hidden" name="participantId" value="@p.Id" />
+                <select name="ring" aria-label="@Localizer["Rings.SelectAria", p.DisplayName]">@RingOptions(p.Ring)</select>
+                <button type="submit" class="ring-btn">@Localizer["Rings.Set"]</button>
+            </form>
+        </div>
+    }
+</div>

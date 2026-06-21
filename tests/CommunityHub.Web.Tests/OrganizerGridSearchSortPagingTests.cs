@@ -77,7 +77,8 @@ public sealed class OrganizerGridSearchSortPagingTests
     {
         var accessor = new HttpCurrentParticipantAccessor(new HttpContextAccessorOver(http));
         return new SpeakersModel(db, accessor, clock,
-            new CommunityHub.Core.Organizer.SpeakerDeletionService(db))
+            new CommunityHub.Core.Organizer.SpeakerDeletionService(db),
+            new CommunityHub.Core.Settings.FeatureGateService(db))
         {
             PageContext = new PageContext { HttpContext = http },
         };
@@ -400,7 +401,7 @@ public sealed class OrganizerGridSearchSortPagingTests
     {
         var accessor = new HttpCurrentParticipantAccessor(new HttpContextAccessorOver(http));
         return new SessionsModel(db, accessor, null!, null!, null!, null!, null!, null!, null!,
-            new FixedClock(), Loc())
+            new FixedClock(), Loc(), new CommunityHub.Core.Settings.FeatureGateService(db))
         {
             PageContext = new PageContext { HttpContext = http },
         };
@@ -507,7 +508,8 @@ public sealed class OrganizerGridSearchSortPagingTests
         // and no sponsor-role participants are seeded, so the sponsor-key loop
         // never invokes them. Pass null for those.
         return new CommunityHub.Pages.Organizer.SponsorAdmin.LeadsModel(
-            db, accessor, null!, null!, null!, null!, clock)
+            db, accessor, null!, null!, null!, null!, clock,
+            new CommunityHub.Core.Settings.FeatureGateService(db))
         {
             PageContext = new PageContext { HttpContext = http },
         };

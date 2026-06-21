@@ -1,5 +1,6 @@
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Integrations;
+using CommunityHub.Core.Settings;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -24,15 +25,18 @@ public sealed class SoMeDispatchJob
 {
     private readonly CommunityHubDbContext _db;
     private readonly SoMeDispatchService _dispatch;
+    private readonly FeatureGateService _gate;
     private readonly ILogger<SoMeDispatchJob> _log;
 
     public SoMeDispatchJob(
         CommunityHubDbContext db,
         SoMeDispatchService dispatch,
+        FeatureGateService gate,
         ILogger<SoMeDispatchJob> log)
     {
         _db = db;
         _dispatch = dispatch;
+        _gate = gate;
         _log = log;
     }
 
@@ -49,6 +53,17 @@ public sealed class SoMeDispatchJob
 
         foreach (var eventId in activeEventIds)
         {
+            // GATE (REQUIREMENTS §23): SoMe scheduling is an advanced feature, off
+            // by default. When disabled for this edition the dispatcher no-ops —
+            // no posts published, no pre-alerts sent.
+            if (!await _gate.IsFeatureEnabledAsync("some-scheduling", eventId, ct))
+            {
+                _log.LogInformation(
+                    "SoMeDispatchJob: event {EventId} — feature 'some-scheduling' disabled, skipped.",
+                    eventId);
+                continue;
+            }
+
             var result = await _dispatch.DispatchDueAsync(eventId, ct);
             _log.LogInformation(
                 "SoMeDispatchJob: event {EventId} — {Published} published, {Failed} failed, "

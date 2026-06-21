@@ -82,16 +82,17 @@
     <div class="ag-body">
         @if (Model.NoActiveEvent || Model.View is null)
         {
-            <p class="ag-empty">@Localizer["Agenda.NoEvent"]</p>
-            return;
+            <p class="ag-empty">@Localizer["Public.NoLiveEvent"]</p>
         }
-        @{ var view = Model.View; }
+        else
+        {
+            var view = Model.View;
 
-        <div class="ag-toolbar">
+            <div class="ag-toolbar">
             <a class="btn-list" href="/Sessions">@Localizer["Agenda.ListView"] &rarr;</a>
         </div>
 
-        @if (view.IsEmpty)
+        if (view.IsEmpty)
         {
             <p class="ag-empty">@Localizer["Agenda.NothingScheduled"]</p>
         }
@@ -145,6 +146,7 @@
                     }
                 </section>
             }
+        }
         }
     </div>
 </div>

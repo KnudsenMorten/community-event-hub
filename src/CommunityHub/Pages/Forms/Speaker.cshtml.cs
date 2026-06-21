@@ -50,27 +50,10 @@ public class SpeakerModel : PageModel
         "Male", "Female", "Non-binary", "Prefer not to say",
     };
 
-    [BindProperty] public string? Accreditation { get; set; }
-    [BindProperty] public bool? IsFirstTimeSpeaker { get; set; }
-    [BindProperty] public string? Country { get; set; }
-    [BindProperty] public string? Gender { get; set; }
-    [BindProperty] public bool SpeakingPreDay { get; set; }
-    [BindProperty] public bool SpeakingMainDay { get; set; }
-
-    /// <summary>Structured dietary/allergy capture for day catering (REQUIREMENTS §21) — shared with the Dinner form.</summary>
-    [BindProperty] public CommunityHub.Pages.Shared.DietaryInput Dietary { get; set; } = new();
-
-    /// <summary>
-    /// Speaker-chosen preferred address for calendar invites + messages. Blank =
-    /// use the Sessionize/community address. Never changes the login identity.
-    /// </summary>
-    [BindProperty]
-    [EmailAddress(ErrorMessage = "Please enter a valid email address (or leave blank to use your Sessionize address).")]
-    [StringLength(320, ErrorMessage = "That email address is too long.")]
-    public string? ContactEmailOverride { get; set; }
-
-    /// <summary>Confirmation/notice shown after the contact-email override changes.</summary>
-    public string? EmailNotice { get; private set; }
+    // Speaker DETAILS fields (Accreditation / first-time / Country / Gender / Speaking
+    // days / preferred email) moved to My Profile (operator 2026-06-21). This form is
+    // now the speaker's BIO editor only. Speaking days are auto-derived on the Profile
+    // save. The option lists stay here (public static) — Profile references them.
 
     public string FullName { get; private set; } = string.Empty;
     public string Email { get; private set; } = string.Empty;
@@ -126,14 +109,6 @@ public class SpeakerModel : PageModel
             sp => sp.EventId == me.EventId && sp.ParticipantId == me.ParticipantId, ct);
         if (profile is not null)
         {
-            Accreditation = profile.Accreditation;
-            IsFirstTimeSpeaker = profile.IsFirstTimeSpeaker;
-            Country = profile.Country;
-            Gender = profile.Gender;
-            SpeakingPreDay = profile.SpeakingPreDay;
-            SpeakingMainDay = profile.SpeakingMainDay;
-            ContactEmailOverride = profile.ContactEmailOverride;
-
             Tagline = profile.Tagline;
             Biography = profile.Biography;
             Blog = profile.Blog;
@@ -144,10 +119,6 @@ public class SpeakerModel : PageModel
             BioLastEditedBySpeakerAt = profile.BioLastEditedBySpeakerAt;
         }
 
-        var diet = await _db.DietaryRequirements.FirstOrDefaultAsync(
-            d => d.EventId == me.EventId && d.ParticipantId == me.ParticipantId
-                 && d.Surface == DietarySurface.SpeakerCatering, ct);
-        Dietary.LoadFrom(diet);
         return Page();
     }
 
@@ -165,11 +136,6 @@ public class SpeakerModel : PageModel
             return Page();
         }
 
-        // Format-validate the contact-email override before any save. A bad
-        // address (other than blank) blocks the save with a field error.
-        var newOverride = string.IsNullOrWhiteSpace(ContactEmailOverride)
-            ? null
-            : ContactEmailOverride.Trim();
         if (!ModelState.IsValid)
         {
             await PopulatePreviewAsync(me.EventId, me.ParticipantId, ct);
@@ -195,36 +161,15 @@ public class SpeakerModel : PageModel
             profile.UpdatedAt = now;
         }
 
-        // Only touch the Hub-collected fields here. (Sessionize import writes
-        // the bio fields; the speaker edits them below.)
-        profile.Accreditation = AccreditationOptions.Contains(Accreditation)
-            ? Accreditation : null;
-        profile.IsFirstTimeSpeaker = IsFirstTimeSpeaker;
-        profile.Country = string.IsNullOrWhiteSpace(Country) ? null : Country.Trim();
-        profile.Gender = GenderOptions.Contains(Gender) ? Gender : null;
-        profile.SpeakingPreDay = SpeakingPreDay;
-        profile.SpeakingMainDay = SpeakingMainDay;
-
-        // --- Speaker bio fields (seeded from Sessionize, owned by the speaker) -
-        // The speaker edits their OWN bio here (own-row scoped). When a field's
-        // value actually changes, mark it speaker-edited so the delta Sessionize
-        // sync never flushes it. (The organizer "Full import" override is the
-        // only path that re-seeds + clears these markers.)
+        // BIO ONLY (operator 2026-06-21): the speaker details fields moved to My
+        // Profile; this form edits the bio. When a field's value actually changes,
+        // mark it speaker-edited so the delta Sessionize sync never overwrites it.
         ApplyBioField(profile, SpeakerProfile.BioFields.Tagline,   profile.Tagline,   Normalize(Tagline),   v => profile.Tagline = v,   now);
         ApplyBioField(profile, SpeakerProfile.BioFields.Biography, profile.Biography, Normalize(Biography), v => profile.Biography = v, now);
         ApplyBioField(profile, SpeakerProfile.BioFields.Blog,      profile.Blog,      Normalize(Blog),      v => profile.Blog = v,      now);
         ApplyBioField(profile, SpeakerProfile.BioFields.LinkedIn,  profile.LinkedIn,  Normalize(LinkedIn),  v => profile.LinkedIn = v,  now);
         ApplyBioField(profile, SpeakerProfile.BioFields.Twitter,   profile.Twitter,   Normalize(Twitter),   v => profile.Twitter = v,   now);
         ApplyBioField(profile, SpeakerProfile.BioFields.PhotoUrl,  profile.PhotoUrl,  Normalize(PhotoUrl),  v => profile.PhotoUrl = v,  now);
-
-        // Contact-email override: detect a change so we only notify + propagate
-        // to Backstage when the effective address actually moved.
-        var previousOverride = string.IsNullOrWhiteSpace(profile.ContactEmailOverride)
-            ? null : profile.ContactEmailOverride.Trim();
-        var overrideChanged = !string.Equals(
-            previousOverride, newOverride, StringComparison.OrdinalIgnoreCase);
-        profile.ContactEmailOverride = newOverride;
-        ContactEmailOverride = newOverride;
 
         // Re-populate the bound bio fields with the saved (normalized) values.
         Tagline = profile.Tagline;
@@ -236,33 +181,8 @@ public class SpeakerModel : PageModel
         LastSessionizeImportAt = profile.LastSessionizeImportAt;
         BioLastEditedBySpeakerAt = profile.BioLastEditedBySpeakerAt;
 
-        await SaveDietaryAsync(me.EventId, me.ParticipantId, ct);
-
         await _db.SaveChangesAsync(ct);
-        Message = "Your speaker details have been saved.";
-
-        if (overrideChanged)
-        {
-            // Confirmation/notice + propagate the effective address to Backstage.
-            var effective = SpeakerProfile.EffectiveEmailFor(me.Email, newOverride);
-            EmailNotice = newOverride is null
-                ? $"Your preferred email was cleared. Calendar invites and "
-                  + $"messages will now use your Sessionize address ({me.Email})."
-                : $"Calendar invites and messages will now be sent to "
-                  + $"{effective}. Your sign-in still uses {me.Email}.";
-
-            try
-            {
-                await _backstageEmail.QueueAsync(
-                    me.EventId, me.ParticipantId, me.Email, newOverride, ct);
-            }
-            catch
-            {
-                // Propagation to the external event system must never break the
-                // form save; the hub's own mail/calendar already use the override.
-            }
-        }
-
+        Message = "Your bio has been saved.";
         return Page();
     }
 
@@ -278,30 +198,6 @@ public class SpeakerModel : PageModel
         if (profile is null) return;
         LastSessionizeImportAt = profile.LastSessionizeImportAt;
         BioLastEditedBySpeakerAt = profile.BioLastEditedBySpeakerAt;
-    }
-
-    // ----- Structured dietary capture (shared with the Dinner form) ------
-    private async Task SaveDietaryAsync(int eventId, int participantId, CancellationToken ct)
-    {
-        var row = await _db.DietaryRequirements.FirstOrDefaultAsync(
-            d => d.EventId == eventId && d.ParticipantId == participantId
-                 && d.Surface == DietarySurface.SpeakerCatering, ct);
-        if (row is null)
-        {
-            row = new DietaryRequirement
-            {
-                EventId = eventId,
-                ParticipantId = participantId,
-                Surface = DietarySurface.SpeakerCatering,
-                CreatedAt = _clock.GetUtcNow(),
-            };
-            _db.DietaryRequirements.Add(row);
-        }
-        else
-        {
-            row.UpdatedAt = _clock.GetUtcNow();
-        }
-        Dietary.ApplyTo(row);
     }
 
     private static string? Normalize(string? value) =>

@@ -27,6 +27,9 @@
                 <input asp-for="Address" maxlength="500" autocomplete="off" />
                 <label for="ContactEmail">@Localizer["OrgHotels.ContactEmail"]</label>
                 <input asp-for="ContactEmail" type="email" maxlength="320" autocomplete="off" />
+                <label for="RoomBlockSize">@Localizer["OrgHotels.RoomBlockSize"]</label>
+                <input asp-for="RoomBlockSize" type="number" min="0" inputmode="numeric" autocomplete="off" />
+                <small style="display:block;color:#6b7280;margin:-4px 0 8px;">@Localizer["OrgHotels.RoomBlockSizeHelp"]</small>
                 <label for="Notes">@Localizer["Common.NotesOptional"]</label>
                 <textarea asp-for="Notes" rows="2" maxlength="1000"></textarea>
                 <button type="submit">@Localizer["Common.Save"]</button>
@@ -69,6 +72,7 @@
                         <th style="padding:6px;">@Localizer["OrgHotels.Name"]</th>
                         <th style="padding:6px;">@Localizer["OrgHotels.Address"]</th>
                         <th style="padding:6px;">@Localizer["OrgHotels.ContactEmail"]</th>
+                        <th style="padding:6px;text-align:right;">@Localizer["OrgHotels.RoomBlockColumn"]</th>
                         <th style="padding:6px;">@Localizer["Common.NotesOptional"]</th>
                         <th style="padding:6px;"></th>
                     </tr>
@@ -84,6 +88,7 @@
                             <td style="padding:6px;font-weight:600;">@h.Name</td>
                             <td style="padding:6px;">@h.Address</td>
                             <td style="padding:6px;">@h.ContactEmail</td>
+                            <td style="padding:6px;text-align:right;">@(h.RoomBlockSize.HasValue ? h.RoomBlockSize.Value.ToString() : "—")</td>
                             <td style="padding:6px;max-width:240px;">@h.Notes</td>
                             <td style="padding:6px;white-space:nowrap;">
                                 <a asp-page="/Organizer/Hotels" asp-route-EditId="@h.Id">@Localizer["Common.Edit"]</a>

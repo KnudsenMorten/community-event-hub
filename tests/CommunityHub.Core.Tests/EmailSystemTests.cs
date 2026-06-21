@@ -244,7 +244,8 @@ public sealed class EmailSystemTests
         });
         await db.SaveChangesAsync();
 
-        var builder = new TaskReminderBuilder(db, RealTemplates(), Clock);
+        var builder = new TaskReminderBuilder(
+            db, RealTemplates(), Clock, new SponsorRecipientResolver(db));
         var due = await builder.BuildDueAsync(eventId);
 
         var msg = Assert.Single(due);
@@ -348,7 +349,7 @@ public sealed class EmailSystemTests
         // is what these decorator tests exercise.
         return new LoggingEmailSender(
             inner, scopes, ctx,
-            Options.Create(new EmailOptions { OnlySendTo = "@example.test" }), Clock, log: null);
+            Options.Create(new EmailOptions()), Clock, log: null);
     }
 
     private sealed class ThrowingEmailSender : IEmailSender

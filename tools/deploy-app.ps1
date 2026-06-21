@@ -70,7 +70,17 @@ $proj   = if ($App -eq 'jobs') { 'src/CommunityHub.Jobs/CommunityHub.Jobs.csproj
 $outDir = if ($App -eq 'jobs') { 'publish-jobs-out' } else { 'publish-out' }
 
 Write-Host ">> Building $App (Release)..." -ForegroundColor Cyan
-dotnet publish (Join-Path $repo $proj) -c Release -o (Join-Path $repo $outDir) | Out-Null
+# WEB: publish ReadyToRun (crossgen for the App Service linux-x64 runtime). R2R
+# pre-compiles IL -> native so the FIRST hit of each page/query is not JIT-bound,
+# which (with the in-process startup warm-up) is what killed the ~10-30s
+# cold-start hangs. Framework-dependent (--self-contained false): still runs on
+# the App Service's installed .NET 8, the zip stays small, and an incompatible
+# R2R image silently falls back to JIT (never a crash).
+$pubArgs = @('publish', (Join-Path $repo $proj), '-c', 'Release', '-o', (Join-Path $repo $outDir))
+if ($App -eq 'web') {
+    $pubArgs += @('-r', 'linux-x64', '--self-contained', 'false', '-p:PublishReadyToRun=true')
+}
+dotnet @pubArgs | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed." }
 
 $artDir = Join-Path $repo 'deploy-artifacts'
@@ -163,3 +173,64 @@ for ($i = 0; $i -lt 24; $i++) {
 }
 if ($healthy) { Write-Host ">> $Env is healthy." -ForegroundColor Green }
 else { Write-Host ">> WARNING: $($t.url) not answering 200 after 2 minutes -- check logs: az webapp log tail -g $($t.rg) -n $($t.app)" -ForegroundColor Red }
+
+# --- Go-live LOG-VALIDATION gate (REQUIREMENTS: validate logs after initial
+#     login) ---------------------------------------------------------------
+# A green health probe is not enough: the container can still be restart-looping
+# on the start-timeout, or the app can be logging unhandled exceptions / SQL
+# login failures that users feel as multi-second hangs. After the app is up and
+# warmed, pull the live container log and assert the LATEST boot started cleanly
+# and is not erroring. Fails the deploy (non-zero exit) so a bad go-live is
+# caught here, not by the first user.
+Write-Host ">> Validating deployment logs ..." -ForegroundColor Cyan
+$logZip = Join-Path $env:TEMP ("eldk-{0}-deploylog-{1}.zip" -f $Env, [guid]::NewGuid().ToString('N'))
+$logDir = Join-Path $env:TEMP ("eldk-{0}-deploylog" -f $Env)
+try {
+    if (Test-Path $logDir) { Remove-Item $logDir -Recurse -Force -ErrorAction SilentlyContinue }
+    [void](Invoke-Az @('webapp','log','download','-g',$t.rg,'-n',$t.app,'--log-file',$logZip))
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    [System.IO.Compression.ZipFile]::ExtractToDirectory($logZip, $logDir)
+
+    $docker = Get-ChildItem $logDir -Recurse -File -Filter *docker*.log -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTime -Descending | Select-Object -First 1
+    if (-not $docker) {
+        Write-Host ">> WARN: no container log found to validate (skipping gate)." -ForegroundColor Yellow
+    } else {
+        $lines = @(Get-Content $docker.FullName)
+        if ($lines.Count -eq 0) {
+            Write-Host ">> WARN: container log empty (skipping gate)." -ForegroundColor Yellow
+            return
+        }
+        # Scope to the CURRENT boot: lines after the last container (re)start so an
+        # OLD timeout from a prior boot never fails a clean go-live.
+        $startIdx = 0
+        for ($k = $lines.Count - 1; $k -ge 0; $k--) {
+            if ($lines[$k] -match 'Container start method called|Running the command: dotnet') { $startIdx = $k; break }
+        }
+        $boot = @($lines[$startIdx..($lines.Count - 1)])
+        $bootText = $boot -join "`n"
+
+        $started   = $bootText -match 'Application started|Site started|startup probe succeeded'
+        $errPattern = 'ContainerTimeout|Unhandled exception|Login failed for|did not start within expected time|crash loop|FATAL'
+        $errs = @($boot | Where-Object { $_ -match $errPattern } | Select-Object -First 8)
+        $probeMatch = $boot | Select-String -Pattern 'startup probe succeeded after ([\d\.]+) seconds' | Select-Object -Last 1
+        $probe = if ($probeMatch) { $probeMatch.Matches[0].Groups[1].Value } else { $null }
+
+        if ($probe) { Write-Host "   startup probe: ${probe}s" -ForegroundColor Gray }
+        # The REAL gate is error detection. (We do NOT require an "Application started"
+        # line: on the slot-swap path the worker starts in the STAGING slot, so the
+        # post-swap production log legitimately has no fresh start line — and the
+        # health-check above already proved the app is serving 200.)
+        if ($errs) {
+            Write-Host ">> LOG-VALIDATION FAILED -- the latest boot logged errors:" -ForegroundColor Red
+            $errs | ForEach-Object { Write-Host "   $_" -ForegroundColor Red }
+            throw "Deployment log validation failed for $Env. NOT clean -- investigate before calling it live."
+        }
+        if (-not $started) {
+            Write-Host ">> Note: no fresh 'Application started' in the prod log window (expected on a slot-swap); health check already passed." -ForegroundColor Gray
+        }
+        Write-Host ">> Logs validated: no errors in the latest boot window." -ForegroundColor Green
+    }
+} finally {
+    Remove-Item $logZip -Force -ErrorAction SilentlyContinue
+}

@@ -70,7 +70,7 @@ public class TasksTableModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer)
+        if (!OrganizerAuth.IsRealOrganizer(me))
         {
             AccessDenied = true;
             return Page();
@@ -125,7 +125,7 @@ public class TasksTableModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer)
+        if (!OrganizerAuth.IsRealOrganizer(me))
         {
             return Forbid();
         }

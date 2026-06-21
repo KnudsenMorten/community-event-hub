@@ -90,7 +90,7 @@ public class EditParticipantModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+        if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
 
         var emailNorm = (Email ?? "").Trim().ToLowerInvariant();
         if (string.IsNullOrWhiteSpace(emailNorm) || !emailNorm.Contains('@'))
@@ -194,7 +194,7 @@ public class EditParticipantModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+        if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
 
         var p = Id is null ? null
             : await _db.Participants.FirstOrDefaultAsync(x => x.Id == Id && x.EventId == me.EventId, ct);

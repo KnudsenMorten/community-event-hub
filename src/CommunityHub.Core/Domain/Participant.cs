@@ -1,3 +1,5 @@
+using CommunityHub.Core.Settings;
+
 namespace CommunityHub.Core.Domain;
 
 /// <summary>
@@ -51,6 +53,50 @@ public class Participant
     /// external id carried for scoping (CONTEXT.md 11g).
     /// </summary>
     public string? SponsorCompanyId { get; set; }
+
+    /// <summary>
+    /// For a Sponsor-role contact: the Company Manager / WordPress <c>user_id</c>
+    /// — the <b>unique identifier that links this hub contact back to its Company
+    /// Manager user</b> (the canonical id-link the operator's ERP→webshop sync
+    /// uses; CM links a user by <c>user_id</c> and a company by <c>company_id</c>,
+    /// never by name). Written at sync time by
+    /// <see cref="Integrations.SponsorContactSyncService"/> from the CM
+    /// <c>/companies/{id}/users</c> response. Correlation back to CM (e.g. the
+    /// recipient resolver) prefers this id over email — email is reserved only for
+    /// the ERP→CM bridge where e-conomic and WordPress share no common id. Null for
+    /// non-sponsor participants and for sponsors not yet synced from CM. Tolerant
+    /// parse: CM returns it as a string ("68") on <c>/companies/{id}/users</c> and a
+    /// number (68) on <c>/users/{id}</c> — both resolve to this int.
+    /// </summary>
+    public int? CmUserId { get; set; }
+
+    // --- Sponsor-contact roles (independent flags) --------------------------
+    /// <summary>
+    /// For a Sponsor-role contact: this person is a <b>signer</b> for the company
+    /// (they sign the contract / approve the order). Independent of
+    /// <see cref="IsEventCoordinator"/> — a contact can be both. <b>Signer-only
+    /// contacts never receive sponsor mail</b> (the universal sponsor-email
+    /// audience rule, REQUIREMENTS §7c): the shared
+    /// <c>SponsorRecipientResolver</c> selects recipients purely on
+    /// <see cref="IsEventCoordinator"/>. Default false. Sourced from Company
+    /// Manager's company-level <c>default_signer_id</c> at sync time (CM exposes
+    /// no per-user roles — see REQUIREMENTS §7c), and editable by an organizer.
+    /// </summary>
+    public bool IsSigner { get; set; }
+
+    /// <summary>
+    /// For a Sponsor-role contact: this person is an <b>event coordinator</b> for
+    /// the company (they handle the event logistics / onboarding). Independent of
+    /// <see cref="IsSigner"/> — a contact can be both, and a both-roles contact
+    /// STILL receives sponsor mail because they are a coordinator. This flag is
+    /// the SOLE audience selector for every sponsor email path (welcome/intro,
+    /// sponsor-overdue, sponsor task-deadline-reminder, organizer sponsor
+    /// broadcast) via <c>SponsorRecipientResolver</c> (REQUIREMENTS §7c). A
+    /// company can have several coordinators. Default false. Sourced from Company
+    /// Manager's company-level <c>event_coordination_default_contact_id</c> at
+    /// sync time, and editable by an organizer.
+    /// </summary>
+    public bool IsEventCoordinator { get; set; }
 
     /// <summary>
     /// False = the person cannot log in (e.g. withdrew). Login checks this.
@@ -159,6 +205,27 @@ public class Participant
     /// touching real registrations. Default false (real participant).
     /// </summary>
     public bool IsTestUser { get; set; }
+
+    // --- Release ring (controlled-rollout access level, REQUIREMENTS §23) ----
+    /// <summary>
+    /// This person's RELEASE RING — their access level for the progressive
+    /// feature rollout. Lower ring = earlier access. A feature is active for this
+    /// person iff it is enabled (not killed) AND this person's <b>effective ring</b>
+    /// is ≤ the feature's released-to ring.
+    ///
+    /// For a <b>sponsor contact</b> this is the CONTACT-level ring, which
+    /// SUPERSEDES their company's default ring (<see cref="SponsorInfo.Ring"/>);
+    /// the effective ring is <c>contact.Ring ?? company.Ring ?? Broad</c>. For
+    /// every other role there is no company default, so the effective ring is
+    /// simply this value.
+    ///
+    /// Defaults to <see cref="Ring.Broad"/> (general availability): an unassigned
+    /// person sees ONLY fully-released features, and a feature released to Broad
+    /// (the default) is visible to everyone — so today's behaviour is unchanged.
+    /// Assigning Ring0/Ring1 IS the "let this person see test features" override
+    /// (it replaces the old per-user test-on flag).
+    /// </summary>
+    public Ring Ring { get; set; } = Rings.Default;
 
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? LastLoginAt { get; set; }

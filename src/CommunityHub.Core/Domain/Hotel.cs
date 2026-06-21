@@ -31,6 +31,17 @@ public class Hotel
     /// <summary>Free-text notes for the organizers (room block ref, rate code, …).</summary>
     public string? Notes { get; set; }
 
+    /// <summary>
+    /// The size of the room block reserved at this hotel — how many rooms the
+    /// organizers have held. Optional (null = no block size recorded yet, so the
+    /// occupancy view shows "not set" rather than a misleading 0). When set, the
+    /// room-block occupancy view compares it against the number of people placed
+    /// here so organizers can see at a glance whether a hotel is under, at, or
+    /// over its block. A non-negative count (0 is allowed — e.g. a hotel held for
+    /// reference with no rooms reserved).
+    /// </summary>
+    public int? RoomBlockSize { get; set; }
+
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? UpdatedAt { get; set; }
 

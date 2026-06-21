@@ -13,10 +13,16 @@
     }
     else
     {
+        @if (Model.ResendResult is not null)
+        {
+            <partial name="_Flash" model='new CommunityHub.Pages.Shared.FlashModel(Model.ResendResult.Message, Model.ResendResult.FlashKindString)' />
+        }
+
         <p>Every outbound email the hub has sent for this edition &mdash; welcome,
            sign-in codes, reminders, broadcasts, onboarding and manual re-sends.
            Filter by a person's <strong>name or email</strong> to see exactly what
-           reached them.</p>
+           reached them. A <strong>failed</strong> send that targeted a known person
+           can be <strong>re-sent</strong> straight from here.</p>
 
         <form method="get" role="search" aria-label="Filter the email log">
             <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;">
@@ -87,6 +93,19 @@
                                     else
                                     {
                                         <span style="color:#a50e0e;" title="@e.Error">Failed</span>
+                                        @if (CommunityHub.Pages.Organizer.EmailLogModel.CanResend(e))
+                                        {
+                                            <form method="post" asp-page-handler="Resend" style="display:inline;margin-left:8px;">
+                                                <input type="hidden" name="id" value="@e.Id" />
+                                                <input type="hidden" name="Filter" value="@Model.Filter" />
+                                                <input type="hidden" name="Category" value="@Model.Category" />
+                                                <button type="submit" class="btn-secondary"
+                                                        style="padding:2px 10px;font-size:13px;"
+                                                        title="Re-send this email to @e.ToEmail">
+                                                    Re-send
+                                                </button>
+                                            </form>
+                                        }
                                     }
                                 </td>
                             </tr>

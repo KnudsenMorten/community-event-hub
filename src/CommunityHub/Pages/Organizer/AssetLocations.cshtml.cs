@@ -59,7 +59,7 @@ public class AssetLocationsModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+        if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
 
         await _locations.UpsertAsync(
             me.EventId, Group, SiteUrl, DriveName, RootFolderPath, BrowseUrl, Notes, me.Email, ct);

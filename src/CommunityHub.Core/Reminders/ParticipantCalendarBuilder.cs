@@ -34,9 +34,15 @@ public sealed class ParticipantCalendarBuilder
 
     private readonly CommunityHubDbContext _db;
 
-    public ParticipantCalendarBuilder(CommunityHubDbContext db)
+    private readonly ScheduleService? _schedule;
+
+    // ScheduleService is optional so existing unit tests can construct the builder
+    // with just the DbContext; DI always supplies it, so the live feed includes the
+    // role-relevant schedule (sync-all).
+    public ParticipantCalendarBuilder(CommunityHubDbContext db, ScheduleService? schedule = null)
     {
         _db = db;
+        _schedule = schedule;
     }
 
     /// <summary>
@@ -85,8 +91,115 @@ public sealed class ParticipantCalendarBuilder
         var items = await BuildItemsAsync(
             p.Id, p.EventId, p.SponsorCompanyId, uidHost, ev?.VenueName, ct);
 
+        // SYNC-ALL: append the role-relevant SCHEDULE / key dates (move-in … party …
+        // appreciation dinner) so the one subscription also carries them. Filtered to
+        // the participant's role via ScheduleService; each gets a stable UID.
+        if (_schedule is not null)
+        {
+            var role = await _db.Participants.AsNoTracking()
+                .Where(x => x.Id == p.Id).Select(x => (ParticipantRole?)x.Role)
+                .FirstOrDefaultAsync(ct);
+            foreach (var s in await _schedule.GetForRoleAsync(p.EventId, role, ct))
+            {
+                items.Add(ToCalendarItem(s, uidHost));
+            }
+        }
+
+        // SPEAKER SESSION sync: the participant's own Backstage / Sessionize sessions
+        // (title + room) as timed entries, so a speaker's calendar shows when + where
+        // they present. Linked via SessionSpeaker; only scheduled sessions are emitted.
+        var sessions = await _db.SessionSpeakers.AsNoTracking()
+            .Where(ss => ss.ParticipantId == p.Id
+                      && ss.Session.EventId == p.EventId
+                      && ss.Session.StartsAt != null)
+            .Select(ss => new
+            {
+                ss.Session.Id,
+                ss.Session.Title,
+                ss.Session.Room,
+                ss.Session.StartsAt,
+                ss.Session.EndsAt,
+            })
+            .ToListAsync(ct);
+        foreach (var s in sessions)
+        {
+            items.Add(new CalendarItem(
+                Uid: $"session:{s.Id}@{uidHost}",
+                Summary: $"My session: {s.Title}",
+                Description: null,
+                Location: s.Room,
+                Start: s.StartsAt!.Value,
+                End: s.EndsAt ?? s.StartsAt!.Value.AddHours(1),
+                AllDay: false,
+                AlarmsDaysBefore: new[] { 1 }));
+        }
+
         return IcsCalendarBuilder.BuildFeed(
             calendarName, ownerEmail, p.FullName, items);
+    }
+
+    /// <summary>Convert a schedule entry to a calendar item (stable UID, all-day or timed).</summary>
+    public static CalendarItem ToCalendarItem(ScheduleEntry s, string uidHost)
+    {
+        var key = s.Id > 0
+            ? s.Id.ToString()
+            : $"{s.StartsAt.UtcTicks}-{new string(s.Title.Where(char.IsLetterOrDigit).ToArray())}";
+        var end = s.EndsAt ?? (s.AllDay ? s.StartsAt.AddDays(1) : s.StartsAt.AddHours(1));
+        return new CalendarItem(
+            Uid: $"sched:{key}@{uidHost}",
+            Summary: s.Title,
+            Description: s.Notes,
+            Location: s.Location,
+            Start: s.StartsAt,
+            End: end,
+            AllDay: s.AllDay,
+            AlarmsDaysBefore: System.Array.Empty<int>());
+    }
+
+    /// <summary>
+    /// One human-readable row of a participant's calendar feed, for the organizer
+    /// "preview my feed" panel on the Calendar settings page. It mirrors exactly the
+    /// items <see cref="BuildFeedAsync"/> would emit (same query, same scope), but
+    /// returns plain values for the UI rather than RFC 5545 text — so an organizer
+    /// can SEE what the subscribable feed contains without parsing an .ics file.
+    /// </summary>
+    public sealed record CalendarPreviewRow(
+        string Summary, DateOnly Date, bool AllDay, string? Location);
+
+    /// <summary>
+    /// Build the human-readable preview of one participant's calendar feed (the
+    /// same items as <see cref="BuildFeedAsync"/>, date-ordered). Returns an empty
+    /// list for an unknown participant or one with no dated items. Read-only.
+    /// </summary>
+    public async Task<IReadOnlyList<CalendarPreviewRow>> BuildPreviewAsync(
+        int participantId, CancellationToken ct = default)
+    {
+        var p = await _db.Participants
+            .AsNoTracking()
+            .Where(x => x.Id == participantId)
+            .Select(x => new { x.Id, x.EventId, x.SponsorCompanyId })
+            .FirstOrDefaultAsync(ct);
+        if (p is null) return Array.Empty<CalendarPreviewRow>();
+
+        var venueName = await _db.Events
+            .AsNoTracking()
+            .Where(e => e.Id == p.EventId)
+            .Select(e => e.VenueName)
+            .FirstOrDefaultAsync(ct);
+
+        // "preview" is a stable, non-routable host: the preview never produces a
+        // subscribable URL, so the UID host is irrelevant — it only keeps UIDs
+        // well-formed for the shared item builder.
+        var items = await BuildItemsAsync(
+            p.Id, p.EventId, p.SponsorCompanyId, "preview", venueName, ct);
+
+        return items
+            .Select(i => new CalendarPreviewRow(
+                Summary: i.Summary,
+                Date: DateOnly.FromDateTime(i.Start.UtcDateTime),
+                AllDay: i.AllDay,
+                Location: i.Location))
+            .ToList();
     }
 
     /// <summary>

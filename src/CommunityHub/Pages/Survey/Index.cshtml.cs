@@ -2,12 +2,14 @@ using System.Security.Cryptography;
 using System.Text;
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
+using CommunityHub.Core.Resources;
 using CommunityHub.Core.Surveys;
 using CommunityHub.Surveys;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Localization;
 using Microsoft.Extensions.Logging;
 
 namespace CommunityHub.Pages.Survey;
@@ -31,19 +33,25 @@ public class IndexModel : PageModel
 {
     private readonly SurveyDefinitionProvider _definitions;
     private readonly CommunityHubDbContext _db;
+    private readonly SurveySummaryService _summary;
     private readonly TimeProvider _clock;
     private readonly ILogger<IndexModel> _log;
+    private readonly IStringLocalizer<SharedResource> _loc;
 
     public IndexModel(
         SurveyDefinitionProvider definitions,
         CommunityHubDbContext db,
+        SurveySummaryService summary,
         TimeProvider clock,
-        ILogger<IndexModel> log)
+        ILogger<IndexModel> log,
+        IStringLocalizer<SharedResource> loc)
     {
         _definitions = definitions;
         _db = db;
+        _summary = summary;
         _clock = clock;
         _log = log;
+        _loc = loc;
     }
 
     // --- View state -------------------------------------------------------
@@ -51,6 +59,13 @@ public class IndexModel : PageModel
     public string Slug { get; private set; } = string.Empty;
     public bool SubmittedOk { get; private set; }
     public string? ErrorMessage { get; private set; }
+
+    /// <summary>
+    /// True when an organizer has CLOSED this survey: the wizard is hidden and a
+    /// friendly "closed" state is shown instead. Results stay viewable. A survey
+    /// with no state row is OPEN (the historical default).
+    /// </summary>
+    public bool IsClosed { get; private set; }
 
     // --- Form binding (single POST on submit) -----------------------------
     [BindProperty] public string SelectedTrackId { get; set; } = string.Empty;
@@ -68,11 +83,12 @@ public class IndexModel : PageModel
     /// </summary>
     [BindProperty] public string? Website { get; set; }
 
-    public IActionResult OnGet(string slug)
+    public async Task<IActionResult> OnGetAsync(string slug, CancellationToken ct)
     {
         Slug = slug ?? string.Empty;
         Survey = _definitions.TryGet(Slug);
         if (Survey is null) return NotFound();
+        IsClosed = !await _summary.IsOpenAsync(Slug, ct);
         return Page();
     }
 
@@ -81,6 +97,16 @@ public class IndexModel : PageModel
         Slug = slug ?? string.Empty;
         Survey = _definitions.TryGet(Slug);
         if (Survey is null) return NotFound();
+
+        // Closed survey: never accept a submission. Show the closed state (the
+        // wizard is hidden) and do not write anything. Defense-in-depth — the
+        // public page hides the form when closed, but a hand-rolled POST must
+        // also be rejected.
+        if (!await _summary.IsOpenAsync(Slug, ct))
+        {
+            IsClosed = true;
+            return Page();
+        }
 
         // Honeypot. Pretend success without writing anything.
         if (!string.IsNullOrWhiteSpace(Website))
@@ -94,7 +120,7 @@ public class IndexModel : PageModel
         var track = Survey.FindTrack(SelectedTrackId);
         if (track is null)
         {
-            ErrorMessage = "Pick a track in step 1 before submitting.";
+            ErrorMessage = _loc["Survey.ValTrack"];
             return Page();
         }
 
@@ -107,12 +133,12 @@ public class IndexModel : PageModel
 
         if (picks.Any(p => string.IsNullOrWhiteSpace(p.TopicId)))
         {
-            ErrorMessage = "Rank three different topics in step 2 before submitting.";
+            ErrorMessage = _loc["Survey.ValRankThree"];
             return Page();
         }
         if (picks.Select(p => p.TopicId).Distinct(StringComparer.OrdinalIgnoreCase).Count() != 3)
         {
-            ErrorMessage = "Your three picks must all be different topics.";
+            ErrorMessage = _loc["Survey.ValPicksDistinct"];
             return Page();
         }
         // All picked topic ids must belong to the selected track (defense in
@@ -121,12 +147,12 @@ public class IndexModel : PageModel
         var topicIdsInTrack = track.Topics.Select(t => t.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
         if (picks.Any(p => !topicIdsInTrack.Contains(p.TopicId!)))
         {
-            ErrorMessage = "One of your picks is not a topic in the selected track.";
+            ErrorMessage = _loc["Survey.ValTopicNotInTrack"];
             return Page();
         }
         if (picks.Any(p => p.Level is null))
         {
-            ErrorMessage = "Pick a level (Introduction / Advanced / Expert) for each of your three picks.";
+            ErrorMessage = _loc["Survey.ValLevel"];
             return Page();
         }
 
@@ -154,7 +180,7 @@ public class IndexModel : PageModel
         catch (DbUpdateException ex)
         {
             _log.LogWarning(ex, "Survey response DB write failed for slug={Slug}", Slug);
-            ErrorMessage = "We hit a problem saving your response. Please try again in a moment.";
+            ErrorMessage = _loc["Survey.ValSaveFailed"];
             return Page();
         }
 

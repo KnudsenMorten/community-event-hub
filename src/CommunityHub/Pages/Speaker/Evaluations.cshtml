@@ -66,8 +66,15 @@
             <div class="se-sess">
                 <div class="se-sess-head">
                     <h3>
-                        <a href="/Sessions/@s.SessionId"
-                           style="color:#fff;text-decoration:underline;">@s.Title</a>
+                        @if (Model.PubliclyViewableSessionIds.Contains(s.SessionId))
+                        {
+                            <a href="/Sessions/@s.SessionId"
+                               style="color:#fff;text-decoration:underline;">@s.Title</a>
+                        }
+                        else
+                        {
+                            <span>@s.Title</span>
+                        }
                         @if (s.IsMasterClass)
                         {
                             <span class="se-mcb">@Localizer["SpeakerEval.MasterClass"]</span>

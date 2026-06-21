@@ -51,7 +51,7 @@ public class SoMeQueueModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return null;
-        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return null; }
+        if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return null; }
         return me;
     }
 

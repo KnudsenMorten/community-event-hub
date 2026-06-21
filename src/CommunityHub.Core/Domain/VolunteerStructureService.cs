@@ -63,6 +63,21 @@ public sealed class VolunteerStructureService
                  && s.ParticipantId == actor.ParticipantId, ct);
     }
 
+    /// <summary>
+    /// True if the participant supervises AT LEAST ONE bucket in the edition
+    /// (legacy single-supervisor column OR the multi-supervisor join table). Used
+    /// by the nav to show the "Supervisor" dashboard item only to real supervisors
+    /// — a cheap indexed existence check, safe to call per request for volunteers.
+    /// </summary>
+    public async Task<bool> IsSupervisorAsync(int eventId, int participantId, CancellationToken ct = default)
+    {
+        var legacy = await _db.VolunteerCategories.AnyAsync(
+            c => c.EventId == eventId && c.SupervisorParticipantId == participantId, ct);
+        if (legacy) return true;
+        return await _db.VolunteerBucketSupervisors.AnyAsync(
+            s => s.EventId == eventId && s.ParticipantId == participantId, ct);
+    }
+
     private async Task RequireManageCategoryAsync(ActorContext actor, int categoryId, CancellationToken ct)
     {
         if (!await CanManageCategoryAsync(actor, categoryId, ct))

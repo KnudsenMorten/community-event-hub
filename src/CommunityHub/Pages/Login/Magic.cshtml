@@ -2,13 +2,32 @@
 @model CommunityHub.Pages.Login.MagicModel
 @{
     ViewData["Title"] = Localizer["Login.Title"].Value;
+    ViewData["HidePublicNav"] = true;   // magic-link landing — no public event nav bar
 }
 
 <div class="card">
     <h2>@Localizer["Login.Title"]</h2>
-    @if (!string.IsNullOrEmpty(Model.Error))
+    @if (!string.IsNullOrEmpty(Model.ErrorKey))
     {
-        <p class="error" role="alert">@Model.Error</p>
-        <p><a asp-page="/Login">@Localizer["Login.GoToEmailPin"]</a></p>
+        <p class="error" role="alert">@Localizer[Model.ErrorKey]</p>
+
+        @* Recovery state: a real, one-tap path back into the sign-in flow.
+           A GET form to the email + PIN page, pre-staged with the recovered
+           email (when the link was a genuine-but-expired one) and the intended
+           destination, so the participant requests a fresh code without retyping
+           anything. Never a dead end. The submit button inherits the primary
+           styling; mobile-first (full-width on a narrow phone). *@
+        <p style="margin:6px 0 14px 0;color:#4a5160;">@Localizer["Login.RecoverHelp"]</p>
+        <form method="get" action="/Login">
+            @if (!string.IsNullOrEmpty(Model.RecoveryEmail))
+            {
+                <input type="hidden" name="email" value="@Model.RecoveryEmail" />
+            }
+            @if (!string.IsNullOrEmpty(Model.ReturnUrl))
+            {
+                <input type="hidden" name="ReturnUrl" value="@Model.ReturnUrl" />
+            }
+            <button type="submit" style="width:100%;max-width:360px;">@Localizer["Login.RequestNewCode"]</button>
+        </form>
     }
 </div>

@@ -31,6 +31,7 @@ public class IndexModel : PageModel
     private readonly SpeakerDeadlineSeeder _speakerDeadlines;
     private readonly MasterClassLogisticsService _logistics;
     private readonly SpeakerSessionsService _sessions;
+    private readonly PublicSessionsService _publicSessions;
     private readonly CalendarFeedTokenService _calendarTokens;
     private readonly ILogger<IndexModel> _logger;
 
@@ -41,6 +42,7 @@ public class IndexModel : PageModel
         SpeakerDeadlineSeeder speakerDeadlines,
         MasterClassLogisticsService logistics,
         SpeakerSessionsService sessions,
+        PublicSessionsService publicSessions,
         CalendarFeedTokenService calendarTokens,
         ILogger<IndexModel> logger)
     {
@@ -50,6 +52,7 @@ public class IndexModel : PageModel
         _speakerDeadlines = speakerDeadlines;
         _logistics = logistics;
         _sessions = sessions;
+        _publicSessions = publicSessions;
         _calendarTokens = calendarTokens;
         _logger = logger;
     }
@@ -81,6 +84,16 @@ public class IndexModel : PageModel
     /// <summary>The signed-in speaker's own sessions (room/time + question links).</summary>
     public IReadOnlyList<MySpeakerSession> MySessions { get; private set; } =
         Array.Empty<MySpeakerSession>();
+
+    /// <summary>
+    /// Ids of the speaker's own sessions whose PUBLIC page (<c>/Sessions/{id}</c>)
+    /// would actually resolve — the same gate <see cref="PublicSessionsService.GetByIdAsync"/>
+    /// applies (in the active edition, not a service session), NOT the speaker's own
+    /// profile-publish state. The view shows the "view public session page" link iff
+    /// the session id is in this set.
+    /// </summary>
+    public IReadOnlySet<int> PubliclyViewableSessionIds { get; private set; } =
+        new HashSet<int>();
 
     /// <summary>
     /// The speaker's PUBLIC preview URL (<c>/Speakers/{id}</c>) when their profile
@@ -154,6 +167,13 @@ public class IndexModel : PageModel
         // My sessions (own-row scoped server-side) — room/time + question links.
         MySessions = await _sessions.GetMySessionsAsync(
             me.EventId, me.ParticipantId, me.Role, ct);
+
+        // Resolve, per session, whether its PUBLIC /Sessions/{id} page would actually
+        // resolve — the same gate the public page uses (active edition + not a service
+        // session), independent of the speaker's own profile-publish state. The view
+        // only links rows that are genuinely publicly viewable.
+        PubliclyViewableSessionIds = await _publicSessions.GetPubliclyViewableSessionIdsAsync(
+            MySessions.Select(s => s.SessionId), ct);
 
         // Public preview: only resolvable once the organizer has selected this
         // speaker for publish (the §6 hard gate — an unselected /Speakers/{id}

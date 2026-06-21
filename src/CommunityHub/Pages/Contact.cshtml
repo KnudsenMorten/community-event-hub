@@ -1,0 +1,14 @@
+@page
+@model CommunityHub.Pages.ContactModel
+@{
+    ViewData["Title"] = Localizer["Nav.ContactOrganizers"].Value;
+}
+
+<div class="card">
+    <h2>@Localizer["Nav.ContactOrganizers"]</h2>
+    <p>Questions about the event, your sessions, logistics or anything else? The organizing team is here to help.</p>
+    <p style="margin-top:14px;">
+        <a class="task-link-btn" href="mailto:@Model.OrganizerEmail">&#9993; Email the organizers</a>
+    </p>
+    <p style="color:#6b7280;font-size:13px;">We usually reply within a day. You can also reach us at <a href="mailto:@Model.OrganizerEmail">@Model.OrganizerEmail</a>.</p>
+</div>

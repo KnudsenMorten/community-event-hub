@@ -175,6 +175,10 @@ public sealed class SponsorOrderPullService
             var tasksByTitleKey = new Dictionary<string, SponsorTask>(
                 StringComparer.OrdinalIgnoreCase);
             string? companyBoothNumber = null;
+            // The company's highest booth tier across every line item it ordered,
+            // stamped onto SponsorInfo.Tier below so the public sponsors page groups
+            // this company under the right tier without a manual organizer set.
+            var companyTier = BoothTier.None;
 
             foreach (var order in group)
             {
@@ -184,6 +188,10 @@ public sealed class SponsorOrderPullService
                     if (companyBoothNumber is null && !string.IsNullOrWhiteSpace(cls.BoothNumber))
                     {
                         companyBoothNumber = cls.BoothNumber;
+                    }
+                    if (BoothTierRanking.Weight(cls.Tier) > BoothTierRanking.Weight(companyTier))
+                    {
+                        companyTier = cls.Tier;
                     }
                     foreach (var st in expander.Expand(
                         cls, activeEvent.StartDate, firstOrderDate, today))
@@ -261,6 +269,36 @@ public sealed class SponsorOrderPullService
                     // next pull -- canonical source is sponsor.<edition>.json.
                     existing.Title = renderedTitle;
                     existing.Description = renderedDesc;
+                }
+            }
+
+            // Stamp the company's highest booth tier onto its SponsorInfo facts row
+            // so the PUBLIC sponsors page (/Sponsors) groups it under the right tier
+            // without an organizer setting it by hand. Idempotent + RAISE-ONLY: the
+            // pull only fills a blank tier or upgrades to a higher one, so an
+            // organizer's manual correction (e.g. a comped tier bump) is never
+            // silently downgraded on the next pull. A facts row is created lazily
+            // here when the sponsor hasn't opened their self-service info page yet,
+            // so the public listing shows the company as soon as their booth order
+            // lands. None-tier orders never create a row (nothing to show yet).
+            if (companyTier != BoothTier.None)
+            {
+                var info = await _db.SponsorInfos.FirstOrDefaultAsync(
+                    s => s.EventId == activeEvent.Id
+                         && s.SponsorCompanyId == companyId, ct);
+                if (info is null)
+                {
+                    _db.SponsorInfos.Add(new SponsorInfo
+                    {
+                        EventId = activeEvent.Id,
+                        SponsorCompanyId = companyId,
+                        Tier = companyTier,
+                    });
+                }
+                else if (BoothTierRanking.Weight(companyTier) > BoothTierRanking.Weight(info.Tier))
+                {
+                    info.Tier = companyTier;
+                    info.UpdatedAt = DateTimeOffset.UtcNow;
                 }
             }
         }

@@ -58,7 +58,7 @@ public sealed class HotelManagementService
     /// <summary>Create a hotel. Throws <see cref="ArgumentException"/> on a blank name.</summary>
     public async Task<Hotel> CreateHotelAsync(
         int eventId, string name, string? address, string? contactEmail, string? notes,
-        CancellationToken ct = default)
+        int? roomBlockSize = null, CancellationToken ct = default)
     {
         name = (name ?? string.Empty).Trim();
         if (name.Length == 0) throw new ArgumentException("Hotel name is required.", nameof(name));
@@ -70,6 +70,7 @@ public sealed class HotelManagementService
             Address = Blank(address),
             ContactEmail = Blank(contactEmail),
             Notes = Blank(notes),
+            RoomBlockSize = NormalizeBlockSize(roomBlockSize),
             CreatedAt = _clock.GetUtcNow(),
         };
         _db.Hotels.Add(hotel);
@@ -80,7 +81,7 @@ public sealed class HotelManagementService
     /// <summary>Update a hotel in place. Returns false if it does not exist in the edition.</summary>
     public async Task<bool> UpdateHotelAsync(
         int eventId, int hotelId, string name, string? address, string? contactEmail, string? notes,
-        CancellationToken ct = default)
+        int? roomBlockSize = null, CancellationToken ct = default)
     {
         name = (name ?? string.Empty).Trim();
         if (name.Length == 0) throw new ArgumentException("Hotel name is required.", nameof(name));
@@ -92,10 +93,20 @@ public sealed class HotelManagementService
         hotel.Address = Blank(address);
         hotel.ContactEmail = Blank(contactEmail);
         hotel.Notes = Blank(notes);
+        hotel.RoomBlockSize = NormalizeBlockSize(roomBlockSize);
         hotel.UpdatedAt = _clock.GetUtcNow();
         await _db.SaveChangesAsync(ct);
         return true;
     }
+
+    /// <summary>
+    /// Normalise a room-block size posted from the UI: a null clears the block
+    /// (occupancy view shows "not set"); a negative number is clamped to 0 so a
+    /// stray "-1" never recorded a nonsense block. 0 is a legitimate value (a
+    /// hotel kept for reference with no rooms held).
+    /// </summary>
+    private static int? NormalizeBlockSize(int? size) =>
+        size is null ? null : Math.Max(0, size.Value);
 
     /// <summary>
     /// Delete a hotel. Any participants placed in it are first un-assigned

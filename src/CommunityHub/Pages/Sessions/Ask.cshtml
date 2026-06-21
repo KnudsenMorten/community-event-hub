@@ -92,7 +92,7 @@
                 <div class="q-error" role="alert">@Model.ErrorMessage</div>
             }
 
-            <form method="post" novalidate>
+            <form method="post" novalidate data-ceh-loading data-ceh-dirty>
                 @* Honeypot *@
                 <div class="q-hp" aria-hidden="true">
                     <label for="Website">Leave this field empty</label>
@@ -102,7 +102,7 @@
                 <div class="q-field">
                     <label for="QuestionText">Your question <span class="hint">(required)</span></label>
                     <textarea asp-for="QuestionText" id="QuestionText" maxlength="2000" required
-                              aria-required="true"
+                              aria-required="true" data-ceh-counter="@Localizer.GetString("Common.CharCount").Value"
                               placeholder="e.g. Could you cover migrating an existing setup?"></textarea>
                 </div>
 
@@ -117,7 +117,7 @@
                 </div>
 
                 <div class="q-actions">
-                    <button type="submit">Send my question</button>
+                    <button type="submit" data-ceh-loading-text="@Localizer["Common.Sending"]">Send my question</button>
                 </div>
             </form>
         }

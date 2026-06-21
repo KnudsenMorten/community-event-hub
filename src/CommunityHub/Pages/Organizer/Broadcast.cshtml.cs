@@ -129,7 +129,7 @@ public class BroadcastModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) return Forbid();
+        if (!OrganizerAuth.IsRealOrganizer(me)) return Forbid();
 
         var tpl = BroadcastTemplates.Find(TemplateKey);
         if (tpl is null)
@@ -153,7 +153,7 @@ public class BroadcastModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) return Forbid();
+        if (!OrganizerAuth.IsRealOrganizer(me)) return Forbid();
 
         if (!Validate()) return Page();
 
@@ -175,7 +175,7 @@ public class BroadcastModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) return Forbid();
+        if (!OrganizerAuth.IsRealOrganizer(me)) return Forbid();
 
         if (!Validate()) return Page();
 
@@ -262,6 +262,15 @@ public class BroadcastModel : PageModel
             participants = await _db.Participants
                 .Where(p => p.EventId == eventId && Roles.Contains(p.Role))
                 .ToListAsync(ct);
+
+            // Universal sponsor-email audience rule (REQUIREMENTS §7c): when a
+            // broadcast targets the Sponsor role, only a company's EVENT-COORDINATOR
+            // contacts receive it (signer-only excluded, both-roles included). Drop
+            // non-coordinator sponsor rows BEFORE the pure audience filter so the
+            // previewed list equals the sent list. Non-sponsor roles are untouched.
+            participants = participants
+                .Where(p => p.Role != ParticipantRole.Sponsor || p.IsEventCoordinator)
+                .ToList();
         }
 
         List<CommunityHub.Core.Domain.Attendee> attendees = new();
@@ -316,9 +325,14 @@ public class BroadcastModel : PageModel
         var subject = BroadcastTemplates.Substitute(Subject.Trim(), values);
         var bodyText = BroadcastTemplates.Substitute(Message, values);
 
+        // The renderer HTML-encodes plain tokens at the seam (the {{subject}}
+        // header stays plain, {{firstName}} is encoded for the body), so pass
+        // raw values here. messageHtml is the organizer's free text turned into
+        // safe paragraph HTML (each paragraph already encoded) — a raw-HTML
+        // token that must pass through verbatim. REQUIREMENTS §10c-4.
         var tokens = _templates.NewTokenSet();
-        tokens["subject"] = System.Net.WebUtility.HtmlEncode(subject);
-        tokens["firstName"] = System.Net.WebUtility.HtmlEncode(values["FirstName"]);
+        tokens["subject"] = subject;
+        tokens["firstName"] = values["FirstName"];
         tokens["messageHtml"] = ToParagraphHtml(bodyText);
         return _templates.Render("broadcast", tokens);
     }

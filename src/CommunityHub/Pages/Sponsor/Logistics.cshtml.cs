@@ -1,5 +1,6 @@
 using CommunityHub.Auth;
 using CommunityHub.Core.Config;
+using CommunityHub.Core.Domain;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
@@ -28,6 +29,9 @@ public class LogisticsModel : PageModel
         _eventConfigOptions = eventConfigOptions;
     }
 
+    /// <summary>Set when a non-sponsor reaches the page (server-side gate, not CSS).</summary>
+    public bool AccessDenied { get; private set; }
+
     public string? ExhibitorGuideUrl { get; private set; }
     public string? VenueFloorPlanUrl { get; private set; }
     public string? FreightContactPhone { get; private set; }
@@ -35,12 +39,26 @@ public class LogisticsModel : PageModel
     public string? ShippingAddressDsv { get; private set; }
     public string EditionCode { get; private set; } = string.Empty;
 
+    /// <summary>Key-dates panel data (same source/shape Tasks used before the panel moved here).</summary>
+    public EditionDates? EventDates { get; private set; }
+
     public IActionResult OnGet()
     {
-        if (_participant.Current is null) return RedirectToPage("/Login");
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+
+        // Server-enforced role gate — the sponsor logistics page is for the Sponsor role only.
+        if (me.Role != ParticipantRole.Sponsor)
+        {
+            AccessDenied = true;
+            return Page();
+        }
 
         var cfg = _eventConfigLoader.Load(_eventConfigOptions.EventConfigPath);
         EditionCode = cfg.Code ?? string.Empty;
+        // Key dates panel data — same single-read load Tasks used (the partial
+        // tolerates a null model). Moved here from Sponsor/Tasks.
+        EventDates = cfg.Dates;
         cfg.Placeholders.TryGetValue("exhibitorGuideUrl",   out var g); ExhibitorGuideUrl   = g;
         cfg.Placeholders.TryGetValue("venueFloorPlanUrl",   out var v); VenueFloorPlanUrl   = v;
         cfg.Placeholders.TryGetValue("freightContactPhone", out var fp); FreightContactPhone = fp;

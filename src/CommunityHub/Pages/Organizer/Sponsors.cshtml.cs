@@ -97,7 +97,7 @@ public class SponsorsModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+        if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
 
         var result = await _infoDeletion.DeleteAsync(me.EventId, sponsorInfoId, ct);
         switch (result.Status)
@@ -123,7 +123,7 @@ public class SponsorsModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+        if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
 
         var contacts = await _db.Participants
             .Where(p => p.EventId == me.EventId && p.Role == ParticipantRole.Sponsor)

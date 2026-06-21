@@ -1,5 +1,8 @@
+using CommunityHub.Core.Data;
 using CommunityHub.Core.Integrations;
+using CommunityHub.Core.Settings;
 using Microsoft.Azure.Functions.Worker;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
 namespace CommunityHub.Jobs;
@@ -21,6 +24,8 @@ public sealed class BackstageSyncJob
     private readonly BackstageSyncService _sync;
     private readonly BackstageSyncOptions _options;
     private readonly TestModeOptions _testMode;
+    private readonly CommunityHubDbContext _db;
+    private readonly FeatureGateService _gate;
     private readonly ILogger<BackstageSyncJob> _log;
 
     public BackstageSyncJob(
@@ -28,12 +33,16 @@ public sealed class BackstageSyncJob
         BackstageSyncService sync,
         BackstageSyncOptions options,
         TestModeOptions testMode,
+        CommunityHubDbContext db,
+        FeatureGateService gate,
         ILogger<BackstageSyncJob> log)
     {
         _woo = woo;
         _sync = sync;
         _options = options;
         _testMode = testMode;
+        _db = db;
+        _gate = gate;
         _log = log;
     }
 
@@ -46,6 +55,30 @@ public sealed class BackstageSyncJob
         if (!_options.Enabled)
         {
             _log.LogInformation("BackstageSyncJob: disabled by config.");
+            return;
+        }
+
+        // GATE (REQUIREMENTS §23): the Backstage/Zoho sync is an advanced feature,
+        // off by default. This job is fleet-wide (not edition-scoped), so it runs
+        // only while at least one active edition has 'backstage-sync' enabled; when
+        // every active edition has it off the job no-ops (no Backstage calls / sends).
+        var activeEventIds = await _db.Events
+            .Where(e => e.IsActive)
+            .Select(e => e.Id)
+            .ToListAsync(ct);
+        var anyEnabled = false;
+        foreach (var id in activeEventIds)
+        {
+            if (await _gate.IsFeatureEnabledAsync("backstage-sync", id, ct))
+            {
+                anyEnabled = true;
+                break;
+            }
+        }
+        if (!anyEnabled)
+        {
+            _log.LogInformation(
+                "BackstageSyncJob: feature 'backstage-sync' disabled for all active editions, skipped.");
             return;
         }
 

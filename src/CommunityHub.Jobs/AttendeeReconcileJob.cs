@@ -3,6 +3,7 @@ using CommunityHub.Core.Domain;
 using CommunityHub.Core.Email;
 using CommunityHub.Core.Integrations;
 using CommunityHub.Core.Reminders;
+using CommunityHub.Core.Settings;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -25,6 +26,7 @@ public sealed class AttendeeReconcileJob
     private readonly ReminderEngine _engine;
     private readonly EmailTemplateProvider _templates;
     private readonly TimeProvider _clock;
+    private readonly FeatureGateService _gate;
     private readonly ILogger<AttendeeReconcileJob> _log;
 
     public AttendeeReconcileJob(
@@ -35,6 +37,7 @@ public sealed class AttendeeReconcileJob
         ReminderEngine engine,
         EmailTemplateProvider templates,
         TimeProvider clock,
+        FeatureGateService gate,
         ILogger<AttendeeReconcileJob> log)
     {
         _db = db;
@@ -44,6 +47,7 @@ public sealed class AttendeeReconcileJob
         _engine = engine;
         _templates = templates;
         _clock = clock;
+        _gate = gate;
         _log = log;
     }
 
@@ -69,6 +73,17 @@ public sealed class AttendeeReconcileJob
             return;
         }
         var eventId = activeEvent.Id;
+
+        // GATE (REQUIREMENTS §23): attendee reconciliation is an advanced feature,
+        // off by default. When disabled for this edition the job no-ops — no Zoho
+        // pull, no attendee upserts, no chaser reminders sent.
+        if (!await _gate.IsFeatureEnabledAsync("attendee-reconcile", eventId, ct))
+        {
+            _log.LogInformation(
+                "AttendeeReconcileJob: event {EventId} — feature 'attendee-reconcile' disabled, skipped.",
+                eventId);
+            return;
+        }
 
         var token = await _zoho.GetAccessTokenAsync(ct);
         if (token is null)
@@ -184,16 +199,18 @@ public sealed class AttendeeReconcileJob
         string? template = null;
         string? occasion = null;
 
+        // Token values are HTML-encoded by the renderer at the seam
+        // (EmailTemplateRenderer, REQUIREMENTS §10c-4) — pass raw text.
         var tokens = _templates.NewTokenSet();
-        tokens["firstName"] = Enc(string.IsNullOrWhiteSpace(r.FirstName) ? "there" : r.FirstName);
-        tokens["eventDisplayName"] = Enc(eventDisplayName);
+        tokens["firstName"] = string.IsNullOrWhiteSpace(r.FirstName) ? "there" : r.FirstName;
+        tokens["eventDisplayName"] = eventDisplayName;
 
         // 3. Duplicate booking.
         if (bookingStatus == MasterClassBookingStatus.MultipleBookings)
         {
             template = "attendee-duplicate-booking";
             occasion = $"dup:{r.Email}";
-            tokens["masterClassList"] = Enc(string.Join(", ", r.MasterClassNames));
+            tokens["masterClassList"] = string.Join(", ", r.MasterClassNames);
         }
         // 1. Has 2-day ticket, no booking.
         else if (ticketStatus == TicketStatus.TwoDay
@@ -216,6 +233,4 @@ public sealed class AttendeeReconcileJob
         return new ReminderMessage(
             r.Email, template, occasion!, rendered.Subject, rendered.HtmlBody);
     }
-
-    private static string Enc(string s) => System.Net.WebUtility.HtmlEncode(s);
 }

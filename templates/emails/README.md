@@ -23,35 +23,108 @@ Beautiful, manageable email - without fighting email clients.
 - Placeholder tokens are `{{token}}`, filled by the app at send time.
 - Content templates contain NO `<html>`/`<body>` - only the inner content.
 
-## Common tokens (every template)
+## Supported variables — the source of truth
+
+> Every token below is **resolved by code** (file:line cited). A token a template
+> uses but no code fills resolves to an **empty string** (the renderer never
+> crashes — `EmailTemplateRenderer.cs:67-73`). Do not add a `{{token}}` to a
+> template unless a sender actually fills it.
+
+### Branding tokens (auto-filled on EVERY branded email)
+
+`EmailTemplateProvider.NewTokenSet()` (`EmailTemplateProvider.cs:63-69`) seeds
+these from `event.<edition>.json`; the renderer also injects `bodyContent` +
+`subject` into `_layout.html` (`EmailTemplateRenderer.cs:57-61`).
 
 | Token | Filled with |
 |-------|-------------|
-| `{{firstName}}` / `{{fullName}}` | Recipient name |
-| `{{communityName}}` | From `event.<edition>.json` |
-| `{{eventDisplayName}}` | e.g. ELDK27 Crew Hub |
+| `{{brandColor}}` | Edition brand colour (theming `_layout.html`) |
+| `{{logoUrl}}` | Public logo URL (theming `_layout.html`) |
+| `{{supportEmail}}` | Configured support address |
 | `{{hubUrl}}` | Link to the hub |
-| `{{brandColor}}` / `{{logoUrl}}` | Brand theming (used by `_layout.html`) |
-| `{{senderName}}` / `{{supportEmail}}` | Configured sender / support address |
+| `{{subject}}` / `{{bodyContent}}` | Filled by the renderer into the layout |
 
-## Template-specific tokens
+### Common per-recipient tokens
 
-- **Deadline reminders** (`speaker-deadline-reminder`, `task-deadline-reminder`):
-  `{{taskTitle}}`, `{{dueDate}}`, `{{state}}`, `{{taskLink}}`.
-- **List digests** (`speaker-pending-tasks`, `sponsor-overdue`):
-  `{{taskListHtml}}` - a pre-rendered list of the person's open/overdue tasks.
-- **Sponsor templates** also have `{{sponsorCompany}}`.
-- **Sponsor onboarding / booth templates** (a sponsor-welcome template, to be
-  added): `{{boothTier}}`, `{{boothWallSize}}`, `{{boothWallSpecUrl}}` (the
-  design-spec PDF the sponsor must design their booth wall to) and
-  `{{boothCoupon}}`. These come from `sponsor.<edition>.json → boothWallSpecs`,
-  resolved by the sponsor's booth tier. A non-booth sponsor leaves them blank.
-- **Incomplete-form chaser**: `{{formName}}`, `{{formDeadline}}`.
-- **Welcome with auto-login** (`welcome-login`, DEV-only): `{{eventCode}}`,
-  `{{roleName}}` (friendly role noun, e.g. "speaker" / "sponsor contact"),
-  `{{roleLine}}` (the one role-specific sentence), and `{{loginUrl}}` (the real
-  magic-link `/Login/Magic?token=…` that signs the recipient in automatically).
-  Sent as HTML + a plain-text alternative; single CTA "Open my Event Hub".
+Most per-person templates go through `ParticipantEmailService` base tokens
+(`ParticipantEmailService.cs:83-91`): `{{firstName}}`, `{{communityName}}`,
+`{{eventDisplayName}}`, `{{roleName}}`. Other senders set the same names
+themselves.
+
+| Token | Filled with | Resolved at |
+|-------|-------------|-------------|
+| `{{firstName}}` | Recipient first name (falls back to "there") | `ParticipantEmailService.cs:84` and per-sender |
+| `{{communityName}}` | Community name from config | `ParticipantEmailService.cs:85` |
+| `{{eventDisplayName}}` | Edition display name, e.g. *ELDK27 Crew Hub* | `ParticipantEmailService.cs:86` |
+| `{{roleName}}` | Friendly role noun (e.g. "speaker") | `ParticipantEmailService.cs:87` |
+
+> There is **no `{{fullName}}` and no `{{senderName}}`** — no code fills them.
+> They were documented here historically but resolve to blank; do not use them.
+
+### Per-template tokens (the exact set each sender fills)
+
+| Template | Sender (file:line) | Template-specific tokens |
+|----------|--------------------|--------------------------|
+| `welcome` | `WelcomeEmailService.cs:82-87` | `{{roleGuidance}}` |
+| `welcome-login` *(DEV-only)* | `WelcomeWithLoginEmailService.cs:128-135` | `{{eventCode}}`, `{{roleLine}}`, `{{loginUrl}}` (magic-link `/Login/Magic?token=…`) |
+| `invitation` | `SendInvitations.cshtml.cs:101-106` | `{{eventCode}}`, `{{magicLink}}` (note: `{{roleName}}` here is the raw enum) |
+| `task-deadline-reminder` | `TaskReminderBuilder.cs:101-108` | `{{taskTitle}}`, `{{dueDate}}`, `{{state}}`, `{{taskLink}}` |
+| `task-manual-reminder` | `SpeakerReminders.cshtml.cs:217-236` | `{{eventCode}}`, `{{taskTitle}}`, `{{dueText}}` *(raw HTML)*, `{{descriptionBlock}}` *(raw HTML)* |
+| `travel-reimbursement-paid` | `TravelReimbursements.cshtml.cs:102-107` | `{{eventCode}}`, `{{amount}}`, `{{notesBlock}}` |
+| `group-photo-invite` | `GroupPhotos.cshtml.cs:154-159` | `{{contactName}}`, `{{companyName}}`, `{{slotTime}}`, `{{location}}` |
+| `app-game-gift-reminder` | `AppGame.cshtml.cs:171-176` | `{{companyName}}`, `{{giftDescription}}` |
+| `volunteer-help-raised` | `VolunteerHelpNotificationService.cs:105-111` | `{{volunteerName}}`, `{{categoryName}}`, `{{taskTitle}}`, `{{helpMessage}}` |
+| `speaker-question-digest` | `SpeakerQuestionDigestService.cs:153-161` | `{{openCount}}`, `{{sessionCount}}`, `{{openCountNoun}}`, `{{sessionCountNoun}}` |
+| `onboarding-getting-started`, `onboarding-your-tasks` | `OnboardingEmailService.cs:68-70` | *(base tokens only)* |
+| `onboarding-step-reset` | `OnboardingStepResetEmailService.cs:60` | `{{stepLabel}}` |
+| `sponsor-leads-digest` | `SponsorLeadsJob.cs:135-139` | `{{sponsorCompany}}`, `{{leadCount}}`, `{{leadListHtml}}` |
+| `attendee-missing-booking`, `attendee-missing-ticket` | `AttendeeReconcileJob.cs:202-211` | *(base tokens only)* |
+| `attendee-duplicate-booking` | `AttendeeReconcileJob.cs:202-211` | `{{masterClassList}}` |
+| `broadcast` | `Broadcast.cshtml.cs:308-325` | `{{messageHtml}}` (see broadcast note below) |
+
+### HTML-encoding contract — "encode at the seam"
+
+`EmailTemplateRenderer` **HTML-encodes every token value** as it substitutes it
+into the **HTML body**, so a name/title containing `<`, `&` or `"` renders as
+readable text and can never break the markup. **Senders pass raw values — do not
+pre-encode** (that would double-encode). The exception is tokens whose value is a
+deliberately sender-built **HTML fragment**: these are identified by the
+**`Html` / `Block` naming suffix** (e.g. `{{leadListHtml}}`, `{{taskListHtml}}`,
+`{{messageHtml}}`, `{{descriptionBlock}}`, `{{notesBlock}}`) plus the explicit
+set `{{bodyContent}}` / `{{dueText}}`, and pass through **verbatim** (a sender
+building such a fragment still encodes its own untrusted leaf values). The
+**`Subject:` header** is plain text and is **not** encoded. When adding a token:
+name a free-text value plainly (it gets encoded for free) and a markup fragment
+with the `…Html` / `…Block` suffix (so it is treated as raw).
+
+### Organizer-authored broadcast — a SEPARATE `{Token}` syntax
+
+The Organizer **Broadcast** page (`/Organizer/Broadcast`) lets an organizer type
+a free subject + body. There, personalization uses **single-brace `{Token}`**
+(not `{{token}}`), resolved by `BroadcastTemplates.Substitute`
+(`BroadcastTemplate.cs:99-110`) before the text is poured into the branded
+`broadcast.html` shell. The supported set is intentionally tiny
+(`BroadcastTemplate.cs:34-39`):
+
+| Token | Filled with |
+|-------|-------------|
+| `{FirstName}` | Recipient first name (falls back to "there") |
+| `{EventName}` | Edition display name |
+
+An unknown `{Token}` is left **verbatim** (a mistyped `{Foo}` survives). The page
+shows an inline legend (meaning + example + click-to-insert) driven by
+`BroadcastTemplates.TokenHelp`, so the GUI can never advertise a token the engine
+does not substitute (guarded by `BroadcastTokenLegendTests`).
+
+### Templates present but not wired to a live sender
+
+`incomplete-form-chaser.html` (`{{formName}}`, `{{formDeadline}}`),
+`sponsor-overdue.html`, `speaker-deadline-reminder.html` and
+`speaker-pending-tasks.html` exist but have no live send path yet; they render
+only via the Email Center **preview / test-send** with sample values
+(`EmailCenter.cshtml.cs` `BuildSampleTokensAsync`). No booth tokens
+(`boothTier`/`boothWallSize`/`boothWallSpecUrl`/`boothCoupon`) are wired — they
+are a future idea, not a supported variable today.
 
 ## Rules
 

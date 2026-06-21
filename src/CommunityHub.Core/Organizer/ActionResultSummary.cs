@@ -93,7 +93,7 @@ public sealed record ActionResultSummary
 /// No DB, no clock, no I/O — fully unit-testable. The format strings keep the
 /// localizable shape in one place; callers pass an already-localized
 /// <c>formats</c> bundle (or the built-in English defaults) so the same shaping
-/// serves en + da-DK.
+/// serves the English UI.
 /// </summary>
 public static class ActionResultSummarizer
 {

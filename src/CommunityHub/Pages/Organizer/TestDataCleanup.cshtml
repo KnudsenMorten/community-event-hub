@@ -1,0 +1,101 @@
+@page
+@model CommunityHub.Pages.Organizer.TestDataCleanupModel
+@{
+    ViewData["Title"] = Localizer["TestCleanup.Title"].Value;
+    var p = Model.Preview;
+}
+
+<div class="card">
+    <h2>&#129529; @Localizer["TestCleanup.Title"]</h2>
+
+    @if (Model.AccessDenied)
+    {
+        <p class="error" role="alert">@Localizer["Common.OrganizersOnly"]</p>
+        <p><a asp-page="/Organizer/Setup">&larr; @Localizer["Common.BackToOrganizerArea"]</a></p>
+    }
+    else
+    {
+        <p>@Localizer["TestCleanup.Intro"]</p>
+
+        @if (Model.DoneMessage is not null)
+        {
+            var parts = Model.DoneMessage.Split('|');
+            var hd = parts.Length > 0 ? parts[0] : "0";
+            var da = parts.Length > 1 ? parts[1] : "0";
+            <p class="info" role="status"
+               style="background:#f0fdf4;border:1px solid #16a34a;padding:8px 12px;border-radius:6px;">
+                @Localizer["TestCleanup.DoneFlash", hd, da]
+            </p>
+        }
+
+        @if (p is null || !p.Any)
+        {
+            <div role="status"
+                 style="background:#fafbfc;border:1px dashed #d0d4dd;border-radius:10px;padding:24px 18px;text-align:center;color:#5a6170;">
+                <strong>@Localizer["TestCleanup.NoneHeading"]</strong>
+                <p style="margin:6px 0 0 0;">@Localizer["TestCleanup.None"]</p>
+            </div>
+        }
+        else
+        {
+            <p role="status" style="font-weight:600;">
+                @Localizer["TestCleanup.Summary", p.Total, p.WouldHardDelete, p.WouldDeactivate]
+            </p>
+
+            <div style="overflow-x:auto;">
+                <table style="width:100%;border-collapse:collapse;font-size:14px;">
+                    <caption class="sr-only">@Localizer["TestCleanup.Title"]</caption>
+                    <thead>
+                        <tr style="text-align:left;border-bottom:2px solid #e2e6ee;">
+                            <th style="padding:8px 10px;">@Localizer["TestCleanup.ColName"]</th>
+                            <th style="padding:8px 10px;">@Localizer["TestCleanup.ColEmail"]</th>
+                            <th style="padding:8px 10px;">@Localizer["TestCleanup.ColRole"]</th>
+                            <th style="padding:8px 10px;">@Localizer["TestCleanup.ColOutcome"]</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var row in p.Rows)
+                        {
+                            <tr style="border-bottom:1px solid #eef0f5;">
+                                <td style="padding:8px 10px;">@row.FullName</td>
+                                <td style="padding:8px 10px;word-break:break-all;">@row.Email</td>
+                                <td style="padding:8px 10px;">@row.Role</td>
+                                <td style="padding:8px 10px;">
+                                    @if (row.WouldHardDelete)
+                                    {
+                                        <span style="color:#991b1b;font-weight:600;">@Localizer["TestCleanup.WillDelete"]</span>
+                                    }
+                                    else
+                                    {
+                                        <span style="color:#7a5a00;font-weight:600;">@Localizer["TestCleanup.WillDeactivate"]</span>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+
+            <form method="post" style="margin-top:16px;">
+                @* Confirm-gated destructive action (REQUIREMENTS §21). With JS off
+                   the button submits directly; the service is idempotent + safe. *@
+                <button type="submit" asp-page-handler="Cleanup"
+                        data-ceh-confirm="confirmTestCleanup"
+                        data-ceh-count="@p.Total">
+                    @Localizer["TestCleanup.Run"]
+                </button>
+            </form>
+
+            <partial name="_ConfirmModal" model='new CommunityHub.Pages.Shared.ConfirmModalModel(
+                Id: "confirmTestCleanup",
+                Title: Localizer["TestCleanup.ConfirmTitle"].Value,
+                Body: Localizer["TestCleanup.ConfirmBody", "{count}"].Value,
+                ConfirmLabel: Localizer["TestCleanup.Run"].Value,
+                CancelLabel: Localizer["Common.Cancel"].Value,
+                Danger: true,
+                DefaultCount: p.Total.ToString())' />
+        }
+
+        <p style="margin-top:16px;"><a asp-page="/Organizer/Setup">&larr; @Localizer["Common.BackToOrganizerArea"]</a></p>
+    }
+</div>

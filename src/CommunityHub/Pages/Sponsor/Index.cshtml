@@ -2,13 +2,21 @@
 @using CommunityHub.Core.Domain
 @model CommunityHub.Pages.Sponsor.IndexModel
 @{
-    ViewData["Title"] = "Sponsor Engagement Details";
+    ViewData["Title"] = "Sponsor Webshop";
 }
 
-@if (Model.NoCompanyLink)
+@if (Model.AccessDenied)
 {
     <div class="card">
-        <h2>Sponsor Engagement Details</h2>
+        <h2>Sponsor Webshop</h2>
+        <p class="error">This page is for sponsors only.</p>
+        <p><a asp-page="/Index">Back to hub</a></p>
+    </div>
+}
+else if (Model.NoCompanyLink)
+{
+    <div class="card">
+        <h2>Sponsor Webshop</h2>
         <p class="error">Your sponsor account is not yet linked to a company,
            so we cannot show your details. Please contact the organizers.</p>
         <p><a asp-page="/Index">Back to hub</a></p>
@@ -29,7 +37,35 @@ else
     }
 
     <div class="card">
-        <h2>Sponsor Engagement Details</h2>
+        <h2>Sponsor Webshop</h2>
+
+        @* Self-service company profile (logo + short description + overview),
+           entered via Sponsor Tasks → "Upload Company information" (SponsorInfo).
+           Logo source: SponsorInfo.LogoRasterPath (raster only; vector EPS/AI/PDF
+           is dropped as non-browser-renderable). Shown above the Company Manager
+           facts so the sponsor sees their own profile first. *@
+        @if (!string.IsNullOrWhiteSpace(Model.LogoPath)
+             || !string.IsNullOrWhiteSpace(Model.CompanyDescriptionShort)
+             || !string.IsNullOrWhiteSpace(Model.CompanyDescription))
+        {
+            <div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap;margin:0 0 18px;">
+                @if (!string.IsNullOrWhiteSpace(Model.LogoPath))
+                {
+                    <img src="@Model.LogoPath" alt="Company logo"
+                         style="max-width:120px;max-height:120px;object-fit:contain;border:1px solid #e5e7eb;border-radius:6px;padding:6px;background:#fff;" />
+                }
+                <div style="flex:1;min-width:220px;">
+                    @if (!string.IsNullOrWhiteSpace(Model.CompanyDescriptionShort))
+                    {
+                        <p style="margin:0 0 8px;font-size:16px;font-weight:600;color:var(--el-darkblue);">@Model.CompanyDescriptionShort</p>
+                    }
+                    @if (!string.IsNullOrWhiteSpace(Model.CompanyDescription))
+                    {
+                        <p style="margin:0;font-size:15px;color:#444;white-space:pre-wrap;">@Model.CompanyDescription</p>
+                    }
+                </div>
+            </div>
+        }
 
         @if (Model.CompanyDetails is not null)
         {
@@ -93,14 +129,19 @@ else
                 </tr>
             </table>
 
-            @if (!string.IsNullOrWhiteSpace(Model.ConfiguratorUrl))
-            {
-                <p style="margin:16px 0 4px;">
+            <p style="margin:16px 0 4px;display:flex;gap:10px;flex-wrap:wrap;">
+                @* "Change" -> Zoho exhibitor profile (logo, company overview / short
+                   description live there). Operator 2026-06-21. *@
+                <a class="task-link-btn" href="https://eldk27.expertslive.dk/#/exhibitor-dashboard/booth-info" target="_blank" rel="noopener noreferrer">
+                    Change company details (logo, description) &rarr;<span class="visually-hidden">@Localizer["Common.OpensNewTab"]</span>
+                </a>
+                @if (!string.IsNullOrWhiteSpace(Model.ConfiguratorUrl))
+                {
                     <a class="task-link-btn" href="@Model.ConfiguratorUrl" target="_blank" rel="noopener noreferrer">
                         Update in webshop &rarr;
                     </a>
-                </p>
-            }
+                }
+            </p>
         }
         else
         {
@@ -111,7 +152,7 @@ else
         }
 
         @* --- Sponsor orders (filtered to this company, inside the date window) --- *@
-        <h3 style="font-size:17px;color:var(--el-darkblue);margin:22px 0 8px;">Sponsor orders</h3>
+        <h3 id="orders" style="font-size:17px;color:var(--el-darkblue);margin:22px 0 8px;">Sponsor orders</h3>
         <p style="margin:0 0 10px;color:#555;font-size:14px;">
             Completed orders we have on file for your company in the current sales window.
             If something is missing, log in to the sponsor configurator and check the order status there.
@@ -160,7 +201,7 @@ else
         }
 
         @* --- Linked contacts --- *@
-        <h3 style="font-size:17px;color:var(--el-darkblue);margin:22px 0 8px;">Linked contacts</h3>
+        <h3 id="linked-contacts" style="font-size:17px;color:var(--el-darkblue);margin:22px 0 8px;">Linked contacts</h3>
         <p style="margin:0 0 10px;color:#555;font-size:14px;">
             Anyone listed here can sign in to the hub and manage the shared task list for your company.
             To add or remove a contact, update the sponsor webshop &mdash; the hub syncs on the next pull.

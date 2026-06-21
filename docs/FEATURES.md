@@ -1,6 +1,6 @@
 # Community Event Hub — Feature Catalog
 
-*Delivered feature set, as of 2026-06-14.*
+*Delivered feature set, as of 2026-06-21.*
 
 Community Event Hub (CEH) is the all-in-one workspace that runs a tech-community
 conference end to end: one home for your organizers, speakers, volunteers,
@@ -46,6 +46,16 @@ Hosting & Reliability.
   entirely as edition settings (no developer needed); links and downloads are
   grouped into tidy sections, and the page shows a friendly "nothing here yet"
   message until content is added. *(✅ 2026-06-15)*
+- **Go-live test-data cleanup — clear the rehearsal cast in one click.** ✅ 2026-06-18 —
+  while you set the hub up you can seed a synthetic test cast (speakers, sponsors,
+  volunteers, attendees) to rehearse every flow. Before the edition goes live, a
+  single organizer page lists everyone marked as a test user and clears them out so
+  they never skew your real counts, exports or emails. It is safe by design: a clean
+  test person is removed outright, but a test person who picked up real-looking data
+  during the rehearsal is kept and simply deactivated instead of deleted, so nothing
+  can be left dangling — and your genuine registrations are never touched. You see
+  exactly who will go (and what happens to each) before you confirm, and the action
+  can be re-run any time.
 
 ## 2. Sign-in & embedding — frictionless, no new passwords
 
@@ -59,6 +69,14 @@ Hosting & Reliability.
   refreshes itself as you keep using the hub.
 - **Magic-link login.** Invitation emails can carry a tap-to-sign-in link, so crew
   land straight in their hub without typing a PIN.
+- **Never a dead end — gentle sign-in recovery.** ✅ 2026-06-17 — if a tap-to-sign-in
+  link has expired (or is otherwise no longer valid), the page doesn't leave anyone
+  stuck: it explains what happened and offers a one-tap **"Request a new sign-in
+  code"** that takes the person to the email + code sign-in — and, when the expired
+  link is recognised, it pre-fills their email and remembers where the link was
+  taking them, so they get a fresh code and land on the right page without retyping
+  anything. A deactivated account is told to contact the organizers instead. Fully
+  bilingual (English / Dansk) and mobile-friendly.
 - **Pre-filled login links.** A link of the form `/Login?email=<address>` opens the
   sign-in page with the email already filled in, so a person only has to request their
   code — a small convenience that never bypasses the PIN. It works in every environment
@@ -69,6 +87,14 @@ Hosting & Reliability.
 - **Embeds safely in your event portal.** The hub can appear inside your existing
   conference platform (e.g. a Backstage portal) as a seamless embedded panel, with
   the security controls needed to keep that safe.
+- **Anonymous visitors go straight to sign-in.** *(✅ 2026-06-21)* The separate public
+  landing page was removed; someone who isn't signed in now lands directly on the
+  **sign-in** page. The public, no-login programme pages (Sessions, Speakers, Sponsors,
+  Master Classes, Agenda) remain reachable by their own addresses.
+- **Sign-in sessions survive a deploy.** *(✅ 2026-06-21)* Sessions now persist across
+  releases — a deploy no longer signs everyone out — because the hub uses a **shared
+  data-protection key ring** rather than per-instance keys. People stay signed in
+  through an update.
 
 ## 3. Crew profiles & roles — the right hub for each person
 
@@ -188,6 +214,29 @@ coordinator is not chased down for every change.
   first at ~360px, with labelled controls and a status region for screen readers.
   *(No self event-check-in / live headcount — that stays in Zoho Backstage.)*
 
+### Volunteer self-service, unified — one schedule, your availability, signup *(✅ 2026-06-21)*
+
+The volunteer experience now gathers everything a volunteer manages into one place,
+keeps the supervisor tools out of an ordinary volunteer's way, and opens a no-login
+way to sign up.
+
+- **One unified "My Schedule".** Assigned **shifts and tasks** now live on a single
+  page, each with the actions a volunteer needs: **confirm**, **decline**,
+  **request-swap**, **withdraw**, and **ask-for-help** — so a volunteer manages their
+  whole commitment in one view instead of two.
+- **My Availability — tell organizers when you can work.** A volunteer sets their
+  availability **per event day**: **full**, **half** or **blocked** — so planners know
+  who is free before they assign work.
+- **An anonymous shift-signup survey at `/volunteer/signup`.** A no-login page lets a
+  prospective volunteer sign up — capturing their **identity and shift availability** —
+  which lands in the normal validation queue, just like other interest-form sign-ups.
+- **The Supervisor dashboard shows only to actual supervisors.** The supervisor tools
+  are now shown **only to volunteers who actually run a category**, so an ordinary
+  volunteer's hub stays focused on their own work.
+- **An Event-logistics fold-out and action guidance.** The volunteer hub carries a
+  fold-out with the practical **event logistics** plus short action guidance, so a
+  volunteer knows what to do and where to find it. Mobile-first, in English and Danish.
+
 ### Volunteer Buckets & resource allocation — plan staffing, then commit *(✅ 2026-06-15)*
 
 On top of the work structure, organizers get a planning surface that turns a long
@@ -284,6 +333,17 @@ place each person in the right one, then manage the room block per hotel.
   obvious a hotel has no one in it yet.
 - **A confirmation number per person.** Once a hotel returns a reservation number,
   the organizer records it against that person.
+- **Room-block occupancy at a glance.** *(✅ 2026-06-17)* Each hotel can carry the
+  **size of the room block** you reserved there (set it on the hotel's edit form). A
+  new **Room block occupancy** page then shows, per hotel, the reserved block against
+  the number of people you've placed there — counting only those who actually said
+  they need a room — with the rooms still free and a clear **within block / over by N /
+  no block set** status. A roll-up across all hotels shows your total reserved rooms,
+  how many room-needers are placed, how many rooms are still free, and — importantly —
+  **how many people who need a room aren't placed in any hotel yet**, so it's obvious
+  whether the room plan still holds. A green banner confirms when everything fits; an
+  amber one flags exactly what needs attention. Read-only (it doesn't move anyone),
+  mobile-first and available in English and Danish.
 - **The hotel details land in the person's email.** When a participant's hotel
   calendar invite/email goes out, it now names their **assigned hotel, its address and
   their confirmation number** (the per-person number takes priority over any legacy
@@ -392,6 +452,26 @@ follow-up automatically.
   for that session (with an open-question count), and — once they're announced — a
   link to their public session page. Speakers see exactly how and where they
   present without asking an organizer. *(✅ 2026-06-16)*
+- **A My Sessions hub — every session as a card with its own actions.** *(✅ 2026-06-21)*
+  The speaker's sessions are now laid out as a **per-session grid**, each card carrying
+  the actions for that talk: **SoMe Promote** (build a share post), **Calendar Sync**
+  (download the session `.ics`), an **Evaluations** link once results are published, and
+  a **Session Template**. A small **per-session action legend** explains what each action
+  does, so a speaker manages each talk in place. Mobile-first, in English and Danish.
+- **Bio is now a dedicated bio-only page.** *(✅ 2026-06-21)* A speaker's public bio lives
+  on its own focused page, separate from their personal details, so editing the bio is a
+  single clear task. The other **speaker details — preferred email, accreditation,
+  country, gender and "first-time speaker"** — have moved to **My Profile**, keeping each
+  page about one thing.
+- **Speaking days are derived automatically.** *(✅ 2026-06-21)* A speaker's **speaking
+  days** are now worked out from their accepted sessions rather than asked for separately,
+  and are shown and managed on the organizer **Speakers** page — so the days a speaker is
+  needed always match the sessions on the agenda.
+- **A Calendar + Event-logistics fold-out for speakers.** *(✅ 2026-06-21)* The speaker
+  hub now carries a fold-out covering the practical event logistics a speaker needs —
+  **hotel, dinner, lunch, speaker gift and travel** — plus a one-tap **Contact
+  Organizers**, so everything a speaker needs for the day is gathered in one place.
+  Mobile-first, in English and Danish.
 - **See how your sessions were rated.** A speaker now has a self-service "My session
   ratings" page: for each of their own sessions it shows how attendees rated it
   (the quick 1–5 smiley score they leave via the room QR code), the average and
@@ -437,6 +517,29 @@ follow-up automatically.
   controls calendar sync for the whole edition — when off, the personal feed and
   the activation invite are disabled and the "Add to my calendar" card is hidden.
   *(✅ 2026-06-15)*
+- **Preview your own calendar feed before you share it.** Right on the calendar
+  settings page, an organizer now sees a read-only preview of exactly what their
+  personal calendar feed contains — each item with its date and where it happens —
+  so they can confirm the feed looks right before passing the subscribe link along.
+  *(✅ 2026-06-18)*
+- **Key dates, tailored to each role — and synced to your calendar.** Everyone now
+  sees a short table of the dates that actually apply to them: move-in, logistics,
+  packing, setup, pre-day/master-class and main day, plus the timed moments on the
+  pre-day (Party 16:00, Group photo 17:30, Appreciation Dinner 18:00). A speaker
+  never sees move-in; sponsors don't see the group photo — each entry is shown only
+  to the roles it's tagged for (**Media** covers both the video and photo crew).
+  Every row carries a one-tap **"+ calendar"** download, and the whole list is part
+  of the personal calendar feed, so dates land in your own calendar and stay current.
+  Organizers manage it all at **Schedule / key dates** (reached from the Logistics
+  hub) — add/remove entries, mark them all-day or timed, and tick which roles see
+  each one; sensible defaults are seeded automatically. *(✅ 2026-06-20)*
+- **Anyone can RSVP to the Party — no login.** A public page at **`/Party`** asks for
+  name + email and an opt-in to attend the Party (16:00–18:00 on the pre-day). It's
+  spam-hardened (honeypot + IP hash), upserts by email (re-submit to change your
+  mind), and offers an **"Add to my calendar"** download on confirmation — no email
+  invite (so no inbox needed, no spam risk). Organizers get the **attending
+  headcount** + a CSV at **Party RSVPs** (Logistics hub) — the figure for the Bella
+  Center food order. Signing up grants no hub access. *(✅ 2026-06-21)*
 
 ## 6. Sessions & surveys — from call-for-speakers to the schedule
 
@@ -555,7 +658,9 @@ follow-up automatically.
   call to action, and clear cards into the public **Sessions, Speakers, Sponsors and
   Master Classes** pages — so the public programme is shareable and discoverable without
   a login. Signed-in crew still go straight to their personal hub. Mobile-first,
-  accessible, and bilingual (English / Danish). *(✅ 2026-06-15)*
+  accessible, and bilingual (English / Danish). *(✅ 2026-06-15)* *(Superseded
+  2026-06-21: the `/` landing page was retired so an anonymous visitor now goes straight
+  to sign-in; the public programme pages stay reachable by their own addresses — see §2.)*
 - **A day-by-day agenda anyone can scan.** A public, no-login page at **`/Agenda`** lays
   the programme out as a **running order, grouped by day** and shown in start time order —
   each talk with its **time, room, type and speaker(s)**, deep-linking to the full session
@@ -565,6 +670,42 @@ follow-up automatically.
   list), and the page shows a friendly "running order coming soon" message until the
   schedule is published. Linked from the public front door, mobile-first, accessible, and
   bilingual (English / Danish). *(✅ 2026-06-17)*
+- **Every public section is one tap away.** The public navigation (shown to anyone who
+  isn't signed in) now reaches the whole public site — **Agenda, Sessions, Master classes,
+  Speakers, Sponsors and Contributors** — so no public page is an orphan. "Master classes"
+  jumps straight to the programme pre-filtered to the master-class talks, and that filter
+  (like every Sessions filter) lives in the page address, so a filtered view is **shareable
+  and bookmarkable** — send someone the link and they see exactly what you saw. Mobile-first
+  and bilingual. *(✅ 2026-06-18)*
+- **Times shown in the event's local time, not UTC.** Public timestamps now read in the
+  venue's wall-clock time: the **master-class logistics** "last updated" stamp and the
+  **survey-results "latest response"** time are shown in the event's timezone with a clear
+  zone label (e.g. `UTC+01:00`) instead of raw UTC — so a reader never has to do the maths.
+  *(✅ 2026-06-18)*
+- **A clearer "no responses yet" survey dashboard.** When a topic-interest survey has no
+  responses, the live-results page now leads with a friendly **headline** (not just a small
+  line of text), so a freshly-shared dashboard reads as "ready and waiting" rather than
+  looking broken. Bilingual (English / Danish). *(✅ 2026-06-18)*
+- **Manage your surveys from one organizer page.** A new **Surveys** page (in the
+  *Sessions & speakers* area) lists every survey with its **response count** and whether it's
+  **open or closed**, and for each one you can:
+  - **Grab the shareable links** — the public survey link and its results link, each with a
+    one-tap **Copy** button (and shown as plain, selectable text so it works even with
+    JavaScript off);
+  - **Open or close submissions** — flip a survey **closed** when you're done collecting and
+    the public page shows a friendly "this survey is closed" message while the **results stay
+    viewable**; **activate** it again any time. (Surveys are open by default.)
+  - **View the results right there** — the same demand breakdown the public dashboard shows,
+    embedded in the organizer page, plus a link to open the full public dashboard;
+  - **Reset responses before a fresh send-out** — a safe, **type-to-confirm** action that
+    deletes every response for that one survey (and nothing else), so you can start clean
+    before sending it out. Organizer-only, and every reset is recorded in the logs.
+  Mobile-first and bilingual (English / Danish). *(✅ 2026-06-18)*
+- **A Contributors page that credits people properly.** The public **Contributors** page now
+  shows each person with an **avatar** (their photo when provided, otherwise their initials),
+  their **name** (linking to their profile when available) and their **role** — a polished,
+  mobile-first credit roll for the organizer team and everyone who helps build the hub.
+  *(✅ 2026-06-18)*
 - **A QR code for every room — on the screen and in the slides.** Give each physical
   room a single QR code linked to that room. The hub generates it, stores the image on
   your **SharePoint**, and attaches its link to every session in the room — so each
@@ -675,6 +816,13 @@ follow-up automatically.
   the text (they simply sign in); everyone else just reads it. A "show public link"
   button on the organizer session view and on the speaker hub gives you the URL in
   one click. Mobile-first and accessible. *(✅ 2026-06-15)*
+- **A Master Class communication page at `/MasterClass/{slug}`.** *(✅ 2026-06-21)*
+  Every master class's public page now opens with a standard, plain-language **"What is
+  a Master Class?"** explainer and a short **laptop / charging FAQ** above the per-class
+  logistics, so a first-timer understands what to expect — bring a charged laptop, what
+  the format is — before reading the class-specific setup notes. The same page carries
+  the speaker- and organizer-edited logistics underneath. Mobile-first, accessible and
+  bilingual (English / Danish).
 - **Master-class participant sync from Zoho Booking.** Pull the people who booked a
   master class straight into the hub, linked to the right class — one-way from Zoho
   Booking, so Booking stays the source of truth. Each master class has its own
@@ -683,6 +831,20 @@ follow-up automatically.
   in the normal validation queue (they can't sign in until an organizer activates
   them). Until your Booking endpoint and credentials are connected it honestly
   reports "not configured" rather than inventing participants. *(✅ 2026-06-15)*
+- **Speaker emails pulled from Sessionize's secured side-view.** Sessionize keeps
+  speaker emails off the public speaker view (privacy) and serves them only through
+  a separate, token-protected view. The hub now reads that secured view and matches
+  it to each speaker, so the import gets the email it needs to create the account —
+  without it speakers were silently skipped. The token is stored as a secret, never
+  in the repo. *(✅ 2026-06-20)*
+- **Sessionize sync runs every hour.** The speaker + session pull now refreshes
+  hourly instead of once a day, so new acceptances and schedule tweaks show up the
+  same hour. It's still additive and safe — new people and empty fields only, never
+  deletes, never emails, and a missed hour is simply caught the next run. *(✅ 2026-06-20)*
+- **Your own talk lands in your calendar.** Each speaker's accepted session(s) —
+  title, room and time — are added to their personal calendar feed automatically, so
+  the talk they're giving sits alongside the key dates they need to be there for.
+  *(✅ 2026-06-20)*
 
 ## 7. Sponsors — managed as companies, with the right tasks
 
@@ -705,6 +867,15 @@ follow-up automatically.
   company name**, and an optional **link to their website**. When a company hasn't
   uploaded a logo yet, a tidy initials badge stands in. Read-only and mobile-first,
   with a friendly empty state before sponsors are announced. *(✅ 2026-06-15)*
+- **Sponsor tiers fill in automatically from their booth order.** ✅ 2026-06-18 — the
+  public sponsors page groups companies by tier, and now a company lands in the right
+  tier group on its own: when its booth order is processed, the hub reads the booth
+  tier from the order and stamps it onto the company, so a sponsor appears under
+  Platinum / Diamond / Gold / Feature without an organizer setting it by hand. A
+  company that orders several booth products is filed under its **highest** tier. It is
+  also safe to override: the automatic stamp only ever fills a blank tier or raises a
+  lower one, so a tier you've deliberately bumped (for example, a comped upgrade) is
+  never quietly downgraded on the next order sync.
 - **A real "become a sponsor" call-to-action.** *(✅ 2026-06-17)* The public sponsors
   page now offers a prospective sponsor a clear way to reach out — a prominent
   **"Contact us about sponsoring"** button that opens either a pre-filled email (with
@@ -777,6 +948,19 @@ follow-up automatically.
   the records the hub holds. Where invoicing isn't configured yet, the portal says so
   plainly and shows orders as *pending* rather than inventing an invoice. Each
   sponsor sees only their own company's data, mobile-first and in English or Danish.
+- **A sponsor landing card and orientation guidance.** *(✅ 2026-06-21)* The sponsor
+  portal now opens with a landing card showing the company's **logo, a short
+  description and an overview** of their sponsorship, and the sponsor-tasks page carries
+  short **orientation guidance** so a contact knows what's expected of them. **Key dates**
+  have moved under **Event logistics**, keeping the home view focused.
+- **A Sponsor Webshop fold-out.** *(✅ 2026-06-21)* Sponsors get a **webshop** fold-out
+  to **buy extra services**, see their **orders**, and view the **linked contacts** for
+  their company — all inside their own portal. Mobile-first, in English and Danish.
+- **Exhibitor & Booth Details and Leads fold-outs.** *(✅ 2026-06-21)* Two further
+  fold-outs round out the portal: **Exhibitor & Booth Details** surfaces the **Zoho
+  dashboard** plus an **in-hub capture-lead failover** so booth staff can still log a lead
+  if the Zoho path is unavailable, and a **Leads** fold-out gives a **leads export page**.
+  Mobile-first, in English and Danish.
 
 ## 8. Sponsor leads — capture, screen and route booth leads
 
@@ -811,6 +995,13 @@ follow-up automatically.
   test/junk entry) and the final total. The same logic that scores a lead produces the
   explanation, so the badge and the breakdown always agree. No more guessing why a lead
   was flagged. Available in English and Danish, phone-first.
+- **Contact your leads with one tap — no API key needed.** *(✅ 2026-06-18)* Your "Your
+  leads" page now lists every lead, inquiry and booth meeting captured for your company
+  right in the hub, with a one-tap **Email** and **Call** button on each — opening your
+  own mail or phone app with the person already addressed. You don't need to set up the
+  download API or run a script to follow up; the API and CSV feed stay there for anyone
+  who wants to automate. Junk and ignored leads are hidden, the newest are first, and a
+  lead with no email or phone is clearly marked. Phone-first, English and Danish.
 
 ## 9. Attendees & masterclass reconciliation — one clear picture
 
@@ -853,6 +1044,41 @@ follow-up automatically.
   question** before the event, and to **rate the session** afterwards. It is a
   read-only, mobile-first view in English and Danish — booking still happens at the
   source, the hub just gives attendees one tidy place to see their whole day.
+- **Build your own "My plan" of talks to attend (✅ 2026-06-17).** A new **My plan**
+  page lets each attendee curate their own running order: browse the programme and tap
+  **Save** to add the talks they want to attend, or **Remove** to take one out. Saved
+  talks appear together at the top — the scheduled ones in time order, with any
+  not-yet-timed talks listed after so nothing is forgotten — each showing its time,
+  room and speaker(s) and linking straight to the session details. It is a private,
+  personal bookmark list that is **only ever visible to that attendee** and **never
+  books a seat** (booking stays in the booking system) — it simply remembers the
+  sessions they care about. Saving the same talk twice does nothing, and a talk that
+  gets removed from the programme quietly drops off the plan. Phone-first, in English
+  and Danish.
+- **Add your whole plan to your calendar (✅ 2026-06-17).** From the My plan page an
+  attendee can **download their saved talks as a calendar file (.ics)** and open it in
+  Outlook, Google or Apple Calendar — one entry per saved talk that has a confirmed
+  time, with the room, the speaker(s) and a link back to the session details, plus a
+  reminder shortly before each talk starts. Re-download any time: your calendar
+  **updates in place** rather than creating duplicates, and a talk you remove from your
+  plan drops off your calendar on the next download. The file is **only ever your own**
+  plan, and when none of your saved talks has a confirmed time yet the page simply tells
+  you there's nothing to add to a calendar instead of offering an empty file.
+  Phone-first, in English and Danish.
+- **A focused attendee menu.** *(✅ 2026-06-21)* An attendee now sees a minimal,
+  uncluttered menu built around just what they need — **Home, Master Class, My plan**
+  and **Waitlist** — instead of a long mixed list, so the things an attendee actually
+  uses are one tap away. Mobile-first, English and Danish.
+- **Choose your Master Class right in the hub.** *(✅ 2026-06-21)* The external booking
+  deep-link is replaced by an **in-hub Master Class chooser**: an attendee can **sign
+  up** for a master class, **give up a seat** they no longer want, download the session
+  **`.ics`**, and toggle a **reminder** — all without leaving the hub. The hub card and
+  the waitlist also carry short **orientation guidance** so a first-timer knows what a
+  Master Class is and how seats work. Phone-first, in English and Danish.
+- **Master Class waitlist with auto-email on a seat opening.** *(✅ 2026-06-21)* When a
+  master class is full, an attendee can join its **waitlist**; the moment a seat frees up
+  (someone gives up their place), the next person on the list is **emailed automatically**
+  so they can claim it. Mobile-first, in English and Danish.
 
 ## 10. Email & notifications — on-brand, controllable, safe
 
@@ -886,6 +1112,13 @@ follow-up automatically.
 - **An Email Center for organizers.** Preview any template safely, send a one-click
   test to yourself, and watch a delivery pulse with a filterable history of what's
   been sent.
+- **Send a test copy to any address.** *(✅ 2026-06-17)* Beyond the "send to me" test, an
+  organizer can type **any mailbox** — a colleague's, a role test account — and send the
+  selected template there to confirm it really arrives. The hub is honest about the outcome
+  before it tries: if the address isn't on the safety allowlist it tells you it would be
+  **dropped** (so you're never left waiting for mail that will never come), and in the test
+  environment it tells you when the copy is **redirected** to the shared test inbox. A typo or
+  malformed address is caught up front. Mobile-first and bilingual (English / Dansk).
 - **Broadcast to exactly the people you mean.** *(✅ 2026-06-15)* Send one personalized
   message individually (branded layout, personal "Hi {FirstName}") to a precisely chosen
   audience. **Filter the audience** by role group (speaker / sponsor / volunteer / organizer
@@ -896,9 +1129,11 @@ follow-up automatically.
   list** (email, first name, group) — what you preview is exactly what is sent. **Start from
   a reusable template** — *blank*, *generic announcement*, *friendly reminder*, or
   *welcome / introduction* — then edit it freely; simple **{FirstName} / {EventName} tokens**
-  are filled in per recipient. Sending stays resilient (a single bad address never stops the
-  batch) and resume-safe (re-sending the same subject only reaches people who have not yet
-  received it). Mobile-first and screen-reader friendly.
+  are filled in per recipient. An inline **"variables you can use" legend** spells out each token
+  with a plain-language meaning and an example, and a tap drops the token straight into your subject
+  or message — so you never have to remember the exact spelling *(✅ 2026-06-18)*. Sending stays
+  resilient (a single bad address never stops the batch) and resume-safe (re-sending the same
+  subject only reaches people who have not yet received it). Mobile-first and screen-reader friendly.
 - **Per-persona onboarding emails that send themselves.** *(✅ 2026-06-15)* Each crew group
   (volunteer / speaker / media-team / sponsor / organizer) has its own short **set of getting-started
   emails**. The moment an organizer **activates** someone, that person automatically receives their
@@ -911,6 +1146,14 @@ follow-up automatically.
   reminders, broadcasts, onboarding and manual re-sends — is recorded. Organizers get a log view that
   shows **all** emails and **per person**, **filterable by name or email**, with the subject, category,
   the address it went to (and any CC), and whether it succeeded. Nothing is sent off the books.
+- **Re-send a failed email straight from the log.** *(✅ 2026-06-18)* When a logged email
+  shows **Failed**, organizers get a one-click **Re-send** button right on that row — it
+  retries the exact same template to the exact same person, with their secondary-email CC
+  and the safety allowlist applied just like the original. The retry is itself logged, so
+  you can see whether the second attempt went through. Only failed emails that targeted a
+  known person are re-sendable; a broadcast or a sign-in code (which has no template/person
+  on record) shows no button and is honestly explained, never a fake success. English and
+  Danish.
 - **A secondary email per person (optional CC).** *(✅ 2026-06-15)* Anyone can add an **extra address**
   that gets **copied on every email** to them — a colleague's inbox, a shared team alias or a personal
   backup. It is purely additive: the main message still goes to the person's primary (or, for speakers,
@@ -924,6 +1167,14 @@ follow-up automatically.
   someone's onboarding step, the hub emails that person a friendly note pointing them straight at the
   wizard to finish it — automatically on the nightly run, or instantly via a **"send now"** button on the
   Action Queue. Each re-opened step is chased exactly once.
+- **Names and titles can never break a branded email.** *(✅ 2026-06-18)* A person, company or task name
+  that happens to contain characters with special meaning in web pages — an ampersand, an angle bracket or
+  a quote (e.g. *"Tom & Jerry"*, *"R&D <invoice>"*) — is now always rendered as plain readable text inside
+  every branded email, never as broken or unsafe markup. Previously some emails handled this and others did
+  not, so the same name could look fine in one mail and garbled in another. There is now **one consistent
+  rule applied in a single place**, so every current and future email is safe by default. The email's
+  subject line still reads exactly as typed. This is a behind-the-scenes correctness and safety fix; nothing
+  changes in how organizers compose or send mail.
 
 ## 11. Organizer hub — run the whole event from one place
 
@@ -955,6 +1206,12 @@ follow-up automatically.
   still there, just sorted into its group. Works the same on a phone, in English and
   Danish, with full keyboard and screen-reader support and the current page clearly
   marked.
+- **A lean hub-level menu with button-grid hub pages.** *(✅ 2026-06-21)* The top menu
+  is now leaner, pointing at a small set of **hubs**; each hub page lays its tools out
+  as a **button grid**, so **every admin page is reachable as a tile** on its hub
+  rather than buried in a long dropdown. Mobile-first, in English and Danish.
+- **Retired the dead Sponsor Portal page.** *(✅ 2026-06-21)* The unused organizer
+  Sponsor Portal page was removed, so the back-office no longer carries a dead link.
 - **A cross-role event overview.** One read-only page that answers "where does
   the whole event stand?" in a glance: participation counts by role
   (organizer / speaker / sponsor / volunteer / attendee), task completion split
@@ -964,7 +1221,11 @@ follow-up automatically.
   attendee check-in numbers — topped by "needs attention" tiles for overdue
   tasks, unassigned volunteer tasks, open help requests and pending volunteer
   applications. Pure aggregation over existing data: it changes nothing.
-  Mobile-first and screen-reader friendly. *(✅ 2026-06-15)*
+  Mobile-first and screen-reader friendly. *(✅ 2026-06-15)* The "needs attention"
+  tiles are now **clickable** — each opens the matching list already filtered to
+  exactly the rows it counts (e.g. the overdue-tasks tile lands on the open tasks
+  sorted by due date, pending volunteers on the inactive volunteers), so a number
+  that needs action is one tap from the work. *(✅ 2026-06-18)*
 - **Download "who hasn't onboarded yet" as a chase-list.** *(✅ 2026-06-17)* The
   onboarding dashboard now has a one-click **CSV export** of everyone still working
   through onboarding — anyone who hasn't finished every step their role needs. Each
@@ -1172,6 +1433,29 @@ follow-up automatically.
   in one line whether everything is current or how many sources look stale. It is read-only — it
   reports what already happened and never sends or changes anything. Mobile-first, keyboard-accessible,
   English / Danish.
+- **Breadcrumbs — always know where you are in the back-office.** *(✅ 2026-06-18)* The organizer area
+  is a deep set of hubs and feature pages reached through one compact menu, which made it easy to lose
+  your bearings on a deep page. Every back-office page now shows a small **breadcrumb trail** at the top
+  — for example **Organizer area / People / Participants** — where each step before the current page is
+  a one-click link back to its hub and to the organizer home. It appears automatically on every
+  organizer page (and stays out of the way everywhere else), reads correctly to screen readers (a
+  navigation landmark with the current page marked as such), wraps cleanly on a phone, and is shown in
+  English and Danish.
+- **Unsaved-changes guard on the participant editor.** *(✅ 2026-06-18)* If you start editing a
+  participant and then try to leave the page without saving, the browser now asks you to confirm — so a
+  stray click or back-button never silently loses your edits. Saving (or pressing Cancel) leaves
+  normally with no prompt, and the **Save** button shows a busy state and locks while the save is in
+  flight so a double-click can't post twice.
+- **Loading skeletons on the big grids — the portal never looks frozen.** *(✅ 2026-06-18)* The
+  high-volume organizer grids (**Participants, Speakers, Attendees, Sessions, Sponsors**) re-load the
+  whole page when you search, change a filter, sort a column or page through results, which left a brief
+  moment where nothing seemed to happen. Now, the instant you trigger one of those, the grid dims its
+  current rows and shows an animated **loading skeleton** over them while the next page comes back, and
+  screen-reader users hear a polite "Loading…" announcement. It clears by itself when the new page
+  arrives (and when you press the browser Back button). It honours the "reduce motion" accessibility
+  setting (you still get the dimmed "busy" look, just without the animation), works down to a narrow
+  phone screen, and is shown in English and Danish. A CSV download link is deliberately excluded so a
+  file download doesn't flash the skeleton.
 
 ## 12. Hosting & reliability — production-grade by design
 
@@ -1264,6 +1548,23 @@ only (no database or data-model change).
     a real failure shows the reason. The confirmation is colour- and icon-coded (green success,
     blue "nothing happened", red error), announced to screen readers, and available in English
     and Danish.
+  - **Small interaction cues that prevent confusion and accidental double-submits** *(✅ 2026-06-18)*.
+    Four lightweight, accessible touches now work the same everywhere, with no setup:
+    - **"Copied!" feedback.** The *Copy link* button on the subscribable-calendar cards (the hub
+      home, the Speaker hub and the Volunteer schedule) now copies the link and briefly confirms
+      **"Copied!"** on the button — announced to screen readers — instead of silently doing nothing.
+      (This unifies three slightly different copy buttons onto one shared behaviour.)
+    - **Live character counters.** Long free-text fields show a live **"used / limit"** counter as
+      you type — turning amber as you approach the cap — so you are never surprised by a hard limit.
+      It is on the public **ask-a-question** and **rate-this-session** boxes, the **volunteer
+      application** note, the **speaker bio**, and the sponsor **lead-capture** notes.
+    - **Submit feedback + double-click guard.** When you submit one of those forms, the button shows
+      a busy **"Saving…/Sending…"** state and is locked while the post is in flight, so an
+      impatient double-tap can never send your question, rating or application twice.
+    - **Unsaved-changes guard.** If you start filling one of those forms and then try to leave the
+      page without submitting, the browser asks you to confirm — so you don't lose what you typed.
+    All four are progressive enhancements (everything still works with JavaScript off), mobile-first
+    (~360px), and bilingual (English + Danish).
 
 ## 14. Bilingual UI — English and Danish *(✅ 2026-06-15)*
 
@@ -1304,6 +1605,34 @@ The work is markup + resource files only — **no database or data-model change*
 - **Easy to extend.** Strings live in one shared resource file per language
   (`SharedResource.resx` for English, `SharedResource.da-DK.resx` for Danish); adding a
   language or translating more pages is a resource-file edit, not a code rewrite.
+
+### Public Sessions list + Master Class logistics pages now bilingual *(✅ 2026-06-18)*
+
+The last two **public, no-login** pages that still showed only English are now bilingual,
+so an anonymous Danish visitor sees a fully Danish page (no schema or data change):
+
+- **The Sessions list (`/Sessions`).** The heading, the filter bar (Type / Length / Room / Search
+  labels, the placeholder and the "All types / Any length / All rooms" options), the "Showing N of M"
+  count, the friendly empty states ("nothing published yet" vs "no match — clear the filters"), and
+  every session card's **type / length / room tags**, the "With <speakers>" label and the "Master
+  class info & setup" / "Ask the speaker a question" links all follow the chosen language.
+- **The Master Class logistics page (`/MasterClass/{slug}`).** The not-found message, the hero
+  "Master Class logistics & setup" / "Presented by …" meta, the "Before you arrive" section and its
+  "nothing published yet" empty state, the "last updated" stamp, and the involved-speaker/organizer
+  **edit logistics** affordance (heading, field label, placeholder, help note and Save button) are
+  all bilingual.
+
+### Signed-in Hub status badges now bilingual + accessible *(✅ 2026-06-18)*
+
+The **Done / Pending status chips** on the signed-in Hub home (the role sub-cards for
+hotel, dinner, volunteer shifts and volunteer work) were the last hardcoded-English
+fragments on that page — the badge text ("Submitted" / "Pending") was baked into the
+markup and never followed the chosen language. They now read from the shared
+`Status.Done` / `Status.Pending` resource keys, so a Danish participant sees **Færdig /
+Mangler**. The leading status glyph (✓ / ⚠) is marked decorative (`aria-hidden`) so a
+screen reader announces only the localized word, and the chip styling moved from inline
+styles into mobile-first `.hub-badge` CSS classes (the chip stays on one line and wraps
+with its caption at ~360px). No schema or data change.
 
 ## 15. Social-media graphics & shared file store *(✅ 2026-06-15)*
 
@@ -1381,3 +1710,49 @@ the right time — with a review-and-fine-tune step so every post is exactly rig
 with their own credentials; until it's connected, the whole calendar — scheduling, tagging,
 previews, pre-alerts and notifications — works in a safe, no-post mode that never sends anything to
 LinkedIn.*
+
+## 16. Feature settings — turn capabilities on when you're ready *(✅ 2026-06-17)*
+
+The hub is built so that **nothing optional "just happens"**. The core experience — signing in,
+searching, viewing and editing, and the public pages — is always on. Every optional integration and
+piece of automation is **off until an organizer turns it on**, so you can switch things on one at a
+time, test each, and never have a new release spring a surprise on a live event.
+
+- **One Feature settings page.** A single organizer page (under **Setup → Feature settings**) lists
+  every optional capability, grouped into clear chapters: **Email**, **Speakers and sessions**,
+  **Sponsors and exhibitors**, **Social media**, **Surveys**, **Reminders and digests**, and
+  **Attendees**. Each capability has a plain-language name and description and a simple
+  **Enable / Disable** button.
+- **Off by default, opt-in.** New optional capabilities start **switched off**. You decide when each
+  one goes live for your edition — so a deploy that ships a new integration never starts running it
+  automatically.
+- **Release rings, with the ring shown.** *(✅ 2026-06-21)* Feature flags now default to
+  **Ring 1**, and each flag shows its **release ring**, so an organizer can see at a glance
+  which stage of rollout a capability is in.
+- **Attendee welcome & auto sign-in (off by default).** *(✅ 2026-06-21)* A new flag,
+  **"Attendee welcome & auto sign-in"**, enables **attendee auto-provisioning** plus a
+  **one-click magic-link welcome** when a 2-day ticket is synced — so a new attendee can be
+  set up and signed in from a single link. It ships **switched off** and only runs once an
+  organizer turns it on.
+- **Disabled features stay visible.** A turned-off capability is never hidden — it stays on the page,
+  **dimmed with a small "Disabled" label**, so you always know it exists and can turn it on later.
+- **Switches that really take effect everywhere.** Turning a capability off makes it genuinely inert:
+  the background jobs and sync services check the switch and **do nothing** when it's off — no
+  imports, no posts, no digests, no sends. It's not just hidden in the screen; the work actually
+  stops. This now covers **every** optional sync — Sessionize speaker/session import, the sponsor
+  order pull, the sponsor leads pipeline, the sponsor upload watcher, the Backstage/Zoho exhibitor
+  sync, the social-media scheduler, and the attendee reconciliation — **on both the scheduled run AND
+  the matching "do it now" button** in the screen, so the toggle you see always equals what actually
+  happens. A turned-off "do it now" button responds with a clear *"turned off — enable it in
+  Settings"* message instead of silently doing nothing.
+- **Prerequisite hints.** Some capabilities build on another (for example, digest emails need the
+  reminder job). The page shows what each one needs and **warns** if you've enabled something whose
+  prerequisite is still off, so you're never left wondering why nothing happens.
+- **Email controls, front and centre.** A global **email master switch** turns **all** outbound email
+  off instantly — sign-in codes, welcomes, reminders and digests — across the whole hub. Alongside it
+  the page shows the **safe-recipient allowlist** and any **test redirect** in force, so it's always
+  clear who can and can't receive mail. The hub never mails anyone outside the allowlist, and with the
+  master switch off it sends to nobody at all.
+- **Per-edition.** Every switch is set per edition, so a new edition starts clean and you tailor it to
+  that event.
+- **Bilingual & mobile-first.** The whole page is available in English and Danish and works on a phone.

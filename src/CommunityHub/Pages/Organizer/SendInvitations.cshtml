@@ -24,7 +24,7 @@
             clear their <em>SentReminder</em> row for type <em>invitation</em>.
         </p>
 
-        if (!string.IsNullOrEmpty(Model.Message))
+        @if (!string.IsNullOrEmpty(Model.Message))
         {
             <p class="info">@Model.Message</p>
         }

@@ -4,6 +4,7 @@ using CommunityHub.Core.Domain;
 using CommunityHub.Core.Email;
 using CommunityHub.Core.Integrations;
 using CommunityHub.Core.Integrations.Sponsors;
+using CommunityHub.Core.Settings;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -33,6 +34,7 @@ public sealed class SponsorLeadsJob
     private readonly EmailTemplateProvider _templates;
     private readonly IEmailSender _emailSender;
     private readonly TimeProvider _clock;
+    private readonly FeatureGateService _gate;
     private readonly ILogger<SponsorLeadsJob> _log;
 
     public SponsorLeadsJob(
@@ -42,6 +44,7 @@ public sealed class SponsorLeadsJob
         EmailTemplateProvider templates,
         IEmailSender emailSender,
         TimeProvider clock,
+        FeatureGateService gate,
         ILogger<SponsorLeadsJob> log)
     {
         _db = db;
@@ -50,6 +53,7 @@ public sealed class SponsorLeadsJob
         _templates = templates;
         _emailSender = emailSender;
         _clock = clock;
+        _gate = gate;
         _log = log;
     }
 
@@ -63,6 +67,17 @@ public sealed class SponsorLeadsJob
         if (activeEvent is null)
         {
             _log.LogWarning("SponsorLeadsJob: no active event.");
+            return;
+        }
+
+        // GATE (REQUIREMENTS §23): the sponsor-leads pipeline (CRM pull + delta
+        // digests) is an advanced feature, off by default. When disabled for this
+        // edition the job no-ops — no CRM sync, no digests sent.
+        if (!await _gate.IsFeatureEnabledAsync("sponsor-leads", activeEvent.Id, ct))
+        {
+            _log.LogInformation(
+                "SponsorLeadsJob: event {EventId} — feature 'sponsor-leads' disabled, skipped.",
+                activeEvent.Id);
             return;
         }
 
@@ -117,9 +132,12 @@ public sealed class SponsorLeadsJob
                 continue;
             }
 
+            // Plain-text tokens are HTML-encoded by the renderer at the seam
+            // (EmailTemplateRenderer, REQUIREMENTS §10c-4); leadListHtml is a
+            // sender-built HTML fragment (raw-HTML token) so it stays verbatim.
             var tokens = _templates.NewTokenSet();
-            tokens["eventDisplayName"] = Enc(activeEvent.DisplayName);
-            tokens["sponsorCompany"] = Enc(pref.SponsorCompanyId);
+            tokens["eventDisplayName"] = activeEvent.DisplayName;
+            tokens["sponsorCompany"] = pref.SponsorCompanyId;
             tokens["leadCount"] = fresh.Count.ToString();
             tokens["leadListHtml"] = BuildLeadListHtml(fresh);
 

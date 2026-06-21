@@ -8,11 +8,19 @@ namespace CommunityHub.Core.Email;
 /// <see cref="IEmailContextAccessor.Set"/> (ideally in a <c>using</c> scope);
 /// when nothing is set the decorator falls back to category "other".
 /// </summary>
+/// <param name="TemplateName">
+/// The branded template this send rendered, when the caller sent via a template
+/// (e.g. the per-participant <c>ParticipantEmailService</c> path). Recorded on
+/// the <c>EmailLog</c> row so an organizer can <b>re-send the exact same email</b>
+/// after a failure without re-typing it. Null for raw/ad-hoc sends (broadcast,
+/// PIN) that did not come from a named template.
+/// </param>
 public sealed record EmailContext(
     string Category,
     int EventId = 0,
     int? ParticipantId = null,
-    string? RecipientName = null);
+    string? RecipientName = null,
+    string? TemplateName = null);
 
 /// <summary>
 /// Holds the current <see cref="EmailContext"/> for the logical async flow.

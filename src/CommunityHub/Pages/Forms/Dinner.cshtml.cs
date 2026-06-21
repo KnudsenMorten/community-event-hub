@@ -144,7 +144,8 @@ public class DinnerModel : PageModel
 
         signup.Rsvp = Rsvp;
         signup.PlusOneCount = Math.Max(0, PlusOneCount);
-        signup.AllergyNotes = AllergyNotes;
+        // AllergyNotes field removed from the form (redundant with the dietary
+        // partial's "Other allergies"); don't overwrite any existing value on save.
         signup.Comments = Comments;
         // Keep legacy Attending in sync so older queries still work.
         signup.Attending = Rsvp == DinnerRsvp.Yes;

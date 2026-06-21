@@ -31,6 +31,33 @@ public sealed class SurveyDefinitionProvider
         _log = log;
     }
 
+    /// <summary>
+    /// Enumerate the slugs of every survey defined on disk (the *.json file
+    /// basenames under {ContentRoot}/App_Data/Surveys/). Used by the organizer
+    /// management surface to list all known surveys. Returns an empty list when
+    /// the folder is absent. Never throws on a missing folder — a fresh
+    /// deployment with no surveys is a valid (empty) state.
+    /// </summary>
+    public IReadOnlyList<string> ListSlugs()
+    {
+        var dir = Path.Combine(_env.ContentRootPath, "App_Data", "Surveys");
+        if (!Directory.Exists(dir)) return Array.Empty<string>();
+        try
+        {
+            return Directory.EnumerateFiles(dir, "*.json")
+                .Select(Path.GetFileNameWithoutExtension)
+                .Where(s => !string.IsNullOrWhiteSpace(s))
+                .Select(s => s!)
+                .OrderBy(s => s, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(ex, "Failed to enumerate survey definitions in {Dir}", dir);
+            return Array.Empty<string>();
+        }
+    }
+
     public SurveyDefinition? TryGet(string slug)
     {
         if (string.IsNullOrWhiteSpace(slug)) return null;

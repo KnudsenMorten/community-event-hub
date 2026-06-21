@@ -20,7 +20,13 @@ namespace CommunityHub.Core.Navigation;
 /// pure information-architecture metadata — it never changes the route, the
 /// gating, or the membership of the menu.
 /// </summary>
-public sealed record NavItem(string Href, string? LabelKey, string? FallbackLabel = null, bool ExactMatch = false, string? SectionKey = null);
+/// <param name="External">
+/// True for a link to a DIFFERENT site (e.g. the Zoho exhibitor dashboard or the
+/// webshop). The view renders it with <c>target="_blank" rel="noopener noreferrer"</c>
+/// so it opens in a new tab and the hub stays open behind it. Internal hub routes
+/// leave this false (same-tab navigation).
+/// </param>
+public sealed record NavItem(string Href, string? LabelKey, string? FallbackLabel = null, bool ExactMatch = false, string? SectionKey = null, bool External = false);
 
 /// <summary>
 /// A named, collapsible sub-group of nav items within a single <see cref="NavGroup"/>

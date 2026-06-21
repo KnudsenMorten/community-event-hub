@@ -17,10 +17,13 @@ public class LunchSignup
     public int ParticipantId { get; set; }
     public Participant Participant { get; set; } = null!;
 
-    /// <summary>True = will join the lunch on Setup-day (day before Pre-day).</summary>
+    /// <summary>True = will join the lunch on the EARLY setup day (Sun, StartDate-2). Crew/organizers only.</summary>
+    public bool LunchEarlySetupDay { get; set; }
+
+    /// <summary>True = will join the lunch on Setup-day (Mon, StartDate-1). Crew/organizers only.</summary>
     public bool LunchSetupDay { get; set; }
 
-    /// <summary>True = will join the lunch on Pre-day (Master Class day, day before main).</summary>
+    /// <summary>True = will join the lunch on Pre-day / Master Class (Tue, StartDate). All eligible roles.</summary>
     public bool LunchPreDay { get; set; }
 
     /// <summary>Free-text notes (late arrival, dietary, etc.).</summary>

@@ -1,4 +1,6 @@
 @page
+@using Microsoft.AspNetCore.Mvc.Localization
+@inject IHtmlLocalizer<CommunityHub.Core.Resources.SharedResource> Localizer
 @model CommunityHub.Pages.Organizer.EmailCenterModel
 @{
     ViewData["Title"] = "Email center";
@@ -62,6 +64,28 @@
                 <input type="hidden" name="TypeFilter" value="@Model.TypeFilter" />
                 <input type="hidden" name="EmailFilter" value="@Model.EmailFilter" />
                 <button type="submit">Send test copy to me</button>
+            </form>
+
+            <form method="post" asp-page-handler="TestSendToAddress" style="margin-top:10px;">
+                <input type="hidden" name="Template" value="@Model.Template" />
+                <input type="hidden" name="TypeFilter" value="@Model.TypeFilter" />
+                <input type="hidden" name="EmailFilter" value="@Model.EmailFilter" />
+                <fieldset style="border:1px solid #e3e4ea;border-radius:8px;padding:14px;">
+                    <legend>@Localizer["EmailCenter.TestToAddressLegend"]</legend>
+                    <p style="margin:0 0 10px;color:#6b7280;font-size:13px;">
+                        @Localizer["EmailCenter.TestToAddressHelp"]</p>
+                    <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;">
+                        <div style="flex:1 1 240px;">
+                            <label for="TestAddress">@Localizer["EmailCenter.TestToAddressLabel"]</label>
+                            <input type="email" id="TestAddress" name="TestAddress"
+                                   style="width:100%;" autocomplete="off" inputmode="email"
+                                   placeholder="name@@example.com" />
+                        </div>
+                        <div>
+                            <button type="submit">@Localizer["EmailCenter.TestToAddressSend"]</button>
+                        </div>
+                    </div>
+                </fieldset>
             </form>
         }
     }

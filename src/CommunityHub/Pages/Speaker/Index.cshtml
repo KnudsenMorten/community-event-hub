@@ -176,6 +176,16 @@
     <div class="card">
         <h2>@Localizer["Speaker.MySessions"]</h2>
         <p style="font-size:13.5px;color:#555;margin-top:0;">@Localizer["Speaker.MySessionsIntro"]</p>
+        <p style="margin:0 0 12px;">
+            <a class="task-link-btn" href="https://template.expertslive.dk/" target="_blank" rel="noopener">&#128196; @Localizer["Speaker.SessionTemplate"]<span class="visually-hidden">@Localizer["Common.OpensNewTab"]</span></a>
+        </p>
+        <p style="font-size:12.5px;color:#6b7280;margin:0 0 12px;line-height:1.6;">
+            For each session: <strong>View public</strong> = your public listing &middot;
+            <strong>Attendee Questions</strong> = Q&amp;A sent in &middot;
+            <strong>SoMe Promote</strong> = ready-made social graphics &middot;
+            <strong>Calendar Sync</strong> = add to your calendar &middot;
+            <strong>Evaluations</strong> = your post-session ratings (when published).
+        </p>
         <ul style="list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:12px;">
             @foreach (var s in Model.MySessions)
             {
@@ -218,9 +228,13 @@
                     }
 
                     <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;">
-                        @if (Model.PublicProfileLive)
+                        @if (Model.PubliclyViewableSessionIds.Contains(s.SessionId))
                         {
                             <a class="task-link-btn" href="/Sessions/@s.SessionId">@Localizer["Speaker.ViewPublicSession"]</a>
+                        }
+                        else
+                        {
+                            <span style="color:#6b7280;font-size:13px;align-self:center;">@Localizer["Speaker.SessionNotPublicYet"]</span>
                         }
                         <a class="task-link-btn" asp-page="/Speaker/Questions">
                             @Localizer["Speaker.AttendeeQuestions"]
@@ -229,6 +243,12 @@
                                 <span class="ms-badge due" style="margin-left:4px;">@s.OpenQuestionCount</span>
                             }
                         </a>
+                        <a class="task-link-btn" asp-page="/Speaker/Graphics">&#128241; @Localizer["Speaker.SoMePromote"]</a>
+                        <a class="task-link-btn" href="/Sessions/@(s.SessionId).ics">&#128197; @Localizer["Speaker.CalendarSync"]</a>
+                        @if (!string.IsNullOrWhiteSpace(s.EvaluationUrl))
+                        {
+                            <a class="task-link-btn" href="@s.EvaluationUrl" target="_blank" rel="noopener">&#128202; @Localizer["Speaker.EvaluationsDownload"]<span class="visually-hidden">@Localizer["Common.OpensNewTab"]</span></a>
+                        }
                     </div>
                 </li>
             }
@@ -275,21 +295,13 @@
                    id="sp-cal-url" value="@Model.CalendarWebcalUrl"
                    onclick="this.select()"
                    style="flex:1 1 220px;min-width:0;font-size:12.5px;background:#f3f4f6;box-sizing:border-box;" />
-            <button type="button" onclick="spCopyCal()" id="sp-cal-copy">@Localizer["Hub.CopyLink"]</button>
+            <button type="button" id="sp-cal-copy" data-ceh-copy="sp-cal-url"
+                    data-ceh-copied="@Localizer["Hub.Copied"]"
+                    data-ceh-copy-label="@Localizer["Hub.CopyLink"]">@Localizer["Hub.CopyLink"]</button>
             <a class="task-link-btn" href="@Model.CalendarWebcalUrl">@Localizer["Hub.Subscribe"]</a>
         </div>
     </div>
-    <script>
-        function spCopyCal() {
-            var el = document.getElementById('sp-cal-url');
-            el.select(); el.setSelectionRange(0, 99999);
-            navigator.clipboard.writeText(el.value).then(function () {
-                var b = document.getElementById('sp-cal-copy');
-                var t = b.textContent; b.textContent = '@Localizer["Hub.Copied"]';
-                setTimeout(function () { b.textContent = t; }, 1500);
-            });
-        }
-    </script>
+    @* Copy uses the shared data-ceh-copy behaviour in _Layout (REQUIREMENTS §21). *@
 }
 
 <div class="card">

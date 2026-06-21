@@ -3,6 +3,7 @@
 @{
     Layout = "_Layout";
     ViewData["Title"] = Model.Survey?.Title ?? "Survey";
+    ViewData["HidePublicNav"] = true;   // standalone anonymous survey — no public event nav bar
 }
 @functions {
     // JS-encoded localized string for safe inlining inside the wizard <script>.
@@ -210,7 +211,17 @@
            to Step 2 / 3 it's gone, so they're not staring at the same
            paragraph for the whole wizard. *@
 
-        @if (Model.SubmittedOk)
+        @if (Model.IsClosed)
+        {
+            <div class="vol-success" role="status" style="background:#f3f4f6;border-color:#d0d4dd;color:#374151;">
+                <h3>@Localizer["Survey.ClosedTitle"]</h3>
+                <p>@Localizer["Survey.ClosedBody"]</p>
+                <p style="margin-top:14px;">
+                    <a href="/survey/@Model.Slug/results"><strong>&rarr; @Model.Survey.ResultsLinkLabel</strong></a>
+                </p>
+            </div>
+        }
+        else if (Model.SubmittedOk)
         {
             <div class="vol-success">
                 <h3>@Model.Survey.ThanksTitle</h3>
@@ -246,6 +257,33 @@
             {
                 <div class="vol-error" role="alert">@Model.ErrorMessage</div>
             }
+
+            @* Progressive-enhancement fallback. The wizard hides steps 2 & 3
+               (.step-section { display:none }) and ships Next/Submit disabled,
+               relying on JS to reveal steps and enable the controls. With JS
+               OFF a visitor would otherwise see step 1 only, with no way to
+               advance or submit. This <noscript> block (a) shows a clear
+               notice that JavaScript is needed for the best experience and how
+               to proceed, and (b) degrades the wizard to a single scrollable
+               form: every step is revealed, the step pills (a JS-only progress
+               affordance) are hidden, and the submit button is shown + enabled
+               so the form can still be filled top-to-bottom and posted. The
+               server validates the post regardless, so an incomplete no-JS
+               submit is rejected with the normal error message. *@
+            <noscript>
+                <style>
+                    /* Reveal all steps and turn the wizard into one long form. */
+                    .step-section { display: block !important; }
+                    /* Hide the JS-only step pills + the prev/next buttons. */
+                    .stepbar { display: none !important; }
+                    #prevBtn, #nextBtn { display: none !important; }
+                    /* Show + enable the submit button (JS would normally do this). */
+                    #submitBtn { display: inline-block !important; }
+                </style>
+                <div class="vol-error" role="alert" style="background:#fff8e1;border-left-color:#f4b400;color:#7a5b00;">
+                    @Localizer["Survey.NoScriptNotice"]
+                </div>
+            </noscript>
 
             <ol class="stepbar" aria-label="@Localizer["Survey.Progress"]" style="list-style:none;padding:0;">
                 <li class="pill active" data-step-pill="1" aria-current="step">@Localizer["Survey.Step1Pill"]</li>
@@ -351,10 +389,15 @@
                 </section>
 
                 <div class="wizard-actions">
+                    @* No `disabled` / `display:none` baked into the markup:
+                       the JS sets those at startup (gateInitialControls() below).
+                       That way a NO-JS visitor gets the controls enabled +
+                       visible (see the <noscript> block above) and can still
+                       submit the single scrollable form. *@
                     <button type="button" class="secondary" id="prevBtn" style="visibility:hidden;">@Localizer["Survey.BackBtn"]</button>
                     <div class="right">
-                        <button type="button" id="nextBtn" disabled>@Localizer["Survey.NextBtn"]</button>
-                        <button type="submit" id="submitBtn" style="display:none;" disabled>@Localizer["Survey.SubmitBtn"]</button>
+                        <button type="button" id="nextBtn">@Localizer["Survey.NextBtn"]</button>
+                        <button type="submit" id="submitBtn">@Localizer["Survey.SubmitBtn"]</button>
                     </div>
                 </div>
             </form>
@@ -547,6 +590,15 @@
                     prevBtn.addEventListener('click', function() { if (current > 1) setStep(current - 1); });
                     nextBtn.addEventListener('click', function() { if (current < 3) setStep(current + 1); });
 
+                    // Initial gated state — applied by JS (not baked into the
+                    // markup) so the form degrades gracefully with JS OFF: the
+                    // submit button starts hidden, Next starts disabled, and
+                    // refreshButtons() then enables/disables per step-1 state.
+                    function gateInitialControls() {
+                        submitBtn.style.display = 'none';
+                        nextBtn.disabled = true;
+                    }
+                    gateInitialControls();
                     refreshButtons();
                 })();
             </script>

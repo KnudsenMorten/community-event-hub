@@ -92,7 +92,7 @@ public sealed class ParticipantEmailService
 
         var rendered = _templates.Render(templateName, tokens);
 
-        using (_context.Set(new EmailContext(category, eventId, p.Id, p.FullName)))
+        using (_context.Set(new EmailContext(category, eventId, p.Id, p.FullName, templateName)))
         {
             await _emailSender.SendAsync(toEmail, rendered.Subject, rendered.HtmlBody, cc, ct);
         }

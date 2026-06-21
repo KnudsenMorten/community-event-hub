@@ -16,6 +16,7 @@
         @Localizer["Welcome.RoleIntro", Model.RoleName]
         @if (Model.MainDay is not null)
         {
+            <br />
             <text>@Localizer["Welcome.Countdown", Model.MainDay?.ToString("dddd, d MMMM yyyy") ?? "", venue]</text>
         }
     </p>
@@ -33,7 +34,6 @@
             <li>&#127968; @Localizer["Welcome.RightAwayHotel"]</li>
             <li>&#127863; @Localizer["Welcome.RightAwayDinner"]</li>
             <li>&#128083; @Localizer["Welcome.RightAwayPolo"]</li>
-            <li>&#9992;&#65039; @Localizer["Welcome.RightAwayTravel"]</li>
         </ul>
 
         <p style="margin-top:18px;">

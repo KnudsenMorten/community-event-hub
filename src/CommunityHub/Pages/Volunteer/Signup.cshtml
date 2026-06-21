@@ -5,6 +5,7 @@
     ViewData["Title"] = string.IsNullOrEmpty(Model.EventDisplayName)
         ? "Become a volunteer"
         : $"Volunteer at {Model.EventDisplayName}";
+    ViewData["HidePublicNav"] = true;   // standalone anonymous signup form — no public event nav bar
 }
 
 <style>
@@ -108,6 +109,24 @@
         margin-bottom: 14px;
         font-size: 13.5px;
     }
+    /* Shift checklist -- the survey core, mobile-first responsive grid */
+    .vol-shifts {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 8px;
+    }
+    .vol-shift {
+        display: flex; align-items: center; gap: 10px;
+        border: 1px solid #c4c8d4; border-radius: 8px;
+        padding: 10px 12px; margin: 0; cursor: pointer;
+        font-weight: 500; font-size: 13.5px; background: #fff;
+    }
+    .vol-shift input { width: 18px; height: 18px; flex: 0 0 auto; accent-color: var(--el-blue, #008BD2); }
+    .vol-shift:has(input:checked) {
+        border-color: var(--el-blue, #008BD2);
+        background: #e6f4fb;
+        box-shadow: 0 0 0 1px var(--el-blue, #008BD2) inset;
+    }
     /* Honeypot -- invisible to humans, irresistible to bots */
     .vol-hp { position: absolute; left: -9999px; height: 0; width: 0; overflow: hidden; }
 </style>
@@ -151,7 +170,7 @@
                 <div class="vol-error">@Model.ErrorMessage</div>
             }
 
-            <form method="post" autocomplete="on" novalidate>
+            <form method="post" autocomplete="on" novalidate data-ceh-loading data-ceh-dirty>
                 @* Honeypot field. Real humans cannot see this; bots fill every field. *@
                 <div class="vol-hp" aria-hidden="true">
                     <label for="Website">Website (do not fill)</label>
@@ -178,6 +197,31 @@
                     </div>
 
                     <div class="full">
+                        <label>Which shifts can you cover?</label>
+                        <p class="vol-fineprint" style="margin:0 0 8px;">Pick all that apply &mdash; we build your schedule from these. You can change them later.</p>
+                        <div class="vol-shifts">
+                            @foreach (var shift in CommunityHub.Pages.Volunteer.SignupModel.ShiftCatalogue)
+                            {
+                                <label class="vol-shift">
+                                    <input type="checkbox" name="SelectedShifts" value="@shift"
+                                           checked="@(Model.SelectedShifts.Contains(shift))" />
+                                    <span>@shift</span>
+                                </label>
+                            }
+                        </div>
+                    </div>
+
+                    <div>
+                        <label for="PreferredRole">Preferred role (optional)</label>
+                        <input type="text" id="PreferredRole" asp-for="PreferredRole" maxlength="200"
+                               placeholder="e.g. Registration, A/V, floater" autocomplete="off" />
+                    </div>
+                    <div>
+                        <label for="MaxHoursPerDay">Max hours per day</label>
+                        <input type="number" id="MaxHoursPerDay" asp-for="MaxHoursPerDay" min="1" max="24" />
+                    </div>
+
+                    <div class="full">
                         <label for="Interests">What would you most enjoy helping with? (optional)</label>
                         <select id="Interests" asp-for="Interests">
                             <option value="">Pick one (or leave blank, we&rsquo;ll find a spot for you)</option>
@@ -193,7 +237,13 @@
 
                     <div class="full">
                         <label for="Motivation">Anything else we should know? (optional)</label>
+                        @* Common.CharCount is a "{0} / {1} characters" template the
+                           client-side counter (see _Layout) substitutes itself, so emit
+                           the RAW localized value: IHtmlLocalizer's indexer runs
+                           string.Format with zero args over the placeholders and throws
+                           FormatException (HTTP 500). GetString(..).Value skips formatting. *@
                         <textarea id="Motivation" asp-for="Motivation" maxlength="1000"
+                                  data-ceh-counter="@Localizer.GetString("Common.CharCount").Value"
                                   placeholder="Languages you speak, prior community work, dietary requirements, accessibility needs, T-shirt size, etc."></textarea>
                     </div>
                 </div>
@@ -202,7 +252,7 @@
                     <span class="vol-fineprint">
                         We&rsquo;ll only use your details to evaluate your application and contact you about the event.
                     </span>
-                    <button type="submit">Send my application</button>
+                    <button type="submit" data-ceh-loading-text="@Localizer["Common.Sending"]">Send my application</button>
                 </div>
             </form>
         }

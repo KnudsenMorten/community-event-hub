@@ -22,42 +22,15 @@
 
 @if (!Model.AccessDenied)
 {
-    <div class="card">
-        <h2>1. Sponsor tasks</h2>
-        <p>Catalog of tasks every sponsor company has to complete (logo
-           upload, attendee list, dinner pick, etc). Create new ones,
-           delete obsolete ones, or shift the deadline when a milestone
-           moves.</p>
-        <p><a asp-page="/Organizer/SponsorAdmin/Tasks">Manage sponsor tasks</a></p>
-    </div>
-
-    <div class="card">
-        <h2>2. Sponsor leads</h2>
-        <p>Leads, inquiries, and booth-meeting requests pulled daily from
-           Zoho CRM. View per sponsor; download as CSV (also auto-exported
-           to each sponsor's storage drop daily).</p>
-        <p><a asp-page="/Organizer/SponsorAdmin/Leads">Manage sponsor leads</a></p>
-    </div>
-
-    <div class="card">
-        <h2>3. Sponsor status dashboard</h2>
-        <p>Per-sponsor view of: tasks done vs open, overdue items, lead
-           volume this week / since start, last Zoho sync. Sortable; click
-           a row for the per-sponsor detail.</p>
-        <p><a asp-page="/Organizer/SponsorAdmin/Dashboard">Open dashboard</a></p>
-    </div>
-
-    <div class="card">
-        <h2>4. Sponsor directory</h2>
-        <p>The full list of sponsor companies for this edition: contacts,
-           tiers and onboarding status. Add, edit or deactivate a sponsor.</p>
-        <p><a asp-page="/Organizer/Sponsors">Manage sponsor directory</a></p>
-    </div>
-
-    <div class="card">
-        <h2>5. App game</h2>
-        <p>Track which sponsors take part in the attendee app game, the gift
-           they committed, and send bring-the-gift reminders.</p>
-        <p><a asp-page="/Organizer/AppGame">Manage app game</a></p>
-    </div>
+    var tiles = new List<CommunityHub.Pages.Shared.HubTile>
+    {
+        new("/Organizer/SponsorAdmin/Tasks", "Sponsor tasks", "Catalog of tasks every sponsor company has to complete; create, delete, or shift deadlines."),
+        new("/Organizer/SponsorAdmin/Leads", "Sponsor leads", "Leads, inquiries, and booth-meeting requests pulled daily from Zoho CRM; view per sponsor and download as CSV."),
+        new("/Organizer/SponsorAdmin/Dashboard", "Sponsor status dashboard", "Per-sponsor view of tasks done vs open, overdue items, lead volume, and last Zoho sync."),
+        new("/Organizer/Sponsors", "Sponsor directory", "The full list of sponsor companies for this edition: contacts, tiers and onboarding status."),
+        new("/Organizer/SponsorAdmin/Welcome", "Sponsor welcome", "Resend the sponsor welcome / intro email per company or to all sponsors, and reset the welcome flag."),
+        new("/Organizer/AppGame", "App game", "Track which sponsors take part in the attendee app game, the gift they committed, and send reminders."),
+        new("/Organizer/EconomicContacts", "e-conomic contacts", "Manage the contacts on any e-conomic customer (add / edit / delete) straight from the hub."),
+    };
+    <partial name="_HubGrid" model="@tiles" />
 }

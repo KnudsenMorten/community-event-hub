@@ -27,7 +27,10 @@ public sealed record MySpeakerSession(
     bool IsMasterClass,
     bool IsScheduled,
     int OpenQuestionCount,
-    IReadOnlyList<string> CoSpeakerNames);
+    IReadOnlyList<string> CoSpeakerNames,
+    /// <summary>The organizer-provided evaluation results link (Session.EvaluationFormUrl),
+    /// or null. When set, the speaker grid shows an "Evaluations" download link.</summary>
+    string? EvaluationUrl = null);
 
 /// <summary>
 /// Builds the signed-in speaker's OWN session list for the Speaker hub
@@ -76,6 +79,7 @@ public sealed class SpeakerSessionsService
                 s.StartsAt,
                 s.EndsAt,
                 s.Type,
+                s.EvaluationFormUrl,
                 OpenQuestionCount = s.Questions.Count(q => q.Status == SessionQuestionStatus.Open),
                 CoSpeakers = s.SessionSpeakers
                     .Where(ss => ss.ParticipantId != participantId)
@@ -100,7 +104,8 @@ public sealed class SpeakerSessionsService
                 r.CoSpeakers
                     .Where(n => !string.IsNullOrWhiteSpace(n))
                     .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
-                    .ToList()))
+                    .ToList(),
+                string.IsNullOrWhiteSpace(r.EvaluationFormUrl) ? null : r.EvaluationFormUrl))
             .ToList();
     }
 }

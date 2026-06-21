@@ -63,6 +63,9 @@
                 <h4 style="margin:4px 0 8px;">Help requests
                     @if (openHelp > 0) { <span style="color:#ea580c;">(@openHelp open)</span> }
                 </h4>
+                <p class="info" style="font-size:13px;margin:0 0 8px;">Type a reply and pick
+                   <strong>Answered</strong> (the volunteer still handles it) or
+                   <strong>Resolved</strong> (the request is closed) to send your response.</p>
                 @if (help.Count == 0)
                 {
                     <p class="info" style="font-size:13px;">No help requests in this category.</p>
@@ -95,6 +98,9 @@
                 }
 
                 <h4 style="margin:14px 0 8px;">Work</h4>
+                <p class="info" style="font-size:13px;margin:0 0 8px;">Create a subcategory first,
+                   then add tasks to it, assign a volunteer to each task, and update its status as the
+                   work progresses.</p>
                 @foreach (var sub in cat.Subcategories.OrderBy(s => s.Name))
                 {
                     <div class="sv-sub">

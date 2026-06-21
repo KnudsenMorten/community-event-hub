@@ -62,7 +62,7 @@ public class SoMeSettingsModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+        if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
 
         await _settings.SaveAsync(
             me.EventId, Enabled, CompanyPageUrlOrOrgId, SpeakerPreAlertOrganizerEmail,

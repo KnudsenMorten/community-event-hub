@@ -66,10 +66,6 @@
             <h3 style="color:var(--el-darkblue);font-size:16px;margin-top:22px;">@Localizer["Diet.Heading"]</h3>
             <partial name="_DietaryFieldset" model="Model.Dietary" />
 
-            <label for="AllergyNotes">@Localizer["Dinner.AllergyExtraLabel"]</label>
-            <textarea asp-for="AllergyNotes" rows="2"
-                      placeholder="@Localizer["Dinner.AllergyPlaceholder"]"></textarea>
-
             <label for="Comments">@Localizer["Dinner.CommentsLabel"]</label>
             <textarea asp-for="Comments" rows="3"></textarea>
 

@@ -30,15 +30,18 @@ public sealed class TaskReminderBuilder
     private readonly CommunityHubDbContext _db;
     private readonly EmailTemplateProvider _templates;
     private readonly TimeProvider _clock;
+    private readonly SponsorRecipientResolver _sponsorRecipients;
 
     public TaskReminderBuilder(
         CommunityHubDbContext db,
         EmailTemplateProvider templates,
-        TimeProvider clock)
+        TimeProvider clock,
+        SponsorRecipientResolver sponsorRecipients)
     {
         _db = db;
         _templates = templates;
         _clock = clock;
+        _sponsorRecipients = sponsorRecipients;
     }
 
     public async Task<IReadOnlyList<ReminderMessage>> BuildDueAsync(
@@ -64,6 +67,8 @@ public sealed class TaskReminderBuilder
                 t.Id,
                 t.Title,
                 DueDate = t.DueDate!.Value,
+                // The full entity carries Role + SponsorCompanyId, which drive the
+                // sponsor coordinator-only audience rule (REQUIREMENTS §7c) below.
                 Participant = t.AssignedParticipant!,
                 // Speaker contact-email override (null for non-speakers / unset).
                 ContactEmailOverride = _db.SpeakerProfiles
@@ -115,11 +120,45 @@ public sealed class TaskReminderBuilder
             // participant's secondary email rides along as CC (10a-5).
             var persona = Email.OnboardingEmailSets.PersonaFor(t.Participant.Role)
                 .ToString();
+
+            var occasionKey = $"task:{t.Id}:m{milestone}";
+
+            // SPONSOR audience rule (REQUIREMENTS §7c): a sponsor task reminder
+            // does NOT go to whoever the task happens to be assigned to (which may
+            // be a signer-only contact) — it goes to the company's EVENT-COORDINATOR
+            // contacts (signer-only excluded, both-roles included, all coordinators).
+            // Routed through the shared SponsorRecipientResolver so the audience rule
+            // lives in one place. The OccasionKey embeds each coordinator's address
+            // so every coordinator is deduped independently in the ledger.
+            if (t.Participant.Role == ParticipantRole.Sponsor
+                && !string.IsNullOrWhiteSpace(t.Participant.SponsorCompanyId))
+            {
+                var coordinators = await _sponsorRecipients.ResolveAsync(
+                    eventId, t.Participant.SponsorCompanyId!, ct);
+                foreach (var c in coordinators)
+                {
+                    var cCc = string.IsNullOrWhiteSpace(c.SecondaryEmail)
+                        ? null
+                        : new[] { c.SecondaryEmail!.Trim() };
+                    messages.Add(new ReminderMessage(
+                        RecipientEmail: c.Email,
+                        ReminderType: "task-deadline",
+                        OccasionKey: $"{occasionKey}:{c.Email}",
+                        Subject: rendered.Subject,
+                        HtmlBody: rendered.HtmlBody,
+                        DeliverToEmail: c.Email,
+                        Persona: persona,
+                        ParticipantId: c.ParticipantId,
+                        RecipientName: c.FullName,
+                        Cc: cCc));
+                }
+                continue;
+            }
+
             var cc = string.IsNullOrWhiteSpace(t.Participant.SecondaryEmail)
                 ? null
                 : new[] { t.Participant.SecondaryEmail!.Trim() };
 
-            var occasionKey = $"task:{t.Id}:m{milestone}";
             messages.Add(new ReminderMessage(
                 RecipientEmail: t.Participant.Email,
                 ReminderType: "task-deadline",

@@ -36,8 +36,8 @@ public class IndexModel : PageModel
     private readonly EventConfigOptions _eventConfigOptions;
     private readonly CommunityHub.Core.Reminders.CalendarFeedTokenService _calendarTokens;
     private readonly CommunityHub.Core.Reminders.ParticipantCalendarBuilder _calendarBuilder;
-    private readonly CommunityHub.Core.Reminders.PublicLandingService _landing;
     private readonly CommunityHub.Core.Participants.ParticipantChecklistBuilder _checklist;
+    private readonly CommunityHub.Core.Reminders.SpeakerSessionsService _speakerSessions;
     private readonly ILogger<IndexModel> _logger;
 
     public IndexModel(
@@ -48,8 +48,8 @@ public class IndexModel : PageModel
         EventConfigOptions eventConfigOptions,
         CommunityHub.Core.Reminders.CalendarFeedTokenService calendarTokens,
         CommunityHub.Core.Reminders.ParticipantCalendarBuilder calendarBuilder,
-        CommunityHub.Core.Reminders.PublicLandingService landing,
         CommunityHub.Core.Participants.ParticipantChecklistBuilder checklist,
+        CommunityHub.Core.Reminders.SpeakerSessionsService speakerSessions,
         ILogger<IndexModel> logger)
     {
         _db = db;
@@ -59,36 +59,14 @@ public class IndexModel : PageModel
         _eventConfigOptions = eventConfigOptions;
         _calendarTokens = calendarTokens;
         _calendarBuilder = calendarBuilder;
-        _landing = landing;
         _checklist = checklist;
+        _speakerSessions = speakerSessions;
         _logger = logger;
     }
 
-    /// <summary>
-    /// Non-null when the request is anonymous: the view renders the PUBLIC landing
-    /// branch instead of the authed hub. Null for a signed-in participant (the hub).
-    /// </summary>
-    public CommunityHub.Core.Reminders.PublicLandingView? Landing { get; private set; }
-
-    /// <summary>True for an anonymous visitor (drives the view's landing-vs-hub split).</summary>
-    public bool IsAnonymous { get; private set; }
-
-    /// <summary>
-    /// Human-friendly edition date range for the landing hero, localized via the
-    /// current UI culture. Collapses same-month ranges ("9–10 Feb 2027") and
-    /// renders a single day when start == end.
-    /// </summary>
-    public static string FormatDateRange(DateOnly start, DateOnly end)
-    {
-        // Explicit "day-month-year" parts (not the culture's short-date pattern) so
-        // a same-month range collapses cleanly to "9–10 Feb 2027" in any culture.
-        if (start == end) return start.ToString("d MMM yyyy");
-        if (start.Year == end.Year && start.Month == end.Month)
-            return $"{start:%d}–{end:d MMM yyyy}";
-        if (start.Year == end.Year)
-            return $"{start:d MMM}–{end:d MMM yyyy}";
-        return $"{start:d MMM yyyy}–{end:d MMM yyyy}";
-    }
+    /// <summary>The speaker's own sessions, surfaced on the speaker landing card.</summary>
+    public IReadOnlyList<CommunityHub.Core.Reminders.MySpeakerSession> SpeakerSessions { get; private set; }
+        = System.Array.Empty<CommunityHub.Core.Reminders.MySpeakerSession>();
 
     public CommunityHub.Core.Config.EditionDates? EventDates { get; private set; }
 
@@ -149,13 +127,11 @@ public class IndexModel : PageModel
         var me = _participant.Current;
         if (me is null)
         {
-            // Anonymous visitor: render the PUBLIC landing page in place (no Login
-            // redirect) so the public Sessions / Speakers / Sponsors pages are
-            // reachable + shareable. Landing == null only if there is no active
-            // event, which the view handles with a friendly empty state.
-            IsAnonymous = true;
-            Landing = await _landing.BuildAsync(ct);
-            return Page();
+            // No session cookie ⇒ go STRAIGHT to the Event Hub sign-in (operator
+            // 2026-06-21: the marketing landing page is removed entirely). The public
+            // Sessions / Speakers / Sponsors pages remain reachable at their own
+            // routes; only the root "/" no longer shows a landing.
+            return RedirectToPage("/Login");
         }
 
         // First-time-after-login welcome: redirect once, then never again.
@@ -206,6 +182,14 @@ public class IndexModel : PageModel
 
         ApplyRoleVisibility(me.Role);
         await LoadSectionDataAsync(me, ct);
+
+        // Speaker landing card (operator 2026-06-21): show the speaker their own
+        // sessions right on the hub (pending tasks already render via the checklist;
+        // important dates link out to the Calendar).
+        if (me.Role is ParticipantRole.Speaker or ParticipantRole.MasterclassSpeaker)
+        {
+            SpeakerSessions = await _speakerSessions.GetMySessionsAsync(me.EventId, me.ParticipantId, me.Role, ct);
+        }
 
         // Key-dates panel data -- loaded for everyone (the card shows the
         // edition's preDay / day1 / day2 / lockDate). Returns null when the
@@ -276,8 +260,12 @@ public class IndexModel : PageModel
         switch (role)
         {
             case ParticipantRole.Organizer:
-                ShowHotel = ShowDinner = ShowVolunteerShifts = true;
-                ShowSpeakerDeadlines = ShowSponsorPipeline = true;
+                // Organizers get hotel + dinner (they attend) + the sponsor pipeline
+                // + organizer tools. They are NOT volunteers or speakers, so the
+                // Volunteer-shifts and Speaker-hub cards are NOT shown on their hub
+                // (operator 2026-06-20).
+                ShowHotel = ShowDinner = true;
+                ShowSponsorPipeline = true;
                 ShowOrganizerTools = true;
                 break;
             case ParticipantRole.Speaker:

@@ -70,7 +70,7 @@ public class SpeakerRemindersModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+        if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
 
         var task = await _db.Tasks
             .Where(t => t.Id == taskId && t.EventId == me.EventId)
@@ -218,6 +218,10 @@ public class SpeakerRemindersModel : PageModel
         string fullName, string taskTitle, string? description, DateOnly? due, string eventCode)
     {
         var firstName = string.IsNullOrWhiteSpace(fullName) ? "there" : fullName.Split(' ')[0];
+        // dueText carries a <strong> span (raw-HTML token); descriptionBlock is
+        // a sender-built HTML paragraph with the free-text already encoded.
+        // Plain tokens (firstName/eventCode/taskTitle) are HTML-encoded by the
+        // renderer at the seam — pass raw text. REQUIREMENTS §10c-4.
         var dueText = due is null
             ? "no fixed due date"
             : $"due <strong>{due:dd/MM/yyyy}</strong>";
@@ -229,7 +233,6 @@ public class SpeakerRemindersModel : PageModel
         tokens["firstName"] = firstName;
         tokens["eventCode"] = eventCode;
         tokens["taskTitle"] = taskTitle;
-        tokens["taskTitleHtml"] = System.Net.WebUtility.HtmlEncode(taskTitle);
         tokens["dueText"] = dueText;
         tokens["descriptionBlock"] = descriptionBlock;
 

@@ -5,6 +5,16 @@
     var mailto = $"mailto:{Model.LeadEmail}?subject=" + Uri.EscapeDataString($"[{Model.EditionCode}] Sponsor question");
 }
 
+@if (Model.AccessDenied)
+{
+    <div class="card">
+        <h2>Contact the sponsor team</h2>
+        <p class="error">This page is for sponsors only.</p>
+        <p><a asp-page="/Index">Back to hub</a></p>
+    </div>
+    return;
+}
+
 <div class="card">
     <h2>Contact the sponsor team</h2>
     <p>Reach out for anything sponsor-related — booth setup, deliverables, billing, schedule, attendee bag content, anything that does not have its own task.</p>

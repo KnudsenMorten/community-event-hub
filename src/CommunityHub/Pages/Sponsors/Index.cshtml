@@ -81,11 +81,12 @@
         @if (Model.NoActiveEvent || Model.View is null)
         {
             <p class="spo-empty">@Localizer["Public.NoLiveEvent"]</p>
-            return;
         }
-        @{ var view = Model.View; }
+        else
+        {
+            var view = Model.View;
 
-        @if (view.TotalCount == 0)
+            if (view.TotalCount == 0)
         {
             <p class="spo-empty">
                 <span class="big">@Localizer["Sponsors.ComingSoonTitle"]</span>
@@ -150,6 +151,7 @@
                     <a class="spo-cta-btn" href="@Model.BecomeSponsor.Href">@Localizer["Sponsors.BecomeCta"]</a>
                 }
             </section>
+        }
         }
     </div>
 </div>

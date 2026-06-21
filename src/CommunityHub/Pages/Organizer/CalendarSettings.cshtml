@@ -45,6 +45,48 @@
                 </div>
             </fieldset>
         </form>
+
+        <section style="margin-top:20px;" aria-labelledby="cal-preview-h">
+            <h3 id="cal-preview-h" style="font-size:15px;margin-bottom:4px;">
+                @Localizer["CalPreview.Heading"]
+            </h3>
+            <p style="color:#6b7280;font-size:13px;margin-top:0;">@Localizer["CalPreview.Intro"]</p>
+
+            @if (Model.FeedPreview.Count == 0)
+            {
+                <p class="info" role="status" style="color:#6b7280;font-style:italic;font-size:13px;">
+                    @Localizer["CalPreview.Empty"]
+                </p>
+            }
+            else
+            {
+                <p role="status" style="font-size:13px;color:#374151;">
+                    @string.Format(Localizer["CalPreview.Count"].Value, Model.FeedPreview.Count)
+                </p>
+                <div style="overflow-x:auto;-webkit-overflow-scrolling:touch;">
+                    <table style="width:100%;border-collapse:collapse;font-size:13.5px;">
+                        <caption class="sr-only">@Localizer["CalPreview.Heading"]</caption>
+                        <thead>
+                            <tr>
+                                <th scope="col" style="text-align:left;padding:8px 10px;border-bottom:1px solid #e6e8ee;background:#f9fafb;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:#6b7280;">@Localizer["CalPreview.Col.Date"]</th>
+                                <th scope="col" style="text-align:left;padding:8px 10px;border-bottom:1px solid #e6e8ee;background:#f9fafb;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:#6b7280;">@Localizer["CalPreview.Col.Item"]</th>
+                                <th scope="col" style="text-align:left;padding:8px 10px;border-bottom:1px solid #e6e8ee;background:#f9fafb;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:#6b7280;">@Localizer["CalPreview.Col.Where"]</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                        @foreach (var row in Model.FeedPreview)
+                        {
+                            <tr>
+                                <td style="padding:8px 10px;border-bottom:1px solid #e6e8ee;white-space:nowrap;">@row.Date.ToString("yyyy-MM-dd")</td>
+                                <td style="padding:8px 10px;border-bottom:1px solid #e6e8ee;">@row.Summary</td>
+                                <td style="padding:8px 10px;border-bottom:1px solid #e6e8ee;color:#6b7280;">@(string.IsNullOrWhiteSpace(row.Location) ? "—" : row.Location)</td>
+                            </tr>
+                        }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </section>
     }
     <p style="margin-top:16px;"><a asp-page="/Organizer/Index">Back to organizer area</a></p>
 </div>

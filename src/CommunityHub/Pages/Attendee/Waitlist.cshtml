@@ -1,0 +1,43 @@
+@page
+@model CommunityHub.Pages.Attendee.WaitlistModel
+@{
+    ViewData["Title"] = Localizer["Nav.Waitlist"].Value;
+}
+
+<div class="card">
+    <h2>@Localizer["Nav.Waitlist"]</h2>
+
+    @if (!string.IsNullOrEmpty(Model.Message))
+    {
+        <partial name="_Flash" model='new CommunityHub.Pages.Shared.FlashModel(Model.Message!, "success")' />
+    }
+
+    @if (!Model.HasAttendeeRecord)
+    {
+        <p class="error">We couldn't match your ticket yet. If you've just registered, please check back shortly.</p>
+    }
+    else if (!Model.Eligible)
+    {
+        <p>Master Classes are part of the <strong>2-day ticket</strong>. Your current ticket doesn't include one.</p>
+    }
+    else if (Model.Pending is null)
+    {
+        <p>You're not on any Master Class waitlist.</p>
+        <p class="info">If a Master Class is full, you can join its waitlist — we'll email you automatically if a seat opens up.</p>
+        <p><a class="task-link-btn" asp-page="/Attendee/Index">Add myself to master class waitlist</a></p>
+    }
+    else
+    {
+        <p class="info">You're on the waitlist for <strong>@Model.Pending.Title</strong>
+           — position <strong>@Model.Pending.WaitlistPosition</strong>. We'll email you if a seat opens.</p>
+        @if (Model.Confirmed is not null)
+        {
+            <p>Your confirmed Master Class is <strong>@Model.Confirmed.Title</strong>. If a waitlisted seat comes through,
+               it replaces your current one (you never hold two).</p>
+        }
+        <form method="post" asp-page-handler="Leave" style="margin-top:10px;">
+            <input type="hidden" name="sessionId" value="@Model.Pending.SessionId" />
+            <button type="submit" class="secondary">Leave this waitlist</button>
+        </form>
+    }
+</div>

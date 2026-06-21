@@ -5,8 +5,6 @@
     ViewData["Title"] = Localizer["SponsorTasks.Title"].Value;
 }
 
-@await Html.PartialAsync("_KeyDates", Model.EventDates)
-
 <div class="card">
     <h2>@Localizer["SponsorTasks.Title"]</h2>
 
@@ -26,6 +24,12 @@
     else
     {
         <p>@Localizer["SponsorTasks.Intro"]</p>
+        <div style="margin:6px 0 14px;padding:12px 14px;background:#f8fafc;border:1px solid #cbd5e0;border-left:4px solid var(--el-blue);border-radius:6px;color:#444;font-size:14px;line-height:1.5;">
+            These are the onboarding tasks for your company. Work through each one before its due date so everything is ready in time for the event.
+            Items not marked <em>Optional</em> are mandatory &mdash; they need to be completed for your booth and event listing to be ready.
+            Click a task to see exactly what's needed, fill in any details, then mark it done. A red badge means a task is overdue; a yellow badge shows an upcoming due date.
+            If anything is unclear, please contact the organizers and we'll be happy to help.
+        </div>
         @if (Model.LinkedContacts.Count > 0)
         {
             <p style="margin:6px 0 14px;color:#555;font-size:14px;">

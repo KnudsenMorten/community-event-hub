@@ -95,7 +95,7 @@ public class OnboardingModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) return Forbid();
+        if (!OrganizerAuth.IsRealOrganizer(me)) return Forbid();
 
         var reset = await _onboarding.ResetStepAsync(me.EventId, participantId, step, ct);
         var msg = reset
@@ -116,7 +116,7 @@ public class OnboardingModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) return Forbid();
+        if (!OrganizerAuth.IsRealOrganizer(me)) return Forbid();
 
         var result = await _onboarding.ResetStepForPersonaAsync(
             me.EventId, personaGroup, step, ct);
@@ -143,7 +143,7 @@ public class OnboardingModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) return Forbid();
+        if (!OrganizerAuth.IsRealOrganizer(me)) return Forbid();
 
         var csv = await _onboarding.BuildPendingCsvAsync(me.EventId, Persona, ct);
         var bytes = Encoding.UTF8.GetPreamble()

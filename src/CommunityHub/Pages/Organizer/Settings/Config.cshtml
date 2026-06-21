@@ -1,0 +1,159 @@
+@page
+@using CommunityHub.Core.Config
+@model CommunityHub.Pages.Organizer.Settings.ConfigModel
+@{
+    ViewData["Title"] = Localizer["ConfigEditor.Title"].Value;
+
+    string InputType(ScalarKind k) => k switch
+    {
+        ScalarKind.Number => "number",
+        ScalarKind.Url => "url",
+        _ => "text",
+    };
+}
+
+@if (Model.AccessDenied)
+{
+    <div class="card">
+        <h2>@Localizer["ConfigEditor.Title"]</h2>
+        <p class="error" role="alert">@Localizer["Common.OrganizersOnly"]</p>
+        <p><a asp-page="/Index">@Localizer["Common.BackToHub"]</a></p>
+    </div>
+    return;
+}
+
+<style>
+    .cfg-btn { background:#008BD2; color:#fff; border:0; border-radius:6px;
+               padding:7px 13px; font-size:14px; cursor:pointer; }
+    .cfg-btn:hover { background:#0079b8; }
+    .cfg-btn.reset { background:#6b7280; }
+    .cfg-btn.reset:hover { background:#4b5563; }
+    .cfg-field { padding:12px 0; border-top:1px solid #e5e7eb; }
+    .cfg-field:first-child { border-top:0; }
+    .cfg-field label.cfg-label { display:block; font-weight:600; font-size:14px;
+                                 margin-bottom:2px; word-break:break-word; }
+    .cfg-path { font-size:11px; color:#6b7280; font-family:monospace; }
+    .cfg-tag { display:inline-block; font-size:11px; line-height:1; padding:3px 7px;
+               border-radius:999px; margin-left:6px; vertical-align:middle; }
+    .cfg-tag.ovr { background:#e0f2fe; color:#075985; }
+    .cfg-tag.def { background:#f3f4f6; color:#6b7280; }
+    /* Mobile-first: the save row stacks; on wider screens it goes inline. */
+    .cfg-row { display:flex; flex-wrap:wrap; gap:8px; align-items:center;
+               margin-top:6px; }
+    .cfg-row input[type=text], .cfg-row input[type=url], .cfg-row input[type=number] {
+        flex:1 1 100%; min-width:0; box-sizing:border-box; font-size:14px;
+        padding:7px 9px; border:1px solid #d1d5db; border-radius:6px; }
+    .cfg-row .cfg-actions { display:flex; gap:8px; flex:1 1 100%; }
+    @@media (min-width:560px) {
+        .cfg-row input[type=text], .cfg-row input[type=url],
+        .cfg-row input[type=number] { flex:1 1 auto; }
+        .cfg-row .cfg-actions { flex:0 0 auto; }
+    }
+    .cfg-bool { display:flex; align-items:center; gap:8px; margin-top:6px; }
+    .cfg-default-hint { font-size:12px; color:#6b7280; margin:4px 0 0; }
+    .cfg-err { background:#fef2f2; border:1px solid #fecaca; border-radius:6px;
+               padding:7px 10px; font-size:13px; color:#b91c1c; margin:6px 0 0; }
+    .cfg-empty { color:#6b7280; font-size:13px; margin:6px 0 0; }
+</style>
+
+@if (Model.Saved)
+{
+    <div class="card"><p role="status" style="color:#0a6;margin:0;">@Localizer["ConfigEditor.Saved"]</p></div>
+}
+@if (Model.Reset)
+{
+    <div class="card"><p role="status" style="color:#0a6;margin:0;">@Localizer["ConfigEditor.ResetDone"]</p></div>
+}
+
+<div class="card">
+    <h1 style="margin-top:0;">@Localizer["ConfigEditor.Title"]</h1>
+    <p>@Localizer["ConfigEditor.Intro"]</p>
+    <p class="cfg-empty">@Localizer["ConfigEditor.SecretsNote"]</p>
+    <p><a asp-page="/Organizer/Settings">&larr; @Localizer["Common.BackToOrganizerArea"]</a></p>
+</div>
+
+@foreach (var sec in Model.Sections)
+{
+    <div class="card">
+        <h2>@Localizer[sec.TitleKey]</h2>
+
+        @if (sec.Fields.Count == 0)
+        {
+            <p class="cfg-empty">@Localizer["ConfigEditor.NoScalars"]</p>
+        }
+
+        @foreach (var f in sec.Fields)
+        {
+            var fieldId = $"{sec.Section}-{f.Path}".Replace('.', '-');
+            var hasError = string.Equals(Model.ErrorPath, f.Path, StringComparison.Ordinal);
+            <div class="cfg-field">
+                <label class="cfg-label" for="@fieldId">
+                    @f.Key
+                    @if (f.IsOverridden)
+                    {
+                        <span class="cfg-tag ovr">@Localizer["ConfigEditor.Overridden"]</span>
+                    }
+                    else
+                    {
+                        <span class="cfg-tag def">@Localizer["ConfigEditor.Default"]</span>
+                    }
+                </label>
+                <div class="cfg-path">@f.Path</div>
+
+                @if (f.Kind == ScalarKind.Bool)
+                {
+                    var on = string.Equals(f.EffectiveValue, "true", StringComparison.OrdinalIgnoreCase);
+                    <form method="post" asp-page-handler="Save" class="cfg-bool">
+                        <input type="hidden" name="section" value="@sec.Section" />
+                        <input type="hidden" name="path" value="@f.Path" />
+                        <input type="hidden" name="kind" value="@((int)f.Kind)" />
+                        @* hidden false + checkbox true → posts "false" when unchecked *@
+                        <input type="hidden" name="value" value="false" />
+                        <input type="checkbox" id="@fieldId" name="value" value="true" @(on ? "checked" : "") />
+                        <button type="submit" class="cfg-btn">@Localizer["Common.Save"]</button>
+                        @if (f.IsOverridden)
+                        {
+                            <button type="submit" class="cfg-btn reset"
+                                    asp-page-handler="Reset" formnovalidate>
+                                @Localizer["ConfigEditor.Reset"]
+                            </button>
+                        }
+                    </form>
+                }
+                else
+                {
+                    <form method="post" asp-page-handler="Save" class="cfg-row">
+                        <input type="hidden" name="section" value="@sec.Section" />
+                        <input type="hidden" name="path" value="@f.Path" />
+                        <input type="hidden" name="kind" value="@((int)f.Kind)" />
+                        <input type="@InputType(f.Kind)" id="@fieldId" name="value"
+                               value="@f.EffectiveValue"
+                               inputmode="@(f.Kind == ScalarKind.Number ? "decimal" : "text")"
+                               aria-label="@f.Path" />
+                        <div class="cfg-actions">
+                            <button type="submit" class="cfg-btn">@Localizer["Common.Save"]</button>
+                            @if (f.IsOverridden)
+                            {
+                                <button type="submit" class="cfg-btn reset"
+                                        asp-page-handler="Reset" formnovalidate>
+                                    @Localizer["ConfigEditor.Reset"]
+                                </button>
+                            }
+                        </div>
+                    </form>
+                }
+
+                @if (f.IsOverridden)
+                {
+                    <p class="cfg-default-hint">
+                        @Localizer["ConfigEditor.DefaultIs", string.IsNullOrEmpty(f.DefaultValue) ? Localizer["Common.None"].Value : f.DefaultValue]
+                    </p>
+                }
+                @if (hasError)
+                {
+                    <p class="cfg-err" role="alert">@Model.ErrorMessage</p>
+                }
+            </div>
+        }
+    </div>
+}

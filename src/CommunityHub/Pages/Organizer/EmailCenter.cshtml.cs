@@ -30,6 +30,7 @@ public class EmailCenterModel : PageModel
     private readonly EmailTemplateOptions _templateOptions;
     private readonly IEmailSender _emailSender;
     private readonly ParticipantEmailService _participantEmail;
+    private readonly EmailTestSendPlanner _testSendPlanner;
     private readonly TimeProvider _clock;
 
     public EmailCenterModel(
@@ -39,6 +40,7 @@ public class EmailCenterModel : PageModel
         IOptions<EmailTemplateOptions> templateOptions,
         IEmailSender emailSender,
         ParticipantEmailService participantEmail,
+        EmailTestSendPlanner testSendPlanner,
         TimeProvider clock)
     {
         _db = db;
@@ -47,6 +49,7 @@ public class EmailCenterModel : PageModel
         _templateOptions = templateOptions.Value;
         _emailSender = emailSender;
         _participantEmail = participantEmail;
+        _testSendPlanner = testSendPlanner;
         _clock = clock;
     }
 
@@ -60,6 +63,9 @@ public class EmailCenterModel : PageModel
     public string? PreviewError { get; private set; }
     public List<string> PreviewTokens { get; private set; } = new();
     public string? ActionMessage { get; private set; }
+
+    // --- Test-send to an arbitrary address (REQUIREMENTS §21 organizer) -------
+    [BindProperty] public string? TestAddress { get; set; }
 
     // --- Ledger -------------------------------------------------------------
     public List<SentReminder> Ledger { get; private set; } = new();
@@ -109,7 +115,7 @@ public class EmailCenterModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) return Forbid();
+        if (!OrganizerAuth.IsRealOrganizer(me)) return Forbid();
 
         LoadTemplateList();
         string msg;
@@ -162,7 +168,7 @@ public class EmailCenterModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) return Forbid();
+        if (!OrganizerAuth.IsRealOrganizer(me)) return Forbid();
 
         LoadTemplateList();
         string msg;
@@ -183,6 +189,64 @@ public class EmailCenterModel : PageModel
             catch (Exception ex)
             {
                 msg = $"Test send failed: {ex.Message}";
+            }
+        }
+        return RedirectToPage(new { Template, TypeFilter, EmailFilter, Msg = msg });
+    }
+
+    /// <summary>
+    /// Test-send the selected template (sample tokens) to an ARBITRARY address the
+    /// organizer types — for verifying delivery to a specific mailbox, e.g. a
+    /// colleague or a role test account. The send is honest: the
+    /// <see cref="EmailTestSendPlanner"/> decides up front (using the SAME
+    /// redirect/allowlist gate as the sender) whether the address is invalid,
+    /// would be dropped by the allowlist, would be redirected to the dev mailbox,
+    /// or lands as typed — so a dropped/redirected send is never reported as a
+    /// plain success.
+    /// </summary>
+    public async Task<IActionResult> OnPostTestSendToAddressAsync(CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+        if (!OrganizerAuth.IsRealOrganizer(me)) return Forbid();
+
+        LoadTemplateList();
+        string msg;
+        if (Template is null || !TemplateNames.Contains(Template))
+        {
+            msg = "Pick a template first.";
+        }
+        else
+        {
+            var plan = _testSendPlanner.Plan(TestAddress);
+            switch (plan.Outcome)
+            {
+                case EmailTestSendOutcome.InvalidAddress:
+                    msg = "Enter a valid email address to test-send to.";
+                    break;
+                case EmailTestSendOutcome.DroppedByKillSwitch:
+                    // No-op, NOT a success: tell the organizer it would be dropped
+                    // so they don't wait for mail that will never arrive.
+                    msg = $"Not sent: the global outbound-email kill switch is ON, "
+                        + "so the hub would drop it. Turn off Email__KillSwitch to test-send.";
+                    break;
+                default:
+                    try
+                    {
+                        var tokens = await BuildSampleTokensAsync(me.EventId, ct);
+                        var rendered = _templates.Render(Template, tokens);
+                        await _emailSender.SendAsync(
+                            plan.TargetAddress!, $"[TEST] {rendered.Subject}", rendered.HtmlBody, ct);
+                        msg = plan.Outcome == EmailTestSendOutcome.WouldRedirect
+                            ? $"Test mail '{Template}' sent for {plan.TargetAddress} "
+                              + $"(redirected to {plan.ActualRecipient} in this environment)."
+                            : $"Test mail '{Template}' sent to {plan.TargetAddress}.";
+                    }
+                    catch (Exception ex)
+                    {
+                        msg = $"Test send failed: {ex.Message}";
+                    }
+                    break;
             }
         }
         return RedirectToPage(new { Template, TypeFilter, EmailFilter, Msg = msg });

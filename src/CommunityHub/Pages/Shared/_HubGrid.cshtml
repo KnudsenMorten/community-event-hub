@@ -1,0 +1,23 @@
+@model IEnumerable<CommunityHub.Pages.Shared.HubTile>
+@*
+    Shared organizer hub button-grid. Render from a hub landing page with:
+        <partial name="_HubGrid" model="@tiles" />
+    where `tiles` is an IEnumerable<HubTile>. Styling (.hub-grid / .hub-tile) is
+    global in _Layout so every hub looks identical. Each tile is a full-card link.
+*@
+@if (Model is not null && Model.Any())
+{
+    <div class="hub-grid">
+        @foreach (var t in Model)
+        {
+            <a class="hub-tile" href="@t.Href">
+                <span class="hub-tile-title">@t.Title</span>
+                @if (!string.IsNullOrWhiteSpace(t.Description))
+                {
+                    <span class="hub-tile-desc">@t.Description</span>
+                }
+                <span class="hub-tile-go">Open &rarr;</span>
+            </a>
+        }
+    </div>
+}

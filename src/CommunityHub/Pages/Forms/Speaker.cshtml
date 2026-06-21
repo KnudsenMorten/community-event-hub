@@ -27,14 +27,12 @@
     #biotab-bio:checked      ~ .bio-panel-bio,
     #biotab-tagline:checked  ~ .bio-panel-tagline,
     #biotab-links:checked    ~ .bio-panel-links,
-    #biotab-photo:checked    ~ .bio-panel-photo,
-    #biotab-sessions:checked ~ .bio-panel-sessions { display: block; }
+    #biotab-photo:checked    ~ .bio-panel-photo { display: block; }
     /* Selected-tab styling. The radios precede the labels inside .bio-tablist. */
     #biotab-bio:checked      ~ .bio-tablist [for="biotab-bio"],
     #biotab-tagline:checked  ~ .bio-tablist [for="biotab-tagline"],
     #biotab-links:checked    ~ .bio-tablist [for="biotab-links"],
-    #biotab-photo:checked    ~ .bio-tablist [for="biotab-photo"],
-    #biotab-sessions:checked ~ .bio-tablist [for="biotab-sessions"] {
+    #biotab-photo:checked    ~ .bio-tablist [for="biotab-photo"] {
         color: var(--el-darkblue);
         border-color: #e5e7eb;
         background: #f9fafb;
@@ -60,14 +58,8 @@
 
         @* Shared success toast (REQUIREMENTS §21): role=status, auto-dismiss, dismissable. *@
         <partial name="_Flash" model='new CommunityHub.Pages.Shared.FlashModel(Model.Message, "success")' />
-        @if (!string.IsNullOrEmpty(Model.EmailNotice))
-        {
-            <p class="info" style="background:#eef7ff;border-left:4px solid var(--el-blue);padding:8px 12px;border-radius:6px;">
-                @Model.EmailNotice
-            </p>
-        }
 
-        <form method="post">
+        <form method="post" data-ceh-loading data-ceh-dirty>
 
             @* Shared inline-validation summary (REQUIREMENTS §21). *@
             <div asp-validation-summary="All" class="ceh-validation-summary"></div>
@@ -81,72 +73,13 @@
                 @Localizer["SpeakerForm.SignInNote"]
             </p>
 
-            <label for="ContactEmailOverride">@Localizer["SpeakerForm.PreferredEmail"]</label>
-            <input type="email" inputmode="email" autocomplete="email"
-                   asp-for="ContactEmailOverride"
-                   placeholder="@Localizer["SpeakerForm.PreferredPlaceholder"]" />
-            <span asp-validation-for="ContactEmailOverride" class="error"></span>
-            <p style="color:#6b7280;font-size:12px;margin:-8px 0 14px;">
-                @Localizer["SpeakerForm.PreferredNote"]
+            @* Speaker details (preferred email, accreditation, country, gender,
+               first-time, speaking days) moved to My Profile (operator 2026-06-21).
+               This form is now your BIO. *@
+            <p style="background:#eef7ff;border-left:4px solid var(--el-blue);padding:8px 12px;border-radius:6px;font-size:13px;">
+                Your contact details (preferred email, accreditation, country, gender) are now on
+                <a asp-page="/Profile">My profile</a>.
             </p>
-
-            <label for="Accreditation">@Localizer["SpeakerForm.Accreditation"]</label>
-            <select asp-for="Accreditation">
-                <option value="">@Localizer["SpeakerForm.Select"]</option>
-                @foreach (var opt in CommunityHub.Pages.Forms.SpeakerModel.AccreditationOptions)
-                {
-                    <option value="@opt">@opt</option>
-                }
-            </select>
-
-            <fieldset style="border:0;padding:0;margin:0;">
-                <legend style="font-weight:600;font-size:14px;margin-top:10px;">@Localizer["SpeakerForm.FirstTimeLegend"]</legend>
-                <div style="display:flex; gap:18px; margin:6px 0 14px;">
-                    <label style="font-weight:normal;">
-                        <input type="radio" asp-for="IsFirstTimeSpeaker" value="true" />
-                        @Localizer["Common.Yes"]
-                    </label>
-                    <label style="font-weight:normal;">
-                        <input type="radio" asp-for="IsFirstTimeSpeaker" value="false" />
-                        @Localizer["Common.No"]
-                    </label>
-                </div>
-            </fieldset>
-
-            <fieldset style="border:0;padding:0;margin:0;">
-                <legend style="font-weight:600;font-size:14px;margin-top:10px;">@Localizer["SpeakerForm.DaysLegend"]</legend>
-                <div style="display:flex; flex-direction:column; gap:6px; margin:6px 0 14px;">
-                    <label style="font-weight:normal; display:flex; align-items:center; gap:8px;">
-                        <input type="checkbox" asp-for="SpeakingPreDay" style="width:auto;margin:0;" />
-                        @Localizer["SpeakerForm.PreDay"]
-                    </label>
-                    <label style="font-weight:normal; display:flex; align-items:center; gap:8px;">
-                        <input type="checkbox" asp-for="SpeakingMainDay" style="width:auto;margin:0;" />
-                        @Localizer["SpeakerForm.MainDay"]
-                    </label>
-                </div>
-            </fieldset>
-            <p style="color:#6b7280;font-size:12px;margin:-8px 0 14px;">
-                @Localizer["SpeakerForm.DaysNote"]
-            </p>
-
-            @* Structured dietary/allergy capture for day catering (REQUIREMENTS
-               §21) — shared partial, identical on the Dinner form. *@
-            <h3 style="color:var(--el-darkblue);font-size:16px;margin-top:22px;">@Localizer["Diet.SpeakerHeading"]</h3>
-            <p style="color:#6b7280;font-size:12px;margin-top:0;">@Localizer["Diet.SpeakerNote"]</p>
-            <partial name="_DietaryFieldset" model="Model.Dietary" />
-
-            <label for="Country">@Localizer["SpeakerForm.Country"]</label>
-            <input type="text" asp-for="Country" placeholder="@Localizer["SpeakerForm.CountryPlaceholder"]" />
-
-            <label for="Gender">@Localizer["SpeakerForm.Gender"]</label>
-            <select asp-for="Gender">
-                <option value="">@Localizer["SpeakerForm.Select"]</option>
-                @foreach (var opt in CommunityHub.Pages.Forms.SpeakerModel.GenderOptions)
-                {
-                    <option value="@opt">@opt</option>
-                }
-            </select>
 
             <h3 style="color:var(--el-darkblue);margin-top:26px;">@Localizer["SpeakerForm.BioHeading"]</h3>
             <p style="color:#6b7280;font-size:13px;margin-top:0;">
@@ -172,19 +105,18 @@
                 <input type="radio" name="biotab" id="biotab-tagline" class="bio-tabradio" />
                 <input type="radio" name="biotab" id="biotab-links" class="bio-tabradio" />
                 <input type="radio" name="biotab" id="biotab-photo" class="bio-tabradio" />
-                <input type="radio" name="biotab" id="biotab-sessions" class="bio-tabradio" />
 
                 <div class="bio-tablist" role="tablist" aria-label="@Localizer["SpeakerForm.BioHeading"]">
                     <label class="bio-tab" for="biotab-bio" role="tab" tabindex="0">@Localizer["SpeakerForm.Bio"]</label>
                     <label class="bio-tab" for="biotab-tagline" role="tab" tabindex="0">@Localizer["SpeakerForm.Tagline"]</label>
                     <label class="bio-tab" for="biotab-links" role="tab" tabindex="0">@Localizer["SpeakerForm.LinksTab"]</label>
                     <label class="bio-tab" for="biotab-photo" role="tab" tabindex="0">@Localizer["SpeakerForm.PhotoTab"]</label>
-                    <label class="bio-tab" for="biotab-sessions" role="tab" tabindex="0">@Localizer["SpeakerForm.SessionsTab"]</label>
                 </div>
 
                 <section class="bio-panel bio-panel-bio" role="tabpanel" aria-label="@Localizer["SpeakerForm.Bio"]">
                     <label for="Biography">@Localizer["SpeakerForm.Bio"]</label>
-                    <textarea asp-for="Biography" rows="7"
+                    <textarea asp-for="Biography" rows="7" maxlength="4000"
+                              data-ceh-counter="@Localizer.GetString("Common.CharCount").Value"
                               placeholder="@Localizer["SpeakerForm.BioPlaceholder"]"></textarea>
                     <span asp-validation-for="Biography" class="error"></span>
                 </section>
@@ -226,85 +158,11 @@
                              style="max-width:160px;border-radius:10px;margin-top:8px;" />
                     }
                 </section>
-
-                <section class="bio-panel bio-panel-sessions" role="tabpanel" aria-label="@Localizer["SpeakerForm.SessionsTab"]">
-                    <p style="color:#374151;font-size:14px;">@Localizer["SpeakerForm.SessionsNote"]</p>
-                </section>
             </div>
 
-            <button type="submit">@Localizer["SpeakerForm.Save"]</button>
+            <button type="submit" data-ceh-loading-text="@Localizer["Common.Saving"]">@Localizer["SpeakerForm.Save"]</button>
         </form>
 
         <p><a asp-page="/Index">@Localizer["Common.BackToHub"]</a></p>
     }
 </div>
-
-@if (!Model.AccessDenied)
-{
-    <div class="card">
-        <h2>@Localizer["SpeakerForm.ManualTitle"]</h2>
-        <p style="background:#fff7e6;padding:8px 12px;border-radius:6px;font-size:13px;">
-            @Localizer["SpeakerForm.ManualNote"]
-        </p>
-
-        <ul style="font-size:14px;line-height:1.8;list-style:none;padding:0;">
-            <li>
-                &#128196;
-                <a href="/manuals/speaker-manual-wn-norway.pptx" target="_blank" rel="noopener">
-                    Workplace Ninja Norway 2026 &mdash; Speaker manual (PPTX)
-                </a>
-            </li>
-        </ul>
-    </div>
-
-    <div class="card">
-        <h2>@Localizer["SpeakerForm.DatesTitle"]</h2>
-        <ul style="font-size:14px;line-height:1.7;">
-            <li><strong>10 Sept 2026</strong> &mdash; We start onboarding speakers into our event-system Zoho. Invitations come as an email to onboard the speaker.</li>
-            <li><strong>26 Sept 2026</strong> &mdash; Speaker must validate speaker profile on Zoho Backstage (event system).</li>
-            <li><strong>1 Oct 2026</strong> &mdash; Deadline to update your speaker profile information on Event Hub (travel, hotel, speaker dinner, polo, etc.).</li>
-            <li><strong>9 Jan 2027</strong> &mdash; Travel-reimbursement claim deadline (submit ticket + invoice).</li>
-            <li><strong>20 Jan 2027</strong> &mdash; First PPT draft due. Upload to the ELDK27 Presentations folder + send confirmation email to <a href="mailto:info@expertslive.dk">info@expertslive.dk</a>.</li>
-            <li><strong>3 Feb 2027</strong> &mdash; Final presentation must be uploaded to the ELDK27 Presentations folder so attendees can check out the slides.</li>
-            <li><strong>9 Feb 2027</strong> &mdash; Main event day.</li>
-        </ul>
-    </div>
-
-    <div class="card">
-        <h2>@Localizer["SpeakerForm.TemplateTitle"]</h2>
-        <p>@Localizer["SpeakerForm.TemplateBody"]</p>
-        <p>
-            <a class="button"
-               href="https://template.expertslive.dk/" target="_blank" rel="noopener"
-               style="display:inline-block;background:var(--el-blue);color:#fff;
-                      padding:9px 16px;border-radius:7px;text-decoration:none;
-                      font-size:15px;">
-               @Localizer["SpeakerForm.TemplateDownload"]
-            </a>
-        </p>
-    </div>
-
-    <div class="card">
-        <h2>@Localizer["SpeakerForm.SocialTitle"]</h2>
-        <ul style="font-size:14px;line-height:1.7;">
-            <li>Speaker graphics are ready &mdash; click here to find your pictures to use in social-media posts.</li>
-            <li>We will also announce speakers through our social-media campaign &mdash; but you are welcome to announce it now if you want.</li>
-            <li>Please include the tags <strong>#ELDK27 #ExpertsLiveDK</strong> in your posts, and tag our company pages on LinkedIn and X / Twitter.</li>
-        </ul>
-    </div>
-
-    <div class="card">
-        <h2>@Localizer["SpeakerForm.SessionInfoTitle"]</h2>
-        <ul style="font-size:14px;line-height:1.7;">
-            <li><strong>Session length:</strong> 60 min &middot; <strong>language:</strong> English.</li>
-            <li>Give the audience a deep introduction to the topic with lots of demos &mdash; and time for questions (5&ndash;10 min) during the session.</li>
-            <li>Preferable level: <strong>400 (Expert)</strong> or <strong>300 (Advanced)</strong>. No level-200 (intro) sessions, please!</li>
-            <li>Keep a good 50/50 balance between slides and demos. The audience loves to see the technology through demos they can relate to &mdash; <em>"Less PowerPoint, More Demos"</em>.</li>
-        </ul>
-    </div>
-
-    <div class="card">
-        <h2>@Localizer["SpeakerForm.QuestionsTitle"]</h2>
-        <p>@Localizer["SpeakerForm.QuestionsBody"]</p>
-    </div>
-}

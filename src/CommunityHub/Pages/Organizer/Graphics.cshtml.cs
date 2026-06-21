@@ -64,7 +64,7 @@ public class GraphicsModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+        if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
 
         await _graphics.ReleaseAsync(me.EventId, AssetId, me.Email, ct);
         Message = "Graphic released to the speaker.";
@@ -76,7 +76,7 @@ public class GraphicsModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+        if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
 
         await _graphics.UnreleaseAsync(me.EventId, AssetId, ct);
         Message = "Graphic pulled back (hidden from the speaker again).";
@@ -88,7 +88,7 @@ public class GraphicsModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+        if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
 
         if (Replacement is null || Replacement.Length == 0)
         {

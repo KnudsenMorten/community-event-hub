@@ -1,6 +1,7 @@
 using CommunityHub.Auth;
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
+using CommunityHub.Core.Reminders;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
@@ -24,13 +25,16 @@ public class CalendarSettingsModel : PageModel
 {
     private readonly ICurrentParticipantAccessor _participant;
     private readonly CommunityHubDbContext _db;
+    private readonly ParticipantCalendarBuilder _calendar;
 
     public CalendarSettingsModel(
         ICurrentParticipantAccessor participant,
-        CommunityHubDbContext db)
+        CommunityHubDbContext db,
+        ParticipantCalendarBuilder calendar)
     {
         _participant = participant;
         _db = db;
+        _calendar = calendar;
     }
 
     [BindProperty]
@@ -38,6 +42,14 @@ public class CalendarSettingsModel : PageModel
 
     public bool AccessDenied { get; private set; }
     public string? SavedMessage { get; private set; }
+
+    /// <summary>
+    /// Read-only preview of the organizer's OWN calendar feed — the same items a
+    /// calendar client would see when it subscribes to the per-user .ics. Lets the
+    /// organizer confirm what the feed contains before sharing the subscribe URL.
+    /// </summary>
+    public IReadOnlyList<ParticipantCalendarBuilder.CalendarPreviewRow> FeedPreview { get; private set; }
+        = System.Array.Empty<ParticipantCalendarBuilder.CalendarPreviewRow>();
 
     public async Task<IActionResult> OnGetAsync(CancellationToken ct)
     {
@@ -49,6 +61,8 @@ public class CalendarSettingsModel : PageModel
             .Where(e => e.Id == me.EventId)
             .Select(e => e.CalendarSyncEnabled)
             .FirstOrDefaultAsync(ct);
+
+        FeedPreview = await _calendar.BuildPreviewAsync(me.ParticipantId, ct);
         return Page();
     }
 
@@ -56,7 +70,7 @@ public class CalendarSettingsModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+        if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
 
         var ev = await _db.Events.FirstOrDefaultAsync(e => e.Id == me.EventId, ct);
         if (ev is null) return NotFound();

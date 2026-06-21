@@ -68,6 +68,17 @@ public sealed class EmailOptions
 {
     public const string SectionName = "Email";
 
+    /// <summary>
+    /// GLOBAL OUTBOUND-EMAIL KILL SWITCH (REQUIREMENTS §23). When true, NO mail
+    /// leaves the hub by ANY path — web, jobs, digests — regardless of the
+    /// allowlist or redirect. The send is short-circuited before SMTP and logged
+    /// as a kill-switch drop. This is the process-wide hard stop set in config
+    /// (app setting <c>Email__KillSwitch</c>); the per-edition organizer switch
+    /// (the <c>outbound-email</c> feature gate) sits on top for edition-scoped
+    /// control. Default false (mail flows, subject to the allowlist).
+    /// </summary>
+    public bool KillSwitch { get; set; }
+
     public string SmtpHost { get; set; } = "smtp-relay.brevo.com";
     public int SmtpPort { get; set; } = 587;
 
@@ -89,20 +100,30 @@ public sealed class EmailOptions
     public string RedirectAllTo { get; set; } = string.Empty;
 
     /// <summary>
-    /// PRODUCTION-SAFE ALLOWLIST. When non-empty, outbound mail is sent only if
-    /// the (post-redirect) recipient matches an entry; non-matching recipients
-    /// are silently DROPPED (logged at Information). Empty = no allowlist =
-    /// every recipient gets mail (normal PROD behaviour).
-    ///
-    /// Format: comma- or semicolon-separated list of either:
-    ///   - exact addresses     "mok@expertslive.dk"
-    ///   - domain wildcards    "@2linkit.net"           (any address at this domain)
-    ///
-    /// Use case: deploy new functionality to PROD with allowlist set to
-    /// internal staff only, smoke-test against real PROD data without spamming
-    /// external recipients, then clear the setting once happy. ALWAYS remove
-    /// (or leave empty) for normal operation -- otherwise the hub silently
-    /// drops mail to sponsors / volunteers / speakers.
+    /// RING CEILING (REQUIREMENTS §23) — caps the outbound-email audience at a ring,
+    /// regardless of a feature's released ring. Primary use is the DEV env: set
+    /// <c>Email__MaxReleaseRing=Ring1</c> so DEV onboarding / reminders / schedules
+    /// reach only ring0/ring1 participants and NEVER ring2+ (real sponsors, speakers,
+    /// volunteers) even if a feature is released to ring2/ring3. The effective email
+    /// release ring becomes <c>min(featureReleasedRing, MaxReleaseRing)</c> (lower =
+    /// more restrictive). Leave EMPTY in PROD so the feature's released ring rules.
+    /// Accepts a <see cref="Settings.Ring"/> name ("Ring0".."Ring3"/"Broad") or its
+    /// number ("0".."3"); unparseable / empty = no ceiling.
     /// </summary>
-    public string OnlySendTo { get; set; } = string.Empty;
+    public string MaxReleaseRing { get; set; } = string.Empty;
+
+    /// <summary>
+    /// PROD OPERATOR BCC. When non-empty, this address is added as a BCC on every
+    /// mail that ACTUALLY SENDS — i.e. after the ring gate AND the
+    /// allowlist/redirect/kill-switch decision have all passed for the primary
+    /// recipient. It is NOT added to mail that is ring-dropped, allowlist-dropped,
+    /// redirected away, or kill-switched, so the bcc faithfully reflects what truly
+    /// went out (a silent archive of real outbound). The bcc itself is not subject
+    /// to ring/allowlist filtering — it is the operator (organizer, ring0,
+    /// allowlisted) and must always receive a copy of any sent mail — but the rules
+    /// for the PRIMARY recipient are never bypassed. Set in PROD via app setting
+    /// <c>Email__BccAllTo</c> (e.g. the operator's mailbox); leave empty in DEV /
+    /// tests (default) so behaviour is unchanged there.
+    /// </summary>
+    public string BccAllTo { get; set; } = string.Empty;
 }

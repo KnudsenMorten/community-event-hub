@@ -195,6 +195,14 @@ public class Session
     /// <summary>When the Zoho Booking participant sync for this master class last ran.</summary>
     public DateTimeOffset? BookingLastSyncedAt { get; set; }
 
+    /// <summary>
+    /// Seat capacity for the in-hub Master Class signup + waitlist (REQUIREMENTS §6).
+    /// Organizer-set on a <see cref="SessionType.CommunityMasterClass"/> session.
+    /// null = no cap configured (everyone who signs up is confirmed; no waitlist);
+    /// when set, signups beyond the cap are waitlisted (FIFO).
+    /// </summary>
+    public int? MasterClassCapacity { get; set; }
+
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? UpdatedAt { get; set; }
 

@@ -5,7 +5,7 @@ namespace CommunityHub.Core.Organizer;
 
 /// <summary>
 /// A stable, language-neutral key for one data feed on the freshness panel. The
-/// UI maps it to a localized label (en + da-DK); the service never emits display
+/// UI maps it to a localized label (English); the service never emits display
 /// text, only the key + the timestamps.
 /// </summary>
 public enum FreshnessFeed

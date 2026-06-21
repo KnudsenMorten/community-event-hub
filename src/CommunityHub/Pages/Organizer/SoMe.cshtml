@@ -20,27 +20,12 @@
 
 @if (!Model.AccessDenied)
 {
-    <div class="card">
-        <h2>@Localizer["Nav.OrgGraphics"]</h2>
-        <p>@Localizer["OrgSoMe.Graphics"]</p>
-        <p><a asp-page="/Organizer/Graphics">@Localizer["Nav.OrgGraphics"]</a></p>
-    </div>
-
-    <div class="card">
-        <h2>@Localizer["Nav.OrgSoMeQueue"]</h2>
-        <p>@Localizer["OrgSoMe.Queue"]</p>
-        <p><a asp-page="/Organizer/SoMeQueue">@Localizer["Nav.OrgSoMeQueue"]</a></p>
-    </div>
-
-    <div class="card">
-        <h2>@Localizer["Nav.OrgSoMeSettings"]</h2>
-        <p>@Localizer["OrgSoMe.Settings"]</p>
-        <p><a asp-page="/Organizer/SoMeSettings">@Localizer["Nav.OrgSoMeSettings"]</a></p>
-    </div>
-
-    <div class="card">
-        <h2>@Localizer["Nav.OrgAssetLocations"]</h2>
-        <p>@Localizer["OrgSoMe.AssetLocations"]</p>
-        <p><a asp-page="/Organizer/AssetLocations">@Localizer["Nav.OrgAssetLocations"]</a></p>
-    </div>
+    var tiles = new List<CommunityHub.Pages.Shared.HubTile>
+    {
+        new("/Organizer/Graphics", Localizer["Nav.OrgGraphics"].Value, Localizer["OrgSoMe.Graphics"].Value),
+        new("/Organizer/SoMeQueue", Localizer["Nav.OrgSoMeQueue"].Value, Localizer["OrgSoMe.Queue"].Value),
+        new("/Organizer/SoMeSettings", Localizer["Nav.OrgSoMeSettings"].Value, Localizer["OrgSoMe.Settings"].Value),
+        new("/Organizer/AssetLocations", Localizer["Nav.OrgAssetLocations"].Value, Localizer["OrgSoMe.AssetLocations"].Value),
+    };
+    <partial name="_HubGrid" model="@tiles" />
 }
