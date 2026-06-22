@@ -219,8 +219,7 @@ public sealed class OrganizerOverviewService
         var speakerTasks = await _db.Tasks
             .Where(t => t.EventId == eventId
                         && t.AssignedParticipant != null
-                        && (t.AssignedParticipant.Role == ParticipantRole.Speaker
-                            || t.AssignedParticipant.Role == ParticipantRole.MasterclassSpeaker))
+                        && t.AssignedParticipant.Role == ParticipantRole.Speaker)
             .Select(t => new { t.Title, t.State, t.DueDate })
             .ToListAsync(ct);
 

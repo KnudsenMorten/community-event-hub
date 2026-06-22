@@ -173,12 +173,8 @@
   <data name="Login.PrestageTipSummary" xml:space="preserve"><value>Tip: bookmark a one-click sign-in for each account</value></data>
   <data name="Login.PrestageTipBody" xml:space="preserve"><value>Add your email to the page address and this field is pre-filled, so you only click “Send my sign-in code”. Bookmark one link per account to switch between several logins fast:</value></data>
   <data name="Login.EnterCode" xml:space="preserve"><value>Enter the 6-digit code we emailed you</value></data>
-  <data name="Login.StaySignedIn" xml:space="preserve"><value>Stay signed in for</value></data>
-  <data name="Login.RememberDay" xml:space="preserve"><value>1 day (next morning)</value></data>
-  <data name="Login.RememberWeek" xml:space="preserve"><value>1 week (default)</value></data>
-  <data name="Login.RememberMonth" xml:space="preserve"><value>1 month</value></data>
-  <data name="Login.RememberPersistent" xml:space="preserve"><value>Until I sign out</value></data>
-  <data name="Login.RememberHelp" xml:space="preserve"><value>Use a shorter option on shared devices; "Until I sign out" is convenient on a personal phone / laptop.</value></data>
+  <data name="Login.RememberMe" xml:space="preserve"><value>Remember me</value></data>
+  <data name="Login.RememberMeHelp" xml:space="preserve"><value>Stay signed in on this device until you sign out. Leave unticked on a shared computer.</value></data>
   <data name="Login.SignInButton" xml:space="preserve"><value>Sign in</value></data>
   <data name="Login.SendNewCode" xml:space="preserve"><value>Send a new code</value></data>
   <data name="Login.GoToEmailPin" xml:space="preserve"><value>Go to email + PIN sign-in</value></data>
@@ -520,6 +516,7 @@
 
   <!-- Forms: Dinner -->
   <data name="Dinner.Title" xml:space="preserve"><value>Appreciation Dinner</value></data>
+  <data name="Dinner.AccessDenied" xml:space="preserve"><value>The appreciation dinner is by invitation based on your participation. Your current entitlement does not include the dinner — if you believe this is a mistake, please contact the organizers.</value></data>
   <data name="Dinner.IntroBody" xml:space="preserve"><value>We appreciate that you take the time to join us for &lt;strong&gt;#{0}&lt;/strong&gt; — and would like to invite all speakers, volunteers, appreciation sponsors, VIP guests and organizers to our appreciation dinner on &lt;strong&gt;{1} at {2} at 18:00 / 6&amp;nbsp;pm&lt;/strong&gt;.</value></data>
   <data name="Dinner.BeforeNote" xml:space="preserve"><value>This is the evening &lt;strong&gt;BEFORE&lt;/strong&gt; the main conference day — please make your travel plans accordingly.</value></data>
   <data name="Dinner.YourRsvp" xml:space="preserve"><value>Your RSVP:</value></data>
@@ -1204,6 +1201,45 @@
   <data name="Settings.Feat.AttendeeReconcile.Desc" xml:space="preserve"><value>Reconcile tickets and master-class bookings and chase attendees about mismatches.</value></data>
   <data name="Settings.Feat.AttendeeWelcome.Name" xml:space="preserve"><value>Attendee welcome &amp; auto sign-in</value></data>
   <data name="Settings.Feat.AttendeeWelcome.Desc" xml:space="preserve"><value>Auto-create a hub account for each 2-day ticket holder and email them a one-click sign-in link. Sends real email to attendees — turn on deliberately.</value></data>
+  <!-- Incubation: new user-impact GUI actions, ring-tested before GA (§23a) -->
+  <data name="Settings.Feat.BroadcastEmail.Name" xml:space="preserve"><value>Broadcast &amp; Email Center</value></data>
+  <data name="Settings.Feat.BroadcastEmail.Desc" xml:space="preserve"><value>Compose and send mass or one-off email to a chosen audience. Reaches real people — ring-test before going broad.</value></data>
+  <data name="Settings.Feat.InvitationEmail.Name" xml:space="preserve"><value>Send invitations</value></data>
+  <data name="Settings.Feat.InvitationEmail.Desc" xml:space="preserve"><value>Email an invitation with a personal sign-in link to each selected person.</value></data>
+  <data name="Settings.Feat.EmailResend.Name" xml:space="preserve"><value>Resend email</value></data>
+  <data name="Settings.Feat.EmailResend.Desc" xml:space="preserve"><value>Re-send a previously sent or templated email to a participant.</value></data>
+  <data name="Settings.Feat.OnboardingStepReset.Name" xml:space="preserve"><value>Onboarding step resets</value></data>
+  <data name="Settings.Feat.OnboardingStepReset.Desc" xml:space="preserve"><value>Bulk-email people asking them to redo a specific onboarding step.</value></data>
+  <data name="Settings.Feat.ParticipantActivation.Name" xml:space="preserve"><value>Account activation &amp; provisioning</value></data>
+  <data name="Settings.Feat.ParticipantActivation.Desc" xml:space="preserve"><value>Activate or provision login-capable accounts (pre-selection queue, bulk participant ops) — enables sign-in for real people.</value></data>
+  <data name="Settings.Feat.MasterClassInvites.Name" xml:space="preserve"><value>Master Class invites</value></data>
+  <data name="Settings.Feat.MasterClassInvites.Desc" xml:space="preserve"><value>Send Master Class invitation and waitlist-promotion emails with self-service seat links.</value></data>
+  <data name="Settings.Feat.SessionEvalEmail.Name" xml:space="preserve"><value>Email session evaluations</value></data>
+  <data name="Settings.Feat.SessionEvalEmail.Desc" xml:space="preserve"><value>Email each speaker their session evaluation (HappyOrNot) results.</value></data>
+  <data name="Settings.Feat.SponsorWelcome.Name" xml:space="preserve"><value>Sponsor welcome email</value></data>
+  <data name="Settings.Feat.SponsorWelcome.Desc" xml:space="preserve"><value>Send (or re-send) the sponsor welcome / intro email per company or to all sponsors.</value></data>
+  <data name="Settings.Feat.SponsorTasks.Name" xml:space="preserve"><value>Sponsor tasks</value></data>
+  <data name="Settings.Feat.SponsorTasks.Desc" xml:space="preserve"><value>Create onboarding tasks for sponsor companies — they appear to every sponsor contact.</value></data>
+  <data name="Settings.Feat.SponsorReminders.Name" xml:space="preserve"><value>Sponsor reminders</value></data>
+  <data name="Settings.Feat.SponsorReminders.Desc" xml:space="preserve"><value>Email reminders to sponsors (e.g. the app game).</value></data>
+  <data name="Settings.Feat.VolunteerTasks.Name" xml:space="preserve"><value>Volunteer tasks &amp; assignment</value></data>
+  <data name="Settings.Feat.VolunteerTasks.Desc" xml:space="preserve"><value>Create volunteer tasks and assign volunteers — tasks appear to the assigned people.</value></data>
+  <data name="Settings.Feat.VolunteerAllocation.Name" xml:space="preserve"><value>Volunteer shift allocation</value></data>
+  <data name="Settings.Feat.VolunteerAllocation.Desc" xml:space="preserve"><value>Commit volunteer shift / bucket allocations to many volunteers at once.</value></data>
+  <data name="Settings.Feat.HotelAssignment.Name" xml:space="preserve"><value>Hotel assignment</value></data>
+  <data name="Settings.Feat.HotelAssignment.Desc" xml:space="preserve"><value>Assign hotels and rooms to participants.</value></data>
+  <data name="Settings.Feat.GroupPhotoInvites.Name" xml:space="preserve"><value>Group-photo invites</value></data>
+  <data name="Settings.Feat.GroupPhotoInvites.Desc" xml:space="preserve"><value>Email group-photo session invitations to participants.</value></data>
+  <data name="Settings.Feat.TravelReimbursementEmail.Name" xml:space="preserve"><value>Travel reimbursement confirmations</value></data>
+  <data name="Settings.Feat.TravelReimbursementEmail.Desc" xml:space="preserve"><value>Email a payment confirmation when a travel reimbursement is marked paid.</value></data>
+  <data name="Settings.Feat.GraphicsRelease.Name" xml:space="preserve"><value>Release SoMe graphics</value></data>
+  <data name="Settings.Feat.GraphicsRelease.Desc" xml:space="preserve"><value>Release social-media graphics to speakers — they become visible in the speaker's area.</value></data>
+  <data name="Settings.Feat.TestDataCleanup.Name" xml:space="preserve"><value>Test-data cleanup</value></data>
+  <data name="Settings.Feat.TestDataCleanup.Desc" xml:space="preserve"><value>Bulk-delete test participants and data. Destructive — ring-test only.</value></data>
+  <data name="Settings.Feat.HotelInvite.Name" xml:space="preserve"><value>Hotel calendar invite</value></data>
+  <data name="Settings.Feat.HotelInvite.Desc" xml:space="preserve"><value>Email the hotel booking calendar invite (.ics) to a participant when their booking is submitted or confirmed.</value></data>
+  <data name="Settings.Feat.DinnerInvite.Name" xml:space="preserve"><value>Dinner calendar invite</value></data>
+  <data name="Settings.Feat.DinnerInvite.Desc" xml:space="preserve"><value>Email the appreciation-dinner calendar invite (.ics) to a participant when they confirm attendance.</value></data>
   <!-- Sessionize import dry-run / preview (§21) -->
   <data name="Sezimport.PreviewDelta" xml:space="preserve"><value>Preview delta</value></data>
   <data name="Sezimport.PreviewFull" xml:space="preserve"><value>Preview full import</value></data>

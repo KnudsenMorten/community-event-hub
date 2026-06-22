@@ -2,6 +2,7 @@ using System.Text;
 using CommunityHub.Auth;
 using CommunityHub.Core.Domain;
 using CommunityHub.Core.Reminders;
+using CommunityHub.Export;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
@@ -49,12 +50,28 @@ public class PartyRsvpsModel : PageModel
         if (me is null) return RedirectToPage("/Login");
         if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
 
-        var rows = await _svc.GetAllAsync(me.EventId, ct);
+        var csv = await BuildCsvAsync(me.EventId, ct);
+        return File(Encoding.UTF8.GetBytes(csv), "text/csv", "party-rsvps.csv");
+    }
+
+    public async Task<IActionResult> OnGetXlsxAsync(CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+
+        var csv = await BuildCsvAsync(me.EventId, ct);
+        return File(CsvToXlsx.Build(csv, "Party RSVPs"), CsvToXlsx.ContentType, "party-rsvps.xlsx");
+    }
+
+    private async Task<string> BuildCsvAsync(int eventId, CancellationToken ct)
+    {
+        var rows = await _svc.GetAllAsync(eventId, ct);
         var sb = new StringBuilder();
         sb.Append("Name,Email,Attending,SubmittedUtc\r\n");
         foreach (var r in rows)
             sb.Append($"{Csv(r.Name)},{Csv(r.Email)},{(r.Attending ? "yes" : "no")},{r.UpdatedAt:yyyy-MM-dd HH:mm}\r\n");
-        return File(Encoding.UTF8.GetBytes(sb.ToString()), "text/csv", "party-rsvps.csv");
+        return sb.ToString();
     }
 
     private static string Csv(string s) =>

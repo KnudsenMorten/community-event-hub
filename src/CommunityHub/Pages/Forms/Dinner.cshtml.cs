@@ -3,6 +3,7 @@ using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
 using CommunityHub.Core.Email;
 using CommunityHub.Core.Reminders;
+using CommunityHub.Forms;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
@@ -26,6 +27,7 @@ public class DinnerModel : PageModel
     private readonly EmailOptions _emailOptions;
     private readonly OrganizerActionItemService _actions;
     private readonly IStringLocalizer<SharedResource> _loc;
+    private readonly IEmailContextAccessor? _context;
 
     public DinnerModel(
         CommunityHubDbContext db,
@@ -34,7 +36,8 @@ public class DinnerModel : PageModel
         IEmailSender emailSender,
         IOptions<EmailOptions> emailOptions,
         OrganizerActionItemService actions,
-        IStringLocalizer<SharedResource> loc)
+        IStringLocalizer<SharedResource> loc,
+        IEmailContextAccessor? context = null)
     {
         _db = db;
         _participant = participant;
@@ -43,6 +46,7 @@ public class DinnerModel : PageModel
         _emailOptions = emailOptions.Value;
         _actions = actions;
         _loc = loc;
+        _context = context;
     }
 
     [BindProperty] public DinnerRsvp Rsvp { get; set; } = DinnerRsvp.NotAnswered;
@@ -64,6 +68,24 @@ public class DinnerModel : PageModel
     public bool IsLocked { get; private set; }
     public string? Message { get; private set; }
 
+    /// <summary>FEATURE B: true when the participant is not entitled to the appreciation dinner.</summary>
+    public bool AccessDenied { get; private set; }
+
+    /// <summary>
+    /// FEATURE B: the appreciation-dinner RSVP is gated by ENTITLEMENT
+    /// (<see cref="OrderItem.AppreciationDinner"/>). A sponsor-self-funded speaker
+    /// IS entitled and still sees the form; a speaker with no dinner entitlement is
+    /// denied. Every NON-speaker role keeps its prior access (the form historically
+    /// had no role gate), so access is never silently removed; only speakers are
+    /// entitlement-gated.
+    /// </summary>
+    private async Task<bool> IsEligibleAsync(CurrentParticipant me, CancellationToken ct)
+    {
+        if (me.Role != ParticipantRole.Speaker) return true; // historical: every non-speaker role had the form
+        return await FormEntitlementGate.IsEntitledAsync(
+            _db, me.EventId, me.ParticipantId, OrderItem.AppreciationDinner, ct);
+    }
+
     public async Task<IActionResult> OnGetAsync(CancellationToken ct)
     {
         var me = _participant.Current;
@@ -72,6 +94,8 @@ public class DinnerModel : PageModel
         await PopulateContextAsync(me.EventId, ct);
         FullName = me.FullName;
         Email = me.Email;
+
+        if (!await IsEligibleAsync(me, ct)) { AccessDenied = true; return Page(); }
 
         IsLocked = await IsEditingLockedAsync(me.EventId, ct);
         await EnsureDinnerTaskExistsAsync(me.EventId, me.ParticipantId, ct);
@@ -101,6 +125,8 @@ public class DinnerModel : PageModel
         await PopulateContextAsync(me.EventId, ct);
         FullName = me.FullName;
         Email = me.Email;
+
+        if (!await IsEligibleAsync(me, ct)) { AccessDenied = true; return Page(); }
 
         if (await IsEditingLockedAsync(me.EventId, ct))
         {
@@ -321,7 +347,12 @@ public class DinnerModel : PageModel
             $"<p>See you there!</p>" +
             $"<p>Cheers,<br/>ELDK-team</p>";
 
-        await _emailSender.SendWithIcsAsync(
-            toEmail, subject, htmlBody, ics, "dinner.ics", ct);
+        // Ring-governed by the dinner-invite feature (operator 2026-06-22).
+        using (_context?.Set(new EmailContext(
+            "dinner-invite", signup.EventId, signup.ParticipantId, fullName, FeatureKey: "dinner-invite")))
+        {
+            await _emailSender.SendWithIcsAsync(
+                toEmail, subject, htmlBody, ics, "dinner.ics", ct);
+        }
     }
 }

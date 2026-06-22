@@ -23,17 +23,20 @@ public sealed class WelcomeEmailService
     private readonly EmailTemplateProvider _templates;
     private readonly IEmailSender _emailSender;
     private readonly TimeProvider _clock;
+    private readonly IEmailContextAccessor? _context;
 
     public WelcomeEmailService(
         CommunityHubDbContext db,
         EmailTemplateProvider templates,
         IEmailSender emailSender,
-        TimeProvider clock)
+        TimeProvider clock,
+        IEmailContextAccessor? context = null)
     {
         _db = db;
         _templates = templates;
         _emailSender = emailSender;
         _clock = clock;
+        _context = context;
     }
 
     /// <summary>
@@ -48,6 +51,14 @@ public sealed class WelcomeEmailService
             .Include(p => p.Event)
             .FirstOrDefaultAsync(p => p.Id == participantId, ct);
         if (participant is null || !participant.IsActive)
+        {
+            return false;
+        }
+
+        // Attendees get the per-role variant welcome (welcome-attendee) via the
+        // WelcomeWithLoginEmailService provisioning path, NOT this legacy once-ever
+        // welcome — so skip them here to avoid a double welcome (operator 2026-06-22).
+        if (participant.Role == ParticipantRole.Attendee)
         {
             return false;
         }
@@ -87,8 +98,14 @@ public sealed class WelcomeEmailService
         tokens["roleGuidance"] = RoleGuidance(participant.Role);
 
         var rendered = _templates.Render(TemplateName, tokens);
-        await _emailSender.SendAsync(
-            toEmail, rendered.Subject, rendered.HtmlBody, ct);
+        // Ring-governed by the welcome-email feature (operator 2026-06-22).
+        using (_context?.Set(new EmailContext(
+            ReminderType, participant.EventId, participant.Id, participant.FullName,
+            FeatureKey: "welcome-email")))
+        {
+            await _emailSender.SendAsync(
+                toEmail, rendered.Subject, rendered.HtmlBody, ct);
+        }
 
         // Record it so a re-import does not re-send.
         _db.SentReminders.Add(new SentReminder
@@ -107,7 +124,6 @@ public sealed class WelcomeEmailService
     {
         ParticipantRole.Organizer => "organizer",
         ParticipantRole.Speaker => "speaker",
-        ParticipantRole.MasterclassSpeaker => "Master Class speaker",
         ParticipantRole.Volunteer => "volunteer",
         ParticipantRole.Sponsor => "sponsor contact",
         ParticipantRole.Attendee => "attendee",
@@ -124,9 +140,6 @@ public sealed class WelcomeEmailService
             "You will find your hotel and dinner forms and your session "
             + "deadlines in the hub. Please complete the forms before the "
             + "deadline.",
-        ParticipantRole.MasterclassSpeaker =>
-            "You will find your hotel and dinner forms, your session "
-            + "deadlines, and pre-day information in the hub.",
         ParticipantRole.Volunteer =>
             "Please complete the volunteer sign-up in the hub to tell us which "
             + "shifts you can work. You will also find your hotel and dinner "

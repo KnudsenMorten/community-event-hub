@@ -188,8 +188,11 @@ public sealed class HotelManagementService
             .Select(hb => new { hb.ParticipantId, hb.NeedsRoom })
             .ToDictionaryAsync(x => x.ParticipantId, x => x.NeedsRoom, ct);
 
+        // Sponsors are not part of crew logistics (hotel, dinner, swag, …) — they
+        // never get a hotel room block, so they must not appear in the hotel
+        // assignment lists in org admin (operator 2026-06-21).
         var people = await _db.Participants
-            .Where(p => p.EventId == eventId)
+            .Where(p => p.EventId == eventId && p.Role != ParticipantRole.Sponsor)
             .Select(p => new
             {
                 p.Id, p.FullName, p.Email, p.Role, p.HotelId, p.HotelConfirmationNumber,

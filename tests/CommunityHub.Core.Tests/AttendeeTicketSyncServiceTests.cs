@@ -18,7 +18,7 @@ public class AttendeeTicketSyncServiceTests
     {
         var e = new Event { CommunityName = "C", DisplayName = "C 2027", Code = "C27", IsActive = true };
         db.Events.Add(e); await db.SaveChangesAsync();
-        var s = new Session { EventId = e.Id, Title = "MC", Type = SessionType.CommunityMasterClass, MasterClassCapacity = cap };
+        var s = new Session { EventId = e.Id, Title = "MC", Type = SessionType.MasterClass, MasterClassCapacity = cap };
         db.Sessions.Add(s); await db.SaveChangesAsync();
         return (e.Id, s.Id);
     }

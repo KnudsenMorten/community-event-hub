@@ -3,6 +3,7 @@ using CommunityHub.Auth;
 using CommunityHub.Core.Domain;
 using CommunityHub.Core.Export;
 using CommunityHub.Core.Reminders;
+using CommunityHub.Export;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
@@ -110,8 +111,24 @@ public class ActionQueueModel : PageModel
         if (me is null) return RedirectToPage("/Login");
         if (!OrganizerAuth.IsRealOrganizer(me)) return Forbid();
 
+        var csv = await BuildExportCsvAsync(me.EventId, ct);
+        return File(Encoding.UTF8.GetBytes(csv), "text/csv", "action-queue.csv");
+    }
+
+    public async Task<IActionResult> OnGetExportXlsxAsync(CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+        if (!OrganizerAuth.IsRealOrganizer(me)) return Forbid();
+
+        var csv = await BuildExportCsvAsync(me.EventId, ct);
+        return File(CsvToXlsx.Build(csv, "Action queue"), CsvToXlsx.ContentType, "action-queue.xlsx");
+    }
+
+    private async Task<string> BuildExportCsvAsync(int eventId, CancellationToken ct)
+    {
         var open = await _actions.GetOpenAsync(
-            me.EventId, string.IsNullOrWhiteSpace(TypeFilter) ? null : TypeFilter, ct);
+            eventId, string.IsNullOrWhiteSpace(TypeFilter) ? null : TypeFilter, ct);
 
         var header = new[] { "Type", "Participant", "Email", "What changed", "Last activity" };
         var rows = open.Select(a => (IReadOnlyList<string>)new[]
@@ -123,8 +140,7 @@ public class ActionQueueModel : PageModel
             (a.UpdatedAt ?? a.CreatedAt).ToString("yyyy-MM-dd HH:mm"),
         });
 
-        var csv = CsvWriter.Write(header, rows);
-        return File(Encoding.UTF8.GetBytes(csv), "text/csv", "action-queue.csv");
+        return CsvWriter.Write(header, rows);
     }
 
     private async Task LoadAsync(int eventId, CancellationToken ct)

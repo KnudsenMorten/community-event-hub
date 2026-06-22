@@ -1,17 +1,52 @@
 @model IEnumerable<CommunityHub.Pages.Shared.HubTile>
+@using CommunityHub.Core.Settings
 @*
     Shared organizer hub button-grid. Render from a hub landing page with:
         <partial name="_HubGrid" model="@tiles" />
     where `tiles` is an IEnumerable<HubTile>. Styling (.hub-grid / .hub-tile) is
     global in _Layout so every hub looks identical. Each tile is a full-card link.
+
+    RING BADGE + GATE: a tile tagged with a FeatureKey that is USER-IMPACT is
+    badged with its released ring (yellow "Ring N" pill while < Broad) and HIDDEN
+    from users whose effective ring is above it — the same staged-rollout gate the
+    nav uses. _Layout resolves the data once per request and shares it via ViewData
+    (RingFeatureMap + RingUserRing); we never re-query here. Best-effort: if the map
+    is absent (non-layout render), tiles show ungated.
 *@
-@if (Model is not null && Model.Any())
+@{
+    var ringMap = ViewData["RingFeatureMap"] as Dictionary<string, FeatureState>;
+    var ringUser = ViewData["RingUserRing"] is Ring r ? r : Rings.Default;
+
+    // Hidden when the org disabled a RING-SCOPED feature (Queue / User-impact), or
+    // the viewer's ring is above its released ring. Engine/EngineQueued features +
+    // untagged tiles never hide.
+    Func<HubTile, bool> ringHidden = t =>
+        t.FeatureKey is not null
+        && ringMap is not null
+        && ringMap.TryGetValue(t.FeatureKey, out var fs)
+        && fs.Descriptor.IsRingScoped
+        && (!fs.Enabled || !Rings.IsActiveForRing(ringUser, fs.ReleasedToRing));
+
+    // Badge the released ring while the feature is enabled + not yet Broad/GA.
+    Func<HubTile, Ring?> ringBadgeOf = t =>
+        t.FeatureKey is not null
+        && ringMap is not null
+        && ringMap.TryGetValue(t.FeatureKey, out var fs)
+        && fs.Descriptor.IsRingScoped
+        && fs.Enabled
+        && fs.ReleasedToRing != Ring.Broad
+            ? fs.ReleasedToRing : (Ring?)null;
+
+    var visible = (Model ?? Enumerable.Empty<HubTile>()).Where(t => !ringHidden(t)).ToList();
+}
+@if (visible.Count > 0)
 {
     <div class="hub-grid">
-        @foreach (var t in Model)
+        @foreach (var t in visible)
         {
+            var rb = ringBadgeOf(t);
             <a class="hub-tile" href="@t.Href">
-                <span class="hub-tile-title">@t.Title</span>
+                <span class="hub-tile-title">@t.Title@if (rb is not null) {<span class="set-tag ring" title="@Localizer["Settings.RingBadgeTitle"]">@Rings.Label(rb.Value)</span>}</span>
                 @if (!string.IsNullOrWhiteSpace(t.Description))
                 {
                     <span class="hub-tile-desc">@t.Description</span>

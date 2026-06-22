@@ -125,8 +125,7 @@ public class SpeakersModel : PageModel
 
         var ids = await _db.Participants
             .Where(p => p.EventId == me.EventId && emails.Contains(p.Email)
-                        && (p.Role == ParticipantRole.Speaker
-                            || p.Role == ParticipantRole.MasterclassSpeaker))
+                        && p.Role == ParticipantRole.Speaker)
             .Select(p => p.Id)
             .ToArrayAsync(ct);
 
@@ -325,8 +324,7 @@ public class SpeakersModel : PageModel
 
         var emailIdx = await _db.Participants
             .Where(p => p.EventId == me.EventId
-                        && (p.Role == ParticipantRole.Speaker
-                            || p.Role == ParticipantRole.MasterclassSpeaker))
+                        && p.Role == ParticipantRole.Speaker)
             .ToDictionaryAsync(p => p.Email, p => p.Id, StringComparer.OrdinalIgnoreCase, ct);
 
         var profileIdx = await _db.SpeakerProfiles
@@ -431,8 +429,7 @@ public class SpeakersModel : PageModel
         // count + sort + page in SQL, never loading every speaker into memory).
         var baseQuery = _db.Participants
             .Where(p => p.EventId == eventId
-                        && (p.Role == ParticipantRole.Speaker
-                            || p.Role == ParticipantRole.MasterclassSpeaker))
+                        && p.Role == ParticipantRole.Speaker)
             .Select(p => new
             {
                 p.Id, p.FullName, p.Email, p.Role, p.IsActive,

@@ -37,7 +37,7 @@ public class GraphicsModel : PageModel
     }
 
     public static readonly ParticipantRole[] EligibleRoles =
-        { ParticipantRole.Speaker, ParticipantRole.MasterclassSpeaker };
+        { ParticipantRole.Speaker };
 
     public bool AccessDenied { get; private set; }
     public ParticipantRole Role { get; private set; }

@@ -4,6 +4,28 @@ using CommunityHub.Core.Settings;
 namespace CommunityHub.Core.Domain;
 
 /// <summary>
+/// The sponsorship PACKAGE a company holds, ordered cheapest → richest.
+/// Distinct from <see cref="Integrations.BoothTier"/> (the physical booth-wall
+/// spec): the package is the commercial level that decides whether the company
+/// gets a booth at all. Silver is digital-only (no booth); Gold and above are
+/// exhibitor packages that include a booth.
+/// </summary>
+public enum SponsorPackage
+{
+    /// <summary>Digital / no booth.</summary>
+    Silver = 0,
+
+    /// <summary>Booth / exhibitor.</summary>
+    Gold = 1,
+
+    /// <summary>Booth / exhibitor.</summary>
+    Diamond = 2,
+
+    /// <summary>Booth / exhibitor.</summary>
+    Platinum = 3,
+}
+
+/// <summary>
 /// One sponsor company's self-service info: logos + descriptive text.
 /// Scoped to (EventId, SponsorCompanyId) so all contacts of a company edit
 /// the same row -- first one to save sets values; subsequent contacts edit
@@ -31,6 +53,23 @@ public class SponsorInfo
     /// sponsor's booth order is processed; an organizer may correct it.
     /// </summary>
     public BoothTier Tier { get; set; } = BoothTier.None;
+
+    /// <summary>
+    /// The commercial sponsorship package this company bought
+    /// (Silver/Gold/Diamond/Platinum). Defaults to
+    /// <see cref="SponsorPackage.Silver"/> (digital, no booth). Set from the
+    /// purchased product name at sync time (see
+    /// <see cref="Integrations.SponsorPackageMapper"/>); an organizer may correct
+    /// it. Drives <see cref="HasBooth"/> and the sponsor-hat order entitlements.
+    /// </summary>
+    public SponsorPackage SponsorPackage { get; set; } = SponsorPackage.Silver;
+
+    /// <summary>
+    /// True when this company's package includes a booth/exhibitor presence
+    /// (Gold and above). Silver is digital-only. Computed from
+    /// <see cref="SponsorPackage"/>; not persisted.
+    /// </summary>
+    public bool HasBooth => SponsorPackage >= SponsorPackage.Gold;
 
     /// <summary>
     /// Optional public website URL shown as the sponsor's link on the public

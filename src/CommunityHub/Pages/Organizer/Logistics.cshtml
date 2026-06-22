@@ -23,12 +23,13 @@
     var tiles = new List<CommunityHub.Pages.Shared.HubTile>
     {
         new("/Organizer/Hotels", Localizer["Nav.OrgHotels"].Value, Localizer["OrgLogistics.Hotels"].Value),
-        new("/Organizer/HotelAssignments", Localizer["Nav.OrgHotelAssignments"].Value, Localizer["OrgLogistics.Hotels"].Value),
+        new("/Organizer/HotelAssignments", Localizer["Nav.OrgHotelAssignments"].Value, Localizer["OrgLogistics.Hotels"].Value, "hotel-assignment"),
         new("/Organizer/HotelRoomBlocks", Localizer["RoomBlocks.Title"].Value, Localizer["OrgLogistics.Hotels"].Value),
         new("/Organizer/Swag", Localizer["Nav.OrgSwag"].Value, Localizer["OrgLogistics.Swag"].Value),
-        new("/Organizer/TravelReimbursements", Localizer["Nav.OrgTravel"].Value, Localizer["OrgLogistics.Travel"].Value),
+        new("/Organizer/TravelReimbursements", Localizer["Nav.OrgTravel"].Value, Localizer["OrgLogistics.Travel"].Value, "travel-reimbursement-email"),
         new("/Organizer/Lunch", Localizer["Nav.OrgLunch"].Value, Localizer["OrgLogistics.Lunch"].Value),
-        new("/Organizer/GroupPhotos", Localizer["Nav.OrgGroupPhotos"].Value, Localizer["OrgLogistics.GroupPhotos"].Value),
+        new("/Organizer/GroupPhotos", Localizer["Nav.OrgGroupPhotos"].Value, Localizer["OrgLogistics.GroupPhotos"].Value, "group-photo-invites"),
+        new("/Organizer/SpeakerReview", "Speaker & order review", "After a Sessionize import: classify each speaker (funding, days, same-person dedup, per-item overrides) and verify the deduped 'what to order' counts."),
         new("/Organizer/Schedule", Localizer["Nav.OrgSchedule"].Value, "The event schedule (move-in, setup, pre-day, party, dinner, main day, …) — role-tagged, shown on each participant's Key dates panel and synced to their calendar."),
         new("/Organizer/PartyRsvps", "Party RSVPs & headcount", "Anonymous Party sign-ups from the public /Party form — the attending headcount for the Bella Center food order, plus a CSV export."),
         new("/Organizer/Exports", Localizer["Nav.OrgExports"].Value, Localizer["OrgArea.Exports"].Value),

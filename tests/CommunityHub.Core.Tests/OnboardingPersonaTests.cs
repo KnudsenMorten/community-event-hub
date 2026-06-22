@@ -69,14 +69,6 @@ public sealed class OnboardingPersonaTests
     }
 
     [Fact]
-    public void MasterclassSpeaker_maps_to_the_speaker_step_set()
-    {
-        Assert.Equal(
-            OnboardingStepSets.For(ParticipantRole.Speaker),
-            OnboardingStepSets.For(ParticipantRole.MasterclassSpeaker));
-    }
-
-    [Fact]
     public void Sponsor_only_requires_appreciation_and_swag_not_bio_or_hotel()
     {
         var steps = OnboardingStepSets.For(ParticipantRole.Sponsor);
@@ -89,8 +81,8 @@ public sealed class OnboardingPersonaTests
     public void Volunteer_and_media_require_crew_steps_no_bio()
     {
         var vol = OnboardingStepSets.For(ParticipantRole.Volunteer);
-        var cam = OnboardingStepSets.For(ParticipantRole.Camera);
-        Assert.Equal(vol, cam);  // media-team == volunteer crew set
+        var media = OnboardingStepSets.For(ParticipantRole.Media);
+        Assert.Equal(vol, media);  // media-team == volunteer crew set
         Assert.DoesNotContain(OnboardingStep.Bio, vol);
         Assert.Contains(OnboardingStep.Hotel, vol);
     }

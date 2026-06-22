@@ -54,7 +54,7 @@ public sealed class MasterClassLogisticsService
             .FirstOrDefaultAsync(s => s.Id == sessionId && s.EventId == eventId, ct)
             ?? throw new InvalidOperationException(
                 $"Session {sessionId} not found in event {eventId}.");
-        if (session.Type != SessionType.CommunityMasterClass)
+        if (session.Type != SessionType.MasterClass)
         {
             throw new InvalidOperationException(
                 "A public logistics page is only available for a master-class session.");
@@ -84,7 +84,7 @@ public sealed class MasterClassLogisticsService
             .AsNoTracking()
             .Include(s => s.SessionSpeakers).ThenInclude(ss => ss.Participant)
             .FirstOrDefaultAsync(
-                s => s.PublicSlug == trimmed && s.Type == SessionType.CommunityMasterClass, ct);
+                s => s.PublicSlug == trimmed && s.Type == SessionType.MasterClass, ct);
         if (session is null) return null;
 
         var speakers = session.SessionSpeakers
@@ -109,7 +109,7 @@ public sealed class MasterClassLogisticsService
     {
         var isMasterClass = await _db.Sessions.AnyAsync(
             s => s.Id == sessionId && s.EventId == eventId
-                 && s.Type == SessionType.CommunityMasterClass, ct);
+                 && s.Type == SessionType.MasterClass, ct);
         if (!isMasterClass) return false;
 
         if (role == ParticipantRole.Organizer) return true;

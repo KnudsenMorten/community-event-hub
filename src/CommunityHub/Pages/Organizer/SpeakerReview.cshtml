@@ -1,0 +1,212 @@
+@page
+@using CommunityHub.Core.Domain
+@using CommunityHub.Core.Entitlements
+@model CommunityHub.Pages.Organizer.SpeakerReviewModel
+@{
+    ViewData["Title"] = "Speaker & order review";
+}
+
+<div class="card">
+    <h2>Speaker &amp; order review</h2>
+
+    @if (Model.AccessDenied)
+    {
+        <p class="error">This area is for organizers only.</p>
+        <p><a asp-page="/Index">Back to hub</a></p>
+    }
+    else
+    {
+        <p>After a Sessionize import, classify each speaker (who funds them, which
+           days they speak, and whether a community-email row is really the same
+           person as a sponsor/organizer row) and verify the deduped
+           <strong>what to order</strong> counts below.</p>
+
+        @if (!string.IsNullOrEmpty(Model.Error))
+        {
+            <p class="error">@Model.Error</p>
+        }
+        @if (!string.IsNullOrEmpty(Model.Notice))
+        {
+            <p class="info">@Model.Notice</p>
+        }
+
+        @* ---------- Section 1: order counts summary ---------- *@
+        <h3>What to order</h3>
+        <p>Deduped count of distinct people entitled to each item in this edition
+           (after same-person dedup and per-item overrides).</p>
+        <div style="display:flex;flex-wrap:wrap;gap:8px;margin:8px 0 16px;">
+            @foreach (var item in SpeakerReviewModel.AllItems)
+            {
+                var n = Model.Counts.TryGetValue(item, out var c) ? c : 0;
+                <div style="border:1px solid #d0d7de;border-radius:6px;padding:8px 12px;min-width:120px;">
+                    <div style="font-size:13px;color:#6b7280;">@item</div>
+                    <div style="font-size:22px;font-weight:600;">@n</div>
+                </div>
+            }
+        </div>
+
+        @* ---------- Section 2: speaker review list ---------- *@
+        <h3>Speakers (@Model.Speakers.Count)</h3>
+        @if (Model.Speakers.Count == 0)
+        {
+            <p class="info">No participants with a speaker profile in this edition yet.</p>
+        }
+        else
+        {
+            @foreach (var s in Model.Speakers)
+            {
+                <details style="margin:10px 0;padding:8px 12px;border:1px solid #d0d7de;border-radius:6px;">
+                    <summary>
+                        <strong>@s.FullName</strong>
+                        <span style="color:#6b7280;font-size:13px;">&mdash; @s.Email &middot; @s.Role</span>
+                        <span style="font-size:13px;">&middot; @s.Funding</span>
+                        @if (s.SpeakingPreDay)
+                        {
+                            <span class="info" style="font-size:12px;">pre-day</span>
+                        }
+                        @if (s.SpeakingMainDay)
+                        {
+                            <span class="info" style="font-size:12px;">main-day</span>
+                        }
+                        @if (s.SamePersonAsId is not null)
+                        {
+                            <span style="color:#b45309;font-size:12px;">&middot; same person as @s.SamePersonAsLabel</span>
+                        }
+                    </summary>
+
+                    @* Live effective-entitlement chips — the consequence of the settings *@
+                    <div style="margin:10px 0;">
+                        <span style="font-size:13px;color:#6b7280;">Effective entitlements:</span>
+                        @if (s.Effective.Count == 0)
+                        {
+                            <span style="font-size:13px;">none</span>
+                        }
+                        else
+                        {
+                            foreach (var item in SpeakerReviewModel.AllItems.Where(i => s.Effective.Contains(i)))
+                            {
+                                <span class="info" style="display:inline-block;font-size:12px;margin:2px;padding:2px 8px;border-radius:10px;">@item</span>
+                            }
+                        }
+                    </div>
+
+                    @* 1) Funding *@
+                    <form method="post" asp-page-handler="Funding" style="margin:8px 0;display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
+                        <input type="hidden" name="participantId" value="@s.ParticipantId" />
+                        <label for="fund-@s.ParticipantId">Funding</label>
+                        <select id="fund-@s.ParticipantId" name="funding">
+                            @foreach (var f in Enum.GetValues<SpeakerFunding>())
+                            {
+                                if (f == s.Funding)
+                                {
+                                    <option value="@f" selected>@f</option>
+                                }
+                                else
+                                {
+                                    <option value="@f">@f</option>
+                                }
+                            }
+                        </select>
+                        <button type="submit">Save funding</button>
+                    </form>
+
+                    @* 2) Days *@
+                    <form method="post" asp-page-handler="Days" style="margin:8px 0;">
+                        <input type="hidden" name="participantId" value="@s.ParticipantId" />
+                        <input type="hidden" name="preDay" value="false" />
+                        <input type="hidden" name="mainDay" value="false" />
+                        <fieldset style="border:1px solid #e5e7eb;border-radius:6px;padding:8px 12px;">
+                            <legend style="font-size:13px;">Speaking days</legend>
+                            <label style="margin-right:12px;">
+                                <input type="checkbox" name="preDay" value="true" @(s.SpeakingPreDay ? "checked" : "") /> Pre-day
+                            </label>
+                            <label style="margin-right:12px;">
+                                <input type="checkbox" name="mainDay" value="true" @(s.SpeakingMainDay ? "checked" : "") /> Main-day
+                            </label>
+                            <button type="submit">Save days</button>
+                        </fieldset>
+                    </form>
+
+                    @* 3) Same person as *@
+                    <form method="post" asp-page-handler="SamePerson" style="margin:8px 0;display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
+                        <input type="hidden" name="participantId" value="@s.ParticipantId" />
+                        <label for="same-@s.ParticipantId">Same person as</label>
+                        <select id="same-@s.ParticipantId" name="samePersonAsId">
+                            <option value="0">— select primary —</option>
+                            @foreach (var opt in Model.LinkTargets.Where(o => o.Id != s.ParticipantId))
+                            {
+                                if (s.SamePersonAsId == opt.Id)
+                                {
+                                    <option value="@opt.Id" selected>@opt.FullName (@opt.Email) · @opt.Role</option>
+                                }
+                                else
+                                {
+                                    <option value="@opt.Id">@opt.FullName (@opt.Email) · @opt.Role</option>
+                                }
+                            }
+                        </select>
+                        <button type="submit">Link</button>
+                        <button type="submit" asp-page-handler="ClearSamePerson" class="secondary" formnovalidate>Clear</button>
+                    </form>
+
+                    @* 4) Per-item overrides *@
+                    <details style="margin:8px 0;">
+                        <summary style="font-size:13px;">Per-item overrides</summary>
+                        <div style="margin-top:8px;">
+                            @foreach (var item in SpeakerReviewModel.AllItems)
+                            {
+                                var hasOverride = s.Overrides.TryGetValue(item, out var inc);
+                                var state = !hasOverride ? "default" : (inc ? "include" : "exclude");
+                                <form method="post" asp-page-handler="Override" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:4px 0;">
+                                    <input type="hidden" name="participantId" value="@s.ParticipantId" />
+                                    <input type="hidden" name="item" value="@item" />
+                                    <label style="min-width:150px;" for="ov-@s.ParticipantId-@item">@item</label>
+                                    <select id="ov-@s.ParticipantId-@item" name="state">
+                                        <option value="default" selected="@(state == "default")">Default</option>
+                                        <option value="include" selected="@(state == "include")">Force include</option>
+                                        <option value="exclude" selected="@(state == "exclude")">Force exclude</option>
+                                    </select>
+                                    <button type="submit">Apply</button>
+                                </form>
+                            }
+                        </div>
+                    </details>
+                </details>
+            }
+        }
+
+        @* ---------- Section 3: sponsor booth members ---------- *@
+        <h3>Sponsor booth members (@Model.BoothMembers.Count)</h3>
+        <p>Booth membership affects polo + main-day lunch counts. Package &amp;
+           booth status are read-only (set from the sponsor's order).</p>
+        @if (Model.BoothMembers.Count == 0)
+        {
+            <p class="info">No sponsor-role participants in this edition.</p>
+        }
+        else
+        {
+            <table style="width:100%;border-collapse:collapse;">
+                <tr style="text-align:left;border-bottom:2px solid #ddd;">
+                    <th>Name</th><th>Email</th><th>Package</th><th>Has booth</th><th>Booth member</th>
+                </tr>
+                @foreach (var b in Model.BoothMembers)
+                {
+                    <tr style="border-bottom:1px solid #eee;">
+                        <td>@b.FullName</td>
+                        <td>@b.Email</td>
+                        <td>@(b.Package?.ToString() ?? "—")</td>
+                        <td>@(b.HasBooth is null ? "—" : (b.HasBooth.Value ? "yes" : "no"))</td>
+                        <td>
+                            <form method="post" asp-page-handler="BoothMember" style="margin:0;">
+                                <input type="hidden" name="participantId" value="@b.ParticipantId" />
+                                <input type="hidden" name="isBoothMember" value="@((!b.IsBoothMember).ToString().ToLowerInvariant())" />
+                                <button type="submit">@(b.IsBoothMember ? "✓ Booth member (remove)" : "Mark as booth member")</button>
+                            </form>
+                        </td>
+                    </tr>
+                }
+            </table>
+        }
+    }
+    <p style="margin-top:16px;"><a asp-page="/Organizer/Logistics">Back to logistics</a></p>
+</div>

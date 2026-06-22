@@ -15,7 +15,7 @@ namespace CommunityHub.Core.Reminders;
 /// is no separate sync store.
 ///
 /// Role coverage falls out of the data, not a per-role code path:
-///  - Speaker / MasterclassSpeaker — milestone deadlines (seeded as dated
+///  - Speaker — milestone deadlines (seeded as dated
 ///    <see cref="ParticipantTask"/> rows by SpeakerDeadlineSeeder).
 ///  - Volunteer — their shifts (VolunteerAvailability) + any assigned dated tasks.
 ///  - Organizer — their assigned dated tasks / deadlines.

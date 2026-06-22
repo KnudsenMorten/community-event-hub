@@ -1,0 +1,108 @@
+@page
+@using CommunityHub.Core.Settings
+@model CommunityHub.Pages.Organizer.EmailTemplatesModel
+@{
+    ViewData["Title"] = "Email templates";
+}
+
+<div class="card">
+    <h2>Email templates</h2>
+    <p>Verify and modify every email's text per edition, preview it, and set its release ring.
+       The shipped template is the default; your saved edit wins at send time — no deploy.
+       The first line is <code>Subject: …</code>; tokens look like <code>{{firstName}}</code>.</p>
+
+    @if (Model.AccessDenied) { <p class="error">This area is for organizers only.</p> return; }
+
+    @if (!string.IsNullOrEmpty(Model.Message))
+    {
+        <p class="@(Model.IsError ? "error" : "info")" role="@(Model.IsError ? "alert" : "status")">@Model.Message</p>
+    }
+
+    @if (!Model.Editing)
+    {
+        <div style="overflow-x:auto;">
+            <table style="width:100%;border-collapse:collapse;font-size:13.5px;">
+                <thead>
+                    <tr style="text-align:left;border-bottom:2px solid #e5e7eb;">
+                        <th style="padding:6px 8px;">Template</th>
+                        <th style="padding:6px 8px;">Governed by</th>
+                        <th style="padding:6px 8px;">Ring</th>
+                        <th style="padding:6px 8px;">State</th>
+                        <th style="padding:6px 8px;"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var r in Model.Templates)
+                    {
+                        <tr style="border-bottom:1px solid #f0f1f4;">
+                            <td style="padding:6px 8px;"><strong>@r.Title</strong><br><span style="color:#8a90a0;font-size:11.5px;">@r.Key</span></td>
+                            <td style="padding:6px 8px;">@r.FeatureKey</td>
+                            <td style="padding:6px 8px;">
+                                @if (r.Ring != Ring.Broad)
+                                {
+                                    <span style="background:#fef9c3;color:#854d0e;border-radius:8px;padding:1px 8px;font-size:11.5px;font-weight:600;">@Rings.Label(r.Ring)</span>
+                                }
+                                else { <span style="color:#16a34a;font-size:12px;">GA</span> }
+                            </td>
+                            <td style="padding:6px 8px;">
+                                @if (r.Overridden) { <span style="background:#eef2ff;color:#3730a3;border:1px solid #c7d2fe;border-radius:8px;padding:1px 8px;font-size:11.5px;">Edited</span> }
+                                else { <span style="color:#8a90a0;font-size:12px;">Default</span> }
+                            </td>
+                            <td style="padding:6px 8px;"><a asp-page-handler="" asp-route-Key="@r.Key">Edit &rarr;</a></td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+    else
+    {
+        <p><a asp-page-handler="" asp-route-Key="">&larr; All templates</a></p>
+        <h3 style="margin-bottom:2px;">@Model.SelectedTitle <span style="color:#8a90a0;font-size:13px;font-weight:400;">(@Model.Key)</span></h3>
+        <p style="font-size:12.5px;color:#6e7681;margin-top:0;">
+            Governed by <strong>@Model.SelectedFeatureKey</strong>.
+            @if (!string.IsNullOrEmpty(Model.UpdatedInfo)) { <span style="color:#3730a3;"> · @Model.UpdatedInfo</span> }
+        </p>
+
+        @* ---- Ring control (per template, via its feature) ---- *@
+        <form method="post" asp-page-handler="Ring" asp-route-Key="@Model.Key" style="display:flex;gap:8px;align-items:center;margin-bottom:12px;">
+            <label style="font-size:12.5px;color:#4a5160;">Release ring</label>
+            <select name="ring" style="padding:6px 9px;border:1px solid #c4c8d4;border-radius:6px;">
+                @foreach (var r in new[] { Ring.Ring0, Ring.Ring1, Ring.Ring2, Ring.Broad })
+                {
+                    <option value="@r" selected="@(Model.SelectedRing == r)">@Rings.Label(r)</option>
+                }
+            </select>
+            <button type="submit" style="padding:6px 12px;border:1px solid #c4c8d4;border-radius:6px;background:#fff;cursor:pointer;">Set ring</button>
+        </form>
+
+        @* ---- Editor ---- *@
+        <form method="post" asp-page-handler="Save" asp-route-Key="@Model.Key">
+            <textarea name="EditText" rows="18" spellcheck="false"
+                      style="width:100%;box-sizing:border-box;font-family:Consolas,monospace;font-size:13px;border:1px solid #c4c8d4;border-radius:6px;padding:10px;">@Model.EditText</textarea>
+            <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;">
+                <button type="submit" style="padding:8px 16px;border:0;border-radius:6px;background:#16a34a;color:#fff;font-weight:600;cursor:pointer;">Save</button>
+                <button type="submit" asp-page-handler="Preview" asp-route-Key="@Model.Key" formnovalidate style="padding:8px 16px;border:1px solid #c4c8d4;border-radius:6px;background:#fff;font-weight:600;cursor:pointer;">Preview (unsaved)</button>
+                @if (Model.SelectedOverridden)
+                {
+                    <button type="submit" asp-page-handler="Reset" asp-route-Key="@Model.Key" formnovalidate
+                            style="padding:8px 16px;border:1px solid #fca5a5;border-radius:6px;background:#fff;color:#991b1b;font-weight:600;cursor:pointer;">Reset to default</button>
+                }
+            </div>
+        </form>
+
+        @* ---- Preview ---- *@
+        <h4 style="margin:16px 0 4px 0;">Preview</h4>
+        @if (!string.IsNullOrEmpty(Model.PreviewError))
+        {
+            <p class="error">Preview error: @Model.PreviewError</p>
+        }
+        else if (!string.IsNullOrEmpty(Model.PreviewHtml))
+        {
+            <p style="font-size:13px;color:#4a5160;margin:0 0 6px 0;"><strong>Subject:</strong> @Model.PreviewSubject</p>
+            <iframe sandbox="" srcdoc="@Model.PreviewHtml"
+                    style="width:100%;height:520px;border:1px solid #d6d8e0;border-radius:8px;background:#fff;"></iframe>
+            <p style="font-size:11.5px;color:#8a90a0;margin-top:6px;">Rendered with sample data ({{tokens}} filled with examples).</p>
+        }
+    }
+</div>

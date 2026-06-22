@@ -1,0 +1,112 @@
+@page
+@model CommunityHub.Pages.Organizer.AuditTrailModel
+@{
+    ViewData["Title"] = "Audit trail";
+}
+
+<div class="card">
+    <h2>Audit trail</h2>
+    <p>Every user action and backend/engine event for this edition — for troubleshooting
+       (“why did this happen?”) and usage insight (“how many calendar syncs?”).</p>
+
+    @if (Model.AccessDenied)
+    {
+        <p class="error">This area is for organizers only.</p>
+        return;
+    }
+
+    @* ---- Usage counts (the "how many" view) ---- *@
+    @if (Model.CategoryCounts.Count > 0)
+    {
+        <div style="display:flex;flex-wrap:wrap;gap:8px;margin:8px 0 14px 0;">
+            @foreach (var c in Model.CategoryCounts)
+            {
+                <span style="background:#eef2ff;color:#3730a3;border:1px solid #c7d2fe;border-radius:10px;padding:4px 10px;font-size:13px;font-weight:600;">
+                    @c.Category: @c.Count
+                </span>
+            }
+        </div>
+    }
+
+    @* ---- Filters ---- *@
+    <form method="get" style="display:flex;flex-wrap:wrap;gap:8px;align-items:end;margin-bottom:14px;">
+        <label style="font-size:12.5px;color:#4a5160;">Category
+            <select name="Category" style="display:block;padding:7px 9px;border:1px solid #c4c8d4;border-radius:6px;">
+                <option value="">All</option>
+                @foreach (var c in Model.Categories)
+                {
+                    <option value="@c" selected="@(string.Equals(Model.Category, c, StringComparison.OrdinalIgnoreCase))">@c</option>
+                }
+            </select>
+        </label>
+        <label style="font-size:12.5px;color:#4a5160;">Window
+            <select name="Days" style="display:block;padding:7px 9px;border:1px solid #c4c8d4;border-radius:6px;">
+                @foreach (var d in new[] { 1, 7, 30, 90, 0 })
+                {
+                    <option value="@d" selected="@(Model.Days == d)">@(d == 0 ? "All time" : $"Last {d} day(s)")</option>
+                }
+            </select>
+        </label>
+        <label style="font-size:12.5px;color:#4a5160;flex:1 1 200px;">Search (actor / action / summary)
+            <input type="text" name="Filter" value="@Model.Filter" style="display:block;width:100%;box-sizing:border-box;padding:7px 9px;border:1px solid #c4c8d4;border-radius:6px;" />
+        </label>
+        <button type="submit" style="padding:8px 14px;border:0;border-radius:6px;background:#008BD2;color:#fff;font-weight:600;cursor:pointer;">Filter</button>
+        <a asp-page-handler="Export" asp-route-format="csv" asp-route-Category="@Model.Category" asp-route-Days="@Model.Days" asp-route-Filter="@Model.Filter"
+           style="padding:8px 12px;border:1px solid #c4c8d4;border-radius:6px;text-decoration:none;color:#1D3380;font-weight:600;">Export CSV</a>
+        <a asp-page-handler="Export" asp-route-format="xlsx" asp-route-Category="@Model.Category" asp-route-Days="@Model.Days" asp-route-Filter="@Model.Filter"
+           style="padding:8px 12px;border:1px solid #c4c8d4;border-radius:6px;text-decoration:none;color:#1D3380;font-weight:600;">Export XLSX</a>
+    </form>
+
+    <p style="font-size:12.5px;color:#6e7681;">
+        @Model.TotalCount event(s) match@(Model.Capped ? $" — showing the {300} most recent" : "").
+    </p>
+
+    @if (Model.Rows.Count == 0)
+    {
+        <p style="color:#6e7681;">No audit events match the current filter.</p>
+    }
+    else
+    {
+        <div style="overflow-x:auto;">
+            <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                <thead>
+                    <tr style="text-align:left;border-bottom:2px solid #e5e7eb;">
+                        <th style="padding:6px 8px;">When (UTC)</th>
+                        <th style="padding:6px 8px;">Category</th>
+                        <th style="padding:6px 8px;">Actor</th>
+                        <th style="padding:6px 8px;">Action</th>
+                        <th style="padding:6px 8px;">Outcome</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var r in Model.Rows)
+                    {
+                        <tr style="border-bottom:1px solid #f0f1f4;">
+                            <td style="padding:6px 8px;white-space:nowrap;">@r.OccurredUtc.UtcDateTime.ToString("yyyy-MM-dd HH:mm:ss")</td>
+                            <td style="padding:6px 8px;">@r.Category</td>
+                            <td style="padding:6px 8px;">
+                                @r.ActorEmail
+                                @if (r.IsActingAs)
+                                {
+                                    <span style="color:#92400e;font-size:11px;"> (as @r.OnBehalfOf)</span>
+                                }
+                            </td>
+                            <td style="padding:6px 8px;">@r.Summary</td>
+                            <td style="padding:6px 8px;">
+                                @{
+                                    var (bg, fg) = r.Outcome switch
+                                    {
+                                        CommunityHub.Core.Domain.AuditOutcome.Failure => ("#fee2e2", "#991b1b"),
+                                        CommunityHub.Core.Domain.AuditOutcome.Denied => ("#fef9c3", "#854d0e"),
+                                        _ => ("#dcfce7", "#166534"),
+                                    };
+                                }
+                                <span style="background:@bg;color:@fg;border-radius:8px;padding:1px 8px;font-size:11.5px;font-weight:600;">@r.Outcome</span>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</div>

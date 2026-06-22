@@ -2,6 +2,7 @@ using CommunityHub.Auth;
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
 using CommunityHub.Core.Resources;
+using CommunityHub.Forms;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
@@ -38,9 +39,25 @@ public class SwagModel : PageModel
     {
         ParticipantRole.Volunteer,
         ParticipantRole.Speaker,
-        ParticipantRole.MasterclassSpeaker,
         ParticipantRole.Organizer,
     };
+
+    /// <summary>
+    /// FEATURE B: the swag/polo form is gated by ENTITLEMENT
+    /// (<see cref="OrderItem.Swag"/> OR <see cref="OrderItem.Polo"/> — the form
+    /// covers both), so a sponsor-self-funded speaker (entitled to neither) is
+    /// denied. A non-speaker role keeps its historical access (Volunteer /
+    /// Organizer) even if a future rule change dropped its entitlement, so access
+    /// is never silently removed; speakers are gated purely by entitlement.
+    /// </summary>
+    private async Task<bool> IsEligibleAsync(CurrentParticipant me, CancellationToken ct)
+    {
+        var entitled = await FormEntitlementGate.IsEntitledToAnyAsync(
+            _db, me.EventId, me.ParticipantId, ct, OrderItem.Swag, OrderItem.Polo);
+        var historicalNonSpeaker =
+            me.Role != ParticipantRole.Speaker && EligibleRoles.Contains(me.Role);
+        return entitled || historicalNonSpeaker;
+    }
 
     /// <summary>17 polo size options (shared catalog). The last option means "no polo".</summary>
     public const string NoPoloLabel = SwagOptions.NoPoloLabel;
@@ -70,7 +87,7 @@ public class SwagModel : PageModel
         FullName = me.FullName;
         Email = me.Email;
         Role = me.Role;
-        if (!EligibleRoles.Contains(me.Role))
+        if (!await IsEligibleAsync(me, ct))
         {
             AccessDenied = true;
             return Page();
@@ -99,7 +116,7 @@ public class SwagModel : PageModel
         FullName = me.FullName;
         Email = me.Email;
         Role = me.Role;
-        if (!EligibleRoles.Contains(me.Role))
+        if (!await IsEligibleAsync(me, ct))
         {
             AccessDenied = true;
             return Page();

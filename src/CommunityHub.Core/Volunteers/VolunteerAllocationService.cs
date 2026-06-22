@@ -1,5 +1,6 @@
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
+using CommunityHub.Core.Settings;
 using Microsoft.EntityFrameworkCore;
 
 namespace CommunityHub.Core.Volunteers;
@@ -30,8 +31,18 @@ public sealed record TaskCoverage(
     public bool IsCovered => ResourcesNeeded <= SimulatedCount;
 }
 
-/// <summary>The outcome of committing a draft queue into real assignments.</summary>
-public sealed record CommitResult(int Committed, int SkippedDuplicate);
+/// <summary>The outcome of committing a draft queue into real assignments.
+/// <paramref name="SkippedOutOfRing"/> drafts target a volunteer whose ring is above
+/// the feature's released ring — they are LEFT in the queue (committed-but-dormant),
+/// so promoting the ring in /Organizer/Settings and re-committing picks them up.</summary>
+public sealed record CommitResult(int Committed, int SkippedDuplicate, int SkippedOutOfRing = 0);
+
+/// <summary>
+/// The outcome of seeding a drop-out re-plan: how many of the dropped volunteer's
+/// real assignments were freed, how many distinct tasks that affected, and how many
+/// backfill candidates were queued as DRAFTS for the organizer to review + commit.
+/// </summary>
+public sealed record DropoutReplanResult(int FreedAssignments, int AffectedTasks, int SeededBackfillDrafts);
 
 /// <summary>
 /// The TASK-MAPPER engine: gap detection plus the DRAFT → COMMIT allocation queue.
@@ -49,11 +60,20 @@ public sealed class VolunteerAllocationService
 {
     private readonly CommunityHubDbContext _db;
     private readonly TimeProvider _clock;
+    private readonly FeatureGateService _gate;
+    private readonly RingResolver _rings;
 
-    public VolunteerAllocationService(CommunityHubDbContext db, TimeProvider clock)
+    /// <summary>The QUEUE feature key whose released ring scopes a commit (category 3).</summary>
+    public const string FeatureKey = "volunteer-allocation";
+
+    public VolunteerAllocationService(
+        CommunityHubDbContext db, TimeProvider clock,
+        FeatureGateService gate, RingResolver rings)
     {
         _db = db;
         _clock = clock;
+        _gate = gate;
+        _rings = rings;
     }
 
     private static void RequireOrganizer(VolunteerStructureService.ActorContext actor)
@@ -201,10 +221,28 @@ public sealed class VolunteerAllocationService
             .ToListAsync(ct);
         if (drafts.Count == 0) return new CommitResult(0, 0);
 
-        int committed = 0, skipped = 0;
+        // RING-SCOPED COMMIT (REQUIREMENTS §23a, category 3 Queue): the released ring of
+        // the volunteer-allocation feature scopes the impact. A draft whose TARGET
+        // volunteer's effective ring is above that ring is LEFT in the queue
+        // (committed-but-dormant) — so even with 40 staged, only in-ring volunteers get a
+        // real assignment now; promote the ring + re-commit to widen. Default released
+        // ring is Broad (GA), so by default every target is in scope (no behaviour change).
+        var releasedRing = await _gate.GetReleasedRingAsync(FeatureKey, actor.EventId, ct);
+
+        int committed = 0, skipped = 0, outOfRing = 0;
         var now = _clock.GetUtcNow();
+        var consumed = new List<TaskAllocationDraft>();
         foreach (var d in drafts)
         {
+            var targetRing = await _rings.GetEffectiveRingAsync(d.ParticipantId, ct);
+            if (!Rings.IsActiveForRing(targetRing, releasedRing))
+            {
+                outOfRing++;   // leave this draft in the queue (dormant until promoted)
+                continue;
+            }
+
+            consumed.Add(d);   // this draft is resolved this commit -> removable
+
             var exists = await _db.VolunteerTaskAssignments.AnyAsync(
                 a => a.TaskId == d.TaskId && a.ParticipantId == d.ParticipantId, ct);
             if (exists) { skipped++; continue; }
@@ -220,9 +258,104 @@ public sealed class VolunteerAllocationService
             committed++;
         }
 
-        _db.TaskAllocationDrafts.RemoveRange(drafts); // queue is consumed on commit
+        // Consume only the in-ring drafts; out-of-ring drafts stay queued.
+        _db.TaskAllocationDrafts.RemoveRange(consumed);
         await _db.SaveChangesAsync(ct);
-        return new CommitResult(committed, skipped);
+        return new CommitResult(committed, skipped, outOfRing);
+    }
+
+    /// <summary>
+    /// DROP-OUT RE-PLAN: a volunteer has pulled out. Free their real task
+    /// assignments (they are gone), then SEED the organizer's draft queue with
+    /// backfill candidates for each now-short task — available volunteers (those who
+    /// submitted availability are preferred) who aren't already on the task. Nothing
+    /// is re-assigned here: the organizer reviews the seeded drafts in the live
+    /// coverage simulation and <see cref="CommitAsync"/>s (or <see cref="DiscardAsync"/>s)
+    /// them. Freeing the dropped volunteer's slots IS applied immediately (they left).
+    /// </summary>
+    public async Task<DropoutReplanResult> SeedDropoutBackfillAsync(
+        VolunteerStructureService.ActorContext actor, int droppedParticipantId, CancellationToken ct = default)
+    {
+        RequireOrganizer(actor);
+
+        // The dropped volunteer's real assignments in this edition.
+        var theirs = await _db.VolunteerTaskAssignments
+            .Where(a => a.EventId == actor.EventId && a.ParticipantId == droppedParticipantId)
+            .ToListAsync(ct);
+        if (theirs.Count == 0) return new DropoutReplanResult(0, 0, 0);
+
+        var taskIds = theirs.Select(a => a.TaskId).Distinct().ToList();
+
+        // They left — free their slots now.
+        _db.VolunteerTaskAssignments.RemoveRange(theirs);
+        await _db.SaveChangesAsync(ct);
+
+        // Candidate pool: active volunteers in the edition (excluding the leaver),
+        // those who submitted availability preferred so we propose people likely to
+        // say yes first.
+        var availableIds = new HashSet<int>(
+            (await _db.VolunteerDayAvailabilities
+                .Where(v => v.EventId == actor.EventId).Select(v => v.ParticipantId).ToListAsync(ct))
+            .Concat(await _db.VolunteerAvailabilities
+                .Where(v => v.EventId == actor.EventId).Select(v => v.ParticipantId).ToListAsync(ct)));
+
+        var pool = (await _db.Participants
+                .Where(p => p.EventId == actor.EventId
+                            && p.Role == ParticipantRole.Volunteer
+                            && p.IsActive
+                            && p.Id != droppedParticipantId)
+                .Select(p => p.Id)
+                .ToListAsync(ct))
+            .OrderByDescending(id => availableIds.Contains(id))
+            .ThenBy(id => id)
+            .ToList();
+
+        var now = _clock.GetUtcNow();
+        var seeded = 0;
+        foreach (var taskId in taskIds)
+        {
+            var task = await _db.VolunteerTasks.FirstOrDefaultAsync(
+                t => t.Id == taskId && t.EventId == actor.EventId, ct);
+            if (task is null) continue;
+
+            var assignedNow = await _db.VolunteerTaskAssignments
+                .CountAsync(a => a.TaskId == taskId && a.EventId == actor.EventId, ct);
+            var draftedNow = await _db.TaskAllocationDrafts
+                .CountAsync(d => d.TaskId == taskId && d.EventId == actor.EventId
+                                 && d.OwnerParticipantId == actor.ParticipantId, ct);
+            var shortfall = Math.Max(0, task.ResourcesNeeded - assignedNow - draftedNow);
+            if (shortfall == 0) continue;
+
+            // On-task ids (real or already drafted) to avoid proposing duplicates.
+            var onTask = new HashSet<int>(
+                (await _db.VolunteerTaskAssignments
+                    .Where(a => a.TaskId == taskId && a.EventId == actor.EventId)
+                    .Select(a => a.ParticipantId).ToListAsync(ct))
+                .Concat(await _db.TaskAllocationDrafts
+                    .Where(d => d.TaskId == taskId && d.EventId == actor.EventId
+                                && d.OwnerParticipantId == actor.ParticipantId)
+                    .Select(d => d.ParticipantId).ToListAsync(ct)));
+
+            foreach (var candidateId in pool)
+            {
+                if (shortfall == 0) break;
+                if (onTask.Contains(candidateId)) continue;
+                _db.TaskAllocationDrafts.Add(new TaskAllocationDraft
+                {
+                    EventId = actor.EventId,
+                    OwnerParticipantId = actor.ParticipantId,
+                    TaskId = taskId,
+                    ParticipantId = candidateId,
+                    CreatedAt = now,
+                });
+                onTask.Add(candidateId);
+                seeded++;
+                shortfall--;
+            }
+        }
+
+        if (seeded > 0) await _db.SaveChangesAsync(ct);
+        return new DropoutReplanResult(theirs.Count, taskIds.Count, seeded);
     }
 
     /// <summary>DISCARD the organizer's whole draft queue — nothing is assigned.</summary>

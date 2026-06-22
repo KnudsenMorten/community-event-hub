@@ -15,12 +15,31 @@ namespace CommunityHub.Core.Email;
 /// after a failure without re-typing it. Null for raw/ad-hoc sends (broadcast,
 /// PIN) that did not come from a named template.
 /// </param>
+/// <param name="FeatureKey">
+/// The <see cref="Settings.FeatureCatalog"/> key of the FEATURE that triggered this
+/// send (e.g. <c>reminder-jobs</c>, <c>masterclass-invites</c>, <c>broadcast-email</c>).
+/// When set AND that feature is ring-scoped, <c>BrevoEmailSender</c> tightens the
+/// recipient ring gate to the MORE RESTRICTIVE of the feature's released ring and the
+/// <c>outbound-email</c> transport ring — so a feature still in testing (Ring 1) never
+/// mails ring-2+ recipients even when the transport is Broad. Null ⇒ the transport
+/// ring (outbound-email) alone applies, as before. Never LOOSENS the transport gate.
+/// </param>
+/// <param name="RingExempt">
+/// When true this send BYPASSES ring gating entirely — it always sends regardless of
+/// the recipient's ring (the global kill switch + allowlist/redirect still apply). This
+/// is ONLY for the on-demand SIGN-IN email (the PIN code a user requests to log in):
+/// it has direct, user-initiated impact and must reach a user at any ring. Every other
+/// email is ring-governed by its feature (operator 2026-06-22). Do NOT set this on
+/// broadcast/welcome/invitation blasts — those are ring-scoped.
+/// </param>
 public sealed record EmailContext(
     string Category,
     int EventId = 0,
     int? ParticipantId = null,
     string? RecipientName = null,
-    string? TemplateName = null);
+    string? TemplateName = null,
+    string? FeatureKey = null,
+    bool RingExempt = false);
 
 /// <summary>
 /// Holds the current <see cref="EmailContext"/> for the logical async flow.

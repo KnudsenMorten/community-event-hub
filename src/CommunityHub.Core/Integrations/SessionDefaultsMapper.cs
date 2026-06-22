@@ -3,22 +3,25 @@ using CommunityHub.Core.Domain;
 namespace CommunityHub.Core.Integrations;
 
 /// <summary>
-/// Maps an imported Sessionize session to sensible <see cref="SessionType"/> and
-/// <see cref="SessionLength"/> defaults (REQUIREMENTS § session type + length).
-/// Imported sessions carry no explicit type/length, so we derive them from the
-/// Sessionize duration (start/end) and service-session flag. Hub-added sessions set
-/// these explicitly and never go through here.
+/// Maps an imported Sessionize / Backstage session to sensible <see cref="SessionType"/>
+/// and <see cref="SessionLength"/> defaults (REQUIREMENTS § session type + length).
+/// Imported sessions carry no explicit hub type/length, so we derive them from the
+/// source CATEGORY / FORMAT label (when present) and the duration (start/end).
+/// Hub-added sessions set these explicitly and never go through here.
 ///
 /// Pure + static so it is unit-testable without a network call or DB. The mapping is
 /// a documented heuristic, not a guess hidden in the importer:
 ///  - <b>Length</b>: round the start→end minutes to the nearest supported bucket
 ///    (20 / 50 / 60). A session at or beyond a half-day (≥ 4 h) — or with no times —
-///    that is a master class maps to <see cref="SessionLength.FullDay"/>; otherwise an
-///    untimed session defaults to <see cref="SessionLength.SixtyMin"/>.
-///  - <b>Type</b>: a full-day-length session is a <see cref="SessionType.CommunityMasterClass"/>;
-///    everything else defaults to <see cref="SessionType.CommunityTechSession"/>. The
-///    importer never infers <see cref="SessionType.SponsorSession"/> — that is a
-///    hub-added designation only.
+///    maps to <see cref="SessionLength.FullDay"/> only via the master-class path;
+///    otherwise an untimed session defaults to <see cref="SessionLength.SixtyMin"/>.
+///  - <b>Type</b>: derived from the source category / format label first
+///    (contains "master class"/"masterclass"/"workshop" → MasterClass; "keynote" →
+///    Keynote; "ask the experts" → AskTheExperts; "panel" → PanelDiscussion;
+///    "welcome" → Welcome); when no label matches, a full-day-length session is a
+///    <see cref="SessionType.MasterClass"/> and everything else defaults to
+///    <see cref="SessionType.TechnicalSession"/>. The importer never infers
+///    <see cref="SessionType.Other"/> — that is a neutral fallback only.
 /// </summary>
 public static class SessionDefaultsMapper
 {
@@ -56,12 +59,47 @@ public static class SessionDefaultsMapper
     }
 
     /// <summary>
-    /// Derive the default <see cref="SessionType"/> for an imported session. A full-day
-    /// length implies a master class; everything else is a regular community tech
-    /// session. The importer never assigns <see cref="SessionType.SponsorSession"/>.
+    /// Derive the default <see cref="SessionType"/> from an imported session's source
+    /// category / format label, falling back to the duration when no label matches.
+    /// A full-day length (with no recognised label) implies a master class; everything
+    /// else is a regular technical session. The importer never assigns
+    /// <see cref="SessionType.Other"/>.
     /// </summary>
-    public static SessionType MapType(SessionLength length) =>
-        length == SessionLength.FullDay
-            ? SessionType.CommunityMasterClass
-            : SessionType.CommunityTechSession;
+    /// <param name="category">
+    /// The Sessionize category / Backstage format label, when present (e.g.
+    /// "Master Class", "Keynote", "Ask the Experts", "Panel"). Null/blank → derive
+    /// from length only (the pre-existing duration fallback).
+    /// </param>
+    /// <param name="length">The mapped <see cref="SessionLength"/> (duration fallback).</param>
+    public static SessionType MapType(string? category, SessionLength length)
+    {
+        if (!string.IsNullOrWhiteSpace(category))
+        {
+            var c = category.Trim().ToLowerInvariant();
+            if (c.Contains("master class") || c.Contains("masterclass") || c.Contains("workshop"))
+                return SessionType.MasterClass;
+            if (c.Contains("keynote"))
+                return SessionType.Keynote;
+            if (c.Contains("ask the expert"))
+                return SessionType.AskTheExperts;
+            if (c.Contains("panel"))
+                return SessionType.PanelDiscussion;
+            if (c.Contains("welcome"))
+                return SessionType.Welcome;
+            // A recognised category that isn't one of the special kinds is a
+            // regular technical session (NOT Other).
+            return SessionType.TechnicalSession;
+        }
+
+        // No label → keep the historic duration fallback.
+        return length == SessionLength.FullDay
+            ? SessionType.MasterClass
+            : SessionType.TechnicalSession;
+    }
+
+    /// <summary>
+    /// Back-compat duration-only overload: derive the default type from length alone.
+    /// A full-day length implies a master class; everything else is a technical session.
+    /// </summary>
+    public static SessionType MapType(SessionLength length) => MapType(null, length);
 }

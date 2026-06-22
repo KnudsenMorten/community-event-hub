@@ -1,4 +1,6 @@
+using CommunityHub.Core.Audit;
 using CommunityHub.Core.Data;
+using CommunityHub.Core.Domain;
 using CommunityHub.Core.Integrations;
 using CommunityHub.Core.Settings;
 using Microsoft.Azure.Functions.Worker;
@@ -26,6 +28,7 @@ public sealed class BackstageSyncJob
     private readonly TestModeOptions _testMode;
     private readonly CommunityHubDbContext _db;
     private readonly FeatureGateService _gate;
+    private readonly IAuditTrail _audit;
     private readonly ILogger<BackstageSyncJob> _log;
 
     public BackstageSyncJob(
@@ -35,6 +38,7 @@ public sealed class BackstageSyncJob
         TestModeOptions testMode,
         CommunityHubDbContext db,
         FeatureGateService gate,
+        IAuditTrail audit,
         ILogger<BackstageSyncJob> log)
     {
         _woo = woo;
@@ -43,6 +47,7 @@ public sealed class BackstageSyncJob
         _testMode = testMode;
         _db = db;
         _gate = gate;
+        _audit = audit;
         _log = log;
     }
 
@@ -126,5 +131,20 @@ public sealed class BackstageSyncJob
             "BackstageSyncJob done: {Examined} examined, {Created} created, "
             + "{Would} flagged to coordinator, {Failed} failed.",
             result.Examined, result.Created, result.WouldCreate, result.Failed);
+
+        // Named Engine event (REQUIREMENTS §24) — only when the sync created/flagged/
+        // failed something (a no-change daily run isn't worth a trail row).
+        if (result.Created + result.WouldCreate + result.Failed > 0)
+            await _audit.RecordAsync(new AuditEntry
+            {
+                EventId = activeEventIds.FirstOrDefault(),
+                Category = AuditCategory.Engine,
+                Action = "backstage-sync",
+                ActorEmail = "system",
+                Source = AuditSource.Job,
+                Outcome = result.Failed > 0 ? AuditOutcome.Failure : AuditOutcome.Success,
+                Summary = $"Backstage sync: {result.Examined} examined, {result.Created} created, "
+                    + $"{result.WouldCreate} flagged, {result.Failed} failed",
+            }, ct);
     }
 }

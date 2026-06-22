@@ -28,7 +28,7 @@ public sealed class SessionBulkOperationScenarioTests
             SessionizeId = hubAdded ? "hub-" + Guid.NewGuid().ToString("N") : "sz-" + Guid.NewGuid().ToString("N"),
             Title = title,
             IsHubAdded = hubAdded,
-            Type = SessionType.SponsorSession,
+            Type = SessionType.TechnicalSession,
             Length = SessionLength.FiftyMin,
         };
 

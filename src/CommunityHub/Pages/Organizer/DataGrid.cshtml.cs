@@ -240,7 +240,6 @@ public class DataGridModel : PageModel
         {
             "speakers-volunteers" => query.Where(p =>
                 p.Role == ParticipantRole.Speaker
-                || p.Role == ParticipantRole.MasterclassSpeaker
                 || p.Role == ParticipantRole.Volunteer),
             "all" => query,
             _ => Enum.TryParse<ParticipantRole>(RoleFilter, out var r)

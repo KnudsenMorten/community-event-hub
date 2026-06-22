@@ -18,8 +18,8 @@ public class MasterClassSignupServiceTests
     {
         var e = new Event { CommunityName = "C", DisplayName = "C 2027", Code = "C27", IsActive = true };
         db.Events.Add(e); await db.SaveChangesAsync();
-        var a = new Session { EventId = e.Id, Title = "MC A", Type = SessionType.CommunityMasterClass, MasterClassCapacity = capA };
-        var b = new Session { EventId = e.Id, Title = "MC B", Type = SessionType.CommunityMasterClass, MasterClassCapacity = capB };
+        var a = new Session { EventId = e.Id, Title = "MC A", Type = SessionType.MasterClass, MasterClassCapacity = capA };
+        var b = new Session { EventId = e.Id, Title = "MC B", Type = SessionType.MasterClass, MasterClassCapacity = capB };
         db.Sessions.AddRange(a, b); await db.SaveChangesAsync();
         return (e.Id, a.Id, b.Id);
     }

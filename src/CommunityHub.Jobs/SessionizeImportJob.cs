@@ -1,4 +1,6 @@
+using CommunityHub.Core.Audit;
 using CommunityHub.Core.Data;
+using CommunityHub.Core.Domain;
 using CommunityHub.Core.Integrations;
 using CommunityHub.Core.Reminders;
 using CommunityHub.Core.Settings;
@@ -29,6 +31,7 @@ public sealed class SessionizeImportJob
     private readonly SessionizeApiOptions _options;
     private readonly CommunityHubDbContext _db;
     private readonly FeatureGateService _gate;
+    private readonly IAuditTrail _audit;
     private readonly ILogger<SessionizeImportJob> _log;
 
     public SessionizeImportJob(
@@ -36,12 +39,14 @@ public sealed class SessionizeImportJob
         SessionizeApiOptions options,
         CommunityHubDbContext db,
         FeatureGateService gate,
+        IAuditTrail audit,
         ILogger<SessionizeImportJob> log)
     {
         _service = service;
         _options = options;
         _db = db;
         _gate = gate;
+        _audit = audit;
         _log = log;
     }
 
@@ -88,6 +93,8 @@ public sealed class SessionizeImportJob
         {
             _log.LogWarning(
                 "SessionizeImportJob: {Error}", result.Error);
+            await RecordRunAsync(activeEventId.Value, AuditOutcome.Failure,
+                $"Sessionize import failed: {result.Error}", ct);
             return;
         }
 
@@ -96,6 +103,13 @@ public sealed class SessionizeImportJob
             + "updated {Updated}, skipped {Skipped}, warnings {Warnings}.",
             result.Fetched, result.Created, result.Updated, result.Skipped,
             result.Warnings.Count);
+
+        // Only audit a run that actually CHANGED something — idle hourly pulls
+        // (0 created/updated) would flood the trail with no signal.
+        if (result.Created > 0 || result.Updated > 0)
+            await RecordRunAsync(activeEventId.Value, AuditOutcome.Success,
+                $"Sessionize import: {result.Fetched} fetched, {result.Created} created, "
+                + $"{result.Updated} updated, {result.Skipped} skipped", ct);
 
         if (result.Sessions is { } sx)
         {
@@ -112,4 +126,17 @@ public sealed class SessionizeImportJob
             }
         }
     }
+
+    // Named Engine event in the unified audit trail (REQUIREMENTS §24).
+    private Task RecordRunAsync(int eventId, AuditOutcome outcome, string summary, CancellationToken ct) =>
+        _audit.RecordAsync(new AuditEntry
+        {
+            EventId = eventId,
+            Category = AuditCategory.Engine,
+            Action = "sessionize-import",
+            ActorEmail = "system",
+            Source = AuditSource.Job,
+            Summary = summary,
+            Outcome = outcome,
+        }, ct);
 }

@@ -39,8 +39,8 @@
 </style>
 
 @functions {
-    static string TypeClass(SessionType t) => t == SessionType.CommunityMasterClass ? "type-mc"
-        : t == SessionType.SponsorSession ? "type-sponsor" : "";
+    static string TypeClass(SessionType t) => t == SessionType.MasterClass ? "type-mc"
+        : t == SessionType.TechnicalSession ? "type-sponsor" : "";
     static string TypeLabel(SessionType t) => CommunityHub.Pages.Sessions.IndexModel.Display(t);
 }
 

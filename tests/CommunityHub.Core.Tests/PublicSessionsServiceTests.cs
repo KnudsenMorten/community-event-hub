@@ -79,22 +79,22 @@ public sealed class PublicSessionsServiceTests
         }
 
         var mc = Sess("sess-mc", "Kubernetes Workshop",
-            SessionType.CommunityMasterClass, SessionLength.FullDay, "Room A", Day1, alice);
+            SessionType.MasterClass, SessionLength.FullDay, "Room A", Day1, alice);
         mc.PublicSlug = "mc-slug-123";
         mc.PublicToken = "ask-token-mc";
 
         var tech = Sess("sess-tech", "Intro to Bicep",
-            SessionType.CommunityTechSession, SessionLength.FiftyMin, "Room B",
+            SessionType.TechnicalSession, SessionLength.FiftyMin, "Room B",
             Day1.AddHours(2), alice, bob);
         tech.PublicToken = "ask-token-tech";
 
         Sess("sess-sponsor", "Sponsor Showcase",
-            SessionType.SponsorSession, SessionLength.TwentyMin, "Expo",
+            SessionType.Keynote, SessionLength.TwentyMin, "Expo",
             Day1.AddHours(3), carol);
 
         // A service session (break) — must NEVER appear in the public overview.
         Sess("sess-break", "Coffee Break",
-            SessionType.CommunityTechSession, SessionLength.TwentyMin, "Foyer",
+            SessionType.TechnicalSession, SessionLength.TwentyMin, "Foyer",
             Day1.AddHours(1)).IsServiceSession = true;
 
         await db.SaveChangesAsync();
@@ -144,7 +144,7 @@ public sealed class PublicSessionsServiceTests
         await SeedAsync(db);
         var svc = new PublicSessionsService(db);
 
-        var view = await svc.BuildAsync(type: SessionType.SponsorSession);
+        var view = await svc.BuildAsync(type: SessionType.Keynote);
 
         Assert.NotNull(view);
         Assert.Equal(3, view!.TotalCount);          // total is unfiltered
@@ -176,13 +176,13 @@ public sealed class PublicSessionsServiceTests
 
         // Tech AND 50-min → exactly the Bicep session.
         var hit = await svc.BuildAsync(
-            type: SessionType.CommunityTechSession, length: SessionLength.FiftyMin);
+            type: SessionType.TechnicalSession, length: SessionLength.FiftyMin);
         Assert.Single(hit!.Sessions);
         Assert.Equal("Intro to Bicep", hit.Sessions[0].Title);
 
         // Tech AND full-day → none (the full-day one is a master class).
         var miss = await svc.BuildAsync(
-            type: SessionType.CommunityTechSession, length: SessionLength.FullDay);
+            type: SessionType.TechnicalSession, length: SessionLength.FullDay);
         Assert.Empty(miss!.Sessions);
         Assert.Equal(0, miss.MatchCount);
         Assert.Equal(3, miss.TotalCount);   // total still reflects the edition
@@ -265,7 +265,7 @@ public sealed class PublicSessionsServiceTests
         db.Sessions.Add(new Session
         {
             EventId = other.Id, SessionizeId = "old-sess", Title = "Last Year Talk",
-            Type = SessionType.CommunityTechSession, Length = SessionLength.SixtyMin,
+            Type = SessionType.TechnicalSession, Length = SessionLength.SixtyMin,
         });
         await db.SaveChangesAsync();
 
@@ -293,7 +293,7 @@ public sealed class PublicSessionsServiceTests
         Assert.NotNull(detail);
         Assert.Equal("Kubernetes Workshop", detail!.Title);
         Assert.Equal("Public Community 2027", detail.EventDisplayName);
-        Assert.Equal(SessionType.CommunityMasterClass, detail.Type);
+        Assert.Equal(SessionType.MasterClass, detail.Type);
         Assert.Equal("mc-slug-123", detail.PublicSlug);   // master class → logistics link
         Assert.Equal("ask-token-mc", detail.AskToken);
         Assert.Contains(detail.Speakers, sp => sp.Name == "Alice Adams");
@@ -381,7 +381,7 @@ public sealed class PublicSessionsServiceTests
         var unscheduled = new Session
         {
             EventId = eventId, SessionizeId = "sess-tba", Title = "To Be Announced",
-            Type = SessionType.CommunityTechSession, Length = SessionLength.FiftyMin,
+            Type = SessionType.TechnicalSession, Length = SessionLength.FiftyMin,
             StartsAt = null, EndsAt = null,
         };
         db.Sessions.Add(unscheduled);
@@ -466,7 +466,7 @@ public sealed class PublicSessionsServiceTests
         var oldSession = new Session
         {
             EventId = old.Id, SessionizeId = "old-sess", Title = "Last Year Talk",
-            Type = SessionType.CommunityTechSession,
+            Type = SessionType.TechnicalSession,
         };
         db.Sessions.Add(oldSession);
         await db.SaveChangesAsync();

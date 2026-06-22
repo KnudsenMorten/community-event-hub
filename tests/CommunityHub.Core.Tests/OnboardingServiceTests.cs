@@ -265,7 +265,7 @@ public sealed class OnboardingServiceTests
     {
         using var db = NewDb();
         var s1 = await SeedActiveAsync(db, "s1@example.test");                                  // Speaker
-        var mc = await SeedActiveRoleAsync(db, ParticipantRole.MasterclassSpeaker, "mc@example.test"); // same persona
+        var mc = await SeedActiveRoleAsync(db, ParticipantRole.Speaker, "mc@example.test"); // same persona
         // Another edition's speaker with the step done must be untouched (scoping).
         db.Events.Add(new Event
         {

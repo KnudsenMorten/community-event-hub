@@ -71,7 +71,7 @@ public class AttendeeWelcomeProvisioningServiceTests
         Assert.Equal(ParticipantRole.Attendee, p.Role);
         Assert.True(p.IsActive);
         Assert.Equal(ParticipantLifecycleState.Active, p.LifecycleState);   // can sign in
-        Assert.Equal(Ring.Ring1, p.Ring);                                   // visible + passes email ring-gate
+        Assert.Equal(Rings.Default, p.Ring);   // Broad — release safety: not auto-welcomed until email feature is promoted to Broad
         Assert.Equal("attendee@example.com", p.Email);                      // lower-cased
         Assert.Equal("Avery Attendee", p.FullName);
         Assert.Null(p.WelcomeWithLoginSentAt);                             // not welcomed yet (caller does that)

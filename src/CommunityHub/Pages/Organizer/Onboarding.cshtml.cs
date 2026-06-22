@@ -3,6 +3,7 @@ using CommunityHub.Auth;
 using CommunityHub.Core.Domain;
 using CommunityHub.Core.Email;
 using CommunityHub.Core.Organizer;
+using CommunityHub.Export;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
@@ -152,5 +153,25 @@ public class OnboardingModel : PageModel
             ? "onboarding-pending.csv"
             : $"onboarding-pending-{Persona.Value.ToString().ToLowerInvariant()}.csv";
         return File(bytes, "text/csv", fileName);
+    }
+
+    /// <summary>
+    /// Same "who hasn't onboarded yet" export as <see cref="OnGetPendingCsvAsync"/>
+    /// but delivered as a native Excel (.xlsx) workbook. Reuses the EXACT same CSV
+    /// builder (<see cref="OnboardingService.BuildPendingCsvAsync"/>) so the columns
+    /// and rows are identical; only the file format differs. Honours the current
+    /// persona filter; organizer-gated server-side; read-only.
+    /// </summary>
+    public async Task<IActionResult> OnGetPendingXlsxAsync(CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+        if (!OrganizerAuth.IsRealOrganizer(me)) return Forbid();
+
+        var csv = await _onboarding.BuildPendingCsvAsync(me.EventId, Persona, ct);
+        var fileName = Persona is null
+            ? "onboarding-pending.xlsx"
+            : $"onboarding-pending-{Persona.Value.ToString().ToLowerInvariant()}.xlsx";
+        return File(CsvToXlsx.Build(csv, "Onboarding"), CsvToXlsx.ContentType, fileName);
     }
 }

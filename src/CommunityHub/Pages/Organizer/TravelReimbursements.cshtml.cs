@@ -19,13 +19,15 @@ public class TravelReimbursementsModel : PageModel
     private readonly EmailTemplateProvider _templates;
     private readonly CommunityHub.Branding.ActiveEventNameProvider _activeEvent;
     private readonly ILogger<TravelReimbursementsModel> _logger;
+    private readonly IEmailContextAccessor? _context;
 
     public TravelReimbursementsModel(
         CommunityHubDbContext db, ICurrentParticipantAccessor participant,
         TimeProvider clock, IEmailSender emailSender,
         EmailTemplateProvider templates,
         CommunityHub.Branding.ActiveEventNameProvider activeEvent,
-        ILogger<TravelReimbursementsModel> logger)
+        ILogger<TravelReimbursementsModel> logger,
+        IEmailContextAccessor? context = null)
     {
         _db = db;
         _participant = participant;
@@ -34,6 +36,7 @@ public class TravelReimbursementsModel : PageModel
         _templates = templates;
         _activeEvent = activeEvent;
         _logger = logger;
+        _context = context;
     }
 
     public bool AccessDenied { get; private set; }
@@ -107,7 +110,13 @@ public class TravelReimbursementsModel : PageModel
                     tokens["communityName"] = _activeEvent.GetCommunityName();
 
                     var rendered = _templates.Render("travel-reimbursement-paid", tokens);
-                    await _emailSender.SendAsync(p.Email, rendered.Subject, rendered.HtmlBody, ct);
+                    // Ring-governed by the travel-reimbursement-email feature (operator 2026-06-22).
+                    using (_context?.Set(new EmailContext(
+                        "travel-reimbursement-paid", p.EventId, row.ParticipantId, p.FullName,
+                        FeatureKey: "travel-reimbursement-email")))
+                    {
+                        await _emailSender.SendAsync(p.Email, rendered.Subject, rendered.HtmlBody, ct);
+                    }
                     Message = $"Marked claim #{id} as paid and notified {p.Email}.";
                 }
                 catch (Exception ex)

@@ -2,6 +2,7 @@ using CommunityHub.Auth;
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
 using CommunityHub.Core.Resources;
+using CommunityHub.Forms;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
@@ -33,8 +34,19 @@ public class TravelModel : PageModel
     public static readonly ParticipantRole[] EligibleRoles =
     {
         ParticipantRole.Speaker,
-        ParticipantRole.MasterclassSpeaker,
     };
+
+    /// <summary>
+    /// FEATURE B: travel reimbursement is gated by ENTITLEMENT
+    /// (<see cref="OrderItem.TravelReimbursement"/>), not role alone. Only a
+    /// Supported speaker is entitled — a sponsor-self-funded / organizer-funded
+    /// speaker is NOT, so they are denied the form even though their role is
+    /// Speaker. The historical role set was speaker-only, so there is no
+    /// non-speaker access to preserve here.
+    /// </summary>
+    private Task<bool> IsEligibleAsync(CurrentParticipant me, CancellationToken ct) =>
+        FormEntitlementGate.IsEntitledAsync(
+            _db, me.EventId, me.ParticipantId, OrderItem.TravelReimbursement, ct);
 
     public const decimal Cap300 = 300m;
     public const decimal Cap400 = 400m;
@@ -70,7 +82,7 @@ public class TravelModel : PageModel
         FullName = me.FullName;
         Email = me.Email;
         Role = me.Role;
-        if (!EligibleRoles.Contains(me.Role))
+        if (!await IsEligibleAsync(me, ct))
         {
             AccessDenied = true;
             return Page();
@@ -104,7 +116,7 @@ public class TravelModel : PageModel
         FullName = me.FullName;
         Email = me.Email;
         Role = me.Role;
-        if (!EligibleRoles.Contains(me.Role))
+        if (!await IsEligibleAsync(me, ct))
         {
             AccessDenied = true;
             return Page();

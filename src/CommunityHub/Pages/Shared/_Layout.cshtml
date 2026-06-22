@@ -4,6 +4,9 @@
 @inject CommunityHub.Core.Config.EventEditionConfigLoader EventConfigLoader
 @inject CommunityHub.Core.Config.EventConfigOptions EventConfigOptions
 @inject CommunityHub.Core.Domain.VolunteerStructureService VolunteerStructure
+@inject CommunityHub.Core.Settings.FeatureSettingsService FeatureSettings
+@inject CommunityHub.Core.Settings.RingResolver RingResolver
+@inject CommunityHub.Core.Data.CommunityHubDbContext Db
 @{
     // Product / tool name shown in the graphics layout. This is the display
     // name only - the codebase, namespaces, and Azure resources stay
@@ -313,6 +316,12 @@
         a.hub-tile .hub-tile-title { font-size: 15.5px; font-weight: 700; color: var(--el-darkblue, #1D3380); }
         a.hub-tile .hub-tile-desc { font-size: 12.5px; color: #4b5563; margin-top: 4px; line-height: 1.4; }
         a.hub-tile .hub-tile-go { font-size: 12px; font-weight: 600; color: var(--el-blue, #008BD2); margin-top: 10px; }
+        /* Ring badge — yellow "Ring N" pill next to a feature still in staged
+           rollout (not yet Broad/GA). Promoted from /Organizer/Settings so nav +
+           tiles render the identical marker. */
+        .set-tag { display:inline-block; font-size:10.5px; line-height:1; padding:2px 6px;
+            border-radius:999px; margin-left:6px; vertical-align:middle; }
+        .set-tag.ring { background:#fef9c3; color:#854d0e; border:1px solid #fde047; font-weight:600; }
         .info { color: #0a6; }
         .error { color: #c0392b; }
         button, input[type=submit] {
@@ -669,6 +678,88 @@
         var nav = NavBuilder.Build(role!.Value, isVolunteerSupervisor);
         var participant = nav.Groups[0];
         var management = nav.ManagementGroup;
+
+        // Ring scope (org-managed via /Organizer/Settings): each feature carries an
+        // Enabled flag + a released ring. For nav items tagged with a FeatureKey:
+        //   • the ORG turns it OFF (Enabled=false) -> hidden for everyone;
+        //   • the ORG assigns its ring -> impact is SCOPED to users at that ring AND
+        //     LOWER (a user above the ring doesn't see it), and a yellow "Ring N"
+        //     pill marks it while it is not yet Broad/GA so a ring tester sees what's
+        //     scoped to them. Resolved once per request; best-effort (never 500 nav).
+        var featureMap = new Dictionary<string, CommunityHub.Core.Settings.FeatureState>(StringComparer.Ordinal);
+        var userRing = CommunityHub.Core.Settings.Rings.Default;
+        if (me is not null)
+        {
+            try
+            {
+                userRing = await RingResolver.GetEffectiveRingAsync(me.ParticipantId);
+                foreach (var fs in await FeatureSettings.GetAllAsync(me.EventId))
+                    featureMap[fs.Key] = fs;
+            }
+            catch { /* badges/gating are best-effort; never 500 the nav */ }
+        }
+        // Share the resolved ring data with _HubGrid (organizer hub tiles) so it
+        // badges + gates the SAME way without re-querying. Read back as
+        // (Dictionary<string,FeatureState>, Ring) in the partial.
+        ViewData["RingFeatureMap"] = featureMap;
+        ViewData["RingUserRing"] = userRing;
+        // Hidden when the org disabled the feature, OR the user's ring is above the
+        // feature's released ring (out of scope).
+        // Only RING-SCOPED surfaces (Queue + User-impact) are GUI ring-scoped; Engine
+        // / EngineQueued (plumbing) are never hidden/badged in the nav even if tagged.
+        Func<CommunityHub.Core.Navigation.NavItem, bool> ringHidden = it =>
+            it.FeatureKey is not null
+            && featureMap.TryGetValue(it.FeatureKey, out var fs)
+            && fs.Descriptor.IsRingScoped
+            && (!fs.Enabled
+                || !CommunityHub.Core.Settings.Rings.IsActiveForRing(userRing, fs.ReleasedToRing));
+        // Badge the feature's ring while enabled + not yet Broad/GA.
+        Func<CommunityHub.Core.Navigation.NavItem, CommunityHub.Core.Settings.Ring?> ringBadgeOf = it =>
+            it.FeatureKey is not null
+            && featureMap.TryGetValue(it.FeatureKey, out var fs)
+            && fs.Descriptor.IsRingScoped
+            && fs.Enabled
+            && fs.ReleasedToRing != CommunityHub.Core.Settings.Ring.Broad
+                ? fs.ReleasedToRing : (CommunityHub.Core.Settings.Ring?)null;
+
+        // FEATURE B: hide a self-service FORM link unless the participant is ENTITLED
+        // to the matching OrderItem — the same entitlement rule the form's own gate
+        // applies (OrderEntitlements as the single source of truth). Non-speaker roles
+        // keep their historical links; only speakers are entitlement-gated, so a
+        // sponsor-self-funded speaker loses Hotel/Travel/Swag but keeps Lunch/Dinner.
+        // Resolved ONCE per request; best-effort (never 500 the nav).
+        var entitledItems = new HashSet<CommunityHub.Core.Domain.OrderItem>();
+        if (me is not null)
+        {
+            try
+            {
+                entitledItems = new HashSet<CommunityHub.Core.Domain.OrderItem>(
+                    await CommunityHub.Forms.FormEntitlementGate.EffectiveItemsAsync(
+                        Db, me.EventId, me.ParticipantId, default));
+            }
+            catch { /* entitlement gating is best-effort; never 500 the nav */ }
+        }
+        var isSpeakerRole = role == CommunityHub.Core.Domain.ParticipantRole.Speaker;
+        // Map a form href → the OrderItem(s) that entitle it. A link is hidden only
+        // for SPEAKERS who lack the entitlement; every other role keeps its link.
+        Func<CommunityHub.Core.Navigation.NavItem, bool> formEntitlementHidden = it =>
+        {
+            if (!isSpeakerRole) { return false; }
+            var href = (it.Href ?? string.Empty).TrimEnd('/');
+            bool Has(params CommunityHub.Core.Domain.OrderItem[] items) => items.Any(entitledItems.Contains);
+            return href switch
+            {
+                "/Forms/Hotel"  => !Has(CommunityHub.Core.Domain.OrderItem.Hotel),
+                "/Forms/Travel" => !Has(CommunityHub.Core.Domain.OrderItem.TravelReimbursement),
+                "/Forms/Swag"   => !Has(CommunityHub.Core.Domain.OrderItem.Swag, CommunityHub.Core.Domain.OrderItem.Polo),
+                "/Forms/Lunch"  => !Has(CommunityHub.Core.Domain.OrderItem.LunchPreDay, CommunityHub.Core.Domain.OrderItem.LunchMainDay),
+                "/Forms/Dinner" => !Has(CommunityHub.Core.Domain.OrderItem.AppreciationDinner),
+                _ => false,
+            };
+        };
+        // Combined nav-item hide: ring scope OR (Feature B) form entitlement.
+        Func<CommunityHub.Core.Navigation.NavItem, bool> navHidden = it =>
+            ringHidden(it) || formEntitlementHidden(it);
         <nav class="primary" aria-label="@Localizer["Nav.MyEvent"]">
             @* Render the participant group by SECTION (mirrors the management
                bar). Items with no SectionKey collapse into the leading
@@ -684,21 +775,26 @@
                 {
                     foreach (var item in section.Items)
                     {
-                        <a href="@item.Href" target="@(item.External ? "_blank" : null)" rel="@(item.External ? "noopener noreferrer" : null)" aria-current="@ariaCurrent(item.Href)">@navLabel(item)@if (item.External) {<span class="visually-hidden">@Localizer["Common.OpensNewTab"]</span>}</a>
+                        if (navHidden(item)) { continue; }
+                        var rb = ringBadgeOf(item);
+                        <a href="@item.Href" target="@(item.External ? "_blank" : null)" rel="@(item.External ? "noopener noreferrer" : null)" aria-current="@ariaCurrent(item.Href)">@navLabel(item)@if (rb is not null) {<span class="set-tag ring" title="@Localizer["Settings.RingBadgeTitle"]">@CommunityHub.Core.Settings.Rings.Label(rb.Value)</span>}@if (item.External) {<span class="visually-hidden">@Localizer["Common.OpensNewTab"]</span>}</a>
                     }
                 }
                 else
                 {
-                    var sectionOpen = section.Items.Any(i => ariaCurrent(i.Href) == "page");
+                    var visible = section.Items.Where(i => !navHidden(i)).ToList();
+                    if (visible.Count == 0) { continue; }   // whole fold-out gated out
+                    var sectionOpen = visible.Any(i => ariaCurrent(i.Href) == "page");
                     <details class="nav-section" open="@(sectionOpen ? "open" : null)">
                         <summary>
                             <span class="nav-section-label">@Localizer[section.HeadingKey]</span>
                             <span class="nav-section-caret" aria-hidden="true">&#9662;</span>
                         </summary>
                         <div class="nav-section-items">
-                            @foreach (var item in section.Items)
+                            @foreach (var item in visible)
                             {
-                                <a href="@item.Href" target="@(item.External ? "_blank" : null)" rel="@(item.External ? "noopener noreferrer" : null)" aria-current="@ariaCurrent(item.Href)">@navLabel(item)@if (item.External) {<span class="visually-hidden">@Localizer["Common.OpensNewTab"]</span>}</a>
+                                var rb = ringBadgeOf(item);
+                                <a href="@item.Href" target="@(item.External ? "_blank" : null)" rel="@(item.External ? "noopener noreferrer" : null)" aria-current="@ariaCurrent(item.Href)">@navLabel(item)@if (rb is not null) {<span class="set-tag ring" title="@Localizer["Settings.RingBadgeTitle"]">@CommunityHub.Core.Settings.Rings.Label(rb.Value)</span>}@if (item.External) {<span class="visually-hidden">@Localizer["Common.OpensNewTab"]</span>}</a>
                             }
                         </div>
                     </details>
@@ -781,7 +877,7 @@
         <nav class="primary" aria-label="@Localizer["Nav.Primary"]">
             <a href="/Agenda" aria-current="@ariaCurrent("/Agenda")">@Localizer["Nav.Agenda"]</a>
             <a href="/Sessions" aria-current="@ariaCurrent("/Sessions")">@Localizer["Nav.Sessions"]</a>
-            <a href="/Sessions?FilterType=CommunityMasterClass">@Localizer["Nav.MasterClasses"]</a>
+            <a href="/Sessions?FilterType=MasterClass">@Localizer["Nav.MasterClasses"]</a>
             <a href="/Speakers" aria-current="@ariaCurrent("/Speakers")">@Localizer["Nav.Speakers"]</a>
             <a href="/Sponsors" aria-current="@ariaCurrent("/Sponsors")">@Localizer["Nav.Sponsors"]</a>
             <a href="/Contributors" aria-current="@ariaCurrent("/Contributors")">@Localizer["Nav.Contributors"]</a>

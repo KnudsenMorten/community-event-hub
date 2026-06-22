@@ -19,7 +19,7 @@ namespace CommunityHub.Pages.Speaker;
 /// path from "accepted" to "on-stage" without hunting through the generic
 /// task list. Mobile-first (works at ~360px).
 ///
-/// Only Speaker / MasterclassSpeaker reach the content; any other role gets a
+/// Only Speakers reach the content; any other role gets a
 /// friendly "not a speaker" message instead of a 403 so the nav stays simple.
 /// </summary>
 [Authorize]
@@ -57,11 +57,15 @@ public class IndexModel : PageModel
         _logger = logger;
     }
 
-    /// <summary>One master class this speaker is linked to, with its public logistics link.</summary>
+    /// <summary>One master class this speaker is linked to, with its public logistics + landing links.</summary>
     /// <param name="SessionId">The master-class session id.</param>
     /// <param name="Title">The master-class title.</param>
     /// <param name="PublicLink">The public logistics page URL (minted on view).</param>
-    public sealed record MyMasterClass(int SessionId, string Title, string Slug, string PublicLink);
+    /// <param name="PrepLink">The speaker prep-content editor URL (FEATURE 2).</param>
+    /// <param name="LandingLink">The attendee Master Class landing-page URL (FEATURE 2).</param>
+    public sealed record MyMasterClass(
+        int SessionId, string Title, string Slug, string PublicLink,
+        string PrepLink, string LandingLink);
 
     /// <summary>The signed-in speaker's master classes (with public logistics link).</summary>
     public List<MyMasterClass> MasterClasses { get; private set; } = new();
@@ -69,7 +73,6 @@ public class IndexModel : PageModel
     public static readonly ParticipantRole[] EligibleRoles =
     {
         ParticipantRole.Speaker,
-        ParticipantRole.MasterclassSpeaker,
     };
 
     public bool AccessDenied { get; private set; }
@@ -222,9 +225,12 @@ public class IndexModel : PageModel
         {
             var slug = await _logistics.EnsureSlugAsync(me.EventId, mc.Id, ct);
             var link = Url.PageLink(pageName: "/MasterClass/Index", values: new { slug }) ?? string.Empty;
-            MasterClasses.Add(new MyMasterClass(mc.Id, mc.Title, slug, link));
+            // FEATURE 2: the speaker prep editor + the attendee landing page (preview).
+            var prep = Url.Page("/Speaker/MasterClassPrep", null, new { sessionId = mc.Id }) ?? string.Empty;
+            var landing = Url.Page("/MasterClassPage", null, new { sessionId = mc.Id }) ?? string.Empty;
+            MasterClasses.Add(new MyMasterClass(mc.Id, mc.Title, slug, link, prep, landing));
         }
     }
 
-    private const SessionType ParticipantMasterClassType = SessionType.CommunityMasterClass;
+    private const SessionType ParticipantMasterClassType = SessionType.MasterClass;
 }

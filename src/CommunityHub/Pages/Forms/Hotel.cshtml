@@ -26,11 +26,10 @@
     @{
         var policyKey = Model.Role switch
         {
-            CommunityHub.Core.Domain.ParticipantRole.Speaker
-                or CommunityHub.Core.Domain.ParticipantRole.MasterclassSpeaker => "Hotel.PolicySpeaker",
+            CommunityHub.Core.Domain.ParticipantRole.Speaker => "Hotel.PolicySpeaker",
             CommunityHub.Core.Domain.ParticipantRole.Volunteer
-                or CommunityHub.Core.Domain.ParticipantRole.Video
-                or CommunityHub.Core.Domain.ParticipantRole.Camera => "Hotel.PolicyVolunteer",
+                or CommunityHub.Core.Domain.ParticipantRole.Media
+                or CommunityHub.Core.Domain.ParticipantRole.EventPartner => "Hotel.PolicyVolunteer",
             _ => (string?)null,   // Organizer (+ any other) -> no policy text
         };
     }

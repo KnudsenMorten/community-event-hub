@@ -103,12 +103,11 @@ public sealed class ParticipantEmailService
     {
         ParticipantRole.Organizer => "organizer",
         ParticipantRole.Speaker => "speaker",
-        ParticipantRole.MasterclassSpeaker => "Master Class speaker",
         ParticipantRole.Volunteer => "volunteer",
         ParticipantRole.Sponsor => "sponsor contact",
         ParticipantRole.Attendee => "attendee",
-        ParticipantRole.Video => "video crew",
-        ParticipantRole.Camera => "photography crew",
+        ParticipantRole.Media => "media crew",
+        ParticipantRole.EventPartner => "event partner",
         _ => "participant",
     };
 }

@@ -14,9 +14,12 @@
     else
     {
         <p>Register each company's group photo session, schedule the slot,
-           and send a calendar invite to the lead contact plus internal
-           participants. Re-sending after a slot move <strong>updates</strong>
-           the recipients' existing calendar entry (stable invite id).</p>
+           and send a calendar invite to the <strong>appointed company lead</strong>.
+           The group photo is a perk for the larger packages: only companies with
+           <strong>more than @CommunityHub.Core.Domain.GroupPhotoRegistration.QualifyingTicketThreshold tickets</strong>
+           (volume package) qualify &mdash; enter the ticket count below. Re-sending
+           after a slot move <strong>updates</strong> the lead's existing calendar
+           entry (stable invite id).</p>
 
         @if (!string.IsNullOrEmpty(Model.Notice))
         {
@@ -32,7 +35,9 @@
                 <input type="text" name="contactName" />
                 <label>Lead contact email</label>
                 <input type="email" name="contactEmail" required />
-                <label>Internal participants (comma-separated emails)</label>
+                <label>Tickets (volume package) &mdash; more than @CommunityHub.Core.Domain.GroupPhotoRegistration.QualifyingTicketThreshold qualifies</label>
+                <input type="number" name="ticketCount" min="0" value="0" />
+                <label>Internal participants (comma-separated emails &mdash; reference only, NOT invited)</label>
                 <input type="text" name="internalParticipants" />
                 <label>Slot (Danish local time)</label>
                 <input type="datetime-local" name="scheduledLocal" />
@@ -63,6 +68,14 @@
                         {
                             <span style="color:#b45309;font-size:13px;">&mdash; not scheduled</span>
                         }
+                        @if (r.Qualifies)
+                        {
+                            <span class="info" style="font-size:13px;">&middot; @r.TicketCount tickets &#10003; qualifies</span>
+                        }
+                        else
+                        {
+                            <span style="color:#b45309;font-size:13px;">&middot; @r.TicketCount tickets &mdash; below volume threshold (not eligible)</span>
+                        }
                         @if (r.InviteLastSentAt is not null)
                         {
                             <span class="info" style="font-size:13px;">&middot; invite sent @r.InviteLastSentAt.Value.UtcDateTime.ToString("dd MMM HH:mm") UTC</span>
@@ -74,7 +87,9 @@
                         <input type="text" name="contactName" value="@r.ContactName" />
                         <label>Lead contact email</label>
                         <input type="email" name="contactEmail" value="@r.ContactEmail" required />
-                        <label>Internal participants</label>
+                        <label>Tickets (volume package) &mdash; more than @CommunityHub.Core.Domain.GroupPhotoRegistration.QualifyingTicketThreshold qualifies</label>
+                        <input type="number" name="ticketCount" min="0" value="@r.TicketCount" />
+                        <label>Internal participants (reference only, NOT invited)</label>
                         <input type="text" name="internalParticipants" value="@r.InternalParticipants" />
                         <label>Slot (Danish local time)</label>
                         <input type="datetime-local" name="scheduledLocal"

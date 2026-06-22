@@ -26,7 +26,8 @@
         new("/Organizer/SessionizeEndpointSettings", Localizer["Nav.OrgSessionizeEndpoint"].Value, Localizer["OrgSetup.Sessionize"].Value),
         new("/Organizer/SoMeSettings", Localizer["Nav.OrgSoMeSettings"].Value, Localizer["OrgSetup.SoMe"].Value),
         new("/Organizer/Settings", Localizer["Nav.OrgSettings"].Value, Localizer["OrgSetup.Settings"].Value),
-        new("/Organizer/TestDataCleanup", Localizer["Nav.OrgTestDataCleanup"].Value, Localizer["OrgSetup.TestData"].Value),
+        new("/Organizer/AuditTrail", "Audit trail", "Every user action + backend event (emails, calendar syncs) for troubleshooting and usage — filter, count, export."),
+        new("/Organizer/TestDataCleanup", Localizer["Nav.OrgTestDataCleanup"].Value, Localizer["OrgSetup.TestData"].Value, "test-data-cleanup"),
     };
     <partial name="_HubGrid" model="@tiles" />
 }

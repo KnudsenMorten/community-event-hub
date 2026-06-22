@@ -97,12 +97,21 @@ public sealed class SpeakerDeadlineSeeder
             return 0;
         }
 
+        // The pre-day ("Master Class") nuance now lives on the speaker PROFILE
+        // (SpeakingPreDay), not on a separate role — so a masterclass-only
+        // deadline is gated on the profile's SpeakingPreDay flag below.
         var speakers = await _db.Participants
             .Where(p => p.EventId == eventId
                         && p.IsActive
-                        && (p.Role == ParticipantRole.Speaker
-                            || p.Role == ParticipantRole.MasterclassSpeaker))
-            .Select(p => new { p.Id, p.Role })
+                        && p.Role == ParticipantRole.Speaker)
+            .Select(p => new
+            {
+                p.Id,
+                SpeakingPreDay = _db.SpeakerProfiles
+                    .Where(s => s.EventId == eventId && s.ParticipantId == p.Id)
+                    .Select(s => (bool?)s.SpeakingPreDay)
+                    .FirstOrDefault() ?? false,
+            })
             .ToListAsync(ct);
 
         var now = _clock.GetUtcNow();
@@ -112,9 +121,9 @@ public sealed class SpeakerDeadlineSeeder
         {
             foreach (var dl in config.Deadlines)
             {
-                // A masterclass-only deadline is skipped for plain session speakers.
-                if (dl.MasterclassOnly
-                    && speaker.Role != ParticipantRole.MasterclassSpeaker)
+                // A masterclass-only deadline is skipped unless this speaker is
+                // delivering on the pre-day (SpeakingPreDay).
+                if (dl.MasterclassOnly && !speaker.SpeakingPreDay)
                 {
                     continue;
                 }

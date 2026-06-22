@@ -115,8 +115,8 @@
                     <h2>@dayLabel</h2>
                     @foreach (var s in day.Items)
                     {
-                        var typeClass = s.Type == SessionType.CommunityMasterClass ? "type-mc"
-                            : s.Type == SessionType.SponsorSession ? "type-sponsor" : "";
+                        var typeClass = s.Type == SessionType.MasterClass ? "type-mc"
+                            : s.Type == SessionType.TechnicalSession ? "type-sponsor" : "";
                         var timeText = s.StartsAt.ToString("HH:mm")
                             + (s.EndsAt is not null ? $"–{s.EndsAt.Value.ToString("HH:mm")}" : "");
                         <article class="ag-slot @typeClass">

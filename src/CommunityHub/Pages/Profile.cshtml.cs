@@ -71,7 +71,7 @@ public class ProfileModel : PageModel
     public bool Saved { get; private set; }
 
     private static bool IsSpeakerRole(ParticipantRole r) =>
-        r is ParticipantRole.Speaker or ParticipantRole.MasterclassSpeaker;
+        r is ParticipantRole.Speaker;
 
     public async Task<IActionResult> OnGetAsync(CancellationToken ct)
     {
@@ -211,8 +211,8 @@ public class ProfileModel : PageModel
                 .Where(s => s.EventId == me.EventId && !s.IsServiceSession
                             && s.SessionSpeakers.Any(ss => ss.ParticipantId == me.ParticipantId))
                 .Select(s => s.Type).ToListAsync(ct);
-            sp.SpeakingPreDay = types.Any(t => t == SessionType.CommunityMasterClass);
-            sp.SpeakingMainDay = types.Any(t => t != SessionType.CommunityMasterClass);
+            sp.SpeakingPreDay = types.Any(t => t == SessionType.MasterClass);
+            sp.SpeakingMainDay = types.Any(t => t != SessionType.MasterClass);
         }
 
         await _db.SaveChangesAsync(ct);

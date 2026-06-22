@@ -15,9 +15,8 @@ public sealed class ScheduleRolesTests
     [InlineData(ParticipantRole.Organizer, "organizer")]
     [InlineData(ParticipantRole.Volunteer, "volunteer")]
     [InlineData(ParticipantRole.Speaker, "speaker")]
-    [InlineData(ParticipantRole.MasterclassSpeaker, "speaker")] // master-class folds into speaker
-    [InlineData(ParticipantRole.Video, "media")]                // video crew  -> media
-    [InlineData(ParticipantRole.Camera, "media")]               // photo crew  -> media
+    [InlineData(ParticipantRole.Media, "media")]                // press/photo/video crew -> media
+    [InlineData(ParticipantRole.EventPartner, "organizer")]     // event partner -> staff/organizer
     [InlineData(ParticipantRole.Attendee, "attendee")]
     [InlineData(ParticipantRole.Sponsor, "sponsor")]
     public void ViewerKeyword_maps_each_role(ParticipantRole role, string expected) =>
@@ -40,7 +39,7 @@ public sealed class ScheduleRolesTests
         // "Group photo" — all except sponsors.
         const string csv = "organizer,volunteer,speaker,media,attendee";
         Assert.True(ScheduleRoles.Applies(csv, ParticipantRole.Organizer));
-        Assert.True(ScheduleRoles.Applies(csv, ParticipantRole.Camera));   // photo crew -> media
+        Assert.True(ScheduleRoles.Applies(csv, ParticipantRole.Media));    // press/photo/video crew -> media
         Assert.False(ScheduleRoles.Applies(csv, ParticipantRole.Sponsor)); // excluded
     }
 
@@ -49,7 +48,6 @@ public sealed class ScheduleRolesTests
     {
         const string csv = "organizer,volunteer"; // move-in day
         Assert.False(ScheduleRoles.Applies(csv, ParticipantRole.Speaker));
-        Assert.False(ScheduleRoles.Applies(csv, ParticipantRole.MasterclassSpeaker));
         Assert.True(ScheduleRoles.Applies(csv, ParticipantRole.Volunteer));
     }
 

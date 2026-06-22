@@ -74,7 +74,13 @@ public static class BackstageSessionParser
                     StartsAt: ParseTime(s, "startTime", "startsAt", "startsOn"),
                     EndsAt: ParseTime(s, "endTime", "endsAt", "endsOn"),
                     IsServiceSession: Bool(s, "isServiceSession") || Bool(s, "isBreak"),
-                    SpeakerIds: SpeakerKeys(s)));
+                    SpeakerIds: SpeakerKeys(s),
+                    // Source format/type/category label drives the hub SessionType
+                    // (SessionDefaultsMapper). Tolerant of the common Backstage field
+                    // names; null when none is present (then duration decides).
+                    Category: NullIfEmpty(FirstNonEmpty(
+                        Str(s, "format"), Str(s, "sessionType"), Str(s, "type"),
+                        Str(s, "category"), Str(s, "track")))));
             }
         }
         return new SessionizeSessionsParseResult(sessions, warnings, null);

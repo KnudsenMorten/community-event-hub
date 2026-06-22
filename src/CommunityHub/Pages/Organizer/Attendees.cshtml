@@ -82,6 +82,13 @@
                asp-route-MismatchOnly="@Model.MismatchOnly" asp-route-Search="@Model.Search"
                data-ceh-grid-skip download
                style="margin-left:10px;">Export CSV (current filter)</a>
+            @* data-ceh-grid-skip: this is an Excel download, not a page replace, so
+               it must NOT trigger the grid loading skeleton. *@
+            <a asp-page="/Organizer/Attendees" asp-page-handler="ExportXlsx"
+               asp-route-Ticket="@Model.Ticket" asp-route-Booking="@Model.Booking"
+               asp-route-MismatchOnly="@Model.MismatchOnly" asp-route-Search="@Model.Search"
+               data-ceh-grid-skip download
+               style="margin-left:10px;">Excel (.xlsx)</a>
         </form>
 
         @if (Model.Attendees.Count == 0)

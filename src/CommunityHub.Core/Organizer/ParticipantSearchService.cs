@@ -156,8 +156,8 @@ public sealed class ParticipantSearchService
             query = query.Where(p => p.Role == request.Role.Value);
         }
 
-        // Persona collapses several roles into one audience (speaker ⇒ Speaker +
-        // MasterclassSpeaker, media-team ⇒ Video + Camera, …). Resolve to the set
+        // Persona collapses several roles into one audience (media-team ⇒ Media,
+        // event-partner ⇒ organizer, …). Resolve to the set
         // of roles in that persona and filter to them; an explicit Role filter
         // (above) is the finer-grained control and both can apply together.
         if (request.Persona is not null)
@@ -222,9 +222,9 @@ public sealed class ParticipantSearchService
     public static IReadOnlyList<ParticipantRole> RolesFor(PersonaGroup persona) => persona switch
     {
         PersonaGroup.Organizer => new[] { ParticipantRole.Organizer },
-        PersonaGroup.Speaker => new[] { ParticipantRole.Speaker, ParticipantRole.MasterclassSpeaker },
+        PersonaGroup.Speaker => new[] { ParticipantRole.Speaker },
         PersonaGroup.Volunteer => new[] { ParticipantRole.Volunteer },
-        PersonaGroup.MediaTeam => new[] { ParticipantRole.Video, ParticipantRole.Camera },
+        PersonaGroup.MediaTeam => new[] { ParticipantRole.Media },
         PersonaGroup.Sponsor => new[] { ParticipantRole.Sponsor },
         _ => Array.Empty<ParticipantRole>(),
     };

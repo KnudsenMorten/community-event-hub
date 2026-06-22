@@ -107,6 +107,12 @@
                aria-label="@Localizer["OnbExport.DownloadAria"]">
                 @Localizer["OnbExport.Download"]
             </a>
+            <a class="button" role="button"
+               asp-page-handler="PendingXlsx" asp-route-persona="@(Model.Persona?.ToString())"
+               aria-label="@Localizer["OnbExport.DownloadAria"]"
+               style="margin-left:8px;">
+                Excel (.xlsx)
+            </a>
         </div>
 
         <!-- Per-step progress tiles (only people who REQUIRE that step). -->

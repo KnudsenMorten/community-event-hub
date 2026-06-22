@@ -39,7 +39,11 @@ public sealed record SessionizeSession(
     DateTimeOffset? StartsAt,
     DateTimeOffset? EndsAt,
     bool IsServiceSession,
-    IReadOnlyList<string> SpeakerIds);
+    IReadOnlyList<string> SpeakerIds,
+    // Source category / format label (Sessionize categoryItems / Backstage format),
+    // when present, used to derive the hub SessionType (see SessionDefaultsMapper).
+    // Null when the source carries no category/format for the session.
+    string? Category = null);
 
 /// <summary>The outcome of parsing the Sessionize sessions view.</summary>
 public sealed record SessionizeSessionsParseResult(

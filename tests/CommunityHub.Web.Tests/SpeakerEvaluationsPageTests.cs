@@ -86,7 +86,7 @@ public sealed class SpeakerEvaluationsPageTests
             var s = new Session
             {
                 EventId = evt.Id, SessionizeId = id, Title = title,
-                Type = SessionType.CommunityTechSession, Room = "Room A",
+                Type = SessionType.TechnicalSession, Room = "Room A",
                 StartsAt = new DateTimeOffset(2027, 2, 9, 10, 0, 0, TimeSpan.Zero),
             };
             foreach (var sp in speakers)

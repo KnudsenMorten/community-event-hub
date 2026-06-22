@@ -21,7 +21,9 @@ public sealed class VolunteerBucketsScenarioTests
         => new(db, ScenarioFixture.Clock);
 
     private static VolunteerAllocationService NewAllocation(CommunityHub.Core.Data.CommunityHubDbContext db)
-        => new(db, ScenarioFixture.Clock);
+        => new(db, ScenarioFixture.Clock,
+               new CommunityHub.Core.Settings.FeatureGateService(db),
+               new CommunityHub.Core.Settings.RingResolver(db));
 
     private static Actor Organizer(ScenarioSeed.SeedResult s)
         => new(s.OrganizerId, ScenarioSeed.OrganizerEmail, ParticipantRole.Organizer, s.EventId);

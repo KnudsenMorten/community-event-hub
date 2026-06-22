@@ -3,6 +3,7 @@ using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
 using CommunityHub.Core.Reminders;
 using CommunityHub.Core.Resources;
+using CommunityHub.Forms;
 using CommunityHub.Notify;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -65,16 +66,37 @@ public class HotelModel : PageModel
     /// <summary>
     /// Hotel is arranged + covered by us for crew/speakers/organizers; sponsors and
     /// attendees arrange their own accommodation, so the form is not shown to them.
+    ///
+    /// <para>FEATURE B: additionally gated by ENTITLEMENT
+    /// (<see cref="OrderItem.Hotel"/>). A sponsor-self-funded speaker (entitled to no
+    /// hotel) is treated as "not relevant" even though their role is Speaker; a
+    /// Supported speaker is entitled. Every NON-speaker role keeps its historical
+    /// access (Organizer / Volunteer / Media / EventPartner), so access is never
+    /// silently removed. Computed in <see cref="OnGetAsync"/> / <see cref="OnPostAsync"/>.</para>
     /// </summary>
-    public bool HotelRelevant =>
-        Role is not (ParticipantRole.Sponsor or ParticipantRole.Attendee);
+    public bool HotelRelevant { get; private set; }
+
+    /// <summary>The role-only relevance rule (excludes sponsors + attendees) — the historical gate.</summary>
+    private static bool HotelRoleRelevant(ParticipantRole role) =>
+        role is not (ParticipantRole.Sponsor or ParticipantRole.Attendee);
+
+    /// <summary>FEATURE B eligibility: entitled to a hotel, OR a non-speaker role that historically had the form.</summary>
+    private async Task<bool> IsHotelRelevantAsync(CurrentParticipant me, CancellationToken ct)
+    {
+        var entitled = await FormEntitlementGate.IsEntitledAsync(
+            _db, me.EventId, me.ParticipantId, OrderItem.Hotel, ct);
+        var historicalNonSpeaker =
+            me.Role != ParticipantRole.Speaker && HotelRoleRelevant(me.Role);
+        return entitled || historicalNonSpeaker;
+    }
 
     public async Task<IActionResult> OnGetAsync(CancellationToken ct)
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
         Role = me.Role;
-        if (!HotelRelevant) return Page();   // sponsors/attendees: "not relevant" view, no form
+        HotelRelevant = await IsHotelRelevantAsync(me, ct);
+        if (!HotelRelevant) return Page();   // not entitled / sponsors / attendees: "not relevant" view, no form
 
         IsLocked = await IsEditingLockedAsync(me.EventId, ct);
         await EnsureHotelTaskExistsAsync(me.EventId, me.ParticipantId, ct);
@@ -98,7 +120,8 @@ public class HotelModel : PageModel
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
         Role = me.Role;
-        if (!HotelRelevant) return Page();   // sponsors/attendees can't book through us
+        HotelRelevant = await IsHotelRelevantAsync(me, ct);
+        if (!HotelRelevant) return Page();   // not entitled / sponsors / attendees can't book through us
 
         if (await IsEditingLockedAsync(me.EventId, ct))
         {

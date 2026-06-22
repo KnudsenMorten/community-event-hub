@@ -104,6 +104,21 @@ public sealed class EmailTemplateRenderer
     }
 
     /// <summary>
+    /// Render a content template's BODY FRAGMENT ONLY: strip the <c>Subject:</c>
+    /// first line and substitute the body tokens (HTML-encoded at the seam, except
+    /// the raw-HTML token set), but do NOT wrap it in the <c>_layout.html</c> shell.
+    /// For surfaces that want the content but not the email chrome (e.g. an in-portal
+    /// welcome card).
+    /// </summary>
+    public string RenderBodyFragment(
+        string contentTemplate,
+        IReadOnlyDictionary<string, string> tokens)
+    {
+        var fragment = StripSubjectLine(contentTemplate, out _);
+        return Substitute(fragment, tokens, encode: true);
+    }
+
+    /// <summary>
     /// Replace every {{token}} with its mapped value (missing =&gt; "").
     /// When <paramref name="encode"/> is true, each value is HTML-encoded at the
     /// seam, except tokens in the raw-HTML set (see <see cref="IsRawHtmlToken"/>)

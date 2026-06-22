@@ -43,9 +43,13 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
     public DbSet<SwagPreference> SwagPreferences => Set<SwagPreference>();
     public DbSet<LunchSignup> LunchSignups => Set<LunchSignup>();
     public DbSet<SpeakerProfile> SpeakerProfiles => Set<SpeakerProfile>();
+    public DbSet<ParticipantOrderOverride> ParticipantOrderOverrides => Set<ParticipantOrderOverride>();
     public DbSet<Session> Sessions => Set<Session>();
     public DbSet<SessionSpeaker> SessionSpeakers => Set<SessionSpeaker>();
     public DbSet<SessionQuestion> SessionQuestions => Set<SessionQuestion>();
+
+    /// <summary>Q&amp;A comments on a master class's attendee landing page (FEATURE 2).</summary>
+    public DbSet<MasterClassComment> MasterClassComments => Set<MasterClassComment>();
     public DbSet<SessionEvaluation> SessionEvaluations => Set<SessionEvaluation>();
     public DbSet<MasterClassParticipant> MasterClassParticipants => Set<MasterClassParticipant>();
     public DbSet<SpeakerBackstageEmailSync> SpeakerBackstageEmailSyncs => Set<SpeakerBackstageEmailSync>();
@@ -129,9 +133,39 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
     // runtime. No row ⇒ the shipped default applies unchanged. No secrets here.
     public DbSet<ConfigOverride> ConfigOverrides => Set<ConfigOverride>();
 
+    // --- Per-edition editable email templates (REQUIREMENTS §25h) -------------
+    // Override the shipped on-disk templates per edition; the renderer uses the
+    // override at send + preview time, else the shipped default.
+    public DbSet<EmailTemplateOverride> EmailTemplateOverrides => Set<EmailTemplateOverride>();
+
+    // --- Unified AUDIT TRAIL (REQUIREMENTS §24) -------------------------------
+    // Append-only record of every user action + backend/engine event, reviewed by
+    // organizers in /Organizer/AuditTrail for troubleshooting + usage insight.
+    public DbSet<AuditEntry> AuditEntries => Set<AuditEntry>();
+
     protected override void OnModelCreating(ModelBuilder b)
     {
         base.OnModelCreating(b);
+
+        // --- Audit trail (§24): edition + time index for the org trail view -----
+        b.Entity<AuditEntry>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Action).IsRequired().HasMaxLength(200);
+            e.Property(x => x.ActorEmail).IsRequired().HasMaxLength(256);
+            e.Property(x => x.ActorRole).HasMaxLength(64);
+            e.Property(x => x.OnBehalfOf).HasMaxLength(256);
+            e.Property(x => x.TargetType).HasMaxLength(128);
+            e.Property(x => x.TargetId).HasMaxLength(128);
+            e.Property(x => x.Summary).HasMaxLength(1024);
+            e.Property(x => x.Detail).HasMaxLength(4000);
+            e.Property(x => x.HttpMethod).HasMaxLength(16);
+            e.Property(x => x.Path).HasMaxLength(512);
+            // The trail view orders by edition + newest-first; usage counts filter by
+            // edition + category.
+            e.HasIndex(x => new { x.EventId, x.OccurredUtc });
+            e.HasIndex(x => new { x.EventId, x.Category });
+        });
 
         // --- Event ----------------------------------------------------------
         b.Entity<Event>(e =>
@@ -192,6 +226,15 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
                 .WithMany(h => h.Participants)
                 .HasForeignKey(x => x.HotelId)
                 .OnDelete(DeleteBehavior.NoAction);
+
+            // Same-person duplicate pointer (order dedup): nullable self-reference,
+            // Restrict (no cascade) so removing a primary never deletes the
+            // duplicate row that points at it. The duplicate is excluded from
+            // tallies by OrderCountService, not by an FK action.
+            e.HasOne(x => x.SamePersonAs)
+                .WithMany()
+                .HasForeignKey(x => x.SamePersonAsId)
+                .OnDelete(DeleteBehavior.Restrict);
 
             // "Everyone in this hotel" grouping query.
             e.HasIndex(x => new { x.EventId, x.HotelId });
@@ -628,6 +671,9 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
             // Comma-separated set of speaker-edited bio field tokens (the
             // per-field dirty set the delta sync reads). Small; 200 is ample.
             e.Property(x => x.SpeakerEditedFields).HasMaxLength(200);
+            // Who funds the speaker's appreciation package (drives entitlements);
+            // stored as int, defaults to Supported (0).
+            e.Property(x => x.SpeakerFunding).HasConversion<int>();
 
             e.HasOne(x => x.Event).WithMany()
                 .HasForeignKey(x => x.EventId)
@@ -637,6 +683,29 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
                 .OnDelete(DeleteBehavior.Restrict);
 
             e.HasIndex(x => new { x.EventId, x.ParticipantId }).IsUnique();
+        });
+
+        // --- ParticipantOrderOverride (per-person order-item include/exclude) -
+        b.Entity<ParticipantOrderOverride>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Item).HasConversion<int>();
+            e.Property(x => x.Reason).HasMaxLength(500);
+            e.Property(x => x.SetByEmail).HasMaxLength(320);
+
+            e.HasOne(x => x.Event).WithMany()
+                .HasForeignKey(x => x.EventId)
+                .OnDelete(DeleteBehavior.Cascade);
+            // NoAction on the Participant FK: the Event root already cascade-
+            // deletes both Participants and these overrides, so a second
+            // Participant→Override cascade path would be a SQL Server
+            // multiple-cascade-path error.
+            e.HasOne(x => x.Participant).WithMany()
+                .HasForeignKey(x => x.ParticipantId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            // One override per (edition, participant, item) — upserted on edit.
+            e.HasIndex(x => new { x.EventId, x.ParticipantId, x.Item }).IsUnique();
         });
 
         // --- Session (Sessionize session import; in-hub only) ----------------
@@ -771,12 +840,56 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
             e.HasOne(x => x.RespondedByParticipant).WithMany()
                 .HasForeignKey(x => x.RespondedByParticipantId)
                 .OnDelete(DeleteBehavior.NoAction);
+            // 1:1 private-question asker (master-class landing page, FEATURE 2):
+            // optional Attendee pointer. NoAction — the Event root already cascade-
+            // deletes both Attendees and these questions, so a second cascade path
+            // would be a SQL Server multiple-cascade-path error.
+            e.HasOne(x => x.AskerAttendee).WithMany()
+                .HasForeignKey(x => x.AskerAttendeeId)
+                .OnDelete(DeleteBehavior.NoAction);
 
             // Organizer "all questions" + per-session (speaker) inbox, newest first.
             e.HasIndex(x => new { x.EventId, x.Status, x.CreatedAt });
             e.HasIndex(x => new { x.SessionId, x.Status });
             // Soft rate-limit lookup by IP hash within an edition.
             e.HasIndex(x => new { x.EventId, x.IpHash });
+            // "This attendee's own 1:1 questions for this session" landing-page lookup.
+            e.HasIndex(x => new { x.SessionId, x.AskerAttendeeId });
+        });
+
+        // --- MasterClassComment (MC landing-page Q&A, FEATURE 2) -------------
+        // Public WITHIN the master class: confirmed signups + the MC's speakers
+        // (and organizers) post + read. Threaded via ParentCommentId. The author is
+        // EITHER a Participant (speaker/organizer) OR an Attendee (confirmed signup).
+        b.Entity<MasterClassComment>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.AuthorDisplayName).IsRequired().HasMaxLength(200);
+            e.Property(x => x.Body).IsRequired().HasMaxLength(2000);
+
+            e.HasOne(x => x.Event).WithMany()
+                .HasForeignKey(x => x.EventId)
+                .OnDelete(DeleteBehavior.Cascade);
+            // NoAction on Session / Participant / Attendee FKs: the Event root already
+            // cascade-deletes those AND these comments, so a second cascade path would
+            // be a SQL Server multiple-cascade-path error (cf. MasterClassSignup).
+            e.HasOne(x => x.Session).WithMany()
+                .HasForeignKey(x => x.SessionId)
+                .OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(x => x.AuthorParticipant).WithMany()
+                .HasForeignKey(x => x.AuthorParticipantId)
+                .OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(x => x.AuthorAttendee).WithMany()
+                .HasForeignKey(x => x.AuthorAttendeeId)
+                .OnDelete(DeleteBehavior.NoAction);
+            // A reply points at its parent comment; Restrict so deleting a parent
+            // never silently cascades the whole thread.
+            e.HasOne(x => x.ParentComment).WithMany()
+                .HasForeignKey(x => x.ParentCommentId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // The landing-page thread: a session's comments oldest-first.
+            e.HasIndex(x => new { x.SessionId, x.CreatedAt });
         });
 
         // --- SessionEvaluation (public post-session attendee rating; hub-only) -
@@ -869,6 +982,9 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
             e.Property(x => x.SocialMediaIntro).HasMaxLength(600);
             e.Property(x => x.LastUpdatedByEmail).HasMaxLength(320);
             e.Property(x => x.WebsiteUrl).HasMaxLength(400);
+            // Commercial sponsorship package (Silver/Gold/Diamond/Platinum):
+            // stored as int, defaults to Silver (0 = digital / no booth).
+            e.Property(x => x.SponsorPackage).HasConversion<int>();
 
             // Company default release ring (controlled rollout §23): stored as int,
             // defaults to Broad (3) — the company default for its contacts unless a
@@ -1591,6 +1707,21 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
 
             // One override row per (edition, section) — upserted on save.
             e.HasIndex(x => new { x.EventId, x.Section }).IsUnique();
+        });
+
+        // --- EmailTemplateOverride (per-edition editable email templates §25h) -
+        b.Entity<EmailTemplateOverride>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.TemplateKey).IsRequired().HasMaxLength(100);
+            // The full edited template text (subject line + body). nvarchar(max).
+            e.Property(x => x.OverrideText).IsRequired();
+            e.Property(x => x.UpdatedByEmail).HasMaxLength(320);
+            e.HasOne(x => x.Event).WithMany()
+                .HasForeignKey(x => x.EventId)
+                .OnDelete(DeleteBehavior.Cascade);
+            // One override per (edition, template) — upserted on save.
+            e.HasIndex(x => new { x.EventId, x.TemplateKey }).IsUnique();
         });
 
         // --- SavedSession (attendee personal "My plan", saved sessions) -------

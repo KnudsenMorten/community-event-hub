@@ -47,6 +47,8 @@ public sealed class JobFeatureGateTests
     }
 
     private static FeatureGateService Gate(CommunityHubDbContext db) => new(db);
+    private static CommunityHub.Core.Audit.IAuditTrail Audit(CommunityHubDbContext db) =>
+        new CommunityHub.Core.Audit.AuditTrailService(db, TimeProvider.System);
 
     private static async Task EnableAsync(CommunityHubDbContext db, int eventId, string key)
     {
@@ -67,7 +69,7 @@ public sealed class JobFeatureGateTests
         // Config is on, but the per-edition gate defaults OFF, so the run must
         // no-op BEFORE _service.ImportAsync — proven by null services not throwing.
         var options = new CommunityHub.Core.Integrations.SessionizeApiOptions { Enabled = true };
-        var job = new SessionizeImportJob(service: null!, options, db, Gate(db),
+        var job = new SessionizeImportJob(service: null!, options, db, Gate(db), Audit(db),
             NullLogger<SessionizeImportJob>.Instance);
 
         await job.Run(Timer(), default); // no throw == gate short-circuited
@@ -81,7 +83,7 @@ public sealed class JobFeatureGateTests
         await EnableAsync(db, eventId, "sessionize-import");
 
         var options = new CommunityHub.Core.Integrations.SessionizeApiOptions { Enabled = true };
-        var job = new SessionizeImportJob(service: null!, options, db, Gate(db),
+        var job = new SessionizeImportJob(service: null!, options, db, Gate(db), Audit(db),
             NullLogger<SessionizeImportJob>.Instance);
 
         // Enabled ⇒ the run proceeds to the (null) import service and throws —
@@ -99,7 +101,7 @@ public sealed class JobFeatureGateTests
 
         var options = new CommunityHub.Core.Integrations.ZohoOptions { Enabled = true };
         var job = new AttendeeReconcileJob(db, zoho: null!, options, reconciler: null!,
-            engine: null!, templates: null!, new FixedClock(Now), Gate(db),
+            engine: null!, templates: null!, new FixedClock(Now), Gate(db), Audit(db),
             NullLogger<AttendeeReconcileJob>.Instance);
 
         await job.Run(Timer(), default); // no throw == gate short-circuited
@@ -114,7 +116,7 @@ public sealed class JobFeatureGateTests
 
         var options = new CommunityHub.Core.Integrations.ZohoOptions { Enabled = true };
         var job = new AttendeeReconcileJob(db, zoho: null!, options, reconciler: null!,
-            engine: null!, templates: null!, new FixedClock(Now), Gate(db),
+            engine: null!, templates: null!, new FixedClock(Now), Gate(db), Audit(db),
             NullLogger<AttendeeReconcileJob>.Instance);
 
         await Assert.ThrowsAsync<NullReferenceException>(() => job.Run(Timer(), default));
@@ -130,7 +132,7 @@ public sealed class JobFeatureGateTests
 
         var zoho = new CommunityHub.Core.Integrations.ZohoOptions { CrmEnabled = true };
         var job = new SponsorLeadsJob(db, sync: null!, zoho, templates: null!,
-            emailSender: null!, new FixedClock(Now), Gate(db),
+            emailSender: null!, new FixedClock(Now), Gate(db), Audit(db),
             NullLogger<SponsorLeadsJob>.Instance);
 
         await job.Run(Timer(), default); // no throw == gate short-circuited
@@ -147,7 +149,7 @@ public sealed class JobFeatureGateTests
         var zoho = new CommunityHub.Core.Integrations.ZohoOptions { CrmEnabled = true };
         var job = new SponsorLeadsJob(db, sync: null!, zoho, templates: null!,
             emailSender: null!, new FixedClock(new DateTimeOffset(2027, 1, 15, 5, 0, 0, TimeSpan.Zero)),
-            Gate(db), NullLogger<SponsorLeadsJob>.Instance);
+            Gate(db), Audit(db), NullLogger<SponsorLeadsJob>.Instance);
 
         await Assert.ThrowsAsync<NullReferenceException>(() => job.Run(Timer(), default));
     }
@@ -160,7 +162,7 @@ public sealed class JobFeatureGateTests
         using var db = NewDb();
         await SeedActiveEventAsync(db);
 
-        var job = new WooCommercePullJob(service: null!, db, Gate(db),
+        var job = new WooCommercePullJob(service: null!, db, Gate(db), Audit(db),
             NullLogger<WooCommercePullJob>.Instance);
 
         await job.Run(Timer(), default); // no throw == gate short-circuited
@@ -173,7 +175,7 @@ public sealed class JobFeatureGateTests
         var eventId = await SeedActiveEventAsync(db);
         await EnableAsync(db, eventId, "sponsor-order-pull");
 
-        var job = new WooCommercePullJob(service: null!, db, Gate(db),
+        var job = new WooCommercePullJob(service: null!, db, Gate(db), Audit(db),
             NullLogger<WooCommercePullJob>.Instance);
 
         await Assert.ThrowsAsync<NullReferenceException>(() => job.Run(Timer(), default));
@@ -187,7 +189,7 @@ public sealed class JobFeatureGateTests
         using var db = NewDb();
         await SeedActiveEventAsync(db);
 
-        var job = new SponsorUploadWatchJob(watch: null!, db, Gate(db),
+        var job = new SponsorUploadWatchJob(watch: null!, db, Gate(db), Audit(db),
             NullLogger<SponsorUploadWatchJob>.Instance);
 
         await job.Run(Timer(), default); // no throw == gate short-circuited
@@ -200,7 +202,7 @@ public sealed class JobFeatureGateTests
         var eventId = await SeedActiveEventAsync(db);
         await EnableAsync(db, eventId, "sponsor-upload-watch");
 
-        var job = new SponsorUploadWatchJob(watch: null!, db, Gate(db),
+        var job = new SponsorUploadWatchJob(watch: null!, db, Gate(db), Audit(db),
             NullLogger<SponsorUploadWatchJob>.Instance);
 
         await Assert.ThrowsAsync<NullReferenceException>(() => job.Run(Timer(), default));

@@ -77,8 +77,8 @@ public sealed class SessionManagementTests
     [Fact]
     public void MapType_fullday_is_masterclass_else_techsession()
     {
-        Assert.Equal(SessionType.CommunityMasterClass, SessionDefaultsMapper.MapType(SessionLength.FullDay));
-        Assert.Equal(SessionType.CommunityTechSession, SessionDefaultsMapper.MapType(SessionLength.FiftyMin));
+        Assert.Equal(SessionType.MasterClass, SessionDefaultsMapper.MapType(SessionLength.FullDay));
+        Assert.Equal(SessionType.TechnicalSession, SessionDefaultsMapper.MapType(SessionLength.FiftyMin));
     }
 
     // ------------------------------------------------------------- import default ----
@@ -103,12 +103,12 @@ public sealed class SessionManagementTests
 
         var talk = await db.Sessions.SingleAsync(s => s.SessionizeId == "sess-talk");
         Assert.Equal(SessionLength.FiftyMin, talk.Length);
-        Assert.Equal(SessionType.CommunityTechSession, talk.Type);
+        Assert.Equal(SessionType.TechnicalSession, talk.Type);
         Assert.False(talk.IsHubAdded);
 
         var ws = await db.Sessions.SingleAsync(s => s.SessionizeId == "sess-ws");
         Assert.Equal(SessionLength.FullDay, ws.Length);
-        Assert.Equal(SessionType.CommunityMasterClass, ws.Type);
+        Assert.Equal(SessionType.MasterClass, ws.Type);
     }
 
     // ----------------------------------------------------------------- hub-add ----
@@ -121,13 +121,13 @@ public sealed class SessionManagementTests
         var svc = new SessionManagementService(db, new NullRoomQrProvider(), new FixedClock(Now));
 
         var s = await svc.AddHubSessionAsync(
-            eventId, "Sponsor Showcase", SessionType.SponsorSession, SessionLength.TwentyMin,
+            eventId, "Sponsor Showcase", SessionType.TechnicalSession, SessionLength.TwentyMin,
             room: "Expo", @abstract: "By a sponsor.",
             speakerParticipantIds: new[] { speakerAId });
 
         Assert.True(s.IsHubAdded);
         Assert.StartsWith(SessionManagementService.HubSessionizeIdPrefix, s.SessionizeId);
-        Assert.Equal(SessionType.SponsorSession, s.Type);
+        Assert.Equal(SessionType.TechnicalSession, s.Type);
         Assert.Equal(SessionLength.TwentyMin, s.Length);
         Assert.Equal("Expo", s.Room);
         Assert.Single(s.SessionSpeakers);
@@ -140,7 +140,7 @@ public sealed class SessionManagementTests
         var (eventId, _, _) = await SeedAsync(db);
         var mgmt = new SessionManagementService(db, new NullRoomQrProvider(), new FixedClock(Now));
         var hub = await mgmt.AddHubSessionAsync(
-            eventId, "Hub Only", SessionType.SponsorSession, SessionLength.FiftyMin, room: "Expo");
+            eventId, "Hub Only", SessionType.TechnicalSession, SessionLength.FiftyMin, room: "Expo");
 
         // A full import that does NOT include the hub session must leave it intact.
         var import = new SessionImportService(db, new FixedClock(Now));
@@ -151,7 +151,7 @@ public sealed class SessionManagementTests
 
         var stillThere = await db.Sessions.SingleAsync(s => s.Id == hub.Id);
         Assert.Equal("Hub Only", stillThere.Title);
-        Assert.Equal(SessionType.SponsorSession, stillThere.Type);
+        Assert.Equal(SessionType.TechnicalSession, stillThere.Type);
         Assert.True(stillThere.IsHubAdded);
         Assert.Equal(2, await db.Sessions.CountAsync(s => s.EventId == eventId));
     }
@@ -164,15 +164,15 @@ public sealed class SessionManagementTests
         using var db = TestDb.New();
         var (eventId, _, _) = await SeedAsync(db);
         var mgmt = new SessionManagementService(db, new NullRoomQrProvider(), new FixedClock(Now));
-        await mgmt.AddHubSessionAsync(eventId, "Sponsor 20", SessionType.SponsorSession, SessionLength.TwentyMin);
-        await mgmt.AddHubSessionAsync(eventId, "Tech 60", SessionType.CommunityTechSession, SessionLength.SixtyMin);
-        await mgmt.AddHubSessionAsync(eventId, "Master Full", SessionType.CommunityMasterClass, SessionLength.FullDay);
+        await mgmt.AddHubSessionAsync(eventId, "Keynote 20", SessionType.Keynote, SessionLength.TwentyMin);
+        await mgmt.AddHubSessionAsync(eventId, "Tech 60", SessionType.TechnicalSession, SessionLength.SixtyMin);
+        await mgmt.AddHubSessionAsync(eventId, "Master Full", SessionType.MasterClass, SessionLength.FullDay);
 
-        var sponsors = await db.Sessions
-            .Where(s => s.EventId == eventId && s.Type == SessionType.SponsorSession)
+        var keynotes = await db.Sessions
+            .Where(s => s.EventId == eventId && s.Type == SessionType.Keynote)
             .ToListAsync();
-        Assert.Single(sponsors);
-        Assert.Equal("Sponsor 20", sponsors[0].Title);
+        Assert.Single(keynotes);
+        Assert.Equal("Keynote 20", keynotes[0].Title);
 
         var sixties = await db.Sessions
             .Where(s => s.EventId == eventId && s.Length == SessionLength.SixtyMin)
@@ -189,7 +189,7 @@ public sealed class SessionManagementTests
         using var db = TestDb.New();
         var (eventId, _, _) = await SeedAsync(db);
         var mgmt = new SessionManagementService(db, new NullRoomQrProvider(), new FixedClock(Now));
-        await mgmt.AddHubSessionAsync(eventId, "In Room A", SessionType.SponsorSession, SessionLength.FiftyMin, room: "Room A");
+        await mgmt.AddHubSessionAsync(eventId, "In Room A", SessionType.TechnicalSession, SessionLength.FiftyMin, room: "Room A");
 
         var result = await mgmt.ProvisionRoomQrAsync(eventId, "Room A", "https://example.test/room-a");
 
@@ -205,9 +205,9 @@ public sealed class SessionManagementTests
         using var db = TestDb.New();
         var (eventId, _, _) = await SeedAsync(db);
         var mgmt = new SessionManagementService(db, new FakeRoomQrProvider(), new FixedClock(Now));
-        await mgmt.AddHubSessionAsync(eventId, "A1", SessionType.SponsorSession, SessionLength.FiftyMin, room: "Room A");
-        await mgmt.AddHubSessionAsync(eventId, "A2", SessionType.CommunityTechSession, SessionLength.SixtyMin, room: "Room A");
-        await mgmt.AddHubSessionAsync(eventId, "B1", SessionType.CommunityTechSession, SessionLength.SixtyMin, room: "Room B");
+        await mgmt.AddHubSessionAsync(eventId, "A1", SessionType.TechnicalSession, SessionLength.FiftyMin, room: "Room A");
+        await mgmt.AddHubSessionAsync(eventId, "A2", SessionType.TechnicalSession, SessionLength.SixtyMin, room: "Room A");
+        await mgmt.AddHubSessionAsync(eventId, "B1", SessionType.TechnicalSession, SessionLength.SixtyMin, room: "Room B");
 
         var result = await mgmt.ProvisionRoomQrAsync(eventId, "Room A", "https://example.test/room-a");
 
@@ -229,7 +229,7 @@ public sealed class SessionManagementTests
         var (eventId, speakerAId, speakerBId) = await SeedAsync(db);
         var mgmt = new SessionManagementService(db, new NullRoomQrProvider(), new FixedClock(Now));
         var session = await mgmt.AddHubSessionAsync(
-            eventId, "Joint", SessionType.CommunityTechSession, SessionLength.SixtyMin,
+            eventId, "Joint", SessionType.TechnicalSession, SessionLength.SixtyMin,
             speakerParticipantIds: new[] { speakerAId, speakerBId });
 
         var mailer = new CapturingEmailSender();
@@ -254,7 +254,7 @@ public sealed class SessionManagementTests
         var (eventId, speakerAId, _) = await SeedAsync(db);
         var mgmt = new SessionManagementService(db, new NullRoomQrProvider(), new FixedClock(Now));
         var session = await mgmt.AddHubSessionAsync(
-            eventId, "Solo", SessionType.CommunityTechSession, SessionLength.SixtyMin,
+            eventId, "Solo", SessionType.TechnicalSession, SessionLength.SixtyMin,
             speakerParticipantIds: new[] { speakerAId });
 
         var mailer = new CapturingEmailSender();

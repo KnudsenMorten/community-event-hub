@@ -43,17 +43,20 @@ public sealed class PinLoginService
     private readonly PinService _pinService;
     private readonly IEmailSender _emailSender;
     private readonly TimeProvider _clock;
+    private readonly IEmailContextAccessor? _context;
 
     public PinLoginService(
         CommunityHubDbContext db,
         PinService pinService,
         IEmailSender emailSender,
-        TimeProvider clock)
+        TimeProvider clock,
+        IEmailContextAccessor? context = null)
     {
         _db = db;
         _pinService = pinService;
         _emailSender = emailSender;
         _clock = clock;
+        _context = context;
     }
 
     /// <summary>
@@ -118,8 +121,15 @@ public sealed class PinLoginService
             : $"{eventCode} Event Hub";
         var subject = $"{subjectPrefix} - Your sign-in code";
         var body = BuildPinEmail(participant.FullName, plainPin);
-        await _emailSender.SendAsync(
-            participant.Email, subject, body, cancellationToken);
+        // SIGN-IN EXEMPTION (operator 2026-06-22): the on-demand PIN must reach a user
+        // at ANY ring — mark this send ring-exempt so the gate never drops it. (The
+        // global kill switch still applies.) `using (null)` is a safe no-op in test wiring.
+        using (_context?.Set(new EmailContext(
+            "pin-signin", eventId, participant.Id, participant.FullName, RingExempt: true)))
+        {
+            await _emailSender.SendAsync(
+                participant.Email, subject, body, cancellationToken);
+        }
 
         return PinRequestResult.Ok();
     }

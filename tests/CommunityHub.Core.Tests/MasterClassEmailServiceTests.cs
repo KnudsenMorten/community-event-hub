@@ -25,7 +25,7 @@ public class MasterClassEmailServiceTests
     {
         var e = new Event { CommunityName = "C", DisplayName = "C 2027", Code = "C27", IsActive = true, StartDate = new DateOnly(2027, 2, 9), EndDate = new DateOnly(2027, 2, 10) };
         db.Events.Add(e); await db.SaveChangesAsync();
-        var s = new Session { EventId = e.Id, Title = "Deep Dive MC", Type = SessionType.CommunityMasterClass, MasterClassCapacity = 5 };
+        var s = new Session { EventId = e.Id, Title = "Deep Dive MC", Type = SessionType.MasterClass, MasterClassCapacity = 5 };
         db.Sessions.Add(s); await db.SaveChangesAsync();
         var a = new Attendee { EventId = e.Id, Email = "p@x.dk", FirstName = "Pat", LastName = "Lee", TicketStatus = TicketStatus.TwoDay };
         db.Attendees.Add(a); await db.SaveChangesAsync();
@@ -62,7 +62,7 @@ public class MasterClassEmailServiceTests
         using var db = ScenarioFixture.NewDb();
         var (ev, mc, att) = await SeedAsync(db);
         // Make it full so the next signer waitlists; have 'att' hold a seat then waitlist a 2nd.
-        var mc2 = new Session { EventId = ev, Title = "MC2", Type = SessionType.CommunityMasterClass, MasterClassCapacity = 0 };
+        var mc2 = new Session { EventId = ev, Title = "MC2", Type = SessionType.MasterClass, MasterClassCapacity = 0 };
         db.Sessions.Add(mc2); await db.SaveChangesAsync();
         var (email, sender, svc) = Build(db);
         await svc.SignUpAsync(ev, att, mc);                              // confirmed in mc

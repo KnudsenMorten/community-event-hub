@@ -76,6 +76,10 @@ Write-Host ">> Building $App (Release)..." -ForegroundColor Cyan
 # cold-start hangs. Framework-dependent (--self-contained false): still runs on
 # the App Service's installed .NET 8, the zip stays small, and an incompatible
 # R2R image silently falls back to JIT (never a crash).
+# Clean the publish output first so a file DELETED from the repo (e.g. a removed
+# email template) does not linger in the zip from a previous build.
+$outPath = Join-Path $repo $outDir
+if (Test-Path $outPath) { Remove-Item $outPath -Recurse -Force }
 $pubArgs = @('publish', (Join-Path $repo $proj), '-c', 'Release', '-o', (Join-Path $repo $outDir))
 if ($App -eq 'web') {
     $pubArgs += @('-r', 'linux-x64', '--self-contained', 'false', '-p:PublishReadyToRun=true')
@@ -121,7 +125,7 @@ if ($App -eq 'jobs') {
 $slots = Invoke-Az @('webapp','deployment','slot','list','-g',$t.rg,'-n',$t.app,'--query','[].name','-o','tsv')
 if ($slots -contains 'staging') {
     Write-Host ">> 'staging' slot found -- slot-swap deploy (near-zero downtime)" -ForegroundColor Green
-    [void](Invoke-Az @('webapp','deploy','-g',$t.rg,'-n',$t.app,'--slot','staging','--src-path',$zip,'--type','zip','--output','none'))
+    [void](Invoke-Az @('webapp','deploy','-g',$t.rg,'-n',$t.app,'--slot','staging','--src-path',$zip,'--type','zip','--clean','true','--output','none'))
     if ($script:AzExit -ne 0) { throw "slot deploy failed." }
 
     # Warm the slot until it answers (JIT + EF model build happen here, NOT in prod).
@@ -157,7 +161,7 @@ if ($slots -contains 'staging') {
     }
 } else {
     Write-Host ">> No staging slot (B1 doesn't support slots; see tools/enable-slot-deploys.ps1). Direct deploy -- expect a short outage." -ForegroundColor Yellow
-    [void](Invoke-Az @('webapp','deploy','-g',$t.rg,'-n',$t.app,'--src-path',$zip,'--type','zip','--output','none'))
+    [void](Invoke-Az @('webapp','deploy','-g',$t.rg,'-n',$t.app,'--src-path',$zip,'--type','zip','--clean','true','--output','none'))
     if ($script:AzExit -ne 0) { throw "deploy failed." }
 }
 
@@ -211,8 +215,26 @@ try {
         $bootText = $boot -join "`n"
 
         $started   = $bootText -match 'Application started|Site started|startup probe succeeded'
-        $errPattern = 'ContainerTimeout|Unhandled exception|Login failed for|did not start within expected time|crash loop|FATAL'
-        $errs = @($boot | Where-Object { $_ -match $errPattern } | Select-Object -First 8)
+        # FATAL app patterns ALWAYS fail the gate (real faults the health check can miss).
+        $fatalPattern = 'Unhandled exception|Login failed for|crash loop|FATAL'
+        $errs = @($boot | Where-Object { $_ -match $fatalPattern } | Select-Object -First 8)
+        # STARTUP TIMEOUTS need care: a cold start can exceed the 230s limit, get
+        # retried by Azure, and recover — after which the platform keeps a STALE
+        # "LastError: ContainerTimeout" field on EVERY subsequent state line (even INFO
+        # ones like "Container is running"). Matching that blindly false-fails a healthy
+        # go-live. So count a timeout ONLY when it is a genuine ERR-level stop event
+        # (DetailsLevel: ERR) that is NOT followed by a successful start/probe later in
+        # the window (i.e. it never recovered). A recovered timeout is benign.
+        for ($ti = 0; $ti -lt $boot.Count; $ti++) {
+            if ($boot[$ti] -notmatch 'ContainerTimeout|did not start within expected time') { continue }
+            if ($boot[$ti] -notmatch 'DetailsLevel:\s*ERR') { continue }   # stale field on an INFO line — ignore
+            $recovered = $false
+            for ($j = $ti + 1; $j -lt $boot.Count; $j++) {
+                if ($boot[$j] -match 'Site started|startup probe succeeded|Container is running') { $recovered = $true; break }
+            }
+            if (-not $recovered) { $errs += $boot[$ti] }
+        }
+        $errs = @($errs | Select-Object -First 8)
         $probeMatch = $boot | Select-String -Pattern 'startup probe succeeded after ([\d\.]+) seconds' | Select-Object -Last 1
         $probe = if ($probeMatch) { $probeMatch.Matches[0].Groups[1].Value } else { $null }
 

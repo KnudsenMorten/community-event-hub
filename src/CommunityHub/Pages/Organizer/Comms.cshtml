@@ -285,12 +285,13 @@
         @{
             var tiles = new List<CommunityHub.Pages.Shared.HubTile>
             {
-                new("/Organizer/EmailCenter", Localizer["Nav.OrgEmailCenter"].Value, "Compose and send templated email to participants."),
+                new("/Organizer/EmailCenter", Localizer["Nav.OrgEmailCenter"].Value, "Compose and send templated email to participants.", "broadcast-email"),
                 new("/Organizer/EmailLog", Localizer["Nav.OrgEmailLog"].Value, "The full delivery log of every email sent."),
-                new("/Organizer/Broadcast", Localizer["Nav.OrgBroadcast"].Value, "Send a one-off broadcast message to a chosen audience."),
-                new("/Organizer/SendInvitations", Localizer["Nav.OrgSendInvitations"].Value, "Send the event invitation to invitees."),
-                new("/Organizer/SendWelcomeLogin", Localizer["Nav.OrgSendWelcome"].Value, "Send welcome-login emails so people can sign in."),
-                new("/Organizer/SpeakerReminders", Localizer["Nav.OrgSpeakerReminders"].Value, "Remind speakers about pending tasks and deadlines."),
+                new("/Organizer/EmailTemplates", "Email templates", "Verify, edit + preview every email template per edition, and set each one's release ring."),
+                new("/Organizer/Broadcast", Localizer["Nav.OrgBroadcast"].Value, "Send a one-off broadcast message to a chosen audience.", "broadcast-email"),
+                new("/Organizer/SendInvitations", Localizer["Nav.OrgSendInvitations"].Value, "Send the event invitation to invitees.", "invitation-email"),
+                new("/Organizer/SendWelcomeLogin", Localizer["Nav.OrgSendWelcome"].Value, "Send welcome-login emails so people can sign in.", "welcome-email"),
+                new("/Organizer/SpeakerReminders", Localizer["Nav.OrgSpeakerReminders"].Value, "Remind speakers about pending tasks and deadlines.", "reminder-jobs"),
                 new("/Organizer/SoMeQueue", Localizer["Nav.OrgSoMeQueue"].Value, "The queue of social posts ready to publish across channels."),
             };
         }

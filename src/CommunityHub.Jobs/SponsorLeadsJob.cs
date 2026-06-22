@@ -1,4 +1,5 @@
 using System.Text;
+using CommunityHub.Core.Audit;
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
 using CommunityHub.Core.Email;
@@ -35,6 +36,7 @@ public sealed class SponsorLeadsJob
     private readonly IEmailSender _emailSender;
     private readonly TimeProvider _clock;
     private readonly FeatureGateService _gate;
+    private readonly IAuditTrail _audit;
     private readonly ILogger<SponsorLeadsJob> _log;
 
     public SponsorLeadsJob(
@@ -45,6 +47,7 @@ public sealed class SponsorLeadsJob
         IEmailSender emailSender,
         TimeProvider clock,
         FeatureGateService gate,
+        IAuditTrail audit,
         ILogger<SponsorLeadsJob> log)
     {
         _db = db;
@@ -54,6 +57,7 @@ public sealed class SponsorLeadsJob
         _emailSender = emailSender;
         _clock = clock;
         _gate = gate;
+        _audit = audit;
         _log = log;
     }
 
@@ -88,6 +92,21 @@ public sealed class SponsorLeadsJob
         {
             var result = await _sync.SyncAsync(activeEvent.Id, ct);
             _log.LogInformation("SponsorLeadsJob sync: {Message}", result.Message);
+            // Named Engine event (REQUIREMENTS §24): the CRM pull. (The delta digests
+            // below are user-impact emails, already captured as Email events.) Only
+            // audit a pull that ran + changed something.
+            if (result.Ran && (result.Created + result.Updated > 0))
+                await _audit.RecordAsync(new AuditEntry
+                {
+                    EventId = activeEvent.Id,
+                    Category = AuditCategory.Engine,
+                    Action = "sponsor-leads",
+                    ActorEmail = "system",
+                    Source = AuditSource.Job,
+                    Outcome = AuditOutcome.Success,
+                    Summary = $"Sponsor leads CRM sync: {result.Created} created, {result.Updated} updated, "
+                        + $"{result.Screened} screened",
+                }, ct);
         }
         else if (!_zohoOptions.CrmEnabled)
         {

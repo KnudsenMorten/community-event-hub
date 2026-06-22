@@ -1,4 +1,6 @@
+using CommunityHub.Core.Audit;
 using CommunityHub.Core.Data;
+using CommunityHub.Core.Domain;
 using CommunityHub.Core.Integrations;
 using CommunityHub.Core.Settings;
 using Microsoft.Azure.Functions.Worker;
@@ -26,17 +28,20 @@ public sealed class SoMeDispatchJob
     private readonly CommunityHubDbContext _db;
     private readonly SoMeDispatchService _dispatch;
     private readonly FeatureGateService _gate;
+    private readonly IAuditTrail _audit;
     private readonly ILogger<SoMeDispatchJob> _log;
 
     public SoMeDispatchJob(
         CommunityHubDbContext db,
         SoMeDispatchService dispatch,
         FeatureGateService gate,
+        IAuditTrail audit,
         ILogger<SoMeDispatchJob> log)
     {
         _db = db;
         _dispatch = dispatch;
         _gate = gate;
+        _audit = audit;
         _log = log;
     }
 
@@ -70,6 +75,21 @@ public sealed class SoMeDispatchJob
                 + "{Skipped} skipped, {PreAlerts} pre-alert(s). {Message}",
                 eventId, result.Published, result.Failed, result.Skipped,
                 result.PreAlertsSent, result.Message);
+
+            // Named Engine event (REQUIREMENTS §24) — only when this 5-min run actually
+            // published/failed/pre-alerted (idle runs would flood the trail).
+            if (result.Published + result.Failed + result.PreAlertsSent > 0)
+                await _audit.RecordAsync(new AuditEntry
+                {
+                    EventId = eventId,
+                    Category = AuditCategory.Engine,
+                    Action = "some-scheduling",
+                    ActorEmail = "system",
+                    Source = AuditSource.Job,
+                    Outcome = result.Failed > 0 ? AuditOutcome.Failure : AuditOutcome.Success,
+                    Summary = $"SoMe dispatch: {result.Published} published, {result.Failed} failed, "
+                        + $"{result.PreAlertsSent} pre-alert(s)",
+                }, ct);
         }
     }
 }

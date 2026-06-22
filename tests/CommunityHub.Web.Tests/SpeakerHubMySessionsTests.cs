@@ -133,7 +133,7 @@ public sealed class SpeakerHubMySessionsTests
             var s = new Session
             {
                 EventId = evt.Id, SessionizeId = id, Title = title,
-                Type = SessionType.CommunityTechSession,
+                Type = SessionType.TechnicalSession,
                 StartsAt = new DateTimeOffset(2027, 2, 9, 10, 0, 0, TimeSpan.Zero),
             };
             foreach (var sp in speakers)

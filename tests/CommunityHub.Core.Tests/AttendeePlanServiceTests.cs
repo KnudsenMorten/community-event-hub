@@ -64,7 +64,7 @@ public sealed class AttendeePlanServiceTests
             var s = new Session
             {
                 EventId = eventId, SessionizeId = id, Title = title,
-                Type = SessionType.CommunityTechSession, Length = SessionLength.FiftyMin,
+                Type = SessionType.TechnicalSession, Length = SessionLength.FiftyMin,
                 Room = "Room A", StartsAt = start, EndsAt = start?.AddMinutes(50),
                 IsServiceSession = service,
             };
@@ -313,11 +313,11 @@ public sealed class AttendeePlanServiceTests
         var t = new DateTimeOffset(2027, 2, 9, 9, 0, 0, TimeSpan.Zero);
         var rows = new[]
         {
-            new RawSavedSession(3, "Zed", SessionType.CommunityTechSession,
+            new RawSavedSession(3, "Zed", SessionType.TechnicalSession,
                 null, null, null, null, Array.Empty<string>()),
-            new RawSavedSession(2, "Same Time Room B", SessionType.CommunityTechSession,
+            new RawSavedSession(2, "Same Time Room B", SessionType.TechnicalSession,
                 "Room B", null, t, t.AddMinutes(50), new[] { "Bob", "Ann" }),
-            new RawSavedSession(1, "Same Time Room A", SessionType.CommunityTechSession,
+            new RawSavedSession(1, "Same Time Room A", SessionType.TechnicalSession,
                 "Room A", null, t, t.AddMinutes(50), Array.Empty<string>()),
         };
 

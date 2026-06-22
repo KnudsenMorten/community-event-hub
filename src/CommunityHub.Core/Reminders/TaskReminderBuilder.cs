@@ -1,3 +1,4 @@
+using CommunityHub.Core.Config;
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
 using CommunityHub.Core.Email;
@@ -27,21 +28,80 @@ public sealed class TaskReminderBuilder
 
     private const string TemplateName = "task-deadline-reminder";
 
+    private const string DefaultSupportEmail = "info@expertslive.dk";
+
     private readonly CommunityHubDbContext _db;
     private readonly EmailTemplateProvider _templates;
     private readonly TimeProvider _clock;
     private readonly SponsorRecipientResolver _sponsorRecipients;
 
+    // Optional edition-config source for the per-role contact footer (config →
+    // token bridge). Null in older test constructions — then the contact tokens
+    // render blank / fall back to the support email, leaving behaviour unchanged.
+    private readonly EventEditionConfigLoader? _eventConfigLoader;
+    private readonly EventConfigOptions? _eventConfigOptions;
+
+    // Lazily-loaded once and cached so we don't re-read the JSON per message.
+    private IReadOnlyDictionary<string, string>? _placeholders;
+    private string? _supportEmail;
+
     public TaskReminderBuilder(
         CommunityHubDbContext db,
         EmailTemplateProvider templates,
         TimeProvider clock,
-        SponsorRecipientResolver sponsorRecipients)
+        SponsorRecipientResolver sponsorRecipients,
+        EventEditionConfigLoader? eventConfigLoader = null,
+        EventConfigOptions? eventConfigOptions = null)
     {
         _db = db;
         _templates = templates;
         _clock = clock;
         _sponsorRecipients = sponsorRecipients;
+        _eventConfigLoader = eventConfigLoader;
+        _eventConfigOptions = eventConfigOptions;
+    }
+
+    /// <summary>
+    /// Resolve (once, cached) the edition placeholders + support email used for the
+    /// per-role contact footer. With no config loader wired, returns an empty map
+    /// and the default support email so the footer is render-blank-safe.
+    /// </summary>
+    private (IReadOnlyDictionary<string, string> Placeholders, string SupportEmail) ContactConfig()
+    {
+        if (_placeholders is not null && _supportEmail is not null)
+        {
+            return (_placeholders, _supportEmail);
+        }
+
+        var placeholders = (IReadOnlyDictionary<string, string>)
+            new Dictionary<string, string>();
+        var supportEmail = DefaultSupportEmail;
+
+        if (_eventConfigLoader is not null)
+        {
+            try
+            {
+                var path = _eventConfigOptions?.EventConfigPath
+                           ?? new EventConfigOptions().EventConfigPath;
+                var cfg = _eventConfigLoader.Load(path);
+                placeholders = cfg.Placeholders ?? placeholders;
+                if (cfg.Placeholders is not null
+                    && cfg.Placeholders.TryGetValue("supportEmail", out var se)
+                    && !string.IsNullOrWhiteSpace(se))
+                {
+                    supportEmail = se;
+                }
+            }
+            catch
+            {
+                // Fail-safe: a missing/broken config never breaks reminders — the
+                // footer just falls back to the default support email.
+            }
+        }
+
+        _placeholders = placeholders;
+        _supportEmail = supportEmail;
+        return (placeholders, supportEmail);
     }
 
     public async Task<IReadOnlyList<ReminderMessage>> BuildDueAsync(
@@ -111,6 +171,12 @@ public sealed class TaskReminderBuilder
             tokens["dueDate"] = t.DueDate.ToString("dd/MM/yyyy");
             tokens["state"] = state;
             tokens["taskLink"] = "Open the hub to see and update this task.";
+
+            // Per-role organizer-lead contact footer (config → token bridge). The
+            // names/emails live ONLY in the edition config; here we just resolve
+            // the recipient's role to contactName/contactEmail/supportEmail tokens.
+            var (placeholders, supportEmail) = ContactConfig();
+            RoleContact.AddTo(tokens, t.Participant.Role, placeholders, supportEmail);
 
             var rendered = _templates.Render(TemplateName, tokens);
 

@@ -129,12 +129,11 @@ public sealed class NavBuilderTests
     private static readonly ParticipantRole[] NonOrganizerRoles =
     {
         ParticipantRole.Speaker,
-        ParticipantRole.MasterclassSpeaker,
         ParticipantRole.Volunteer,
         ParticipantRole.Sponsor,
         ParticipantRole.Attendee,
-        ParticipantRole.Video,
-        ParticipantRole.Camera,
+        ParticipantRole.Media,
+        ParticipantRole.EventPartner,
     };
 
     [Theory]
@@ -316,9 +315,10 @@ public sealed class NavBuilderTests
         var attendee = NavBuilder.Build(ParticipantRole.Attendee).Groups[0];
         var hrefs = attendee.Items.Select(i => i.Href).ToList();
 
-        // Home + Master Class + My plan + Waitlist (operator 2026-06-21: My plan was
-        // surfaced — a complete page that previously had no menu/link path).
-        Assert.Equal(new[] { "/", "/Attendee", "/Attendee/MyPlan", "/Attendee/Waitlist" }, hrefs);
+        // Home + Master Class + My plan + Waitlist + Contact Organizers (the latter
+        // appended last for every role, operator 2026-06-21). My plan was surfaced —
+        // a complete page that previously had no menu/link path.
+        Assert.Equal(new[] { "/", "/Attendee", "/Attendee/MyPlan", "/Attendee/Waitlist", "/Contact" }, hrefs);
         Assert.Equal("Nav.MasterClass", attendee.Items.Single(i => i.Href == "/Attendee").LabelKey);
         Assert.Equal("Nav.Waitlist", attendee.Items.Single(i => i.Href == "/Attendee/Waitlist").LabelKey);
         Assert.Equal("Nav.MyPlan", attendee.Items.Single(i => i.Href == "/Attendee/MyPlan").LabelKey);
@@ -442,6 +442,20 @@ public sealed class NavBuilderTests
     // Each of these was a "the best surface for this role isn't in the menu"
     // defect. The fix is information-architecture only (targets / labels /
     // grouping); no route is dropped — the assertions below lock that in.
+
+    [Fact]
+    public void Contact_organizers_is_the_furthest_right_item_for_every_role()
+    {
+        // Operator 2026-06-21: Contact Organizers is always the LAST (rightmost)
+        // participant-menu item, in every role. Sponsors keep their own contact page.
+        foreach (var role in Enum.GetValues<ParticipantRole>())
+        {
+            var participant = NavBuilder.Build(role).Groups[0];
+            var last = participant.Items[^1];
+            Assert.Equal("Nav.ContactOrganizers", last.LabelKey);
+            Assert.Equal(role == ParticipantRole.Sponsor ? "/Sponsor/Contact" : "/Contact", last.Href);
+        }
+    }
 
     [Fact]
     public void Attendee_primary_entry_is_the_master_class_chooser()

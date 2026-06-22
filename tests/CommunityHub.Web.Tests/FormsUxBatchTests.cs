@@ -97,6 +97,21 @@ public sealed class FormsUxBatchTests
         };
         db.Participants.Add(p);
         await db.SaveChangesAsync();
+
+        // FEATURE B: the self-service forms are entitlement-gated. A SUPPORTED speaker
+        // is entitled to the full appreciation set (hotel/swag/lunch/dinner/travel), so
+        // these UX/validation tests exercise the forms as an eligible participant. The
+        // entitlement DENY paths are covered separately in FormEntitlementGateTests.
+        if (role == ParticipantRole.Speaker)
+        {
+            db.SpeakerProfiles.Add(new SpeakerProfile
+            {
+                EventId = EventId, ParticipantId = p.Id,
+                SpeakerFunding = SpeakerFunding.Supported,
+                SpeakingPreDay = true, SpeakingMainDay = true,
+            });
+            await db.SaveChangesAsync();
+        }
         return p;
     }
 

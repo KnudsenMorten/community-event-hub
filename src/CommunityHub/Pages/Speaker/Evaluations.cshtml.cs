@@ -15,7 +15,7 @@ namespace CommunityHub.Pages.Speaker;
 /// (scope enforced server-side in <see cref="SpeakerEvaluationsService"/>).
 /// Read-only; mobile-first.
 ///
-/// Only Speaker / MasterclassSpeaker reach the content; any other role gets a
+/// Only Speakers reach the content; any other role gets a
 /// friendly message rather than a 403 so the nav stays simple.
 /// </summary>
 [Authorize]
@@ -38,7 +38,6 @@ public class EvaluationsModel : PageModel
     public static readonly ParticipantRole[] EligibleRoles =
     {
         ParticipantRole.Speaker,
-        ParticipantRole.MasterclassSpeaker,
     };
 
     public bool AccessDenied { get; private set; }

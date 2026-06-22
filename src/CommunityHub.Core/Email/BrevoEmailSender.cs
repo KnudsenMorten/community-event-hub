@@ -142,6 +142,12 @@ public class BrevoEmailSender : IEmailSender
         // allowlist remains the only gate (unchanged behaviour).
         if (_scopes is null) return false;
 
+        // SIGN-IN EXEMPTION (operator 2026-06-22): the on-demand sign-in/PIN email has
+        // direct, user-initiated impact and MUST reach a user at ANY ring — never ring-
+        // drop it. (The global kill switch still applies downstream.) Every other email
+        // stays ring-governed by its feature below.
+        if (_emailContext?.Current?.RingExempt == true) return false;
+
         try
         {
             using var scope = _scopes.CreateScope();
@@ -189,6 +195,23 @@ public class BrevoEmailSender : IEmailSender
 
             var emailReleaseRing = await gate.GetReleasedRingAsync(
                 FeatureCatalog.OutboundEmailKey, eventId, ct);
+
+            // PER-FEATURE GATE (REQUIREMENTS §23a): if the caller tagged the send with
+            // the TRIGGERING feature (EmailContext.FeatureKey) and that feature is
+            // ring-scoped, tighten to the MORE RESTRICTIVE (lower) of its released ring
+            // and the transport's — so a feature still in testing (Ring1) never mails
+            // ring-2+ recipients even when outbound-email is Broad. Engine/untagged
+            // sends are unaffected (transport ring alone), so this never LOOSENS.
+            var featureKey = _emailContext?.Current?.FeatureKey;
+            if (!string.IsNullOrWhiteSpace(featureKey)
+                && FeatureCatalog.Find(featureKey)?.IsRingScoped == true)
+            {
+                var featureRing = await gate.GetReleasedRingAsync(featureKey, eventId, ct);
+                if ((int)featureRing < (int)emailReleaseRing)
+                {
+                    emailReleaseRing = featureRing;
+                }
+            }
 
             // Optional ring CEILING (e.g. DEV Email:MaxReleaseRing=Ring1): the
             // effective release is the MORE RESTRICTIVE (lower) of the feature's ring
@@ -301,15 +324,61 @@ public class BrevoEmailSender : IEmailSender
     protected virtual async Task DispatchAsync(
         MailMessage message, CancellationToken cancellationToken)
     {
-        using var client = new SmtpClient(_options.SmtpHost, _options.SmtpPort)
+        // Retry transient SMTP failures (connection blips, Brevo throttling /
+        // 4xx, socket/IO errors) with a short backoff, on a FRESH connection each
+        // attempt. Permanent failures (bad address 5xx) are NOT retried — they
+        // throw on the first try so the caller logs the real error. 3 attempts:
+        // immediate, +1s, +2s.
+        const int maxAttempts = 3;
+        for (var attempt = 1; ; attempt++)
         {
-            EnableSsl = true, // STARTTLS on 587
-            DeliveryMethod = SmtpDeliveryMethod.Network,
-            Credentials = new NetworkCredential(
-                _options.SmtpUsername, _options.SmtpKey),
-        };
+            try
+            {
+                using var client = new SmtpClient(_options.SmtpHost, _options.SmtpPort)
+                {
+                    EnableSsl = true, // STARTTLS on 587
+                    DeliveryMethod = SmtpDeliveryMethod.Network,
+                    Credentials = new NetworkCredential(
+                        _options.SmtpUsername, _options.SmtpKey),
+                };
 
-        await client.SendMailAsync(message, cancellationToken);
+                await client.SendMailAsync(message, cancellationToken);
+                return;
+            }
+            catch (Exception ex) when (
+                attempt < maxAttempts
+                && !cancellationToken.IsCancellationRequested
+                && IsTransientSmtpError(ex))
+            {
+                await Task.Delay(TimeSpan.FromSeconds(attempt), cancellationToken);
+            }
+        }
+    }
+
+    /// <summary>
+    /// True for SMTP errors worth retrying on a fresh connection: service
+    /// unavailable / mailbox busy / transaction failed / general failure (Brevo
+    /// throttling + transient relay errors) and connection-level socket/IO/timeout
+    /// faults. A permanent rejection (e.g. 550 bad address) is NOT transient.
+    /// </summary>
+    private static bool IsTransientSmtpError(Exception ex)
+    {
+        if (ex is SmtpException smtp)
+        {
+            switch (smtp.StatusCode)
+            {
+                case SmtpStatusCode.ServiceNotAvailable:   // 421
+                case SmtpStatusCode.MailboxBusy:           // 450
+                case SmtpStatusCode.MailboxUnavailable:    // 550 can be transient on relays
+                case SmtpStatusCode.TransactionFailed:     // 451/554
+                case SmtpStatusCode.GeneralFailure:
+                case SmtpStatusCode.ClientNotPermitted:
+                case SmtpStatusCode.InsufficientStorage:   // 452
+                    return true;
+            }
+            return smtp.InnerException is IOException or System.Net.Sockets.SocketException;
+        }
+        return ex is IOException or System.Net.Sockets.SocketException or TimeoutException;
     }
 
     // Ring-gate each CC the same way as the primary recipient (REQUIREMENTS §23):

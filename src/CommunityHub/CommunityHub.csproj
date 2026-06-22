@@ -53,6 +53,16 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>Always</CopyToPublishDirectory>
     </None>
+    <!-- PRIVATE per-edition email templates (publish-safe layer). These are the
+         edition's real, named copy and are denylisted from the public mirror;
+         EmailTemplateProvider resolves config/email-templates/{key}.html ahead of
+         the shipped default. Without this Include the private copy is absent from
+         the published bundle and the generic default is used instead. -->
+    <None Include="..\..\config\email-templates\**\*.html">
+      <Link>config\email-templates\%(RecursiveDir)%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>Always</CopyToPublishDirectory>
+    </None>
   </ItemGroup>
 
 </Project>

@@ -121,8 +121,7 @@ public sealed class PublicSessionsService
                 sp.EventId == eventId
                 && sp.SelectedForPublish
                 && sp.Participant.IsActive
-                && (sp.Participant.Role == ParticipantRole.Speaker
-                    || sp.Participant.Role == ParticipantRole.MasterclassSpeaker))
+                && sp.Participant.Role == ParticipantRole.Speaker)
             .Select(sp => sp.ParticipantId)
             .Distinct()
             .ToListAsync(ct);
@@ -176,7 +175,7 @@ public sealed class PublicSessionsService
                     .ToList(),
                 // Only a master class exposes a public logistics page; for any other
                 // type the slug is irrelevant to the public overview.
-                s.Type == SessionType.CommunityMasterClass ? s.PublicSlug : null,
+                s.Type == SessionType.MasterClass ? s.PublicSlug : null,
                 s.PublicToken))
             .ToList();
 
@@ -255,8 +254,7 @@ public sealed class PublicSessionsService
                 sp.EventId == eventId
                 && sp.SelectedForPublish
                 && sp.Participant.IsActive
-                && (sp.Participant.Role == ParticipantRole.Speaker
-                    || sp.Participant.Role == ParticipantRole.MasterclassSpeaker))
+                && sp.Participant.Role == ParticipantRole.Speaker)
             .Select(sp => sp.ParticipantId)
             .Distinct()
             .ToListAsync(ct);
@@ -297,7 +295,7 @@ public sealed class PublicSessionsService
             s.EndsAt,
             speakers,
             // Only a master class exposes a public logistics page.
-            s.Type == SessionType.CommunityMasterClass ? s.PublicSlug : null,
+            s.Type == SessionType.MasterClass ? s.PublicSlug : null,
             s.PublicToken);
     }
 

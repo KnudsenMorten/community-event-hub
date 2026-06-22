@@ -58,6 +58,25 @@ public class SessionQuestion
     /// <summary>The attendee's free-text question. Required; capped at 2000 chars.</summary>
     public string QuestionText { get; set; } = string.Empty;
 
+    // --- 1:1 private question (master-class landing page, FEATURE 2) ---------
+
+    /// <summary>
+    /// True when this is a PRIVATE 1:1 question submitted by a confirmed attendee
+    /// from the master-class landing page (FEATURE 2), routed to the MC's speakers.
+    /// The speakers' response is shown back to that attendee on the landing page;
+    /// it is never shown to other attendees. False for the pre-event public ask
+    /// (the original use, visible to organizers + the session's speakers only).
+    /// </summary>
+    public bool IsPrivate { get; set; }
+
+    /// <summary>
+    /// The confirmed <see cref="Domain.Attendee"/> who asked the 1:1 private
+    /// question, so the landing page can show that attendee their own questions +
+    /// the speakers' responses. Null for a public (anonymous) pre-event ask.
+    /// </summary>
+    public int? AskerAttendeeId { get; set; }
+    public Attendee? AskerAttendee { get; set; }
+
     /// <summary>
     /// SHA-256 of the requester's IP (truncated). Soft rate-limit only; never
     /// PII'd back to the IP. Mirrors <see cref="SurveyResponse.IpHash"/>.

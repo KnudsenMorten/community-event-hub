@@ -78,17 +78,17 @@ public sealed class SpeakerSessionsServiceTests
 
         // Alice: a scheduled master class (with Bob co-speaking) + an unscheduled tech talk.
         var mc = Sess(evt.Id, "s-mc", "Kubernetes Workshop",
-            SessionType.CommunityMasterClass, "Room A", Day1, false, alice, bob);
+            SessionType.MasterClass, "Room A", Day1, false, alice, bob);
         Sess(evt.Id, "s-unsched", "Future Talk",
-            SessionType.CommunityTechSession, null, null, false, alice);
+            SessionType.TechnicalSession, null, null, false, alice);
         // Bob has his OWN solo session Alice must NEVER see.
-        Sess(evt.Id, "s-bob", "Bob Solo", SessionType.CommunityTechSession,
+        Sess(evt.Id, "s-bob", "Bob Solo", SessionType.TechnicalSession,
             "Room B", Day1.AddHours(1), false, bob);
         // A service session Alice is (oddly) linked to — must be excluded anyway.
-        Sess(evt.Id, "s-break", "Lunch", SessionType.CommunityTechSession,
+        Sess(evt.Id, "s-break", "Lunch", SessionType.TechnicalSession,
             "Foyer", Day1.AddHours(2), true, alice);
         // Old-edition session for Alice's old row — must not leak into SPK27.
-        Sess(other.Id, "s-old", "Old Talk", SessionType.CommunityTechSession,
+        Sess(other.Id, "s-old", "Old Talk", SessionType.TechnicalSession,
             "Room Z", Day1.AddDays(-365), false, aliceOld);
         await db.SaveChangesAsync();
 

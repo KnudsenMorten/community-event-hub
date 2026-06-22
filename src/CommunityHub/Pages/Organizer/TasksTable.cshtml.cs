@@ -3,6 +3,7 @@ using CommunityHub.Auth;
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
 using CommunityHub.Core.Export;
+using CommunityHub.Export;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
@@ -130,7 +131,27 @@ public class TasksTableModel : PageModel
             return Forbid();
         }
 
-        await LoadAsync(me.EventId, ct);
+        var csv = await BuildExportCsvAsync(me.EventId, ct);
+        return File(Encoding.UTF8.GetBytes(csv), "text/csv", "tasks.csv");
+    }
+
+    /// <summary>Export the current (filtered) task list as Excel (.xlsx).</summary>
+    public async Task<IActionResult> OnGetExportXlsxAsync(CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+        if (!OrganizerAuth.IsRealOrganizer(me))
+        {
+            return Forbid();
+        }
+
+        var csv = await BuildExportCsvAsync(me.EventId, ct);
+        return File(CsvToXlsx.Build(csv, "Tasks"), CsvToXlsx.ContentType, "tasks.xlsx");
+    }
+
+    private async Task<string> BuildExportCsvAsync(int eventId, CancellationToken ct)
+    {
+        await LoadAsync(eventId, ct);
 
         var header = new[] { "Id", "Title", "Due date", "State", "Assignee", "Source" };
         var rows = Tasks.Select(t => (IReadOnlyList<string>)new[]
@@ -143,8 +164,7 @@ public class TasksTableModel : PageModel
             t.SourceKey ?? string.Empty,
         });
 
-        var csv = CsvWriter.Write(header, rows);
-        return File(Encoding.UTF8.GetBytes(csv), "text/csv", "tasks.csv");
+        return CsvWriter.Write(header, rows);
     }
 
     private async Task LoadAsync(int eventId, CancellationToken ct)

@@ -3,7 +3,7 @@ import { test, expect, BASE, USERS, PINS, login, signedInMarker, onLoginPage, na
 /**
  * FEATURES.md §2 — Sign-in & embedding.
  *
- * Covers: the 6-digit PIN flow, the "stay signed in" choice, neutral
+ * Covers: the 6-digit PIN flow, the "Remember me" choice, neutral
  * non-enumerable messaging, the magic-link handler, and the embedding / SSO
  * security contract. The deep PIN login itself needs a planted PIN (DEV-only);
  * the anonymous-contract assertions need no auth and always run.
@@ -15,28 +15,28 @@ test.describe('@gui §2 Sign-in (anonymous contract — no auth)', () => {
     test('login page renders the PIN request step', async ({ page }) => {
         await page.goto(`${BASE}/Login`, { waitUntil: 'domcontentloaded' });
         await expect(page.locator('h2', { hasText: 'Sign in' })).toBeVisible();
-        // Step 1: the email field + the "send my code" button.
+        // Step 1: the email field + the "Remember me" checkbox + the "send my code" button.
         await expect(page.locator('input[name="Email"]')).toBeVisible();
+        const remember = page.locator('input[name="RememberMe"]');
+        await expect(remember).toBeVisible();
+        await expect(remember).not.toBeChecked();   // unticked by default (normal session)
         await expect(page.getByRole('button', { name: /Send my sign-in code/i })).toBeVisible();
         await assertNoHorizontalScroll(page);
     });
 
-    test('requesting a code advances to the PIN step with the stay-signed-in choice', async ({ page }) => {
+    test('requesting a code advances to the PIN step (Remember me carried as a hidden field)', async ({ page }) => {
         await page.goto(`${BASE}/Login`, { waitUntil: 'domcontentloaded' });
         // Use an unregistered address: the message must be NEUTRAL (never reveals
         // whether the email exists) and the flow must still advance to step 2.
         await page.locator('input[name="Email"]').fill(`pw-nobody-${Date.now()}@example.com`);
+        await page.locator('input[name="RememberMe"]').check();   // choose persistent up front
         await page.getByRole('button', { name: /Send my sign-in code/i }).click();
 
         await expect(page.locator('input[name="Pin"]')).toBeVisible();
-        // "Stay signed in" select exists with its four documented options and
-        // defaults to a week.
-        const remember = page.locator('select[name="RememberFor"]');
-        await expect(remember).toBeVisible();
-        await expect(remember).toHaveValue('week');
-        for (const v of ['day', 'week', 'month', 'persistent']) {
-            await expect(remember.locator(`option[value="${v}"]`)).toHaveCount(1);
-        }
+        // The choice the user made on step 1 is carried into the verify form so it
+        // is honoured when the cookie is issued. The old 4-option dropdown is gone.
+        await expect(page.locator('select[name="RememberFor"]')).toHaveCount(0);
+        await expect(page.locator('input[name="RememberMe"][value="true"]')).toHaveCount(1);
         // Non-enumerable: no message should say "unknown"/"not found"/"no account".
         const body = (await page.locator('body').innerText()).toLowerCase();
         expect(body).not.toMatch(/no account|not found|unknown email|isn't registered|not registered/);
@@ -65,8 +65,8 @@ test.describe('@gui §2 Sign-in (real PIN login — DEV only)', () => {
     test.skip(!PINS.organizer, 'ADMIN_PIN not set - plant with tools/plant-test-pins.ps1 first');
     narrowOnly();
 
-    test('PIN login signs in and "stay signed in" sets a session cookie', async ({ page, context }) => {
-        await login(page, USERS.organizer, PINS.organizer, { rememberFor: 'persistent' });
+    test('PIN login signs in and "Remember me" sets a persistent cookie', async ({ page, context }) => {
+        await login(page, USERS.organizer, PINS.organizer, { rememberMe: true });
         await expect(signedInMarker(page)).toBeVisible();
         // A real auth cookie now exists for the host.
         const cookies = await context.cookies(BASE);

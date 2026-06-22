@@ -84,7 +84,6 @@
     // (milestone deadlines), volunteers (shifts/tasks), organizers (tasks).
     var showCalendar = !string.IsNullOrEmpty(Model.CalendarToken)
         && (Model.Me.Role == CommunityHub.Core.Domain.ParticipantRole.Speaker
-            || Model.Me.Role == CommunityHub.Core.Domain.ParticipantRole.MasterclassSpeaker
             || Model.Me.Role == CommunityHub.Core.Domain.ParticipantRole.Volunteer
             || Model.Me.Role == CommunityHub.Core.Domain.ParticipantRole.Organizer);
 }

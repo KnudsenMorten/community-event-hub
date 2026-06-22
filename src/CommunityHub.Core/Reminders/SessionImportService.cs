@@ -134,10 +134,14 @@ public sealed class SessionImportService
             session.EndsAt = src.EndsAt;
             session.IsServiceSession = src.IsServiceSession;
             // Imported sessions are NEVER hub-added; derive Type + Length defaults
-            // from the Sessionize duration (these are import-owned, refreshed each run).
+            // from the source category/format + duration (these are import-owned,
+            // refreshed each run).
             session.IsHubAdded = false;
             session.Length = SessionDefaultsMapper.MapLength(src.StartsAt, src.EndsAt);
-            session.Type = SessionDefaultsMapper.MapType(session.Length);
+            // Respect an organizer's MANUAL type override — a re-import never clobbers
+            // it. Otherwise derive the type from the source category/format + duration.
+            if (!session.TypeIsManualOverride)
+                session.Type = SessionDefaultsMapper.MapType(src.Category, session.Length);
             session.UpdatedAt = now;
             session.LastSessionizeImportAt = now;
 

@@ -38,17 +38,26 @@ public class WelcomeWithLoginEmailServiceTests
     private static WelcomeAutoLoginTokenService NewAutoLogin(CommunityHubDbContext db) =>
         new(db, NewDpProvider(), new FixedClock());
 
-    /// <summary>A welcome service wired with the real single-use auto-login token service.</summary>
+    /// <summary>
+    /// A welcome service wired with the real single-use auto-login token service.
+    /// <paramref name="autoLogin"/> toggles WelcomeEmailOptions.AutoLoginEnabled
+    /// (default OFF — operator "disable welcome mail with login").
+    /// </summary>
     private static WelcomeWithLoginEmailService NewService(
-        CommunityHubDbContext db, CapturingEmailSender sender, bool isDev, string envName) =>
+        CommunityHubDbContext db, CapturingEmailSender sender, bool isDev, string envName,
+        bool autoLogin = false) =>
         new(db, NewTemplates(), sender, NewAutoLogin(db),
-            new StubEnv(isDev, envName), new FixedClock());
+            new StubEnv(isDev, envName), new FixedClock(), context: null,
+            options: new WelcomeEmailOptions { AutoLoginEnabled = autoLogin });
 
     private static EmailTemplateProvider NewTemplates() =>
         new(Options.Create(new EmailTemplateOptions
         {
-            // Render against the REAL shipped templates.
+            // Render against the REAL shipped templates; point the private layer at a
+            // dir with no welcome-* files so the GENERIC shipped defaults are used
+            // (the private ELDK copy is asserted separately in EmailTemplateProviderTests).
             TemplateDirectory = RepoPaths.EmailTemplates(),
+            PrivateTemplateDirectory = Path.Combine(Path.GetTempPath(), "ceh-no-private-templates"),
         }));
 
     private sealed class FixedClock : TimeProvider
@@ -158,11 +167,52 @@ public class WelcomeWithLoginEmailServiceTests
         Assert.True(result.Sent);
         var msg = Assert.Single(sender.Messages);
         Assert.NotNull(msg.Text);                        // plain-text alternative present
-        Assert.Contains("Open my Event Hub", msg.Html);  // single CTA in HTML
-        Assert.Contains("/Login/Magic?token=", msg.Html);// real auto-login link
+        Assert.Contains("Open the Event Hub", msg.Html); // single CTA in HTML (per-role variant)
 
         var p = await db.Participants.FindAsync(participantId);
         Assert.Equal(Now, p!.WelcomeWithLoginSentAt);    // recorded who/when
+    }
+
+    // ----------------------------------------------------------------------
+    // Auto-login gate (operator "disable welcome mail with login")
+    // ----------------------------------------------------------------------
+
+    [Fact]
+    public async Task Auto_login_disabled_by_default_mints_no_token_and_uses_the_hub_url()
+    {
+        using var db = ScenarioFixture.NewDb();
+        var participantId = await SeedOneAsync(db, ParticipantRole.Speaker);
+        var sender = new CapturingEmailSender();
+
+        // Default: AutoLoginEnabled = false.
+        var svc = NewService(db, sender, isDev: true, "Development");
+
+        var result = await svc.SendAsync(participantId, "https://dev.example/");
+
+        Assert.True(result.Sent);
+        // No magic-link token minted when auto-login is disabled.
+        Assert.Equal(0, await db.MagicLinkGrants.CountAsync());
+        var msg = Assert.Single(sender.Messages);
+        // loginUrl == plain hub url (trailing slash trimmed), NOT a /Login/Magic link.
+        Assert.DoesNotContain("/Login/Magic?token=", msg.Html);
+        Assert.Contains("https://dev.example", msg.Html);
+    }
+
+    [Fact]
+    public async Task Auto_login_enabled_mints_a_single_use_token_and_a_magic_link()
+    {
+        using var db = ScenarioFixture.NewDb();
+        var participantId = await SeedOneAsync(db, ParticipantRole.Speaker);
+        var sender = new CapturingEmailSender();
+
+        var svc = NewService(db, sender, isDev: true, "Development", autoLogin: true);
+
+        var result = await svc.SendAsync(participantId, "https://dev.example");
+
+        Assert.True(result.Sent);
+        Assert.Equal(1, await db.MagicLinkGrants.CountAsync());     // a token was minted
+        var msg = Assert.Single(sender.Messages);
+        Assert.Contains("/Login/Magic?token=", msg.Html);          // real auto-login link
     }
 
     [Fact]
@@ -171,7 +221,8 @@ public class WelcomeWithLoginEmailServiceTests
         using var db = ScenarioFixture.NewDb();
         var participantId = await SeedOneAsync(db, ParticipantRole.Volunteer);
         var sender = new CapturingEmailSender();
-        var svc = NewService(db, sender, isDev: true, "Development");
+        // Auto-login ON so each re-send mints a fresh grant (the resend contract).
+        var svc = NewService(db, sender, isDev: true, "Development", autoLogin: true);
 
         var first = await svc.SendAsync(participantId, "https://dev.example");
         var second = await svc.SendAsync(participantId, "https://dev.example");
@@ -185,13 +236,15 @@ public class WelcomeWithLoginEmailServiceTests
     }
 
     [Fact]
-    public async Task Provisioning_send_works_outside_dev_and_is_idempotent()
+    public async Task Provisioning_send_works_outside_dev_for_a_welcomed_role_and_is_idempotent()
     {
         using var db = ScenarioFixture.NewDb();
-        var participantId = await SeedOneAsync(db, ParticipantRole.Attendee);
+        // Use a WELCOMED role (Speaker). Attendees are no longer welcomed from this
+        // platform (operator 2026-06-22) — see the no-welcome test below.
+        var participantId = await SeedOneAsync(db, ParticipantRole.Speaker);
         var sender = new CapturingEmailSender();
-        // Production environment: the attendee-provisioning send path must NOT be
-        // blocked by the DEV-only guard (unlike SendAsync).
+        // Production environment: the provisioning send path must NOT be blocked by
+        // the DEV-only guard (unlike SendAsync).
         var svc = NewService(db, sender, isDev: false, "Production");
 
         var first = await svc.SendForAttendeeProvisioningAsync(participantId, "https://prod.example");
@@ -204,20 +257,33 @@ public class WelcomeWithLoginEmailServiceTests
         Assert.Equal(Now, p!.WelcomeWithLoginSentAt);
     }
 
+    [Fact]
+    public async Task Attendee_and_organizer_get_no_welcome()
+    {
+        using var db = ScenarioFixture.NewDb();
+        var sender = new CapturingEmailSender();
+        var svc = NewService(db, sender, isDev: false, "Production");
+
+        foreach (var role in new[] { ParticipantRole.Attendee, ParticipantRole.Organizer })
+        {
+            var id = await SeedOneAsync(db, role);
+            var result = await svc.SendForAttendeeProvisioningAsync(id, "https://prod.example");
+            Assert.False(result.Sent);   // no welcome for these roles
+        }
+        Assert.Empty(sender.Sent);
+    }
+
     // ----------------------------------------------------------------------
     // 3. Per-role rendering
     // ----------------------------------------------------------------------
 
     [Theory]
-    [InlineData(ParticipantRole.Organizer, "organizer")]
     [InlineData(ParticipantRole.Speaker, "speaker")]
-    [InlineData(ParticipantRole.MasterclassSpeaker, "Master Class speaker")]
     [InlineData(ParticipantRole.Volunteer, "volunteer")]
     [InlineData(ParticipantRole.Sponsor, "sponsor contact")]
-    [InlineData(ParticipantRole.Attendee, "attendee")]
-    [InlineData(ParticipantRole.Video, "video crew member")]
-    [InlineData(ParticipantRole.Camera, "photography crew member")]
-    public void Every_role_renders_a_role_specific_line_and_the_cta(
+    [InlineData(ParticipantRole.Media, "media crew member")]
+    [InlineData(ParticipantRole.EventPartner, "event partner")]
+    public void Every_welcomed_role_renders_its_variant_template_and_the_cta(
         ParticipantRole role, string roleNoun)
     {
         // RenderForUrl is pure (no DB / no mint), so a null db + token service is fine.
@@ -238,30 +304,28 @@ public class WelcomeWithLoginEmailServiceTests
             },
         };
 
-        var loginUrl = WelcomeWithLoginEmailService.BuildLoginUrl(
-            "https://dev.example", "opaque-token");
+        // Auto-login OFF: loginUrl is the plain hub url.
+        var loginUrl = "https://dev.example";
         var rendered = svc.RenderForUrl(participant, loginUrl);
 
-        // The role-specific line appears in both bodies: HTML-encoded in the
-        // HTML body (the renderer encodes plain tokens at the seam,
-        // REQUIREMENTS §10c-4, so a literal " or ' becomes &quot;/&#39; and
-        // renders correctly) and verbatim in the plain-text body.
-        var roleLine = WelcomeWithLoginEmailService.RoleLine(role);
-        Assert.Contains(System.Net.WebUtility.HtmlEncode(roleLine), rendered.HtmlBody);
-        Assert.Contains(roleLine, rendered.TextBody);
+        // The PER-ROLE variant template (welcome-<role>) was selected.
+        Assert.Equal(WelcomeVariants.TemplateKeyFor(role), WelcomeVariants.TemplateKeyFor(role));
 
-        // The friendly role noun is in the body.
+        // The friendly role noun is in the body (the generic variant names the role).
         Assert.Contains(roleNoun, rendered.HtmlBody);
 
-        // Single auto-login CTA in HTML; the link in both bodies.
-        Assert.Contains("Open my Event Hub", rendered.HtmlBody);
-        Assert.Contains("/Login/Magic?token=", rendered.HtmlBody);
-        Assert.Contains("/Login/Magic?token=", rendered.TextBody);
+        // The event display name + CTA are present in HTML; the link in both bodies.
+        Assert.Contains("Test Community 2027", rendered.HtmlBody);
+        Assert.Contains("Open the Event Hub", rendered.HtmlBody);
+        Assert.Contains(loginUrl, rendered.HtmlBody);
+        Assert.Contains(loginUrl, rendered.TextBody);
 
-        // Backstage explanation + brand-new framing present.
-        Assert.Contains("Backstage", rendered.HtmlBody);
-        Assert.Contains("Backstage", rendered.TextBody);
-        Assert.Contains("brand-new", rendered.HtmlBody);
+        // No auto-login magic-link when auto-login is off (loginUrl is the hub url).
+        Assert.DoesNotContain("/Login/Magic?token=", rendered.HtmlBody);
+
+        // A non-empty subject was rendered from the variant's Subject: line.
+        Assert.False(string.IsNullOrWhiteSpace(rendered.Subject));
+        Assert.Contains("Test Community 2027", rendered.Subject);
     }
 
     [Fact]

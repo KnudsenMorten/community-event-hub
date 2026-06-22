@@ -114,21 +114,21 @@ public sealed class PublicSessionsServiceRelationalTests : IDisposable
         }
 
         var mc = Sess("sess-mc", "Kubernetes Workshop",
-            SessionType.CommunityMasterClass, SessionLength.FullDay, "Room A", Day1, alice);
+            SessionType.MasterClass, SessionLength.FullDay, "Room A", Day1, alice);
         mc.PublicSlug = "mc-slug-123";
         mc.PublicToken = "ask-token-mc";
 
         var tech = Sess("sess-tech", "Intro to Bicep",
-            SessionType.CommunityTechSession, SessionLength.FiftyMin, "Room B",
+            SessionType.TechnicalSession, SessionLength.FiftyMin, "Room B",
             Day1.AddHours(2), alice, bob);
         tech.PublicToken = "ask-token-tech";
 
         Sess("sess-sponsor", "Sponsor Showcase",
-            SessionType.SponsorSession, SessionLength.TwentyMin, "Expo",
+            SessionType.Keynote, SessionLength.TwentyMin, "Expo",
             Day1.AddHours(3), carol);
 
         Sess("sess-break", "Coffee Break",
-            SessionType.CommunityTechSession, SessionLength.TwentyMin, "Foyer",
+            SessionType.TechnicalSession, SessionLength.TwentyMin, "Foyer",
             Day1.AddHours(1)).IsServiceSession = true;
 
         await db.SaveChangesAsync();
@@ -187,7 +187,7 @@ public sealed class PublicSessionsServiceRelationalTests : IDisposable
         await SeedAsync(db);
         var svc = new PublicSessionsService(db);
 
-        var byType = await svc.BuildAsync(type: SessionType.SponsorSession);
+        var byType = await svc.BuildAsync(type: SessionType.Keynote);
         Assert.Single(byType!.Sessions);
         Assert.Equal("Sponsor Showcase", byType.Sessions[0].Title);
 

@@ -116,6 +116,14 @@ builder.Services.Configure<CommunityHub.Core.Sponsors.BecomeSponsorOptions>(
 builder.Services.AddSingleton<EmailTemplateProvider>();
 builder.Services.AddScoped<WelcomeEmailService>();
 
+// Welcome-email options: auto-login link DISABLED by default (operator "disable
+// welcome mail with login"); bound from the WelcomeEmail config section so it can
+// be re-enabled per environment without a code change.
+builder.Services.Configure<CommunityHub.Core.Reminders.WelcomeEmailOptions>(
+    builder.Configuration.GetSection(CommunityHub.Core.Reminders.WelcomeEmailOptions.SectionName));
+builder.Services.AddSingleton(sp =>
+    sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<CommunityHub.Core.Reminders.WelcomeEmailOptions>>().Value);
+
 // Universal sponsor-email audience rule (REQUIREMENTS §7c): the single authority
 // for "which contacts at a sponsor company receive this email" — coordinators
 // only (signer-only excluded, both-roles included). The coordinator audience is
@@ -221,6 +229,9 @@ builder.Services.AddScoped<CommunityHub.Core.Domain.SessionEvaluationService>();
 //    Vault, so no Booking call is faked (🟡 pending). Swap in a live
 //    IMasterClassBookingFetcher here once wired — no caller changes.
 builder.Services.AddScoped<CommunityHub.Core.Reminders.MasterClassLogisticsService>();
+// Master Class attendee LANDING PAGE (FEATURE 2): prep content + Q&A comments + 1:1
+// private questions — the single server-side authority for that page's access model.
+builder.Services.AddScoped<CommunityHub.Core.Reminders.MasterClassPrepService>();
 builder.Services.AddSingleton<
     CommunityHub.Core.Integrations.IMasterClassBookingFetcher,
     CommunityHub.Core.Integrations.NullMasterClassBookingFetcher>();
@@ -315,7 +326,13 @@ localizationOptions.RequestCultureProviders =
         .ToList();
 
 builder.Services.AddRazorPages()
-    .AddViewLocalization();
+    .AddViewLocalization()
+    // Unified AUDIT TRAIL (REQUIREMENTS §24): a global page filter auto-captures every
+    // mutating user action. Type-activated per request so its scoped deps resolve.
+    .AddMvcOptions(o => o.Filters.Add<CommunityHub.Audit.AuditPageFilter>());
+
+// Audit trail writer (append-only, edition-scoped). Scoped — holds the DbContext.
+builder.Services.AddScoped<CommunityHub.Core.Audit.IAuditTrail, CommunityHub.Core.Audit.AuditTrailService>();
 
 builder.Services.AddSingleton<CommunityHub.Branding.ActiveEventNameProvider>();
 builder.Services.AddSingleton<CommunityHub.Auth.MagicLinkService>();
@@ -339,6 +356,7 @@ builder.Services.AddScoped<CommunityHub.Core.Organizer.SponsorInfoDeletionServic
 builder.Services.AddScoped<CommunityHub.Core.Organizer.TestDataCleanupService>();
 builder.Services.AddScoped<CommunityHub.Core.Organizer.VolunteerTaskBulkOperationService>();
 builder.Services.AddScoped<CommunityHub.Core.Organizer.OrganizerOverviewService>();
+builder.Services.AddScoped<CommunityHub.Core.Entitlements.OrderCountService>();
 builder.Services.AddScoped<CommunityHub.Core.Organizer.DataFreshnessService>();
 builder.Services.AddScoped<CommunityHub.Core.Organizer.PreselectionQueueService>();
 builder.Services.AddScoped<CommunityHub.Core.Organizer.OnboardingService>();
@@ -651,6 +669,9 @@ builder.Configuration.GetSection(CommunityHub.Core.Config.IntegrationsConfigOpti
 builder.Services.AddSingleton(integrationsConfigOptions);
 builder.Services.AddSingleton<CommunityHub.Core.Config.IntegrationsConfigLoader>();
 builder.Services.AddScoped<CommunityHub.Core.Config.ConfigOverrideStore>();
+// Per-edition editable email templates (REQUIREMENTS §25h): the override store the editor
+// writes + the EmailTemplateProvider reads at send/preview time.
+builder.Services.AddScoped<CommunityHub.Core.Email.EmailTemplateOverrideStore>();
 
 // --- Current-participant accessor (Stage 4) --------------------------------
 builder.Services.AddHttpContextAccessor();

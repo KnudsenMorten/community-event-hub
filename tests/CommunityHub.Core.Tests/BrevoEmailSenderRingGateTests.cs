@@ -160,6 +160,67 @@ public sealed class BrevoEmailSenderRingGateTests
     }
 
     [Fact]
+    public async Task Per_feature_ring_tightens_below_the_transport_ring()
+    {
+        // Transport (outbound-email) is Broad, but the TRIGGERING feature is released
+        // only to Ring1 -> a Broad recipient is dropped (the per-feature ring tightens),
+        // while a Ring1 recipient still sends.
+        await using var h = await Harness.CreateAsync(
+            Ring.Broad, featureKey: "masterclass-invites", featureRing: Ring.Ring1);
+        await h.SeedSpeakerAsync("broad@in.test", Ring.Broad);
+        await h.SeedSpeakerAsync("ring1@in.test", Ring.Ring1);
+
+        await h.Sender.SendAsync("broad@in.test", "Hi", "<p>hi</p>");   // out of feature ring
+        await h.Sender.SendAsync("ring1@in.test", "Hi", "<p>hi</p>");   // in feature ring
+
+        Assert.Single(h.Sent);
+        Assert.Equal("ring1@in.test", h.Sent[0].To[0].Address);
+        Assert.Contains(h.Logs, l => l.Contains("RING-DROP") && l.Contains("broad@in.test"));
+    }
+
+    [Fact]
+    public async Task Per_feature_ring_never_loosens_the_transport_ring()
+    {
+        // Transport Ring1, feature Broad -> still capped at Ring1 (a feature ring can
+        // only TIGHTEN, never widen, the transport gate). A Broad recipient is dropped.
+        await using var h = await Harness.CreateAsync(
+            Ring.Ring1, featureKey: "masterclass-invites", featureRing: Ring.Broad);
+        await h.SeedSpeakerAsync("broad@in.test", Ring.Broad);
+
+        await h.Sender.SendAsync("broad@in.test", "Hi", "<p>hi</p>");
+
+        Assert.Empty(h.Sent);
+        Assert.Contains(h.Logs, l => l.Contains("RING-DROP") && l.Contains("broad@in.test"));
+    }
+
+    [Fact]
+    public async Task Sign_in_exempt_email_sends_to_a_broad_recipient_even_at_ring1()
+    {
+        // The on-demand sign-in/PIN email is RingExempt — it must reach a Broad user
+        // even though outbound-email is Ring1 (would otherwise be dropped). This is the
+        // "sign-in always sends" exception (operator 2026-06-22).
+        await using var h = await Harness.CreateAsync(Ring.Ring1, ringExempt: true);
+        await h.SeedSpeakerAsync("broad@in.test", Ring.Broad);
+
+        await h.Sender.SendAsync("broad@in.test", "Your sign-in code", "<p>123456</p>");
+
+        Assert.Single(h.Sent);
+        Assert.DoesNotContain(h.Logs, l => l.Contains("RING-DROP"));
+    }
+
+    [Fact]
+    public async Task Sign_in_exempt_still_honours_the_global_kill_switch()
+    {
+        // Exempt from RING gating, but the master kill switch still hard-stops.
+        await using var h = await Harness.CreateAsync(Ring.Ring1, killSwitch: true, ringExempt: true);
+        await h.SeedSpeakerAsync("broad@in.test", Ring.Broad);
+
+        await h.Sender.SendAsync("broad@in.test", "Your sign-in code", "<p>123456</p>");
+
+        Assert.Empty(h.Sent);
+    }
+
+    [Fact]
     public async Task Kill_switch_hard_stops_even_an_in_ring_recipient()
     {
         await using var h = await Harness.CreateAsync(Ring.Ring1, killSwitch: true);
@@ -197,7 +258,8 @@ public sealed class BrevoEmailSenderRingGateTests
 
         public static async Task<Harness> CreateAsync(
             Ring emailReleaseRing, string? maxReleaseRing = null, bool killSwitch = false,
-            int contextEventId = EventId, bool seedActiveEdition = false)
+            int contextEventId = EventId, bool seedActiveEdition = false,
+            string? featureKey = null, Ring featureRing = Ring.Broad, bool ringExempt = false)
         {
             var dbName = $"sender-rings-{Guid.NewGuid():N}";
             var services = new ServiceCollection();
@@ -213,6 +275,10 @@ public sealed class BrevoEmailSenderRingGateTests
                     db, new FixedClock(new DateTimeOffset(2027, 1, 1, 0, 0, 0, TimeSpan.Zero)));
                 await settings.SetReleasedRingAsync(
                     EventId, FeatureCatalog.OutboundEmailKey, emailReleaseRing, null);
+                // Optionally release the TRIGGERING feature to its own ring so the
+                // per-feature gate can be exercised independently of the transport ring.
+                if (featureKey is not null)
+                    await settings.SetReleasedRingAsync(EventId, featureKey, featureRing, null);
             }
             if (seedActiveEdition)
             {
@@ -225,7 +291,7 @@ public sealed class BrevoEmailSenderRingGateTests
             var logQueue = new ConcurrentQueue<string>();
             var logger = new CapturingLogger<BrevoEmailSender>(logQueue);
             var scopeFactory = new BreakableScopeFactory(provider.GetRequiredService<IServiceScopeFactory>());
-            var ctx = new FixedEmailContext(new EmailContext(Category: "test", EventId: contextEventId));
+            var ctx = new FixedEmailContext(new EmailContext(Category: "test", EventId: contextEventId, FeatureKey: featureKey, RingExempt: ringExempt));
             var options = Options.Create(new EmailOptions
             {
                 MaxReleaseRing = maxReleaseRing ?? string.Empty,

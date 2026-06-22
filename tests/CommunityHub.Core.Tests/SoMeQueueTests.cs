@@ -54,7 +54,7 @@ public sealed class SoMeQueueTests
         var session = new Session
         {
             EventId = evt.Id, SessionizeId = "hub-x", Title = "Building Things",
-            Type = SessionType.CommunityTechSession,
+            Type = SessionType.TechnicalSession,
         };
         db.Sessions.Add(session);
         await db.SaveChangesAsync();

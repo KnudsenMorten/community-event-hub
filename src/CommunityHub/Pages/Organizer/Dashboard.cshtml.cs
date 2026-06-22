@@ -249,8 +249,7 @@ public class DashboardModel : PageModel
         var tasks = await _db.Tasks
             .Where(t => t.EventId == eventId
                         && t.AssignedParticipantId != null
-                        && (t.AssignedParticipant!.Role == ParticipantRole.Speaker
-                            || t.AssignedParticipant!.Role == ParticipantRole.MasterclassSpeaker))
+                        && t.AssignedParticipant!.Role == ParticipantRole.Speaker)
             .Select(t => new
             {
                 t.Title,

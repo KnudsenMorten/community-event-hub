@@ -76,28 +76,28 @@ public sealed class PublicAgendaServiceTests
         // Day 1: two talks at the SAME time in different rooms (room tie-break), plus a
         // later one. Day 2: one talk. Deliberately seeded OUT of chronological order.
         Sess("d2-keynote", "Day Two Keynote",
-            SessionType.CommunityTechSession, SessionLength.SixtyMin, "Room A",
+            SessionType.TechnicalSession, SessionLength.SixtyMin, "Room A",
             Day1At9.AddDays(1));                                           // Day 2, 09:00
 
         Sess("d1-late", "Closing Panel",
-            SessionType.CommunityTechSession, SessionLength.FiftyMin, "Room A",
+            SessionType.TechnicalSession, SessionLength.FiftyMin, "Room A",
             Day1At9.AddHours(6), bob);                                     // Day 1, 15:00
 
         Sess("d1-roomB", "Bicep Basics",
-            SessionType.CommunityTechSession, SessionLength.FiftyMin, "Room B",
+            SessionType.TechnicalSession, SessionLength.FiftyMin, "Room B",
             Day1At9, alice);                                              // Day 1, 09:00 (Room B)
 
         Sess("d1-roomA", "Kubernetes Workshop",
-            SessionType.CommunityMasterClass, SessionLength.FullDay, "Room A",
+            SessionType.MasterClass, SessionLength.FullDay, "Room A",
             Day1At9, alice, bob);                                         // Day 1, 09:00 (Room A)
 
         // Unscheduled talk — counted, but NOT on the grid.
         Sess("tba", "To Be Announced",
-            SessionType.CommunityTechSession, SessionLength.SixtyMin, null, null);
+            SessionType.TechnicalSession, SessionLength.SixtyMin, null, null);
 
         // Service session (break) — excluded entirely.
         Sess("brk", "Coffee Break",
-            SessionType.CommunityTechSession, SessionLength.TwentyMin, "Foyer",
+            SessionType.TechnicalSession, SessionLength.TwentyMin, "Foyer",
             Day1At9.AddHours(2)).IsServiceSession = true;
 
         await db.SaveChangesAsync();
@@ -200,7 +200,7 @@ public sealed class PublicAgendaServiceTests
         db.Sessions.Add(new Session
         {
             EventId = other.Id, SessionizeId = "old", Title = "Last Year Talk",
-            Type = SessionType.CommunityTechSession, Length = SessionLength.SixtyMin,
+            Type = SessionType.TechnicalSession, Length = SessionLength.SixtyMin,
             StartsAt = new DateTimeOffset(2026, 2, 1, 9, 0, 0, TimeSpan.FromHours(1)),
         });
         await db.SaveChangesAsync();
@@ -228,7 +228,7 @@ public sealed class PublicAgendaServiceTests
         db.Sessions.Add(new Session
         {
             EventId = evt.Id, SessionizeId = "tba", Title = "Unscheduled",
-            Type = SessionType.CommunityTechSession, Length = SessionLength.SixtyMin,
+            Type = SessionType.TechnicalSession, Length = SessionLength.SixtyMin,
             StartsAt = null,
         });
         await db.SaveChangesAsync();
@@ -250,11 +250,11 @@ public sealed class PublicAgendaServiceTests
         var d1 = new DateTimeOffset(2027, 2, 9, 10, 0, 0, TimeSpan.FromHours(1));
         var rows = new List<RawAgendaSession>
         {
-            new(2, "Second", SessionType.CommunityTechSession, SessionLength.FiftyMin,
+            new(2, "Second", SessionType.TechnicalSession, SessionLength.FiftyMin,
                 "R1", null, d1.AddHours(2), d1.AddHours(3), new[] { "Zoe" }),
-            new(1, "First", SessionType.CommunityTechSession, SessionLength.FiftyMin,
+            new(1, "First", SessionType.TechnicalSession, SessionLength.FiftyMin,
                 "R1", null, d1, d1.AddHours(1), new[] { "Bob", "Ann" }),
-            new(3, "NoTime", SessionType.CommunityTechSession, SessionLength.FiftyMin,
+            new(3, "NoTime", SessionType.TechnicalSession, SessionLength.FiftyMin,
                 null, null, null, null, Array.Empty<string>()),
         };
 

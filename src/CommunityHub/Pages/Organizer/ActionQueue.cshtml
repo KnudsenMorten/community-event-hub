@@ -76,6 +76,10 @@
                 <a asp-page-handler="Export" asp-route-TypeFilter="@Model.TypeFilter">
                     Export open items to CSV
                 </a>
+                &nbsp;|&nbsp;
+                <a asp-page-handler="ExportXlsx" asp-route-TypeFilter="@Model.TypeFilter">
+                    Excel (.xlsx)
+                </a>
             </p>
         }
 

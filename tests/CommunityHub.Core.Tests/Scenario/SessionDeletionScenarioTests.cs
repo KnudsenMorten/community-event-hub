@@ -33,7 +33,7 @@ public sealed class SessionDeletionScenarioTests
             SessionizeId = hubAdded ? "hub-" + Guid.NewGuid().ToString("N") : "sz-123",
             Title = hubAdded ? "Sponsor showcase (duplicate)" : "Imported talk",
             IsHubAdded = hubAdded,
-            Type = SessionType.SponsorSession,
+            Type = SessionType.TechnicalSession,
             Length = SessionLength.FiftyMin,
         };
         // Link a seeded speaker so we can prove the link is cleaned, not orphaned.

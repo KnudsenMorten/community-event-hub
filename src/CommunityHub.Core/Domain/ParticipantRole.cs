@@ -10,11 +10,18 @@ public enum ParticipantRole
     /// <summary>Organizing team. Sees everything; can manage other participants.</summary>
     Organizer = 0,
 
-    /// <summary>Session speaker. Hotel, dinner, speaker deadlines, resources.</summary>
+    /// <summary>
+    /// Session speaker. Hotel, dinner, speaker deadlines, resources. The
+    /// pre-day vs main-day distinction (formerly the dropped
+    /// <c>MasterclassSpeaker</c> role, value 2) now lives on
+    /// <see cref="SpeakerProfile.SpeakingPreDay"/> /
+    /// <see cref="SpeakerProfile.SpeakingMainDay"/> and on the entitlement rules
+    /// (<see cref="Entitlements.OrderEntitlements"/>), not on the role itself.
+    /// </summary>
     Speaker = 1,
 
-    /// <summary>Masterclass / pre-day speaker. As Speaker, plus pre-day items.</summary>
-    MasterclassSpeaker = 2,
+    // Value 2 was MasterclassSpeaker (dropped); the gap is intentional so
+    // existing stored Speaker (1) / Volunteer (3) values keep their meaning.
 
     /// <summary>Volunteer. Shifts, tasks, dinner, resources.</summary>
     Volunteer = 3,
@@ -33,9 +40,9 @@ public enum ParticipantRole
     /// </summary>
     Attendee = 5,
 
-    /// <summary>Video crew (recording / streaming). Sees Hotel + Dinner like staff.</summary>
-    Video = 6,
+    /// <summary>Press / photo / video crew — sees Hotel + Dinner + Lunch like staff.</summary>
+    Media = 6,
 
-    /// <summary>Photo crew. Sees Hotel + Dinner like staff.</summary>
-    Camera = 7
+    /// <summary>Event partner org — sees Hotel + Dinner + Lunch + task management, like staff.</summary>
+    EventPartner = 7
 }

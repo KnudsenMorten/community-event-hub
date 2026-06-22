@@ -62,8 +62,8 @@
     }
     @{ var s = Model.Session; }
     @{
-        var typeClass = s.Type == SessionType.CommunityMasterClass ? "type-mc"
-            : s.Type == SessionType.SponsorSession ? "type-sponsor" : "";
+        var typeClass = s.Type == SessionType.MasterClass ? "type-mc"
+            : s.Type == SessionType.TechnicalSession ? "type-sponsor" : "";
     }
 
     <div class="sd-head">
@@ -126,13 +126,13 @@
             </div>
         }
 
-        @if ((s.Type == SessionType.CommunityMasterClass && !string.IsNullOrWhiteSpace(s.PublicSlug))
+        @if ((s.Type == SessionType.MasterClass && !string.IsNullOrWhiteSpace(s.PublicSlug))
              || !string.IsNullOrWhiteSpace(s.AskToken)
              || s.StartsAt is not null)
         {
             <div class="sd-section">
                 <div class="sd-links">
-                    @if (s.Type == SessionType.CommunityMasterClass && !string.IsNullOrWhiteSpace(s.PublicSlug))
+                    @if (s.Type == SessionType.MasterClass && !string.IsNullOrWhiteSpace(s.PublicSlug))
                     {
                         <a href="/MasterClass/@s.PublicSlug">@Localizer["SessionDetail.MasterClassLink"]</a>
                     }

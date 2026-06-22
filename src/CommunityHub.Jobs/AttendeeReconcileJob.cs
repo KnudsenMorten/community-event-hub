@@ -1,3 +1,4 @@
+using CommunityHub.Core.Audit;
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
 using CommunityHub.Core.Email;
@@ -27,6 +28,7 @@ public sealed class AttendeeReconcileJob
     private readonly EmailTemplateProvider _templates;
     private readonly TimeProvider _clock;
     private readonly FeatureGateService _gate;
+    private readonly IAuditTrail _audit;
     private readonly ILogger<AttendeeReconcileJob> _log;
 
     public AttendeeReconcileJob(
@@ -38,6 +40,7 @@ public sealed class AttendeeReconcileJob
         EmailTemplateProvider templates,
         TimeProvider clock,
         FeatureGateService gate,
+        IAuditTrail audit,
         ILogger<AttendeeReconcileJob> log)
     {
         _db = db;
@@ -48,6 +51,7 @@ public sealed class AttendeeReconcileJob
         _templates = templates;
         _clock = clock;
         _gate = gate;
+        _audit = audit;
         _log = log;
     }
 
@@ -124,6 +128,21 @@ public sealed class AttendeeReconcileJob
         _log.LogInformation(
             "AttendeeReconcileJob: {Count} attendees, {Sent} chasers sent.",
             results.Count, sent);
+
+        // Named Engine event (REQUIREMENTS §24) — the reconcile RUN summary. (Chaser
+        // emails are separately captured as Email events.) Only when it processed
+        // attendees or sent chasers.
+        if (results.Count > 0 || sent > 0)
+            await _audit.RecordAsync(new AuditEntry
+            {
+                EventId = eventId,
+                Category = AuditCategory.Engine,
+                Action = "attendee-reconcile",
+                ActorEmail = "system",
+                Source = AuditSource.Job,
+                Outcome = AuditOutcome.Success,
+                Summary = $"Attendee reconcile: {results.Count} attendees, {sent} chaser(s) sent",
+            }, ct);
     }
 
     private static (TicketStatus, MasterClassBookingStatus, bool) Evaluate(

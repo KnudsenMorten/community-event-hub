@@ -1,5 +1,7 @@
+using CommunityHub.Core.Audit;
 using CommunityHub.Core.Config;
 using CommunityHub.Core.Data;
+using CommunityHub.Core.Domain;
 using CommunityHub.Core.Reminders;
 using CommunityHub.Core.Settings;
 using Microsoft.Azure.Functions.Worker;
@@ -25,6 +27,7 @@ public sealed class ReminderJob
     private readonly CommunityHub.Core.Email.OnboardingStepResetEmailService _stepResetEmails;
     private readonly CommunityHub.Core.Email.SpeakerQuestionDigestService _speakerQuestionDigest;
     private readonly FeatureGateService _gate;
+    private readonly IAuditTrail _audit;
     private readonly ILogger<ReminderJob> _log;
 
     public ReminderJob(
@@ -35,6 +38,7 @@ public sealed class ReminderJob
         CommunityHub.Core.Email.OnboardingStepResetEmailService stepResetEmails,
         CommunityHub.Core.Email.SpeakerQuestionDigestService speakerQuestionDigest,
         FeatureGateService gate,
+        IAuditTrail audit,
         ILogger<ReminderJob> log)
     {
         _db = db;
@@ -44,6 +48,7 @@ public sealed class ReminderJob
         _stepResetEmails = stepResetEmails;
         _speakerQuestionDigest = speakerQuestionDigest;
         _gate = gate;
+        _audit = audit;
         _log = log;
     }
 
@@ -107,6 +112,22 @@ public sealed class ReminderJob
                 + "{Due} reminders due, {Sent} sent, {StepResets} step-reset reminders sent, "
                 + "{QuestionDigests} speaker question digests sent.",
                 eventId, seeded, due.Count, sent, stepResets, questionDigests);
+
+            // Named Engine event (REQUIREMENTS §24) — the reminder RUN summary. (Each
+            // email is separately captured as an Email event.) Only when the run did
+            // something (seeded/sent/digested).
+            if (seeded + sent + stepResets + questionDigests > 0)
+                await _audit.RecordAsync(new AuditEntry
+                {
+                    EventId = eventId,
+                    Category = AuditCategory.Engine,
+                    Action = "reminder-jobs",
+                    ActorEmail = "system",
+                    Source = AuditSource.Job,
+                    Outcome = AuditOutcome.Success,
+                    Summary = $"Reminder run: {seeded} deadlines seeded, {sent} reminders, "
+                        + $"{stepResets} step-resets, {questionDigests} speaker digests",
+                }, ct);
         }
     }
 }

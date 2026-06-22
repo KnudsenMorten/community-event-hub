@@ -21,7 +21,7 @@ public sealed record SponsorContactSyncResult(
 ///
 /// Safety rule: only INSERT new rows or UPDATE rows that are already
 /// Role=Sponsor. NEVER overwrite an Organizer / Speaker / Volunteer /
-/// Video / Camera / Attendee row even if the email collides with a
+/// Media / EventPartner / Attendee row even if the email collides with a
 /// sponsor's contact -- a hub staff member listed inside a sponsor's
 /// Company Manager record should not silently lose their staff role.
 /// Such collisions are logged as Skipped.

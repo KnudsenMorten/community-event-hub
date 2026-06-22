@@ -1,4 +1,6 @@
+using CommunityHub.Core.Config;
 using CommunityHub.Core.Data;
+using CommunityHub.Core.Domain;
 using CommunityHub.Core.Email;
 using Microsoft.EntityFrameworkCore;
 
@@ -31,18 +33,32 @@ public sealed record SessionEvaluationMailResult(
 /// </summary>
 public sealed class SessionEvaluationMailService
 {
+    private const string DefaultSupportEmail = "info@expertslive.dk";
+
     private readonly CommunityHubDbContext _db;
     private readonly IEmailSender _emailSender;
     private readonly TimeProvider _clock;
+    private readonly IEmailContextAccessor? _context;
+
+    // Optional edition-config source for the SPEAKER contact in the footer line.
+    // Null in older test constructions → blank name / support-email fallback.
+    private readonly EventEditionConfigLoader? _eventConfigLoader;
+    private readonly EventConfigOptions? _eventConfigOptions;
 
     public SessionEvaluationMailService(
         CommunityHubDbContext db,
         IEmailSender emailSender,
-        TimeProvider clock)
+        TimeProvider clock,
+        IEmailContextAccessor? context = null,
+        EventEditionConfigLoader? eventConfigLoader = null,
+        EventConfigOptions? eventConfigOptions = null)
     {
         _db = db;
         _emailSender = emailSender;
         _clock = clock;
+        _context = context;
+        _eventConfigLoader = eventConfigLoader;
+        _eventConfigOptions = eventConfigOptions;
     }
 
     /// <summary>
@@ -112,9 +128,14 @@ public sealed class SessionEvaluationMailService
         var subject = $"Your session evaluation — {session.Title}";
         var htmlBody = BuildHtmlBody(session.Title, resultsText);
 
-        foreach (var addr in recipients)
+        // Ring-governed by the session-eval-email feature (operator 2026-06-22).
+        using (_context?.Set(new EmailContext(
+            "session-eval", FeatureKey: "session-eval-email")))
         {
-            await _emailSender.SendAsync(addr, subject, htmlBody, ct);
+            foreach (var addr in recipients)
+            {
+                await _emailSender.SendAsync(addr, subject, htmlBody, ct);
+            }
         }
 
         session.EvaluationEmailedAt = _clock.GetUtcNow();
@@ -126,7 +147,7 @@ public sealed class SessionEvaluationMailService
             $"Evaluation results emailed to {recipients.Count} speaker(s).");
     }
 
-    private static string BuildHtmlBody(string title, string resultsText)
+    private string BuildHtmlBody(string title, string resultsText)
     {
         var safeTitle = System.Net.WebUtility.HtmlEncode(title);
         var safeResults = System.Net.WebUtility.HtmlEncode(resultsText)
@@ -140,7 +161,45 @@ public sealed class SessionEvaluationMailService
             {safeResults}
             </blockquote>
             <p>These results were collected from the on-site feedback box.</p>
+            {SpeakerContactLine()}
             <p>— The organizer team</p>
             """;
+    }
+
+    /// <summary>
+    /// The speaker-facing contact line. Recipients of an evaluation mail are always
+    /// SPEAKERS, so the SPEAKER organizer-lead (from edition config) is used; name
+    /// is blank-safe and the email falls back to the support address.
+    /// </summary>
+    private string SpeakerContactLine()
+    {
+        var placeholders = (IReadOnlyDictionary<string, string>)
+            new Dictionary<string, string>();
+        var supportEmail = DefaultSupportEmail;
+
+        if (_eventConfigLoader is not null)
+        {
+            try
+            {
+                var path = _eventConfigOptions?.EventConfigPath
+                           ?? new EventConfigOptions().EventConfigPath;
+                var cfg = _eventConfigLoader.Load(path);
+                placeholders = cfg.Placeholders ?? placeholders;
+                if (cfg.Placeholders is not null
+                    && cfg.Placeholders.TryGetValue("supportEmail", out var se)
+                    && !string.IsNullOrWhiteSpace(se))
+                {
+                    supportEmail = se;
+                }
+            }
+            catch { /* fail-safe to default */ }
+        }
+
+        var (name, email) = RoleContact.For(
+            ParticipantRole.Speaker, placeholders, supportEmail);
+        var encName = System.Net.WebUtility.HtmlEncode(name);
+        var encEmail = System.Net.WebUtility.HtmlEncode(email);
+        var encSupport = System.Net.WebUtility.HtmlEncode(supportEmail);
+        return $"<p>Questions about your evaluation? Contact {encName} ({encEmail}) — or {encSupport}.</p>";
     }
 }

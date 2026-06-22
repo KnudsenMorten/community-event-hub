@@ -17,7 +17,7 @@ namespace CommunityHub.Core.Migrations
         {
 #pragma warning disable 612, 618
             modelBuilder
-                .HasAnnotation("ProductVersion", "8.0.6")
+                .HasAnnotation("ProductVersion", "8.0.28")
                 .HasAnnotation("Relational:MaxIdentifierLength", 128);
 
             SqlServerModelBuilderExtensions.UseIdentityColumns(modelBuilder);
@@ -177,6 +177,87 @@ namespace CommunityHub.Core.Migrations
                     b.HasIndex("EventId", "HasReconciliationMismatch");
 
                     b.ToTable("Attendees");
+                });
+
+            modelBuilder.Entity("CommunityHub.Core.Domain.AuditEntry", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<string>("Action")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("ActorEmail")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<int?>("ActorParticipantId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("ActorRole")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<int>("Category")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Detail")
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
+
+                    b.Property<int>("EventId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("HttpMethod")
+                        .HasMaxLength(16)
+                        .HasColumnType("nvarchar(16)");
+
+                    b.Property<bool>("IsActingAs")
+                        .HasColumnType("bit");
+
+                    b.Property<DateTimeOffset>("OccurredUtc")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("OnBehalfOf")
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<int>("Outcome")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Path")
+                        .HasMaxLength(512)
+                        .HasColumnType("nvarchar(512)");
+
+                    b.Property<int>("Source")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Summary")
+                        .IsRequired()
+                        .HasMaxLength(1024)
+                        .HasColumnType("nvarchar(1024)");
+
+                    b.Property<string>("TargetId")
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<string>("TargetType")
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("EventId", "Category");
+
+                    b.HasIndex("EventId", "OccurredUtc");
+
+                    b.ToTable("AuditEntries");
                 });
 
             modelBuilder.Entity("CommunityHub.Core.Domain.ConfigOverride", b =>
@@ -454,6 +535,41 @@ namespace CommunityHub.Core.Migrations
                     b.HasIndex("EventId", "ToEmail");
 
                     b.ToTable("EmailLogs");
+                });
+
+            modelBuilder.Entity("CommunityHub.Core.Domain.EmailTemplateOverride", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("EventId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("OverrideText")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("TemplateKey")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("UpdatedByEmail")
+                        .HasMaxLength(320)
+                        .HasColumnType("nvarchar(320)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("EventId", "TemplateKey")
+                        .IsUnique();
+
+                    b.ToTable("EmailTemplateOverrides");
                 });
 
             modelBuilder.Entity("CommunityHub.Core.Domain.ErpCustomerLink", b =>
@@ -888,6 +1004,9 @@ namespace CommunityHub.Core.Migrations
                     b.Property<DateTimeOffset?>("ScheduledAtUtc")
                         .HasColumnType("datetimeoffset");
 
+                    b.Property<int>("TicketCount")
+                        .HasColumnType("int");
+
                     b.HasKey("Id");
 
                     b.HasIndex("EventId", "ScheduledAtUtc");
@@ -1183,6 +1302,57 @@ namespace CommunityHub.Core.Migrations
                     b.ToTable("MagicLinkGrants");
                 });
 
+            modelBuilder.Entity("CommunityHub.Core.Domain.MasterClassComment", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<int?>("AuthorAttendeeId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("AuthorDisplayName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<int?>("AuthorParticipantId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Body")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("EventId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("ParentCommentId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("SessionId")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AuthorAttendeeId");
+
+                    b.HasIndex("AuthorParticipantId");
+
+                    b.HasIndex("EventId");
+
+                    b.HasIndex("ParentCommentId");
+
+                    b.HasIndex("SessionId", "CreatedAt");
+
+                    b.ToTable("MasterClassComments");
+                });
+
             modelBuilder.Entity("CommunityHub.Core.Domain.MasterClassParticipant", b =>
                 {
                     b.Property<int>("Id")
@@ -1422,6 +1592,9 @@ namespace CommunityHub.Core.Migrations
                     b.Property<bool>("IsActive")
                         .HasColumnType("bit");
 
+                    b.Property<bool>("IsBoothMember")
+                        .HasColumnType("bit");
+
                     b.Property<bool>("IsEventCoordinator")
                         .HasColumnType("bit");
 
@@ -1482,6 +1655,9 @@ namespace CommunityHub.Core.Migrations
                     b.Property<int>("Role")
                         .HasColumnType("int");
 
+                    b.Property<int?>("SamePersonAsId")
+                        .HasColumnType("int");
+
                     b.Property<string>("SecondaryEmail")
                         .HasMaxLength(320)
                         .HasColumnType("nvarchar(320)");
@@ -1504,6 +1680,8 @@ namespace CommunityHub.Core.Migrations
 
                     b.HasIndex("HotelId");
 
+                    b.HasIndex("SamePersonAsId");
+
                     b.HasIndex("EventId", "CmUserId");
 
                     b.HasIndex("EventId", "Email")
@@ -1516,6 +1694,47 @@ namespace CommunityHub.Core.Migrations
                     b.HasIndex("EventId", "SponsorCompanyId");
 
                     b.ToTable("Participants");
+                });
+
+            modelBuilder.Entity("CommunityHub.Core.Domain.ParticipantOrderOverride", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("EventId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("Include")
+                        .HasColumnType("bit");
+
+                    b.Property<int>("Item")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ParticipantId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Reason")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<DateTimeOffset>("SetAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("SetByEmail")
+                        .HasMaxLength(320)
+                        .HasColumnType("nvarchar(320)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ParticipantId");
+
+                    b.HasIndex("EventId", "ParticipantId", "Item")
+                        .IsUnique();
+
+                    b.ToTable("ParticipantOrderOverrides");
                 });
 
             modelBuilder.Entity("CommunityHub.Core.Domain.ParticipantSecretaryToken", b =>
@@ -1857,6 +2076,15 @@ namespace CommunityHub.Core.Migrations
                     b.Property<int?>("MasterClassCapacity")
                         .HasColumnType("int");
 
+                    b.Property<string>("PrepContent")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTimeOffset?>("PrepUpdatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("PrepUpdatedByParticipantId")
+                        .HasColumnType("int");
+
                     b.Property<string>("PublicSlug")
                         .HasMaxLength(64)
                         .HasColumnType("nvarchar(64)");
@@ -1895,6 +2123,9 @@ namespace CommunityHub.Core.Migrations
 
                     b.Property<int>("Type")
                         .HasColumnType("int");
+
+                    b.Property<bool>("TypeIsManualOverride")
+                        .HasColumnType("bit");
 
                     b.Property<DateTimeOffset?>("UpdatedAt")
                         .HasColumnType("datetimeoffset");
@@ -1977,6 +2208,9 @@ namespace CommunityHub.Core.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
+                    b.Property<int?>("AskerAttendeeId")
+                        .HasColumnType("int");
+
                     b.Property<string>("AskerEmail")
                         .HasMaxLength(320)
                         .HasColumnType("nvarchar(320)");
@@ -1994,6 +2228,9 @@ namespace CommunityHub.Core.Migrations
                     b.Property<string>("IpHash")
                         .HasMaxLength(64)
                         .HasColumnType("nvarchar(64)");
+
+                    b.Property<bool>("IsPrivate")
+                        .HasColumnType("bit");
 
                     b.Property<string>("QuestionText")
                         .IsRequired()
@@ -2022,9 +2259,13 @@ namespace CommunityHub.Core.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("AskerAttendeeId");
+
                     b.HasIndex("RespondedByParticipantId");
 
                     b.HasIndex("EventId", "IpHash");
+
+                    b.HasIndex("SessionId", "AskerAttendeeId");
 
                     b.HasIndex("SessionId", "Status");
 
@@ -2388,6 +2629,9 @@ namespace CommunityHub.Core.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)");
 
+                    b.Property<int>("SpeakerFunding")
+                        .HasColumnType("int");
+
                     b.Property<bool>("SpeakingMainDay")
                         .HasColumnType("bit");
 
@@ -2517,6 +2761,9 @@ namespace CommunityHub.Core.Migrations
                         .IsRequired()
                         .HasMaxLength(64)
                         .HasColumnType("nvarchar(64)");
+
+                    b.Property<int>("SponsorPackage")
+                        .HasColumnType("int");
 
                     b.Property<int>("Tier")
                         .HasColumnType("int");
@@ -3593,6 +3840,17 @@ namespace CommunityHub.Core.Migrations
                     b.Navigation("Participant");
                 });
 
+            modelBuilder.Entity("CommunityHub.Core.Domain.EmailTemplateOverride", b =>
+                {
+                    b.HasOne("CommunityHub.Core.Domain.Event", "Event")
+                        .WithMany()
+                        .HasForeignKey("EventId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Event");
+                });
+
             modelBuilder.Entity("CommunityHub.Core.Domain.FeatureGroupSetting", b =>
                 {
                     b.HasOne("CommunityHub.Core.Domain.Event", "Event")
@@ -3752,6 +4010,46 @@ namespace CommunityHub.Core.Migrations
                     b.Navigation("Participant");
                 });
 
+            modelBuilder.Entity("CommunityHub.Core.Domain.MasterClassComment", b =>
+                {
+                    b.HasOne("CommunityHub.Core.Domain.Attendee", "AuthorAttendee")
+                        .WithMany()
+                        .HasForeignKey("AuthorAttendeeId")
+                        .OnDelete(DeleteBehavior.NoAction);
+
+                    b.HasOne("CommunityHub.Core.Domain.Participant", "AuthorParticipant")
+                        .WithMany()
+                        .HasForeignKey("AuthorParticipantId")
+                        .OnDelete(DeleteBehavior.NoAction);
+
+                    b.HasOne("CommunityHub.Core.Domain.Event", "Event")
+                        .WithMany()
+                        .HasForeignKey("EventId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("CommunityHub.Core.Domain.MasterClassComment", "ParentComment")
+                        .WithMany()
+                        .HasForeignKey("ParentCommentId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("CommunityHub.Core.Domain.Session", "Session")
+                        .WithMany()
+                        .HasForeignKey("SessionId")
+                        .OnDelete(DeleteBehavior.NoAction)
+                        .IsRequired();
+
+                    b.Navigation("AuthorAttendee");
+
+                    b.Navigation("AuthorParticipant");
+
+                    b.Navigation("Event");
+
+                    b.Navigation("ParentComment");
+
+                    b.Navigation("Session");
+                });
+
             modelBuilder.Entity("CommunityHub.Core.Domain.MasterClassParticipant", b =>
                 {
                     b.HasOne("CommunityHub.Core.Domain.Event", "Event")
@@ -3848,9 +4146,35 @@ namespace CommunityHub.Core.Migrations
                         .HasForeignKey("HotelId")
                         .OnDelete(DeleteBehavior.NoAction);
 
+                    b.HasOne("CommunityHub.Core.Domain.Participant", "SamePersonAs")
+                        .WithMany()
+                        .HasForeignKey("SamePersonAsId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.Navigation("Event");
 
                     b.Navigation("Hotel");
+
+                    b.Navigation("SamePersonAs");
+                });
+
+            modelBuilder.Entity("CommunityHub.Core.Domain.ParticipantOrderOverride", b =>
+                {
+                    b.HasOne("CommunityHub.Core.Domain.Event", "Event")
+                        .WithMany()
+                        .HasForeignKey("EventId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("CommunityHub.Core.Domain.Participant", "Participant")
+                        .WithMany()
+                        .HasForeignKey("ParticipantId")
+                        .OnDelete(DeleteBehavior.NoAction)
+                        .IsRequired();
+
+                    b.Navigation("Event");
+
+                    b.Navigation("Participant");
                 });
 
             modelBuilder.Entity("CommunityHub.Core.Domain.ParticipantSecretaryToken", b =>
@@ -3982,6 +4306,11 @@ namespace CommunityHub.Core.Migrations
 
             modelBuilder.Entity("CommunityHub.Core.Domain.SessionQuestion", b =>
                 {
+                    b.HasOne("CommunityHub.Core.Domain.Attendee", "AskerAttendee")
+                        .WithMany()
+                        .HasForeignKey("AskerAttendeeId")
+                        .OnDelete(DeleteBehavior.NoAction);
+
                     b.HasOne("CommunityHub.Core.Domain.Event", "Event")
                         .WithMany()
                         .HasForeignKey("EventId")
@@ -3998,6 +4327,8 @@ namespace CommunityHub.Core.Migrations
                         .HasForeignKey("SessionId")
                         .OnDelete(DeleteBehavior.NoAction)
                         .IsRequired();
+
+                    b.Navigation("AskerAttendee");
 
                     b.Navigation("Event");
 

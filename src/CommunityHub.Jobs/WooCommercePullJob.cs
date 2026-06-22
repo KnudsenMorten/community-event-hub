@@ -1,4 +1,6 @@
+using CommunityHub.Core.Audit;
 using CommunityHub.Core.Data;
+using CommunityHub.Core.Domain;
 using CommunityHub.Core.Integrations;
 using CommunityHub.Core.Settings;
 using Microsoft.Azure.Functions.Worker;
@@ -19,17 +21,20 @@ public sealed class WooCommercePullJob
     private readonly SponsorOrderPullService _service;
     private readonly CommunityHubDbContext _db;
     private readonly FeatureGateService _gate;
+    private readonly IAuditTrail _audit;
     private readonly ILogger<WooCommercePullJob> _log;
 
     public WooCommercePullJob(
         SponsorOrderPullService service,
         CommunityHubDbContext db,
         FeatureGateService gate,
+        IAuditTrail audit,
         ILogger<WooCommercePullJob> log)
     {
         _service = service;
         _db = db;
         _gate = gate;
+        _audit = audit;
         _log = log;
     }
 
@@ -69,5 +74,25 @@ public sealed class WooCommercePullJob
             _log.LogWarning(
                 "WooCommercePullJob: skipped ({Reason}).", result.SkipReason);
         }
+
+        // Named Engine event (REQUIREMENTS §24). Fleet-wide pull — record under the
+        // active edition (CEH runs one active edition at a time). Only audit a run
+        // that did something (or failed) — idle 30-min polls would flood the trail.
+        var changed = result.OrdersFetched + result.TasksCreated
+            + result.ContactsCreated + result.ContactsUpdated;
+        if (changed > 0 || !result.RanToCompletion)
+            await _audit.RecordAsync(new AuditEntry
+            {
+                EventId = activeEventIds.FirstOrDefault(),
+                Category = AuditCategory.Engine,
+                Action = "sponsor-order-pull",
+                ActorEmail = "system",
+                Source = AuditSource.Job,
+                Outcome = result.RanToCompletion ? AuditOutcome.Success : AuditOutcome.Failure,
+                Summary = result.RanToCompletion
+                    ? $"Sponsor order pull: {result.OrdersFetched} orders, {result.TasksCreated} tasks, "
+                        + $"contacts +{result.ContactsCreated}/~{result.ContactsUpdated}"
+                    : $"Sponsor order pull skipped: {result.SkipReason}",
+            }, ct);
     }
 }

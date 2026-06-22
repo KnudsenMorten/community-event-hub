@@ -14,7 +14,7 @@ namespace CommunityHub.Pages.Speaker;
 /// co-speakers coordinate — which is exactly what this page renders: the full
 /// per-session question thread, including any co-speaker's response. Mobile-first.
 ///
-/// Only Speaker / MasterclassSpeaker reach the content; any other role gets a
+/// Only Speakers reach the content; any other role gets a
 /// friendly message rather than a 403 so the nav stays simple.
 /// </summary>
 [Authorize]
@@ -32,7 +32,6 @@ public class QuestionsModel : PageModel
     public static readonly ParticipantRole[] EligibleRoles =
     {
         ParticipantRole.Speaker,
-        ParticipantRole.MasterclassSpeaker,
     };
 
     public bool AccessDenied { get; private set; }

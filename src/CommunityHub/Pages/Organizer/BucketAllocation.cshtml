@@ -1,5 +1,6 @@
 @page
 @using CommunityHub.Core.Domain
+@using CommunityHub.Pages.Shared
 @model CommunityHub.Pages.Organizer.BucketAllocationModel
 @{
     ViewData["Title"] = "Buckets & allocation";
@@ -97,13 +98,39 @@
         </div>
         <div class="ba-form" style="margin-top:10px;">
             <form method="post" asp-page-handler="Commit" style="display:inline">
-                <button type="submit" class="green">Commit draft</button>
+                <button type="submit" class="green"
+                        data-ceh-confirm="confirmCommitAlloc" data-ceh-count="@Model.DraftCount">Commit draft</button>
             </form>
             <form method="post" asp-page-handler="Discard" style="display:inline">
                 <button type="submit" class="danger">Discard draft</button>
             </form>
         </div>
+        @* Second confirmation before the real commit (REQUIREMENTS §23a, category 3
+           Queue safety): states the consequence + count, and that impact is RING-SCOPED. *@
+        <partial name="_ConfirmModal" model='new ConfirmModalModel(
+            Id: "confirmCommitAlloc",
+            Title: "Commit volunteer allocations?",
+            Body: "This turns {count} draft allocation(s) into real assignments now. Only volunteers within the feature’s released ring are committed (others stay in the queue). This affects real people — are you sure?",
+            ConfirmLabel: "Yes, commit",
+            CancelLabel: "Cancel",
+            Danger: false,
+            DefaultCount: Model.DraftCount.ToString())' />
     }
+
+    @* ---- Drop-out re-plan: free a leaver's slots + queue backfill candidates ---- *@
+    <div style="margin-top:14px;border-top:1px solid #e6e8ee;padding-top:10px;">
+        <h3 style="font-size:14px;margin:0 0 4px;">Someone dropped out?</h3>
+        <p style="margin:0 0 8px;font-size:13px;color:#6e7681;">
+            Free their shifts and auto-queue backfill candidates (available volunteers preferred)
+            as drafts — review the red/green simulation below, then Commit.
+        </p>
+        <form method="post" asp-page-handler="ReplanDropout" class="ba-form">
+            <select name="volunteerId" aria-label="Volunteer who dropped out" asp-items="Model.VolunteerOptions">
+                <option value="">— who dropped out? —</option>
+            </select>
+            <button type="submit" class="danger">Free slots &amp; queue backfill</button>
+        </form>
+    </div>
 </div>
 
 @* ---- Buckets with gap indicators + the task-mapper ---- *@

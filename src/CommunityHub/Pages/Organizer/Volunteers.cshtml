@@ -22,8 +22,8 @@
 {
     var tiles = new List<CommunityHub.Pages.Shared.HubTile>
     {
-        new("/Organizer/VolunteerStructure", Localizer["Nav.OrgVolunteerStructure"].Value, Localizer["OrgVolunteers.Structure"].Value),
-        new("/Organizer/BucketAllocation", Localizer["Nav.OrgBucketAllocation"].Value, Localizer["OrgVolunteers.Buckets"].Value),
+        new("/Organizer/VolunteerStructure", Localizer["Nav.OrgVolunteerStructure"].Value, Localizer["OrgVolunteers.Structure"].Value, "volunteer-tasks"),
+        new("/Organizer/BucketAllocation", Localizer["Nav.OrgBucketAllocation"].Value, Localizer["OrgVolunteers.Buckets"].Value, "volunteer-allocation"),
     };
     <partial name="_HubGrid" model="@tiles" />
 }

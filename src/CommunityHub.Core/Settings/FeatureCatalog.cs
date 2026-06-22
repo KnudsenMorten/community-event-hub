@@ -70,10 +70,59 @@ public sealed record FeatureDescriptor(
     FeatureTier Tier,
     bool DefaultEnabled,
     IReadOnlyList<string> DependsOn,
-    Ring DefaultReleasedToRing = Ring.Ring1)
+    Ring DefaultReleasedToRing = Ring.Ring1,
+    FeatureSurface Surface = FeatureSurface.Engine)
 {
     /// <summary>Convenience: advanced features default OFF, core default ON.</summary>
     public bool IsAdvanced => Tier == FeatureTier.Advanced;
+
+    /// <summary>True for a USER-IMPACT feature (category 4: a user experiences it —
+    /// email received / task visible / GUI surface). Ring-scoped on the target user.</summary>
+    public bool IsUserImpact => Surface == FeatureSurface.UserImpact;
+
+    /// <summary>True for a QUEUE feature (category 3: organizer stages + Commits data
+    /// for an engine; org-admin only; 2nd-confirm + ring-scoped impact at commit).</summary>
+    public bool IsQueue => Surface == FeatureSurface.Queue;
+
+    /// <summary>True for an ENGINE feature (category 1 plumbing OR category 2
+    /// queue-fed engine). Never ring-scoped — governed only by the kill switch (GA).</summary>
+    public bool IsEngine => Surface is FeatureSurface.Engine or FeatureSurface.EngineQueued;
+
+    /// <summary>True when the feature is RING-SCOPED (categories 3 Queue + 4 UserImpact):
+    /// staged rollout limits who it touches. Engine/EngineQueued are NOT ring-scoped.
+    /// This is the single predicate the GUI badge+gate and the ring gate key off.</summary>
+    public bool IsRingScoped => Surface is FeatureSurface.Queue or FeatureSurface.UserImpact;
+}
+
+/// <summary>
+/// The FOUR feature surfaces (REQUIREMENTS §23a, operator 2026-06-22, locked). The
+/// surface decides how a feature is governed: Engine/EngineQueued by a kill switch
+/// only (GA, never ring-scoped); Queue/UserImpact additionally ring-scoped (staged
+/// rollout). Decision tree: "would a non-organizer notice this happened to them?"
+/// yes ⇒ UserImpact; "is it an organizer staging+committing data for an engine?"
+/// ⇒ Queue; "is it backend that only runs on committed queue data?" ⇒ EngineQueued;
+/// else ⇒ Engine.
+/// </summary>
+public enum FeatureSurface
+{
+    /// <summary>(1) Core backend / plumbing — mail routing/transport, pulls, syncs,
+    /// schedulers. No per-user experience. On/off only, default ON, GA — never
+    /// ring-scoped.</summary>
+    Engine = 0,
+
+    /// <summary>(4) A user experiences it — an email received, a task visible with a
+    /// deadline, a GUI feature. Ring-scoped on the TARGET user (staged rollout).</summary>
+    UserImpact = 1,
+
+    /// <summary>(2) A backend engine with a data dependency on a queue/job (LinkedIn
+    /// poster, the volunteer/hotel APPLIER). On/off, default ON, GA — never
+    /// ring-scoped — but inert until an organizer Commits scoped data from a Queue.</summary>
+    EngineQueued = 2,
+
+    /// <summary>(3) Organizer-operated staging surface (org admin only): stage data,
+    /// hit Commit (2nd-confirm + consequences) to write to SQL. Impact is RING-SCOPED
+    /// at commit — out-of-ring rows persist but stay dormant until the ring widens.</summary>
+    Queue = 3,
 }
 
 /// <summary>
@@ -145,80 +194,97 @@ public static class FeatureCatalog
         new("welcome-email", "Settings.Feat.WelcomeEmail.Name",
             "Settings.Feat.WelcomeEmail.Desc",
             FeatureGroup.Email, FeatureTier.Advanced, DefaultEnabled: false,
-            DependsOn: new[] { OutboundEmailKey }, DefaultReleasedToRing: Ring.Ring1),
+            DependsOn: new[] { OutboundEmailKey }, DefaultReleasedToRing: Ring.Ring1,
+            Surface: FeatureSurface.UserImpact),
 
         new("magic-link", "Settings.Feat.MagicLink.Name",
             "Settings.Feat.MagicLink.Desc",
             FeatureGroup.Email, FeatureTier.Advanced, DefaultEnabled: false,
-            DependsOn: new[] { OutboundEmailKey }, DefaultReleasedToRing: Ring.Ring1),
+            DependsOn: new[] { OutboundEmailKey }, DefaultReleasedToRing: Ring.Ring1,
+            Surface: FeatureSurface.UserImpact),
 
         // --- Speakers & sessions --------------------------------------------
+        // GA (operator 2026-06-22): released to Broad — runs for everyone, unscoped.
         new("sessionize-import", "Settings.Feat.Sessionize.Name",
             "Settings.Feat.Sessionize.Desc",
             FeatureGroup.SpeakersSessions, FeatureTier.Advanced, DefaultEnabled: false,
-            DependsOn: Array.Empty<string>(), DefaultReleasedToRing: Ring.Ring1),
+            DependsOn: Array.Empty<string>(), DefaultReleasedToRing: Ring.Broad),
 
         // --- Sponsors -------------------------------------------------------
+        // GA (operator 2026-06-22): tested backend syncs — released to Broad, unscoped.
         new("backstage-sync", "Settings.Feat.BackstageSync.Name",
             "Settings.Feat.BackstageSync.Desc",
             FeatureGroup.Sponsors, FeatureTier.Advanced, DefaultEnabled: false,
-            DependsOn: Array.Empty<string>(), DefaultReleasedToRing: Ring.Ring1),
+            DependsOn: Array.Empty<string>(), DefaultReleasedToRing: Ring.Broad),
 
         new("economic-erp-sync", "Settings.Feat.EconomicErp.Name",
             "Settings.Feat.EconomicErp.Desc",
             FeatureGroup.Sponsors, FeatureTier.Advanced, DefaultEnabled: false,
-            DependsOn: Array.Empty<string>(), DefaultReleasedToRing: Ring.Ring1),
+            DependsOn: Array.Empty<string>(), DefaultReleasedToRing: Ring.Broad),
 
+        // GA (operator 2026-06-22): tested backend pull — released to Broad, unscoped.
         new("sponsor-order-pull", "Settings.Feat.SponsorOrderPull.Name",
             "Settings.Feat.SponsorOrderPull.Desc",
             FeatureGroup.Sponsors, FeatureTier.Advanced, DefaultEnabled: false,
-            DependsOn: Array.Empty<string>(), DefaultReleasedToRing: Ring.Ring1),
+            DependsOn: Array.Empty<string>(), DefaultReleasedToRing: Ring.Broad),
 
+        // ENGINE (operator 2026-06-22): a backend export of leads to the sponsor (today
+        // just a Zoho Backstage link — no API yet). Kill-switch only, NOT ring-scoped.
         new("sponsor-leads", "Settings.Feat.SponsorLeads.Name",
             "Settings.Feat.SponsorLeads.Desc",
             FeatureGroup.Sponsors, FeatureTier.Advanced, DefaultEnabled: false,
-            DependsOn: Array.Empty<string>(), DefaultReleasedToRing: Ring.Ring1),
+            DependsOn: Array.Empty<string>(), DefaultReleasedToRing: Ring.Broad),
 
+        // GA (operator 2026-06-22): tested backend job — released to Broad, unscoped.
         new("sponsor-upload-watch", "Settings.Feat.SponsorUploadWatch.Name",
             "Settings.Feat.SponsorUploadWatch.Desc",
             FeatureGroup.Sponsors, FeatureTier.Advanced, DefaultEnabled: false,
-            DependsOn: Array.Empty<string>(), DefaultReleasedToRing: Ring.Ring1),
+            DependsOn: Array.Empty<string>(), DefaultReleasedToRing: Ring.Broad),
 
-        // --- Social media ---------------------------------------------------
+        // --- Social media (category 2: ENGINE-QUEUED dispatch — GA/Broad, never
+        // ring-scoped, but inert until the SoMe queue commits scoped posts) -------
         new("some-scheduling", "Settings.Feat.SoMe.Name",
             "Settings.Feat.SoMe.Desc",
             FeatureGroup.SocialMedia, FeatureTier.Advanced, DefaultEnabled: false,
-            DependsOn: Array.Empty<string>(), DefaultReleasedToRing: Ring.Ring1),
+            DependsOn: Array.Empty<string>(), DefaultReleasedToRing: Ring.Broad,
+            Surface: FeatureSurface.EngineQueued),
 
         new("linkedin-queue", "Settings.Feat.LinkedIn.Name",
             "Settings.Feat.LinkedIn.Desc",
             FeatureGroup.SocialMedia, FeatureTier.Advanced, DefaultEnabled: false,
-            DependsOn: new[] { "some-scheduling" }, DefaultReleasedToRing: Ring.Ring1),
+            DependsOn: new[] { "some-scheduling" }, DefaultReleasedToRing: Ring.Broad,
+            Surface: FeatureSurface.EngineQueued),
 
         // --- Surveys --------------------------------------------------------
         new("surveys", "Settings.Feat.Surveys.Name",
             "Settings.Feat.Surveys.Desc",
             FeatureGroup.Surveys, FeatureTier.Advanced, DefaultEnabled: false,
-            DependsOn: Array.Empty<string>(), DefaultReleasedToRing: Ring.Ring1),
+            DependsOn: Array.Empty<string>(), DefaultReleasedToRing: Ring.Ring1,
+            Surface: FeatureSurface.UserImpact),
 
         // --- Reminders / digests --------------------------------------------
         // RULE 2: reminders + digests are OUTBOUND EMAIL ⇒ released to ring 1 only.
         new("reminder-jobs", "Settings.Feat.ReminderJobs.Name",
             "Settings.Feat.ReminderJobs.Desc",
             FeatureGroup.Reminders, FeatureTier.Advanced, DefaultEnabled: false,
-            DependsOn: Array.Empty<string>(), DefaultReleasedToRing: Ring.Ring1),
+            DependsOn: Array.Empty<string>(), DefaultReleasedToRing: Ring.Ring1,
+            Surface: FeatureSurface.UserImpact),
 
         new("digest-emails", "Settings.Feat.DigestEmails.Name",
             "Settings.Feat.DigestEmails.Desc",
             FeatureGroup.Reminders, FeatureTier.Advanced, DefaultEnabled: false,
             DependsOn: new[] { "reminder-jobs", OutboundEmailKey },
-            DefaultReleasedToRing: Ring.Ring1),
+            DefaultReleasedToRing: Ring.Ring1, Surface: FeatureSurface.UserImpact),
 
         // --- Attendees ------------------------------------------------------
+        // GA (operator 2026-06-22): the Zoho attendee pull is GA — it runs for all.
+        // Impact is scoped PER USER (Participant.Ring + IsTestUser): pulled attendees
+        // default to Broad; flag specific test attendees Ring1 to trial ring-1
+        // features on them. So the pull itself is NOT ring-gated.
         new("attendee-reconcile", "Settings.Feat.AttendeeReconcile.Name",
             "Settings.Feat.AttendeeReconcile.Desc",
             FeatureGroup.Attendees, FeatureTier.Advanced, DefaultEnabled: false,
-            DependsOn: Array.Empty<string>(), DefaultReleasedToRing: Ring.Ring1),
+            DependsOn: Array.Empty<string>(), DefaultReleasedToRing: Ring.Broad),
 
         // Auto-provision a login-capable Attendee Participant per 2-day-ticket
         // holder + email a one-click magic-link welcome. DEFAULT OFF: this sends
@@ -227,7 +293,155 @@ public static class FeatureCatalog
         new("attendee-welcome", "Settings.Feat.AttendeeWelcome.Name",
             "Settings.Feat.AttendeeWelcome.Desc",
             FeatureGroup.Attendees, FeatureTier.Advanced, DefaultEnabled: false,
-            DependsOn: new[] { "attendee-reconcile", OutboundEmailKey }, DefaultReleasedToRing: Ring.Ring1),
+            DependsOn: new[] { "attendee-reconcile", OutboundEmailKey }, DefaultReleasedToRing: Ring.Ring1,
+            Surface: FeatureSurface.UserImpact),
+
+        // --- Incubation: NEW user-impact GUI actions, ring-tested before GA -----
+        // (operator 2026-06-22) Every GUI action that a person NOTICES happening to
+        // them — a mass email, a task that appears, an assignment, an account being
+        // provisioned — is a USER-IMPACT feature: born in Incubation at Ring1 so only
+        // ring-1 testers see + exercise it, promoted group/feature -> Broad in
+        // /Organizer/Settings once proven. No deploy springs these on a live event.
+        // These back the hub TILES (HubTile.FeatureKey) so _HubGrid badges + gates
+        // them the same way the nav does. They graduate into a real group later.
+
+        // Mass / one-off outbound mail composed in the GUI (Email Center, Broadcast).
+        new("broadcast-email", "Settings.Feat.BroadcastEmail.Name",
+            "Settings.Feat.BroadcastEmail.Desc",
+            FeatureGroup.Incubation, FeatureTier.Advanced, DefaultEnabled: false,
+            DependsOn: new[] { OutboundEmailKey }, DefaultReleasedToRing: Ring.Ring1,
+            Surface: FeatureSurface.UserImpact),
+
+        // Invitation email blast (SendInvitations) — mints + emails sign-in links.
+        new("invitation-email", "Settings.Feat.InvitationEmail.Name",
+            "Settings.Feat.InvitationEmail.Desc",
+            FeatureGroup.Incubation, FeatureTier.Advanced, DefaultEnabled: false,
+            DependsOn: new[] { OutboundEmailKey, "magic-link" }, DefaultReleasedToRing: Ring.Ring1,
+            Surface: FeatureSurface.UserImpact),
+
+        // Re-send an arbitrary logged/templated email to people (Comms, Email log).
+        new("email-resend", "Settings.Feat.EmailResend.Name",
+            "Settings.Feat.EmailResend.Desc",
+            FeatureGroup.Incubation, FeatureTier.Advanced, DefaultEnabled: false,
+            DependsOn: new[] { OutboundEmailKey }, DefaultReleasedToRing: Ring.Ring1,
+            Surface: FeatureSurface.UserImpact),
+
+        // Bulk "redo this onboarding step" emails (Action queue).
+        new("onboarding-step-reset", "Settings.Feat.OnboardingStepReset.Name",
+            "Settings.Feat.OnboardingStepReset.Desc",
+            FeatureGroup.Incubation, FeatureTier.Advanced, DefaultEnabled: false,
+            DependsOn: new[] { OutboundEmailKey }, DefaultReleasedToRing: Ring.Ring1,
+            Surface: FeatureSurface.UserImpact),
+
+        // Activate / provision login-capable accounts (Pre-selection queue, bulk
+        // participant ops) — enables sign-in for real people.
+        new("participant-activation", "Settings.Feat.ParticipantActivation.Name",
+            "Settings.Feat.ParticipantActivation.Desc",
+            FeatureGroup.Incubation, FeatureTier.Advanced, DefaultEnabled: false,
+            DependsOn: Array.Empty<string>(), DefaultReleasedToRing: Ring.Ring1,
+            Surface: FeatureSurface.UserImpact),
+
+        // Master Class invite + waitlist-promotion emails w/ self-service links.
+        new("masterclass-invites", "Settings.Feat.MasterClassInvites.Name",
+            "Settings.Feat.MasterClassInvites.Desc",
+            FeatureGroup.Incubation, FeatureTier.Advanced, DefaultEnabled: false,
+            DependsOn: new[] { OutboundEmailKey }, DefaultReleasedToRing: Ring.Ring1,
+            Surface: FeatureSurface.UserImpact),
+
+        // Email session-evaluation (HappyOrNot) results to speakers.
+        new("session-eval-email", "Settings.Feat.SessionEvalEmail.Name",
+            "Settings.Feat.SessionEvalEmail.Desc",
+            FeatureGroup.Incubation, FeatureTier.Advanced, DefaultEnabled: false,
+            DependsOn: new[] { OutboundEmailKey }, DefaultReleasedToRing: Ring.Ring1,
+            Surface: FeatureSurface.UserImpact),
+
+        // Sponsor welcome / intro email (per-company or all).
+        new("sponsor-welcome", "Settings.Feat.SponsorWelcome.Name",
+            "Settings.Feat.SponsorWelcome.Desc",
+            FeatureGroup.Incubation, FeatureTier.Advanced, DefaultEnabled: false,
+            DependsOn: new[] { OutboundEmailKey }, DefaultReleasedToRing: Ring.Ring1,
+            Surface: FeatureSurface.UserImpact),
+
+        // Tasks created for sponsor companies (appear to all their contacts).
+        new("sponsor-tasks", "Settings.Feat.SponsorTasks.Name",
+            "Settings.Feat.SponsorTasks.Desc",
+            FeatureGroup.Incubation, FeatureTier.Advanced, DefaultEnabled: false,
+            DependsOn: Array.Empty<string>(), DefaultReleasedToRing: Ring.Ring1,
+            Surface: FeatureSurface.UserImpact),
+
+        // Reminder emails to sponsors (App game).
+        new("sponsor-reminders", "Settings.Feat.SponsorReminders.Name",
+            "Settings.Feat.SponsorReminders.Desc",
+            FeatureGroup.Incubation, FeatureTier.Advanced, DefaultEnabled: false,
+            DependsOn: new[] { OutboundEmailKey }, DefaultReleasedToRing: Ring.Ring1,
+            Surface: FeatureSurface.UserImpact),
+
+        // QUEUE (category 3): organizer stages task assignments + Commits (2nd-confirm,
+        // ring-scoped impact). The task BECOMING VISIBLE to a volunteer is the
+        // user-impact, gated per target at commit time. These three are ALREADY-SHIPPED
+        // features, so their released ring defaults to BROAD (GA) — current behaviour is
+        // preserved (every target in scope). The ring-scoping MECHANISM is wired
+        // (CommitAsync filters drafts by each target's ring): lower the ring to Ring1 in
+        // /Organizer/Settings to ring-TEST a change so only Ring1 targets are committed.
+        // (A genuinely NEW queue feature is born Ring1 — the catalog default.)
+        new("volunteer-tasks", "Settings.Feat.VolunteerTasks.Name",
+            "Settings.Feat.VolunteerTasks.Desc",
+            FeatureGroup.Incubation, FeatureTier.Advanced, DefaultEnabled: false,
+            DependsOn: Array.Empty<string>(), DefaultReleasedToRing: Ring.Broad,
+            Surface: FeatureSurface.Queue),
+
+        new("volunteer-allocation", "Settings.Feat.VolunteerAllocation.Name",
+            "Settings.Feat.VolunteerAllocation.Desc",
+            FeatureGroup.Incubation, FeatureTier.Advanced, DefaultEnabled: false,
+            DependsOn: Array.Empty<string>(), DefaultReleasedToRing: Ring.Broad,
+            Surface: FeatureSurface.Queue),
+
+        new("hotel-assignment", "Settings.Feat.HotelAssignment.Name",
+            "Settings.Feat.HotelAssignment.Desc",
+            FeatureGroup.Incubation, FeatureTier.Advanced, DefaultEnabled: false,
+            DependsOn: Array.Empty<string>(), DefaultReleasedToRing: Ring.Broad,
+            Surface: FeatureSurface.Queue),
+
+        // Group-photo session invite emails.
+        new("group-photo-invites", "Settings.Feat.GroupPhotoInvites.Name",
+            "Settings.Feat.GroupPhotoInvites.Desc",
+            FeatureGroup.Incubation, FeatureTier.Advanced, DefaultEnabled: false,
+            DependsOn: new[] { OutboundEmailKey }, DefaultReleasedToRing: Ring.Ring1,
+            Surface: FeatureSurface.UserImpact),
+
+        // Travel-reimbursement payment confirmation emails.
+        new("travel-reimbursement-email", "Settings.Feat.TravelReimbursementEmail.Name",
+            "Settings.Feat.TravelReimbursementEmail.Desc",
+            FeatureGroup.Incubation, FeatureTier.Advanced, DefaultEnabled: false,
+            DependsOn: new[] { OutboundEmailKey }, DefaultReleasedToRing: Ring.Ring1,
+            Surface: FeatureSurface.UserImpact),
+
+        // Release SoMe graphics to speakers (becomes visible to them).
+        new("graphics-release", "Settings.Feat.GraphicsRelease.Name",
+            "Settings.Feat.GraphicsRelease.Desc",
+            FeatureGroup.Incubation, FeatureTier.Advanced, DefaultEnabled: false,
+            DependsOn: Array.Empty<string>(), DefaultReleasedToRing: Ring.Ring1,
+            Surface: FeatureSurface.UserImpact),
+
+        // Bulk delete of test participants / data — impactful, ring-test only.
+        new("test-data-cleanup", "Settings.Feat.TestDataCleanup.Name",
+            "Settings.Feat.TestDataCleanup.Desc",
+            FeatureGroup.Incubation, FeatureTier.Advanced, DefaultEnabled: false,
+            DependsOn: Array.Empty<string>(), DefaultReleasedToRing: Ring.Ring1,
+            Surface: FeatureSurface.UserImpact),
+
+        // Attendee calendar invites — independently dialable per email (operator 2026-06-22).
+        new("hotel-invite", "Settings.Feat.HotelInvite.Name",
+            "Settings.Feat.HotelInvite.Desc",
+            FeatureGroup.Incubation, FeatureTier.Advanced, DefaultEnabled: false,
+            DependsOn: new[] { OutboundEmailKey }, DefaultReleasedToRing: Ring.Ring1,
+            Surface: FeatureSurface.UserImpact),
+
+        new("dinner-invite", "Settings.Feat.DinnerInvite.Name",
+            "Settings.Feat.DinnerInvite.Desc",
+            FeatureGroup.Incubation, FeatureTier.Advanced, DefaultEnabled: false,
+            DependsOn: new[] { OutboundEmailKey }, DefaultReleasedToRing: Ring.Ring1,
+            Surface: FeatureSurface.UserImpact),
     };
 
     /// <summary>Look up a descriptor by key, or null if not in the catalog.</summary>

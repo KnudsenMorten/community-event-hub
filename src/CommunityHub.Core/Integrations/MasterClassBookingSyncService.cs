@@ -66,7 +66,7 @@ public sealed class MasterClassBookingSyncService
 
     /// <summary>
     /// Sync the bookings for ONE master-class session. The session must be a
-    /// <see cref="SessionType.CommunityMasterClass"/> with a configured
+    /// <see cref="SessionType.MasterClass"/> with a configured
     /// <see cref="Session.BookingEndpointUri"/>. Returns the counts, or why
     /// nothing ran (not a master class, no endpoint mapped, seam not wired).
     /// </summary>
@@ -79,7 +79,7 @@ public sealed class MasterClassBookingSyncService
         {
             return new MasterClassBookingSyncResult(false, 0, 0, 0, "Session not found.");
         }
-        if (session.Type != SessionType.CommunityMasterClass)
+        if (session.Type != SessionType.MasterClass)
         {
             return new MasterClassBookingSyncResult(false, 0, 0, 0,
                 "Booking sync only applies to a master-class session.");

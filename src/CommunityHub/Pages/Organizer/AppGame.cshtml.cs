@@ -23,19 +23,22 @@ public class AppGameModel : PageModel
     private readonly EmailTemplateProvider _templates;
     private readonly IEmailSender _emailSender;
     private readonly TimeProvider _clock;
+    private readonly IEmailContextAccessor? _context;
 
     public AppGameModel(
         CommunityHubDbContext db,
         ICurrentParticipantAccessor participant,
         EmailTemplateProvider templates,
         IEmailSender emailSender,
-        TimeProvider clock)
+        TimeProvider clock,
+        IEmailContextAccessor? context = null)
     {
         _db = db;
         _participant = participant;
         _templates = templates;
         _emailSender = emailSender;
         _clock = clock;
+        _context = context;
     }
 
     public bool AccessDenied { get; private set; }
@@ -177,7 +180,13 @@ public class AppGameModel : PageModel
                 tokens["giftDescription"] = string.IsNullOrWhiteSpace(row.GiftDescription)
                     ? "the gift your team committed" : row.GiftDescription;
                 var rendered = _templates.Render("app-game-gift-reminder", tokens);
-                await _emailSender.SendAsync(c.Email, rendered.Subject, rendered.HtmlBody, ct);
+                // Ring-governed by the sponsor-reminders feature (operator 2026-06-22).
+                using (_context?.Set(new EmailContext(
+                    "app-game-gift-reminder", row.EventId, null, c.FullName,
+                    FeatureKey: "sponsor-reminders")))
+                {
+                    await _emailSender.SendAsync(c.Email, rendered.Subject, rendered.HtmlBody, ct);
+                }
                 sent++;
             }
             catch { failed++; }

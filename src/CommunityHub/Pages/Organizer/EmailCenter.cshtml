@@ -117,7 +117,7 @@
                         <label for="PersonTemplate">Template</label>
                         <select id="PersonTemplate" name="PersonTemplate" style="width:100%;" required>
                             <option value="">Pick a template&hellip;</option>
-                            @foreach (var t in Model.TemplateNames)
+                            @foreach (var t in Model.PersonTemplateNames)
                             {
                                 <option value="@t">@t</option>
                             }

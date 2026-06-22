@@ -71,7 +71,6 @@ public sealed class SpeakerEvaluationsService
     private static readonly ParticipantRole[] SpeakerRoles =
     {
         ParticipantRole.Speaker,
-        ParticipantRole.MasterclassSpeaker,
     };
 
     /// <summary>
@@ -125,7 +124,7 @@ public sealed class SpeakerEvaluationsService
                     s.Id,
                     s.Title,
                     string.IsNullOrWhiteSpace(s.Room) ? null : s.Room,
-                    s.Type == SessionType.CommunityMasterClass,
+                    s.Type == SessionType.MasterClass,
                     rows.Count,
                     rows.Count == 0 ? null : Math.Round(rows.Average(r => r.Rating), 2),
                     comments);

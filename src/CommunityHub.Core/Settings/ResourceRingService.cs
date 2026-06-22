@@ -144,7 +144,7 @@ public sealed class ResourceRingService
     {
         RingResourceKind.SponsorContact => new[] { ParticipantRole.Sponsor },
         RingResourceKind.Speaker => new[]
-            { ParticipantRole.Speaker, ParticipantRole.MasterclassSpeaker },
+            { ParticipantRole.Speaker },
         RingResourceKind.Volunteer => new[] { ParticipantRole.Volunteer },
         _ => Array.Empty<ParticipantRole>(),
     };

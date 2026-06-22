@@ -62,6 +62,9 @@ var host = new HostBuilder()
         // ring rule the GUI uses (a job only processes a resource whose effective
         // ring ≤ the feature's released ring).
         services.AddScoped<CommunityHub.Core.Settings.RingResolver>();
+        // Unified audit trail (REQUIREMENTS §24): jobs record their runs as Engine
+        // events + the daily purge job enforces retention.
+        services.AddScoped<CommunityHub.Core.Audit.IAuditTrail, CommunityHub.Core.Audit.AuditTrailService>();
 
         services.Configure<EmailOptions>(
             config.GetSection(EmailOptions.SectionName));
@@ -115,6 +118,14 @@ var host = new HostBuilder()
             CommunityHub.Core.Auth.WelcomeAutoLoginTokenService>();
         services.AddScoped<CommunityHub.Core.Reminders.WelcomeWithLoginEmailService>();
         services.AddScoped<CommunityHub.Core.Reminders.AttendeeWelcomeProvisioningService>();
+
+        // Welcome-email options: auto-login link DISABLED by default (operator
+        // "disable welcome mail with login"); bound from the WelcomeEmail config
+        // section so it can be re-enabled per environment without a code change.
+        services.Configure<CommunityHub.Core.Reminders.WelcomeEmailOptions>(
+            config.GetSection(CommunityHub.Core.Reminders.WelcomeEmailOptions.SectionName));
+        services.AddSingleton(sp =>
+            sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<CommunityHub.Core.Reminders.WelcomeEmailOptions>>().Value);
 
         // --- Email templates (branded reminder rendering) -------------------
         services.Configure<EmailTemplateOptions>(
@@ -170,6 +181,8 @@ var host = new HostBuilder()
         services.AddSingleton(integrationsConfigOptions);
         services.AddSingleton<IntegrationsConfigLoader>();
         services.AddScoped<ConfigOverrideStore>();
+        // Per-edition editable email templates (§25h): job sends honor overrides too.
+        services.AddScoped<CommunityHub.Core.Email.EmailTemplateOverrideStore>();
 
         // --- Sessionize (speaker import via v2 view API) -------------------
         var sessionizeOptions = new SessionizeApiOptions();

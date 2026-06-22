@@ -26,7 +26,14 @@ namespace CommunityHub.Core.Navigation;
 /// so it opens in a new tab and the hub stays open behind it. Internal hub routes
 /// leave this false (same-tab navigation).
 /// </param>
-public sealed record NavItem(string Href, string? LabelKey, string? FallbackLabel = null, bool ExactMatch = false, string? SectionKey = null, bool External = false);
+/// <param name="FeatureKey">
+/// Optional FeatureCatalog key this menu item represents. When set, the view
+/// resolves the feature's released ring + the user's effective ring to (a) GATE
+/// the item (hide it from users above the ring) and (b) BADGE it with a yellow
+/// "Ring N" pill while it is not yet Broad/GA — so a ring tester sees exactly what
+/// is scoped to them to test. Null for ungated, always-visible items.
+/// </param>
+public sealed record NavItem(string Href, string? LabelKey, string? FallbackLabel = null, bool ExactMatch = false, string? SectionKey = null, bool External = false, string? FeatureKey = null);
 
 /// <summary>
 /// A named, collapsible sub-group of nav items within a single <see cref="NavGroup"/>

@@ -53,7 +53,7 @@ public enum SessionizeImportMode
 ///  - New email  -> create a Participant, role Speaker, IsActive = true, and
 ///    send the welcome email.
 ///  - Existing email -> update the name; do NOT change the role (an organizer
-///    may have re-classified them as a MasterclassSpeaker).
+///    may have re-classified them).
 ///  - Never delete: a speaker removed in Sessionize is deactivated by an
 ///    organizer on the Participants page, not auto-removed.
 /// </summary>

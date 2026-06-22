@@ -52,25 +52,25 @@ export function narrowOnly() {
 
 /**
  * Real PIN login. Mirrors the exact markup of Pages/Login.cshtml:
- *   step 1  form asp-page-handler="RequestPin"  -> input[name=Email] + "Send my sign-in code"
- *   step 2  form asp-page-handler="VerifyPin"   -> input[name=Pin] + select[name=RememberFor] + "Sign in"
+ *   step 1  form asp-page-handler="RequestPin"  -> input[name=Email] + input[name=RememberMe] (checkbox) + "Send my sign-in code"
+ *   step 2  form asp-page-handler="VerifyPin"   -> input[name=Pin] + hidden RememberMe + "Sign in"
  * Success is detected by the signed-in marker the shared layout renders only
  * when authenticated: header .user-tools button.signout.
  */
 export async function login(
     page: Page, email: string, pin: string,
-    opts: { rememberFor?: 'day' | 'week' | 'month' | 'persistent' } = {},
+    opts: { rememberMe?: boolean } = {},
 ) {
     await page.goto(`${BASE}/Login`, { waitUntil: 'domcontentloaded' });
     await page.locator('input[name="Email"]').fill(email);
+    if (opts.rememberMe) {
+        await page.locator('input[name="RememberMe"]').check();
+    }
     await page.getByRole('button', { name: /send.*code|email me|request/i }).click();
 
     const pinInput = page.locator('input[name="Pin"]');
     await expect(pinInput).toBeVisible();
     await pinInput.fill(pin);
-    if (opts.rememberFor) {
-        await page.locator('select[name="RememberFor"]').selectOption(opts.rememberFor);
-    }
     await page.getByRole('button', { name: 'Sign in', exact: true }).click();
     await expect(signedInMarker(page)).toBeVisible({ timeout: 15_000 });
 }

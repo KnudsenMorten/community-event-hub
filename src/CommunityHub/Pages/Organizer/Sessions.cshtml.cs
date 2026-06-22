@@ -111,7 +111,7 @@ public class SessionsModel : PageModel
 
     // --- Add hub session form ----------------------------------------------
     [BindProperty] public string? NewTitle { get; set; }
-    [BindProperty] public SessionType NewType { get; set; } = SessionType.SponsorSession;
+    [BindProperty] public SessionType NewType { get; set; } = SessionType.TechnicalSession;
     [BindProperty] public SessionLength NewLength { get; set; } = SessionLength.FiftyMin;
     [BindProperty] public string? NewRoom { get; set; }
     [BindProperty] public string? NewAbstract { get; set; }
@@ -170,9 +170,12 @@ public class SessionsModel : PageModel
 
     public static string Display(SessionType t) => t switch
     {
-        SessionType.CommunityMasterClass => "Community Master Class",
-        SessionType.CommunityTechSession => "Community Tech Session",
-        SessionType.SponsorSession => "Sponsor Session",
+        SessionType.Keynote => "Keynote",
+        SessionType.TechnicalSession => "Technical Session",
+        SessionType.MasterClass => "Master Class",
+        SessionType.AskTheExperts => "Ask the Experts",
+        SessionType.PanelDiscussion => "Panel Discussion",
+        SessionType.Welcome => "Welcome",
         _ => t.ToString(),
     };
 
@@ -377,7 +380,7 @@ public class SessionsModel : PageModel
         {
             Error = "Session not found.";
         }
-        else if (session.Type != SessionType.CommunityMasterClass)
+        else if (session.Type != SessionType.MasterClass)
         {
             Error = "A Zoho Booking endpoint can only be mapped to a master-class session.";
         }

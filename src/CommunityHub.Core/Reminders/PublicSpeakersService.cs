@@ -116,8 +116,7 @@ public sealed class PublicSpeakersService
             .Where(sp => sp.EventId == eventId
                          && sp.SelectedForPublish
                          && sp.Participant.IsActive
-                         && (sp.Participant.Role == ParticipantRole.Speaker
-                             || sp.Participant.Role == ParticipantRole.MasterclassSpeaker))
+                         && sp.Participant.Role == ParticipantRole.Speaker)
             .Select(sp => new PublicSpeakerRow(
                 sp.ParticipantId,
                 sp.Participant.FullName,
@@ -164,8 +163,7 @@ public sealed class PublicSpeakersService
                         && p.EventId == eventId
                         && p.SelectedForPublish
                         && p.Participant.IsActive
-                        && (p.Participant.Role == ParticipantRole.Speaker
-                            || p.Participant.Role == ParticipantRole.MasterclassSpeaker))
+                        && p.Participant.Role == ParticipantRole.Speaker)
             .Select(p => new
             {
                 p.ParticipantId,

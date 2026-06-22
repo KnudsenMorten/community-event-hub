@@ -1,3 +1,4 @@
+using CommunityHub.Core.Config;
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
 using CommunityHub.Core.Reminders;
@@ -18,19 +19,39 @@ public sealed class MasterClassPromotionEmailService
 {
     private const string Category = "masterclass-promotion";
 
+    private const string DefaultSupportEmail = "info@expertslive.dk";
+
     private readonly CommunityHubDbContext _db;
     private readonly IEmailSender _sender;
     private readonly IEmailContextAccessor _context;
     private readonly MasterClassSignupService _signups;
 
+    // Optional edition-config source for the support email shown in the contact
+    // line. Null in older test constructions → falls back to the default.
+    private readonly EventEditionConfigLoader? _eventConfigLoader;
+    private readonly EventConfigOptions? _eventConfigOptions;
+    private string? _supportEmail;
+
     public MasterClassPromotionEmailService(
         CommunityHubDbContext db, IEmailSender sender,
-        IEmailContextAccessor context, MasterClassSignupService signups)
+        IEmailContextAccessor context, MasterClassSignupService signups,
+        EventEditionConfigLoader? eventConfigLoader = null,
+        EventConfigOptions? eventConfigOptions = null)
     {
         _db = db;
         _sender = sender;
         _context = context;
         _signups = signups;
+        _eventConfigLoader = eventConfigLoader;
+        _eventConfigOptions = eventConfigOptions;
+    }
+
+    /// <summary>The "Questions? Email …" contact line; support email sourced from edition config.</summary>
+    private string ContactLine()
+    {
+        _supportEmail ??= MasterClassEmailService.ResolveSupportEmail(
+            _eventConfigLoader, _eventConfigOptions);
+        return $"<p>Questions? Email {System.Net.WebUtility.HtmlEncode(_supportEmail)}.</p>";
     }
 
     /// <summary>
@@ -71,6 +92,7 @@ public sealed class MasterClassPromotionEmailService
                 "Since you can hold only one confirmed Master Class, taking this one means giving up your current class.</p>" +
                 $"<p><a href=\"{encUrl}\">Choose here</a> — switch to the new class or keep your current one. " +
                 "If you don't decide in time, we'll switch you automatically.</p>" +
+                ContactLine() +
                 "<p>The team</p>";
         }
         else
@@ -82,10 +104,11 @@ public sealed class MasterClassPromotionEmailService
                 $"in the Master Class <strong>{encTitle}</strong>. 🎉</p>" +
                 $"<p>You don't need to do anything to keep it. If your plans change, please " +
                 $"<a href=\"{encUrl}\">manage or give up your place here</a> so someone on the waitlist can take it.</p>" +
+                ContactLine() +
                 "<p>See you there,<br/>The team</p>";
         }
 
-        using (_context.Set(new EmailContext(Category, s.EventId, null, $"{s.Attendee.FirstName} {s.Attendee.LastName}".Trim())))
+        using (_context.Set(new EmailContext(Category, s.EventId, null, $"{s.Attendee.FirstName} {s.Attendee.LastName}".Trim(), FeatureKey: "masterclass-invites")))
         {
             await _sender.SendAsync(s.Attendee.Email, subject, htmlBody, ct);
         }

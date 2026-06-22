@@ -1,6 +1,6 @@
 # Community Event Hub — Feature Catalog
 
-*Delivered feature set, as of 2026-06-21.*
+*Delivered feature set, as of 2026-06-22.*
 
 Community Event Hub (CEH) is the all-in-one workspace that runs a tech-community
 conference end to end: one home for your organizers, speakers, volunteers,
@@ -126,6 +126,34 @@ Hosting & Reliability.
 - **Link a sponsor contact to their company.** When editing someone, organizers can
   set or clear the sponsor company a contact belongs to, so that person sees exactly
   their company's sponsor tasks — and unlink them just as easily. *(✅ 2026-06-14)*
+- **One person, several hats — handled cleanly.** *(✅ 2026-06-22)* A real person often
+  wears more than one hat: a sponsor on a booth who also gives a talk, an organizer who
+  presents, a digital sponsor who both signs the contract and runs a Master Class. The
+  hub now models this properly — each person has **one main role** plus any number of
+  **add-on capabilities** layered on top — so the same human is no longer forced into a
+  single box or duplicated across rows.
+- **Speaking is a capability anyone can have.** *(✅ 2026-06-22)* Being a speaker is now
+  a hat a person wears, not a separate role: anyone — a sponsor contact, an organizer —
+  can present. Each speaker carries **which day(s) they present** (the pre-day Master
+  Class and/or the main-day sessions) and a **funding category** that says who covers
+  them: **fully supported** (the hub covers their hotel, travel, swag and the rest), a
+  **self-funded sponsor speaker** (their company covers them), or an **organizer who
+  presents** (counted as an organizer, not added to the external-speaker tally). This
+  is what decides who is counted and funded as a speaker.
+- **Everyone gets exactly what they're due — counted once.** *(✅ 2026-06-22)* There is
+  now a **single source of truth** for who receives each orderable thing — polo and
+  swag, an award, hotel, travel, the appreciation dinner and lunch. It works out each
+  person's entitlements from **all** their hats combined and **counts each person once**,
+  so someone who is both a sponsor contact and a speaker never double-orders a polo or a
+  lunch. An organizer can **manually include or exclude** any person for any single item
+  (with a reason) when the defaults need a tweak, and can **mark two rows as the same
+  human** so a person who appears under two emails is still only counted once.
+- **A "Speaker & order review" screen for organizers.** *(✅ 2026-06-22)* One organizer
+  page brings the whole picture together: every speaker with their day(s) and funding
+  category, and a live, de-duplicated count of who is due each orderable item — so the
+  team can see at a glance how many polos, dinners, hotel rooms and lunches to order,
+  set a person's funding, link "same person" rows, and apply per-item include/exclude
+  overrides in one place. Mobile-first, in English and Danish.
 
 ### Volunteer work structure — run a big volunteer pool without a bottleneck *(✅ 2026-06-15)*
 
@@ -412,6 +440,13 @@ follow-up automatically.
   the page shows you which of your requests are still pending so you don't have to ask
   twice. No more emailing around to fix a detail after the cut-off. Mobile-first,
   available in English and Danish, and accessible.
+- **You only see the forms that apply to you (✅ 2026-06-22).** A speaker now sees
+  exactly the forms they're actually due, based on who funds them. A self-funded
+  sponsor speaker — whose company covers their stay and travel — no longer sees the
+  hotel, travel or swag forms, so they're never asked to fill in something that isn't
+  theirs to claim; a fully-supported speaker still sees them all. Forms follow the same
+  single source of truth that decides each person's entitlements, so what's offered and
+  what's ordered always agree.
 
 ## 5. Tasks & reminders — nothing slips, no inbox spam
 
@@ -627,6 +662,14 @@ follow-up automatically.
   them yourself on hub-added sessions, and can adjust any session. The session list
   **filters by type and length** so you can find exactly the set you want.
   *(✅ 2026-06-15)*
+- **A clear set of session types, with a public and organizer filter.** *(✅ 2026-06-22)*
+  Every session is now typed from a standard list — **Keynote, Technical session,
+  Master Class, Ask the Experts, Panel discussion** and **Welcome** — so a programme
+  reads consistently however the session was created. The type is read from the source
+  when a session is imported, with an organizer override per session. Both the **public**
+  sessions page and the **organizer** session admin gain a **type filter**, so an
+  attendee can show just the keynotes (or just the Master Classes) and the team can work
+  through one type at a time.
 - **A public sessions overview anyone can browse.** A clean, no-login page at
   **`/Sessions`** lists the live edition's sessions with their **speaker(s), type,
   length, room and scheduled time**. Visitors **filter by type and length** (and by
@@ -823,6 +866,15 @@ follow-up automatically.
   the format is — before reading the class-specific setup notes. The same page carries
   the speaker- and organizer-edited logistics underneath. Mobile-first, accessible and
   bilingual (English / Danish).
+- **A Master Class landing page the speakers run.** *(✅ 2026-06-22)* Every Master Class
+  now has its own landing page that **its speakers edit themselves** — what to expect,
+  "bring a charged laptop", and anything to prepare in advance — so attendees arrive
+  ready. It's **visible only to attendees who hold a confirmed seat** in that class, and
+  it adds two ways to talk to the speakers before the day: a **group Q&A** the class and
+  its speakers can all read and post in, and **private 1:1 questions** an attendee can
+  send straight to the speakers. When someone confirms their seat, their confirmation
+  email **links them to this page** alongside the self-service controls to manage their
+  seat or waitlist place.
 - **Master-class participant sync from Zoho Booking.** Pull the people who booked a
   master class straight into the hub, linked to the right class — one-way from Zoho
   Booking, so Booking stays the source of truth. Each master class has its own
@@ -856,6 +908,15 @@ follow-up automatically.
 
 - **A sponsor is a company, not a single contact.** Every contact at a sponsor
   company sees that company's shared tasks, so nothing depends on one person.
+- **Sponsor packages — digital or booth, with clear roles per contact.** *(✅ 2026-06-22)*
+  A sponsor company now carries its **package**: **Silver is digital** (no booth), while
+  **Gold, Diamond and Platinum include a booth** (an exhibitor presence), so whether a
+  sponsor exhibits follows straight from what they bought. Each contact at the company
+  can be flagged independently as a **booth member**, a **signer** and an **event
+  coordinator**, so the right person gets the right tasks and emails. The appreciation
+  dinner is for the supported crew and speakers, so plain booth members aren't added to
+  it by default — but a booth member who **also speaks** is included through the speaker
+  side, so no one is missed.
 - **Your company directory stays the source of truth.** Company and contact details,
   including who signs and who coordinates the event, come from your central company
   directory; the hub reads from it and never duplicates it.
@@ -1109,9 +1170,22 @@ follow-up automatically.
   is being shaken out, with every test send safely redirected to the team's test
   inbox; it can be re-sent as often as needed and the team can see who has received
   it.
+- **A welcome tailored to each role — page and email.** *(✅ 2026-06-22)* The first-login
+  experience is now written for the role the person actually holds. A **speaker**,
+  **volunteer**, **sponsor**, **media** or **event-partner** gets a first-login **welcome
+  page** and a **welcome email** that talk about their part — the forms, tools and tasks
+  that apply to them — instead of one generic message for everyone. **Organizers and
+  attendees don't receive a generic welcome**: organizers already know the hub, and
+  attendees are looked after by their Master Class confirmation, so no one gets a welcome
+  that doesn't fit. Mobile-first, in English and Danish.
 - **An Email Center for organizers.** Preview any template safely, send a one-click
   test to yourself, and watch a delivery pulse with a filterable history of what's
   been sent.
+- **An in-portal email template editor.** *(✅ 2026-06-22)* Organizers can edit the
+  wording of the hub's emails right in the back-office — adjust the subject and body of
+  any template, **preview** it safely with sample values before saving, and **reset to
+  default** at any time. Edits take effect immediately, with no redeploy, and stay scoped
+  to your own edition.
 - **Send a test copy to any address.** *(✅ 2026-06-17)* Beyond the "send to me" test, an
   organizer can type **any mailbox** — a colleague's, a role test account — and send the
   selected template there to confirm it really arrives. The hub is honest about the outcome
@@ -1175,6 +1249,14 @@ follow-up automatically.
   rule applied in a single place**, so every current and future email is safe by default. The email's
   subject line still reads exactly as typed. This is a behind-the-scenes correctness and safety fix; nothing
   changes in how organizers compose or send mail.
+- **Polished, dependable emails.** *(✅ 2026-06-22)* A round of finishing touches makes
+  every email look right and work right wherever it lands: a **white-banner logo** that
+  reads cleanly on any background instead of vanishing on a dark theme, a **slim, tidy
+  footer**, **call-to-action buttons that actually work** (including a one-tap "open my
+  Event Hub" button on the welcomes and a "manage my seat & waitlist" button on the
+  Master Class confirmation) and **clickable, plain-language links** in place of long raw
+  web addresses. Delivery is steadier too: a transient hiccup at the mail relay is
+  **retried automatically** rather than dropped, so messages get through.
 
 ## 11. Organizer hub — run the whole event from one place
 

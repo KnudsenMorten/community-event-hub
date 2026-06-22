@@ -83,7 +83,7 @@ public sealed class OrganizerExportsServiceTests
         var s1 = new Session
         {
             EventId = EventId, SessionizeId = "sez-1", Title = "Opening Keynote",
-            Room = "Hall A", Type = SessionType.CommunityTechSession, Length = SessionLength.SixtyMin,
+            Room = "Hall A", Type = SessionType.TechnicalSession, Length = SessionLength.SixtyMin,
             StartsAt = new DateTimeOffset(2027, 2, 10, 9, 0, 0, TimeSpan.Zero),
             EndsAt = new DateTimeOffset(2027, 2, 10, 10, 0, 0, TimeSpan.Zero),
             RoomQrUrl = "https://example.test/qr/hall-a.png", PublicToken = "tok-1",
@@ -91,7 +91,7 @@ public sealed class OrganizerExportsServiceTests
         var s2 = new Session
         {
             EventId = EventId, SessionizeId = "sez-2", Title = "Deep Dive",
-            Room = "Hall A", Type = SessionType.CommunityTechSession, Length = SessionLength.FiftyMin,
+            Room = "Hall A", Type = SessionType.TechnicalSession, Length = SessionLength.FiftyMin,
             StartsAt = new DateTimeOffset(2027, 2, 10, 11, 0, 0, TimeSpan.Zero),
         };
         var sService = new Session

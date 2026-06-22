@@ -100,9 +100,8 @@ public sealed class ReportingService
         HashSet<int> Role(ParticipantRole r) =>
             activeByRole.TryGetValue(r, out var s) ? s : new HashSet<int>();
 
-        // Hotel + dinner apply to speakers, MC speakers, volunteers.
+        // Hotel + dinner apply to speakers and volunteers.
         var hotelDinnerAudience = Role(ParticipantRole.Speaker)
-            .Concat(Role(ParticipantRole.MasterclassSpeaker))
             .Concat(Role(ParticipantRole.Volunteer))
             .ToHashSet();
         var volunteerAudience = Role(ParticipantRole.Volunteer);

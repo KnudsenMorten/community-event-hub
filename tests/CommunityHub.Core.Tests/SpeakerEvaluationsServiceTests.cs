@@ -82,18 +82,18 @@ public sealed class SpeakerEvaluationsServiceTests
 
         // Alice + Bob co-present a master class; Alice solo-presents a tech talk.
         var mc = Sess(evt.Id, "s-mc", "Kubernetes Workshop",
-            SessionType.CommunityMasterClass, "Room A", false, alice, bob);
+            SessionType.MasterClass, "Room A", false, alice, bob);
         var tech = Sess(evt.Id, "s-tech", "Future Talk",
-            SessionType.CommunityTechSession, "Room A", false, alice);
+            SessionType.TechnicalSession, "Room A", false, alice);
         // Bob has his OWN solo session whose ratings Alice must NEVER see.
         var bobSolo = Sess(evt.Id, "s-bob", "Bob Solo",
-            SessionType.CommunityTechSession, "Room B", false, bob);
+            SessionType.TechnicalSession, "Room B", false, bob);
         // A service session Alice is (oddly) linked to — excluded anyway.
         var brk = Sess(evt.Id, "s-break", "Lunch",
-            SessionType.CommunityTechSession, "Foyer", true, alice);
+            SessionType.TechnicalSession, "Foyer", true, alice);
         // Old-edition session for Alice's old row — must not leak into SPK27.
         var old = Sess(other.Id, "s-old", "Old Talk",
-            SessionType.CommunityTechSession, "Room Z", false, aliceOld);
+            SessionType.TechnicalSession, "Room Z", false, aliceOld);
         await db.SaveChangesAsync();
 
         void Eval(int eventId, int sessionId, int rating, string? comment, DateTimeOffset when)
@@ -181,7 +181,7 @@ public sealed class SpeakerEvaluationsServiceTests
         var carolSess = new Session
         {
             EventId = s.EventId, SessionizeId = "s-carol", Title = "Carol Talk",
-            Type = SessionType.CommunityTechSession, Room = "Room C",
+            Type = SessionType.TechnicalSession, Room = "Room C",
             StartsAt = T0, EndsAt = T0.AddMinutes(50),
         };
         carolSess.SessionSpeakers.Add(new SessionSpeaker

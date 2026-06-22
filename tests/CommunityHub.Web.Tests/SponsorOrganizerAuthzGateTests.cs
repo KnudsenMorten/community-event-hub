@@ -143,7 +143,7 @@ public sealed class SponsorOrganizerAuthzGateTests
         var s = new Session
         {
             EventId = EventId, Title = "Talk with QR", Room = "Room A",
-            Type = SessionType.CommunityTechSession, Length = SessionLength.SixtyMin,
+            Type = SessionType.TechnicalSession, Length = SessionLength.SixtyMin,
             SessionizeId = Guid.NewGuid().ToString("N"),
             RoomQrUrl = "https://contoso.example/qr/room-a.png",
         };

@@ -43,7 +43,7 @@
             <div style="overflow-x:auto;">
             <table style="width:100%;border-collapse:collapse;min-width:640px;">
                 <tr style="text-align:left;border-bottom:2px solid #ddd;">
-                    <th>Company id</th>
+                    <th>Company</th>
                     <th style="text-align:right;">Contacts</th>
                     <th style="text-align:right;">Tasks done</th>
                     <th style="text-align:right;">Total tasks</th>
@@ -55,7 +55,7 @@
                 @foreach (var r in Model.Rows)
                 {
                     <tr style="border-bottom:1px solid #eee; @(r.TasksOverdue > 0 ? "background:#fff5f5;" : "")">
-                        <td>@r.CompanyId</td>
+                        <td>@r.CompanyName <span style="color:#9aa0aa;font-size:12px;">#@r.CompanyId</span></td>
                         <td style="text-align:right;">@r.Contacts</td>
                         <td style="text-align:right;">@r.TasksDone</td>
                         <td style="text-align:right;">@r.TasksTotal</td>

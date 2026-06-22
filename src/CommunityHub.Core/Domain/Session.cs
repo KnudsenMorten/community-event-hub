@@ -1,21 +1,35 @@
 namespace CommunityHub.Core.Domain;
 
 /// <summary>
-/// The kind of a <see cref="Session"/>. Imported Sessionize sessions are mapped to a
-/// sensible default (<see cref="CommunityTechSession"/>, or
-/// <see cref="CommunityMasterClass"/> for a full-day session); hub-added sessions set
-/// it explicitly. A filter on the session views narrows by this.
+/// The kind of a <see cref="Session"/>. Imported sessions are mapped from the source
+/// category / format / duration to one of these (see <c>SessionDefaultsMapper</c>);
+/// hub-added sessions set it explicitly. A filter on the session views narrows by
+/// this. Stored as <c>int</c> (see <c>CommunityHubDbContext</c>), so the numeric
+/// values below are part of the persisted contract — a data migration remaps the
+/// legacy values (see migration <c>SessionTypeStandardize</c>).
 /// </summary>
 public enum SessionType
 {
-    /// <summary>A full community master class / workshop (typically full-day).</summary>
-    CommunityMasterClass = 0,
+    /// <summary>A keynote (typically the opening / closing main-stage session).</summary>
+    Keynote = 0,
 
-    /// <summary>A regular community technical session / talk (the default for imports).</summary>
-    CommunityTechSession = 1,
+    /// <summary>A regular technical session / talk (the default for imports with no type).</summary>
+    TechnicalSession = 1,
 
-    /// <summary>A sponsor-delivered session (usually hub-added, not from Sessionize).</summary>
-    SponsorSession = 2,
+    /// <summary>A master class / workshop (typically full-day, in-hub signup + landing page).</summary>
+    MasterClass = 2,
+
+    /// <summary>An "Ask the Experts" panel / clinic.</summary>
+    AskTheExperts = 3,
+
+    /// <summary>A panel discussion.</summary>
+    PanelDiscussion = 4,
+
+    /// <summary>A welcome / opening logistics session.</summary>
+    Welcome = 5,
+
+    /// <summary>Neutral fallback when no type can be derived (never inferred by the importer).</summary>
+    Other = 6,
 }
 
 /// <summary>
@@ -84,10 +98,19 @@ public class Session
     public string? Track { get; set; }
 
     /// <summary>
-    /// The session kind. Imported sessions get a default mapping; hub-added sessions
-    /// set it. Defaults to <see cref="SessionType.CommunityTechSession"/>.
+    /// The session kind. Imported sessions get a default mapping from the source
+    /// category / format / duration; hub-added sessions set it. Defaults to
+    /// <see cref="SessionType.TechnicalSession"/>.
     /// </summary>
-    public SessionType Type { get; set; } = SessionType.CommunityTechSession;
+    public SessionType Type { get; set; } = SessionType.TechnicalSession;
+
+    /// <summary>
+    /// True when an organizer has manually set <see cref="Type"/> from the session
+    /// admin. A Sessionize / Backstage re-import RESPECTS this flag and never
+    /// clobbers a manual override (it still refreshes the other import-owned fields).
+    /// False for a freshly-imported session whose type was derived from the source.
+    /// </summary>
+    public bool TypeIsManualOverride { get; set; }
 
     /// <summary>
     /// The scheduled length bucket. Imported sessions get a default mapping from the
@@ -180,6 +203,27 @@ public class Session
     /// </summary>
     public string? LogisticsUpdatedByEmail { get; set; }
 
+    // --- Master class: attendee landing page prep content (FEATURE 2) -------
+
+    /// <summary>
+    /// Rich-text preparation content shown on the master-class attendee landing
+    /// page (what to expect, "bring a laptop", things to set up in advance).
+    /// Edited by a speaker LINKED to this master-class session (or an organizer);
+    /// read by confirmed attendees + the MC's speakers. Null/blank = nothing
+    /// published yet. Only meaningful for a <see cref="SessionType.MasterClass"/>
+    /// session. Rendered HTML-encoded with line breaks preserved.
+    /// </summary>
+    public string? PrepContent { get; set; }
+
+    /// <summary>When <see cref="PrepContent"/> was last edited. Null = never.</summary>
+    public DateTimeOffset? PrepUpdatedAt { get; set; }
+
+    /// <summary>
+    /// The participant id (a linked speaker or organizer) who last edited
+    /// <see cref="PrepContent"/> — audit only, never rendered to attendees.
+    /// </summary>
+    public int? PrepUpdatedByParticipantId { get; set; }
+
     // --- Master class: Zoho Booking participant sync (REQUIREMENTS § 6c) -----
 
     /// <summary>
@@ -188,7 +232,7 @@ public class Session
     /// this to pull the master class's booked participants (one-way Booking →
     /// hub). Plain config (NOT a secret); null/blank = not yet mapped, so the
     /// sync for this session is a no-op. Only meaningful for a
-    /// <see cref="SessionType.CommunityMasterClass"/> session.
+    /// <see cref="SessionType.MasterClass"/> session.
     /// </summary>
     public string? BookingEndpointUri { get; set; }
 
@@ -197,7 +241,7 @@ public class Session
 
     /// <summary>
     /// Seat capacity for the in-hub Master Class signup + waitlist (REQUIREMENTS §6).
-    /// Organizer-set on a <see cref="SessionType.CommunityMasterClass"/> session.
+    /// Organizer-set on a <see cref="SessionType.MasterClass"/> session.
     /// null = no cap configured (everyone who signs up is confirmed; no waitlist);
     /// when set, signups beyond the cap are waitlisted (FIFO).
     /// </summary>

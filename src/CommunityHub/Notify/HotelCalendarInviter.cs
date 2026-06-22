@@ -14,12 +14,15 @@ public sealed class HotelCalendarInviter
 {
     private readonly IEmailSender _emailSender;
     private readonly EmailOptions _emailOptions;
+    private readonly IEmailContextAccessor? _context;
 
     public HotelCalendarInviter(
-        IEmailSender emailSender, IOptions<EmailOptions> emailOptions)
+        IEmailSender emailSender, IOptions<EmailOptions> emailOptions,
+        IEmailContextAccessor? context = null)
     {
         _emailSender = emailSender;
         _emailOptions = emailOptions.Value;
+        _context = context;
     }
 
     public async Task SendAsync(
@@ -68,7 +71,12 @@ public sealed class HotelCalendarInviter
             organizerEmail: _emailOptions.FromAddress,
             organizerName: _emailOptions.FromDisplayName);
 
-        await _emailSender.SendWithIcsAsync(
-            toEmail, content.Subject, content.HtmlBody, ics, "hotel.ics", ct);
+        // Ring-governed by the hotel-invite feature (operator 2026-06-22).
+        using (_context?.Set(new EmailContext(
+            "hotel-invite", eventId, participantId, fullName, FeatureKey: "hotel-invite")))
+        {
+            await _emailSender.SendWithIcsAsync(
+                toEmail, content.Subject, content.HtmlBody, ics, "hotel.ics", ct);
+        }
     }
 }

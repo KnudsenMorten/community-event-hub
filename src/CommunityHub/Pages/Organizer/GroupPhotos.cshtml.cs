@@ -24,19 +24,22 @@ public class GroupPhotosModel : PageModel
     private readonly EmailTemplateProvider _templates;
     private readonly IEmailSender _emailSender;
     private readonly TimeProvider _clock;
+    private readonly IEmailContextAccessor? _context;
 
     public GroupPhotosModel(
         CommunityHubDbContext db,
         ICurrentParticipantAccessor participant,
         EmailTemplateProvider templates,
         IEmailSender emailSender,
-        TimeProvider clock)
+        TimeProvider clock,
+        IEmailContextAccessor? context = null)
     {
         _db = db;
         _participant = participant;
         _templates = templates;
         _emailSender = emailSender;
         _clock = clock;
+        _context = context;
     }
 
     public bool AccessDenied { get; private set; }
@@ -62,7 +65,7 @@ public class GroupPhotosModel : PageModel
 
     public async Task<IActionResult> OnPostCreateAsync(
         string companyName, string contactName, string contactEmail,
-        string? internalParticipants, string? location, string? notes,
+        int ticketCount, string? internalParticipants, string? location, string? notes,
         DateTime? scheduledLocal, CancellationToken ct)
     {
         var me = _participant.Current;
@@ -80,6 +83,7 @@ public class GroupPhotosModel : PageModel
             CompanyName = companyName.Trim(),
             ContactName = (contactName ?? string.Empty).Trim(),
             ContactEmail = contactEmail.Trim(),
+            TicketCount = Math.Max(0, ticketCount),
             InternalParticipants = (internalParticipants ?? string.Empty).Trim(),
             Location = location?.Trim(),
             Notes = notes?.Trim(),
@@ -94,7 +98,7 @@ public class GroupPhotosModel : PageModel
 
     public async Task<IActionResult> OnPostUpdateAsync(
         int id, string contactName, string contactEmail,
-        string? internalParticipants, string? location, string? notes,
+        int ticketCount, string? internalParticipants, string? location, string? notes,
         DateTime? scheduledLocal, CancellationToken ct)
     {
         var me = _participant.Current;
@@ -107,6 +111,7 @@ public class GroupPhotosModel : PageModel
 
         row.ContactName = (contactName ?? string.Empty).Trim();
         row.ContactEmail = (contactEmail ?? string.Empty).Trim();
+        row.TicketCount = Math.Max(0, ticketCount);
         row.InternalParticipants = (internalParticipants ?? string.Empty).Trim();
         row.Location = location?.Trim();
         row.Notes = notes?.Trim();
@@ -142,6 +147,10 @@ public class GroupPhotosModel : PageModel
             .Include(r => r.Event)
             .FirstOrDefaultAsync(r => r.Id == id && r.EventId == me.EventId, ct);
         if (row is null) return RedirectToPage(new { Msg = "Registration not found." });
+        if (!row.Qualifies)
+        {
+            return RedirectToPage(new { Msg = $"'{row.CompanyName}' has {row.TicketCount} ticket(s) - the group photo is for companies with more than {GroupPhotoRegistration.QualifyingTicketThreshold} tickets (volume package). Update the ticket count to send." });
+        }
         if (row.ScheduledAtUtc is null)
         {
             return RedirectToPage(new { Msg = $"'{row.CompanyName}' has no slot yet - set a time before sending the invite." });
@@ -173,27 +182,35 @@ public class GroupPhotosModel : PageModel
             organizerEmail: me.Email,
             organizerName: me.FullName);
 
-        var recipients = new List<string> { row.ContactEmail };
-        recipients.AddRange((row.InternalParticipants ?? string.Empty)
-            .Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Where(r => r.Contains('@')));
+        // The calendar invite goes to the APPOINTED COMPANY LEAD ONLY (operator
+        // 2026-06-22). InternalParticipants is reference-only and not invited.
+        var lead = row.ContactEmail?.Trim();
+        if (string.IsNullOrWhiteSpace(lead) || !lead.Contains('@'))
+        {
+            return RedirectToPage(new { Msg = $"'{row.CompanyName}' has no valid lead email - set the company lead's address before sending the invite." });
+        }
 
-        int sent = 0, failed = 0;
-        foreach (var to in recipients.Distinct(StringComparer.OrdinalIgnoreCase))
+        bool sent;
+        // Ring-governed by the group-photo-invites feature (operator 2026-06-22).
+        using (_context?.Set(new EmailContext(
+            "group-photo-invite", row.EventId, null, row.ContactName,
+            FeatureKey: "group-photo-invites")))
         {
             try
             {
                 await _emailSender.SendWithIcsAsync(
-                    to, rendered.Subject, rendered.HtmlBody, ics,
+                    lead, rendered.Subject, rendered.HtmlBody, ics,
                     $"group-photo-{row.CompanyName}.ics".Replace(' ', '-'), ct);
-                sent++;
+                sent = true;
             }
-            catch { failed++; }
+            catch { sent = false; }
         }
 
         row.InviteLastSentAt = _clock.GetUtcNow();
         await _db.SaveChangesAsync(ct);
-        return RedirectToPage(new { Msg = $"Invite for '{row.CompanyName}': {sent} sent{(failed > 0 ? $", {failed} failed" : "")}." });
+        return RedirectToPage(new { Msg = sent
+            ? $"Invite for '{row.CompanyName}' sent to the company lead ({lead})."
+            : $"Invite for '{row.CompanyName}' could NOT be sent (delivery failed or blocked by the ring/kill switch)." });
     }
 
     // --- Danish wall-clock <-> UTC (same convention as the hotel invite) ---

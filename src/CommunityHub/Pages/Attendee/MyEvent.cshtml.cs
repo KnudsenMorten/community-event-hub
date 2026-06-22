@@ -91,10 +91,9 @@ public class MyEventModel : PageModel
     {
         ParticipantRole.Organizer,
         ParticipantRole.Speaker,
-        ParticipantRole.MasterclassSpeaker,
         ParticipantRole.Volunteer,
-        ParticipantRole.Video,
-        ParticipantRole.Camera,
+        ParticipantRole.Media,
+        ParticipantRole.EventPartner,
     };
 
     /// <summary>

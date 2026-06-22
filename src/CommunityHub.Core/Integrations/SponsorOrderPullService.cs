@@ -286,6 +286,10 @@ public sealed class SponsorOrderPullService
                 var info = await _db.SponsorInfos.FirstOrDefaultAsync(
                     s => s.EventId == activeEvent.Id
                          && s.SponsorCompanyId == companyId, ct);
+                // Derive the commercial package from the company's highest booth
+                // tier (Gold+ ⇒ booth/exhibitor; None ⇒ digital Silver). RAISE-ONLY
+                // like the tier itself so a manual organizer bump survives a re-pull.
+                var companyPackage = SponsorPackageMapper.FromBoothTier(companyTier);
                 if (info is null)
                 {
                     _db.SponsorInfos.Add(new SponsorInfo
@@ -293,12 +297,23 @@ public sealed class SponsorOrderPullService
                         EventId = activeEvent.Id,
                         SponsorCompanyId = companyId,
                         Tier = companyTier,
+                        SponsorPackage = companyPackage,
                     });
                 }
-                else if (BoothTierRanking.Weight(companyTier) > BoothTierRanking.Weight(info.Tier))
+                else
                 {
-                    info.Tier = companyTier;
-                    info.UpdatedAt = DateTimeOffset.UtcNow;
+                    var changed = false;
+                    if (BoothTierRanking.Weight(companyTier) > BoothTierRanking.Weight(info.Tier))
+                    {
+                        info.Tier = companyTier;
+                        changed = true;
+                    }
+                    if (companyPackage > info.SponsorPackage)
+                    {
+                        info.SponsorPackage = companyPackage;
+                        changed = true;
+                    }
+                    if (changed) info.UpdatedAt = DateTimeOffset.UtcNow;
                 }
             }
         }

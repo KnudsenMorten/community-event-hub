@@ -3,7 +3,7 @@ namespace CommunityHub.Core.Domain;
 /// <summary>
 /// A participant's swag preferences for an edition (polo / jacket / gift).
 /// Only collected for roles that receive swag (Volunteer, Speaker,
-/// MasterclassSpeaker, Organizer) — never for Sponsor / Attendee.
+/// Organizer) — never for Sponsor / Attendee.
 /// Stores the participant's STATED preference. The organizer-set final
 /// allocation count lives on a separate entitlement table (added later).
 /// </summary>

@@ -1,4 +1,5 @@
 using CommunityHub.Auth;
+using CommunityHub.Core.Config;
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
 using CommunityHub.Core.Email;
@@ -19,19 +20,69 @@ public class SpeakerRemindersModel : PageModel
     private readonly IEmailSender _emailSender;
     private readonly EmailTemplateProvider _templates;
     private readonly TimeProvider _clock;
+    private readonly IEmailContextAccessor? _context;
+
+    // Optional edition-config source for the per-role contact footer (this page is
+    // speaker-only, so the SPEAKER contact is used). Null-safe → blank/fallback.
+    private readonly EventEditionConfigLoader? _eventConfigLoader;
+    private readonly EventConfigOptions? _eventConfigOptions;
+    private IReadOnlyDictionary<string, string>? _placeholders;
+    private string? _supportEmail;
 
     public SpeakerRemindersModel(
         CommunityHubDbContext db,
         ICurrentParticipantAccessor participant,
         IEmailSender emailSender,
         EmailTemplateProvider templates,
-        TimeProvider clock)
+        TimeProvider clock,
+        IEmailContextAccessor? context = null,
+        EventEditionConfigLoader? eventConfigLoader = null,
+        EventConfigOptions? eventConfigOptions = null)
     {
         _db = db;
         _participant = participant;
         _emailSender = emailSender;
         _templates = templates;
         _clock = clock;
+        _context = context;
+        _eventConfigLoader = eventConfigLoader;
+        _eventConfigOptions = eventConfigOptions;
+    }
+
+    private const string DefaultSupportEmail = "info@expertslive.dk";
+
+    private (IReadOnlyDictionary<string, string> Placeholders, string SupportEmail) ContactConfig()
+    {
+        if (_placeholders is not null && _supportEmail is not null)
+        {
+            return (_placeholders, _supportEmail);
+        }
+
+        var placeholders = (IReadOnlyDictionary<string, string>)
+            new Dictionary<string, string>();
+        var supportEmail = DefaultSupportEmail;
+
+        if (_eventConfigLoader is not null)
+        {
+            try
+            {
+                var path = _eventConfigOptions?.EventConfigPath
+                           ?? new EventConfigOptions().EventConfigPath;
+                var cfg = _eventConfigLoader.Load(path);
+                placeholders = cfg.Placeholders ?? placeholders;
+                if (cfg.Placeholders is not null
+                    && cfg.Placeholders.TryGetValue("supportEmail", out var se)
+                    && !string.IsNullOrWhiteSpace(se))
+                {
+                    supportEmail = se;
+                }
+            }
+            catch { /* fail-safe: footer falls back to the default support email */ }
+        }
+
+        _placeholders = placeholders;
+        _supportEmail = supportEmail;
+        return (placeholders, supportEmail);
     }
 
     public bool AccessDenied { get; private set; }
@@ -122,7 +173,13 @@ public class SpeakerRemindersModel : PageModel
         var rendered = BuildReminderEmail(p.FullName, task.Title, task.Description, task.DueDate, eventCode);
         try
         {
-            await _emailSender.SendAsync(toEmail, rendered.Subject, rendered.HtmlBody, ct);
+            // Ring-governed by the reminder-jobs feature (operator 2026-06-22).
+            using (_context?.Set(new EmailContext(
+                ReminderType, me.EventId, p.Id, p.FullName,
+                FeatureKey: "reminder-jobs")))
+            {
+                await _emailSender.SendAsync(toEmail, rendered.Subject, rendered.HtmlBody, ct);
+            }
             _db.SentReminders.Add(new SentReminder
             {
                 EventId = me.EventId,
@@ -154,8 +211,7 @@ public class SpeakerRemindersModel : PageModel
         var tasks = await _db.Tasks
             .Where(t => t.EventId == eventId
                         && t.AssignedParticipantId != null
-                        && (t.AssignedParticipant!.Role == ParticipantRole.Speaker
-                            || t.AssignedParticipant!.Role == ParticipantRole.MasterclassSpeaker))
+                        && t.AssignedParticipant!.Role == ParticipantRole.Speaker)
             .Select(t => new
             {
                 TaskId = t.Id,
@@ -235,6 +291,10 @@ public class SpeakerRemindersModel : PageModel
         tokens["taskTitle"] = taskTitle;
         tokens["dueText"] = dueText;
         tokens["descriptionBlock"] = descriptionBlock;
+
+        // Per-role contact footer — this page reminds SPEAKERS only.
+        var (placeholders, supportEmail) = ContactConfig();
+        RoleContact.AddTo(tokens, ParticipantRole.Speaker, placeholders, supportEmail);
 
         return _templates.Render("task-manual-reminder", tokens);
     }

@@ -21,7 +21,7 @@ public sealed class MyEventScheduleBuilderTests
             Id: id,
             Title: title,
             Abstract: null,
-            Type: SessionType.CommunityTechSession,
+            Type: SessionType.TechnicalSession,
             Length: SessionLength.SixtyMin,
             Room: "Room A",
             Track: null,

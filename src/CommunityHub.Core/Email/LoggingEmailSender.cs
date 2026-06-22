@@ -141,6 +141,30 @@ public sealed class LoggingEmailSender : IEmailSender
                 SentAt = _clock.GetUtcNow(),
             });
             await db.SaveChangesAsync();
+
+            // UNIFIED AUDIT TRAIL (REQUIREMENTS §24): surface the send as an engine
+            // event in the one trail organizers review, alongside user actions. The
+            // EmailLog above keeps the rich re-send detail; this is the trail line.
+            var audit = scope.ServiceProvider
+                .GetService(typeof(CommunityHub.Core.Audit.IAuditTrail))
+                as CommunityHub.Core.Audit.IAuditTrail;
+            if (audit is not null)
+            {
+                await audit.RecordAsync(new Domain.AuditEntry
+                {
+                    EventId = ctx?.EventId ?? 0,
+                    Category = Domain.AuditCategory.Email,
+                    Action = CommunityHub.Core.Audit.AuditActions.EmailSent,
+                    ActorEmail = "system",
+                    Source = Domain.AuditSource.System,
+                    TargetType = "Email",
+                    TargetId = Trim(toEmail, 128),
+                    Summary = $"Email “{Trim(subject, 120)}” to {Trim(toEmail, 120)}",
+                    Detail = ctx?.Category,
+                    Outcome = success ? Domain.AuditOutcome.Success : Domain.AuditOutcome.Failure,
+                    OccurredUtc = _clock.GetUtcNow(),
+                });
+            }
         }
         catch (Exception ex)
         {

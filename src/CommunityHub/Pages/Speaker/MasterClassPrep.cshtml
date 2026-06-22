@@ -1,0 +1,47 @@
+@page "/Speaker/MasterClassPrep/{sessionId:int}"
+@model CommunityHub.Pages.Speaker.MasterClassPrepModel
+@{
+    ViewData["Title"] = "Master Class prep";
+}
+
+<div style="max-width:760px;margin:0 auto;padding:16px;">
+    @if (Model.NotFoundState)
+    {
+        <h1>Master Class not found</h1>
+        <p>That Master Class could not be found in this edition.</p>
+    }
+    else if (Model.AccessDenied)
+    {
+        <h1>Master Class prep</h1>
+        <p role="status">Only a speaker linked to this Master Class (or an organizer) may edit its preparation notes.</p>
+    }
+    else if (Model.View is not null)
+    {
+        <h1 style="margin:0 0 4px;">Prepare attendees: @Model.View.Title</h1>
+        <p style="color:#555;margin:0 0 12px;">
+            This text appears on the attendee Master Class page. Tell attendees what to expect,
+            what to bring (e.g. a laptop), and anything to set up in advance.
+        </p>
+
+        @if (!string.IsNullOrEmpty(Model.Message))
+        {
+            <p role="status" style="background:#e6f4ea;border:1px solid #1c6b35;border-radius:6px;padding:10px 12px;">@Model.Message</p>
+        }
+        @if (!string.IsNullOrEmpty(Model.Error))
+        {
+            <p role="alert" style="background:#fdecea;border:1px solid #b3261e;border-radius:6px;padding:10px 12px;">@Model.Error</p>
+        }
+
+        <form method="post" asp-route-sessionId="@Model.SessionId">
+            <label for="prep" style="display:block;font-weight:600;margin-bottom:4px;">Preparation notes</label>
+            <textarea id="prep" name="PrepContent" rows="12" maxlength="8000"
+                      style="width:100%;box-sizing:border-box;padding:10px;border:1px solid #ccc;border-radius:6px;line-height:1.5;">@Model.PrepContent</textarea>
+            <button type="submit" style="margin-top:10px;background:#1c6b35;color:#fff;border:0;border-radius:6px;padding:10px 20px;font-weight:600;">Save notes</button>
+        </form>
+
+        @if (!string.IsNullOrEmpty(Model.LandingLink))
+        {
+            <p style="margin-top:14px;"><a href="@Model.LandingLink">Preview the attendee Master Class page</a></p>
+        }
+    }
+</div>

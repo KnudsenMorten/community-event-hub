@@ -49,6 +49,7 @@ public class BroadcastModel : PageModel
     private readonly TimeProvider _clock;
     private readonly ILogger<BroadcastModel> _log;
     private readonly IStringLocalizer<SharedResource> _loc;
+    private readonly IEmailContextAccessor? _context;
 
     public BroadcastModel(
         CommunityHubDbContext db,
@@ -57,7 +58,8 @@ public class BroadcastModel : PageModel
         IEmailSender emailSender,
         TimeProvider clock,
         ILogger<BroadcastModel> log,
-        IStringLocalizer<SharedResource> loc)
+        IStringLocalizer<SharedResource> loc,
+        IEmailContextAccessor? context = null)
     {
         _db = db;
         _participant = participant;
@@ -66,6 +68,7 @@ public class BroadcastModel : PageModel
         _clock = clock;
         _log = log;
         _loc = loc;
+        _context = context;
     }
 
     public bool AccessDenied { get; private set; }
@@ -197,7 +200,13 @@ public class BroadcastModel : PageModel
             try
             {
                 var rendered = RenderFor(r.FirstName, eventName);
-                await _emailSender.SendAsync(r.Email, rendered.Subject, rendered.HtmlBody, ct);
+                // Ring-governed by the broadcast-email feature (operator 2026-06-22).
+                using (_context?.Set(new EmailContext(
+                    ReminderType, me.EventId, null, r.FirstName,
+                    FeatureKey: "broadcast-email")))
+                {
+                    await _emailSender.SendAsync(r.Email, rendered.Subject, rendered.HtmlBody, ct);
+                }
                 _db.SentReminders.Add(new SentReminder
                 {
                     EventId = me.EventId,

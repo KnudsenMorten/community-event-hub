@@ -92,7 +92,14 @@ public sealed class AttendeeWelcomeProvisioningService
                 IsActive = true,
                 LifecycleState = ParticipantLifecycleState.Active,
                 QueueSource = ParticipantQueueSource.Manual,
-                Ring = Ring.Ring1,
+                // RELEASE SAFETY: provision real attendees at Broad/GA, NOT Ring1.
+                // The email ring-gate only delivers to recipients at/below the email
+                // feature's released ring, so Broad attendees are NOT auto-welcomed
+                // until the email feature is deliberately promoted to Broad — this
+                // prevents a rogue mass-blast to all ~1000 ticket holders. To test
+                // the welcome with a small cohort, mark specific test attendees Ring1
+                // (via /Organizer/ResourceRings) while the email feature is at Ring1.
+                Ring = Rings.Default,
                 CreatedAt = now,
             };
             _db.Participants.Add(p);

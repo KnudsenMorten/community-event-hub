@@ -102,8 +102,35 @@ public sealed class FeatureGateService
         string featureKey, int eventId, Ring effectiveRing, CancellationToken ct = default)
     {
         if (!await IsFeatureEnabledAsync(featureKey, eventId, ct)) return false;
+        // ENGINE + ENGINEQUEUED features (plumbing/dependency — pulls, syncs,
+        // transport, queue-fed posters/appliers) are never ring-scoped: active for
+        // everyone once enabled (GA). Only RING-SCOPED surfaces — QUEUE (org-admin
+        // staging, gated per organizer/target) and USER-IMPACT (email/task/GUI a
+        // person experiences) — scope by ring. An unknown key (null descriptor) is
+        // treated as not ring-scoped (fail-open), matching the Broad ring default.
+        if (FeatureCatalog.Find(featureKey)?.IsRingScoped != true) return true;
         var releasedTo = await GetReleasedRingAsync(featureKey, eventId, ct);
         return Rings.IsActiveForRing(effectiveRing, releasedTo);
+    }
+
+    /// <summary>
+    /// RING-ONLY scope check for QUEUE commits/assigns (REQUIREMENTS §23a category 3):
+    /// is the TARGET participant within <paramref name="featureKey"/>'s released ring?
+    /// Unlike <see cref="IsFeatureActiveForRingAsync"/> this does NOT consult the kill
+    /// switch — the on/off/availability gate for a queue feature is enforced at its
+    /// TILE, so an ALREADY-SHIPPED queue feature (released ring defaults Broad, but
+    /// catalog default-enabled is OFF) is never accidentally blocked here. With the
+    /// Broad default every target is in scope (no behaviour change); lower the released
+    /// ring in <c>/Organizer/Settings</c> to ring-TEST and out-of-ring targets return
+    /// false so the organizer can hold them until the ring is promoted.
+    /// </summary>
+    public async Task<bool> IsTargetInReleasedRingAsync(
+        string featureKey, int eventId, int participantId,
+        RingResolver rings, CancellationToken ct = default)
+    {
+        var releasedTo = await GetReleasedRingAsync(featureKey, eventId, ct);
+        var effective = await rings.GetEffectiveRingAsync(participantId, ct);
+        return Rings.IsActiveForRing(effective, releasedTo);
     }
 
     /// <summary>

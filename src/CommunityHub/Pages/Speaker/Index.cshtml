@@ -340,6 +340,8 @@
                     <strong>@mc.Title</strong>
                     <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:8px;">
                         <a class="task-link-btn" asp-page="/MasterClass/Index" asp-route-slug="@mc.Slug">Edit / view logistics</a>
+                        <a class="task-link-btn" asp-page="/Speaker/MasterClassPrep" asp-route-sessionId="@mc.SessionId">Edit prep notes</a>
+                        <a class="task-link-btn" asp-page="/MasterClassPage" asp-route-sessionId="@mc.SessionId">Attendee page &amp; Q&amp;A</a>
                     </div>
                     <label for="mc-link-@mc.SessionId" style="display:block;font-size:12.5px;color:#6b7280;margin-top:10px;">Public link (share with attendees)</label>
                     <input id="mc-link-@mc.SessionId" type="text" readonly value="@mc.PublicLink"

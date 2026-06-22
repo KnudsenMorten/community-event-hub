@@ -1,0 +1,131 @@
+@page "/MasterClassPage/{sessionId:int}"
+@model CommunityHub.Pages.MasterClassPageModel
+@{
+    ViewData["Title"] = Model.View?.Title ?? "Master Class";
+    string Stamp(DateTimeOffset at) => at.UtcDateTime.ToString("d MMM yyyy HH:mm 'UTC'");
+}
+
+<div style="max-width:760px;margin:0 auto;padding:16px;">
+    @if (Model.NotFoundState)
+    {
+        <h1>Master Class not found</h1>
+        <p>This Master Class page is not available. The link may be out of date.</p>
+    }
+    else if (Model.AccessDenied)
+    {
+        <h1>Master Class</h1>
+        <p role="status">
+            This Master Class page is only available to attendees with a confirmed seat,
+            and to the Master Class speakers. If you have a confirmed seat, please open the
+            page from the link in your confirmation email.
+        </p>
+    }
+    else if (Model.View is not null)
+    {
+        <h1 style="margin:0 0 4px;">@Model.View.Title</h1>
+        @if (Model.View.Speakers.Count > 0)
+        {
+            <p style="color:#555;margin:0 0 4px;">Presented by @string.Join(", ", Model.View.Speakers)</p>
+        }
+        @if (!string.IsNullOrWhiteSpace(Model.View.Room))
+        {
+            <p style="color:#555;margin:0 0 12px;">Room: @Model.View.Room</p>
+        }
+
+        @if (!string.IsNullOrEmpty(Model.Message))
+        {
+            <p role="status" style="background:#e6f4ea;border:1px solid #1c6b35;border-radius:6px;padding:10px 12px;">@Model.Message</p>
+        }
+        @if (!string.IsNullOrEmpty(Model.Error))
+        {
+            <p role="alert" style="background:#fdecea;border:1px solid #b3261e;border-radius:6px;padding:10px 12px;">@Model.Error</p>
+        }
+
+        <!-- ============ Prep content ============ -->
+        <section aria-labelledby="prep-h" style="margin:18px 0;">
+            <h2 id="prep-h" style="font-size:1.25rem;">How to prepare</h2>
+            @if (string.IsNullOrWhiteSpace(Model.View.PrepContent))
+            {
+                <p style="color:#666;">The speakers have not posted preparation notes yet — check back soon.</p>
+            }
+            else
+            {
+                <div style="white-space:pre-wrap;line-height:1.55;">@Model.View.PrepContent</div>
+                @if (Model.View.PrepUpdatedAt is { } pu)
+                {
+                    <p style="color:#888;font-size:.85rem;margin-top:8px;">Last updated @Stamp(pu)</p>
+                }
+            }
+        </section>
+
+        <!-- ============ 1:1 private questions (attendee only) ============ -->
+        @if (Model.IsAttendeeViewer)
+        {
+            <section aria-labelledby="ask-h" style="margin:18px 0;">
+                <h2 id="ask-h" style="font-size:1.25rem;">Ask the speakers (private)</h2>
+                <p style="color:#666;margin:0 0 8px;">Only the Master Class speakers see this — other attendees do not.</p>
+                <form method="post" asp-page-handler="Ask" asp-route-sessionId="@Model.SessionId" asp-route-t="@Model.Token">
+                    <label for="qtext" style="display:block;font-weight:600;margin-bottom:4px;">Your question</label>
+                    <textarea id="qtext" name="QuestionText" rows="3" required maxlength="2000"
+                              style="width:100%;box-sizing:border-box;padding:8px;border:1px solid #ccc;border-radius:6px;"></textarea>
+                    <button type="submit" style="margin-top:8px;background:#1c6b35;color:#fff;border:0;border-radius:6px;padding:10px 18px;font-weight:600;">Send question</button>
+                </form>
+
+                @if (Model.MyQuestions.Count > 0)
+                {
+                    <h3 style="font-size:1.05rem;margin:16px 0 6px;">Your questions</h3>
+                    <ul style="list-style:none;padding:0;margin:0;">
+                        @foreach (var q in Model.MyQuestions)
+                        {
+                            <li style="border:1px solid #e3e3e3;border-radius:8px;padding:10px 12px;margin-bottom:8px;">
+                                <div style="white-space:pre-wrap;">@q.QuestionText</div>
+                                @if (!string.IsNullOrWhiteSpace(q.ResponseText))
+                                {
+                                    <div style="margin-top:8px;padding-top:8px;border-top:1px dashed #ccc;">
+                                        <strong>Speaker reply:</strong>
+                                        <div style="white-space:pre-wrap;">@q.ResponseText</div>
+                                    </div>
+                                }
+                                else
+                                {
+                                    <div style="margin-top:6px;color:#888;font-size:.85rem;">Awaiting a reply.</div>
+                                }
+                            </li>
+                        }
+                    </ul>
+                }
+            </section>
+        }
+
+        <!-- ============ Q&A comments (public within the MC) ============ -->
+        <section aria-labelledby="qa-h" style="margin:18px 0;">
+            <h2 id="qa-h" style="font-size:1.25rem;">Group Q&amp;A</h2>
+            <p style="color:#666;margin:0 0 8px;">Visible to everyone in this Master Class.</p>
+
+            <form method="post" asp-page-handler="Comment" asp-route-sessionId="@Model.SessionId" asp-route-t="@Model.Token">
+                <label for="cbody" style="display:block;font-weight:600;margin-bottom:4px;">Add a comment</label>
+                <textarea id="cbody" name="CommentBody" rows="2" required maxlength="2000"
+                          style="width:100%;box-sizing:border-box;padding:8px;border:1px solid #ccc;border-radius:6px;"></textarea>
+                <button type="submit" style="margin-top:8px;background:#34507a;color:#fff;border:0;border-radius:6px;padding:10px 18px;font-weight:600;">Post comment</button>
+            </form>
+
+            @if (Model.Comments.Count == 0)
+            {
+                <p style="color:#666;margin-top:12px;">No comments yet — start the conversation.</p>
+            }
+            else
+            {
+                <ul style="list-style:none;padding:0;margin:14px 0 0;">
+                    @foreach (var c in Model.Comments)
+                    {
+                        <li style="border:1px solid #e3e3e3;border-radius:8px;padding:10px 12px;margin-bottom:8px;@(c.ParentCommentId is null ? "" : "margin-left:20px;")">
+                            <div style="font-weight:600;">@c.AuthorDisplayName</div>
+                            <div style="white-space:pre-wrap;">@c.Body</div>
+                            <div style="color:#888;font-size:.8rem;margin-top:4px;">@Stamp(c.CreatedAt)</div>
+                        </li>
+                    }
+                </ul>
+            }
+        </section>
+    }
+</div>

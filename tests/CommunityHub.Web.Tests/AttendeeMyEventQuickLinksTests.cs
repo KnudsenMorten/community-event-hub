@@ -43,7 +43,6 @@ public sealed class AttendeeMyEventQuickLinksTests
     [Theory]
     [InlineData(ParticipantRole.Organizer)]
     [InlineData(ParticipantRole.Speaker)]
-    [InlineData(ParticipantRole.MasterclassSpeaker)]
     [InlineData(ParticipantRole.Volunteer)]
     public void Lunch_and_swag_eligible_roles_see_those_links(ParticipantRole role)
     {
@@ -54,10 +53,9 @@ public sealed class AttendeeMyEventQuickLinksTests
     [Theory]
     [InlineData(ParticipantRole.Organizer)]
     [InlineData(ParticipantRole.Speaker)]
-    [InlineData(ParticipantRole.MasterclassSpeaker)]
     [InlineData(ParticipantRole.Volunteer)]
-    [InlineData(ParticipantRole.Video)]
-    [InlineData(ParticipantRole.Camera)]
+    [InlineData(ParticipantRole.Media)]
+    [InlineData(ParticipantRole.EventPartner)]
     public void Hotel_eligible_roles_see_the_hotel_link(ParticipantRole role)
     {
         Assert.True(MyEventModel.IsEligibleForHotel(role));

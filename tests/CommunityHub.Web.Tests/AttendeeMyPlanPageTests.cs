@@ -91,7 +91,7 @@ public sealed class AttendeeMyPlanPageTests
             var s = new Session
             {
                 EventId = evt.Id, SessionizeId = id, Title = title,
-                Type = SessionType.CommunityTechSession, Length = SessionLength.FiftyMin,
+                Type = SessionType.TechnicalSession, Length = SessionLength.FiftyMin,
                 Room = "Room A", StartsAt = start, EndsAt = start.AddMinutes(50),
             };
             db.Sessions.Add(s);

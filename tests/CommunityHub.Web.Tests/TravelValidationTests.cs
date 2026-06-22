@@ -88,6 +88,16 @@ public sealed class TravelValidationTests
         };
         db.Participants.Add(speaker);
         await db.SaveChangesAsync();
+        // FEATURE B: travel is entitlement-gated; a SUPPORTED speaker is entitled to
+        // OrderItem.TravelReimbursement, so the form is accessible (a sponsor-self-funded
+        // speaker would be denied — covered by FormEntitlementGateTests).
+        db.SpeakerProfiles.Add(new SpeakerProfile
+        {
+            EventId = EventId, ParticipantId = speaker.Id,
+            SpeakerFunding = SpeakerFunding.Supported,
+            SpeakingPreDay = true, SpeakingMainDay = true,
+        });
+        await db.SaveChangesAsync();
         return speaker;
     }
 

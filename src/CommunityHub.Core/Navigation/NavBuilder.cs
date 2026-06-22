@@ -66,7 +66,7 @@ public static class NavBuilder
             items.Add(new("/Profile", "Nav.MyProfile"));
             // Resources removed for attendees + speakers + sponsors + volunteers
             // (operator 2026-06-21); organizer + media crew keep it.
-            if (role is not ParticipantRole.Speaker and not ParticipantRole.MasterclassSpeaker
+            if (role is not ParticipantRole.Speaker
                      and not ParticipantRole.Sponsor and not ParticipantRole.Volunteer)
                 items.Add(new("/Resources", "Nav.Resources"));
             // Public Sessions list removed for sponsors + volunteers (only relevant to
@@ -78,8 +78,8 @@ public static class NavBuilder
         // Hotel + Dinner: organizer + media crew. Speakers AND volunteers get these
         // inside their own "Event logistics" fold-out below (operator 2026-06-21).
         if (role is ParticipantRole.Organizer
-            or ParticipantRole.Video
-            or ParticipantRole.Camera)
+            or ParticipantRole.Media
+            or ParticipantRole.EventPartner)
         {
             items.Add(new("/Forms/Hotel", "Nav.Hotel"));
             items.Add(new("/Forms/Dinner", "Nav.Dinner"));
@@ -107,7 +107,7 @@ public static class NavBuilder
         // form), a per-role Calendar, an Event-logistics fold-out, and Contact
         // Organizers. No route dropped — Questions/Evaluations/Graphics remain reached
         // from the My Sessions hub.
-        if (role is ParticipantRole.Speaker or ParticipantRole.MasterclassSpeaker)
+        if (role is ParticipantRole.Speaker)
         {
             items.Add(new("/Speaker", "Nav.MySessions"));
             items.Add(new("/Forms/Speaker", "Nav.Bio"));
@@ -122,8 +122,7 @@ public static class NavBuilder
             // (No "Important dates" item here: speakers already have a prominent
             // top-level "Calendar" entry above pointing at the same /Calendar page —
             // a second fold-out entry to the identical route was a duplicate.)
-
-            items.Add(new("/Contact", "Nav.ContactOrganizers"));
+            // (Contact Organizers is appended LAST for every role — see end of method.)
         }
 
         // Volunteer shift wizard — organizer only. For volunteers the sign-up is being
@@ -211,8 +210,15 @@ public static class NavBuilder
 
             // Dedicated leaf label (was reusing the "Event logistics" SECTION key).
             items.Add(new("/Sponsor/Logistics", "Nav.SponsorEventLogistics"));
-            items.Add(new("/Sponsor/Contact", "Nav.ContactOrganizers"));
+            // (Contact Organizers is appended LAST for every role — see end of method.)
         }
+
+        // Contact Organizers — ALWAYS the furthest-right (last) menu item, for every
+        // role (operator 2026-06-21). Sponsors keep their sponsor-specific contact
+        // page; everyone else uses the shared /Contact page.
+        items.Add(new(
+            role == ParticipantRole.Sponsor ? "/Sponsor/Contact" : "/Contact",
+            "Nav.ContactOrganizers"));
 
         // No heading on the primary group — it IS the primary nav.
         return new NavGroup(HeadingKey: null, Items: items, IsManagement: false);

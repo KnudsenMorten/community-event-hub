@@ -52,14 +52,15 @@ public class LoginModel : PageModel
     public string Step { get; set; } = "email";
 
     /// <summary>
-    /// User-picked session lifetime. Replaces the previous "always 8 hours"
-    /// behaviour because attendees / speakers / sponsors with infrequent
-    /// hub visits complained they had to redo the PIN flow every time.
-    /// Values come from the &lt;select&gt; on the login form: "day" /
-    /// "week" / "month" / "persistent" (= until-signout).
+    /// "Remember me" — a single checkbox replacing the old "Stay signed in for"
+    /// dropdown (operator 2026-06-22). CHECKED ⇒ a persistent "until I sign out"
+    /// session (IsPersistent + 365-day expiry — the ASP.NET Core idiom); UNCHECKED
+    /// ⇒ a normal non-persistent working session (browser-session cookie, 8-hour
+    /// sliding expiry). Carried from step 1 (email) through to step 2 (PIN) via a
+    /// hidden field so the choice the user makes up front is honoured at sign-in.
     /// </summary>
     [BindProperty]
-    public string RememberFor { get; set; } = "week";
+    public bool RememberMe { get; set; }
 
     public string? Message { get; set; }
     public bool IsError { get; set; }
@@ -160,20 +161,14 @@ public class LoginModel : PageModel
         var identity = new ClaimsIdentity(
             claims, CookieAuthenticationDefaults.AuthenticationScheme);
 
-        // Per-user session lifetime. The default cookie ExpireTimeSpan
-        // (Program.cs) is 8 hours -- we override it here when the user
-        // picked something longer, so the cookie outlives a single
-        // working session for users who hit the hub only occasionally.
-        // "persistent" sets IsPersistent + a 365-day expiry, which is the
-        // ASP.NET Core idiomatic way to say "until explicit signout".
-        var (expiresUtc, isPersistent) = RememberFor switch
-        {
-            "day"        => (DateTimeOffset.UtcNow.AddDays(1),    true),
-            "week"       => (DateTimeOffset.UtcNow.AddDays(7),    true),
-            "month"      => (DateTimeOffset.UtcNow.AddDays(30),   true),
-            "persistent" => (DateTimeOffset.UtcNow.AddDays(365),  true),
-            _            => (DateTimeOffset.UtcNow.AddHours(8),   false), // fall-back: prior behaviour
-        };
+        // Session lifetime from the single "Remember me" checkbox.
+        //   CHECKED   -> IsPersistent + 365-day expiry — the ASP.NET Core idiom for
+        //               "until explicit sign-out"; the cookie survives browser restarts.
+        //   UNCHECKED -> a normal non-persistent session cookie (cleared when the
+        //               browser closes) with the default 8-hour sliding expiry.
+        var (expiresUtc, isPersistent) = RememberMe
+            ? (DateTimeOffset.UtcNow.AddDays(365), true)
+            : (DateTimeOffset.UtcNow.AddHours(8),  false);
         var authProps = new AuthenticationProperties
         {
             IsPersistent = isPersistent,

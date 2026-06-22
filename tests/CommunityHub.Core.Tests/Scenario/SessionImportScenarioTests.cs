@@ -182,8 +182,7 @@ public sealed class SessionImportScenarioTests
         // the titles of their linked sessions (ordered by start then title).
         var overview = await db.Participants
             .Where(p => p.EventId == seed.EventId
-                        && (p.Role == ParticipantRole.Speaker
-                            || p.Role == ParticipantRole.MasterclassSpeaker))
+                        && p.Role == ParticipantRole.Speaker)
             .Select(p => new
             {
                 p.Id,

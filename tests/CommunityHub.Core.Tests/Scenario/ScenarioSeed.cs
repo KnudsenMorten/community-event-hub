@@ -105,7 +105,9 @@ public static class ScenarioSeed
         }
 
         var organizer = Add(OrganizerEmail, "Demo Organizer", ParticipantRole.Organizer);
-        var mc = Add(MasterclassSpeakerEmail, "Masterclass Mentor", ParticipantRole.MasterclassSpeaker);
+        // The "Master Class" speaker is now a plain Speaker; the pre-day nuance
+        // lives on SpeakerProfile.SpeakingPreDay (set on their profile below).
+        var mc = Add(MasterclassSpeakerEmail, "Masterclass Mentor", ParticipantRole.Speaker);
         var s1 = Add(SpeakerOneEmail, "Session Speaker One", ParticipantRole.Speaker);
         var s2 = Add(SpeakerTwoEmail, "Session Speaker Two", ParticipantRole.Speaker);
         var sp = Add(SponsorContactEmail, "Sponsor Contact", ParticipantRole.Sponsor, SponsorCompanyId);
@@ -119,6 +121,9 @@ public static class ScenarioSeed
         {
             EventId = evt.Id, ParticipantId = mc.Id, CreatedAt = now,
             Tagline = "Master Class lead", Biography = "Veteran practitioner.",
+            // Pre-day (Master Class) speaker — drives the masterclass-only
+            // milestone + pre-day lunch entitlement.
+            SpeakingPreDay = true,
         });
         db.SpeakerProfiles.Add(new SpeakerProfile
         {

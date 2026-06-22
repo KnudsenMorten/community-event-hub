@@ -33,7 +33,6 @@ public class SpeakerModel : PageModel
     public static readonly ParticipantRole[] EligibleRoles =
     {
         ParticipantRole.Speaker,
-        ParticipantRole.MasterclassSpeaker,
     };
 
     public static readonly string[] AccreditationOptions =

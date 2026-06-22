@@ -54,7 +54,6 @@ public class AccessLinksModel : PageModel
     {
         ParticipantRole.Organizer,
         ParticipantRole.Speaker,
-        ParticipantRole.MasterclassSpeaker,
         ParticipantRole.Volunteer,
     };
 

@@ -7,6 +7,13 @@
 <div class="card">
     <h2>@Localizer["Dinner.Title"]</h2>
 
+    @if (Model.AccessDenied)
+    {
+        <p class="error">@Localizer["Dinner.AccessDenied"]</p>
+        <p><a asp-page="/Index">@Localizer["Common.BackToHub"]</a></p>
+    }
+    else
+    {
     <p>@Localizer["Dinner.IntroBody", Model.EventCode, Model.DinnerDateLabel, Model.DinnerVenue]</p>
     <p>@Localizer["Dinner.BeforeNote"]</p>
 
@@ -76,4 +83,5 @@
         </p>
     }
     <p><a asp-page="/Index">@Localizer["Common.BackToHub"]</a></p>
+    }
 </div>

@@ -4,8 +4,8 @@ namespace CommunityHub.Core.Domain;
 /// The single source of truth for mapping a <see cref="ScheduleEntry.Roles"/> CSV
 /// (role keywords) to participant roles — used by the Key-dates display, the iCal
 /// feed and the organizer editor so role visibility is identical everywhere.
-/// Keywords: organizer, volunteer, speaker (incl. master-class), media (video/camera),
-/// attendee, sponsor, all (everyone). Empty = everyone.
+/// Keywords: organizer, volunteer, speaker (incl. master-class), media (press/photo/video crew),
+/// attendee, sponsor, all (everyone). Empty = everyone. Event partners map to "organizer".
 /// </summary>
 public static class ScheduleRoles
 {
@@ -24,8 +24,9 @@ public static class ScheduleRoles
     {
         ParticipantRole.Organizer => "organizer",
         ParticipantRole.Volunteer => "volunteer",
-        ParticipantRole.Speaker or ParticipantRole.MasterclassSpeaker => "speaker",
-        ParticipantRole.Video or ParticipantRole.Camera => "media",
+        ParticipantRole.Speaker => "speaker",
+        ParticipantRole.Media => "media",
+        ParticipantRole.EventPartner => "organizer",
         ParticipantRole.Attendee => "attendee",
         ParticipantRole.Sponsor => "sponsor",
         _ => "",

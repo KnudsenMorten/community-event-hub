@@ -408,7 +408,7 @@ public sealed class OrganizerGridSearchSortPagingTests
     }
 
     private static Session MakeSession(string title, string? room = null,
-        SessionType type = SessionType.CommunityTechSession,
+        SessionType type = SessionType.TechnicalSession,
         SessionLength length = SessionLength.SixtyMin) => new()
     {
         EventId = EventId, Title = title, Room = room, Type = type, Length = length,

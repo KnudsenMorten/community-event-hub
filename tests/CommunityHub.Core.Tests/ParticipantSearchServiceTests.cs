@@ -43,9 +43,9 @@ public sealed class ParticipantSearchServiceTests
                 ParticipantRole.Speaker, active: false, life: ParticipantLifecycleState.Active),
             // Not yet activated (lifecycle Preselected) → NOT lifecycle-active.
             Person(EventId, "Dave Dahl", "dave@example.test",
-                ParticipantRole.MasterclassSpeaker, active: true, life: ParticipantLifecycleState.Preselected),
+                ParticipantRole.Speaker, active: true, life: ParticipantLifecycleState.Preselected),
             Person(EventId, "Eve Eriksen", "eve@example.test",
-                ParticipantRole.Camera, active: true, life: ParticipantLifecycleState.Active),
+                ParticipantRole.Media, active: true, life: ParticipantLifecycleState.Active),
             // Different edition — must never leak into EventId queries.
             Person(OtherEventId, "Alice Other", "alice@other.test",
                 ParticipantRole.Speaker, active: true, life: ParticipantLifecycleState.Active));
@@ -166,7 +166,8 @@ public sealed class ParticipantSearchServiceTests
         var speakers = await RunAsync(db,
             Req(role: ParticipantRole.Speaker, status: ParticipantStatusFilter.All));
 
-        Assert.Equal(new[] { "Alice Andersen", "Carol Carlsen" },
+        // Dave (formerly MasterclassSpeaker) is now a plain Speaker too.
+        Assert.Equal(new[] { "Alice Andersen", "Carol Carlsen", "Dave Dahl" },
             speakers.OrderBy(p => p.FullName).Select(p => p.FullName).ToArray());
     }
 
@@ -176,13 +177,13 @@ public sealed class ParticipantSearchServiceTests
         using var db = NewDb();
         await SeedAsync(db);
 
-        // Speaker persona = Speaker + MasterclassSpeaker → Alice, Carol, Dave.
+        // Speaker persona = Speaker → Alice, Carol, Dave.
         var speakerPersona = await RunAsync(db,
             Req(persona: PersonaGroup.Speaker, status: ParticipantStatusFilter.All));
         Assert.Equal(new[] { "Alice Andersen", "Carol Carlsen", "Dave Dahl" },
             speakerPersona.OrderBy(p => p.FullName).Select(p => p.FullName).ToArray());
 
-        // Media-team persona = Video + Camera → Eve only.
+        // Media-team persona = Media → Eve only.
         var media = await RunAsync(db,
             Req(persona: PersonaGroup.MediaTeam, status: ParticipantStatusFilter.All));
         Assert.Equal(new[] { "Eve Eriksen" }, media.Select(p => p.FullName).ToArray());
@@ -216,7 +217,7 @@ public sealed class ParticipantSearchServiceTests
 
         var byPersona = await RunAsync(db,
             Req(status: ParticipantStatusFilter.All, sort: ParticipantSortColumn.Persona));
-        // Role enum order: Speaker(1) < MasterclassSpeaker(2) < Volunteer(3) < Camera(7).
+        // Role enum order: Speaker(1) < Volunteer(3) < Media(6).
         Assert.Equal(ParticipantRole.Speaker, byPersona.First().Role);
     }
 

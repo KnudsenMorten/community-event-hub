@@ -57,14 +57,14 @@ public sealed class MasterClassFeaturesTests
         await db.SaveChangesAsync();
 
         var org = new Participant { EventId = evt.Id, FullName = "Org One", Email = "org@example.test", Role = ParticipantRole.Organizer, IsActive = true };
-        var speaker = new Participant { EventId = evt.Id, FullName = "MC Speaker", Email = "mcspeaker@example.test", Role = ParticipantRole.MasterclassSpeaker, IsActive = true };
+        var speaker = new Participant { EventId = evt.Id, FullName = "MC Speaker", Email = "mcspeaker@example.test", Role = ParticipantRole.Speaker, IsActive = true };
         var other = new Participant { EventId = evt.Id, FullName = "Other Speaker", Email = "other@example.test", Role = ParticipantRole.Speaker, IsActive = true };
         db.Participants.AddRange(org, speaker, other);
         await db.SaveChangesAsync();
 
         var mgmt = new SessionManagementService(db, new NullRoomQrProvider(), new FixedClock(Now));
         var mc = await mgmt.AddHubSessionAsync(
-            evt.Id, "Hands-on Master Class", SessionType.CommunityMasterClass,
+            evt.Id, "Hands-on Master Class", SessionType.MasterClass,
             SessionLength.FullDay, room: "Lab", speakerParticipantIds: new[] { speaker.Id });
 
         return (evt.Id, org.Id, speaker.Id, other.Id, mc.Id);
@@ -93,7 +93,7 @@ public sealed class MasterClassFeaturesTests
         var (eventId, _, _, _, _) = await SeedAsync(db);
         var mgmt = new SessionManagementService(db, new NullRoomQrProvider(), new FixedClock(Now));
         var tech = await mgmt.AddHubSessionAsync(
-            eventId, "A Talk", SessionType.CommunityTechSession, SessionLength.SixtyMin);
+            eventId, "A Talk", SessionType.TechnicalSession, SessionLength.SixtyMin);
         var svc = new MasterClassLogisticsService(db, new FixedClock(Now));
 
         await Assert.ThrowsAsync<InvalidOperationException>(
@@ -137,7 +137,7 @@ public sealed class MasterClassFeaturesTests
         var svc = new MasterClassLogisticsService(db, new FixedClock(Now));
 
         Assert.True(await svc.CanEditAsync(eventId, mcId, orgId, ParticipantRole.Organizer));
-        Assert.True(await svc.CanEditAsync(eventId, mcId, speakerId, ParticipantRole.MasterclassSpeaker));
+        Assert.True(await svc.CanEditAsync(eventId, mcId, speakerId, ParticipantRole.Speaker));
     }
 
     [Fact]
@@ -159,7 +159,7 @@ public sealed class MasterClassFeaturesTests
         var svc = new MasterClassLogisticsService(db, new FixedClock(Now));
 
         await svc.UpdateLogisticsAsync(
-            eventId, mcId, speakerId, ParticipantRole.MasterclassSpeaker,
+            eventId, mcId, speakerId, ParticipantRole.Speaker,
             "mcspeaker@example.test", "Bring your laptop charged.");
 
         var view = await svc.GetPublicViewAsync((await db.Sessions.SingleAsync(s => s.Id == mcId)).PublicSlug);
@@ -227,7 +227,7 @@ public sealed class MasterClassFeaturesTests
         var (eventId, _, _, _, _) = await SeedAsync(db);
         var mgmt = new SessionManagementService(db, new NullRoomQrProvider(), new FixedClock(Now));
         var tech = await mgmt.AddHubSessionAsync(
-            eventId, "A Talk", SessionType.CommunityTechSession, SessionLength.SixtyMin);
+            eventId, "A Talk", SessionType.TechnicalSession, SessionLength.SixtyMin);
         var tsess = await db.Sessions.SingleAsync(x => x.Id == tech.Id);
         tsess.BookingEndpointUri = "https://zoho.example.test/bookings/x";
         await db.SaveChangesAsync();

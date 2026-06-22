@@ -27,17 +27,26 @@ public class DashboardModel : PageModel
     private readonly ICurrentParticipantAccessor _participant;
     private readonly TimeProvider _clock;
     private readonly ZohoOptions _zoho;
+    private readonly CompanyManagerClient _cm;
+    private readonly CompanyManagerOptions _cmOptions;
+    private readonly ILogger<DashboardModel> _logger;
 
     public DashboardModel(
         CommunityHubDbContext db,
         ICurrentParticipantAccessor participant,
         TimeProvider clock,
-        ZohoOptions zoho)
+        ZohoOptions zoho,
+        CompanyManagerClient cm,
+        CompanyManagerOptions cmOptions,
+        ILogger<DashboardModel> logger)
     {
         _db = db;
         _participant = participant;
         _clock = clock;
         _zoho = zoho;
+        _cm = cm;
+        _cmOptions = cmOptions;
+        _logger = logger;
     }
 
     public bool AccessDenied { get; private set; }
@@ -52,6 +61,7 @@ public class DashboardModel : PageModel
 
     public record SponsorRow(
         string CompanyId,
+        string CompanyName,
         int Contacts,
         int TasksTotal,
         int TasksDone,
@@ -130,6 +140,12 @@ public class DashboardModel : PageModel
         foreach (var cid in contactsByCompany.Keys) allCompanyIds.Add(cid);
         foreach (var cid in leadAgg.Keys) allCompanyIds.Add(cid);
 
+        // Resolve each company's display NAME (don't show the raw id). Authoritative
+        // source is Company Manager (public -> legal name), the same chain the
+        // sponsor-facing pages use; falls back to "Company {id}" only when the lookup
+        // is unavailable. Resolved once per company per request.
+        var names = await ResolveCompanyNamesAsync(allCompanyIds, ct);
+
         Rows = allCompanyIds
             .Select(cid =>
             {
@@ -138,6 +154,7 @@ public class DashboardModel : PageModel
                 leadAgg.TryGetValue(cid, out var la);
                 return new SponsorRow(
                     CompanyId:    cid,
+                    CompanyName:  names.TryGetValue(cid, out var nm) ? nm : $"Company {cid}",
                     Contacts:     contactCount,
                     TasksTotal:   ta?.TasksTotal   ?? 0,
                     TasksDone:    ta?.TasksDone    ?? 0,
@@ -147,9 +164,38 @@ public class DashboardModel : PageModel
                     LastZohoSync: la?.LastSync);
             })
             .OrderByDescending(r => r.TasksOverdue)
-            .ThenBy(r => r.CompanyId)
+            .ThenBy(r => r.CompanyName)
             .ToList();
 
         return Page();
+    }
+
+    /// <summary>
+    /// Map each sponsor company id to its display name via Company Manager
+    /// (public name -&gt; legal name, the canonical <see cref="SponsorCompanyName"/>
+    /// chain). Resilient: a failed/disabled lookup leaves the id out of the map so
+    /// the caller falls back to "Company {id}" rather than 500-ing the dashboard.
+    /// </summary>
+    private async Task<Dictionary<string, string>> ResolveCompanyNamesAsync(
+        IEnumerable<string> companyIds, CancellationToken ct)
+    {
+        var map = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (!_cmOptions.Enabled) return map;
+
+        foreach (var cid in companyIds)
+        {
+            if (!int.TryParse(cid, out var idInt)) continue;
+            try
+            {
+                var c = await _cm.GetCompanyAsync(idInt, ct);
+                if (c is null) continue;
+                map[cid] = SponsorCompanyName.Resolve(c.PublicName, c.Name, billingName: null, companyId: cid);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Sponsor dashboard: company-name lookup failed for {CompanyId}.", cid);
+            }
+        }
+        return map;
     }
 }

@@ -1037,15 +1037,15 @@ Describe "14. Speaker hub — self-service milestone tracker" {
 
     # FEATURE: the Speaker Hub page exists and is speaker-only.
     # ACCEPTANCE: /Speaker/Index page + model present; eligibility is gated to
-    # Speaker / MasterclassSpeaker; non-speakers see AccessDenied, not a 403.
+    # the Speaker role (the pre-day nuance lives on SpeakerProfile.SpeakingPreDay,
+    # not a separate role); non-speakers see AccessDenied, not a 403.
     It "Speaker hub page exists and is gated to speaker roles" {
         (Test-Path (Join-Path $script:SrcRoot 'Pages/Speaker/Index.cshtml')) | Should -BeTrue -Because "the speaker hub is a first-class page"
         $code = Get-SrcText 'src/CommunityHub/Pages/Speaker/Index.cshtml.cs'
         $code | Should -Not -BeNullOrEmpty
         $code | Should -Match '\[Authorize\]' -Because "the speaker hub requires sign-in"
-        $code | Should -Match 'EligibleRoles' -Because "only Speaker / MasterclassSpeaker have a journey"
+        $code | Should -Match 'EligibleRoles' -Because "only the Speaker role has a journey"
         $code | Should -Match 'ParticipantRole\.Speaker' -Because "speakers are eligible"
-        $code | Should -Match 'ParticipantRole\.MasterclassSpeaker' -Because "master-class speakers are eligible"
         $code | Should -Match 'AccessDenied' -Because "a non-speaker gets a friendly message, not a hard 403"
     }
 

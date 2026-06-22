@@ -99,6 +99,31 @@ public class Participant
     public bool IsEventCoordinator { get; set; }
 
     /// <summary>
+    /// For a Sponsor-role contact: this person staffs the company's BOOTH at the
+    /// event (an exhibitor present on site), as opposed to a purely digital /
+    /// administrative sponsor contact. Drives the sponsor-hat order entitlements
+    /// (<see cref="Entitlements.OrderEntitlements"/>): a booth member gets
+    /// polo + dinner + main-day lunch, a non-booth sponsor gets nothing from the
+    /// sponsor hat. Default false.
+    /// </summary>
+    public bool IsBoothMember { get; set; }
+
+    /// <summary>
+    /// Optional self-reference to the <see cref="Id"/> of the PRIMARY participant
+    /// row this person is a duplicate of (the same physical person registered
+    /// under more than one hat / email). When set, this row is NOT counted on its
+    /// own in order tallies — the primary it points to represents them, so each
+    /// physical person is counted exactly once
+    /// (<see cref="Entitlements.OrderCountService"/>). Null = this row is itself a
+    /// primary (the normal case). No cascade delete: removing the primary must not
+    /// delete the duplicate row.
+    /// </summary>
+    public int? SamePersonAsId { get; set; }
+
+    /// <summary>The primary participant this row duplicates (see <see cref="SamePersonAsId"/>).</summary>
+    public Participant? SamePersonAs { get; set; }
+
+    /// <summary>
     /// False = the person cannot log in (e.g. withdrew). Login checks this.
     /// This stays the deactivation / cancellation switch — orthogonal to
     /// <see cref="LifecycleState"/> (the onboarding pre-selection gate).

@@ -1,5 +1,7 @@
 using System.Security.Cryptography;
+using CommunityHub.Core.Audit;
 using CommunityHub.Core.Data;
+using CommunityHub.Core.Domain;
 using Microsoft.EntityFrameworkCore;
 
 namespace CommunityHub.Core.Reminders;
@@ -17,10 +19,12 @@ namespace CommunityHub.Core.Reminders;
 public sealed class CalendarFeedTokenService
 {
     private readonly CommunityHubDbContext _db;
+    private readonly IAuditTrail? _audit;
 
-    public CalendarFeedTokenService(CommunityHubDbContext db)
+    public CalendarFeedTokenService(CommunityHubDbContext db, IAuditTrail? audit = null)
     {
         _db = db;
+        _audit = audit;
     }
 
     /// <summary>
@@ -39,6 +43,9 @@ public sealed class CalendarFeedTokenService
 
         p.CalendarFeedToken = NewToken();
         await _db.SaveChangesAsync(ct);
+        // AUDIT (§24): the FIRST mint is "this user set up calendar sync" — the usage
+        // signal the organizer wants to count. (Per-poll feed fetches are NOT audited.)
+        await AuditCalendarAsync(p, AuditActions.CalendarSubscribe, "Subscribed to calendar feed", ct);
         return p.CalendarFeedToken!;
     }
 
@@ -53,7 +60,25 @@ public sealed class CalendarFeedTokenService
 
         p.CalendarFeedToken = NewToken();
         await _db.SaveChangesAsync(ct);
+        await AuditCalendarAsync(p, AuditActions.CalendarTokenReset, "Reset calendar feed token", ct);
         return p.CalendarFeedToken!;
+    }
+
+    private async Task AuditCalendarAsync(Participant p, string action, string summary, CancellationToken ct)
+    {
+        if (_audit is null) return;
+        await _audit.RecordAsync(new AuditEntry
+        {
+            EventId = p.EventId,
+            Category = AuditCategory.CalendarSync,
+            Action = action,
+            ActorParticipantId = p.Id,
+            ActorEmail = string.IsNullOrWhiteSpace(p.Email) ? "(unknown)" : p.Email,
+            ActorRole = p.Role.ToString(),
+            Summary = summary,
+            TargetType = "CalendarFeed",
+            TargetId = p.Id.ToString(),
+        }, ct);
     }
 
     /// <summary>

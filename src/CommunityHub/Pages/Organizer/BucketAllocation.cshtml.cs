@@ -124,6 +124,7 @@ public class BucketAllocationModel : PageModel
         catch (VolunteerAccessDeniedException) { return Forbid(); }
     }
 
+    [CommunityHub.Audit.Audit("Committed volunteer allocations", Category = CommunityHub.Core.Domain.AuditCategory.Admin, TargetType = "VolunteerAllocation")]
     public async Task<IActionResult> OnPostCommitAsync(CancellationToken ct)
     {
         var me = _participant.Current;
@@ -131,7 +132,11 @@ public class BucketAllocationModel : PageModel
         try
         {
             var r = await _alloc.CommitAsync(Actor(me), ct);
-            return RedirectToPage(new { Msg = $"Committed {r.Committed} allocation(s)." });
+            var msg = $"Committed {r.Committed} allocation(s).";
+            if (r.SkippedDuplicate > 0) msg += $" {r.SkippedDuplicate} already assigned (skipped).";
+            if (r.SkippedOutOfRing > 0)
+                msg += $" {r.SkippedOutOfRing} left in the queue — those volunteers are above the feature's released ring (out of scope). Promote the ring in Settings, then commit again to include them.";
+            return RedirectToPage(new { Msg = msg });
         }
         catch (VolunteerAccessDeniedException) { return Forbid(); }
     }
@@ -141,6 +146,22 @@ public class BucketAllocationModel : PageModel
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
         try { var n = await _alloc.DiscardAsync(Actor(me), ct); return RedirectToPage(new { Msg = $"Discarded {n} draft allocation(s)." }); }
+        catch (VolunteerAccessDeniedException) { return Forbid(); }
+    }
+
+    public async Task<IActionResult> OnPostReplanDropoutAsync(int volunteerId, CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+        try
+        {
+            var r = await _alloc.SeedDropoutBackfillAsync(Actor(me), volunteerId, ct);
+            var msg = r.FreedAssignments == 0
+                ? "That volunteer had no assignments to free."
+                : $"Freed {r.FreedAssignments} assignment(s) across {r.AffectedTasks} task(s) and queued " +
+                  $"{r.SeededBackfillDrafts} backfill candidate(s) as drafts — review the simulation below, then Commit.";
+            return RedirectToPage(new { Msg = msg });
+        }
         catch (VolunteerAccessDeniedException) { return Forbid(); }
     }
 

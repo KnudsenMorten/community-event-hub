@@ -65,6 +65,8 @@
         <div class="ex-actions ex-no-print">
             <a class="ex-btn" asp-page="/Organizer/Exports" asp-page-handler="AttendeesCsv"
                aria-label="@Localizer["Exports.DownloadAttendees"]">@Localizer["Exports.DownloadCsv"]</a>
+            <a class="ex-btn" asp-page="/Organizer/Exports" asp-page-handler="AttendeesXlsx"
+               aria-label="Download the attendee list as Excel (.xlsx)">Excel (.xlsx)</a>
         </div>
         @if (Model.Attendees.Count == 0)
         {
@@ -105,6 +107,8 @@
         <div class="ex-actions ex-no-print">
             <a class="ex-btn" asp-page="/Organizer/Exports" asp-page-handler="LunchCsv"
                aria-label="@Localizer["Exports.DownloadLunch"]">@Localizer["Exports.DownloadCsv"]</a>
+            <a class="ex-btn" asp-page="/Organizer/Exports" asp-page-handler="LunchXlsx"
+               aria-label="Download the lunch headcount as Excel (.xlsx)">Excel (.xlsx)</a>
         </div>
         <div class="ex-scroll">
             <table class="ex-tbl">
@@ -162,6 +166,8 @@
         <div class="ex-actions ex-no-print">
             <a class="ex-btn" asp-page="/Organizer/Exports" asp-page-handler="RoomsCsv"
                aria-label="@Localizer["Exports.DownloadRooms"]">@Localizer["Exports.DownloadCsv"]</a>
+            <a class="ex-btn" asp-page="/Organizer/Exports" asp-page-handler="RoomsXlsx"
+               aria-label="Download the room sheets as Excel (.xlsx)">Excel (.xlsx)</a>
         </div>
         @if (Model.RoomSheets.Count == 0)
         {
@@ -204,6 +210,8 @@
         <div class="ex-actions ex-no-print">
             <a class="ex-btn" asp-page="/Organizer/Exports" asp-page-handler="VolunteerRotaCsv"
                aria-label="@Localizer["Exports.DownloadRota"]">@Localizer["Exports.DownloadCsv"]</a>
+            <a class="ex-btn" asp-page="/Organizer/Exports" asp-page-handler="VolunteerRotaXlsx"
+               aria-label="Download the volunteer rota as Excel (.xlsx)">Excel (.xlsx)</a>
         </div>
         @if (Model.VolunteerRota.Count == 0)
         {
@@ -248,6 +256,8 @@
         <div class="ex-actions ex-no-print">
             <a class="ex-btn" asp-page="/Organizer/Exports" asp-page-handler="BadgesCsv"
                aria-label="@Localizer["Exports.DownloadBadges"]">@Localizer["Exports.DownloadCsv"]</a>
+            <a class="ex-btn" asp-page="/Organizer/Exports" asp-page-handler="BadgesXlsx"
+               aria-label="Download the badge data as Excel (.xlsx)">Excel (.xlsx)</a>
         </div>
         @if (Model.BadgeData.Count == 0)
         {

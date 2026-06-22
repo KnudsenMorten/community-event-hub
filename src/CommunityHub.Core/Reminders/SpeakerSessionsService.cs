@@ -52,7 +52,6 @@ public sealed class SpeakerSessionsService
     private static readonly ParticipantRole[] SpeakerRoles =
     {
         ParticipantRole.Speaker,
-        ParticipantRole.MasterclassSpeaker,
     };
 
     /// <summary>
@@ -98,7 +97,7 @@ public sealed class SpeakerSessionsService
                 string.IsNullOrWhiteSpace(r.Room) ? null : r.Room,
                 r.StartsAt,
                 r.EndsAt,
-                r.Type == SessionType.CommunityMasterClass,
+                r.Type == SessionType.MasterClass,
                 r.StartsAt is not null,
                 r.OpenQuestionCount,
                 r.CoSpeakers

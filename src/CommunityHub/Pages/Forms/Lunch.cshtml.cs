@@ -1,6 +1,7 @@
 using CommunityHub.Auth;
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
+using CommunityHub.Forms;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
@@ -30,10 +31,9 @@ public class LunchModel : PageModel
     {
         ParticipantRole.Volunteer,
         ParticipantRole.Speaker,
-        ParticipantRole.MasterclassSpeaker,
         ParticipantRole.Organizer,
-        ParticipantRole.Video,
-        ParticipantRole.Camera,
+        ParticipantRole.Media,
+        ParticipantRole.EventPartner,
     };
 
     /// <summary>
@@ -45,8 +45,26 @@ public class LunchModel : PageModel
     public static bool ShowSetupDayFor(ParticipantRole role) =>
         role is ParticipantRole.Volunteer
              or ParticipantRole.Organizer
-             or ParticipantRole.Video
-             or ParticipantRole.Camera;
+             or ParticipantRole.Media
+             or ParticipantRole.EventPartner;
+
+    /// <summary>
+    /// FEATURE B: lunch is gated by ENTITLEMENT
+    /// (<see cref="OrderItem.LunchPreDay"/> OR <see cref="OrderItem.LunchMainDay"/>).
+    /// A sponsor-self-funded speaker IS entitled (LunchMainDay) and so still sees
+    /// the form. A non-speaker role keeps its historical access even if its
+    /// entitlement changed, so access is never silently removed; speakers are gated
+    /// purely by entitlement.
+    /// </summary>
+    private async Task<bool> IsEligibleAsync(CurrentParticipant me, CancellationToken ct)
+    {
+        var entitled = await FormEntitlementGate.IsEntitledToAnyAsync(
+            _db, me.EventId, me.ParticipantId, ct,
+            OrderItem.LunchPreDay, OrderItem.LunchMainDay);
+        var historicalNonSpeaker =
+            me.Role != ParticipantRole.Speaker && EligibleRoles.Contains(me.Role);
+        return entitled || historicalNonSpeaker;
+    }
 
     /// <summary>SourceKey prefix used for the "complete the lunch form" task.</summary>
     public const string LunchTaskKey = "lunch-form";
@@ -76,7 +94,7 @@ public class LunchModel : PageModel
         FullName = me.FullName;
         Email = me.Email;
         Role = me.Role;
-        if (!EligibleRoles.Contains(me.Role))
+        if (!await IsEligibleAsync(me, ct))
         {
             AccessDenied = true;
             return Page();
@@ -109,7 +127,7 @@ public class LunchModel : PageModel
         FullName = me.FullName;
         Email = me.Email;
         Role = me.Role;
-        if (!EligibleRoles.Contains(me.Role))
+        if (!await IsEligibleAsync(me, ct))
         {
             AccessDenied = true;
             return Page();

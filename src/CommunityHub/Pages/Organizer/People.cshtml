@@ -8,12 +8,12 @@
     {
         new HubTile("/Organizer/FindPerson", Localizer["Nav.OrgFindPerson"].Value, Localizer["OrgPeople.FindPerson"].Value),
         new HubTile("/Organizer/Participants", Localizer["Nav.OrgParticipants"].Value, Localizer["OrgPeople.Participants"].Value),
-        new HubTile("/Organizer/PreselectionQueue", Localizer["Nav.OrgPreselectionQueue"].Value, Localizer["OrgPeople.Preselection"].Value),
+        new HubTile("/Organizer/PreselectionQueue", Localizer["Nav.OrgPreselectionQueue"].Value, Localizer["OrgPeople.Preselection"].Value, "participant-activation"),
         new HubTile("/Organizer/Onboarding", Localizer["Nav.OrgOnboarding"].Value, Localizer["OrgPeople.Onboarding"].Value),
         new HubTile("/Organizer/Attendees", Localizer["Nav.OrgAttendees"].Value, Localizer["OrgPeople.Attendees"].Value),
-        new HubTile("/Organizer/ActionQueue", Localizer["Nav.OrgActionQueue"].Value, Localizer["OrgPeople.ActionQueue"].Value),
-        new HubTile("/Organizer/WelcomeLinks", "Welcome sign-in links", "Review and revoke welcome auto-login links the hub has issued."),
-        new HubTile("/Organizer/AccessLinks", "Permanent sign-in links", "Standing one-click sign-in links."),
+        new HubTile("/Organizer/ActionQueue", Localizer["Nav.OrgActionQueue"].Value, Localizer["OrgPeople.ActionQueue"].Value, "onboarding-step-reset"),
+        new HubTile("/Organizer/WelcomeLinks", "Welcome sign-in links", "Review and revoke welcome auto-login links the hub has issued.", "magic-link"),
+        new HubTile("/Organizer/AccessLinks", "Permanent sign-in links", "Standing one-click sign-in links.", "magic-link"),
     };
 }
 

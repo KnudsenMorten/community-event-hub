@@ -3,6 +3,7 @@ using CommunityHub.Auth;
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
 using CommunityHub.Core.Organizer;
+using CommunityHub.Export;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
@@ -106,26 +107,57 @@ public class AttendeesModel : PageModel
         if (me is null) return RedirectToPage("/Login");
         if (!OrganizerAuth.IsRealOrganizer(me)) return Forbid();
 
-        var rows = await BuildQuery(me.EventId)
+        var csv = await BuildExportCsvAsync(me.EventId, ';', ct);
+
+        // UTF-8 BOM so Excel detects the encoding (Danish names).
+        var bytes = Encoding.UTF8.GetPreamble()
+            .Concat(Encoding.UTF8.GetBytes(csv)).ToArray();
+        return File(bytes, "text/csv", "attendees.csv");
+    }
+
+    /// <summary>Same export as <see cref="OnGetExportAsync"/> (current filter)
+    /// but delivered as a native Excel (.xlsx) workbook. Reuses the EXACT same row
+    /// builder (<see cref="BuildExportCsvAsync"/>) so columns and rows are identical;
+    /// only the file format differs. NOTE: the on-screen CSV download is
+    /// semicolon-delimited (an existing download contract we must not change), but
+    /// <see cref="CsvToXlsx"/> parses comma-delimited RFC-4180 — so the workbook is
+    /// fed a comma-delimited rendering of the SAME rows/columns/values.</summary>
+    public async Task<IActionResult> OnGetExportXlsxAsync(CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+        if (!OrganizerAuth.IsRealOrganizer(me)) return Forbid();
+
+        var csv = await BuildExportCsvAsync(me.EventId, ',', ct);
+        return File(CsvToXlsx.Build(csv, "Attendees"), CsvToXlsx.ContentType, "attendees.xlsx");
+    }
+
+    /// <summary>Builds the attendee export (header + one line per row) for the
+    /// CURRENT filter selection. Single source of truth shared by the CSV and the
+    /// XLSX download handlers so both contain identical columns/rows. The delimiter
+    /// is a parameter so the CSV handler keeps its semicolon contract while the
+    /// xlsx feed uses commas (what <see cref="CsvToXlsx"/> parses into columns);
+    /// fields are escaped against whichever delimiter is in use.</summary>
+    private async Task<string> BuildExportCsvAsync(int eventId, char delimiter, CancellationToken ct)
+    {
+        var rows = await BuildQuery(eventId)
             .OrderBy(a => a.LastName).ThenBy(a => a.FirstName)
             .ToListAsync(ct);
 
         var sb = new StringBuilder();
-        sb.AppendLine("FirstName;LastName;Email;TicketStatus;TicketClass;BookingStatus;MasterClass;Mismatch;LastSyncedUtc");
+        sb.AppendLine(string.Join(delimiter,
+            "FirstName", "LastName", "Email", "TicketStatus", "TicketClass",
+            "BookingStatus", "MasterClass", "Mismatch", "LastSyncedUtc"));
         foreach (var a in rows)
         {
-            sb.AppendLine(string.Join(';',
-                Csv(a.FirstName), Csv(a.LastName), Csv(a.Email),
-                a.TicketStatus, Csv(a.TicketClassName),
-                a.BookingStatus, Csv(a.MasterClassName),
+            sb.AppendLine(string.Join(delimiter,
+                Csv(a.FirstName, delimiter), Csv(a.LastName, delimiter), Csv(a.Email, delimiter),
+                a.TicketStatus, Csv(a.TicketClassName, delimiter),
+                a.BookingStatus, Csv(a.MasterClassName, delimiter),
                 a.HasReconciliationMismatch ? "YES" : "",
                 a.LastSyncedAt.UtcDateTime.ToString("yyyy-MM-dd HH:mm")));
         }
-
-        // UTF-8 BOM so Excel detects the encoding (Danish names).
-        var bytes = Encoding.UTF8.GetPreamble()
-            .Concat(Encoding.UTF8.GetBytes(sb.ToString())).ToArray();
-        return File(bytes, "text/csv", "attendees.csv");
+        return sb.ToString();
     }
 
     private IQueryable<Core.Domain.Attendee> BuildQuery(int eventId)
@@ -161,11 +193,13 @@ public class AttendeesModel : PageModel
             : await all.MaxAsync(a => (DateTimeOffset?)a.LastSyncedAt, ct);
     }
 
-    /// <summary>Semicolon-separated CSV field: quote when needed.</summary>
-    private static string Csv(string? v)
+    /// <summary>CSV field for the given <paramref name="delimiter"/>: quote when the
+    /// value contains the delimiter, a quote or a newline. Defaults to the original
+    /// semicolon so the on-screen CSV download stays byte-identical.</summary>
+    private static string Csv(string? v, char delimiter = ';')
     {
         if (string.IsNullOrEmpty(v)) return string.Empty;
-        return v.Contains(';') || v.Contains('"') || v.Contains('\n')
+        return v.Contains(delimiter) || v.Contains('"') || v.Contains('\n')
             ? '"' + v.Replace("\"", "\"\"") + '"'
             : v;
     }

@@ -67,7 +67,7 @@ public sealed class OrganizerOverviewServiceTests
         var org = P("org", ParticipantRole.Organizer);
         var sp1 = P("sp1", ParticipantRole.Speaker);
         var sp2 = P("sp2", ParticipantRole.Speaker);
-        var mc1 = P("mc1", ParticipantRole.MasterclassSpeaker);
+        var mc1 = P("mc1", ParticipantRole.Speaker);
         var vol1 = P("vol1", ParticipantRole.Volunteer);
         var vol2 = P("vol2", ParticipantRole.Volunteer);
         var volPending = P("volp", ParticipantRole.Volunteer, active: false); // pending application
@@ -199,7 +199,7 @@ public sealed class OrganizerOverviewServiceTests
         Assert.Equal(1, vol.Inactive);
         // No leakage from the other edition's Speaker.
         var speakers = Assert.Single(o.RolesBreakdown, rc => rc.Role == nameof(ParticipantRole.Speaker));
-        Assert.Equal(2, speakers.Total);
+        Assert.Equal(3, speakers.Total);   // sp1 + sp2 + mc1 (master-class folded into Speaker)
     }
 
     [Fact]

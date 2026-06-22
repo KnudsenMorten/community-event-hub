@@ -153,7 +153,7 @@ public sealed class SessionQuestionService
             return await _db.Sessions.AnyAsync(
                 s => s.Id == sessionId && s.EventId == actor.EventId, ct);
 
-        if (actor.Role is ParticipantRole.Speaker or ParticipantRole.MasterclassSpeaker)
+        if (actor.Role is ParticipantRole.Speaker)
             return await _db.SessionSpeakers.AnyAsync(
                 ss => ss.SessionId == sessionId
                       && ss.ParticipantId == actor.ParticipantId
@@ -217,7 +217,7 @@ public sealed class SessionQuestionService
     public async Task<List<Session>> LoadMySessionsAsync(
         ActorContext actor, CancellationToken ct = default)
     {
-        if (actor.Role is not (ParticipantRole.Speaker or ParticipantRole.MasterclassSpeaker))
+        if (actor.Role is not ParticipantRole.Speaker)
             return new List<Session>();
 
         return await _db.Sessions

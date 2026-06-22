@@ -65,7 +65,7 @@ public sealed class PublicSitePolishTests : IDisposable
         db.Sessions.Add(new Session
         {
             Id = 10, EventId = 1, Title = "Hands-on Master Class",
-            Type = SessionType.CommunityMasterClass, PublicSlug = "mc-abc",
+            Type = SessionType.MasterClass, PublicSlug = "mc-abc",
             LogisticsText = "Bring a charged laptop.", LogisticsUpdatedAt = updated,
         });
         await db.SaveChangesAsync();
@@ -96,7 +96,7 @@ public sealed class PublicSitePolishTests : IDisposable
         db.Events.Add(new Event { Id = 1, Code = "TST", CommunityName = "Test", IsActive = true });
         db.Sessions.Add(new Session
         {
-            Id = 10, EventId = 1, Title = "MC", Type = SessionType.CommunityMasterClass,
+            Id = 10, EventId = 1, Title = "MC", Type = SessionType.MasterClass,
             PublicSlug = "mc-xyz", LogisticsUpdatedAt = updated,
         });
         await db.SaveChangesAsync();

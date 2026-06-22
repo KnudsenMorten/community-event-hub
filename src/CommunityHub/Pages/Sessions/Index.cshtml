@@ -12,10 +12,11 @@
     // organizer back-office; these are the en/da participant-facing labels).
     Func<SessionType, string> typeLabel = t => t switch
     {
-        SessionType.CommunityMasterClass => Localizer["SessOv.TypeMasterClass"].Value,
-        SessionType.CommunityTechSession => Localizer["SessOv.TypeTechSession"].Value,
-        SessionType.SponsorSession => Localizer["SessOv.TypeSponsor"].Value,
-        _ => t.ToString(),
+        SessionType.MasterClass => Localizer["SessOv.TypeMasterClass"].Value,
+        SessionType.TechnicalSession => Localizer["SessOv.TypeTechSession"].Value,
+        // The remaining standardized types use the shared English back-office label
+        // (no per-locale key yet); MasterClass + TechnicalSession keep their i18n keys.
+        _ => CommunityHub.Pages.Sessions.IndexModel.Display(t),
     };
     Func<SessionLength, string> lengthLabel = l => l switch
     {
@@ -180,8 +181,8 @@
             <ul class="so-list" style="list-style:none;padding:0;margin:0;">
                 @foreach (var s in view.Sessions)
                 {
-                    var typeClass = s.Type == SessionType.CommunityMasterClass ? "type-mc"
-                        : s.Type == SessionType.SponsorSession ? "type-sponsor" : "";
+                    var typeClass = s.Type == SessionType.MasterClass ? "type-mc"
+                        : s.Type == SessionType.TechnicalSession ? "type-sponsor" : "";
                     <li class="so-card">
                         <h2><a href="/Sessions/@s.Id">@s.Title</a></h2>
                         <div class="so-tags">
@@ -228,7 +229,7 @@
                             <p class="so-abstract">@s.Abstract</p>
                         }
                         <div class="so-links">
-                            @if (s.Type == SessionType.CommunityMasterClass && !string.IsNullOrWhiteSpace(s.PublicSlug))
+                            @if (s.Type == SessionType.MasterClass && !string.IsNullOrWhiteSpace(s.PublicSlug))
                             {
                                 <a href="/MasterClass/@s.PublicSlug">@Localizer["SessOv.MasterClassLink"] &rarr;</a>
                             }

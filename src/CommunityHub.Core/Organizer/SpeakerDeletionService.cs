@@ -6,7 +6,7 @@ namespace CommunityHub.Core.Organizer;
 /// <summary>
 /// The single server-side authority for REMOVING a speaker from an edition's
 /// speaker roster (REQUIREMENTS §22 "Speakers delete"). A "speaker" is a
-/// <see cref="Domain.Participant"/> (role Speaker / MasterclassSpeaker) plus an
+/// <see cref="Domain.Participant"/> (role Speaker) plus an
 /// optional <see cref="Domain.SpeakerProfile"/>; this service "un-speakers" the
 /// person — it deletes the <b>speaker profile</b> (bio, photo, accreditation,
 /// publish flag, contact override) so they are no longer a speaker, WITHOUT

@@ -15,7 +15,7 @@ namespace CommunityHub.Core.Tests.Scenario;
 ///
 ///  - match on email (case-insensitive),
 ///  - NEVER overwrite an existing participant's role (an organizer may have
-///    re-classified a speaker as a MasterclassSpeaker),
+///    re-classified a speaker),
 ///  - skip + report a speaker with no email (can't log in without one),
 ///  - never delete anyone,
 ///  - send the welcome mail only to genuinely NEW speakers.
@@ -95,17 +95,17 @@ public sealed class SessionizeImportScenarioTests
         var seed = await ScenarioSeed.SeedAsync(db);
         var (import, _) = ScenarioFixture.NewImporter(db);
 
-        // The seed has the Masterclass Mentor as MasterclassSpeaker. The import
-        // payload would create a plain Speaker — it must NOT downgrade the role.
+        // The seed has the Masterclass Mentor as a Speaker. The import payload
+        // re-sends them — it must NOT change the existing participant's role.
         var before = await db.Participants.SingleAsync(p => p.Id == seed.MasterclassSpeakerId);
-        Assert.Equal(ParticipantRole.MasterclassSpeaker, before.Role);
+        Assert.Equal(ParticipantRole.Speaker, before.Role);
 
         var parsed = SessionizeApiClient.ParseSpeakers(AcceptedSpeakersJson);
         await import.ImportSpeakersAsync(
             seed.EventId, parsed.Speakers, parsed.Warnings, sendWelcome: false);
 
         var after = await db.Participants.SingleAsync(p => p.Id == seed.MasterclassSpeakerId);
-        Assert.Equal(ParticipantRole.MasterclassSpeaker, after.Role); // unchanged
+        Assert.Equal(ParticipantRole.Speaker, after.Role); // unchanged
     }
 
     [Fact]

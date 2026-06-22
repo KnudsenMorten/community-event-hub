@@ -24,6 +24,16 @@
             <label for="Email">@Localizer["Login.YourEmail"]</label>
             <input type="email" id="Email" name="Email" value="@Model.Email"
                    required autocomplete="email" />
+
+            <label class="remember-me" style="display:flex;align-items:center;gap:8px;margin:12px 0 4px 0;font-size:14px;color:#3a414e;cursor:pointer;">
+                <input type="checkbox" id="RememberMe" name="RememberMe" value="true"
+                       @(Model.RememberMe ? "checked" : "") style="width:16px;height:16px;margin:0;" />
+                <span>@Localizer["Login.RememberMe"]</span>
+            </label>
+            <p id="RememberMeHelp" style="font-size:11.5px;color:#5a6170;margin:0 0 12px 0;">
+                @Localizer["Login.RememberMeHelp"]
+            </p>
+
             <button type="submit">@Localizer["Login.SendCode"]</button>
         </form>
     }
@@ -33,6 +43,8 @@
         <form method="post" asp-page-handler="VerifyPin" style="margin-bottom:14px;">
             <input type="hidden" name="Email" value="@Model.Email" />
             <input type="hidden" name="Step" value="pin" />
+            @* Carry the "Remember me" choice the user made on step 1 through to sign-in. *@
+            <input type="hidden" name="RememberMe" value="@(Model.RememberMe ? "true" : "false")" />
             @if (!string.IsNullOrEmpty(Model.ReturnUrl))
             {
                 <input type="hidden" name="ReturnUrl" value="@Model.ReturnUrl" />
@@ -41,21 +53,11 @@
             <input type="text" id="Pin" name="Pin" inputmode="numeric"
                    pattern="[0-9]{6}" maxlength="6" required autocomplete="one-time-code" />
 
-            <label for="RememberFor" style="display:block;margin-top:12px;font-size:13px;color:#4a5160;">@Localizer["Login.StaySignedIn"]</label>
-            <select id="RememberFor" name="RememberFor" aria-describedby="RememberForHelp" style="width:100%;padding:8px 10px;border:1px solid #c4c8d4;border-radius:6px;font-size:14px;margin-top:4px;">
-                <option value="day">@Localizer["Login.RememberDay"]</option>
-                <option value="week" selected>@Localizer["Login.RememberWeek"]</option>
-                <option value="month">@Localizer["Login.RememberMonth"]</option>
-                <option value="persistent">@Localizer["Login.RememberPersistent"]</option>
-            </select>
-            <p id="RememberForHelp" style="font-size:11.5px;color:#5a6170;margin:4px 0 12px 0;">
-                @Localizer["Login.RememberHelp"]
-            </p>
-
             <button type="submit">@Localizer["Login.SignInButton"]</button>
         </form>
         <form method="post" asp-page-handler="RequestPin" style="margin-top:14px;">
             <input type="hidden" name="Email" value="@Model.Email" />
+            <input type="hidden" name="RememberMe" value="@(Model.RememberMe ? "true" : "false")" />
             @if (!string.IsNullOrEmpty(Model.ReturnUrl))
             {
                 <input type="hidden" name="ReturnUrl" value="@Model.ReturnUrl" />

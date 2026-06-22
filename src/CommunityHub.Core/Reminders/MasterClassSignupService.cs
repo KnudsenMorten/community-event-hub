@@ -208,7 +208,7 @@ public sealed class MasterClassSignupService
     public async Task<int> SeedDefaultMasterClassesAsync(int eventId, CancellationToken ct = default)
     {
         var existing = await _db.Sessions.AsNoTracking()
-            .Where(s => s.EventId == eventId && s.Type == SessionType.CommunityMasterClass)
+            .Where(s => s.EventId == eventId && s.Type == SessionType.MasterClass)
             .Select(s => s.Title).ToListAsync(ct);
         var have = new HashSet<string>(existing, StringComparer.OrdinalIgnoreCase);
 
@@ -224,7 +224,7 @@ public sealed class MasterClassSignupService
                 // (EventId, SessionizeId) unique index (an empty default collides on
                 // the 2nd seed) and the Sessionize import never matches/deletes it.
                 SessionizeId = $"hub-{Guid.NewGuid():D}",
-                Type = SessionType.CommunityMasterClass, IsHubAdded = true, CreatedAt = now,
+                Type = SessionType.MasterClass, IsHubAdded = true, CreatedAt = now,
             });
             added++;
         }
@@ -244,7 +244,7 @@ public sealed class MasterClassSignupService
     public async Task SetCapacityAsync(int eventId, int sessionId, int? capacity, CancellationToken ct = default)
     {
         var mc = await _db.Sessions.FirstOrDefaultAsync(
-            s => s.Id == sessionId && s.EventId == eventId && s.Type == SessionType.CommunityMasterClass, ct);
+            s => s.Id == sessionId && s.EventId == eventId && s.Type == SessionType.MasterClass, ct);
         if (mc is null) return;
         mc.MasterClassCapacity = capacity is > 0 ? capacity : null;
         mc.UpdatedAt = DateTimeOffset.UtcNow;
@@ -257,7 +257,7 @@ public sealed class MasterClassSignupService
     {
         await ExpireOffersAsync(DateTimeOffset.UtcNow, eventId, ct);
         var mcs = await _db.Sessions.AsNoTracking()
-            .Where(s => s.EventId == eventId && s.Type == SessionType.CommunityMasterClass && !s.IsServiceSession)
+            .Where(s => s.EventId == eventId && s.Type == SessionType.MasterClass && !s.IsServiceSession)
             .Select(s => new { s.Id, s.Title, s.MasterClassCapacity }).ToListAsync(ct);
 
         var counts = await _db.MasterClassSignups.AsNoTracking()
@@ -349,7 +349,7 @@ public sealed class MasterClassSignupService
 
         var mc = await _db.Sessions.FirstOrDefaultAsync(
             s => s.Id == sessionId && s.EventId == eventId
-                 && s.Type == SessionType.CommunityMasterClass && !s.IsServiceSession, ct);
+                 && s.Type == SessionType.MasterClass && !s.IsServiceSession, ct);
         if (mc is null) return new SignupResult(false, "That Master Class was not found.", null);
 
         await ExpireOffersAsync(DateTimeOffset.UtcNow, eventId, ct);

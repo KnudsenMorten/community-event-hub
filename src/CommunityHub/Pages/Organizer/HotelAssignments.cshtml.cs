@@ -18,11 +18,17 @@ public class HotelAssignmentsModel : PageModel
 {
     private readonly ICurrentParticipantAccessor _participant;
     private readonly HotelManagementService _hotels;
+    private readonly CommunityHub.Core.Settings.FeatureGateService _gate;
+    private readonly CommunityHub.Core.Settings.RingResolver _rings;
 
-    public HotelAssignmentsModel(ICurrentParticipantAccessor participant, HotelManagementService hotels)
+    public HotelAssignmentsModel(
+        ICurrentParticipantAccessor participant, HotelManagementService hotels,
+        CommunityHub.Core.Settings.FeatureGateService gate, CommunityHub.Core.Settings.RingResolver rings)
     {
         _participant = participant;
         _hotels = hotels;
+        _gate = gate;
+        _rings = rings;
     }
 
     public bool AccessDenied { get; private set; }
@@ -45,11 +51,23 @@ public class HotelAssignmentsModel : PageModel
         return Page();
     }
 
+    [CommunityHub.Audit.Audit("Assigned a hotel to a participant", TargetType = "Hotel")]
     public async Task<IActionResult> OnPostAssignAsync(CancellationToken ct)
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
         if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
+
+        // RING-SCOPED (REQUIREMENTS §23a category 3): don't assign a hotel to a
+        // participant above the hotel-assignment feature's released ring. With the
+        // Broad default everyone is in scope; lower the ring in Settings to ring-test.
+        if (HotelId is not null
+            && !await _gate.IsTargetInReleasedRingAsync("hotel-assignment", me.EventId, ParticipantId, _rings, ct))
+        {
+            Message = "That participant is above the hotel-assignment feature's released ring (out of scope). Promote the ring in Settings to include them.";
+            await LoadAsync(me.EventId, ct);
+            return Page();
+        }
 
         var ok = await _hotels.AssignParticipantAsync(me.EventId, ParticipantId, HotelId, ct);
         Message = ok ? "Hotel assignment saved." : "Participant or hotel not found.";

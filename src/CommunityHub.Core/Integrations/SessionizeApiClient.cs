@@ -505,8 +505,13 @@ public sealed class SessionizeApiClient
             }
         }
 
-        // Track: first category item label, if any (All view "categories").
+        // Category labels: every resolvable categoryItems label (All view
+        // "categories"). The FIRST is the Track (best-effort); the joined set is the
+        // Category used to derive the hub SessionType (format/level/type categories
+        // all contribute, so a "Master Class" / "Keynote" format label is detected
+        // even when it is not the first category).
         string? track = null;
+        var categoryLabels = new List<string>();
         if (sess.TryGetProperty("categoryItems", out var ci)
             && ci.ValueKind == JsonValueKind.Array)
         {
@@ -517,8 +522,8 @@ public sealed class SessionizeApiClient
                     : item.GetString() ?? string.Empty;
                 if (categoryItemNames.TryGetValue(key, out var name))
                 {
-                    track = name;
-                    break;
+                    track ??= name;
+                    categoryLabels.Add(name);
                 }
             }
         }
@@ -532,7 +537,8 @@ public sealed class SessionizeApiClient
             StartsAt:         GetDateTimeOffset(sess, "startsAt"),
             EndsAt:           GetDateTimeOffset(sess, "endsAt"),
             IsServiceSession: GetBool(sess, "isServiceSession"),
-            SpeakerIds:       speakerIds);
+            SpeakerIds:       speakerIds,
+            Category:         categoryLabels.Count > 0 ? string.Join(" | ", categoryLabels) : null);
     }
 
     /// <summary>

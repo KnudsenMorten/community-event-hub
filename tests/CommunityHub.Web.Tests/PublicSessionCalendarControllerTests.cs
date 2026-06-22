@@ -59,7 +59,7 @@ public sealed class PublicSessionCalendarControllerTests
         var scheduled = new Session
         {
             EventId = evt.Id, SessionizeId = "sess-1", Title = "Intro to Bicep",
-            Abstract = "A talk.", Type = SessionType.CommunityTechSession,
+            Abstract = "A talk.", Type = SessionType.TechnicalSession,
             Length = SessionLength.FiftyMin, Room = "Room B",
             StartsAt = new DateTimeOffset(2027, 2, 9, 11, 0, 0, TimeSpan.Zero),
             EndsAt = new DateTimeOffset(2027, 2, 9, 11, 50, 0, TimeSpan.Zero),
@@ -69,12 +69,12 @@ public sealed class PublicSessionCalendarControllerTests
         var unscheduled = new Session
         {
             EventId = evt.Id, SessionizeId = "sess-2", Title = "To Be Announced",
-            Type = SessionType.CommunityTechSession, Length = SessionLength.FiftyMin,
+            Type = SessionType.TechnicalSession, Length = SessionLength.FiftyMin,
         };
         var service = new Session
         {
             EventId = evt.Id, SessionizeId = "sess-3", Title = "Coffee Break",
-            Type = SessionType.CommunityTechSession, Length = SessionLength.TwentyMin,
+            Type = SessionType.TechnicalSession, Length = SessionLength.TwentyMin,
             StartsAt = new DateTimeOffset(2027, 2, 9, 10, 0, 0, TimeSpan.Zero),
             IsServiceSession = true,
         };

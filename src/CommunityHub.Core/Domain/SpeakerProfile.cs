@@ -1,8 +1,32 @@
 namespace CommunityHub.Core.Domain;
 
 /// <summary>
-/// Per-participant speaker profile. Used for Speaker / MasterclassSpeaker
-/// roles only. Splits into:
+/// Who pays for this speaker's appreciation package (hotel/travel/swag/etc).
+/// Drives the speaker-hat order entitlements in
+/// <see cref="Entitlements.OrderEntitlements"/>.
+/// </summary>
+public enum SpeakerFunding
+{
+    /// <summary>Organizer-supported speaker: the full speaker appreciation set.</summary>
+    Supported = 0,
+
+    /// <summary>
+    /// A speaker brought + paid for by a sponsor (e.g. a sponsor-session
+    /// speaker): only the shared social items (dinner + main-day lunch), no
+    /// polo/swag/award/hotel/travel.
+    /// </summary>
+    SponsorSelfFunded = 1,
+
+    /// <summary>
+    /// An organizer who is also speaking: contributes NOTHING from the speaker
+    /// hat (they are excluded from speaker tallies); their Organizer-role
+    /// entitlements still apply.
+    /// </summary>
+    Organizer = 2,
+}
+
+/// <summary>
+/// Per-participant speaker profile. Used for the Speaker role only. Splits into:
 ///  - "Hub-collected" fields (the participant fills the speaker form):
 ///      Accreditation, IsFirstTimeSpeaker, Country, Gender
 ///  - "Sessionize-imported" fields (organizer uploads the Sessionize export):
@@ -39,6 +63,14 @@ public class SpeakerProfile
 
     /// <summary>True if the speaker is delivering a session on the main conference day.</summary>
     public bool SpeakingMainDay { get; set; }
+
+    /// <summary>
+    /// Who funds this speaker's appreciation package — drives the speaker-hat
+    /// order entitlements (<see cref="Entitlements.OrderEntitlements"/>).
+    /// Defaults to <see cref="SpeakerFunding.Supported"/> (organizer-supported,
+    /// full speaker set).
+    /// </summary>
+    public SpeakerFunding SpeakerFunding { get; set; } = SpeakerFunding.Supported;
 
     // --- Publish gate (hub-collected; the HARD GATE for the Backstage bio sync) -
     /// <summary>

@@ -28,7 +28,7 @@ public sealed class SessionEvaluationScenarioTests
     private static async Task<Session> AddSessionAsync(
         CommunityHub.Core.Data.CommunityHubDbContext db, ScenarioSeed.SeedResult s,
         string title, string? room = null,
-        SessionType type = SessionType.CommunityTechSession, params int[] speakerIds)
+        SessionType type = SessionType.TechnicalSession, params int[] speakerIds)
     {
         var session = new Session
         {
@@ -58,7 +58,7 @@ public sealed class SessionEvaluationScenarioTests
         var seed = await ScenarioSeed.SeedAsync(db);
         var eval = NewService(db);
         var ask = new SessionQuestionService(db, ScenarioFixture.Clock);
-        var session = await AddSessionAsync(db, seed, "Keynote", "Room A", SessionType.CommunityTechSession, seed.SpeakerOneId);
+        var session = await AddSessionAsync(db, seed, "Keynote", "Room A", SessionType.TechnicalSession, seed.SpeakerOneId);
 
         var token = await eval.EnsurePublicTokenAsync(session.Id);
         Assert.True(token.Length >= 40);
@@ -216,9 +216,9 @@ public sealed class SessionEvaluationScenarioTests
         var svc = NewService(db);
 
         // Room A: two sessions; Room B: one session.
-        var a1 = await AddSessionAsync(db, seed, "A1", "Room A", SessionType.CommunityTechSession);
-        var a2 = await AddSessionAsync(db, seed, "A2", "Room A", SessionType.CommunityTechSession);
-        var b1 = await AddSessionAsync(db, seed, "B1", "Room B", SessionType.SponsorSession);
+        var a1 = await AddSessionAsync(db, seed, "A1", "Room A", SessionType.TechnicalSession);
+        var a2 = await AddSessionAsync(db, seed, "A2", "Room A", SessionType.TechnicalSession);
+        var b1 = await AddSessionAsync(db, seed, "B1", "Room B", SessionType.TechnicalSession);
 
         var ta1 = await svc.EnsurePublicTokenAsync(a1.Id);
         var ta2 = await svc.EnsurePublicTokenAsync(a2.Id);
@@ -300,15 +300,15 @@ public sealed class SessionEvaluationScenarioTests
         var seed = await ScenarioSeed.SeedAsync(db);
         var svc = NewService(db);
 
-        var tech = await AddSessionAsync(db, seed, "Tech", "Room A", SessionType.CommunityTechSession);
-        var sponsor = await AddSessionAsync(db, seed, "Sponsor", "Room B", SessionType.SponsorSession);
+        var tech = await AddSessionAsync(db, seed, "Tech", "Room A", SessionType.TechnicalSession);
+        var sponsor = await AddSessionAsync(db, seed, "Sponsor", "Room B", SessionType.Keynote);
         var tTech = await svc.EnsurePublicTokenAsync(tech.Id);
         var tSpon = await svc.EnsurePublicTokenAsync(sponsor.Id);
         await svc.SubmitPublicEvaluationAsync(tTech, 5, null, "v1", null);
         await svc.SubmitPublicEvaluationAsync(tSpon, 1, null, "v2", null);
 
         // Filter by type.
-        var techOnly = await svc.BuildDashboardAsync(seed.EventId, type: SessionType.CommunityTechSession);
+        var techOnly = await svc.BuildDashboardAsync(seed.EventId, type: SessionType.TechnicalSession);
         Assert.Single(techOnly.Sessions);
         Assert.Equal("Tech", techOnly.Sessions[0].Title);
         Assert.Equal(1, techOnly.TotalCount);

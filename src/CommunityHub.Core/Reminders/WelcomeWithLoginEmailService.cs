@@ -43,8 +43,6 @@ public sealed record WelcomeWithLoginResult(bool Sent, string Reason)
 /// </summary>
 public sealed class WelcomeWithLoginEmailService
 {
-    private const string TemplateName = "welcome-login";
-
     /// <summary>
     /// Auto-login token lifetime for the welcome email. Short-lived (the welcome
     /// is a one-tap onboarding nudge, not a standing credential); the default
@@ -59,6 +57,8 @@ public sealed class WelcomeWithLoginEmailService
     private readonly IWelcomeAutoLoginTokenService _autoLogin;
     private readonly IEnvironmentInfo _env;
     private readonly TimeProvider _clock;
+    private readonly IEmailContextAccessor? _context;
+    private readonly WelcomeEmailOptions _options;
 
     public WelcomeWithLoginEmailService(
         CommunityHubDbContext db,
@@ -66,7 +66,9 @@ public sealed class WelcomeWithLoginEmailService
         IEmailSender emailSender,
         IWelcomeAutoLoginTokenService autoLogin,
         IEnvironmentInfo env,
-        TimeProvider clock)
+        TimeProvider clock,
+        IEmailContextAccessor? context = null,
+        WelcomeEmailOptions? options = null)
     {
         _db = db;
         _templates = templates;
@@ -74,7 +76,13 @@ public sealed class WelcomeWithLoginEmailService
         _autoLogin = autoLogin;
         _env = env;
         _clock = clock;
+        _context = context;
+        // Default: auto-login DISABLED (operator "disable welcome mail with login").
+        _options = options ?? new WelcomeEmailOptions();
     }
+
+    /// <summary>Whether the auto-login magic-link is minted (else the plain hub URL is used).</summary>
+    public bool AutoLoginEnabled => _options.AutoLoginEnabled;
 
     /// <summary>
     /// Send the welcome-with-login email to one active participant. The
@@ -127,14 +135,40 @@ public sealed class WelcomeWithLoginEmailService
             return new WelcomeWithLoginResult(false, "Already welcomed.");
         }
 
-        // Mint a SINGLE-USE, short-lived, revocable, audited auto-login token
-        // (its own MagicLinkGrant row) — NOT the reusable invitation magic-link.
-        var token = await _autoLogin.CreateAsync(participant.Id, TokenTtl, ct);
-        var loginUrl = BuildLoginUrl(baseUrl, token);
+        // Roles with NO welcome (Organizer, Attendee — operator 2026-06-22) are not
+        // sent a welcome from this platform.
+        var roleTemplateKey = WelcomeVariants.TemplateKeyFor(participant.Role);
+        if (string.IsNullOrEmpty(roleTemplateKey))
+        {
+            return new WelcomeWithLoginResult(false, $"No welcome for the {participant.Role} role.");
+        }
+
+        // AUTO-LOGIN GATE (operator "disable welcome mail with login"): when enabled
+        // we mint a SINGLE-USE, short-lived, revocable, audited auto-login token (its
+        // own MagicLinkGrant row) — NOT the reusable invitation magic-link. When
+        // DISABLED (the default) we mint NOTHING and the CTA points at the plain hub
+        // URL, so the recipient signs in normally with email + a one-time code.
+        string loginUrl;
+        if (_options.AutoLoginEnabled)
+        {
+            var token = await _autoLogin.CreateAsync(participant.Id, TokenTtl, ct);
+            loginUrl = BuildLoginUrl(baseUrl, token);
+        }
+        else
+        {
+            loginUrl = (baseUrl ?? string.Empty).TrimEnd('/');
+        }
 
         var rendered = RenderForUrl(participant, loginUrl);
-        await _emailSender.SendAsync(
-            participant.Email, rendered.Subject, rendered.HtmlBody, rendered.TextBody, ct);
+        // Ring-governed by the welcome-email feature (operator 2026-06-22).
+        using (_context?.Set(new EmailContext(
+            roleTemplateKey,
+            participant.EventId, participant.Id, participant.FullName,
+            FeatureKey: "welcome-email")))
+        {
+            await _emailSender.SendAsync(
+                participant.Email, rendered.Subject, rendered.HtmlBody, rendered.TextBody, ct);
+        }
 
         // Record the send. Each send mints a FRESH single-use grant, so an earlier
         // link is left to expire / be superseded — a re-send does not resurrect a
@@ -146,9 +180,11 @@ public sealed class WelcomeWithLoginEmailService
     }
 
     /// <summary>
-    /// Render the welcome-with-login email for a participant against an
-    /// already-built auto-login URL. Public + pure (no DB / no send / no token
-    /// mint / no guard) so the per-role copy can be unit-tested directly. Also
+    /// Render the welcome email for a participant against an already-built sign-in
+    /// URL (an auto-login magic-link when auto-login is enabled, otherwise the plain
+    /// hub URL). Renders the per-role VARIANT template (by the participant's PRIMARY
+    /// role via <see cref="WelcomeVariants"/>). Public + pure (no DB / no send / no
+    /// token mint / no guard) so the per-role copy can be unit-tested directly. Also
     /// exposes the plain-text alternative on the returned record.
     /// </summary>
     public RenderedWelcomeEmail RenderForUrl(Participant participant, string loginUrl)
@@ -157,6 +193,10 @@ public sealed class WelcomeWithLoginEmailService
             ? "there"
             : participant.FullName.Split(' ')[0];
 
+        var templateKey = WelcomeVariants.TemplateKeyFor(participant.Role)
+            ?? throw new InvalidOperationException(
+                $"No welcome template for role {participant.Role} — the caller must guard before rendering.");
+
         var tokens = _templates.NewTokenSet();
         tokens["firstName"] = firstName;
         tokens["communityName"] = participant.Event.CommunityName;
@@ -164,9 +204,14 @@ public sealed class WelcomeWithLoginEmailService
         tokens["eventCode"] = participant.Event.Code;
         tokens["roleName"] = FriendlyRoleName(participant.Role);
         tokens["roleLine"] = RoleLine(participant.Role);
+        // Both loginUrl and hubUrl resolve to the same sign-in URL the caller built:
+        // the magic-link when auto-login is on, the plain hub URL when off. Templates
+        // may reference either token. (NewTokenSet already seeds the branding hubUrl;
+        // override it so the variant always points at the same place as loginUrl.)
         tokens["loginUrl"] = loginUrl;
+        tokens["hubUrl"] = loginUrl;
 
-        var html = _templates.Render(TemplateName, tokens);
+        var html = _templates.Render(templateKey, tokens);
         var text = BuildPlainText(
             firstName,
             participant.Event.CommunityName,
@@ -195,12 +240,11 @@ public sealed class WelcomeWithLoginEmailService
     {
         ParticipantRole.Organizer => "organizer",
         ParticipantRole.Speaker => "speaker",
-        ParticipantRole.MasterclassSpeaker => "Master Class speaker",
         ParticipantRole.Volunteer => "volunteer",
         ParticipantRole.Sponsor => "sponsor contact",
         ParticipantRole.Attendee => "attendee",
-        ParticipantRole.Video => "video crew member",
-        ParticipantRole.Camera => "photography crew member",
+        ParticipantRole.Media => "media crew member",
+        ParticipantRole.EventPartner => "event partner",
         _ => "crew member",
     };
 
@@ -216,18 +260,16 @@ public sealed class WelcomeWithLoginEmailService
             "As an organizer you get the full picture: participants, sponsors, attendee reconciliation and the live dashboards that run the whole event from one place.",
         ParticipantRole.Speaker =>
             "As a speaker you will find your session details, your hotel and dinner forms, and your milestone deadlines — all in one place, with gentle reminders so nothing slips.",
-        ParticipantRole.MasterclassSpeaker =>
-            "As a Master Class speaker you get your session details, hotel and dinner forms, your milestone deadlines and the extra pre-day information for your Master Class.",
         ParticipantRole.Volunteer =>
             "As a volunteer you can pick the shifts you can cover and fill in your hotel and dinner details — your tasks then appear in your own to-do list.",
         ParticipantRole.Sponsor =>
             "As a sponsor contact you get your company's onboarding tasks and deadlines, and you can capture the leads you meet at your booth — straight from your phone.",
         ParticipantRole.Attendee =>
             "As an attendee you get your own \"My Event\" page: a countdown, your Master Class status, the practical info, and a one-tap check-in on the day.",
-        ParticipantRole.Video =>
-            "As part of the video crew you will find your hotel and dinner details and your crew schedule in one place.",
-        ParticipantRole.Camera =>
-            "As part of the photography crew you will find your hotel and dinner details and your crew schedule in one place.",
+        ParticipantRole.Media =>
+            "As part of the press / media crew you will find your hotel, dinner and lunch details and your crew schedule in one place.",
+        ParticipantRole.EventPartner =>
+            "As an event partner you will find your hotel, dinner and lunch details plus your task management in one place.",
         _ =>
             "Sign in to see exactly the part of the event that is relevant to you.",
     };
@@ -252,17 +294,15 @@ The Event Hub is the one place for everyone's part in the event: your forms, you
 
 {roleLine}
 
-How it fits with the public site:
-The public event site, schedule and tickets live in Zoho Backstage. The Event Hub is its behind-the-scenes companion — the self-service home for everything you need to do as crew.
-
-Open my Event Hub — signs you in automatically:
+Open the Event Hub:
 {loginUrl}
 
-(That link signs you in automatically and takes you straight to your hub — no password, no code to type. If it ever stops working, just go to the hub and sign in with your email and a one-time code.)
+Sign in with your email address — no password to remember.
 
-The Event Hub is brand-new this year, so please expect a few rough edges. If anything looks off or breaks, just reply to this email and tell us — your feedback genuinely helps.
+If anything looks off or breaks, just reply to this email and tell us — your feedback genuinely helps.
 
-See you at {eventDisplayName}.";
+See you at {eventDisplayName}.
+The team";
 }
 
 /// <summary>

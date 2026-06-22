@@ -151,11 +151,126 @@ public sealed class FeatureCatalogClassificationTests
     /// on the old Ring0 default.
     /// </summary>
     [Fact]
-    public void Existing_features_are_pinned_to_ring1()
+    public void Feature_surface_classification_is_consistent()
     {
+        // (1) ENGINE — core plumbing (pulls/syncs/transport): GA/Broad, NOT ring-scoped.
+        foreach (var key in new[]
+                 {
+                     "sessionize-import", "sponsor-order-pull", "attendee-reconcile",
+                     "backstage-sync", "economic-erp-sync", "sponsor-upload-watch",
+                 })
+        {
+            var d = FeatureCatalog.Find(key)!;
+            Assert.Equal(FeatureSurface.Engine, d.Surface);
+            Assert.True(d.IsEngine);
+            Assert.False(d.IsRingScoped);
+            Assert.Equal(Ring.Broad, d.DefaultReleasedToRing);   // GA, runs for all
+        }
+
+        // (2) ENGINE-QUEUED — backend fed by a queue commit: GA/Broad, NOT ring-scoped
+        // (inert until a queue commits scoped data).
+        foreach (var key in new[] { "some-scheduling", "linkedin-queue" })
+        {
+            var d = FeatureCatalog.Find(key)!;
+            Assert.Equal(FeatureSurface.EngineQueued, d.Surface);
+            Assert.True(d.IsEngine);
+            Assert.False(d.IsRingScoped);
+            Assert.Equal(Ring.Broad, d.DefaultReleasedToRing);
+        }
+
+        // sponsor-leads is a backend EXPORT to the sponsor (Zoho link, no API yet) —
+        // Engine, kill-switch only, GA (operator 2026-06-22). Not ring-scoped.
+        var sl = FeatureCatalog.Find("sponsor-leads")!;
+        Assert.Equal(FeatureSurface.Engine, sl.Surface);
+        Assert.False(sl.IsRingScoped);
+        Assert.Equal(Ring.Broad, sl.DefaultReleasedToRing);
+
+        // (4) USER-IMPACT — a human experiences it (email/task/GUI): ring-scoped,
+        // staged-rolled on the target user.
+        foreach (var key in new[]
+                 {
+                     "welcome-email", "magic-link", "reminder-jobs", "digest-emails",
+                     "attendee-welcome", "surveys",
+                 })
+        {
+            var d = FeatureCatalog.Find(key)!;
+            Assert.Equal(FeatureSurface.UserImpact, d.Surface);
+            Assert.True(d.IsUserImpact);
+            Assert.True(d.IsRingScoped);
+        }
+
+        // outbound-email is the ENGINE transport (+ global kill switch); held at
+        // Ring1 as the email ceiling until go-live.
+        var oe = FeatureCatalog.Find(FeatureCatalog.OutboundEmailKey)!;
+        Assert.Equal(FeatureSurface.Engine, oe.Surface);
+        Assert.False(oe.IsRingScoped);
+    }
+
+    /// <summary>
+    /// (3) QUEUE surfaces (operator 2026-06-22): organizer-operated staging+commit
+    /// for an engine — ring-scoped (2nd-confirm + ring-scoped impact at commit). These
+    /// three are ALREADY-SHIPPED features, so they default to Broad (GA) — no behaviour
+    /// regression — while the ring-scoping mechanism (CommitAsync) lets an organizer
+    /// lower the ring to Ring1 to test a change. (A NEW queue feature is born Ring1.)
+    /// </summary>
+    [Fact]
+    public void Queue_surfaces_are_classified_and_ring_scoped()
+    {
+        foreach (var key in new[] { "volunteer-tasks", "volunteer-allocation", "hotel-assignment" })
+        {
+            var d = FeatureCatalog.Find(key)!;
+            Assert.Equal(FeatureSurface.Queue, d.Surface);
+            Assert.True(d.IsQueue);
+            Assert.True(d.IsRingScoped);   // ring-scopable — dial down to Ring1 to test
+            Assert.False(d.IsEngine);
+            Assert.Equal(Ring.Broad, d.DefaultReleasedToRing);   // shipped ⇒ GA default
+        }
+    }
+
+    /// <summary>
+    /// The Incubation user-impact GUI actions (operator 2026-06-22): every new
+    /// mass-impact GUI action (broadcast, invitations, activations, assignments,
+    /// task creation, releases) is born in Incubation, classified USER-IMPACT and
+    /// released to Ring1 so only ring-1 testers see + exercise it until promoted.
+    /// These back the hub tiles (HubTile.FeatureKey) so the GUI badges + gates them.
+    /// </summary>
+    [Fact]
+    public void Incubation_user_impact_actions_are_classified_and_ring1()
+    {
+        // NB: volunteer-tasks / volunteer-allocation / hotel-assignment are QUEUE
+        // surfaces (see Queue_surfaces_are_classified_and_ring_scoped), not here.
+        var incubationUserImpact = new[]
+        {
+            "broadcast-email", "invitation-email", "email-resend", "onboarding-step-reset",
+            "participant-activation", "masterclass-invites", "session-eval-email",
+            "sponsor-welcome", "sponsor-tasks", "sponsor-reminders",
+            "group-photo-invites", "travel-reimbursement-email", "graphics-release",
+            "test-data-cleanup", "hotel-invite", "dinner-invite",
+        };
+
+        foreach (var key in incubationUserImpact)
+        {
+            var d = FeatureCatalog.Find(key);
+            Assert.True(d is not null, $"Incubation feature '{key}' missing from catalog.");
+            Assert.Equal(FeatureSurface.UserImpact, d!.Surface);
+            Assert.True(d.IsUserImpact, $"'{key}' must be USER-IMPACT (a person notices it).");
+            Assert.Equal(FeatureGroup.Incubation, d.Group);
+            Assert.Equal(Ring.Ring1, d.DefaultReleasedToRing);
+            Assert.False(d.DefaultEnabled, $"'{key}' must default OFF (opt-in).");
+        }
+    }
+
+    [Fact]
+    public void Existing_features_are_released_to_ring1_or_broad_never_ring0()
+    {
+        // Operator 2026-06-22: a catalog feature is either still in TESTING (Ring1)
+        // or promoted to GA (Broad) — never born dev-only (Ring0). The tested backend
+        // pulls/syncs are GA/Broad; email + sensitive features stay Ring1.
         foreach (var f in FeatureCatalog.All)
         {
-            Assert.Equal(Ring.Ring1, f.DefaultReleasedToRing);
+            Assert.True(
+                f.DefaultReleasedToRing == Ring.Ring1 || f.DefaultReleasedToRing == Ring.Broad,
+                $"{f.Key} should be Ring1 (testing) or Broad (GA); got {f.DefaultReleasedToRing}.");
             Assert.NotEqual(Ring.Ring0, f.DefaultReleasedToRing);
         }
     }

@@ -66,4 +66,15 @@
     </None>
   </ItemGroup>
 
+  <!-- PRIVATE per-edition email templates (publish-safe layer): the edition's
+       real, named copy, denylisted from the public mirror. EmailTemplateProvider
+       resolves config/email-templates/{key}.html ahead of the shipped default. -->
+  <ItemGroup>
+    <None Include="..\..\config\email-templates\**\*.html">
+      <Link>config\email-templates\%(RecursiveDir)%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>Always</CopyToPublishDirectory>
+    </None>
+  </ItemGroup>
+
 </Project>

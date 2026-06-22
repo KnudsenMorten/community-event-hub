@@ -47,9 +47,12 @@ public class IndexModel : PageModel
     // --- Display helpers (shared labels with the organizer page) ------------
     public static string Display(SessionType t) => t switch
     {
-        SessionType.CommunityMasterClass => "Community Master Class",
-        SessionType.CommunityTechSession => "Community Tech Session",
-        SessionType.SponsorSession => "Sponsor Session",
+        SessionType.Keynote => "Keynote",
+        SessionType.TechnicalSession => "Technical Session",
+        SessionType.MasterClass => "Master Class",
+        SessionType.AskTheExperts => "Ask the Experts",
+        SessionType.PanelDiscussion => "Panel Discussion",
+        SessionType.Welcome => "Welcome",
         _ => t.ToString(),
     };
 

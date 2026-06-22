@@ -106,7 +106,8 @@ public sealed class ReminderEngine
                     ? msg.ReminderType
                     : $"{msg.ReminderType}:{msg.Persona}";
                 using (_emailContext?.Set(new EmailContext(
-                    category, eventId, msg.ParticipantId, msg.RecipientName)))
+                    category, eventId, msg.ParticipantId, msg.RecipientName,
+                    FeatureKey: "reminder-jobs")))
                 {
                     await _emailSender.SendAsync(
                         msg.EffectiveRecipient, msg.Subject, msg.HtmlBody, msg.Cc, ct);

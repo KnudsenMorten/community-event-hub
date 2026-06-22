@@ -2,6 +2,7 @@ using System.Text;
 using CommunityHub.Auth;
 using CommunityHub.Core.Domain;
 using CommunityHub.Core.Organizer;
+using CommunityHub.Export;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
@@ -80,6 +81,26 @@ public class ExportsModel : PageModel
     public Task<IActionResult> OnGetBadgesCsvAsync(CancellationToken ct)
         => CsvAsync(id => _exports.BuildBadgeDataCsvAsync(id, ct), "badge-data.csv");
 
+    // --- Excel (.xlsx) download handlers ------------------------------------
+    // Each reuses the exact same CSV builder the CSV handler uses (single source
+    // of truth for the data), then converts via CsvToXlsx — the data is never
+    // re-derived. Sheet name comes from the export's name.
+
+    public Task<IActionResult> OnGetAttendeesXlsxAsync(CancellationToken ct)
+        => XlsxAsync(id => _exports.BuildAttendeeListCsvAsync(id, ct), "attendee-list.xlsx", "Attendees");
+
+    public Task<IActionResult> OnGetLunchXlsxAsync(CancellationToken ct)
+        => XlsxAsync(id => _exports.BuildLunchCsvAsync(id, ct), "lunch-headcount.xlsx", "Lunch headcount");
+
+    public Task<IActionResult> OnGetRoomsXlsxAsync(CancellationToken ct)
+        => XlsxAsync(id => _exports.BuildRoomSheetsCsvAsync(id, ct), "room-sheets.xlsx", "Room sheets");
+
+    public Task<IActionResult> OnGetVolunteerRotaXlsxAsync(CancellationToken ct)
+        => XlsxAsync(id => _exports.BuildVolunteerRotaCsvAsync(id, ct), "volunteer-rota.xlsx", "Volunteer rota");
+
+    public Task<IActionResult> OnGetBadgesXlsxAsync(CancellationToken ct)
+        => XlsxAsync(id => _exports.BuildBadgeDataCsvAsync(id, ct), "badge-data.xlsx", "Badge data");
+
     private async Task<IActionResult> CsvAsync(Func<int, Task<string>> build, string fileName)
     {
         var me = _participant.Current;
@@ -91,5 +112,16 @@ public class ExportsModel : PageModel
         var bytes = Encoding.UTF8.GetPreamble()
             .Concat(Encoding.UTF8.GetBytes(csv)).ToArray();
         return File(bytes, "text/csv", fileName);
+    }
+
+    private async Task<IActionResult> XlsxAsync(Func<int, Task<string>> build, string fileName, string sheetName)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+        if (!OrganizerAuth.IsRealOrganizer(me)) return Forbid();
+
+        // Same CSV builder as the CSV handler — data is not re-derived.
+        var csv = await build(me.EventId);
+        return File(CsvToXlsx.Build(csv, sheetName), CsvToXlsx.ContentType, fileName);
     }
 }

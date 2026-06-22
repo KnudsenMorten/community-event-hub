@@ -25,17 +25,23 @@ public class VolunteerStructureModel : PageModel
     private readonly ICurrentParticipantAccessor _participant;
     private readonly VolunteerStructureService _svc;
     private readonly CommunityHub.Core.Organizer.VolunteerTaskBulkOperationService _bulk;
+    private readonly CommunityHub.Core.Settings.FeatureGateService _gate;
+    private readonly CommunityHub.Core.Settings.RingResolver _rings;
 
     public VolunteerStructureModel(
         CommunityHubDbContext db,
         ICurrentParticipantAccessor participant,
         VolunteerStructureService svc,
-        CommunityHub.Core.Organizer.VolunteerTaskBulkOperationService bulk)
+        CommunityHub.Core.Organizer.VolunteerTaskBulkOperationService bulk,
+        CommunityHub.Core.Settings.FeatureGateService gate,
+        CommunityHub.Core.Settings.RingResolver rings)
     {
         _db = db;
         _participant = participant;
         _svc = svc;
         _bulk = bulk;
+        _gate = gate;
+        _rings = rings;
     }
 
     /// <summary>The task ids ticked in the bulk-select grid (posted form field).</summary>
@@ -113,8 +119,18 @@ public class VolunteerStructureModel : PageModel
     public Task<IActionResult> OnPostDeleteTaskAsync(int taskId, CancellationToken ct)
         => RunAsync(async a => { await _svc.DeleteTaskAsync(a, taskId, ct); return "Task removed."; });
 
+    [CommunityHub.Audit.Audit("Assigned a volunteer to a task", TargetType = "VolunteerTask")]
     public Task<IActionResult> OnPostAssignAsync(int taskId, int volunteerParticipantId, CancellationToken ct)
-        => RunAsync(async a => { await _svc.AssignVolunteerAsync(a, taskId, volunteerParticipantId, ct); return "Volunteer assigned."; });
+        => RunAsync(async a =>
+        {
+            // RING-SCOPED (REQUIREMENTS §23a category 3): don't assign a volunteer who is
+            // above the volunteer-tasks feature's released ring. With the Broad default
+            // every volunteer is in scope; lower the ring in Settings to ring-test.
+            if (!await _gate.IsTargetInReleasedRingAsync("volunteer-tasks", a.EventId, volunteerParticipantId, _rings, ct))
+                return "That volunteer is above the volunteer-tasks feature's released ring (out of scope). Promote the ring in Settings to include them.";
+            await _svc.AssignVolunteerAsync(a, taskId, volunteerParticipantId, ct);
+            return "Volunteer assigned.";
+        });
 
     public Task<IActionResult> OnPostUnassignAsync(int taskId, int volunteerParticipantId, CancellationToken ct)
         => RunAsync(async a => { await _svc.UnassignVolunteerAsync(a, taskId, volunteerParticipantId, ct); return "Volunteer unassigned."; });

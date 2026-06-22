@@ -164,8 +164,7 @@ public class IndexModel : PageModel
         // skipped, NEW deadlines added to the speaker-deadlines JSON config
         // appear on the next page load automatically -- no Functions run
         // required, no admin step.
-        if (me.Role == ParticipantRole.Speaker
-            || me.Role == ParticipantRole.MasterclassSpeaker)
+        if (me.Role == ParticipantRole.Speaker)
         {
             try
             {
@@ -186,7 +185,7 @@ public class IndexModel : PageModel
         // Speaker landing card (operator 2026-06-21): show the speaker their own
         // sessions right on the hub (pending tasks already render via the checklist;
         // important dates link out to the Calendar).
-        if (me.Role is ParticipantRole.Speaker or ParticipantRole.MasterclassSpeaker)
+        if (me.Role is ParticipantRole.Speaker)
         {
             SpeakerSessions = await _speakerSessions.GetMySessionsAsync(me.EventId, me.ParticipantId, me.Role, ct);
         }
@@ -248,8 +247,8 @@ public class IndexModel : PageModel
     /// <summary>
     /// Which sections each role sees. Defaults chosen per CONTEXT.md section 4:
     ///  - Organizer         : everything + organizer tools
-    ///  - Speaker           : hotel, dinner, speaker deadlines
-    ///  - MasterclassSpeaker : as Speaker (pre-day items fold into deadlines)
+    ///  - Speaker           : hotel, dinner, speaker deadlines (pre-day nuance
+    ///                        folds into the seeded deadlines + entitlements)
     ///  - Volunteer         : hotel, dinner, volunteer shifts
     ///  - Sponsor           : sponsor pipeline
     ///  - Attendee          : attendee area only
@@ -269,7 +268,6 @@ public class IndexModel : PageModel
                 ShowOrganizerTools = true;
                 break;
             case ParticipantRole.Speaker:
-            case ParticipantRole.MasterclassSpeaker:
                 ShowHotel = ShowDinner = ShowSpeakerDeadlines = true;
                 break;
             case ParticipantRole.Volunteer:

@@ -1,4 +1,6 @@
+using CommunityHub.Core.Audit;
 using CommunityHub.Core.Data;
+using CommunityHub.Core.Domain;
 using CommunityHub.Core.Integrations;
 using CommunityHub.Core.Settings;
 using Microsoft.Azure.Functions.Worker;
@@ -20,17 +22,20 @@ public sealed class SponsorUploadWatchJob
     private readonly SponsorUploadWatchService _watch;
     private readonly CommunityHubDbContext _db;
     private readonly FeatureGateService _gate;
+    private readonly IAuditTrail _audit;
     private readonly ILogger<SponsorUploadWatchJob> _log;
 
     public SponsorUploadWatchJob(
         SponsorUploadWatchService watch,
         CommunityHubDbContext db,
         FeatureGateService gate,
+        IAuditTrail audit,
         ILogger<SponsorUploadWatchJob> log)
     {
         _watch = watch;
         _db = db;
         _gate = gate;
+        _audit = audit;
         _log = log;
     }
 
@@ -70,5 +75,20 @@ public sealed class SponsorUploadWatchJob
             "SponsorUploadWatchJob: {Loc} folders, {Obs} files, {New} new, {Chg} changed, {Sent} mails, {Err} errors.",
             result.LocationsChecked, result.FilesObserved, result.FilesNew,
             result.FilesChanged, result.NotificationsSent, result.Errors);
+
+        // Named Engine event (REQUIREMENTS §24) — only when something actually changed
+        // or errored (idle 15-min polls would flood the trail).
+        if (result.FilesNew + result.FilesChanged + result.NotificationsSent + result.Errors > 0)
+            await _audit.RecordAsync(new AuditEntry
+            {
+                EventId = activeEventIds.FirstOrDefault(),
+                Category = AuditCategory.Engine,
+                Action = "sponsor-upload-watch",
+                ActorEmail = "system",
+                Source = AuditSource.Job,
+                Outcome = result.Errors > 0 ? AuditOutcome.Failure : AuditOutcome.Success,
+                Summary = $"Sponsor uploads: {result.FilesNew} new, {result.FilesChanged} changed, "
+                    + $"{result.NotificationsSent} mail(s), {result.Errors} error(s)",
+            }, ct);
     }
 }

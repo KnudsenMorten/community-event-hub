@@ -42,7 +42,6 @@ public sealed class SpeakerQuestionDigestService
     private static readonly ParticipantRole[] SpeakerRoles =
     {
         ParticipantRole.Speaker,
-        ParticipantRole.MasterclassSpeaker,
     };
 
     private readonly CommunityHubDbContext _db;
@@ -101,8 +100,7 @@ public sealed class SpeakerQuestionDigestService
             join ss in _db.SessionSpeakers on q.SessionId equals ss.SessionId
             join p in _db.Participants on ss.ParticipantId equals p.Id
             where p.EventId == eventId && p.IsActive
-                  && (p.Role == ParticipantRole.Speaker
-                      || p.Role == ParticipantRole.MasterclassSpeaker)
+                  && p.Role == ParticipantRole.Speaker
             select new
             {
                 SpeakerId = p.Id,

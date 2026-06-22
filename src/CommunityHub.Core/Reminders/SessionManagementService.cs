@@ -124,6 +124,9 @@ public sealed class SessionManagementService
                 $"Session {sessionId} not found in event {eventId}.");
 
         session.Type = type;
+        // An organizer manually setting the type is a manual override: a later
+        // Sessionize / Backstage re-import must NOT clobber it (FEATURE 1).
+        session.TypeIsManualOverride = true;
         session.Length = length;
         session.Room = string.IsNullOrWhiteSpace(room) ? null : room.Trim();
         session.EvaluationFormUrl =

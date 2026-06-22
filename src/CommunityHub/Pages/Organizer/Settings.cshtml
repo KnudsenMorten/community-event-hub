@@ -51,6 +51,7 @@
        organizer can SEE it is still in rollout and needs testing + release.
        Hidden entirely once released to Broad (the quiet/normal state). */
     .set-tag.ring { background:#fef9c3; color:#854d0e; border:1px solid #fde047; font-weight:600; }
+    .set-tag.kind { background:#eef2ff; color:#3730a3; border:1px solid #c7d2fe; }
     .set-build { font-size:12px; color:#6b7280; margin:6px 0 0; }
     .set-build code { background:#f3f4f6; padding:1px 5px; border-radius:4px; }
     /* A disabled feature is DIMMED (never hidden) for discoverability. */
@@ -226,7 +227,29 @@
                         {
                             <span class="set-tag off">@Localizer["Settings.Disabled"]</span>
                         }
-                        @if (s.ReleasedToRing != Ring.Broad)
+                        @* Kind (4 surfaces, REQUIREMENTS §23a): Engine = core plumbing;
+                           Engine (queued) = backend fed by a queue commit; Queue =
+                           organizer staging+commit (ring-scoped); User-impact = a person
+                           experiences it (ring-scoped). Ring-scoped kinds carry a pill. *@
+                        @{
+                            var kindLabel = s.Descriptor.Surface switch
+                            {
+                                FeatureSurface.UserImpact => "User-impact",
+                                FeatureSurface.Queue => "Queue",
+                                FeatureSurface.EngineQueued => "Engine (queued)",
+                                _ => "Engine",
+                            };
+                            var kindTitle = s.Descriptor.Surface switch
+                            {
+                                FeatureSurface.UserImpact => "A user experiences this (email / task / GUI) — ring-scoped on the target user.",
+                                FeatureSurface.Queue => "Organizer stages + Commits data for an engine — ring-scoped at commit; org-admin only.",
+                                FeatureSurface.EngineQueued => "Backend engine fed by a queue commit — runs broad when on; not ring-scoped; inert without committed data.",
+                                _ => "Core backend / plumbing — runs broad when on; not ring-scoped.",
+                            };
+                        }
+                        <span class="set-tag kind" title="@kindTitle">@kindLabel</span>
+                        @* Ring badge only for RING-SCOPED kinds (Queue + User-impact) — an Engine feature's ring is moot. *@
+                        @if (s.Descriptor.IsRingScoped && s.ReleasedToRing != Ring.Broad)
                         {
                             <span class="set-tag ring" title="@Localizer["Settings.RingBadgeTitle"]">@Localizer["Settings.RingBadge", Rings.Label(s.ReleasedToRing)]</span>
                         }

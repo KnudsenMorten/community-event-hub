@@ -21,6 +21,7 @@ public class SendInvitationsModel : PageModel
     private readonly EmailTemplateProvider _templates;
     private readonly CommunityHub.Branding.ActiveEventNameProvider _activeEvent;
     private readonly TimeProvider _clock;
+    private readonly IEmailContextAccessor? _context;
 
     public SendInvitationsModel(
         CommunityHubDbContext db,
@@ -29,7 +30,8 @@ public class SendInvitationsModel : PageModel
         IEmailSender emailSender,
         EmailTemplateProvider templates,
         CommunityHub.Branding.ActiveEventNameProvider activeEvent,
-        TimeProvider clock)
+        TimeProvider clock,
+        IEmailContextAccessor? context = null)
     {
         _db = db;
         _participant = participant;
@@ -38,6 +40,7 @@ public class SendInvitationsModel : PageModel
         _templates = templates;
         _activeEvent = activeEvent;
         _clock = clock;
+        _context = context;
     }
 
     public bool AccessDenied { get; private set; }
@@ -106,7 +109,13 @@ public class SendInvitationsModel : PageModel
                 tokens["magicLink"] = link;
 
                 var rendered = _templates.Render("invitation", tokens);
-                await _emailSender.SendAsync(p.Email, rendered.Subject, rendered.HtmlBody, ct);
+                // Ring-governed by the invitation-email feature (operator 2026-06-22).
+                using (_context?.Set(new EmailContext(
+                    ReminderType, me.EventId, p.Id, p.FullName,
+                    FeatureKey: "invitation-email")))
+                {
+                    await _emailSender.SendAsync(p.Email, rendered.Subject, rendered.HtmlBody, ct);
+                }
 
                 _db.SentReminders.Add(new SentReminder
                 {

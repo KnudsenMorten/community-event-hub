@@ -215,7 +215,7 @@ public sealed class SpeakerBioOwnershipScenarioTests
         var (import, _) = ScenarioFixture.NewImporter(db);
         var now = ScenarioFixture.Clock.GetUtcNow();
 
-        // Give the masterclass speaker hub-collected facts + an email override.
+        // Give the pre-day speaker hub-collected facts + an email override.
         var p = await db.Participants.SingleAsync(x => x.Id == seed.MasterclassSpeakerId);
         var prof = await db.SpeakerProfiles.SingleAsync(
             sp => sp.EventId == seed.EventId && sp.ParticipantId == p.Id);
@@ -236,7 +236,7 @@ public sealed class SpeakerBioOwnershipScenarioTests
                 mode: mode);
 
             var after = await db.Participants.SingleAsync(x => x.Id == p.Id);
-            Assert.Equal(ParticipantRole.MasterclassSpeaker, after.Role); // role unchanged
+            Assert.Equal(ParticipantRole.Speaker, after.Role); // role unchanged
             var profAfter = await db.SpeakerProfiles.SingleAsync(
                 sp => sp.EventId == seed.EventId && sp.ParticipantId == p.Id);
             // Hub-collected fields are NEVER touched by either import mode.

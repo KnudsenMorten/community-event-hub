@@ -6,9 +6,8 @@ namespace CommunityHub.Core.Email;
 /// The five persona GROUPS the onboarding email sets are keyed on. A persona
 /// group collapses the finer <see cref="ParticipantRole"/> values into the
 /// audiences the requirement lists (volunteer / speaker / media-team / sponsor /
-/// organizer). Speaker covers both <see cref="ParticipantRole.Speaker"/> and
-/// <see cref="ParticipantRole.MasterclassSpeaker"/>; media-team covers
-/// <see cref="ParticipantRole.Video"/> and <see cref="ParticipantRole.Camera"/>.
+/// organizer). Speaker covers <see cref="ParticipantRole.Speaker"/>; media-team
+/// covers <see cref="ParticipantRole.Media"/>. Event partners map to the organizer set.
 /// Attendees are deliberately NOT an onboarding-set persona (they get the
 /// existing welcome flow, not a crew onboarding set).
 /// </summary>
@@ -66,10 +65,9 @@ public static class OnboardingEmailSets
     {
         ParticipantRole.Organizer => PersonaGroup.Organizer,
         ParticipantRole.Speaker => PersonaGroup.Speaker,
-        ParticipantRole.MasterclassSpeaker => PersonaGroup.Speaker,
         ParticipantRole.Volunteer => PersonaGroup.Volunteer,
-        ParticipantRole.Video => PersonaGroup.MediaTeam,
-        ParticipantRole.Camera => PersonaGroup.MediaTeam,
+        ParticipantRole.Media => PersonaGroup.MediaTeam,
+        ParticipantRole.EventPartner => PersonaGroup.Organizer,
         ParticipantRole.Sponsor => PersonaGroup.Sponsor,
         _ => PersonaGroup.None,
     };

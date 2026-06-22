@@ -77,6 +77,10 @@ public class EmailCenterModel : PageModel
 
     // --- Send to a person (10a-2) + secondary email (10a-5) -----------------
     public List<(int Id, string Label)> ActiveParticipants { get; private set; } = new();
+    /// <summary>Templates offered in "send to a person" — excludes context-specific
+    /// ones (e.g. masterclass-*) that need per-signup tokens and would render blank
+    /// in a manual send (those have their own contextual send actions).</summary>
+    public List<string> PersonTemplateNames { get; private set; } = new();
     [BindProperty] public int PersonId { get; set; }
     [BindProperty] public string? PersonTemplate { get; set; }
     [BindProperty] public string? SecondaryEmail { get; set; }
@@ -123,7 +127,7 @@ public class EmailCenterModel : PageModel
         {
             msg = "Pick a person first.";
         }
-        else if (PersonTemplate is null || !TemplateNames.Contains(PersonTemplate))
+        else if (PersonTemplate is null || !PersonTemplateNames.Contains(PersonTemplate))
         {
             msg = "Pick a template first.";
         }
@@ -136,9 +140,19 @@ public class EmailCenterModel : PageModel
                 var to = await _participantEmail.SendTemplateToParticipantAsync(
                     me.EventId, PersonId, PersonTemplate, category: "manual-resend",
                     extraTokens: null, ct);
-                msg = to is null
-                    ? "That person was not found in this edition."
-                    : $"Sent '{PersonTemplate}' to {to}.";
+                if (to is null)
+                {
+                    msg = "That person was not found in this edition.";
+                }
+                else
+                {
+                    // Surface the DEV/redirect note so the organizer knows where the
+                    // mail actually went (same honesty as the test-send-to-address path).
+                    var plan = _testSendPlanner.Plan(to);
+                    msg = plan.Outcome == EmailTestSendOutcome.WouldRedirect
+                        ? $"Sent '{PersonTemplate}' for {to} (redirected to {plan.ActualRecipient} in this environment)."
+                        : $"Sent '{PersonTemplate}' to {to}.";
+                }
             }
             catch (Exception ex)
             {
@@ -182,8 +196,11 @@ public class EmailCenterModel : PageModel
             {
                 var tokens = await BuildSampleTokensAsync(me.EventId, ct);
                 var rendered = _templates.Render(Template, tokens);
+                // TEMP (operator 2026-06-22): include the template name in the subject
+                // so a batch test-send is identifiable in one inbox. Revert after the
+                // template cleanup.
                 await _emailSender.SendAsync(
-                    me.Email, $"[TEST] {rendered.Subject}", rendered.HtmlBody, ct);
+                    me.Email, $"[TEST: {Template}] {rendered.Subject}", rendered.HtmlBody, ct);
                 msg = $"Test mail '{Template}' sent to {me.Email}.";
             }
             catch (Exception ex)
@@ -235,8 +252,10 @@ public class EmailCenterModel : PageModel
                     {
                         var tokens = await BuildSampleTokensAsync(me.EventId, ct);
                         var rendered = _templates.Render(Template, tokens);
+                        // TEMP (operator 2026-06-22): template name in subject so a
+                        // batch test-send is identifiable in one inbox. Revert after cleanup.
                         await _emailSender.SendAsync(
-                            plan.TargetAddress!, $"[TEST] {rendered.Subject}", rendered.HtmlBody, ct);
+                            plan.TargetAddress!, $"[TEST: {Template}] {rendered.Subject}", rendered.HtmlBody, ct);
                         msg = plan.Outcome == EmailTestSendOutcome.WouldRedirect
                             ? $"Test mail '{Template}' sent for {plan.TargetAddress} "
                               + $"(redirected to {plan.ActualRecipient} in this environment)."
@@ -263,6 +282,12 @@ public class EmailCenterModel : PageModel
                 .OrderBy(n => n)
                 .ToList();
         }
+        // "Send to a person" hides context-specific templates that need per-signup
+        // tokens (masterclass-*) — they'd render with blank title/links in a manual
+        // send. They still preview + test-send (with sample tokens) above.
+        PersonTemplateNames = TemplateNames
+            .Where(n => !n.StartsWith("masterclass", StringComparison.OrdinalIgnoreCase))
+            .ToList();
     }
 
     private async Task RenderPreviewAsync(int eventId, CancellationToken ct)
@@ -324,6 +349,20 @@ public class EmailCenterModel : PageModel
         tokens["formDeadline"] = sampleDue;
         tokens["sponsorCompany"] = "Example Sponsor ApS";
         tokens["masterClassList"] = "Master Class A, Master Class B";
+
+        // URL tokens — so every button has a working href in PREVIEW + TEST-SEND.
+        // The real sends populate these from the actual context (signup/session);
+        // here we give sample links so a preview/test never shows a dead button.
+        var hub = string.IsNullOrWhiteSpace(_templateOptions.HubUrl)
+            ? "https://eldk27.eventhub.expertslive.dk"
+            : _templateOptions.HubUrl.TrimEnd('/');
+        tokens["hubUrl"] = hub;
+        tokens["loginUrl"] = hub;
+        tokens["selectionUrl"] = hub + "/MyMasterClass";
+        tokens["selfServiceUrl"] = hub + "/MyMasterClass";
+        tokens["landingPageUrl"] = hub + "/MasterClassPage/1";
+        tokens["icsUrl"] = hub + "/MyMasterClass.ics";
+        tokens["masterClassTitle"] = "Securing Entra ID (sample)";
         return tokens;
     }
 

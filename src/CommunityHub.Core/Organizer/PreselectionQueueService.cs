@@ -63,9 +63,13 @@ public sealed class PreselectionQueueService
         int eventId, ParticipantQueueSource? source = null,
         CancellationToken ct = default)
     {
+        // Sponsors are managed in the Sponsor admin area, not the onboarding
+        // pre-selection queue — exclude them so synced sponsor contacts never
+        // appear here (operator 2026-06-21).
         var q = _db.Participants
             .Where(p => p.EventId == eventId
-                        && p.LifecycleState != ParticipantLifecycleState.Active);
+                        && p.LifecycleState != ParticipantLifecycleState.Active
+                        && p.Role != ParticipantRole.Sponsor);
         if (source is not null)
         {
             q = q.Where(p => p.QueueSource == source.Value);

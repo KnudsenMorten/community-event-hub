@@ -53,6 +53,10 @@
             <a asp-page-handler="Export"
                asp-route-Sort="@Model.Sort"
                asp-route-StateFilter="@Model.StateFilter">Export to CSV</a>
+            &nbsp;|&nbsp;
+            <a asp-page-handler="ExportXlsx"
+               asp-route-Sort="@Model.Sort"
+               asp-route-StateFilter="@Model.StateFilter">Excel (.xlsx)</a>
         </p>
 
         @if (Model.Tasks.Count == 0)

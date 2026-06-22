@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text;
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Integrations.Sponsors;
+using CommunityHub.Export;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -101,17 +102,25 @@ public sealed class SponsorLeadsController : ControllerBase
         string sponsorCompanyId,
         string fileName,
         [FromQuery(Name = "key")] string? queryKey,
+        [FromQuery(Name = "format")] string? format,
         CancellationToken ct)
     {
         // Delegate to the canonical handler; the {fileName} part is just
         // for the caller's benefit + audit logs.
-        return GetCsvAsync(sponsorCompanyId, queryKey, ct);
+        return GetCsvAsync(sponsorCompanyId, queryKey, format, ct);
     }
 
+    /// <summary>
+    /// Canonical leads download. CSV by default; pass <c>?format=xlsx</c> to get
+    /// the identical data as an .xlsx workbook instead. Auth is unchanged — the
+    /// same API-key check guards both formats; only the serialisation of the
+    /// already-built rows differs (the xlsx variant reuses the exact CSV string).
+    /// </summary>
     [HttpGet("leads.csv")]
     public async Task<IActionResult> GetCsvAsync(
         string sponsorCompanyId,
         [FromQuery(Name = "key")] string? queryKey,
+        [FromQuery(Name = "format")] string? format,
         CancellationToken ct)
     {
         if (!await AuthAsync(sponsorCompanyId, queryKey, ct)) return Unauthorized();
@@ -133,8 +142,17 @@ public sealed class SponsorLeadsController : ControllerBase
         }
 
         var stamp = DateTimeOffset.UtcNow.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        var csv = sb.ToString();
+
+        // ?format=xlsx -> same data as the CSV, packaged as an Excel workbook.
+        if (string.Equals(format, "xlsx", StringComparison.OrdinalIgnoreCase))
+        {
+            var xlsxName = $"leads-{sponsorCompanyId}-{stamp}.xlsx";
+            return File(CsvToXlsx.Build(csv, "Sponsor leads"), CsvToXlsx.ContentType, xlsxName);
+        }
+
         var fileName = $"leads-{sponsorCompanyId}-{stamp}.csv";
-        return File(Encoding.UTF8.GetBytes(sb.ToString()), "text/csv", fileName);
+        return File(Encoding.UTF8.GetBytes(csv), "text/csv", fileName);
     }
 
     // ---- internals ---------------------------------------------------
