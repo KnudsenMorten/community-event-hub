@@ -40,6 +40,10 @@ public sealed class SessionEvaluationMailService
     private readonly TimeProvider _clock;
     private readonly IEmailContextAccessor? _context;
 
+    // Optional template provider for the results mail body (the generic shipped
+    // default is the fallback). Null in older test constructions → inline HTML.
+    private readonly EmailTemplateProvider? _templates;
+
     // Optional edition-config source for the SPEAKER contact in the footer line.
     // Null in older test constructions → blank name / support-email fallback.
     private readonly EventEditionConfigLoader? _eventConfigLoader;
@@ -50,6 +54,7 @@ public sealed class SessionEvaluationMailService
         IEmailSender emailSender,
         TimeProvider clock,
         IEmailContextAccessor? context = null,
+        EmailTemplateProvider? templates = null,
         EventEditionConfigLoader? eventConfigLoader = null,
         EventConfigOptions? eventConfigOptions = null)
     {
@@ -57,6 +62,7 @@ public sealed class SessionEvaluationMailService
         _emailSender = emailSender;
         _clock = clock;
         _context = context;
+        _templates = templates;
         _eventConfigLoader = eventConfigLoader;
         _eventConfigOptions = eventConfigOptions;
     }
@@ -104,7 +110,8 @@ public sealed class SessionEvaluationMailService
                          && sp.ContactEmailOverride != "")
             .ToDictionaryAsync(sp => sp.ParticipantId, sp => sp.ContactEmailOverride!, ct);
 
-        var recipients = new List<string>();
+        // Address + the speaker's first name (for a per-speaker greeting token).
+        var recipients = new List<(string Addr, string FirstName)>();
         foreach (var link in session.SessionSpeakers)
         {
             var p = link.Participant;
@@ -112,9 +119,11 @@ public sealed class SessionEvaluationMailService
             var addr = overrides.TryGetValue(link.ParticipantId, out var ov)
                 ? ov
                 : p.Email;
-            if (!string.IsNullOrWhiteSpace(addr) && !recipients.Contains(addr, StringComparer.OrdinalIgnoreCase))
+            if (!string.IsNullOrWhiteSpace(addr)
+                && !recipients.Any(r => string.Equals(r.Addr, addr, StringComparison.OrdinalIgnoreCase)))
             {
-                recipients.Add(addr);
+                var first = string.IsNullOrWhiteSpace(p.FullName) ? "there" : p.FullName.Split(' ')[0];
+                recipients.Add((addr, first));
             }
         }
 
@@ -125,15 +134,21 @@ public sealed class SessionEvaluationMailService
                 "No linked speaker with an email address — nothing was emailed.");
         }
 
+        var eventName = await _db.Events
+            .Where(e => e.Id == session.EventId)
+            .Select(e => e.DisplayName)
+            .FirstOrDefaultAsync(ct) ?? string.Empty;
         var subject = $"Your session evaluation — {session.Title}";
-        var htmlBody = BuildHtmlBody(session.Title, resultsText);
 
         // Ring-governed by the session-eval-email feature (operator 2026-06-22).
         using (_context?.Set(new EmailContext(
             "session-eval", FeatureKey: "session-eval-email")))
         {
-            foreach (var addr in recipients)
+            foreach (var (addr, firstName) in recipients)
             {
+                var htmlBody = _templates is not null
+                    ? RenderResults(firstName, session.Title, resultsText, eventName)
+                    : BuildHtmlBody(session.Title, resultsText);
                 await _emailSender.SendAsync(addr, subject, htmlBody, ct);
             }
         }
@@ -143,8 +158,26 @@ public sealed class SessionEvaluationMailService
         await _db.SaveChangesAsync(ct);
 
         return new SessionEvaluationMailResult(
-            true, recipients,
+            true, recipients.Select(r => r.Addr).ToList(),
             $"Evaluation results emailed to {recipients.Count} speaker(s).");
+    }
+
+    /// <summary>
+    /// Render the results mail from the <c>session-evaluation-results</c> template.
+    /// The raw results text becomes the <c>resultsHtml</c> raw token (encoded here,
+    /// with newlines turned into &lt;br&gt;, so the renderer inserts it verbatim).
+    /// </summary>
+    private string RenderResults(string firstName, string title, string resultsText, string eventName)
+    {
+        var safeResults = System.Net.WebUtility.HtmlEncode(resultsText)
+            .Replace("\r\n", "\n")
+            .Replace("\n", "<br>");
+        var tokens = _templates!.NewTokenSet();
+        tokens["firstName"] = firstName;
+        tokens["sessionTitle"] = title;
+        tokens["resultsHtml"] = safeResults;   // raw-HTML token (renderer keeps verbatim)
+        tokens["eventDisplayName"] = eventName;
+        return _templates.Render("session-evaluation-results", tokens).HtmlBody;
     }
 
     private string BuildHtmlBody(string title, string resultsText)

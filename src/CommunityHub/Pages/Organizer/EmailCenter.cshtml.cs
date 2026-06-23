@@ -196,9 +196,9 @@ public class EmailCenterModel : PageModel
             {
                 var tokens = await BuildSampleTokensAsync(me.EventId, ct);
                 var rendered = _templates.Render(Template, tokens);
-                // TEMP (operator 2026-06-22): include the template name in the subject
-                // so a batch test-send is identifiable in one inbox. Revert after the
-                // template cleanup.
+                // Template name in the TEST-send subject so a batch test-send is
+                // identifiable in one inbox. Test-sends only — never real mail.
+                // (Kept as a permanent test aid, operator 2026-06-23.)
                 await _emailSender.SendAsync(
                     me.Email, $"[TEST: {Template}] {rendered.Subject}", rendered.HtmlBody, ct);
                 msg = $"Test mail '{Template}' sent to {me.Email}.";
@@ -252,8 +252,9 @@ public class EmailCenterModel : PageModel
                     {
                         var tokens = await BuildSampleTokensAsync(me.EventId, ct);
                         var rendered = _templates.Render(Template, tokens);
-                        // TEMP (operator 2026-06-22): template name in subject so a
-                        // batch test-send is identifiable in one inbox. Revert after cleanup.
+                        // Template name in the TEST-send subject so a batch test-send is
+                        // identifiable in one inbox. Test-sends only — never real mail.
+                        // (Kept as a permanent test aid, operator 2026-06-23.)
                         await _emailSender.SendAsync(
                             plan.TargetAddress!, $"[TEST: {Template}] {rendered.Subject}", rendered.HtmlBody, ct);
                         msg = plan.Outcome == EmailTestSendOutcome.WouldRedirect

@@ -45,18 +45,24 @@ public sealed class PinLoginService
     private readonly TimeProvider _clock;
     private readonly IEmailContextAccessor? _context;
 
+    // Optional template provider for the sign-in PIN mail (the generic shipped
+    // default is the fallback). Null in older test constructions → inline HTML.
+    private readonly EmailTemplateProvider? _templates;
+
     public PinLoginService(
         CommunityHubDbContext db,
         PinService pinService,
         IEmailSender emailSender,
         TimeProvider clock,
-        IEmailContextAccessor? context = null)
+        IEmailContextAccessor? context = null,
+        EmailTemplateProvider? templates = null)
     {
         _db = db;
         _pinService = pinService;
         _emailSender = emailSender;
         _clock = clock;
         _context = context;
+        _templates = templates;
     }
 
     /// <summary>
@@ -119,16 +125,33 @@ public sealed class PinLoginService
         var subjectPrefix = string.IsNullOrWhiteSpace(eventCode)
             ? "Event Hub"
             : $"{eventCode} Event Hub";
-        var subject = $"{subjectPrefix} - Your sign-in code";
-        var body = BuildPinEmail(participant.FullName, plainPin);
+
+        var firstName = FirstNameOf(participant.FullName);
         // SIGN-IN EXEMPTION (operator 2026-06-22): the on-demand PIN must reach a user
         // at ANY ring — mark this send ring-exempt so the gate never drops it. (The
         // global kill switch still applies.) `using (null)` is a safe no-op in test wiring.
         using (_context?.Set(new EmailContext(
             "pin-signin", eventId, participant.Id, participant.FullName, RingExempt: true)))
         {
-            await _emailSender.SendAsync(
-                participant.Email, subject, body, cancellationToken);
+            if (_templates is not null)
+            {
+                var tokens = _templates.NewTokenSet();
+                tokens["firstName"] = firstName;
+                tokens["pin"] = plainPin;
+                tokens["expiryMinutes"] = ((int)PinLifetime.TotalMinutes).ToString();
+                tokens["subjectPrefix"] = subjectPrefix;
+                var rendered = _templates.Render("pin-signin", tokens);
+                await _emailSender.SendAsync(
+                    participant.Email, rendered.Subject, rendered.HtmlBody, cancellationToken);
+            }
+            else
+            {
+                // Fallback: legacy inline HTML (older test constructions with no provider).
+                var subject = $"{subjectPrefix} - Your sign-in code";
+                var body = BuildPinEmail(participant.FullName, plainPin);
+                await _emailSender.SendAsync(
+                    participant.Email, subject, body, cancellationToken);
+            }
         }
 
         return PinRequestResult.Ok();
@@ -138,11 +161,13 @@ public sealed class PinLoginService
     public static string NormalizeEmail(string email) =>
         (email ?? string.Empty).Trim().ToLowerInvariant();
 
+    /// <summary>First word of a full name, or "there" when blank.</summary>
+    private static string FirstNameOf(string name) =>
+        string.IsNullOrWhiteSpace(name) ? "there" : name.Split(' ')[0];
+
     private static string BuildPinEmail(string name, string pin)
     {
-        var firstName = string.IsNullOrWhiteSpace(name)
-            ? "there"
-            : name.Split(' ')[0];
+        var firstName = FirstNameOf(name);
 
         // Minimal inline-styled HTML; the full branded template comes from the
         // email-template system in later stages.

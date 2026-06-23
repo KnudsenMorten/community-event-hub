@@ -80,6 +80,17 @@ themselves.
 | `sponsor-leads-digest` | `SponsorLeadsJob.cs:135-139` | `{{sponsorCompany}}`, `{{leadCount}}`, `{{leadListHtml}}` |
 | `attendee-missing-booking`, `attendee-missing-ticket` | `AttendeeReconcileJob.cs:202-211` | *(base tokens only)* |
 | `attendee-duplicate-booking` | `AttendeeReconcileJob.cs:202-211` | `{{masterClassList}}` |
+| `masterclass-selection-invite` | `MasterClassEmailService.cs` (`SendSelectionInviteAsync`) | `{{selectionUrl}}` |
+| `masterclass-confirmed` | `MasterClassEmailService.cs` (`SendConfirmedAsync`) | `{{masterClassTitle}}`, `{{landingPageUrl}}`, `{{icsUrl}}`, `{{selfServiceUrl}}` |
+| `masterclass-waitlisted` | `MasterClassEmailService.cs` (`SendWaitlistedAsync`) | `{{masterClassTitle}}`, `{{selfServiceUrl}}`, `{{waitlistTerms}}` *(raw HTML)* |
+| `masterclass-cancelled` | `MasterClassEmailService.cs` (`SendCancelledAsync`) | `{{masterClassTitle}}`, `{{signupUrl}}` |
+| `masterclass-reassignment` | `MasterClassEmailService.cs` (`SendReassignmentValidationAsync`) | `{{heldMasterClass}}` *(raw HTML)*, `{{selfServiceUrl}}` |
+| `masterclass-offer` | `MasterClassPromotionEmailService.cs` (`SendPromotionAsync`, Offered) | `{{masterClassTitle}}`, `{{selfServiceUrl}}`, `{{offerDeadline}}` |
+| `masterclass-promoted` | `MasterClassPromotionEmailService.cs` (`SendPromotionAsync`, Confirmed) | `{{masterClassTitle}}`, `{{selfServiceUrl}}` |
+| `masterclass-month-reminder` | `MasterClassEmailService.cs` (`SendMonthReminderAsync`) | `{{masterClassTitle}}` *(+ .ics attachment)* |
+| `pin-signin` | `PinLoginService.cs` (`RequestPinAsync`) | `{{subjectPrefix}}`, `{{pin}}`, `{{expiryMinutes}}` |
+| `calendar-invite` | `CalendarInviteEmailService.cs` (`SendActivationInviteAsync`) | *(base tokens only; + .ics attachment)* |
+| `session-evaluation-results` | `SessionEvaluationMailService.cs` (`EmailResultsToSpeakersAsync`) | `{{sessionTitle}}`, `{{resultsHtml}}` *(raw HTML)* |
 | `broadcast` | `Broadcast.cshtml.cs:308-325` | `{{messageHtml}}` (see broadcast note below) |
 
 ### HTML-encoding contract — "encode at the seam"
@@ -90,8 +101,9 @@ readable text and can never break the markup. **Senders pass raw values — do n
 pre-encode** (that would double-encode). The exception is tokens whose value is a
 deliberately sender-built **HTML fragment**: these are identified by the
 **`Html` / `Block` naming suffix** (e.g. `{{leadListHtml}}`, `{{taskListHtml}}`,
-`{{messageHtml}}`, `{{descriptionBlock}}`, `{{notesBlock}}`) plus the explicit
-set `{{bodyContent}}` / `{{dueText}}`, and pass through **verbatim** (a sender
+`{{messageHtml}}`, `{{descriptionBlock}}`, `{{notesBlock}}`, `{{resultsHtml}}`)
+plus the explicit set `{{bodyContent}}` / `{{dueText}}` / `{{waitlistTerms}}` /
+`{{heldMasterClass}}`, and pass through **verbatim** (a sender
 building such a fragment still encodes its own untrusted leaf values). The
 **`Subject:` header** is plain text and is **not** encoded. When adding a token:
 name a free-text value plainly (it gets encoded for free) and a markup fragment

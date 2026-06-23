@@ -45,6 +45,12 @@ public sealed class EmailTemplateRenderer
             "bodyContent",
             // dueText carries a <strong>…</strong> span (its date is app-formatted).
             "dueText",
+            // Master Class waitlist-signup terms: an optional, sender-built <p> block
+            // (the auto-switch consent) or empty when not consented.
+            "waitlistTerms",
+            // Master Class reassignment "what the ticket holds": a sender-built <p>
+            // block (either the inherited class name in <strong>, or a choose-one note).
+            "heldMasterClass",
         };
 
     private static bool IsRawHtmlToken(string token) =>

@@ -77,6 +77,11 @@ public sealed class CapturingEmailSender : IEmailSender
     /// <summary>The .ics content of the most recent SendWithIcsAsync call (calendar invite).</summary>
     public string? LastIcs { get; private set; }
 
+    /// <summary>Full capture (To, Subject, Html) of every SendWithIcsAsync call —
+    /// kept separate from <see cref="Messages"/> so .ics sends don't change the
+    /// non-ics message count that existing tests assert on.</summary>
+    public List<(string To, string Subject, string Html)> IcsMessages { get; } = new();
+
     public Task SendAsync(
         string toEmail, string subject, string htmlBody,
         CancellationToken ct = default)
@@ -109,6 +114,7 @@ public sealed class CapturingEmailSender : IEmailSender
         CancellationToken ct = default)
     {
         Sent.Add((toEmail, subject));
+        IcsMessages.Add((toEmail, subject, htmlBody));
         LastIcs = icsContent;
         return Task.CompletedTask;
     }

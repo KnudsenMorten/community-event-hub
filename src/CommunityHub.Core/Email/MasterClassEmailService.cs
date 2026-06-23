@@ -222,9 +222,28 @@ public sealed class MasterClassEmailService
         var url = await SelfServiceUrlAsync(a.Id, baseUrl, ct);
         var fn = string.IsNullOrWhiteSpace(a.FirstName) ? "there" : a.FirstName;
         var ev = a.Event.DisplayName;
+        var name = $"{fn} {a.LastName}".Trim();
+        // The "what the ticket currently holds" block is sender-built HTML (raw token).
         var held = string.IsNullOrWhiteSpace(inheritedMcTitle)
             ? "<p>The ticket does not currently hold a Master Class — please choose one below.</p>"
             : $"<p>The ticket currently holds the following master class: <strong>{Enc(inheritedMcTitle)}</strong></p>";
+
+        if (_templates is not null)
+        {
+            var tokens = _templates.NewTokenSet();
+            tokens["firstName"] = fn;
+            tokens["eventDisplayName"] = ev;
+            tokens["heldMasterClass"] = held;     // raw-HTML token (renderer keeps verbatim)
+            tokens["selfServiceUrl"] = url;
+            using (_context.Set(new EmailContext(Category, a.EventId, null, name, FeatureKey: "masterclass-invites")))
+            {
+                var rendered = _templates.Render("masterclass-reassignment", tokens);
+                await _sender.SendAsync(a.Email, rendered.Subject, rendered.HtmlBody, ct);
+            }
+            return true;
+        }
+
+        // Fallback: legacy inline HTML (older test constructions with no provider).
         var html =
             $"<p>Dear {Enc(fn)},</p>" +
             $"<p>You have been re-assigned a 2-day ticket with Master Class for <strong>{Enc(ev)}</strong>.</p>" +
@@ -243,7 +262,7 @@ public sealed class MasterClassEmailService
             ContactLine() +
             "<p>The team</p>";
 
-        await SendAsync(a.Email, $"{fn} {a.LastName}".Trim(), a.EventId,
+        await SendAsync(a.Email, name, a.EventId,
             $"Action required: Validate your Master Class for {ev} (ticket re-assignment)", html, ct);
         return true;
     }
@@ -310,10 +329,29 @@ public sealed class MasterClassEmailService
         var c = await LoadAsync(signupId, ct);
         if (c is null) return;
         var url = await SelfServiceUrlAsync(c.S.AttendeeId, baseUrl, ct);
+        var name = $"{c.FirstName} {c.S.Attendee.LastName}".Trim();
+        // Auto-switch consent terms: a sender-built <p> block (raw token) or empty.
         var terms = c.S.AutoSwitchConsentAt is not null
             ? "<p><strong>You accepted:</strong> if a seat opens here, your current Master Class will be " +
               "cancelled and you'll be moved to this one automatically.</p>"
             : "";
+
+        if (_templates is not null)
+        {
+            var tokens = _templates.NewTokenSet();
+            tokens["firstName"] = c.FirstName;
+            tokens["masterClassTitle"] = c.Title;
+            tokens["selfServiceUrl"] = url;
+            tokens["waitlistTerms"] = terms;       // raw-HTML token (renderer keeps verbatim)
+            using (_context.Set(new EmailContext(Category, c.EventId, null, name, FeatureKey: "masterclass-invites")))
+            {
+                var rendered = _templates.Render("masterclass-waitlisted", tokens);
+                await _sender.SendAsync(c.Email, rendered.Subject, rendered.HtmlBody, ct);
+            }
+            return;
+        }
+
+        // Fallback: legacy inline HTML (older test constructions with no provider).
         var html =
             $"<p>Hi {Enc(c.FirstName)},</p>" +
             $"<p>You're on the <strong>waitlist</strong> for <strong>{Enc(c.Title)}</strong>. " +
@@ -321,7 +359,7 @@ public sealed class MasterClassEmailService
             $"<p>You can <a href=\"{Enc(url)}\">leave the waitlist</a> any time.</p>" +
             ContactLine() +
             "<p>The team</p>";
-        await SendAsync(c.Email, $"{c.FirstName} {c.S.Attendee.LastName}".Trim(), c.EventId,
+        await SendAsync(c.Email, name, c.EventId,
             $"You're on the waitlist: {c.Title}", html, ct);
     }
 
@@ -341,13 +379,34 @@ public sealed class MasterClassEmailService
 
         var ics = BuildIcs(host, s.SessionId, s.Session.Title, s.Session.StartsAt, s.Session.EndsAt, s.Session.Event.StartDate);
         var fn = string.IsNullOrWhiteSpace(s.Attendee.FirstName) ? "there" : s.Attendee.FirstName;
-        var html =
+        var name = $"{fn} {s.Attendee.LastName}".Trim();
+
+        string subject;
+        string html;
+        if (_templates is not null)
+        {
+            var tokens = _templates.NewTokenSet();
+            tokens["firstName"] = fn;
+            tokens["masterClassTitle"] = s.Session.Title;
+            using (_context.Set(new EmailContext(Category, s.EventId, null, name, FeatureKey: "masterclass-invites")))
+            {
+                var rendered = _templates.Render("masterclass-month-reminder", tokens);
+                // The .ics attachment stays — only the HTML body became a template.
+                await _sender.SendWithIcsAsync(s.Attendee.Email, rendered.Subject, rendered.HtmlBody, ics, "master-class.ics", ct);
+            }
+            await _signups.MarkMonthReminderSentAsync(s.Id, ct);
+            return true;
+        }
+
+        // Fallback: legacy inline HTML (older test constructions with no provider).
+        subject = $"Coming up: {s.Session.Title}";
+        html =
             $"<p>Hi {Enc(fn)},</p>" +
             $"<p>Your Master Class <strong>{Enc(s.Session.Title)}</strong> is coming up — here's the calendar " +
             "entry you asked us to send (attached).</p>" + ContactLine() +
             "<p>See you there,<br/>The team</p>";
-        using (_context.Set(new EmailContext(Category, s.EventId, null, $"{fn} {s.Attendee.LastName}".Trim(), FeatureKey: "masterclass-invites")))
-            await _sender.SendWithIcsAsync(s.Attendee.Email, $"Coming up: {s.Session.Title}", html, ics, "master-class.ics", ct);
+        using (_context.Set(new EmailContext(Category, s.EventId, null, name, FeatureKey: "masterclass-invites")))
+            await _sender.SendWithIcsAsync(s.Attendee.Email, subject, html, ics, "master-class.ics", ct);
 
         await _signups.MarkMonthReminderSentAsync(s.Id, ct);
         return true;
@@ -361,6 +420,25 @@ public sealed class MasterClassEmailService
         if (string.IsNullOrWhiteSpace(email)) return;
         var url = await SelfServiceUrlAsync(attendeeId, baseUrl, ct);
         var fn = string.IsNullOrWhiteSpace(firstName) ? "there" : firstName;
+        var name = $"{fn} {lastName}".Trim();
+        var eventName = await _signups.EventNameAsync(eventId, ct);
+
+        if (_templates is not null)
+        {
+            var tokens = _templates.NewTokenSet();
+            tokens["firstName"] = fn;
+            tokens["masterClassTitle"] = mcTitle;
+            tokens["eventDisplayName"] = eventName;
+            tokens["signupUrl"] = url;
+            using (_context.Set(new EmailContext(Category, eventId, null, name, FeatureKey: "masterclass-invites")))
+            {
+                var rendered = _templates.Render("masterclass-cancelled", tokens);
+                await _sender.SendAsync(email, rendered.Subject, rendered.HtmlBody, ct);
+            }
+            return;
+        }
+
+        // Fallback: legacy inline HTML (older test constructions with no provider).
         var html =
             $"<p>Hi {Enc(fn)},</p>" +
             $"<p>Your place in the Master Class <strong>{Enc(mcTitle)}</strong> has been <strong>cancelled</strong>.</p>" +
@@ -368,7 +446,7 @@ public sealed class MasterClassEmailService
             "(subject to availability).</p>" +
             ContactLine() +
             "<p>The team</p>";
-        await SendAsync(email, $"{fn} {lastName}".Trim(), eventId,
+        await SendAsync(email, name, eventId,
             $"Cancelled: {mcTitle}", html, ct);
     }
 }

@@ -36,16 +36,22 @@ public sealed class CalendarInviteEmailService
     private readonly IEmailContextAccessor _context;
     private readonly TimeProvider _clock;
 
+    // Optional template provider for the activation invite body (the generic shipped
+    // default is the fallback). Null in older test constructions → inline HTML.
+    private readonly EmailTemplateProvider? _templates;
+
     public CalendarInviteEmailService(
         CommunityHubDbContext db,
         IEmailSender emailSender,
         IEmailContextAccessor context,
-        TimeProvider clock)
+        TimeProvider clock,
+        EmailTemplateProvider? templates = null)
     {
         _db = db;
         _emailSender = emailSender;
         _context = context;
         _clock = clock;
+        _templates = templates;
     }
 
     /// <summary>
@@ -89,22 +95,40 @@ public sealed class CalendarInviteEmailService
         var firstName = string.IsNullOrWhiteSpace(p.FullName)
             ? "there"
             : p.FullName.Split(' ')[0];
-        var encName = System.Net.WebUtility.HtmlEncode(firstName);
-        var encEvent = System.Net.WebUtility.HtmlEncode(p.Event.DisplayName);
 
-        var subject = $"{p.Event.DisplayName} — added to your calendar";
-        var htmlBody =
-            $"<p>Hi {encName},</p>" +
-            $"<p>Welcome aboard! We've attached a calendar invitation for " +
-            $"<strong>{encEvent}</strong> so the event lands straight in your calendar — " +
-            "just open the attachment and accept.</p>" +
-            "<p>For your personal deadlines, shifts and tasks, subscribe to your private " +
-            "calendar feed from your Event Hub — it stays in sync automatically as things " +
-            "change. Sign in and look for <em>\"Add to my calendar\"</em>.</p>" +
-            "<p>See you there,<br/>The team</p>";
-
+        string subject;
+        string htmlBody;
+        // No-FeatureKey EmailContext (unchanged): this transactional invite is governed
+        // only by the global outbound kill switch, not a per-feature ring.
         using (_context.Set(new EmailContext(ReminderType, p.EventId, p.Id, p.FullName)))
         {
+            if (_templates is not null)
+            {
+                var tokens = _templates.NewTokenSet();
+                tokens["firstName"] = firstName;
+                tokens["eventDisplayName"] = p.Event.DisplayName;
+                var rendered = _templates.Render("calendar-invite", tokens);
+                subject = rendered.Subject;
+                htmlBody = rendered.HtmlBody;
+            }
+            else
+            {
+                // Fallback: legacy inline HTML (older test constructions with no provider).
+                var encName = System.Net.WebUtility.HtmlEncode(firstName);
+                var encEvent = System.Net.WebUtility.HtmlEncode(p.Event.DisplayName);
+                subject = $"{p.Event.DisplayName} — added to your calendar";
+                htmlBody =
+                    $"<p>Hi {encName},</p>" +
+                    $"<p>Welcome aboard! We've attached a calendar invitation for " +
+                    $"<strong>{encEvent}</strong> so the event lands straight in your calendar — " +
+                    "just open the attachment and accept.</p>" +
+                    "<p>For your personal deadlines, shifts and tasks, subscribe to your private " +
+                    "calendar feed from your Event Hub — it stays in sync automatically as things " +
+                    "change. Sign in and look for <em>\"Add to my calendar\"</em>.</p>" +
+                    "<p>See you there,<br/>The team</p>";
+            }
+
+            // The .ics attachment stays — only the HTML body became a template.
             await _emailSender.SendWithIcsAsync(
                 toEmail, subject, htmlBody, ics, "event.ics", ct);
         }

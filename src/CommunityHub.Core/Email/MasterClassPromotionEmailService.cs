@@ -26,6 +26,10 @@ public sealed class MasterClassPromotionEmailService
     private readonly IEmailContextAccessor _context;
     private readonly MasterClassSignupService _signups;
 
+    // Optional template provider for the offer/promoted mails (the generic shipped
+    // default is the fallback). Null in older test constructions → inline HTML.
+    private readonly EmailTemplateProvider? _templates;
+
     // Optional edition-config source for the support email shown in the contact
     // line. Null in older test constructions → falls back to the default.
     private readonly EventEditionConfigLoader? _eventConfigLoader;
@@ -35,6 +39,7 @@ public sealed class MasterClassPromotionEmailService
     public MasterClassPromotionEmailService(
         CommunityHubDbContext db, IEmailSender sender,
         IEmailContextAccessor context, MasterClassSignupService signups,
+        EmailTemplateProvider? templates = null,
         EventEditionConfigLoader? eventConfigLoader = null,
         EventConfigOptions? eventConfigOptions = null)
     {
@@ -42,6 +47,7 @@ public sealed class MasterClassPromotionEmailService
         _sender = sender;
         _context = context;
         _signups = signups;
+        _templates = templates;
         _eventConfigLoader = eventConfigLoader;
         _eventConfigOptions = eventConfigOptions;
     }
@@ -77,14 +83,35 @@ public sealed class MasterClassPromotionEmailService
         var url = $"{baseUrl.TrimEnd('/')}/MyMasterClass?t={token}";
 
         var firstName = string.IsNullOrWhiteSpace(s.Attendee.FirstName) ? "there" : s.Attendee.FirstName;
+        var isOffer = s.Status == MasterClassSignupStatus.Offered;
+        var when = s.OfferExpiresAt is { } exp ? $" by {exp:dddd HH:mm} UTC" : "";
+        var name = $"{s.Attendee.FirstName} {s.Attendee.LastName}".Trim();
+
+        string subject, htmlBody;
+        if (_templates is not null)
+        {
+            // The service already branches on status: render the matching key.
+            var tokens = _templates.NewTokenSet();
+            tokens["firstName"] = firstName;
+            tokens["masterClassTitle"] = s.Session.Title;
+            tokens["selfServiceUrl"] = url;
+            tokens["offerDeadline"] = when;   // offer variant only; empty otherwise
+            using (_context.Set(new EmailContext(Category, s.EventId, null, name, FeatureKey: "masterclass-invites")))
+            {
+                var rendered = _templates.Render(
+                    isOffer ? "masterclass-offer" : "masterclass-promoted", tokens);
+                await _sender.SendAsync(s.Attendee.Email, rendered.Subject, rendered.HtmlBody, ct);
+            }
+            await _signups.MarkPromotionNotifiedAsync(s.Id, ct);
+            return true;
+        }
+
+        // Fallback: legacy inline HTML (older test constructions with no provider).
         var encName = System.Net.WebUtility.HtmlEncode(firstName);
         var encTitle = System.Net.WebUtility.HtmlEncode(s.Session.Title);
         var encUrl = System.Net.WebUtility.HtmlEncode(url);
-
-        string subject, htmlBody;
-        if (s.Status == MasterClassSignupStatus.Offered)
+        if (isOffer)
         {
-            var when = s.OfferExpiresAt is { } exp ? $" by {exp:dddd HH:mm} UTC" : "";
             subject = $"A Master Class seat is held for you: {s.Session.Title}";
             htmlBody =
                 $"<p>Hi {encName},</p>" +
@@ -108,7 +135,7 @@ public sealed class MasterClassPromotionEmailService
                 "<p>See you there,<br/>The team</p>";
         }
 
-        using (_context.Set(new EmailContext(Category, s.EventId, null, $"{s.Attendee.FirstName} {s.Attendee.LastName}".Trim(), FeatureKey: "masterclass-invites")))
+        using (_context.Set(new EmailContext(Category, s.EventId, null, name, FeatureKey: "masterclass-invites")))
         {
             await _sender.SendAsync(s.Attendee.Email, subject, htmlBody, ct);
         }
