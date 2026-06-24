@@ -63,7 +63,11 @@
            Master Class (operator 2026-06-21). The per-MC speaker-published logistics
            below carry the specifics (what to bring for THIS class); this block is the
            general orientation + the laptop / charging house rules. *@
-        <section class="mc-logistics" aria-labelledby="mc-about-h">
+        @* NB: deliberately NOT class="mc-logistics" — that class sets
+           white-space:pre-wrap (for the raw speaker logistics text below); applied to
+           this STRUCTURED html it rendered the source-code newlines/indentation as
+           huge gaps between paragraphs and bullets (operator 2026-06-24). *@
+        <section aria-labelledby="mc-about-h">
             <h2 id="mc-about-h" style="font-size:17px;margin:0 0 8px;">What is an Experts Live Master Class?</h2>
             <p>An Experts Live Master Class is a full-day, in-person learning event where people with a shared interest in a topic come together to learn from experienced professionals—mainly Microsoft MVPs and sometimes Microsoft itself.</p>
             <p>There isn't a strict definition of what makes up a master class. Our main goal is to create a room of peers and provide honest, practical insight — the "no filter" version of what works and what doesn't.</p>

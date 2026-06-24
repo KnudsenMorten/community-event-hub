@@ -96,30 +96,63 @@ public sealed class AttendeeReconcileJob
             return;
         }
 
+        // Master classes are now booked IN-HUB (CEH MasterClassSignups), NOT Zoho
+        // Bookings — so we no longer pull Zoho appointments. We still pull Zoho TICKETS
+        // to know who holds a 2-day ticket (the only eligibility source).
         var tickets = await _zoho.GetBackstageTicketsAsync(token, ct);
-        var appointments = await _zoho.GetBookingsAppointmentsAsync(token, ct);
 
         var results = _reconciler.Reconcile(
-            tickets, appointments,
+            tickets, Array.Empty<ZohoAppointment>(),
             _options.TwoDayTicketNameRegex,
             _options.BookingServiceNameRegex);
 
         var now = _clock.GetUtcNow();
-        var due = new List<ReminderMessage>();
 
+        // 1) Upsert each reconciled attendee with their Zoho TICKET status.
         foreach (var r in results)
         {
-            var (ticketStatus, bookingStatus, mismatch) = Evaluate(r);
+            var ticketStatus = r.HasTwoDayTicket
+                ? TicketStatus.TwoDay
+                : r.TicketClassName is not null ? TicketStatus.Other : TicketStatus.None;
+            await UpsertAttendeeAsync(eventId, r, ticketStatus, now, ct);
+        }
+        await _db.SaveChangesAsync(ct);
 
-            await UpsertAttendeeAsync(eventId, r, ticketStatus,
-                bookingStatus, mismatch, now, ct);
+        // 2) Resolve the CEH master-class SELECTION per attendee (a CONFIRMED in-hub
+        //    seat) and reflect it onto the attendee row.
+        var confirmed = await _db.MasterClassSignups
+            .Where(s => s.EventId == eventId && s.Status == MasterClassSignupStatus.Confirmed)
+            .Select(s => new { s.AttendeeId, Title = s.Session.Title })
+            .ToListAsync(ct);
+        var selectionByAttendee = confirmed
+            .GroupBy(x => x.AttendeeId)
+            .ToDictionary(g => g.Key, g => g.First().Title);
 
-            // Build whichever chaser applies.
-            var chaser = BuildChaser(r, ticketStatus, bookingStatus, activeEvent.DisplayName);
-            if (chaser is not null)
-            {
-                due.Add(chaser);
-            }
+        // 3) Chase 2-day-ticket holders who still haven't picked a master class.
+        //    (Duplicate-booking and missing-2-day-ticket chasers were removed
+        //    2026-06-24: one-seat in-hub signup makes duplicates impossible, and the
+        //    pull is already filtered to 2-day buyers — so the only remaining nudge is
+        //    "you bought a 2-day ticket but haven't selected your master class yet".)
+        var twoDay = await _db.Attendees
+            .Where(a => a.EventId == eventId && a.TicketStatus == TicketStatus.TwoDay)
+            .ToListAsync(ct);
+        var due = new List<ReminderMessage>();
+        foreach (var a in twoDay)
+        {
+            var hasSelection = selectionByAttendee.TryGetValue(a.Id, out var mcTitle);
+            a.BookingStatus = hasSelection ? MasterClassBookingStatus.Booked : MasterClassBookingStatus.NotBooked;
+            a.MasterClassName = hasSelection ? mcTitle : null;
+            a.HasReconciliationMismatch = !hasSelection;
+            a.LastSyncedAt = now;
+            if (hasSelection) continue;
+
+            var tokens = _templates.NewTokenSet();
+            tokens["firstName"] = string.IsNullOrWhiteSpace(a.FirstName) ? "there" : a.FirstName;
+            tokens["eventDisplayName"] = activeEvent.DisplayName;
+            var rendered = _templates.Render("pending-master-class-selection", tokens);
+            due.Add(new ReminderMessage(
+                a.Email, "pending-master-class-selection", $"pendingmc:{a.Email}",
+                rendered.Subject, rendered.HtmlBody));
         }
 
         await _db.SaveChangesAsync(ct);
@@ -145,36 +178,9 @@ public sealed class AttendeeReconcileJob
             }, ct);
     }
 
-    private static (TicketStatus, MasterClassBookingStatus, bool) Evaluate(
-        AttendeeReconResult r)
-    {
-        var ticketStatus = r.HasTwoDayTicket
-            ? TicketStatus.TwoDay
-            : r.TicketClassName is not null ? TicketStatus.Other : TicketStatus.None;
-
-        var bookingStatus = r.MasterClassBookingCount switch
-        {
-            0 => MasterClassBookingStatus.NotBooked,
-            1 => MasterClassBookingStatus.Booked,
-            _ => MasterClassBookingStatus.MultipleBookings,
-        };
-
-        // A mismatch is: 2-day ticket but no booking; OR a booking but no
-        // 2-day ticket; OR more than one booking.
-        var mismatch =
-            (ticketStatus == TicketStatus.TwoDay
-             && bookingStatus == MasterClassBookingStatus.NotBooked)
-            || (bookingStatus != MasterClassBookingStatus.NotBooked
-                && ticketStatus != TicketStatus.TwoDay)
-            || bookingStatus == MasterClassBookingStatus.MultipleBookings;
-
-        return (ticketStatus, bookingStatus, mismatch);
-    }
-
     private async Task UpsertAttendeeAsync(
-        int eventId, AttendeeReconResult r,
-        TicketStatus ticketStatus, MasterClassBookingStatus bookingStatus,
-        bool mismatch, DateTimeOffset now, CancellationToken ct)
+        int eventId, AttendeeReconResult r, TicketStatus ticketStatus,
+        DateTimeOffset now, CancellationToken ct)
     {
         var attendee = await _db.Attendees.FirstOrDefaultAsync(
             a => a.EventId == eventId && a.Email == r.Email, ct);
@@ -194,62 +200,8 @@ public sealed class AttendeeReconcileJob
         attendee.LastName = r.LastName;
         attendee.TicketStatus = ticketStatus;
         attendee.TicketClassName = r.TicketClassName;
-        attendee.BookingStatus = bookingStatus;
-        attendee.MasterClassName = r.MasterClassNames.Count > 0
-            ? string.Join(", ", r.MasterClassNames)
-            : null;
-        attendee.HasReconciliationMismatch = mismatch;
         attendee.LastSyncedAt = now;
-    }
-
-    /// <summary>
-    /// The chaser for this attendee, or null if nothing to chase. The
-    /// OccasionKey is stable per mismatch type so the engine dedups.
-    /// Rendered through the branded EmailTemplateProvider (CONTEXT.md 11d)
-    /// like every other reminder type — the inline-HTML bodies this method
-    /// used to build were the last emails bypassing the template system.
-    /// </summary>
-    private ReminderMessage? BuildChaser(
-        AttendeeReconResult r,
-        TicketStatus ticketStatus,
-        MasterClassBookingStatus bookingStatus,
-        string eventDisplayName)
-    {
-        string? template = null;
-        string? occasion = null;
-
-        // Token values are HTML-encoded by the renderer at the seam
-        // (EmailTemplateRenderer, REQUIREMENTS §10c-4) — pass raw text.
-        var tokens = _templates.NewTokenSet();
-        tokens["firstName"] = string.IsNullOrWhiteSpace(r.FirstName) ? "there" : r.FirstName;
-        tokens["eventDisplayName"] = eventDisplayName;
-
-        // 3. Duplicate booking.
-        if (bookingStatus == MasterClassBookingStatus.MultipleBookings)
-        {
-            template = "attendee-duplicate-booking";
-            occasion = $"dup:{r.Email}";
-            tokens["masterClassList"] = string.Join(", ", r.MasterClassNames);
-        }
-        // 1. Has 2-day ticket, no booking.
-        else if (ticketStatus == TicketStatus.TwoDay
-                 && bookingStatus == MasterClassBookingStatus.NotBooked)
-        {
-            template = "attendee-missing-booking";
-            occasion = $"nobooking:{r.Email}";
-        }
-        // 2. Has a booking, no 2-day ticket.
-        else if (bookingStatus != MasterClassBookingStatus.NotBooked
-                 && ticketStatus != TicketStatus.TwoDay)
-        {
-            template = "attendee-missing-ticket";
-            occasion = $"noticket:{r.Email}";
-        }
-
-        if (template is null) return null;
-
-        var rendered = _templates.Render(template, tokens);
-        return new ReminderMessage(
-            r.Email, template, occasion!, rendered.Subject, rendered.HtmlBody);
+        // BookingStatus / MasterClassName / mismatch are set from the CEH master-class
+        // selection pass in Run (in-hub signup is the source of truth now).
     }
 }

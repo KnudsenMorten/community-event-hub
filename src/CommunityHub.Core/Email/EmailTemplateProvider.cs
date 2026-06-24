@@ -32,6 +32,16 @@ public sealed class EmailTemplateOptions
     public string LogoUrl { get; set; } = string.Empty;
     public string SupportEmail { get; set; } = "info@expertslive.dk";
     public string HubUrl { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Edition display name and short code for the shared layout footer
+    /// ("{{eventDisplayName}} ({{eventCode}})"). From event.&lt;edition&gt;.json.
+    /// Callers that build an email may override <c>eventDisplayName</c> with the
+    /// live Event row's value; these provide the always-present base/footer
+    /// fallback so no email ever renders a bare placeholder.
+    /// </summary>
+    public string EventDisplayName { get; set; } = string.Empty;
+    public string EventCode { get; set; } = string.Empty;
 }
 
 /// <summary>
@@ -65,8 +75,8 @@ public sealed class EmailTemplateProvider
         _options = options.Value;
         _scopes = scopes;
         _emailContext = emailContext;
-        _templateDirectory = _options.TemplateDirectory;
-        _privateTemplateDirectory = _options.PrivateTemplateDirectory;
+        _templateDirectory = ResolveContentDir(_options.TemplateDirectory);
+        _privateTemplateDirectory = ResolveContentDir(_options.PrivateTemplateDirectory);
         _renderer = new Lazy<EmailTemplateRenderer>(() =>
         {
             var layoutPath = Path.Combine(_templateDirectory, "_layout.html");
@@ -80,6 +90,26 @@ public sealed class EmailTemplateProvider
     }
 
     /// <summary>
+    /// Resolve a (possibly relative) content directory to an absolute path. The web
+    /// host's working directory IS its content root, so the relative default resolves
+    /// fine there; the Azure Functions host runs with a DIFFERENT working directory,
+    /// so the same relative "templates/emails" missed the bundle and every templated
+    /// render threw FileNotFoundException (found 2026-06-23). When the path is relative
+    /// and absent from the cwd, fall back to <see cref="AppContext.BaseDirectory"/>
+    /// (the published app folder, where the csproj copies the templates). Empty/rooted
+    /// paths and paths that already exist relative to cwd are returned unchanged.
+    /// </summary>
+    private static string ResolveContentDir(string dir)
+    {
+        if (string.IsNullOrWhiteSpace(dir) || Path.IsPathRooted(dir) || Directory.Exists(dir))
+        {
+            return dir;
+        }
+        var baseDir = Path.Combine(AppContext.BaseDirectory, dir);
+        return Directory.Exists(baseDir) ? baseDir : dir;
+    }
+
+    /// <summary>
     /// A fresh token map pre-filled with the edition's branding tokens
     /// (brandColor, logoUrl, supportEmail, hubUrl). Callers add their
     /// content-specific tokens to this and pass it to <see cref="Render"/>.
@@ -90,6 +120,15 @@ public sealed class EmailTemplateProvider
         ["logoUrl"] = _options.LogoUrl,
         ["supportEmail"] = _options.SupportEmail,
         ["hubUrl"] = _options.HubUrl,
+        // Base/footer fallbacks; a caller may overwrite eventDisplayName with the
+        // live Event row value. eventCodeParens has no per-send override and is
+        // supplied here so the layout footer always resolves. It is empty-safe:
+        // blank code ⇒ "" (no stray "()"), otherwise " (ELDK27)".
+        ["eventDisplayName"] = _options.EventDisplayName,
+        ["eventCode"] = _options.EventCode,
+        ["eventCodeParens"] = string.IsNullOrWhiteSpace(_options.EventCode)
+            ? string.Empty
+            : $" ({_options.EventCode})",
     };
 
     /// <summary>

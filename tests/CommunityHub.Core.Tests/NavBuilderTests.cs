@@ -288,25 +288,34 @@ public sealed class NavBuilderTests
         var g = NavBuilder.Build(ParticipantRole.Speaker).Groups[0];
         var hrefs = g.Items.Select(i => i.Href).ToList();
 
-        // Present (operator 2026-06-21): My Sessions, Bio, Calendar, Event-logistics
-        // fold-out (Hotel/Dinner/Lunch/Swag/Travel/Important dates), Contact Organizers.
+        // operator 2026-06-24 (§26c): Home, My Hub Profile, Speaker Details, My sessions,
+        // My tasks, Help Promote, Sync Calendar, Event-logistics fold-out, Contact.
+        Assert.Equal("Nav.MyProfile", g.Items.Single(i => i.Href == "/Profile").LabelKey);
+        Assert.Equal("Nav.SpeakerDetails", g.Items.Single(i => i.Href == "/Speaker/Details").LabelKey);
         Assert.Equal("Nav.MySessions", g.Items.Single(i => i.Href == "/Speaker").LabelKey);
-        Assert.Equal("Nav.Bio", g.Items.Single(i => i.Href == "/Forms/Speaker").LabelKey);
-        Assert.Contains("/Calendar", hrefs);
+        Assert.Equal("Nav.HelpPromote", g.Items.Single(i => i.Href == "/Speaker/Graphics").LabelKey);
+        Assert.DoesNotContain("/Forms/Speaker", hrefs);   // Bio replaced by Speaker Details
         Assert.Contains("/Contact", hrefs);
+
+        // /Calendar appears twice: a top-level "Sync Calendar" + a fold-out "Key Dates & Times".
+        var calLabels = g.Items.Where(i => i.Href == "/Calendar").Select(i => i.LabelKey).ToList();
+        Assert.Contains("Nav.SyncCalendar", calLabels);
+        Assert.Contains("Nav.KeyDatesTimes", calLabels);
+
         var logistics = g.Sections().SingleOrDefault(s => s.HeadingKey == "Nav.SectionEventLogistics");
         Assert.NotNull(logistics);
         var lh = logistics!.Items.Select(i => i.Href).ToList();
-        // No fold-out "/Calendar" (Important dates) — speakers have a prominent
-        // top-level Calendar; the duplicate fold-out entry was removed (2026-06-21).
-        Assert.Equal(new[] { "/Forms/Hotel", "/Forms/Dinner", "/Forms/Lunch", "/Forms/Swag", "/Forms/Travel" }, lh);
+        Assert.Equal(new[] { "/Forms/Hotel", "/Forms/Dinner", "/Forms/Lunch", "/Forms/Swag", "/Forms/Travel", "/Calendar" }, lh);
         Assert.Equal("Nav.SpeakerGift", logistics.Items.Single(i => i.Href == "/Forms/Swag").LabelKey);
+        Assert.Equal("Nav.KeyDatesTimes", logistics.Items.Single(i => i.Href == "/Calendar").LabelKey);
 
-        // Removed for speakers: Resources, the flat Speaker hub items, My tasks stays.
+        // Removed for speakers (operator 2026-06-23): My tasks, public Sessions, Resources.
+        Assert.DoesNotContain("/Tasks", hrefs);
+        Assert.DoesNotContain("/Sessions", hrefs);
         Assert.DoesNotContain("/Resources", hrefs);
         Assert.DoesNotContain("/Speaker/Questions", hrefs);   // reached from My Sessions hub
         Assert.DoesNotContain("/Speaker/Evaluations", hrefs); // reached from My Sessions hub
-        Assert.DoesNotContain("/Speaker/Graphics", hrefs);    // reached from My Sessions hub
+        // /Speaker/Graphics is now surfaced as "Help Promote" (§26c) — asserted above.
     }
 
     [Fact]
@@ -318,10 +327,13 @@ public sealed class NavBuilderTests
         // Home + Master Class + My plan + Waitlist + Contact Organizers (the latter
         // appended last for every role, operator 2026-06-21). My plan was surfaced —
         // a complete page that previously had no menu/link path.
-        Assert.Equal(new[] { "/", "/Attendee", "/Attendee/MyPlan", "/Attendee/Waitlist", "/Contact" }, hrefs);
+        // My plan removed (operator 2026-06-23 — Zoho Backstage); Master Class Q&A
+        // shortcut added (operator 2026-06-24).
+        Assert.Equal(new[] { "/", "/Attendee", "/Attendee/Waitlist", "/Attendee/MasterClassQa", "/Contact" }, hrefs);
         Assert.Equal("Nav.MasterClass", attendee.Items.Single(i => i.Href == "/Attendee").LabelKey);
         Assert.Equal("Nav.Waitlist", attendee.Items.Single(i => i.Href == "/Attendee/Waitlist").LabelKey);
-        Assert.Equal("Nav.MyPlan", attendee.Items.Single(i => i.Href == "/Attendee/MyPlan").LabelKey);
+        Assert.Equal("Nav.MasterClassQa", attendee.Items.Single(i => i.Href == "/Attendee/MasterClassQa").LabelKey);
+        Assert.DoesNotContain("/Attendee/MyPlan", hrefs);
 
         // Removed for attendees.
         Assert.DoesNotContain("/Tasks", hrefs);
@@ -340,7 +352,7 @@ public sealed class NavBuilderTests
         Assert.Contains("/Forms/Hotel", speaker);
         Assert.Contains("/Forms/Dinner", speaker);
         Assert.Contains("/Speaker", speaker);          // now "My Sessions"
-        Assert.Contains("/Forms/Speaker", speaker);    // now "Bio"
+        Assert.Contains("/Speaker/Details", speaker);  // consolidated Speaker Details (replaced Bio, §26c)
         Assert.Contains("/Forms/Travel", speaker);
         Assert.Contains("/Forms/Lunch", speaker);
         Assert.Contains("/Forms/Swag", speaker);
@@ -374,9 +386,13 @@ public sealed class NavBuilderTests
         // Removed (operator 2026-06-21): Sponsor Portal, standalone Capture-lead tab,
         // the plain /Sponsor engagement link, Resources, Sessions.
         Assert.DoesNotContain("/Sponsor/Portal", hrefs);
-        Assert.DoesNotContain("/Sponsor", hrefs);          // now anchored under Sponsor Webshop
         Assert.DoesNotContain("/Resources", hrefs);
         Assert.DoesNotContain("/Sessions", hrefs);
+        // Orders + Linked-contacts merged into ONE Webshop item -> the /Sponsor page
+        // (operator 2026-06-23). The old per-anchor entries are gone.
+        Assert.Contains("/Sponsor", hrefs);
+        Assert.DoesNotContain("/Sponsor#orders", hrefs);
+        Assert.DoesNotContain("/Sponsor#linked-contacts", hrefs);
 
         // Fold-outs present with the right sections.
         var sections = g.Sections().Where(s => s.HeadingKey is not null).Select(s => s.HeadingKey).ToList();
@@ -414,8 +430,8 @@ public sealed class NavBuilderTests
         Assert.Contains("/volunteer/myschedule", hrefs);
         Assert.Contains("/volunteer/availability", hrefs);
         Assert.Contains("/volunteer/supervisor", hrefs);
-        Assert.True(hrefs.IndexOf("/volunteer/myschedule") < hrefs.IndexOf("/volunteer/availability"),
-            "My schedule comes before My availability.");
+        Assert.True(hrefs.IndexOf("/volunteer/availability") < hrefs.IndexOf("/volunteer/myschedule"),
+            "My availability comes before My schedule (operator 2026-06-23).");
 
         // Event-logistics fold-out with Volunteer Gift + Important dates.
         var logistics = g.Sections().Single(s => s.HeadingKey == "Nav.SectionEventLogistics");

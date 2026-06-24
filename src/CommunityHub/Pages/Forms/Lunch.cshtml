@@ -9,9 +9,16 @@
 
     @if (Model.AccessDenied)
     {
-        <p class="error">
-            @Localizer["Lunch.AccessDenied", CommunityHub.Branding.RoleDisplay.Name(Model.Role)]
-        </p>
+        @if (Model.PreDayAutoCounted)
+        {
+            <p class="info">Your pre-day lunch is <strong>automatically counted</strong> — there's nothing to fill in here. Enjoy!</p>
+        }
+        else
+        {
+            <p class="error">
+                @Localizer["Lunch.AccessDenied", CommunityHub.Branding.RoleDisplay.Name(Model.Role)]
+            </p>
+        }
         <p><a asp-page="/Index">@Localizer["Common.BackToHub"]</a></p>
     }
     else
@@ -47,12 +54,21 @@
                     </label>
                 }
 
-                <label style="font-weight:normal; display:flex; align-items:flex-start; gap:8px; margin:8px 0 14px;">
-                    <input type="checkbox" asp-for="LunchPreDay" style="width:auto;margin:5px 0 0;" />
-                    <span>
-                        <strong>@Localizer["Lunch.PreDay", Model.PreDayLabel]</strong>
-                    </span>
-                </label>
+                @if (Model.ShowPreDay)
+                {
+                    <label style="font-weight:normal; display:flex; align-items:flex-start; gap:8px; margin:8px 0 14px;">
+                        <input type="checkbox" asp-for="LunchPreDay" style="width:auto;margin:5px 0 0;" />
+                        <span>
+                            <strong>@Localizer["Lunch.PreDay", Model.PreDayLabel]</strong>
+                        </span>
+                    </label>
+                }
+                else if (Model.PreDayAutoCounted)
+                {
+                    <p style="color:#15803d;font-size:13px;margin:8px 0 14px;">
+                        ✓ Your <strong>pre-day / Master Class lunch</strong> is automatically counted — no need to tick it.
+                    </p>
+                }
             </fieldset>
 
             @if (!Model.ShowSetupDay)

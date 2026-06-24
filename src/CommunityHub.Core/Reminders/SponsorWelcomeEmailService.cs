@@ -10,7 +10,9 @@ public sealed record SponsorWelcomeResult(
     string SponsorCompanyId,
     int CoordinatorsResolved,
     int Sent,
-    int Skipped);
+    int Skipped,
+    bool Blocked = false,
+    string? Reason = null);
 
 /// <summary>
 /// The sponsor-facing welcome/intro send + reset, honouring the universal
@@ -57,6 +59,30 @@ public sealed class SponsorWelcomeEmailService
     public async Task<SponsorWelcomeResult> SendForCompanyAsync(
         int eventId, string sponsorCompanyId, CancellationToken ct = default)
     {
+        // DEPENDENCY GUARD (operator 2026-06-23): the welcome must NOT go out before
+        // a booth company's SharePoint upload folders are provisioned — otherwise the
+        // exhibitor lands on tasks whose upload links aren't ready. A booth company
+        // (package >= Gold) must have at least one provisioned upload folder
+        // (SponsorUploadLocation with an edit link) first; digital/Silver companies
+        // have nothing to provision and are never gated. Run the sponsor pull
+        // (WooCommercePullJob / OneShot pull-sponsors) to provision, then resend.
+        var hasBooth = await _db.SponsorInfos.AnyAsync(
+            s => s.EventId == eventId && s.SponsorCompanyId == sponsorCompanyId
+                 && s.SponsorPackage >= SponsorPackage.Gold, ct);
+        if (hasBooth)
+        {
+            var provisioned = await _db.SponsorUploadLocations.AnyAsync(
+                l => l.EventId == eventId && l.SponsorCompanyId == sponsorCompanyId
+                     && l.EditLinkUrl != null && l.EditLinkUrl != "", ct);
+            if (!provisioned)
+            {
+                return new SponsorWelcomeResult(
+                    sponsorCompanyId, 0, 0, 0,
+                    Blocked: true,
+                    Reason: "SharePoint upload folders not provisioned yet — run the sponsor pull first, then resend.");
+            }
+        }
+
         var coordinators = await _recipients.ResolveAsync(eventId, sponsorCompanyId, ct);
         int sent = 0, skipped = 0;
         foreach (var c in coordinators)

@@ -21,7 +21,9 @@ public sealed record CompanyManagerCompany(
     string CorporateIdentificationNumber = "",
     string Currency = "",
     string VatZone = "",
-    string ErpCustomerNumber = "");
+    string ErpCustomerNumber = "",
+    // Internal notes / special agreements (CM company "notes" field).
+    string Notes = "");
 
 /// <summary>One user linked to a Company Manager company.</summary>
 public sealed record CompanyManagerUser(
@@ -29,6 +31,27 @@ public sealed record CompanyManagerUser(
     string Email,
     string FullName,
     string DisplayName);
+
+/// <summary>A resolved Company Manager person (from GET /users/{id}) with split name + phone.</summary>
+public sealed record CompanyManagerUserDetail(
+    int UserId,
+    string FirstName,
+    string LastName,
+    string Email,
+    string Phone);
+
+/// <summary>Slim company row for the ERP→webshop reconcile (id + erp number + defaults).</summary>
+public sealed record CompanyManagerCompanyRef(
+    int Id, string ErpCustomerNumber, int DefaultSignerUserId,
+    int EventCoordinationDefaultContactUserId, string Name);
+
+/// <summary>The default event coordinator resolved for a company (contact for Zoho).</summary>
+public sealed record CompanyManagerCoordinator(
+    string FirstName,
+    string LastName,
+    string Email,
+    string Phone,
+    string CompanyName);
 
 /// <summary>Company Manager REST settings. Auth is WordPress Basic with an app-password.</summary>
 public sealed class CompanyManagerOptions
@@ -103,7 +126,102 @@ public sealed class CompanyManagerClient
             CorporateIdentificationNumber: GetString(o, "corporate_identification_number"),
             Currency: GetString(o, "currency"),
             VatZone: GetString(o, "vat_zone"),
-            ErpCustomerNumber: GetString(o, "erp_customer_number"));
+            ErpCustomerNumber: GetString(o, "erp_customer_number"),
+            Notes: GetString(o, "notes"));
+    }
+
+    /// <summary>
+    /// PATCH/PUT arbitrary fields onto a Company Manager company (e.g.
+    /// <c>default_signer_id</c>, <c>event_coordination_default_contact_id</c>,
+    /// <c>notes</c>, <c>company_name_public</c>, <c>web_address</c>,
+    /// <c>linkedin_url</c>, <c>twitter_url</c>). Only the keys you pass are written.
+    /// Returns whether the update succeeded.
+    /// </summary>
+    public async Task<bool> UpdateCompanyAsync(
+        int companyId, IReadOnlyDictionary<string, object?> fields, CancellationToken ct = default)
+    {
+        var url = $"{_options.BaseUrl.TrimEnd('/')}/companies/{companyId}";
+        // UTF-8 JSON so Danish æøå survive (WordPress is charset-sensitive).
+        var json = JsonSerializer.Serialize(fields);
+        using var req = new HttpRequestMessage(HttpMethod.Put, url)
+        {
+            Content = new StringContent(json, new UTF8Encoding(false), "application/json"),
+        };
+        using var resp = await _http.SendAsync(req, ct);
+        return resp.IsSuccessStatusCode;
+    }
+
+    /// <summary>
+    /// GET all companies (paged), slim — id + erp_customer_number + the two default
+    /// contact ids — for the ERP→webshop reconcile to map an ERP customer to its
+    /// webshop company and check/set the default signer + event coordinator.
+    /// </summary>
+    public async Task<IReadOnlyList<CompanyManagerCompanyRef>> ListCompaniesAsync(CancellationToken ct = default)
+    {
+        var list = new List<CompanyManagerCompanyRef>();
+        var page = 1;
+        while (page < 100)
+        {
+            var url = $"{_options.BaseUrl.TrimEnd('/')}/companies?per_page=200&page={page}";
+            using var resp = await _http.GetAsync(url, ct);
+            if (!resp.IsSuccessStatusCode) break;
+            using var doc = await JsonDocument.ParseAsync(await resp.Content.ReadAsStreamAsync(ct), default, ct);
+            if (doc.RootElement.ValueKind != JsonValueKind.Array) break;
+            var n = 0;
+            foreach (var c in doc.RootElement.EnumerateArray())
+            {
+                n++;
+                list.Add(new CompanyManagerCompanyRef(
+                    Id: GetInt(c, "id"),
+                    ErpCustomerNumber: GetString(c, "erp_customer_number"),
+                    DefaultSignerUserId: GetInt(c, "default_signer_id"),
+                    EventCoordinationDefaultContactUserId: GetInt(c, "event_coordination_default_contact_id"),
+                    Name: GetString(c, "name")));
+            }
+            if (n < 200) break;
+            page++;
+        }
+        return list;
+    }
+
+    /// <summary>
+    /// POST a new Company Manager user (webshop contact). Returns the new user id
+    /// (0 on failure). Links to <paramref name="companyId"/> when given.
+    /// </summary>
+    public async Task<int> CreateUserAsync(
+        string email, string firstName, string lastName, int? companyId, CancellationToken ct = default)
+    {
+        var local = (email ?? string.Empty).Split('@')[0];
+        var body = new Dictionary<string, object?>
+        {
+            ["username"] = string.IsNullOrWhiteSpace(local) ? email : local,
+            ["email"] = email,
+            ["first_name"] = firstName ?? string.Empty,
+            ["last_name"] = lastName ?? string.Empty,
+        };
+        if (companyId is int cid) body["company_id"] = cid;
+
+        var url = $"{_options.BaseUrl.TrimEnd('/')}/users";
+        using var req = new HttpRequestMessage(HttpMethod.Post, url)
+        {
+            Content = new StringContent(JsonSerializer.Serialize(body), new UTF8Encoding(false), "application/json"),
+        };
+        using var resp = await _http.SendAsync(req, ct);
+        if (!resp.IsSuccessStatusCode) return 0;
+        using var doc = await JsonDocument.ParseAsync(await resp.Content.ReadAsStreamAsync(ct), default, ct);
+        return GetInt(doc.RootElement, "user_id") is var u && u > 0 ? u : GetInt(doc.RootElement, "id");
+    }
+
+    /// <summary>POST link an existing user to a company (companies/{id}/users {user_id}).</summary>
+    public async Task<bool> LinkUserToCompanyAsync(int companyId, int userId, CancellationToken ct = default)
+    {
+        var url = $"{_options.BaseUrl.TrimEnd('/')}/companies/{companyId}/users";
+        using var req = new HttpRequestMessage(HttpMethod.Post, url)
+        {
+            Content = new StringContent(JsonSerializer.Serialize(new { user_id = userId }), new UTF8Encoding(false), "application/json"),
+        };
+        using var resp = await _http.SendAsync(req, ct);
+        return resp.IsSuccessStatusCode;
     }
 
     /// <summary>
@@ -144,10 +262,75 @@ public sealed class CompanyManagerClient
         return list;
     }
 
+    /// <summary>
+    /// GET /users/{id} — a single user's detail with SPLIT first/last name + phone
+    /// (the /companies/{id}/users list only carries full_name + email). Used to
+    /// resolve a company's default event coordinator into a Zoho contact. Returns
+    /// null when the id doesn't exist.
+    /// </summary>
+    public async Task<CompanyManagerUserDetail?> GetUserAsync(int userId, CancellationToken ct = default)
+    {
+        if (userId <= 0) return null;
+        var url = $"{_options.BaseUrl.TrimEnd('/')}/users/{userId}";
+        using var resp = await _http.GetAsync(url, ct);
+        if (resp.StatusCode == System.Net.HttpStatusCode.NotFound) return null;
+        resp.EnsureSuccessStatusCode();
+
+        await using var stream = await resp.Content.ReadAsStreamAsync(ct);
+        using var doc = await JsonDocument.ParseAsync(stream, default, ct);
+        var o = doc.RootElement;
+        return new CompanyManagerUserDetail(
+            UserId: userId,
+            FirstName: GetStringAny(o, "first_name", "firstname", "given_name"),
+            LastName: GetStringAny(o, "last_name", "lastname", "surname", "family_name"),
+            Email: GetStringAny(o, "email", "user_email", "email_address", "billing_email"),
+            Phone: GetStringAny(o, "billing_phone", "phone", "phone_number", "telephone", "mobile"));
+    }
+
+    /// <summary>
+    /// Resolve a company's DEFAULT EVENT COORDINATOR as a Zoho contact: company's
+    /// event_coordination_default_contact_id (fallback default_signer_id) → GET
+    /// /users/{id} → first/last/email/phone. Company-level billing_email/phone are
+    /// used as a last-resort fallback. Returns null if nothing resolves.
+    /// </summary>
+    public async Task<CompanyManagerCoordinator?> GetDefaultCoordinatorAsync(
+        int companyId, CancellationToken ct = default)
+    {
+        var company = await GetCompanyAsync(companyId, ct);
+        if (company is null) return null;
+        var companyName = !string.IsNullOrWhiteSpace(company.PublicName) ? company.PublicName : company.Name;
+
+        var coordId = company.EventCoordinationDefaultContactUserId > 0
+            ? company.EventCoordinationDefaultContactUserId
+            : company.DefaultSignerUserId;
+
+        var user = coordId > 0 ? await GetUserAsync(coordId, ct) : null;
+        var first = user?.FirstName ?? string.Empty;
+        var last = user?.LastName ?? string.Empty;
+        var email = user?.Email ?? string.Empty;
+        var phone = user?.Phone ?? string.Empty;
+
+        if (string.IsNullOrWhiteSpace(first) && string.IsNullOrWhiteSpace(last)
+            && string.IsNullOrWhiteSpace(email) && string.IsNullOrWhiteSpace(phone))
+            return null;   // nothing usable
+
+        return new CompanyManagerCoordinator(first, last, email, phone, companyName);
+    }
+
     private static string GetString(JsonElement e, string prop) =>
         e.TryGetProperty(prop, out var v) && v.ValueKind == JsonValueKind.String
             ? v.GetString() ?? string.Empty
             : string.Empty;
+
+    private static string GetStringAny(JsonElement e, params string[] props)
+    {
+        foreach (var p in props)
+        {
+            var s = GetString(e, p);
+            if (!string.IsNullOrWhiteSpace(s)) return s;
+        }
+        return string.Empty;
+    }
 
     /// <summary>
     /// Company Manager returns numeric ids as either JSON numbers OR strings

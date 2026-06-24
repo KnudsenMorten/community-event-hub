@@ -76,11 +76,12 @@ public sealed class PinLoginService
         var normalizedEmail = NormalizeEmail(email);
         var now = _clock.GetUtcNow();
 
+        // Match the PRIMARY email or the optional ALTERNATE login email (§26d).
         var participant = await _db.Participants
             .Include(p => p.LoginPins)
             .FirstOrDefaultAsync(
                 p => p.EventId == eventId
-                     && p.Email == normalizedEmail
+                     && (p.Email == normalizedEmail || p.AlternateEmail == normalizedEmail)
                      && p.IsActive
                      // Onboarding gate: a not-yet-activated queue entry cannot
                      // sign in (login requires IsActive AND lifecycle Active).
@@ -141,8 +142,10 @@ public sealed class PinLoginService
                 tokens["expiryMinutes"] = ((int)PinLifetime.TotalMinutes).ToString();
                 tokens["subjectPrefix"] = subjectPrefix;
                 var rendered = _templates.Render("pin-signin", tokens);
+                // Send to the address the user typed (primary OR alternate) so they
+                // receive the PIN at the inbox they signed in with (§26d).
                 await _emailSender.SendAsync(
-                    participant.Email, rendered.Subject, rendered.HtmlBody, cancellationToken);
+                    normalizedEmail, rendered.Subject, rendered.HtmlBody, cancellationToken);
             }
             else
             {
@@ -150,7 +153,7 @@ public sealed class PinLoginService
                 var subject = $"{subjectPrefix} - Your sign-in code";
                 var body = BuildPinEmail(participant.FullName, plainPin);
                 await _emailSender.SendAsync(
-                    participant.Email, subject, body, cancellationToken);
+                    normalizedEmail, subject, body, cancellationToken);
             }
         }
 

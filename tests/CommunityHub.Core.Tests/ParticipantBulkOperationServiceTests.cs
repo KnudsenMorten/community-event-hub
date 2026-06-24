@@ -1,6 +1,7 @@
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
 using CommunityHub.Core.Organizer;
+using CommunityHub.Core.Settings;
 using Microsoft.EntityFrameworkCore;
 using Xunit;
 
@@ -33,8 +34,40 @@ public sealed class ParticipantBulkOperationServiceTests
             Email = email,
             FullName = email.Split('@')[0],
             Role = role,
+            // "active" means the LIFECYCLE-CORRECT state (IsActive AND
+            // LifecycleState == Active), so seed both consistently.
             IsActive = active,
+            LifecycleState = active
+                ? ParticipantLifecycleState.Active
+                : ParticipantLifecycleState.Inactive,
         };
+
+    [Fact]
+    public async Task Reactivate_activates_a_synced_row_with_IsActive_true_but_lifecycle_not_active()
+    {
+        // The real bug (operator 2026-06-23): synced sponsors had IsActive=true but
+        // LifecycleState != Active, so they read as "Inactive" yet reactivate said
+        // "already active" and never cleared the lifecycle gate.
+        using var db = NewDb();
+        var synced = new Participant
+        {
+            EventId = EventId, Email = "synced@example.test", FullName = "Synced",
+            Role = ParticipantRole.Sponsor,
+            IsActive = true,
+            LifecycleState = ParticipantLifecycleState.Inactive,
+        };
+        db.Participants.Add(synced);
+        await db.SaveChangesAsync();
+
+        var svc = new ParticipantBulkOperationService(db);
+        var result = await svc.ReactivateAsync(EventId, new[] { synced.Id }, default);
+
+        Assert.Equal(1, result.Matched);
+        Assert.Equal(1, result.Changed);
+        var reloaded = (await db.Participants.FindAsync(synced.Id))!;
+        Assert.True(ParticipantActivation.IsActive(reloaded));
+        Assert.Equal(ParticipantLifecycleState.Active, reloaded.LifecycleState);
+    }
 
     [Fact]
     public async Task Deactivate_flips_only_active_rows_and_counts_real_changes()
@@ -88,6 +121,42 @@ public sealed class ParticipantBulkOperationServiceTests
         Assert.Equal(2, result.Matched);
         Assert.Equal(1, result.Changed);
         Assert.True((await db.Participants.FindAsync(a.Id))!.IsActive);
+    }
+
+    [Fact]
+    public async Task SetRing_assigns_ring_and_skips_rows_already_on_that_ring()
+    {
+        using var db = NewDb();
+        var a = P(EventId, "a@example.test");           // default ring
+        var b = P(EventId, "b@example.test");
+        b.Ring = Ring.Ring1;                              // already on the target
+        db.Participants.AddRange(a, b);
+        await db.SaveChangesAsync();
+
+        var svc = new ParticipantBulkOperationService(db);
+        var result = await svc.SetRingAsync(EventId, new[] { a.Id, b.Id }, Ring.Ring1, default);
+
+        Assert.Equal(2, result.Matched);
+        Assert.Equal(1, result.Changed);                 // only a moved
+        Assert.Equal(Ring.Ring1, (await db.Participants.FindAsync(a.Id))!.Ring);
+        Assert.Equal(Ring.Ring1, (await db.Participants.FindAsync(b.Id))!.Ring);
+    }
+
+    [Fact]
+    public async Task SetRing_is_event_scoped()
+    {
+        using var db = NewDb();
+        var mine = P(EventId, "mine@example.test");
+        var theirs = P(OtherEventId, "theirs@example.test");
+        db.Participants.AddRange(mine, theirs);
+        await db.SaveChangesAsync();
+
+        var svc = new ParticipantBulkOperationService(db);
+        var result = await svc.SetRingAsync(EventId, new[] { mine.Id, theirs.Id }, Ring.Ring2, default);
+
+        Assert.Equal(1, result.Matched);
+        Assert.Equal(Ring.Ring2, (await db.Participants.FindAsync(mine.Id))!.Ring);
+        Assert.NotEqual(Ring.Ring2, (await db.Participants.FindAsync(theirs.Id))!.Ring);
     }
 
     [Fact]

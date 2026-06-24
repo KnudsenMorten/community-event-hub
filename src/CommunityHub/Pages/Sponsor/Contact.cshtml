@@ -2,7 +2,8 @@
 @model CommunityHub.Pages.Sponsor.ContactModel
 @{
     ViewData["Title"] = "Contact";
-    var mailto = $"mailto:{Model.LeadEmail}?subject=" + Uri.EscapeDataString($"[{Model.EditionCode}] Sponsor question");
+    var subjectCompany = string.IsNullOrWhiteSpace(Model.CompanyName) ? "" : $" from {Model.CompanyName}";
+    var mailto = $"mailto:{Model.LeadEmail}?subject=" + Uri.EscapeDataString($"[{Model.EditionCode}] Sponsor question{subjectCompany}");
 }
 
 @if (Model.AccessDenied)
@@ -21,16 +22,4 @@
 
     <h3 style="margin-top:18px;">Sponsor lead</h3>
     <p><strong>@Model.LeadName</strong> &mdash; <a href="@mailto" class="task-link-btn">Send email to @Model.LeadEmail</a></p>
-
-    @if (!string.IsNullOrEmpty(Model.BookingsUrl))
-    {
-        <h3 style="margin-top:18px;">Request a Teams meeting</h3>
-        <p>Pick a time that works for you. The slot is held automatically once you confirm.</p>
-        <p><a href="@Model.BookingsUrl" target="_blank" rel="noopener noreferrer" class="task-link-btn" style="background:#5b5fc7;">Book a Teams meeting with @Model.LeadName</a></p>
-    }
-    else
-    {
-        <h3 style="margin-top:18px;">Request a Teams meeting</h3>
-        <p>Email @Model.LeadEmail with two or three time slots that suit you — a Teams invite will come back the same day.</p>
-    }
 </div>

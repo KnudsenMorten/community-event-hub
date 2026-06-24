@@ -50,6 +50,7 @@ public class IndexModel : PageModel
         CommunityHub.Core.Reminders.ParticipantCalendarBuilder calendarBuilder,
         CommunityHub.Core.Participants.ParticipantChecklistBuilder checklist,
         CommunityHub.Core.Reminders.SpeakerSessionsService speakerSessions,
+        CommunityHub.Core.Reminders.MasterClassSignupService masterClassSignups,
         ILogger<IndexModel> logger)
     {
         _db = db;
@@ -61,8 +62,11 @@ public class IndexModel : PageModel
         _calendarBuilder = calendarBuilder;
         _checklist = checklist;
         _speakerSessions = speakerSessions;
+        _masterClassSignups = masterClassSignups;
         _logger = logger;
     }
+
+    private readonly CommunityHub.Core.Reminders.MasterClassSignupService _masterClassSignups;
 
     /// <summary>The speaker's own sessions, surfaced on the speaker landing card.</summary>
     public IReadOnlyList<CommunityHub.Core.Reminders.MySpeakerSession> SpeakerSessions { get; private set; }
@@ -97,6 +101,9 @@ public class IndexModel : PageModel
     public bool DinnerSubmitted { get; private set; }
     public bool VolunteerSubmitted { get; private set; }
     public MasterClassBookingStatus? AttendeeBookingStatus { get; private set; }
+
+    /// <summary>Title of the attendee's CONFIRMED Master Class (null if none) — same source as /Attendee/Index.</summary>
+    public string? AttendeeConfirmedTitle { get; private set; }
 
     /// <summary>
     /// The unified participant checklist (REQUIREMENTS Top-8 #7) — the SAME shape
@@ -238,10 +245,8 @@ public class IndexModel : PageModel
         var ics = await _calendarBuilder.BuildSingleTaskAsync(me.ParticipantId, taskId, host, ct);
         if (ics is null) return NotFound();
 
-        return File(
-            System.Text.Encoding.UTF8.GetBytes(ics),
-            "text/calendar; charset=utf-8",
-            $"task-{taskId}.ics");
+        // Inline (no filename) so it opens in the calendar app rather than downloading.
+        return File(System.Text.Encoding.UTF8.GetBytes(ics), "text/calendar; charset=utf-8");
     }
 
     /// <summary>
@@ -341,10 +346,22 @@ public class IndexModel : PageModel
 
         if (ShowAttendeeArea)
         {
-            AttendeeBookingStatus = await _db.Attendees
-                .Where(a => a.EventId == me.EventId && a.Email == me.Email)
-                .Select(a => (MasterClassBookingStatus?)a.BookingStatus)
-                .FirstOrDefaultAsync(ct);
+            // Use the SAME source of truth as /Attendee/Index — the Master Class
+            // SIGNUP status — not the denormalised Attendees.BookingStatus (which
+            // was stale, so the home card showed "not reserved" for confirmed
+            // attendees; operator 2026-06-23).
+            var attendee = await _masterClassSignups.ResolveByEmailAsync(me.EventId, me.Email, ct);
+            if (attendee is not null)
+            {
+                var mine = await _masterClassSignups.GetForAttendeeAsync(attendee.EventId, attendee.Id, ct);
+                var confirmed = mine.Where(s => s.Status == MasterClassSignupStatus.Confirmed).ToList();
+                AttendeeConfirmedTitle = confirmed.FirstOrDefault()?.Title;
+                AttendeeBookingStatus = confirmed.Count > 1
+                    ? MasterClassBookingStatus.MultipleBookings
+                    : confirmed.Count == 1
+                        ? MasterClassBookingStatus.Booked
+                        : (MasterClassBookingStatus?)null;
+            }
         }
     }
 

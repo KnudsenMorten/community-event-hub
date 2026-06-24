@@ -48,3 +48,5 @@ publish-prod/
 publish-prod-deploy/
 publish-*/
 publish-*.zip
+
+tests/playwright/_diag-*.spec.ts

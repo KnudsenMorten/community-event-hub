@@ -282,6 +282,35 @@ public sealed class FeatureSettingsService
         await _db.SaveChangesAsync(ct);
     }
 
+    /// <summary>
+    /// PAUSE or RESUME all background jobs for an edition — the Organizer Settings
+    /// master switch (operator 2026-06-23). Upserts the reserved
+    /// <see cref="FeatureGateService.JobsPausedKey"/> row (<c>Enabled == true ⇒
+    /// paused</c>). It is NOT a catalog feature, so it intentionally bypasses the
+    /// catalog validation in <see cref="SetEnabledAsync"/>. Returns the new state.
+    /// </summary>
+    public async Task<bool> SetJobsPausedAsync(
+        int eventId, bool paused, string? byEmail, CancellationToken ct = default)
+    {
+        var row = await _db.FeatureSettings.FirstOrDefaultAsync(
+            f => f.EventId == eventId && f.FeatureKey == FeatureGateService.JobsPausedKey, ct);
+        if (row is null)
+        {
+            row = new FeatureSetting
+            {
+                EventId = eventId,
+                FeatureKey = FeatureGateService.JobsPausedKey,
+                ReleasedToRing = Rings.Default,
+            };
+            _db.FeatureSettings.Add(row);
+        }
+
+        row.Enabled = paused;
+        Stamp(row, byEmail);
+        await _db.SaveChangesAsync(ct);
+        return paused;
+    }
+
     private async Task<FeatureSetting> UpsertRowAsync(
         int eventId, string featureKey, FeatureDescriptor descriptor, CancellationToken ct)
     {

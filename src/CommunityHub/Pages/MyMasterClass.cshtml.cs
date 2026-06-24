@@ -139,7 +139,8 @@ public class MyMasterClassModel : PageModel
         if (s is null) return NotFound();
         var ics = MasterClassEmailService.BuildIcs(
             Request.Host.Host, Confirmed.SessionId, s.Title, s.StartsAt, s.EndsAt, s.EditionStart);
-        return File(System.Text.Encoding.UTF8.GetBytes(ics), "text/calendar", "master-class.ics");
+        // Inline (no filename) so it opens in the calendar app rather than downloading.
+        return File(System.Text.Encoding.UTF8.GetBytes(ics), "text/calendar; charset=utf-8");
     }
 
     /// <summary>Toggle the "remind me ~1 month before" calendar opt-in on the confirmed seat.</summary>

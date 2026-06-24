@@ -43,7 +43,7 @@
     .ms-main { flex:1 1 220px; min-width:0; }
     .ms-title { font-weight:700; color:var(--el-darkblue); font-size:16px; }
     .ms-item.done .ms-title { color:#0a6; }
-    .ms-desc { color:#4b5563; font-size:13px; margin-top:4px; }
+    .ms-desc { color:#4b5563; font-size:13px; margin-top:4px; white-space:pre-line; overflow-wrap:anywhere; }
     .ms-due  { color:#6b7280; font-size:12px; margin-top:6px; }
     .ms-badge {
         display:inline-block; border-radius:999px; padding:2px 10px;
@@ -63,113 +63,9 @@
     }
 </style>
 
-<div class="card">
-    <h2>@Localizer["Speaker.JourneyHeading", Model.FirstName]</h2>
-    <p>
-        @Localizer["Speaker.JourneyIntro"]
-    </p>
-
-    @if (p.Total == 0)
-    {
-        <p class="info">@Localizer["Speaker.NoMilestones"]</p>
-    }
-    else
-    {
-        <div class="sp-progress-wrap" role="progressbar"
-             aria-valuemin="0" aria-valuemax="100" aria-valuenow="@p.PercentComplete">
-            <div class="sp-progress-bar"
-                 style="width:@(p.PercentComplete)%; background:@barColor;"></div>
-        </div>
-        <div class="sp-progress-meta">
-            <span><strong>@p.DoneCount of @p.Total</strong> done (@p.PercentComplete%)</span>
-            @if (p.OpenCount > 0) { <span>@p.OpenCount open</span> }
-            @if (p.OverdueCount > 0) { <span style="color:#c0392b;font-weight:600;">@p.OverdueCount overdue</span> }
-        </div>
-
-        @if (p.AllDone)
-        {
-            <p class="info" style="margin-top:10px;font-weight:600;">&#10003; @Localizer["Speaker.AllComplete"]</p>
-        }
-        else if (p.NextUp is { } next)
-        {
-            <p style="margin-top:10px;font-size:13px;color:#374151;">
-                <strong>@Localizer["Speaker.NextUp"]</strong> @next.Title
-                @if (next.DueDate is { } d)
-                {
-                    <text>— due @d.ToString("dd MMM yyyy")</text>
-                    @if (next.DaysUntilDue is { } du && du >= 0)
-                    {
-                        <text> (@(du == 0 ? "today" : du + " day" + (du == 1 ? "" : "s") + " to go"))</text>
-                    }
-                }
-            </p>
-        }
-    }
-</div>
-
-@if (p.Total > 0)
-{
-    <div class="card">
-        <h2>@Localizer["Speaker.Milestones"]</h2>
-        <ul class="ms-list">
-            @foreach (var m in p.Milestones)
-            {
-                var cls = m.Done ? "done" : (m.Overdue ? "overdue" : "");
-                <li class="ms-item @cls">
-                    <div class="ms-main">
-                        <div class="ms-title">
-                            @(m.Done ? "✓ " : "")@m.Title
-                        </div>
-                        @if (!string.IsNullOrWhiteSpace(m.Description))
-                        {
-                            <div class="ms-desc">@m.Description</div>
-                        }
-                        <div class="ms-due">
-                            @if (m.DueDate is { } d)
-                            {
-                                <text>Due @d.ToString("dd MMM yyyy")</text>
-                            }
-                            else
-                            {
-                                <text>No fixed date</text>
-                            }
-                            &nbsp;
-                            @if (m.Done)
-                            {
-                                <span class="ms-badge ok">&#10003; @Localizer["Common.Done"]</span>
-                            }
-                            else if (m.Overdue)
-                            {
-                                <span class="ms-badge late">@Localizer["Hub.Overdue"] @m.DaysOverdue day@(m.DaysOverdue == 1 ? "" : "s")</span>
-                            }
-                            else if (m.DueToday)
-                            {
-                                <span class="ms-badge due">Due today</span>
-                            }
-                            else if (m.DaysUntilDue is { } du)
-                            {
-                                <span class="ms-badge soon">@du day@(du == 1 ? "" : "s") to go</span>
-                            }
-                        </div>
-                    </div>
-                    <div class="ms-action">
-                        <form method="post" asp-page-handler="Toggle">
-                            <input type="hidden" name="taskId" value="@m.TaskId" />
-                            @if (m.Done)
-                            {
-                                <button type="submit" class="secondary" aria-label="@(reopenLabel): @m.Title">@Localizer["Speaker.Reopen"]</button>
-                            }
-                            else
-                            {
-                                <button type="submit" aria-label="@(markDoneLabel): @m.Title">@Localizer["Speaker.MarkDone"]</button>
-                            }
-                        </form>
-                    </div>
-                </li>
-            }
-        </ul>
-    </div>
-}
+@* Speaker "journey" + Milestones cards removed (operator 2026-06-24): they duplicated
+   the speaker deadline tasks shown on the "My tasks" page. This page is now just the
+   speaker's sessions. *@
 
 @if (Model.MySessions.Count > 0)
 {
@@ -298,7 +194,7 @@
             <button type="button" id="sp-cal-copy" data-ceh-copy="sp-cal-url"
                     data-ceh-copied="@Localizer["Hub.Copied"]"
                     data-ceh-copy-label="@Localizer["Hub.CopyLink"]">@Localizer["Hub.CopyLink"]</button>
-            <a class="task-link-btn" href="@Model.CalendarWebcalUrl">@Localizer["Hub.Subscribe"]</a>
+            <a class="task-link-btn" href="@Model.CalendarWebcalUrl" data-ceh-confirm="calSyncInfo">@Localizer["Hub.Subscribe"]</a>
         </div>
     </div>
     @* Copy uses the shared data-ceh-copy behaviour in _Layout (REQUIREMENTS §21). *@

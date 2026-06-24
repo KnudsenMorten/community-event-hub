@@ -1,0 +1,112 @@
+@page
+@model CommunityHub.Pages.Organizer.SponsorWebshopCompanyModel
+@{
+    ViewData["Title"] = "Sponsor webshop company management";
+}
+
+@if (Model.AccessDenied)
+{
+    <div class="card">
+        <h2>@ViewData["Title"]</h2>
+        <p class="error" role="alert">@Localizer["Common.OrganizersOnly"]</p>
+        <p><a asp-page="/Index">@Localizer["Common.BackToHub"]</a></p>
+    </div>
+    return;
+}
+
+@if (!string.IsNullOrEmpty(Model.ActionMessage))
+{
+    <div class="card"><p role="status" style="color:#0a6;margin:0;">@Model.ActionMessage</p></div>
+}
+
+@if (Model.NotConfigured)
+{
+    <div class="card">
+        <h1 style="margin-top:0;">@ViewData["Title"]</h1>
+        <p class="error">Company Manager isn't connected (the <code>CompanyManager</code> settings are missing).</p>
+        <p><a asp-page="/Organizer/Index">&larr; @Localizer["Common.BackToOrganizerArea"]</a></p>
+    </div>
+    return;
+}
+
+@if (Model.SelectedCompanyId is null)
+{
+    <div class="card">
+        <h1 style="margin-top:0;">@ViewData["Title"]</h1>
+        <p>Edit a sponsor's webshop (Company Manager) record — public name, website, socials,
+           internal notes (special agreements), and the <strong>default signer</strong> +
+           <strong>default event coordinator</strong>. Changing the default event coordinator
+           also updates CEH and Zoho Backstage automatically.</p>
+        <p><a asp-page="/Organizer/Index">&larr; @Localizer["Common.BackToOrganizerArea"]</a></p>
+
+        <table style="width:100%;border-collapse:collapse;font-size:13px;">
+            <thead><tr style="text-align:left;border-bottom:1px solid #eef0f4;"><th style="padding:6px;">Sponsor</th><th></th></tr></thead>
+            <tbody>
+            @foreach (var c in Model.Companies)
+            {
+                <tr style="border-bottom:1px solid #f3f4f6;">
+                    <td style="padding:6px;">@c.Name <span style="color:#9aa0aa;">#@c.CompanyId</span></td>
+                    <td style="padding:6px;"><a asp-page="/Organizer/SponsorWebshopCompany" asp-route-companyId="@c.CompanyId">Manage &rarr;</a></td>
+                </tr>
+            }
+            @if (Model.Companies.Count == 0)
+            {
+                <tr><td style="padding:6px;color:#6b7280;">No sponsor companies found for this event.</td></tr>
+            }
+            </tbody>
+        </table>
+    </div>
+}
+else
+{
+    <div class="card">
+        <h1 style="margin-top:0;">@(string.IsNullOrEmpty(Model.PublicName) ? Model.CompanyName : Model.PublicName)</h1>
+        <p style="color:#6b7280;">Company Manager company #@Model.SelectedCompanyId</p>
+        <p><a asp-page="/Organizer/SponsorWebshopCompany">&larr; All sponsors</a></p>
+
+        @if (!string.IsNullOrEmpty(Model.Error))
+        {
+            <p class="error" role="alert">@Model.Error</p>
+        }
+
+        <form method="post" asp-page-handler="Save">
+            <input type="hidden" name="companyId" value="@Model.SelectedCompanyId" />
+
+            <label for="publicName">Public company name</label>
+            <input type="text" id="publicName" name="publicName" value="@Model.PublicName" />
+
+            <label for="webAddress">Website</label>
+            <input type="url" id="webAddress" name="webAddress" value="@Model.WebAddress" />
+
+            <label for="linkedIn">LinkedIn URL</label>
+            <input type="url" id="linkedIn" name="linkedIn" value="@Model.LinkedIn" />
+
+            <label for="twitter">X / Twitter URL</label>
+            <input type="url" id="twitter" name="twitter" value="@Model.Twitter" />
+
+            <label for="signerUserId">Default signer</label>
+            <select id="signerUserId" name="signerUserId">
+                <option value="0">— none —</option>
+                @foreach (var u in Model.Users)
+                {
+                    <option value="@u.UserId" selected="@(u.UserId == Model.DefaultSignerUserId)">@u.FullName (@u.Email)</option>
+                }
+            </select>
+
+            <label for="coordinatorUserId">Default event coordinator</label>
+            <select id="coordinatorUserId" name="coordinatorUserId">
+                <option value="0">— none —</option>
+                @foreach (var u in Model.Users)
+                {
+                    <option value="@u.UserId" selected="@(u.UserId == Model.DefaultCoordinatorUserId)">@u.FullName (@u.Email)</option>
+                }
+            </select>
+            <p style="font-size:12px;color:#6b7280;margin:2px 0 12px;">A sponsor must always have a default signer AND a default event coordinator. Changing the coordinator also updates CEH + Zoho Backstage.</p>
+
+            <label for="notes">Internal notes (special agreements)</label>
+            <textarea id="notes" name="notes" rows="4">@Model.Notes</textarea>
+
+            <button type="submit" style="margin-top:12px;">Save to webshop</button>
+        </form>
+    </div>
+}

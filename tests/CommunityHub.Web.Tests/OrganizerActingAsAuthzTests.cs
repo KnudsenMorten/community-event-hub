@@ -173,7 +173,7 @@ public sealed class OrganizerActingAsAuthzTests
     // ---------------------------------------------------------------------
 
     private static SettingsModel NewSettings(CommunityHubDbContext db, HttpContext http, FeatureSettingsService? settings) =>
-        new(Accessor(http), settings!, Options.Create(new EmailOptions()), new StubWebHostEnv())
+        new(Accessor(http), settings!, new CommunityHub.Core.Settings.FeatureGateService(db), Options.Create(new EmailOptions()), new StubWebHostEnv())
         {
             PageContext = new PageContext { HttpContext = http },
         };

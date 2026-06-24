@@ -34,41 +34,18 @@
         <input type="email" asp-for="SecondaryEmail" autocomplete="email" maxlength="320"
                placeholder="blank = no extra copy" />
 
+        <label for="AlternateEmail">Alternate sign-in email <span style="font-weight:400;color:#6b7280;">(optional &mdash; sign in with this OR your main email)</span></label>
+        <input type="email" asp-for="AlternateEmail" autocomplete="email" maxlength="320"
+               placeholder="blank = sign in with your main email only" />
+
         @if (Model.IsSpeaker)
         {
-            <h3 style="color:var(--el-darkblue);font-size:16px;margin:22px 0 6px;">Speaker details</h3>
-
-            <p style="font-size:12.5px;color:#6b7280;margin:0 0 12px;">
-                Your speaking days (pre-day / main day) are set automatically from your accepted sessions &mdash; the organizers manage these.
+            @* Speaker details (bio, accreditation, country, photo, preferred email) moved
+               to the consolidated Speaker Details page (operator 2026-06-24). *@
+            <p style="font-size:13px;color:#374151;background:#eef2fb;border-left:4px solid var(--el-darkblue,#1D3380);padding:8px 12px;border-radius:6px;margin:16px 0;">
+                Your speaker details (bio, photo, accreditation, country, preferred email) live on
+                <a asp-page="/Speaker/Details">Speaker Details</a>.
             </p>
-
-            <label for="SpeakerContactEmail">Preferred email for calendar &amp; messages <span style="font-weight:400;color:#6b7280;">(optional &mdash; blank = use your Sessionize address)</span></label>
-            <input type="email" asp-for="SpeakerContactEmail" maxlength="320" placeholder="blank = use Sessionize address" />
-
-            <label for="SpeakerAccreditation">Accreditation</label>
-            <select asp-for="SpeakerAccreditation">
-                <option value="">— not set —</option>
-                @foreach (var a in CommunityHub.Pages.ProfileModel.AccreditationOptions)
-                {
-                    <option value="@a" selected="@(Model.SpeakerAccreditation == a)">@a</option>
-                }
-            </select>
-
-            <label for="SpeakerCountry">Country</label>
-            <input type="text" asp-for="SpeakerCountry" maxlength="100" />
-
-            <label for="SpeakerGender">Gender</label>
-            <select asp-for="SpeakerGender">
-                <option value="">— prefer not to say —</option>
-                @foreach (var g in CommunityHub.Pages.ProfileModel.GenderOptions)
-                {
-                    <option value="@g" selected="@(Model.SpeakerGender == g)">@g</option>
-                }
-            </select>
-
-            <label style="display:block;margin-top:10px;">Is this your first time as a speaker at this event?</label>
-            <label style="font-weight:400;"><input type="radio" asp-for="SpeakerFirstTime" value="true" /> Yes</label>
-            <label style="font-weight:400;"><input type="radio" asp-for="SpeakerFirstTime" value="false" /> No</label>
         }
 
         <label for="ProfileEmail">Email <span style="font-weight:400;color:#6b7280;">(sign-in identity &mdash; read-only)</span></label>

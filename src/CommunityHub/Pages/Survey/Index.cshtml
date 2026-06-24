@@ -1,9 +1,8 @@
 @page "/survey/{slug}"
 @model CommunityHub.Pages.Survey.IndexModel
 @{
-    Layout = "_Layout";
+    Layout = "_PublicLayout";   // anonymous standalone — never shows internal chrome (§27)
     ViewData["Title"] = Model.Survey?.Title ?? "Survey";
-    ViewData["HidePublicNav"] = true;   // standalone anonymous survey — no public event nav bar
 }
 @functions {
     // JS-encoded localized string for safe inlining inside the wizard <script>.

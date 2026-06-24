@@ -26,11 +26,20 @@ public class LunchModel : PageModel
         _clock = clock;
     }
 
-    /// <summary>Roles eligible to declare lunch attendance. Sponsors + Attendees excluded.</summary>
+    /// <summary>
+    /// Roles eligible to DECLARE lunch attendance on this form. Operator 2026-06-24:
+    /// the "must fill" group is Speaker, Sponsor, Volunteer; Sponsor was added and
+    /// Speakers are no longer gated behind an order entitlement (the reported bug:
+    /// a plain Speaker was wrongly told "your role is not in the lunch headcount").
+    /// Organizer / Media / Event-partner remain eligible for now (they attend setup
+    /// days too, so removing them would lose their headcount until the report-side
+    /// "auto-count for pre-day" is wired — a deliberate follow-up). Attendees excluded.
+    /// </summary>
     public static readonly ParticipantRole[] EligibleRoles =
     {
         ParticipantRole.Volunteer,
         ParticipantRole.Speaker,
+        ParticipantRole.Sponsor,
         ParticipantRole.Organizer,
         ParticipantRole.Media,
         ParticipantRole.EventPartner,
@@ -56,14 +65,37 @@ public class LunchModel : PageModel
     /// entitlement changed, so access is never silently removed; speakers are gated
     /// purely by entitlement.
     /// </summary>
-    private async Task<bool> IsEligibleAsync(CurrentParticipant me, CancellationToken ct)
+    /// <summary>
+    /// Roles whose PRE-DAY lunch is AUTO-COUNTED in the headcount (no pre-day
+    /// checkbox; counted automatically in the organizer report) — crew that is
+    /// always on site for the pre-day (operator 2026-06-24). Master-class speakers
+    /// are also auto-counted but detected via SpeakerProfile.SpeakingPreDay.
+    /// </summary>
+    public static bool PreDayAutoCountedRole(ParticipantRole role) =>
+        role is ParticipantRole.Organizer or ParticipantRole.Media or ParticipantRole.EventPartner;
+
+    /// <summary>
+    /// Resolve per-role form visibility (operator 2026-06-24):
+    ///   - PRE-DAY checkbox shown to the "must declare" group (non-MC Speaker,
+    ///     Sponsor, Volunteer); HIDDEN for auto-counted crew + MC speakers.
+    ///   - SETUP-day checkboxes shown to on-site setup crew (Volunteer + Organizer
+    ///     + Media + Event-partner) so their setup lunches are still captured.
+    /// Eligible to see the form = at least one day applies. MC speakers (pre-day
+    /// auto, no setup) get a friendly "auto-counted" message instead.
+    /// </summary>
+    private async Task<bool> ResolveAccessAsync(CurrentParticipant me, CancellationToken ct)
     {
-        var entitled = await FormEntitlementGate.IsEntitledToAnyAsync(
-            _db, me.EventId, me.ParticipantId, ct,
-            OrderItem.LunchPreDay, OrderItem.LunchMainDay);
-        var historicalNonSpeaker =
-            me.Role != ParticipantRole.Speaker && EligibleRoles.Contains(me.Role);
-        return entitled || historicalNonSpeaker;
+        var speakingPreDay = me.Role == ParticipantRole.Speaker
+            && (await _db.SpeakerProfiles
+                    .Where(s => s.EventId == me.EventId && s.ParticipantId == me.ParticipantId)
+                    .Select(s => (bool?)s.SpeakingPreDay)
+                    .FirstOrDefaultAsync(ct) ?? false);
+
+        PreDayAutoCounted = PreDayAutoCountedRole(me.Role) || speakingPreDay;
+        ShowPreDay = !PreDayAutoCounted
+            && me.Role is ParticipantRole.Speaker or ParticipantRole.Sponsor or ParticipantRole.Volunteer;
+        ShowSetupDay = ShowSetupDayFor(me.Role);
+        return ShowPreDay || ShowSetupDay;
     }
 
     /// <summary>SourceKey prefix used for the "complete the lunch form" task.</summary>
@@ -86,6 +118,11 @@ public class LunchModel : PageModel
     public string MainDayLabel { get; private set; } = "main day";
     public bool ShowSetupDay { get; private set; }
 
+    /// <summary>True when the PRE-DAY checkbox should be shown (the "must declare" group).</summary>
+    public bool ShowPreDay { get; private set; }
+    /// <summary>True when this person's pre-day lunch is AUTO-COUNTED (crew / MC speaker).</summary>
+    public bool PreDayAutoCounted { get; private set; }
+
     public async Task<IActionResult> OnGetAsync(CancellationToken ct)
     {
         var me = _participant.Current;
@@ -94,14 +131,13 @@ public class LunchModel : PageModel
         FullName = me.FullName;
         Email = me.Email;
         Role = me.Role;
-        if (!await IsEligibleAsync(me, ct))
+        if (!await ResolveAccessAsync(me, ct))
         {
             AccessDenied = true;
             return Page();
         }
 
         await ResolveDayLabelsAsync(me.EventId, ct);
-        ShowSetupDay = ShowSetupDayFor(me.Role);
 
         // Make sure the "complete the lunch form" task exists on first visit
         // so it shows up under My tasks even before the speaker fills it in.
@@ -127,14 +163,13 @@ public class LunchModel : PageModel
         FullName = me.FullName;
         Email = me.Email;
         Role = me.Role;
-        if (!await IsEligibleAsync(me, ct))
+        if (!await ResolveAccessAsync(me, ct))
         {
             AccessDenied = true;
             return Page();
         }
 
         await ResolveDayLabelsAsync(me.EventId, ct);
-        ShowSetupDay = ShowSetupDayFor(me.Role);
 
         var signup = await _db.LunchSignups.FirstOrDefaultAsync(
             l => l.EventId == me.EventId && l.ParticipantId == me.ParticipantId, ct);
@@ -158,7 +193,9 @@ public class LunchModel : PageModel
         // ignore any value that came through (defensive against tampering).
         signup.LunchEarlySetupDay = ShowSetupDay && LunchEarlySetupDay;
         signup.LunchSetupDay = ShowSetupDay && LunchSetupDay;
-        signup.LunchPreDay = LunchPreDay;
+        // Pre-day only persists for the "must declare" group; auto-counted roles
+        // never set it (it's added automatically in the organizer report).
+        signup.LunchPreDay = ShowPreDay && LunchPreDay;
         signup.Notes = Notes;
 
         await _db.SaveChangesAsync(ct);

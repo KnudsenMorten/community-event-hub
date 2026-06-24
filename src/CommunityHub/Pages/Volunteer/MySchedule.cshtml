@@ -84,7 +84,7 @@
                     id="ms-cal-copy" data-ceh-copy="ms-cal-url"
                     data-ceh-copied="@Localizer["Hub.Copied"]"
                     data-ceh-copy-label="@Localizer["Hub.CopyLink"]">@Localizer["Hub.CopyLink"]</button>
-            <a class="cal-btn cal-btn-ghost" href="@Model.CalendarWebcalUrl">@Localizer["Hub.Subscribe"]</a>
+            <a class="cal-btn cal-btn-ghost" href="@Model.CalendarWebcalUrl" data-ceh-confirm="calSyncInfo">@Localizer["Hub.Subscribe"]</a>
         </div>
     </div>
     @* Copy uses the shared data-ceh-copy behaviour in _Layout (REQUIREMENTS §21). *@

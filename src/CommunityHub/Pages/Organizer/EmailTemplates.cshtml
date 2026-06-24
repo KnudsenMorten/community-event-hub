@@ -91,6 +91,16 @@
             </div>
         </form>
 
+        @* ---- Send a real test email to one address (ring-exempt) ---- *@
+        <form method="post" asp-page-handler="SendTest" asp-route-Key="@Model.Key"
+              style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:10px;padding-top:10px;border-top:1px solid #eef0f4;">
+            <input type="email" name="TestEmail" placeholder="you@example.com" required
+                   style="padding:8px 10px;border:1px solid #c4c8d4;border-radius:6px;min-width:240px;" />
+            <button type="submit" formnovalidate
+                    style="padding:8px 16px;border:1px solid #1d3380;border-radius:6px;background:#eef2fb;color:#1d3380;font-weight:600;cursor:pointer;">Send test to this address</button>
+            <span style="font-size:12px;color:#6b7280;">Sends the effective content with sample values; always delivers (ring-exempt).</span>
+        </form>
+
         @* ---- Preview ---- *@
         <h4 style="margin:16px 0 4px 0;">Preview</h4>
         @if (!string.IsNullOrEmpty(Model.PreviewError))

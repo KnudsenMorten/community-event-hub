@@ -1,6 +1,6 @@
 Subject: Action needed: {{stepLabel}} for {{eventDisplayName}}
 <h2 style="margin:0 0 16px;font-size:20px;color:#1a1a2e;">Hi {{firstName}},</h2>
-<p style="margin:0 0 16px;">One of your onboarding steps for <strong>{{eventDisplayName}}</strong> has been re-opened and needs your attention:</p>
+<p style="margin:0 0 16px;">One of your onboarding steps for <strong>{{eventDisplayName}}{{eventCodeParens}}</strong> has been re-opened and needs your attention:</p>
 <p style="margin:0 0 24px;font-size:16px;"><strong>{{stepLabel}}</strong></p>
 <p style="margin:0 0 16px;">Please open the hub and complete this step in the onboarding wizard.</p>
 <table role="presentation" cellpadding="0" cellspacing="0"><tr>
@@ -8,4 +8,5 @@ Subject: Action needed: {{stepLabel}} for {{eventDisplayName}}
     <a href="{{hubUrl}}" style="display:inline-block;padding:12px 28px;color:#ffffff;font-size:15px;font-weight:bold;text-decoration:none;">Complete this step</a>
   </td>
 </tr></table>
+<p style="margin:6px 0 16px;color:#6b7280;font-size:13px;">(Log in with your email, if prompted)</p>
 <p style="margin:24px 0 0;color:#6b7280;">Questions? Reply to this mail or contact {{supportEmail}}.</p>

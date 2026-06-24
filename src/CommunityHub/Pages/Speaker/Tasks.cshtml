@@ -1,0 +1,63 @@
+@page "/Speaker/Tasks"
+@using CommunityHub.Core.Domain
+@model CommunityHub.Pages.Speaker.TasksModel
+@{
+    ViewData["Title"] = "My tasks";
+}
+
+<div class="card">
+    <h2>My tasks</h2>
+
+    @if (!Model.NotSpeaker)
+    {
+        @await Html.PartialAsync("Shared/_SecondaryEmailBanner")
+    }
+
+    @if (Model.NotSpeaker)
+    {
+        <p class="error">This page is for speakers.</p>
+        <p><a asp-page="/Index">@Localizer["Common.BackToHub"]</a></p>
+    }
+    else if (Model.Tasks.Count == 0)
+    {
+        <p>No tasks yet — check back soon.</p>
+    }
+    else
+    {
+        <div style="margin:6px 0 14px;padding:12px 14px;background:#f8fafc;border:1px solid #cbd5e0;border-left:4px solid var(--el-blue);border-radius:6px;color:#444;font-size:14px;line-height:1.5;">
+            <p style="margin:0 0 10px;"><strong>Instructions:</strong></p>
+            <p style="margin:0 0 10px;">Below are your speaker tasks. Please complete each one by its stated due date — it helps us finalise the programme, logistics and attendee planning in good time.</p>
+            <p style="margin:0;">A red badge means a task is overdue; a yellow badge is an upcoming deadline. Mark a task complete once you're done. If you can't meet a deadline, contact the organizers as soon as possible.</p>
+        </div>
+
+        var pending = Model.Tasks.Where(t => t.State != TaskState.Done).ToList();
+        var completed = Model.Tasks.Where(t => t.State == TaskState.Done).ToList();
+
+        <h3 style="margin:18px 0 8px;color:var(--el-darkblue);">Pending (@pending.Count)</h3>
+        @if (pending.Count == 0)
+        {
+            <p style="color:#1f6d3a;">All caught up — nothing pending. 🎉</p>
+        }
+        @foreach (var task in pending)
+        {
+            @await Html.PartialAsync("_SpeakerTaskRow", task)
+        }
+
+        @if (completed.Count > 0)
+        {
+            <details style="margin-top:14px;padding-top:4px;">
+                <summary style="font-size:18px;font-weight:700;color:var(--el-darkblue);cursor:pointer;">
+                    Completed (@completed.Count)
+                    <span style="font-size:13px;font-weight:400;color:#666;margin-left:6px;">— click to expand</span>
+                </summary>
+                <div style="margin-top:8px;">
+                    @foreach (var task in completed)
+                    {
+                        @await Html.PartialAsync("_SpeakerTaskRow", task)
+                    }
+                </div>
+            </details>
+        }
+    }
+    <p style="margin-top:14px;"><a asp-page="/Index">@Localizer["Common.BackToHub"]</a></p>
+</div>

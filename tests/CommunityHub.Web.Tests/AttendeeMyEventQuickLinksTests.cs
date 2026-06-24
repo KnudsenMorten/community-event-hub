@@ -30,12 +30,13 @@ public sealed class AttendeeMyEventQuickLinksTests
     }
 
     [Fact]
-    public void Sponsor_is_not_eligible_for_hotel_swag_or_lunch_quick_links()
+    public void Sponsor_is_not_eligible_for_hotel_or_swag_but_IS_for_lunch()
     {
-        // Sponsors are likewise excluded from these crew/speaker forms.
+        // Sponsors are excluded from the hotel + swag forms...
         Assert.False(MyEventModel.IsEligibleForHotel(ParticipantRole.Sponsor));
         Assert.False(MyEventModel.IsEligibleForSwag(ParticipantRole.Sponsor));
-        Assert.False(MyEventModel.IsEligibleForLunch(ParticipantRole.Sponsor));
+        // ...but DO declare lunch now (operator 2026-06-24 — sponsors must fill it).
+        Assert.True(MyEventModel.IsEligibleForLunch(ParticipantRole.Sponsor));
     }
 
     // --- (b) Eligible roles DO see the links they are entitled to -------------

@@ -1,0 +1,37 @@
+@*
+    PUBLIC / ANONYMOUS layout (operator 2026-06-24, REQUIREMENTS §27).
+
+    For pages that must NEVER show internal/authenticated chrome — surveys, the
+    volunteer signup, sign-in, magic-link. It injects NO auth services and renders
+    NO nav, NO user identity, NO Sign-out: structurally impossible to leak an
+    internal view, even if a signed-in organizer opens the page in the same browser.
+    It reuses the SAME styles + client behaviours as _Layout via shared partials, so
+    these pages look and behave identically — minus the chrome. Auth pages keep using
+    _Layout and are completely unaffected by anything here.
+*@
+@{
+    Layout = null;
+}<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>@ViewData["Title"]</title>
+    <partial name="_LayoutStyles" />
+</head>
+<body>
+    <header>
+        <a class="brand" href="/" aria-label="Experts Live Denmark">
+            <img src="~/img/logo-experts-live-denmark-white.png" alt="Experts Live Denmark" style="height:48px; display:block;" />
+        </a>
+        <a class="brand" href="/" aria-label="Experts Live Denmark event logo" style="background:#fff; padding:6px 8px; border-radius:8px;">
+            <img src="~/img/logo-eldk27-event.png" alt="ELDK27" style="height:48px; display:block;" />
+        </a>
+    </header>
+    <main id="main" tabindex="-1">
+        @RenderBody()
+    </main>
+    <partial name="_LayoutClientScripts" />
+    @await RenderSectionAsync("Scripts", required: false)
+</body>
+</html>

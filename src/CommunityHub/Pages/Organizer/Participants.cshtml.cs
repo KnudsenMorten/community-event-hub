@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace CommunityHub.Pages.Organizer;
 
@@ -34,6 +35,8 @@ public class ParticipantsModel : PageModel
     private readonly ParticipantDeletionService _deletion;
     private readonly ParticipantSearchService _search;
     private readonly ImpersonationAuditService _audit;
+    private readonly CommunityHub.Core.Integrations.CompanyManagerClient _companyManager;
+    private readonly ILogger<ParticipantsModel> _logger;
     private readonly TimeProvider _clock;
 
     public ParticipantsModel(
@@ -43,6 +46,8 @@ public class ParticipantsModel : PageModel
         ParticipantDeletionService deletion,
         ParticipantSearchService search,
         ImpersonationAuditService audit,
+        CommunityHub.Core.Integrations.CompanyManagerClient companyManager,
+        ILogger<ParticipantsModel> logger,
         TimeProvider clock)
     {
         _db = db;
@@ -51,8 +56,18 @@ public class ParticipantsModel : PageModel
         _deletion = deletion;
         _search = search;
         _audit = audit;
+        _companyManager = companyManager;
+        _logger = logger;
         _clock = clock;
     }
+
+    /// <summary>
+    /// Resolved sponsor company display names (companyId → name) for this request,
+    /// built from Company Manager (public → legal → "Company {id}") so the grid +
+    /// filter show the REAL company name instead of "Company {id}" (operator
+    /// 2026-06-23). Fail-soft: a lookup miss leaves the id to fall back.
+    /// </summary>
+    public Dictionary<string, string> CompanyNames { get; private set; } = new();
 
     public List<Participant> Participants { get; private set; } = new();
     public bool AccessDenied { get; private set; }
@@ -73,6 +88,10 @@ public class ParticipantsModel : PageModel
     /// <summary>Filter by sponsor company id (only meaningful for sponsor rows), or null.</summary>
     [BindProperty(SupportsGet = true)]
     public string? SponsorCompanyFilter { get; set; }
+
+    /// <summary>Optional single persona-flag filter: test | booth | signer | coordinator | speaker.</summary>
+    [BindProperty(SupportsGet = true)]
+    public string? FlagFilter { get; set; }
 
     /// <summary>Free-text search over name + email (server-side, case-insensitive).</summary>
     [BindProperty(SupportsGet = true)]
@@ -104,9 +123,19 @@ public class ParticipantsModel : PageModel
     [BindProperty]
     public ParticipantRole BulkRole { get; set; }
 
+    /// <summary>Bulk "change ring to" target (operator 2026-06-23).</summary>
+    [BindProperty]
+    public CommunityHub.Core.Settings.Ring BulkRing { get; set; }
+
     /// <summary>Resolve a sponsor company id to its display name (fallback chain).</summary>
-    public static string CompanyDisplayName(string companyId) =>
-        SponsorCompanyName.Resolve(null, null, null, companyId);
+    /// <summary>
+    /// Display name for a sponsor company id — the Company-Manager-resolved name
+    /// loaded this request, else the "Company {id}" fallback.
+    /// </summary>
+    public string CompanyDisplayName(string companyId) =>
+        !string.IsNullOrWhiteSpace(companyId) && CompanyNames.TryGetValue(companyId, out var n)
+            ? n
+            : SponsorCompanyName.Resolve(null, null, null, companyId);
 
     /// <summary>Lifecycle-correct "is this participant active?" for the status badge.</summary>
     public static bool IsActive(Participant p) => ParticipantActivation.IsActive(p);
@@ -138,7 +167,18 @@ public class ParticipantsModel : PageModel
             p => p.Id == participantId && p.EventId == me.EventId, ct);
         if (target is not null)
         {
-            target.IsActive = !target.IsActive;
+            // Lifecycle-correct toggle (operator 2026-06-23): activating clears BOTH
+            // the withdrawal switch and the onboarding gate so a synced participant
+            // (IsActive=true but LifecycleState != Active) actually becomes active.
+            if (ParticipantActivation.IsActive(target))
+            {
+                target.IsActive = false;
+            }
+            else
+            {
+                target.IsActive = true;
+                target.LifecycleState = ParticipantLifecycleState.Active;
+            }
             await _db.SaveChangesAsync(ct);
         }
 
@@ -175,6 +215,48 @@ public class ParticipantsModel : PageModel
                 targetParticipantId: result.ParticipantId,
                 action: ImpersonationAuditService.ActionDeactivate,
                 detail: $"Organizer deactivated {result.FullName}.", ct: ct);
+        }
+
+        return RedirectToPage(new { ActiveFilter, RoleFilter, SponsorCompanyFilter, Search, Sort, Desc, PageNo, Msg = msg });
+    }
+
+    /// <summary>
+    /// Per-row "Resend welcome": re-send the welcome email to THIS participant
+    /// (operator 2026-06-24). Unlike the old DEV-only bulk SendWelcomeLogin page,
+    /// this targets the one clicked participant and works in production. It forces
+    /// past the once-ever idempotency ledger; the ring gate + email allowlist still
+    /// apply (so a recipient outside the released ring is not actually mailed).
+    /// </summary>
+    public async Task<IActionResult> OnPostResendWelcomeAsync(
+        int participantId, CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+        if (!IsRealOrganizer(me)) return Forbid();
+
+        var p = await _db.Participants
+            .Where(x => x.EventId == me.EventId && x.Id == participantId)
+            .Select(x => new { x.FullName, x.Email, x.Role })
+            .FirstOrDefaultAsync(ct);
+
+        string msg;
+        if (p is null)
+        {
+            msg = "That participant could not be found in this event.";
+        }
+        else if (p.Role == ParticipantRole.Attendee)
+        {
+            // Attendees get their welcome via the provisioning path, not this one.
+            msg = $"{p.FullName} is an attendee — their welcome is sent via attendee provisioning, not here.";
+        }
+        else
+        {
+            var welcome = HttpContext.RequestServices
+                .GetRequiredService<CommunityHub.Core.Reminders.WelcomeEmailService>();
+            var sent = await welcome.SendWelcomeAsync(participantId, ct, force: true);
+            msg = sent
+                ? $"Welcome email re-sent to {p.FullName} ({p.Email})."
+                : $"Welcome to {p.FullName} was not sent — they are outside the released ring or sending is paused.";
         }
 
         return RedirectToPage(new { ActiveFilter, RoleFilter, SponsorCompanyFilter, Search, Sort, Desc, PageNo, Msg = msg });
@@ -313,6 +395,10 @@ public class ParticipantsModel : PageModel
         RunBulkAsync((me) => _bulk.ChangeRoleAsync(me.EventId, SelectedIds, BulkRole, ct),
             verb: $"moved to {BulkRole}", ct);
 
+    public Task<IActionResult> OnPostBulkSetRingAsync(CancellationToken ct) =>
+        RunBulkAsync((me) => _bulk.SetRingAsync(me.EventId, SelectedIds, BulkRing, ct),
+            verb: $"set to {CommunityHub.Core.Settings.Rings.Label(BulkRing)}", ct);
+
     private async Task<IActionResult> RunBulkAsync(
         Func<CurrentParticipant, Task<ParticipantBulkOperationService.BulkResult>> op,
         string verb, CancellationToken ct)
@@ -371,11 +457,61 @@ public class ParticipantsModel : PageModel
             Search, RoleFilter, persona: null, ActiveFilter, SponsorCompanyFilter, Sort, Desc);
         var query = _search.Query(eventId, request);
 
+        // Optional persona-flag filter (operator 2026-06-24): narrow to one flag.
+        query = FlagFilter switch
+        {
+            "test"        => query.Where(p => p.IsTestUser),
+            "booth"       => query.Where(p => p.IsBoothMember),
+            "signer"      => query.Where(p => p.IsSigner),
+            "coordinator" => query.Where(p => p.IsEventCoordinator),
+            "speaker"     => query.Where(p => p.Role == ParticipantRole.Speaker),
+            _             => query,
+        };
+
         var matched = await query.CountAsync(ct);
         Paging = GridPaging.Resolve(PageNo, GridPaging.DefaultPageSize, matched);
 
         Participants = await query
             .Skip(Paging.Skip).Take(Paging.PageSize)
             .ToListAsync(ct);
+
+        await ResolveCompanyNamesAsync(ct);
+    }
+
+    /// <summary>
+    /// Resolve real company names (Company Manager) for the sponsor company ids the
+    /// page references — the filter dropdown + the sponsor rows on this page.
+    /// Fail-soft per company so a Company-Manager outage just leaves the "Company
+    /// {id}" fallback rather than breaking the grid.
+    /// </summary>
+    private async Task ResolveCompanyNamesAsync(CancellationToken ct)
+    {
+        var ids = SponsorCompanyIds
+            .Concat(Participants
+                .Where(p => p.Role == ParticipantRole.Sponsor && !string.IsNullOrWhiteSpace(p.SponsorCompanyId))
+                .Select(p => p.SponsorCompanyId!))
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        if (ids.Count == 0) return;
+
+        foreach (var cid in ids)
+        {
+            if (!int.TryParse(cid, out var idInt)) continue;
+            try
+            {
+                var c = await _companyManager.GetCompanyAsync(idInt, ct);
+                if (c is not null)
+                {
+                    CompanyNames[cid] = SponsorCompanyName.Resolve(
+                        c.PublicName, c.Name, billingName: null, companyId: cid);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "Participants: company-name lookup failed for {CompanyId}; using fallback.", cid);
+            }
+        }
     }
 }

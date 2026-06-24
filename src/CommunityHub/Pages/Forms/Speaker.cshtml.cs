@@ -95,6 +95,11 @@ public class SpeakerModel : PageModel
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
 
+        // §26c: the bio editor is superseded by the consolidated Speaker Details page.
+        // Funnel speakers (and any old "Bio"/task links) there.
+        if (me.Role == ParticipantRole.Speaker)
+            return RedirectToPage("/Speaker/Details");
+
         FullName = me.FullName;
         Email = me.Email;
         Role = me.Role;

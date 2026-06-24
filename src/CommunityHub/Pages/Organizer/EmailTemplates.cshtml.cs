@@ -24,6 +24,8 @@ public class EmailTemplatesModel : PageModel
     private readonly EmailTemplateProvider _templates;
     private readonly EmailTemplateOverrideStore _store;
     private readonly FeatureSettingsService _features;
+    private readonly IEmailSender _email;
+    private readonly IEmailContextAccessor _context;
     private readonly ILogger<EmailTemplatesModel> _log;
 
     public EmailTemplatesModel(
@@ -31,12 +33,16 @@ public class EmailTemplatesModel : PageModel
         EmailTemplateProvider templates,
         EmailTemplateOverrideStore store,
         FeatureSettingsService features,
+        IEmailSender email,
+        IEmailContextAccessor context,
         ILogger<EmailTemplatesModel> log)
     {
         _participant = participant;
         _templates = templates;
         _store = store;
         _features = features;
+        _email = email;
+        _context = context;
         _log = log;
     }
 
@@ -50,6 +56,7 @@ public class EmailTemplatesModel : PageModel
     // The currently-edited template (when ?key=… is selected).
     [BindProperty(SupportsGet = true)] public string? Key { get; set; }
     [BindProperty] public string? EditText { get; set; }
+    [BindProperty] public string? TestEmail { get; set; }
     public bool Editing => !string.IsNullOrWhiteSpace(Key);
     public bool SelectedOverridden { get; private set; }
     public string SelectedTitle { get; private set; } = string.Empty;
@@ -114,6 +121,49 @@ public class EmailTemplatesModel : PageModel
         await LoadListAsync(me.EventId, ct);
         await LoadEditorAsync(me.EventId, Key ?? string.Empty, loadTextFromStore: false, ct);
         BuildPreview(EditText);   // preview the UNSAVED text
+        return Page();
+    }
+
+    /// <summary>
+    /// Send the selected template (effective override-or-default text, rendered with
+    /// sample tokens) as a REAL email to one address so the organizer can validate the
+    /// content. Ring-EXEMPT — a deliberate test send always arrives regardless of the
+    /// recipient's ring. Organizer-only.
+    /// </summary>
+    public async Task<IActionResult> OnPostSendTestAsync(CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+        if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
+
+        await LoadListAsync(me.EventId, ct);
+        await LoadEditorAsync(me.EventId, Key ?? string.Empty, loadTextFromStore: true, ct);
+
+        if (string.IsNullOrWhiteSpace(Key) || string.IsNullOrWhiteSpace(TestEmail))
+        {
+            IsError = true; Message = "Pick a template and enter a recipient address.";
+            BuildPreview(EditText);
+            return Page();
+        }
+
+        try
+        {
+            var rendered = _templates.RenderText(EditText ?? SafeDefaultText(Key!), BuildSampleTokens());
+            using (_context.Set(new EmailContext(
+                Category: "operational", EventId: me.EventId, RecipientName: "Test recipient",
+                TemplateName: Key, RingExempt: true)))
+            {
+                await _email.SendAsync(TestEmail.Trim(), "[TEST] " + rendered.Subject, rendered.HtmlBody, ct);
+            }
+            Message = $"Test email sent to {TestEmail.Trim()}.";
+        }
+        catch (Exception ex)
+        {
+            IsError = true; Message = "Test send failed: " + ex.Message;
+            _log.LogWarning(ex, "EmailTemplates test-send failed for {Key} to {To}", Key, TestEmail);
+        }
+
+        BuildPreview(EditText);
         return Page();
     }
 
@@ -212,7 +262,8 @@ public class EmailTemplatesModel : PageModel
         void S(string k, string v) { t[k] = v; }
         S("firstName", "Alex"); S("fullName", "Alex Sample");
         S("communityName", "Experts Live"); S("eventDisplayName", "Experts Live Denmark 2027");
-        S("eventCode", "ELDK27"); S("roleName", "Speaker");
+        S("eventCode", "ELDK27"); S("eventCodeParens", " (ELDK27)"); S("roleName", "Speaker");
+        S("sponsorRole", "event coordinator and booth member");
         S("roleGuidance", "Here's what's relevant for your role at the event.");
         S("roleLine", "Thanks for being part of the event.");
         S("hubUrl", "https://eldk27.eventhub.expertslive.dk");

@@ -43,6 +43,8 @@ public sealed class MasterClassPrepService
     /// <param name="Room">The room, when known.</param>
     /// <param name="PrepContent">The published prep content (null/blank = nothing yet).</param>
     /// <param name="PrepUpdatedAt">When the prep content was last edited.</param>
+    /// <param name="LogisticsText">The published "before you arrive / what to bring" logistics (null/blank = nothing yet).</param>
+    /// <param name="LogisticsUpdatedAt">When the logistics text was last edited.</param>
     /// <param name="Speakers">The MC's speaker display names ("presented by").</param>
     public sealed record LandingView(
         int SessionId,
@@ -50,6 +52,8 @@ public sealed class MasterClassPrepService
         string? Room,
         string? PrepContent,
         DateTimeOffset? PrepUpdatedAt,
+        string? LogisticsText,
+        DateTimeOffset? LogisticsUpdatedAt,
         IReadOnlyList<string> Speakers);
 
     /// <summary>
@@ -77,7 +81,8 @@ public sealed class MasterClassPrepService
             .ToList();
 
         return new LandingView(
-            s.Id, s.Title, s.Room, s.PrepContent, s.PrepUpdatedAt, speakers);
+            s.Id, s.Title, s.Room, s.PrepContent, s.PrepUpdatedAt,
+            s.LogisticsText, s.LogisticsUpdatedAt, speakers);
     }
 
     // =====================================================================

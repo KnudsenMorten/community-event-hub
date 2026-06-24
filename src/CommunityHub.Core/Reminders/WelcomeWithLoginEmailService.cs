@@ -204,6 +204,11 @@ public sealed class WelcomeWithLoginEmailService
         tokens["eventCode"] = participant.Event.Code;
         tokens["roleName"] = FriendlyRoleName(participant.Role);
         tokens["roleLine"] = RoleLine(participant.Role);
+        // Sponsor welcome: the "you are receiving this in your role as …" line is
+        // DYNAMIC — built from the recipient's actual sponsor flags (event
+        // coordinator / signer / booth member), not a static value.
+        tokens["sponsorRole"] = WelcomeVariants.SponsorRoleLabel(
+            participant.IsEventCoordinator, participant.IsSigner, participant.IsBoothMember);
         // Both loginUrl and hubUrl resolve to the same sign-in URL the caller built:
         // the magic-link when auto-login is on, the plain hub URL when off. Templates
         // may reference either token. (NewTokenSet already seeds the branding hubUrl;

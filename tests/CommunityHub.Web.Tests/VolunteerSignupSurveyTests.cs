@@ -1,5 +1,8 @@
+using CommunityHub.Core.Config;
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
+using CommunityHub.Core.Email;
+using CommunityHub.Core.Integrations;
 using CommunityHub.Pages.Volunteer;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc.RazorPages;
@@ -10,18 +13,27 @@ using Xunit;
 namespace CommunityHub.Web.Tests;
 
 /// <summary>
-/// The anonymous volunteer sign-up is now a shift-availability SURVEY: submitting
-/// it creates the pending applicant AND records their chosen shifts as a
-/// <see cref="VolunteerAvailability"/> row (operator 2026-06-21). Drives the real
-/// <see cref="SignupModel"/> over an in-memory DB.
+/// The anonymous volunteer sign-up is a 3-step wizard (operator 2026-06-23):
+/// about-you → availability → collaboration agreement. Submitting creates the
+/// pending applicant, records per-day availability + a VolunteerAvailability row
+/// (LinkedIn / agreement timestamp), and requires the agreement to be accepted.
+/// Drives the real <see cref="SignupModel"/> over an in-memory DB. FAKE names only.
 /// </summary>
 public sealed class VolunteerSignupSurveyTests
 {
-    private static readonly DateTimeOffset Now = new(2026, 6, 15, 9, 0, 0, TimeSpan.Zero);
+    private static readonly DateTimeOffset Now = new(2026, 6, 23, 9, 0, 0, TimeSpan.Zero);
 
     private sealed class FixedClock : TimeProvider
     {
         public override DateTimeOffset GetUtcNow() => Now;
+    }
+
+    private sealed class NoOpEmail : IEmailSender
+    {
+        public Task SendAsync(string to, string s, string h, CancellationToken ct = default) => Task.CompletedTask;
+        public Task SendAsync(string to, string s, string h, string t, CancellationToken ct = default) => Task.CompletedTask;
+        public Task SendAsync(string to, string s, string h, IReadOnlyCollection<string>? cc, CancellationToken ct = default) => Task.CompletedTask;
+        public Task SendWithIcsAsync(string to, string s, string h, string ics, string fn, CancellationToken ct = default) => Task.CompletedTask;
     }
 
     private static CommunityHubDbContext NewDb() =>
@@ -29,93 +41,110 @@ public sealed class VolunteerSignupSurveyTests
             .UseInMemoryDatabase($"vol-signup-{Guid.NewGuid():N}")
             .Options);
 
+    private static readonly DateOnly PreDay = new(2027, 2, 9);
+    private static readonly DateOnly MainDay = new(2027, 2, 10);
+
     private static async Task<int> SeedEventAsync(CommunityHubDbContext db)
     {
-        var ev = new Event { CommunityName = "C", DisplayName = "C 2027", Code = "C27", IsActive = true };
+        var ev = new Event
+        {
+            CommunityName = "C", DisplayName = "C 2027", Code = "C27", IsActive = true,
+            StartDate = MainDay, EndDate = MainDay, PreDayDate = PreDay,
+        };
         db.Events.Add(ev);
         await db.SaveChangesAsync();
         return ev.Id;
     }
 
     private static SignupModel NewModel(CommunityHubDbContext db) =>
-        new(db, new FixedClock(), NullLogger<SignupModel>.Instance)
+        new(db, new FixedClock(),
+            new EventEditionConfigLoader(),
+            new EventConfigOptions { EventConfigPath = "config/does-not-exist.json" }, // empty config => no extra days
+            new SharePointUploadClient(new HttpClient(), new SharePointUploadOptions()), // IsConfigured=false => photo skipped
+            new NoOpEmail(),
+            NullLogger<SignupModel>.Instance)
         {
             PageContext = new PageContext { HttpContext = new DefaultHttpContext() },
         };
 
     [Fact]
-    public async Task Submitting_with_shifts_creates_applicant_and_availability()
+    public async Task OnGet_builds_the_day_list_without_throwing()
+    {
+        using var db = NewDb();
+        await SeedEventAsync(db);
+        var m = NewModel(db);
+
+        await m.OnGetAsync(default);
+
+        Assert.False(m.NoActiveEvent);
+        Assert.Equal(2, m.Days.Count); // pre-day + main day
+    }
+
+    [Fact]
+    public async Task Submitting_with_agreement_creates_applicant_availability_and_meta()
     {
         using var db = NewDb();
         var eventId = await SeedEventAsync(db);
         var m = NewModel(db);
         m.FullName = "Avery Helper";
         m.Email = "Avery@Example.com";
-        m.SelectedShifts = new List<string> { "Setup (day before)", "Session room support" };
-        m.PreferredRole = "Floater";
-        m.MaxHoursPerDay = 6;
+        m.Phone = "+45 12345678";
+        m.LinkedInUrl = "https://www.linkedin.com/in/avery";
+        m.AgreementAccepted = true;
+        m.Availability = new()
+        {
+            new() { Day = PreDay, Level = VolunteerAvailabilityLevel.Full },
+            new() { Day = MainDay, Level = VolunteerAvailabilityLevel.Unavailable, Note = "family" },
+        };
 
         await m.OnPostAsync(default);
 
+        Assert.True(m.SubmittedOk);
         var p = await db.Participants.SingleAsync(x => x.EventId == eventId);
         Assert.Equal(ParticipantRole.Volunteer, p.Role);
-        Assert.False(p.IsActive);                       // pending applicant
+        Assert.False(p.IsActive); // pending applicant
         Assert.Equal("avery@example.com", p.Email);
 
-        var av = await db.VolunteerAvailabilities.SingleAsync(x => x.ParticipantId == p.Id);
-        Assert.Contains("Setup (day before)", av.SelectedShifts);
-        Assert.Contains("Session room support", av.SelectedShifts);
-        Assert.Equal("Floater", av.PreferredRole);
-        Assert.Equal(6, av.MaxHoursPerDay);
+        var days = await db.VolunteerDayAvailabilities.Where(x => x.ParticipantId == p.Id).ToListAsync();
+        Assert.Equal(2, days.Count);
+        Assert.Equal(VolunteerAvailabilityLevel.Unavailable, days.Single(d => d.Day == MainDay).Level);
+
+        var meta = await db.VolunteerAvailabilities.SingleAsync(x => x.ParticipantId == p.Id);
+        Assert.Equal("https://www.linkedin.com/in/avery", meta.LinkedInUrl);
+        Assert.NotNull(meta.AgreementAcceptedAt);
     }
 
     [Fact]
-    public async Task Tampered_shift_values_are_dropped()
+    public async Task Submitting_without_agreement_is_rejected_and_creates_nothing()
     {
         using var db = NewDb();
         await SeedEventAsync(db);
         var m = NewModel(db);
-        m.FullName = "Bob Helper";
-        m.Email = "bob@example.com";
-        m.SelectedShifts = new List<string> { "Session room support", "DROP TABLE volunteers" };
+        m.FullName = "Bo Helper";
+        m.Email = "bo@example.com";
+        m.AgreementAccepted = false;
 
         await m.OnPostAsync(default);
 
-        var av = await db.VolunteerAvailabilities.SingleAsync();
-        Assert.Contains("Session room support", av.SelectedShifts);
-        Assert.DoesNotContain("DROP TABLE", av.SelectedShifts);
+        Assert.False(m.SubmittedOk);
+        Assert.NotNull(m.ErrorMessage);
+        Assert.Equal(0, await db.Participants.CountAsync());
     }
 
     [Fact]
-    public async Task No_shifts_still_creates_the_applicant_but_no_availability_row()
+    public async Task Honeypot_silently_succeeds_without_writing()
     {
         using var db = NewDb();
         await SeedEventAsync(db);
         var m = NewModel(db);
-        m.FullName = "Cara Helper";
-        m.Email = "cara@example.com";
-        m.SelectedShifts = new List<string>();
+        m.FullName = "Bot";
+        m.Email = "bot@example.com";
+        m.AgreementAccepted = true;
+        m.Website = "http://spam.example"; // honeypot tripped
 
         await m.OnPostAsync(default);
 
-        Assert.Equal(1, await db.Participants.CountAsync());
-        Assert.Equal(0, await db.VolunteerAvailabilities.CountAsync());
-    }
-
-    [Fact]
-    public async Task Hours_out_of_range_are_clamped()
-    {
-        using var db = NewDb();
-        await SeedEventAsync(db);
-        var m = NewModel(db);
-        m.FullName = "Dee Helper";
-        m.Email = "dee@example.com";
-        m.SelectedShifts = new List<string> { "Setup (day before)" };
-        m.MaxHoursPerDay = 99;
-
-        await m.OnPostAsync(default);
-
-        var av = await db.VolunteerAvailabilities.SingleAsync();
-        Assert.Equal(24, av.MaxHoursPerDay);   // clamped to a sane day
+        Assert.True(m.SubmittedOk);
+        Assert.Equal(0, await db.Participants.CountAsync());
     }
 }

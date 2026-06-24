@@ -18,9 +18,12 @@ public interface IEconomicContactAdminClient
     /// <summary>True only when base URL + both tokens are configured (live writes possible).</summary>
     bool CanWrite { get; }
 
-    /// <summary>All e-conomic customers (paged through), optionally name/number filtered.</summary>
+    /// <summary>
+    /// e-conomic customers (paged through), optionally name/number filtered and
+    /// optionally restricted to a customer GROUP (e.g. group 1 = sponsors).
+    /// </summary>
     Task<IReadOnlyList<EconomicCustomerRow>> ListCustomersAsync(
-        string? search, CancellationToken ct = default);
+        string? search, int? customerGroup = null, CancellationToken ct = default);
 
     /// <summary>The contacts on one customer.</summary>
     Task<IReadOnlyList<EconomicContactRow>> ListContactsAsync(
@@ -42,9 +45,10 @@ public interface IEconomicContactAdminClient
 /// <summary>One e-conomic customer row for the selection grid.</summary>
 public sealed record EconomicCustomerRow(int CustomerNumber, string Name, string? Email);
 
-/// <summary>One e-conomic customer contact as stored in e-conomic.</summary>
+/// <summary>One e-conomic customer contact as stored in e-conomic (incl. raw notes,
+/// which carries the <c>Role:1,2</c> convention — e-conomic is the role master).</summary>
 public sealed record EconomicContactRow(
-    int ContactNumber, string Name, string? Email, string? Phone);
+    int ContactNumber, string Name, string? Email, string? Phone, string? Notes = null);
 
-/// <summary>The e-conomic-side fields for a create/update.</summary>
-public sealed record EconomicContactInput(string Name, string Email, string? Phone);
+/// <summary>The e-conomic-side fields for a create/update (notes carries Role:1,2).</summary>
+public sealed record EconomicContactInput(string Name, string Email, string? Phone, string? Notes = null);

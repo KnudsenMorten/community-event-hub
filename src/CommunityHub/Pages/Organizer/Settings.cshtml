@@ -172,6 +172,42 @@
     </p>
 </div>
 
+@* --- Background jobs: the master pause/resume switch for ALL timer jobs --- *@
+<div class="card">
+    <h2>@Localizer["Settings.JobsHeading"]</h2>
+    <p>@Localizer["Settings.JobsHelp"]</p>
+
+    @if (Model.JobsPaused)
+    {
+        <p class="set-warn" role="alert">@Localizer["Settings.JobsPausedWarn"]</p>
+    }
+
+    <div class="set-feat @(Model.JobsPaused ? "is-disabled" : "")">
+        <div class="set-body">
+            <h3>
+                @Localizer["Settings.JobsRunHeading"]
+                @if (Model.JobsPaused)
+                {
+                    <span class="set-tag off">@Localizer["Settings.JobsStatePaused"]</span>
+                }
+                else
+                {
+                    <span class="set-tag on">@Localizer["Settings.JobsStateRunning"]</span>
+                }
+            </h3>
+            <p>@Localizer["Settings.JobsDetail"]</p>
+        </div>
+        <div class="set-action">
+            <form method="post" asp-page-handler="SetJobsPaused">
+                <input type="hidden" name="paused" value="@((!Model.JobsPaused).ToString().ToLowerInvariant())" />
+                <button type="submit" class="set-btn @(Model.JobsPaused ? "" : "off")">
+                    @(Model.JobsPaused ? Localizer["Settings.ResumeJobs"] : Localizer["Settings.PauseJobs"])
+                </button>
+            </form>
+        </div>
+    </div>
+</div>
+
 @* --- Dependency warnings (enabled-but-prerequisite-off) --- *@
 @if (Model.UnmetDependencies.Count > 0)
 {

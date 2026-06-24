@@ -183,8 +183,8 @@ public sealed class CalendarSyncScenarioTests
         var ics = await new ParticipantCalendarBuilder(db)
             .BuildFeedAsync(seed.SpeakerOneId, UidHost);
 
-        // A plain session speaker has the three all-speaker milestones.
-        Assert.Equal(3, CountOccurrences(ics, "BEGIN:VEVENT"));
+        // A speaker has all 7 milestone deadlines (operator 2026-06-23 task set).
+        Assert.Equal(7, CountOccurrences(ics, "BEGIN:VEVENT"));
         // VALARM reminders present (7 & 1 days before).
         Assert.True(CountOccurrences(ics, "BEGIN:VALARM") >= 2);
         Assert.Contains("TRIGGER:-P7D", ics);
@@ -194,7 +194,7 @@ public sealed class CalendarSyncScenarioTests
     }
 
     [Fact]
-    public async Task Masterclass_speaker_gets_the_masterclass_only_milestone()
+    public async Task Masterclass_speaker_gets_the_full_milestone_set()
     {
         using var db = ScenarioFixture.NewDb();
         var seed = await ScenarioSeed.SeedAsync(db);
@@ -203,8 +203,9 @@ public sealed class CalendarSyncScenarioTests
         var ics = await new ParticipantCalendarBuilder(db)
             .BuildFeedAsync(seed.MasterclassSpeakerId, UidHost);
 
-        // Master Class speaker has all FOUR milestones (incl. title+abstract).
-        Assert.Equal(4, CountOccurrences(ics, "BEGIN:VEVENT"));
+        // No masterclass-only task now (operator 2026-06-23): a Master Class speaker
+        // gets the same full set of 7 milestones as any other speaker.
+        Assert.Equal(7, CountOccurrences(ics, "BEGIN:VEVENT"));
     }
 
     // ---- Role coverage: volunteer ------------------------------------------

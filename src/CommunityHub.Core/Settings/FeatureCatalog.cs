@@ -203,6 +203,14 @@ public static class FeatureCatalog
             DependsOn: new[] { OutboundEmailKey }, DefaultReleasedToRing: Ring.Ring1,
             Surface: FeatureSurface.UserImpact),
 
+        // §26c "Help Promote": email speakers when their promo graphics are released,
+        // pointing them to /Speaker/Graphics. Ring-scoped + off by default.
+        new("speaker-graphics-promote", "Settings.Feat.SpeakerGraphicsPromote.Name",
+            "Settings.Feat.SpeakerGraphicsPromote.Desc",
+            FeatureGroup.Email, FeatureTier.Advanced, DefaultEnabled: false,
+            DependsOn: new[] { OutboundEmailKey }, DefaultReleasedToRing: Ring.Ring1,
+            Surface: FeatureSurface.UserImpact),
+
         // --- Speakers & sessions --------------------------------------------
         // GA (operator 2026-06-22): released to Broad — runs for everyone, unscoped.
         new("sessionize-import", "Settings.Feat.Sessionize.Name",
@@ -225,6 +233,22 @@ public static class FeatureCatalog
         // GA (operator 2026-06-22): tested backend pull — released to Broad, unscoped.
         new("sponsor-order-pull", "Settings.Feat.SponsorOrderPull.Name",
             "Settings.Feat.SponsorOrderPull.Desc",
+            FeatureGroup.Sponsors, FeatureTier.Advanced, DefaultEnabled: false,
+            DependsOn: Array.Empty<string>(), DefaultReleasedToRing: Ring.Broad),
+
+        // ENGINE (operator 2026-06-24): after the order pull, create/link the Zoho
+        // Backstage sponsor + exhibitor records from webshop data (replaces the legacy
+        // PowerShell sync). Off by default — enable to let CEH own the create flow.
+        new("sponsor-zoho-provision", "Settings.Feat.SponsorZohoProvision.Name",
+            "Settings.Feat.SponsorZohoProvision.Desc",
+            FeatureGroup.Sponsors, FeatureTier.Advanced, DefaultEnabled: false,
+            DependsOn: Array.Empty<string>(), DefaultReleasedToRing: Ring.Broad),
+
+        // ENGINE (operator 2026-06-24): scheduled ERP→webshop contact reconcile (the C#
+        // port of Sync-ERP-Contacts-to-Webshop.ps1). Off by default — the org enables it
+        // to retire the legacy script. The service self-guards on e-conomic+CM config.
+        new("erp-webshop-reconcile", "Settings.Feat.ErpWebshopReconcile.Name",
+            "Settings.Feat.ErpWebshopReconcile.Desc",
             FeatureGroup.Sponsors, FeatureTier.Advanced, DefaultEnabled: false,
             DependsOn: Array.Empty<string>(), DefaultReleasedToRing: Ring.Broad),
 
@@ -286,15 +310,10 @@ public static class FeatureCatalog
             FeatureGroup.Attendees, FeatureTier.Advanced, DefaultEnabled: false,
             DependsOn: Array.Empty<string>(), DefaultReleasedToRing: Ring.Broad),
 
-        // Auto-provision a login-capable Attendee Participant per 2-day-ticket
-        // holder + email a one-click magic-link welcome. DEFAULT OFF: this sends
-        // real email to real attendees, so it must be turned on deliberately by an
-        // organizer (a mass action — never auto-enabled by a deploy).
-        new("attendee-welcome", "Settings.Feat.AttendeeWelcome.Name",
-            "Settings.Feat.AttendeeWelcome.Desc",
-            FeatureGroup.Attendees, FeatureTier.Advanced, DefaultEnabled: false,
-            DependsOn: new[] { "attendee-reconcile", OutboundEmailKey }, DefaultReleasedToRing: Ring.Ring1,
-            Surface: FeatureSurface.UserImpact),
+        // attendee-welcome feature REMOVED (operator 2026-06-23): there is no separate
+        // attendee welcome — attendees receive only the Master Class confirmed-seat
+        // mail (masterclass-confirmed). The attendee-missing-* chasers ride on
+        // attendee-reconcile.
 
         // --- Incubation: NEW user-impact GUI actions, ring-tested before GA -----
         // (operator 2026-06-22) Every GUI action that a person NOTICES happening to

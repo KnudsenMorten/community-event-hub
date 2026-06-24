@@ -449,7 +449,9 @@ public sealed class ParticipantCalendarBuilder
         var start = new DateTimeOffset(dueDate.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
         var desc = string.IsNullOrWhiteSpace(description)
             ? "Deadline from your Community Hub. Open the hub to update this item."
-            : description;
+            // Strip the **bold**/__underline__/[label](url) markup to plain text so
+            // the markers don't leak literally into the calendar entry.
+            : CommunityHub.Core.Email.TaskMarkup.ToPlainText(description);
         return new CalendarItem(
             Uid: $"task:{taskId}@{uidHost}",
             Summary: title,

@@ -206,6 +206,9 @@ switch (command)
             // build/test — only when explicitly invoked here.
             var to = GetArg(args, "--to") ?? string.Empty;
             var sponsor = GetArg(args, "--sponsor") ?? "2LINKIT";
+            // Optional: send only ONE template (its key, e.g. "welcome-sponsor"),
+            // for reviewing a single mail after an edit instead of the full set.
+            var only = GetArg(args, "--only");
 
             var templates = host.Services.GetRequiredService<EmailTemplateProvider>();
             var sender = host.Services.GetRequiredService<IEmailSender>();
@@ -214,7 +217,7 @@ switch (command)
                 .Value;
 
             return await CommunityHub.OneShot.SendSampleEmailsCommand.RunAsync(
-                templates, sender, templateOptions, to, sponsor, logger, CancellationToken.None);
+                templates, sender, templateOptions, to, sponsor, logger, CancellationToken.None, only);
         }
 
     case "watch-uploads":

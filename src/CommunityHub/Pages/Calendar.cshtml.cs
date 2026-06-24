@@ -1,6 +1,7 @@
 using CommunityHub.Auth;
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
+using CommunityHub.Core.Email;
 using CommunityHub.Core.Reminders;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -43,6 +44,22 @@ public class CalendarModel : PageModel
     public string WebcalUrl { get; private set; } = string.Empty;
     public string HttpsUrl { get; private set; } = string.Empty;
 
+    /// <summary>One "add to calendar" row, pre-built with OPEN-in-calendar links.</summary>
+    public sealed record CalRow(
+        string Title, DateTimeOffset StartsAt, string? Location,
+        string GoogleUrl, string OutlookUrl, string? IcsUrl);
+
+    /// <summary>Entries grouped by month ("MMMM yyyy") for the restructured Key Dates list.</summary>
+    public IReadOnlyList<IGrouping<string, CalRow>> Months { get; private set; } =
+        Array.Empty<IGrouping<string, CalRow>>();
+
+    /// <summary>
+    /// Role-appropriate description of what the subscribe feed includes, so the
+    /// copy never offers a speaker "shifts" (volunteer-only) or a volunteer
+    /// "sessions" (operator 2026-06-23).
+    /// </summary>
+    public string SyncItemsPhrase { get; private set; } = "tasks";
+
     public async Task<IActionResult> OnGetAsync(CancellationToken ct)
     {
         var me = _participant.Current;
@@ -53,6 +70,33 @@ public class CalendarModel : PageModel
             .FirstOrDefaultAsync(ct);
 
         Entries = await _schedule.GetForRoleAsync(me.EventId, me.Role, ct);
+
+        // Build per-entry OPEN-in-calendar links (Google + Outlook), grouped by month.
+        // The .ics link is only offered for a real persisted entry (Id > 0) so we never
+        // emit /schedule/0.ics (which 404s). End time defaults to +1h when unset.
+        Months = Entries
+            .OrderBy(e => e.StartsAt)
+            .Select(e =>
+            {
+                var end = e.EndsAt ?? e.StartsAt.AddHours(1);
+                var details = $"Experts Live Denmark — {e.Title}";
+                return new CalRow(
+                    e.Title, e.StartsAt, e.Location,
+                    CalendarLinkBuilder.GoogleUrl(e.Title, e.StartsAt, end, details, e.Location),
+                    CalendarLinkBuilder.OutlookUrl(e.Title, e.StartsAt, end, details, e.Location),
+                    e.Id > 0 ? $"/schedule/{e.Id}.ics" : null);
+            })
+            .GroupBy(r => r.StartsAt.ToString("MMMM yyyy"))
+            .ToList();
+
+        SyncItemsPhrase = me.Role switch
+        {
+            ParticipantRole.Speaker => "sessions and tasks",
+            ParticipantRole.Volunteer => "shifts and tasks",
+            ParticipantRole.Organizer or ParticipantRole.Media or ParticipantRole.EventPartner
+                => "sessions, tasks and shifts",
+            _ => "tasks",
+        };
 
         if (CalendarSyncEnabled)
         {

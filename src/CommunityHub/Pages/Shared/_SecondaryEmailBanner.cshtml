@@ -1,0 +1,60 @@
+@*
+    Shared ALTERNATIVE-EMAIL banner — surfaced at the top of every role's task
+    page so the secondary-email option isn't buried in My Hub Profile.
+
+    Task + calendar reminders are CC'd to Participant.SecondaryEmail
+    (ParticipantEmailService.ResolveRouting / TaskReminderBuilder). This banner
+    tells the person which inbox(es) those reminders reach and lets them add or
+    change the alternative inbox in one tap — useful when someone keeps their
+    calendar reminders on a different account than their primary login email.
+
+    Self-contained: reads the CURRENT participant (honours organizer "act as")
+    and looks up their secondary email, so it drops into any page with one line:
+        @await Html.PartialAsync("Shared/_SecondaryEmailBanner")
+*@
+@using CommunityHub.Auth
+@using CommunityHub.Core.Data
+@using Microsoft.EntityFrameworkCore
+@inject ICurrentParticipantAccessor CurrentParticipant
+@inject CommunityHubDbContext Db
+@{
+    var me = CurrentParticipant.Current;
+    string primary = me?.Email ?? string.Empty;
+    string? secondary = null;
+    if (me is not null)
+    {
+        secondary = await Db.Participants
+            .Where(p => p.Id == me.ParticipantId)
+            .Select(p => p.SecondaryEmail)
+            .FirstOrDefaultAsync();
+    }
+    var hasSecondary = !string.IsNullOrWhiteSpace(secondary);
+}
+@if (me is not null)
+{
+    <div class="alt-email-banner"
+         style="margin:0 0 16px;padding:12px 14px;border-radius:8px;font-size:13.5px;line-height:1.55;
+                background:@(hasSecondary ? "#f0fdf4" : "#eff6ff");
+                border:1px solid @(hasSecondary ? "#bbf7d0" : "#bfdbfe");
+                border-left:4px solid @(hasSecondary ? "#16a34a" : "#2563eb");color:#1f2937;">
+        @if (hasSecondary)
+        {
+            <p style="margin:0;"><span aria-hidden="true">&#128231;</span>
+                <strong>Reminders reach two inboxes.</strong>
+                Your task &amp; calendar reminder emails go to your primary
+                <strong>@primary</strong> and are also copied to <strong>@secondary</strong>.
+                <a asp-page="/Profile" asp-fragment="SecondaryEmail" style="white-space:nowrap;">Change &rarr;</a>
+            </p>
+        }
+        else
+        {
+            <p style="margin:0;"><span aria-hidden="true">&#128231;</span>
+                <strong>Want reminders in another inbox too?</strong>
+                Right now task &amp; calendar reminders only go to <strong>@primary</strong>.
+                If you keep your calendar reminders on a different account,
+                <a asp-page="/Profile" asp-fragment="SecondaryEmail" style="white-space:nowrap;">add an alternative email &rarr;</a>
+                and we&rsquo;ll copy every reminder there as well.
+            </p>
+        }
+    </div>
+}

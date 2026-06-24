@@ -19,6 +19,7 @@ namespace CommunityHub.Jobs;
 public sealed class WooCommercePullJob
 {
     private readonly SponsorOrderPullService _service;
+    private readonly SponsorZohoProvisionService _provision;
     private readonly CommunityHubDbContext _db;
     private readonly FeatureGateService _gate;
     private readonly IAuditTrail _audit;
@@ -26,12 +27,14 @@ public sealed class WooCommercePullJob
 
     public WooCommercePullJob(
         SponsorOrderPullService service,
+        SponsorZohoProvisionService provision,
         CommunityHubDbContext db,
         FeatureGateService gate,
         IAuditTrail audit,
         ILogger<WooCommercePullJob> log)
     {
         _service = service;
+        _provision = provision;
         _db = db;
         _gate = gate;
         _audit = audit;
@@ -94,5 +97,40 @@ public sealed class WooCommercePullJob
                         + $"contacts +{result.ContactsCreated}/~{result.ContactsUpdated}"
                     : $"Sponsor order pull skipped: {result.SkipReason}",
             }, ct);
+
+        // STAGE 4b — after the pull, create/link Zoho sponsor + exhibitor records from
+        // webshop data (replaces the legacy PowerShell sync). Per-edition gated by
+        // 'sponsor-zoho-provision' (off by default) so it activates only when the
+        // operator is ready to retire the script.
+        foreach (var id in activeEventIds)
+        {
+            if (!await _gate.IsFeatureEnabledAsync("sponsor-zoho-provision", id, ct)) continue;
+            try
+            {
+                var pr = await _provision.ProvisionAsync(id, ct);
+                if (!pr.Enabled) continue;
+                var did = pr.SponsorsCreated + pr.SponsorsLinked + pr.ExhibitorsRequested + pr.ExhibitorsLinked + pr.Skipped;
+                _log.LogInformation(
+                    "Zoho provision (event {Event}): created {C}, linked {L}, exhibitor-requests {E}, exhibitor-linked {EL}, skipped {S}.",
+                    id, pr.SponsorsCreated, pr.SponsorsLinked, pr.ExhibitorsRequested, pr.ExhibitorsLinked, pr.Skipped);
+                if (did > 0)
+                    await _audit.RecordAsync(new AuditEntry
+                    {
+                        EventId = id,
+                        Category = AuditCategory.Engine,
+                        Action = "sponsor-zoho-provision",
+                        ActorEmail = "system",
+                        Source = AuditSource.Job,
+                        Outcome = AuditOutcome.Success,
+                        Summary = $"Zoho provision: {pr.SponsorsCreated} sponsor(s) created, {pr.SponsorsLinked} linked, "
+                            + $"{pr.ExhibitorsRequested} exhibitor request(s), {pr.ExhibitorsLinked} exhibitor(s) linked, {pr.Skipped} skipped."
+                            + (pr.Notes.Count > 0 ? " " + string.Join("; ", pr.Notes.Take(8)) : ""),
+                    }, ct);
+            }
+            catch (Exception ex)
+            {
+                _log.LogError(ex, "Zoho provision failed for event {Event}.", id);
+            }
+        }
     }
 }

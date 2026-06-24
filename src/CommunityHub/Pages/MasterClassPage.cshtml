@@ -41,6 +41,44 @@
             <p role="alert" style="background:#fdecea;border:1px solid #b3261e;border-radius:6px;padding:10px 12px;">@Model.Error</p>
         }
 
+        <!-- ============ Orientation: what is a Master Class (standard copy) ============ -->
+        @* Consolidated here (operator 2026-06-24): the "Master Class info & what to bring"
+           details now live ON this Q&A page so attendees find everything in one place. *@
+        <section aria-labelledby="mc-about-h" style="margin:18px 0;">
+            <h2 id="mc-about-h" style="font-size:1.25rem;">What is an Experts Live Master Class?</h2>
+            <p>An Experts Live Master Class is a full-day, in-person learning event where people with a shared interest in a topic come together to learn from experienced professionals—mainly Microsoft MVPs and sometimes Microsoft itself.</p>
+            <p>There isn't a strict definition of what makes up a master class. Our main goal is to create a room of peers and provide honest, practical insight — the "no filter" version of what works and what doesn't.</p>
+            <p><strong>Key points:</strong></p>
+            <ul style="margin:0 0 10px 18px;line-height:1.6;">
+                <li>Open dialogue is encouraged — you can ask questions and challenge features.</li>
+                <li>Speakers choose their own format.</li>
+                <li>Some sessions include hands-on labs; others mix presentations and discussions.</li>
+                <li>It's not meant to feel like traditional school despite the word "class."</li>
+                <li>Asking questions is strongly encouraged, since much of the value comes from interaction.</li>
+            </ul>
+            <h3 style="font-size:1.05rem;margin:14px 0 4px;">Do I need to bring my laptop?</h3>
+            <p>Many attendees bring a laptop to take notes and follow along. Your master class may require you to bring your laptop as outlined in the "Before you arrive" notes below.</p>
+            <h3 style="font-size:1.05rem;margin:14px 0 4px;">Can I charge my laptop during the master class?</h3>
+            <p>Due to Danish fire safety regulations, we cannot run charging cables along the classroom table rows. Each room has a charging table (up to 15 devices at once) for laptops or phones. For the best start, please arrive with your laptop fully charged.</p>
+        </section>
+
+        <!-- ============ Before you arrive / what to bring (speaker logistics) ============ -->
+        <section aria-labelledby="mc-bring-h" style="margin:18px 0;">
+            <h2 id="mc-bring-h" style="font-size:1.25rem;">Before you arrive — what to bring</h2>
+            @if (string.IsNullOrWhiteSpace(Model.View.LogisticsText))
+            {
+                <p style="color:#666;">The speakers haven't posted specifics for this class yet — check back soon.</p>
+            }
+            else
+            {
+                <div style="white-space:pre-wrap;line-height:1.55;">@Model.View.LogisticsText</div>
+                @if (Model.View.LogisticsUpdatedAt is { } lu)
+                {
+                    <p style="color:#888;font-size:.85rem;margin-top:8px;">Last updated @Stamp(lu)</p>
+                }
+            }
+        </section>
+
         <!-- ============ Prep content ============ -->
         <section aria-labelledby="prep-h" style="margin:18px 0;">
             <h2 id="prep-h" style="font-size:1.25rem;">How to prepare</h2>

@@ -127,6 +127,11 @@ public sealed class SponsorContactSyncService
                     IsSigner = isSigner,
                     IsEventCoordinator = isCoordinator,
                     IsActive = true,
+                    // Active by default (operator 2026-06-23): without this the
+                    // LifecycleState defaulted to Inactive, so a synced sponsor read
+                    // as "Inactive" (IsActive=true AND LifecycleState==Active is the
+                    // active rule) and was hidden by the active-only filter.
+                    LifecycleState = ParticipantLifecycleState.Active,
                     CreatedAt = now,
                 });
                 created++;

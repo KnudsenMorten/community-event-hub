@@ -113,6 +113,305 @@ public sealed class ZohoClient
         _options = options;
     }
 
+    /// <summary>One Backstage exhibitor — its system id + company name (for matching by name).</summary>
+    public sealed record BackstageExhibitor(string Id, string CompanyName);
+
+    /// <summary>
+    /// List every exhibitor in the configured Backstage event (id + company_name)
+    /// so a sponsor can be matched by company name. Scope:
+    /// <c>ZohoBackstage.exhibitor.READ</c>. Returns empty on auth/HTTP failure.
+    /// </summary>
+    public async Task<IReadOnlyList<BackstageExhibitor>> GetExhibitorsAsync(
+        string accessToken, CancellationToken ct = default)
+    {
+        var list = new List<BackstageExhibitor>();
+        await foreach (var el in PageV3Async("exhibitors", "exhibitors", accessToken, ct))
+        {
+            var id = el.TryGetProperty("id", out var i) ? i.GetString() : null;
+            var name = el.TryGetProperty("company_name", out var n) ? n.GetString() : null;
+            if (!string.IsNullOrWhiteSpace(id) && !string.IsNullOrWhiteSpace(name))
+                list.Add(new BackstageExhibitor(id!, name!));
+        }
+        return list;
+    }
+
+    /// <summary>
+    /// PUT updated profile fields onto a Backstage exhibitor. Only non-null
+    /// fields are sent. Scope: <c>ZohoBackstage.exhibitor.UPDATE</c>. Returns
+    /// whether the update succeeded.
+    /// </summary>
+    public async Task<bool> UpdateExhibitorAsync(
+        string accessToken, string exhibitorId,
+        string? companyOverview, string? companyShortDescription,
+        CancellationToken ct = default,
+        string? companyName = null, string? contactFirstName = null, string? contactLastName = null,
+        string? websiteUrl = null, string? linkedInUrl = null, string? twitterUrl = null,
+        string? contactEmail = null, string? contactMobile = null)
+    {
+        var url = $"{_options.ApiDomain}/backstage/v3/portals/{_options.BackstagePortalId}"
+            + $"/events/{_options.BackstageEventId}/exhibitors/{exhibitorId}";
+        var payload = new Dictionary<string, object?>();
+        if (companyOverview is not null) payload["company_overview"] = companyOverview;
+        if (companyShortDescription is not null) payload["company_short_description"] = companyShortDescription;
+        if (!string.IsNullOrWhiteSpace(websiteUrl)) payload["website_url"] = websiteUrl;
+        // company_social_pages is an object keyed by platform (linkedin / twitter / facebook).
+        if (!string.IsNullOrWhiteSpace(linkedInUrl) || !string.IsNullOrWhiteSpace(twitterUrl))
+        {
+            var social = new Dictionary<string, object?>();
+            if (!string.IsNullOrWhiteSpace(linkedInUrl)) social["linkedin"] = linkedInUrl;
+            if (!string.IsNullOrWhiteSpace(twitterUrl)) social["twitter"] = twitterUrl;
+            payload["company_social_pages"] = social;
+        }
+        // Re-push the correct UTF-8 company + contact name so Zoho's mojibake
+        // (æøåÆØÅ shown as "?") is overwritten. JsonContent serializes UTF-8.
+        if (!string.IsNullOrWhiteSpace(companyName)) payload["company_name"] = companyName;
+        if (!string.IsNullOrWhiteSpace(contactFirstName) || !string.IsNullOrWhiteSpace(contactLastName)
+            || !string.IsNullOrWhiteSpace(contactEmail) || !string.IsNullOrWhiteSpace(contactMobile))
+        {
+            var contact = new Dictionary<string, object?>
+            {
+                ["first_name"] = contactFirstName ?? string.Empty,
+                ["last_name"] = contactLastName ?? string.Empty,
+            };
+            if (!string.IsNullOrWhiteSpace(contactEmail)) contact["email"] = contactEmail;
+            if (!string.IsNullOrWhiteSpace(contactMobile)) contact["mobile_no"] = contactMobile;
+            payload["contact"] = contact;
+        }
+
+        using var req = new HttpRequestMessage(HttpMethod.Put, url)
+        {
+            Content = System.Net.Http.Json.JsonContent.Create(payload),
+        };
+        req.Headers.Add("Authorization", $"Zoho-oauthtoken {accessToken}");
+        using var resp = await _http.SendAsync(req, ct);
+        return resp.IsSuccessStatusCode;
+    }
+
+    /// <summary>One Backstage sponsor — its system id + company name (for matching by name).</summary>
+    public sealed record BackstageSponsor(string Id, string CompanyName);
+
+    /// <summary>
+    /// List every sponsor in the configured Backstage event (id + company_name) so a
+    /// CEH sponsor can be matched by company name. Scope: <c>ZohoBackstage.sponsor.READ</c>.
+    /// Returns empty on auth/HTTP failure.
+    /// </summary>
+    public async Task<IReadOnlyList<BackstageSponsor>> GetSponsorsAsync(
+        string accessToken, CancellationToken ct = default)
+    {
+        var list = new List<BackstageSponsor>();
+        await foreach (var el in PageV3Async("sponsors", "sponsors", accessToken, ct))
+        {
+            var id = el.TryGetProperty("id", out var i) ? i.GetString() : null;
+            var name = el.TryGetProperty("company_name", out var n) ? n.GetString() : null;
+            if (!string.IsNullOrWhiteSpace(id) && !string.IsNullOrWhiteSpace(name))
+                list.Add(new BackstageSponsor(id!, name!));
+        }
+        return list;
+    }
+
+    /// <summary>
+    /// PUT updated profile fields onto a Backstage SPONSOR record. Only non-null
+    /// fields are sent. Scope: <c>ZohoBackstage.sponsor.UPDATE</c>. Returns whether
+    /// the update succeeded.
+    /// </summary>
+    public async Task<bool> UpdateSponsorAsync(
+        string accessToken, string sponsorId,
+        string? description, string? websiteUrl, string? companyName,
+        CancellationToken ct = default,
+        string? contactFirstName = null, string? contactLastName = null, string? contactEmail = null)
+    {
+        var url = $"{_options.ApiDomain}/backstage/v3/portals/{_options.BackstagePortalId}"
+            + $"/events/{_options.BackstageEventId}/sponsors/{sponsorId}";
+        var payload = new Dictionary<string, object?>();
+        if (description is not null) payload["description"] = description;
+        if (!string.IsNullOrWhiteSpace(websiteUrl)) payload["website_url"] = websiteUrl;
+        if (!string.IsNullOrWhiteSpace(companyName)) payload["company_name"] = companyName;
+        // Sponsor contact = first/last/email only (Zoho rejects phone on a sponsor).
+        if (!string.IsNullOrWhiteSpace(contactFirstName) || !string.IsNullOrWhiteSpace(contactLastName)
+            || !string.IsNullOrWhiteSpace(contactEmail))
+        {
+            var contact = new Dictionary<string, object?>
+            {
+                ["first_name"] = contactFirstName ?? string.Empty,
+                ["last_name"] = contactLastName ?? string.Empty,
+            };
+            if (!string.IsNullOrWhiteSpace(contactEmail)) contact["email"] = contactEmail;
+            payload["contact"] = contact;
+        }
+
+        using var req = new HttpRequestMessage(HttpMethod.Put, url)
+        {
+            Content = System.Net.Http.Json.JsonContent.Create(payload),
+        };
+        req.Headers.Add("Authorization", $"Zoho-oauthtoken {accessToken}");
+        using var resp = await _http.SendAsync(req, ct);
+        return resp.IsSuccessStatusCode;
+    }
+
+    /// <summary>One Zoho sponsorship type / sponsor category (id + name).</summary>
+    public sealed record BackstageSponsorshipType(string Id, string Name);
+
+    /// <summary>
+    /// GET the event's sponsorship types (sponsor categories) — name → id, used to
+    /// set <c>sponsorship_type</c> when creating a sponsor. Small finite set, no paging.
+    /// </summary>
+    public async Task<IReadOnlyList<BackstageSponsorshipType>> GetSponsorshipTypesAsync(
+        string accessToken, CancellationToken ct = default)
+    {
+        var url = $"{_options.ApiDomain}/backstage/v3/portals/{_options.BackstagePortalId}"
+            + $"/events/{_options.BackstageEventId}/sponsorship_types";
+        using var req = new HttpRequestMessage(HttpMethod.Get, url);
+        req.Headers.Add("Authorization", $"Zoho-oauthtoken {accessToken}");
+        using var resp = await _http.SendAsync(req, ct);
+        if (!resp.IsSuccessStatusCode) return Array.Empty<BackstageSponsorshipType>();
+
+        using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync(ct));
+        var list = new List<BackstageSponsorshipType>();
+        foreach (var prop in new[] { "sponsorship_types", "sponsor_categories", "data" })
+        {
+            if (!doc.RootElement.TryGetProperty(prop, out var arr) || arr.ValueKind != JsonValueKind.Array) continue;
+            foreach (var el in arr.EnumerateArray())
+            {
+                // Field names vary across Zoho events — try the same candidates the
+                // legacy script used (name/category_name/title, id/sponsorship_type_id/…).
+                var id = FirstNonEmpty(
+                    GetString(el, "id"), GetString(el, "sponsorship_type_id"),
+                    GetString(el, "sponsor_category_id"), GetString(el, "category_id"));
+                var name = FirstNonEmpty(
+                    GetString(el, "name"), GetString(el, "category_name"),
+                    GetString(el, "title"), GetString(el, "sponsorship_type_name"));
+                if (id.Length > 0 && name.Length > 0)
+                    list.Add(new BackstageSponsorshipType(id, name));
+            }
+            if (list.Count > 0) break;
+        }
+        return list;
+    }
+
+    /// <summary>
+    /// POST create a sponsor. Returns the new sponsor id, or null on failure.
+    /// Body: company_name, website_url, description, sponsorship_type (category id),
+    /// contact{first_name,last_name,email}. (currency_code/language are server-set.)
+    /// </summary>
+    public async Task<string?> CreateSponsorAsync(
+        string accessToken, string companyName, string? websiteUrl, string? description,
+        string sponsorshipTypeId, string? contactFirstName, string? contactLastName, string? contactEmail,
+        CancellationToken ct = default)
+    {
+        var url = $"{_options.ApiDomain}/backstage/v3/portals/{_options.BackstagePortalId}"
+            + $"/events/{_options.BackstageEventId}/sponsors";
+        var payload = new Dictionary<string, object?>
+        {
+            ["company_name"] = companyName,
+            ["sponsorship_type"] = sponsorshipTypeId,
+        };
+        if (!string.IsNullOrWhiteSpace(websiteUrl)) payload["website_url"] = websiteUrl;
+        if (!string.IsNullOrWhiteSpace(description)) payload["description"] = description;
+        if (!string.IsNullOrWhiteSpace(contactFirstName) || !string.IsNullOrWhiteSpace(contactLastName)
+            || !string.IsNullOrWhiteSpace(contactEmail))
+        {
+            var contact = new Dictionary<string, object?>
+            {
+                ["first_name"] = contactFirstName ?? string.Empty,
+                ["last_name"] = contactLastName ?? string.Empty,
+            };
+            if (!string.IsNullOrWhiteSpace(contactEmail)) contact["email"] = contactEmail;
+            payload["contact"] = contact;
+        }
+
+        using var req = new HttpRequestMessage(HttpMethod.Post, url)
+        {
+            Content = System.Net.Http.Json.JsonContent.Create(payload),
+        };
+        req.Headers.Add("Authorization", $"Zoho-oauthtoken {accessToken}");
+        using var resp = await _http.SendAsync(req, ct);
+        if (!resp.IsSuccessStatusCode) return null;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync(ct));
+            var root = doc.RootElement;
+            // The created sponsor may be at the root or nested under "sponsor".
+            if (root.TryGetProperty("sponsor", out var sp) && sp.ValueKind == JsonValueKind.Object) root = sp;
+            foreach (var key in new[] { "id", "sponsor_id" })
+                if (root.TryGetProperty(key, out var idEl) && idEl.ValueKind == JsonValueKind.String)
+                    return idEl.GetString();
+        }
+        catch { /* created but couldn't parse id — a later run links it by name */ }
+        return string.Empty;   // non-null = created (id unknown), so caller doesn't retry-create
+    }
+
+    /// <summary>One exhibitor booth member as Zoho returns it.</summary>
+    public sealed record BackstageBoothMember(
+        string Email, string FirstName, string LastName, string Role);
+
+    /// <summary>
+    /// GET all booth members of an exhibitor. Response shape:
+    /// <c>{ members: [ { role, status, contact: { first_name, last_name, email } } ] }</c>.
+    /// Scope: <c>ZohoBackstage.exhibitor.READ</c>. Empty on failure.
+    /// </summary>
+    public async Task<IReadOnlyList<BackstageBoothMember>> GetBoothMembersAsync(
+        string accessToken, string exhibitorId, CancellationToken ct = default)
+    {
+        var url = $"{_options.ApiDomain}/backstage/v3/portals/{_options.BackstagePortalId}"
+            + $"/events/{_options.BackstageEventId}/exhibitors/{exhibitorId}/members";
+        using var req = new HttpRequestMessage(HttpMethod.Get, url);
+        req.Headers.Add("Authorization", $"Zoho-oauthtoken {accessToken}");
+        using var resp = await _http.SendAsync(req, ct);
+        if (!resp.IsSuccessStatusCode) return Array.Empty<BackstageBoothMember>();
+
+        using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync(ct));
+        var list = new List<BackstageBoothMember>();
+        if (doc.RootElement.TryGetProperty("members", out var arr) && arr.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var m in arr.EnumerateArray())
+            {
+                var contact = m.TryGetProperty("contact", out var c) ? c : default;
+                var email = Lower(GetString(contact, "email"));
+                if (email.Length == 0) continue;
+                list.Add(new BackstageBoothMember(
+                    Email: email,
+                    FirstName: GetString(contact, "first_name"),
+                    LastName: GetString(contact, "last_name"),
+                    Role: GetString(m, "role")));
+            }
+        }
+        return list;
+    }
+
+    /// <summary>
+    /// POST create booth members in bulk for an exhibitor.
+    /// Body: <c>{ members: [ { role, first_name, last_name, email, company_name } ] }</c>
+    /// (role = "ADMIN" | "staff"). Scope: <c>ZohoBackstage.exhibitor.CREATE</c>.
+    /// </summary>
+    public async Task<bool> CreateBoothMembersAsync(
+        string accessToken, string exhibitorId,
+        IReadOnlyList<(string FirstName, string LastName, string Email, string Role, string? CompanyName)> members,
+        CancellationToken ct = default)
+    {
+        if (members.Count == 0) return true;
+        var url = $"{_options.ApiDomain}/backstage/v3/portals/{_options.BackstagePortalId}"
+            + $"/events/{_options.BackstageEventId}/exhibitors/{exhibitorId}/members";
+        var payload = new Dictionary<string, object?>
+        {
+            ["members"] = members.Select(m => new Dictionary<string, object?>
+            {
+                ["role"] = m.Role,
+                ["first_name"] = m.FirstName,
+                ["last_name"] = m.LastName,
+                ["email"] = m.Email,
+                ["company_name"] = m.CompanyName ?? string.Empty,
+            }).ToList(),
+        };
+        using var req = new HttpRequestMessage(HttpMethod.Post, url)
+        {
+            Content = System.Net.Http.Json.JsonContent.Create(payload),
+        };
+        req.Headers.Add("Authorization", $"Zoho-oauthtoken {accessToken}");
+        using var resp = await _http.SendAsync(req, ct);
+        return resp.IsSuccessStatusCode;
+    }
+
     /// <summary>Exchange the refresh token for a short-lived access token.</summary>
     public async Task<string?> GetAccessTokenAsync(CancellationToken ct = default)
     {

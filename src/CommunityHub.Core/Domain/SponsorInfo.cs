@@ -44,6 +44,21 @@ public class SponsorInfo
     public string SponsorCompanyId { get; set; } = string.Empty;
 
     /// <summary>
+    /// Zoho Backstage SPONSOR id for this company (every paying company is a Zoho
+    /// sponsor). Persisted so the Zoho sync targets this company by id instead of
+    /// matching on company name (which can change). Null until mapped. See the
+    /// one-time ID-fetch that matches by company name across CEH / Zoho / webshop.
+    /// </summary>
+    public string? ZohoSponsorId { get; set; }
+
+    /// <summary>
+    /// Zoho Backstage EXHIBITOR id for this company — present only when the company
+    /// bought booth products (so it appears as an exhibitor as well as a sponsor).
+    /// Null for sponsor-only companies. A company can therefore carry TWO Zoho ids.
+    /// </summary>
+    public string? ZohoExhibitorId { get; set; }
+
+    /// <summary>
     /// The sponsorship tier this company holds (the booth tier — Gold / Diamond /
     /// Platinum / Feature, or <see cref="BoothTier.None"/> when unknown). Drives the
     /// grouping on the PUBLIC sponsors page (<c>/Sponsors</c>), where sponsors are
@@ -78,6 +93,30 @@ public class SponsorInfo
     /// public page only ever renders an absolute http(s) URL.
     /// </summary>
     public string? WebsiteUrl { get; set; }
+
+    /// <summary>
+    /// Company LinkedIn page URL (full https URL, e.g.
+    /// https://www.linkedin.com/company/2linkit). Hub-collected on the Company
+    /// Details page; synced to Zoho Backstage exhibitor <c>company_social_pages</c>.
+    /// </summary>
+    public string? LinkedInUrl { get; set; }
+
+    /// <summary>
+    /// Company Twitter/X page URL (full https URL). Hub-collected on the Company
+    /// Details page; synced to Zoho Backstage exhibitor <c>company_social_pages</c>.
+    /// </summary>
+    public string? TwitterUrl { get; set; }
+
+    // --- Event Coordinator (the sponsor's primary contact) -------------------
+    // Synced to the Zoho sponsor/exhibitor `contact` object (first/last/email +
+    // phone on the exhibitor's mobile_no). Seeded by a one-time migration from the
+    // webshop default event coordinator; thereafter CEH owns it (editable on
+    // Company Details).
+    public string? EventCoordinatorFirstName { get; set; }
+    public string? EventCoordinatorLastName { get; set; }
+    public string? EventCoordinatorCompanyName { get; set; }
+    public string? EventCoordinatorEmail { get; set; }
+    public string? EventCoordinatorPhone { get; set; }
 
     // --- Logos (relative paths under wwwroot, e.g. uploads/sponsors/<co>/logo.eps) -
     public string? LogoVectorPath { get; set; }

@@ -41,6 +41,27 @@ public static class TaskTextLinkifier
         @"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b",
         RegexOptions.Compiled);
 
+    // JSON authors write list items with a leading "* " (or "- "); render them
+    // as TRUE bullets (a "• " glyph) since the text is shown verbatim under
+    // white-space:pre-line (no markdown list parsing).
+    private static readonly Regex BulletPattern = new(
+        @"(?m)^[ \t]*[*-][ \t]+",
+        RegexOptions.Compiled);
+
+    // Markdown-style **bold** so JSON authors can emphasise short bits (coupon
+    // code/value, etc.) without raw HTML (which is encoded away). Inner text has
+    // no '*' or newline; runs AFTER the bullet pass (a line-start "* " is already
+    // a bullet, and "**x**" never starts with "* ") and is unaffected by it.
+    private static readonly Regex BoldPattern = new(
+        @"\*\*(?=\S)([^*\n]+?)\*\*",
+        RegexOptions.Compiled);
+
+    // Markdown-ish __underline__ -> <u> for section headers. Distinct from
+    // **bold**; inner text has no underscore/newline.
+    private static readonly Regex UnderlinePattern = new(
+        @"__(?=\S)([^_\n]+?)__",
+        RegexOptions.Compiled);
+
     public static IHtmlContent Render(string? description)
     {
         if (string.IsNullOrEmpty(description))
@@ -49,6 +70,15 @@ public static class TaskTextLinkifier
         }
 
         var encoded = WebUtility.HtmlEncode(description);
+
+        // Pass 0: turn "* item" / "- item" line starts into true bullets.
+        encoded = BulletPattern.Replace(encoded, "• ");
+
+        // Pass 0b: **bold** -> <strong>.
+        encoded = BoldPattern.Replace(encoded, "<strong>$1</strong>");
+
+        // Pass 0c: __underline__ -> <u>.
+        encoded = UnderlinePattern.Replace(encoded, "<u>$1</u>");
 
         // Pass 1: extract markdown links to a side-buffer and leave a
         // sentinel in the text. We MUST do this before the URL pass --
@@ -73,10 +103,12 @@ public static class TaskTextLinkifier
             return $"<a class=\"task-link-btn\" href=\"{url}\" target=\"_blank\" rel=\"noopener noreferrer\">{url}</a>";
         });
 
+        // Emails render as a PLAIN inline link (not a boxed button) so the
+        // address itself is the clickable text and reads inline with the prose.
         encoded = EmailPattern.Replace(encoded, m =>
         {
             var email = m.Value; // already HTML-encoded above
-            return $"<a class=\"task-link-btn\" href=\"mailto:{email}\">{email}</a>";
+            return $"<a href=\"mailto:{email}\" style=\"color:#1565c0;text-decoration:underline;\">{email}</a>";
         });
 
         // Splice the stored markdown anchors back in.

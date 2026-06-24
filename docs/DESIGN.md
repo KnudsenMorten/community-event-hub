@@ -670,6 +670,21 @@ A clean .NET slice of the legacy PowerShell ERP/webshop pipeline, in
 - Config sections (secret NAMES + non-secret endpoints only): `EconomicErp`, `CvrLookup`,
   `FxRates`. All three default disabled, so a community without them runs unaffected.
 
+**ERP → webshop contact reconcile (2026-06-24, REQUIREMENTS §26g).** The .NET port of the
+legacy `Sync-ERP-Contacts-to-Webshop.ps1`. All work lives in `ErpWebshopContactSyncService`
+(Core) — the **one engine** both the organizer **"Reconcile ERP → webshop"** button and the
+scheduled job call, so manual and timed runs are byte-identical. It: **creates a missing
+webshop (Company Manager) contact** from an ERP contact (respecting the one-user-per-company
+limit so a FASTTRACK override is left alone — `skip-existing-user`, never a duplicate); sets
+the company's **default signer / default event coordinator only when empty** (never
+overwrites an existing default); and **alerts the organizer** (`mok@expertslive.dk`) when a
+company is missing a Role:1 / Role:2 contact. The timer is `ErpWebshopReconcileJob`
+(`CommunityHub.Jobs`, **every 30 min**), gated by the **`erp-webshop-reconcile`** feature
+flag (off by default, checked across active editions) AND the service's own
+`ErpWebshopContactSyncService.CanRun` (so it no-ops until ERP/webshop creds are configured —
+no faked writes). Idempotent: a contact that already exists is skipped, so a save on either
+side that fires both the write-through and the next timer tick never double-creates.
+
 ### SharePoint (Graph)
 Per-sponsor upload folders + a watcher job (SponsorUploadWatch) that detects new sponsor
 uploads. The folder listing (`SharePointUploadClient.ListFolderFilesAsync`) follows
@@ -695,6 +710,16 @@ longer misses files past the first page).
   attendee hub is fast and `SentReminder` can dedup; the hub **deep-links** to Zoho Bookings to act
   but never re-implements seat reservation/capacity/waitlists. No auto-merge of identities — a human
   resolves "same person, two emails".
+- **Attendee reconcile reworked to the in-hub Master Class (2026-06-24, REQUIREMENTS §26c-3).**
+  Now that the Master Class selection is **CEH-owned** (in-hub `MasterClassSignups`, not Zoho
+  Bookings), `AttendeeReconcileJob` no longer sources Master Class state from Bookings. The two
+  orphaned Bookings-era paths were **removed** — the duplicate-master-class-booking detection (its
+  "involved people" mail) and the missing-2-day-ticket chaser — because the pull is already filtered
+  to 2-day buyers and an in-hub one-seat signup makes a duplicate impossible; their templates
+  (`attendee-duplicate-booking` / `attendee-missing-booking` / `attendee-missing-ticket`) were
+  deleted from disk + the email catalog. The **only** chaser left is a 2-day-ticket holder with **no
+  confirmed `MasterClassSignups` seat in CEH** → the new **`pending-master-class-selection`** email.
+  `Attendee.BookingStatus` / `MasterClassName` are now set from the CEH seat, not the Zoho booking.
 - **CRM** — lead pull (gated off by default) into `SponsorLead`.
 - Zoho is the **EU** data centre — token endpoint `accounts.zoho.eu`, API `zohoapis.eu`, OAuth
   refresh-token based. Config: a `zoho` block with the EU API domain, Backstage portal id + event
@@ -765,6 +790,31 @@ that builds the request and applies two invariants regardless of the writer:
   **placeholders only** in committed/public files. With the default Null writer the gated request is built
   (`BuiltOnly`) but no Zoho call is faked. Register a live writer + enable the flag once an endpoint/creds
   exist **and** the lineup is selected — no caller changes. **Live activation is ◻.**
+
+**Speaker Details consolidation + speaker schema (2026-06-24, REQUIREMENTS §26c).** The
+scattered speaker self-service fields fold into ONE `/Speaker/Details` page (name + bio/socials
++ photo + accreditation/skills + country + contact email, with **Save** and
+**Save & Sync to Zoho**); the old `/Forms/Speaker` 301-redirects to it. The speaker nav drops
+the standalone **Bio** item, adds **Speaker Details** + **Help Promote** (→ `/Speaker/Graphics`)
+and reorders **My tasks** to sit right after Speaker Details — wired in `NavBuilder` (asserted by
+`NavBuilderTests`). New `SpeakerProfile` columns (EF migration `SpeakerDetailsFields`):
+`BackstageSpeakerId` + `SessionizeSpeakerId` (the stable id-links), `FirstName`/`LastName`,
+`PhotoSharePointPath`, and `MvpCategories` (the multi-select accreditation, mapped to Zoho
+skills). `SessionizeImportService` Stage 1 now writes `SessionizeSpeakerId` + names + best-effort
+fetches the Sessionize `profilePicture` into SharePoint (`Speakers/speaker-{id}` →
+`PhotoSharePointPath`). All hub-collected (Accreditation/Country/override/etc.) — neither import
+mode touches them.
+
+**Speaker ring gating (2026-06-24, REQUIREMENTS §26c-1).** Ring numbers are **inverted vs the
+operator's words**: in `Ring.cs`, `Broad=3` is LEAST restricted (GA) and the **default**; a person
+gets a feature when `personRing ≤ feature.releasedToRing`. So "locked down" = a HIGH ring sitting
+ABOVE the feature's release ring. To match the operator's "3 = locked, move to 2 to test" mental
+model, speaker features release to **Ring2**: a default-ring-3 speaker is blocked until promoted to
+Ring2. Imported speakers default to **Ring 3 / Broad** and the scheduled/API Sessionize import sends
+**no email** (`sendWelcome:false`) and does **no Zoho sync**, so importing the real master classes
+emails/syncs nobody. *(Still ◻: set Ring explicitly = most-locked on the import speaker-create rather
+than relying on the model default; ring-gate `SpeakerBioBackstageSyncService` — today only its config
+`Enabled` flag + per-speaker `SelectedForPublish` gate it; release speaker **email** to Ring2.)*
 
 - **API (v2 view endpoints, JSON)** — the primary, hands-off path. `SessionizeApiClient` pulls the
   configured event's view (`Speakers` by default; `All` also supported) from
@@ -1731,6 +1781,16 @@ configured `IEmailSender` (so the DEV redirect + allowlist apply). It runs **onl
 the CLI — never during build or test. The template directory is resolved to an absolute path (walking
 up to `<root>/templates/emails`) so the command works regardless of launch directory.
 
+### Email-template "Send test to address" (organizer, ring-exempt) — 2026-06-24
+
+`/Organizer/EmailTemplates` gained a **"Send test to address"** action: an organizer types any mailbox
+and the selected template's rendered content is sent there as a **real** send to validate copy
+end-to-end (e.g. previewing the new `pending-master-class-selection` mail to a ring-1 test attendee).
+It is deliberately **exempt from the rollout-ring gate** — a content review must reach the typed
+address regardless of that address's effective ring — while the DEV redirect / PROD `Email:OnlySendTo`
+allowlist still apply underneath (it goes through the same `IEmailSender`). Organizer-gated,
+edition-scoped.
+
 ### Organizer email center — broadcast (audience filters + reusable templates)
 
 The organizer **broadcast** (`/Organizer/Broadcast`) composes one message and sends it individually
@@ -1945,6 +2005,19 @@ The mechanism is a per-user, token-secured, read-only iCal feed — add it once 
   the free-text shift/time-end window goes in the DESCRIPTION since the catalogue is config-driven).
   `BuildSingleVolunteerTaskAsync` powers the per-shift "Download .ics" on `/volunteer/myschedule`,
   scoped to the volunteer's own assignment. No schema change.
+
+**Open-in-calendar links (2026-06-24, REQUIREMENTS §26b/§26a).** "Add to calendar" must **open the
+calendar entry**, not download a file. `CalendarLinkBuilder` (`CommunityHub.Core/Email`) builds two
+**prefilled web-calendar URLs per event** — **Outlook** (`outlook.live.com/.../deeplink/compose`) and
+**Google** (`calendar.google.com/calendar/render?action=TEMPLATE`) — from a title/start/end/location,
+and the `.ics` stays as the Apple/other fallback. Every single-item `.ics` handler (key-date/schedule
+route, hub task, volunteer task, master class, party) now serves **inline** (no `filename`) and the
+public-session link drops `download=""`, so the OS hands the file to the calendar app instead of
+saving it. The Key Dates panel (`Calendar.cshtml`) is **grouped by month** with headers; the
+`/schedule/{id}.ics` fallback is emitted only for a real entry (`Id > 0`, so `/schedule/0.ics` can't
+404), and the subscribe link the copy button shares is the plain **`https`** feed URL (Google/Apple/
+Outlook "subscribe from URL" won't follow the `webcal://` → http → https redirect chain; `webcal://`
+is kept only as the one-click Apple/Outlook affordance).
 
 ### Role-tagged schedule / key-dates (2026-06-20)
 

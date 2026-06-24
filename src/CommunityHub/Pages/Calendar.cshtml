@@ -1,12 +1,27 @@
 @page
 @model CommunityHub.Pages.CalendarModel
 @{
-    ViewData["Title"] = Localizer["Nav.Calendar"].Value;
+    ViewData["Title"] = Localizer["Nav.KeyDatesTimes"].Value;
 }
 
+<style>
+    .kd-month { margin:18px 0 8px; font-size:14px; font-weight:700; color:var(--el-darkblue,#1D3380);
+        text-transform:uppercase; letter-spacing:.04em; border-bottom:2px solid #e5e7eb; padding-bottom:4px; }
+    .kd-list { list-style:none; margin:0; padding:0; }
+    .kd-item { display:flex; flex-wrap:wrap; gap:8px 14px; align-items:baseline;
+        padding:10px 0; border-bottom:1px solid #f0f0f3; }
+    .kd-when { display:inline-block; min-width:96px; font-weight:700; color:#1f2430; }
+    .kd-title { flex:1 1 200px; color:#1f2430; }
+    .kd-loc { color:#6b7280; font-size:13px; }
+    .kd-cal { display:flex; gap:8px; flex-wrap:wrap; }
+    .kd-cal a { font-size:12.5px; font-weight:600; text-decoration:none; padding:4px 10px;
+        border:1px solid #c7d2f0; border-radius:999px; color:var(--el-darkblue,#1D3380); background:#f5f8ff; }
+    .kd-cal a:hover { background:#e8efff; }
+</style>
+
 <div class="card">
-    <h2>@Localizer["Nav.Calendar"]</h2>
-    <p>Key moments for your role — add the ones you want to your own calendar.</p>
+    <h2>@Localizer["Nav.KeyDatesTimes"]</h2>
+    <p>Key moments for your role — tap <strong>Outlook</strong> or <strong>Google</strong> to open the entry straight in your calendar.</p>
 
     @if (Model.Entries.Count == 0)
     {
@@ -14,21 +29,30 @@
     }
     else
     {
-        <ul class="task-list">
-            @foreach (var e in Model.Entries.OrderBy(x => x.StartsAt))
-            {
-                <li>
-                    <span>
-                        <strong>@e.Title</strong>
-                        <span class="due">
-                            &middot; @e.StartsAt.ToString("ddd d MMM HH:mm")
-                            @if (!string.IsNullOrWhiteSpace(e.Location)) { <text>&middot; @e.Location</text> }
+        @foreach (var month in Model.Months)
+        {
+            <div class="kd-month">@month.Key</div>
+            <ul class="kd-list">
+                @foreach (var e in month)
+                {
+                    <li class="kd-item">
+                        <span class="kd-when">@e.StartsAt.ToString("ddd d HH:mm")</span>
+                        <span class="kd-title">
+                            <strong>@e.Title</strong>
+                            @if (!string.IsNullOrWhiteSpace(e.Location)) { <span class="kd-loc">&middot; @e.Location</span> }
                         </span>
-                    </span>
-                    <a class="cal-dl-link" href="/schedule/@(e.Id).ics">+ calendar</a>
-                </li>
-            }
-        </ul>
+                        <span class="kd-cal">
+                            <a href="@e.OutlookUrl" target="_blank" rel="noopener">&#128197; Outlook</a>
+                            <a href="@e.GoogleUrl" target="_blank" rel="noopener">&#128197; Google</a>
+                            @if (e.IcsUrl is not null)
+                            {
+                                <a href="@e.IcsUrl">Apple / .ics</a>
+                            }
+                        </span>
+                    </li>
+                }
+            </ul>
+        }
     }
 </div>
 
@@ -36,13 +60,19 @@
 {
     <div class="card">
         <h2>&#128197; @Localizer["Hub.AddToCalendar"]</h2>
-        <p style="color:#4b5563;margin:0 0 4px;">Subscribe once and everything for your role — these events plus your own sessions, tasks and shifts — stays in sync.</p>
+        <p style="color:#4b5563;margin:0 0 4px;">Subscribe once and everything for your role — these events plus your own @Model.SyncItemsPhrase — stays in sync.</p>
         <div class="cal-url-row">
-            <input type="text" readonly aria-label="@Localizer["Hub.AddToCalendar"]" id="cal-url" value="@Model.WebcalUrl" />
+            @* Copy the HTTPS link — it works everywhere via "Subscribe from URL" (Google,
+               Apple, Outlook). webcal:// maps to http and 301-redirects to https, which
+               many calendar apps refuse to follow — so the copyable link is now https. *@
+            <input type="text" readonly aria-label="@Localizer["Hub.AddToCalendar"]" id="cal-url" value="@Model.HttpsUrl" />
             <button type="button" class="cal-btn cal-btn-primary" id="cal-copy" data-ceh-copy="cal-url"
                     data-ceh-copied="@Localizer["Hub.Copied"]" data-ceh-copy-label="@Localizer["Hub.CopyLink"]">@Localizer["Hub.CopyLink"]</button>
-            <a class="cal-btn cal-btn-ghost" href="@Model.WebcalUrl">@Localizer["Hub.Subscribe"]</a>
+            <a class="cal-btn cal-btn-ghost" href="@Model.WebcalUrl" data-ceh-confirm="calSyncInfo">@Localizer["Hub.Subscribe"] (Apple/Outlook)</a>
         </div>
-        <p style="font-size:12px;color:#6b7280;margin:8px 0 0;">Google Calendar: use the <a href="@Model.HttpsUrl">https link</a>.</p>
+        <p style="font-size:12px;color:#6b7280;margin:8px 0 0;">
+            Best way: <strong>Copy link</strong>, then in your calendar choose <em>Add / subscribe from URL</em> and paste it (works in Google, Apple &amp; Outlook).
+            The <strong>Subscribe</strong> button is one-click on Apple/Outlook desktop.
+        </p>
     </div>
 }

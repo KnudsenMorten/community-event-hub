@@ -114,15 +114,13 @@ public sealed class PublicVolunteerSignupRenderTests
     }
 
     [Fact]
-    public void Signup_view_uses_the_safe_GetString_counter_template()
+    public void Signup_view_does_not_use_the_crashing_indexer_counter()
     {
-        // Belt-and-braces source assertion: the public Signup view must NOT use the
-        // crashing `@Localizer["Common.CharCount"]` indexer form for the counter
-        // attribute. Pins the fix so a future edit can't silently reintroduce the 500.
+        // The 3-step signup wizard (operator 2026-06-23) no longer has a free-text
+        // char-counter field, so it must simply never use the crashing
+        // `@Localizer["Common.CharCount"]` indexer form (which 500'd at render).
         var view = File.ReadAllText(WebRepoPaths.SignupCshtml);
-
-        Assert.DoesNotContain("data-ceh-counter=\"@Localizer[\"Common.CharCount\"]\"", view);
-        Assert.Contains("data-ceh-counter=\"@Localizer.GetString(\"Common.CharCount\").Value\"", view);
+        Assert.DoesNotContain("@Localizer[\"Common.CharCount\"]", view);
     }
 
     [Fact]
@@ -160,9 +158,9 @@ internal static class WebRepoPaths
 
     public static string SignupCshtml => Pages("Volunteer", "Signup.cshtml");
 
+    // NOTE: Volunteer/Signup dropped — the 3-step wizard has no char-counter field.
     public static string[] CounterViews =>
     [
-        Pages("Volunteer", "Signup.cshtml"),
         Pages("Sponsor", "CaptureLead.cshtml"),
         Pages("Sessions", "Evaluate.cshtml"),
         Pages("Sessions", "Ask.cshtml"),

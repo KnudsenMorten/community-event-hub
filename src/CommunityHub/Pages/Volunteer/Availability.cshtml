@@ -18,8 +18,9 @@
     .av-opt label .av-sub { display:block; color:#6e7681; font-size:12px; margin-top:2px; }
     .av-opt input:checked + label { border-color:#008BD2; background:#e6f4fb; box-shadow:0 0 0 1px #008BD2 inset; }
     .av-opt input:focus-visible + label { outline:2px solid #1D3380; outline-offset:2px; }
-    .av-note { width:100%; box-sizing:border-box; padding:8px 10px; font-size:13.5px;
-        border:1px solid #c4c8d4; border-radius:6px; font-family:inherit; }
+    .av-note { width:100%; box-sizing:border-box; padding:10px 12px; font-size:14px;
+        border:1px solid #c4c8d4; border-radius:6px; font-family:inherit;
+        min-height:60px; resize:vertical; line-height:1.45; }
     .av-note-lbl { display:block; font-size:12.5px; color:#6e7681; margin:0 0 4px; }
     .av-actions { margin-top:18px; }
     .av-actions button { background:#008BD2; color:#fff; border:0; border-radius:8px;
@@ -77,12 +78,23 @@
                                    checked="@(d.Level == VolunteerAvailabilityLevel.Blocked)" />
                             <label for="d@(i)_blocked"><span class="av-pct">Blocked</span><span class="av-sub">attending only — not working</span></label>
                         </div>
+                        <div class="av-opt">
+                            <input type="radio" id="d@(i)_unavail" name="Inputs[@i].Level"
+                                   value="@((int)VolunteerAvailabilityLevel.Unavailable)"
+                                   checked="@(d.Level == VolunteerAvailabilityLevel.Unavailable)" />
+                            <label for="d@(i)_unavail"><span class="av-pct">Not able to help</span><span class="av-sub">I am not able to help this day</span></label>
+                        </div>
                     </div>
                     <label class="av-note-lbl" for="d@(i)_note">Note (optional) — e.g. which hours you need free</label>
-                    <input class="av-note" type="text" id="d@(i)_note" name="Inputs[@i].Note"
-                           maxlength="500" value="@d.Note" placeholder="e.g. blocked 13:00–15:00 for a session I want to attend" />
+                    <textarea class="av-note" id="d@(i)_note" name="Inputs[@i].Note" rows="2"
+                              maxlength="500" placeholder="e.g. blocked 13:00–15:00 for a session I want to attend">@d.Note</textarea>
                 </div>
             }
+            <p style="font-size:13px;color:#6e7681;margin:18px 0 8px;">
+                📧 When you click <strong>Save</strong>, your availability is emailed to
+                Morten Leth (<a href="mailto:mlh@expertslive.dk">mlh@expertslive.dk</a>)
+                so we can plan the schedule.
+            </p>
             <div class="av-actions">
                 <button type="submit">Save my availability</button>
             </div>

@@ -57,6 +57,8 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
     public DbSet<TravelReimbursement> TravelReimbursements => Set<TravelReimbursement>();
     public DbSet<OrganizerActionItem> OrganizerActionItems => Set<OrganizerActionItem>();
     public DbSet<SponsorInfo> SponsorInfos => Set<SponsorInfo>();
+    public DbSet<SponsorBoothMember> SponsorBoothMembers => Set<SponsorBoothMember>();
+    public DbSet<SponsorBoothMaterial> SponsorBoothMaterials => Set<SponsorBoothMaterial>();
     public DbSet<SponsorUploadLocation> SponsorUploadLocations => Set<SponsorUploadLocation>();
     public DbSet<SponsorUploadFile> SponsorUploadFiles => Set<SponsorUploadFile>();
     public DbSet<SurveyResponse> SurveyResponses => Set<SurveyResponse>();
@@ -193,6 +195,9 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
             e.Property(x => x.Phone).HasMaxLength(40);
             // Optional extra CC address (10a-5). 320 = max RFC 5321 email length.
             e.Property(x => x.SecondaryEmail).HasMaxLength(320);
+            // Optional alternate LOGIN address (§26d). Indexed for the login lookup.
+            e.Property(x => x.AlternateEmail).HasMaxLength(320);
+            e.HasIndex(x => new { x.EventId, x.AlternateEmail });
             e.Property(x => x.Role).HasConversion<int>();
             e.Property(x => x.SponsorCompanyId).HasMaxLength(64);
             e.Property(x => x.CalendarFeedToken).HasMaxLength(64);
@@ -668,6 +673,13 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
             // speaker is ever made public in Backstage until explicitly approved.
             e.Property(x => x.SelectedForPublish).HasDefaultValue(false);
             e.Property(x => x.PhotoUrl).HasMaxLength(1000);
+            // Speaker Details (§26c): Sessionize/Zoho ids, split name, skills, stored photo path.
+            e.Property(x => x.SessionizeSpeakerId).HasMaxLength(80);
+            e.Property(x => x.BackstageSpeakerId).HasMaxLength(80);
+            e.Property(x => x.FirstName).HasMaxLength(200);
+            e.Property(x => x.LastName).HasMaxLength(200);
+            e.Property(x => x.MvpCategories).HasMaxLength(1000);
+            e.Property(x => x.PhotoSharePointPath).HasMaxLength(1000);
             // Comma-separated set of speaker-edited bio field tokens (the
             // per-field dirty set the delta sync reads). Small; 200 is ample.
             e.Property(x => x.SpeakerEditedFields).HasMaxLength(200);
@@ -982,6 +994,15 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
             e.Property(x => x.SocialMediaIntro).HasMaxLength(600);
             e.Property(x => x.LastUpdatedByEmail).HasMaxLength(320);
             e.Property(x => x.WebsiteUrl).HasMaxLength(400);
+            e.Property(x => x.LinkedInUrl).HasMaxLength(400);
+            e.Property(x => x.TwitterUrl).HasMaxLength(400);
+            e.Property(x => x.EventCoordinatorFirstName).HasMaxLength(120);
+            e.Property(x => x.EventCoordinatorLastName).HasMaxLength(120);
+            e.Property(x => x.EventCoordinatorCompanyName).HasMaxLength(200);
+            e.Property(x => x.EventCoordinatorEmail).HasMaxLength(320);
+            e.Property(x => x.EventCoordinatorPhone).HasMaxLength(60);
+            e.Property(x => x.ZohoSponsorId).HasMaxLength(64);
+            e.Property(x => x.ZohoExhibitorId).HasMaxLength(64);
             // Commercial sponsorship package (Silver/Gold/Diamond/Platinum):
             // stored as int, defaults to Silver (0 = digital / no booth).
             e.Property(x => x.SponsorPackage).HasConversion<int>();
@@ -1002,6 +1023,36 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
             e.HasIndex(x => new { x.EventId, x.SponsorCompanyId }).IsUnique();
             // The public sponsors page groups by tier; index it for the lookup.
             e.HasIndex(x => new { x.EventId, x.Tier });
+        });
+
+        // --- SponsorBoothMember ---------------------------------------------
+        b.Entity<SponsorBoothMember>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.SponsorCompanyId).IsRequired().HasMaxLength(64);
+            e.Property(x => x.FirstName).IsRequired().HasMaxLength(120);
+            e.Property(x => x.LastName).IsRequired().HasMaxLength(120);
+            e.Property(x => x.Email).IsRequired().HasMaxLength(320);
+            e.Property(x => x.Role).HasConversion<int>();
+            e.HasOne(x => x.Event).WithMany()
+                .HasForeignKey(x => x.EventId)
+                .OnDelete(DeleteBehavior.Cascade);
+            // One row per (company, email); used to dedupe the Zoho reconcile.
+            e.HasIndex(x => new { x.EventId, x.SponsorCompanyId, x.Email }).IsUnique();
+        });
+
+        // --- SponsorBoothMaterial -------------------------------------------
+        b.Entity<SponsorBoothMaterial>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.SponsorCompanyId).IsRequired().HasMaxLength(64);
+            e.Property(x => x.Kind).HasConversion<int>();
+            e.Property(x => x.Url).IsRequired().HasMaxLength(1000);
+            e.Property(x => x.FileName).HasMaxLength(400);
+            e.HasOne(x => x.Event).WithMany()
+                .HasForeignKey(x => x.EventId)
+                .OnDelete(DeleteBehavior.Cascade);
+            e.HasIndex(x => new { x.EventId, x.SponsorCompanyId, x.Kind });
         });
 
         // --- SponsorUploadLocation ------------------------------------------

@@ -51,8 +51,11 @@ public sealed class MasterClassSignupService
     public enum AvailabilityLevel { Available, FillingUp, Full }
 
     public sealed record McOption(
-        int SessionId, string Title, int? Capacity, int Confirmed, int Offered, int Waitlisted)
+        int SessionId, string Title, int? Capacity, int Confirmed, int Offered, int Waitlisted,
+        string? Abstract = null, IReadOnlyList<string>? Speakers = null)
     {
+        /// <summary>Speaker display names (never null), for the "presented by" line.</summary>
+        public IReadOnlyList<string> SpeakerNames => Speakers ?? Array.Empty<string>();
         /// <summary>Confirmed + Offered both occupy a seat.</summary>
         public int Taken => Confirmed + Offered;
         public bool IsFull => Capacity is int c && Taken >= c;
@@ -258,7 +261,14 @@ public sealed class MasterClassSignupService
         await ExpireOffersAsync(DateTimeOffset.UtcNow, eventId, ct);
         var mcs = await _db.Sessions.AsNoTracking()
             .Where(s => s.EventId == eventId && s.Type == SessionType.MasterClass && !s.IsServiceSession)
-            .Select(s => new { s.Id, s.Title, s.MasterClassCapacity }).ToListAsync(ct);
+            .Select(s => new
+            {
+                s.Id, s.Title, s.MasterClassCapacity, s.Abstract,
+                Speakers = s.SessionSpeakers
+                    .Where(ss => ss.Participant != null && ss.Participant.FullName != null)
+                    .Select(ss => ss.Participant!.FullName!)
+                    .ToList()
+            }).ToListAsync(ct);
 
         var counts = await _db.MasterClassSignups.AsNoTracking()
             .Where(x => x.EventId == eventId)
@@ -271,7 +281,9 @@ public sealed class MasterClassSignupService
         return mcs.Select(m => new McOption(m.Id, m.Title, m.MasterClassCapacity,
             C(m.Id, MasterClassSignupStatus.Confirmed),
             C(m.Id, MasterClassSignupStatus.Offered),
-            C(m.Id, MasterClassSignupStatus.Waitlisted)))
+            C(m.Id, MasterClassSignupStatus.Waitlisted),
+            m.Abstract,
+            m.Speakers.OrderBy(n => n, StringComparer.OrdinalIgnoreCase).ToList()))
             .OrderBy(m => m.Title).ToList();
     }
 

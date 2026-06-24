@@ -1559,6 +1559,10 @@ namespace CommunityHub.Core.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
+                    b.Property<string>("AlternateEmail")
+                        .HasMaxLength(320)
+                        .HasColumnType("nvarchar(320)");
+
                     b.Property<string>("CalendarFeedToken")
                         .HasMaxLength(64)
                         .HasColumnType("nvarchar(64)");
@@ -1681,6 +1685,8 @@ namespace CommunityHub.Core.Migrations
                     b.HasIndex("HotelId");
 
                     b.HasIndex("SamePersonAsId");
+
+                    b.HasIndex("EventId", "AlternateEmail");
 
                     b.HasIndex("EventId", "CmUserId");
 
@@ -2574,6 +2580,10 @@ namespace CommunityHub.Core.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
 
+                    b.Property<string>("BackstageSpeakerId")
+                        .HasMaxLength(80)
+                        .HasColumnType("nvarchar(80)");
+
                     b.Property<DateTimeOffset?>("BioLastEditedBySpeakerAt")
                         .HasColumnType("datetimeoffset");
 
@@ -2599,12 +2609,20 @@ namespace CommunityHub.Core.Migrations
                     b.Property<int>("EventId")
                         .HasColumnType("int");
 
+                    b.Property<string>("FirstName")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
                     b.Property<string>("Gender")
                         .HasMaxLength(40)
                         .HasColumnType("nvarchar(40)");
 
                     b.Property<bool?>("IsFirstTimeSpeaker")
                         .HasColumnType("bit");
+
+                    b.Property<string>("LastName")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
 
                     b.Property<DateTimeOffset?>("LastSessionizeImportAt")
                         .HasColumnType("datetimeoffset");
@@ -2613,8 +2631,16 @@ namespace CommunityHub.Core.Migrations
                         .HasMaxLength(500)
                         .HasColumnType("nvarchar(500)");
 
+                    b.Property<string>("MvpCategories")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
                     b.Property<int>("ParticipantId")
                         .HasColumnType("int");
+
+                    b.Property<string>("PhotoSharePointPath")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
 
                     b.Property<string>("PhotoUrl")
                         .HasMaxLength(1000)
@@ -2624,6 +2650,10 @@ namespace CommunityHub.Core.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("bit")
                         .HasDefaultValue(false);
+
+                    b.Property<string>("SessionizeSpeakerId")
+                        .HasMaxLength(80)
+                        .HasColumnType("nvarchar(80)");
 
                     b.Property<string>("SpeakerEditedFields")
                         .HasMaxLength(200)
@@ -2706,6 +2736,95 @@ namespace CommunityHub.Core.Migrations
                     b.ToTable("SponsorApiKeys");
                 });
 
+            modelBuilder.Entity("CommunityHub.Core.Domain.SponsorBoothMaterial", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("EventId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("FileName")
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)");
+
+                    b.Property<int>("Kind")
+                        .HasColumnType("int");
+
+                    b.Property<string>("SponsorCompanyId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("Url")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("EventId", "SponsorCompanyId", "Kind");
+
+                    b.ToTable("SponsorBoothMaterials");
+                });
+
+            modelBuilder.Entity("CommunityHub.Core.Domain.SponsorBoothMember", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("Email")
+                        .IsRequired()
+                        .HasMaxLength(320)
+                        .HasColumnType("nvarchar(320)");
+
+                    b.Property<int>("EventId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("FirstName")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("nvarchar(120)");
+
+                    b.Property<string>("LastName")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("nvarchar(120)");
+
+                    b.Property<int>("Role")
+                        .HasColumnType("int");
+
+                    b.Property<string>("SponsorCompanyId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<bool>("SyncedToZoho")
+                        .HasColumnType("bit");
+
+                    b.Property<DateTimeOffset?>("UpdatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("EventId", "SponsorCompanyId", "Email")
+                        .IsUnique();
+
+                    b.ToTable("SponsorBoothMembers");
+                });
+
             modelBuilder.Entity("CommunityHub.Core.Domain.SponsorInfo", b =>
                 {
                     b.Property<int>("Id")
@@ -2725,12 +2844,36 @@ namespace CommunityHub.Core.Migrations
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("datetimeoffset");
 
+                    b.Property<string>("EventCoordinatorCompanyName")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("EventCoordinatorEmail")
+                        .HasMaxLength(320)
+                        .HasColumnType("nvarchar(320)");
+
+                    b.Property<string>("EventCoordinatorFirstName")
+                        .HasMaxLength(120)
+                        .HasColumnType("nvarchar(120)");
+
+                    b.Property<string>("EventCoordinatorLastName")
+                        .HasMaxLength(120)
+                        .HasColumnType("nvarchar(120)");
+
+                    b.Property<string>("EventCoordinatorPhone")
+                        .HasMaxLength(60)
+                        .HasColumnType("nvarchar(60)");
+
                     b.Property<int>("EventId")
                         .HasColumnType("int");
 
                     b.Property<string>("LastUpdatedByEmail")
                         .HasMaxLength(320)
                         .HasColumnType("nvarchar(320)");
+
+                    b.Property<string>("LinkedInUrl")
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)");
 
                     b.Property<string>("LogoRasterFileName")
                         .HasMaxLength(200)
@@ -2768,12 +2911,24 @@ namespace CommunityHub.Core.Migrations
                     b.Property<int>("Tier")
                         .HasColumnType("int");
 
+                    b.Property<string>("TwitterUrl")
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)");
+
                     b.Property<DateTimeOffset?>("UpdatedAt")
                         .HasColumnType("datetimeoffset");
 
                     b.Property<string>("WebsiteUrl")
                         .HasMaxLength(400)
                         .HasColumnType("nvarchar(400)");
+
+                    b.Property<string>("ZohoExhibitorId")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("ZohoSponsorId")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
 
                     b.HasKey("Id");
 
@@ -3363,11 +3518,17 @@ namespace CommunityHub.Core.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
+                    b.Property<DateTimeOffset?>("AgreementAcceptedAt")
+                        .HasColumnType("datetimeoffset");
+
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("datetimeoffset");
 
                     b.Property<int>("EventId")
                         .HasColumnType("int");
+
+                    b.Property<string>("LinkedInUrl")
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<int>("MaxHoursPerDay")
                         .HasColumnType("int");
@@ -3375,9 +3536,15 @@ namespace CommunityHub.Core.Migrations
                     b.Property<int>("ParticipantId")
                         .HasColumnType("int");
 
+                    b.Property<string>("PhotoUrl")
+                        .HasColumnType("nvarchar(max)");
+
                     b.Property<string>("PreferredRole")
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)");
+
+                    b.Property<bool>("ProfileConsent")
+                        .HasColumnType("bit");
 
                     b.Property<string>("SelectedShifts")
                         .IsRequired()
@@ -4450,6 +4617,28 @@ namespace CommunityHub.Core.Migrations
                     b.Navigation("Event");
 
                     b.Navigation("Participant");
+                });
+
+            modelBuilder.Entity("CommunityHub.Core.Domain.SponsorBoothMaterial", b =>
+                {
+                    b.HasOne("CommunityHub.Core.Domain.Event", "Event")
+                        .WithMany()
+                        .HasForeignKey("EventId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Event");
+                });
+
+            modelBuilder.Entity("CommunityHub.Core.Domain.SponsorBoothMember", b =>
+                {
+                    b.HasOne("CommunityHub.Core.Domain.Event", "Event")
+                        .WithMany()
+                        .HasForeignKey("EventId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Event");
                 });
 
             modelBuilder.Entity("CommunityHub.Core.Domain.SponsorInfo", b =>

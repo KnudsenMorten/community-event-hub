@@ -406,7 +406,9 @@ follow-up automatically.
   changes.
 - **Swag.** Choose polo, jacket and award preferences.
 - **Travel.** Submit a reimbursement claim, which automatically creates the
-  matching invoice/payout task.
+  matching invoice/payout task. *(✅ 2026-06-24)* The upload-invoice/receipts button moved
+  down to sit just above the submit, and the submit button is now clearly labelled
+  **"Request Travel Reimbursement"**.
 - **Volunteer sign-up.** A single guided, multi-step wizard that sets up the right
   tasks for each volunteer (the older one-page form was retired so there is exactly
   one path — ✅ 2026-06-14).
@@ -568,6 +570,13 @@ follow-up automatically.
   Organizers manage it all at **Schedule / key dates** (reached from the Logistics
   hub) — add/remove entries, mark them all-day or timed, and tick which roles see
   each one; sensible defaults are seeded automatically. *(✅ 2026-06-20)*
+- **Key dates that open straight in your calendar — and read more clearly.**
+  *(✅ 2026-06-24)* Each Key Dates entry now carries **Outlook** and **Google**
+  "add to calendar" links that **open the calendar with the event prefilled** (the
+  `.ics` stays as an Apple/other fallback), so adding a date is one tap instead of a
+  file download. The list is also **grouped by month** with headers and tidier rows on a
+  phone, and the calendar **subscribe** link now uses a plain `https` address so more
+  calendar apps accept it.
 - **Anyone can RSVP to the Party — no login.** A public page at **`/Party`** asks for
   name + email and an opt-in to attend the Party (16:00–18:00 on the pre-day). It's
   spam-hardened (honeypot + IP hash), upserts by email (re-submit to change your
@@ -897,6 +906,22 @@ follow-up automatically.
   title, room and time — are added to their personal calendar feed automatically, so
   the talk they're giving sits alongside the key dates they need to be there for.
   *(✅ 2026-06-20)*
+- **One "Speaker Details" page, with a cleaner speaker menu.** *(✅ 2026-06-24)* A
+  speaker's name, bio and socials, photo, accreditation/skills, country and contact email
+  now live on a single **Speaker Details** page (with **Save** and **Save & Sync to Zoho**),
+  instead of being scattered. The speaker menu was tidied to match: the standalone **Bio**
+  item is gone, replaced by **Speaker Details** and **Help Promote** (the share-graphics
+  page), and **My tasks** moved into a more sensible order. The old speaker form redirects to
+  the new page.
+- **Richer speaker records from the import.** *(✅ 2026-06-24)* The hub now stores each
+  speaker's **Zoho Backstage and Sessionize ids** and **first/last/full name**, and the
+  Sessionize import pulls a speaker's **profile picture into the shared SharePoint store**
+  (rather than relying on a remote link). Newly-imported speakers start in the **most-locked
+  rollout ring**, so nothing (email, sync) reaches them until an organizer promotes them.
+- **MS accreditation as a multi-select, plus a country picker.** *(✅ 2026-06-24)* The
+  Speaker Details page captures **Microsoft accreditations as a multi-select** (which maps to
+  the speaker's Zoho skills) and offers a proper **country dropdown**, so these fields are
+  consistent and easy to fill instead of free text.
 
 ## 7. Sponsors — managed as companies, with the right tasks
 
@@ -990,6 +1015,15 @@ follow-up automatically.
   re-running never creates duplicates. *(Optional + off until your accounting/webshop
   credentials are configured; until then it shows exactly what it would do and never
   touches a live system.)*
+- **Accounting → webshop contact reconcile, manual and on a timer.** *(✅ 2026-06-24)* The
+  hub keeps your sponsor webshop in step with the accounting system: it **creates any
+  missing webshop contact** from an accounting contact (respecting the one-user-per-company
+  limit), **fills the default signer and event coordinator only when they're empty**, and
+  **alerts the organizer** if a company is missing one of those roles. It runs both from a
+  one-click **"Reconcile ERP → webshop"** organizer button **and automatically every 30
+  minutes** so saves on either side don't drift. It is behind the `erp-webshop-reconcile`
+  feature flag (off by default) and **skips a contact that already exists** rather than
+  duplicating it.
 - **Tax-ID checked before a sponsor is created.** *(🟡 2026-06-15)* A new sponsor's
   company tax-id is validated automatically, catching typos and invalid numbers up
   front rather than at invoicing time.
@@ -1081,6 +1115,14 @@ follow-up automatically.
   to re-do seat reservations, capacity or waitlists.
 - **People decide identity, not algorithms.** "Same person, two emails" cases are
   resolved by a human or by the attendee via a chaser — never auto-merged.
+- **Reconciliation now follows the in-hub Master Class selection.** *(✅ 2026-06-24)* Now
+  that attendees choose their Master Class inside the hub, reconciliation is sourced from the
+  hub's own confirmed seats rather than the old external bookings. The only chaser is sent to
+  a **2-day-ticket holder who hasn't picked a Master Class in the hub** — a new
+  **"choose your Master Class"** email — and each attendee's status reflects their in-hub
+  selection. The now-impossible cases (duplicate bookings, and missing-ticket chasing — the
+  pull is already filtered to 2-day buyers) and their emails were **removed**, so no one gets
+  an irrelevant nudge.
 - **An attendee browser for organizers.** A clean, read-only view with tiles,
   search, filters and CSV export (correctly handling accented names). Corrections
   happen at the source system, keeping data trustworthy.
@@ -1140,6 +1182,19 @@ follow-up automatically.
   master class is full, an attendee can join its **waitlist**; the moment a seat frees up
   (someone gives up their place), the next person on the list is **emailed automatically**
   so they can claim it. Mobile-first, in English and Danish.
+- **A clearer Master Class Selection page.** *(✅ 2026-06-24)* The attendee Master Class
+  Selection page is easier to read and act on: the "you're confirmed" line moved off the
+  hard-to-read green style to a **high-contrast, neutral** banner, and **"Add to my
+  calendar" now opens the calendar entry** (a prefilled Outlook/Google web-calendar event)
+  instead of silently downloading a file — one tap on phone or desktop, with the `.ics` kept
+  as a fallback. The separate "Master Class info & what to bring" prep content has been
+  **consolidated onto the Master Class Q&A page**, so everything about a class lives in one
+  place.
+- **Master Class selection cards show seats, details and capacity.** *(✅ 2026-06-24)* Each
+  master class card on the selection page now shows **"N of M seats available"** next to the
+  title and availability traffic-light, and the **abstract and speaker(s)** sit in a
+  collapsed "Session details" disclosure you expand to read — so the list stays scannable on
+  a phone while the full detail is one tap away. Per-class **capacities** are organizer-set.
 
 ## 10. Email & notifications — on-brand, controllable, safe
 
@@ -1257,6 +1312,22 @@ follow-up automatically.
   Master Class confirmation) and **clickable, plain-language links** in place of long raw
   web addresses. Delivery is steadier too: a transient hiccup at the mail relay is
   **retried automatically** rather than dropped, so messages get through.
+- **A tidier Master Class cancellation email.** *(✅ 2026-06-24)* The "your place was
+  cancelled" email reads more cleanly: the redundant "Questions? Email…" and sign-off lines
+  are gone, the class is referred to by its own title (which already says "Master Class"),
+  and the event name is bolded — so the message is short and clear.
+- **Readable hint text everywhere — no more green.** *(✅ 2026-06-24)* The light info/hint
+  text used across the hub (waitlist notes, the Master Class selection confirmation, and the
+  like) was a hard-to-read green; it is now a **neutral dark slate** applied in one place, so
+  every hint line reads cleanly on any screen.
+- **Send a template test to any address — from the editor.** *(✅ 2026-06-24)* The email
+  template back-office gained a **"Send test to address"** action: an organizer types any
+  mailbox and sends the selected template there as a **real** send (deliberately exempt from
+  the rollout-ring gate) to check its content end to end before it goes to real recipients.
+- **Emails name the event clearly, and explain the sign-in button.** *(✅ 2026-06-24)* The
+  event name now reads in **bold** (with its short code) wherever an email mentions it, and a
+  short **hint sits just below the sign-in button** explaining that it signs the person in —
+  so a recipient knows what the button does before they tap it.
 
 ## 11. Organizer hub — run the whole event from one place
 

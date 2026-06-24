@@ -113,17 +113,17 @@
   <data name="Nav.ShareGraphics" xml:space="preserve"><value>Share graphics</value></data>
   <data name="Nav.Home" xml:space="preserve"><value>Home</value></data>
   <data name="Nav.MyTasks" xml:space="preserve"><value>My tasks</value></data>
-  <data name="Nav.MyProfile" xml:space="preserve"><value>My profile</value></data>
+  <data name="Nav.MyProfile" xml:space="preserve"><value>My Hub Profile</value></data>
   <data name="Nav.Resources" xml:space="preserve"><value>Resources</value></data>
   <data name="Nav.Sessions" xml:space="preserve"><value>Sessions</value></data>
   <data name="Nav.Agenda" xml:space="preserve"><value>Agenda</value></data>
   <data name="Nav.MasterClasses" xml:space="preserve"><value>Master classes</value></data>
   <data name="Nav.Contributors" xml:space="preserve"><value>Contributors</value></data>
   <data name="Nav.Hotel" xml:space="preserve"><value>Hotel</value></data>
-  <data name="Nav.Dinner" xml:space="preserve"><value>Dinner</value></data>
+  <data name="Nav.Dinner" xml:space="preserve"><value>Appreciation Dinner</value></data>
   <data name="Nav.SpeakerHub" xml:space="preserve"><value>Speaker hub</value></data>
   <data name="Nav.Speaker" xml:space="preserve"><value>Speaker</value></data>
-  <data name="Nav.Travel" xml:space="preserve"><value>Travel</value></data>
+  <data name="Nav.Travel" xml:space="preserve"><value>Travel reimbursement</value></data>
   <data name="Nav.Lunch" xml:space="preserve"><value>Lunch</value></data>
   <data name="Nav.Swag" xml:space="preserve"><value>Swag</value></data>
   <data name="Nav.VolunteerShifts" xml:space="preserve"><value>Volunteer shifts</value></data>
@@ -138,28 +138,34 @@
   <data name="Nav.Logistics" xml:space="preserve"><value>Logistics</value></data>
   <data name="Nav.Contact" xml:space="preserve"><value>Contact</value></data>
   <data name="Nav.MasterClassBooking" xml:space="preserve"><value>Master-class booking</value></data>
-  <data name="Nav.MasterClass" xml:space="preserve"><value>Master Class</value></data>
-  <data name="Nav.Waitlist" xml:space="preserve"><value>Waitlist</value></data>
+  <data name="Nav.MasterClass" xml:space="preserve"><value>Master Class Selection</value></data>
+  <data name="Nav.Waitlist" xml:space="preserve"><value>Master Class Waitlist</value></data>
+  <data name="Nav.MasterClassQa" xml:space="preserve"><value>Master Class Q&amp;A</value></data>
   <data name="Nav.MySessions" xml:space="preserve"><value>My Sessions</value></data>
   <data name="Nav.Bio" xml:space="preserve"><value>Bio</value></data>
+  <data name="Nav.SpeakerDetails" xml:space="preserve"><value>Speaker Details</value></data>
+  <data name="Nav.HelpPromote" xml:space="preserve"><value>Help Promote</value></data>
   <data name="Nav.Calendar" xml:space="preserve"><value>Calendar</value></data>
   <data name="Nav.SectionEventLogistics" xml:space="preserve"><value>Event logistics</value></data>
-  <data name="Nav.SpeakerGift" xml:space="preserve"><value>Speaker Gift</value></data>
+  <data name="Nav.SpeakerGift" xml:space="preserve"><value>Swag / Speaker gift</value></data>
   <data name="Nav.ImportantDates" xml:space="preserve"><value>Important dates / deadlines</value></data>
+  <data name="Nav.SyncCalendar" xml:space="preserve"><value>Sync Calendar</value></data>
+  <data name="Nav.KeyDatesTimes" xml:space="preserve"><value>Key Dates &amp; Times</value></data>
   <data name="Nav.ContactOrganizers" xml:space="preserve"><value>Contact Organizers</value></data>
   <data name="Nav.VolunteerGift" xml:space="preserve"><value>Volunteer Gift</value></data>
   <data name="Nav.SectionSponsorWebshop" xml:space="preserve"><value>Sponsor Webshop</value></data>
   <data name="Nav.SponsorBuyServices" xml:space="preserve"><value>Buy extra services &amp; furniture</value></data>
-  <data name="Nav.SponsorOrders" xml:space="preserve"><value>Sponsor orders</value></data>
+  <data name="Nav.SponsorOrders" xml:space="preserve"><value>Sponsor orders &amp; contacts</value></data>
+  <data name="Nav.SponsorCompanyDetails" xml:space="preserve"><value>Company Details</value></data>
   <data name="Nav.SponsorLinkedContacts" xml:space="preserve"><value>Linked contacts</value></data>
   <data name="Nav.SectionExhibitorBooth" xml:space="preserve"><value>Exhibitor &amp; Booth Details</value></data>
-  <data name="Nav.ExhibitorProfile" xml:space="preserve"><value>Exhibitor Profile</value></data>
-  <data name="Nav.BoothMembers" xml:space="preserve"><value>Booth Members</value></data>
-  <data name="Nav.ExhibitorMaterials" xml:space="preserve"><value>Exhibitor Materials</value></data>
-  <data name="Nav.PromotionalBanner" xml:space="preserve"><value>Exhibitor Promotional Banner</value></data>
+  <data name="Nav.ExhibitorProfile" xml:space="preserve"><value>Exhibitor Profile (Zoho)</value></data>
+  <data name="Nav.BoothMembers" xml:space="preserve"><value>Booth Members (Zoho)</value></data>
+  <data name="Nav.ExhibitorMaterials" xml:space="preserve"><value>Exhibitor Materials (Zoho)</value></data>
+  <data name="Nav.PromotionalBanner" xml:space="preserve"><value>Exhibitor Promotional Banner (Zoho)</value></data>
   <data name="Nav.SectionLeads" xml:space="preserve"><value>Leads</value></data>
-  <data name="Nav.LeadsZoho" xml:space="preserve"><value>Leads</value></data>
-  <data name="Nav.InquiriesZoho" xml:space="preserve"><value>Inquiries</value></data>
+  <data name="Nav.LeadsZoho" xml:space="preserve"><value>Leads (Zoho)</value></data>
+  <data name="Nav.InquiriesZoho" xml:space="preserve"><value>Inquiries (Zoho)</value></data>
   <data name="Nav.CaptureLeadFailover" xml:space="preserve"><value>Capture leads (failover)</value></data>
   <data name="Nav.CaptureLead" xml:space="preserve"><value>Capture lead</value></data>
   <data name="Nav.VolunteerMyTasks" xml:space="preserve"><value>My volunteer tasks</value></data>
@@ -581,7 +587,7 @@
   <data name="Travel.ErrPickAmount" xml:space="preserve"><value>Choose an amount, or select "No, I'm not claiming".</value></data>
   <data name="Travel.ErrOtherAmount" xml:space="preserve"><value>Enter the amount in EUR (greater than 0) for "Other".</value></data>
   <data name="Travel.ErrOtherExplanation" xml:space="preserve"><value>An explanation is required when you choose "Other".</value></data>
-  <data name="Travel.Save" xml:space="preserve"><value>Save travel request</value></data>
+  <data name="Travel.Save" xml:space="preserve"><value>Request Travel Reimbursement</value></data>
 
   <!-- Forms: Speaker details -->
   <data name="SpeakerForm.Title" xml:space="preserve"><value>Speaker details</value></data>
@@ -746,7 +752,7 @@
   <data name="TaskRow.EmailCopyNote" xml:space="preserve"><value>Saving sends a copy to info@expertslive.dk and mlh@expertslive.dk.</value></data>
   <data name="TaskRow.Reopen" xml:space="preserve"><value>Reopen task</value></data>
   <data name="TaskRow.MarkComplete" xml:space="preserve"><value>Mark complete</value></data>
-  <data name="TaskRow.AddToCalendar" xml:space="preserve"><value>Add to calendar</value></data>
+  <data name="TaskRow.AddToCalendar" xml:space="preserve"><value>Add Reminder To Calendar</value></data>
   <data name="TaskRow.CompleteBeforeDue" xml:space="preserve"><value>Please complete before the due date. If not, you will receive reminder emails.</value></data>
 
   <!-- Attendee: Master Class details -->
@@ -1114,6 +1120,16 @@
   <data name="Settings.RedirectLabel" xml:space="preserve"><value>Redirect all mail to (test mode)</value></data>
   <data name="Settings.RedirectNone" xml:space="preserve"><value>No redirect (mail goes to the real recipient, if allowed).</value></data>
   <data name="Settings.KillSwitchConfig" xml:space="preserve"><value>The master email switch is currently forced OFF by the environment configuration. Nothing will send until that is changed.</value></data>
+  <!-- Background jobs master pause/resume switch -->
+  <data name="Settings.JobsHeading" xml:space="preserve"><value>Background jobs</value></data>
+  <data name="Settings.JobsHelp" xml:space="preserve"><value>The master switch for every scheduled background job — welcome and reminder sends, the Backstage and WooCommerce pulls, digests, and all other timers. Pause it to instantly stop all of them; resume to start again. Each job re-checks this before it runs, so resume takes effect on the next scheduled tick.</value></data>
+  <data name="Settings.JobsRunHeading" xml:space="preserve"><value>All scheduled jobs</value></data>
+  <data name="Settings.JobsDetail" xml:space="preserve"><value>When paused, every timer job no-ops without doing any work or sending anything. This does not change your per-feature switches or rings — it is a single operational stop/start for the whole scheduler.</value></data>
+  <data name="Settings.JobsStateRunning" xml:space="preserve"><value>Running</value></data>
+  <data name="Settings.JobsStatePaused" xml:space="preserve"><value>Paused</value></data>
+  <data name="Settings.JobsPausedWarn" xml:space="preserve"><value>Background jobs are currently PAUSED — no scheduled work is running. Resume to start the scheduler again.</value></data>
+  <data name="Settings.PauseJobs" xml:space="preserve"><value>Pause all jobs</value></data>
+  <data name="Settings.ResumeJobs" xml:space="preserve"><value>Resume all jobs</value></data>
   <!-- §23 release rings (progressive rollout) -->
   <data name="Settings.ReleasedToRing" xml:space="preserve"><value>Released to ring</value></data>
   <data name="Settings.ReleasedToRingAria" xml:space="preserve"><value>Choose the release ring for {0}</value></data>
@@ -1175,6 +1191,8 @@
   <data name="Settings.Feat.WelcomeEmail.Desc" xml:space="preserve"><value>Send each person a branded welcome when they are activated.</value></data>
   <data name="Settings.Feat.MagicLink.Name" xml:space="preserve"><value>One-click sign-in links</value></data>
   <data name="Settings.Feat.MagicLink.Desc" xml:space="preserve"><value>Include a magic-link button that signs the recipient in automatically.</value></data>
+  <data name="Settings.Feat.SpeakerGraphicsPromote.Name" xml:space="preserve"><value>Speaker "Help Promote" graphics email</value></data>
+  <data name="Settings.Feat.SpeakerGraphicsPromote.Desc" xml:space="preserve"><value>Email each speaker when their promo graphics are released, pointing them to the Help Promote page to share on LinkedIn. Sent once per speaker; ring-scoped.</value></data>
   <data name="Settings.Feat.Sessionize.Name" xml:space="preserve"><value>Sessionize import</value></data>
   <data name="Settings.Feat.Sessionize.Desc" xml:space="preserve"><value>Import accepted speakers and sessions from your Sessionize endpoint.</value></data>
   <data name="Settings.Feat.BackstageSync.Name" xml:space="preserve"><value>Backstage / Zoho exhibitor sync</value></data>
@@ -1193,6 +1211,10 @@
   <data name="Settings.Feat.DigestEmails.Desc" xml:space="preserve"><value>Email speakers and organizers periodic digests (open questions, re-opened steps).</value></data>
   <data name="Settings.Feat.SponsorOrderPull.Name" xml:space="preserve"><value>Sponsor order pull</value></data>
   <data name="Settings.Feat.SponsorOrderPull.Desc" xml:space="preserve"><value>Pull completed sponsor and exhibitor orders from the webshop and expand their onboarding tasks.</value></data>
+  <data name="Settings.Feat.SponsorZohoProvision.Name" xml:space="preserve"><value>Sponsor Zoho provisioning</value></data>
+  <data name="Settings.Feat.SponsorZohoProvision.Desc" xml:space="preserve"><value>After the order pull, create or link each sponsor and exhibitor in Zoho Backstage from webshop data (replaces the legacy sync script). Existing companies are never overwritten.</value></data>
+  <data name="Settings.Feat.ErpWebshopReconcile.Name" xml:space="preserve"><value>ERP → webshop reconcile</value></data>
+  <data name="Settings.Feat.ErpWebshopReconcile.Desc" xml:space="preserve"><value>Every 30 minutes, create missing webshop users from the e-conomic group-1 sponsor contacts and set each company default signer + event coordinator from the contact roles (never overwriting a curated value). Contacts missing a role are emailed to the organizer. Replaces the legacy ERP-contacts sync script.</value></data>
   <data name="Settings.Feat.SponsorLeads.Name" xml:space="preserve"><value>Sponsor leads pipeline</value></data>
   <data name="Settings.Feat.SponsorLeads.Desc" xml:space="preserve"><value>Pull captured leads from the CRM and send each sponsor a delta digest of their new leads.</value></data>
   <data name="Settings.Feat.SponsorUploadWatch.Name" xml:space="preserve"><value>Sponsor upload watcher</value></data>

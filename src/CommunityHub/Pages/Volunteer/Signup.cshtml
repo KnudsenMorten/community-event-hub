@@ -1,165 +1,103 @@
 @page "/volunteer/signup"
+@using CommunityHub.Core.Domain
 @model CommunityHub.Pages.Volunteer.SignupModel
 @{
-    Layout = "_Layout";
+    // Anonymous public signup (operator 2026-06-24, §27): dedicated public layout —
+    // structurally never shows internal/auth chrome.
+    Layout = "_PublicLayout";
     ViewData["Title"] = string.IsNullOrEmpty(Model.EventDisplayName)
         ? "Become a volunteer"
         : $"Volunteer at {Model.EventDisplayName}";
-    ViewData["HidePublicNav"] = true;   // standalone anonymous signup form — no public event nav bar
 }
 
 <style>
-    /* Brand hero band -- matches /survey + /survey/results so the public
-       attendee-facing pages feel like one product, not three. */
     .volunteer-hero {
-        background: var(--el-darkblue, #1D3380);
-        color: #ffffff;
-        padding: 0 22px;
-        border-radius: 10px 10px 0 0;
-        margin: -20px -20px 0 -20px;
-        text-align: center;
-        min-height: 90px;
-        display: flex; flex-direction: column;
-        align-items: center; justify-content: center;
+        background: var(--el-darkblue, #1D3380); color: #fff; padding: 0 22px;
+        border-radius: 10px 10px 0 0; margin: -20px -20px 0 -20px; text-align: center;
+        min-height: 90px; display: flex; flex-direction: column; align-items: center; justify-content: center;
     }
-    .volunteer-hero h1 {
-        margin: 0;
-        font-size: 22px;
-        font-weight: 700;
-        line-height: 1.2;
-    }
-    .volunteer-hero p {
-        margin: 8px 0 0 0;
-        font-size: 13.5px;
-        opacity: 0.92;
-        line-height: 1.45;
-    }
-    .volunteer-card {
-        padding: 24px 22px 22px 22px;
-    }
-    .vol-grid {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 14px 18px;
-    }
+    .volunteer-hero h1 { margin: 0; font-size: 22px; font-weight: 700; line-height: 1.2; }
+    .volunteer-hero p { margin: 8px 0 0; font-size: 13.5px; opacity: .92; line-height: 1.45; }
+    .volunteer-card { padding: 22px; }
+
+    /* Step bar */
+    .stepbar { list-style: none; display: flex; gap: 8px; padding: 0; margin: 0 0 18px; }
+    .stepbar .pill { flex: 1; text-align: center; font-size: 12.5px; font-weight: 600; color: #6e7681;
+        background: #f0f2f6; border-radius: 999px; padding: 7px 6px; border: 1px solid #e1e4ea; }
+    .stepbar .pill.active { color: #fff; background: var(--el-blue, #008BD2); border-color: var(--el-blue, #008BD2); }
+    .stepbar .pill.done { color: #166534; background: #e9f9ef; border-color: #b7e4c7; }
+    .step-section { display: none; }
+    .step-section.active { display: block; }
+
+    .vol-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 18px; }
     .vol-grid .full { grid-column: 1 / -1; }
-    .vol-grid label {
-        display: block;
-        font-weight: 600;
-        font-size: 13px;
-        color: #24292f;
-        margin-top: 6px;
-        margin-bottom: 4px;
+    .vol-grid label { display: block; font-weight: 600; font-size: 13px; color: #24292f; margin: 6px 0 4px; }
+    .vol-grid input[type=text], .vol-grid input[type=email], .vol-grid input[type=tel],
+    .vol-grid input[type=url], .vol-grid input[type=file] {
+        width: 100%; box-sizing: border-box; padding: 9px 11px; font-size: 14px;
+        border: 1px solid #c4c8d4; border-radius: 6px; background: #fff; font-family: inherit;
     }
-    .vol-grid input[type=text],
-    .vol-grid input[type=email],
-    .vol-grid input[type=tel],
-    .vol-grid select,
-    .vol-grid textarea {
-        width: 100%;
-        box-sizing: border-box;
-        padding: 8px 10px;
-        font-size: 14px;
-        border: 1px solid #c4c8d4;
-        border-radius: 6px;
-        background: #ffffff;
-        font-family: inherit;
-    }
-    .vol-grid textarea { min-height: 80px; resize: vertical; }
-    .vol-grid input:focus, .vol-grid select:focus, .vol-grid textarea:focus {
-        outline: none;
-        border-color: var(--el-blue, #008BD2);
-        box-shadow: 0 0 0 2px rgba(0, 139, 210, 0.18);
-    }
-    .vol-actions {
-        margin-top: 18px;
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        flex-wrap: wrap;
-        gap: 12px;
-    }
-    .vol-actions button {
-        background: var(--el-blue, #008BD2);
-        color: #ffffff;
-        border: 0;
-        border-radius: 6px;
-        padding: 11px 22px;
-        font-size: 14px;
-        font-weight: 600;
-        cursor: pointer;
-    }
-    .vol-actions button:hover { background: var(--el-darkblue, #1D3380); }
+    .vol-grid input:focus { outline: none; border-color: var(--el-blue, #008BD2); box-shadow: 0 0 0 2px rgba(0,139,210,.18); }
     .vol-fineprint { font-size: 12px; color: #6e7681; }
-    .vol-success {
-        padding: 20px 22px;
-        background: #f0fdf4;
-        border-left: 4px solid #16a34a;
-        border-radius: 6px;
-        margin: 18px 0;
-    }
-    .vol-success h3 { margin: 0 0 8px 0; color: #166534; font-size: 17px; }
-    .vol-success p { margin: 6px 0 0 0; color: #166534; font-size: 13.5px; }
-    .vol-error {
-        padding: 12px 14px;
-        background: #fff3f3;
-        border-left: 4px solid #c0392b;
-        border-radius: 6px;
-        color: #c0392b;
-        margin-bottom: 14px;
-        font-size: 13.5px;
-    }
-    /* Shift checklist -- the survey core, mobile-first responsive grid */
-    .vol-shifts {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-        gap: 8px;
-    }
-    .vol-shift {
-        display: flex; align-items: center; gap: 10px;
-        border: 1px solid #c4c8d4; border-radius: 8px;
-        padding: 10px 12px; margin: 0; cursor: pointer;
-        font-weight: 500; font-size: 13.5px; background: #fff;
-    }
-    .vol-shift input { width: 18px; height: 18px; flex: 0 0 auto; accent-color: var(--el-blue, #008BD2); }
-    .vol-shift:has(input:checked) {
-        border-color: var(--el-blue, #008BD2);
-        background: #e6f4fb;
-        box-shadow: 0 0 0 1px var(--el-blue, #008BD2) inset;
-    }
-    /* Honeypot -- invisible to humans, irresistible to bots */
-    .vol-hp { position: absolute; left: -9999px; height: 0; width: 0; overflow: hidden; }
+
+    /* Availability grid (step 2) */
+    .av-day { background:#f6f8fb; border-radius:8px; padding:12px 14px; margin:10px 0; }
+    .av-day h3 { margin:0 0 8px; font-size:15px; color:var(--el-darkblue,#1D3380); }
+    .av-opts { display:flex; flex-wrap:wrap; gap:8px; margin:0 0 8px; }
+    .av-opt { flex:1 1 150px; min-width:0; }
+    .av-opt input { position:absolute; opacity:0; pointer-events:none; }
+    .av-opt label { display:block; cursor:pointer; border:1.5px solid #c4c8d4; border-radius:8px;
+        padding:9px 10px; font-size:13px; background:#fff; box-sizing:border-box; text-align:center; font-weight:500; }
+    .av-opt label .av-pct { display:block; font-weight:700; color:var(--el-darkblue,#1D3380); font-size:13.5px; }
+    .av-opt label .av-sub { display:block; color:#6e7681; font-size:11.5px; margin-top:2px; }
+    .av-opt input:checked + label { border-color:#008BD2; background:#e6f4fb; box-shadow:0 0 0 1px #008BD2 inset; }
+    .av-note { width:100%; box-sizing:border-box; padding:9px 11px; font-size:13.5px; border:1px solid #c4c8d4;
+        border-radius:6px; font-family:inherit; min-height:48px; resize:vertical; }
+    .av-note-lbl { display:block; font-size:12px; color:#6e7681; margin:0 0 4px; }
+
+    /* Agreement (step 3) */
+    .agree-box { border:1px solid #e1e4ea; border-radius:8px; padding:4px 16px; max-height:340px; overflow-y:auto; background:#fcfcfd; }
+    .agree-box h3 { color:var(--el-darkblue,#1D3380); font-size:15.5px; margin:16px 0 6px; }
+    .agree-box ul { margin:0 0 8px; padding-left:20px; }
+    .agree-box li { font-size:13.5px; line-height:1.5; margin:4px 0; }
+    .agree-accept { display:flex; gap:10px; align-items:flex-start; margin:16px 0 0; font-size:14px; font-weight:600; }
+    .agree-accept input { width:20px; height:20px; flex:0 0 auto; accent-color: var(--el-blue,#008BD2); margin-top:1px; }
+
+    .vol-actions { margin-top: 18px; display:flex; justify-content: space-between; align-items:center; gap:12px; flex-wrap:wrap; }
+    .vol-btn { background: var(--el-blue, #008BD2); color:#fff; border:0; border-radius:6px; padding:11px 22px;
+        font-size:14px; font-weight:600; cursor:pointer; }
+    .vol-btn:hover { background: var(--el-darkblue, #1D3380); }
+    .vol-btn.ghost { background:#eef1f6; color:#24292f; }
+    .vol-btn:disabled { opacity:.5; cursor:not-allowed; }
+
+    .vol-success { padding:20px 22px; background:#f0fdf4; border-left:4px solid #16a34a; border-radius:6px; margin:18px 0; }
+    .vol-success h3 { margin:0 0 8px; color:#166534; font-size:17px; }
+    .vol-success p { margin:6px 0 0; color:#166534; font-size:13.5px; }
+    .vol-error { padding:12px 14px; background:#fff3f3; border-left:4px solid #c0392b; border-radius:6px;
+        color:#c0392b; margin-bottom:14px; font-size:13.5px; }
+    .vol-hp { position:absolute; left:-9999px; height:0; width:0; overflow:hidden; }
+    @@media (max-width: 600px) { .vol-grid { grid-template-columns: 1fr; } .av-opt { flex:1 1 100%; } }
 </style>
 
-<div class="card" style="padding: 0; overflow: hidden;">
+<div class="card" style="padding:0; overflow:hidden;">
     <div class="volunteer-hero">
         <h1>Volunteer at @(string.IsNullOrEmpty(Model.EventDisplayName) ? "our community event" : Model.EventDisplayName)</h1>
-        <p>
-            Want to help run the show? Tell us a bit about yourself and we&rsquo;ll be in touch.
-            Volunteering is hands-on, social, and the best way to learn the inside of a community conference.
-        </p>
+        <p>Hands-on, social, and the best seat in the house. Three quick steps and you&rsquo;re on the team.</p>
     </div>
 
     <div class="volunteer-card">
-
         @if (Model.NoActiveEvent)
         {
-            <div class="vol-error">
-                <strong>Sign-ups are closed right now.</strong>
-                There&rsquo;s no active event accepting volunteer applications. Please check back when the next edition is announced.
-            </div>
+            <div class="vol-error"><strong>Sign-ups are closed right now.</strong>
+                There&rsquo;s no active event accepting volunteer applications. Please check back when the next edition is announced.</div>
         }
         else if (Model.SubmittedOk)
         {
             <div class="vol-success">
                 <h3>Thanks @Model.SubmittedName &mdash; your application is in!</h3>
-                <p>
-                    We&rsquo;ve recorded your interest for <strong>@Model.EventDisplayName</strong>.
-                    An organizer will review applications and reach out to selected volunteers by email.
-                </p>
-                <p style="margin-top:10px;">
-                    Status: <strong>Pending review</strong>. You&rsquo;ll hear from us at <strong>@Model.SubmittedEmail</strong>.
-                </p>
+                <p>We&rsquo;ve recorded your interest for <strong>@Model.EventDisplayName</strong>.
+                   An organizer will review applications and reach out to selected volunteers by email.</p>
+                <p style="margin-top:10px;">Status: <strong>Pending review</strong>. You&rsquo;ll hear from us at <strong>@Model.SubmittedEmail</strong>.</p>
             </div>
             <p><a href="/">&larr; Back to the hub</a></p>
         }
@@ -170,91 +108,215 @@
                 <div class="vol-error">@Model.ErrorMessage</div>
             }
 
-            <form method="post" autocomplete="on" novalidate data-ceh-loading data-ceh-dirty>
-                @* Honeypot field. Real humans cannot see this; bots fill every field. *@
+            <ol class="stepbar" id="vol-stepbar">
+                <li class="pill active" data-pill="1">1. About you</li>
+                <li class="pill" data-pill="2">2. My availability</li>
+                <li class="pill" data-pill="3">3. Public profile</li>
+                <li class="pill" data-pill="4">4. Agreement</li>
+            </ol>
+
+            <form method="post" enctype="multipart/form-data" autocomplete="on" novalidate id="vol-form" data-ceh-loading data-ceh-dirty>
                 <div class="vol-hp" aria-hidden="true">
                     <label for="Website">Website (do not fill)</label>
                     <input type="text" name="Website" id="Website" tabindex="-1" autocomplete="off" />
                 </div>
 
-                <div class="vol-grid">
-                    <div>
-                        <label for="FullName">Full name <span style="color:#c0392b;">*</span></label>
-                        <input type="text" id="FullName" asp-for="FullName" required maxlength="200" autocomplete="name" />
-                    </div>
-                    <div>
-                        <label for="Email">Email <span style="color:#c0392b;">*</span></label>
-                        <input type="email" id="Email" asp-for="Email" required maxlength="320" autocomplete="email" />
-                    </div>
-
-                    <div>
-                        <label for="Phone">Phone (optional)</label>
-                        <input type="tel" id="Phone" asp-for="Phone" maxlength="40" autocomplete="tel" />
-                    </div>
-                    <div>
-                        <label for="Country">Country (optional)</label>
-                        <input type="text" id="Country" asp-for="Country" maxlength="60" autocomplete="country-name" />
-                    </div>
-
-                    <div class="full">
-                        <label>Which shifts can you cover?</label>
-                        <p class="vol-fineprint" style="margin:0 0 8px;">Pick all that apply &mdash; we build your schedule from these. You can change them later.</p>
-                        <div class="vol-shifts">
-                            @foreach (var shift in CommunityHub.Pages.Volunteer.SignupModel.ShiftCatalogue)
-                            {
-                                <label class="vol-shift">
-                                    <input type="checkbox" name="SelectedShifts" value="@shift"
-                                           checked="@(Model.SelectedShifts.Contains(shift))" />
-                                    <span>@shift</span>
-                                </label>
-                            }
+                @* ---- Step 1: about you ---- *@
+                <section class="step-section active" data-step="1">
+                    <img src="https://expertslive.dk/wp-content/uploads/2026/03/VOLUNTEERS-1-scaled.jpg"
+                         alt="Experts Live Denmark volunteers" loading="lazy"
+                         style="width:100%;height:auto;border-radius:10px;margin:0 0 16px;" />
+                    <div class="vol-grid">
+                        <div>
+                            <label for="FullName">Full name <span style="color:#c0392b;">*</span></label>
+                            <input type="text" id="FullName" asp-for="FullName" required maxlength="200" autocomplete="name" />
+                        </div>
+                        <div>
+                            <label for="Email">Email <span style="color:#c0392b;">*</span></label>
+                            <input type="email" id="Email" asp-for="Email" required maxlength="320" autocomplete="email" />
+                        </div>
+                        <div class="full">
+                            <label for="Phone">Mobile phone <span style="color:#c0392b;">*</span></label>
+                            <input type="tel" id="Phone" asp-for="Phone" required maxlength="40" autocomplete="tel" />
                         </div>
                     </div>
+                </section>
 
-                    <div>
-                        <label for="PreferredRole">Preferred role (optional)</label>
-                        <input type="text" id="PreferredRole" asp-for="PreferredRole" maxlength="200"
-                               placeholder="e.g. Registration, A/V, floater" autocomplete="off" />
+                @* ---- Step 2: availability ---- *@
+                <section class="step-section" data-step="2">
+                    <p class="vol-fineprint" style="margin:0 0 12px;">
+                        Tell us how much you can help each day — Full, Half, attending-only (Blocked), or not at all.
+                        We schedule you only inside your available windows.
+                    </p>
+                    @for (var i = 0; i < Model.Days.Count; i++)
+                    {
+                        var d = Model.Days[i];
+                        <div class="av-day">
+                            <h3>@d.Label</h3>
+                            <input type="hidden" name="Availability[@i].Day" value="@d.Day.ToString("yyyy-MM-dd")" />
+                            <div class="av-opts">
+                                <div class="av-opt">
+                                    <input type="radio" id="s@(i)_full" name="Availability[@i].Level"
+                                           value="@((int)VolunteerAvailabilityLevel.Full)" checked="@(d.Level == VolunteerAvailabilityLevel.Full)" />
+                                    <label for="s@(i)_full"><span class="av-pct">Full day</span><span class="av-sub">100% available</span></label>
+                                </div>
+                                <div class="av-opt">
+                                    <input type="radio" id="s@(i)_half" name="Availability[@i].Level"
+                                           value="@((int)VolunteerAvailabilityLevel.Half)" checked="@(d.Level == VolunteerAvailabilityLevel.Half)" />
+                                    <label for="s@(i)_half"><span class="av-pct">Half day</span><span class="av-sub">~50% — split</span></label>
+                                </div>
+                                <div class="av-opt">
+                                    <input type="radio" id="s@(i)_blocked" name="Availability[@i].Level"
+                                           value="@((int)VolunteerAvailabilityLevel.Blocked)" checked="@(d.Level == VolunteerAvailabilityLevel.Blocked)" />
+                                    <label for="s@(i)_blocked"><span class="av-pct">Blocked</span><span class="av-sub">attending only</span></label>
+                                </div>
+                                <div class="av-opt">
+                                    <input type="radio" id="s@(i)_unavail" name="Availability[@i].Level"
+                                           value="@((int)VolunteerAvailabilityLevel.Unavailable)" checked="@(d.Level == VolunteerAvailabilityLevel.Unavailable)" />
+                                    <label for="s@(i)_unavail"><span class="av-pct">Not able</span><span class="av-sub">can&rsquo;t help</span></label>
+                                </div>
+                            </div>
+                            <label class="av-note-lbl" for="s@(i)_note">Note (optional)</label>
+                            <textarea class="av-note" id="s@(i)_note" name="Availability[@i].Note" rows="1"
+                                      maxlength="500" placeholder="e.g. free after 13:00">@d.Note</textarea>
+                        </div>
+                    }
+                </section>
+
+                @* ---- Step 3: public profile (opt-in) ---- *@
+                <section class="step-section" data-step="3">
+                    <p class="vol-fineprint" style="margin:0 0 12px;">
+                        We love celebrating our volunteers publicly — see last year's wall:
+                        <a href="https://expertslive.dk/volunteers-eldk26/" target="_blank" rel="noopener">expertslive.dk/volunteers-eldk26</a>.
+                        With your consent we'll feature you with your <strong>name, photo and LinkedIn</strong>. This is optional.
+                    </p>
+                    <label class="agree-accept" style="margin-bottom:14px;">
+                        <input type="checkbox" id="ProfileConsent" asp-for="ProfileConsent" />
+                        <span>Yes — feature me on the public volunteer page (name, photo &amp; LinkedIn).</span>
+                    </label>
+                    <div class="vol-grid">
+                        <div class="full">
+                            <label for="LinkedInUrl">LinkedIn URL</label>
+                            <input type="url" id="LinkedInUrl" asp-for="LinkedInUrl" maxlength="300"
+                                   placeholder="https://www.linkedin.com/in/you" autocomplete="url" />
+                        </div>
+                        <div class="full">
+                            <label for="Photo">Photo</label>
+                            <input type="file" id="Photo" name="Photo" accept="image/*" />
+                            <p class="vol-fineprint" style="margin:4px 0 0;">A friendly headshot (JPG/PNG, max 8&nbsp;MB) — used on the volunteer wall &amp; recognition.</p>
+                        </div>
                     </div>
-                    <div>
-                        <label for="MaxHoursPerDay">Max hours per day</label>
-                        <input type="number" id="MaxHoursPerDay" asp-for="MaxHoursPerDay" min="1" max="24" />
+                </section>
+
+                @* ---- Step 4: collaboration agreement ---- *@
+                <section class="step-section" data-step="4">
+                    <div class="agree-box">
+                        <h3>What you get as an ELDK27 volunteer</h3>
+                        <ul>
+                            <li><strong>Hotel</strong> — Depending on your assignment, Experts Live Denmark will cover your hotel stay. This is optional and typically one night; volunteers taking on more will be offered additional nights.</li>
+                            <li><strong>Appreciation Dinner</strong> — You&rsquo;re invited to our volunteer dinner on the evening of 9 February 2027 — our way of saying thank you.</li>
+                            <li><strong>Credly badge</strong> — You&rsquo;ll receive a Credly badge to proudly share on LinkedIn and other social media.</li>
+                            <li><strong>Web &amp; social media recognition</strong> — We&rsquo;ll feature volunteers through articles and shout-outs across our channels.</li>
+                            <li><strong>Coaching &amp; guidance</strong> — We&rsquo;re happy to support you with career, job, and personal development conversations.</li>
+                            <li><strong>Lunch</strong> — Lunch is on us on the days you&rsquo;re helping.</li>
+                            <li><strong>Volunteer polo</strong> — You&rsquo;ll get an exclusive ELDK27 volunteer T-shirt or jacket — practical for the day and a nice keepsake.</li>
+                            <li><strong>Gift</strong></li>
+                            <li><strong>Award</strong></li>
+                            <li><strong>Sessions you care about</strong> — We do our best not to schedule you during the sessions or master classes you most want to attend, so let us know your top picks in advance.</li>
+                            <li><strong>Plenty of time to network</strong> — Volunteering puts you right in the middle of the action, with lots of time to connect with speakers, sponsors, and fellow attendees you&rsquo;d otherwise only see on stage.</li>
+                            <li><strong>A reference when you need one</strong> — Need a LinkedIn recommendation or a personal reference for a job search? Just ask an organizer.</li>
+                            <li><strong>Travel contribution</strong> — A modest transport stipend is available for volunteers travelling from outside Copenhagen (DKK 500).</li>
+                            <li><strong>A manageable commitment</strong> — Most volunteers work a maximum of 50% of the event time. The main exceptions are family members helping out, who often stay for the full event.</li>
+                            <li><strong>Typical assignments</strong> fall into one of these:
+                                <ul>
+                                    <li>a) <strong>Full event helper</strong> — Help with setup (Wednesday evening) and take-down after the event, and join the conference for both full days (pre-day and main day).</li>
+                                    <li>b) <strong>Main day, half-day</strong> — Help for half of the main day, and attend the conference for the other half.</li>
+                                    <li>c) <strong>Early mornings</strong> — Help during the mornings of both pre-day and main day.</li>
+                                    <li>d) <strong>Packing day (optional)</strong> — Lend a hand on pack-down day.</li>
+                                </ul>
+                            </li>
+                        </ul>
+
+                        <h3>What we ask of you</h3>
+                        <ul>
+                            <li><strong>Give us notice of changes</strong> — If something changes, please let us know at least one week before your first day of help, so we have time to re-allocate tasks.</li>
+                            <li><strong>Check your schedule carefully before committing</strong> — Please review your assigned tasks and times, and make sure they don&rsquo;t clash with family obligations. We&rsquo;ve had volunteers leave mid-assignment for family reasons despite committing well in advance — a little planning up front saves everyone stress.</li>
+                            <li><strong>Tell us if you can&rsquo;t make it</strong> — If you&rsquo;re prevented from attending, please call or text Morten Leth Hedegaard on his mobile as soon as possible.</li>
+                            <li><strong>Stay reachable on the day</strong> — Keep your phone on and join the volunteer chat so we can coordinate quickly.</li>
+                            <li><strong>Be on time</strong> — Arrive 15 minutes before your shift for a quick handover.</li>
+                            <li><strong>Be a friendly face</strong> — Volunteers are often the first person an attendee talks to, so a warm, welcoming attitude matters as much as the task itself. Wearing your volunteer shirt helps attendees find you.</li>
+                            <li><strong>Handle information with care</strong> — Treat any attendee or sponsor information you come across with discretion.</li>
+                        </ul>
                     </div>
 
-                    <div class="full">
-                        <label for="Interests">What would you most enjoy helping with? (optional)</label>
-                        <select id="Interests" asp-for="Interests">
-                            <option value="">Pick one (or leave blank, we&rsquo;ll find a spot for you)</option>
-                            <option value="Registration desk">Registration desk &mdash; greeting attendees</option>
-                            <option value="Session room">Session room &mdash; A/V + speaker support</option>
-                            <option value="Sponsor area">Sponsor area &mdash; helping exhibitors</option>
-                            <option value="Setup / teardown">Setup / teardown &mdash; physical work</option>
-                            <option value="Photo / video">Photo / video</option>
-                            <option value="Social media">Social media / on-site reporting</option>
-                            <option value="Anywhere needed">Anywhere needed &mdash; flex</option>
-                        </select>
-                    </div>
-
-                    <div class="full">
-                        <label for="Motivation">Anything else we should know? (optional)</label>
-                        @* Common.CharCount is a "{0} / {1} characters" template the
-                           client-side counter (see _Layout) substitutes itself, so emit
-                           the RAW localized value: IHtmlLocalizer's indexer runs
-                           string.Format with zero args over the placeholders and throws
-                           FormatException (HTTP 500). GetString(..).Value skips formatting. *@
-                        <textarea id="Motivation" asp-for="Motivation" maxlength="1000"
-                                  data-ceh-counter="@Localizer.GetString("Common.CharCount").Value"
-                                  placeholder="Languages you speak, prior community work, dietary requirements, accessibility needs, T-shirt size, etc."></textarea>
-                    </div>
-                </div>
+                    <label class="agree-accept">
+                        <input type="checkbox" id="AgreementAccepted" asp-for="AgreementAccepted" />
+                        <span>I have read and accept the volunteer collaboration agreement above.</span>
+                    </label>
+                </section>
 
                 <div class="vol-actions">
-                    <span class="vol-fineprint">
-                        We&rsquo;ll only use your details to evaluate your application and contact you about the event.
-                    </span>
-                    <button type="submit" data-ceh-loading-text="@Localizer["Common.Sending"]">Send my application</button>
+                    <button type="button" class="vol-btn ghost" id="vol-prev" style="visibility:hidden;">&larr; Back</button>
+                    <span class="vol-fineprint" id="vol-help"></span>
+                    <button type="button" class="vol-btn" id="vol-next">Next &rarr;</button>
+                    <button type="submit" class="vol-btn" id="vol-submit" style="display:none;">Submit application</button>
                 </div>
+
+                <noscript>
+                    <p class="vol-fineprint" style="margin-top:12px;">All steps are shown above; complete them and press Submit.</p>
+                </noscript>
             </form>
         }
     </div>
 </div>
+
+@if (!Model.NoActiveEvent && !Model.SubmittedOk)
+{
+    <script>
+        (function () {
+            var form = document.getElementById('vol-form');
+            if (!form) return;
+            var sections = Array.prototype.slice.call(form.querySelectorAll('.step-section'));
+            var pills = Array.prototype.slice.call(document.querySelectorAll('#vol-stepbar .pill'));
+            var prev = document.getElementById('vol-prev');
+            var next = document.getElementById('vol-next');
+            var submit = document.getElementById('vol-submit');
+            var help = document.getElementById('vol-help');
+            var step = 1;
+            var total = sections.length;
+
+            function valid(n) {
+                if (n === 1) {
+                    var name = form.querySelector('#FullName').value.trim();
+                    var email = form.querySelector('#Email').value.trim();
+                    var phone = form.querySelector('#Phone').value.trim();
+                    return name.length >= 2 && /^[^@@\s]+@@[^@@\s]+\.[^@@\s]+$/.test(email) && phone.length >= 4;
+                }
+                if (n === total) { return form.querySelector('#AgreementAccepted').checked; }
+                return true;
+            }
+            function render() {
+                sections.forEach(function (s) { s.classList.toggle('active', +s.dataset.step === step); });
+                pills.forEach(function (p) {
+                    var n = +p.dataset.pill;
+                    p.classList.toggle('active', n === step);
+                    p.classList.toggle('done', n < step);
+                });
+                prev.style.visibility = step > 1 ? 'visible' : 'hidden';
+                next.style.display = step < total ? '' : 'none';
+                submit.style.display = step < total ? 'none' : '';
+                if (step === 1 && !valid(1)) { help.textContent = 'Enter your name, a valid email and your mobile to continue.'; }
+                else if (step === total && !valid(total)) { help.textContent = 'Accept the agreement to submit.'; }
+                else { help.textContent = ''; }
+                next.disabled = !valid(step);
+                submit.disabled = step === total && !valid(total);
+            }
+            next.addEventListener('click', function () { if (valid(step) && step < total) { step++; render(); window.scrollTo(0, 0); } });
+            prev.addEventListener('click', function () { if (step > 1) { step--; render(); window.scrollTo(0, 0); } });
+            form.addEventListener('input', render);
+            form.addEventListener('change', render);
+            form.addEventListener('submit', function (e) { if (!valid(total)) { e.preventDefault(); step = total; render(); } });
+            render();
+        })();
+    </script>
+}

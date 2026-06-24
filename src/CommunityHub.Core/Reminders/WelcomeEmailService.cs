@@ -24,28 +24,37 @@ public sealed class WelcomeEmailService
     private readonly IEmailSender _emailSender;
     private readonly TimeProvider _clock;
     private readonly IEmailContextAccessor? _context;
+    private readonly CommunityHub.Core.Settings.FeatureGateService? _gate;
+    private readonly CommunityHub.Core.Settings.RingResolver? _rings;
 
     public WelcomeEmailService(
         CommunityHubDbContext db,
         EmailTemplateProvider templates,
         IEmailSender emailSender,
         TimeProvider clock,
-        IEmailContextAccessor? context = null)
+        IEmailContextAccessor? context = null,
+        CommunityHub.Core.Settings.FeatureGateService? gate = null,
+        CommunityHub.Core.Settings.RingResolver? rings = null)
     {
         _db = db;
         _templates = templates;
         _emailSender = emailSender;
         _clock = clock;
         _context = context;
+        _gate = gate;
+        _rings = rings;
     }
 
     /// <summary>
     /// Send the welcome email to one participant if it has not been sent
     /// before (idempotent via the SentReminder ledger). Returns true if an
-    /// email was actually sent.
+    /// email was actually sent. Pass <paramref name="force"/> = true for an
+    /// organizer-initiated RESEND: the once-ever idempotency check is bypassed
+    /// (the ring gate + email allowlist still apply), and no duplicate ledger
+    /// row is written.
     /// </summary>
     public async Task<bool> SendWelcomeAsync(
-        int participantId, CancellationToken ct = default)
+        int participantId, CancellationToken ct = default, bool force = false)
     {
         var participant = await _db.Participants
             .Include(p => p.Event)
@@ -81,7 +90,20 @@ public sealed class WelcomeEmailService
                  && s.ReminderType == ReminderType
                  && s.OccasionKey == occasionKey,
             ct);
-        if (already)
+        if (already && !force)
+        {
+            return false;
+        }
+
+        // DESIRED-STATE RING GATE (operator 2026-06-23): if the recipient is OUTSIDE
+        // the welcome-email feature's released ring, SKIP without recording — so a
+        // reconcile re-sends automatically when the ring is later widened. Without
+        // this, the send below would be ring-DROPPED by BrevoEmailSender yet still
+        // recorded as welcomed, and the recipient would never get it. (Null gate in
+        // legacy/test wiring ⇒ no pre-gate; the sender's ring drop still applies.)
+        if (_gate is not null && _rings is not null
+            && !await _gate.IsFeatureActiveForParticipantAsync(
+                "welcome-email", participant.EventId, participant.Id, _rings, ct))
         {
             return false;
         }
@@ -94,10 +116,20 @@ public sealed class WelcomeEmailService
         tokens["firstName"] = firstName;
         tokens["communityName"] = participant.Event.CommunityName;
         tokens["eventDisplayName"] = participant.Event.DisplayName;
+        tokens["eventCode"] = participant.Event.Code;
         tokens["roleName"] = FriendlyRoleName(participant.Role);
         tokens["roleGuidance"] = RoleGuidance(participant.Role);
+        tokens["roleLine"] = WelcomeWithLoginEmailService.RoleLine(participant.Role);
+        // Sponsor variant: dynamic "you are receiving this in your role as …" line.
+        tokens["sponsorRole"] = CommunityHub.Core.Email.WelcomeVariants.SponsorRoleLabel(
+            participant.IsEventCoordinator, participant.IsSigner, participant.IsBoothMember);
 
-        var rendered = _templates.Render(TemplateName, tokens);
+        // Render the per-role VARIANT (welcome-sponsor / welcome-speaker / …) when
+        // one exists for the role, so the polished role-specific copy is what goes
+        // out; fall back to the generic welcome for roles without a variant.
+        var templateKey =
+            CommunityHub.Core.Email.WelcomeVariants.TemplateKeyFor(participant.Role) ?? TemplateName;
+        var rendered = _templates.Render(templateKey, tokens);
         // Ring-governed by the welcome-email feature (operator 2026-06-22).
         using (_context?.Set(new EmailContext(
             ReminderType, participant.EventId, participant.Id, participant.FullName,
@@ -107,16 +139,20 @@ public sealed class WelcomeEmailService
                 toEmail, rendered.Subject, rendered.HtmlBody, ct);
         }
 
-        // Record it so a re-import does not re-send.
-        _db.SentReminders.Add(new SentReminder
+        // Record it (first time) so a re-import does not re-send. A forced resend
+        // re-sends an already-welcomed person without adding a duplicate ledger row.
+        if (!already)
         {
-            EventId = participant.EventId,
-            RecipientEmail = participant.Email,
-            ReminderType = ReminderType,
-            OccasionKey = occasionKey,
-            SentAt = _clock.GetUtcNow(),
-        });
-        await _db.SaveChangesAsync(ct);
+            _db.SentReminders.Add(new SentReminder
+            {
+                EventId = participant.EventId,
+                RecipientEmail = participant.Email,
+                ReminderType = ReminderType,
+                OccasionKey = occasionKey,
+                SentAt = _clock.GetUtcNow(),
+            });
+            await _db.SaveChangesAsync(ct);
+        }
         return true;
     }
 

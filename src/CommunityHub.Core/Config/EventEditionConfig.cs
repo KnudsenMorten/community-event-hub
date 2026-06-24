@@ -28,6 +28,15 @@ public sealed class EventEditionConfig
     public Dictionary<string, string> Placeholders { get; set; } = new();
 
     /// <summary>
+    /// Zoho Backstage sponsor-category NAME → sponsorship_type id (pinned). Zoho's
+    /// live /sponsorship_types endpoint returns 400 "No Sponsorship Categories
+    /// Available" on this account, so the provision/create flow resolves the id
+    /// from this map (e.g. "Diamond sponsors" → "14880000003485509").
+    /// </summary>
+    [JsonPropertyName("zohoSponsorCategoryIds")]
+    public Dictionary<string, string> ZohoSponsorCategoryIds { get; set; } = new();
+
+    /// <summary>
     /// Optional SharePoint Online block loaded from
     /// <c>event.&lt;edition&gt;.json -&gt; sharepoint</c>. Used to pre-create
     /// per-sponsor upload folders + mint anonymous edit-link URLs the sponsor
@@ -43,6 +52,15 @@ public sealed class EventEditionConfig
     /// </summary>
     [JsonIgnore]
     public EditionDates? Dates { get; set; }
+
+    /// <summary>
+    /// Optional <c>volunteer</c> block — volunteer-specific edition facts, e.g.
+    /// EXTRA availability days (move-in / packing / setup days that fall outside
+    /// the public event range) shown on My Availability + the sign-up wizard.
+    /// Null when the section is absent.
+    /// </summary>
+    [JsonIgnore]
+    public VolunteerEditionConfig? Volunteer { get; set; }
 
     /// <summary>
     /// Optional <c>resources</c> block loaded from
@@ -196,6 +214,75 @@ public sealed class SharePointEditionConfig
 
     [JsonPropertyName("rootFolderPath")]
     public string RootFolderPath { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Optional drive-relative folder where every volunteer's uploaded PHOTO lands
+    /// (anonymous sign-up wizard, operator 2026-06-23). Same site + drive. Empty
+    /// disables the photo step's upload.
+    /// </summary>
+    [JsonPropertyName("volunteerPhotoFolderPath")]
+    public string VolunteerPhotoFolderPath { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Optional drive-relative folder where every sponsor's uploaded LOGO file is
+    /// ALSO copied (collected) so the organizers have all logos in one place
+    /// (operator 2026-06-23). On the same site + drive as the per-company upload
+    /// folders. Each copy is named <c>{CompanyName} - {fileName}</c> so logos from
+    /// different sponsors never collide and a re-upload overwrites cleanly. Empty
+    /// disables the collection copy (only the per-company folder is written).
+    /// </summary>
+    [JsonPropertyName("logoCollectionFolderPath")]
+    public string LogoCollectionFolderPath { get; set; } = string.Empty;
+
+    // --- Sponsor Company Details uploads (operator 2026-06-24) ----------------
+    // Drive-relative folders for the versioned logo / exhibitor-wall uploads on
+    // /Sponsor/CompanyDetails. Same site + drive. Empty disables that upload button.
+    [JsonPropertyName("logoSoMeBrandingFolderPath")]
+    public string LogoSoMeBrandingFolderPath { get; set; } = string.Empty;
+
+    [JsonPropertyName("logoPrintFolderPath")]
+    public string LogoPrintFolderPath { get; set; } = string.Empty;
+
+    [JsonPropertyName("logoZohoFolderPath")]
+    public string LogoZohoFolderPath { get; set; } = string.Empty;
+
+    [JsonPropertyName("exhibitorWallFolderPath")]
+    public string ExhibitorWallFolderPath { get; set; } = string.Empty;
+
+    [JsonPropertyName("boothCollateralFolderPath")]
+    public string BoothCollateralFolderPath { get; set; } = string.Empty;
+
+    /// <summary>Recipients notified when a sponsor uploads a SoMe / print / wall file.</summary>
+    [JsonPropertyName("sponsorUploadNotify")]
+    public List<string> SponsorUploadNotify { get; set; } = new();
+
+    /// <summary>Recipients notified when a sponsor uploads the Zoho lead-system logo.</summary>
+    [JsonPropertyName("sponsorUploadNotifyZoho")]
+    public List<string> SponsorUploadNotifyZoho { get; set; } = new();
+}
+
+/// <summary>Volunteer section of event.&lt;edition&gt;.json (sibling of <c>edition</c>).</summary>
+public sealed class VolunteerEditionConfig
+{
+    /// <summary>
+    /// Extra availability days that fall OUTSIDE the public event date range
+    /// (move-in, logistics, packing, setup) but that volunteers can still mark
+    /// availability for. Merged into My Availability + the sign-up wizard.
+    /// </summary>
+    [JsonPropertyName("extraAvailabilityDays")]
+    public List<VolunteerExtraDay> ExtraAvailabilityDays { get; set; } = new();
+}
+
+/// <summary>One extra volunteer availability day (outside the public event range).</summary>
+public sealed class VolunteerExtraDay
+{
+    /// <summary>ISO yyyy-MM-dd.</summary>
+    [JsonPropertyName("date")]
+    public string Date { get; set; } = string.Empty;
+
+    /// <summary>Display label, e.g. "Packing day (9–14)".</summary>
+    [JsonPropertyName("label")]
+    public string Label { get; set; } = string.Empty;
 }
 
 /// <summary>Where the event config file lives, mirrors SponsorConfigOptions.</summary>
@@ -300,6 +387,28 @@ public sealed class EventEditionConfigLoader
             && d.ValueKind == JsonValueKind.Object)
         {
             cfg.Dates = d.Deserialize<EditionDates>(Options);
+        }
+
+        // Pull the SIBLING "zohoSponsorCategoryIds" map (name → id). Underscore
+        // keys are documentation and skipped.
+        if (doc.RootElement.TryGetProperty("zohoSponsorCategoryIds", out var zc)
+            && zc.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var prop in zc.EnumerateObject())
+                if (!prop.Name.StartsWith("_") && prop.Value.ValueKind == JsonValueKind.String)
+                    cfg.ZohoSponsorCategoryIds[prop.Name] = prop.Value.GetString() ?? string.Empty;
+        }
+
+        // Pull the SIBLING "volunteer" object (extra availability days, etc.).
+        if (doc.RootElement.TryGetProperty("volunteer", out var vol)
+            && vol.ValueKind == JsonValueKind.Object)
+        {
+            var vc = vol.Deserialize<VolunteerEditionConfig>(Options) ?? new VolunteerEditionConfig();
+            // Drop garbage extra-day rows (need a parseable date).
+            vc.ExtraAvailabilityDays = (vc.ExtraAvailabilityDays ?? new List<VolunteerExtraDay>())
+                .Where(x => x is not null && DateOnly.TryParse(x.Date, out _))
+                .ToList();
+            cfg.Volunteer = vc;
         }
 
         // Pull the SIBLING "resources" object that drives the shared

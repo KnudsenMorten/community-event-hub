@@ -160,6 +160,40 @@ public sealed class SponsorUploadWatchService
                 }
 
                 known.LastNotifiedAt = DateTimeOffset.UtcNow;
+
+                // Also COPY a new/changed LOGO into the central logo-collection
+                // folder so organizers have every sponsor logo in one place
+                // (operator 2026-06-23). Same site + drive; named
+                // "{Company} - {file}" so logos never collide and a re-upload
+                // overwrites cleanly. Tolerant: a copy failure is logged and never
+                // aborts the run (re-run the watcher, or the sponsor re-uploads, to
+                // re-attempt).
+                if (!string.IsNullOrWhiteSpace(sp.LogoCollectionFolderPath)
+                    && string.Equals(loc.Subfolder, "LOGO", StringComparison.OrdinalIgnoreCase))
+                {
+                    try
+                    {
+                        var bytes = await _sp.DownloadItemContentAsync(sp.SiteUrl, sp.DriveName, file.ItemId, ct);
+                        if (bytes is not null)
+                        {
+                            var destName = $"{SanitizeNameComponent(loc.CompanyName)} - {file.Name}";
+                            await _sp.UploadFileAsync(
+                                sp.SiteUrl, sp.DriveName, sp.LogoCollectionFolderPath, destName,
+                                bytes, GuessContentType(file.Name), ct);
+                            _log.LogInformation(
+                                "SponsorUploadWatchService: copied logo '{File}' for {Co} into the collection folder as '{Dest}'.",
+                                file.Name, loc.CompanyName, destName);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        errors++;
+                        _log.LogError(ex,
+                            "SponsorUploadWatchService: failed to copy logo '{File}' for {Co} into the collection folder; "
+                            + "notification still sent, will re-attempt on the next change.",
+                            file.Name, loc.CompanyName);
+                    }
+                }
             }
         }
 
@@ -217,5 +251,39 @@ public sealed class SponsorUploadWatchService
     {
         if (string.IsNullOrEmpty(s)) return s;
         return s.Length <= max ? s : s.Substring(0, max);
+    }
+
+    /// <summary>
+    /// Make a company name safe to use as part of a SharePoint file name: drop the
+    /// characters SharePoint rejects (<c>" * : &lt; &gt; ? / \ |</c>) and collapse
+    /// whitespace, so the collected logo lands as a clean "{Company} - {file}".
+    /// </summary>
+    private static string SanitizeNameComponent(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return "Sponsor";
+        var cleaned = new string(name
+            .Where(c => "\"*:<>?/\\|".IndexOf(c) < 0)
+            .ToArray());
+        cleaned = string.Join(" ", cleaned.Split(
+            (char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        return string.IsNullOrWhiteSpace(cleaned) ? "Sponsor" : cleaned;
+    }
+
+    /// <summary>Best-effort content type from a logo file's extension (PUT infers from the name anyway).</summary>
+    private static string GuessContentType(string fileName)
+    {
+        var ext = System.IO.Path.GetExtension(fileName).ToLowerInvariant();
+        return ext switch
+        {
+            ".png"  => "image/png",
+            ".jpg" or ".jpeg" => "image/jpeg",
+            ".gif"  => "image/gif",
+            ".svg"  => "image/svg+xml",
+            ".webp" => "image/webp",
+            ".pdf"  => "application/pdf",
+            ".eps"  => "application/postscript",
+            ".ai"   => "application/postscript",
+            _        => "application/octet-stream",
+        };
     }
 }

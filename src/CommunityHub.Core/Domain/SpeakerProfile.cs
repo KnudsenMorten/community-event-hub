@@ -149,6 +149,31 @@ public class SpeakerProfile
     /// </summary>
     public string? PhotoUrl { get; set; }
 
+    // --- Speaker Details (operator 2026-06-24 §26c) -----------------------
+    /// <summary>The Sessionize speaker id (GUID) this profile imported from; the import match/dedup key.</summary>
+    public string? SessionizeSpeakerId { get; set; }
+
+    /// <summary>The Zoho Backstage speaker id once created there — drives UPDATE-vs-CREATE on Save &amp; Sync.</summary>
+    public string? BackstageSpeakerId { get; set; }
+
+    /// <summary>First name (from Sessionize, editable). FullName stays on the Participant.</summary>
+    public string? FirstName { get; set; }
+    /// <summary>Last name (from Sessionize, editable).</summary>
+    public string? LastName { get; set; }
+
+    /// <summary>
+    /// Comma-separated MS-accreditation categories (e.g. MVP categories) that map to
+    /// Zoho speaker "Skills" on Save &amp; Sync. Multi-select; hub-collected.
+    /// </summary>
+    public string? MvpCategories { get; set; }
+
+    /// <summary>
+    /// The SharePoint-stored copy of the speaker picture (relative path, e.g.
+    /// <c>Speakers/speaker-42.jpg</c>). Set when the Sessionize <c>profilePicture</c>
+    /// is fetched + uploaded on import; <see cref="PhotoUrl"/> remains the display URL.
+    /// </summary>
+    public string? PhotoSharePointPath { get; set; }
+
     /// <summary>
     /// Comma-separated set of bio field names the SPEAKER has edited in the hub
     /// (the per-field "dirty" set). A delta Sessionize re-import must NEVER

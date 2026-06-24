@@ -25,6 +25,10 @@ public class LunchModel : PageModel
     public int EarlySetupDayCount { get; private set; }
     public int SetupDayCount { get; private set; }
     public int PreDayCount   { get; private set; }
+    /// <summary>Pre-day headcount auto-counted (active crew + MC speakers).</summary>
+    public int AutoCountedPreDayCount { get; private set; }
+    /// <summary>Pre-day headcount from form declarations (non-auto-counted roles).</summary>
+    public int DeclaredPreDayCount { get; private set; }
     public int TotalResponses { get; private set; }
     public string EarlySetupDayLabel { get; private set; } = "Setup day (Sun)";
     public string SetupDayLabel { get; private set; } = "Setup day (Mon)";
@@ -57,7 +61,7 @@ public class LunchModel : PageModel
             .Where(l => l.EventId == me.EventId)
             .Join(_db.Participants, l => l.ParticipantId, p => p.Id, (l, p) => new
             {
-                p.FullName, p.Email, p.Role,
+                p.Id, p.FullName, p.Email, p.Role,
                 l.LunchEarlySetupDay, l.LunchSetupDay, l.LunchPreDay, l.Notes
             })
             .ToListAsync(ct);
@@ -69,10 +73,29 @@ public class LunchModel : PageModel
                 r.LunchEarlySetupDay, r.LunchSetupDay, r.LunchPreDay, r.Notes))
             .ToList();
 
+        // Pre-day AUTO-COUNT (operator 2026-06-24): active crew (Organizer / Media /
+        // Event-partner) + Master-class speakers are counted automatically — they
+        // don't fill the form's pre-day. Add them to the pre-day headcount, and count
+        // form pre-day declarations only from everyone else (no double-count).
+        var autoCountedIds = (await _db.Participants
+            .Where(ParticipantActivation.IsActiveExpr)
+            .Where(p => p.EventId == me.EventId
+                && (p.Role == ParticipantRole.Organizer
+                    || p.Role == ParticipantRole.Media
+                    || p.Role == ParticipantRole.EventPartner
+                    || (p.Role == ParticipantRole.Speaker
+                        && _db.SpeakerProfiles.Any(s =>
+                            s.EventId == me.EventId && s.ParticipantId == p.Id && s.SpeakingPreDay))))
+            .Select(p => p.Id)
+            .ToListAsync(ct))
+            .ToHashSet();
+
         TotalResponses = rows.Count;
         EarlySetupDayCount = rows.Count(r => r.LunchEarlySetupDay);
         SetupDayCount      = rows.Count(r => r.LunchSetupDay);
-        PreDayCount        = rows.Count(r => r.LunchPreDay);
+        AutoCountedPreDayCount = autoCountedIds.Count;
+        DeclaredPreDayCount = rows.Count(r => r.LunchPreDay && !autoCountedIds.Contains(r.Id));
+        PreDayCount = AutoCountedPreDayCount + DeclaredPreDayCount;
 
         return Page();
     }

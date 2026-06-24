@@ -39,8 +39,8 @@ public class EconomicContactsModel : PageModel
     public IReadOnlyList<EconomicContactAdminService.ContactView> Contacts { get; private set; }
         = Array.Empty<EconomicContactAdminService.ContactView>();
 
-    public static readonly ErpContactRole[] Roles =
-        { ErpContactRole.Contact, ErpContactRole.Signer, ErpContactRole.EventCoordinator };
+    /// <summary>Sponsors live in e-conomic customer group 1.</summary>
+    public const int SponsorCustomerGroup = 1;
 
     private CurrentParticipant? Guard()
     {
@@ -65,19 +65,20 @@ public class EconomicContactsModel : PageModel
         if (customer is int cid)
         {
             Contacts = await _admin.ListContactsAsync(cid, ct);
-            var match = await _admin.ListCustomersAsync(cid.ToString(), ct);
+            var match = await _admin.ListCustomersAsync(cid.ToString(), SponsorCustomerGroup, ct);
             SelectedCustomerName = match.FirstOrDefault(c => c.CustomerNumber == cid)?.Name;
         }
         else
         {
-            Customers = await _admin.ListCustomersAsync(search, ct);
+            // Sponsors only — e-conomic customer group 1.
+            Customers = await _admin.ListCustomersAsync(search, SponsorCustomerGroup, ct);
         }
         return Page();
     }
 
     public async Task<IActionResult> OnPostCreateAsync(
-        int customer, string name, string email, string? phone,
-        int role, string? notes, CancellationToken ct)
+        int customer, string name, string? email, string? phone,
+        bool signer, bool coordinator, CancellationToken ct)
     {
         var me = Guard();
         if (_participant.Current is null) return RedirectToPage("/Login");
@@ -86,25 +87,22 @@ public class EconomicContactsModel : PageModel
         if (string.IsNullOrWhiteSpace(name))
             return RedirectToPage(new { customer, msg = "Name is required." });
 
-        await _admin.CreateAsync(customer,
-            new EconomicContactInput(name.Trim(), (email ?? "").Trim(), phone?.Trim()),
-            (ErpContactRole)role, notes, me.Email, ct);
-        return RedirectToPage(new { customer, msg = "Contact added." });
+        await _admin.CreateAsync(customer, name, email, phone, signer, coordinator, ct);
+        return RedirectToPage(new { customer, msg = "Contact added in e-conomic." });
     }
 
     public async Task<IActionResult> OnPostUpdateAsync(
-        int customer, int contact, string name, string email, string? phone,
-        int role, string? notes, CancellationToken ct)
+        int customer, int contact, string name, string? email, string? phone,
+        bool signer, bool coordinator, string? notes, CancellationToken ct)
     {
         var me = Guard();
         if (_participant.Current is null) return RedirectToPage("/Login");
         if (me is null) return Page();
         if (!_admin.CanWrite) { NotConfigured = true; return Page(); }
 
-        await _admin.UpdateAsync(customer, contact,
-            new EconomicContactInput((name ?? "").Trim(), (email ?? "").Trim(), phone?.Trim()),
-            (ErpContactRole)role, notes, me.Email, ct);
-        return RedirectToPage(new { customer, msg = "Contact updated." });
+        await _admin.UpdateAsync(customer, contact, name ?? string.Empty, email, phone,
+            signer, coordinator, notes, ct);
+        return RedirectToPage(new { customer, msg = "Contact updated in e-conomic." });
     }
 
     public async Task<IActionResult> OnPostDeleteAsync(int customer, int contact, CancellationToken ct)

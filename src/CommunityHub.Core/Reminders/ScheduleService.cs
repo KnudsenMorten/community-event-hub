@@ -88,9 +88,10 @@ public sealed class ScheduleService
     public static List<ScheduleEntry> BuildDefault(int eventId, DateOnly start, DateOnly end)
     {
         DateTime D(DateOnly d, int h = 0, int m = 0) => d.ToDateTime(new TimeOnly(h, m));
-        ScheduleEntry E(DateTime when, string title, string roles, bool allDay) => new()
+        ScheduleEntry E(DateTime when, string title, string roles, bool allDay, DateTime? endWhen = null) => new()
         {
             EventId = eventId, StartsAt = EventLocal(when), Title = title, Roles = roles, AllDay = allDay,
+            EndsAt = endWhen is { } e ? EventLocal(e) : null,
         };
         return new List<ScheduleEntry>
         {
@@ -98,11 +99,12 @@ public sealed class ScheduleService
             E(D(start.AddDays(-3)),        "Last-minute logistics & comms", "organizer", true),
             E(D(start.AddDays(-2)),        "Packing day",                   "organizer,volunteer", true),
             E(D(start.AddDays(-1)),        "Setup day",                     "organizer,volunteer,media", true),
-            E(D(start),                    "Pre-day / Master Class",        "organizer,volunteer,speaker,media", true),
+            // Pre-day / Master Class runs 09:00–16:00; main day 07:00–17:15 (operator 2026-06-24).
+            E(D(start, 9, 0),              "Pre-day / Master Class",        "organizer,volunteer,speaker,media", false, D(start, 16, 0)),
             E(D(start, 16, 0),             "Party",                         "all", false),
             E(D(start, 17, 30),            "Group photo",                   "organizer,volunteer,speaker,media,attendee", false),
             E(D(start, 18, 0),             "Appreciation Dinner",           "all", false),
-            E(D(end),                      "Main day",                      "organizer,volunteer,speaker,media", true),
+            E(D(end, 7, 0),                "Main day",                      "organizer,volunteer,speaker,media", false, D(end, 17, 15)),
         };
     }
 }

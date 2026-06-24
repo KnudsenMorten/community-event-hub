@@ -31,7 +31,8 @@ public static class SendSampleEmailsCommand
         string toAddress,
         string sponsorName,
         ILogger logger,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        string? onlyTemplate = null)
     {
         if (string.IsNullOrWhiteSpace(toAddress))
         {
@@ -53,8 +54,16 @@ public static class SendSampleEmailsCommand
         var files = Directory.GetFiles(dir, "*.html")
             .Select(Path.GetFileNameWithoutExtension)
             .Where(name => name is not null && !SkipTemplates.Contains(name!))
+            .Where(name => string.IsNullOrWhiteSpace(onlyTemplate)
+                || string.Equals(name, onlyTemplate, StringComparison.OrdinalIgnoreCase))
             .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
             .ToList();
+
+        if (!string.IsNullOrWhiteSpace(onlyTemplate) && files.Count == 0)
+        {
+            logger.LogError("send-sample-emails: --only '{Only}' matched no template in {Dir}.", onlyTemplate, dir);
+            return 2;
+        }
 
         if (files.Count == 0)
         {
@@ -117,6 +126,7 @@ public static class SendSampleEmailsCommand
         t["eventDisplayName"] = "Experts Live Denmark 2027";
         t["eventCode"] = "ELDK27";
         t["roleName"] = "sponsor contact";
+        t["sponsorRole"] = "event coordinator and booth member"; // sample multi-role label
         t["roleGuidance"] =
             "Your sponsor onboarding tasks and deadlines are in the hub. New tasks appear as your order is processed.";
         t["roleLine"] =

@@ -1,8 +1,8 @@
 @page
 @model CommunityHub.Pages.LoginModel
 @{
+    Layout = "_PublicLayout";   // bare anonymous sign-in — no internal chrome (§27)
     ViewData["Title"] = Localizer["Login.Title"].Value;
-    ViewData["HidePublicNav"] = true;   // bare sign-in page — no public event nav bar
 }
 
 <div class="card">

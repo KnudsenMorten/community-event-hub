@@ -16,19 +16,79 @@
     }
     else
     {
-        <p style="background:#eef6ff;padding:10px 14px;border-radius:6px;font-size:14px;">
-            <strong>@Localizer["Travel.PolicyLead"]</strong> @Localizer["Travel.PolicyBody"]
-        </p>
+        <div style="background:#eef6ff;padding:14px 16px;border-radius:8px;font-size:14px;line-height:1.55;">
+            <p style="margin:0 0 8px;"><strong>Travel reimbursement — flights only.</strong>
+                We cover economy flights only: up to <strong>EUR 400</strong> per speaker for
+                single-speaker sessions, and max <strong>EUR 300</strong> per person for co-speaking
+                sessions. If you are not able to get flights within these boundaries, let us know and
+                we will work with you on this. You will get the reimbursement after the event and we
+                will give you instructions.</p>
+            <p style="margin:0;">We do <strong>not</strong> cover taxi, Uber, public transportation,
+                or own car in Denmark.</p>
+        </div>
+
+        <h3>Eligibility</h3>
+        <p style="font-size:14px;">Reimbursement is available to <strong>international speakers only</strong>
+            — defined as speakers travelling from outside Denmark.</p>
+
+        <h3>Covered cost</h3>
         <ul style="font-size:14px;">
-            <li>@Localizer["Travel.RuleEconomy"]</li>
-            <li>@Localizer["Travel.RuleSingle", CommunityHub.Pages.Forms.TravelModel.Cap400]</li>
-            <li>@Localizer["Travel.RuleCo", CommunityHub.Pages.Forms.TravelModel.Cap300]</li>
-            <li>@Localizer["Travel.RuleOther"]</li>
-            @if (Model.SubmitInvoiceDueDate is not null)
-            {
-                <li>@Localizer["Travel.RuleSubmit", Model.SubmitInvoiceDueDate?.ToString("dd/MM/yyyy") ?? ""]</li>
-            }
+            <li><strong>Air travel (European)</strong> — EUR 400 for a single-speaker session (round trip),
+                or EUR 300 per person for co-speaking sessions. Economy class only; booked at least
+                6 weeks before the event.</li>
+            <li><strong>Air travel (intercontinental)</strong> — EUR 800 for a single-speaker session
+                (round trip), or EUR 600 per person for co-speaking sessions (round trip). Economy class
+                only; booked at least 6 weeks before the event.</li>
         </ul>
+
+        <h3>Not covered</h3>
+        <ul style="font-size:14px;">
+            <li>Seat upgrades / business class</li>
+            <li>Ground transport / parking</li>
+            <li>Meals / incidentals</li>
+        </ul>
+
+        <h3>Booking requirements</h3>
+        <ul style="font-size:14px;">
+            <li><strong>Economy class</strong> — all flights must be booked in economy class. Upgrades,
+                premium economy and business class are not reimbursable.</li>
+            <li><strong>Advance booking</strong> — tickets must be booked at least six weeks before the
+                event date. Tickets booked later will only be reimbursed up to the equivalent economy
+                price available at the six-week mark, unless a documented exception has been approved in
+                advance by the organizing committee.</li>
+            <li><strong>Original receipts or payment confirmations</strong> (PDF, JPG or PNG) showing
+                name, route, dates and total amount paid are required. Booking confirmations without
+                payment details are not sufficient.</li>
+        </ul>
+
+        <h3>Submission process</h3>
+        <ul style="font-size:14px;">
+            <li>Submit all reimbursement documents by this form no later than
+                <strong>10 January 2027</strong>. Late submissions will not be processed.</li>
+            <li>A receipt alone is not sufficient. You must also submit either:
+                <ul>
+                    <li><strong>Company invoice</strong> — if you have a registered company, an invoice
+                        must be issued to Experts Live Denmark. The invoice must include sender details,
+                        recipient details, a description (e.g. &ldquo;Speaker travel reimbursement —
+                        Experts Live DK 2027&rdquo;) and the total amount.</li>
+                    <li><strong>Personal declaration</strong> — if you do not have a company, a personal
+                        declaration is acceptable. This must include your full name, address, a valid
+                        identification number (passport or national ID), the recipient entity, a
+                        description of the costs and the total amount claimed.</li>
+                </ul>
+            </li>
+        </ul>
+
+        <h3>Billing details</h3>
+        <p style="font-size:14px;background:#f6f8fb;border-radius:8px;padding:12px 14px;margin:0 0 10px;">
+            <strong>Experts Live Denmark</strong><br>
+            Strandvejen 21A<br>
+            6000 Kolding<br>
+            Denmark<br>
+            VAT Number: DK44197588
+        </p>
+        <p style="font-size:14px;">Your bank account details on the invoice must include:
+            <strong>Bank name, IBAN, BIC/SWIFT, Account Holder Name</strong>.</p>
 
         @* Shared success toast (REQUIREMENTS §21): announced via role=status,
            auto-dismisses, dismissable. Replaces the bespoke <p class="info">. *@
@@ -99,6 +159,14 @@
                           placeholder="@Localizer["Travel.ExplanationPlaceholder"]"></textarea>
                 <span asp-validation-for="Explanation" class="ceh-field-error"></span>
             </div>
+
+            <h3 style="margin-top:8px;">Upload your invoice &amp; receipts</h3>
+            <p style="font-size:14px;">Upload your invoice and receipts (PDF) here:</p>
+            <p style="margin:6px 0 22px;">
+                <a href="https://expertslivedk.sharepoint.com/sites/ExpertsLiveDK/Shared%20Documents/Forms/AllItems.aspx?id=%2Fsites%2FExpertsLiveDK%2FShared%20Documents%2FGeneral%2FEvents%2FELDK%202027%2FEventHub%2FFinance%2FTravel%20Reimbursement&amp;viewid=e81e24c2%2Dda6f%2D49c4%2D8961%2D86ba9876779b"
+                   target="_blank" rel="noopener noreferrer"
+                   style="display:inline-block;background:#1565c0;color:#ffffff;text-decoration:none;font-weight:700;font-size:15px;padding:12px 26px;border-radius:8px;box-shadow:0 2px 6px rgba(0,0,0,0.18);">Upload invoice + receipts (PDF)</a>
+            </p>
 
             <button type="submit">@Localizer["Travel.Save"]</button>
         </form>

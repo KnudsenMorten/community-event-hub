@@ -40,6 +40,17 @@ public class Participant
     /// </summary>
     public string? SecondaryEmail { get; set; }
 
+    /// <summary>
+    /// Optional ALTERNATE LOGIN address (operator 2026-06-24, §26d). A person can
+    /// sign in (PIN / magic-link request) with EITHER their primary <see cref="Email"/>
+    /// OR this address — useful when someone registered with a community address but
+    /// uses a work address day-to-day. Stored lower-cased + trimmed. The resolved
+    /// participant's primary <see cref="Email"/> remains the canonical identity (the
+    /// cookie + all downstream keys still use it); this only widens what you can type
+    /// to log in. Distinct from <see cref="SecondaryEmail"/> (CC-only, not a login).
+    /// </summary>
+    public string? AlternateEmail { get; set; }
+
     // --- Role ---------------------------------------------------------------
     /// <summary>Admin-set. Drives the personalized hub. One role per person.</summary>
     public ParticipantRole Role { get; set; }

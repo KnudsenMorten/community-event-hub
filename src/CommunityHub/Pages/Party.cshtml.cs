@@ -99,6 +99,7 @@ public class PartyModel : PageModel
             $"SUMMARY:{p.EventName} — Party",
             "END:VEVENT", "END:VCALENDAR") + "\r\n";
 
-        return File(Encoding.UTF8.GetBytes(ics), "text/calendar", "party.ics");
+        // Inline (no filename) so it opens in the calendar app rather than downloading.
+        return File(Encoding.UTF8.GetBytes(ics), "text/calendar; charset=utf-8");
     }
 }

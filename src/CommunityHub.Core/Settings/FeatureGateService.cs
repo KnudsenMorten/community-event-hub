@@ -27,6 +27,32 @@ public sealed class FeatureGateService
     }
 
     /// <summary>
+    /// Reserved (NON-catalog) per-edition key for the org-admin "pause all
+    /// background jobs" master switch (operator 2026-06-23). Stored as a
+    /// <see cref="FeatureSetting"/> row whose <see cref="FeatureSetting.Enabled"/>
+    /// means PAUSED (<c>true ⇒ paused</c>); a MISSING row means NOT paused, so the
+    /// safe default is jobs run. Deliberately not a <see cref="FeatureCatalog"/>
+    /// feature — it is a single operational kill switch, not a rollout-staged
+    /// capability, so it bypasses the catalog grid.
+    /// </summary>
+    public const string JobsPausedKey = "jobs-paused";
+
+    /// <summary>
+    /// True when an organizer has PAUSED all background jobs for the edition via the
+    /// Settings master switch. The Functions worker checks this before EVERY job
+    /// runs (see JobsPauseMiddleware); a missing flag ⇒ not paused (default behaviour
+    /// unchanged). Resume takes effect on each job's next tick (the flag is re-read).
+    /// </summary>
+    public async Task<bool> AreJobsPausedAsync(int eventId, CancellationToken ct = default)
+    {
+        var paused = await _db.FeatureSettings
+            .Where(f => f.EventId == eventId && f.FeatureKey == JobsPausedKey)
+            .Select(f => (bool?)f.Enabled)
+            .FirstOrDefaultAsync(ct);
+        return paused ?? false;
+    }
+
+    /// <summary>
     /// Is <paramref name="featureKey"/> enabled for <paramref name="eventId"/>?
     /// Reads the persisted kill switch first, then the catalog default. An unknown
     /// key (not a registered feature) returns the catalog fallback (true), so a

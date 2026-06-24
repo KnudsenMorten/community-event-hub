@@ -13,8 +13,19 @@
     .mc-avail.available { color:#0a7d33; }
     .mc-avail.filling  { color:#b45309; }
     .mc-avail.full     { color:#b91c1c; }
+    .mc-details { margin:8px 0 0; }
+    .mc-details > summary { cursor:pointer; font-size:13.5px; font-weight:600; color:var(--el-darkblue,#1D3380);
+        list-style:revert; padding:2px 0; user-select:none; }
+    .mc-details[open] > summary { margin-bottom:4px; }
+    .mc-speakers { margin:6px 0 0; font-size:13.5px; color:#374151; font-weight:600; }
+    .mc-abstract { margin:6px 0 0; font-size:14px; color:#4b5563; line-height:1.5; white-space:pre-wrap; }
     .mc-actions { display:flex; gap:10px; flex-wrap:wrap; margin-top:10px; align-items:center; }
     .mc-consent { font-size:13px; color:#4b5563; display:flex; gap:6px; align-items:flex-start; margin-top:8px; }
+    /* Confirmed banner — high-contrast dark text on a light neutral panel (operator
+       2026-06-24: the old green .info text was hard to read). */
+    .mc-confirmed { font-size:16px; color:#1f2430; background:#eef2fb; border:1px solid #c7d2f0;
+        border-left:4px solid var(--el-darkblue,#1D3380); border-radius:8px; padding:10px 14px; margin:0 0 6px; }
+    .mc-confirmed strong { color:var(--el-darkblue,#1D3380); }
 </style>
 
 <div class="card">
@@ -35,14 +46,21 @@
     }
     else if (Model.Confirmed is not null)
     {
-        <p class="info">You're confirmed for your Master Class: <strong>@Model.Confirmed.Title</strong>.</p>
+        <p class="mc-confirmed">&#10003; You're confirmed for your Master Class: <strong>@Model.Confirmed.Title</strong>.</p>
 
         <div class="mc-actions">
-            <a class="task-link-btn" asp-page-handler="Ics">&#128197; Add to my calendar</a>
-            @if (!string.IsNullOrEmpty(Model.CommSlug))
+            @* Add to calendar that OPENS the entry (not a file download). Outlook/Google
+               open a pre-filled event in the browser; the .ics is the universal fallback. *@
+            @if (Model.OutlookCalUrl is not null)
             {
-                <a class="task-link-btn" href="/MasterClass/@Model.CommSlug">&#128203; Master Class info &amp; what to bring</a>
+                <a class="task-link-btn" href="@Model.OutlookCalUrl" target="_blank" rel="noopener">&#128197; Add to Outlook</a>
             }
+            @if (Model.GoogleCalUrl is not null)
+            {
+                <a class="task-link-btn" href="@Model.GoogleCalUrl" target="_blank" rel="noopener">&#128197; Add to Google Calendar</a>
+            }
+            <a class="task-link-btn" asp-page-handler="Ics">&#128197; Apple / other (.ics)</a>
+            <a class="task-link-btn" href="/MasterClassPage/@Model.Confirmed.SessionId">&#128203; Master Class info, what to bring &amp; Q&amp;A</a>
         </div>
 
         <form method="post" asp-page-handler="ToggleReminder" style="margin-top:12px;">
@@ -76,11 +94,29 @@
             {
                 var cls = o.Availability == MasterClassSignupService.AvailabilityLevel.Full ? "full"
                         : o.Availability == MasterClassSignupService.AvailabilityLevel.FillingUp ? "filling" : "available";
-                var availText = o.Availability == MasterClassSignupService.AvailabilityLevel.Full ? "Full — join the waitlist"
-                        : o.Availability == MasterClassSignupService.AvailabilityLevel.FillingUp ? "Filling up" : "Seats available";
+                // Seat count when capacity is configured: "N of M seats left"; else a plain label.
+                var availText = o.Availability == MasterClassSignupService.AvailabilityLevel.Full
+                        ? (o.Capacity is int fc ? $"Full ({fc} seats) — join the waitlist" : "Full — join the waitlist")
+                    : (o.Free is int free && o.Capacity is int cap)
+                        ? $"{free} of {cap} seats available"
+                        : "Seats available";
                 <div class="mc-card">
                     <h3>@o.Title</h3>
                     <span class="mc-avail @cls">@availText</span>
+                    @if (o.SpeakerNames.Count > 0 || !string.IsNullOrWhiteSpace(o.Abstract))
+                    {
+                        <details class="mc-details">
+                            <summary>Session details</summary>
+                            @if (o.SpeakerNames.Count > 0)
+                            {
+                                <p class="mc-speakers">Presented by @string.Join(", ", o.SpeakerNames)</p>
+                            }
+                            @if (!string.IsNullOrWhiteSpace(o.Abstract))
+                            {
+                                <p class="mc-abstract">@o.Abstract</p>
+                            }
+                        </details>
+                    }
                     <form method="post" asp-page-handler="Join" class="mc-actions">
                         <input type="hidden" name="sessionId" value="@o.SessionId" />
                         @* Already hold a seat elsewhere? Joining a different one (or its waitlist) needs

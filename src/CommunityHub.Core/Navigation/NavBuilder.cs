@@ -55,7 +55,10 @@ public static class NavBuilder
         // assigned-to-me /Tasks list. Attendees get a deliberately MINIMAL menu
         // (Home + Master Class + Waitlist only — operator 2026-06-21), so they are
         // excluded from My tasks / My profile / Resources / Sessions here.
-        if (role != ParticipantRole.Sponsor && role != ParticipantRole.Attendee)
+        // Speakers excluded too (operator 2026-06-23 menu: Home, My Hub Profile,
+        // Bio, My sessions, Event Logistics, Contact — no top-level My tasks).
+        if (role != ParticipantRole.Sponsor && role != ParticipantRole.Attendee
+            && role != ParticipantRole.Speaker)
         {
             items.Add(new("/Tasks", "Nav.MyTasks"));
         }
@@ -71,7 +74,8 @@ public static class NavBuilder
                 items.Add(new("/Resources", "Nav.Resources"));
             // Public Sessions list removed for sponsors + volunteers (only relevant to
             // speakers + organizers/crew).
-            if (role is not ParticipantRole.Sponsor and not ParticipantRole.Volunteer)
+            if (role is not ParticipantRole.Sponsor and not ParticipantRole.Volunteer
+                     and not ParticipantRole.Speaker)
                 items.Add(new("/Sessions", "Nav.Sessions"));
         }
 
@@ -109,9 +113,14 @@ public static class NavBuilder
         // from the My Sessions hub.
         if (role is ParticipantRole.Speaker)
         {
+            // operator 2026-06-24 (§26c): "Bio" replaced by the consolidated
+            // "Speaker Details" page; "Help Promote" added (SoMe graphics). Then My
+            // sessions, Sync Calendar, the Event-logistics fold-out, Contact (last).
+            items.Add(new("/Speaker/Details", "Nav.SpeakerDetails"));
+            items.Add(new("/Speaker/Tasks", "Nav.MyTasks"));   // operator 2026-06-24: right after Speaker Details
             items.Add(new("/Speaker", "Nav.MySessions"));
-            items.Add(new("/Forms/Speaker", "Nav.Bio"));
-            items.Add(new("/Calendar", "Nav.Calendar"));
+            items.Add(new("/Speaker/Graphics", "Nav.HelpPromote"));
+            items.Add(new("/Calendar", "Nav.SyncCalendar"));
 
             const string EventLogistics = "Nav.SectionEventLogistics";
             items.Add(new("/Forms/Hotel", "Nav.Hotel", SectionKey: EventLogistics));
@@ -119,9 +128,7 @@ public static class NavBuilder
             items.Add(new("/Forms/Lunch", "Nav.Lunch", SectionKey: EventLogistics));
             items.Add(new("/Forms/Swag", "Nav.SpeakerGift", SectionKey: EventLogistics));
             items.Add(new("/Forms/Travel", "Nav.Travel", SectionKey: EventLogistics));
-            // (No "Important dates" item here: speakers already have a prominent
-            // top-level "Calendar" entry above pointing at the same /Calendar page —
-            // a second fold-out entry to the identical route was a duplicate.)
+            items.Add(new("/Calendar", "Nav.KeyDatesTimes", SectionKey: EventLogistics));
             // (Contact Organizers is appended LAST for every role — see end of method.)
         }
 
@@ -142,8 +149,10 @@ public static class NavBuilder
         // survey).
         if (role == ParticipantRole.Volunteer)
         {
-            items.Add(new("/volunteer/myschedule", "Nav.MySchedule"));
+            // My Availability first (operator 2026-06-23) — volunteers set it before
+            // they have a schedule to look at.
             items.Add(new("/volunteer/availability", "Nav.MyAvailability"));
+            items.Add(new("/volunteer/myschedule", "Nav.MySchedule"));
             // Supervisor dashboard: shown ONLY to volunteers who actually supervise a
             // bucket (operator 2026-06-21). A non-supervisor volunteer would otherwise
             // see a menu item that lands on a "you are not a supervisor" dead end.
@@ -166,11 +175,12 @@ public static class NavBuilder
         if (role == ParticipantRole.Attendee)
         {
             items.Add(new("/Attendee", "Nav.MasterClass"));
-            // My plan: the attendee's personal saved-sessions agenda (a complete,
-            // working page that previously had no menu/link path at all — operator
-            // 2026-06-21). Sits between the Master Class chooser and the Waitlist.
-            items.Add(new("/Attendee/MyPlan", "Nav.MyPlan"));
+            // My plan removed (operator 2026-06-23) — handled in Zoho Backstage, not
+            // the hub.
             items.Add(new("/Attendee/Waitlist", "Nav.Waitlist"));
+            // Master Class Q&A shortcut (operator 2026-06-24): redirects to the
+            // attendee's confirmed Master Class page, which hosts the shared Q&A board.
+            items.Add(new("/Attendee/MasterClassQa", "Nav.MasterClassQa"));
         }
 
         // Sponsor menu (operator 2026-06-21). The redundant Sponsor Portal + the
@@ -187,8 +197,13 @@ public static class NavBuilder
             // webshop buy-flow + the internal hub sections for orders / linked contacts.
             const string Webshop = "Nav.SectionSponsorWebshop";
             items.Add(new("https://expertslive.dk/sponsor", "Nav.SponsorBuyServices", SectionKey: Webshop, External: true));
-            items.Add(new("/Sponsor#orders", "Nav.SponsorOrders", SectionKey: Webshop));
-            items.Add(new("/Sponsor#linked-contacts", "Nav.SponsorLinkedContacts", SectionKey: Webshop));
+            // Orders + Linked-contacts are sections of the SAME /Sponsor page, so
+            // they're one menu entry (operator 2026-06-23).
+            items.Add(new("/Sponsor", "Nav.SponsorOrders", SectionKey: Webshop));
+
+            // Company Details — the in-hub self-service page where a sponsor/exhibitor
+            // maintains vital company info (top-level so it's easy to find).
+            items.Add(new("/Sponsor/CompanyDetails", "Nav.SponsorCompanyDetails"));
 
             // Exhibitor & Booth Details (Zoho, external).
             const string Booth = "Nav.SectionExhibitorBooth";
@@ -204,9 +219,9 @@ public static class NavBuilder
             items.Add(new($"{Zoho}lead-list", "Nav.LeadsZoho", SectionKey: Leads, External: true));
             items.Add(new($"{Zoho}inquiry-list", "Nav.InquiriesZoho", SectionKey: Leads, External: true));
             items.Add(new("/Sponsor/CaptureLead", "Nav.CaptureLeadFailover", SectionKey: Leads));
-            // The in-hub leads export/API page (was an island reachable only via
-            // in-page links) — surfaced in the Leads fold-out (operator 2026-06-21).
-            items.Add(new("/Sponsor/Leads", "Nav.SponsorLeadsExport", SectionKey: Leads));
+            // "My leads (export)" removed from the menu (operator 2026-06-23): the
+            // leads API/export isn't live yet. Re-add the line below when it is.
+            // items.Add(new("/Sponsor/Leads", "Nav.SponsorLeadsExport", SectionKey: Leads));
 
             // Dedicated leaf label (was reusing the "Event logistics" SECTION key).
             items.Add(new("/Sponsor/Logistics", "Nav.SponsorEventLogistics"));

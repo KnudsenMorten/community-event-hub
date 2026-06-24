@@ -53,12 +53,15 @@ public sealed class LiveEconomicContactAdminClient : IEconomicContactAdminClient
     }
 
     public async Task<IReadOnlyList<EconomicCustomerRow>> ListCustomersAsync(
-        string? search, CancellationToken ct = default)
+        string? search, int? customerGroup = null, CancellationToken ct = default)
     {
         EnsureWritable();
         var rows = new List<EconomicCustomerRow>();
-        // e-conomic pages a large collection; follow pagination.nextPage.
-        var url = $"{Base}/customers?pagesize=1000";
+        // e-conomic pages a large collection; follow pagination.nextPage. Restrict to
+        // a customer group server-side (group 1 = sponsors) when requested.
+        var url = customerGroup is int g
+            ? $"{Base}/customers?pagesize=1000&filter=customerGroup.customerGroupNumber$eq:{g}"
+            : $"{Base}/customers?pagesize=1000";
         var safety = 0;
         while (url is not null && safety++ < 100)
         {
@@ -106,7 +109,8 @@ public sealed class LiveEconomicContactAdminClient : IEconomicContactAdminClient
                 var num = GetInt(c, "customerContactNumber");
                 if (num == 0) continue;
                 rows.Add(new EconomicContactRow(
-                    num, GetStr(c, "name"), NullIfEmpty(GetStr(c, "email")), NullIfEmpty(GetStr(c, "phone"))));
+                    num, GetStr(c, "name"), NullIfEmpty(GetStr(c, "email")), NullIfEmpty(GetStr(c, "phone")),
+                    NullIfEmpty(GetStr(c, "notes"))));
             }
         }
         return rows.OrderBy(r => r.Name).ToList();
@@ -122,6 +126,7 @@ public sealed class LiveEconomicContactAdminClient : IEconomicContactAdminClient
             name = input.Name,
             email = string.IsNullOrWhiteSpace(input.Email) ? null : input.Email,
             phone = string.IsNullOrWhiteSpace(input.Phone) ? null : input.Phone,
+            notes = string.IsNullOrWhiteSpace(input.Notes) ? null : input.Notes,
         };
         var req = Req(HttpMethod.Post, $"{Base}/customers/{customerNumber}/contacts");
         req.Content = JsonContent.Create(body);
@@ -142,6 +147,7 @@ public sealed class LiveEconomicContactAdminClient : IEconomicContactAdminClient
             name = input.Name,
             email = string.IsNullOrWhiteSpace(input.Email) ? null : input.Email,
             phone = string.IsNullOrWhiteSpace(input.Phone) ? null : input.Phone,
+            notes = string.IsNullOrWhiteSpace(input.Notes) ? null : input.Notes,
         };
         var req = Req(HttpMethod.Put, $"{Base}/customers/{customerNumber}/contacts/{contactNumber}");
         req.Content = JsonContent.Create(body);

@@ -269,6 +269,41 @@ public sealed class SharePointUploadClient
     }
 
     /// <summary>
+    /// Download the raw bytes of a drive item by its Graph id. Used to COPY a
+    /// sponsor-uploaded file into a second folder (download here, then
+    /// <see cref="UploadFileAsync"/> to the destination) — a download+upload copy
+    /// gives clean overwrite semantics when a sponsor re-uploads the same name.
+    /// Returns null if the item no longer exists (tolerated by callers).
+    /// </summary>
+    public async Task<byte[]?> DownloadItemContentAsync(
+        string siteUrl,
+        string driveName,
+        string itemId,
+        CancellationToken ct = default)
+    {
+        if (!IsConfigured)
+        {
+            throw new SharePointUploadException("SharePoint integration is not fully configured.");
+        }
+
+        var driveId = await GetDriveIdAsync(siteUrl, driveName, ct);
+
+        using var req = new HttpRequestMessage(
+            HttpMethod.Get, GraphRoot + $"/drives/{driveId}/items/{itemId}/content");
+        req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", await GetAccessTokenAsync(ct));
+
+        using var resp = await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
+        if (resp.StatusCode == HttpStatusCode.NotFound) return null; // gone — tolerate
+        if (!resp.IsSuccessStatusCode)
+        {
+            var raw = await resp.Content.ReadAsStringAsync(ct);
+            throw new SharePointUploadException(
+                $"Graph GET item content {itemId} failed (HTTP {(int)resp.StatusCode}): {Truncate(raw, 400)}");
+        }
+        return await resp.Content.ReadAsByteArrayAsync(ct);
+    }
+
+    /// <summary>
     /// Delete the file at <c>{rootFolderPath}/{relativePath}</c>. Idempotent — a
     /// 404 (already gone) is treated as success so callers can delete freely.
     /// </summary>

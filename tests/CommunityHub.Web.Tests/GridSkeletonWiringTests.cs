@@ -39,10 +39,16 @@ public sealed class GridSkeletonWiringTests
     private static string Page(params string[] parts) =>
         File.ReadAllText(Path.Combine(PagesDir(), Path.Combine(parts)));
 
+    // §27: layout CSS + script now live in shared partials _Layout includes.
+    private static string LayoutAll() =>
+        Page("Shared", "_Layout.cshtml")
+        + "\n" + Page("Shared", "_LayoutClientScripts.cshtml")
+        + "\n" + Page("Shared", "_LayoutStyles.cshtml");
+
     [Fact]
     public void Layout_implements_the_grid_skeleton_behaviour()
     {
-        var layout = Page("Shared", "_Layout.cshtml");
+        var layout = LayoutAll();
         // The shared script watches the opt-in attribute and flips a busy state.
         Assert.Contains("data-ceh-grid", layout);
         Assert.Contains("data-ceh-grid-busy", layout);
@@ -54,7 +60,7 @@ public sealed class GridSkeletonWiringTests
     [Fact]
     public void Skeleton_is_accessible_busy_and_announced()
     {
-        var layout = Page("Shared", "_Layout.cshtml");
+        var layout = LayoutAll();
         // The busy grid is marked aria-busy and an aria-live region announces it.
         Assert.Contains("aria-busy", layout);
         Assert.Contains("aria-live", layout);
@@ -64,14 +70,14 @@ public sealed class GridSkeletonWiringTests
     [Fact]
     public void Skeleton_respects_reduced_motion()
     {
-        var layout = Page("Shared", "_Layout.cshtml");
+        var layout = LayoutAll();
         Assert.Contains("prefers-reduced-motion", layout);
     }
 
     [Fact]
     public void Skeleton_is_one_shot_and_clears_on_bfcache_restore()
     {
-        var layout = Page("Shared", "_Layout.cshtml");
+        var layout = LayoutAll();
         // A single navigation arms it once; a back/forward bfcache restore clears it.
         Assert.Contains("if (armed) return", layout);
         Assert.Contains("pageshow", layout);

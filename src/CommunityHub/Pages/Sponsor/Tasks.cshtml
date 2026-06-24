@@ -8,6 +8,11 @@
 <div class="card">
     <h2>@Localizer["SponsorTasks.Title"]</h2>
 
+    @if (!Model.NoCompanyLink)
+    {
+        @await Html.PartialAsync("Shared/_SecondaryEmailBanner")
+    }
+
     @if (!string.IsNullOrEmpty(Model.Message))
     {
         <p class="info">@Model.Message</p>
@@ -23,12 +28,13 @@
     }
     else
     {
-        <p>@Localizer["SponsorTasks.Intro"]</p>
         <div style="margin:6px 0 14px;padding:12px 14px;background:#f8fafc;border:1px solid #cbd5e0;border-left:4px solid var(--el-blue);border-radius:6px;color:#444;font-size:14px;line-height:1.5;">
-            These are the onboarding tasks for your company. Work through each one before its due date so everything is ready in time for the event.
-            Items not marked <em>Optional</em> are mandatory &mdash; they need to be completed for your booth and event listing to be ready.
-            Click a task to see exactly what's needed, fill in any details, then mark it done. A red badge means a task is overdue; a yellow badge shows an upcoming due date.
-            If anything is unclear, please contact the organizers and we'll be happy to help.
+            <p style="margin:0 0 10px;"><strong>Instructions:</strong></p>
+            <p style="margin:0 0 10px;">Below are the tasks for your company. To ensure your booth, company listing, and event materials are ready on time, please complete each task by its stated due date.</p>
+            <p style="margin:0 0 10px;">Delivering information by the deadlines gives us enough time to handle the necessary logistics and preparations, while also helping maximize your company's visibility and exposure to attendees before and during the event.</p>
+            <p style="margin:0 0 10px;">Tasks that are not marked as <em>Optional</em> are mandatory and must be completed for your company to be fully represented at the event.</p>
+            <p style="margin:0 0 10px;">A red badge indicates that a task is overdue, while a yellow badge indicates an upcoming deadline. Mark the task as completed once finished.</p>
+            <p style="margin:0;">If you are unable to meet a deadline, please contact the organizers as soon as possible so we can discuss possible solutions.</p>
         </div>
         @if (Model.LinkedContacts.Count > 0)
         {
@@ -61,7 +67,7 @@
 
         @if (completedTasks.Count > 0)
         {
-            <details style="margin-top:28px;border-top:2px solid var(--el-blue);padding-top:14px;">
+            <details style="margin-top:14px;padding-top:4px;">
                 <summary style="font-size:18px;font-weight:700;color:var(--el-darkblue);cursor:pointer;">
                     @Localizer["SponsorTasks.Completed", completedTasks.Count]
                     <span style="font-size:13px;font-weight:400;color:#666;margin-left:6px;">@Localizer["SponsorTasks.ClickToToggle"]</span>

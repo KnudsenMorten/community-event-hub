@@ -441,11 +441,9 @@ public sealed class MasterClassEmailService
         // Fallback: legacy inline HTML (older test constructions with no provider).
         var html =
             $"<p>Hi {Enc(fn)},</p>" +
-            $"<p>Your place in the Master Class <strong>{Enc(mcTitle)}</strong> has been <strong>cancelled</strong>.</p>" +
+            $"<p>Your place in <strong>{Enc(mcTitle)}</strong> for <strong>{Enc(eventName)}</strong> has been <strong>cancelled</strong>.</p>" +
             $"<p>You can sign up for another Master Class on your <a href=\"{Enc(url)}\">self-service page</a> " +
-            "(subject to availability).</p>" +
-            ContactLine() +
-            "<p>The team</p>";
+            "(subject to availability).</p>";
         await SendAsync(email, name, eventId,
             $"Cancelled: {mcTitle}", html, ct);
     }

@@ -1,5 +1,6 @@
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
+using CommunityHub.Core.Settings;
 using Microsoft.EntityFrameworkCore;
 
 namespace CommunityHub.Core.Organizer;
@@ -68,8 +69,21 @@ public sealed class ParticipantBulkOperationService
         int changed = 0;
         foreach (var p in targets)
         {
-            if (p.IsActive == active) continue;
-            p.IsActive = active;
+            // Compare against the LIFECYCLE-CORRECT active state, not just the
+            // IsActive flag — a synced participant can have IsActive=true while
+            // LifecycleState != Active (so it still reads as "Inactive"). Activating
+            // must therefore set BOTH; otherwise reactivate said "already active" and
+            // never cleared the lifecycle gate (operator 2026-06-23).
+            if (ParticipantActivation.IsActive(p) == active) continue;
+            if (active)
+            {
+                p.IsActive = true;
+                p.LifecycleState = ParticipantLifecycleState.Active;
+            }
+            else
+            {
+                p.IsActive = false; // the withdrawal switch — enough to read inactive
+            }
             changed++;
         }
 
@@ -98,6 +112,34 @@ public sealed class ParticipantBulkOperationService
         {
             if (p.Role == role) continue;
             p.Role = role;
+            changed++;
+        }
+
+        if (changed > 0) await _db.SaveChangesAsync(ct);
+        return new BulkResult(targets.Count, changed);
+    }
+
+    /// <summary>
+    /// Assign rollout <paramref name="ring"/> to every selected participant's own
+    /// ring (<see cref="Participant.Ring"/>) — no-op for rows already on that ring
+    /// (operator 2026-06-23). Edition-scoped; does not touch IsActive or role.
+    /// </summary>
+    public async Task<BulkResult> SetRingAsync(
+        int eventId, IEnumerable<int> participantIds, Ring ring,
+        CancellationToken ct = default)
+    {
+        var ids = Normalize(participantIds);
+        if (ids.Count == 0) return new BulkResult(0, 0);
+
+        var targets = await _db.Participants
+            .Where(p => p.EventId == eventId && ids.Contains(p.Id))
+            .ToListAsync(ct);
+
+        int changed = 0;
+        foreach (var p in targets)
+        {
+            if (p.Ring == ring) continue;
+            p.Ring = ring;
             changed++;
         }
 

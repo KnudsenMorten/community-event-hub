@@ -50,10 +50,12 @@ public sealed class PinIdentityProvider : IIdentityProvider
         var email = PinLoginService.NormalizeEmail(claim.Email);
         var now = _clock.GetUtcNow();
 
+        // Match the PRIMARY email or the optional ALTERNATE login email (§26d). The
+        // resolved participant's primary Email stays the canonical cookie identity.
         var participant = await _db.Participants
             .FirstOrDefaultAsync(
                 p => p.EventId == eventId
-                     && p.Email == email
+                     && (p.Email == email || p.AlternateEmail == email)
                      && p.IsActive
                      // Onboarding gate: a not-yet-activated queue entry cannot
                      // sign in (login requires IsActive AND lifecycle Active).

@@ -12,6 +12,7 @@
 
 <div class="card">
     <h2>@Localizer["Tasks.Title"]</h2>
+    @await Html.PartialAsync("Shared/_SecondaryEmailBanner")
     @if (Model.Tasks.Count == 0)
     {
         <p>@Localizer["Tasks.NoTasks"]</p>
@@ -35,7 +36,7 @@
                 }
                 @if (!string.IsNullOrEmpty(task.Description))
                 {
-                    <p style="margin:4px 0;">@task.Description</p>
+                    <p style="margin:4px 0;white-space:pre-line;overflow-wrap:anywhere;">@CommunityHub.Branding.TaskTextLinkifier.Render(task.Description)</p>
                 }
                 <form method="post" asp-page-handler="Toggle">
                     <input type="hidden" name="taskId" value="@task.Id" />

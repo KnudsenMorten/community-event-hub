@@ -1,0 +1,299 @@
+    <script defer>
+    (function () {
+        // ---- 0. Scroll preservation across form POSTs -----------------------
+        // After an action button posts, the page reloads and the browser would
+        // jump to the top — losing the user's place. Save the scroll position on
+        // submit and restore it on load so the window stays where the button was
+        // (the result shows as a fixed toast). Applies to every form, app-wide.
+        try {
+            var SKEY = 'ceh:scroll:' + location.pathname;
+            document.addEventListener('submit', function () {
+                try { sessionStorage.setItem(SKEY, String(window.scrollY || window.pageYOffset || 0)); } catch (e) {}
+            }, true);
+            var saved = null;
+            try { saved = sessionStorage.getItem(SKEY); } catch (e) {}
+            if (saved !== null) {
+                try { sessionStorage.removeItem(SKEY); } catch (e) {}
+                var y = parseInt(saved, 10);
+                if (y > 0) {
+                    if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
+                    // After layout settles (two frames) so the target offset exists.
+                    requestAnimationFrame(function () { requestAnimationFrame(function () { window.scrollTo(0, y); }); });
+                }
+            }
+        } catch (e) { /* progressive enhancement only */ }
+
+        // ---- 1. Flash toast: auto-dismiss (success) + close button ----------
+        function dismissFlash(el) {
+            if (!el) return;
+            el.style.transition = 'opacity .25s ease';
+            el.style.opacity = '0';
+            setTimeout(function () { el.remove(); }, 260);
+        }
+        document.querySelectorAll('[data-ceh-flash]').forEach(function (flash) {
+            var btn = flash.querySelector('[data-ceh-flash-close]');
+            if (btn) btn.addEventListener('click', function () { dismissFlash(flash); });
+            var ms = parseInt(flash.getAttribute('data-autodismiss') || '0', 10);
+            if (ms > 0) setTimeout(function () { dismissFlash(flash); }, ms);
+        });
+
+        // ---- 3. Confirmation modal: open/close + focus trap (role=dialog) ----
+        // A reusable accessible modal. Any element with
+        //   data-ceh-confirm="<modalId>"
+        // becomes a trigger: clicking it opens the modal instead of performing
+        // its action, and the modal's Confirm button replays the original action
+        // (submitting the trigger's form, or following its href).
+        var FOCUSABLE = 'a[href],button:not([disabled]),input:not([disabled]),' +
+                        'select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
+        var openModal = null, lastFocused = null;
+
+        function trapFocus(e) {
+            if (!openModal || e.key !== 'Tab') return;
+            var nodes = openModal.querySelectorAll(FOCUSABLE);
+            if (!nodes.length) return;
+            var first = nodes[0], last = nodes[nodes.length - 1];
+            if (e.shiftKey && document.activeElement === first) { last.focus(); e.preventDefault(); }
+            else if (!e.shiftKey && document.activeElement === last) { first.focus(); e.preventDefault(); }
+        }
+        function close() {
+            if (!openModal) return;
+            openModal.removeAttribute('data-open');
+            document.removeEventListener('keydown', onKey, true);
+            openModal = null;
+            if (lastFocused) { lastFocused.focus(); lastFocused = null; }
+        }
+        function onKey(e) {
+            if (e.key === 'Escape') { e.preventDefault(); close(); }
+            else trapFocus(e);
+        }
+        function open(modal, trigger) {
+            lastFocused = trigger || document.activeElement;
+            openModal = modal;
+            // Fill in the per-action count/summary the trigger declares.
+            var countEl = modal.querySelector('[data-ceh-modal-count]');
+            if (countEl && trigger && trigger.hasAttribute('data-ceh-count')) {
+                countEl.textContent = trigger.getAttribute('data-ceh-count');
+            }
+            var sumEl = modal.querySelector('[data-ceh-modal-summary]');
+            if (sumEl && trigger && trigger.hasAttribute('data-ceh-summary')) {
+                sumEl.textContent = trigger.getAttribute('data-ceh-summary');
+            }
+            // Wire the Confirm button to the originating action.
+            var confirmBtn = modal.querySelector('[data-ceh-modal-confirm]');
+            if (confirmBtn) {
+                confirmBtn.onclick = function () {
+                    close();
+                    if (trigger && trigger.tagName === 'A' && trigger.href) {
+                        window.location.href = trigger.href;
+                    } else if (trigger) {
+                        // A submit button: replay it on its own form so its
+                        // name/value (asp-page-handler etc.) is included.
+                        var form = trigger.form || trigger.closest('form');
+                        if (form) {
+                            if (trigger.name) {
+                                var hidden = document.createElement('input');
+                                hidden.type = 'hidden';
+                                hidden.name = trigger.name;
+                                hidden.value = trigger.value || '';
+                                form.appendChild(hidden);
+                            }
+                            if (form.requestSubmit) form.requestSubmit(); else form.submit();
+                        }
+                    }
+                };
+            }
+            modal.setAttribute('data-open', '');
+            document.addEventListener('keydown', onKey, true);
+            var firstFocus = modal.querySelector('[data-ceh-modal-confirm]') ||
+                             modal.querySelector(FOCUSABLE);
+            if (firstFocus) firstFocus.focus();
+        }
+        document.querySelectorAll('[data-ceh-confirm]').forEach(function (trigger) {
+            trigger.addEventListener('click', function (e) {
+                var modal = document.getElementById(trigger.getAttribute('data-ceh-confirm'));
+                if (!modal) return; // no modal => let the native action proceed
+                e.preventDefault();
+                open(modal, trigger);
+            });
+        });
+        document.querySelectorAll('.ceh-modal-backdrop').forEach(function (backdrop) {
+            // Click on the backdrop (outside the dialog) closes it.
+            backdrop.addEventListener('click', function (e) {
+                if (e.target === backdrop) close();
+            });
+            backdrop.querySelectorAll('[data-ceh-modal-cancel]').forEach(function (c) {
+                c.addEventListener('click', close);
+            });
+        });
+
+        // ---- 4. Copy-to-clipboard with transient confirmation ---------------
+        // A button with data-ceh-copy="<inputId>" copies that field's value and
+        // briefly swaps its label to the localized "copied" text (data-ceh-copied),
+        // announced via aria-live. Falls back to execCommand on old browsers; with
+        // JS off the field is still selectable, so this is pure enhancement.
+        document.querySelectorAll('[data-ceh-copy]').forEach(function (btn) {
+            var target = document.getElementById(btn.getAttribute('data-ceh-copy'));
+            if (!target) return;
+            var label = btn.getAttribute('data-ceh-copy-label') || btn.textContent;
+            var copied = btn.getAttribute('data-ceh-copied') || 'Copied!';
+            var reset = null;
+            btn.addEventListener('click', function () {
+                var done = function () {
+                    btn.textContent = copied;
+                    btn.classList.add('ceh-copied');
+                    btn.setAttribute('aria-live', 'polite');
+                    if (reset) clearTimeout(reset);
+                    reset = setTimeout(function () {
+                        btn.textContent = label;
+                        btn.classList.remove('ceh-copied');
+                    }, 1500);
+                };
+                var fail = function () { try { target.select(); document.execCommand('copy'); done(); } catch (e) { } };
+                try { target.select(); target.setSelectionRange && target.setSelectionRange(0, 99999); } catch (e) { }
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    navigator.clipboard.writeText(target.value).then(done, fail);
+                } else { fail(); }
+            });
+        });
+
+        // ---- 5. Live character counter for maxlength fields -----------------
+        // Any <textarea>/<input data-ceh-counter maxlength="N"> gets a live
+        // "used / N" counter rendered just after it, announced politely; it turns
+        // "near" amber inside the last 10% so a writer sees the cap approaching.
+        document.querySelectorAll('[data-ceh-counter][maxlength]').forEach(function (field) {
+            var max = parseInt(field.getAttribute('maxlength'), 10);
+            if (!(max > 0)) return;
+            var tmpl = field.getAttribute('data-ceh-counter') || '{0} / {1}';
+            var counter = document.createElement('span');
+            counter.className = 'ceh-counter';
+            counter.setAttribute('aria-live', 'polite');
+            counter.setAttribute('aria-atomic', 'true');
+            field.insertAdjacentElement('afterend', counter);
+            var render = function () {
+                var used = (field.value || '').length;
+                counter.textContent = tmpl.replace('{0}', used).replace('{1}', max);
+                if (used >= max * 0.9) counter.classList.add('ceh-counter--near');
+                else counter.classList.remove('ceh-counter--near');
+            };
+            field.addEventListener('input', render);
+            render();
+        });
+
+        // ---- 6. Submit loading state + double-click guard -------------------
+        // A <form data-ceh-loading> disables its submit control on the FIRST
+        // submit (so a double-click can't fire two posts) and shows a busy label
+        // (data-ceh-loading-text on the button) while the navigation is in flight.
+        // The form is allowed to submit normally; we only guard re-entry. If the
+        // form fails client validation (submit cancelled), the guard self-clears.
+        document.querySelectorAll('form[data-ceh-loading]').forEach(function (form) {
+            form.addEventListener('submit', function () {
+                // Let any other submit handler (validation) run + cancel first.
+                setTimeout(function () {
+                    if (form.dataset.cehSubmitted) return;
+                    form.dataset.cehSubmitted = '1';
+                    form.classList.add('ceh-submitting');
+                    var btn = form.querySelector('[type="submit"], button:not([type="button"])');
+                    if (btn) {
+                        var busy = btn.getAttribute('data-ceh-loading-text');
+                        if (busy) {
+                            if (btn.tagName === 'INPUT') btn.value = busy; else btn.textContent = busy;
+                        }
+                        btn.classList.add('ceh-busy');
+                        btn.setAttribute('aria-busy', 'true');
+                        // Re-enabling is avoided so a slow POST can't be re-fired;
+                        // a fresh page load resets everything.
+                        btn.disabled = true;
+                    }
+                }, 0);
+            });
+        });
+
+        // ---- 7. Unsaved-changes guard ---------------------------------------
+        // A <form data-ceh-dirty> warns (native beforeunload) if the user edits a
+        // field then tries to leave WITHOUT submitting. Submitting the form (or
+        // clicking a control that opts out via data-ceh-allow-leave) clears the
+        // guard so the post itself never trips the prompt.
+        document.querySelectorAll('form[data-ceh-dirty]').forEach(function (form) {
+            var dirty = false;
+            var clear = function () { dirty = false; };
+            form.addEventListener('input', function () { dirty = true; });
+            form.addEventListener('change', function () { dirty = true; });
+            form.addEventListener('submit', clear);
+            form.querySelectorAll('[data-ceh-allow-leave]').forEach(function (el) {
+                el.addEventListener('click', clear);
+            });
+            window.addEventListener('beforeunload', function (e) {
+                if (!dirty) return;
+                e.preventDefault();
+                e.returnValue = '';   // browsers show their own generic prompt
+                return '';
+            });
+        });
+
+        // ---- 8. Grid loading skeleton --------------------------------------
+        // A container marked data-ceh-grid shows an animated skeleton overlay
+        // while the next page of a data-heavy organizer grid is being fetched.
+        // The grids navigate with a full-page GET (filter form submit, or a
+        // sort/pagination link), so there is a perceptible wait the user gets no
+        // feedback for today. We hook those navigations and flip the grid into a
+        // busy state: the stale rows dim, the shimmer skeleton lays over them and
+        // an aria-live region announces it. A fresh page load clears everything,
+        // so there is nothing to reset. Pure enhancement (JS off => unchanged).
+        document.querySelectorAll('[data-ceh-grid]').forEach(function (grid) {
+            // Build the skeleton + live region once and keep them hidden until busy.
+            var loadingText = grid.getAttribute('data-ceh-grid-loading') || 'Loading…';
+            var skeleton = document.createElement('div');
+            skeleton.className = 'ceh-grid__skeleton';
+            skeleton.setAttribute('aria-hidden', 'true'); // decorative bars
+            for (var i = 0; i < 6; i++) {
+                var bar = document.createElement('div');
+                bar.className = 'ceh-grid__bar';
+                skeleton.appendChild(bar);
+            }
+            grid.appendChild(skeleton);
+
+            var live = document.createElement('span');
+            live.className = 'sr-only';
+            live.setAttribute('role', 'status');
+            live.setAttribute('aria-live', 'polite');
+            grid.appendChild(live);
+
+            var armed = false;
+            function setBusy() {
+                if (armed) return;       // one-shot per navigation
+                armed = true;
+                grid.setAttribute('data-ceh-grid-busy', '');
+                grid.setAttribute('aria-busy', 'true');
+                live.textContent = loadingText;
+            }
+
+            // a) the grid's own GET filter form (search / status / persona...).
+            var filterForm = grid.querySelector('form[method="get"]');
+            if (filterForm) filterForm.addEventListener('submit', function () { setTimeout(setBusy, 0); });
+
+            // b) sort-header + pagination links inside the grid. Skip in-page
+            //    anchors and anything that opts out (data-ceh-grid-skip), and
+            //    ignore modified clicks (new tab / download) so we never show a
+            //    skeleton for a navigation that isn't replacing this page.
+            grid.addEventListener('click', function (e) {
+                var a = e.target.closest && e.target.closest('a[href]');
+                if (!a || !grid.contains(a)) return;
+                if (a.hasAttribute('data-ceh-grid-skip')) return;
+                if (a.target === '_blank' || a.hasAttribute('download')) return;
+                if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+                var href = a.getAttribute('href') || '';
+                if (href === '' || href.charAt(0) === '#') return;
+                setBusy();
+            });
+        });
+
+        // The browser's bfcache can restore a busy grid when the user navigates
+        // back; clear the state on pageshow so it never sticks.
+        window.addEventListener('pageshow', function () {
+            document.querySelectorAll('[data-ceh-grid][data-ceh-grid-busy]').forEach(function (g) {
+                g.removeAttribute('data-ceh-grid-busy');
+                g.removeAttribute('aria-busy');
+            });
+        });
+    })();
+    </script>

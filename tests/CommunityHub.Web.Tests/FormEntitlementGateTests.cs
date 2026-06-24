@@ -167,10 +167,12 @@ public sealed class FormEntitlementGateTests
     // ===== Sponsor-self-funded speaker: ALLOWED lunch + dinner ================
 
     [Fact]
-    public async Task Sponsor_self_funded_speaker_is_allowed_lunch()
+    public async Task Sponsor_self_funded_master_class_speaker_lunch_is_auto_counted()
     {
+        // Master-class speakers (SpeakingPreDay) are AUTO-COUNTED for the pre-day
+        // lunch now (operator 2026-06-24) — they don't fill the form.
         var (m, db) = Build(SpeakerFunding.SponsorSelfFunded, NewLunch);
-        using (db) { await m.OnGetAsync(default); Assert.False(m.AccessDenied); }
+        using (db) { await m.OnGetAsync(default); Assert.True(m.AccessDenied); Assert.True(m.PreDayAutoCounted); }
     }
 
     [Fact]
@@ -204,10 +206,12 @@ public sealed class FormEntitlementGateTests
     }
 
     [Fact]
-    public async Task Supported_speaker_is_allowed_lunch_and_dinner()
+    public async Task Supported_master_class_speaker_lunch_auto_counted_dinner_allowed()
     {
+        // Pre-day lunch is auto-counted for the master-class speaker (operator
+        // 2026-06-24); dinner is unaffected and still shown.
         var (lunch, db1) = Build(SpeakerFunding.Supported, NewLunch);
-        using (db1) { await lunch.OnGetAsync(default); Assert.False(lunch.AccessDenied); }
+        using (db1) { await lunch.OnGetAsync(default); Assert.True(lunch.AccessDenied); Assert.True(lunch.PreDayAutoCounted); }
 
         var (dinner, db2) = Build(SpeakerFunding.Supported, NewDinner);
         using (db2) { await dinner.OnGetAsync(default); Assert.False(dinner.AccessDenied); }

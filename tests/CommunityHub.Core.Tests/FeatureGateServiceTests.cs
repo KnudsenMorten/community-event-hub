@@ -69,6 +69,34 @@ public sealed class FeatureGateServiceTests
     }
 
     [Fact]
+    public async Task Jobs_pause_master_switch_defaults_running_and_round_trips_per_edition()
+    {
+        using var db = NewDb();
+        var settings = NewSettings(db);
+        var gate = NewGate(db);
+
+        // Default (no row): NOT paused — jobs run, so behaviour is unchanged.
+        Assert.False(await gate.AreJobsPausedAsync(EventId));
+
+        // Pause this edition only; a different edition is unaffected.
+        await settings.SetJobsPausedAsync(EventId, true, "org@expertslive.dk");
+        Assert.True(await gate.AreJobsPausedAsync(EventId));
+        Assert.False(await gate.AreJobsPausedAsync(OtherEventId));
+
+        // Resume.
+        await settings.SetJobsPausedAsync(EventId, false, "org@expertslive.dk");
+        Assert.False(await gate.AreJobsPausedAsync(EventId));
+    }
+
+    [Fact]
+    public void Jobs_pause_key_is_not_a_catalog_feature()
+    {
+        // The pause switch is a reserved operational key, NOT a rollout-staged
+        // feature — it must not appear in the catalog grid.
+        Assert.Null(FeatureCatalog.Find(FeatureGateService.JobsPausedKey));
+    }
+
+    [Fact]
     public async Task Persisted_switch_wins_over_catalog_default()
     {
         using var db = NewDb();

@@ -1,6 +1,9 @@
+using System.Net.Http;
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
 using CommunityHub.Core.Integrations;
+using CommunityHub.Core.Integrations.Graphics;
+using CommunityHub.Core.Settings;
 using Microsoft.EntityFrameworkCore;
 
 namespace CommunityHub.Core.Reminders;
@@ -63,17 +66,25 @@ public sealed class SessionizeImportService
     private readonly SessionizeExcelParser _parser;
     private readonly WelcomeEmailService _welcome;
     private readonly TimeProvider _clock;
+    // Optional (§26c): used to copy the Sessionize profile picture into SharePoint.
+    // Null in unit tests / when SharePoint isn't configured — picture import is then
+    // simply skipped (best-effort), never failing the import.
+    private readonly ISharePointFileStore? _pictureStore;
+    // Shared client for the best-effort picture fetch (low volume; one per process).
+    private static readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(30) };
 
     public SessionizeImportService(
         CommunityHubDbContext db,
         SessionizeExcelParser parser,
         WelcomeEmailService welcome,
-        TimeProvider clock)
+        TimeProvider clock,
+        ISharePointFileStore? pictureStore = null)
     {
         _db = db;
         _parser = parser;
         _welcome = welcome;
         _clock = clock;
+        _pictureStore = pictureStore;
     }
 
     /// <summary>
@@ -160,7 +171,18 @@ public sealed class SessionizeImportService
                     Email = s.Email,
                     FullName = fullName,
                     Role = ParticipantRole.Speaker,
+                    // Active by default — set BOTH fields so ParticipantActivation.IsActive
+                    // is true. IsActive alone left LifecycleState defaulting to Inactive,
+                    // so imported speakers read inactive everywhere (same dual-field bug
+                    // fixed for synced sponsors). Ring gating still controls their emails.
                     IsActive = true,
+                    LifecycleState = ParticipantLifecycleState.Active,
+                    // §26c: imported speakers default to the LOCKED ring (Broad = released
+                    // last) so NOTHING ring-gated (email, Zoho sync) fires for them until an
+                    // organizer explicitly promotes them. Set explicitly, not relying on the
+                    // model default. (Broad is "locked" because the speaker features are
+                    // released to an inner ring; promotion = moving the speaker inward.)
+                    Ring = Ring.Broad,
                     CreatedAt = now,
                 };
                 _db.Participants.Add(fresh);
@@ -210,6 +232,8 @@ public sealed class SessionizeImportService
                 prof.LinkedIn  = s.LinkedIn;
                 prof.Twitter   = s.Twitter;
                 prof.PhotoUrl  = s.ProfilePictureUrl;
+                prof.FirstName = string.IsNullOrWhiteSpace(s.FirstName) ? prof.FirstName : s.FirstName;
+                prof.LastName  = string.IsNullOrWhiteSpace(s.LastName) ? prof.LastName : s.LastName;
                 prof.ClearSpeakerEdited();
             }
             else
@@ -221,6 +245,27 @@ public sealed class SessionizeImportService
                 prof.LinkedIn  = FillIfUntouched(prof, SpeakerProfile.BioFields.LinkedIn,  prof.LinkedIn,  s.LinkedIn);
                 prof.Twitter   = FillIfUntouched(prof, SpeakerProfile.BioFields.Twitter,   prof.Twitter,   s.Twitter);
                 prof.PhotoUrl  = FillIfUntouched(prof, SpeakerProfile.BioFields.PhotoUrl,  prof.PhotoUrl,  s.ProfilePictureUrl);
+                if (string.IsNullOrWhiteSpace(prof.FirstName)) prof.FirstName = s.FirstName;
+                if (string.IsNullOrWhiteSpace(prof.LastName))  prof.LastName  = s.LastName;
+            }
+
+            // Identity: always track the Sessionize speaker id (it never "belongs" to
+            // the speaker to edit). Match/dedup + future picture refresh key.
+            if (!string.IsNullOrWhiteSpace(s.SessionizeId)) prof.SessionizeSpeakerId = s.SessionizeId;
+
+            // Picture -> SharePoint (best-effort, §26c): fetch the Sessionize
+            // profilePicture once and store a stable copy. Only when we have a URL, a
+            // configured store, and no stored copy yet; a failure never fails the import.
+            if (_pictureStore?.CanStore == true
+                && !string.IsNullOrWhiteSpace(s.ProfilePictureUrl)
+                && string.IsNullOrWhiteSpace(prof.PhotoSharePointPath))
+            {
+                try
+                {
+                    var storedPath = await FetchAndStorePictureAsync(p.Id, s.ProfilePictureUrl!, ct);
+                    if (!string.IsNullOrWhiteSpace(storedPath)) prof.PhotoSharePointPath = storedPath;
+                }
+                catch { /* best-effort: a picture failure must not fail the import */ }
             }
 
             prof.UpdatedAt = now;
@@ -261,5 +306,26 @@ public sealed class SessionizeImportService
         if (prof.IsSpeakerEdited(field)) return current;          // speaker owns it
         if (!string.IsNullOrWhiteSpace(current)) return current;  // already populated
         return incoming;                                          // genuinely empty
+    }
+
+    /// <summary>
+    /// Fetch a Sessionize profile-picture URL and store a stable copy in SharePoint
+    /// (e.g. <c>Speakers/speaker-42.jpg</c>). Returns the stored relative path, or
+    /// null when nothing could be fetched/stored. Best-effort: the caller swallows
+    /// failures so a picture issue never fails the speaker import.
+    /// </summary>
+    private async Task<string?> FetchAndStorePictureAsync(int participantId, string url, CancellationToken ct)
+    {
+        if (_pictureStore is null) return null;
+        using var resp = await _http.GetAsync(url, ct);
+        if (!resp.IsSuccessStatusCode) return null;
+        var bytes = await resp.Content.ReadAsByteArrayAsync(ct);
+        if (bytes.Length == 0) return null;
+        var contentType = resp.Content.Headers.ContentType?.MediaType ?? "image/jpeg";
+        var ext = contentType.Contains("png") ? ".png"
+                : contentType.Contains("gif") ? ".gif"
+                : contentType.Contains("webp") ? ".webp" : ".jpg";
+        var stored = await _pictureStore.StoreAsync($"Speakers/speaker-{participantId}{ext}", bytes, contentType, ct);
+        return stored.Path;
     }
 }

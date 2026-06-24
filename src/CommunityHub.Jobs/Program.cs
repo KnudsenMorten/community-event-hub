@@ -1,3 +1,4 @@
+using CommunityHub.Jobs;
 using CommunityHub.Core.Config;
 using CommunityHub.Core.Data;
 using Microsoft.AspNetCore.DataProtection;
@@ -17,7 +18,9 @@ using Microsoft.Extensions.Hosting;
 // ===========================================================================
 
 var host = new HostBuilder()
-    .ConfigureFunctionsWorkerDefaults()
+    // JobsPauseMiddleware: the org-admin "pause all jobs" master switch — one
+    // central guard so every timer job no-ops before doing any work when paused.
+    .ConfigureFunctionsWorkerDefaults(worker => worker.UseMiddleware<JobsPauseMiddleware>())
     .ConfigureServices((context, services) =>
     {
         var config = context.Configuration;
@@ -192,6 +195,10 @@ var host = new HostBuilder()
         // Excel parser + welcome path are shared with the upload route.
         services.AddSingleton<SessionizeExcelParser>();
         services.AddScoped<WelcomeEmailService>();
+        // Desired-state sponsor welcome reconcile (SponsorWelcomeReconcileJob).
+        services.AddScoped<CommunityHub.Core.Reminders.SponsorWelcomeEmailService>();
+        // One-shot email-feature enable (EnableEmailFeaturesJob, admin-triggered).
+        services.AddScoped<CommunityHub.Core.Settings.FeatureSettingsService>();
         services.AddScoped<SessionizeImportService>();
         // Sessions are pulled from the same v2 view API and linked to speakers.
         services.AddScoped<SessionImportService>();
@@ -227,6 +234,11 @@ var host = new HostBuilder()
         services.AddSingleton(zohoOptions);
         services.AddSingleton<AttendeeReconciler>();
         services.AddHttpClient<ZohoClient>();
+
+        // STAGE 4b: create/link Zoho sponsor + exhibitor records from webshop data
+        // after the order pull (replaces the legacy PowerShell sync). Run by
+        // WooCommercePullJob, gated by 'sponsor-zoho-provision'.
+        services.AddScoped<SponsorZohoProvisionService>();
 
         // --- Sponsor leads pipeline (nightly CRM pull + delta digests) ------
         services.AddSingleton<CommunityHub.Core.Integrations.Sponsors.SponsorLeadScreeningService>();
@@ -273,6 +285,14 @@ var host = new HostBuilder()
         config.GetSection(CommunityHub.Core.Integrations.Erp.EconomicErpOptions.SectionName)
             .Bind(economicErpOptions);
         services.AddSingleton(economicErpOptions);
+
+        // ERP→webshop reconcile (the scheduled ErpWebshopReconcileJob, 30-min timer):
+        // mirror the web app's registration so the job can resolve the sync service.
+        // All other deps (CompanyManagerClient/Options, EmailSender) are already above.
+        services.AddHttpClient<CommunityHub.Core.Integrations.Erp.IEconomicContactAdminClient,
+            CommunityHub.Core.Integrations.Erp.LiveEconomicContactAdminClient>();
+        services.AddScoped<CommunityHub.Core.Integrations.Erp.EconomicContactAdminService>();
+        services.AddScoped<CommunityHub.Core.Integrations.Erp.ErpWebshopContactSyncService>();
 
         // Read-only e-conomic ROLE source (REQUIREMENTS §7c): resolves the
         // sponsor-email coordinator audience from e-conomic contact role data

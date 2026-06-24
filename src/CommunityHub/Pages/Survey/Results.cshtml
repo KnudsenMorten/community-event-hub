@@ -1,9 +1,8 @@
 @page "/survey/{slug}/results"
 @model CommunityHub.Pages.Survey.ResultsModel
 @{
-    Layout = "_Layout";
+    Layout = "_PublicLayout";   // anonymous standalone — never shows internal chrome (§27)
     ViewData["Title"] = (Model.Survey?.Title ?? "Survey") + " — Results";
-    ViewData["HidePublicNav"] = true;   // standalone survey results — no public event nav bar
 }
 
 @if (Model.Survey is null)

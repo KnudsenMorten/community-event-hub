@@ -34,6 +34,31 @@ public static class WelcomeVariants
         _                            => null,
     };
 
+    /// <summary>
+    /// The recipient's sponsor role label for the welcome's "you are receiving this
+    /// in your role as …" line — built from the participant's actual sponsor flags
+    /// (event coordinator / signer / booth member), so it is never a static value.
+    /// Multiple roles are joined naturally ("event coordinator and signer",
+    /// "event coordinator, signer, and booth member"). When no flag is set it falls
+    /// back to the generic "sponsor contact".
+    /// </summary>
+    public static string SponsorRoleLabel(
+        bool isEventCoordinator, bool isSigner, bool isBoothMember)
+    {
+        var roles = new List<string>(3);
+        if (isEventCoordinator) roles.Add("event coordinator");
+        if (isSigner) roles.Add("signer");
+        if (isBoothMember) roles.Add("booth member");
+
+        return roles.Count switch
+        {
+            0 => "sponsor contact",
+            1 => roles[0],
+            2 => $"{roles[0]} and {roles[1]}",
+            _ => $"{string.Join(", ", roles.Take(roles.Count - 1))}, and {roles[^1]}",
+        };
+    }
+
     /// <summary>The full set of welcome template keys (one per welcomed role) — for catalog/registration.</summary>
     public static readonly IReadOnlyList<string> AllTemplateKeys = new[]
     {

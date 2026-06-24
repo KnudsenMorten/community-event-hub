@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace CommunityHub.Pages.Organizer.SponsorAdmin;
 
@@ -50,6 +51,72 @@ public class DashboardModel : PageModel
     }
 
     public bool AccessDenied { get; private set; }
+
+    [TempData] public string? ActionMessage { get; set; }
+
+    /// <summary>
+    /// One-time (re-runnable) maintenance: fill each sponsor's Event Coordinator
+    /// from the webshop default coordinator where empty, then re-sync every sponsor
+    /// record to Zoho Backstage (fixes the legacy UTF-8 mojibake + pushes contacts).
+    /// </summary>
+    public async Task<IActionResult> OnPostMigrateResyncAsync(CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+
+        var svc = HttpContext.RequestServices.GetRequiredService<SponsorZohoSyncService>();
+        var r = await svc.MigrateCoordinatorsAndResyncAsync(me.EventId, ct);
+        ActionMessage =
+            $"Coordinators filled from webshop: {r.CoordinatorsFilled}. " +
+            $"Synced to Zoho: {r.SponsorsSynced} sponsor + {r.ExhibitorsSynced} exhibitor record(s) " +
+            $"across {r.Companies} compan{(r.Companies == 1 ? "y" : "ies")}." +
+            (r.Failed > 0 ? $" {r.Failed} need attention: {string.Join("; ", r.Notes.Take(8))}" : " No issues.");
+        return RedirectToPage();
+    }
+
+    /// <summary>
+    /// Stage 4b: CREATE or LINK each sponsor company's Zoho Backstage sponsor +
+    /// exhibitor records from webshop data (the manual equivalent of the scheduled
+    /// provisioning the order-pull job runs). Re-runnable; existing/linked companies
+    /// are left as-is.
+    /// </summary>
+    public async Task<IActionResult> OnPostProvisionAsync(CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+
+        var svc = HttpContext.RequestServices.GetRequiredService<SponsorZohoProvisionService>();
+        var r = await svc.ProvisionAsync(me.EventId, ct);
+        ActionMessage = !r.Enabled
+            ? "Zoho Backstage is not enabled for this environment."
+            : $"Zoho provision: {r.SponsorsCreated} sponsor(s) created, {r.SponsorsLinked} linked, " +
+              $"{r.ExhibitorsRequested} exhibitor request(s), {r.ExhibitorsLinked} exhibitor(s) linked, {r.Skipped} skipped." +
+              (r.Notes.Count > 0 ? " " + string.Join("; ", r.Notes.Take(8)) : "");
+        return RedirectToPage();
+    }
+
+    /// <summary>
+    /// ERP→webshop reconcile: create missing Company Manager users from the group-1
+    /// e-conomic contacts, set each company's default signer + event coordinator from
+    /// the contact roles, and email an alert for any contacts missing a Role:1/Role:2.
+    /// </summary>
+    public async Task<IActionResult> OnPostReconcileErpAsync(CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+
+        var svc = HttpContext.RequestServices.GetRequiredService<CommunityHub.Core.Integrations.Erp.ErpWebshopContactSyncService>();
+        var r = await svc.SyncAsync(ct);
+        ActionMessage = !r.Enabled
+            ? "e-conomic / Company Manager is not configured for this environment."
+            : $"ERP→webshop reconcile: {r.Customers} sponsor customers, {r.UsersCreated} webshop user(s) created, " +
+              $"{r.DefaultsSet} default(s) set, {r.Alerts} item(s) need attention" +
+              (r.Alerts > 0 ? $" (alert emailed to {CommunityHub.Core.Integrations.Erp.ErpWebshopContactSyncService.AlertEmail}): {string.Join("; ", r.AlertNotes.Take(10))}" : ".");
+        return RedirectToPage();
+    }
 
     /// <summary>
     /// True only when the leads pipeline is genuinely unconfigured: the Zoho

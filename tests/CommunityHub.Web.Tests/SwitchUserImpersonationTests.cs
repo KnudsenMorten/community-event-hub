@@ -105,7 +105,9 @@ public sealed class SwitchUserImpersonationTests
             db, accessor, new ParticipantBulkOperationService(db),
             new ParticipantDeletionService(db, clock),
             new ParticipantSearchService(db),
-            new ImpersonationAuditService(db, clock), clock)
+            new ImpersonationAuditService(db, clock),
+            new CommunityHub.Core.Integrations.CompanyManagerClient(new System.Net.Http.HttpClient(), new CommunityHub.Core.Integrations.CompanyManagerOptions()),
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<ParticipantsModel>.Instance, clock)
         {
             PageContext = new PageContext { HttpContext = http },
         };

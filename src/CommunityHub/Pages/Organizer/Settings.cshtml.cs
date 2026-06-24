@@ -28,17 +28,20 @@ public class SettingsModel : PageModel
 {
     private readonly ICurrentParticipantAccessor _participant;
     private readonly FeatureSettingsService _settings;
+    private readonly FeatureGateService _gate;
     private readonly EmailOptions _email;
     private readonly IWebHostEnvironment _env;
 
     public SettingsModel(
         ICurrentParticipantAccessor participant,
         FeatureSettingsService settings,
+        FeatureGateService gate,
         IOptions<EmailOptions> email,
         IWebHostEnvironment env)
     {
         _participant = participant;
         _settings = settings;
+        _gate = gate;
         _email = email.Value;
         _env = env;
     }
@@ -88,6 +91,9 @@ public class SettingsModel : PageModel
     /// <summary>The effective lifecycle ring of every feature group (§23a) — the per-group control state.</summary>
     public IReadOnlyList<GroupRingState> GroupRings { get; private set; }
         = Array.Empty<GroupRingState>();
+
+    /// <summary>True when all background jobs are currently PAUSED for this edition (master switch).</summary>
+    public bool JobsPaused { get; private set; }
 
     /// <summary>The effective group ring for one group (for the GUI group header).</summary>
     public GroupRingState GroupRingFor(FeatureGroup g) =>
@@ -213,10 +219,29 @@ public class SettingsModel : PageModel
         return Page();
     }
 
+    /// <summary>
+    /// PAUSE or RESUME all background jobs for this edition — the master switch.
+    /// Every timer job consults this (via JobsPauseMiddleware) and no-ops while
+    /// paused; resume takes effect on each job's next tick.
+    /// </summary>
+    public async Task<IActionResult> OnPostSetJobsPausedAsync(bool paused, CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+        if (!OrganizerAuth.IsRealOrganizer(me)) return Forbid();
+
+        await _settings.SetJobsPausedAsync(me.EventId, paused, me.Email, ct);
+        Saved = true;
+
+        await LoadAsync(me.EventId, ct);
+        return Page();
+    }
+
     private async Task LoadAsync(int eventId, CancellationToken ct)
     {
         Groups = await _settings.GetByGroupAsync(eventId, ct);
         UnmetDependencies = await _settings.GetUnmetDependenciesAsync(eventId, ct);
         GroupRings = await _settings.GetGroupRingsAsync(eventId, ct);
+        JobsPaused = await _gate.AreJobsPausedAsync(eventId, ct);
     }
 }

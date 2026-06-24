@@ -95,6 +95,16 @@ public class WelcomeModel : PageModel
         tokens["communityName"] = communityName;
         tokens["eventDisplayName"] = EventDisplayName;
         tokens["eventCode"] = EventCode;
+        // Sponsor welcome: dynamic role label from the participant's actual sponsor
+        // flags (event coordinator / signer / booth member), matching the email.
+        var spFlags = _db.Participants
+            .Where(x => x.Id == me.ParticipantId)
+            .Select(x => new { x.IsEventCoordinator, x.IsSigner, x.IsBoothMember })
+            .FirstOrDefault();
+        tokens["sponsorRole"] = spFlags is null
+            ? "sponsor contact"
+            : WelcomeVariants.SponsorRoleLabel(
+                spFlags.IsEventCoordinator, spFlags.IsSigner, spFlags.IsBoothMember);
         // hubUrl/supportEmail/brandColor/logoUrl are seeded by NewTokenSet().
         try
         {

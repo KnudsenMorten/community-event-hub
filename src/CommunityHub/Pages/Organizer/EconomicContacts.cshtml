@@ -1,10 +1,7 @@
 @page
-@using CommunityHub.Core.Integrations.Erp
 @model CommunityHub.Pages.Organizer.EconomicContactsModel
 @{
-    ViewData["Title"] = "e-conomic contacts";
-    string RoleLabel(ErpContactRole r) => r switch {
-        ErpContactRole.Signer => "Signer", ErpContactRole.EventCoordinator => "Event Coordinator", _ => "Contact" };
+    ViewData["Title"] = "e-conomic sponsor contacts";
 }
 
 @if (Model.AccessDenied)
@@ -19,9 +16,11 @@
 
 <style>
     .ec-tbl { width:100%; border-collapse:collapse; font-size:13px; }
-    .ec-tbl th, .ec-tbl td { padding:6px 8px; border-bottom:1px solid #eef0f4; text-align:left; vertical-align:top; }
-    .ec-tbl input[type=text], .ec-tbl input[type=email], .ec-tbl select, .ec-tbl textarea {
+    .ec-tbl th, .ec-tbl td { padding:6px 8px; border-bottom:1px solid #eef0f4; text-align:left; vertical-align:middle; }
+    .ec-tbl input[type=text], .ec-tbl input[type=email], .ec-tbl input[type=tel] {
         width:100%; box-sizing:border-box; padding:5px 7px; border:1px solid #cbd2d9; border-radius:6px; font-size:13px; }
+    .ec-roles { display:flex; gap:10px; white-space:nowrap; font-size:12.5px; }
+    .ec-roles label { display:flex; align-items:center; gap:4px; }
     .ec-del { background:#fff; border:1px solid #e3a3a3; color:#b3261e; border-radius:6px; padding:4px 10px; font-size:12px; cursor:pointer; }
     .ec-search input { padding:8px 10px; border:1px solid #cbd2d9; border-radius:6px; font-size:14px; min-width:240px; }
 </style>
@@ -37,7 +36,7 @@
         <h1 style="margin-top:0;">@ViewData["Title"]</h1>
         <p class="error">e-conomic isn't connected yet. Set the <code>EconomicErp</code> base URL + the
            App-Secret / Agreement-Grant tokens (from Key Vault) on the app, then this page can list
-           customers and manage their contacts.</p>
+           sponsor customers and manage their contacts.</p>
         <p><a asp-page="/Organizer/Index">&larr; @Localizer["Common.BackToOrganizerArea"]</a></p>
     </div>
     return;
@@ -47,8 +46,9 @@
 {
     <div class="card">
         <h1 style="margin-top:0;">@ViewData["Title"]</h1>
-        <p>Pick an e-conomic customer to manage its contacts. Email, name and phone are saved straight to
-           e-conomic; the role and notes are kept in the hub.</p>
+        <p>Sponsor customers from e-conomic (<strong>customer group 1</strong>). Pick one to manage its contacts —
+           name, email, phone and role write straight to e-conomic (the master). Roles: <strong>Signer</strong>
+           and/or <strong>Event Coordinator</strong> (a person can hold both).</p>
         <p><a asp-page="/Organizer/Index">&larr; @Localizer["Common.BackToOrganizerArea"]</a></p>
 
         <form method="get" class="ec-search" style="margin:10px 0;">
@@ -58,7 +58,7 @@
         </form>
 
         <table class="ec-tbl">
-            <thead><tr><th>#</th><th>Customer</th><th>Email</th><th></th></tr></thead>
+            <thead><tr><th>#</th><th>Sponsor</th><th>Email</th><th></th></tr></thead>
             <tbody>
             @foreach (var c in Model.Customers)
             {
@@ -71,7 +71,7 @@
             }
             @if (Model.Customers.Count == 0)
             {
-                <tr><td colspan="4" style="color:#6b7280;">No customers@(string.IsNullOrEmpty(Model.Search) ? "." : " match that search.")</td></tr>
+                <tr><td colspan="4" style="color:#6b7280;">No sponsor customers@(string.IsNullOrEmpty(Model.Search) ? "." : " match that search.")</td></tr>
             }
             </tbody>
         </table>
@@ -81,11 +81,11 @@ else
 {
     <div class="card">
         <h1 style="margin-top:0;">Contacts — @(Model.SelectedCustomerName ?? $"Customer #{Model.SelectedCustomer}")</h1>
-        <p style="color:#6b7280;">e-conomic customer #@Model.SelectedCustomer</p>
-        <p><a asp-page="/Organizer/EconomicContacts">&larr; All customers</a></p>
+        <p style="color:#6b7280;">e-conomic customer #@Model.SelectedCustomer (sponsor, group 1)</p>
+        <p><a asp-page="/Organizer/EconomicContacts">&larr; All sponsors</a></p>
 
         <table class="ec-tbl">
-            <thead><tr><th>#</th><th>Name</th><th>Email</th><th>Phone</th><th>Role</th><th>Notes</th><th></th></tr></thead>
+            <thead><tr><th>#</th><th>Name</th><th>Email</th><th>Phone</th><th>Role</th><th></th><th></th></tr></thead>
             <tbody>
             @foreach (var c in Model.Contacts)
             {
@@ -93,22 +93,18 @@ else
                     <form method="post" asp-page-handler="Update">
                         <input type="hidden" name="customer" value="@Model.SelectedCustomer" />
                         <input type="hidden" name="contact" value="@c.ContactNumber" />
+                        <input type="hidden" name="notes" value="@c.Notes" />
                         <td>@c.ContactNumber</td>
                         <td><input type="text" name="name" value="@c.Name" required /></td>
                         <td><input type="email" name="email" value="@c.Email" /></td>
-                        <td><input type="text" name="phone" value="@c.Phone" /></td>
+                        <td><input type="tel" name="phone" value="@c.Phone" /></td>
                         <td>
-                            <select name="role">
-                                @foreach (var r in CommunityHub.Pages.Organizer.EconomicContactsModel.Roles)
-                                {
-                                    <option value="@((int)r)" selected="@(r == c.Role)">@RoleLabel(r)</option>
-                                }
-                            </select>
+                            <span class="ec-roles">
+                                <label><input type="checkbox" name="signer" value="true" checked="@c.IsSigner" /> Signer</label>
+                                <label><input type="checkbox" name="coordinator" value="true" checked="@c.IsEventCoordinator" /> Event Coordinator</label>
+                            </span>
                         </td>
-                        <td><input type="text" name="notes" value="@c.Notes" /></td>
-                        <td style="white-space:nowrap;">
-                            <button type="submit">Save</button>
-                        </td>
+                        <td style="white-space:nowrap;"><button type="submit">Save</button></td>
                     </form>
                     <td style="border-bottom:1px solid #eef0f4;">
                         <form method="post" asp-page-handler="Delete" onsubmit="return confirm('Delete this contact from e-conomic? This cannot be undone.');">
@@ -135,16 +131,13 @@ else
                 <tr>
                     <td><input type="text" name="name" placeholder="Full name" required /></td>
                     <td><input type="email" name="email" placeholder="Email" /></td>
-                    <td><input type="text" name="phone" placeholder="Phone" /></td>
+                    <td><input type="tel" name="phone" placeholder="Phone" /></td>
                     <td>
-                        <select name="role">
-                            @foreach (var r in CommunityHub.Pages.Organizer.EconomicContactsModel.Roles)
-                            {
-                                <option value="@((int)r)">@RoleLabel(r)</option>
-                            }
-                        </select>
+                        <span class="ec-roles">
+                            <label><input type="checkbox" name="signer" value="true" /> Signer</label>
+                            <label><input type="checkbox" name="coordinator" value="true" /> Event Coordinator</label>
+                        </span>
                     </td>
-                    <td><input type="text" name="notes" placeholder="Notes (hub only)" /></td>
                     <td><button type="submit">Add</button></td>
                 </tr>
             </table>

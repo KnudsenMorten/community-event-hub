@@ -1,19 +1,17 @@
-using CommunityHub.Core.Domain;
 using CommunityHub.Core.Integrations.Erp;
-using CommunityHub.Core.Tests.Scenario;
 using Xunit;
 
 namespace CommunityHub.Core.Tests;
 
 /// <summary>
-/// The organizer e-conomic contact-CRUD orchestration (<see cref="EconomicContactAdminService"/>):
-/// the live e-conomic write (faked here) plus the hub-side role + notes annotation
-/// kept in lock-step — list merges them, create/update/delete write both sides.
-/// EF in-memory; no real e-conomic.
+/// The e-conomic contact-CRUD orchestration (<see cref="EconomicContactAdminService"/>).
+/// e-conomic is the MASTER: a contact's role (Signer / Event Coordinator) is encoded
+/// in the contact's notes as Role:1,2; the service writes it on create/update and
+/// parses it on list. Faked live client; no real e-conomic.
 /// </summary>
 public class EconomicContactAdminServiceTests
 {
-    /// <summary>In-memory fake of the live e-conomic client; records writes.</summary>
+    /// <summary>In-memory fake of the live e-conomic client; records writes (incl. notes).</summary>
     private sealed class FakeClient : IEconomicContactAdminClient
     {
         public bool CanWrite { get; set; } = true;
@@ -22,7 +20,7 @@ public class EconomicContactAdminServiceTests
         public int Deleted;
         public (int customer, int contact, EconomicContactInput input)? LastUpdate;
 
-        public Task<IReadOnlyList<EconomicCustomerRow>> ListCustomersAsync(string? search, CancellationToken ct = default) =>
+        public Task<IReadOnlyList<EconomicCustomerRow>> ListCustomersAsync(string? search, int? customerGroup = null, CancellationToken ct = default) =>
             Task.FromResult<IReadOnlyList<EconomicCustomerRow>>(new[] { new EconomicCustomerRow(1, "Acme A/S", "acc@acme.test") });
 
         public Task<IReadOnlyList<EconomicContactRow>> ListContactsAsync(int customerNumber, CancellationToken ct = default) =>
@@ -31,7 +29,7 @@ public class EconomicContactAdminServiceTests
         public Task<int> CreateContactAsync(int customerNumber, EconomicContactInput input, CancellationToken ct = default)
         {
             var n = NextNumber++;
-            Contacts.Add(new EconomicContactRow(n, input.Name, input.Email, input.Phone));
+            Contacts.Add(new EconomicContactRow(n, input.Name, input.Email, input.Phone, input.Notes));
             return Task.FromResult(n);
         }
 
@@ -39,7 +37,7 @@ public class EconomicContactAdminServiceTests
         {
             LastUpdate = (customerNumber, contactNumber, input);
             Contacts.RemoveAll(c => c.ContactNumber == contactNumber);
-            Contacts.Add(new EconomicContactRow(contactNumber, input.Name, input.Email, input.Phone));
+            Contacts.Add(new EconomicContactRow(contactNumber, input.Name, input.Email, input.Phone, input.Notes));
             return Task.CompletedTask;
         }
 
@@ -52,67 +50,73 @@ public class EconomicContactAdminServiceTests
     }
 
     [Fact]
-    public async Task Create_writes_economic_and_persists_role_notes_then_list_merges_them()
+    public async Task Create_encodes_role_into_economic_notes_then_list_parses_it()
     {
-        using var db = ScenarioFixture.NewDb();
         var client = new FakeClient();
-        var svc = new EconomicContactAdminService(client, db);
+        var svc = new EconomicContactAdminService(client);
 
-        var num = await svc.CreateAsync(1,
-            new EconomicContactInput("Jane Doe", "jane@acme.test", "+45 1234"),
-            ErpContactRole.EventCoordinator, "VIP - call first", "mok@expertslive.dk");
+        var num = await svc.CreateAsync(1, "Jane Doe", "jane@acme.test", "+45 1234",
+            signer: false, eventCoordinator: true);
 
         Assert.True(num >= 100);
-        Assert.Single(db.EconomicContactAnnotations);
-
-        var listed = await svc.ListContactsAsync(1);
-        var row = Assert.Single(listed);
+        var row = Assert.Single(await svc.ListContactsAsync(1));
         Assert.Equal("Jane Doe", row.Name);
-        Assert.Equal(ErpContactRole.EventCoordinator, row.Role);   // from the hub annotation
-        Assert.Equal("VIP - call first", row.Notes);
+        Assert.False(row.IsSigner);
+        Assert.True(row.IsEventCoordinator);     // parsed back from e-conomic notes (Role:2)
+        Assert.Contains("Role:2", row.Notes);
     }
 
     [Fact]
-    public async Task Update_writes_economic_and_upserts_the_annotation()
+    public async Task Update_can_set_both_roles_and_merges_into_notes()
     {
-        using var db = ScenarioFixture.NewDb();
         var client = new FakeClient();
-        var svc = new EconomicContactAdminService(client, db);
-        var num = await svc.CreateAsync(1, new EconomicContactInput("A", "a@x.test", null),
-            ErpContactRole.Contact, null, "org@x");
+        var svc = new EconomicContactAdminService(client);
+        var num = await svc.CreateAsync(1, "A", "a@x.test", null, signer: false, eventCoordinator: false);
 
-        await svc.UpdateAsync(1, num, new EconomicContactInput("A Renamed", "a2@x.test", "+45 9"),
-            ErpContactRole.Signer, "now the signer", "org@x");
+        await svc.UpdateAsync(1, num, "A Renamed", "a2@x.test", "+45 9",
+            signer: true, eventCoordinator: true, existingNotes: null);
 
-        Assert.Equal((1, num, new EconomicContactInput("A Renamed", "a2@x.test", "+45 9")), client.LastUpdate);
+        Assert.Equal(1, client.LastUpdate!.Value.customer);
         var row = Assert.Single(await svc.ListContactsAsync(1));
         Assert.Equal("A Renamed", row.Name);
-        Assert.Equal(ErpContactRole.Signer, row.Role);
-        Assert.Equal("now the signer", row.Notes);
-        Assert.Single(db.EconomicContactAnnotations);   // upsert, not a 2nd row
+        Assert.True(row.IsSigner);
+        Assert.True(row.IsEventCoordinator);
+        Assert.Contains("Role:1,2", row.Notes);
     }
 
     [Fact]
-    public async Task Delete_removes_economic_contact_and_its_annotation()
+    public async Task Update_preserves_existing_free_text_notes()
     {
-        using var db = ScenarioFixture.NewDb();
         var client = new FakeClient();
-        var svc = new EconomicContactAdminService(client, db);
-        var num = await svc.CreateAsync(1, new EconomicContactInput("Z", "z@x.test", null),
-            ErpContactRole.Signer, "note", "org@x");
+        var svc = new EconomicContactAdminService(client);
+        var num = await svc.CreateAsync(1, "B", "b@x.test", null, signer: false, eventCoordinator: false);
+
+        await svc.UpdateAsync(1, num, "B", "b@x.test", null,
+            signer: true, eventCoordinator: false, existingNotes: "VIP - call first; Role:2");
+
+        var row = Assert.Single(await svc.ListContactsAsync(1));
+        Assert.Contains("VIP - call first", row.Notes);   // free text kept
+        Assert.True(row.IsSigner);
+        Assert.False(row.IsEventCoordinator);             // Role replaced (was 2, now 1)
+    }
+
+    [Fact]
+    public async Task Delete_removes_the_economic_contact()
+    {
+        var client = new FakeClient();
+        var svc = new EconomicContactAdminService(client);
+        var num = await svc.CreateAsync(1, "Z", "z@x.test", null, signer: true, eventCoordinator: false);
 
         await svc.DeleteAsync(1, num);
 
         Assert.Equal(1, client.Deleted);
         Assert.Empty(await svc.ListContactsAsync(1));
-        Assert.Empty(db.EconomicContactAnnotations);    // annotation cleaned up too
     }
 
     [Fact]
     public void CanWrite_reflects_the_underlying_client()
     {
-        using var db = ScenarioFixture.NewDb();
-        Assert.True(new EconomicContactAdminService(new FakeClient { CanWrite = true }, db).CanWrite);
-        Assert.False(new EconomicContactAdminService(new FakeClient { CanWrite = false }, db).CanWrite);
+        Assert.True(new EconomicContactAdminService(new FakeClient { CanWrite = true }).CanWrite);
+        Assert.False(new EconomicContactAdminService(new FakeClient { CanWrite = false }).CanWrite);
     }
 }

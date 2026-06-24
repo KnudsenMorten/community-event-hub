@@ -188,7 +188,7 @@ const ROLE_ROUTES: Record<string, { email: string; pin: string; routes: string[]
     attendee:  { email: USERS.attendee,  pin: PINS.attendee,
         routes: ['/', '/Attendee', '/Attendee/MyEvent', '/Tasks', '/Profile', '/Resources'] },
     sponsor:   { email: USERS.sponsor,   pin: PINS.sponsor,
-        routes: ['/', '/Sponsor', '/Sponsor/Tasks', '/Sponsor/Logistics',
+        routes: ['/', '/Sponsor', '/Sponsor/CompanyDetails', '/Sponsor/Tasks', '/Sponsor/Logistics',
                  '/Sponsor/Leads', '/Sponsor/Contact', '/Sponsor/CaptureLead', '/Profile', '/Resources'] },
 };
 

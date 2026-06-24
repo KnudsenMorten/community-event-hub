@@ -1,0 +1,369 @@
+@page
+@model CommunityHub.Pages.Sponsor.CompanyDetailsModel
+@{
+    ViewData["Title"] = "Company Details";
+}
+
+<div class="card">
+    <h2>Company Details</h2>
+
+    @if (Model.AccessDenied)
+    {
+        <p class="error">This page is for sponsors only.</p>
+        <p><a asp-page="/Index">@Localizer["Common.BackToHub"]</a></p>
+        return;
+    }
+    @if (Model.NoCompanyLink)
+    {
+        <p class="error">Your account isn't linked to a sponsor company yet, so there's nothing to edit here. Please contact the organizers.</p>
+        <p><a asp-page="/Index">@Localizer["Common.BackToHub"]</a></p>
+        return;
+    }
+
+    <p style="color:#4b5563;margin-top:0;">
+        Maintain your company's vital information here. This is the single place to keep it up to date —
+        it drives your exposure on the Zoho Backstage ticket/lead system and ELDK's social-media promotion.
+    </p>
+
+    <partial name="_Flash" model='new CommunityHub.Pages.Shared.FlashModel(Model.Message, "success")' />
+    @if (!string.IsNullOrEmpty(Model.Error))
+    {
+        <p class="error">@Model.Error</p>
+    }
+
+    <form method="post">
+        <!-- Read-only identity -->
+        <label>Public Name</label>
+        <input type="text" value="@Model.PublicName" readonly
+               title="Your public company name (from the webshop company profile). Contact the organizers to change it." />
+        <p style="font-size:12px;color:#6b7280;margin:2px 0 12px;">From your webshop company profile (public name, not the billing name).</p>
+
+        <label>Type</label>
+        <input type="text" value="@Model.TypeLabel" readonly />
+        <p style="font-size:12px;color:#6b7280;margin:2px 0 14px;">
+            @(Model.IsExhibitor
+                ? "You bought booth products, so you appear as an Exhibitor (and a sponsor) on Zoho Backstage."
+                : "You appear as a Sponsor on Zoho Backstage.")
+        </p>
+
+        <!-- Links -->
+        <label for="WebsiteUrl">Website URL</label>
+        <input type="url" id="WebsiteUrl" asp-for="WebsiteUrl" maxlength="@CommunityHub.Pages.Sponsor.CompanyDetailsModel.MaxUrl"
+               placeholder="https://www.example.com" />
+        <p style="font-size:12px;color:#6b7280;margin:2px 0 12px;">Must be a full URL including https://</p>
+
+        <label for="LinkedInUrl">LinkedIn URL</label>
+        <input type="url" id="LinkedInUrl" asp-for="LinkedInUrl" maxlength="@CommunityHub.Pages.Sponsor.CompanyDetailsModel.MaxUrl"
+               placeholder="https://www.linkedin.com/company/yourcompany" />
+        <p style="font-size:12px;color:#6b7280;margin:2px 0 12px;">Full URL, e.g. https://www.linkedin.com/company/2linkit</p>
+
+        <label for="TwitterUrl">Twitter / X URL</label>
+        <input type="url" id="TwitterUrl" asp-for="TwitterUrl" maxlength="@CommunityHub.Pages.Sponsor.CompanyDetailsModel.MaxUrl"
+               placeholder="https://www.twitter.com/yourcompany" />
+        <p style="font-size:12px;color:#6b7280;margin:2px 0 14px;">Full URL, e.g. https://www.twitter.com/xyz</p>
+
+        <!-- Overview -->
+        <label for="CompanyOverview">Company Overview</label>
+        <textarea id="CompanyOverview" asp-for="CompanyOverview" rows="6"
+                  maxlength="@CommunityHub.Pages.Sponsor.CompanyDetailsModel.MaxOverview"
+                  oninput="document.getElementById('overviewCount').textContent=this.value.length;"></textarea>
+        <p style="font-size:12px;color:#6b7280;margin:2px 0 14px;">
+            Used for exposure on Zoho Backstage ticket/lead system. A detailed overview of the
+            @(Model.IsExhibitor ? "exhibitor's" : "company's") company. This description helps attendees learn about the
+            mission, services, and background (max 1000 chars).
+            <span id="overviewCount">@(Model.CompanyOverview?.Length ?? 0)</span> / 1000
+        </p>
+
+        <!-- Social branding (CEH-only) -->
+        <label for="SocialMediaBrandingText">Company Social Media Branding Text</label>
+        <textarea id="SocialMediaBrandingText" asp-for="SocialMediaBrandingText" rows="4"
+                  maxlength="@CommunityHub.Pages.Sponsor.CompanyDetailsModel.MaxSocial"
+                  oninput="document.getElementById('socialCount').textContent=this.value.length;"></textarea>
+        <p style="font-size:12px;color:#6b7280;margin:2px 0 14px;">
+            Text is used by ELDK in social media promotion (max 600 chars). This is NOT sent to Zoho Backstage.
+            <span id="socialCount">@(Model.SocialMediaBrandingText?.Length ?? 0)</span> / 600
+        </p>
+
+        @if (Model.IsExhibitor)
+        {
+            <!-- Exhibitor only -->
+            <label for="CompanyShortDescription">Company Short Description</label>
+            <textarea id="CompanyShortDescription" asp-for="CompanyShortDescription" rows="2"
+                      maxlength="@CommunityHub.Pages.Sponsor.CompanyDetailsModel.MaxShort"
+                      oninput="document.getElementById('shortCount').textContent=this.value.length;"></textarea>
+            <p style="font-size:12px;color:#6b7280;margin:2px 0 14px;">
+                Used for exposure on Zoho Backstage ticket/lead system. A concise version of the company
+                description suitable for sections with limited space, such as event listings or the mobile app (max 80 chars).
+                <span id="shortCount">@(Model.CompanyShortDescription?.Length ?? 0)</span> / 80
+            </p>
+        }
+
+        <h3 style="margin:18px 0 6px;font-size:15px;color:var(--el-darkblue);">Event Coordinator</h3>
+        <p style="font-size:12px;color:#6b7280;margin:0 0 10px;">Your primary contact for the event. Synced to Zoho Backstage as the @(Model.IsExhibitor ? "sponsor + exhibitor" : "sponsor") contact.</p>
+
+        <label for="EventCoordinatorFirstName">First name</label>
+        <input type="text" id="EventCoordinatorFirstName" asp-for="EventCoordinatorFirstName" maxlength="120" />
+
+        <label for="EventCoordinatorLastName">Last name</label>
+        <input type="text" id="EventCoordinatorLastName" asp-for="EventCoordinatorLastName" maxlength="120" />
+
+        <label for="EventCoordinatorCompanyName">Company name</label>
+        <input type="text" id="EventCoordinatorCompanyName" asp-for="EventCoordinatorCompanyName" maxlength="200" />
+
+        <label for="EventCoordinatorEmail">Email</label>
+        <input type="email" id="EventCoordinatorEmail" asp-for="EventCoordinatorEmail" maxlength="320" />
+
+        <label for="EventCoordinatorPhone">Phone</label>
+        <input type="tel" id="EventCoordinatorPhone" asp-for="EventCoordinatorPhone" maxlength="60" />
+        <p style="font-size:12px;color:#6b7280;margin:2px 0 14px;">Phone is sent to the exhibitor contact only (Zoho doesn't accept a phone on the sponsor record).</p>
+
+        <button type="submit">Save &amp; Sync to Zoho</button>
+        <p style="font-size:12px;color:#6b7280;margin:8px 0 0;">Saving stores your details in the Event Hub and updates your Zoho Backstage records (overwriting what's there).</p>
+    </form>
+</div>
+
+@if (Model.CanManageErpContacts)
+{
+    <div class="card">
+        <h2>Your contacts (Signers &amp; Event Coordinators)</h2>
+        <p style="color:#4b5563;margin-top:0;font-size:13.5px;">
+            These are your company's contacts in our finance system (the source of truth). Add or remove people and set
+            their role — <strong>Signer</strong> and/or <strong>Event Coordinator</strong> (a person can hold both).
+            Changes save straight back to the master, and anything changed there shows here.
+        </p>
+
+        <table style="width:100%;border-collapse:collapse;font-size:13px;">
+            <thead><tr style="text-align:left;border-bottom:1px solid #eef0f4;">
+                <th style="padding:6px;">Name</th><th style="padding:6px;">Email</th><th style="padding:6px;">Phone</th><th style="padding:6px;">Role</th><th></th><th></th>
+            </tr></thead>
+            <tbody>
+            @foreach (var c in Model.ErpContacts)
+            {
+                <tr style="border-bottom:1px solid #f3f4f6;">
+                    <form method="post" asp-page-handler="UpdateErpContact" style="display:contents;">
+                        <input type="hidden" name="contactNumber" value="@c.ContactNumber" />
+                        <input type="hidden" name="notes" value="@c.Notes" />
+                        <td style="padding:6px;"><input type="text" name="name" value="@c.Name" required style="width:100%;box-sizing:border-box;" /></td>
+                        <td style="padding:6px;"><input type="email" name="email" value="@c.Email" style="width:100%;box-sizing:border-box;" /></td>
+                        <td style="padding:6px;"><input type="tel" name="phone" value="@c.Phone" style="width:100%;box-sizing:border-box;" /></td>
+                        <td style="padding:6px;white-space:nowrap;">
+                            <label style="margin-right:8px;"><input type="checkbox" name="signer" value="true" checked="@c.IsSigner" /> Signer</label>
+                            <label><input type="checkbox" name="coordinator" value="true" checked="@c.IsEventCoordinator" /> Coordinator</label>
+                        </td>
+                        <td style="padding:6px;"><button type="submit" class="secondary">Save</button></td>
+                    </form>
+                    <td style="padding:6px;">
+                        <form method="post" asp-page-handler="DeleteErpContact" onsubmit="return confirm('Remove this contact?');" style="margin:0;">
+                            <input type="hidden" name="contactNumber" value="@c.ContactNumber" />
+                            <button type="submit" class="secondary" style="color:#b91c1c;">Remove</button>
+                        </form>
+                    </td>
+                </tr>
+            }
+            @if (Model.ErpContacts.Count == 0)
+            {
+                <tr><td colspan="6" style="padding:6px;color:#6b7280;">No contacts yet — add one below.</td></tr>
+            }
+            </tbody>
+        </table>
+
+        <details style="margin-top:10px;">
+            <summary style="cursor:pointer;font-weight:600;color:var(--el-darkblue);">+ Add a contact</summary>
+            <form method="post" asp-page-handler="AddErpContact" style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:10px;">
+                <input type="text" name="name" placeholder="Full name" required style="flex:1 1 140px;min-width:0;" />
+                <input type="email" name="email" placeholder="Email" style="flex:1 1 160px;min-width:0;" />
+                <input type="tel" name="phone" placeholder="Phone" style="flex:1 1 120px;min-width:0;" />
+                <label style="white-space:nowrap;"><input type="checkbox" name="signer" value="true" /> Signer</label>
+                <label style="white-space:nowrap;"><input type="checkbox" name="coordinator" value="true" /> Coordinator</label>
+                <button type="submit">Add</button>
+            </form>
+        </details>
+    </div>
+}
+
+@if (Model.CanUploadSoMe || Model.CanUploadPrint || Model.CanUploadZoho || Model.CanUploadWall)
+{
+    <div class="card">
+        <h2>Logos &amp; artwork</h2>
+        <p style="color:#4b5563;margin-top:0;font-size:13.5px;">
+            Each upload is versioned automatically (<code>_v1</code>, <code>_v2</code>, …) so the latest file is always clear.
+            The organizers are notified on every upload.
+        </p>
+
+        @if (Model.CanUploadSoMe)
+        {
+            <form method="post" asp-page-handler="Upload" asp-route-kind="some" enctype="multipart/form-data"
+                  style="margin:0 0 18px;padding-bottom:16px;border-bottom:1px solid #eee;">
+                <label style="display:block;font-weight:600;margin-bottom:2px;">Upload Logo for Social Media branding</label>
+                <p style="font-size:12px;color:#6b7280;margin:0 0 6px;">PNG, good quality, max 5 MB.</p>
+                <input type="file" name="UploadFile" accept=".png,image/png" required
+                       style="display:block;margin-bottom:8px;" />
+                <button type="submit">Upload</button>
+            </form>
+        }
+
+        @if (Model.CanUploadPrint)
+        {
+            <form method="post" asp-page-handler="Upload" asp-route-kind="print" enctype="multipart/form-data"
+                  style="margin:0 0 18px;padding-bottom:16px;border-bottom:1px solid #eee;">
+                <label style="display:block;font-weight:600;margin-bottom:2px;">Upload Logo for Printing</label>
+                <p style="font-size:12px;color:#6b7280;margin:0 0 6px;">Vector format (typically .eps, .ai or .pdf).</p>
+                <input type="file" name="UploadFile" accept=".eps,.ai,.pdf" required
+                       style="display:block;margin-bottom:8px;" />
+                <button type="submit">Upload</button>
+            </form>
+        }
+
+        @if (Model.CanUploadZoho)
+        {
+            <form method="post" asp-page-handler="Upload" asp-route-kind="zoho" enctype="multipart/form-data"
+                  style="margin:0 0 18px;@(Model.CanUploadWall ? "padding-bottom:16px;border-bottom:1px solid #eee;" : "")">
+                <label style="display:block;font-weight:600;margin-bottom:2px;">Upload Logo for Zoho Backstage lead system</label>
+                <p style="font-size:12px;color:#6b7280;margin:0 0 6px;">PNG, optimal dimension 200×160px, max 5 MB.</p>
+                <input type="file" name="UploadFile" accept=".png,image/png" required
+                       style="display:block;margin-bottom:8px;" />
+                <button type="submit">Upload</button>
+            </form>
+        }
+
+        @if (Model.CanUploadWall)
+        {
+            <form method="post" asp-page-handler="Upload" asp-route-kind="wall" enctype="multipart/form-data"
+                  style="margin:0;">
+                <label style="display:block;font-weight:600;margin-bottom:2px;">Upload Exhibitor Wall</label>
+                <p style="font-size:12px;color:#6b7280;margin:0 0 6px;">Your booth wall artwork (PNG, JPG or PDF, max 25 MB).</p>
+                <input type="file" name="UploadFile" accept=".png,.jpg,.jpeg,.pdf" required
+                       style="display:block;margin-bottom:8px;" />
+                <button type="submit">Upload</button>
+            </form>
+        }
+    </div>
+}
+
+@if (Model.IsExhibitor)
+{
+    <div class="card">
+        <h2>Booth members</h2>
+        <p style="color:#4b5563;margin-top:0;font-size:13.5px;">
+            Add the people who will staff your booth. <strong>Admin</strong> = update profile, invite/manage members,
+            capture &amp; manage leads, export lead report, manage inquiries. <strong>Staff</strong> = update profile,
+            capture &amp; manage leads, manage inquiries.
+        </p>
+
+        @if (Model.BoothMembers.Count == 0)
+        {
+            <p class="info">No booth members yet — add your first below.</p>
+        }
+        else
+        {
+            <div style="overflow-x:auto;">
+            @foreach (var m in Model.BoothMembers)
+            {
+                <form method="post" asp-page-handler="UpdateMember"
+                      style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:0 0 8px;padding:8px;border:1px solid #eee;border-radius:6px;">
+                    <input type="hidden" name="memberId" value="@m.Id" />
+                    <input type="text" name="firstName" value="@m.FirstName" required placeholder="First name"
+                           style="flex:1 1 120px;min-width:0;" aria-label="First name" />
+                    <input type="text" name="lastName" value="@m.LastName" required placeholder="Last name"
+                           style="flex:1 1 120px;min-width:0;" aria-label="Last name" />
+                    <input type="email" name="email" value="@m.Email" required placeholder="Email"
+                           style="flex:1 1 180px;min-width:0;" aria-label="Email" />
+                    <select name="role" aria-label="Role" style="flex:0 0 auto;">
+                        <option value="Admin" selected="@(m.Role == CommunityHub.Core.Domain.BoothMemberRole.Admin ? "selected" : null)">Admin</option>
+                        <option value="Staff" selected="@(m.Role == CommunityHub.Core.Domain.BoothMemberRole.Staff ? "selected" : null)">Staff</option>
+                    </select>
+                    <button type="submit" class="secondary" style="flex:0 0 auto;">Save</button>
+                    <button type="submit" class="secondary" formaction="?handler=DeleteMember"
+                            style="flex:0 0 auto;color:#b91c1c;" aria-label="Delete @m.FirstName @m.LastName">Delete</button>
+                </form>
+            }
+            </div>
+        }
+
+        <details style="margin-top:10px;">
+            <summary style="cursor:pointer;font-weight:600;color:var(--el-darkblue);">+ Add booth member</summary>
+            <form method="post" asp-page-handler="AddMember"
+                  style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:10px;">
+                <input type="text" name="firstName" required placeholder="First name" style="flex:1 1 120px;min-width:0;" aria-label="First name" />
+                <input type="text" name="lastName" required placeholder="Last name" style="flex:1 1 120px;min-width:0;" aria-label="Last name" />
+                <input type="email" name="email" required placeholder="Email" style="flex:1 1 180px;min-width:0;" aria-label="Email" />
+                <select name="role" aria-label="Role" style="flex:0 0 auto;">
+                    <option value="Staff">Staff</option>
+                    <option value="Admin">Admin</option>
+                </select>
+                <button type="submit" style="flex:0 0 auto;">Add</button>
+            </form>
+        </details>
+
+        <form method="post" asp-page-handler="SyncMembers" style="margin-top:14px;">
+            <button type="submit">Save &amp; Sync booth members to Zoho</button>
+            <p style="font-size:12px;color:#6b7280;margin:6px 0 0;">
+                Syncs by email: new members are created in Zoho, and any members already in Zoho are pulled in here.
+                Removing a member must also be done in Zoho directly.
+            </p>
+        </form>
+    </div>
+}
+
+@if (Model.IsExhibitor)
+{
+    <div class="card">
+        <h2>Booth materials</h2>
+
+        <h3 style="margin:6px 0 4px;font-size:15px;color:var(--el-darkblue);">Videos</h3>
+        <p style="font-size:12px;color:#6b7280;margin:0 0 8px;">Up to @CommunityHub.Pages.Sponsor.CompanyDetailsModel.MaxVideos video links (full https URL).</p>
+        @foreach (var v in Model.BoothVideos)
+        {
+            <div style="display:flex;gap:8px;align-items:center;margin:0 0 6px;">
+                <a href="@v.Url" target="_blank" rel="noopener" style="flex:1 1 auto;min-width:0;word-break:break-all;font-size:13px;">@v.Url</a>
+                <form method="post" asp-page-handler="DeleteMaterial" style="margin:0;flex:0 0 auto;">
+                    <input type="hidden" name="materialId" value="@v.Id" />
+                    <button type="submit" class="secondary" style="color:#b91c1c;">Remove</button>
+                </form>
+            </div>
+        }
+        @if (Model.BoothVideos.Count < CommunityHub.Pages.Sponsor.CompanyDetailsModel.MaxVideos)
+        {
+            <form method="post" asp-page-handler="AddVideo" style="display:flex;gap:6px;flex-wrap:wrap;margin:8px 0 0;">
+                <input type="url" name="videoUrl" required placeholder="https://www.youtube.com/watch?v=…"
+                       style="flex:1 1 220px;min-width:0;" aria-label="Video URL" />
+                <button type="submit" style="flex:0 0 auto;">Add video</button>
+            </form>
+        }
+
+        <h3 style="margin:18px 0 4px;font-size:15px;color:var(--el-darkblue);">Collateral</h3>
+        <p style="font-size:12px;color:#6b7280;margin:0 0 8px;">Up to @CommunityHub.Pages.Sponsor.CompanyDetailsModel.MaxCollateral files. Up to 25 MB. JPG, JPEG, PNG, PDF.</p>
+        @foreach (var c in Model.BoothCollateral)
+        {
+            <div style="display:flex;gap:8px;align-items:center;margin:0 0 6px;">
+                <a href="@c.Url" target="_blank" rel="noopener" style="flex:1 1 auto;min-width:0;word-break:break-all;font-size:13px;">@c.FileName</a>
+                <form method="post" asp-page-handler="DeleteMaterial" style="margin:0;flex:0 0 auto;">
+                    <input type="hidden" name="materialId" value="@c.Id" />
+                    <button type="submit" class="secondary" style="color:#b91c1c;">Remove</button>
+                </form>
+            </div>
+        }
+        @if (Model.CanUploadCollateral && Model.BoothCollateral.Count < CommunityHub.Pages.Sponsor.CompanyDetailsModel.MaxCollateral)
+        {
+            <form method="post" asp-page-handler="UploadCollateral" enctype="multipart/form-data" style="display:flex;gap:6px;flex-wrap:wrap;margin:8px 0 0;">
+                <input type="file" name="UploadFile" accept=".jpg,.jpeg,.png,.pdf" required style="flex:1 1 200px;min-width:0;" />
+                <button type="submit" style="flex:0 0 auto;">Upload file</button>
+            </form>
+        }
+        else if (!Model.CanUploadCollateral)
+        {
+            <p style="font-size:12px;color:#6b7280;">Collateral upload isn't available right now.</p>
+        }
+
+        <form method="post" asp-page-handler="NotifyMaterials" style="margin-top:16px;">
+            <button type="submit">Save &amp; Sync booth materials</button>
+            <p style="font-size:12px;color:#6b7280;margin:6px 0 0;">
+                Your videos and collateral are stored in the Event Hub. Saving notifies the organizers to place them on your Zoho Backstage exhibitor profile (Zoho has no materials API).
+            </p>
+        </form>
+    </div>
+}
+
+<div class="card">
+    <p><a asp-page="/Sponsor/Index">&larr; Back to your sponsor area</a></p>
+</div>

@@ -77,19 +77,8 @@ public sealed class AttendeeBackstageSyncJob
             "AttendeeBackstageSyncJob: {Pulled} attendees — created {C}, updated {U}, reassigned {R} ({RE} validated), cancelled {X} ({PE} promoted).",
             rows.Count, result.Created, result.Updated, result.Reassigned, reEmails, result.Cancelled, promoEmails);
 
-        // Attendee welcome auto-provisioning — DEFAULT OFF (mass email; organizer
-        // turns it on deliberately). When on: create active login-capable Attendee
-        // Participants for 2-day holders + email a one-click magic-link welcome to
-        // the NEWLY-created ones only (idempotent — never re-emails).
-        if (await _gate.IsFeatureEnabledAsync("attendee-welcome", eventId.Value, ct))
-        {
-            var newIds = await _provisioning.ProvisionAsync(eventId.Value, ct);
-            var welcomed = 0;
-            foreach (var pid in newIds)
-                try { if ((await _welcome.SendForAttendeeProvisioningAsync(pid, baseUrl, ct)).Sent) welcomed++; }
-                catch (Exception ex) { _log.LogWarning(ex, "AttendeeBackstageSyncJob: welcome send failed for participant {Pid}.", pid); }
-            if (newIds.Count > 0)
-                _log.LogInformation("AttendeeBackstageSyncJob: provisioned {N} attendee logins, welcomed {W}.", newIds.Count, welcomed);
-        }
+        // Attendee welcome auto-provisioning REMOVED (operator 2026-06-23): there is
+        // no separate attendee welcome — the only attendee mail is the Master Class
+        // confirmed-seat email (masterclass-confirmed), sent on seat confirmation.
     }
 }

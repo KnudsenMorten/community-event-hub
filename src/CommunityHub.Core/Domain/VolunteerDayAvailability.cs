@@ -38,6 +38,14 @@ public class VolunteerDayAvailability
 /// </summary>
 public enum VolunteerAvailabilityLevel
 {
+    /// <summary>
+    /// Not present at all on this day — the volunteer cannot help (operator
+    /// 2026-06-23). Distinct from <see cref="Blocked"/> (present, attending, but
+    /// not working): this volunteer is absent. Negative sentinel so capacity math
+    /// that sums the percentage value treats it as "no capacity" (clamp to 0).
+    /// </summary>
+    Unavailable = -1,
+
     /// <summary>Not available to work this day — attending only.</summary>
     Blocked = 0,
 

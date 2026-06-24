@@ -73,10 +73,9 @@
 <div class="card">
     <h2>@Localizer["Hub.Welcome", Model.Me.FirstName]</h2>
     <p>@Model.EventDisplayName &middot; @Localizer["Hub.SignedInAs"] <strong>@CommunityHub.Branding.RoleDisplay.Name(Model.Me.Role)</strong></p>
-    @if (Model.OpenTaskCount == 0)
-    {
-        <p><span style="color:#0a6;font-weight:600;">&#10003; @Localizer["Hub.AllTasksComplete"]</span></p>
-    }
+    @* "All tasks complete" lives ONLY on the checklist card below, and only when the
+       role actually has tracked tasks — so attendees (no hub tasks) no longer see a
+       confusing "All tasks complete!" with nothing behind it (operator 2026-06-23). *@
 </div>
 
 @{
@@ -101,7 +100,7 @@
                     id="cal-copy" data-ceh-copy="cal-url"
                     data-ceh-copied="@Localizer["Hub.Copied"]"
                     data-ceh-copy-label="@Localizer["Hub.CopyLink"]">@Localizer["Hub.CopyLink"]</button>
-            <a class="cal-btn cal-btn-ghost" href="@Model.CalendarWebcalUrl">@Localizer["Hub.Subscribe"]</a>
+            <a class="cal-btn cal-btn-ghost" href="@Model.CalendarWebcalUrl" data-ceh-confirm="calSyncInfo">@Localizer["Hub.Subscribe"]</a>
         </div>
         <details class="cal-help">
             <summary>@Localizer["Hub.CalendarHowTo"]</summary>
@@ -124,9 +123,14 @@
 }
 
 @* Unified "what's still needed" checklist — shared component (Top-8 #7).
-   The Hub passes the CalendarItem page-handler so dated pending rows offer .ics. *@
-@{ ViewData["ChecklistIcsHandler"] = "CalendarItem"; }
-@await Html.PartialAsync("Shared/_ChecklistCard", Model.Checklist)
+   The Hub passes the CalendarItem page-handler so dated pending rows offer .ics.
+   Rendered ONLY when the role has tracked tasks, so a task-less role (attendee)
+   doesn't get an empty "All tasks complete!" card (operator 2026-06-23). *@
+@if (Model.Checklist.Pending.Count + Model.Checklist.Completed.Count > 0)
+{
+    ViewData["ChecklistIcsHandler"] = "CalendarItem";
+    @await Html.PartialAsync("Shared/_ChecklistCard", Model.Checklist)
+}
 
 @if (Model.ShowHotel)
 {
@@ -232,21 +236,9 @@
     </div>
 }
 
-@if (Model.ShowSponsorPipeline)
-{
-    @await Html.PartialAsync("_KeyDates", Model.EventDates)
-
-    <div class="card">
-        <h2>@Localizer["Hub.SponsorAreaTitle"]</h2>
-        <p>@Localizer["Hub.SponsorAreaIntro"]</p>
-        <p style="display:flex;gap:10px;flex-wrap:wrap;margin-top:8px;">
-            <a class="task-link-btn" asp-page="/Sponsor/Index">@Localizer["Hub.SponsorOpenEngagement"]</a>
-            <a class="task-link-btn" asp-page="/Sponsor/Tasks">@Localizer["Hub.SponsorOpenTasks"]</a>
-            <a class="task-link-btn" asp-page="/Sponsor/CaptureLead">@Localizer["Hub.SponsorCaptureLead"]</a>
-            <a class="task-link-btn" asp-page="/Sponsor/Leads">@Localizer["Hub.SponsorLeadsApi"]</a>
-        </p>
-    </div>
-}
+@* Sponsor "Key dates" + "Sponsor area" dashboard blocks removed (operator
+   2026-06-23): the top nav already exposes these pages, and Key Dates lives on
+   its own page. The Pending/Completed task lists above remain the sponsor home. *@
 
 @if (Model.ShowAttendeeArea)
 {
@@ -255,7 +247,16 @@
         <p style="color:#4b5563;margin:0 0 8px;">Pick your free pre-day Master Class here — a hands-on, full-day deep dive. You can hold one confirmed seat.</p>
         @if (Model.AttendeeBookingStatus == CommunityHub.Core.Domain.MasterClassBookingStatus.Booked)
         {
-            <p class="info">@Localizer["Hub.AttendeeReserved"]</p>
+            <p class="info">
+                @if (!string.IsNullOrWhiteSpace(Model.AttendeeConfirmedTitle))
+                {
+                    <text>You're confirmed for your Master Class: <strong>@Model.AttendeeConfirmedTitle</strong>.</text>
+                }
+                else
+                {
+                    @Localizer["Hub.AttendeeReserved"]
+                }
+            </p>
         }
         else if (Model.AttendeeBookingStatus == CommunityHub.Core.Domain.MasterClassBookingStatus.MultipleBookings)
         {

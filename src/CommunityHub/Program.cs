@@ -465,20 +465,25 @@ builder.Services.AddSingleton<
 builder.Services.Configure<CommunityHub.Core.Integrations.Graphics.GraphicsSharePointOptions>(
     builder.Configuration.GetSection(
         CommunityHub.Core.Integrations.Graphics.GraphicsSharePointOptions.SectionName));
+// SharePoint upload client (SPN creds, deployment-scoped, Key Vault) — registered
+// UNCONDITIONALLY so any web page (volunteer photo upload, etc.) can inject it. It
+// no-ops when the "SharePoint" section is not configured (IsConfigured=false), so
+// this is safe even without SPN creds present. (Previously this lived inside the
+// graphics-store `if`, so injecting it elsewhere 500'd page activation in prod.)
+var spUploadOptions = new CommunityHub.Core.Integrations.SharePointUploadOptions();
+builder.Configuration
+    .GetSection(CommunityHub.Core.Integrations.SharePointUploadOptions.SectionName)
+    .Bind(spUploadOptions);
+builder.Services.AddSingleton(spUploadOptions);
+builder.Services.AddHttpClient<CommunityHub.Core.Integrations.SharePointUploadClient>();
+
 var graphicsSpOptions = new CommunityHub.Core.Integrations.Graphics.GraphicsSharePointOptions();
 builder.Configuration
     .GetSection(CommunityHub.Core.Integrations.Graphics.GraphicsSharePointOptions.SectionName)
     .Bind(graphicsSpOptions);
 if (graphicsSpOptions.IsConfigured)
 {
-    // Live Graph store: needs the SharePoint upload client (SPN creds, deployment
-    // scoped, Key Vault) + the per-edition site/drive/root (operator config).
-    var spUploadOptions = new CommunityHub.Core.Integrations.SharePointUploadOptions();
-    builder.Configuration
-        .GetSection(CommunityHub.Core.Integrations.SharePointUploadOptions.SectionName)
-        .Bind(spUploadOptions);
-    builder.Services.AddSingleton(spUploadOptions);
-    builder.Services.AddHttpClient<CommunityHub.Core.Integrations.SharePointUploadClient>();
+    // Live Graph store: uses the SharePoint upload client registered above.
     builder.Services.AddScoped<
         CommunityHub.Core.Integrations.Graphics.ISharePointFileStore,
         CommunityHub.Core.Integrations.Graphics.GraphSharePointFileStore>();
@@ -542,6 +547,22 @@ var zohoWebOptions = new CommunityHub.Core.Integrations.ZohoOptions();
 builder.Configuration.GetSection(CommunityHub.Core.Integrations.ZohoOptions.SectionName).Bind(zohoWebOptions);
 builder.Services.AddSingleton(zohoWebOptions);
 builder.Services.AddHttpClient<CommunityHub.Core.Integrations.ZohoClient>();
+// Pushes a sponsor's company overview/short-description into the Backstage
+// exhibitor profile when they save it in the hub (fail-soft, gated by Zoho config).
+builder.Services.AddScoped<CommunityHub.Core.Integrations.BackstageExhibitorProfileSync>();
+// Company Details "Save & Sync to Zoho": pushes the sponsor + exhibitor fields to
+// Backstage (resolves+caches the Zoho ids by company name, then targets by id).
+builder.Services.AddScoped<CommunityHub.Core.Integrations.SponsorZohoSyncService>();
+// Stage 4b: create/link Zoho sponsor + exhibitor records from webshop data. The
+// exhibitor-create seam (exhibitor_requests) — Live; CanCreate guards it when the
+// booth-category id isn't configured (then only sponsor create happens).
+var backstageExhibitorWebOptions = new CommunityHub.Core.Integrations.BackstageExhibitorOptions();
+builder.Configuration.GetSection(CommunityHub.Core.Integrations.BackstageExhibitorOptions.SectionName)
+    .Bind(backstageExhibitorWebOptions);
+builder.Services.AddSingleton(backstageExhibitorWebOptions);
+builder.Services.AddHttpClient<CommunityHub.Core.Integrations.IBackstageExhibitorApi,
+    CommunityHub.Core.Integrations.LiveBackstageExhibitorApi>();
+builder.Services.AddScoped<CommunityHub.Core.Integrations.SponsorZohoProvisionService>();
 builder.Services.AddSingleton<CommunityHub.Core.Integrations.Sponsors.SponsorLeadScreeningService>();
 builder.Services.AddScoped<CommunityHub.Core.Integrations.Sponsors.SponsorLeadSyncService>();
 builder.Services.AddScoped<CommunityHub.Core.Integrations.Sponsors.SponsorLeadCaptureService>();
@@ -613,6 +634,9 @@ builder.Services.AddSingleton(economicErpOptionsWeb);
 builder.Services.AddHttpClient<CommunityHub.Core.Integrations.Erp.IEconomicContactAdminClient,
     CommunityHub.Core.Integrations.Erp.LiveEconomicContactAdminClient>();
 builder.Services.AddScoped<CommunityHub.Core.Integrations.Erp.EconomicContactAdminService>();
+// ERP→webshop reconcile (create missing webshop users + set defaults from ERP
+// contact roles + alert on missing roles).
+builder.Services.AddScoped<CommunityHub.Core.Integrations.Erp.ErpWebshopContactSyncService>();
 var economicRolesOptionsWeb = new CommunityHub.Core.Integrations.Erp.EconomicRolesOptions();
 builder.Configuration.GetSection(CommunityHub.Core.Integrations.Erp.EconomicRolesOptions.SectionName)
     .Bind(economicRolesOptionsWeb);
@@ -847,9 +871,9 @@ app.MapGet("/schedule/{id:int}.ics", async (
     var ics = CommunityHub.Core.Email.IcsCalendarBuilder.BuildFeed(
         s.Title, me.Email, me.FullName,
         new[] { CommunityHub.Core.Reminders.ParticipantCalendarBuilder.ToCalendarItem(s, host) });
-    var slug = new string(s.Title.Where(char.IsLetterOrDigit).ToArray());
-    return Results.File(System.Text.Encoding.UTF8.GetBytes(ics),
-        "text/calendar; charset=utf-8", $"{(string.IsNullOrEmpty(slug) ? "event" : slug)}.ics");
+    // Inline (no filename) so the OS hands the .ics to the calendar app instead of
+    // downloading it (operator 2026-06-24: "must open the entry, not download").
+    return Results.File(System.Text.Encoding.UTF8.GetBytes(ics), "text/calendar; charset=utf-8");
 }).RequireAuthorization();
 
 app.MapRazorPages();

@@ -99,7 +99,11 @@ public sealed class EmailTemplateConversionTests
         Assert.Contains("Deep Dive MC", m.Subject);                 // {{masterClassTitle}}
         Assert.Contains("C 2027", m.Html);                          // {{eventDisplayName}}
         Assert.Contains("MyMasterClass?t=", m.Html);                // {{signupUrl}}
-        Assert.Contains("The team", m.Html);
+        // Operator 2026-06-24: dropped the "Questions? Email" + "The team" lines, and
+        // the title already reads "… Master Class", so the body no longer says
+        // "the Master Class" before it.
+        Assert.DoesNotContain("The team", m.Html);
+        Assert.DoesNotContain("the Master Class <strong>", m.Html);
     }
 
     // 3 ------------------------------------------------------------ reassignment ----

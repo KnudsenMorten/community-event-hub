@@ -162,7 +162,7 @@ public sealed class JobFeatureGateTests
         using var db = NewDb();
         await SeedActiveEventAsync(db);
 
-        var job = new WooCommercePullJob(service: null!, db, Gate(db), Audit(db),
+        var job = new WooCommercePullJob(service: null!, provision: null!, db, Gate(db), Audit(db),
             NullLogger<WooCommercePullJob>.Instance);
 
         await job.Run(Timer(), default); // no throw == gate short-circuited
@@ -175,7 +175,7 @@ public sealed class JobFeatureGateTests
         var eventId = await SeedActiveEventAsync(db);
         await EnableAsync(db, eventId, "sponsor-order-pull");
 
-        var job = new WooCommercePullJob(service: null!, db, Gate(db), Audit(db),
+        var job = new WooCommercePullJob(service: null!, provision: null!, db, Gate(db), Audit(db),
             NullLogger<WooCommercePullJob>.Instance);
 
         await Assert.ThrowsAsync<NullReferenceException>(() => job.Run(Timer(), default));

@@ -1,9 +1,6 @@
 @using CommunityHub.Core.Domain
 @model ParticipantTask
 @{
-    var parentModel = ViewData["ParentModel"] as CommunityHub.Pages.Sponsor.TasksModel;
-    var isCompanyInfo = Model.SourceKey != null && Model.SourceKey.EndsWith(":" + CommunityHub.Pages.Sponsor.TasksModel.CompanyInfoSlug);
-
     // Overdue = same rule the shared _ChecklistCard uses (today vs due date, in
     // UTC, DateOnly): an unfinished task whose due date is in the past. Mirrors
     // the checklist card so an overdue sponsor task reads the same everywhere.
@@ -13,8 +10,8 @@
         : 0;
 }
 
-<div style="border-bottom:2px solid var(--el-blue);padding:18px 0 22px;">
-    <div style="font-size:18px;font-weight:700;color:var(--el-darkblue);line-height:1.45;">
+<details style="border-bottom:2px solid var(--el-blue);padding:18px 0 22px;">
+    <summary style="font-size:18px;font-weight:700;color:var(--el-darkblue);line-height:1.45;cursor:pointer;">
         @Model.Title
         @if (!Model.IsMandatory)
         {
@@ -32,87 +29,38 @@
         {
             <span style="display:inline-block;margin-left:8px;padding:2px 10px;font-size:0.78em;background:#fff3cd;color:#7a5b00;border:1px solid #f0d878;border-radius:9px;vertical-align:middle;font-weight:700;">@Localizer["TaskRow.Due", Model.DueDate?.ToString("dd/MM/yyyy") ?? ""]</span>
         }
-    </div>
+    </summary>
     @if (!string.IsNullOrWhiteSpace(Model.Description))
     {
         <p style="margin:8px 0;white-space:pre-line;font-size:15px;">@CommunityHub.Branding.TaskTextLinkifier.Render(Model.Description)</p>
     }
 
-    @if (isCompanyInfo && parentModel is not null && Model.State != TaskState.Done)
-    {
-        <form method="post" asp-page-handler="UploadCompanyInfo"
-              style="margin-top:14px;padding:16px;background:#f8fafc;border:1px solid #cbd5e0;border-radius:6px;">
-            <label for="CompanyDescription" style="display:block;font-weight:600;margin-bottom:4px;">
-                @Localizer["TaskRow.CompanyDesc", CommunityHub.Pages.Sponsor.TasksModel.MaxDesc]
-            </label>
-            <textarea name="CompanyDescription" id="CompanyDescription" rows="6"
-                      maxlength="@CommunityHub.Pages.Sponsor.TasksModel.MaxDesc"
-                      style="width:100%;box-sizing:border-box;font-size:14px;padding:8px;border:1px solid #cbd5e0;border-radius:4px;"
-                      oninput="document.getElementById('CompanyDescriptionCount').textContent=this.value.length;">@parentModel.CompanyDescription</textarea>
-            <p style="font-size:12px;color:#6b7280;margin:2px 0 12px;">
-                <span id="CompanyDescriptionCount">@(parentModel.CompanyDescription?.Length ?? 0)</span> / @CommunityHub.Pages.Sponsor.TasksModel.MaxDesc
-            </p>
-
-            <label for="CompanyDescriptionShort" style="display:block;font-weight:600;margin-bottom:4px;">
-                @Localizer["TaskRow.ShortDesc", CommunityHub.Pages.Sponsor.TasksModel.MaxShort]
-            </label>
-            <textarea name="CompanyDescriptionShort" id="CompanyDescriptionShort" rows="2"
-                      maxlength="@CommunityHub.Pages.Sponsor.TasksModel.MaxShort"
-                      style="width:100%;box-sizing:border-box;font-size:14px;padding:8px;border:1px solid #cbd5e0;border-radius:4px;"
-                      oninput="document.getElementById('CompanyDescriptionShortCount').textContent=this.value.length;">@parentModel.CompanyDescriptionShort</textarea>
-            <p style="font-size:12px;color:#6b7280;margin:2px 0 12px;">
-                <span id="CompanyDescriptionShortCount">@(parentModel.CompanyDescriptionShort?.Length ?? 0)</span> / @CommunityHub.Pages.Sponsor.TasksModel.MaxShort
-            </p>
-
-            <label for="SocialMediaIntro" style="display:block;font-weight:600;margin-bottom:4px;">
-                @Localizer["TaskRow.SocialIntro", CommunityHub.Pages.Sponsor.TasksModel.MaxSocial]
-            </label>
-            <textarea name="SocialMediaIntro" id="SocialMediaIntro" rows="4"
-                      maxlength="@CommunityHub.Pages.Sponsor.TasksModel.MaxSocial"
-                      style="width:100%;box-sizing:border-box;font-size:14px;padding:8px;border:1px solid #cbd5e0;border-radius:4px;"
-                      oninput="document.getElementById('SocialMediaIntroCount').textContent=this.value.length;">@parentModel.SocialMediaIntro</textarea>
-            <p style="font-size:12px;color:#6b7280;margin:2px 0 14px;">
-                <span id="SocialMediaIntroCount">@(parentModel.SocialMediaIntro?.Length ?? 0)</span> / @CommunityHub.Pages.Sponsor.TasksModel.MaxSocial
-            </p>
-
-            <button type="submit"
-                    style="background:#198754;color:#fff;border:1px solid #198754;padding:8px 18px;border-radius:6px;font-weight:600;cursor:pointer;">
-                @Localizer["TaskRow.SaveComplete"]
-            </button>
-            <span style="color:#555;font-size:13px;font-style:italic;margin-left:10px;">
-                @Localizer["TaskRow.EmailCopyNote"]
-            </span>
+    <div style="display:flex;align-items:center;gap:14px;margin-top:22px;flex-wrap:wrap;">
+        <form method="post" asp-page-handler="Toggle" style="display:inline;">
+            <input type="hidden" name="taskId" value="@Model.Id" />
+            @if (Model.State == TaskState.Done)
+            {
+                <button type="submit" class="secondary">@Localizer["TaskRow.Reopen"]</button>
+            }
+            else
+            {
+                <button type="submit"
+                        style="background:#198754;color:#fff;border:1px solid #198754;padding:8px 18px;border-radius:6px;font-weight:600;cursor:pointer;">
+                    @Localizer["TaskRow.MarkComplete"]
+                </button>
+            }
         </form>
-    }
-    else
-    {
-        <div style="display:flex;align-items:center;gap:14px;margin-top:22px;flex-wrap:wrap;">
-            <form method="post" asp-page-handler="Toggle" style="display:inline;">
-                <input type="hidden" name="taskId" value="@Model.Id" />
-                @if (Model.State == TaskState.Done)
-                {
-                    <button type="submit" class="secondary">@Localizer["TaskRow.Reopen"]</button>
-                }
-                else
-                {
-                    <button type="submit"
-                            style="background:#198754;color:#fff;border:1px solid #198754;padding:8px 18px;border-radius:6px;font-weight:600;cursor:pointer;">
-                        @Localizer["TaskRow.MarkComplete"]
-                    </button>
-                }
-            </form>
-            @if (Model.DueDate is not null)
-            {
-                <a class="task-link-btn" asp-page-handler="Ics" asp-route-taskId="@Model.Id" style="background:#475569;">
-                    @Localizer["TaskRow.AddToCalendar"]
-                </a>
-            }
-            @if (Model.State != TaskState.Done)
-            {
-                <span style="color:#555;font-size:13px;font-style:italic;">
-                    @Localizer["TaskRow.CompleteBeforeDue"]
-                </span>
-            }
-        </div>
-    }
-</div>
+        @if (Model.DueDate is not null)
+        {
+            <a class="task-link-btn" asp-page-handler="Ics" asp-route-taskId="@Model.Id" style="background:#475569;font-size:13px;padding:7px 14px;line-height:1.2;">
+                @Localizer["TaskRow.AddToCalendar"]
+            </a>
+        }
+        @if (Model.State != TaskState.Done)
+        {
+            <span style="color:#555;font-size:13px;font-style:italic;">
+                @Localizer["TaskRow.CompleteBeforeDue"]
+            </span>
+        }
+    </div>
+</details>

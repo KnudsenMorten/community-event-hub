@@ -190,7 +190,7 @@ public sealed class FeatureCatalogClassificationTests
         foreach (var key in new[]
                  {
                      "welcome-email", "magic-link", "reminder-jobs", "digest-emails",
-                     "attendee-welcome", "surveys",
+                     "surveys",
                  })
         {
             var d = FeatureCatalog.Find(key)!;

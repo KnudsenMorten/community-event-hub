@@ -46,6 +46,9 @@ public class ProfileModel : PageModel
     /// CC'd here (10a-5). Blank clears it.</summary>
     [BindProperty] public string? SecondaryEmail { get; set; }
 
+    /// <summary>Optional ALTERNATE login email (§26d) — sign in with this OR the primary.</summary>
+    [BindProperty] public string? AlternateEmail { get; set; }
+
     // --- Speaker details (moved here from /Forms/Speaker, operator 2026-06-21).
     //     Shown + editable only for speaker roles; persisted on SpeakerProfile. ---
     [BindProperty]
@@ -80,12 +83,13 @@ public class ProfileModel : PageModel
 
         var p = await _db.Participants
             .Where(p => p.Id == me.ParticipantId && p.EventId == me.EventId)
-            .Select(p => new { p.FullName, p.Phone, p.Email, p.Role, p.SecondaryEmail })
+            .Select(p => new { p.FullName, p.Phone, p.Email, p.Role, p.SecondaryEmail, p.AlternateEmail })
             .FirstOrDefaultAsync(ct);
         if (p is null) return RedirectToPage("/Login");
 
         FullName = p.FullName;
         Phone = p.Phone;
+        AlternateEmail = p.AlternateEmail;
         SecondaryEmail = p.SecondaryEmail;
         Email = p.Email;
         Role = p.Role;
@@ -122,18 +126,6 @@ public class ProfileModel : PageModel
         Role = p.Role;
         IsSpeaker = IsSpeakerRole(p.Role);
 
-        // Speaker preferred-email format check (mirrors the old speaker form).
-        var newOverride = string.IsNullOrWhiteSpace(SpeakerContactEmail) ? null : SpeakerContactEmail.Trim();
-        if (IsSpeaker && newOverride is not null)
-        {
-            var at = newOverride.IndexOf('@');
-            if (newOverride.Length > 320 || at <= 0 || at >= newOverride.Length - 1 || newOverride.Contains(' '))
-            {
-                Message = "Please enter a valid preferred email (or leave it blank).";
-                FullName = p.FullName; Phone = p.Phone; SecondaryEmail = p.SecondaryEmail;
-                return Page();
-            }
-        }
 
         var trimmedName = (FullName ?? string.Empty).Trim();
         if (string.IsNullOrWhiteSpace(trimmedName))
@@ -177,15 +169,46 @@ public class ProfileModel : PageModel
             }
         }
 
+        // Alternate LOGIN email (§26d): normalized; must be a valid shape, must not equal
+        // your own primary, and must not collide with anyone else's primary/alt in the edition.
+        var altEmail = string.IsNullOrWhiteSpace(AlternateEmail)
+            ? null : CommunityHub.Core.Auth.PinLoginService.NormalizeEmail(AlternateEmail);
+        if (altEmail is not null)
+        {
+            var atA = altEmail.IndexOf('@');
+            if (altEmail.Length > 320 || atA <= 0 || atA >= altEmail.Length - 1 || altEmail.Contains(' '))
+            {
+                Message = "Please enter a valid alternate email (or leave it blank).";
+                FullName = p.FullName; Phone = p.Phone; return Page();
+            }
+            if (altEmail == p.Email)
+            {
+                Message = "Your alternate email can't be the same as your sign-in email.";
+                FullName = p.FullName; Phone = p.Phone; return Page();
+            }
+            var clash = await _db.Participants.AnyAsync(
+                x => x.EventId == me.EventId && x.Id != p.Id
+                     && (x.Email == altEmail || x.AlternateEmail == altEmail), ct);
+            if (clash)
+            {
+                Message = "That alternate email is already used by another participant in this event.";
+                FullName = p.FullName; Phone = p.Phone; return Page();
+            }
+        }
+
         p.FullName = trimmedName;
         p.Phone = trimmedPhone;
         p.SecondaryEmail = trimmedSecondary;
+        p.AlternateEmail = altEmail;
 
         // --- Speaker details (operator 2026-06-21): persisted on SpeakerProfile.
         //     Speaking days are NOT speaker-set — they're auto-derived from the
         //     speaker's accepted sessions (master class => pre-day; session => main
         //     day) for organizer hotel/food planning. ---
-        bool overrideChanged = false;
+        // Speaker DETAIL fields (preferred email / accreditation / country / gender /
+        // first-time) moved to the consolidated /Speaker/Details page (operator
+        // 2026-06-24) — Profile no longer edits or writes them. We still keep the
+        // organizer-only speaking-days auto-derivation here so it refreshes on save.
         if (IsSpeaker)
         {
             var now = _clock.GetUtcNow();
@@ -198,15 +221,6 @@ public class ProfileModel : PageModel
             }
             else { sp.UpdatedAt = now; }
 
-            var prevOverride = string.IsNullOrWhiteSpace(sp.ContactEmailOverride) ? null : sp.ContactEmailOverride.Trim();
-            overrideChanged = !string.Equals(prevOverride, newOverride, StringComparison.OrdinalIgnoreCase);
-            sp.ContactEmailOverride = newOverride;
-            sp.Accreditation = AccreditationOptions.Contains(SpeakerAccreditation) ? SpeakerAccreditation : null;
-            sp.Gender = GenderOptions.Contains(SpeakerGender) ? SpeakerGender : null;
-            sp.Country = string.IsNullOrWhiteSpace(SpeakerCountry) ? null : SpeakerCountry.Trim();
-            sp.IsFirstTimeSpeaker = SpeakerFirstTime;
-
-            // Auto-derive speaking days from the speaker's sessions (organizer-only).
             var types = await _db.Sessions
                 .Where(s => s.EventId == me.EventId && !s.IsServiceSession
                             && s.SessionSpeakers.Any(ss => ss.ParticipantId == me.ParticipantId))
@@ -216,15 +230,6 @@ public class ProfileModel : PageModel
         }
 
         await _db.SaveChangesAsync(ct);
-
-        if (IsSpeaker && overrideChanged)
-        {
-            try { await _backstageEmail.QueueAsync(me.EventId, me.ParticipantId, me.Email, newOverride, ct); }
-            catch { /* propagation to the external event system must never break the save */ }
-            SpeakerNotice = newOverride is null
-                ? $"Your preferred email was cleared — calendar invites & messages will use {me.Email}."
-                : $"Calendar invites & messages will now go to {CommunityHub.Core.Domain.SpeakerProfile.EffectiveEmailFor(me.Email, newOverride)}. Sign-in still uses {me.Email}.";
-        }
 
         FullName = p.FullName;
         Phone = p.Phone;

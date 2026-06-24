@@ -186,10 +186,8 @@ public class MyScheduleModel : PageModel
         var ics = await _calendarBuilder.BuildSingleVolunteerTaskAsync(me.ParticipantId, taskId, host, ct);
         if (ics is null) return NotFound();
 
-        return File(
-            System.Text.Encoding.UTF8.GetBytes(ics),
-            "text/calendar; charset=utf-8",
-            $"volunteer-task-{taskId}.ics");
+        // Inline (no filename) so it opens in the calendar app rather than downloading.
+        return File(System.Text.Encoding.UTF8.GetBytes(ics), "text/calendar; charset=utf-8");
     }
 
     private async Task LoadAsync(CurrentParticipant me, CancellationToken ct)

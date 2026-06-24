@@ -1,9 +1,11 @@
 using CommunityHub.Auth;
 using CommunityHub.Core.Config;
+using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
+using Microsoft.EntityFrameworkCore;
 
 namespace CommunityHub.Pages.Sponsor;
 
@@ -20,16 +22,22 @@ public class ContactModel : PageModel
     private readonly ICurrentParticipantAccessor _participant;
     private readonly EventEditionConfigLoader _eventConfigLoader;
     private readonly EventConfigOptions _eventConfigOptions;
+    private readonly CommunityHubDbContext _db;
 
     public ContactModel(
         ICurrentParticipantAccessor participant,
         EventEditionConfigLoader eventConfigLoader,
-        EventConfigOptions eventConfigOptions)
+        EventConfigOptions eventConfigOptions,
+        CommunityHubDbContext db)
     {
         _participant = participant;
         _eventConfigLoader = eventConfigLoader;
         _eventConfigOptions = eventConfigOptions;
+        _db = db;
     }
+
+    /// <summary>The sponsor's company display name, for the mailto subject.</summary>
+    public string? CompanyName { get; private set; }
 
     /// <summary>Set when a non-sponsor reaches the page (server-side gate, not CSS).</summary>
     public bool AccessDenied { get; private set; }
@@ -39,7 +47,7 @@ public class ContactModel : PageModel
     public string? BookingsUrl { get; private set; }
     public string EditionCode { get; private set; } = string.Empty;
 
-    public IActionResult OnGet()
+    public async Task<IActionResult> OnGetAsync(CancellationToken ct)
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
@@ -56,6 +64,21 @@ public class ContactModel : PageModel
         if (cfg.Placeholders.TryGetValue("leadContactName", out var n) && !string.IsNullOrWhiteSpace(n)) LeadName = n;
         if (cfg.Placeholders.TryGetValue("leadContactEmail", out var e) && !string.IsNullOrWhiteSpace(e)) LeadEmail = e;
         if (cfg.Placeholders.TryGetValue("bookingsUrl", out var b) && !string.IsNullOrWhiteSpace(b)) BookingsUrl = b;
+
+        // Resolve the sponsor's company display name for the mailto subject
+        // (so the lead sees "from <Company>"). Same source the pull stamps.
+        var companyId = await _db.Participants
+            .Where(p => p.Id == me.ParticipantId)
+            .Select(p => p.SponsorCompanyId)
+            .FirstOrDefaultAsync(ct);
+        if (!string.IsNullOrWhiteSpace(companyId))
+        {
+            CompanyName = await _db.SponsorUploadLocations
+                .Where(l => l.EventId == me.EventId && l.SponsorCompanyId == companyId
+                            && l.CompanyName != null && l.CompanyName != string.Empty)
+                .Select(l => l.CompanyName)
+                .FirstOrDefaultAsync(ct);
+        }
 
         return Page();
     }

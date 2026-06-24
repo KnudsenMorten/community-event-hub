@@ -35,6 +35,13 @@ public sealed class MicroPolishWiringTests
     private static string Page(params string[] parts) =>
         File.ReadAllText(Path.Combine(PagesDir(), Path.Combine(parts)));
 
+    // §27: the layout's client behaviours + styles now live in shared partials that
+    // _Layout (and _PublicLayout) include. "The layout" for wiring checks = the sum.
+    private static string LayoutAll() =>
+        Page("Shared", "_Layout.cshtml")
+        + "\n" + Page("Shared", "_LayoutClientScripts.cshtml")
+        + "\n" + Page("Shared", "_LayoutStyles.cshtml");
+
     [Theory]
     [InlineData("data-ceh-copy")]      // 4. copy-to-clipboard confirmation
     [InlineData("data-ceh-counter")]   // 5. live character counter
@@ -42,14 +49,14 @@ public sealed class MicroPolishWiringTests
     [InlineData("data-ceh-dirty")]     // 7. unsaved-changes guard
     public void Layout_script_implements_each_micro_polish_behaviour(string attribute)
     {
-        var layout = Page("Shared", "_Layout.cshtml");
+        var layout = LayoutAll();
         Assert.Contains(attribute, layout);
     }
 
     [Fact]
     public void Layout_copy_behaviour_uses_the_clipboard_api_with_a_fallback()
     {
-        var layout = Page("Shared", "_Layout.cshtml");
+        var layout = LayoutAll();
         Assert.Contains("navigator.clipboard", layout);
         Assert.Contains("execCommand", layout); // graceful old-browser fallback
     }
@@ -57,7 +64,7 @@ public sealed class MicroPolishWiringTests
     [Fact]
     public void Loading_guard_disables_the_submit_button_so_a_double_click_cannot_post_twice()
     {
-        var layout = Page("Shared", "_Layout.cshtml");
+        var layout = LayoutAll();
         // The guard sets a one-shot marker and disables the submit control.
         Assert.Contains("cehSubmitted", layout);
         Assert.Contains("btn.disabled = true", layout);
@@ -66,7 +73,7 @@ public sealed class MicroPolishWiringTests
     [Fact]
     public void Dirty_guard_warns_via_beforeunload_only_after_an_edit()
     {
-        var layout = Page("Shared", "_Layout.cshtml");
+        var layout = LayoutAll();
         Assert.Contains("beforeunload", layout);
     }
 
@@ -91,7 +98,7 @@ public sealed class MicroPolishWiringTests
     // Each of these has a free-text field that should carry a live char counter.
     [InlineData("Sessions", "Ask.cshtml")]
     [InlineData("Sessions", "Evaluate.cshtml")]
-    [InlineData("Volunteer", "Signup.cshtml")]
+    // Volunteer/Signup dropped — the 3-step wizard has no prominent free-text field.
     [InlineData("Forms", "Speaker.cshtml")]
     [InlineData("Sponsor", "CaptureLead.cshtml")]
     public void Free_text_fields_carry_a_live_character_counter(string folder, string file)

@@ -221,9 +221,11 @@ public sealed class SponsorOrderPullService
                 activeEvent.Id, companyId, companyName,
                 tasksByTitleKey.Values, editionFacts, ct);
 
+            var desiredKeys = new HashSet<string>(StringComparer.Ordinal);
             foreach (var st in tasksByTitleKey.Values)
             {
                 var sourceKey = $"sponsor:{companyId}:{Slug(st.Title)}";
+                desiredKeys.Add(sourceKey);
 
                 var existing = await _db.Tasks.FirstOrDefaultAsync(
                     t => t.EventId == activeEvent.Id
@@ -269,6 +271,31 @@ public sealed class SponsorOrderPullService
                     // next pull -- canonical source is sponsor.<edition>.json.
                     existing.Title = renderedTitle;
                     existing.Description = renderedDesc;
+                }
+            }
+
+            // PRUNE orphans: delete this company's pull-managed tasks (SourceKey
+            // "sponsor:{companyId}:…") that the CURRENT config no longer produces —
+            // e.g. a task whose title was renamed (the slug, hence the SourceKey,
+            // changes, leaving the old row orphaned). Guard: only prune when this
+            // run produced a non-empty desired set, so a transient empty config can
+            // never wipe a company's tasks. Scoped to this company's sponsor tasks.
+            if (desiredKeys.Count > 0)
+            {
+                var keyPrefix = $"sponsor:{companyId}:";
+                var orphans = await _db.Tasks
+                    .Where(t => t.EventId == activeEvent.Id
+                                && t.SponsorCompanyId == companyId
+                                && t.SourceKey != null
+                                && t.SourceKey.StartsWith(keyPrefix)
+                                && !desiredKeys.Contains(t.SourceKey))
+                    .ToListAsync(ct);
+                if (orphans.Count > 0)
+                {
+                    _db.Tasks.RemoveRange(orphans);
+                    _log.LogInformation(
+                        "SponsorOrderPullService: pruned {N} orphaned task(s) for {Co} (renamed/removed in config).",
+                        orphans.Count, companyName);
                 }
             }
 
@@ -403,12 +430,6 @@ public sealed class SponsorOrderPullService
     {
         var urls = new Dictionary<string, string>(StringComparer.Ordinal);
 
-        var sp = editionFacts.SharePoint;
-        if (sp is null || string.IsNullOrWhiteSpace(sp.SiteUrl) || !_sharePoint.IsConfigured)
-        {
-            return urls;
-        }
-
         // De-dup uploads by subfolder so the same folder is not provisioned
         // twice if two tasks reference it (rare but defensive).
         var uploadDefs = tasks
@@ -417,6 +438,26 @@ public sealed class SponsorOrderPullService
             .GroupBy(u => u.Subfolder, StringComparer.OrdinalIgnoreCase)
             .Select(g => g.First())
             .ToList();
+
+        // SEED every upload placeholder with a blank value up-front so the
+        // description NEVER renders a literal "{{logoFolderUrl}}". A blank value
+        // makes SubstitutePlaceholders fall back to the generic {{uploadPortalUrl}};
+        // a successful SharePoint provision below overrides it with the real
+        // per-company edit link. This keeps the button working even when SharePoint
+        // is disabled or provisioning fails.
+        foreach (var def in uploadDefs)
+        {
+            if (!string.IsNullOrWhiteSpace(def.Placeholder))
+            {
+                urls[def.Placeholder] = string.Empty;
+            }
+        }
+
+        var sp = editionFacts.SharePoint;
+        if (sp is null || string.IsNullOrWhiteSpace(sp.SiteUrl) || !_sharePoint.IsConfigured)
+        {
+            return urls;
+        }
 
         foreach (var def in uploadDefs)
         {

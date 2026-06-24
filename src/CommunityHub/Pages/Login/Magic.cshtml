@@ -1,8 +1,8 @@
 @page
 @model CommunityHub.Pages.Login.MagicModel
 @{
+    Layout = "_PublicLayout";   // anonymous magic-link landing — no internal chrome (§27)
     ViewData["Title"] = Localizer["Login.Title"].Value;
-    ViewData["HidePublicNav"] = true;   // magic-link landing — no public event nav bar
 }
 
 <div class="card">

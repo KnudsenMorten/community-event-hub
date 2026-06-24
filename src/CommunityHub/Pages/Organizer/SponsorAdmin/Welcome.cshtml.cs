@@ -73,11 +73,19 @@ public class WelcomeModel : PageModel
         if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
 
         var r = await _welcome.SendForCompanyAsync(me.EventId, companyId, ct);
-        Message = r.CoordinatorsResolved == 0
-            ? $"Company {companyId} has no event-coordinator contacts, so nothing was sent. Add a coordinator (or set the coordinator flag) first."
-            : $"Company {companyId}: sent {r.Sent} welcome email(s) to {r.CoordinatorsResolved} coordinator(s)."
-              + (r.Skipped > 0 ? $" {r.Skipped} already-welcomed (Reset first to force a resend)." : string.Empty);
-        IsError = r.CoordinatorsResolved == 0;
+        if (r.Blocked)
+        {
+            Message = $"Company {companyId}: {r.Reason}";
+            IsError = true;
+        }
+        else
+        {
+            Message = r.CoordinatorsResolved == 0
+                ? $"Company {companyId} has no event-coordinator contacts, so nothing was sent. Add a coordinator (or set the coordinator flag) first."
+                : $"Company {companyId}: sent {r.Sent} welcome email(s) to {r.CoordinatorsResolved} coordinator(s)."
+                  + (r.Skipped > 0 ? $" {r.Skipped} already-welcomed (Reset first to force a resend)." : string.Empty);
+            IsError = r.CoordinatorsResolved == 0;
+        }
         await LoadRowsAsync(me.EventId, ct);
         return Page();
     }
@@ -103,8 +111,12 @@ public class WelcomeModel : PageModel
         var results = await _welcome.SendForAllSponsorsAsync(me.EventId, ct);
         var sent = results.Sum(r => r.Sent);
         var coordinators = results.Sum(r => r.CoordinatorsResolved);
+        var blocked = results.Count(r => r.Blocked);
         Message = $"Sent {sent} welcome email(s) across {results.Count} sponsor companies "
-                  + $"({coordinators} coordinator(s) resolved). Reset a company first to re-send to already-welcomed coordinators.";
+                  + $"({coordinators} coordinator(s) resolved). Reset a company first to re-send to already-welcomed coordinators."
+                  + (blocked > 0
+                      ? $" {blocked} booth company(ies) skipped — SharePoint upload folders not provisioned yet (run the sponsor pull first)."
+                      : string.Empty);
         await LoadRowsAsync(me.EventId, ct);
         return Page();
     }

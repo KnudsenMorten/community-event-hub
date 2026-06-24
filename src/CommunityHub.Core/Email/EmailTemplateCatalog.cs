@@ -45,9 +45,13 @@ public static class EmailTemplateCatalog
             ["app-game-gift-reminder"]     = ("App-game gift reminder", "sponsor-reminders"),
             ["volunteer-help-raised"]      = ("Volunteer help raised", "outbound-email"),
             ["sponsor-leads-digest"]       = ("Sponsor leads digest", "sponsor-leads"),
-            ["attendee-missing-booking"]   = ("Attendee: missing booking", "attendee-welcome"),
-            ["attendee-missing-ticket"]    = ("Attendee: missing ticket", "attendee-welcome"),
-            ["attendee-duplicate-booking"] = ("Attendee: duplicate booking", "attendee-welcome"),
+            // §26c (2026-06-24): the only attendee chaser now — a 2-day-ticket holder
+            // who hasn't selected a master class IN-HUB yet. (attendee-missing-booking,
+            // attendee-missing-ticket and attendee-duplicate-booking were removed:
+            // master classes are in-hub one-seat, and the pull is filtered to 2-day buyers.)
+            ["pending-master-class-selection"] = ("Attendee: pending master class selection", "attendee-reconcile"),
+            // §26c "Help Promote": notify a speaker when their promo graphics are released.
+            ["speaker-graphics-ready"]     = ("Speaker: promo graphics ready", "speaker-graphics-promote"),
         };
 
     /// <summary>The feature key governing a template's ring (outbound-email transport when unmapped).</summary>

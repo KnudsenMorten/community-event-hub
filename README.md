@@ -204,6 +204,10 @@ A planning surface turns a long task list into a staffed plan, with a draft-it-t
 
 A clear path from "someone is interested" to "they're ready to go", with organizers in control of who comes on board. Prospective volunteers, speakers and media land in a **pre-selection queue** (inactive → preselected → active; only an active person can sign in); organizers validate and activate one or many at once, and clear duplicates/spam. Each activated person then runs a short, **persona-tailored onboarding wizard** that covers only the steps that apply to them, tracked on an **onboarding dashboard** by stage and persona — and an organizer can re-open a single step to trigger a friendly reminder if something changes.
 
+#### Speaker self-service, consolidated
+
+Speakers manage everything about themselves on one **Speaker Details** page — first/last name, bio + socials, photo, Microsoft accreditation (multi-select, mapped to their Zoho speaker **Skills**), country, and an optional preferred contact email — with a single **Save & sync to Zoho**. The Sessionize import seeds these and pulls each speaker's profile picture into SharePoint, and new speakers default to a locked release ring so nothing is published or emailed until an organizer promotes them. Anyone can sign in with their primary **or an alternate email**. A **Help Promote** page hands speakers ready-made social graphics + a one-tap LinkedIn post, with an opt-in email the moment their graphics are released.
+
 #### Multi-hotel management
 
 When the rooms don't all fit in one hotel, organizers define each hotel (name, address, reception contact), assign each person to a hotel in one click, and see everyone **grouped by hotel** with per-hotel headcounts and confirmed counts. Record a per-person reservation number once a hotel returns it, and those details — assigned hotel, its address and the confirmation number — flow straight into each person's hotel calendar invite, so everyone sees exactly where they're staying.

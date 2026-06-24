@@ -24,10 +24,13 @@ namespace CommunityHub.Core.Tests.Scenario;
 /// </summary>
 public sealed class SpeakerMilestoneScenarioTests
 {
-    private static readonly DateOnly TitleAbstractDue = new(2026, 6, 20);
-    private static readonly DateOnly BioPhotoDue = new(2026, 10, 1);
-    private static readonly DateOnly DraftDeckDue = new(2027, 1, 20);
-    private static readonly DateOnly FinalDeckDue = new(2027, 2, 3);
+    // The current speaker-task set (operator 2026-06-23): 7 tasks, all for ALL
+    // speakers (no masterclass-only task). Four share the 1 Oct 2026 date.
+    private static readonly DateOnly Oct1Due = new(2026, 10, 1);    // Bio, Hotel, Dinner, Swag
+    private static readonly DateOnly LunchDue = new(2027, 1, 10);   // Pre-day Lunch
+    private static readonly DateOnly PreviewDue = new(2027, 1, 20); // Upload preview
+    private static readonly DateOnly FinalDue = new(2027, 2, 3);    // Upload final
+    private const int TaskCount = 7;
 
     private static SpeakerDeadlineSeeder NewSeeder(Data.CommunityHubDbContext db) =>
         new(db,
@@ -43,38 +46,36 @@ public sealed class SpeakerMilestoneScenarioTests
         var created = await NewSeeder(db).SeedAsync(seed.EventId);
         Assert.True(created > 0, "the seeder should create speaker-deadline tasks");
 
-        // The Master Class speaker gets all four milestones at their exact dates.
         var mcTasks = await db.Tasks
             .Where(t => t.AssignedParticipantId == seed.MasterclassSpeakerId)
-            .OrderBy(t => t.DueDate)
             .ToListAsync();
 
-        Assert.Equal(4, mcTasks.Count);
-        Assert.Equal(TitleAbstractDue, mcTasks[0].DueDate);
-        Assert.Equal(BioPhotoDue, mcTasks[1].DueDate);
-        Assert.Equal(DraftDeckDue, mcTasks[2].DueDate);
-        Assert.Equal(FinalDeckDue, mcTasks[3].DueDate);
+        Assert.Equal(TaskCount, mcTasks.Count);
+        Assert.Equal(4, mcTasks.Count(t => t.DueDate == Oct1Due));
+        Assert.Single(mcTasks, t => t.DueDate == LunchDue);
+        Assert.Single(mcTasks, t => t.DueDate == PreviewDue);
+        Assert.Single(mcTasks, t => t.DueDate == FinalDue);
         Assert.All(mcTasks, t => Assert.Equal(TaskState.Open, t.State));
     }
 
     [Fact]
-    public async Task Title_and_abstract_milestone_is_masterclass_only()
+    public async Task All_speakers_get_the_same_task_set()
     {
         using var db = ScenarioFixture.NewDb();
         var seed = await ScenarioSeed.SeedAsync(db);
         await NewSeeder(db).SeedAsync(seed.EventId);
 
-        // The plain session speaker gets the three all-speaker milestones, but
-        // NOT the masterclass-only title+abstract one (20 Jun 2026).
+        // No masterclass-only task in the current set (operator 2026-06-23): a plain
+        // session speaker gets exactly the same 7 tasks as a Master Class speaker.
         var s1Tasks = await db.Tasks
             .Where(t => t.AssignedParticipantId == seed.SpeakerOneId)
             .ToListAsync();
 
-        Assert.Equal(3, s1Tasks.Count);
-        Assert.DoesNotContain(s1Tasks, t => t.DueDate == TitleAbstractDue);
-        Assert.Contains(s1Tasks, t => t.DueDate == BioPhotoDue);
-        Assert.Contains(s1Tasks, t => t.DueDate == DraftDeckDue);
-        Assert.Contains(s1Tasks, t => t.DueDate == FinalDeckDue);
+        Assert.Equal(TaskCount, s1Tasks.Count);
+        Assert.Equal(4, s1Tasks.Count(t => t.DueDate == Oct1Due));
+        Assert.Contains(s1Tasks, t => t.DueDate == LunchDue);
+        Assert.Contains(s1Tasks, t => t.DueDate == PreviewDue);
+        Assert.Contains(s1Tasks, t => t.DueDate == FinalDue);
     }
 
     [Fact]

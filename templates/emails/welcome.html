@@ -1,6 +1,6 @@
 Subject: Welcome to {{communityName}} - {{eventDisplayName}}
 <h2 style="margin:0 0 16px;font-size:20px;color:#1a1a2e;">Hi {{firstName}},</h2>
-<p style="margin:0 0 16px;">Welcome to <strong>{{communityName}}</strong>. You have been added to the hub for <strong>{{eventDisplayName}}</strong> as a <strong>{{roleName}}</strong>.</p>
+<p style="margin:0 0 16px;">Welcome to <strong>{{communityName}}</strong>. You have been added to the hub for <strong>{{eventDisplayName}}{{eventCodeParens}}</strong> as a <strong>{{roleName}}</strong>.</p>
 <p style="margin:0 0 16px;">The hub is where you will find everything relevant to your role:</p>
 <p style="margin:0 0 24px;">{{roleGuidance}}</p>
 <p style="margin:0 0 16px;">To sign in, go to the hub and enter your email - you will receive a one-time code. No password to remember.</p>
@@ -9,4 +9,5 @@ Subject: Welcome to {{communityName}} - {{eventDisplayName}}
     <a href="{{hubUrl}}" style="display:inline-block;padding:12px 28px;color:#ffffff;font-size:15px;font-weight:bold;text-decoration:none;">Open the hub</a>
   </td>
 </tr></table>
-<p style="margin:24px 0 0;color:#6b7280;">See you at {{eventDisplayName}}.</p>
+<p style="margin:6px 0 16px;color:#6b7280;font-size:13px;">(Log in with your email, if prompted)</p>
+<p style="margin:24px 0 0;color:#6b7280;">See you at <strong>{{eventDisplayName}}{{eventCodeParens}}</strong>.</p>

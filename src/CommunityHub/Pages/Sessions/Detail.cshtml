@@ -140,8 +140,10 @@
                     {
                         @* Public per-session .ics — only when the talk is scheduled
                            (an unscheduled talk has nothing to put on a calendar). *@
+                        @* No download="" attr so the browser opens the .ics in the calendar
+                           app instead of saving it (operator 2026-06-24). *@
                         <a class="secondary" href="/Sessions/@(s.Id).ics" rel="nofollow"
-                           download="session-@(s.Id).ics" aria-label="@Localizer["SessionDetail.AddToCalendar"]">
+                           aria-label="@Localizer["SessionDetail.AddToCalendar"]">
                             @Localizer["SessionDetail.AddToCalendar"]
                         </a>
                     }

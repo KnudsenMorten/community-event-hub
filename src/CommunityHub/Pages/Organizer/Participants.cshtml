@@ -5,6 +5,19 @@
     ViewData["Title"] = "Participants";
 }
 
+<style>
+    /* Per-persona flag badges + the per-row Action dropdown (operator 2026-06-24). */
+    .pflag { display:inline-block; margin:1px 2px; padding:1px 7px; font-size:11px; font-weight:600;
+        border-radius:9px; background:#eef2f7; color:#334155; border:1px solid #d3dbe6; white-space:nowrap; }
+    .pflag-test { background:#fef3c7; color:#92560a; border-color:#f0d27a; }
+    details.row-actions > summary { cursor:pointer; list-style:none; display:inline-block;
+        padding:6px 12px; border:1px solid #c4c8d4; border-radius:6px; font-weight:600;
+        color:var(--el-darkblue,#1D3380); white-space:nowrap; }
+    details.row-actions > summary::-webkit-details-marker { display:none; }
+    details.row-actions[open] > summary { background:var(--el-grey,#eef1f6); }
+    details.row-actions > div { margin-top:8px; }
+</style>
+
 @* data-ceh-grid: while a filter/sort/page navigation is in flight the shared
    _Layout script lays an animated skeleton over this data-heavy grid (see
    REQUIREMENTS §21). Pure progressive enhancement. *@
@@ -54,9 +67,20 @@
                     @foreach (var cid in Model.SponsorCompanyIds)
                     {
                         <option value="@cid" selected="@(Model.SponsorCompanyFilter == cid)">
-                            @CommunityHub.Pages.Organizer.ParticipantsModel.CompanyDisplayName(cid)
+                            @Model.CompanyDisplayName(cid)
                         </option>
                     }
+                </select>
+            </span>
+            <span style="display:flex;flex-direction:column;gap:2px;">
+                <label for="FlagFilter">Flag</label>
+                <select id="FlagFilter" name="FlagFilter">
+                    <option value="">Any flag</option>
+                    <option value="speaker"     selected="@(Model.FlagFilter == "speaker")">Speakers</option>
+                    <option value="booth"       selected="@(Model.FlagFilter == "booth")">Booth members</option>
+                    <option value="test"        selected="@(Model.FlagFilter == "test")">Test users</option>
+                    <option value="signer"      selected="@(Model.FlagFilter == "signer")">Signers</option>
+                    <option value="coordinator" selected="@(Model.FlagFilter == "coordinator")">Event coordinators</option>
                 </select>
             </span>
             <!-- Keep the active sort when re-filtering; a new search starts at page 1
@@ -94,7 +118,7 @@
                      style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;
                             padding:10px;margin-bottom:12px;border:1px solid #ddd;border-radius:8px;">
                     <button type="button" class="secondary js-bulk" data-handler="BulkDeactivate">Deactivate selected</button>
-                    <button type="button" class="secondary js-bulk" data-handler="BulkReactivate">Reactivate selected</button>
+                    <button type="button" class="secondary js-bulk" data-handler="BulkReactivate">Activate selected</button>
                     <span style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
                         <label for="BulkRole" style="margin:0;">Change persona to</label>
                         <select id="BulkRole" name="BulkRole">
@@ -104,6 +128,16 @@
                             }
                         </select>
                         <button type="button" class="secondary js-bulk" data-handler="BulkChangeRole">Apply persona</button>
+                    </span>
+                    <span style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+                        <label for="BulkRing" style="margin:0;">Change ring to</label>
+                        <select id="BulkRing" name="BulkRing">
+                            @foreach (var r in CommunityHub.Core.Settings.Rings.All)
+                            {
+                                <option value="@r">@CommunityHub.Core.Settings.Rings.Label(r)</option>
+                            }
+                        </select>
+                        <button type="button" class="secondary js-bulk" data-handler="BulkSetRing">Apply ring</button>
                     </span>
                 </div>
 
@@ -140,6 +174,8 @@
                                asp-route-SponsorCompanyFilter="@Model.SponsorCompanyFilter" asp-route-Search="@Model.Search"
                                asp-route-Sort="status" asp-route-Desc="@Model.NextDescFor("status")" asp-route-PageNo="1">@Localizer["OrgGrid.Col.Status"]@Model.SortIndicator("status")</a>
                         </th>
+                        <th scope="col">Ring</th>
+                        <th scope="col">Flags</th>
                         <th scope="col">Actions</th>
                     </tr>
                     @foreach (var p in Model.Participants)
@@ -155,7 +191,7 @@
                             <td>
                                 @if (p.Role == ParticipantRole.Sponsor && !string.IsNullOrWhiteSpace(p.SponsorCompanyId))
                                 {
-                                    @CommunityHub.Pages.Organizer.ParticipantsModel.CompanyDisplayName(p.SponsorCompanyId)
+                                    @Model.CompanyDisplayName(p.SponsorCompanyId)
                                 }
                             </td>
                             <td>
@@ -168,7 +204,16 @@
                                     <span class="error">Inactive</span>
                                 }
                             </td>
+                            <td>@CommunityHub.Core.Settings.Rings.Label(p.Ring)</td>
                             <td>
+                                @if (p.IsTestUser) { <span class="pflag pflag-test">Test</span> }
+                                @if (p.IsBoothMember) { <span class="pflag">Booth member</span> }
+                                @if (p.IsSigner) { <span class="pflag">Signer</span> }
+                                @if (p.IsEventCoordinator) { <span class="pflag">Coordinator</span> }
+                            </td>
+                            <td>
+                                <details class="row-actions">
+                                    <summary>Actions ▾</summary>
                                 <div style="display:flex;flex-wrap:wrap;gap:6px;">
                                     <!-- REAL edit: open the full participant editor (name, email,
                                          persona, active state, sponsor company). Distinct from the
@@ -184,7 +229,7 @@
                                             asp-route-ActiveFilter="@Model.ActiveFilter"
                                             asp-route-RoleFilter="@Model.RoleFilter"
                                             asp-route-SponsorCompanyFilter="@Model.SponsorCompanyFilter">
-                                        @(p.IsActive ? "Deactivate" : "Reactivate")
+                                        @(CommunityHub.Pages.Organizer.ParticipantsModel.IsActive(p) ? "Deactivate" : "Activate")
                                     </button>
                                     <!-- PRIMARY action: full impersonation. Re-issues the
                                          session AS this person and lands on their own hub, so
@@ -211,6 +256,25 @@
                                        asp-page="/Organizer/SecureLink" asp-route-participantId="@p.Id">
                                         Secure link
                                     </a>
+                                    <!-- See this person's email history (operator 2026-06-24). -->
+                                    <a class="secondary" style="text-decoration:none;padding:6px 10px;border:1px solid #c4c8d4;border-radius:6px;"
+                                       asp-page="/Organizer/EmailLog" asp-route-Filter="@p.Email"
+                                       title="See this person's email history">
+                                        Email log
+                                    </a>
+                                    <!-- Resend the welcome email to THIS participant (per-row, production-safe).
+                                         Forces past the once-ever ledger; ring gate + allowlist still apply. -->
+                                    <form method="post" asp-page-handler="ResendWelcome" style="display:inline;margin:0;"
+                                          asp-route-participantId="@p.Id"
+                                          asp-route-ActiveFilter="@Model.ActiveFilter" asp-route-RoleFilter="@Model.RoleFilter"
+                                          asp-route-SponsorCompanyFilter="@Model.SponsorCompanyFilter" asp-route-Search="@Model.Search"
+                                          asp-route-Sort="@Model.Sort" asp-route-Desc="@Model.Desc" asp-route-PageNo="@Model.PageNo">
+                                        <button type="submit" class="secondary"
+                                                style="text-decoration:none;padding:6px 10px;border:1px solid #c4c8d4;border-radius:6px;background:#fff;cursor:pointer;"
+                                                title="Resend the welcome email to @p.FullName">
+                                            Resend welcome
+                                        </button>
+                                    </form>
                                     <!-- Per-row Delete. Opens an accessible confirmation modal
                                          first (no destructive action on a single click). The modal
                                          hosts the real submit button, which posts the Delete handler:
@@ -223,6 +287,7 @@
                                         Delete
                                     </button>
                                 </div>
+                                </details>
                             </td>
                         </tr>
                     }

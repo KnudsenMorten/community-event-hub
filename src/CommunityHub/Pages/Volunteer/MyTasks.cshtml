@@ -31,6 +31,8 @@
        progress, and if you&rsquo;re stuck, ask your category&rsquo;s supervisor
        for help.</p>
 
+    @await Html.PartialAsync("Shared/_SecondaryEmailBanner")
+
     @if (!string.IsNullOrEmpty(Model.Notice))
     {
         <div class="mt-note">@Model.Notice</div>

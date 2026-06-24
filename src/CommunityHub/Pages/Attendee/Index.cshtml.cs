@@ -61,6 +61,11 @@ public class IndexModel : PageModel
     /// <summary>The comm-page slug for the confirmed Master Class (link to /MasterClass/{slug}); null if none.</summary>
     public string? CommSlug { get; private set; }
 
+    /// <summary>"Open in Google Calendar" URL for the confirmed seat (null when the MC time isn't scheduled yet).</summary>
+    public string? GoogleCalUrl { get; private set; }
+    /// <summary>"Open in Outlook (web)" compose URL for the confirmed seat (null when the MC time isn't scheduled yet).</summary>
+    public string? OutlookCalUrl { get; private set; }
+
     private async Task<CommunityHub.Core.Domain.Attendee?> LoadAsync(CancellationToken ct)
     {
         var me = _participant.Current;
@@ -81,6 +86,33 @@ public class IndexModel : PageModel
             // speaker-published logistics page. Best-effort: a failure just hides the link.
             try { CommSlug = await _logistics.EnsureSlugAsync(a.EventId, Confirmed.SessionId, ct); }
             catch { CommSlug = null; }
+
+            // "Add to my calendar" that OPENS the entry (not a download): build Google +
+            // Outlook-web compose URLs from the scheduled time. Only when the MC has a
+            // concrete start/end (pre-day slots may be TBD); the .ics link is the fallback.
+            try
+            {
+                var s = await _svc.GetSessionForIcsAsync(a.EventId, Confirmed.SessionId, ct);
+                if (s is { StartsAt: { } st, EndsAt: { } en })
+                {
+                    var startUtc = st.UtcDateTime;
+                    var endUtc = en.UtcDateTime;
+                    var details = $"Your Experts Live Denmark Master Class. Prep, what to bring & Q&A: {BaseUrl}/MasterClassPage/{Confirmed.SessionId}";
+                    var title = Confirmed.Title;
+                    GoogleCalUrl =
+                        "https://calendar.google.com/calendar/render?action=TEMPLATE" +
+                        $"&text={Uri.EscapeDataString(title)}" +
+                        $"&dates={startUtc:yyyyMMdd'T'HHmmss'Z'}/{endUtc:yyyyMMdd'T'HHmmss'Z'}" +
+                        $"&details={Uri.EscapeDataString(details)}";
+                    OutlookCalUrl =
+                        "https://outlook.office.com/calendar/0/deeplink/compose?path=/calendar/action/compose&rru=addevent" +
+                        $"&subject={Uri.EscapeDataString(title)}" +
+                        $"&startdt={startUtc:yyyy-MM-dd'T'HH:mm:ss'Z'}" +
+                        $"&enddt={endUtc:yyyy-MM-dd'T'HH:mm:ss'Z'}" +
+                        $"&body={Uri.EscapeDataString(details)}";
+                }
+            }
+            catch { GoogleCalUrl = null; OutlookCalUrl = null; }
         }
         return a;
     }
@@ -151,7 +183,8 @@ public class IndexModel : PageModel
         if (s is null) return NotFound();
         var ics = MasterClassEmailService.BuildIcs(
             Request.Host.Host, Confirmed.SessionId, s.Title, s.StartsAt, s.EndsAt, s.EditionStart);
-        return File(System.Text.Encoding.UTF8.GetBytes(ics), "text/calendar", "master-class.ics");
+        // Inline (no filename) so the .ics opens in the OS calendar app.
+        return File(System.Text.Encoding.UTF8.GetBytes(ics), "text/calendar; charset=utf-8");
     }
 
     /// <summary>Toggle the "remind me ~1 month before" calendar opt-in on the confirmed seat.</summary>

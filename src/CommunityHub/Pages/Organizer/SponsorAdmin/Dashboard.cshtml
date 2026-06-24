@@ -17,6 +17,51 @@
            overdue tasks first.</p>
         <p><a asp-page="/Organizer/SponsorAdmin/Index">&larr; Back to Sponsor Admin</a></p>
 
+        @if (!string.IsNullOrEmpty(Model.ActionMessage))
+        {
+            <p class="info" role="status">@Model.ActionMessage</p>
+        }
+
+        <div style="margin:10px 0 16px;padding:12px 14px;background:#eff6ff;border:1px solid #bfdbfe;border-left:4px solid #2563eb;border-radius:8px;">
+            <strong>Webshop → Zoho maintenance.</strong>
+            <p style="margin:4px 0 8px;font-size:13.5px;color:#374151;">
+                Fill each sponsor's Event Coordinator from the webshop default coordinator (only where empty — CEH owns it once set),
+                then re-sync every sponsor record to Zoho Backstage. This also corrects the older UTF-8 mojibake (æ/ø/å) in Zoho.
+            </p>
+            <form method="post" asp-page-handler="MigrateResync" style="display:inline;margin:0;">
+                <button type="submit" data-ceh-confirm="confirmMigrateResync" data-ceh-count="@Model.Rows.Count">Migrate coordinators &amp; re-sync all to Zoho</button>
+            </form>
+            <form method="post" asp-page-handler="Provision" style="display:inline;margin:0 0 0 8px;">
+                <button type="submit" data-ceh-confirm="confirmProvision" data-ceh-count="@Model.Rows.Count">Create / link missing in Zoho</button>
+            </form>
+            <form method="post" asp-page-handler="ReconcileErp" style="display:inline;margin:0 0 0 8px;">
+                <button type="submit" data-ceh-confirm="confirmReconcileErp">Reconcile ERP → webshop (users + defaults)</button>
+            </form>
+            <p style="font-size:12px;color:#6b7280;margin:8px 0 0;">
+                <strong>Create / link</strong> provisions sponsors/exhibitors that don't exist in Zoho yet (replaces the legacy sync script — also runs automatically after each order pull when enabled).
+            </p>
+        </div>
+        <partial name="_ConfirmModal" model='new CommunityHub.Pages.Shared.ConfirmModalModel(
+            Id: "confirmProvision",
+            Title: "Create / link sponsors in Zoho?",
+            Body: "This creates or links {count} sponsor compan(ies) in Zoho Backstage from webshop data. Existing/linked companies are left unchanged. Continue?",
+            ConfirmLabel: "Run it",
+            CancelLabel: "Cancel",
+            DefaultCount: Model.Rows.Count.ToString())' />
+        <partial name="_ConfirmModal" model='new CommunityHub.Pages.Shared.ConfirmModalModel(
+            Id: "confirmReconcileErp",
+            Title: "Reconcile ERP to webshop?",
+            Body: "This creates missing Company Manager users from the e-conomic group-1 contacts and sets each company default signer + event coordinator from the contact roles (never overwriting a curated default). Contacts missing a Role:1/Role:2 are emailed to the organizer. Continue?",
+            ConfirmLabel: "Run it",
+            CancelLabel: "Cancel")' />
+        <partial name="_ConfirmModal" model='new CommunityHub.Pages.Shared.ConfirmModalModel(
+            Id: "confirmMigrateResync",
+            Title: "Migrate coordinators & re-sync to Zoho?",
+            Body: "This fills missing Event Coordinators from the webshop and re-syncs {count} sponsor compan(ies) to Zoho Backstage, overwriting the synced fields there. Continue?",
+            ConfirmLabel: "Run it",
+            CancelLabel: "Cancel",
+            DefaultCount: Model.Rows.Count.ToString())' />
+
         @if (Model.ZohoPipelinePending)
         {
             <p class="info" style="background:#fff8e1;border-left:3px solid #f4b400;padding:8px 12px;border-radius:4px;">

@@ -116,6 +116,10 @@ public sealed class SponsorContactSyncCmUserIdTests
         // The CM user_id ("68"/"77") is parsed and persisted as the id-link.
         Assert.Equal(68, coord.CmUserId);
         Assert.Equal(77, signer.CmUserId);
+
+        // Synced sponsors are ACTIVE by default — lifecycle-correct (operator 2026-06-23).
+        Assert.True(CommunityHub.Core.Domain.ParticipantActivation.IsActive(coord));
+        Assert.True(CommunityHub.Core.Domain.ParticipantActivation.IsActive(signer));
     }
 
     [Fact]

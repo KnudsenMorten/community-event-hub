@@ -1,13 +1,13 @@
 @page
 @model CommunityHub.Pages.Sponsor.LogisticsModel
 @{
-    ViewData["Title"] = "Logistics";
+    ViewData["Title"] = "Key Dates & Times";
 }
 
 @if (Model.AccessDenied)
 {
     <div class="card">
-        <h2>On-site logistics</h2>
+        <h2>Key Dates &amp; Times</h2>
         <p class="error">This page is for sponsors only.</p>
         <p><a asp-page="/Index">Back to hub</a></p>
     </div>
@@ -15,10 +15,48 @@
 }
 
 <div class="card">
-    <h2>On-site logistics</h2>
-    <p>Practical links you need before and during the event.</p>
+    <h2>Key Dates &amp; Times</h2>
+    @if (!string.IsNullOrWhiteSpace(Model.CompanyDisplayName))
+    {
+        <p style="margin:-2px 0 10px;font-size:15px;color:var(--el-darkblue);font-weight:600;">@Model.CompanyDisplayName</p>
+    }
+    <p>The run-of-show for your booth across the event. All times are local (Copenhagen).</p>
+    <p style="margin:6px 0 14px;padding:10px 12px;background:#fff8e1;border:1px solid #f0d878;border-left:4px solid #e0a800;border-radius:6px;color:#7a5b00;font-size:14px;">
+        <strong>Please note:</strong> times are indicative and may change. We'll keep this page updated &mdash; check back closer to the event for the final schedule.
+    </p>
 
-    @await Html.PartialAsync("_KeyDates", Model.EventDates)
+    <h3 style="margin-top:18px;">Mon 8 Feb 2027 &mdash; Setup</h3>
+    <ul style="line-height:1.7;">
+        <li>Experts Live Denmark will set up your booth + furniture.</li>
+    </ul>
+
+    <h3 style="margin-top:18px;">Tue 9 Feb 2027 &mdash; Pre-day (Master Classes + Expo)</h3>
+    <ul style="line-height:1.7;">
+        <li><strong>07:00</strong> &mdash; Doors open &middot; breakfast for attendees</li>
+        <li><strong>07:30</strong> &mdash; Exhibitor check-in to booth (set up swag, demos, etc.)</li>
+        <li><strong>09:00</strong> &mdash; Master Classes start</li>
+        <li><strong>10:30</strong> &mdash; Coffee break (15 min)</li>
+        <li><strong>12:00</strong> &mdash; Exhibitor ready for attendee lunch break (1 hr)</li>
+        <li><strong>14:15</strong> &mdash; Coffee &amp; cake break (30 min)</li>
+        <li><strong>16:00&ndash;18:30</strong> &mdash; Party in Expo / food area</li>
+    </ul>
+
+    <h3 style="margin-top:18px;">Wed 10 Feb 2027 &mdash; Main day</h3>
+    <ul style="line-height:1.7;">
+        <li><strong>06:40</strong> &mdash; Doors open &middot; breakfast</li>
+        <li><strong>07:20&ndash;08:10</strong> &mdash; Sessions (early)</li>
+        <li><strong>08:30&ndash;09:30</strong> &mdash; Welcome &amp; Keynote</li>
+        <li><strong>09:30&ndash;10:00</strong> &mdash; Break (30 min)</li>
+        <li><strong>10:00&ndash;11:00</strong> &mdash; Sessions</li>
+        <li><strong>11:00&ndash;11:30</strong> &mdash; Break (30 min)</li>
+        <li><strong>11:30&ndash;12:30</strong> &mdash; Sessions</li>
+        <li><strong>12:30&ndash;13:30</strong> &mdash; Lunch (1 hr)</li>
+        <li><strong>13:30&ndash;14:30</strong> &mdash; Sessions</li>
+        <li><strong>14:30&ndash;15:00</strong> &mdash; Break (30 min)</li>
+        <li><strong>15:00&ndash;16:00</strong> &mdash; Sessions</li>
+        <li><strong>16:05&ndash;16:25</strong> &mdash; Competition Winners Announcement (Expo)</li>
+        <li><strong>16:30&ndash;17:15</strong> &mdash; Closing</li>
+    </ul>
 
     @if (!string.IsNullOrEmpty(Model.ExhibitorGuideUrl))
     {
@@ -46,5 +84,13 @@
                 @if (!string.IsNullOrEmpty(Model.FreightContactEmail)) { <span> &middot; <a href="mailto:@Model.FreightContactEmail" class="task-link-btn">@Model.FreightContactEmail</a></span> }
             </p>
         }
+    }
+
+    @if (!string.IsNullOrEmpty(Model.ShippingAddressBags))
+    {
+        <h3 style="margin-top:18px;">Attendee-bag content shipping</h3>
+        <p style="margin:6px 0;">If you ship brochures / swag for the attendee bags, send them to:</p>
+        <pre style="background:#f8fafc;border:1px solid #e5e7eb;padding:10px;border-radius:6px;font-family:inherit;white-space:pre-wrap;">@Model.ShippingAddressBags</pre>
+        <p style="margin:6px 0;">Mark every box with: <strong>&lt;your company&gt; &mdash; Attendee Bag Content for @Model.EditionCode</strong></p>
     }
 </div>
