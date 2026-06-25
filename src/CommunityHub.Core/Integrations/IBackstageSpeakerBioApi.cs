@@ -49,7 +49,31 @@ public sealed record SpeakerBioRecord(
     string? Blog,
     string? LinkedIn,
     string? Twitter,
-    SpeakerPublishState PublishState);
+    SpeakerPublishState PublishState,
+    string? FirstName = null,
+    string? LastName = null,
+    string? Country = null,
+    string? Skills = null,
+    string? BackstageSpeakerId = null);
+
+/// <summary>What the Backstage write actually did (the v3 speakers API is create-only).</summary>
+public enum BackstageSpeakerAction
+{
+    /// <summary>A new speaker was created (POST).</summary>
+    Created = 0,
+    /// <summary>
+    /// The speaker already exists in Backstage. The v3 API has NO update endpoint
+    /// (verified 2026-06-25: per-id POST/PUT/PATCH all 404), so we did NOT create a
+    /// duplicate — the caller must alert a human to update them in the Backstage UI.
+    /// </summary>
+    ExistsBlocked = 1,
+    /// <summary>The create attempt failed.</summary>
+    Failed = 2,
+}
+
+/// <summary>Result of an upsert: what happened + the speaker id (when known).</summary>
+public sealed record BackstageSpeakerUpsertResult(
+    BackstageSpeakerAction Action, string? SpeakerId = null, string? Error = null);
 
 /// <summary>
 /// The Zoho Backstage <i>speaker bio</i> OUTBOUND write seam (hub → Backstage).
@@ -85,7 +109,7 @@ public interface IBackstageSpeakerBioApi
     /// <see cref="SpeakerPublishState.Draft"/>. Only called when
     /// <see cref="CanWrite"/> is true.
     /// </summary>
-    Task UpsertSpeakerBioAsync(SpeakerBioRecord record, CancellationToken ct);
+    Task<BackstageSpeakerUpsertResult> UpsertSpeakerBioAsync(SpeakerBioRecord record, CancellationToken ct);
 }
 
 /// <summary>
@@ -98,9 +122,8 @@ public sealed class NullBackstageSpeakerBioApi : IBackstageSpeakerBioApi
 {
     public bool CanWrite => false;
 
-    public Task UpsertSpeakerBioAsync(SpeakerBioRecord record, CancellationToken ct) =>
+    public Task<BackstageSpeakerUpsertResult> UpsertSpeakerBioAsync(SpeakerBioRecord record, CancellationToken ct) =>
         throw new InvalidOperationException(
-            "No wired Zoho Backstage speaker-bio endpoint (creds/endpoints are "
-            + "operator config not in this repo) and the sync is inactive by "
+            "No wired Zoho Backstage speaker endpoint and the sync is inactive by "
             + "default. Do not call UpsertSpeakerBioAsync when CanWrite is false.");
 }

@@ -34,7 +34,10 @@ public sealed record BackstageAttendee(
     string? City,
     string? Postcode,
     string? TaxId,
-    string? CustomFieldsJson);
+    string? CustomFieldsJson,
+    // The ticket's created_time as Backstage returns it ("MM/dd/yyyy HH:mm:ss"), for the
+    // telemetry sales-over-time graph. Null when absent.
+    string? CreatedTimeRaw = null);
 
 /// <summary>A Zoho Bookings appointment, flattened.</summary>
 public sealed record ZohoAppointment(
@@ -341,6 +344,77 @@ public sealed class ZohoClient
         return string.Empty;   // non-null = created (id unknown), so caller doesn't retry-create
     }
 
+    // ===================== SPEAKERS (create-only API) =====================
+    // Verified live 2026-06-25: the Backstage v3 speakers API supports POST (create)
+    // only — per-id POST/PUT/PATCH and DELETE all return 404 "Please provide valid
+    // method". So there is NO in-place update: an existing speaker must be updated
+    // manually in the Backstage UI (the sync blocks + alerts instead of duplicating).
+
+    /// <summary>
+    /// Index of existing Backstage speakers by lower-cased email → speaker id. Used to
+    /// decide create-vs-block (we never create a duplicate for an email already present).
+    /// </summary>
+    public async Task<IReadOnlyDictionary<string, string>> GetSpeakerIdsByEmailAsync(
+        string accessToken, CancellationToken ct = default)
+    {
+        var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        await foreach (var el in PageV3Async("speakers", "speakers", accessToken, ct))
+        {
+            var id = el.TryGetProperty("id", out var i) ? i.GetString() : null;
+            string? email = null;
+            foreach (var f in new[] { "email", "email_address" })
+                if (el.TryGetProperty(f, out var e) && e.ValueKind == JsonValueKind.String) { email = e.GetString(); break; }
+            if (!string.IsNullOrWhiteSpace(id) && !string.IsNullOrWhiteSpace(email))
+                map[email!.Trim()] = id!;
+        }
+        return map;
+    }
+
+    /// <summary>
+    /// POST create a Backstage SPEAKER. Mirrors the legacy
+    /// Sync-Sessionize-Speakers-to-Zoho-Backstage.ps1 payload (name=first, last_name,
+    /// designation=tagline, description=bio, country, linkedin, twitter, + skills).
+    /// Empty fields are stripped. Returns the new speaker id (empty string = created
+    /// but id unparsed; null = failed).
+    /// </summary>
+    public async Task<string?> CreateSpeakerAsync(
+        string accessToken, string email, string? firstName, string? lastName,
+        string? country, string? tagline, string? bio, string? linkedIn, string? twitter,
+        string? skills, bool featured, CancellationToken ct = default)
+    {
+        var url = $"{_options.ApiDomain}/backstage/v3/portals/{_options.BackstagePortalId}"
+            + $"/events/{_options.BackstageEventId}/speakers";
+        // HARD GATE: 'featured' tracks the hub's SelectedForPublish — an unselected
+        // speaker is created non-featured (never highlighted/published).
+        var payload = new Dictionary<string, object?> { ["email"] = email, ["featured"] = featured };
+        void Set(string k, string? v) { if (!string.IsNullOrWhiteSpace(v)) payload[k] = v!.Trim(); }
+        Set("name", firstName);
+        Set("last_name", lastName);
+        Set("country", string.IsNullOrWhiteSpace(country) ? null : country!.Trim().ToUpperInvariant());
+        Set("designation", tagline);
+        Set("description", bio);
+        Set("linkedin", linkedIn);
+        Set("twitter", twitter);
+        Set("skills", skills);
+
+        using var req = new HttpRequestMessage(HttpMethod.Post, url)
+        {
+            Content = System.Net.Http.Json.JsonContent.Create(payload),
+        };
+        req.Headers.Add("Authorization", $"Zoho-oauthtoken {accessToken}");
+        using var resp = await _http.SendAsync(req, ct);
+        if (!resp.IsSuccessStatusCode) return null;
+        try
+        {
+            using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync(ct));
+            var root = doc.RootElement;
+            if (root.TryGetProperty("speaker", out var sp) && sp.ValueKind == JsonValueKind.Object) root = sp;
+            if (root.TryGetProperty("id", out var idEl) && idEl.ValueKind == JsonValueKind.String) return idEl.GetString();
+        }
+        catch { /* created but id unparsed */ }
+        return string.Empty;
+    }
+
     /// <summary>One exhibitor booth member as Zoho returns it.</summary>
     public sealed record BackstageBoothMember(
         string Email, string FirstName, string LastName, string Role);
@@ -503,7 +577,8 @@ public sealed class ZohoClient
                 Phone: NullIf(GetString(contact, "mobile_no")),
                 Country: oi.Country, CountryCode: oi.CountryCode, City: oi.City, Postcode: oi.Postcode,
                 TaxId: oi.Tax,
-                CustomFieldsJson: customJson));
+                CustomFieldsJson: customJson,
+                CreatedTimeRaw: NullIf(GetString(a, "created_time"))));
         }
         return list;
     }

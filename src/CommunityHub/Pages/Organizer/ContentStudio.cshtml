@@ -1,0 +1,77 @@
+@page
+@using CommunityHub.Core.Integrations
+@model CommunityHub.Pages.Organizer.ContentStudioModel
+@{
+    ViewData["Title"] = "Content Studio";
+}
+
+<h1>Content Studio</h1>
+<p class="muted">Generate marketing content from live hub data, then create a <strong>WordPress draft</strong> to validate before publishing. Nothing is published automatically.</p>
+
+@if (Model.AccessDenied)
+{
+    <p class="error">Organizers only.</p>
+}
+else
+{
+    <div class="card" style="margin-bottom:16px;">
+        <form method="get" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+            <label for="Kind"><strong>Content type:</strong></label>
+            <select id="Kind" name="Kind" onchange="this.form.submit()">
+                <option value="@((int)ContentKind.TicketSales)" selected="@(Model.Kind == ContentKind.TicketSales)">Ticket sales update</option>
+                <option value="@((int)ContentKind.MasterClasses)" selected="@(Model.Kind == ContentKind.MasterClasses)">Master classes announcement</option>
+            </select>
+            <noscript><button type="submit">Preview</button></noscript>
+        </form>
+    </div>
+
+    @if (Model.Message is not null)
+    {
+        <p class="@(Model.MessageIsError ? "error" : "success")">
+            @Model.Message
+            @if (Model.DraftEditUrl is not null)
+            {
+                <a href="@Model.DraftEditUrl" target="_blank" rel="noopener">Open the draft in WordPress →</a>
+            }
+        </p>
+    }
+
+    @if (Model.Preview is null)
+    {
+        <div class="card"><p class="info">No data available to generate this post yet. (Ticket sales needs the Zoho telemetry; master classes need at least one master-class session.)</p></div>
+    }
+    else
+    {
+        <div class="card" style="margin-bottom:16px;">
+            <h2 style="margin-top:0;">WordPress draft preview</h2>
+            <p><strong>Title:</strong> @Model.Preview.Title</p>
+            <div style="border:1px solid #e6eaf2;border-radius:8px;padding:14px;background:#fff;">
+                @Html.Raw(Model.Preview.BodyHtml)
+            </div>
+
+            <form method="post" asp-page-handler="CreateDraft" style="margin-top:14px;">
+                <input type="hidden" name="Kind" value="@((int)Model.Kind)" />
+                @if (Model.WordPressReady)
+                {
+                    <button type="submit" class="btn-primary">Create WordPress draft</button>
+                    <span class="muted" style="margin-left:8px;">Creates a draft (status = draft). You validate &amp; publish in WordPress.</span>
+                }
+                else
+                {
+                    <button type="submit" class="btn-primary" disabled>Create WordPress draft</button>
+                    <span class="muted" style="margin-left:8px;">WordPress connector is not configured yet — set <code>WordPress__SiteUrl</code> / <code>WordPress__Username</code> / <code>WordPress__AppPassword</code> and enable the <em>Content Studio</em> feature.</span>
+                }
+            </form>
+        </div>
+
+        <div class="card">
+            <h2 style="margin-top:0;">LinkedIn post text</h2>
+            <p class="muted">Copy this into a LinkedIn company-page post (held for validation — nothing auto-posts).</p>
+            <textarea readonly rows="10" style="width:100%;font-family:inherit;">@Model.Preview.ShortText</textarea>
+            @if (Model.Preview.Tags.Count > 0)
+            {
+                <p style="margin-top:8px;"><strong>Suggested tags:</strong> @string.Join(" ", Model.Preview.Tags)</p>
+            }
+        </div>
+    }
+}

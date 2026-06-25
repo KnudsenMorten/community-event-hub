@@ -434,17 +434,18 @@ builder.Services.AddScoped<CommunityHub.Core.Integrations.SpeakerEmailPropagatio
 //  * HARD GATE: a speaker is pushed PUBLIC only when SpeakerProfile.SelectedForPublish
 //    is explicitly true (defaults false for everyone -- the lineup is not selected
 //    yet); otherwise the bio goes out DRAFT/hidden only.
-//  * Live wiring is (square) pending: the real Backstage portal/event ids + OAuth
-//    creds are operator config (gitignored config/ or Key Vault), not in this repo,
-//    so the default IBackstageSpeakerBioApi is the no-op Null writer (CanWrite=false)
-//    -- the gated request is built (for dry-run) but no Zoho call is faked. Swap in
-//    a live writer here once an endpoint + creds are wired AND the lineup is selected.
+//  * LIVE writer wired 2026-06-25: LiveBackstageSpeakerBioApi (wraps ZohoClient).
+//    CanWrite is true only when Zoho is Enabled + portal/event configured, so it stays
+//    a no-op otherwise. The Backstage speakers API is CREATE-ONLY (no update endpoint),
+//    so it creates a new speaker or — if one already exists — blocks + emails info@
+//    (never a duplicate). The whole sync is still INACTIVE by default
+//    (Backstage:SpeakerBioSync:Enabled=false) and ring-gated per speaker.
 builder.Services.Configure<CommunityHub.Core.Integrations.BackstageSpeakerBioSyncOptions>(
     builder.Configuration.GetSection(
         CommunityHub.Core.Integrations.BackstageSpeakerBioSyncOptions.SectionName));
-builder.Services.AddSingleton<
+builder.Services.AddScoped<
     CommunityHub.Core.Integrations.IBackstageSpeakerBioApi,
-    CommunityHub.Core.Integrations.NullBackstageSpeakerBioApi>();
+    CommunityHub.Core.Integrations.LiveBackstageSpeakerBioApi>();
 builder.Services.AddScoped<CommunityHub.Core.Integrations.SpeakerBioBackstageSyncService>();
 
 // --- SoMe graphics & SharePoint asset store (REQUIREMENTS §18) -------------
@@ -547,6 +548,8 @@ var zohoWebOptions = new CommunityHub.Core.Integrations.ZohoOptions();
 builder.Configuration.GetSection(CommunityHub.Core.Integrations.ZohoOptions.SectionName).Bind(zohoWebOptions);
 builder.Services.AddSingleton(zohoWebOptions);
 builder.Services.AddHttpClient<CommunityHub.Core.Integrations.ZohoClient>();
+// Anonymous attendee telemetry (public "who's coming" page) — aggregate Zoho stats, cached.
+builder.Services.AddScoped<CommunityHub.Core.Integrations.AttendeeTelemetryService>();
 // Pushes a sponsor's company overview/short-description into the Backstage
 // exhibitor profile when they save it in the hub (fail-soft, gated by Zoho config).
 builder.Services.AddScoped<CommunityHub.Core.Integrations.BackstageExhibitorProfileSync>();
@@ -615,6 +618,27 @@ var cmOptions = new CommunityHub.Core.Integrations.CompanyManagerOptions();
 builder.Configuration.GetSection(CommunityHub.Core.Integrations.CompanyManagerOptions.SectionName).Bind(cmOptions);
 builder.Services.AddSingleton(cmOptions);
 builder.Services.AddHttpClient<CommunityHub.Core.Integrations.CompanyManagerClient>();
+
+// --- Content Studio: WordPress + LinkedIn content connector & template engine (§31) --
+// DRAFT-ONLY: the WordPress connector always posts status=draft (operator validates
+// in wp-admin); LinkedIn output is the short text held for validation. The connector
+// self-gates on CanWrite (URL + creds) so an unconfigured deploy is inert; the
+// 'content-studio' feature (default OFF) gates draft creation.
+var wpOptions = new CommunityHub.Core.Integrations.WordPressOptions();
+builder.Configuration.GetSection(CommunityHub.Core.Integrations.WordPressOptions.SectionName).Bind(wpOptions);
+builder.Services.AddSingleton(wpOptions);
+builder.Services.AddHttpClient<CommunityHub.Core.Integrations.IWordPressPublisher,
+    CommunityHub.Core.Integrations.LiveWordPressPublisher>();
+var contentStudioOptions = new CommunityHub.Core.Integrations.ContentStudioOptions();
+builder.Configuration.GetSection(CommunityHub.Core.Integrations.ContentStudioOptions.SectionName).Bind(contentStudioOptions);
+builder.Services.AddSingleton(contentStudioOptions);
+builder.Services.AddSingleton<CommunityHub.Core.Integrations.ContentTemplateEngine>();
+builder.Services.AddScoped<CommunityHub.Core.Integrations.ContentStudioService>();
+
+// --- Speaker onboarding wizard (§28, design A): guided shell over the existing
+// speaker forms (Speaker Details → Hotel → Dinner → Lunch → Swag → Travel) with
+// entitlement + progress; reuses the forms untouched.
+builder.Services.AddScoped<CommunityHub.Forms.SpeakerWizardService>();
 
 // --- Read-only e-conomic ROLE source for the sponsor-email audience (§7c) --
 // The sponsor-email coordinator audience is resolved READ-ONLY from e-conomic

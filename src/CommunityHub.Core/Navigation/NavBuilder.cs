@@ -116,6 +116,9 @@ public static class NavBuilder
             // operator 2026-06-24 (§26c): "Bio" replaced by the consolidated
             // "Speaker Details" page; "Help Promote" added (SoMe graphics). Then My
             // sessions, Sync Calendar, the Event-logistics fold-out, Contact (last).
+            // §28: guided onboarding wizard — the single entry point that chains the
+            // speaker's initial tasks (Speaker Details, Hotel, Dinner, …) with progress.
+            items.Add(new("/Forms/SpeakerWizard", "Nav.SpeakerOnboarding"));
             items.Add(new("/Speaker/Details", "Nav.SpeakerDetails"));
             items.Add(new("/Speaker/Tasks", "Nav.MyTasks"));   // operator 2026-06-24: right after Speaker Details
             items.Add(new("/Speaker", "Nav.MySessions"));
@@ -205,6 +208,10 @@ public static class NavBuilder
             // maintains vital company info (top-level so it's easy to find).
             items.Add(new("/Sponsor/CompanyDetails", "Nav.SponsorCompanyDetails"));
 
+            // Attendee telemetry — the public "who's coming" stats. Opens in a new tab
+            // (it's a standalone anonymous page) so the sponsor keeps their hub session.
+            items.Add(new("/attendee-telemetry", "Nav.AttendeeTelemetry", External: true));
+
             // Exhibitor & Booth Details (Zoho, external).
             const string Booth = "Nav.SectionExhibitorBooth";
             items.Add(new($"{Zoho}booth-info", "Nav.ExhibitorProfile", SectionKey: Booth, External: true));
@@ -278,6 +285,8 @@ public static class NavBuilder
             new("/Organizer", "Nav.OrgArea"),
             new("/Organizer/CommandCenter", "Nav.OrgCommandCenter"),
             new("/Organizer/Dashboard", "Nav.OrgDashboard"),
+            // Public "who's coming" attendee telemetry — standalone page, new tab.
+            new("/attendee-telemetry", "Nav.AttendeeTelemetry", External: true),
             new("/Organizer/FindPerson", "Nav.OrgFindPerson"),
 
             new("/Organizer/People", "Nav.OrgPeople"),

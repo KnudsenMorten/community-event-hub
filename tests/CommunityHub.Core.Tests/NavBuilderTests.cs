@@ -246,8 +246,10 @@ public sealed class NavBuilderTests
     {
         var mgmt = NavBuilder.Build(ParticipantRole.Organizer).ManagementGroup!;
 
-        // Every management entry is an /Organizer route — none scattered elsewhere.
-        Assert.All(mgmt.Items,
+        // Every INTERNAL management entry is an /Organizer route — none scattered
+        // elsewhere. (External/standalone links like the public attendee-telemetry page
+        // open in a new tab and are exempt — operator 2026-06-25.)
+        Assert.All(mgmt.Items.Where(i => !i.External),
             i => Assert.StartsWith("/Organizer", i.Href, StringComparison.OrdinalIgnoreCase));
     }
 

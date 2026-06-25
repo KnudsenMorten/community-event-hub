@@ -144,6 +144,7 @@
   <data name="Nav.MySessions" xml:space="preserve"><value>My Sessions</value></data>
   <data name="Nav.Bio" xml:space="preserve"><value>Bio</value></data>
   <data name="Nav.SpeakerDetails" xml:space="preserve"><value>Speaker Details</value></data>
+  <data name="Nav.SpeakerOnboarding" xml:space="preserve"><value>Get started</value></data>
   <data name="Nav.HelpPromote" xml:space="preserve"><value>Help Promote</value></data>
   <data name="Nav.Calendar" xml:space="preserve"><value>Calendar</value></data>
   <data name="Nav.SectionEventLogistics" xml:space="preserve"><value>Event logistics</value></data>
@@ -446,6 +447,7 @@
   <data name="Breadcrumb.Label" xml:space="preserve"><value>Breadcrumb</value></data>
   <data name="Nav.OrgCommandCenter" xml:space="preserve"><value>Command center</value></data>
   <data name="Nav.OrgDashboard" xml:space="preserve"><value>Dashboard</value></data>
+  <data name="Nav.AttendeeTelemetry" xml:space="preserve"><value>Attendee telemetry</value></data>
   <data name="Nav.OrgAttendees" xml:space="preserve"><value>Attendees</value></data>
   <data name="Nav.OrgEmailCenter" xml:space="preserve"><value>Email center</value></data>
   <data name="Nav.OrgEmailLog" xml:space="preserve"><value>Email log</value></data>
@@ -643,6 +645,26 @@
 
   <!-- Forms: Volunteer wizard -->
   <data name="VolWiz.Title" xml:space="preserve"><value>Volunteer sign-up</value></data>
+  <data name="SpeakerWiz.Title" xml:space="preserve"><value>Speaker onboarding</value></data>
+  <data name="SpeakerWiz.Intro" xml:space="preserve"><value>Let's get you set up for the event. Complete the steps below — you can stop and come back any time; your progress is saved.</value></data>
+  <data name="SpeakerWiz.Progress" xml:space="preserve"><value>{0} of {1} steps done</value></data>
+  <data name="SpeakerWiz.Continue" xml:space="preserve"><value>Continue — step {0} of {1}</value></data>
+  <data name="SpeakerWiz.AllDone" xml:space="preserve"><value>All done — thank you! You can update any step below if anything changes.</value></data>
+  <data name="SpeakerWiz.Nothing" xml:space="preserve"><value>There are no onboarding steps for you right now.</value></data>
+  <data name="SpeakerWiz.Start" xml:space="preserve"><value>Start</value></data>
+  <data name="SpeakerWiz.Edit" xml:space="preserve"><value>Edit</value></data>
+  <data name="SpeakerWiz.Step.details" xml:space="preserve"><value>Speaker details</value></data>
+  <data name="SpeakerWiz.Step.details.Desc" xml:space="preserve"><value>Your bio, photo, tagline, links and session preferences.</value></data>
+  <data name="SpeakerWiz.Step.hotel" xml:space="preserve"><value>Hotel</value></data>
+  <data name="SpeakerWiz.Step.hotel.Desc" xml:space="preserve"><value>Tell us whether you need a room and your check-in / check-out dates.</value></data>
+  <data name="SpeakerWiz.Step.dinner" xml:space="preserve"><value>Appreciation dinner</value></data>
+  <data name="SpeakerWiz.Step.dinner.Desc" xml:space="preserve"><value>RSVP for the speaker appreciation dinner and any dietary needs.</value></data>
+  <data name="SpeakerWiz.Step.lunch" xml:space="preserve"><value>Lunch</value></data>
+  <data name="SpeakerWiz.Step.lunch.Desc" xml:space="preserve"><value>Choose your lunch and let us know any dietary requirements.</value></data>
+  <data name="SpeakerWiz.Step.swag" xml:space="preserve"><value>Swag &amp; gift</value></data>
+  <data name="SpeakerWiz.Step.swag.Desc" xml:space="preserve"><value>Pick your shirt size and gift preferences.</value></data>
+  <data name="SpeakerWiz.Step.travel" xml:space="preserve"><value>Travel reimbursement</value></data>
+  <data name="SpeakerWiz.Step.travel.Desc" xml:space="preserve"><value>Submit your travel details for reimbursement.</value></data>
   <data name="VolWiz.Closed" xml:space="preserve"><value>Volunteer sign-up is closed for this event.</value></data>
   <data name="VolWiz.SavedNote" xml:space="preserve"><value>You can return any time before the deadline to update your details.</value></data>
   <data name="VolWiz.StepOf" xml:space="preserve"><value>Step {0} of 3</value></data>
@@ -1031,6 +1053,7 @@
   <data name="Nav.OrgLogistics" xml:space="preserve"><value>Logistics</value></data>
   <data name="Nav.OrgSchedule" xml:space="preserve"><value>Schedule / key dates</value></data>
   <data name="Nav.OrgSoMe" xml:space="preserve"><value>Marketing / SoMe</value></data>
+  <data name="Nav.OrgContentStudio" xml:space="preserve"><value>Content Studio</value></data>
   <data name="Nav.OrgSetup" xml:space="preserve"><value>Setup</value></data>
   <data name="Nav.OrgCalendarSettings" xml:space="preserve"><value>Calendar sync</value></data>
   <!-- REQUIREMENTS §21: collapsible organizer-nav section headings (group the ~40-link menu). -->
@@ -1091,6 +1114,7 @@
   <data name="OrgSoMe.Title" xml:space="preserve"><value>Marketing / SoMe</value></data>
   <data name="OrgSoMe.Intro" xml:space="preserve"><value>Social-media graphics, the publishing queue, channel settings and where the brand assets live.</value></data>
   <data name="OrgSoMe.Graphics" xml:space="preserve"><value>Generate and manage the branded social-media graphics for speakers and sponsors.</value></data>
+  <data name="OrgSoMe.ContentStudio" xml:space="preserve"><value>Generate WordPress drafts and LinkedIn text from ticket-sales and master-class data.</value></data>
   <data name="OrgSoMe.Queue" xml:space="preserve"><value>The queue of social posts ready to publish across channels.</value></data>
   <data name="OrgSoMe.Settings" xml:space="preserve"><value>Configure the social-media channels and posting defaults.</value></data>
   <data name="OrgSoMe.AssetLocations" xml:space="preserve"><value>Where the brand assets, logos and templates live for this edition.</value></data>
@@ -1193,6 +1217,8 @@
   <data name="Settings.Feat.MagicLink.Desc" xml:space="preserve"><value>Include a magic-link button that signs the recipient in automatically.</value></data>
   <data name="Settings.Feat.SpeakerGraphicsPromote.Name" xml:space="preserve"><value>Speaker "Help Promote" graphics email</value></data>
   <data name="Settings.Feat.SpeakerGraphicsPromote.Desc" xml:space="preserve"><value>Email each speaker when their promo graphics are released, pointing them to the Help Promote page to share on LinkedIn. Sent once per speaker; ring-scoped.</value></data>
+  <data name="Settings.Feat.BackstageSpeakerSync.Name" xml:space="preserve"><value>Speaker → Zoho Backstage sync</value></data>
+  <data name="Settings.Feat.BackstageSpeakerSync.Desc" xml:space="preserve"><value>On Save &amp; sync, create a speaker in Zoho Backstage when they don't exist yet. The Backstage API is create-only, so an existing speaker is never duplicated — info@ is emailed to update them manually. Ring-scoped; off by default.</value></data>
   <data name="Settings.Feat.Sessionize.Name" xml:space="preserve"><value>Sessionize import</value></data>
   <data name="Settings.Feat.Sessionize.Desc" xml:space="preserve"><value>Import accepted speakers and sessions from your Sessionize endpoint.</value></data>
   <data name="Settings.Feat.BackstageSync.Name" xml:space="preserve"><value>Backstage / Zoho exhibitor sync</value></data>
@@ -1201,6 +1227,8 @@
   <data name="Settings.Feat.EconomicErp.Desc" xml:space="preserve"><value>Create and reconcile sponsor customers and orders in the e-conomic accounting system.</value></data>
   <data name="Settings.Feat.SoMe.Name" xml:space="preserve"><value>Social-media scheduling</value></data>
   <data name="Settings.Feat.SoMe.Desc" xml:space="preserve"><value>Schedule and publish posts on a calendar across your social channels.</value></data>
+  <data name="Settings.Feat.ContentStudio.Name" xml:space="preserve"><value>Content Studio</value></data>
+  <data name="Settings.Feat.ContentStudio.Desc" xml:space="preserve"><value>Generate WordPress drafts and LinkedIn post text from ticket-sales and master-class data. Drafts only — nothing is published automatically.</value></data>
   <data name="Settings.Feat.LinkedIn.Name" xml:space="preserve"><value>LinkedIn company-page queue</value></data>
   <data name="Settings.Feat.LinkedIn.Desc" xml:space="preserve"><value>Publish the scheduled posts to your LinkedIn company page, with a pre-alert before speaker posts.</value></data>
   <data name="Settings.Feat.Surveys.Name" xml:space="preserve"><value>Surveys</value></data>

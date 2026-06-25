@@ -211,6 +211,15 @@ public static class FeatureCatalog
             DependsOn: new[] { OutboundEmailKey }, DefaultReleasedToRing: Ring.Ring1,
             Surface: FeatureSurface.UserImpact),
 
+        // §26c: per-speaker ring gate for the Zoho Backstage speaker sync (create-only
+        // API). UserImpact so it's ring-scoped; off by default; speakers at a ring above
+        // the released ring are held (never synced) until promoted.
+        new("backstage-speaker-sync", "Settings.Feat.BackstageSpeakerSync.Name",
+            "Settings.Feat.BackstageSpeakerSync.Desc",
+            FeatureGroup.SpeakersSessions, FeatureTier.Advanced, DefaultEnabled: false,
+            DependsOn: Array.Empty<string>(), DefaultReleasedToRing: Ring.Ring1,
+            Surface: FeatureSurface.UserImpact),
+
         // --- Speakers & sessions --------------------------------------------
         // GA (operator 2026-06-22): released to Broad — runs for everyone, unscoped.
         new("sessionize-import", "Settings.Feat.Sessionize.Name",
@@ -278,6 +287,16 @@ public static class FeatureCatalog
             FeatureGroup.SocialMedia, FeatureTier.Advanced, DefaultEnabled: false,
             DependsOn: new[] { "some-scheduling" }, DefaultReleasedToRing: Ring.Broad,
             Surface: FeatureSurface.EngineQueued),
+
+        // Content Studio (§31): generate WordPress DRAFT posts (+ LinkedIn short text)
+        // from ticket-sales telemetry & master-class data. Engine surface (an organizer
+        // tool that produces DRAFTS only — nothing publishes, no per-user impact), GA-safe,
+        // default OFF so it's opt-in.
+        new("content-studio", "Settings.Feat.ContentStudio.Name",
+            "Settings.Feat.ContentStudio.Desc",
+            FeatureGroup.SocialMedia, FeatureTier.Advanced, DefaultEnabled: false,
+            DependsOn: Array.Empty<string>(), DefaultReleasedToRing: Ring.Broad,
+            Surface: FeatureSurface.Engine),
 
         // --- Surveys --------------------------------------------------------
         new("surveys", "Settings.Feat.Surveys.Name",

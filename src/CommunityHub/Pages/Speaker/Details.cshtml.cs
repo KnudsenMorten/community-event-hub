@@ -139,11 +139,14 @@ public class DetailsModel : PageModel
                 var r = await _sync.SyncOneAsync(me.EventId, me.ParticipantId, ct: ct);
                 Message += r.Outcome switch
                 {
-                    SpeakerBioSyncOutcome.PushedPublic => " Synced to Zoho (public).",
-                    SpeakerBioSyncOutcome.PushedDraft  => " Synced to Zoho (draft — awaiting organizer approval to publish).",
-                    SpeakerBioSyncOutcome.Disabled     => " Zoho speaker sync is off for this edition — nothing pushed yet.",
-                    SpeakerBioSyncOutcome.BuiltOnly    => " Zoho speaker writer isn't configured yet — saved, will sync once it's wired.",
-                    SpeakerBioSyncOutcome.Failed       => " Zoho sync failed: " + (r.Error ?? "unknown error") + ".",
+                    SpeakerBioSyncOutcome.PushedPublic => " Created in Zoho Backstage (public).",
+                    SpeakerBioSyncOutcome.PushedDraft  => " Created in Zoho Backstage (not featured — awaiting publish approval).",
+                    SpeakerBioSyncOutcome.BlockedNeedsManualUpdate =>
+                        " You're already in Zoho Backstage — its API can't update an existing speaker, so the organizers were emailed to update you there by hand.",
+                    SpeakerBioSyncOutcome.RingGated    => " Saved. Zoho sync is held for you until the organizers enable it for your group.",
+                    SpeakerBioSyncOutcome.Disabled     => " Saved. (Zoho speaker sync is off for this edition.)",
+                    SpeakerBioSyncOutcome.BuiltOnly    => " Saved. (Zoho speaker sync isn't configured yet.)",
+                    SpeakerBioSyncOutcome.Failed       => " Saved, but the Zoho sync failed: " + (r.Error ?? "unknown error") + ".",
                     _ => string.Empty,
                 };
                 if (r.Outcome == SpeakerBioSyncOutcome.Failed) IsError = true;
