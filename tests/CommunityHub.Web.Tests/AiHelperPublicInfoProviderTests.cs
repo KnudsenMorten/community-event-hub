@@ -144,6 +144,29 @@ public sealed class AiHelperPublicInfoProviderTests
         Assert.Contains("Pat Public", ctx.ToGroundingText());
     }
 
+    [Fact]
+    public async Task GroundingBuilder_grounds_organizers_md_for_a_non_organizer_role()
+    {
+        // §152: organizers.md is an UN-registered page, so it was never grounded -> the helper
+        // couldn't answer "who are the organizers?". It must now be grounded for ALL roles.
+        var builder = new AiHelperGroundingBuilder(
+            new OrganizersOnlyContent(), new NoOwnData(), organizerOps: null, publicInfo: null);
+
+        var ctx = await builder.BuildAsync(eventId: 1, participantId: 9, role: ParticipantRole.Attendee);
+
+        Assert.Contains(ctx.Sections, s => s.Heading.Contains("organizers", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains("Morten Knudsen", ctx.ToGroundingText());
+        Assert.Contains("mok@expertslive.dk", ctx.ToGroundingText());
+    }
+
+    private sealed class OrganizersOnlyContent : IAiHelperContentProvider
+    {
+        public string? GetContentMarkdown(string slug) =>
+            slug == "organizers"
+                ? "# Contact the Organizers\n## Morten Knudsen\n- Email: mok@expertslive.dk"
+                : null;
+    }
+
     private sealed class NoContent : IAiHelperContentProvider
     {
         public string? GetContentMarkdown(string slug) => null;

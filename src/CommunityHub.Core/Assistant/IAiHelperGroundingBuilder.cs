@@ -83,6 +83,19 @@ public sealed class AiHelperGroundingBuilder : IAiHelperGroundingBuilder
         _publicInfo = publicInfo;
     }
 
+    /// <summary>
+    /// Public content pages that are NOT in <see cref="ContentPageRegistry"/> but every role
+    /// may ask about — grounded for ALL roles (operator 2026-06-27, §152). The organizer/
+    /// contact roster lives in <c>organizers.md</c> (rendered on <c>/Contact</c> as an
+    /// un-registered page), so it was never grounded and the helper could not answer
+    /// "who are the organizers?". It is public contact info (names/roles/emails), no
+    /// sensitive data.
+    /// </summary>
+    private static readonly (string Slug, string Heading)[] AlwaysPublicContent =
+    {
+        ("organizers", "Contact the organizers"),
+    };
+
     public async Task<AiHelperContext> BuildAsync(
         int eventId, int participantId, ParticipantRole role, CancellationToken ct = default)
     {
@@ -95,6 +108,18 @@ public sealed class AiHelperGroundingBuilder : IAiHelperGroundingBuilder
             if (!string.IsNullOrWhiteSpace(md))
             {
                 sections.Add(new AiHelperGroundingSection($"Help page — {page.Title}", md.Trim()));
+            }
+        }
+
+        // (1b) ALWAYS-PUBLIC unregistered content, grounded for EVERY role (§152) — e.g. the
+        // organizer/contact roster (organizers.md). Not in ContentPageRegistry, so the
+        // role-scoped loop above never picks it up.
+        foreach (var (slug, heading) in AlwaysPublicContent)
+        {
+            var md = _content.GetContentMarkdown(slug);
+            if (!string.IsNullOrWhiteSpace(md))
+            {
+                sections.Add(new AiHelperGroundingSection(heading, md.Trim()));
             }
         }
 
