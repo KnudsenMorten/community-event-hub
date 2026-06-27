@@ -161,9 +161,13 @@ public class WizardModel : PageModel
         switch (outcome)
         {
             case WizardStepOutcome.Advance:
-                // Re-read the plan post-save and go to the next incomplete step (or hub).
-                Plan = await BuildPlanAsync(me, ct);
-                return RedirectToStepOrHub(Plan?.NextStep);
+                // Move FORWARD to the next step IN SEQUENCE — NOT the first-incomplete step.
+                // The first-incomplete can be THIS step again when "done" needs more than this
+                // save provides (e.g. Profile is "done" only once a phone is present, yet you
+                // may Save & next without one) — which made Save & next silently loop back to
+                // the same step ("nothing happens"). Completed/skipped steps stay revisitable
+                // via the breadcrumb; the last step's Finish lands on the hub.
+                return AdvanceFrom(idx);
 
             case WizardStepOutcome.NotRelevant:
                 return AdvanceFrom(idx);

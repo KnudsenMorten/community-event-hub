@@ -104,6 +104,20 @@ public sealed class AcceptFormService : IWizardFormService
         AcceptFormModel model, int eventId, int participantId, string email,
         ModelStateDictionary modelState, CancellationToken ct)
     {
+        // ALREADY ACCEPTED first (idempotent): once a row exists the partial shows the
+        // read-only "Accepted on …" confirmation with NO checkbox — so there is nothing to
+        // tick. Without this short-circuit, re-finishing an already-accepted step bound
+        // Accept=false and looped on "Please tick to continue" with no checkbox to tick.
+        var existing = await _db.ParticipantPolicyAcceptances.FirstOrDefaultAsync(
+            a => a.EventId == eventId && a.ParticipantId == participantId, ct);
+        if (existing is not null)
+        {
+            await PopulateExistingAsync(model, eventId, participantId, ct);
+            model.Message = "Your acceptance is already on file.";
+            return WizardStepOutcome.Advance;
+        }
+
+        // New acceptance: the checkbox MUST be ticked.
         if (!model.Accept)
         {
             // Re-render with the field error + flash; nothing is persisted.
@@ -115,23 +129,17 @@ public sealed class AcceptFormService : IWizardFormService
             return WizardStepOutcome.Invalid;
         }
 
-        // Idempotent persist: only record the acceptance once. An existing row's who/when/URLs
-        // are preserved (a later URL change must not rewrite what the person agreed to).
-        var existing = await _db.ParticipantPolicyAcceptances.FirstOrDefaultAsync(
-            a => a.EventId == eventId && a.ParticipantId == participantId, ct);
-        if (existing is null)
+        // Record the acceptance once (who/when/URLs are durable + never overwritten later).
+        _db.ParticipantPolicyAcceptances.Add(new ParticipantPolicyAcceptance
         {
-            _db.ParticipantPolicyAcceptances.Add(new ParticipantPolicyAcceptance
-            {
-                EventId = eventId,
-                ParticipantId = participantId,
-                AcceptedByEmail = email,
-                AcceptedAt = _clock.GetUtcNow(),
-                CodeOfConductUrl = CodeOfConductUrl,
-                PrivacyPolicyUrl = PrivacyPolicyUrl,
-            });
-            await _db.SaveChangesAsync(ct);
-        }
+            EventId = eventId,
+            ParticipantId = participantId,
+            AcceptedByEmail = email,
+            AcceptedAt = _clock.GetUtcNow(),
+            CodeOfConductUrl = CodeOfConductUrl,
+            PrivacyPolicyUrl = PrivacyPolicyUrl,
+        });
+        await _db.SaveChangesAsync(ct);
 
         await PopulateExistingAsync(model, eventId, participantId, ct);
         model.Message = "Thank you — your acceptance has been recorded.";

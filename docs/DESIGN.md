@@ -403,6 +403,27 @@ historical staging plan lives in the source CONTEXT material and is not repeated
   credentials. Unique `(EventId, PersonaGroup)`. Migration: **`GraphicsAssets`** (2 tables, additive).
 - Note: the hub has **no company entity** — `SponsorCompanyId` is just the external Company Manager
   id carried for scoping; company facts are read from Company Manager (§6).
+- **`SpeakerProfile.CalendarEmail`** (added 2026-06-27, migration `SpeakerCalendarEmail`) — an
+  optional **calendar-only** address (nullable, max 320) plus `CalendarEmailSetAt`, for a speaker
+  whose calendar lives on a different mailbox than their contact mail. The static resolver
+  `SpeakerProfile.CalendarEmailFor(sessionize, calendarEmail, contactOverride)` picks the calendar
+  recipient with a deliberate fallback (explicit `CalendarEmail` → contact override → the Sessionize
+  identity email); **only** the `.ics` calendar-invite path resolves through it, while every other
+  outbound mail keeps using `EffectiveEmail` (wiring in §6, §141).
+- **`VolunteerTask.ExternalKey`** (added 2026-06-27) — an **immutable per-task GUID** minted on
+  create and never reused; the stable identity the §151 Excel round-trip upserts on, so a re-import
+  matches the row by `ExternalKey` and titles/owners can change without duplicating. The task also
+  carries an **auto-generated detailed description** (built from its title via the §151 guidance
+  seam), so an organizer-added task is never blank. See §8b.
+- **`JobHealthMarker`** (Domain; added 2026-06-27, migration `20260627062221_JobHealthMarker`) —
+  **one row per job key** holding `ConsecutiveFailures` + `LastSuccess` / `LastFailure` / `LastError`:
+  the durable counter behind the §5 "page only at 2 consecutive failures" job-health gate
+  (`Diagnostics/JobFailureTracker`). Additive, one table.
+- **Master-class atomic switch (§139).** `MasterClassSignupService.SwitchAsync` moves a seat between
+  master classes as a single **serializable read-decide-write**: the target's `SeatsTakenAsync` is
+  **range-locked** inside the transaction, a `NowFullError` **commit guard** rejects an overbooking
+  that raced in, and the **new seat is secured before the old one is released** — so a failed switch
+  never loses the original seat and two concurrent switches can never push a class past capacity.
 
 ### Other stores
 - **Survey definitions** as JSON (`src/CommunityHub/App_Data/Surveys/*.json`, loaded + cached by
@@ -589,6 +610,13 @@ the next run; nothing sends twice.
 
 `TestMode` makes all upstream integrations **read-only** in DEV (no writes to Zoho / Woo / Company
 Manager / Backstage / Bookings).
+
+**Job-health paging (added 2026-06-27, §138).** `ErpWebshopReconcileJob` records a whole-reconcile
+crash via `Diagnostics/JobFailureTracker` (backed by the §3 `JobHealthMarker`): a failed run **bumps
+the consecutive-failure counter** but **pages only at 2** consecutive failures (so a single transient
+blip is swallowed), through the ring-exempt `EngineAlertSender` under the throttle key
+`engine-fail:erp-webshop-reconcile`; a success resets the counter. The job **deliberately does not
+re-throw** — a crash is recorded and alerted, not bubbled up to fail the Functions invocation.
 
 ### Real-time mirror: the Zoho Backstage order-change webhook (§128)
 
@@ -1674,6 +1702,62 @@ notifications) goes through `IEmailSender`, so the DEV redirect / PROD allowlist
 `linkedin-some-access-token`). Until both are wired + posting is enabled, the Null publisher keeps the
 queue inert with nothing faked.
 
+### HTTP resilience — TransientFaultRetryHandler (2026-06-27, §138)
+
+`Integrations/TransientFaultRetryHandler` is a **dependency-free `DelegatingHandler`** that retries a
+failed HTTP call with **bounded, jittered exponential backoff**. It retries **only** transient
+failures — `5xx`, `408`, `429`, and network-level exceptions — never a `4xx` the caller caused. It is
+wired onto **`CompanyManagerClient` in all three hosts** (web, Jobs, OneShot) so every Company Manager
+read/write rides the same policy. On top of it, `ErpWebshopContactSyncService` wraps **each company in
+its own try/catch**, so one company's failure is logged and skipped rather than aborting the whole
+reconcile.
+
+### Venue images — server-proxied live SharePoint images (2026-06-27, §146)
+
+A reusable proxy that surfaces **live** venue/booth images straight from a SharePoint folder without
+copying them into the repo. `Integrations/Graphics/VenueImageService` (Core) lists/serves a configured
+folder via the existing `ISharePointFileStore`, enforcing a **folder allowlist**, a `SanitizeFileName`
+path-traversal guard, an `IMemoryCache` TTL, and an app-credential download. The web
+`VenueImageProvider` façade fronts it for page models, and **`GET /venue-image/{folder}/{file}`** streams
+a single image, **falling back to a committed `wwwroot` copy** when SharePoint is unset. The whole
+feature is **inert until `Graphics:SharePoint:VenueRootFolderPath` is set** (§17) — until then only the
+committed fallback is served. The sponsor **"Our Booth"** page consumes it.
+
+**Calendar-email routing (§141).** With the new `SpeakerProfile.CalendarEmail` (§3), the `.ics` paths —
+`CalendarInviteEmailService` and `ParticipantCalendarBuilder` — now resolve their recipient through
+`SpeakerProfile.CalendarEmailFor` (calendar override → contact override → identity), while **all general
+outbound mail keeps using `EffectiveEmail`**. Setting a calendar address therefore moves only the
+invites, never the contact mail.
+
+### AI Community Helper — grounded conversational assistant (2026-06-27, §149/§152)
+
+A role-aware chat assistant (renamed from "Otto") that answers from **grounded** event content, never
+free-floating model knowledge. The grounding is assembled by **`IAiHelperGroundingBuilder`**, which
+composes role-scoped content from a set of **optional** providers (each provider is constructor-optional,
+so a host missing one still builds safely):
+
+- **`IAiHelperOrganizerOpsProvider`** (organizer-only) — operational context exposed solely to
+  organizers.
+- **`IAiHelperPublicInfoProvider`** (all roles; web impl `WebAiHelperPublicInfoProvider`) — the
+  **published** speakers + skills + sessions + the schedule, for every role plus organizers. Two
+  invariants: a **publish HARD GATE** (a speaker is grounded only when `SelectedForPublish` is true,
+  mirroring §6) and **authorization-at-retrieval** (content is gathered under the caller's identity at
+  query time, not pre-baked), so nothing unpublished or out-of-scope can leak into an answer.
+- **`IAiHelperSharePointGroundingProvider`** (`SharePointGroundingProvider`, a Core concrete in the
+  `VenueImageService` mould) — grounds from an **operator-curated SharePoint folder**. It lists the
+  folder via `ISharePointFileStore`, emits one `Reference: <file>` section per file, caches for
+  **~15 min** (`IMemoryCache`), and is bounded by **MaxFiles 12 / PerDocCharCap 6000 / TotalCharCap
+  30000**, behind a `CanRead` gate and a build-safe optional ctor. Drop or replace a file on SharePoint
+  and the helper reflects it within the cache window — **no deploy** (§152). Inert until
+  `Graphics:SharePoint:GroundingFolderPath` is set (§17). The curated `organizers.md`
+  ("Contact-the-organizers") rides this folder (§149).
+- **`Documents/DocumentTextExtractor`** — the extractor each curated file is run through: **md/txt**
+  (BOM-stripped), **docx** (`DocumentFormat.OpenXml`), **pdf** (`UglyToad.PdfPig`, added to
+  `CommunityHub.Core.csproj`), and **xlsx** (`ClosedXML`, cell text via `GetString` — **not**
+  `GetFormattedString` — with clean time cells and HTML stripped). It honours a **NEVER-throws
+  contract**: an unsupported, empty, or corrupt file returns `null`, never an exception, so one bad
+  document can't break grounding.
+
 ---
 
 ## 7. Email system
@@ -2157,30 +2241,38 @@ saving it. The Key Dates panel (`Calendar.cshtml`) is **grouped by month** with 
 Outlook "subscribe from URL" won't follow the `webcal://` → http → https redirect chain; `webcal://`
 is kept only as the one-click Apple/Outlook affordance).
 
-### Get-started wizards — entitlement-scoped guided onboarding (REQUIREMENTS §28/§32/§43/§44, 2026-06-25)
+### Get-started wizards — a true in-wizard stepper (REQUIREMENTS §28/§32/§43/§44/§148, 2026-06-27)
 
-A single "Get started" wizard shell now serves **every** role. Speakers (§28) and sponsors (§32) had
-bespoke wizards first; `RoleWizardService` is the generic design-A shell that adds **volunteers,
-organizers, event partners and media**, while `SponsorWizardService` keeps the sponsor variant
-(steps from the Company Details section headers, booth steps for exhibitors only). The two invariants
-the audit (§44) demands:
+The single "Get started" wizard now serves **every** role as a **genuine in-wizard stepper** — each
+step's form renders **inline in one host page**, no longer a link-out to a standalone form. The generic
+host is **`/Forms/Wizard`**: it renders the current step's own fields-partial inside one form, with
+**Prev / Next**, a **Step X of N** indicator and a percent-complete bar. **Save & next** runs that
+step's shared service and then **PRG-advances to the next still-incomplete step** (a redirect after
+post, so a refresh never re-submits); a validation failure **re-renders the same step** with its
+messages.
 
-- **Entitlement-scoped steps (§44a).** A step appears only when the participant is **entitled** to
-  it, from role **and** what they bought/were granted — resolved by
+- **One shared service per form (`Forms/Steps/XxxFormService`).** Each form's
+  **validate + persist + side-effects** are extracted into a single `XxxFormService` shared by **both**
+  the standalone page (now a thin shell that just calls the service) **and** the inline
+  **`XxxStepHandler`** (an `IWizardStepHandler` the host invokes), so the inline step and the standalone
+  page behave identically.
+- **Advance-in-sequence loop fix (§148).** The stepper advances to the **next step in sequence that is
+  not yet done**, so "Save & next" can never bounce back onto a completed step or loop on a not-done one
+  — it always moves forward through the persona's ordered set.
+- **Entitlement-scoped steps (§44a, unchanged).** A step appears only when the participant is
+  **entitled** to it, from role **and** what they bought/were granted — resolved by
   `CommunityHub.Core.Entitlements.OrderEntitlements`, the SAME authority that gates the self-service
-  forms. Profile is always step 1; logistics steps (hotel / travel / swag) appear only for an
-  entitled (supported) participant; the volunteer availability step is volunteer-only; a multi-hat
-  person (e.g. a volunteer who is also a supported speaker) gets exactly the union their effective
-  entitlement set grants. `FormEntitlementGate` enforces the same on the form page-model `OnGet`/
-  `OnPost`, so a form a person isn't entitled to (a self-funded speaker's Hotel/Travel/Swag) is
-  genuinely DENIED, not merely hidden.
-- **Auto-complete from saved data (§44b).** Every step (and its standalone page) is marked done
-  **once there is ≥1 persisted save for it** — completion is *read from each page's data*, never a
-  separate "mark complete" flag, so the wizard state and the task list always agree. Steps are
-  numbered + counted (`TotalSteps`/`NextStepNumber`) so "Continue — step X of Y" always equals the
-  displayed list. A step whose backing integration is unavailable (e.g. the sponsor "your contacts"
-  step when e-conomic isn't configured) is shown as a fail-soft guided link rather than blocking the
-  wizard.
+  forms. Profile is always step 1; logistics steps (hotel / travel / swag) appear only for an entitled
+  (supported) participant; the volunteer availability step is volunteer-only; a multi-hat person gets
+  exactly the union their effective entitlement set grants. `FormEntitlementGate` enforces the same on
+  the form page-model `OnGet`/`OnPost`, so a form a person isn't entitled to is genuinely DENIED, not
+  merely hidden.
+- **Auto-complete from saved data (§44b, unchanged).** Every step (and its standalone page) is marked
+  done **once there is ≥1 persisted save for it** — completion is *read from each page's data*, never a
+  separate "mark complete" flag, so wizard state and the task list always agree. Steps are numbered +
+  counted so "Step X of N" always equals the displayed list.
+- **Old entry points are thin redirects.** `/Forms/SpeakerWizard` and `/Forms/GetStarted` now redirect
+  into the generic `/Forms/Wizard` host, so existing links keep working.
 
 ### Role-tagged schedule / key-dates (2026-06-20)
 
@@ -3000,38 +3092,39 @@ Broad/GA. A **build stamp** (`v<ver> (<sha>) · <Env>`) shows which code is depl
 mobile-first, en. **NEW-FEATURE RULE:** a new feature must either join an existing group (adopt its
 lifecycle ring) or be its own feature with a special ring; born at Ring0 in Incubation, never Broad.
 
-### 8b. Allocation scenarios — generic stage → simulate → commit *(PLANNED, not yet built)*
+### 8b. Allocation pipeline — availability → role-routed queues → silent draft → batched commit (BUILT, §150/§151, 2026-06-27)
 
-> **Forward-looking design.** This section describes a designed-but-unbuilt capability. The volunteer
-> **allocation-draft** primitive it builds on already ships (§3 `TaskAllocationDraft` +
-> `VolunteerAllocationService`: `AddDraftAsync`/`RemoveDraftAsync` queue, `CommitAsync` turns the queue
-> into real assignments, `DiscardAsync` resets). Allocation scenarios generalize that one-feature draft
-> queue into a reusable workflow for organizer bulk allocation.
+The generalized allocation workflow is **built**. It extends the volunteer **allocation-draft**
+primitive (§3 `TaskAllocationDraft` + `VolunteerAllocationService`) into a full **propose → queue →
+commit** pipeline that is **silent until commit** and routed by responsible team.
 
-The goal is **one generic stage → simulate → commit workflow** for any organizer bulk-allocation job —
-volunteer task/shift assignment, drop-out re-planning, hotel assignment — so an organizer can plan a
-large change, *see its effect before it lands*, and apply or throw it away atomically.
+- **Availability auto-assign.** `AvailabilityAutoAssignEngine` runs at **step 2** and **proposes**
+  assignments from each person's stated availability (`VolunteerDayAvailability`); it is **generalized
+  over the target role**, so the same engine proposes volunteer *and* organizer allocations.
+- **Role-routed queues.** `ResponsibleTeamRouter` maps a task's **Responsible Team** to a queue:
+  **`ELDK-Volunteers` → the volunteer queue**, the **configured organizer team band(s) (e.g. `ELDK`) →
+  the organizer queue**, and **anything else → tracked-only** (recorded but not surfaced as an
+  actionable queue).
+  `OrganizerAllocationService` + the **`/Organizer/OrganizerAllocation`** page mirror the existing
+  volunteer allocation queue for the organizer side.
+- **Silent 3-stage lifecycle.** Each allocation moves **proposed → queued → committed** and is
+  **completely silent until commit** — **no email** on a proposal or on draft edits, so an organizer can
+  build and reshape the plan without notifying anyone.
+- **One commit email.** `CommitNotificationService` is the **sole** notification path: on **commit** it
+  emits **batched, per-person** notifications (one mail per assignee summarizing their tasks),
+  **ring-gated** through `IEmailSender`. Nothing else in the pipeline mails.
 
-- **A Scenario holds staged actions, not live edits.** A `Scenario` is a named, per-organizer working
-  set of staged `assign` / `unassign` / `move` actions against the live tables (volunteer task
-  assignments, shift assignments, hotel rooms, …). Staging a change writes only to the scenario — the
-  live tables are untouched until commit, so an organizer can build up a whole re-plan over several
-  sittings without anyone being affected.
-- **Simulation is read-only.** "Simulate" validates the staged set against the live data WITHOUT
-  writing: it surfaces **coverage gaps** (a task/shift left under its needed headcount), **conflicts**
-  (a person double-booked, or assigned outside their availability), **capacity** breaches (a hotel /
-  shift over its limit), and a **before/after diff** so the organizer reads exactly what changes. This
-  is the generalization of today's `LoadCoverageAsync` → `TaskCoverage` red/green check.
-- **Commit is atomic; discard is clean.** On **commit** the staged actions are applied to the live
-  tables in **one transaction** (with an audit trail of who committed what), exactly as
-  `VolunteerAllocationService.CommitAsync` turns the draft queue into real `VolunteerTaskAssignment`
-  rows today; a failed validation blocks the commit rather than half-applying. **Discard** drops the
-  scenario without touching anything live (today's `DiscardAsync`).
-- **Why generic.** Drop-out re-planning (re-spread one person's shifts across the rest), bulk volunteer
-  task mapping, and hotel assignment are the same shape — stage a batch of moves, check coverage /
-  capacity / conflicts, commit or bin — so they share one engine + one organizer UI instead of three
-  bespoke flows. All scenario writes are organizer-only, server-enforced, edition-scoped (same gating
-  as the existing allocation pages).
+**Task management (§151).** Alongside the pipeline: a task gets an **auto-generated detailed
+description** from its title via the guidance seam (`HeuristicTaskGuidanceGenerator` always-on,
+`LlmTaskGuidanceGenerator` when a key is configured); **any organizer** can edit any task; and
+`VolunteerTaskExcelService` provides a **`.xlsx` export/import round-trip** that upserts on the immutable
+`VolunteerTask.ExternalKey` GUID (§3), so a re-import updates in place and never duplicates. The full
+**304-task import is operator-run** (not a scheduled job). All allocation/task writes are
+organizer-only, server-enforced, edition-scoped.
+
+> **Still future:** the fully generic **stage → simulate → commit** *scenario* layer (one engine for
+> hotel placement, drop-out re-planning and shift assignment with a before/after diff) remains a
+> forward-looking generalization on top of this pipeline.
 
 ---
 
@@ -3708,6 +3801,14 @@ work at ~360px, shipped in the same commit as the desktop CSS.
 Coverage resolves: per-person override → speaker-type rule → role rule → default.
 `woocommerce.enabled=false` must leave a fully working hub (sponsor module then runs from manual CSV
 import only).
+
+**Graphics / SharePoint folders (`GraphicsSharePointOptions`, added 2026-06-27).** Two drive-relative
+folder paths on the existing `Graphics:SharePoint` options, both **blank by default ⇒ the feature stays
+inert**: `Graphics:SharePoint:VenueRootFolderPath` (the live venue-image folder the §6 `VenueImageService`
+proxies) and `Graphics:SharePoint:GroundingFolderPath` (the operator-curated folder the §6 AI Community
+Helper grounds from). Neither is a secret — both are operator config alongside the existing
+`Graphics:SharePoint` site/drive/root; until set, the venue proxy serves only its committed `wwwroot`
+fallback and the SharePoint grounding provider returns nothing.
 
 **Key Vault secret inventory — by NAME only** (the Bicep provisions the vault but stores no values;
 `set-secrets.sh` loads them at deploy time):

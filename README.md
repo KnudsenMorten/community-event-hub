@@ -25,11 +25,11 @@ The hub gives every persona its own tailored, mobile-first surface — and organ
 
 | Persona | What they get |
 |---|---|
-| **Organizer** | Command center + cross-role overview, live dashboard, fast search/sort/paged grids, participant management (edit / delete-safely / bulk / act-as / secure links), pre-selection & onboarding queues, the action queue for late changes, an Email Center + broadcast, sessions & Sessionize, sponsor admin + leads, volunteer structure & buckets, multi-hotel, swag/travel/lunch/dinner overviews, exports & printable run-sheets, and social-graphics + LinkedIn scheduling. |
-| **Speaker / Masterclass speaker** | A speaker hub with a milestone tracker and countdowns, "My sessions", an editable public bio (tabbed) seeded from Sessionize but owned by them, a public-profile preview, preferred-email routing, calendar-subscribe for deadlines, attendee questions, share graphics, and a public master-class logistics page. |
-| **Volunteer** | "My schedule" (all shifts, time-ordered, with per-shift instructions and calendar subscribe), self-service shifts (confirm / decline / swap), "My tasks" grouped by area, a help channel to their supervisor, and a supervisor dashboard if they run a category. |
-| **Sponsor** | A single sponsor portal (`/Sponsor`) with company profile, booth tier, logistics quick-links, the deliverables checklist, a leads read-view and order/invoice status; booth lead-capture and a secured Leads API; tasks generated from what they bought. |
-| **Attendee** | A "My Event" home with a countdown, master-class status, a personal agenda (ask-a-question and rate-the-session links), self check-in on event days, and the self-service hotel/swag/lunch forms. |
+| **Organizer** | Command center + cross-role overview, live dashboard, fast search/sort/paged grids, participant management (edit / delete-safely / bulk / act-as / secure links), pre-selection & onboarding queues, the action queue for late changes, a task-allocation queue, an Email Center + broadcast, sessions & Sessionize, sponsor admin + leads, volunteer structure & buckets, multi-hotel, swag/travel/lunch/dinner overviews, exports & printable run-sheets, social-graphics + LinkedIn scheduling, and the AI Community Helper to ask about speakers, sessions and key times. |
+| **Speaker / Masterclass speaker** | A speaker hub with a milestone tracker and countdowns, "My sessions", an editable public bio (tabbed) seeded from Sessionize but owned by them, a public-profile preview, preferred-email routing, calendar-subscribe for deadlines, attendee questions, share graphics, a public master-class logistics page, and the AI Community Helper to ask about speakers, sessions and key times. |
+| **Volunteer** | "My schedule" (all shifts, time-ordered, with per-shift instructions and calendar subscribe), self-service shifts (confirm / decline / swap), "My tasks" grouped by area, a help channel to their supervisor, a supervisor dashboard if they run a category, and the AI Community Helper to ask about speakers, sessions and key times. |
+| **Sponsor** | A single sponsor portal (`/Sponsor`) with company profile, booth tier, logistics quick-links, an "Our Booth" page, the deliverables checklist, a leads read-view and order/invoice status; booth lead-capture and a secured Leads API; tasks generated from what they bought; and the AI Community Helper to ask about speakers, sessions and key times. |
+| **Attendee** | A "My Event" home with a countdown, master-class status, a personal agenda (ask-a-question and rate-the-session links), self check-in on event days, the self-service hotel/swag/lunch forms, and the AI Community Helper to ask about speakers, sessions and key times. |
 | **Anyone (no login)** | A public front door (`/`), the programme (`/Sessions`, `/Speakers`), the sponsors page (`/Sponsors`), master-class logistics, per-session ask + rate pages, and the call-for-speakers survey. |
 
 > The detailed public feature catalog is **[`docs/FEATURES.md`](docs/FEATURES.md)**; the architecture, build, deploy and runbook are in **[`docs/DESIGN.md`](docs/DESIGN.md)**.
@@ -65,6 +65,7 @@ The hub gives every persona its own tailored, mobile-first surface — and organ
   - [13. Accessibility](#13-accessibility)
   - [14. Bilingual UI — English & Danish](#14-bilingual-ui--english--danish)
   - [15. Social graphics & post scheduling](#15-social-graphics--post-scheduling)
+  - [16. AI Community Helper](#16-ai-community-helper)
 - [How it fits with Zoho Backstage](#how-it-fits-with-zoho-backstage)
 - [Getting started](#getting-started)
 - [Configuration model](#configuration-model)
@@ -99,25 +100,27 @@ Every screenshot below is captured **headlessly** against a locally-run instance
 
 > ℹ️ The role menus were redesigned in the 2026 edition (see the menu maps below). Fresh screenshots of each redesigned menu are being captured; the maps below are the source of truth in the meantime.
 
+> 📸 **Screenshot refresh in progress.** Several newly-built views deserve their own capture and are pending a separate capture step (no image files are added here yet): the **in-wizard inline stepper** ("Step X of N" with Prev/Next), the **AI Community Helper chat panel**, the sponsor **"Our Booth"** page, a **unified task page** showing the "Task checklist" completion %, and the **`/Organizer/OrganizerAllocation`** task-allocation queue. Two existing shots are **now stale** and will be re-captured: `docs/img/speaker-hub.png` (readiness moved into My Tasks) and the attendee `docs/img/attendee-my-event*.png` shots (the Master Class section is now the in-hub 3-section page).
+
 ## Role menus (2026 redesign)
 
 Each role sees only what's theirs — a focused, mobile-first menu. `▸` marks a fold-out section; `↗` opens an external site (Zoho exhibitor dashboard / webshop) in a new tab.
 
 **Attendee** — deliberately minimal:
-`Home` · `Master Class` (in-hub chooser) · `My plan` · `Waitlist`
+`Home` · `Master Class` (the in-hub 3-section chooser — pick / switch / waitlist, all on one page) · `My plan` · `Community Helper`
 
 **Speaker:**
-`Home` · `My tasks` · `My profile` · `Sessions` · `My Sessions` · `Bio` · `Calendar` · `Event logistics ▸` (Hotel · Appreciation Dinner · Lunch · Speaker Gift · Travel reimbursement) · `Contact Organizers`
+`Home` · `My tasks` (now also where "Am I ready?" readiness lives — no separate `/Speaker/Readiness` leaf) · `My profile` · `Sessions` · `My Sessions` · `Master Class Q&A` (master-class speakers only) · `Bio` · `Calendar` · `Event logistics ▸` (Hotel · Appreciation Dinner · Lunch · Speaker Gift · Travel reimbursement) · `Contact Organizers` · `Community Helper`
 
 **Sponsor:**
-`Home` · `My profile` · `Sponsor Webshop ▸` (Buy extra services ↗ · Sponsor orders · Linked contacts) · `Exhibitor & Booth Details ▸` (Exhibitor Profile ↗ · Booth Members ↗ · Exhibitor Materials ↗ · Promotional Banner ↗) · `Sponsor Tasks` · `Leads ▸` (Leads ↗ · Inquiries ↗ · Capture leads · My leads export) · `Event logistics` · `Contact Organizers`
+`Home` · `My profile` · `Sponsor Webshop ▸` (Buy extra services ↗ · Sponsor orders · Linked contacts) · `Exhibitor & Booth Details ▸` (Exhibitor Profile ↗ · Booth Members ↗ · Exhibitor Materials ↗ · Promotional Banner ↗) · `Sponsor Tasks` (now also where the deliverables % lives) · `Leads ▸` (Leads ↗ · Inquiries ↗ · Capture leads · My leads export) · `Event logistics ▸` (a single fold-out leading with `Booth run-of-show` · `Our Booth` · Hotel · Appreciation Dinner · Lunch) · `Contact Organizers` · `Community Helper`
 
 **Volunteer:**
-`Home` · `My tasks` · `My profile` · `My schedule` (shifts + tasks, with confirm / decline / request-swap) · `My availability` (per-day full / half / blocked) · `Supervisor` (supervisors only) · `Event logistics ▸` (Hotel · Appreciation Dinner · Lunch · Volunteer Gift · Important dates)
+`Home` · `My tasks` · `My profile` · `My schedule` (shifts + tasks, with confirm / decline / request-swap) · `My availability` (per-day full / half / blocked) · `Supervisor` (supervisors only) · `Event logistics ▸` (Hotel · Appreciation Dinner · Lunch · Volunteer Gift · Important dates) · `Community Helper`
 > Volunteers also sign up via an anonymous shift-survey link (no account needed) that captures their availability.
 
 **Organizer** — a lean hub menu; each hub opens a button-grid of its admin pages:
-`Home` · `Command center` · `Dashboard` · `Find person` · `People` · `Sessions & speakers` · `Comms` · `Social media` · `Sponsors` · `Volunteers` · `Logistics` · `Setup` · `Audit log`
+`Home` · `Command center` · `Dashboard` · `Find person` · `People` · `Sessions & speakers` · `Comms` · `Social media` · `Sponsors` · `Volunteers` · `Logistics` · `Setup` · `Audit log` · `Community Helper`
 
 ---
 
@@ -200,6 +203,8 @@ Every volunteer gets one mobile-first page answering "what am I doing, and when?
 
 A planning surface turns a long task list into a staffed plan, with a draft-it-then-commit workflow so nothing is assigned by accident. **Import** the volunteer plan (CSV) to build buckets and tasks, see **red/green coverage** (needed vs assigned) at a glance, get **AI-assisted** suggestions for any missing pre-requisite or expectation, map people into a **draft** and watch coverage simulate live — then **Commit** to make assignments real (or **Discard** the draft). Two organizers can plan at once without stepping on each other.
 
+Beyond drafting buckets, a **task-allocation pipeline** turns availability into staffed work and routes it cleanly. An **availability auto-assign engine** matches open work to the people who said they're free, and the result lands in **role-routed queues** — a volunteer queue, an organizer queue, and a *tracked-only* queue (work owned by a Responsible Team that no one is emailed about). The whole staging area is a **SILENT queue**: editing, re-routing and re-assigning inside it sends **no email**, so organizers can shuffle a plan freely. Only when an organizer **commits** does the hub emit **batched, per-person notifications** — one tidy summary per assignee, not a storm of edits. Supporting it: **auto-generated task descriptions** from the title (so a one-line task still reads clearly), **all-organizer edit** of any task, and an **Excel export / import round-trip** with a stable per-task **GUID upsert** so a plan can be worked in a spreadsheet and re-imported without ever duplicating a row. The organizer view is `/Organizer/OrganizerAllocation`.
+
 #### Onboarding lifecycle — from sign-up to set-up
 
 A clear path from "someone is interested" to "they're ready to go", with organizers in control of who comes on board. Prospective volunteers, speakers and media land in a **pre-selection queue** (inactive → preselected → active; only an active person can sign in); organizers validate and activate one or many at once, and clear duplicates/spam. Each activated person then runs a short, **persona-tailored onboarding wizard** that covers only the steps that apply to them, tracked on an **onboarding dashboard** by stage and persona — and an organizer can re-open a single step to trigger a friendly reminder if something changes.
@@ -226,7 +231,7 @@ Short, mobile-friendly forms wired so completing them does the right follow-up a
 - **Swag** — choose polo, jacket and award preferences.
 - **Travel** — a clear **two-step** flow (**Step 1: Upload Receipt**, then **Step 2: Request Travel Reimbursement**, with Step 2 blocked until a receipt is uploaded) that creates the matching payout task and emails the claim + receipts to the finance inbox for automatic bookkeeping.
 - **Volunteer sign-up** — a single guided, multi-step wizard (about-you → availability → agreement, with the Code of Conduct and Privacy Policy linked) that sets up the right tasks per volunteer.
-- **Get-started wizard for every role** — speakers, sponsors, organizers, volunteers, event partners and media each get a guided checklist that shows **only the steps they're entitled to** (a self-funded speaker doesn't see hotel/travel/swag; a supported one does), marks a step **done automatically from saved data**, and keeps the "step X of Y" count honest. The same entitlement gate closes any form a person isn't entitled to.
+- **Get-started wizard for every role** — speakers, sponsors, organizers, volunteers, event partners and media each get a guided flow that shows **only the steps they're entitled to** (a self-funded speaker doesn't see hotel/travel/swag; a supported one does), marks a step **done automatically from saved data**, and keeps the "step X of Y" count honest. The same entitlement gate closes any form a person isn't entitled to. **"Get started" is now a true inline stepper, not a link list** — each step's real form renders **in place** with **Prev / Next** and **save-and-advance**, so a person fills in a step and moves straight to the next without ever leaving the wizard (and "Save & next" advances in sequence rather than looping on a not-yet-done step). The speaker flow opens with an **optional "Calendar email" step** so a speaker can set the address their calendar invites and reminders go to before anything else.
 - **"Last saved" + auto-save** — every save shows when it was last saved, and Company Details auto-saves plain fields (with a quiet *Saving… / Saved* status) so nothing is lost to a forgotten Save.
 - **Structured dietary & allergy capture** — the dinner and speaker forms use a structured picker (diet choice + common-allergen tick-boxes, free text only for anything not listed), so the caterer gets real head-counts instead of a pile of notes; day-catering and the dinner are tracked separately.
 - **Every form confirms it saved** — submitting any self-service form shows the same clear "saved" banner, announced to screen readers and dismissable, so no submit is silent.
@@ -237,7 +242,7 @@ Short, mobile-friendly forms wired so completing them does the right follow-up a
 
 ### 5. Tasks & reminders
 
-Every person sees only their own tasks, ticks them off, and the list fills itself from the forms they complete and the role they hold. **One consistent "what do I still owe" checklist** — pending, done, and a clear **overdue** badge with days late — renders identically on the hub home, the Tasks page and the attendee My-Event page (and includes a sponsor contact's company-scoped tasks), so the checklist never says "all done" while work is still outstanding; pending items deep-link straight to the form that completes them.
+Every person sees only their own tasks, ticks them off, and the list fills itself from the forms they complete and the role they hold. **One consistent "what do I still owe" checklist** — pending, done, and a clear **overdue** badge with days late — now renders through **one unified task page** shared across the hub home, the Tasks page and the attendee My-Event page (and includes a sponsor contact's company-scoped tasks), so the checklist never says "all done" while work is still outstanding; pending items deep-link straight to the form that completes them. The page leads with a single **"Task checklist" completion %** so everyone sees at a glance how much they still owe, and role-specific signals fold into the same list — a speaker's **"Am I ready?" readiness** and a sponsor's **deliverables progress** are surfaced in **My Tasks** rather than living on a separate page.
 
 Each speaker automatically gets a dated task for every key milestone (for the current edition: submit title + abstract for masterclass speakers, verify bio + photo in the hub, upload a draft preview deck, upload the final deck — each on its own deadline, configurable per edition). A **speaker hub** turns those milestones into one mobile-first tracker: a progress bar, per-milestone cards with a live countdown ("12 days to go" / "due today" / "overdue 3 days"), one-tap Mark done / Reopen, and a clear "next up" — plus a **"My sessions"** card (title, day/time, room or "to be scheduled", co-speakers, a jump to attendee questions, and the public session link once announced) and a **preview of their public profile** exactly as attendees will see it once they're selected for the line-up.
 
@@ -246,7 +251,7 @@ A gentle, reliable reminder engine sends on a per-type cadence — speaker miles
 **Sync to your own calendar.** Every speaker, volunteer and organizer can subscribe their hub deadlines and shifts to the calendar they already use (Outlook / Google / Apple) with a short, friendly subscribe link (private per person, resettable), or download a single item as `.ics` — new and moved deadlines flow through automatically, with a pop-up a week and a day before each due date. When an organizer **activates** a person, their activation email even carries a calendar invite for the event itself. A single edition-wide switch (on by default) turns calendar sync on or off.
 
 ![Speaker hub milestone tracker](docs/img/speaker-hub.png)
-*The speaker hub turns deadlines into a progress tracker with live countdowns, "My sessions" and a public-profile preview.*
+*The speaker hub turns deadlines into a progress tracker with live countdowns, "My sessions" and a public-profile preview (screenshot refresh pending — "Am I ready?" readiness now lives in My Tasks).*
 
 → [`docs/FEATURES.md` §5](docs/FEATURES.md#5-tasks--reminders--nothing-slips-no-inbox-spam) · jobs in [`docs/DESIGN.md` §5](docs/DESIGN.md#5-jobs-scheduled-timers)
 
@@ -289,7 +294,8 @@ A gentle, reliable reminder engine sends on a per-type cadence — speaker miles
 A sponsor is a **company, not a single contact** — every contact at a company sees that company's shared tasks. Company and contact details (including who signs and who coordinates) come from your central company directory, which the hub reads as source-of-truth and never duplicates; sponsor-facing text always shows the company's chosen public name (with a fallback chain). Booth tasks are generated automatically from what each sponsor bought — shared booth basics plus per-tier extras (Platinum / Diamond / Gold) — de-duplicated across orders so a company never sees an item twice. A baseline checklist (logo, onboarding, description, attendee-bag insert, app-game) is set up for every sponsor; deadlines are anchored to the event date or first order, all configurable. Task wording is hand-curated for clarity; instructions render long URLs as clean buttons; each task can have its own upload folder with change alerts. Organizers can add/link/remove coordinators, set the default signer and coordinator, and create or edit tasks targeted at all exhibitors, all sponsors, or a specific tier. Work the platform handles behind the scenes is never shown to sponsors as a to-do.
 
 - **A public sponsors page at `/Sponsors`.** A clean, no-login page lists your sponsor companies **grouped by tier** (Platinum, Diamond, Gold, Feature, other supporters), each with logo (a tidy initials badge as fallback), public company name and optional website link, with a friendly empty state before sponsors are announced.
-- **A single sponsor portal at `/Sponsor`.** Signed-in sponsors get a self-service home that pulls together everything about their sponsorship: company profile and logo, booth tier, booth & logistics quick-links (floor plan, exhibitor guide), their **deliverables checklist** (the same pending/completed view used across the hub), a read view of their **leads**, and **order & invoice status** drawn from the records the hub holds (it says so plainly where invoicing isn't configured rather than inventing one). Each sponsor sees only their own company's data.
+- **A single sponsor portal at `/Sponsor`.** Signed-in sponsors get a self-service home that pulls together everything about their sponsorship: company profile and logo, booth tier, booth & logistics quick-links (floor plan, exhibitor guide), their **deliverables checklist** (now surfaced through Sponsor Tasks, the same pending/completed view used across the hub), a read view of their **leads**, and **order & invoice status** drawn from the records the hub holds (it says so plainly where invoicing isn't configured rather than inventing one). Each sponsor sees only their own company's data.
+- **An "Our Booth" page with live venue images.** A sponsor's **Event logistics** fold-out leads with a **"Booth run-of-show"** and an **"Our Booth"** page that shows the venue and booth-area photos **live from the organizers' SharePoint** — served through the hub's own image proxy, so pictures stay current the moment an organizer drops a new one, with **no SharePoint link ever exposed** to the sponsor. (Until SharePoint is configured the page simply shows nothing rather than a broken link.)
 - **Accounting that keeps itself in step (🟡 optional, off until configured).** New sponsors flow into your accounting system as customers with the right contact roles, webshop orders become accounting orders (all idempotent), a new sponsor's **tax-id is validated up front**, and foreign-currency orders get a **currency check** with today's rate when a rate source is configured. Until accounting/webshop credentials are set, it shows exactly what it *would* do and never touches a live system.
 - **Booth sponsors become exhibitors, kept in step.** A sponsor whose package includes a booth is **created as an exhibitor** in your booth platform automatically, with the right booth category and slot, and updated in place when the slot is assigned later. A sponsor can add booth members and **really remove** them; the engine **self-heals** stale links, **fills in blank** website / LinkedIn / X / description fields across the webshop, the hub and the booth platform (never overwriting a set value), and protects the contact email from a known platform lock-out. It **never deletes a sponsor/exhibitor record** (their leads and identity are tied to it), and when something fails it sends an **operator alert carrying the actual error** — delivered regardless of release-ring gating. *(Booth-platform credentials and one pinned category id are operator config; until set it runs in a safe no-write mode.)*
 
@@ -311,6 +317,7 @@ A full lead pipeline for booth leads. **Capture leads at the booth, right in the
 The hub compares two-day tickets against masterclass bookings and surfaces the mismatches — no booking, no ticket, or duplicate bookings — with branded chaser emails to sort them out. Attendees are synced in for visibility with deep links back to the booking system; the hub never re-does seat reservations, capacity or waitlists. "Same person, two emails" cases are resolved by a human or the attendee via a chaser, never auto-merged. Organizers get a clean, read-only attendee browser with summary tiles, search, filters and a CSV export that handles accented names; corrections happen at the source system.
 
 - **A "My Event" dashboard for attendees.** Every attendee gets one mobile-first home with a live countdown (or "Happening now" during the event), their Master Class status (reserved / not booked / double-booked, with a deep-link to manage the booking), and the practical info — dates plus the venue as a one-tap map link.
+- **A rebuilt in-hub Master Class page (`/MyMasterClass`).** One clean **three-section** page — your current pick, the master classes you can switch to, and a waitlist — so an attendee chooses, **switches**, or joins a waitlist without leaving the hub. Switching is an **atomic move** guarded by a **hard overbooking check**: a seat is only ever given up once the new one is secured, and a class that's full is never oversold (you're offered its waitlist instead). Every option shows **live booked / capacity / waitlist counts**, your **position** if you're waitlisted, and an inline flash that confirms exactly what happened.
 - **A personal agenda on "My Event".** A **My sessions** card (the session they reserved), the **full agenda** with their own session highlighted, and quick links to their hotel, swag and lunch forms plus the public agenda — each session links to its details, to **ask the speaker a question**, and to **rate the session** afterwards. Read-only; booking still happens at the source.
 - **Self check-in — "I'm here".** On the event days a ticket-holding attendee can tap one button to check themselves in (recorded and shown back to them) — self-service, idempotent, open only during the event window, and never re-implementing turnstiles or badge scanning.
 
@@ -318,7 +325,7 @@ The hub compares two-day tickets against masterclass bookings and surfaces the m
 |---|---|
 | [![Attendee hub](docs/img/attendee-my-event.png)](docs/img/attendee-my-event.png) | [![Attendee hub on mobile](docs/img/attendee-my-event-mobile.png)](docs/img/attendee-my-event-mobile.png) |
 
-*The attendee hub: a live countdown, ticket and Master Class status, a personal agenda and self check-in — with a deep-link out to manage the booking. Built phone-first for the person walking up to the venue.*
+*The attendee hub: a live countdown, ticket and Master Class status, a personal agenda and self check-in — with a deep-link out to manage the booking. Built phone-first for the person walking up to the venue (screenshot refresh pending — the Master Class section is now the in-hub 3-section `/MyMasterClass` page).*
 
 → [`docs/FEATURES.md` §9](docs/FEATURES.md#9-attendees--masterclass-reconciliation--one-clear-picture) · reconciler in [`docs/DESIGN.md` §6](docs/DESIGN.md#6-integrations)
 
@@ -396,9 +403,19 @@ The hub produces **ready-to-share social graphics** for speakers and sponsors (a
 
 A **LinkedIn company-page post scheduler** lets organizers queue posts (Speaker / Sponsor / Ad-hoc) with a scheduled time, auto-written text (your manual edit always wins), and the right **approved** graphic attached automatically — a still-unapproved graphic is never attached (the post publishes text-only with a clear note until it's released). Preview exactly what will publish, toggle a post active/inactive without deleting it, with compliant tagging (sponsor posts tag the signer, coordinator and company; speaker posts tag organizers only) plus a 5-minute speaker heads-up email and publish notifications. Nothing is ever double-posted.
 
+The same shared file store also powers a **reusable, server-proxied live-image** component: any page can show pictures straight from a SharePoint folder (e.g. the venue and booth photos behind the sponsor "Our Booth" page) through the hub's own image proxy — the file stays in SharePoint, the link is never exposed to the visitor, and dropping a new photo on SharePoint updates the page with no deploy.
+
 *External connections (the SharePoint tenant/site and LinkedIn page + token) are set up by the operator with their own credentials; until configured, the hub still generates graphics and builds drafts — it simply runs in a safe, no-post mode.*
 
 → [`docs/FEATURES.md` §15](docs/FEATURES.md#15-social-media-graphics--shared-file-store-2026-06-15)
+
+### 16. AI Community Helper
+
+Every signed-in person — attendee, speaker, volunteer, sponsor **and** organizer — gets a built-in **AI Community Helper**: a chat panel that answers "who's speaking on X?", "when's the lunch break?", "which sessions cover Y?" in plain language. It is **grounded**, not guessing: it only ever answers from the event's own facts — the **published** speakers, their skills, the sessions and the schedule (key times like lunch on each day) — plus a short, operator-maintained **"Contact the organizers"** reference. It also reads from an **operator-curated SharePoint reference folder** (Markdown, text, Word, PDF or Excel), so organizers can teach the helper something new — a venue FAQ, a travel note, a sponsor briefing — simply by **dropping or replacing a file on SharePoint**; the helper reflects it within minutes, with **no deploy**.
+
+Privacy is enforced at the source: an **unpublished speaker is a hard gate** — they never surface in an answer until organizers publish them — and every retrieval is **authorized at fetch time**, so the helper can only ever ground on what the asker is allowed to see. The chat panel scrolls long replies so a detailed answer never overflows.
+
+→ [`docs/FEATURES.md` §22](docs/FEATURES.md#22-ai-community-helper--ask-anything-grounded-and-privacy-gated-2026-06-27) · design in [`docs/DESIGN.md`](docs/DESIGN.md)
 
 ---
 
@@ -540,7 +557,7 @@ This repo is a sanitized template — it ships generic placeholders, not event-s
 
 | Doc | What it covers |
 |---|---|
-| **[`docs/FEATURES.md`](docs/FEATURES.md)** | Public feature catalog — the delivered feature set, by audience (the 15 areas above). |
+| **[`docs/FEATURES.md`](docs/FEATURES.md)** | Public feature catalog — the delivered feature set, by audience (the 16 areas above). |
 | **[`docs/DESIGN.md`](docs/DESIGN.md)** | Architecture, data model, integrations, jobs, email, build, infra, deploy, and the operational runbook. |
 
 Newly built capabilities are folded directly into the relevant feature area above (and into [`docs/FEATURES.md`](docs/FEATURES.md)). The public mirror is updated milestone-by-milestone — for per-release detail see the commit history (`git log --oneline`); every public commit message carries the private-repo source sha for traceability.

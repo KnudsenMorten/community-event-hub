@@ -156,9 +156,12 @@ public static class DocumentTextExtractor
                 }
                 return dt.TimeOfDay == TimeSpan.Zero ? dt.ToString("yyyy-MM-dd") : dt.ToString("yyyy-MM-dd HH:mm");
             }
-            catch { /* fall through to the formatted string */ }
+            catch { /* fall through to the plain string */ }
         }
-        return StripHtml(c.GetFormattedString());
+        // GetString() (NOT GetFormattedString(), which is absent in the deployed ClosedXML
+        // and threw MissingMethodException). Time cells are already handled above, so the
+        // raw value here is text/number — fine for grounding.
+        return StripHtml(c.GetString());
     }
 
     /// <summary>

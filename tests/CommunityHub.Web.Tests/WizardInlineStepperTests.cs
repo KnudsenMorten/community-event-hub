@@ -344,4 +344,72 @@ public sealed class WizardInlineStepperTests
         Assert.True(uncovered.Length == 0,
             "Wizard step(s) with no inline handler (host would link out): " + string.Join(", ", uncovered));
     }
+
+    // ===== 7. Save & next ALWAYS moves forward — even when the step stays "not done" =========
+    // Regression: Profile is "done" only once a phone is present, but you may Save & next without
+    // one. The host used to redirect to the FIRST-INCOMPLETE step, which was THIS step again →
+    // Save & next silently looped back ("nothing happens"). It must advance to the NEXT step.
+
+    [Fact]
+    public async Task Save_and_next_advances_even_when_the_step_is_not_marked_done()
+    {
+        using var db = NewDb();
+        var (_, me) = await SeedAsync(db, ParticipantRole.Organizer); // generic role wizard; first step = profile
+
+        var http = WizardBindingHarness.PostContext(Session(me), new Dictionary<string, string?>
+        {
+            ["__step"] = "profile",
+            ["__dir"] = "next",
+            ["FullName"] = "Olive Organizer",   // valid name, but NO phone → step stays "not done"
+        });
+        var host = Host(db, http, new ProfileStepHandler(new ProfileFormService(db, new FixedClock())));
+
+        var result = await host.OnPostAsync(default);
+
+        // Moved FORWARD (PRG) — did NOT loop back to 'profile'.
+        var redirect = Assert.IsType<RedirectToPageResult>(result);
+        var nextStep = redirect.RouteValues is not null && redirect.RouteValues.TryGetValue("step", out var s)
+            ? s as string : null;   // null => redirected to the hub (also forward, never a loop)
+        Assert.NotEqual("profile", nextStep);
+
+        // The save persisted (name) yet the step is still not "done" (no phone) — proving the
+        // advance happened despite the not-done state (the exact loop condition).
+        var saved = await db.Participants.SingleAsync(p => p.Id == me.Id);
+        Assert.Equal("Olive Organizer", saved.FullName);
+        Assert.True(string.IsNullOrEmpty(saved.Phone));
+    }
+
+    // ===== 8. Accept (last) step: already-accepted finishes — NO checkbox to tick ===========
+    // Regression: once accepted, the partial shows the read-only confirmation (no checkbox), but
+    // Finish bound Accept=false and looped on "Please tick to continue" with nothing to tick.
+
+    [Fact]
+    public async Task Accept_step_advances_when_already_accepted_even_with_no_checkbox_posted()
+    {
+        using var db = NewDb();
+        var (eventId, me) = await SeedAsync(db, ParticipantRole.Volunteer);
+        db.ParticipantPolicyAcceptances.Add(new ParticipantPolicyAcceptance
+        {
+            EventId = eventId, ParticipantId = me.Id, AcceptedByEmail = me.Email,
+            AcceptedAt = DateTimeOffset.Parse("2026-06-10T09:00:00Z"),
+            CodeOfConductUrl = AcceptFormService.CodeOfConductUrl,
+            PrivacyPolicyUrl = AcceptFormService.PrivacyPolicyUrl,
+        });
+        await db.SaveChangesAsync();
+
+        // Finish on 'accept' with NO 'Accept' value posted (there's no checkbox to tick).
+        var http = WizardBindingHarness.PostContext(Session(me), new Dictionary<string, string?>
+        {
+            ["__step"] = "accept",
+            ["__dir"] = "next",
+        });
+        var host = Host(db, http, new AcceptStepHandler(new AcceptFormService(db, new FixedClock())));
+
+        var result = await host.OnPostAsync(default);
+
+        // Advances (does NOT re-render on "please tick"); accept is last -> the hub.
+        var redirect = Assert.IsType<RedirectToPageResult>(result);
+        Assert.Equal("/Index", redirect.PageName);
+        Assert.Single(await db.ParticipantPolicyAcceptances.ToListAsync()); // idempotent
+    }
 }

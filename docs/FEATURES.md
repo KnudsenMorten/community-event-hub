@@ -1,6 +1,6 @@
 # Community Event Hub — Feature Catalog
 
-*Delivered feature set, as of 2026-06-25.*
+*Delivered feature set, as of 2026-06-27.*
 
 Community Event Hub (CEH) is the all-in-one workspace that runs a tech-community
 conference end to end: one home for your organizers, speakers, volunteers,
@@ -584,6 +584,19 @@ follow-up automatically.
   invite (so no inbox needed, no spam risk). Organizers get the **attending
   headcount** + a CSV at **Party RSVPs** (Logistics hub) — the figure for the Bella
   Center food order. Signing up grants no hub access. *(✅ 2026-06-21)*
+- **One shared "My Tasks" panel, with a completion %.** *(✅ 2026-06-27)* The three role task pages
+  (speaker, sponsor and volunteer/organizer) are now the **same shared panel**, carrying a **"Task
+  checklist" completion percentage** and a consistent **pending-on-top, completed-at-the-bottom**
+  ordering, so everyone reads their tasks the same way and can see at a glance how far through they are
+  (§147).
+- **Readiness and deliverables roll up at the top of My Tasks.** *(✅ 2026-06-27)* The speaker **"Am I
+  ready?"** readiness summary and the sponsor **deliverables %** now render at the **top of the My
+  Tasks page** rather than as a separate menu item, so a person sees their headline status above the
+  task list itself (§144/§145).
+- **A "Submit travel reimbursement" task you can simply tick.** *(✅ 2026-06-27)* Speakers travelling
+  from outside Denmark get a **"Submit travel reimbursement"** task they can **mark done themselves**
+  without having to claim anything through the form — a lightweight acknowledgement for speakers who
+  handle reimbursement their own way (§143).
 
 ## 6. Sessions & surveys — from call-for-speakers to the schedule
 
@@ -1056,6 +1069,14 @@ follow-up automatically.
   dashboard** plus an **in-hub capture-lead failover** so booth staff can still log a lead
   if the Zoho path is unavailable, and a **Leads** fold-out gives a **leads export page**.
   Mobile-first, in English and Danish.
+- **An "Our Booth" page with the booth number and the Expo map.** *(✅ 2026-06-27)* Exhibiting sponsors
+  get an **"Our Booth"** page that shows **their booth number** (the company's `BoothLabel`) alongside
+  the **Expo floor map**, so booth staff know exactly where they are. It sits inside the merged **Event
+  logistics** fold-out and is **exhibitor-gated** — sponsors without a booth don't see it (§146). The
+  venue images on it are the same **live SharePoint pictures** described in §15.
+- **A cleaner sponsor menu.** *(✅ 2026-06-27)* The sponsor navigation is tidied to a **single "Event
+  logistics" entry**, and the **deliverables %** has moved into the **Sponsor Tasks** page rather than
+  standing as its own menu item, so the menu stays short and obvious (§145).
 
 ## 8. Sponsor leads — capture, screen and route booth leads
 
@@ -1154,6 +1175,16 @@ follow-up automatically.
   title and availability traffic-light, and the **abstract and speaker(s)** sit in a
   collapsed "Session details" disclosure you expand to read — so the list stays scannable on
   a phone while the full detail is one tap away. Per-class **capacities** are organizer-set.
+- **A rebuilt `/MyMasterClass` in three clear sections.** *(✅ 2026-06-27)* The attendee Master Class
+  page is reorganized into **three sections**: **my current class**, **other classes** (each marked
+  **Available** or **FULL**, with **"N of max seats left"** and the **waitlist count**), and the
+  **policies**. Switching between classes is now an **atomic, race-safe SWITCH** with a **hard
+  overbooking guard** — the move runs under a serializable transaction so you **never lose your current
+  seat to a failed switch**, and if the target filled in the meantime it stops cleanly with **"Sorry —
+  this could not be completed: the Master Class is now full."** rather than overbooking. Your
+  **waitlist position** now shows both **in the page and in the email**, actions confirm with an
+  **inline flash**, the **consent wording is cleaner**, and the old teaser block has been removed
+  (§139/§140).
 
 ## 10. Email & notifications — on-brand, controllable, safe
 
@@ -1602,6 +1633,11 @@ follow-up automatically.
   clean and safe.
 - **Custom domains per environment.** Each environment binds its own verified custom
   domain with a managed certificate.
+- **Reconcile jobs ride out a flaky upstream.** *(✅ 2026-06-27)* The ERP→webshop reconcile job is
+  hardened against a temporarily unavailable webshop (HTTP 503): it **retries transient faults**,
+  **continues gracefully company-by-company** so one bad company never sinks the whole run, and only
+  **alerts an organizer after two consecutive failed runs** — tracked through a persisted job-health
+  marker — so a single blip never raises a false alarm (§138).
 
 ## 13. Accessibility — usable by keyboard and screen reader *(✅ 2026-06-15)*
 
@@ -1781,6 +1817,12 @@ it's approved.
   scheduler as ready-to-use branding — the right image plus a prefilled draft caption — so a scheduled
   post can pick up the correct, approved artwork automatically. Only **released** speaker/session graphics
   are offered (the approval step still applies), and sponsor graphics stay for your own internal posts.
+- **Live SharePoint venue images, served safely through the hub.** *(✅ 2026-06-27)* A reusable
+  component now shows **live venue/booth pictures straight from allow-listed SharePoint folders** —
+  drop or replace an image on SharePoint and the hub reflects it (with a **~15-minute cache**). Every
+  image is **proxied through the hub's own credentials**, so a **SharePoint link is never exposed** to
+  the visitor, and a **committed `wwwroot` image** stands in as a fallback if SharePoint is briefly
+  unavailable. It backs the sponsor **"Our Booth"** page (§7) and any other venue imagery (§146).
 
 *External connections (the SharePoint tenant/site and per-user LinkedIn/X posting) are set up by
 the operator with their own credentials; until configured, the hub still generates graphics and
@@ -1930,6 +1972,20 @@ volunteers, event partners and media.
   is always correct. A step that depends on an integration that isn't configured (for example the
   sponsor "your contacts" step when accounting isn't connected) is shown as a gentle guided link
   rather than blocking the wizard.
+- **"Get started" is now a TRUE in-wizard stepper.** *(✅ 2026-06-27)* The checklist is no longer just a
+  list of links — each step's **real form now renders inline inside the wizard**, with **Previous /
+  Next** controls, a **"Step X of N"** header and a **percent progress bar**, so a person walks the
+  whole onboarding without ever leaving the wizard. **Save & next** persists the current step and then
+  **advances to the next step that still needs doing** — it never links out, and it never loops back
+  onto a step that's already done. If a form doesn't validate, the **same step re-renders** with the
+  message so nothing is lost. It's all driven by **one generic `/Forms/Wizard` host** that's shared with
+  the standalone form pages, so the wizard and the direct page are always the same form and stay in
+  step (§148).
+- **A new optional "Calendar email" first step, and a tidier step order.** *(✅ 2026-06-27)* The speaker
+  Get-Started flow opens with a new **optional "Calendar email"** step so a speaker can point calendar
+  invites at the address they actually use (§141). **Travel** and **both presentation uploads** are no
+  longer wizard **steps** — they remain deadline tasks on the task list, not gates in the guided flow —
+  giving the wizard a cleaner **canonical order** (§142).
 
 ## 19. Forms, saving and timeliness polish *(✅ 2026-06-25)*
 
@@ -2007,3 +2063,55 @@ the live agenda, automatic notice when a session moves, and one-click sharing.
   released graphic to LinkedIn** through the existing reviewed/queued posting path. With no LinkedIn
   credentials configured the announcement is **safely queued and nothing is posted or faked**; it goes
   out automatically once the connection is enabled.
+
+## 22. AI Community Helper — ask anything, grounded and privacy-gated *(✅ 2026-06-27)*
+
+An in-hub **AI assistant** that anyone can ask plain-language questions of, available to **every
+role** — attendees, speakers, volunteers, sponsors and organizers. It only ever answers from what the
+event has actually published and what the asker is allowed to see, so it's genuinely helpful without
+ever leaking anything private.
+
+- **Grounded in the real event.** The helper answers from the **published speaker lineup** (names and
+  skills), the **session catalogue**, and the **event schedule and key times** — doors, lunch, breaks
+  and the party — so anyone can ask *"who speaks on Kubernetes?"* or *"when is lunch?"* and get a
+  correct, current answer rather than a guess (§149).
+- **Privacy-gated by design.** A speaker is only ever surfaced **once they're published** — a hard gate
+  — and every answer is built with **authorization-at-retrieval**, so the helper can only ground on
+  what the person asking is entitled to see. Nothing unpublished or out-of-scope ever reaches a reply
+  (§149).
+- **Answers from an operator-curated reference folder — no deploy needed.** Organizers can drop
+  reference documents into a **curated SharePoint folder** (**md, txt, docx, pdf and xlsx**) and the
+  helper grounds on them for **all roles**, refreshing on a **~15-minute cache** — so you can
+  **drop or replace a file and the helper answers from it with no deploy**. The grounding is
+  **prompt-budget capped** so replies stay focused (§152). *Verified live against lunch times — Day 1
+  at 12:00 and Day 2 at 12:30.*
+- **Knows how to reach the organizers.** The helper also grounds on a **Contact-the-organizers**
+  reference, so a "how do I get hold of the team?" question is answered properly (§149).
+- **A chat panel that handles long replies.** The Community Helper chat panel now **scrolls long
+  answers** cleanly instead of overflowing, so a detailed reply stays readable.
+
+## 23. Task allocation pipeline & task management *(✅ 2026-06-27)*
+
+A complete pipeline for getting work onto the right people's plates and keeping every task tidy —
+from an availability-driven auto-assign engine, through role-routed queues, to a single batched
+notification only when an organizer actually commits.
+
+- **Availability-driven auto-assign.** An engine proposes assignments from each volunteer's recorded
+  **day availability**, so organizers start from a sensible draft allocation instead of a blank sheet
+  (§150).
+- **Role-routed queues by Responsible Team.** Proposed work lands in the right queue automatically by
+  its **Responsible Team** — a **volunteer** queue, an **organizer** queue, or a **tracked-only** queue
+  for work that's recorded but not handed out — so each audience sees exactly the tasks meant for it
+  (§150).
+- **A silent draft queue, then one batched email on commit.** While organizers shape the draft the
+  queue is **silent — no email goes out on edits**. Only when an organizer **commits** does the hub
+  send a **single batched per-person notification**, so people hear once with their final list rather
+  than on every tweak (§150).
+- **Auto-written task descriptions.** Every task gets a **detailed description generated automatically
+  from its title**, so a one-line task still arrives with useful context (§151).
+- **Any organizer can edit a task.** Task editing is open to **all organizers**, not a single owner, so
+  whoever's closest can keep the list correct (§151).
+- **Excel export/import round-trip with a stable GUID.** Tasks export to **`.xlsx`** and import back
+  keyed on a **stable GUID (`ExternalKey`)** that **upserts** — a **blank id creates** a new task and a
+  **present id updates** the existing one — so bulk edits in a spreadsheet flow back cleanly without
+  duplicating anything (§151). *(The 304-task data import itself is operator-run and not yet executed.)*
