@@ -7,32 +7,22 @@
 <div class="card">
     <h1>Code of Conduct &amp; Privacy</h1>
 
-    @if (!string.IsNullOrEmpty(Model.Message))
+    @if (!string.IsNullOrEmpty(Model.Form.Message))
     {
-        <p class="@(Model.IsError ? "error" : "info")" role="@(Model.IsError ? "alert" : "status")">@Model.Message</p>
+        <p class="@(Model.Form.IsError ? "error" : "info")" role="@(Model.Form.IsError ? "alert" : "status")">@Model.Form.Message</p>
     }
 
-    <p>Please review and accept our policies:</p>
-    <ul>
-        <li><a href="@CommunityHub.Pages.Forms.AcceptModel.CodeOfConductUrl" target="_blank" rel="noopener">Code of Conduct</a></li>
-        <li><a href="@CommunityHub.Pages.Forms.AcceptModel.PrivacyPolicyUrl" target="_blank" rel="noopener">Privacy Policy</a></li>
-    </ul>
-
-    @if (Model.AlreadyAccepted)
+    @if (Model.Form.AlreadyAccepted)
     {
-        <p class="success" role="status">
-            ✅ Accepted on @Model.AcceptedAt?.ToString("dd MMM yyyy HH:mm 'UTC'")
-            @if (!string.IsNullOrEmpty(Model.AcceptedByEmail)) { <text>by @Model.AcceptedByEmail</text> }.
-        </p>
+        @* The shared partial renders the policy links + read-only acceptance confirmation. *@
+        <partial name="_AcceptFields" model="Model.Form" />
         <p><a asp-page="/Index">Back to hub</a></p>
     }
     else
     {
         <form method="post">
-            <label style="display:flex;align-items:flex-start;gap:10px;font-weight:600;">
-                <input type="checkbox" asp-for="Accept" required style="width:auto;margin-top:3px;" />
-                <span>I accept the Code of Conduct and the Privacy Policy.</span>
-            </label>
+            @* The accept fields are the SAME partial the inline wizard step renders. *@
+            <partial name="_AcceptFields" model="Model.Form" />
             <button type="submit" style="margin-top:14px;">Confirm</button>
         </form>
         <p style="margin-top:14px;"><a asp-page="/Index">Back to hub</a></p>

@@ -14,8 +14,9 @@ namespace CommunityHub.Core.Email;
 /// which carries their own deadlines/shifts/tasks.
 ///
 /// Routing + safety reuse the established seams — there is no new mail path:
-///  - <b>To</b> = effective address (speaker <see cref="SpeakerProfile.ContactEmailOverride"/>
-///    ?? identity), the SAME rule every participant-addressed mail uses;
+///  - <b>To</b> = calendar address (<see cref="SpeakerProfile.CalendarEmailFor"/>:
+///    speaker <see cref="SpeakerProfile.CalendarEmail"/> ?? general
+///    <see cref="SpeakerProfile.ContactEmailOverride"/> ?? identity);
 ///  - <b>DEV redirect / PROD allowlist</b> are applied downstream by the
 ///    <see cref="IEmailSender"/> implementation (all mail to mok@expertslive.dk in DEV);
 ///  - <b>idempotent</b> via the <see cref="SentReminder"/> ledger keyed on the
@@ -84,11 +85,14 @@ public sealed class CalendarInviteEmailService
             ct);
         if (already) return false;
 
-        var speakerOverride = await _db.SpeakerProfiles
+        // Calendar mail prefers the calendar-specific override (wizard step 1), then
+        // the general contact override, then the Sessionize/identity address.
+        var emailOverrides = await _db.SpeakerProfiles
             .Where(sp => sp.ParticipantId == p.Id)
-            .Select(sp => sp.ContactEmailOverride)
+            .Select(sp => new { sp.CalendarEmail, sp.ContactEmailOverride })
             .FirstOrDefaultAsync(ct);
-        var toEmail = SpeakerProfile.EffectiveEmailFor(p.Email, speakerOverride);
+        var toEmail = SpeakerProfile.CalendarEmailFor(
+            p.Email, emailOverrides?.CalendarEmail, emailOverrides?.ContactEmailOverride);
 
         var ics = BuildEventInvite(p.Event, toEmail, p.FullName);
 

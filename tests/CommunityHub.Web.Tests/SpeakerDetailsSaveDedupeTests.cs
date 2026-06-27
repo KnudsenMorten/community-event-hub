@@ -5,6 +5,7 @@ using CommunityHub.Core.Domain;
 using CommunityHub.Core.Email;
 using CommunityHub.Core.Integrations;
 using CommunityHub.Core.Settings;
+using CommunityHub.Forms.Steps;
 using CommunityHub.Pages.Speaker;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Http;
@@ -104,20 +105,22 @@ public sealed class SpeakerDetailsSaveDedupeTests
         await settings.SetReleasedRingAsync(EventId, "backstage-speaker-sync", Ring.Broad, "org@expertslive.dk");
     }
 
+    // REQUIREMENTS §148: the page is now a thin shell over SpeakerDetailsFormService (the inline
+    // wizard step calls the SAME plain-save service). The "Save & sync to Zoho" dedupe stays on the
+    // PAGE, so we drive the real page handler with the bio posted through a model-binding request.
     private static (DetailsModel model, RecordingEmailSender email) NewModel(
-        CommunityHubDbContext db, Participant p)
+        CommunityHubDbContext db, Participant p, string biography)
     {
-        var http = new DefaultHttpContext { User = Session(p) };
+        var http = WizardBindingHarness.PostContext(Session(p),
+            new Dictionary<string, string?> { ["Biography"] = biography });
         var accessor = new HttpCurrentParticipantAccessor(new HttpContextAccessorOver(http));
         var email = new RecordingEmailSender();
         var sync = new SpeakerBioBackstageSyncService(
             db, new ExistsBlockedApi(),
             Options.Create(new BackstageSpeakerBioSyncOptions { Enabled = true }),
             email, new FeatureGateService(db), new RingResolver(db));
-        var model = new DetailsModel(db, accessor, sync, new FixedClock())
-        {
-            PageContext = new PageContext { HttpContext = http },
-        };
+        var form = new SpeakerDetailsFormService(db, new FixedClock());
+        var model = new DetailsModel(accessor, form, sync).Bind(http);
         return (model, email);
     }
 
@@ -127,9 +130,8 @@ public sealed class SpeakerDetailsSaveDedupeTests
         using var db = NewDb();
         var p = await SeedSpeakerAsync(db);
         await EnableSyncAsync(db);
-        var (model, email) = NewModel(db, p);
+        var (model, email) = NewModel(db, p, "A freshly edited bio.");
 
-        model.Biography = "A freshly edited bio.";
         var result = await model.OnPostSaveAsync(default);
 
         Assert.IsType<PageResult>(result);
@@ -146,15 +148,13 @@ public sealed class SpeakerDetailsSaveDedupeTests
         await EnableSyncAsync(db);
 
         // 1) Save & sync WITH a real bio change → organizers are emailed once.
-        var (m1, email) = NewModel(db, p);
-        m1.Biography = "Brand new bio for sync.";
+        var (m1, email) = NewModel(db, p, "Brand new bio for sync.");
         await m1.OnPostSaveAndSyncAsync(default);
         Assert.Single(email.To);
         Assert.Equal(SpeakerBioBackstageSyncService.AlertEmail, email.To[0]);
 
         // 2) Save & sync again with NO change (same persisted bio) → no new email.
-        var (m2, email2) = NewModel(db, p);
-        m2.Biography = "Brand new bio for sync.";   // identical to what is now stored
+        var (m2, email2) = NewModel(db, p, "Brand new bio for sync.");   // identical to what is now stored
         await m2.OnPostSaveAndSyncAsync(default);
         Assert.Empty(email2.To);   // dedupe: organizers NOT re-notified on an unchanged save
     }

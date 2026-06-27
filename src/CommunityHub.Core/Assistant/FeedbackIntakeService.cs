@@ -2,6 +2,7 @@ using System.Net;
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
 using CommunityHub.Core.Email;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
 namespace CommunityHub.Core.Assistant;
@@ -112,13 +113,30 @@ public sealed class FeedbackIntakeService
         _db.Set<FeedbackItem>().Add(item);
         await _db.SaveChangesAsync(ct);
 
+        // Resolve the asker's NAME + EMAIL server-side (REQUIREMENTS §137) — NEVER
+        // from the request body — so the organizer sees who asked and can reply to
+        // them directly. Scoped to the origin edition + id from the signed-in principal.
+        var asker = await _db.Participants
+            .AsNoTracking()
+            .Where(p => p.Id == origin.ParticipantId && p.EventId == origin.EventId)
+            .Select(p => new { p.FullName, p.Email })
+            .FirstOrDefaultAsync(ct);
+        var askerName = string.IsNullOrWhiteSpace(asker?.FullName) ? null : asker!.FullName.Trim();
+        var askerEmail = string.IsNullOrWhiteSpace(asker?.Email) ? null : asker!.Email.Trim();
+        // Subject uses the asker's name (fallback to the participant ref if unresolved);
+        // NEVER the page path.
+        var who = askerName ?? $"participant #{origin.ParticipantId}";
+
         // (2) Best-effort email — ring-exempt (ops/organizer mailbox, not a ring-gated
         // participant); never throws back to the caller.
         try
         {
-            var subject = $"{_options.SubjectPrefix} AiHelper {KindWord(kind)} from {origin.Role}";
+            var subject = $"{_options.SubjectPrefix} AiHelper {KindWord(kind)} from {who}";
+            // Reply-To = the asker, so an organizer hitting "Reply" reaches the person
+            // (the To stays the configured dev/organizer mailbox). Null when unresolved.
+            EmailReplyTo? replyTo = askerEmail is null ? null : new EmailReplyTo(askerEmail, askerName);
             using var _ = _ctx.Set(new EmailContext("feedback-intake", RingExempt: true));
-            await _email.SendAsync(to, subject, BuildHtml(item), ct);
+            await _email.SendAsync(to, subject, BuildHtml(item, askerName, askerEmail), replyTo, ct);
             _log?.LogInformation("AiHelper intake ({Kind}) captured #{Id} + emailed {To}.", kind, item.Id, to);
         }
         catch (Exception ex)
@@ -135,15 +153,28 @@ public sealed class FeedbackIntakeService
         _ => "message",
     };
 
-    private static string BuildHtml(FeedbackItem item)
+    private static string BuildHtml(FeedbackItem item, string? askerName, string? askerEmail)
     {
         var when = item.CreatedAt.ToString("yyyy-MM-dd HH:mm 'UTC'");
         var page = string.IsNullOrWhiteSpace(item.PageUrl)
             ? "(not provided)"
             : WebUtility.HtmlEncode(item.PageUrl);
+
+        // "From: <FullName> <<email>> (<Role>)" — name + email shown clearly so the
+        // organizer knows who asked and can reply (Reply-To is set on the message).
+        var name = string.IsNullOrWhiteSpace(askerName)
+            ? $"participant #{item.ParticipantId}"
+            : askerName;
+        var from = WebUtility.HtmlEncode(name);
+        if (!string.IsNullOrWhiteSpace(askerEmail))
+        {
+            from += $" &lt;{WebUtility.HtmlEncode(askerEmail)}&gt;";
+        }
+        from += $" ({item.Role})";
+
         return
-            $"<p><strong>{KindWord(item.Kind)}</strong> from <strong>{item.Role}</strong> " +
-            $"(participant #{item.ParticipantId}) via the AiHelper.</p>" +
+            $"<p><strong>{KindWord(item.Kind)}</strong> via the AiHelper.</p>" +
+            $"<p><strong>From:</strong> {from}</p>" +
             $"<p style=\"white-space:pre-wrap\">{WebUtility.HtmlEncode(item.Message)}</p>" +
             $"<hr><p style=\"color:#6b7a90;font-size:13px\">Page: {page}<br>When: {when}</p>";
     }

@@ -222,7 +222,21 @@
                         && s.SponsorPackage >= CommunityHub.Core.Domain.SponsorPackage.Gold);
             }
         }
-        var nav = NavBuilder.Build(role!.Value, isVolunteerSupervisor, isExhibitor);
+        // §138: the speaker "Master Class Q&A" nav item shows ONLY when the speaker
+        // presents at least one master class (linked via SessionSpeaker to a
+        // SessionType.MasterClass session in their edition). A speaker with zero master
+        // classes has no Group Q&A board, so the menu item would be a dead-end (the page
+        // stays reachable by direct URL and shows a friendly empty state). Resolved for
+        // speakers only (cheap indexed AnyAsync).
+        var speakerHasMasterClass = false;
+        if (role == CommunityHub.Core.Domain.ParticipantRole.Speaker && me is not null)
+        {
+            speakerHasMasterClass = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions
+                .AnyAsync(Db.SessionSpeakers, ss => ss.ParticipantId == me.ParticipantId
+                    && ss.Session.EventId == me.EventId
+                    && ss.Session.Type == CommunityHub.Core.Domain.SessionType.MasterClass);
+        }
+        var nav = NavBuilder.Build(role!.Value, isVolunteerSupervisor, isExhibitor, speakerHasMasterClass);
         var participant = nav.Groups[0];
         var management = nav.ManagementGroup;
 

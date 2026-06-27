@@ -24,105 +24,8 @@
         <form method="post" data-ceh-loading data-ceh-dirty>
             <div asp-validation-summary="All" class="ceh-validation-summary"></div>
 
-            <label>Sign-in email</label>
-            <input type="text" value="@Model.Email" readonly />
-            <p style="color:#6b7280;font-size:12px;margin:-8px 0 14px;">This is your identity + Sessionize match key — it can't be changed here.</p>
-
-            <h3 style="color:var(--el-darkblue);margin-top:20px;">Name</h3>
-            <div style="display:flex;gap:12px;flex-wrap:wrap;">
-                <div style="flex:1 1 200px;">
-                    <label asp-for="FirstName">First name</label>
-                    <input type="text" asp-for="FirstName" />
-                    <span asp-validation-for="FirstName" class="error"></span>
-                </div>
-                <div style="flex:1 1 200px;">
-                    <label asp-for="LastName">Last name</label>
-                    <input type="text" asp-for="LastName" />
-                    <span asp-validation-for="LastName" class="error"></span>
-                </div>
-            </div>
-
-            <h3 style="color:var(--el-darkblue);margin-top:20px;">Bio &amp; links</h3>
-            <label asp-for="Tagline">Tagline</label>
-            <input type="text" asp-for="Tagline" placeholder="One line that sums you up" />
-            <span asp-validation-for="Tagline" class="error"></span>
-
-            <label asp-for="Biography">Biography</label>
-            <textarea asp-for="Biography" rows="7" maxlength="4000"></textarea>
-            <span asp-validation-for="Biography" class="error"></span>
-
-            <label asp-for="LinkedIn">LinkedIn</label>
-            <input type="url" inputmode="url" asp-for="LinkedIn" placeholder="https://www.linkedin.com/in/you" />
-            <span asp-validation-for="LinkedIn" class="error"></span>
-
-            <label asp-for="Twitter">X / Twitter</label>
-            <input type="url" inputmode="url" asp-for="Twitter" placeholder="https://x.com/you" />
-            <span asp-validation-for="Twitter" class="error"></span>
-
-            <label asp-for="Blog">Blog / website</label>
-            <input type="url" inputmode="url" asp-for="Blog" placeholder="https://yourblog.example" />
-            <span asp-validation-for="Blog" class="error"></span>
-
-            <h3 style="color:var(--el-darkblue);margin-top:20px;">Photo</h3>
-            <label asp-for="PhotoUrl">Photo URL</label>
-            <input type="url" inputmode="url" asp-for="PhotoUrl" placeholder="https://…/your-photo.jpg" />
-            <span asp-validation-for="PhotoUrl" class="error"></span>
-            @if (!string.IsNullOrWhiteSpace(Model.PhotoUrl))
-            {
-                <img src="@Model.PhotoUrl" alt="Your speaker photo" style="max-width:160px;border-radius:10px;margin-top:8px;" />
-            }
-            @if (!string.IsNullOrWhiteSpace(Model.PhotoStoredPath))
-            {
-                <p style="color:#6b7280;font-size:12px;margin-top:6px;">A copy is stored for the event at <code>@Model.PhotoStoredPath</code>.</p>
-            }
-
-            <h3 style="color:var(--el-darkblue);margin-top:20px;">Microsoft accreditation</h3>
-            <p style="color:#6b7280;font-size:12px;margin-top:0;">Tick all that apply.</p>
-            <div style="display:flex;flex-direction:column;gap:6px;margin:4px 0 6px;">
-                @foreach (var opt in CommunityHub.Pages.Speaker.DetailsModel.AccreditationOptions)
-                {
-                    <label style="display:flex;gap:8px;align-items:center;font-weight:400;">
-                        <input type="checkbox" name="SelectedAccreditations" value="@opt" @(Model.SelectedAccreditations.Contains(opt) ? "checked" : "") />
-                        @opt
-                    </label>
-                }
-            </div>
-
-            <h3 style="color:var(--el-darkblue);margin-top:20px;">Details</h3>
-            <label asp-for="Country">Country</label>
-            <select asp-for="Country">
-                <option value="">— select —</option>
-                @foreach (var c in CommunityHub.Core.Domain.Countries.All)
-                {
-                    <option value="@c.Code">@c.Code - @c.Name</option>
-                }
-            </select>
-            <span asp-validation-for="Country" class="error"></span>
-
-            <label asp-for="Gender">Gender</label>
-            <select asp-for="Gender">
-                <option value="">— prefer not to say —</option>
-                @foreach (var opt in CommunityHub.Pages.Speaker.DetailsModel.GenderOptions)
-                {
-                    <option value="@opt">@opt</option>
-                }
-            </select>
-
-            <label style="display:flex;gap:8px;align-items:center;margin-top:10px;">
-                @* Manual checkbox: asp-for can't bind a bool? checkbox. *@
-                <input type="checkbox" name="IsFirstTimeSpeaker" value="true" @(Model.IsFirstTimeSpeaker == true ? "checked" : "") />
-                This is my first time speaking at Experts Live Denmark
-            </label>
-
-            <label asp-for="ContactEmailOverride" style="margin-top:14px;">Preferred contact email (optional)</label>
-            <input type="email" asp-for="ContactEmailOverride" placeholder="Where we send mail + calendar invites" />
-            <span asp-validation-for="ContactEmailOverride" class="error"></span>
-            <p style="color:#6b7280;font-size:12px;">Leave blank to use your sign-in email. This only changes where mail is sent — not your login.</p>
-
-            @if (Model.LastSessionizeImportAt is not null)
-            {
-                <p style="color:#6b7280;font-size:12px;margin-top:14px;">Last Sessionize import: @Model.LastSessionizeImportAt?.ToString("dd/MM/yyyy HH:mm 'UTC'")</p>
-            }
+            @* The speaker-details fields are the SAME partial the inline wizard step renders. *@
+            <partial name="/Pages/Speaker/_DetailsFields.cshtml" model="Model.Form" />
 
             <div style="margin-top:14px;display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
                 @* Plain "Save" keeps your edits in the hub WITHOUT touching Zoho — so a
@@ -130,7 +33,7 @@
                    "Save & sync to Zoho" also pushes to Backstage. *@
                 <button type="submit" asp-page-handler="Save" data-ceh-loading-text="Saving…">Save</button>
                 <button type="submit" asp-page-handler="SaveAndSync" class="secondary" data-ceh-loading-text="Saving &amp; syncing…">Save &amp; sync to Zoho</button>
-                <partial name="_LastSaved" model="Model.LastSavedAt" />
+                <partial name="_LastSaved" model="Model.Form.LastSavedAt" />
             </div>
         </form>
 

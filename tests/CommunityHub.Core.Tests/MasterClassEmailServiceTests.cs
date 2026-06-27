@@ -76,6 +76,24 @@ public class MasterClassEmailServiceTests
     }
 
     [Fact]
+    public async Task Waitlist_email_states_queue_position()
+    {
+        using var db = ScenarioFixture.NewDb();
+        var (ev, mc, att) = await SeedAsync(db);
+        var mc2 = new Session { EventId = ev, Title = "MC2", Type = SessionType.MasterClass, MasterClassCapacity = 0 };
+        db.Sessions.Add(mc2); await db.SaveChangesAsync();
+        var (email, sender, svc) = Build(db);
+        var r = await svc.SignUpAsync(ev, att, mc2.Id);   // cap 0 → waitlisted at position #1
+        var id = (await svc.SignupIdAsync(ev, att, mc2.Id))!.Value;
+
+        // The page passes the queue position (from the SignUp result) into the email.
+        await email.SendWaitlistedAsync(id, "https://hub.test", r.Signup!.WaitlistPosition);
+        var m = Assert.Single(sender.Messages);
+        Assert.Contains("#1", m.Html);                                              // their place in the queue
+        Assert.Contains("on the waitlist", m.Html, System.StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task Cancellation_email_sends()
     {
         using var db = ScenarioFixture.NewDb();

@@ -67,7 +67,11 @@ public sealed class FormTaskReconciler
         if (lunch) signals.Add(new Signal($"lunch-form:{participantId}", "lunch"));
         if (swag) signals.Add(new Signal($"swag-form:{participantId}", "swag"));
         if (volunteer) signals.Add(new Signal($"volunteer-form:{participantId}", null));
-        if (travel) signals.Add(new Signal($"travel:submit-ticket-invoice:{participantId}", null));
+        // A real travel CLAIM completes both the form-owned "submit ticket+invoice"
+        // task AND the §143 speakerdl "submit-travel-reimbursement" deadline (the
+        // "travel" keyword matches that slug). A non-claiming speaker still marks the
+        // §143 task complete manually (opt-out) — that path is not a data signal.
+        if (travel) signals.Add(new Signal($"travel:submit-ticket-invoice:{participantId}", "travel"));
 
         if (signals.Count == 0) return; // nothing submitted yet — no-op
 

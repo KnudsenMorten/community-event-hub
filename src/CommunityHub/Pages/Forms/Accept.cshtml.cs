@@ -1,52 +1,50 @@
 using CommunityHub.Auth;
-using CommunityHub.Core.Data;
-using CommunityHub.Core.Domain;
+using CommunityHub.Forms.Steps;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
-using Microsoft.EntityFrameworkCore;
 
 namespace CommunityHub.Pages.Forms;
 
 /// <summary>
 /// "I accept" Get-Started step (REQUIREMENTS §119): a required checkbox linking the
 /// Code of Conduct + Privacy Policy. Ticking the box + submitting PERSISTS the
-/// acceptance (who/when) as a <see cref="ParticipantPolicyAcceptance"/> row — not a
-/// transient tick — so it is auditable. Applies across all roles' Get-Started flows.
+/// acceptance (who/when) as a <see cref="CommunityHub.Core.Domain.ParticipantPolicyAcceptance"/>
+/// row — not a transient tick — so it is auditable. Applies across all roles' Get-Started flows.
+///
+/// <para>REQUIREMENTS §148: this standalone page is now a thin SHELL — it renders the shared
+/// <c>_AcceptFields</c> partial and delegates load + validate + persist to
+/// <see cref="AcceptFormService"/>. The SAME service backs the inline wizard step
+/// (<c>AcceptStepHandler</c>), so the standalone page and the wizard behave identically. The
+/// page is still deep-linked from My Tasks / emails, so its behavior is unchanged.</para>
 /// </summary>
 [Authorize]
 public class AcceptModel : PageModel
 {
-    public const string CodeOfConductUrl = "https://expertslive.dk/code-of-conduct/";
-    public const string PrivacyPolicyUrl = "https://expertslive.dk/privacy-policy/";
+    /// <summary>Back-compat aliases of the canonical URLs (now owned by <see cref="AcceptFormService"/>).</summary>
+    public const string CodeOfConductUrl = AcceptFormService.CodeOfConductUrl;
+    public const string PrivacyPolicyUrl = AcceptFormService.PrivacyPolicyUrl;
 
-    private readonly CommunityHubDbContext _db;
+    private readonly AcceptFormService _accept;
     private readonly ICurrentParticipantAccessor _participant;
-    private readonly TimeProvider _clock;
 
-    public AcceptModel(
-        CommunityHubDbContext db,
-        ICurrentParticipantAccessor participant,
-        TimeProvider clock)
+    public AcceptModel(AcceptFormService accept, ICurrentParticipantAccessor participant)
     {
-        _db = db;
+        _accept = accept;
         _participant = participant;
-        _clock = clock;
     }
 
-    [BindProperty] public bool Accept { get; set; }
-
-    public bool AlreadyAccepted { get; private set; }
-    public DateTimeOffset? AcceptedAt { get; private set; }
-    public string? AcceptedByEmail { get; private set; }
-    public string? Message { get; private set; }
-    public bool IsError { get; private set; }
+    /// <summary>The shared render+edit model rendered by the <c>_AcceptFields</c> partial. Bound
+    /// with an EMPTY prefix in <see cref="OnPostAsync"/> so the partial's flat input name
+    /// (Accept) matches — identical to the inline wizard step.</summary>
+    public AcceptFormModel Form { get; private set; } = new();
 
     public async Task<IActionResult> OnGetAsync(CancellationToken ct)
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        await LoadAsync(me.EventId, me.ParticipantId, ct);
+
+        Form = await _accept.LoadAsync(me.EventId, me.ParticipantId, ct);
         return Page();
     }
 
@@ -55,45 +53,14 @@ public class AcceptModel : PageModel
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
 
-        if (!Accept)
-        {
-            await LoadAsync(me.EventId, me.ParticipantId, ct);
-            IsError = true;
-            Message = "Please tick \"I accept\" to continue.";
-            return Page();
-        }
+        // Bind the posted checkbox (empty prefix → flat name from the partial) into a fresh
+        // model, then delegate validate + persist to the shared service; it re-derives the
+        // already-accepted state + message. Same flow as the inline wizard step.
+        Form = new AcceptFormModel();
+        await TryUpdateModelAsync(Form, name: string.Empty);
+        await _accept.SaveAsync(Form, me.EventId, me.ParticipantId, me.Email, ModelState, ct);
 
-        var existing = await _db.ParticipantPolicyAcceptances.FirstOrDefaultAsync(
-            a => a.EventId == me.EventId && a.ParticipantId == me.ParticipantId, ct);
-        if (existing is null)
-        {
-            _db.ParticipantPolicyAcceptances.Add(new ParticipantPolicyAcceptance
-            {
-                EventId = me.EventId,
-                ParticipantId = me.ParticipantId,
-                AcceptedByEmail = me.Email,
-                AcceptedAt = _clock.GetUtcNow(),
-                CodeOfConductUrl = CodeOfConductUrl,
-                PrivacyPolicyUrl = PrivacyPolicyUrl,
-            });
-            await _db.SaveChangesAsync(ct);
-        }
-
-        await LoadAsync(me.EventId, me.ParticipantId, ct);
-        Message = "Thank you — your acceptance has been recorded.";
+        // The standalone page always re-renders (success shows the saved message, invalid the error).
         return Page();
-    }
-
-    private async Task LoadAsync(int eventId, int participantId, CancellationToken ct)
-    {
-        var row = await _db.ParticipantPolicyAcceptances.AsNoTracking().FirstOrDefaultAsync(
-            a => a.EventId == eventId && a.ParticipantId == participantId, ct);
-        if (row is not null)
-        {
-            AlreadyAccepted = true;
-            AcceptedAt = row.AcceptedAt;
-            AcceptedByEmail = row.AcceptedByEmail;
-            Accept = true;
-        }
     }
 }

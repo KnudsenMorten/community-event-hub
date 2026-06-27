@@ -245,6 +245,55 @@ public sealed class SpeakerHubMySessionsTests
     }
 
     [Fact]
+    public async Task IsMasterClass_flag_is_true_only_for_master_class_type_sessions()
+    {
+        // §138: the per-session "Master Class Group Q&A" button on My Sessions is gated on
+        // MySpeakerSession.IsMasterClass — it shows ONLY for a Type == MasterClass session,
+        // never for a TechnicalSession (e.g. an "ELDK27 Welcome" talk). This locks the data
+        // that drives that @if gate in the view.
+        using var db = NewDb();
+        var evt = new Event
+        {
+            Code = "SPK27", CommunityName = "C", DisplayName = "SPK 2027",
+            StartDate = new DateOnly(2027, 2, 10), EndDate = new DateOnly(2027, 2, 10),
+            PreDayDate = new DateOnly(2027, 2, 9), IsActive = true, CalendarSyncEnabled = false,
+        };
+        db.Events.Add(evt);
+        await db.SaveChangesAsync();
+
+        var spk = new Participant
+        {
+            EventId = evt.Id, FullName = "Alice Adams", Email = "alice@example.test",
+            Role = ParticipantRole.Speaker, IsActive = true,
+        };
+        db.Participants.Add(spk);
+        await db.SaveChangesAsync();
+
+        Session Sess(string id, string title, SessionType type)
+        {
+            var s = new Session
+            {
+                EventId = evt.Id, SessionizeId = id, Title = title, Type = type,
+                StartsAt = new DateTimeOffset(2027, 2, 10, 9, 0, 0, TimeSpan.Zero),
+            };
+            s.SessionSpeakers.Add(new SessionSpeaker { Session = s, Participant = spk });
+            db.Sessions.Add(s);
+            return s;
+        }
+        Sess("s-welcome", "ELDK27 Welcome", SessionType.TechnicalSession);
+        Sess("s-keynote", "Opening Keynote", SessionType.Keynote);
+        Sess("s-mc", "Hands-on Workshop", SessionType.MasterClass);
+        await db.SaveChangesAsync();
+
+        var sessions = await new SpeakerSessionsService(db)
+            .GetMySessionsAsync(evt.Id, spk.Id, ParticipantRole.Speaker);
+
+        Assert.False(sessions.Single(s => s.Title == "ELDK27 Welcome").IsMasterClass);
+        Assert.False(sessions.Single(s => s.Title == "Opening Keynote").IsMasterClass);
+        Assert.True(sessions.Single(s => s.Title == "Hands-on Workshop").IsMasterClass);
+    }
+
+    [Fact]
     public async Task Fallback_date_is_null_once_the_real_time_is_set()
     {
         // When StartsAt IS set, the display uses the real time and FallbackDate is null

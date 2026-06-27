@@ -1,180 +1,47 @@
 using CommunityHub.Auth;
-using CommunityHub.Core.Data;
-using CommunityHub.Core.Domain;
-using CommunityHub.Core.Resources;
-using CommunityHub.Forms;
+using CommunityHub.Forms.Steps;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Localization;
 
 namespace CommunityHub.Pages.Forms;
 
+/// <summary>
+/// Lunch-logistics form: which lunches (Setup-day / Pre-day / Master Class) a participant
+/// will join. One <c>LunchSignup</c> per participant per edition.
+///
+/// <para>REQUIREMENTS §148: this standalone page is now a thin SHELL — it renders the shared
+/// <c>_LunchFields</c> partial and delegates load + validate + persist + ALL side-effects
+/// (per-role visibility, day labels, auto-task ensure+done) to <see cref="LunchFormService"/>.
+/// The SAME service backs the inline wizard step (<c>LunchStepHandler</c>), so the standalone
+/// page and the wizard behave identically. The page is still deep-linked from My Tasks /
+/// emails, so its behavior is unchanged.</para>
+/// </summary>
 [Authorize]
 public class LunchModel : PageModel
 {
-    private readonly CommunityHubDbContext _db;
+    private readonly LunchFormService _lunch;
     private readonly ICurrentParticipantAccessor _participant;
-    private readonly TimeProvider _clock;
-    private readonly IStringLocalizer<SharedResource> _loc;
 
-    public LunchModel(
-        CommunityHubDbContext db,
-        ICurrentParticipantAccessor participant,
-        TimeProvider clock,
-        IStringLocalizer<SharedResource> loc)
+    public LunchModel(LunchFormService lunch, ICurrentParticipantAccessor participant)
     {
-        _db = db;
+        _lunch = lunch;
         _participant = participant;
-        _clock = clock;
-        _loc = loc;
     }
 
-    /// <summary>
-    /// Roles eligible to DECLARE lunch attendance on this form. Operator 2026-06-24:
-    /// the "must fill" group is Speaker, Sponsor, Volunteer; Sponsor was added and
-    /// Speakers are no longer gated behind an order entitlement (the reported bug:
-    /// a plain Speaker was wrongly told "your role is not in the lunch headcount").
-    /// Organizer / Media / Event-partner remain eligible for now (they attend setup
-    /// days too, so removing them would lose their headcount until the report-side
-    /// "auto-count for pre-day" is wired — a deliberate follow-up). Attendees excluded.
-    /// </summary>
-    public static readonly ParticipantRole[] EligibleRoles =
-    {
-        ParticipantRole.Volunteer,
-        ParticipantRole.Speaker,
-        ParticipantRole.Sponsor,
-        ParticipantRole.Organizer,
-        ParticipantRole.Media,
-        ParticipantRole.EventPartner,
-    };
-
-    /// <summary>
-    /// Crew/organizer roles that are on site for the SETUP days (Sun + Mon, before the
-    /// pre-day): volunteers, organizers and media (video/camera). They see all three
-    /// lunch days. Speakers + master-class speakers are NOT on site for setup; their
-    /// form only offers the Pre-day / Master Class lunch (Tue, StartDate).
-    /// </summary>
-    public static bool ShowSetupDayFor(ParticipantRole role) =>
-        role is ParticipantRole.Volunteer
-             or ParticipantRole.Organizer
-             or ParticipantRole.Media
-             or ParticipantRole.EventPartner;
-
-    /// <summary>
-    /// FEATURE B: lunch is gated by ENTITLEMENT
-    /// (<see cref="OrderItem.LunchPreDay"/> OR <see cref="OrderItem.LunchMainDay"/>).
-    /// A sponsor-self-funded speaker IS entitled (LunchMainDay) and so still sees
-    /// the form. A non-speaker role keeps its historical access even if its
-    /// entitlement changed, so access is never silently removed; speakers are gated
-    /// purely by entitlement.
-    /// </summary>
-    /// <summary>
-    /// Roles whose PRE-DAY lunch is AUTO-COUNTED in the headcount (no pre-day
-    /// checkbox; counted automatically in the organizer report) — crew that is
-    /// always on site for the pre-day (operator 2026-06-24). Master-class speakers
-    /// are also auto-counted but detected via SpeakerProfile.SpeakingPreDay.
-    /// </summary>
-    public static bool PreDayAutoCountedRole(ParticipantRole role) =>
-        role is ParticipantRole.Organizer or ParticipantRole.Media or ParticipantRole.EventPartner;
-
-    /// <summary>
-    /// Resolve per-role form visibility (operator 2026-06-24):
-    ///   - PRE-DAY checkbox shown to the "must declare" group (non-MC Speaker,
-    ///     Sponsor, Volunteer); HIDDEN for auto-counted crew + MC speakers.
-    ///   - SETUP-day checkboxes shown to on-site setup crew (Volunteer + Organizer
-    ///     + Media + Event-partner) so their setup lunches are still captured.
-    /// Eligible to see the form = at least one day applies. MC speakers (pre-day
-    /// auto, no setup) get a friendly "auto-counted" message instead.
-    /// </summary>
-    private async Task<bool> ResolveAccessAsync(CurrentParticipant me, CancellationToken ct)
-    {
-        // §3 parity: a SPEAKER sees the Lunch form only when ENTITLED (LunchPreDay OR
-        // LunchMainDay) — the SAME gate the nav (_Layout) and the speaker wizard use, so
-        // all three agree. Non-speaker roles keep their historical role-based access below.
-        if (me.Role == ParticipantRole.Speaker
-            && !await FormEntitlementGate.IsEntitledToAnyAsync(
-                _db, me.EventId, me.ParticipantId, ct,
-                OrderItem.LunchPreDay, OrderItem.LunchMainDay))
-        {
-            return false;
-        }
-
-        var speakingPreDay = me.Role == ParticipantRole.Speaker
-            && (await _db.SpeakerProfiles
-                    .Where(s => s.EventId == me.EventId && s.ParticipantId == me.ParticipantId)
-                    .Select(s => (bool?)s.SpeakingPreDay)
-                    .FirstOrDefaultAsync(ct) ?? false);
-
-        PreDayAutoCounted = PreDayAutoCountedRole(me.Role) || speakingPreDay;
-        ShowPreDay = !PreDayAutoCounted
-            && me.Role is ParticipantRole.Speaker or ParticipantRole.Sponsor or ParticipantRole.Volunteer;
-        ShowSetupDay = ShowSetupDayFor(me.Role);
-        return ShowPreDay || ShowSetupDay;
-    }
-
-    /// <summary>SourceKey prefix used for the "complete the lunch form" task.</summary>
-    public const string LunchTaskKey = "lunch-form";
-
-    [BindProperty] public bool LunchEarlySetupDay { get; set; }
-    [BindProperty] public bool LunchSetupDay { get; set; }
-    // bool? so the required Yes/No radio is honored (operator §62): null = the
-    // speaker hasn't answered yet (rejected at post). The DB column
-    // LunchSignup.LunchPreDay stays a non-nullable bool — no migration.
-    [BindProperty] public bool? LunchPreDay { get; set; }
-    [BindProperty] public string? Notes { get; set; }
-
-    public string FullName { get; private set; } = string.Empty;
-    public string Email { get; private set; } = string.Empty;
-    public ParticipantRole Role { get; private set; }
-    public bool AccessDenied { get; private set; }
-    public string? Message { get; private set; }
-
-    /// <summary>REQUIREMENTS §51 — when this lunch signup was last saved (UpdatedAt); null = never saved.</summary>
-    public DateTimeOffset? LastSavedAt { get; private set; }
-
-    public string EarlySetupDayLabel { get; private set; } = "Setup day (Sun)";
-    public string SetupDayLabel { get; private set; } = "Setup day (Mon)";
-    public string PreDayLabel { get; private set; } = "Pre-day (Master Class)";
-    public string MainDayLabel { get; private set; } = "main day";
-    public bool ShowSetupDay { get; private set; }
-
-    /// <summary>True when the PRE-DAY checkbox should be shown (the "must declare" group).</summary>
-    public bool ShowPreDay { get; private set; }
-    /// <summary>True when this person's pre-day lunch is AUTO-COUNTED (crew / MC speaker).</summary>
-    public bool PreDayAutoCounted { get; private set; }
+    /// <summary>The shared render+edit model rendered by the <c>_LunchFields</c> partial. Bound
+    /// with an EMPTY prefix in <see cref="OnPostAsync"/> so the partial's flat input names
+    /// (LunchEarlySetupDay / LunchPreDay / …) match — identical to the inline wizard step.</summary>
+    public LunchFormModel Form { get; private set; } = new();
 
     public async Task<IActionResult> OnGetAsync(CancellationToken ct)
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
 
-        FullName = me.FullName;
-        Email = me.Email;
-        Role = me.Role;
-        if (!await ResolveAccessAsync(me, ct))
-        {
-            AccessDenied = true;
-            return Page();
-        }
-
-        await ResolveDayLabelsAsync(me.EventId, ct);
-
-        // Make sure the "complete the lunch form" task exists on first visit
-        // so it shows up under My tasks even before the speaker fills it in.
-        await EnsureLunchTaskExistsAsync(me.EventId, me.ParticipantId, ct);
-
-        var existing = await _db.LunchSignups.FirstOrDefaultAsync(
-            l => l.EventId == me.EventId && l.ParticipantId == me.ParticipantId, ct);
-        if (existing is not null)
-        {
-            LunchEarlySetupDay = existing.LunchEarlySetupDay;
-            LunchSetupDay = existing.LunchSetupDay;
-            LunchPreDay = existing.LunchPreDay;
-            Notes = existing.Notes;
-            LastSavedAt = existing.UpdatedAt;
-        }
+        // Load resolves per-role visibility + day labels, ensures the auto-task, and hydrates
+        // any existing signup; it sets Form.AccessDenied when no lunch day applies.
+        Form = await _lunch.LoadAsync(me.EventId, me.ParticipantId, me.Role, me.FullName, me.Email, ct);
         return Page();
     }
 
@@ -183,135 +50,15 @@ public class LunchModel : PageModel
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
 
-        FullName = me.FullName;
-        Email = me.Email;
-        Role = me.Role;
-        if (!await ResolveAccessAsync(me, ct))
-        {
-            AccessDenied = true;
-            return Page();
-        }
-
-        await ResolveDayLabelsAsync(me.EventId, ct);
-
-        // The PRE-DAY lunch is a REQUIRED Yes/No choice for the "must declare"
-        // group (operator §62): submit must record an explicit answer so the
-        // headcount and task completion are meaningful. Re-render with the field
-        // error when no radio was picked; nothing is persisted.
-        if (ShowPreDay && LunchPreDay is null)
-        {
-            ModelState.AddModelError(nameof(LunchPreDay), _loc["Lunch.ErrPickPreDay"]);
-            return Page();
-        }
-
-        var signup = await _db.LunchSignups.FirstOrDefaultAsync(
-            l => l.EventId == me.EventId && l.ParticipantId == me.ParticipantId, ct);
-
-        if (signup is null)
-        {
-            signup = new LunchSignup
-            {
-                EventId = me.EventId,
-                ParticipantId = me.ParticipantId,
-                CreatedAt = _clock.GetUtcNow(),
-                UpdatedAt = _clock.GetUtcNow(),
-            };
-            _db.LunchSignups.Add(signup);
-        }
-        else
-        {
-            signup.UpdatedAt = _clock.GetUtcNow();
-        }
-
-        // Speakers can't sign up for the setup days -- their form doesn't ask, so
-        // ignore any value that came through (defensive against tampering).
-        signup.LunchEarlySetupDay = ShowSetupDay && LunchEarlySetupDay;
-        signup.LunchSetupDay = ShowSetupDay && LunchSetupDay;
-        // Pre-day only persists for the "must declare" group; auto-counted roles
-        // never set it (it's added automatically in the organizer report). The
-        // choice is validated above, so for that group LunchPreDay is non-null:
-        // Yes => true, No => false (organizer count = LunchPreDay == true).
-        signup.LunchPreDay = ShowPreDay && LunchPreDay == true;
-        signup.Notes = Notes;
-
-        await _db.SaveChangesAsync(ct);
-
-        // Saving the form is what marks the lunch task Done.
-        await MarkLunchTaskDoneAsync(me.EventId, me.ParticipantId, ct);
-
-        Message = "Your lunch preferences have been saved.";
+        // Bind the posted editable fields (empty prefix → flat names from the partial) into a
+        // fresh model, then delegate validate + persist + all side-effects to the shared service;
+        // it re-derives visibility/labels and sets the saved message. Same flow as the inline
+        // wizard step. The page always re-renders (success shows the message, invalid the errors,
+        // not-relevant the access card).
+        Form = new LunchFormModel { Role = me.Role };
+        await TryUpdateModelAsync(Form, name: string.Empty);
+        await _lunch.SaveAsync(
+            Form, me.EventId, me.ParticipantId, me.FullName, me.Email, me.Role, ModelState, ct);
         return Page();
-    }
-
-    private async Task EnsureLunchTaskExistsAsync(
-        int eventId, int participantId, CancellationToken ct)
-    {
-        var sourceKey = $"{LunchTaskKey}:{participantId}";
-        var exists = await _db.Tasks.AnyAsync(
-            t => t.EventId == eventId
-                 && t.AssignedParticipantId == participantId
-                 && t.SourceKey == sourceKey, ct);
-        if (exists) return;
-
-        var due = await _db.Events
-            .Where(e => e.Id == eventId)
-            .Select(e => (DateOnly?)e.StartDate.AddDays(-21))
-            .FirstOrDefaultAsync(ct);
-
-        _db.Tasks.Add(new ParticipantTask
-        {
-            EventId = eventId,
-            AssignedParticipantId = participantId,
-            Title = "Complete the Lunch logistics form",
-            Description = "Tell us which lunches you'll join (Pre-day / Master Class -- " +
-                          "plus Setup day if you're a volunteer or organizer). " +
-                          "Saving the form marks this task Done.",
-            DueDate = due,
-            State = TaskState.Open,
-            SourceKey = sourceKey,
-            CreatedAt = _clock.GetUtcNow(),
-        });
-        await _db.SaveChangesAsync(ct);
-    }
-
-    private async Task MarkLunchTaskDoneAsync(
-        int eventId, int participantId, CancellationToken ct)
-    {
-        var sourceKey = $"{LunchTaskKey}:{participantId}";
-        var task = await _db.Tasks.FirstOrDefaultAsync(
-            t => t.EventId == eventId
-                 && t.AssignedParticipantId == participantId
-                 && t.SourceKey == sourceKey, ct);
-        if (task is null || task.State == TaskState.Done) return;
-
-        task.State = TaskState.Done;
-        task.CompletedAt = _clock.GetUtcNow();
-        await _db.SaveChangesAsync(ct);
-    }
-
-    /// <summary>
-    /// Resolve display labels for Setup-day and Pre-day from the Event row.
-    /// Setup-day = the day BEFORE Pre-day (or two days before StartDate when
-    /// PreDayDate is null).
-    /// </summary>
-    private async Task ResolveDayLabelsAsync(int eventId, CancellationToken ct)
-    {
-        var evt = await _db.Events
-            .Where(e => e.Id == eventId)
-            .Select(e => new { e.StartDate, e.EndDate })
-            .FirstOrDefaultAsync(ct);
-        if (evt is null) return;
-
-        // The conference StartDate IS the pre-day / Master Class day; the two days
-        // before it are setup days (crew + organizers + media). The EndDate is the
-        // main day -- its lunch is booked for everyone, so it's a note, not a choice.
-        var preDay        = evt.StartDate;
-        var setupDay      = evt.StartDate.AddDays(-1);
-        var earlySetupDay = evt.StartDate.AddDays(-2);
-
-        EarlySetupDayLabel = $"Setup day ({earlySetupDay:dddd, MMM d yyyy})";
-        SetupDayLabel      = $"Setup day ({setupDay:dddd, MMM d yyyy})";
-        PreDayLabel        = $"Pre-day / Master Class ({preDay:dddd, MMM d yyyy})";
-        MainDayLabel       = $"{evt.EndDate:dddd, MMM d yyyy}";
     }
 }

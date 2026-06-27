@@ -118,7 +118,8 @@ public class IndexModel : PageModel
                 if (r.Signup!.Status == MasterClassSignupStatus.Confirmed)
                     await _email.SendConfirmedAsync(sid, BaseUrl, ct);
                 else
-                    await _email.SendWaitlistedAsync(sid, BaseUrl, ct);
+                    // Carry the attendee's queue position into the email ("You are #N on the waitlist").
+                    await _email.SendWaitlistedAsync(sid, BaseUrl, r.Signup.WaitlistPosition, ct);
             }
             catch { /* signup stands even if the email fails */ }
         }

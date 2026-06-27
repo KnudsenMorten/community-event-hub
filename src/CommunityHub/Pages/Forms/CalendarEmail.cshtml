@@ -1,0 +1,38 @@
+@page
+@model CommunityHub.Pages.Forms.CalendarEmailModel
+@{
+    ViewData["Title"] = "Calendar email";
+}
+
+<div class="card">
+    <h1>Calendar email (optional)</h1>
+
+    @if (Model.AccessDenied)
+    {
+        <p class="error">This page is for speakers only.</p>
+        <p><a asp-page="/Index">Back to hub</a></p>
+    }
+    else
+    {
+        <p>
+            Some speakers prefer to receive calendar invites and notifications on a
+            different email than the one they registered with. If that's you, enter an
+            alternate <strong>calendar email</strong> below. Leave it blank to keep using
+            your primary email (@Model.Form.PrimaryEmail).
+        </p>
+
+        @if (!string.IsNullOrEmpty(Model.Form.Message))
+        {
+            <p class="success" role="status">@Model.Form.Message</p>
+        }
+
+        <form method="post">
+            @* The calendar-email fields are the SAME partial the inline wizard step renders. *@
+            <partial name="_CalendarEmailFields" model="Model.Form" />
+
+            <button type="submit" class="btn-primary">Save</button>
+        </form>
+    }
+
+    <p style="margin-top:14px;"><a asp-page="/Forms/SpeakerWizard">Back to Get started</a></p>
+</div>

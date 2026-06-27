@@ -21,10 +21,11 @@ public sealed class OpenAiOptions
     /// spoken in the system prompt ("You are {AssistantName}, …"). Configurable so an
     /// operator can rebrand the helper without code changes; override via the
     /// <c>OpenAI:AssistantName</c> config key (app setting <c>OpenAI__AssistantName</c>).
-    /// Defaults to "Otto". Purely cosmetic — the code identifiers are name-agnostic
+    /// Defaults to "Community Helper" (the personal "Otto" name was dropped, operator
+    /// 2026-06-27). Purely cosmetic — the code identifiers are name-agnostic
     /// (AiHelper); only this string changes what users see/read.
     /// </summary>
-    public string AssistantName { get; set; } = "Otto";
+    public string AssistantName { get; set; } = "Community Helper";
 
     /// <summary>Azure OpenAI resource endpoint, e.g. <c>https://my-aoai.openai.azure.com</c>.</summary>
     public string? Endpoint { get; set; }

@@ -51,6 +51,19 @@ public sealed class GraphicsSharePointOptions
     /// </summary>
     public string SessionEvalsQrFolderPath { get; set; } = string.Empty;
 
+    /// <summary>
+    /// Drive-relative ROOT folder holding the per-edition VENUE images
+    /// (REQUIREMENTS §146) — e.g.
+    /// <c>General/Events/ELDK 2027/EventHub/Venue</c>. The server-proxied
+    /// <see cref="VenueImageService"/> maps an allowlisted folder key
+    /// (<c>wayfinding</c>/<c>good-to-know</c>/<c>evaluations</c>/<c>expo</c>) to a
+    /// SUBFOLDER under this root and streams the bytes through CEH using the app's
+    /// own SharePoint credentials (end users never get a SharePoint link). EMPTY by
+    /// default ⇒ the live venue proxy is INERT (nothing listed / downloaded) and the
+    /// committed wwwroot fallback images are used until an operator configures it.
+    /// </summary>
+    public string VenueRootFolderPath { get; set; } = string.Empty;
+
     /// <summary>True when enabled AND a site URL is present (the live store can run).</summary>
     public bool IsConfigured => Enabled && !string.IsNullOrWhiteSpace(SiteUrl);
 }

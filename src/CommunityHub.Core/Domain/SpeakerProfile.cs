@@ -130,6 +130,48 @@ public class SpeakerProfile
             ? (sessionizeEmail ?? string.Empty)
             : contactEmailOverride.Trim();
 
+    // --- Calendar email override (hub-collected; never touched by import) ---
+    /// <summary>
+    /// Optional speaker-chosen address used ONLY for CALENDAR invites /
+    /// calendar notifications (the activation .ics invite + the personal .ics
+    /// feed owner address). Some speakers run their calendar on a different
+    /// address than the one they use for general mail, so this is a calendar-
+    /// specific override that is independent of <see cref="ContactEmailOverride"/>
+    /// (which redirects ALL outbound mail). Set on the Get-Started wizard step 1
+    /// "Calendar email (optional)".
+    ///
+    /// Resolution (<see cref="CalendarEmailFor"/>): calendar mail goes to this
+    /// address when set; if blank it falls back to the general effective address
+    /// (<see cref="ContactEmailOverride"/> ?? the Sessionize/community address) —
+    /// i.e. when neither override is set, calendar mail goes to the primary
+    /// Sessionize email. The Sessionize address stays the IDENTITY + match key;
+    /// this never changes login. Null/blank = no calendar override. A Sessionize
+    /// re-import never writes this field (it is hub-collected).
+    /// </summary>
+    public string? CalendarEmail { get; set; }
+
+    /// <summary>
+    /// When the speaker last saved the "Calendar email (optional)" wizard step
+    /// (stamped even when they leave the field blank). This is the "speaker
+    /// acted" marker that lets the optional step count as DONE in the wizard
+    /// without forcing the speaker to enter an address — mirrors the
+    /// <see cref="BioLastEditedBySpeakerAt"/> marker used by the details step.
+    /// </summary>
+    public DateTimeOffset? CalendarEmailSetAt { get; set; }
+
+    /// <summary>
+    /// Resolve the address CALENDAR invites / notifications must use:
+    /// <c>CalendarEmail ?? (ContactEmailOverride ?? Sessionize)</c>. When the
+    /// speaker sets a calendar-specific address it wins; otherwise calendar mail
+    /// follows the same general routing as everything else (and, with no override
+    /// at all, the primary Sessionize/community address).
+    /// </summary>
+    public static string CalendarEmailFor(
+        string sessionizeEmail, string? calendarEmail, string? contactEmailOverride) =>
+        string.IsNullOrWhiteSpace(calendarEmail)
+            ? EffectiveEmailFor(sessionizeEmail, contactEmailOverride)
+            : calendarEmail.Trim();
+
     // --- Speaker bio (seeded from Sessionize, then OWNED by the speaker) ---
     // These five fields are imported from Sessionize AND editable by the speaker
     // on their own page. The delta sync only fills a field that is empty and has

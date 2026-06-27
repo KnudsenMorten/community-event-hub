@@ -32,6 +32,27 @@ public interface IEmailSender
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Send a single HTML email with an optional <b>Reply-To</b> address (name +
+    /// email) so that an organizer hitting "Reply" replies to <paramref name="replyTo"/>
+    /// (e.g. the person who actually asked) rather than the configured From mailbox.
+    /// Used by the AiHelper intake (REQUIREMENTS §137), where the To is the dev /
+    /// organizer mailbox but the conversation should continue with the asker.
+    ///
+    /// Default interface implementation no-ops the reply-to (it just delegates to the
+    /// 3-arg overload) so existing senders and test doubles need no change; the
+    /// production <see cref="BrevoEmailSender"/> overrides it to set
+    /// <c>MailMessage.ReplyToList</c>. The same redirect/allowlist/kill-switch + ring
+    /// gating as the other overloads applies.
+    /// </summary>
+    Task SendAsync(
+        string toEmail,
+        string subject,
+        string htmlBody,
+        EmailReplyTo? replyTo,
+        CancellationToken cancellationToken = default)
+        => SendAsync(toEmail, subject, htmlBody, cancellationToken);
+
+    /// <summary>
     /// Send an email carrying BOTH an HTML body and a plain-text alternative
     /// (a <c>multipart/alternative</c>): clients that prefer plain text (or
     /// strip HTML) render <paramref name="textBody"/>, the rest render
@@ -82,6 +103,12 @@ public sealed record EmailAttachment(
     string FileName,
     byte[] Content,
     string ContentType);
+
+/// <summary>
+/// An optional Reply-To address for a send (<see cref="IEmailSender.SendAsync(string,string,string,EmailReplyTo?,CancellationToken)"/>).
+/// <paramref name="Name"/> is the optional display name; <paramref name="Email"/> is required.
+/// </summary>
+public sealed record EmailReplyTo(string Email, string? Name = null);
 
 /// <summary>
 /// Brevo SMTP settings, bound from configuration. The username and key come

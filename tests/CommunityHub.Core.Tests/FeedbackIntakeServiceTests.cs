@@ -29,21 +29,27 @@ public sealed class FeedbackIntakeServiceTests
         public override DateTimeOffset GetUtcNow() => DateTimeOffset.Parse("2026-06-27T09:00:00Z");
     }
 
-    // Captures every send + the ambient EmailContext that was in scope at send time.
+    // Captures every send + the Reply-To + the ambient EmailContext that was in scope.
     private sealed class CapturingSender : IEmailSender
     {
         private readonly IEmailContextAccessor _ctx;
         public CapturingSender(IEmailContextAccessor ctx) => _ctx = ctx;
 
-        public readonly List<(string To, string Subject, string Html, EmailContext? Ctx)> Sent = new();
+        public readonly List<(string To, string Subject, string Html, EmailReplyTo? ReplyTo, EmailContext? Ctx)> Sent = new();
 
         public Task SendAsync(string to, string s, string h, CancellationToken ct = default)
         {
-            Sent.Add((to, s, h, _ctx.Current));
+            Sent.Add((to, s, h, null, _ctx.Current));
             return Task.CompletedTask;
         }
         public Task SendAsync(string to, string s, string h, IReadOnlyCollection<string>? cc, CancellationToken ct = default)
             => SendAsync(to, s, h, ct);
+        // The intake path the service uses — capture the Reply-To.
+        public Task SendAsync(string to, string s, string h, EmailReplyTo? replyTo, CancellationToken ct = default)
+        {
+            Sent.Add((to, s, h, replyTo, _ctx.Current));
+            return Task.CompletedTask;
+        }
         public Task SendAsync(string to, string s, string h, string t, CancellationToken ct = default)
             => SendAsync(to, s, h, ct);
         public Task SendWithIcsAsync(string to, string s, string h, string ics, string fn, CancellationToken ct = default)
@@ -68,9 +74,22 @@ public sealed class FeedbackIntakeServiceTests
 
     private static readonly FeedbackIntakeOptions Options = new();
 
+    // The signed-in asker the origin points at (server-resolved name + email).
+    private const int AskerEventId = 7;
+    private const int AskerId = 42;
+    private const string AskerName = "Asker Person";
+    private const string AskerEmail = "asker.person@example.test";
+
     private static (FeedbackIntakeService svc, CapturingSender sender, CommunityHubDbContext db) Build()
     {
         var db = NewDb();
+        // Seed the asker so the service can resolve their name + email server-side.
+        db.Participants.Add(new Participant
+        {
+            Id = AskerId, EventId = AskerEventId, FullName = AskerName,
+            Email = AskerEmail, Role = ParticipantRole.Speaker,
+        });
+        db.SaveChanges();
         var ctx = new EmailContextAccessor();
         var sender = new CapturingSender(ctx);
         var svc = new FeedbackIntakeService(
@@ -78,7 +97,7 @@ public sealed class FeedbackIntakeServiceTests
         return (svc, sender, db);
     }
 
-    private static readonly FeedbackOrigin Origin = new(EventId: 7, ParticipantId: 42, Role: ParticipantRole.Speaker, PageUrl: "/Speaker/Index");
+    private static readonly FeedbackOrigin Origin = new(EventId: AskerEventId, ParticipantId: AskerId, Role: ParticipantRole.Speaker, PageUrl: "/Speaker/Index");
 
     [Fact]
     public async Task Bug_report_is_captured_and_emailed_to_the_dev_mailbox()
@@ -100,9 +119,18 @@ public sealed class FeedbackIntakeServiceTests
         Assert.Equal("mok@expertslive.dk", item.RoutedTo);
 
         var mail = Assert.Single(sender.Sent);
-        Assert.Equal("mok@expertslive.dk", mail.To);
+        Assert.Equal("mok@expertslive.dk", mail.To);           // To stays the dev mailbox
         Assert.Contains("bug", mail.Subject);
-        Assert.Contains("Speaker", mail.Subject);
+        // SUBJECT carries the asker's NAME, and NEVER the page path.
+        Assert.Contains(AskerName, mail.Subject);
+        Assert.DoesNotContain("/Speaker/Index", mail.Subject);
+        // BODY shows the asker's name + email clearly.
+        Assert.Contains(AskerName, mail.Html);
+        Assert.Contains(AskerEmail, mail.Html);
+        // REPLY-TO = the asker, so a "Reply" reaches the person (not info@/the From).
+        Assert.NotNull(mail.ReplyTo);
+        Assert.Equal(AskerEmail, mail.ReplyTo!.Email);
+        Assert.Equal(AskerName, mail.ReplyTo.Name);
         Assert.True(mail.Ctx?.RingExempt);                     // ops mailbox: never ring-dropped
     }
 
@@ -149,7 +177,12 @@ public sealed class FeedbackIntakeServiceTests
         Assert.Equal("info@expertslive.dk", item.RoutedTo);
 
         var mail = Assert.Single(sender.Sent);
-        Assert.Equal("info@expertslive.dk", mail.To);
+        Assert.Equal("info@expertslive.dk", mail.To);          // organizer mailbox
+        // Reply-To = the asker so the organizer replies to the PERSON, not info@.
+        Assert.NotNull(mail.ReplyTo);
+        Assert.Equal(AskerEmail, mail.ReplyTo!.Email);
+        Assert.Contains(AskerName, mail.Html);
+        Assert.Contains(AskerEmail, mail.Html);
         Assert.True(mail.Ctx?.RingExempt);
     }
 

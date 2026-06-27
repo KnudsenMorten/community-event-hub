@@ -67,6 +67,15 @@ public sealed class LoggingEmailSender : IEmailSender
     }
 
     public async Task SendAsync(
+        string toEmail, string subject, string htmlBody, EmailReplyTo? replyTo,
+        CancellationToken cancellationToken = default)
+    {
+        await SendWithLogAsync(
+            toEmail, subject, cc: null,
+            () => _inner.SendAsync(toEmail, subject, htmlBody, replyTo, cancellationToken));
+    }
+
+    public async Task SendAsync(
         string toEmail, string subject, string htmlBody, string textBody,
         CancellationToken cancellationToken = default)
     {

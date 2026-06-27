@@ -89,6 +89,25 @@ public sealed class CalendarInviteScenarioTests
     }
 
     [Fact]
+    public async Task Invite_routes_to_the_calendar_email_over_the_contact_override()
+    {
+        using var db = ScenarioFixture.NewDb();
+        var seed = await ScenarioSeed.SeedAsync(db);
+        var sender = new CapturingEmailSender();
+        var svc = NewService(db, sender);
+
+        await ActivateAsync(db, seed.SpeakerOneId);
+        // §141: with BOTH set, the calendar-specific email wins for the .ics invite.
+        var sp = await db.SpeakerProfiles.FirstAsync(x => x.ParticipantId == seed.SpeakerOneId);
+        sp.CalendarEmail = "calendar@example.test";
+        sp.ContactEmailOverride = "preferred@example.test";
+        await db.SaveChangesAsync();
+
+        Assert.True(await svc.SendActivationInviteAsync(seed.SpeakerOneId));
+        Assert.Equal("calendar@example.test", sender.Sent.Single().To);
+    }
+
+    [Fact]
     public async Task No_invite_is_sent_when_calendar_sync_is_disabled()
     {
         using var db = ScenarioFixture.NewDb();

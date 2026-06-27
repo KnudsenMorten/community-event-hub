@@ -1,0 +1,240 @@
+@model CommunityHub.Forms.Steps.TravelFormModel
+@*
+    Fields-ONLY partial for the Travel-reimbursement step (REQUIREMENTS §148, §48).
+    Contains NO <form>, no validation summary, no page chrome, no Back-to-hub link — the
+    HOST (the standalone /Forms/Travel page OR the generic /Forms/Wizard shell) owns those
+    and places this partial inside its single <form method="post">. Mobile-first.
+
+    TWO-STEP form: Step 1 = upload/delete receipt files (named in-step sub-actions posted as
+    __action=uploadReceipt / __action=deleteReceipt:{id}); Step 2 = the reimbursement claim,
+    gated until ≥1 receipt exists. Input names stay flat (RequestReimbursement / AmountChoice /
+    …) so model binding (empty prefix) is identical in both hosts. The upload button carries
+    formenctype="multipart/form-data" so the file posts even though the generic host form is
+    not multipart; the sub-action + Previous buttons carry formnovalidate so they never trip
+    the Step-2 client validation.
+*@
+
+@* Intro merges the former "Covered cost" and "Not covered" sections (operator §54). *@
+<div style="background:#eef6ff;padding:14px 16px;border-radius:8px;font-size:14px;line-height:1.55;">
+    <p style="margin:0 0 8px;"><strong>Travel reimbursement — flights only.</strong>
+        We cover economy flights only. <strong>Covered:</strong> European air travel —
+        <strong>EUR 400</strong> for a single-speaker session (round trip), or
+        <strong>EUR 300</strong> per person for co-speaking sessions; intercontinental air
+        travel — <strong>EUR 800</strong> for a single-speaker session (round trip), or
+        <strong>EUR 600</strong> per person for co-speaking sessions (round trip). Economy
+        class only; booked at least 6 weeks before the event. If you are not able to get
+        flights within these boundaries, let us know and we will work with you on this. You
+        will get the reimbursement after the event and we will give you instructions.</p>
+    <p style="margin:0;"><strong>Not covered:</strong> taxi, Uber, public transportation, or
+        own car in Denmark; seat upgrades / business class; ground transport / parking;
+        meals / incidentals.</p>
+</div>
+
+<h3>Eligibility</h3>
+<p style="font-size:14px;">Reimbursement is available to <strong>international speakers only</strong>
+    — defined as speakers travelling from outside Denmark.</p>
+
+<h3>Booking requirements</h3>
+<ul style="font-size:14px;">
+    <li><strong>Economy class</strong> — all flights must be booked in economy class. Upgrades,
+        premium economy and business class are not reimbursable.</li>
+    <li><strong>Advance booking</strong> — tickets must be booked at least six weeks before the
+        event date. Tickets booked later will only be reimbursed up to the equivalent economy
+        price available at the six-week mark, unless a documented exception has been approved in
+        advance by the organizing committee.</li>
+    <li><strong>Original receipts or payment confirmations</strong> (PDF, JPG or PNG) showing
+        name, route, dates and total amount paid are required. Booking confirmations without
+        payment details are not sufficient.</li>
+</ul>
+
+<h3>Submission process</h3>
+<ul style="font-size:14px;">
+    <li>Submit all reimbursement documents by this form no later than
+        <strong>10 January 2027</strong>. Late submissions will not be processed.</li>
+    <li>A receipt alone is not sufficient. You must also submit either:
+        <ul>
+            <li><strong>Company invoice</strong> — if you have a registered company, an invoice
+                must be issued to Experts Live Denmark. The invoice must include sender details,
+                recipient details, a description (e.g. &ldquo;Speaker travel reimbursement —
+                Experts Live DK 2027&rdquo;) and the total amount.</li>
+            <li><strong>Personal declaration</strong> — if you do not have a company, a personal
+                declaration is acceptable. This must include your full name, address, a valid
+                identification number (passport or national ID), the recipient entity, a
+                description of the costs and the total amount claimed.</li>
+        </ul>
+    </li>
+</ul>
+
+<h3>Billing details</h3>
+<p style="font-size:14px;background:#f6f8fb;border-radius:8px;padding:12px 14px;margin:0 0 10px;">
+    <strong>Experts Live Denmark</strong><br>
+    Strandvejen 21A<br>
+    6000 Kolding<br>
+    Denmark<br>
+    VAT Number: DK44197588
+</p>
+<p style="font-size:14px;">Your bank account details on the invoice must include:
+    <strong>Bank name, IBAN, BIC/SWIFT, Account Holder Name</strong>.</p>
+
+@* Shared success/error toasts (REQUIREMENTS §21): role=status, auto-dismiss, dismissable.
+   Live in the partial so upload/delete feedback shows in BOTH the standalone page and the wizard. *@
+<partial name="_Flash" model='new CommunityHub.Pages.Shared.FlashModel(Model.Message, "success")' />
+@if (!string.IsNullOrEmpty(Model.Error))
+{
+    <partial name="_Flash" model='new CommunityHub.Pages.Shared.FlashModel(Model.Error, "error")' />
+}
+
+@* ============================ STEP 1 ============================ *@
+@* Upload receipts/invoice. This MUST be completed (≥1 file) before the Step-2 reimbursement
+   request unlocks (REQUIREMENTS §48). Files are stored in the hub and attached to the
+   bookkeeping email on Step-2 submit. *@
+<h3 style="margin-top:8px;">Step 1: Upload receipts</h3>
+<p style="font-size:14px;">Upload your flight receipt(s) and invoice / personal
+    declaration here (PDF, JPG or PNG, max 15&nbsp;MB each). You must upload at
+    least one file before you can request reimbursement in Step 2.</p>
+
+<div style="margin:0 0 14px;">
+    <input type="file" asp-for="ReceiptFile" accept=".pdf,.jpg,.jpeg,.png" />
+    <button type="submit" name="__action" value="uploadReceipt"
+            formenctype="multipart/form-data" formnovalidate>Step 1: Upload Receipt</button>
+</div>
+
+@if (Model.Receipts.Count > 0)
+{
+    <p style="font-size:14px;font-weight:600;margin:6px 0 4px;">Uploaded so far:</p>
+    <ul style="font-size:14px;list-style:none;padding:0;margin:0 0 16px;">
+        @foreach (var r in Model.Receipts)
+        {
+            <li style="margin:4px 0;">
+                <div style="display:flex;align-items:center;gap:10px;">
+                    <span>&#128206; @r.FileName <span style="color:#6b7280;">(@(((r.SizeBytes + 1023) / 1024)) KB)</span></span>
+                    <button type="submit" name="__action" value="deleteReceipt:@r.Id" formnovalidate
+                            style="background:none;border:0;color:#b91c1c;cursor:pointer;text-decoration:underline;padding:0;font-size:13px;">remove</button>
+                </div>
+                @* §68 — when the receipt was uploaded, so a returning speaker sees it's already on file. *@
+                <span style="color:#6b7280;font-size:12px;">Uploaded @r.UploadedAt.ToUniversalTime().ToString("dd MMM yyyy HH:mm") UTC</span>
+            </li>
+        }
+    </ul>
+}
+else
+{
+    <p style="font-size:14px;color:#92400e;background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:10px 12px;margin:0 0 16px;">
+        No receipts uploaded yet. Step 2 (Request Travel Reimbursement) is locked
+        until you upload at least one receipt above.
+    </p>
+}
+
+@* ============================ STEP 2 ============================ *@
+<h3 style="margin-top:4px;">Step 2: Request Travel Reimbursement
+    @if (!Model.HasReceipt)
+    {
+        <span style="font-size:13px;font-weight:600;color:#92400e;">&#128274; locked — complete Step 1 first</span>
+    }
+</h3>
+
+<fieldset id="Step2Fieldset" @(Model.HasReceipt ? "" : "disabled") style="border:0;padding:0;margin:0;@(Model.HasReceipt ? "" : "opacity:0.55;")">
+    <label for="TravelName">@Localizer["Common.Name"]</label>
+    <input type="text" id="TravelName" value="@Model.FullName" readonly />
+
+    <label for="TravelEmail">@Localizer["Common.Email"]</label>
+    <input type="text" id="TravelEmail" value="@Model.Email" readonly />
+
+    <fieldset style="border:0;padding:0;margin:0;">
+        <legend style="font-weight:600;font-size:14px;margin-top:10px;">@Localizer["Travel.ClaimLegend"]</legend>
+        <div style="display:flex; gap:18px; margin:6px 0 14px;">
+            <label style="font-weight:normal;">
+                <input type="radio" asp-for="RequestReimbursement" value="false" id="ReqNo" />
+                @Localizer["Travel.ClaimNo"]
+            </label>
+            <label style="font-weight:normal;">
+                <input type="radio" asp-for="RequestReimbursement" value="true" id="ReqYes" />
+                @Localizer["Common.Yes"]
+            </label>
+        </div>
+    </fieldset>
+
+    <div id="ClaimBlock" style="@(Model.RequestReimbursement ? "" : "display:none;")">
+
+        <label for="OriginCity">@Localizer["Travel.OriginCity"]</label>
+        <input type="text" asp-for="OriginCity" placeholder="@Localizer["Travel.OriginPlaceholder"]" />
+
+        <label for="AmountChoice">@Localizer["Travel.AmountLabel"]</label>
+        <select asp-for="AmountChoice" id="AmountChoice">
+            <option value="@CommunityHub.Forms.Steps.TravelFormModel.ChoiceNone">@Localizer["Travel.PickAmount"]</option>
+            <option value="@CommunityHub.Forms.Steps.TravelFormModel.Choice400">
+                @Localizer["Travel.AmountSingle", CommunityHub.Forms.Steps.TravelFormModel.Cap400]
+            </option>
+            <option value="@CommunityHub.Forms.Steps.TravelFormModel.Choice300">
+                @Localizer["Travel.AmountCo", CommunityHub.Forms.Steps.TravelFormModel.Cap300]
+            </option>
+            <option value="@CommunityHub.Forms.Steps.TravelFormModel.Choice800">
+                @Localizer["Travel.AmountIntercontinental", CommunityHub.Forms.Steps.TravelFormModel.Cap800]
+            </option>
+            <option value="@CommunityHub.Forms.Steps.TravelFormModel.ChoiceOther">
+                @Localizer["Travel.AmountOther"]
+            </option>
+        </select>
+        <span asp-validation-for="AmountChoice" class="ceh-field-error"></span>
+
+        @{
+            // Keep the "Other amount" block visible on a re-render that failed validation
+            // while "Other" was chosen, so the inline error sits next to the field to fix.
+            var otherChosen = Model.AmountChoice == CommunityHub.Forms.Steps.TravelFormModel.ChoiceOther;
+        }
+        <div id="OtherBlock" style="@(otherChosen ? "" : "display:none;")">
+            <label for="OtherAmountEur">@Localizer["Travel.OtherAmount"]</label>
+            <input type="number" asp-for="OtherAmountEur" min="0" step="1" />
+            <span asp-validation-for="OtherAmountEur" class="ceh-field-error"></span>
+        </div>
+
+        <label for="Explanation">@Localizer["Travel.Explanation"]</label>
+        <textarea asp-for="Explanation" rows="3"
+                  placeholder="@Localizer["Travel.ExplanationPlaceholder"]"></textarea>
+        <span asp-validation-for="Explanation" class="ceh-field-error"></span>
+    </div>
+</fieldset>
+
+<script>
+    (function () {
+        var reqYes = document.getElementById('ReqYes');
+        var reqNo  = document.getElementById('ReqNo');
+        var claim  = document.getElementById('ClaimBlock');
+        var pick   = document.getElementById('AmountChoice');
+        var other  = document.getElementById('OtherBlock');
+        var amount = document.getElementById('OtherAmountEur');
+        if (!reqYes || !reqNo || !claim || !pick || !other || !amount) return;
+        var form   = pick.closest('form');
+        function syncClaim() { claim.style.display = reqYes.checked ? '' : 'none'; }
+        function syncOther() { other.style.display = pick.value === 'other' ? '' : 'none'; }
+        reqYes.addEventListener('change', syncClaim);
+        reqNo.addEventListener('change', syncClaim);
+        pick.addEventListener('change', syncOther);
+        syncClaim(); syncOther();
+
+        // Client-side mirror of the server field validation (shared pattern). HTML5 custom
+        // validity gives an inline message without leaving the page; the server re-checks
+        // regardless, so JS-off users are still safe. Only runs for the MAIN save — upload /
+        // delete / Previous buttons carry formnovalidate, so we skip them via e.submitter.
+        if (form) {
+            form.addEventListener('submit', function (e) {
+                if (e.submitter && e.submitter.formNoValidate) return;  // sub-action / prev: skip
+                if (!reqYes.checked) return;                            // not claiming: skip
+                if (pick.value === 'other') {
+                    var v = parseFloat(amount.value);
+                    if (!(v > 0)) {
+                        amount.setCustomValidity(
+                            '@Html.Raw(Localizer["Travel.ErrOtherAmount"].Value.Replace("'", "\\'"))');
+                        amount.reportValidity();
+                        amount.classList.add('ceh-input-invalid');
+                        e.preventDefault();
+                    }
+                }
+            });
+            amount.addEventListener('input', function () {
+                amount.setCustomValidity('');
+                amount.classList.remove('ceh-input-invalid');
+            });
+        }
+    })();
+</script>

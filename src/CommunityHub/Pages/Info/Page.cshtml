@@ -16,6 +16,11 @@
         border-left: 4px solid var(--el-darkblue);
         margin: 12px 0; padding: 4px 14px; background: #f7f9fc; color: #374151;
     }
+    /* §146 venue gallery: single column on phones, multi-column from ~560px up. */
+    .venue-gallery { display: grid; grid-template-columns: 1fr; gap: 12px; margin: 10px 0; }
+    .venue-gallery figure { margin: 0; }
+    .venue-gallery img { width: 100%; height: auto; border-radius: 8px; display: block; }
+    @@media (min-width: 560px) { .venue-gallery { grid-template-columns: repeat(2, 1fr); } }
 </style>
 
 <div class="card content-page">
@@ -32,6 +37,20 @@
         @* Trusted, in-repo operator markdown rendered to HTML by ContentMarkdownRenderer.
            The leading H1 in each .md file serves as the page heading. *@
         @Model.BodyHtml
+    }
+
+    @* §146: LIVE SharePoint venue images (server-proxied via /venue-image/{folder}/{name};
+       never a SharePoint link), appended below the markdown for slugs with a mapped folder.
+       Falls back to the committed wwwroot images, or renders nothing when there are none. *@
+    @if (Model.Gallery.Count > 0)
+    {
+        <h2>Venue images</h2>
+        <div class="venue-gallery">
+            @foreach (var img in Model.Gallery)
+            {
+                <figure><img src="@img.Url" alt="@img.Alt" loading="lazy" /></figure>
+            }
+        </div>
     }
 
     <p><a asp-page="/Index">Back to hub</a></p>

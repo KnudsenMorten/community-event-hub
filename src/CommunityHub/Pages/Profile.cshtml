@@ -7,13 +7,13 @@
 <div class="card">
     <h1>My Hub Profile</h1>
 
-    @if (!string.IsNullOrEmpty(Model.Message))
+    @if (!string.IsNullOrEmpty(Model.Form.Message))
     {
-        <p class="@(Model.Saved ? "info" : "error")" role="@(Model.Saved ? "status" : "alert")">@Model.Message</p>
+        <p class="@(Model.Form.Saved ? "info" : "error")" role="@(Model.Form.Saved ? "status" : "alert")">@Model.Form.Message</p>
     }
-    @if (!string.IsNullOrEmpty(Model.SpeakerNotice))
+    @if (!string.IsNullOrEmpty(Model.Form.SpeakerNotice))
     {
-        <p class="info" role="status">@Model.SpeakerNotice</p>
+        <p class="info" role="status">@Model.Form.SpeakerNotice</p>
     }
 
     <p style="background:#eef6ff;padding:10px 14px;border-radius:6px;font-size:14px;">
@@ -24,34 +24,8 @@
     </p>
 
     <form method="post">
-        <label for="FullName">Full name</label>
-        <input type="text" asp-for="FullName" autocomplete="name" maxlength="200" />
-
-        @* Read-only identity (email + role) shown right after the name (operator 2026-06-25). *@
-        <label for="ProfileEmail">Email <span style="font-weight:400;color:#6b7280;">(sign-in identity &mdash; read-only)</span></label>
-        <input type="email" id="ProfileEmail" value="@Model.Email" disabled />
-
-        <label for="ProfileRole">Role <span style="font-weight:400;color:#6b7280;">(set by organizers &mdash; read-only)</span></label>
-        <input type="text" id="ProfileRole" value="@CommunityHub.Branding.RoleDisplay.Name(Model.Role)" disabled />
-
-        <label for="Phone">Phone <span style="font-weight:400;color:#6b7280;">(optional)</span></label>
-        <input type="tel" asp-for="Phone" autocomplete="tel" maxlength="40" />
-
-        @* One additional-email field only (operator 2026-06-25 — the separate "secondary
-           CC" field was redundant): an alternate address you can ALSO sign in with. *@
-        <label for="AlternateEmail">Alternate sign-in email <span style="font-weight:400;color:#6b7280;">(optional &mdash; sign in with this OR your main email)</span></label>
-        <input type="email" asp-for="AlternateEmail" autocomplete="email" maxlength="320"
-               placeholder="blank = sign in with your main email only" />
-
-        @if (Model.IsSpeaker)
-        {
-            @* Speaker details (bio, accreditation, country, photo, preferred email) moved
-               to the consolidated Speaker Details page (operator 2026-06-24). *@
-            <p style="font-size:13px;color:#374151;background:#eef2fb;border-left:4px solid var(--el-darkblue,#1D3380);padding:8px 12px;border-radius:6px;margin:16px 0;">
-                Your speaker details (bio, photo, accreditation, country, preferred email) live on
-                <a asp-page="/Speaker/Details">Speaker Details</a>.
-            </p>
-        }
+        @* The profile fields are the SAME partial the inline wizard step renders. *@
+        <partial name="_ProfileFields" model="Model.Form" />
 
         <button type="submit">Save</button>
     </form>

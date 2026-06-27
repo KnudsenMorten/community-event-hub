@@ -457,7 +457,7 @@ else
 }
 
 // --- AI Community Helper (code-named AiHelper; REQUIREMENTS §129) -----------
-// Display name is operator-configurable via OpenAI:AssistantName (default "Otto").
+// Display name is operator-configurable via OpenAI:AssistantName (default "Community Helper").
 // Azure OpenAI is wired via the "OpenAI" config section (ApiKey is a KV ref). The
 // assistant is GATED on OpenAiOptions.IsConfigured (Enabled + endpoint + deployment +
 // key) and no-ops gracefully when off. The grounding builder enforces authorization-at-
@@ -482,6 +482,13 @@ builder.Services.AddScoped<CommunityHub.Core.Assistant.IAiHelperOwnDataProvider,
 // never the prompt) — a non-organizer never even calls this provider.
 builder.Services.AddScoped<CommunityHub.Core.Assistant.IAiHelperOrganizerOpsProvider,
     CommunityHub.Assistant.WebAiHelperOrganizerOpsProvider>();
+// §149 PUBLIC INFO for EVERY role: published speakers + their skills + sessions, the session
+// programme, and the event schedule / key times (doors, lunch, party, dinner). Added for ALL
+// roles by the grounding builder (no role gate) — the provider itself enforces the speaker
+// publish HARD GATE, so no unselected speaker leaks. Anyone can ask "who speaks about X?" /
+// "when is lunch?".
+builder.Services.AddScoped<CommunityHub.Core.Assistant.IAiHelperPublicInfoProvider,
+    CommunityHub.Assistant.WebAiHelperPublicInfoProvider>();
 builder.Services.AddScoped<CommunityHub.Core.Assistant.IAiHelperGroundingBuilder,
     CommunityHub.Core.Assistant.AiHelperGroundingBuilder>();
 // Per-participant in-memory rate limit on the endpoint.
@@ -617,6 +624,12 @@ builder.Services.AddScoped<CommunityHub.Core.Integrations.Graphics.GraphicsServi
 // §124: per-room session-evaluation QR codes — reads/uploads via the same
 // SharePoint file-store seam; inert until the QR folder path is configured.
 builder.Services.AddScoped<CommunityHub.Core.Integrations.Graphics.SessionEvalsQrService>();
+// §146: reusable, server-proxied, LIVE venue images — reads an allowlisted Venue
+// SUBFOLDER via the same SharePoint file-store seam (app creds), caches bytes ~15 min,
+// and never exposes a SharePoint link. Inert until Graphics:SharePoint:VenueRootFolderPath
+// is set (then the committed wwwroot images are the fallback via VenueImageProvider).
+builder.Services.AddScoped<CommunityHub.Core.Integrations.Graphics.VenueImageService>();
+builder.Services.AddScoped<CommunityHub.Venue.VenueImageProvider>();
 builder.Services.AddScoped<CommunityHub.Core.Integrations.Graphics.AssetLocationService>();
 // Read-only contract that EXPOSES publishable branding graphics to a downstream
 // consumer (the §19 SoMe queue, or any other) — the release/visibility gate is
@@ -799,6 +812,19 @@ builder.Services.AddScoped<CommunityHub.Forms.SponsorWizardService>();
 // (Volunteer / Organizer / Media / EventPartner); same design-A shell + entitlement
 // gating as the speaker wizard, reusing the existing pages untouched.
 builder.Services.AddScoped<CommunityHub.Forms.RoleWizardService>();
+
+// In-wizard STEPPER (§148): auto-discover every step handler + shared form-service in the
+// web assembly so a new onboarding step = one HandlerClass + one XxxFormService with ZERO
+// edits here. Each IWizardStepHandler is registered against the interface (the host injects
+// IEnumerable<IWizardStepHandler> and keys them by Handler.Key); each IWizardFormService
+// marker type self-registers by its concrete type (injected by the handler + the standalone page).
+foreach (var t in typeof(Program).Assembly.DefinedTypes.Where(t => t is { IsAbstract: false, IsInterface: false }))
+{
+    if (typeof(CommunityHub.Forms.IWizardStepHandler).IsAssignableFrom(t))
+        builder.Services.AddScoped(typeof(CommunityHub.Forms.IWizardStepHandler), t);
+    if (typeof(CommunityHub.Forms.IWizardFormService).IsAssignableFrom(t))
+        builder.Services.AddScoped(t);
+}
 
 // --- Read-only e-conomic ROLE source for the sponsor-email audience (§7c) --
 // The sponsor-email coordinator audience is resolved READ-ONLY from e-conomic
@@ -1076,6 +1102,24 @@ app.MapGet("/schedule/{id:int}.ics", async (
     // Inline (no filename) so the OS hands the .ics to the calendar app instead of
     // downloading it (operator 2026-06-24: "must open the entry, not download").
     return Results.File(System.Text.Encoding.UTF8.GetBytes(ics), "text/calendar; charset=utf-8");
+}).RequireAuthorization();
+
+// §146: SERVER-PROXIED venue image. Streams an allowlisted Venue SUBFOLDER image
+// (wayfinding / good-to-know / evaluations / expo) fetched with the app's OWN SharePoint
+// credentials, with a committed-wwwroot fallback — end users have no SharePoint access and
+// never see a SharePoint URL. The {folder}/{file} route segments can't carry a slash, the
+// folder is allowlisted, and the file name is sanitized (no traversal) in the provider.
+// Authenticated (these pages are behind login). Bytes are memory-cached ~15 min in the
+// service so replacing a file on SharePoint propagates within the window.
+app.MapGet("/venue-image/{folder}/{file}", async (
+        string folder, string file,
+        CommunityHub.Venue.VenueImageProvider venue,
+        CancellationToken ct) =>
+{
+    var img = await venue.GetImageAsync(folder, file, ct);
+    return img is null
+        ? Results.NotFound()
+        : Results.File(img.Content, img.ContentType);
 }).RequireAuthorization();
 
 app.MapRazorPages();

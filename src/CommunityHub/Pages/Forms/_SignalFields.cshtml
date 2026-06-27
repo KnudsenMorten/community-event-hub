@@ -1,0 +1,37 @@
+@model CommunityHub.Forms.Steps.SignalFormModel
+@*
+    Fields-ONLY partial for the Signal step (REQUIREMENTS §148, §109, REFERENCE: _HotelFields).
+    Contains NO <form>, no buttons, no page chrome, no Back-to-hub link — the HOST (the
+    standalone /Forms/Signal page OR the generic /Forms/Wizard shell) owns those and places
+    this partial inside its single layout/<form>. The Signal step has no posted fields
+    (joining is external); this renders the role-appropriate chat + broadcast JOIN buttons +
+    the manual-completion status. Mobile-first. Bound to CommunityHub.Forms.Steps.SignalFormModel.
+*@
+
+@if (Model.OutOfScope || Model.Links is null)
+{
+    <p class="info">There are no Signal groups for your role.</p>
+}
+else
+{
+    <p>We coordinate the event on Signal. Tap the button(s) below to join, then
+       mark this step as completed.</p>
+
+    @if (Model.Done)
+    {
+        <p class="success" role="status">✅ You've marked this step complete.</p>
+    }
+
+    <div style="display:flex;flex-direction:column;gap:10px;margin:16px 0;">
+        @if (Model.Links.HasChat)
+        {
+            <a href="@Model.Links.ChatUrl" target="_blank" rel="noopener" class="btn-primary"
+               style="display:inline-block;text-align:center;">@Model.Links.ChatLabel</a>
+        }
+        @if (Model.Links.HasBroadcast)
+        {
+            <a href="@Model.Links.BroadcastUrl" target="_blank" rel="noopener" class="btn-primary"
+               style="display:inline-block;text-align:center;">@Model.Links.BroadcastLabel</a>
+        }
+    </div>
+}

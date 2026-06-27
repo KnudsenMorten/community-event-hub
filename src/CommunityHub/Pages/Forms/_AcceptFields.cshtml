@@ -1,0 +1,31 @@
+@model CommunityHub.Forms.Steps.AcceptFormModel
+@*
+    Fields-ONLY partial for the Accept step (REQUIREMENTS §148/§119).
+    Contains NO <form>, no flash/message, no buttons, no Back-to-hub link — the HOST
+    (the standalone /Forms/Accept page OR the generic /Forms/Wizard shell) owns those
+    and places this partial inside its single <form method="post">. Mobile-first.
+    Bound to CommunityHub.Forms.Steps.AcceptFormModel; the checkbox input name stays flat
+    (Accept) so model binding is unchanged across both hosts.
+*@
+
+<p>Please review and accept our policies:</p>
+<ul>
+    <li><a href="@Model.CodeOfConductUrl" target="_blank" rel="noopener">Code of Conduct</a></li>
+    <li><a href="@Model.PrivacyPolicyUrl" target="_blank" rel="noopener">Privacy Policy</a></li>
+</ul>
+
+@if (Model.AlreadyAccepted)
+{
+    @* Read-only acceptance confirmation (who/when) — no checkbox once recorded. *@
+    <p class="success" role="status">
+        ✅ Accepted on @Model.AcceptedAt?.ToString("dd MMM yyyy HH:mm 'UTC'")
+        @if (!string.IsNullOrEmpty(Model.AcceptedByEmail)) { <text>by @Model.AcceptedByEmail</text> }.
+    </p>
+}
+else
+{
+    <label style="display:flex;align-items:flex-start;gap:10px;font-weight:600;">
+        <input type="checkbox" asp-for="Accept" required style="width:auto;margin-top:3px;" />
+        <span>I accept the Code of Conduct and the Privacy Policy.</span>
+    </label>
+}

@@ -183,10 +183,11 @@ public sealed class CalendarSyncScenarioTests
         var ics = await new ParticipantCalendarBuilder(db)
             .BuildFeedAsync(seed.SpeakerOneId, UidHost);
 
-        // A plain speaker (not pre-/main-day) gets 5 milestone deadlines: Hotel,
-        // Dinner, Swag (1 Oct) + the two presentation uploads. The Pre-day Lunch is
-        // P12 entitlement-gated out for a non-pre-day speaker.
-        Assert.Equal(5, CountOccurrences(ics, "BEGIN:VEVENT"));
+        // A plain speaker (not pre-/main-day) gets 6 milestone deadlines: Hotel,
+        // Dinner, Swag (1 Oct) + the two presentation uploads + the §143 non-Denmark
+        // travel-reimbursement task (the seed speaker has no country = non-DK). The
+        // Pre-day Lunch is P12 entitlement-gated out for a non-pre-day speaker.
+        Assert.Equal(6, CountOccurrences(ics, "BEGIN:VEVENT"));
         // VALARM reminders present (7 & 1 days before).
         Assert.True(CountOccurrences(ics, "BEGIN:VALARM") >= 2);
         Assert.Contains("TRIGGER:-P7D", ics);
@@ -206,8 +207,8 @@ public sealed class CalendarSyncScenarioTests
             .BuildFeedAsync(seed.MasterclassSpeakerId, UidHost);
 
         // A Master Class (pre-day) speaker is entitled to the Pre-day Lunch, so gets
-        // the FULL set of 6 milestones (the 5 a plain speaker gets + Pre-day Lunch).
-        Assert.Equal(6, CountOccurrences(ics, "BEGIN:VEVENT"));
+        // the FULL set of 7 milestones (the 6 a plain non-DK speaker gets + Pre-day Lunch).
+        Assert.Equal(7, CountOccurrences(ics, "BEGIN:VEVENT"));
     }
 
     // ---- Role coverage: volunteer ------------------------------------------

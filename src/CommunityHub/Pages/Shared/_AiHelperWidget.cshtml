@@ -1,10 +1,17 @@
 @inject CommunityHub.Core.Assistant.OpenAiOptions AiHelperOptions
+@inject CommunityHub.Auth.ICurrentParticipantAccessor CurrentParticipant
 @{
-    // Display name is operator-configurable (OpenAI:AssistantName, default "Otto").
-    // Everything user-facing reads from this variable; the code is name-agnostic.
+    // The brand is "Community Helper" (no personal name — the "Otto" name was dropped,
+    // operator 2026-06-27). The display name stays operator-configurable
+    // (OpenAI:AssistantName, default "Community Helper"); everything user-facing reads
+    // from this variable, so the code is name-agnostic.
     var assistantName = string.IsNullOrWhiteSpace(AiHelperOptions.AssistantName)
-        ? "Otto"
+        ? "Community Helper"
         : AiHelperOptions.AssistantName.Trim();
+    // Personalise: "Hi <FirstName>!" from the signed-in participant (fallback "there").
+    var ahFullName = CurrentParticipant.Current?.FullName;
+    var ahFirstName = string.IsNullOrWhiteSpace(ahFullName) ? "there" : ahFullName.Trim().Split(' ')[0];
+    var ahGreeting = $"Hi {ahFirstName}! I'm the Community Helper for Experts Live Denmark. Lost? Confused? I run on questions, so feed me some! \U0001F916";
 }
 @*
     The corner Community Helper widget (REQUIREMENTS §129). Code-named AiHelper; the
@@ -24,8 +31,8 @@
      data-endpoint="/api/ai-helper" data-assistant-name="@assistantName">
     <button type="button" id="ai-helper-launcher" class="ai-helper-launcher"
             aria-expanded="false" aria-controls="ai-helper-panel"
-            aria-label="Open @assistantName, the Community Helper">
-        <span class="ai-helper-bubble" aria-hidden="true">Hej! Need a hand? &#128075;</span>
+            aria-label="Open the Community Helper">
+        <span class="ai-helper-bubble" aria-hidden="true">@ahGreeting</span>
         <img class="ai-helper-avatar" src="~/img/otto.svg" alt="" width="72" height="78" />
     </button>
 
@@ -33,23 +40,22 @@
              aria-labelledby="ai-helper-title" hidden>
         <header class="ai-helper-header">
             <img class="ai-helper-head-avatar" src="~/img/otto.svg" alt="" width="34" height="37" />
-            <span id="ai-helper-title" class="ai-helper-head-title">@assistantName &middot; Community Helper</span>
+            <span id="ai-helper-title" class="ai-helper-head-title">Community Helper &middot; Experts Live Denmark</span>
             <button type="button" id="ai-helper-close" class="ai-helper-close"
-                    aria-label="Close @assistantName">&times;</button>
+                    aria-label="Close the Community Helper">&times;</button>
         </header>
 
         <div id="ai-helper-log" class="ai-helper-log" aria-live="polite">
             <div class="ai-helper-msg ai-helper-msg-bot">
-                <img class="ai-helper-msg-avatar" src="~/img/otto.svg" alt="@assistantName" width="28" height="30" />
-                <div class="ai-helper-msg-text">Hej! I'm @assistantName. Ask me about your tasks, your sessions, or
-                    anything in your event info — I'll answer from what's relevant to you. &#128075;</div>
+                <img class="ai-helper-msg-avatar" src="~/img/otto.svg" alt="Community Helper" width="28" height="30" />
+                <div class="ai-helper-msg-text">@ahGreeting</div>
             </div>
         </div>
 
         <form id="ai-helper-form" class="ai-helper-form" autocomplete="off">
-            <label for="ai-helper-input" class="visually-hidden">Ask @assistantName a question</label>
+            <label for="ai-helper-input" class="visually-hidden">Ask the Community Helper a question</label>
             <input type="text" id="ai-helper-input" class="ai-helper-input" maxlength="1000"
-                   placeholder="Ask @assistantName&hellip;" />
+                   placeholder="Ask the Community Helper&hellip;" />
             <button type="submit" id="ai-helper-send" class="ai-helper-send"
                     aria-label="Send question">&#10148;</button>
         </form>
@@ -125,7 +131,7 @@
         var widget = document.getElementById('ai-helper-widget');
         if (!widget) return;
         var endpoint = widget.getAttribute('data-endpoint');
-        var assistantName = widget.getAttribute('data-assistant-name') || 'Helper';
+        var assistantName = widget.getAttribute('data-assistant-name') || 'Community Helper';
         var launcher = document.getElementById('ai-helper-launcher');
         var panel = document.getElementById('ai-helper-panel');
         var closeBtn = document.getElementById('ai-helper-close');

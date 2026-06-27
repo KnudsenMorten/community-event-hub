@@ -5,9 +5,9 @@ using CommunityHub.Core.Domain;
 using CommunityHub.Core.Email;
 using CommunityHub.Core.Reminders;
 using CommunityHub.Core.Resources;
+using CommunityHub.Forms.Steps;
 using CommunityHub.Notify;
 using CommunityHub.Pages.Forms;
-using CommunityHub.Pages.Shared;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -21,15 +21,16 @@ using Xunit;
 namespace CommunityHub.Web.Tests;
 
 /// <summary>
-/// REQUIREMENTS §21 Participant [H] forms-UX batch. Drives the real Dinner /
-/// Hotel / Swag / Speaker page-model POST handlers over an in-memory DB + a fake
-/// participant session and asserts:
-///   1. a success flash message is set after a valid save (every form confirms),
-///   2. inline server validation rejects bad input with a field-level error and
-///      persists nothing (Dinner blank RSVP, Hotel blank-need / date order, Swag
-///      blank polo — Travel "Other"-blank is pinned in TravelValidationTests),
-///   3. structured dietary/allergy capture persists on Dinner AND Speaker and is
-///      aggregatable.
+/// REQUIREMENTS §21 Participant [H] forms-UX batch — now also REQUIREMENTS §148: drives the
+/// REAL standalone Dinner / Hotel / Swag page-model POST handlers over an in-memory DB + a
+/// fake participant session and a real model-binding pipeline (<see cref="WizardBindingHarness"/>),
+/// so the post binds posted form fields exactly as the live server does. After the §148
+/// refactor the pages bind their editable fields with <c>TryUpdateModelAsync(Form, name:"")</c>
+/// and delegate validate + persist + side-effects to the shared XxxFormService (the SAME service
+/// the inline wizard step calls), so these tests prove the standalone page STILL:
+///   1. sets a success flash message after a valid save (every form confirms),
+///   2. rejects bad input inline with a field-level error and persists nothing,
+///   3. persists structured dietary on Dinner and aggregates it.
 /// FAKE names only.
 /// </summary>
 public sealed class FormsUxBatchTests
@@ -67,7 +68,7 @@ public sealed class FormsUxBatchTests
         return new StringLocalizer<SharedResource>(factory);
     }
 
-    private static ICurrentParticipantAccessor Accessor(DefaultHttpContext http) =>
+    private static ICurrentParticipantAccessor Accessor(HttpContext http) =>
         new HttpCurrentParticipantAccessor(new HttpContextAccessorOver(http));
 
     private static ClaimsPrincipal Session(Participant p)
@@ -116,32 +117,28 @@ public sealed class FormsUxBatchTests
         return p;
     }
 
-    private static DinnerModel NewDinner(CommunityHubDbContext db, DefaultHttpContext http)
-    {
-        var emailOptions = Options.Create(new EmailOptions());
-        return new DinnerModel(db, Accessor(http), new FixedClock(), new NoOpEmailSender(),
-            emailOptions, new OrganizerActionItemService(db, new FixedClock()), Loc())
-        {
-            PageContext = new PageContext { HttpContext = http },
-        };
-    }
+    // ----- §148: the page now wraps the shared service; the factory builds the service
+    // from the same deps and binds the page to a real model-binding request context. -------
 
-    private static HotelModel NewHotel(CommunityHubDbContext db, DefaultHttpContext http)
-    {
-        var inviter = new HotelCalendarInviter(new NoOpEmailSender(), Options.Create(new EmailOptions()));
-        return new HotelModel(db, Accessor(http), new FixedClock(), inviter,
-            new OrganizerActionItemService(db, new FixedClock()),
-            NullLogger<HotelModel>.Instance, Loc())
-        {
-            PageContext = new PageContext { HttpContext = http },
-        };
-    }
+    private static DinnerModel NewDinner(CommunityHubDbContext db, HttpContext http) =>
+        new DinnerModel(
+            new DinnerFormService(db, new FixedClock(), new NoOpEmailSender(),
+                Options.Create(new EmailOptions()),
+                new OrganizerActionItemService(db, new FixedClock()), Loc()),
+            Accessor(http))
+        .Bind(http);
 
-    private static SwagModel NewSwag(CommunityHubDbContext db, DefaultHttpContext http) =>
-        new(db, Accessor(http), new FixedClock(), Loc())
-        {
-            PageContext = new PageContext { HttpContext = http },
-        };
+    private static HotelModel NewHotel(CommunityHubDbContext db, HttpContext http) =>
+        new HotelModel(
+            new HotelFormService(db, new FixedClock(),
+                new HotelCalendarInviter(new NoOpEmailSender(), Options.Create(new EmailOptions())),
+                new OrganizerActionItemService(db, new FixedClock()),
+                Loc(), NullLogger<HotelFormService>.Instance),
+            Accessor(http))
+        .Bind(http);
+
+    private static SwagModel NewSwag(CommunityHubDbContext db, HttpContext http) =>
+        new SwagModel(new SwagFormService(db, new FixedClock(), Loc()), Accessor(http)).Bind(http);
 
     // ===== 1. Flash on save =================================================
 
@@ -150,16 +147,15 @@ public sealed class FormsUxBatchTests
     {
         using var db = NewDb();
         var me = await SeedAsync(db);
-        var http = new DefaultHttpContext { User = Session(me) };
+        var http = WizardBindingHarness.PostContext(Session(me),
+            new Dictionary<string, string?> { ["Rsvp"] = nameof(DinnerRsvp.No) });   // valid explicit pick
         var model = NewDinner(db, http);
-
-        model.Rsvp = DinnerRsvp.No;   // valid explicit pick, no email side-effects
 
         var result = await model.OnPostAsync(default);
 
         Assert.IsType<PageResult>(result);
         Assert.True(model.ModelState.IsValid);
-        Assert.False(string.IsNullOrWhiteSpace(model.Message));   // drives the _Flash partial
+        Assert.False(string.IsNullOrWhiteSpace(model.Form.Message));   // drives the _Flash partial
         Assert.Single(await db.DinnerSignups.ToListAsync());
     }
 
@@ -168,16 +164,15 @@ public sealed class FormsUxBatchTests
     {
         using var db = NewDb();
         var me = await SeedAsync(db);
-        var http = new DefaultHttpContext { User = Session(me) };
+        var http = WizardBindingHarness.PostContext(Session(me),
+            new Dictionary<string, string?> { ["PoloChoice"] = SwagOptions.NoPoloLabel });   // explicit "no polo"
         var model = NewSwag(db, http);
-
-        model.PoloChoice = SwagModel.NoPoloLabel;   // explicit "no polo" is a valid pick
 
         var result = await model.OnPostAsync(default);
 
         Assert.IsType<PageResult>(result);
         Assert.True(model.ModelState.IsValid);
-        Assert.False(string.IsNullOrWhiteSpace(model.Message));
+        Assert.False(string.IsNullOrWhiteSpace(model.Form.Message));
         Assert.Single(await db.SwagPreferences.ToListAsync());
     }
 
@@ -188,18 +183,17 @@ public sealed class FormsUxBatchTests
     {
         using var db = NewDb();
         var me = await SeedAsync(db);
-        var http = new DefaultHttpContext { User = Session(me) };
+        var http = WizardBindingHarness.PostContext(Session(me),
+            new Dictionary<string, string?> { ["Rsvp"] = nameof(DinnerRsvp.NotAnswered) });   // the blank submit
         var model = NewDinner(db, http);
-
-        model.Rsvp = DinnerRsvp.NotAnswered;   // the blank submit
 
         var result = await model.OnPostAsync(default);
 
         Assert.IsType<PageResult>(result);
         Assert.False(model.ModelState.IsValid);
-        Assert.True(model.ModelState.ContainsKey(nameof(DinnerModel.Rsvp)));
+        Assert.True(model.ModelState.ContainsKey(nameof(DinnerFormModel.Rsvp)));
         Assert.Empty(await db.DinnerSignups.ToListAsync());
-        Assert.Null(model.Message);
+        Assert.Null(model.Form.Message);
     }
 
     [Fact]
@@ -207,16 +201,15 @@ public sealed class FormsUxBatchTests
     {
         using var db = NewDb();
         var me = await SeedAsync(db);
-        var http = new DefaultHttpContext { User = Session(me) };
+        var http = WizardBindingHarness.PostContext(Session(me),
+            new Dictionary<string, string?>());   // no Yes/No chosen → NeedsRoom binds to null
         var model = NewHotel(db, http);
-
-        model.NeedsRoom = null;   // no Yes/No chosen
 
         var result = await model.OnPostAsync(default);
 
         Assert.IsType<PageResult>(result);
         Assert.False(model.ModelState.IsValid);
-        Assert.True(model.ModelState.ContainsKey(nameof(HotelModel.NeedsRoom)));
+        Assert.True(model.ModelState.ContainsKey(nameof(HotelFormModel.NeedsRoom)));
         Assert.Empty(await db.HotelBookings.ToListAsync());
     }
 
@@ -225,18 +218,19 @@ public sealed class FormsUxBatchTests
     {
         using var db = NewDb();
         var me = await SeedAsync(db);
-        var http = new DefaultHttpContext { User = Session(me) };
+        var http = WizardBindingHarness.PostContext(Session(me), new Dictionary<string, string?>
+        {
+            ["NeedsRoom"] = "true",
+            ["CheckInDate"] = "2026-11-02",
+            ["CheckOutDate"] = "2026-11-01",   // before check-in
+        });
         var model = NewHotel(db, http);
-
-        model.NeedsRoom = true;
-        model.CheckInDate = new DateOnly(2026, 11, 2);
-        model.CheckOutDate = new DateOnly(2026, 11, 1);   // before check-in
 
         var result = await model.OnPostAsync(default);
 
         Assert.IsType<PageResult>(result);
         Assert.False(model.ModelState.IsValid);
-        Assert.True(model.ModelState.ContainsKey(nameof(HotelModel.CheckOutDate)));
+        Assert.True(model.ModelState.ContainsKey(nameof(HotelFormModel.CheckOutDate)));
         Assert.Empty(await db.HotelBookings.ToListAsync());
     }
 
@@ -245,16 +239,15 @@ public sealed class FormsUxBatchTests
     {
         using var db = NewDb();
         var me = await SeedAsync(db);
-        var http = new DefaultHttpContext { User = Session(me) };
+        var http = WizardBindingHarness.PostContext(Session(me),
+            new Dictionary<string, string?>());   // nothing picked (the client `required` is bypassed)
         var model = NewSwag(db, http);
-
-        model.PoloChoice = null;   // nothing picked (the client `required` is bypassed)
 
         var result = await model.OnPostAsync(default);
 
         Assert.IsType<PageResult>(result);
         Assert.False(model.ModelState.IsValid);
-        Assert.True(model.ModelState.ContainsKey(nameof(SwagModel.PoloChoice)));
+        Assert.True(model.ModelState.ContainsKey(nameof(SwagFormModel.PoloChoice)));
         Assert.Empty(await db.SwagPreferences.ToListAsync());
     }
 
@@ -265,17 +258,15 @@ public sealed class FormsUxBatchTests
     {
         using var db = NewDb();
         var me = await SeedAsync(db);
-        var http = new DefaultHttpContext { User = Session(me) };
-        var model = NewDinner(db, http);
-
-        model.Rsvp = DinnerRsvp.No;
-        model.Dietary = new DietaryInput
+        var http = WizardBindingHarness.PostContext(Session(me), new Dictionary<string, string?>
         {
-            DietChoice = "Vegan",
-            Gluten = true,
-            Peanuts = true,
-            OtherAllergens = "kiwi",
-        };
+            ["Rsvp"] = nameof(DinnerRsvp.No),
+            ["Dietary.DietChoice"] = "Vegan",
+            ["Dietary.Gluten"] = "true",
+            ["Dietary.Peanuts"] = "true",
+            ["Dietary.OtherAllergens"] = "kiwi",
+        });
+        var model = NewDinner(db, http);
 
         var result = await model.OnPostAsync(default);
 
@@ -321,19 +312,22 @@ public sealed class FormsUxBatchTests
         // 2026-06-21), so only the Dinner row exists after both are posted.
         using var db = NewDb();
         var me = await SeedAsync(db);
-        var http = new DefaultHttpContext { User = Session(me) };
 
-        var dinner = NewDinner(db, http);
-        dinner.Rsvp = DinnerRsvp.Yes;
-        dinner.Dietary = new DietaryInput { Gluten = true };
+        var dinnerHttp = WizardBindingHarness.PostContext(Session(me), new Dictionary<string, string?>
+        {
+            ["Rsvp"] = nameof(DinnerRsvp.Yes),
+            ["Dietary.Gluten"] = "true",
+        });
+        var dinner = NewDinner(db, dinnerHttp);
         // Yes triggers a calendar invite; the NoOp sender swallows it.
         await dinner.OnPostAsync(default);
 
-        var speaker = new SpeakerModel(db, Accessor(http),
+        var speakerHttp = new DefaultHttpContext { User = Session(me) };
+        var speaker = new SpeakerModel(db, Accessor(speakerHttp),
             new CommunityHub.Core.Integrations.SpeakerEmailPropagationService(db, new CommunityHub.Core.Integrations.NullBackstageSpeakerEmailApi(), new FixedClock()),
             new FixedClock())
         {
-            PageContext = new PageContext { HttpContext = http },
+            PageContext = new PageContext { HttpContext = speakerHttp },
         };
         // Speaker form no longer captures dietary (property removed), so its save adds nothing.
         await speaker.OnPostAsync(default);
@@ -349,16 +343,22 @@ public sealed class FormsUxBatchTests
     {
         using var db = NewDb();
         var me = await SeedAsync(db);
-        var http = new DefaultHttpContext { User = Session(me) };
 
-        var first = NewDinner(db, http);
-        first.Rsvp = DinnerRsvp.No;
-        first.Dietary = new DietaryInput { Gluten = true };
+        var firstHttp = WizardBindingHarness.PostContext(Session(me), new Dictionary<string, string?>
+        {
+            ["Rsvp"] = nameof(DinnerRsvp.No),
+            ["Dietary.Gluten"] = "true",
+        });
+        var first = NewDinner(db, firstHttp);
         await first.OnPostAsync(default);
 
-        var second = NewDinner(db, http);
-        second.Rsvp = DinnerRsvp.No;
-        second.Dietary = new DietaryInput { Gluten = false, Fish = true };
+        var secondHttp = WizardBindingHarness.PostContext(Session(me), new Dictionary<string, string?>
+        {
+            ["Rsvp"] = nameof(DinnerRsvp.No),
+            ["Dietary.Gluten"] = "false",
+            ["Dietary.Fish"] = "true",
+        });
+        var second = NewDinner(db, secondHttp);
         await second.OnPostAsync(default);
 
         var row = Assert.Single(await db.DietaryRequirements.ToListAsync());

@@ -1,0 +1,68 @@
+@model CommunityHub.Forms.Steps.DinnerFormModel
+@*
+    Fields-ONLY partial for the Dinner step (REQUIREMENTS §148). Contains NO <form>, no
+    validation summary, no buttons, no flash, no Back-to-hub link — the HOST (the standalone
+    /Forms/Dinner page OR the generic /Forms/Wizard shell) owns those and places this partial
+    inside its single <form method="post">. Mobile-first. Bound to
+    CommunityHub.Forms.Steps.DinnerFormModel; input names stay flat (Rsvp / PlusOneCount /
+    Comments / Dietary.*) so model binding is unchanged across both hosts.
+*@
+
+<p>@Localizer["Dinner.IntroBody", Model.EventCode, Model.DinnerDateLabel, Model.DinnerVenue]</p>
+<p>@Localizer["Dinner.BeforeNote"]</p>
+
+@if (Model.IsLocked)
+{
+    @* Locked dead-end → read-only summary + self-service "request a change" hand-off (§21). *@
+    <p class="error">@Localizer["Common.EditingClosedShort"]</p>
+    <p>@Localizer["Dinner.YourRsvp"] <strong>@Model.Rsvp</strong></p>
+    <partial name="_RequestChangeLink" model="@("Dinner")" />
+}
+else
+{
+    <label for="DinnerName">@Localizer["Common.Name"]</label>
+    <input type="text" id="DinnerName" value="@Model.FullName" readonly />
+
+    <label for="DinnerEmail">@Localizer["Common.Email"]</label>
+    <input type="text" id="DinnerEmail" value="@Model.Email" readonly />
+
+    <fieldset style="border:0;padding:0;margin:0;">
+        <legend style="font-weight:600;font-size:14px;margin-top:10px;">@Localizer["Dinner.JoinLegend"]</legend>
+        <div style="display:flex; flex-direction:column; gap:8px; margin:6px 0 14px;">
+            <label style="font-weight:normal;">
+                <input type="radio" asp-for="Rsvp"
+                       value="@CommunityHub.Core.Domain.DinnerRsvp.Yes" />
+                <strong>@Localizer["Common.Yes"].Value.ToUpperInvariant()</strong> @Localizer["Dinner.RsvpYes"]
+            </label>
+            <label style="font-weight:normal;">
+                <input type="radio" asp-for="Rsvp"
+                       value="@CommunityHub.Core.Domain.DinnerRsvp.No" />
+                <strong>@Localizer["Common.No"].Value.ToUpperInvariant()</strong> @Localizer["Dinner.RsvpNo"]
+            </label>
+            <label style="font-weight:normal;">
+                <input type="radio" asp-for="Rsvp"
+                       value="@CommunityHub.Core.Domain.DinnerRsvp.Maybe" />
+                <strong>MAYBE</strong>
+                <span style="color:#6b7280;font-size:12px;">
+                    @Localizer["Dinner.MaybeNote", Model.RsvpDeadlineLabel]
+                </span>
+            </label>
+        </div>
+    </fieldset>
+    <span asp-validation-for="Rsvp" class="ceh-field-error"></span>
+
+    <label for="PlusOneCount">@Localizer["Dinner.PlusOne"]</label>
+    <input type="number" asp-for="PlusOneCount" min="0" max="10" style="max-width:120px;" />
+
+    @* Structured dietary/allergy capture (REQUIREMENTS §21) — shared
+       partial, identical on the Speaker form; persists aggregatable flags. *@
+    <h3 style="color:var(--el-darkblue);font-size:16px;margin-top:22px;">@Localizer["Diet.Heading"]</h3>
+    <partial name="_DietaryFieldset" model="Model.Dietary" />
+
+    <label for="Comments">@Localizer["Dinner.CommentsLabel"]</label>
+    <textarea asp-for="Comments" rows="3"></textarea>
+
+    <p style="color:#6b7280;font-size:12px;margin-top:10px;">
+        @Localizer["Dinner.IcsNote", Model.Email]
+    </p>
+}

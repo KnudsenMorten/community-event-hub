@@ -241,7 +241,7 @@ public sealed class AiHelperAssistantTests
         Assert.Contains("api-version=2025-01-01-preview", handler.LastRequest!.RequestUri!.ToString());
         Assert.True(handler.LastRequest!.Headers.Contains("api-key"));
         // The system message carries the guardrail (built from the default display name) + the grounding.
-        Assert.Contains(AiHelperAssistant.BuildSystemPrompt("Otto"), handler.LastRequestBody);
+        Assert.Contains(AiHelperAssistant.BuildSystemPrompt("Community Helper"), handler.LastRequestBody);
         Assert.Contains("GROUNDED-TASK-TEXT", handler.LastRequestBody);
     }
 

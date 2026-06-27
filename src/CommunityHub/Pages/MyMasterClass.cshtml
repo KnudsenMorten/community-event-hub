@@ -1,8 +1,13 @@
 @page
 @using CommunityHub.Core.Domain
+@using CommunityHub.Core.Reminders
 @model CommunityHub.Pages.MyMasterClassModel
 @{
     Layout = null;
+    // §140: a flash is shown INLINE next to the action that produced it (handlers tag
+    // their redirect). flashShown ensures it renders exactly once across the inline spots.
+    var flashShown = false;
+    var flashClass = Model.FlashIsError ? "flash err" : "flash ok";
 }
 <!DOCTYPE html>
 <html lang="en">
@@ -11,156 +16,233 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>My Master Class</title>
     <style>
-        :root { --el-darkblue:#1D3380; --el-blue:#008BD2; }
+        :root { --el-darkblue:#1D3380; --el-blue:#008BD2; --el-green:#1c6b35; }
+        * { box-sizing:border-box; }
         body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin:0; background:#0e1116; color:#1f2430; }
-        .wrap { max-width:640px; margin:0 auto; padding:24px 18px 48px; }
-        .card { background:#fff; border-radius:14px; padding:0; overflow:hidden; box-shadow:0 6px 24px rgba(0,0,0,.25); margin-bottom:16px; }
-        .hero { background:var(--el-darkblue); color:#fff; padding:22px; }
-        .hero h1 { font-size:22px; margin:0; }
+        .wrap { max-width:640px; margin:0 auto; padding:18px 14px 48px; }
+        .card { background:#fff; border-radius:14px; overflow:hidden; box-shadow:0 6px 24px rgba(0,0,0,.25); margin-bottom:16px; }
+        .hero { background:var(--el-darkblue); color:#fff; padding:20px; }
+        .hero h1 { font-size:21px; margin:0; line-height:1.25; }
         .hero p { margin:6px 0 0; color:#cdd6f5; font-size:14px; }
-        .body { padding:20px; }
-        h1 { font-size:22px; margin:0 0 4px; }
+        .body { padding:16px; }
+        .sec-title { color:var(--el-darkblue); font-size:18px; margin:0 0 4px; }
+        .sec-sub { color:#5b636e; font-size:13px; margin:0 0 12px; }
         h3 { color:var(--el-darkblue); }
         .muted { color:#5b636e; font-size:14px; }
-        .teaser { color:#3a4150; font-size:14px; line-height:1.5; }
-        .teaser .stat { color:var(--el-darkblue); font-weight:700; }
         .mc { border:1px solid #dfe3e8; border-radius:10px; padding:12px 14px; margin:10px 0; }
-        .mc h3 { margin:0 0 4px; font-size:16px; }
-        .pill { display:inline-block;font-size:12px;font-weight:700;border-radius:999px;padding:2px 9px; }
-        .seat { background:#e7f6ec; color:#1c6b35; }
-        .full { background:#fef6e7; color:#8a5a00; }
-        button { padding:10px 14px; border:0; border-radius:9px; background:#1c6b35; color:#fff; font-weight:600; font-size:15px; cursor:pointer; }
-        .give { background:#fff; border:1px solid #e3a3a3; color:#b3261e; }
-        .flash { background:#eef6ff; border:1px solid #cfe2ff; border-radius:9px; padding:10px 12px; font-size:14px; margin-bottom:14px; }
-        /* Survey "topics" look — selectable track cards. */
-        .track-grid { display:grid; gap:10px; grid-template-columns:1fr; margin:14px 0; }
-        @@media (min-width:560px) { .track-grid { grid-template-columns:1fr 1fr; } }
-        .track-card { display:block; position:relative; padding:14px 16px; border:1.5px solid var(--el-darkblue); border-radius:10px; cursor:pointer; background:var(--el-darkblue); color:#fff; transition:background .12s, transform .12s; }
-        .track-card:hover { background:var(--el-blue); border-color:var(--el-blue); transform:translateY(-1px); }
-        .track-card.full { background:#6b7280; border-color:#6b7280; cursor:default; }
-        .track-card .name { font-weight:700; font-size:15px; display:block; }
-        .track-card .avail { font-size:12px; opacity:.9; margin-top:3px; display:block; }
-        .track-card:has(input:checked) { background:var(--el-blue); border-color:#fff; box-shadow:0 0 0 3px rgba(0,139,210,.4); }
+        .mc h3 { margin:0 0 6px; font-size:16px; }
+        .mc .spk { color:#5b636e; font-size:13px; margin:0 0 6px; }
+        .pill { display:inline-block;font-size:12px;font-weight:700;border-radius:999px;padding:3px 10px; }
+        .seat { background:#e7f6ec; color:var(--el-green); }
+        .full { background:#fef0e7; color:#8a3a00; }
+        .avail { background:#e7f6ec; color:var(--el-green); }
+        .wait { background:#eef2ff; color:var(--el-darkblue); }
+        /* Full-width, tappable buttons (mobile-first 360px). */
+        button, .btn { display:block; width:100%; padding:12px 14px; border:0; border-radius:9px; background:var(--el-green); color:#fff; font-weight:600; font-size:15px; cursor:pointer; text-align:center; margin-top:8px; }
+        button.switch { background:var(--el-blue); }
+        button.wl { background:var(--el-darkblue); }
+        button.ghost, .give { background:#fff; border:1px solid #cbd2d9; color:#1f2430; }
+        .give { border-color:#e3a3a3; color:#b3261e; }
+        /* Confirmation/error shown inline next to the action (clearly visible, not faint). */
+        .flash { border-radius:9px; padding:11px 13px; font-size:14px; line-height:1.4; margin:10px 0; font-weight:600; border-left:4px solid; }
+        .flash.ok { background:#e7f6ec; border:1px solid #9fd9b4; border-left-color:var(--el-green); color:#155724; }
+        .flash.err { background:#fdecec; border:1px solid #f3c2c2; border-left-color:#b3261e; color:#b3261e; }
+        .consent { display:flex;gap:8px;align-items:flex-start;margin:8px 0 0;font-size:13px;color:#5b636e;line-height:1.45; }
+        .consent input { margin-top:2px;flex:0 0 auto; }
+        .consent-class { display:block;margin-top:4px;font-weight:600;color:#3a4150; }
+        .policy { font-size:13.5px; line-height:1.55; color:#3a4150; }
+        .policy li { margin:6px 0; }
+        a { color:var(--el-blue); }
     </style>
 </head>
 <body>
 <div class="wrap">
 @if (Model.InvalidLink)
 {
-    <div class="card"><h1>Link not valid</h1>
-        <p class="muted">This Master Class link is not valid. Please use the link from your email.</p></div>
+    <div class="card"><div class="body"><h1>Link not valid</h1>
+        <p class="muted">This Master Class link is not valid. Please use the link from your email.</p></div></div>
 }
 else
 {
-    @if (!string.IsNullOrEmpty(Model.Message)) { <div class="flash">@Model.Message</div> }
-    @if (!string.IsNullOrEmpty(Model.ErrorMessage)) { <div class="flash" style="background:#fdecec;border-color:#f3c2c2;color:#b3261e;">@Model.ErrorMessage</div> }
+    @* Fallback only: a message with no inline anchor (e.g. an external link). *@
+    @if (Model.HasFlash && !Model.FlashPlacedInline) { <div class="@flashClass">@Model.Message</div> flashShown = true; }
 
     <div class="card">
         <div class="hero">
             <h1>Master Classes@(string.IsNullOrEmpty(Model.EventName) ? "" : $" — {Model.EventName}")</h1>
-            <p>Hi @Model.AttendeeName — choose your pre-day deep-dive below.</p>
+            <p>Hi @Model.AttendeeName — your full-day, pre-day deep-dive.</p>
         </div>
-        <div class="body">
-        <p class="teaser">
-            This year we're once again offering our hugely popular master class option in our pre-day, where you
-            spend a full day deep-diving into your favourite topic.<br /><br />
-            Listen to questions from fellow attendees, ask your own — and learn directly from some of the very best
-            in the world. Master classes are led by Microsoft MVPs and the Microsoft product team (where available).<br /><br />
-            At ELDK26, <span class="stat">+700 attendees</span> joined the master classes and had a fantastic day,
-            with an amazing <span class="stat">93% score</span> on the HappyIndex.
-        </p>
+    </div>
 
-        @if (!Model.Eligible)
-        {
-            <p class="muted">Master Classes are available to <strong>2-day ticket</strong> holders. Our records don't show a 2-day ticket for you — if that's wrong, contact the organisers.</p>
-        }
-        else
-        {
-            @* A held OFFER takes priority — they must decide. *@
-            @if (Model.Pending is { Status: MasterClassSignupStatus.Offered } off)
-            {
-                <div class="mc" style="border-color:#1c6b35;background:#f3fbf5;">
-                    <h3>A seat opened: @off.Title</h3>
-                    <p class="muted">A seat is being held for you@(off.OfferExpiresAt is { } exp ? $" until {exp:dddd HH:mm}" : ""). You can hold only one confirmed Master Class, so to take this you'll give up <strong>@(Model.Confirmed?.Title ?? "your current class")</strong>. If you don't decide in time it switches automatically.</p>
-                    <form method="post" asp-page-handler="Accept" style="display:inline;">
-                        <input type="hidden" name="t" value="@Model.Token" />
-                        <button type="submit">Switch to @off.Title</button>
-                    </form>
-                    <form method="post" asp-page-handler="Decline" style="display:inline;margin-left:8px;">
-                        <input type="hidden" name="t" value="@Model.Token" />
-                        <button type="submit" class="give">Keep @(Model.Confirmed?.Title ?? "my current class")</button>
-                    </form>
-                </div>
-            }
-
+    @if (!Model.Eligible)
+    {
+        <div class="card"><div class="body">
+            <p class="muted">Master Classes are available to <strong>2-day ticket</strong> holders. Our records don't
+            show a 2-day ticket for you — if that's wrong, please contact the organisers.</p>
+        </div></div>
+    }
+    else
+    {
+        @* ============================ SECTION 1 — My current Master Class ============================ *@
+        <div class="card"><div class="body">
+            <h2 class="sec-title">1 · My current Master Class</h2>
             @if (Model.Confirmed is { } seat)
             {
-                <div class="mc">
+                <div class="mc" style="border-color:var(--el-green);background:#f3fbf5;">
                     <h3>@seat.Title</h3>
-                    <p><span class="pill seat">Confirmed seat</span></p>
+                    @if (!flashShown && Model.FlashAtConfirmed) { <div class="@flashClass">@Model.Message</div> flashShown = true; }
+                    <p><span class="pill seat">✓ Confirmed seat</span></p>
                     <p><a href="/MasterClassPage/@seat.SessionId?t=@Model.Token">📋 How to prepare &amp; Group Q&amp;A</a></p>
-                    <form method="post" asp-page-handler="ToggleReminder" style="margin:6px 0;">
+                    <form method="post" asp-page-handler="ToggleReminder">
                         <input type="hidden" name="t" value="@Model.Token" />
                         <input type="hidden" name="wants" value="@((!Model.MonthReminderOptIn).ToString().ToLower())" />
-                        <button type="submit" style="background:#eef0f4;color:#1f2430;border:1px solid #cbd2d9;">
-                            @(Model.MonthReminderOptIn ? "✓ Calendar reminder ~1 month before (turn off)" : "Remind me ~1 month before")
+                        <button type="submit" class="ghost">
+                            @(Model.MonthReminderOptIn ? "✓ Reminder ~1 month before (turn off)" : "Remind me ~1 month before")
                         </button>
                     </form>
-                    <form method="post" asp-page-handler="GiveUp" onsubmit="return confirm('Give up your seat? It goes to the next person on the waitlist.');">
+                    @if (!flashShown && Model.FlashAtReminder) { <div class="@flashClass">@Model.Message</div> flashShown = true; }
+                    <form method="post" asp-page-handler="GiveUp" onsubmit="return confirm('Give up your seat in @seat.Title? It goes to the next person on the waitlist and cannot be undone.');">
                         <input type="hidden" name="t" value="@Model.Token" />
                         <input type="hidden" name="sessionId" value="@seat.SessionId" />
                         <button type="submit" class="give">Give up my seat</button>
                     </form>
                 </div>
             }
-
-            @if (Model.Pending is { Status: MasterClassSignupStatus.Waitlisted } wl)
+            else
             {
+                <p class="sec-sub">You don't have a Master Class seat yet. Pick one from <strong>Other Master Classes</strong> below.</p>
+            }
+
+            @foreach (var wl in Model.Waitlists)
+            {
+                var wlOpt = Model.Options.FirstOrDefault(o => o.SessionId == wl.SessionId);
                 <div class="mc">
                     <h3>@wl.Title</h3>
-                    <p><span class="pill full">Waitlist — position @wl.WaitlistPosition</span></p>
-                    <p class="muted">We'll let you know if a seat opens up.</p>
-                    <form method="post" asp-page-handler="GiveUp">
+                    @if (!flashShown && Model.FlashSessionId == wl.SessionId) { <div class="@flashClass">@Model.Message</div> flashShown = true; }
+                    @if (wl.Status == MasterClassSignupStatus.Waitlisted)
+                    {
+                        <p><span class="pill wait">Waitlist — position @wl.WaitlistPosition</span></p>
+                        @if (wlOpt is not null)
+                        {
+                            <p class="muted">@wlOpt.Waitlisted @(wlOpt.Waitlisted == 1 ? "person is" : "people are") on this waitlist.</p>
+                        }
+                        <p class="muted">We'll let you know if a seat opens up. Joining a waitlist doesn't change your current seat.</p>
+                    }
+                    else
+                    {
+                        <p><span class="pill wait">A seat opened for you</span></p>
+                        <p class="muted">You'll be moved in automatically.</p>
+                    }
+                    <form method="post" asp-page-handler="GiveUp" onsubmit="return confirm('Leave the waitlist for @wl.Title?');">
                         <input type="hidden" name="t" value="@Model.Token" />
                         <input type="hidden" name="sessionId" value="@wl.SessionId" />
-                        <button type="submit" class="give">Leave the waitlist</button>
+                        <button type="submit" class="give">Leave this waitlist</button>
                     </form>
                 </div>
             }
+        </div></div>
 
-            @if (Model.Confirmed is null || Model.Pending is null)
+        @* ============================ SECTION 2 — Other Master Classes ============================ *@
+        <div class="card"><div class="body">
+            <h2 class="sec-title">2 · Other Master Classes</h2>
+            <p class="sec-sub">Every master class with live availability. You can hold one confirmed seat at a time.</p>
+
+            @foreach (var o in Model.Options)
             {
-                <h3 style="margin-top:18px;">@(Model.Confirmed is null ? "Choose your Master Class" : "Wait-list for one more")</h3>
-                <p class="muted">You can hold one confirmed seat plus a waitlist for one other.</p>
-                <form method="post" asp-page-handler="Join">
-                    <input type="hidden" name="t" value="@Model.Token" />
-                    <div class="track-grid">
-                    @foreach (var o in Model.Options)
+                var isMine = Model.Confirmed?.SessionId == o.SessionId;
+                var myWait = Model.Waitlists.FirstOrDefault(w => w.SessionId == o.SessionId);
+                if (isMine) { continue; }   // shown in section 1
+
+                <div class="mc">
+                    <h3>@o.Title</h3>
+                    @if (!flashShown && Model.FlashSessionId == o.SessionId) { <div class="@flashClass">@Model.Message</div> flashShown = true; }
+                    @if (o.SpeakerNames.Count > 0) { <p class="spk">Presented by @string.Join(", ", o.SpeakerNames)</p> }
+
+                    @if (o.Capacity is int cap)
                     {
-                        var mine = (Model.Confirmed?.SessionId == o.SessionId) || (Model.Pending?.SessionId == o.SessionId);
-                        if (mine) { continue; }
-                        <label class="track-card @(o.IsFull ? "full" : "")">
-                            <input type="radio" name="sessionId" value="@o.SessionId" required style="position:absolute;left:-9999px;" />
-                            <span class="name">@o.Title</span>
-                            <span class="avail">
-                                @if (o.Capacity is int cap) { @(o.IsFull ? "Full — join waitlist" : $"{o.Free} of {cap} seats free") } else { <text>Open</text> }
-                            </span>
-                        </label>
+                        if (o.IsFull)
+                        {
+                            <p>
+                                <span class="pill full">FULL — @cap / @cap seats taken</span>
+                                @if (o.Waitlisted > 0) { <span class="pill wait">@o.Waitlisted on waitlist</span> }
+                            </p>
+                        }
+                        else
+                        {
+                            <p><span class="pill avail">Available — @o.Free of @cap seats left</span></p>
+                        }
                     }
-                    </div>
-                    @if (Model.Confirmed is not null)
+                    else
                     {
-                        <label style="display:flex;gap:8px;align-items:flex-start;margin:6px 0 12px;font-size:13px;color:#5b636e;">
-                            <input type="checkbox" name="autoSwitchConsent" value="true" required style="margin-top:2px;" />
-                            I understand that if a waitlisted seat opens, my current Master Class (<strong>@Model.Confirmed.Title</strong>) will be cancelled and I'll be moved to the new one automatically.
-                        </label>
+                        <p><span class="pill avail">Available — open seating</span></p>
                     }
-                    <button type="submit">Confirm my selection</button>
-                </form>
+
+                    @if (myWait is not null)
+                    {
+                        <p class="muted">You're <strong>#@myWait.WaitlistPosition</strong> of <strong>@o.Waitlisted</strong> on this waitlist.</p>
+                        <form method="post" asp-page-handler="GiveUp" onsubmit="return confirm('Leave the waitlist for @o.Title?');">
+                            <input type="hidden" name="t" value="@Model.Token" />
+                            <input type="hidden" name="sessionId" value="@o.SessionId" />
+                            <button type="submit" class="give">Leave waitlist</button>
+                        </form>
+                    }
+                    else if (o.IsFull)
+                    {
+                        @* FULL → join waitlist. Joining never cancels the current seat (§63). *@
+                        <form method="post" asp-page-handler="Join">
+                            <input type="hidden" name="t" value="@Model.Token" />
+                            <input type="hidden" name="sessionId" value="@o.SessionId" />
+                            @if (Model.Confirmed is not null)
+                            {
+                                <label class="consent">
+                                    <input type="checkbox" name="autoSwitchConsent" value="true" required />
+                                    <span>
+                                        I understand that joining this waitlist won't cancel anything now — but if a seat opens
+                                        here, I'll be moved in automatically and my current seat will be released.
+                                        <span class="consent-class">Current seat to be released: @Model.Confirmed.Title</span>
+                                    </span>
+                                </label>
+                            }
+                            <button type="submit" class="wl">Join waitlist</button>
+                        </form>
+                    }
+                    else
+                    {
+                        @* AVAILABLE → switch/book. The confirm() is the pre-submit warning. *@
+                        @if (Model.Confirmed is not null)
+                        {
+                            <form method="post" asp-page-handler="Switch" onsubmit="return confirm('Switch to @o.Title? This CANCELS your current seat in @Model.Confirmed.Title and books @o.Title instead. If @o.Title is full by the time you confirm, nothing changes and you keep your current seat.');">
+                                <input type="hidden" name="t" value="@Model.Token" />
+                                <input type="hidden" name="sessionId" value="@o.SessionId" />
+                                <button type="submit" class="switch">Switch to this Master Class</button>
+                            </form>
+                        }
+                        else
+                        {
+                            <form method="post" asp-page-handler="Switch">
+                                <input type="hidden" name="t" value="@Model.Token" />
+                                <input type="hidden" name="sessionId" value="@o.SessionId" />
+                                <button type="submit">Book this seat</button>
+                            </form>
+                        }
+                    }
+                </div>
             }
-        }
-        </div>
-    </div>
+        </div></div>
+
+        @* ============================ SECTION 3 — Policies ============================ *@
+        <div class="card"><div class="body">
+            <h2 class="sec-title">3 · How master classes &amp; the waitlist work</h2>
+            <ul class="policy">
+                <li>Master classes are for <strong>2-day ticket</strong> holders, and you can hold <strong>one confirmed seat</strong> at a time.</li>
+                <li>The waitlist only opens once a master class is <strong>full</strong>, so you can't join the waitlist for a class that still has available seats.</li>
+                <li>You can be on <strong>one waitlist at a time</strong>.</li>
+                <li>If you join a waitlist while already holding a seat in another master class, <strong>joining alone won't cancel anything</strong>. Your existing seat is only cancelled if a spot opens up in the waitlisted class and you're moved into it.</li>
+                <li><strong>Waitlisted participants are admitted in the order they signed up</strong>, and seats always go to the waitlist before anyone new — promotion is automatic, there's no "accept the offer" step.</li>
+                <li>Choosing <strong>Switch to this Master Class</strong> cancels your current seat and books the new one as a single step. If the class fills up before you confirm, the switch fails safely and you keep your current seat.</li>
+            </ul>
+        </div></div>
+    }
 }
 </div>
 </body>

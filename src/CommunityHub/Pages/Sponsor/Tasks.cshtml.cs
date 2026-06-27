@@ -1,6 +1,7 @@
 using CommunityHub.Auth;
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
+using CommunityHub.Core.Sponsors;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
@@ -25,15 +26,18 @@ public class TasksModel : PageModel
     private readonly CommunityHubDbContext _db;
     private readonly ICurrentParticipantAccessor _participant;
     private readonly TimeProvider _clock;
+    private readonly SponsorDeliverablesService _deliverables;
 
     public TasksModel(
         CommunityHubDbContext db,
         ICurrentParticipantAccessor participant,
-        TimeProvider clock)
+        TimeProvider clock,
+        SponsorDeliverablesService deliverables)
     {
         _db = db;
         _participant = participant;
         _clock = clock;
+        _deliverables = deliverables;
     }
 
     public List<ParticipantTask> SponsorTasks { get; private set; } = new();
@@ -43,6 +47,16 @@ public class TasksModel : PageModel
 
     /// <summary>True when this sponsor has no company id set (see the view).</summary>
     public bool NoCompanyLink { get; private set; }
+
+    /// <summary>
+    /// §135 (operator 2026-06-27): the company's deliverables rollup (X of N done, % + the
+    /// still-missing/overdue items with deep links), surfaced at the TOP of My Tasks now that
+    /// the standalone /Sponsor/Deliverables nav item is removed (mirrors the speaker §138
+    /// readiness move). A pure read-only AGGREGATE of existing data via
+    /// <see cref="SponsorDeliverablesService"/>; null when there is no company link or the
+    /// rollup could not be built (the view then omits the card).
+    /// </summary>
+    public SponsorDeliverables? Deliverables { get; private set; }
 
     public async Task<IActionResult> OnGetAsync(CancellationToken ct)
     {
@@ -114,6 +128,16 @@ public class TasksModel : PageModel
             .OrderBy(t => t.State)
             .ThenBy(t => t.DueDate)
             .ToListAsync(ct);
+
+        // §135: build the deliverables rollup for the top of the page. Read-only AGGREGATE;
+        // tolerate a build hiccup so the task list still renders (the view omits the card
+        // when Deliverables is null).
+        try
+        {
+            var today = DateOnly.FromDateTime(_clock.GetUtcNow().UtcDateTime);
+            Deliverables = await _deliverables.BuildForCompanyAsync(me.EventId, companyId, today, ct: ct);
+        }
+        catch { Deliverables = null; }
 
         LinkedContacts = await _db.Participants
             .Where(p => p.EventId == me.EventId

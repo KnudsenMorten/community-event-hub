@@ -58,6 +58,87 @@ public sealed class SpeakerEmailOverrideScenarioTests
         Assert.Equal("id@example.test", prof.EffectiveEmail);
     }
 
+    // ---- Calendar-specific email override (§141) ---------------------------
+
+    private const string CalOverride = "speaker.work.calendar@example.test";
+
+    [Fact]
+    public void CalendarEmailFor_prefers_calendar_then_contact_then_sessionize()
+    {
+        // Calendar override wins outright.
+        Assert.Equal(CalOverride,
+            SpeakerProfile.CalendarEmailFor("id@example.test", CalOverride, Override));
+        // No calendar override -> falls back to the general contact override.
+        Assert.Equal(Override,
+            SpeakerProfile.CalendarEmailFor("id@example.test", null, Override));
+        Assert.Equal(Override,
+            SpeakerProfile.CalendarEmailFor("id@example.test", "  ", Override));
+        // Neither override -> primary Sessionize address.
+        Assert.Equal("id@example.test",
+            SpeakerProfile.CalendarEmailFor("id@example.test", null, null));
+        // Trimmed.
+        Assert.Equal(CalOverride,
+            SpeakerProfile.CalendarEmailFor("id@example.test", "  " + CalOverride + "  ", null));
+    }
+
+    [Fact]
+    public async Task Calendar_feed_routes_to_the_calendar_email_over_the_contact_override()
+    {
+        using var db = ScenarioFixture.NewDb();
+        var seed = await ScenarioSeed.SeedAsync(db);
+        // Set BOTH overrides: the calendar-specific one must win for the .ics feed.
+        await SetCalendarAndContactAsync(db, seed.EventId, seed.SpeakerOneId, CalOverride, Override);
+
+        db.Tasks.Add(new ParticipantTask
+        {
+            EventId = seed.EventId,
+            AssignedParticipantId = seed.SpeakerOneId,
+            Title = "Upload final deck",
+            DueDate = new DateOnly(2027, 2, 3),
+            State = TaskState.Open,
+            CreatedAt = ScenarioFixture.Clock.GetUtcNow(),
+        });
+        await db.SaveChangesAsync();
+
+        var ics = Unfold(await new ParticipantCalendarBuilder(db)
+            .BuildFeedAsync(seed.SpeakerOneId, "hub.example.test"));
+
+        Assert.Contains($"mailto:{CalOverride}", ics);
+        Assert.DoesNotContain($"mailto:{Override}", ics);
+        Assert.DoesNotContain($"mailto:{ScenarioSeed.SpeakerOneEmail}", ics);
+    }
+
+    // RFC 5545 §3.1 folds long content lines with a "\r\n " continuation, which can
+    // land INSIDE a mailto address (the longer calendar override here is 74 chars on
+    // the ORGANIZER line, so it folds mid-address). Unfold before substring-asserting
+    // on an address so a legal fold never hides the match.
+    private static string Unfold(string ics) => ics.Replace("\r\n ", string.Empty);
+
+    [Fact]
+    public async Task Calendar_feed_falls_back_to_contact_override_when_calendar_blank()
+    {
+        using var db = ScenarioFixture.NewDb();
+        var seed = await ScenarioSeed.SeedAsync(db);
+        // Only the general contact override is set; calendar mail follows it.
+        await SetCalendarAndContactAsync(db, seed.EventId, seed.SpeakerOneId, null, Override);
+
+        db.Tasks.Add(new ParticipantTask
+        {
+            EventId = seed.EventId,
+            AssignedParticipantId = seed.SpeakerOneId,
+            Title = "Upload final deck",
+            DueDate = new DateOnly(2027, 2, 3),
+            State = TaskState.Open,
+            CreatedAt = ScenarioFixture.Clock.GetUtcNow(),
+        });
+        await db.SaveChangesAsync();
+
+        var ics = Unfold(await new ParticipantCalendarBuilder(db)
+            .BuildFeedAsync(seed.SpeakerOneId, "hub.example.test"));
+
+        Assert.Contains($"mailto:{Override}", ics);
+    }
+
     // ---- Calendar feed uses the override -----------------------------------
 
     [Fact]
@@ -80,7 +161,7 @@ public sealed class SpeakerEmailOverrideScenarioTests
         await db.SaveChangesAsync();
 
         var builder = new ParticipantCalendarBuilder(db);
-        var ics = await builder.BuildFeedAsync(seed.SpeakerOneId, "hub.example.test");
+        var ics = Unfold(await builder.BuildFeedAsync(seed.SpeakerOneId, "hub.example.test"));
 
         Assert.Contains($"mailto:{Override}", ics);
         Assert.DoesNotContain($"mailto:{ScenarioSeed.SpeakerOneEmail}", ics);
@@ -103,7 +184,7 @@ public sealed class SpeakerEmailOverrideScenarioTests
         await db.SaveChangesAsync();
 
         var builder = new ParticipantCalendarBuilder(db);
-        var ics = await builder.BuildFeedAsync(seed.SpeakerOneId, "hub.example.test");
+        var ics = Unfold(await builder.BuildFeedAsync(seed.SpeakerOneId, "hub.example.test"));
 
         Assert.Contains($"mailto:{ScenarioSeed.SpeakerOneEmail}", ics);
     }
@@ -291,6 +372,26 @@ public sealed class SpeakerEmailOverrideScenarioTests
             db.SpeakerProfiles.Add(prof);
         }
         prof.ContactEmailOverride = value;
+        await db.SaveChangesAsync();
+    }
+
+    private static async Task SetCalendarAndContactAsync(
+        Data.CommunityHubDbContext db, int eventId, int participantId,
+        string? calendarEmail, string? contactOverride)
+    {
+        var prof = await db.SpeakerProfiles.FirstOrDefaultAsync(
+            sp => sp.ParticipantId == participantId);
+        if (prof is null)
+        {
+            prof = new SpeakerProfile
+            {
+                EventId = eventId, ParticipantId = participantId,
+                CreatedAt = ScenarioFixture.Clock.GetUtcNow(),
+            };
+            db.SpeakerProfiles.Add(prof);
+        }
+        prof.CalendarEmail = calendarEmail;
+        prof.ContactEmailOverride = contactOverride;
         await db.SaveChangesAsync();
     }
 

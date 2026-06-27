@@ -42,9 +42,13 @@ public sealed record SpeakerWizardView(IReadOnlyList<SpeakerWizardStep> Steps)
 /// <summary>
 /// Builds the speaker onboarding wizard view (REQUIREMENTS §28, design A). Reuses
 /// the existing entitlement model (<see cref="FormEntitlementGate"/>) to include
-/// only the steps a speaker is entitled to (Speaker Details is always shown), in a
-/// fixed guided order, and detects completion from each form's persisted data —
-/// reusing the existing form pages + save logic untouched (lowest risk, resumable).
+/// only the steps a speaker is entitled to (Calendar email + Speaker Details are
+/// always shown), in a fixed guided order (Calendar email → Speaker Details →
+/// Hotel → Dinner → Swag → Lunch → Promote → Signal → Accept), and detects
+/// completion from each form's persisted data — reusing the existing form pages +
+/// save logic untouched (lowest risk, resumable). Travel reimbursement + the two
+/// presentation uploads were dropped from the wizard (operator 2026-06-27) — they
+/// remain as deadline tasks, not onboarding steps.
 /// </summary>
 public sealed class SpeakerWizardService
 {
@@ -63,7 +67,18 @@ public sealed class SpeakerWizardService
         var entitled = await FormEntitlementGate.EffectiveItemsAsync(_db, eventId, participantId, ct);
         var steps = new List<SpeakerWizardStep>();
 
-        // 1. Speaker Details — always (the speaker's own profile). Done only once the
+        // 1. Calendar email (optional) — operator 2026-06-27. The FIRST step: an
+        //    optional alternate address used for CALENDAR invites / notifications
+        //    (some speakers don't use their Sessionize email for calendar). Done
+        //    once the speaker has SAVED the step (CalendarEmailSetAt stamped), even
+        //    if they left the field blank — the same "speaker acted" marker the
+        //    details step uses, so an OPTIONAL step can still complete the wizard.
+        var calendarDone = await _db.SpeakerProfiles.AnyAsync(
+            p => p.EventId == eventId && p.ParticipantId == participantId
+                 && p.CalendarEmailSetAt != null, ct);
+        steps.Add(new("calendar", "/Forms/CalendarEmail", calendarDone));
+
+        // 2. Speaker Details — always (the speaker's own profile). Done only once the
         //    SPEAKER has actually edited their own details (P13): a non-blank Biography
         //    can arrive from the Sessionize import before the speaker has touched
         //    anything, which used to mark this step done prematurely. The
@@ -75,7 +90,7 @@ public sealed class SpeakerWizardService
                  && p.BioLastEditedBySpeakerAt != null, ct);
         steps.Add(new("details", "/Speaker/Details", detailsDone));
 
-        // 2. Hotel — when entitled to a room.
+        // 3. Hotel — when entitled to a room.
         if (entitled.Contains(OrderItem.Hotel))
         {
             var done = await _db.HotelBookings.AnyAsync(
@@ -83,7 +98,7 @@ public sealed class SpeakerWizardService
             steps.Add(new("hotel", "/Forms/Hotel", done));
         }
 
-        // 3. Appreciation dinner — when entitled to a seat.
+        // 4. Appreciation dinner — when entitled to a seat.
         if (entitled.Contains(OrderItem.AppreciationDinner))
         {
             var done = await _db.DinnerSignups.AnyAsync(
@@ -91,7 +106,7 @@ public sealed class SpeakerWizardService
             steps.Add(new("dinner", "/Forms/Dinner", done));
         }
 
-        // 4. Swag / gift — when entitled to swag or a polo.
+        // 5. Swag / gift — when entitled to swag or a polo.
         if (entitled.Contains(OrderItem.Swag) || entitled.Contains(OrderItem.Polo))
         {
             var done = await _db.SwagPreferences.AnyAsync(
@@ -99,7 +114,7 @@ public sealed class SpeakerWizardService
             steps.Add(new("swag", "/Forms/Swag", done));
         }
 
-        // 5. Lunch — gated by ENTITLEMENT (LunchPreDay OR LunchMainDay), the SAME gate the
+        // 6. Lunch — gated by ENTITLEMENT (LunchPreDay OR LunchMainDay), the SAME gate the
         //    nav (_Layout formEntitlementHidden) and the Lunch page itself apply, so all
         //    three agree: a speaker who lacks both lunch entitlements no longer sees a
         //    Lunch nav link, a Lunch wizard step AND a directly-rendered Lunch form.
@@ -111,33 +126,14 @@ public sealed class SpeakerWizardService
             steps.Add(new("lunch", "/Forms/Lunch", done));
         }
 
-        // 6. Travel reimbursement — when entitled.
-        if (entitled.Contains(OrderItem.TravelReimbursement))
-        {
-            var done = await _db.TravelReimbursements.AnyAsync(
-                t => t.EventId == eventId && t.ParticipantId == participantId, ct);
-            steps.Add(new("travel", "/Forms/Travel", done));
-        }
+        // Travel reimbursement, "Upload preview presentation" and "Upload final
+        // presentation" were REMOVED from the wizard (operator 2026-06-27, §141/§142):
+        // they have deadlines months out, not onboarding actions. The two uploads
+        // remain as §120 deadline TASKS (SpeakerDeadlineSeeder) on /Speaker/Tasks;
+        // travel is replaced by the country-gated "Submit travel reimbursement" task
+        // (§143) for non-Denmark speakers. None of them is a guided wizard step.
 
-        // 7. + 8. Presentation uploads (B3) — the two speakerdl: deadline tasks the
-        //    SpeakerDeadlineSeeder creates for every speaker ("Upload preview
-        //    presentation" / "Upload final presentation"). These carry no form-data
-        //    signal, so completion mirrors the ParticipantTask State directly (Done
-        //    only when the speaker has marked the upload task Done). They are kept as
-        //    real steps so AllDone stays FALSE while either upload is still Open.
-        var previewKey = $"speakerdl:{participantId}:upload-preview-presentation";
-        var previewDone = await _db.Tasks.AnyAsync(
-            t => t.EventId == eventId && t.AssignedParticipantId == participantId
-                 && t.SourceKey == previewKey && t.State == TaskState.Done, ct);
-        steps.Add(new("upload-preview", "/Speaker/Tasks", previewDone));
-
-        var finalKey = $"speakerdl:{participantId}:upload-final-presentation";
-        var finalDone = await _db.Tasks.AnyAsync(
-            t => t.EventId == eventId && t.AssignedParticipantId == participantId
-                 && t.SourceKey == finalKey && t.State == TaskState.Done, ct);
-        steps.Add(new("upload-final", "/Speaker/Tasks", finalDone));
-
-        // 9. Help to promote your session(s) on LinkedIn (§116). Drives the speaker
+        // 7. Help to promote your session(s) on LinkedIn (§116). Drives the speaker
         //    LinkedIn publish path (Speaker/Graphics → SpeakerLinkedInPublishService,
         //    §52) + the #ELDK27 #ExpertsLiveDK tags. A manual "mark done" (the act of
         //    promoting is external/optional), tracked on a promote: task.
@@ -146,7 +142,7 @@ public sealed class SpeakerWizardService
                  && t.SourceKey == WizardStepTasks.Promote(participantId) && t.State == TaskState.Done, ct);
         steps.Add(new("promote", "/Speaker/Promote", promoteDone));
 
-        // 10. Join Signal groups (§109) — speakers get the Speakers chat + broadcast.
+        // 8. Join Signal groups (§109) — speakers get the Speakers chat + broadcast.
         //     Manual mark-done (joining is external), tracked on a signal: task. Gated
         //     on the signal-groups config being present + Speaker being in scope.
         if (_signal?.InScope(ParticipantRole.Speaker) == true)
@@ -157,8 +153,8 @@ public sealed class SpeakerWizardService
             steps.Add(new("signal", "/Forms/Signal", signalDone));
         }
 
-        // 11. Accept Code of Conduct + Privacy (§119) — all roles, always last. Done
-        //     once the speaker has a persisted acceptance row (who/when).
+        // 9. Accept Code of Conduct + Privacy (§119) — all roles, always last. Done
+        //    once the speaker has a persisted acceptance row (who/when).
         var acceptDone = await _db.ParticipantPolicyAcceptances.AnyAsync(
             a => a.EventId == eventId && a.ParticipantId == participantId, ct);
         steps.Add(new("accept", "/Forms/Accept", acceptDone));

@@ -63,10 +63,17 @@ public sealed class ParticipantCalendarBuilder
                 x.Email,
                 x.FullName,
                 x.SponsorCompanyId,
-                // Speaker contact-email override (null for non-speakers / unset).
-                ContactEmailOverride = _db.SpeakerProfiles
+                // Speaker email overrides (null for non-speakers / unset). Calendar
+                // mail prefers the calendar-specific override (wizard step 1).
+                // Resolve the profile ONCE via a single ordered subquery: two
+                // separate correlated scalar subqueries over the same table get
+                // mis-bound by the provider (the sibling CalendarEmail came back
+                // null while ContactEmailOverride resolved), so project both fields
+                // from one deterministic row.
+                SpeakerEmails = _db.SpeakerProfiles
                     .Where(sp => sp.ParticipantId == x.Id)
-                    .Select(sp => sp.ContactEmailOverride)
+                    .OrderBy(sp => sp.Id)
+                    .Select(sp => new { sp.CalendarEmail, sp.ContactEmailOverride })
                     .FirstOrDefault(),
             })
             .FirstOrDefaultAsync(ct);
@@ -76,8 +83,9 @@ public sealed class ParticipantCalendarBuilder
             return IcsCalendarBuilder.BuildFeed("Community Hub", "", "", Array.Empty<CalendarItem>());
         }
 
-        // ALL calendar invites use the effective address: override ?? Sessionize.
-        var ownerEmail = SpeakerProfile.EffectiveEmailFor(p.Email, p.ContactEmailOverride);
+        // Calendar feed owner: calendar override ?? contact override ?? Sessionize.
+        var ownerEmail = SpeakerProfile.CalendarEmailFor(
+            p.Email, p.SpeakerEmails?.CalendarEmail, p.SpeakerEmails?.ContactEmailOverride);
 
         var ev = await _db.Events
             .AsNoTracking()
@@ -221,15 +229,19 @@ public sealed class ParticipantCalendarBuilder
                 x.Email,
                 x.FullName,
                 x.SponsorCompanyId,
-                ContactEmailOverride = _db.SpeakerProfiles
+                // Single ordered subquery (see BuildFeedAsync) so both override
+                // fields resolve from one deterministic row.
+                SpeakerEmails = _db.SpeakerProfiles
                     .Where(sp => sp.ParticipantId == x.Id)
-                    .Select(sp => sp.ContactEmailOverride)
+                    .OrderBy(sp => sp.Id)
+                    .Select(sp => new { sp.CalendarEmail, sp.ContactEmailOverride })
                     .FirstOrDefault(),
             })
             .FirstOrDefaultAsync(ct);
         if (p is null) return null;
 
-        var ownerEmail = SpeakerProfile.EffectiveEmailFor(p.Email, p.ContactEmailOverride);
+        var ownerEmail = SpeakerProfile.CalendarEmailFor(
+            p.Email, p.SpeakerEmails?.CalendarEmail, p.SpeakerEmails?.ContactEmailOverride);
 
         var task = await _db.Tasks
             .AsNoTracking()
@@ -379,9 +391,12 @@ public sealed class ParticipantCalendarBuilder
                 x.EventId,
                 x.Email,
                 x.FullName,
-                ContactEmailOverride = _db.SpeakerProfiles
+                // Single ordered subquery (see BuildFeedAsync) so both override
+                // fields resolve from one deterministic row.
+                SpeakerEmails = _db.SpeakerProfiles
                     .Where(sp => sp.ParticipantId == x.Id)
-                    .Select(sp => sp.ContactEmailOverride)
+                    .OrderBy(sp => sp.Id)
+                    .Select(sp => new { sp.CalendarEmail, sp.ContactEmailOverride })
                     .FirstOrDefault(),
             })
             .FirstOrDefaultAsync(ct);
@@ -404,7 +419,8 @@ public sealed class ParticipantCalendarBuilder
             .FirstOrDefaultAsync(ct);
         if (task is null || task.DueDate is null) return null;
 
-        var ownerEmail = SpeakerProfile.EffectiveEmailFor(p.Email, p.ContactEmailOverride);
+        var ownerEmail = SpeakerProfile.CalendarEmailFor(
+            p.Email, p.SpeakerEmails?.CalendarEmail, p.SpeakerEmails?.ContactEmailOverride);
         var ev = await _db.Events
             .AsNoTracking()
             .Where(e => e.Id == p.EventId)

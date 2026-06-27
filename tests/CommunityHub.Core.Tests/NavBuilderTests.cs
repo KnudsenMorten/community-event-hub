@@ -287,7 +287,9 @@ public sealed class NavBuilderTests
     [Fact]
     public void Speaker_menu_matches_redesign()
     {
-        var g = NavBuilder.Build(ParticipantRole.Speaker).Groups[0];
+        // §138: the Master Class Q&A item is gated on speakerHasMasterClass; build a
+        // speaker WITH a master class so the rest of the menu (and that item) is present.
+        var g = NavBuilder.Build(ParticipantRole.Speaker, speakerHasMasterClass: true).Groups[0];
         var hrefs = g.Items.Select(i => i.Href).ToList();
 
         // operator 2026-06-24 (§26c): Home, My Hub Profile, Speaker Details, My sessions,
@@ -296,7 +298,7 @@ public sealed class NavBuilderTests
         Assert.Equal("Nav.MyProfile", g.Items.Single(i => i.Href == "/Profile").LabelKey);
         Assert.Equal("Nav.SpeakerDetails", g.Items.Single(i => i.Href == "/Speaker/Details").LabelKey);
         Assert.Equal("Nav.MySessions", g.Items.Single(i => i.Href == "/Speaker").LabelKey);
-        // §86: the speaker Master Class Q&A area is a top-level speaker nav entry.
+        // §86/§138: the speaker Master Class Q&A area is a top-level entry (master-class speaker only).
         Assert.Equal("Nav.MasterClassQa", g.Items.Single(i => i.Href == "/Speaker/Questions").LabelKey);
         Assert.Equal("Nav.HelpPromote", g.Items.Single(i => i.Href == "/Speaker/Graphics").LabelKey);
         Assert.DoesNotContain("/Forms/Speaker", hrefs);   // Bio replaced by Speaker Details
@@ -304,6 +306,9 @@ public sealed class NavBuilderTests
 
         // The calendar UI is retired: /Calendar no longer appears in the speaker menu.
         Assert.DoesNotContain("/Calendar", hrefs);
+        // §138: the standalone "Am I ready?" item is removed from the speaker menu (the
+        // readiness rollup moved to the top of My Tasks).
+        Assert.DoesNotContain("/Speaker/Readiness", hrefs);
 
         var logistics = g.Sections().SingleOrDefault(s => s.HeadingKey == "Nav.SectionEventLogistics");
         Assert.NotNull(logistics);
@@ -321,10 +326,38 @@ public sealed class NavBuilderTests
         Assert.DoesNotContain("/Tasks", hrefs);
         Assert.DoesNotContain("/Sessions", hrefs);
         Assert.DoesNotContain("/Resources", hrefs);
-        // §86 (operator 2026-06-26): the Master Class Q&A area IS now a speaker nav entry.
+        // §86/§138: the Master Class Q&A area IS a speaker nav entry (for a master-class speaker).
         Assert.Contains("/Speaker/Questions", hrefs);
         Assert.DoesNotContain("/Speaker/Evaluations", hrefs); // reached from My Sessions hub
         // /Speaker/Graphics is now surfaced as "Help Promote" (§26c) — asserted above.
+    }
+
+    [Fact]
+    public void Master_class_qa_item_shows_only_for_master_class_speakers()
+    {
+        // §138: the "Master Class Q&A" item is shown ONLY when the speaker presents at
+        // least one master class. A speaker with zero master classes would otherwise land
+        // on an empty Group-Q&A page (the page stays reachable by direct URL).
+        var without = NavBuilder.Build(ParticipantRole.Speaker, speakerHasMasterClass: false)
+            .AllItems.Select(i => i.Href).ToList();
+        Assert.DoesNotContain("/Speaker/Questions", without);
+
+        var with = NavBuilder.Build(ParticipantRole.Speaker, speakerHasMasterClass: true)
+            .AllItems.Select(i => i.Href).ToList();
+        Assert.Contains("/Speaker/Questions", with);
+    }
+
+    [Fact]
+    public void Speaker_readiness_item_is_removed_from_the_menu()
+    {
+        // §138: the standalone "Am I ready?" speaker nav item is gone (the rollup now
+        // lives at the top of My Tasks). This holds regardless of the master-class gate.
+        foreach (var hasMc in new[] { false, true })
+        {
+            var hrefs = NavBuilder.Build(ParticipantRole.Speaker, speakerHasMasterClass: hasMc)
+                .AllItems.Select(i => i.Href).ToList();
+            Assert.DoesNotContain("/Speaker/Readiness", hrefs);
+        }
     }
 
     [Fact]
@@ -380,7 +413,7 @@ public sealed class NavBuilderTests
         // does not. Non-gated sponsor routes (Tasks/Logistics/Contact) appear for both.
         var sponsor = NavBuilder.Build(ParticipantRole.Sponsor, isExhibitor: true).AllItems.Select(i => i.Href).ToList();
         Assert.Contains("/Sponsor/Tasks", sponsor);
-        Assert.Contains("/Sponsor/Logistics", sponsor);   // "Event logistics"
+        Assert.Contains("/Sponsor/Logistics", sponsor);   // booth run-of-show, in the Event-logistics fold-out
         Assert.Contains("/Sponsor/Contact", sponsor);     // "Contact Organizers"
         Assert.Contains("/Sponsor/CaptureLead", sponsor); // failover in the Leads fold-out (exhibitor-only)
         // A sponsor uses the company-shared tasks entry, not the generic /Tasks.
@@ -438,6 +471,32 @@ public sealed class NavBuilderTests
         var failover = leads.Items.Single(i => i.Href == "/Sponsor/CaptureLead");
         Assert.False(failover.External);
 
+        // Operator 2026-06-27 (BUG): there is exactly ONE "Event logistics" entry. The booth
+        // run-of-show (/Sponsor/Logistics) is now a LEAF inside the SHARED
+        // Nav.SectionEventLogistics fold-out (not a second standalone "Event logistics" leaf),
+        // and it LEADS that fold-out, ahead of the §104–§123 content-hub pages.
+        Assert.Single(g.Sections(), s => s.HeadingKey == "Nav.SectionEventLogistics");
+        Assert.DoesNotContain(g.Items, i => i.LabelKey == "Nav.SponsorEventLogistics");
+        var eventLogistics = g.Sections().Single(s => s.HeadingKey == "Nav.SectionEventLogistics");
+        var boothLeaf = eventLogistics.Items.Single(i => i.Href == "/Sponsor/Logistics");
+        Assert.Equal("Nav.SponsorBoothRunOfShow", boothLeaf.LabelKey);
+        Assert.Equal("/Sponsor/Logistics", eventLogistics.Items[0].Href); // booth run-of-show leads
+        var elHrefs = eventLogistics.Items.Select(i => i.Href).ToList();
+        Assert.Contains("/Info/wayfinding", elHrefs);  // content-hub pages share the SAME fold-out
+
+        // §146: "Our Booth" is a LEAF inside the SAME Event-logistics fold-out for an exhibitor
+        // sponsor (after Booth run-of-show, before the content pages).
+        var ourBooth = eventLogistics.Items.Single(i => i.Href == "/Sponsor/Booth");
+        Assert.Equal("Nav.OurBooth", ourBooth.LabelKey);
+        Assert.True(elHrefs.IndexOf("/Sponsor/Booth") > elHrefs.IndexOf("/Sponsor/Logistics"),
+            "Our Booth follows the Booth run-of-show leaf.");
+        Assert.True(elHrefs.IndexOf("/Sponsor/Booth") < elHrefs.IndexOf("/Info/wayfinding"),
+            "Our Booth precedes the content-hub pages.");
+
+        // Operator 2026-06-27: the standalone "Deliverables" nav entry is removed (the rollup
+        // moved to the top of Sponsor My Tasks). The page route stays reachable by direct URL.
+        Assert.DoesNotContain("/Sponsor/Deliverables", hrefs);
+
         // P7: a digital-only (non-exhibitor) sponsor gets NEITHER the Exhibitor/Booth
         // nor the Leads fold-out (the booth/lead Zoho items would be dead links).
         var digital = NavBuilder.Build(ParticipantRole.Sponsor, isExhibitor: false).Groups[0];
@@ -446,6 +505,8 @@ public sealed class NavBuilderTests
         Assert.DoesNotContain("Nav.SectionLeads", digitalSections);
         // The non-gated Sponsor Webshop fold-out still shows for a digital sponsor.
         Assert.Contains("Nav.SectionSponsorWebshop", digitalSections);
+        // §146: "Our Booth" is exhibitor-only — a digital sponsor (no booth) doesn't get it.
+        Assert.DoesNotContain("/Sponsor/Booth", digital.Items.Select(i => i.Href));
     }
 
     [Fact]

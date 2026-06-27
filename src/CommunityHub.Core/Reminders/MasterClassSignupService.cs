@@ -456,6 +456,100 @@ public sealed class MasterClassSignupService
     }
 
     /// <summary>
+    /// The verbatim error shown when a switch/sign-up loses the race for the last seat —
+    /// the target master class FILLED after the page rendered it as Available. The
+    /// attendee keeps their existing seat (the switch is all-or-nothing).
+    /// </summary>
+    public const string NowFullError =
+        "Sorry — this could not be completed: the Master Class is now full.";
+
+    /// <summary>
+    /// ATOMIC "switch to this Master Class" (§139). The attendee gives up their current
+    /// confirmed seat and takes a seat in <paramref name="targetSessionId"/> as ONE unit:
+    /// either both happen or neither does, so a failure can never leave them with no seat.
+    /// <para>
+    /// The whole read-decide-write runs inside the SERIALIZABLE transaction so the
+    /// confirmed-count &lt; capacity guard is re-checked AT COMMIT TIME against range-locked
+    /// rows. If the class filled during the session (e.g. a §93 promotion took the last
+    /// seat after the page rendered it Available), the operation FAILS with
+    /// <see cref="NowFullError"/> and the attendee's existing seat is left intact — the old
+    /// seat is only released once the new seat is secured. Per §94 a target that has grown
+    /// a waitlist is also refused (its seats belong to the waitlist first).
+    /// </para>
+    /// Releasing the old seat promotes that class's waitlist (§93), returned so the caller
+    /// can notify whoever was moved in.
+    /// </summary>
+    public async Task<(bool Ok, string? Error, PromotionResult? FreedPromotion)> SwitchAsync(
+        int eventId, int attendeeId, int targetSessionId, CancellationToken ct = default)
+    {
+        if (!await IsEligibleAsync(eventId, attendeeId, ct))
+            return (false, "A 2-day ticket is required to book a Master Class.", null);
+
+        var mc = await _db.Sessions.FirstOrDefaultAsync(
+            s => s.Id == targetSessionId && s.EventId == eventId
+                 && s.Type == SessionType.MasterClass && !s.IsServiceSession, ct);
+        if (mc is null) return (false, "That Master Class was not found.", null);
+
+        await ExpireOffersAsync(DateTimeOffset.UtcNow, eventId, ct);
+
+        return await InSerializableTxAsync<(bool, string?, PromotionResult?)>(async () =>
+        {
+            var mine = await _db.MasterClassSignups
+                .Where(x => x.EventId == eventId && x.AttendeeId == attendeeId).ToListAsync(ct);
+
+            // Already confirmed here → nothing to do (idempotent).
+            if (mine.Any(x => x.SessionId == targetSessionId
+                              && x.Status == MasterClassSignupStatus.Confirmed))
+                return (true, null, (PromotionResult?)null);
+
+            // GUARD (re-checked at commit, under serializable range locks): the seat must
+            // still be free AND the target must have no waitlist (§94 priority). Checked
+            // BEFORE we touch the old seat, so a failure leaves the attendee untouched.
+            var taken = await SeatsTakenAsync(eventId, targetSessionId, ct);
+            var waiting = await WaitlistCountAsync(eventId, targetSessionId, ct);
+            var capHasRoom = mc.MasterClassCapacity is not int cap || taken < cap;
+            if (!capHasRoom)
+                return (false, NowFullError, (PromotionResult?)null);
+            if (waiting > 0)
+                return (false,
+                    "Sorry — this could not be completed: this Master Class now has a waitlist, so its seats go to waitlisted attendees first. Your current seat was kept — join the waitlist instead.",
+                    (PromotionResult?)null);
+
+            var now = DateTimeOffset.UtcNow;
+            // The attendee's existing confirmed seat (in another class), if any.
+            var oldConfirmed = mine.FirstOrDefault(x => x.Status == MasterClassSignupStatus.Confirmed);
+            // Any waitlist/offer the attendee holds for THIS target is superseded by taking the seat.
+            var targetPending = mine.FirstOrDefault(
+                x => x.SessionId == targetSessionId
+                     && x.Status is MasterClassSignupStatus.Waitlisted or MasterClassSignupStatus.Offered);
+
+            if (targetPending is not null) _db.MasterClassSignups.Remove(targetPending);
+
+            // Secure the new confirmed seat FIRST.
+            _db.MasterClassSignups.Add(new MasterClassSignup
+            {
+                EventId = eventId, SessionId = targetSessionId, AttendeeId = attendeeId,
+                Status = MasterClassSignupStatus.Confirmed,
+                CreatedAt = now, UpdatedAt = now, ConfirmedAt = now,
+            });
+            await _db.SaveChangesAsync(ct);
+
+            // Only AFTER the new seat is secured do we release the old one (+ promote its waitlist).
+            PromotionResult? freed = null;
+            if (oldConfirmed is not null)
+            {
+                var freedSession = oldConfirmed.SessionId;
+                _db.MasterClassSignups.Remove(oldConfirmed);
+                await _db.SaveChangesAsync(ct);
+                var sink = new List<PromotionResult>();
+                await PromoteNextAsync(eventId, freedSession, sink, ct);
+                freed = sink.Count > 0 ? sink[0] : null;
+            }
+            return (true, null, freed);
+        }, ct);
+    }
+
+    /// <summary>
     /// Remove the attendee's entry for ONE master class (give up a seat, leave a
     /// waitlist, or drop a held offer). Freeing a seat (Confirmed/Offered) instantly
     /// promotes the next waitlisted attendee — the returned <see cref="PromotionResult"/>

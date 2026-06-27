@@ -1,15 +1,15 @@
 @page
-@using CommunityHub.Core.Domain
+@using CommunityHub.Pages.Shared
 @model CommunityHub.Pages.Tasks.IndexModel
 @{
     ViewData["Title"] = Localizer["Tasks.Title"].Value;
 }
 
-@* Unified "what's still needed" checklist (Top-8 #7) — the same shared component
-   the Hub home and attendee My-event render, so this page is one consistent
-   "what do I still owe" view with overdue badges rather than a competing list. *@
-@await Html.PartialAsync("Shared/_ChecklistCard", Model.Checklist)
-
+@* §147: ONE unified task list. The page used to render BOTH the shared checklist-card
+   component (pending + completed tables) AND a separate "My tasks" list, so every task
+   appeared TWICE. Now it renders each task once via the shared _TaskListPanel (completion
+   % header → pending at the top → completed collapsed at the bottom), identical to
+   /Speaker/Tasks and /Sponsor/Tasks. *@
 <div class="card">
     <h2>@Localizer["Tasks.Title"]</h2>
     @await Html.PartialAsync("Shared/_SecondaryEmailBanner")
@@ -19,34 +19,8 @@
     }
     else
     {
-        foreach (var task in Model.Tasks)
-        {
-            var toggleLabel = task.State == TaskState.Done
-                ? Localizer["Tasks.MarkNotDone"].Value
-                : Localizer["Tasks.MarkDone"].Value;
-            <div style="border-bottom:1px solid #eee;padding:10px 0;overflow-wrap:anywhere;">
-                <strong>@task.Title</strong>
-                @if (task.State == TaskState.Done)
-                {
-                    <span class="info"> &check; @Localizer["Common.Done"]</span>
-                }
-                else if (task.DueDate is not null)
-                {
-                    <span> &middot; @Localizer["Tasks.Due"] @task.DueDate?.ToString("dd/MM/yyyy")</span>
-                }
-                @if (!string.IsNullOrEmpty(task.Description))
-                {
-                    <p style="margin:4px 0;white-space:pre-line;overflow-wrap:anywhere;">@CommunityHub.Branding.TaskTextLinkifier.Render(task.Description)</p>
-                }
-                <form method="post" asp-page-handler="Toggle">
-                    <input type="hidden" name="taskId" value="@task.Id" />
-                    <button type="submit" class="secondary"
-                            aria-label="@(toggleLabel): @task.Title">
-                        @toggleLabel
-                    </button>
-                </form>
-            </div>
-        }
+        @await Html.PartialAsync("Shared/_TaskListPanel",
+            new TaskListPanelView { Tasks = Model.Tasks, RowPartialName = "_ParticipantTaskRow" })
     }
-    <p><a asp-page="/Index">@Localizer["Common.BackToHub"]</a></p>
+    <p style="margin-top:14px;"><a asp-page="/Index">@Localizer["Common.BackToHub"]</a></p>
 </div>

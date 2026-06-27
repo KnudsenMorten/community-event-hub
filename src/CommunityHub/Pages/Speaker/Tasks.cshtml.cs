@@ -28,23 +28,35 @@ public class TasksModel : PageModel
     private readonly SpeakerDeadlineSeeder _seeder;
     private readonly FormTaskReconciler _formTaskReconciler;
     private readonly SpeakerMilestoneService _milestones;
+    private readonly SpeakerReadinessService _readiness;
 
     public TasksModel(
         CommunityHubDbContext db,
         ICurrentParticipantAccessor participant,
         SpeakerDeadlineSeeder seeder,
         FormTaskReconciler formTaskReconciler,
-        SpeakerMilestoneService milestones)
+        SpeakerMilestoneService milestones,
+        SpeakerReadinessService readiness)
     {
         _db = db;
         _participant = participant;
         _seeder = seeder;
         _formTaskReconciler = formTaskReconciler;
         _milestones = milestones;
+        _readiness = readiness;
     }
 
     public bool NotSpeaker { get; private set; }
     public List<ParticipantTask> Tasks { get; private set; } = new();
+
+    /// <summary>
+    /// §138: the speaker's "am I ready?" readiness rollup (score + the what's-missing
+    /// list), surfaced at the TOP of My Tasks now that the standalone /Speaker/Readiness
+    /// nav item is removed. A pure read-only AGGREGATE of existing data via
+    /// <see cref="SpeakerReadinessService"/>; null when the speaker has no
+    /// <see cref="SpeakerProfile"/> yet (the view then omits the rollup).
+    /// </summary>
+    public SpeakerReadiness? Readiness { get; private set; }
 
     public async Task<IActionResult> OnGetAsync(CancellationToken ct)
     {
@@ -69,6 +81,11 @@ public class TasksModel : PageModel
             .ThenBy(t => t.DueDate)
             .ThenBy(t => t.Title)
             .ToListAsync(ct);
+
+        // §138: build the readiness rollup AFTER seeding + reconcile, so the score
+        // reflects already-submitted form data on first visit. Read-only; null when the
+        // speaker has no SpeakerProfile (the view omits the rollup card).
+        Readiness = await _readiness.BuildForSpeakerAsync(me.EventId, me.ParticipantId, ct);
         return Page();
     }
 

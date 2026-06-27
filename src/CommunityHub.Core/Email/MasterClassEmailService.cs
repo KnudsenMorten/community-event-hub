@@ -323,8 +323,14 @@ public sealed class MasterClassEmailService
         await SendAsync(c.Email, name, c.EventId, $"You're confirmed: {c.Title}", html, ct);
     }
 
-    /// <summary>Waitlist-signup email — terms included; link to leave the waitlist.</summary>
-    public async Task SendWaitlistedAsync(int signupId, string baseUrl, CancellationToken ct = default)
+    /// <summary>
+    /// Waitlist-signup email — terms included; link to leave the waitlist. When the
+    /// attendee's <paramref name="waitlistPosition"/> is known (the value surfaced by
+    /// <see cref="MasterClassSignupService.GetForAttendeeAsync"/>), the email states their
+    /// place in the queue ("You are #N on the waitlist") so they see their real status.
+    /// </summary>
+    public async Task SendWaitlistedAsync(
+        int signupId, string baseUrl, int? waitlistPosition = null, CancellationToken ct = default)
     {
         var c = await LoadAsync(signupId, ct);
         if (c is null) return;
@@ -335,6 +341,10 @@ public sealed class MasterClassEmailService
             ? "<p><strong>You accepted:</strong> if a seat opens here, your current Master Class will be " +
               "cancelled and you'll be moved to this one automatically.</p>"
             : "";
+        // The attendee's place in the queue: a sender-built <p> block (raw token) or empty.
+        var positionBlock = waitlistPosition is int pos && pos > 0
+            ? $"<p>You are <strong>#{pos}</strong> on the waitlist — we admit waitlisted attendees in order.</p>"
+            : "";
 
         if (_templates is not null)
         {
@@ -342,7 +352,8 @@ public sealed class MasterClassEmailService
             tokens["firstName"] = c.FirstName;
             tokens["masterClassTitle"] = c.Title;
             tokens["selfServiceUrl"] = url;
-            tokens["waitlistTerms"] = terms;       // raw-HTML token (renderer keeps verbatim)
+            tokens["waitlistTerms"] = terms;             // raw-HTML token (renderer keeps verbatim)
+            tokens["waitlistPositionBlock"] = positionBlock; // raw-HTML token (Block suffix)
             using (_context.Set(new EmailContext(Category, c.EventId, null, name, FeatureKey: "masterclass-invites")))
             {
                 var rendered = _templates.Render("masterclass-waitlisted", tokens);
@@ -355,7 +366,7 @@ public sealed class MasterClassEmailService
         var html =
             $"<p>Hi {Enc(c.FirstName)},</p>" +
             $"<p>You're on the <strong>waitlist</strong> for <strong>{Enc(c.Title)}</strong>. " +
-            "We'll email you if a seat opens up.</p>" + terms +
+            "We'll email you if a seat opens up.</p>" + positionBlock + terms +
             $"<p>You can <a href=\"{Enc(url)}\">leave the waitlist</a> any time.</p>" +
             ContactLine() +
             "<p>The team</p>";

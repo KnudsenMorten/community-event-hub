@@ -82,7 +82,7 @@ themselves.
 | `attendee-duplicate-booking` | `AttendeeReconcileJob.cs:202-211` | `{{masterClassList}}` |
 | `masterclass-selection-invite` | `MasterClassEmailService.cs` (`SendSelectionInviteAsync`) | `{{selectionUrl}}` |
 | `masterclass-confirmed` | `MasterClassEmailService.cs` (`SendConfirmedAsync`) | `{{masterClassTitle}}`, `{{landingPageUrl}}`, `{{icsUrl}}`, `{{selfServiceUrl}}` |
-| `masterclass-waitlisted` | `MasterClassEmailService.cs` (`SendWaitlistedAsync`) | `{{masterClassTitle}}`, `{{selfServiceUrl}}`, `{{waitlistTerms}}` *(raw HTML)* |
+| `masterclass-waitlisted` | `MasterClassEmailService.cs` (`SendWaitlistedAsync`) | `{{masterClassTitle}}`, `{{selfServiceUrl}}`, `{{waitlistTerms}}` *(raw HTML)*, `{{waitlistPositionBlock}}` *(raw HTML)* |
 | `masterclass-cancelled` | `MasterClassEmailService.cs` (`SendCancelledAsync`) | `{{masterClassTitle}}`, `{{signupUrl}}` |
 | `masterclass-reassignment` | `MasterClassEmailService.cs` (`SendReassignmentValidationAsync`) | `{{heldMasterClass}}` *(raw HTML)*, `{{selfServiceUrl}}` |
 | `masterclass-offer` | `MasterClassPromotionEmailService.cs` (`SendPromotionAsync`, Offered) | `{{masterClassTitle}}`, `{{selfServiceUrl}}`, `{{offerDeadline}}` |

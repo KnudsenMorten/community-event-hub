@@ -1,0 +1,71 @@
+@page
+@model CommunityHub.Pages.Sponsor.BoothModel
+@{
+    ViewData["Title"] = "Our Booth";
+}
+
+@if (Model.AccessDenied)
+{
+    <div class="card">
+        <h1>Our Booth</h1>
+        <p class="error">This page is for sponsors only.</p>
+        <p><a asp-page="/Index">Back to hub</a></p>
+    </div>
+    return;
+}
+
+<style>
+    /* Mobile-first: stack on phones; expo maps fill the card width. */
+    .booth-number {
+        display: inline-block; margin: 6px 0 4px; padding: 10px 18px;
+        background: var(--el-darkblue); color: #fff; border-radius: 10px;
+        font-size: 28px; font-weight: 700; letter-spacing: .5px;
+    }
+    .booth-tbd {
+        display: inline-block; margin: 6px 0 4px; padding: 10px 16px;
+        background: #fff8e1; border: 1px solid #f0d878; border-left: 4px solid #e0a800;
+        border-radius: 8px; color: #7a5b00; font-size: 16px; font-weight: 600;
+    }
+    .expo-gallery { display: grid; grid-template-columns: 1fr; gap: 12px; margin: 12px 0; }
+    .expo-gallery figure { margin: 0; }
+    .expo-gallery img { width: 100%; height: auto; border-radius: 8px; display: block; }
+    @@media (min-width: 560px) { .expo-gallery { grid-template-columns: repeat(2, 1fr); } }
+</style>
+
+<div class="card">
+    <h1>Our Booth</h1>
+
+    <h2 style="color:var(--el-darkblue);">Your booth number</h2>
+    @if (Model.BoothNumber is not null)
+    {
+        <p><span class="booth-number">@Model.BoothNumber</span></p>
+        <p>Find your booth on the expo map below. We look forward to seeing you on-site!</p>
+    }
+    else
+    {
+        <p><span class="booth-tbd">Booth TBD</span></p>
+        <p>
+            Your booth number isn't assigned yet. We'll update this page as soon as your
+            booth is allocated &mdash; please check back closer to the event.
+        </p>
+    }
+
+    <h2 style="color:var(--el-darkblue);">Expo map</h2>
+    @if (Model.ExpoImages.Count > 0)
+    {
+        <div class="expo-gallery">
+            @foreach (var img in Model.ExpoImages)
+            {
+                <figure><img src="@img.Url" alt="@img.Alt" loading="lazy" /></figure>
+            }
+        </div>
+    }
+    else
+    {
+        <p class="info" style="background:#eef6ff;padding:10px 14px;border-radius:6px;">
+            The expo map will be published here closer to the event. Please check back soon.
+        </p>
+    }
+
+    <p><a asp-page="/Index">Back to hub</a></p>
+</div>

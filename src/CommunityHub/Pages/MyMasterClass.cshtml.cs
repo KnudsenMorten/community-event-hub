@@ -46,12 +46,45 @@ public class MyMasterClassModel : PageModel
     public string? Message { get; private set; }
     public string? ErrorMessage { get; private set; }
 
-    /// <summary>The attendee's confirmed seat, if any.</summary>
+    // --- §140 inline flash placement -------------------------------------------------
+    // A confirmation/error after a POST-redirect (PRG) is shown NEXT TO the action that
+    // produced it instead of as a faint top banner. Each handler tags its redirect with
+    // the session it concerns (FlashSessionId) and/or a named scope (FlashScope, e.g.
+    // "reminder"); the page renders the message inline at that spot. FlashIsError styles it.
+    /// <summary>Named placement hint for a flash with no session (e.g. "reminder").</summary>
+    public string? FlashScope { get; private set; }
+    /// <summary>The Master Class the flash concerns, so it renders inside that card.</summary>
+    public int? FlashSessionId { get; private set; }
+    /// <summary>True when the flash is an error (red), false for a success (green).</summary>
+    public bool FlashIsError { get; private set; }
+    /// <summary>Whether there is any flash message to show at all.</summary>
+    public bool HasFlash => !string.IsNullOrEmpty(Message);
+    /// <summary>Flash belongs by the ~1-month reminder toggle (in the confirmed card).</summary>
+    public bool FlashAtReminder => FlashScope == "reminder" && Confirmed is not null;
+    /// <summary>Flash belongs at the top of the confirmed-seat card (e.g. a switch landed here).</summary>
+    public bool FlashAtConfirmed =>
+        !FlashAtReminder && Confirmed is not null && FlashSessionId == Confirmed.SessionId;
+    /// <summary>
+    /// True when the flash WILL be rendered inline somewhere on the page (so the top
+    /// fallback can stay hidden). Inline spots: the reminder toggle, the confirmed card,
+    /// a section-1 waitlist card, or a section-2 option card.
+    /// </summary>
+    public bool FlashPlacedInline =>
+        HasFlash && (FlashAtReminder || FlashAtConfirmed
+            || (FlashSessionId is int sid
+                && (Waitlists.Any(w => w.SessionId == sid)
+                    || Options.Any(o => o.SessionId == sid && Confirmed?.SessionId != sid))));
+
+    /// <summary>The attendee's confirmed seat, if any (§139 section 1).</summary>
     public MasterClassSignupService.MySignup? Confirmed { get; private set; }
-    /// <summary>The attendee's waitlist place or held offer, if any.</summary>
-    public MasterClassSignupService.MySignup? Pending { get; private set; }
+    /// <summary>The attendee's waitlist place(s) / any held offer (§139 section 1).</summary>
+    public IReadOnlyList<MasterClassSignupService.MySignup> Waitlists { get; private set; }
+        = Array.Empty<MasterClassSignupService.MySignup>();
+    /// <summary>First waitlist/offer, kept for the legacy offer handlers.</summary>
+    public MasterClassSignupService.MySignup? Pending => Waitlists.Count > 0 ? Waitlists[0] : null;
     /// <summary>Whether the confirmed seat has opted into the ~1-month-before reminder.</summary>
     public bool MonthReminderOptIn => Confirmed?.WantsMonthReminder ?? false;
+    /// <summary>ALL master classes with live availability (§139 section 2).</summary>
     public IReadOnlyList<MasterClassSignupService.McOption> Options { get; private set; }
         = Array.Empty<MasterClassSignupService.McOption>();
 
@@ -68,7 +101,8 @@ public class MyMasterClassModel : PageModel
         Eligible = a.TicketStatus == TicketStatus.TwoDay;
         var mine = await _svc.GetForAttendeeAsync(a.EventId, a.Id, ct);
         Confirmed = mine.FirstOrDefault(s => s.Status == MasterClassSignupStatus.Confirmed);
-        Pending = mine.FirstOrDefault(s => s.Status is MasterClassSignupStatus.Waitlisted or MasterClassSignupStatus.Offered);
+        Waitlists = mine.Where(s => s.Status is MasterClassSignupStatus.Waitlisted or MasterClassSignupStatus.Offered)
+            .OrderBy(s => s.WaitlistPosition ?? int.MaxValue).ToList();
         Options = await _svc.ListMasterClassesAsync(a.EventId, ct);
         return a;
     }
@@ -82,9 +116,13 @@ public class MyMasterClassModel : PageModel
         }
     }
 
-    public async Task<IActionResult> OnGetAsync(string? t, string? msg, CancellationToken ct)
+    public async Task<IActionResult> OnGetAsync(
+        string? t, string? msg, string? scope, int? sid, bool err, CancellationToken ct)
     {
         Message = msg;
+        FlashScope = scope;
+        FlashSessionId = sid;
+        FlashIsError = err;
         await LoadAsync(t, ct);
         return Page();
     }
@@ -95,7 +133,7 @@ public class MyMasterClassModel : PageModel
         if (a is null) return Page();
 
         var r = await _svc.SignUpAsync(a.EventId, a.Id, sessionId, autoSwitchConsent, ct);
-        if (!r.Ok) return RedirectToPage(new { t = Token, msg = r.Error });
+        if (!r.Ok) return RedirectToPage(new { t = Token, msg = r.Error, sid = sessionId, err = true });
 
         // Confirmation / waitlist-with-terms email.
         var newSignupId = await _svc.SignupIdAsync(a.EventId, a.Id, sessionId, ct);
@@ -106,7 +144,9 @@ public class MyMasterClassModel : PageModel
                 if (r.Signup!.Status == MasterClassSignupStatus.Confirmed)
                     await _email.SendConfirmedAsync(sid, BaseUrl, ct);
                 else
-                    await _email.SendWaitlistedAsync(sid, BaseUrl, ct);
+                    // Carry the attendee's queue position (from GetForAttendeeAsync via the
+                    // SignUp result) into the email so they see "You are #N on the waitlist".
+                    await _email.SendWaitlistedAsync(sid, BaseUrl, r.Signup.WaitlistPosition, ct);
             }
             catch { /* signup stands even if the email fails */ }
         }
@@ -114,7 +154,7 @@ public class MyMasterClassModel : PageModel
         var status = r.Signup!.Status == MasterClassSignupStatus.Confirmed
             ? "You've got a seat 🎉"
             : $"You're on the waitlist (position {r.Signup.WaitlistPosition}). We'll let you know if a seat opens.";
-        return RedirectToPage(new { t = Token, msg = status });
+        return RedirectToPage(new { t = Token, msg = status, sid = sessionId });
     }
 
     public async Task<IActionResult> OnPostGiveUpAsync(string? t, int sessionId, CancellationToken ct)
@@ -127,7 +167,40 @@ public class MyMasterClassModel : PageModel
         await NotifyAsync(promo, ct);                       // notify whoever got the freed seat
         try { await _email.SendCancelledAsync(a.EventId, a.Email, a.FirstName, a.LastName, mcTitle, BaseUrl, a.Id, ct); }
         catch { /* removal stands even if the email fails */ }
-        return RedirectToPage(new { t = Token, msg = "Done — your Master Class place was updated." });
+        // The row is now gone; the freed class still shows in section 2, so anchor the
+        // confirmation to its card (sid) — right where the give-up button was.
+        return RedirectToPage(new { t = Token, msg = "Done — your Master Class place was updated.", sid = sessionId });
+    }
+
+    /// <summary>
+    /// §139: ATOMICALLY switch the attendee's confirmed seat to <paramref name="sessionId"/>.
+    /// The pre-submit warning (cshtml <c>confirm()</c>) is the UX guard; this is the safety
+    /// net — if the class filled during the session the service refuses and the attendee
+    /// keeps their current seat (<see cref="MasterClassSignupService.NowFullError"/>).
+    /// </summary>
+    public async Task<IActionResult> OnPostSwitchAsync(string? t, int sessionId, CancellationToken ct)
+    {
+        var a = await LoadAsync(t, ct);
+        if (a is null) return Page();
+
+        var hadSeat = Confirmed is not null;
+        var oldTitle = Confirmed?.Title;
+        var (ok, err, freed) = await _svc.SwitchAsync(a.EventId, a.Id, sessionId, ct);
+        if (!ok) return RedirectToPage(new { t = Token, msg = err, sid = sessionId, err = true });
+
+        await NotifyAsync(freed, ct);   // notify whoever got the seat we released
+        var newTitle = Options.FirstOrDefault(o => o.SessionId == sessionId)?.Title ?? "your new Master Class";
+        try
+        {
+            var newSignupId = await _svc.SignupIdAsync(a.EventId, a.Id, sessionId, ct);
+            if (newSignupId is int sid) await _email.SendConfirmedAsync(sid, BaseUrl, ct);
+            if (hadSeat && !string.IsNullOrEmpty(oldTitle))
+                await _email.SendCancelledAsync(a.EventId, a.Email, a.FirstName, a.LastName, oldTitle, BaseUrl, a.Id, ct);
+        }
+        catch { /* the switch stands even if a mail fails */ }
+
+        // The target is now the confirmed seat (section 1) — anchor the success there.
+        return RedirectToPage(new { t = Token, msg = $"Switched — you've got a seat in {newTitle}. 🎉", sid = sessionId });
     }
 
     /// <summary>"Add to my calendar" — the attendee's confirmed Master Class as an .ics.</summary>
@@ -149,7 +222,9 @@ public class MyMasterClassModel : PageModel
         var a = await LoadAsync(t, ct);
         if (a is null) return Page();
         await _svc.SetMonthReminderOptInAsync(a.EventId, a.Id, wants, ct);
-        return RedirectToPage(new { t = Token, msg = wants ? "We'll remind you about a month before." : "Reminder turned off." });
+        // Anchor next to the reminder toggle in the confirmed card.
+        return RedirectToPage(new { t = Token, scope = "reminder",
+            msg = wants ? "We'll remind you about a month before." : "Reminder turned off." });
     }
 
     public async Task<IActionResult> OnPostAcceptAsync(string? t, CancellationToken ct)

@@ -715,6 +715,8 @@
   <data name="SpeakerWiz.Nothing" xml:space="preserve"><value>There are no onboarding steps for you right now.</value></data>
   <data name="SpeakerWiz.Start" xml:space="preserve"><value>Start</value></data>
   <data name="SpeakerWiz.Edit" xml:space="preserve"><value>Edit</value></data>
+  <data name="SpeakerWiz.Step.calendar" xml:space="preserve"><value>Calendar email (optional)</value></data>
+  <data name="SpeakerWiz.Step.calendar.Desc" xml:space="preserve"><value>Optionally use a different email for calendar invites and notifications. Leave blank to use your primary email.</value></data>
   <data name="SpeakerWiz.Step.details" xml:space="preserve"><value>Speaker details</value></data>
   <data name="SpeakerWiz.Step.details.Desc" xml:space="preserve"><value>Your bio, photo, tagline, links and session preferences.</value></data>
   <data name="SpeakerWiz.Step.hotel" xml:space="preserve"><value>Hotel</value></data>
@@ -764,6 +766,15 @@
   <data name="RoleWiz.Step.signal.Desc" xml:space="preserve"><value>Join the ELDK27 Signal chat and broadcast group, then mark this done.</value></data>
   <data name="RoleWiz.Step.accept" xml:space="preserve"><value>Code of Conduct &amp; Privacy</value></data>
   <data name="RoleWiz.Step.accept.Desc" xml:space="preserve"><value>Review and accept our Code of Conduct and Privacy Policy.</value></data>
+  <data name="Wizard.Next" xml:space="preserve"><value>Save &amp; next</value></data>
+  <data name="Wizard.Previous" xml:space="preserve"><value>Previous</value></data>
+  <data name="Wizard.Finish" xml:space="preserve"><value>Save &amp; finish</value></data>
+  <data name="Wizard.Skip" xml:space="preserve"><value>Skip for now</value></data>
+  <data name="Wizard.StepXofN" xml:space="preserve"><value>Step {0} of {1}</value></data>
+  <data name="Wizard.Title" xml:space="preserve"><value>Get started</value></data>
+  <data name="Wizard.AllDone" xml:space="preserve"><value>All done — thank you! You can update any step from your hub if anything changes.</value></data>
+  <data name="Wizard.GoToHub" xml:space="preserve"><value>Go to my hub</value></data>
+  <data name="Wizard.Nothing" xml:space="preserve"><value>There are no get-started steps for you right now.</value></data>
   <data name="VolWiz.Closed" xml:space="preserve"><value>Volunteer sign-up is closed for this event.</value></data>
   <data name="VolWiz.SavedNote" xml:space="preserve"><value>You can return any time before the deadline to update your details.</value></data>
   <data name="VolWiz.StepOf" xml:space="preserve"><value>Step {0} of 3</value></data>
@@ -860,6 +871,16 @@
   <data name="SponsorTasks.Completed" xml:space="preserve"><value>Completed Tasks ({0})</value></data>
   <data name="SponsorTasks.ClickToToggle" xml:space="preserve"><value>— click to show / hide</value></data>
   <data name="SponsorTasks.BackEngagement" xml:space="preserve"><value>← Sponsor Engagement Details</value></data>
+
+  <!-- §147: shared unified task-list panel (all three task pages) -->
+  <data name="TaskList.ProgressHeading" xml:space="preserve"><value>Task checklist</value></data>
+  <data name="TaskList.Summary" xml:space="preserve"><value>{0} of {1} done</value></data>
+  <data name="TaskList.ProgressAria" xml:space="preserve"><value>Tasks {0} percent complete</value></data>
+  <data name="TaskList.AllDone" xml:space="preserve"><value>All done</value></data>
+  <data name="TaskList.Pending" xml:space="preserve"><value>Still to do ({0})</value></data>
+  <data name="TaskList.Completed" xml:space="preserve"><value>Completed ({0})</value></data>
+  <data name="TaskList.ClickToExpand" xml:space="preserve"><value>— click to expand</value></data>
+  <data name="TaskList.AllCaughtUp" xml:space="preserve"><value>All caught up — nothing pending.</value></data>
 
   <!-- Sponsor: task row partial -->
   <data name="TaskRow.Done" xml:space="preserve"><value>done</value></data>
@@ -1188,6 +1209,8 @@
   <data name="Nav.OrgSectionLogistics" xml:space="preserve"><value>Logistics</value></data>
   <data name="Nav.OrgSectionSetup" xml:space="preserve"><value>Setup &amp; audit</value></data>
   <data name="Nav.SponsorEventLogistics" xml:space="preserve"><value>Event logistics</value></data>
+  <data name="Nav.SponsorBoothRunOfShow" xml:space="preserve"><value>Booth run-of-show</value></data>
+  <data name="Nav.OurBooth" xml:space="preserve"><value>Our Booth</value></data>
   <data name="Nav.SponsorLeadsExport" xml:space="preserve"><value>My leads (export)</value></data>
   <data name="OrgArea.Title" xml:space="preserve"><value>Organizer area</value></data>
   <data name="OrgArea.Intro" xml:space="preserve"><value>Everything for running the event, grouped into hubs. Pick an area to drill in.</value></data>

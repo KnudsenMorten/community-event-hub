@@ -5,6 +5,7 @@ using CommunityHub.Core.Domain;
 using CommunityHub.Core.Email;
 using CommunityHub.Core.Reminders;
 using CommunityHub.Core.Resources;
+using CommunityHub.Forms.Steps;
 using CommunityHub.Notify;
 using CommunityHub.Pages.Forms;
 using Microsoft.AspNetCore.Authentication.Cookies;
@@ -122,26 +123,31 @@ public sealed class FormEntitlementGateTests
         return (model, db);
     }
 
+    // REQUIREMENTS §148: the form pages are now thin shells over the shared XxxFormService
+    // (the inline-wizard step calls the SAME service). The factories build the service from the
+    // same deps the page used to take, so the entitlement (relevance) gate under test is identical.
     private static HotelModel NewHotel(CommunityHubDbContext db, DefaultHttpContext http) =>
-        new(db, Accessor(http), new FixedClock(),
-            new HotelCalendarInviter(new NoOpEmailSender(), Options.Create(new EmailOptions())),
-            new OrganizerActionItemService(db, new FixedClock()),
-            NullLogger<HotelModel>.Instance, Loc());
+        new(new HotelFormService(db, new FixedClock(),
+                new HotelCalendarInviter(new NoOpEmailSender(), Options.Create(new EmailOptions())),
+                new OrganizerActionItemService(db, new FixedClock()),
+                Loc(), NullLogger<HotelFormService>.Instance),
+            Accessor(http));
 
     private static TravelModel NewTravel(CommunityHubDbContext db, DefaultHttpContext http) =>
         new(db, Accessor(http), new FixedClock(), Loc(), new NoOpEmailSender(),
             NullLogger<TravelModel>.Instance);
 
     private static SwagModel NewSwag(CommunityHubDbContext db, DefaultHttpContext http) =>
-        new(db, Accessor(http), new FixedClock(), Loc());
+        new(new SwagFormService(db, new FixedClock(), Loc()), Accessor(http));
 
     private static LunchModel NewLunch(CommunityHubDbContext db, DefaultHttpContext http) =>
-        new(db, Accessor(http), new FixedClock(), Loc());
+        new(new LunchFormService(db, new FixedClock(), Loc()), Accessor(http));
 
     private static DinnerModel NewDinner(CommunityHubDbContext db, DefaultHttpContext http) =>
-        new(db, Accessor(http), new FixedClock(), new NoOpEmailSender(),
-            Options.Create(new EmailOptions()),
-            new OrganizerActionItemService(db, new FixedClock()), Loc());
+        new(new DinnerFormService(db, new FixedClock(), new NoOpEmailSender(),
+                Options.Create(new EmailOptions()),
+                new OrganizerActionItemService(db, new FixedClock()), Loc()),
+            Accessor(http));
 
     // ===== Sponsor-self-funded speaker: DENIED hotel/travel/swag ==============
 
@@ -174,7 +180,7 @@ public sealed class FormEntitlementGateTests
         // Master-class speakers (SpeakingPreDay) are AUTO-COUNTED for the pre-day
         // lunch now (operator 2026-06-24) — they don't fill the form.
         var (m, db) = Build(SpeakerFunding.SponsorSelfFunded, NewLunch);
-        using (db) { await m.OnGetAsync(default); Assert.True(m.AccessDenied); Assert.True(m.PreDayAutoCounted); }
+        using (db) { await m.OnGetAsync(default); Assert.True(m.Form.AccessDenied); Assert.True(m.Form.PreDayAutoCounted); }
     }
 
     [Fact]
@@ -213,7 +219,7 @@ public sealed class FormEntitlementGateTests
         // Pre-day lunch is auto-counted for the master-class speaker (operator
         // 2026-06-24); dinner is unaffected and still shown.
         var (lunch, db1) = Build(SpeakerFunding.Supported, NewLunch);
-        using (db1) { await lunch.OnGetAsync(default); Assert.True(lunch.AccessDenied); Assert.True(lunch.PreDayAutoCounted); }
+        using (db1) { await lunch.OnGetAsync(default); Assert.True(lunch.Form.AccessDenied); Assert.True(lunch.Form.PreDayAutoCounted); }
 
         var (dinner, db2) = Build(SpeakerFunding.Supported, NewDinner);
         using (db2) { await dinner.OnGetAsync(default); Assert.False(dinner.AccessDenied); }

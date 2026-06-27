@@ -26,6 +26,16 @@ public sealed class SpeakerDeadlineDefinition
     /// </summary>
     [JsonPropertyName("masterclassOnly")]
     public bool MasterclassOnly { get; set; }
+
+    /// <summary>
+    /// If true, this deadline applies ONLY to speakers whose Speaker Details
+    /// <see cref="Domain.SpeakerProfile.Country"/> is NOT Denmark (operator
+    /// 2026-06-27, §143 — the travel-reimbursement task). Danish speakers don't
+    /// travel, so they never see it. A speaker with no country set yet is treated
+    /// as non-Denmark (they get the task). Default false = all speakers.
+    /// </summary>
+    [JsonPropertyName("nonDenmarkOnly")]
+    public bool NonDenmarkOnly { get; set; }
 }
 
 /// <summary>The speaker-deadlines config file.</summary>
@@ -112,6 +122,12 @@ public sealed class SpeakerDeadlineSeeder
                     .Where(s => s.EventId == eventId && s.ParticipantId == p.Id)
                     .Select(s => (bool?)s.SpeakingPreDay)
                     .FirstOrDefault() ?? false,
+                // Speaker Details country (2-letter code, e.g. "DK"); null when no
+                // profile / not yet filled in. Gates the §143 non-Denmark travel task.
+                Country = _db.SpeakerProfiles
+                    .Where(s => s.EventId == eventId && s.ParticipantId == p.Id)
+                    .Select(s => s.Country)
+                    .FirstOrDefault(),
             })
             .ToListAsync(ct);
 
@@ -136,6 +152,14 @@ public sealed class SpeakerDeadlineSeeder
                 // A masterclass-only deadline is skipped unless this speaker is
                 // delivering on the pre-day (SpeakingPreDay).
                 if (dl.MasterclassOnly && !speaker.SpeakingPreDay)
+                {
+                    continue;
+                }
+
+                // §143 country gate: a non-Denmark-only deadline (the travel
+                // reimbursement task) is skipped for Danish speakers. A speaker with
+                // no country set yet is treated as non-Denmark, so they get it.
+                if (dl.NonDenmarkOnly && IsDenmark(speaker.Country))
                 {
                     continue;
                 }
@@ -254,6 +278,19 @@ public sealed class SpeakerDeadlineSeeder
             .ToListAsync(ct);
 
         return OrderEntitlements.Effective(participant, speaker, overrides);
+    }
+
+    /// <summary>
+    /// True when the speaker's country denotes Denmark. Speaker Details stores a
+    /// 2-letter upper code ("DK"); we also tolerate the full name "Denmark"
+    /// case-insensitively. Null/blank = unknown = NOT Denmark (they get the task).
+    /// </summary>
+    private static bool IsDenmark(string? country)
+    {
+        if (string.IsNullOrWhiteSpace(country)) return false;
+        var c = country.Trim();
+        return string.Equals(c, "DK", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(c, "Denmark", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string Slug(string title)

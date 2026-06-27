@@ -5,6 +5,72 @@
     ViewData["Title"] = "My tasks";
 }
 
+@* §138: the "Am I ready?" readiness rollup, surfaced at the TOP of My Tasks (the
+   standalone /Speaker/Readiness nav item is removed). Mobile-first: score + bar +
+   the still-to-do list, each missing item deep-linking to where it's fixed. *@
+@if (!Model.NotSpeaker && Model.Readiness is { } rd)
+{
+    <style>
+        .rd-score { display:flex; flex-wrap:wrap; align-items:baseline; gap:6px 12px; }
+        .rd-score .rd-pct { font-size:34px; font-weight:800; color:var(--el-darkblue); line-height:1; }
+        .rd-score .rd-of  { font-size:15px; color:#4b5563; }
+        .rd-progress-wrap { background:#eef0f4; border-radius:999px; height:14px; overflow:hidden; margin:12px 0 4px; }
+        .rd-progress-bar  { height:100%; border-radius:999px; transition:width .3s ease; background:#0a6; }
+        .rd-ready { background:#0a6; color:#fff; border-radius:999px; padding:2px 12px; font-size:13px; font-weight:700; white-space:nowrap; }
+        .rd-list { list-style:none; padding:0; margin:8px 0 0; }
+        .rd-item {
+            border:1px solid #f0dcb8; background:#fdf8f0; border-radius:10px;
+            padding:12px 14px; margin:10px 0;
+            display:flex; flex-wrap:wrap; gap:8px 14px; align-items:center;
+        }
+        .rd-ico { font-size:18px; flex:0 0 auto; }
+        .rd-label { flex:1 1 180px; min-width:0; font-weight:600; color:var(--el-darkblue); overflow-wrap:anywhere; }
+        .rd-fix { flex:0 0 auto; }
+        .rd-fix a { margin:0; }
+        @@media (max-width: 460px) {
+            .rd-fix { flex-basis:100%; }
+            .rd-fix .task-link-btn { display:block; text-align:center; }
+        }
+    </style>
+    <div class="card">
+        <h2 style="margin-top:0;">&#9989; Am I ready?</h2>
+        <div class="rd-score">
+            <span class="rd-pct">@rd.Percent%</span>
+            <span class="rd-of">&middot; @rd.Summary</span>
+            @if (rd.IsReady)
+            {
+                <span class="rd-ready">All set &#127881;</span>
+            }
+        </div>
+        <div class="rd-progress-wrap" role="progressbar"
+             aria-valuenow="@rd.Percent" aria-valuemin="0" aria-valuemax="100"
+             aria-label="Readiness @rd.Percent percent">
+            <div class="rd-progress-bar" style="width:@(rd.Percent)%;"></div>
+        </div>
+        @if (rd.MissingItems.Count > 0)
+        {
+            <h3 style="font-size:16px;margin:16px 0 4px;color:var(--el-darkblue);">Still to do (@rd.MissingItems.Count)</h3>
+            <ul class="rd-list">
+                @foreach (var item in rd.MissingItems)
+                {
+                    <li class="rd-item">
+                        <span class="rd-ico" aria-hidden="true">&#9633;</span>
+                        <span class="rd-label">@item.Label</span>
+                        @if (!string.IsNullOrEmpty(item.FixLink))
+                        {
+                            <span class="rd-fix"><a class="task-link-btn" href="@item.FixLink">Fix this</a></span>
+                        }
+                    </li>
+                }
+            </ul>
+        }
+        else
+        {
+            <p style="color:#1f6d3a;margin:12px 0 0;">Everything we need from you is done. 🎉</p>
+        }
+    </div>
+}
+
 <div class="card">
     <h1>My tasks</h1>
 
@@ -30,34 +96,13 @@
             <p style="margin:0;">A red badge means a task is overdue; a yellow badge is an upcoming deadline. Mark a task complete once you're done. If you can't meet a deadline, contact the organizers as soon as possible.</p>
         </div>
 
-        var pending = Model.Tasks.Where(t => t.State != TaskState.Done).ToList();
-        var completed = Model.Tasks.Where(t => t.State == TaskState.Done).ToList();
-
-        <h3 style="margin:18px 0 8px;color:var(--el-darkblue);">Pending (@pending.Count)</h3>
-        @if (pending.Count == 0)
-        {
-            <p style="color:#1f6d3a;">All caught up — nothing pending. 🎉</p>
-        }
-        @foreach (var task in pending)
-        {
-            @await Html.PartialAsync("_SpeakerTaskRow", task)
-        }
-
-        @if (completed.Count > 0)
-        {
-            <details style="margin-top:14px;padding-top:4px;">
-                <summary style="font-size:18px;font-weight:700;color:var(--el-darkblue);cursor:pointer;">
-                    Completed (@completed.Count)
-                    <span style="font-size:13px;font-weight:400;color:#666;margin-left:6px;">— click to expand</span>
-                </summary>
-                <div style="margin-top:8px;">
-                    @foreach (var task in completed)
-                    {
-                        @await Html.PartialAsync("_SpeakerTaskRow", task)
-                    }
-                </div>
-            </details>
-        }
+        @* §147: the unified task list (completion % header → pending at the top →
+           completed collapsed at the bottom), the SAME shared _TaskListPanel the /Tasks
+           and /Sponsor/Tasks pages use. The "Task checklist" % here is ParticipantTask
+           completion — deliberately distinct from the "Am I ready?" readiness rollup
+           card above (which aggregates richer profile/upload signals). *@
+        @await Html.PartialAsync("Shared/_TaskListPanel",
+            new CommunityHub.Pages.Shared.TaskListPanelView { Tasks = Model.Tasks, RowPartialName = "_SpeakerTaskRow" })
     }
     <p style="margin-top:14px;"><a asp-page="/Index">@Localizer["Common.BackToHub"]</a></p>
 </div>

@@ -34,9 +34,17 @@ public static class NavBuilder
     /// dead links for them. The caller (the layout) computes this for sponsors only;
     /// it is ignored for every other role.
     /// </param>
-    public static NavModel Build(ParticipantRole role, bool isVolunteerSupervisor = false, bool isExhibitor = false)
+    /// <param name="speakerHasMasterClass">
+    /// True when the signed-in SPEAKER is linked (via <see cref="SessionSpeaker"/>) to at
+    /// least one <see cref="SessionType.MasterClass"/> session in the active edition (§138).
+    /// The "Master Class Q&amp;A" menu item is shown ONLY then — a speaker who presents no
+    /// master class has no Group Q&amp;A board, so the item would land on an empty page. The
+    /// page itself stays reachable by direct URL (it shows a friendly empty state). The
+    /// caller (the layout) computes this for speakers only; it is ignored for every other role.
+    /// </param>
+    public static NavModel Build(ParticipantRole role, bool isVolunteerSupervisor = false, bool isExhibitor = false, bool speakerHasMasterClass = false)
     {
-        var groups = new List<NavGroup> { BuildParticipantGroup(role, isVolunteerSupervisor, isExhibitor) };
+        var groups = new List<NavGroup> { BuildParticipantGroup(role, isVolunteerSupervisor, isExhibitor, speakerHasMasterClass) };
 
         // Server-side management gate: only an organizer ever gets these items.
         if (role == ParticipantRole.Organizer)
@@ -52,7 +60,7 @@ public static class NavBuilder
     /// per-role visibility exactly (no route added or dropped) — Home, My tasks,
     /// My profile, Resources, then the role-specific hubs + self-service forms.
     /// </summary>
-    private static NavGroup BuildParticipantGroup(ParticipantRole role, bool isVolunteerSupervisor, bool isExhibitor)
+    private static NavGroup BuildParticipantGroup(ParticipantRole role, bool isVolunteerSupervisor, bool isExhibitor, bool speakerHasMasterClass)
     {
         var items = new List<NavItem>
         {
@@ -147,15 +155,20 @@ public static class NavBuilder
             items.Add(new("/Forms/SpeakerWizard", "Nav.SpeakerOnboarding"));
             items.Add(new("/Speaker/Details", "Nav.SpeakerDetails"));
             items.Add(new("/Speaker/Tasks", "Nav.MyTasks"));   // operator 2026-06-24: right after Speaker Details
-            // §134: the speaker's own "am I ready?" readiness rollup (score + what's
-            // missing), right after My Tasks so the journey reads details → tasks → ready.
-            items.Add(new("/Speaker/Readiness", "Nav.SpeakerReadiness"));
+            // §138 (operator 2026-06-27): the standalone "Am I ready?" speaker nav entry is
+            // removed — the readiness rollup (score + what's missing) now lives at the TOP of
+            // the My Tasks page (so the journey reads details → tasks-with-readiness). The
+            // /Speaker/Readiness page + the /Organizer/SpeakerReadiness roster stay intact;
+            // only this speaker-facing menu item is dropped.
             items.Add(new("/Speaker", "Nav.MySessions"));
             // §86 (operator 2026-06-26): the speaker Master Class Q&A area — see the
             // audience questions on your session(s), reply (shared with co-speakers), and
-            // edit each Master Class attendee landing page. Re-surfaced as a top-level
-            // speaker entry (it was previously only reachable from the My Sessions hub).
-            items.Add(new("/Speaker/Questions", "Nav.MasterClassQa"));
+            // edit each Master Class attendee landing page. §138 (operator 2026-06-27): shown
+            // ONLY when the speaker presents at least one master class (speakerHasMasterClass);
+            // a speaker with zero master classes has no Group Q&A board, so the item would land
+            // on an empty page. The page stays reachable by direct URL (friendly empty state).
+            if (speakerHasMasterClass)
+                items.Add(new("/Speaker/Questions", "Nav.MasterClassQa"));
             items.Add(new("/Speaker/Graphics", "Nav.HelpPromote"));
 
             const string EventLogistics = "Nav.SectionEventLogistics";
@@ -258,10 +271,12 @@ public static class NavBuilder
             // maintains vital company info (top-level so it's easy to find).
             items.Add(new("/Sponsor/CompanyDetails", "Nav.SponsorCompanyDetails"));
 
-            // §135 Deliverables tracker — the company's own lifecycle-completion checklist
-            // (what's left / overdue, each linking to where it's fixed). FallbackLabel (no
-            // resx key yet), mirroring the operator-authored content pages.
-            items.Add(new("/Sponsor/Deliverables", LabelKey: null, FallbackLabel: "Deliverables"));
+            // §135 (operator 2026-06-27): the standalone "Deliverables" nav entry is removed —
+            // the deliverables rollup (X of N done, % + the still-missing/overdue items with
+            // deep links) now lives at the TOP of Sponsor My Tasks (mirrors the speaker §138
+            // readiness move). The /Sponsor/Deliverables page + the /Organizer/SponsorDeliverables
+            // board + SponsorDeliverablesService stay intact; only this sponsor-facing menu item
+            // is dropped.
 
             // Attendee telemetry — the "who's coming" stats. §55: link to the
             // AUTHENTICATED in-area page (same ranked tables/filters as the public
@@ -297,8 +312,20 @@ public static class NavBuilder
                 items.Add(new("/Sponsor/Leads", "Nav.SponsorLeadsExport", SectionKey: Leads));
             }
 
-            // Dedicated leaf label (was reusing the "Event logistics" SECTION key).
-            items.Add(new("/Sponsor/Logistics", "Nav.SponsorEventLogistics"));
+            // §135 (operator 2026-06-27): the booth run-of-show (key dates & times) is now a
+            // LEAF inside the SHARED "Event logistics" fold-out (Nav.SectionEventLogistics) —
+            // it is NO LONGER a second standalone "Event logistics" entry that read identically
+            // to the content-hub Event-Logistics fold-out below. Added here (before the §104–§123
+            // content pages join the same section) so it LEADS the fold-out; the order then reads
+            // Booth run-of-show, Wayfinding, Good to know, Addresses, Check out last event.
+            items.Add(new("/Sponsor/Logistics", "Nav.SponsorBoothRunOfShow", SectionKey: "Nav.SectionEventLogistics"));
+            // §146: "Our Booth" — the sponsor's physical booth number + the expo map image(s).
+            // Inside the SAME merged Event-logistics fold-out (after Booth run-of-show, before the
+            // §104–§123 content pages). EXHIBITOR-only (isExhibitor = SponsorInfo.HasBooth): a
+            // digital-only sponsor has no booth/expo presence, so the item would be a near-dead
+            // link for them; the page stays reachable by direct URL and shows "Booth TBD".
+            if (isExhibitor)
+                items.Add(new("/Sponsor/Booth", "Nav.OurBooth", SectionKey: "Nav.SectionEventLogistics"));
             // (Contact Organizers is appended LAST for every role — see end of method.)
         }
 

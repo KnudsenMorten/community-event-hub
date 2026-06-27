@@ -1,5 +1,6 @@
 using CommunityHub.Core.Config;
 using CommunityHub.Core.Domain;
+using CommunityHub.Core.Reminders;
 using Microsoft.EntityFrameworkCore;
 using Xunit;
 
@@ -24,19 +25,24 @@ namespace CommunityHub.Core.Tests.Scenario;
 /// </summary>
 public sealed class SpeakerMilestoneScenarioTests
 {
-    // The current speaker-task set (operator 2026-06-25): the 6 configured speaker
-    // deadlines — Hotel, Appreciation Dinner, Swag/Speaker gift, Pre-day Lunch, plus
-    // the two KEPT presentation uploads (preview + final). Logistics deadlines are
-    // P12 entitlement-gated; the uploads are NEVER gated (every speaker gets them).
+    // The current speaker-task set (operator 2026-06-27): Hotel, Appreciation Dinner,
+    // Swag/Speaker gift, Pre-day Lunch, the §143 country-gated "Submit travel
+    // reimbursement" (non-Denmark speakers only), plus the two KEPT presentation
+    // uploads (preview + final). Logistics deadlines are P12 entitlement-gated; the
+    // uploads are NEVER gated; the travel task is country-gated. The seeded cast has
+    // no country set, so they count as non-Denmark and DO get the travel task.
     // A Master Class (pre-day) speaker is entitled to the Pre-day Lunch, so gets all
-    // 6; a plain speaker not on the pre-/main-day has no lunch entitlement, so the
-    // Lunch deadline is gated out and they get 5.
+    // 7; a plain speaker not on the pre-/main-day has no lunch entitlement, so the
+    // Lunch deadline is gated out and they get 6.
     private static readonly DateOnly Oct1Due = new(2026, 10, 1);    // Hotel, Dinner, Swag
     private static readonly DateOnly LunchDue = new(2027, 1, 10);   // Pre-day Lunch (pre-day speakers only)
+    private static readonly DateOnly TravelDue = new(2027, 1, 10);  // Submit travel reimbursement (non-DK)
     private static readonly DateOnly PreviewDue = new(2027, 1, 20); // Upload preview presentation
     private static readonly DateOnly FinalDue = new(2027, 2, 3);    // Upload final presentation
-    private const int MasterclassTaskCount = 6;   // + Pre-day Lunch (pre-day entitlement)
-    private const int SpeakerTaskCount = 5;       // no Pre-day Lunch (not entitled)
+    private const string LunchTitle = "Pre-day Lunch";
+    private const string TravelTitle = "Submit travel reimbursement";
+    private const int MasterclassTaskCount = 7;   // + Pre-day Lunch (pre-day entitlement) + travel
+    private const int SpeakerTaskCount = 6;        // no Pre-day Lunch (not entitled), + travel
 
     private static SpeakerDeadlineSeeder NewSeeder(Data.CommunityHubDbContext db) =>
         new(db,
@@ -56,11 +62,15 @@ public sealed class SpeakerMilestoneScenarioTests
             .Where(t => t.AssignedParticipantId == seed.MasterclassSpeakerId)
             .ToListAsync();
 
-        // A Master Class (pre-day) speaker gets the full set of 6: Hotel/Dinner/Swag
-        // (1 Oct), Pre-day Lunch (10 Jan), upload preview (20 Jan), upload final (3 Feb).
+        // A Master Class (pre-day) speaker gets the full set of 7: Hotel/Dinner/Swag
+        // (1 Oct), Pre-day Lunch (10 Jan), Submit travel reimbursement (10 Jan, non-DK),
+        // upload preview (20 Jan), upload final (3 Feb). Lunch + travel share 10 Jan, so
+        // those two are asserted by title rather than by due date.
         Assert.Equal(MasterclassTaskCount, mcTasks.Count);
         Assert.Equal(3, mcTasks.Count(t => t.DueDate == Oct1Due));
-        Assert.Single(mcTasks, t => t.DueDate == LunchDue);
+        Assert.Single(mcTasks, t => t.Title == LunchTitle && t.DueDate == LunchDue);
+        Assert.Single(mcTasks, t => t.Title == TravelTitle && t.DueDate == TravelDue);
+        Assert.Equal(2, mcTasks.Count(t => t.DueDate == LunchDue)); // lunch + travel
         Assert.Single(mcTasks, t => t.DueDate == PreviewDue);
         Assert.Single(mcTasks, t => t.DueDate == FinalDue);
         Assert.All(mcTasks, t => Assert.Equal(TaskState.Open, t.State));
@@ -74,18 +84,68 @@ public sealed class SpeakerMilestoneScenarioTests
         await NewSeeder(db).SeedAsync(seed.EventId);
 
         // A plain session speaker (not pre-/main-day) is NOT entitled to lunch, so the
-        // Pre-day Lunch deadline is P12-gated out: they get 5 tasks — Hotel/Dinner/Swag
-        // (1 Oct) + the two presentation uploads — but NOT the Pre-day Lunch the Master
-        // Class speaker gets.
+        // Pre-day Lunch deadline is P12-gated out: they get 6 tasks — Hotel/Dinner/Swag
+        // (1 Oct) + the §143 travel task (non-DK) + the two presentation uploads — but
+        // NOT the Pre-day Lunch the Master Class speaker gets.
         var s1Tasks = await db.Tasks
             .Where(t => t.AssignedParticipantId == seed.SpeakerOneId)
             .ToListAsync();
 
         Assert.Equal(SpeakerTaskCount, s1Tasks.Count);
         Assert.Equal(3, s1Tasks.Count(t => t.DueDate == Oct1Due));
-        Assert.DoesNotContain(s1Tasks, t => t.DueDate == LunchDue); // P12: lunch gated out
+        Assert.DoesNotContain(s1Tasks, t => t.Title == LunchTitle); // P12: lunch gated out
+        Assert.Single(s1Tasks, t => t.Title == TravelTitle);        // §143: non-DK gets travel
         Assert.Single(s1Tasks, t => t.DueDate == PreviewDue);
         Assert.Single(s1Tasks, t => t.DueDate == FinalDue);
+    }
+
+    [Fact]
+    public async Task Travel_task_is_non_denmark_only_and_links_to_the_travel_form()
+    {
+        using var db = ScenarioFixture.NewDb();
+        var seed = await ScenarioSeed.SeedAsync(db);
+
+        // Make SpeakerOne a Danish speaker; the Master Class speaker stays non-DK
+        // (no country set). §143: Danish speakers must NOT get the travel task.
+        var s1Profile = await db.SpeakerProfiles.FirstAsync(p => p.ParticipantId == seed.SpeakerOneId);
+        s1Profile.Country = "DK";
+        await db.SaveChangesAsync();
+
+        await NewSeeder(db).SeedAsync(seed.EventId);
+
+        var dkTasks = await db.Tasks
+            .Where(t => t.AssignedParticipantId == seed.SpeakerOneId).ToListAsync();
+        var nonDkTasks = await db.Tasks
+            .Where(t => t.AssignedParticipantId == seed.MasterclassSpeakerId).ToListAsync();
+
+        // Danish speaker: no travel task.
+        Assert.DoesNotContain(dkTasks, t => t.Title == TravelTitle);
+        // Non-Denmark speaker: gets it, dated 10 Jan 2027, linking to the travel form.
+        var travel = Assert.Single(nonDkTasks, t => t.Title == TravelTitle);
+        Assert.Equal(TravelDue, travel.DueDate);
+        Assert.Contains("/Forms/Travel", travel.Description);
+    }
+
+    [Fact]
+    public async Task Travel_task_can_be_marked_complete_without_claiming()
+    {
+        using var db = ScenarioFixture.NewDb();
+        var seed = await ScenarioSeed.SeedAsync(db);
+        await NewSeeder(db).SeedAsync(seed.EventId);
+
+        var travel = await db.Tasks.FirstAsync(
+            t => t.AssignedParticipantId == seed.SpeakerOneId && t.Title == TravelTitle);
+        Assert.Equal(TaskState.Open, travel.State);
+
+        // The /Speaker/Tasks "Mark done" path: SpeakerMilestoneService.ToggleAsync —
+        // it flips any speakerdl: task, so the speaker opts out without ever claiming.
+        var svc = new SpeakerMilestoneService(db, ScenarioFixture.Clock);
+        var changed = await svc.ToggleAsync(seed.EventId, seed.SpeakerOneId, travel.Id);
+
+        Assert.True(changed);
+        var after = await db.Tasks.FirstAsync(t => t.Id == travel.Id);
+        Assert.Equal(TaskState.Done, after.State);
+        Assert.NotNull(after.CompletedAt);
     }
 
     [Fact]

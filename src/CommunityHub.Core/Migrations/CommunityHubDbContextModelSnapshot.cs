@@ -2873,6 +2873,13 @@ namespace CommunityHub.Core.Migrations
                         .HasMaxLength(500)
                         .HasColumnType("nvarchar(500)");
 
+                    b.Property<string>("CalendarEmail")
+                        .HasMaxLength(320)
+                        .HasColumnType("nvarchar(320)");
+
+                    b.Property<DateTimeOffset?>("CalendarEmailSetAt")
+                        .HasColumnType("datetimeoffset");
+
                     b.Property<string>("ContactEmailOverride")
                         .HasMaxLength(320)
                         .HasColumnType("nvarchar(320)");

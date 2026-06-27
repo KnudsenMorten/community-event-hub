@@ -21,101 +21,26 @@
 <div class="card">
     <h1>@Localizer["Hotel.Title"]</h1>
 
-    @* Role-specific policy. Organizers see no policy (not relevant to them); the
-       lead sits on its own line above the body (two lines). *@
-    @{
-        var policyKey = Model.Role switch
-        {
-            CommunityHub.Core.Domain.ParticipantRole.Speaker => "Hotel.PolicySpeaker",
-            CommunityHub.Core.Domain.ParticipantRole.Volunteer
-                or CommunityHub.Core.Domain.ParticipantRole.Media
-                or CommunityHub.Core.Domain.ParticipantRole.EventPartner => "Hotel.PolicyVolunteer",
-            _ => (string?)null,   // Organizer (+ any other) -> no policy text
-        };
-    }
-    @if (policyKey is not null)
+    @if (Model.Form.IsLocked)
     {
-        <p style="background:#eef6ff;padding:10px 14px;border-radius:6px;font-size:14px;">
-            <strong>@Localizer["Hotel.PolicyLead"]</strong><br />
-            @Localizer[policyKey]
-        </p>
-    }
-
-    @* Read-only reservation confirmation (REQUIREMENTS §46). Once an organizer enters
-       the hotel's booking confirmation number, the reservation is [CONFIRMED]; the
-       participant sees the number here (read-only) and has been re-sent a calendar
-       invite carrying it. *@
-    @if (Model.IsReservationConfirmed)
-    {
-        <p style="background:#dcfce7;color:#166534;padding:10px 14px;border-radius:6px;font-size:14px;">
-            <strong>@Localizer["Hotel.Confirmed"]</strong><br />
-            @if (!string.IsNullOrWhiteSpace(Model.AssignedHotelName))
-            {
-                @Localizer["Hotel.ConfirmedHotel", Model.AssignedHotelName!]<br />
-            }
-            @Localizer["Hotel.ConfirmationNumberLabel"] <strong>@Model.HotelConfirmationNumber</strong>
-        </p>
-    }
-
-    @if (Model.IsLocked)
-    {
-        <p class="error">@Localizer["Common.EditingClosed"]</p>
-        <p>@Localizer["Hotel.NeedsRoomLabel"] <strong>@(Model.NeedsRoom == true ? Localizer["Common.Yes"].Value : Model.NeedsRoom == false ? Localizer["Common.No"].Value : Localizer["Common.NotChosen"].Value)</strong></p>
-        @if (Model.NeedsRoom == true)
-        {
-            <p>@Localizer["Hotel.CheckInOut", Model.CheckInDate?.ToString("dd/MM/yyyy") ?? "", Model.CheckOutDate?.ToString("dd/MM/yyyy") ?? ""]</p>
-        }
-        @* Locked dead-end → self-service "request a change" hand-off (§21). *@
-        <partial name="_RequestChangeLink" model="@("Hotel")" />
+        @* Locked: the shared partial renders the read-only summary + _RequestChangeLink. *@
+        <partial name="_HotelFields" model="Model.Form" />
     }
     else
     {
         @* Shared success toast (REQUIREMENTS §21): role=status, auto-dismiss, dismissable. *@
-        <partial name="_Flash" model='new CommunityHub.Pages.Shared.FlashModel(Model.Message, "success")' />
+        <partial name="_Flash" model='new CommunityHub.Pages.Shared.FlashModel(Model.Form.Message, "success")' />
 
         <form method="post">
             @* Shared inline-validation summary + per-field messages (§21). *@
             <div asp-validation-summary="All" class="ceh-validation-summary"></div>
 
-            <fieldset style="border:1px solid #e5e7eb;border-radius:6px;padding:10px 14px;margin:8px 0;">
-                <legend style="font-weight:600;">@Localizer["Hotel.NeedRoomLegend"]</legend>
-                <label style="display:block;margin:6px 0;">
-                    <input type="radio" asp-for="NeedsRoom" value="true" /> @Localizer["Hotel.YesNeed"]
-                </label>
-                <label style="display:block;margin:6px 0;">
-                    <input type="radio" asp-for="NeedsRoom" value="false" /> @Localizer["Hotel.NoNeed"]
-                </label>
-            </fieldset>
-            <span asp-validation-for="NeedsRoom" class="ceh-field-error"></span>
-
-            <div id="hotelDetails">
-                <label for="CheckInDate">@Localizer["Hotel.CheckInDate"]</label>
-                <input type="date" asp-for="CheckInDate" />
-                <span asp-validation-for="CheckInDate" class="ceh-field-error"></span>
-                <label for="CheckOutDate">@Localizer["Hotel.CheckOutDate"]</label>
-                <input type="date" asp-for="CheckOutDate" />
-                <span asp-validation-for="CheckOutDate" class="ceh-field-error"></span>
-                <label for="Notes">@Localizer["Common.NotesOptional"]</label>
-                <textarea asp-for="Notes" rows="3"></textarea>
-            </div>
+            @* The hotel fields are the SAME partial the inline wizard step renders. *@
+            <partial name="_HotelFields" model="Model.Form" />
 
             <button type="submit">@Localizer["Common.Save"]</button>
-            <partial name="_LastSaved" model="Model.LastSavedAt" />
+            <partial name="_LastSaved" model="Model.Form.LastSavedAt" />
         </form>
-        <script>
-            // Show date/share/notes block only when "Yes" is chosen.
-            (function () {
-                var details = document.getElementById('hotelDetails');
-                var radios  = document.querySelectorAll('input[name="NeedsRoom"]');
-                function refresh() {
-                    var picked = document.querySelector('input[name="NeedsRoom"]:checked');
-                    var show   = picked && picked.value === 'true';
-                    details.style.display = show ? '' : 'none';
-                }
-                radios.forEach(function (r) { r.addEventListener('change', refresh); });
-                refresh();
-            })();
-        </script>
     }
     <p><a asp-page="/Index">@Localizer["Common.BackToHub"]</a></p>
 </div>

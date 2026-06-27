@@ -146,11 +146,16 @@
                         {
                             <span style="color:#6b7280;font-size:13px;align-self:center;">@Localizer["Speaker.SessionNotPublicYet"]</span>
                         }
-                        @* §136 (operator 2026-06-27): the per-Master-Class Group Q&A area
-                           (one separate, labelled board per master class — read attendee
-                           questions, reply, and edit the attendee landing page). 1:1
-                           questions are disabled. *@
-                        <a class="task-link-btn" asp-page="/Speaker/Questions">&#128172; @Localizer["Speaker.AttendeeQuestions"]</a>
+                        @* §138 (operator 2026-06-27): the per-Master-Class Group Q&A button
+                           shows ONLY for a session whose Type == MasterClass. A non-master-class
+                           session (e.g. a TechnicalSession / Keynote / panel) has no Group Q&A
+                           board, so the button would be a dead-end there. (One separate, labelled
+                           board per master class — read attendee questions, reply, and edit the
+                           attendee landing page. 1:1 questions are disabled.) *@
+                        @if (s.IsMasterClass)
+                        {
+                            <a class="task-link-btn" asp-page="/Speaker/Questions">&#128172; @Localizer["Speaker.AttendeeQuestions"]</a>
+                        }
                         <a class="task-link-btn" asp-page="/Speaker/Graphics">&#128241; @Localizer["Speaker.SoMePromote"]</a>
                         <a class="task-link-btn" href="/Sessions/@(s.SessionId).ics">&#128197; @Localizer["Speaker.CalendarSync"]</a>
                         @if (!string.IsNullOrWhiteSpace(s.EvaluationUrl))

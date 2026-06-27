@@ -62,29 +62,34 @@ public sealed class SpeakerWizardServiceTests
     }
 
     [Fact]
-    public async Task Speaker_details_is_always_shown_even_with_no_entitlements()
+    public async Task Calendar_email_is_step_one_and_details_always_shown()
     {
         var (db, ev, pid) = await SeedSpeakerAsync();
         var view = await Wizard(db).BuildAsync(ev, pid);
 
+        // §141: Calendar email (optional) is the FIRST wizard step, ahead of details.
+        Assert.Equal("calendar", view.Steps[0].Key);
+        Assert.Equal("/Forms/CalendarEmail", view.Steps[0].Route);
         Assert.Contains(view.Steps, s => s.Key == "details");
         Assert.Equal("/Speaker/Details", view.Steps.Single(s => s.Key == "details").Route);
     }
 
     [Fact]
-    public async Task Only_entitled_steps_appear_in_order()
+    public async Task Travel_and_uploads_are_no_longer_wizard_steps()
     {
+        // §141/§142: travel reimbursement + both presentation uploads were DROPPED from
+        // the wizard. Even WITH the travel entitlement, no travel step appears; the two
+        // uploads (always-on before) are gone too. Remaining: calendar + details (always),
+        // hotel (entitled), then promote (§116) + signal (§109) + accept (§119).
         var (db, ev, pid) = await SeedSpeakerAsync(OrderItem.Hotel, OrderItem.TravelReimbursement);
         var view = await Wizard(db).BuildAsync(ev, pid);
 
-        // details (always) + hotel + travel — in the fixed wizard order — then the two
-        // presentation uploads (B3), which are added for EVERY speaker (never gated), then
-        // the always-on promote (§116) + signal (§109, Speaker in scope) + accept (§119)
-        // steps. Lunch is now ENTITLEMENT-GATED (LunchPreDay/LunchMainDay) — the SAME gate
-        // the nav + Lunch page use — so it is hidden here (no lunch entitlement).
         Assert.Equal(
-            new[] { "details", "hotel", "travel", "upload-preview", "upload-final", "promote", "signal", "accept" },
+            new[] { "calendar", "details", "hotel", "promote", "signal", "accept" },
             view.Steps.Select(s => s.Key).ToArray());
+        Assert.DoesNotContain(view.Steps, s => s.Key == "travel");
+        Assert.DoesNotContain(view.Steps, s => s.Key == "upload-preview");
+        Assert.DoesNotContain(view.Steps, s => s.Key == "upload-final");
         Assert.DoesNotContain(view.Steps, s => s.Key == "dinner");
         Assert.DoesNotContain(view.Steps, s => s.Key == "swag");
         Assert.DoesNotContain(view.Steps, s => s.Key == "lunch");
@@ -113,40 +118,41 @@ public sealed class SpeakerWizardServiceTests
     }
 
     [Fact]
-    public async Task Lunch_sits_at_step_5_in_the_canonical_order()
+    public async Task Lunch_sits_at_step_6_in_the_canonical_order()
     {
-        // With all preceding steps entitled (incl. a lunch entitlement), lunch is the 5th
-        // visible step: details(1), hotel(2), dinner(3), swag(4), lunch(5).
+        // With all preceding steps entitled (incl. a lunch entitlement), lunch is the 6th
+        // visible step: calendar(1), details(2), hotel(3), dinner(4), swag(5), lunch(6).
         var (db, ev, pid) = await SeedSpeakerAsync(
             OrderItem.Hotel, OrderItem.AppreciationDinner, OrderItem.Swag, OrderItem.LunchMainDay);
         var view = await Wizard(db).BuildAsync(ev, pid);
 
         Assert.Equal(
-            new[] { "details", "hotel", "dinner", "swag", "lunch", "upload-preview", "upload-final", "promote", "signal", "accept" },
+            new[] { "calendar", "details", "hotel", "dinner", "swag", "lunch", "promote", "signal", "accept" },
             view.Steps.Select(s => s.Key).ToArray());
-        Assert.Equal("lunch", view.Steps[4].Key);
+        Assert.Equal("lunch", view.Steps[5].Key);
     }
 
     [Fact]
     public async Task Completion_is_detected_from_persisted_data()
     {
         var (db, ev, pid) = await SeedSpeakerAsync(OrderItem.Hotel, OrderItem.LunchMainDay);
-        // Hotel done; details not done (no profile bio).
+        // Hotel done; calendar + details not done (no profile markers).
         db.HotelBookings.Add(new HotelBooking { EventId = ev, ParticipantId = pid, NeedsRoom = true });
         await db.SaveChangesAsync();
 
         var view = await Wizard(db).BuildAsync(ev, pid);
 
         Assert.True(view.Steps.Single(s => s.Key == "hotel").Done);
+        Assert.False(view.Steps.Single(s => s.Key == "calendar").Done);
         Assert.False(view.Steps.Single(s => s.Key == "details").Done);
-        // 8 entitled steps now: details + hotel + lunch (entitled here) + the two
-        // always-on uploads (B3) + promote (§116) + signal (§109) + accept (§119).
-        // Only hotel is done.
-        Assert.Equal(8, view.EntitledCount);
+        // 7 entitled steps now: calendar (always) + details (always) + hotel + lunch
+        // (entitled) + promote (§116) + signal (§109) + accept (§119). Uploads + travel
+        // are no longer wizard steps. Only hotel is done.
+        Assert.Equal(7, view.EntitledCount);
         Assert.Equal(1, view.DoneCount);
-        Assert.Equal(12, view.Percent); // round(100/8) = 12 (banker's rounding of 12.5)
-        // Next incomplete step is Speaker Details (first in order).
-        Assert.Equal("details", view.NextStep!.Key);
+        Assert.Equal(14, view.Percent); // round(100/7) = 14
+        // Next incomplete step is Calendar email (now first in order).
+        Assert.Equal("calendar", view.NextStep!.Key);
         Assert.False(view.AllDone);
     }
 
@@ -155,8 +161,8 @@ public sealed class SpeakerWizardServiceTests
     {
         var (db, ev, pid) = await SeedSpeakerAsync(OrderItem.Hotel, OrderItem.LunchMainDay);
         // Organizer-funded profile adds NO speaker-hat entitlements, so the only
-        // entitled steps are Speaker Details (always) + the Hotel + Lunch overrides + the
-        // two always-on presentation uploads (B3).
+        // entitled steps are Calendar email + Speaker Details (always) + the Hotel +
+        // Lunch overrides + promote + signal + accept.
         db.SpeakerProfiles.Add(new SpeakerProfile
         {
             EventId = ev, ParticipantId = pid, Biography = "Hi, I speak.",
@@ -164,27 +170,15 @@ public sealed class SpeakerWizardServiceTests
             // P13: details is "done" only once the SPEAKER has edited it (the
             // speaker-edit marker), not merely from an imported biography.
             BioLastEditedBySpeakerAt = new DateTimeOffset(2026, 6, 1, 0, 0, 0, TimeSpan.Zero),
+            // §141: the calendar step is done once the speaker has SAVED it (the
+            // CalendarEmailSetAt marker), even though the address itself is left blank.
+            CalendarEmailSetAt = new DateTimeOffset(2026, 6, 1, 0, 0, 0, TimeSpan.Zero),
         });
         db.HotelBookings.Add(new HotelBooking { EventId = ev, ParticipantId = pid, NeedsRoom = false });
         // §62: lunch is now an always-on step for every speaker, so AllDone requires a
         // persisted lunch signup too.
         db.LunchSignups.Add(new LunchSignup { EventId = ev, ParticipantId = pid, LunchPreDay = true });
-        // B3: the two upload steps complete only when their speakerdl: tasks are Done.
         db.Tasks.AddRange(
-            new ParticipantTask
-            {
-                EventId = ev, AssignedParticipantId = pid,
-                Title = "Upload preview presentation",
-                SourceKey = $"speakerdl:{pid}:upload-preview-presentation",
-                State = TaskState.Done,
-            },
-            new ParticipantTask
-            {
-                EventId = ev, AssignedParticipantId = pid,
-                Title = "Upload final presentation",
-                SourceKey = $"speakerdl:{pid}:upload-final-presentation",
-                State = TaskState.Done,
-            },
             // §116 promote + §109 signal: manual mark-done tasks, completed here.
             new ParticipantTask
             {

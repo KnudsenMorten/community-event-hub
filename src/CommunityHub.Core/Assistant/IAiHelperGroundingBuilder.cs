@@ -69,15 +69,18 @@ public sealed class AiHelperGroundingBuilder : IAiHelperGroundingBuilder
     private readonly IAiHelperContentProvider _content;
     private readonly IAiHelperOwnDataProvider _ownData;
     private readonly IAiHelperOrganizerOpsProvider? _organizerOps;
+    private readonly IAiHelperPublicInfoProvider? _publicInfo;
 
     public AiHelperGroundingBuilder(
         IAiHelperContentProvider content,
         IAiHelperOwnDataProvider ownData,
-        IAiHelperOrganizerOpsProvider? organizerOps = null)
+        IAiHelperOrganizerOpsProvider? organizerOps = null,
+        IAiHelperPublicInfoProvider? publicInfo = null)
     {
         _content = content;
         _ownData = ownData;
         _organizerOps = organizerOps;
+        _publicInfo = publicInfo;
     }
 
     public async Task<AiHelperContext> BuildAsync(
@@ -98,6 +101,18 @@ public sealed class AiHelperGroundingBuilder : IAiHelperGroundingBuilder
         // (2) The participant's OWN data (own rows only; provider filters by id).
         var own = await _ownData.GetOwnDataAsync(eventId, participantId, role, ct);
         sections.AddRange(own.Where(s => !string.IsNullOrWhiteSpace(s.Body)));
+
+        // (2b) PUBLIC info for EVERY role (REQUIREMENTS §149): published speakers + their
+        // skills + sessions, the session programme, and the event schedule / key times
+        // (doors open, lunch, party, dinner). Added for ALL roles — UNLIKE the organizer
+        // ops below, there is no role gate, because this is public, non-personal info the
+        // operator wants anyone to be able to ask about. The provider itself enforces the
+        // speaker publish HARD GATE, so no unselected speaker can leak.
+        if (_publicInfo is not null)
+        {
+            var pub = await _publicInfo.GetPublicInfoAsync(eventId, ct);
+            sections.AddRange(pub.Where(s => !string.IsNullOrWhiteSpace(s.Body)));
+        }
 
         // (3) ORGANIZER-ONLY ops aggregates (REQUIREMENTS §133). THE GATE: keyed on the
         // SERVER-resolved role, in this retrieval layer — never the prompt. A non-organizer

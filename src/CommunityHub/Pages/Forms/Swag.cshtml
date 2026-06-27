@@ -10,7 +10,7 @@
     @if (Model.AccessDenied)
     {
         <p class="error">
-            @Localizer["Swag.AccessDenied", CommunityHub.Branding.RoleDisplay.Name(Model.Role)]
+            @Localizer["Swag.AccessDenied", CommunityHub.Branding.RoleDisplay.Name(Model.Form.Role)]
         </p>
         <p><a asp-page="/Index">@Localizer["Common.BackToHub"]</a></p>
     }
@@ -19,49 +19,17 @@
         <p>@Localizer["Swag.Intro"]</p>
 
         @* Shared success toast (REQUIREMENTS §21): role=status, auto-dismiss, dismissable. *@
-        <partial name="_Flash" model='new CommunityHub.Pages.Shared.FlashModel(Model.Message, "success")' />
+        <partial name="_Flash" model='new CommunityHub.Pages.Shared.FlashModel(Model.Form.Message, "success")' />
 
         <form method="post">
+            @* Shared inline-validation summary + per-field messages (§21). *@
+            <div asp-validation-summary="All" class="ceh-validation-summary"></div>
 
-        @* Shared inline-validation summary + per-field messages (§21). *@
-        <div asp-validation-summary="All" class="ceh-validation-summary"></div>
-
-        <label for="SwagName">@Localizer["Common.Name"]</label>
-        <input type="text" id="SwagName" value="@Model.FullName" readonly />
-
-        <label for="SwagEmail">@Localizer["Common.Email"]</label>
-        <input type="text" id="SwagEmail" value="@Model.Email" readonly />
-
-        <label for="PoloChoice">@Localizer["Swag.PoloSize"]</label>
-        <select asp-for="PoloChoice" required>
-            <option value="">@Localizer["Swag.PickSize"]</option>
-            @foreach (var size in CommunityHub.Pages.Forms.SwagModel.PoloSizes)
-            {
-                <option value="@size">@size</option>
-            }
-        </select>
-        <span asp-validation-for="PoloChoice" class="ceh-field-error"></span>
-
-        <fieldset style="border:0;padding:0;margin:0;">
-            <legend style="font-weight:600;font-size:14px;margin-top:10px;">@Localizer["Swag.ExtrasLegend"]</legend>
-            <div style="display:flex; flex-direction:column; gap:6px; margin:6px 0 14px;">
-                <label style="font-weight:normal; display:flex; align-items:center; gap:8px;">
-                    <input type="checkbox" asp-for="WantsGift" style="width:auto;margin:0;" />
-                    @Localizer["Swag.WantsGift"]
-                </label>
-                <label style="font-weight:normal; display:flex; align-items:center; gap:8px;">
-                    <input type="checkbox" asp-for="WantsCredlyBadge" style="width:auto;margin:0;" />
-                    @Localizer["Swag.WantsCredly"]
-                </label>
-            </div>
-        </fieldset>
-
-        <label for="Notes">@Localizer["Common.NotesOptional"]</label>
-        <textarea asp-for="Notes" rows="3"
-                  placeholder="@Localizer["Swag.NotesPlaceholder"]"></textarea>
+            @* The swag fields are the SAME partial the inline wizard step renders. *@
+            <partial name="_SwagFields" model="Model.Form" />
 
             <button type="submit">@Localizer["Swag.Save"]</button>
-            <partial name="_LastSaved" model="Model.LastSavedAt" />
+            <partial name="_LastSaved" model="Model.Form.LastSavedAt" />
         </form>
 
         <p style="color:#6b7280;font-size:12px;margin-top:14px;">

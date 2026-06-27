@@ -1,0 +1,32 @@
+@model CommunityHub.Forms.Steps.PromoteFormModel
+@*
+    Fields-ONLY partial for the Promote step (REQUIREMENTS §148 / §116).
+    Contains NO <form>, no toggle button, no page chrome (h1/card), no Back-to-hub link —
+    the HOST (the standalone /Speaker/Promote page OR the generic /Forms/Wizard shell) owns
+    those and places this partial inside its single form. Mobile-first. Promote has no
+    editable inputs (it is a MANUAL "mark done" step), so this is purely informational.
+    Bound to CommunityHub.Forms.Steps.PromoteFormModel.
+*@
+
+<p>Help us spread the word! Promote your session(s) on LinkedIn and tag
+   <strong>@CommunityHub.Forms.Steps.PromoteFormModel.Hashtags</strong>.</p>
+
+@if (Model.Done)
+{
+    <p class="success" role="status">✅ You've marked this step complete. Thank you!</p>
+}
+
+<p>The best way is to publish your released session graphic straight from your
+   <a asp-page="/Speaker/Graphics">SoMe graphics page</a> — it builds a LinkedIn
+   draft (and can publish to the event's LinkedIn page) with the correct tags.</p>
+
+<div style="display:flex;flex-direction:column;gap:10px;margin:16px 0;">
+    <a asp-page="/Speaker/Graphics" class="btn-primary" style="text-align:center;">Open my SoMe graphics &amp; publish</a>
+    <a href="@Model.LinkedInShareUrl" target="_blank" rel="noopener" class="btn-primary" style="text-align:center;">Share on LinkedIn</a>
+</div>
+
+<p style="font-size:13px;color:#6b7280;">
+    Note: a prefilled LinkedIn share can only carry the link; add your own words
+    and the tags @CommunityHub.Forms.Steps.PromoteFormModel.Hashtags. For a graphic +
+    generated post text, use the SoMe graphics page above.
+</p>

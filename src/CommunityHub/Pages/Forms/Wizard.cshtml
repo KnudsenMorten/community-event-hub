@@ -1,0 +1,119 @@
+@page
+@model CommunityHub.Pages.Forms.WizardModel
+@{
+    ViewData["Title"] = Localizer["Wizard.Title"].Value;
+
+    // Step label/description per key (prefix differs per wizard service: SpeakerWiz / RoleWiz).
+    string StepTitle(string key) => Model.Plan is null ? key : Localizer[Model.Plan.ResxPrefix + ".Step." + key].Value;
+    string StepDesc(string key) => Model.Plan is null ? "" : Localizer[Model.Plan.ResxPrefix + ".Step." + key + ".Desc"].Value;
+}
+
+<div class="card" style="max-width:640px;margin:0 auto;">
+    <h1>@Localizer["Wizard.Title"]</h1>
+
+    @if (Model.AccessDenied)
+    {
+        <p class="error">@Localizer["SpeakerForm.AccessDenied", Model.FullName]</p>
+        <p><a asp-page="/Index">@Localizer["Common.BackToHub"]</a></p>
+    }
+    else if (Model.NothingToDo)
+    {
+        <p class="info">@Localizer["Wizard.Nothing"]</p>
+        <p><a asp-page="/Index">@Localizer["Common.BackToHub"]</a></p>
+    }
+    else if (Model.ShowAllDone || Model.Plan is null || Model.CurrentStep is null)
+    {
+        <p class="success" style="font-size:16px;">🎉 @Localizer["Wizard.AllDone"]</p>
+        <p><a asp-page="/Index" class="btn-primary">@Localizer["Wizard.GoToHub"]</a></p>
+    }
+    else
+    {
+        var plan = Model.Plan;
+        var step = Model.CurrentStep!;
+
+        @* Progress: "{done} of {total} steps done" + percent + bar (reused chrome). *@
+        <div style="margin:14px 0;">
+            <div style="display:flex;justify-content:space-between;font-size:13px;color:#4b5563;margin-bottom:4px;">
+                <span>@Localizer["SpeakerWiz.Progress", plan.DoneCount, plan.EntitledCount]</span>
+                <span>@plan.Percent%</span>
+            </div>
+            <div style="height:10px;background:#eef2f7;border-radius:999px;overflow:hidden;" role="progressbar"
+                 aria-valuenow="@plan.Percent" aria-valuemin="0" aria-valuemax="100">
+                <div style="height:100%;width:@(plan.Percent)%;background:var(--el-blue,#008BD2);border-radius:999px;"></div>
+            </div>
+        </div>
+
+        @* Step breadcrumb chips (cheap, scrollable on phones). Completed steps are revisitable. *@
+        <div style="display:flex;gap:6px;overflow-x:auto;padding-bottom:6px;margin-bottom:6px;-webkit-overflow-scrolling:touch;">
+            @{ var i = 0; }
+            @foreach (var s in plan.Steps)
+            {
+                var isCurrent = i == Model.CurrentIndex;
+                var bg = isCurrent ? "var(--el-blue,#008BD2)" : (s.Done ? "#dcfce7" : "#eef2f7");
+                var fg = isCurrent ? "#fff" : (s.Done ? "#166534" : "#4b5563");
+                <a asp-page="/Forms/Wizard" asp-route-step="@s.Key"
+                   title="@StepTitle(s.Key)"
+                   style="flex:0 0 auto;font-size:12px;padding:4px 10px;border-radius:999px;text-decoration:none;background:@bg;color:@fg;white-space:nowrap;">
+                    @(s.Done ? "✓ " : "")@StepTitle(s.Key)
+                </a>
+                i++;
+            }
+        </div>
+
+        <p style="font-size:13px;color:#6b7280;margin:0 0 4px;">
+            @Localizer["Wizard.StepXofN", Model.CurrentStepNumber, plan.EntitledCount]
+        </p>
+        <h2 style="margin:0 0 2px;font-size:20px;">@StepTitle(step.Key)</h2>
+        <p class="muted" style="font-size:13px;margin:0 0 12px;">@StepDesc(step.Key)</p>
+
+        <form method="post">
+            <div asp-validation-summary="All" class="ceh-validation-summary"></div>
+
+            @if (Model.CurrentHandler is not null)
+            {
+                <partial name="@Model.CurrentHandler.PartialName" model="@Model.CurrentHandler.Model" />
+            }
+            else
+            {
+                @* No inline handler registered for this step yet (rollout window) → open the
+                   standalone page; the buttons below still let the participant move on. *@
+                <p class="info" style="background:#eef6ff;padding:10px 14px;border-radius:6px;font-size:14px;">
+                    <a asp-page="@step.Route" class="btn-primary">@StepTitle(step.Key)</a>
+                </p>
+            }
+
+            <input type="hidden" name="__step" value="@step.Key" />
+
+            @* Sticky mobile-first button bar. *@
+            <div style="position:sticky;bottom:0;background:#fff;border-top:1px solid #e6eaf2;display:flex;gap:10px;justify-content:space-between;padding:12px 0;margin-top:16px;">
+                @if (!Model.IsFirstStep)
+                {
+                    <button type="submit" name="__dir" value="prev" formnovalidate
+                            style="flex:0 0 auto;">@Localizer["Wizard.Previous"]</button>
+                }
+                else
+                {
+                    <span></span>
+                }
+
+                @if (Model.CurrentHandler is null)
+                {
+                    <button type="submit" name="__dir" value="next" class="btn-primary"
+                            style="flex:0 0 auto;">@Localizer["Wizard.Skip"]</button>
+                }
+                else if (Model.IsLastStep)
+                {
+                    <button type="submit" name="__dir" value="next" class="btn-primary"
+                            style="flex:0 0 auto;">@Localizer["Wizard.Finish"]</button>
+                }
+                else
+                {
+                    <button type="submit" name="__dir" value="next" class="btn-primary"
+                            style="flex:0 0 auto;">@Localizer["Wizard.Next"]</button>
+                }
+            </div>
+        </form>
+
+        <p style="margin-top:10px;"><a asp-page="/Index">@Localizer["Common.BackToHub"]</a></p>
+    }
+</div>

@@ -1,0 +1,85 @@
+@using CommunityHub.Core.Domain
+@using CommunityHub.Pages.Shared
+@model TaskListPanelView
+@*
+    §147: the ONE shared task-list rendering used by all three task pages
+    (volunteer/media/eventpartner /Tasks, /Speaker/Tasks, /Sponsor/Tasks). It renders,
+    in this fixed order so every role reads identically:
+
+      1. a COMPLETION header — "X of N done" + a percent + a progress bar. This is the
+         ParticipantTask-completion measure (§147), labelled "Task checklist" so it is
+         clearly DISTINCT from the speaker readiness (§144) / sponsor deliverables (§145)
+         rollup card the page renders ABOVE it.
+      2. PENDING tasks at the TOP (overdue first), each via the per-role row partial.
+      3. COMPLETED tasks at the BOTTOM, collapsed in a <details>, each via the same
+         per-role row partial.
+
+    Every task is rendered ONCE (the page must NOT also render the shared _ChecklistCard
+    — that was the duplicate the unify removed). The per-row markup is delegated to
+    Model.RowPartialName so a role can vary its own row (sponsor: Optional badge + .ics)
+    while this structure + the maths stay shared.
+*@
+@{
+    var c = Model.Completion;
+}
+
+<style>
+    /* Self-contained so the panel looks identical wherever it renders. Mobile-first. */
+    .ceh-tasklist .tl-head { margin:6px 0 16px; }
+    .ceh-tasklist .tl-score { display:flex; flex-wrap:wrap; align-items:baseline; gap:6px 12px; }
+    .ceh-tasklist .tl-pct { font-size:34px; font-weight:800; color:var(--el-darkblue); line-height:1; }
+    .ceh-tasklist .tl-of { font-size:15px; color:#4b5563; }
+    .ceh-tasklist .tl-label { font-size:13px; font-weight:700; letter-spacing:.02em; text-transform:uppercase; color:#6b7280; flex-basis:100%; margin-bottom:2px; }
+    .ceh-tasklist .tl-progress-wrap { background:#eef0f4; border-radius:999px; height:14px; overflow:hidden; margin:12px 0 4px; }
+    .ceh-tasklist .tl-progress-bar { height:100%; border-radius:999px; transition:width .3s ease; background:#0a6; }
+    .ceh-tasklist .tl-alldone { background:#0a6; color:#fff; border-radius:999px; padding:2px 12px; font-size:13px; font-weight:700; white-space:nowrap; }
+    .ceh-tasklist .tl-section { margin:18px 0 8px; color:var(--el-darkblue); }
+</style>
+
+<div class="ceh-tasklist">
+    @* 1. Completion % header — distinct from the readiness/deliverables card above. *@
+    <div class="tl-head">
+        <div class="tl-score">
+            <span class="tl-label">@Localizer["TaskList.ProgressHeading"]</span>
+            <span class="tl-pct">@c.Percent%</span>
+            <span class="tl-of">&middot; @Localizer["TaskList.Summary", c.Done, c.Total]</span>
+            @if (c.AllDone)
+            {
+                <span class="tl-alldone">@Localizer["TaskList.AllDone"] &#127881;</span>
+            }
+        </div>
+        <div class="tl-progress-wrap" role="progressbar"
+             aria-valuenow="@c.Percent" aria-valuemin="0" aria-valuemax="100"
+             aria-label="@Localizer["TaskList.ProgressAria", c.Percent]">
+            <div class="tl-progress-bar" style="width:@(c.Percent)%;"></div>
+        </div>
+    </div>
+
+    @* 2. PENDING at the top (overdue first). *@
+    <h3 class="tl-section">@Localizer["TaskList.Pending", Model.Pending.Count]</h3>
+    @if (Model.Pending.Count == 0)
+    {
+        <p style="color:#1f6d3a;">@Localizer["TaskList.AllCaughtUp"] &#127881;</p>
+    }
+    @foreach (var task in Model.Pending)
+    {
+        @await Html.PartialAsync(Model.RowPartialName, task)
+    }
+
+    @* 3. COMPLETED at the bottom, collapsed. *@
+    @if (Model.Completed.Count > 0)
+    {
+        <details style="margin-top:14px;padding-top:4px;">
+            <summary style="font-size:18px;font-weight:700;color:var(--el-darkblue);cursor:pointer;">
+                @Localizer["TaskList.Completed", Model.Completed.Count]
+                <span style="font-size:13px;font-weight:400;color:#666;margin-left:6px;">@Localizer["TaskList.ClickToExpand"]</span>
+            </summary>
+            <div style="margin-top:8px;">
+                @foreach (var task in Model.Completed)
+                {
+                    @await Html.PartialAsync(Model.RowPartialName, task)
+                }
+            </div>
+        </details>
+    }
+</div>

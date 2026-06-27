@@ -858,6 +858,9 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
             e.Property(x => x.Gender).HasMaxLength(40);
             // 320 = max RFC 5321 email length. Nullable: blank = no override.
             e.Property(x => x.ContactEmailOverride).HasMaxLength(320);
+            // Calendar-specific email override (wizard step 1). 320 = max RFC 5321
+            // email length. Nullable: blank = no calendar override.
+            e.Property(x => x.CalendarEmail).HasMaxLength(320);
             e.Property(x => x.Tagline).HasMaxLength(500);
             e.Property(x => x.Biography).HasMaxLength(4000);
             e.Property(x => x.Blog).HasMaxLength(500);

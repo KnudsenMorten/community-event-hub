@@ -1,0 +1,91 @@
+@using CommunityHub.Core.Domain
+@using CommunityHub.Core.Volunteers
+@model CommunityHub.Forms.Steps.VolunteerAvailabilityFormModel
+@*
+    Fields-ONLY partial for the volunteer "My Availability" step (REQUIREMENTS §148).
+    Contains NO <form>, no Notice banner, no Save button, no "Back to …" link — the HOST
+    (the standalone /volunteer/availability page OR the generic /Forms/Wizard shell) owns
+    those and places this partial inside its single <form method="post">. Mobile-first.
+    Bound to CommunityHub.Forms.Steps.VolunteerAvailabilityFormModel; input names stay flat
+    (Inputs[i].Day / Inputs[i].Slot / Inputs[i].Note) so model binding is unchanged across
+    the standalone page and the wizard.
+*@
+
+<style>
+    .av-intro { color:#374151; font-size:14px; margin:0 0 16px; line-height:1.5; }
+    .av-day { background:#f6f8fb; border-radius:8px; padding:14px 16px; margin:12px 0; }
+    .av-day h3 { margin:0 0 10px; font-size:15.5px; color:var(--el-darkblue,#1D3380); }
+    .av-opts { display:flex; flex-wrap:wrap; gap:8px; margin:0 0 10px; }
+    .av-opt { flex:1 1 150px; min-width:0; }
+    .av-opt input { position:absolute; opacity:0; pointer-events:none; }
+    .av-opt label { display:block; cursor:pointer; border:1.5px solid #c4c8d4; border-radius:8px;
+        padding:10px 12px; font-size:13.5px; background:#fff; box-sizing:border-box; text-align:center; }
+    .av-opt label .av-pct { display:block; font-weight:700; color:var(--el-darkblue,#1D3380); font-size:14px; }
+    .av-opt label .av-sub { display:block; color:#6e7681; font-size:12px; margin-top:2px; }
+    .av-opt input:checked + label { border-color:#008BD2; background:#e6f4fb; box-shadow:0 0 0 1px #008BD2 inset; }
+    .av-opt input:focus-visible + label { outline:2px solid #1D3380; outline-offset:2px; }
+    .av-note { width:100%; box-sizing:border-box; padding:10px 12px; font-size:14px;
+        border:1px solid #c4c8d4; border-radius:6px; font-family:inherit;
+        min-height:60px; resize:vertical; line-height:1.45; }
+    .av-note-lbl { display:block; font-size:12.5px; color:#6e7681; margin:0 0 4px; }
+    .av-actions { margin-top:18px; }
+    .av-actions button { background:#008BD2; color:#fff; border:0; border-radius:8px;
+        padding:12px 24px; font-size:15px; font-weight:600; cursor:pointer; }
+    .av-note-saved { background:#f0fdf4; border-left:4px solid #16a34a; padding:10px 12px;
+        border-radius:6px; margin-bottom:14px; font-size:13.5px; color:#166534; }
+    .av-opt input:disabled + label { opacity:.4; cursor:not-allowed; }
+    @@media (max-width: 600px) { .av-opt { flex:1 1 100%; } }
+</style>
+
+<p class="av-intro">
+    Tell us how much you can help on each day. Some volunteers work the whole day,
+    others split their time (helping for part of it and attending sessions the rest),
+    and some days you may not be available to work at all. We use this to schedule
+    your shifts fairly — you will only be assigned tasks inside your available windows.
+    You can update this any time.
+</p>
+
+@if (Model.Days.Count == 0)
+{
+    <p style="color:#888;font-style:italic;">No event days are configured yet. Please check back later.</p>
+}
+else
+{
+    @for (var i = 0; i < Model.Days.Count; i++)
+    {
+        var d = Model.Days[i];
+        var opts = VolunteerDayOptions.For(d.Day);
+        var selected = VolunteerDayOptions.Resolve(d.Day, d.Level, d.RawNote);
+        <div class="av-day" data-av-day>
+            <h3>@d.Label</h3>
+            <input type="hidden" name="Inputs[@i].Day" value="@d.Day.ToString("yyyy-MM-dd")" />
+            <div class="av-opts">
+                @for (var j = 0; j < opts.Count; j++)
+                {
+                    var o = opts[j];
+                    <div class="av-opt">
+                        <input type="radio" id="d@(i)_@j" name="Inputs[@i].Slot"
+                               value="@o.Slot" data-exclusive="@(o.IsExclusive ? "1" : "0")"
+                               checked="@(o.Slot == selected.Slot)" />
+                        <label for="d@(i)_@j"><span class="av-pct">@o.Title</span>@if (o.Sub is not null) {<span class="av-sub">@o.Sub</span>}</label>
+                    </div>
+                }
+            </div>
+            <label class="av-note-lbl" for="d@(i)_note">Note (optional) — e.g. which hours you need free</label>
+            <textarea class="av-note" id="d@(i)_note" name="Inputs[@i].Note" rows="2"
+                      maxlength="500" placeholder="e.g. blocked 13:00–15:00 for a session I want to attend">@d.UserNote</textarea>
+        </div>
+    }
+    <p style="font-size:13px;color:#6e7681;margin:18px 0 8px;">
+        📧 When you click <strong>Save</strong>, your availability is emailed to
+        Morten Leth (<a href="mailto:mlh@expertslive.dk">mlh@expertslive.dk</a>)
+        so we can plan the schedule.
+    </p>
+}
+
+@* Per-day availability exclusivity (REQUIREMENTS §45): every option for a day is a
+   radio that shares the SAME name (Inputs[i].Slot), so the browser already enforces
+   "exactly one per day" natively — choosing any option deselects its siblings. NO
+   client-side disabling is applied (an earlier version disabled siblings whenever an
+   EXCLUSIVE option was selected, which LOCKED the day on its default). Native radio
+   grouping is the whole mechanism. *@

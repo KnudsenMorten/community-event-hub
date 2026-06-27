@@ -1,0 +1,65 @@
+@model CommunityHub.Forms.Steps.LunchFormModel
+@*
+    Fields-ONLY partial for the Lunch step (REQUIREMENTS §148).
+    Contains NO <form>, no validation summary, no flash, no Save button, no
+    Back-to-hub link — the HOST (the standalone /Forms/Lunch page OR the generic
+    /Forms/Wizard shell) owns those and places this partial inside its single
+    <form method="post">. Mobile-first. Bound to CommunityHub.Forms.Steps.LunchFormModel;
+    input names stay flat (LunchEarlySetupDay / LunchSetupDay / LunchPreDay / Notes) so
+    model binding (empty prefix) is unchanged between the page and the wizard.
+*@
+
+<label for="LunchName">@Localizer["Common.Name"]</label>
+<input type="text" id="LunchName" value="@Model.FullName" readonly />
+
+<label for="LunchEmail">@Localizer["Common.Email"]</label>
+<input type="text" id="LunchEmail" value="@Model.Email" readonly />
+
+<fieldset style="border:0;padding:0;margin:0;">
+    <legend style="font-weight:600;font-size:14px;margin-top:10px;">@Localizer["Lunch.WhichLegend"]</legend>
+    @if (Model.ShowSetupDay)
+    {
+        <label style="font-weight:normal; display:flex; align-items:flex-start; gap:8px; margin-top:8px;">
+            <input type="checkbox" asp-for="LunchEarlySetupDay" style="width:auto;margin:5px 0 0;" />
+            <span>
+                <strong>@Localizer["Lunch.SetupDay", Model.EarlySetupDayLabel]</strong>
+            </span>
+        </label>
+        <label style="font-weight:normal; display:flex; align-items:flex-start; gap:8px; margin-top:8px;">
+            <input type="checkbox" asp-for="LunchSetupDay" style="width:auto;margin:5px 0 0;" />
+            <span>
+                <strong>@Localizer["Lunch.SetupDay", Model.SetupDayLabel]</strong>
+            </span>
+        </label>
+    }
+
+    @if (Model.ShowPreDay)
+    {
+        @* PRE-DAY lunch is a REQUIRED Yes/No choice (operator §62): a checkbox can't
+           be counted (unchecked == no == not-answered), so submit must always record
+           an explicit answer. *@
+        <div style="margin:8px 0 14px;">
+            <p style="font-weight:normal;margin:8px 0 6px;">
+                <strong>@Localizer["Lunch.PreDayQuestion", Model.PreDayLabel]</strong>
+            </p>
+            <label style="font-weight:normal; display:block; margin:6px 0;">
+                <input type="radio" asp-for="LunchPreDay" value="true" required />
+                @Localizer["Common.Yes"]
+            </label>
+            <label style="font-weight:normal; display:block; margin:6px 0;">
+                <input type="radio" asp-for="LunchPreDay" value="false" required />
+                @Localizer["Common.No"]
+            </label>
+            <span asp-validation-for="LunchPreDay" class="ceh-field-error"></span>
+        </div>
+    }
+    else if (Model.PreDayAutoCounted)
+    {
+        <p style="color:#15803d;font-size:13px;margin:8px 0 14px;">
+            ✓ Your <strong>pre-day / Master Class lunch</strong> is automatically counted — no need to tick it.
+        </p>
+    }
+</fieldset>
+
+<label for="Notes">@Localizer["Lunch.NotesLabel"]</label>
+<textarea asp-for="Notes" rows="3"></textarea>

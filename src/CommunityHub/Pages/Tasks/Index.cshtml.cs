@@ -19,38 +19,33 @@ public class IndexModel : PageModel
     private readonly CommunityHubDbContext _db;
     private readonly ICurrentParticipantAccessor _participant;
     private readonly TimeProvider _clock;
-    private readonly CommunityHub.Core.Participants.ParticipantChecklistBuilder _checklist;
+    private readonly CommunityHub.Core.Participants.FormTaskReconciler _reconciler;
 
     public IndexModel(
         CommunityHubDbContext db,
         ICurrentParticipantAccessor participant,
         TimeProvider clock,
-        CommunityHub.Core.Participants.ParticipantChecklistBuilder checklist)
+        CommunityHub.Core.Participants.FormTaskReconciler reconciler)
     {
         _db = db;
         _participant = participant;
         _clock = clock;
-        _checklist = checklist;
+        _reconciler = reconciler;
     }
 
     public List<ParticipantTask> Tasks { get; private set; } = new();
-
-    /// <summary>
-    /// The unified "what's still needed" checklist (REQUIREMENTS Top-8 #7) — the
-    /// SAME shared component the Hub home and attendee My-event render, so the
-    /// Tasks page no longer competes as a separate landing surface. Built by the
-    /// shared <see cref="CommunityHub.Core.Participants.ParticipantChecklistBuilder"/>.
-    /// </summary>
-    public CommunityHub.Core.Participants.ParticipantChecklist Checklist { get; private set; } =
-        new(System.Array.Empty<CommunityHub.Core.Participants.ChecklistRow>(),
-            System.Array.Empty<CommunityHub.Core.Participants.ChecklistRow>());
 
     public async Task<IActionResult> OnGetAsync(CancellationToken ct)
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
 
-        Checklist = await _checklist.BuildAsync(me.EventId, me.ParticipantId, ct);
+        // §147: the page renders ONE unified task list (shared _TaskListPanel) — no
+        // longer the shared _ChecklistCard too — so tasks appear once. We still run the
+        // reconciler here (the side-effect the old checklist build provided) so tasks
+        // whose form data is already submitted show as Done. Idempotent; no-op when
+        // nothing changed.
+        await _reconciler.ReconcileAsync(me.EventId, me.ParticipantId, ct);
 
         Tasks = await _db.Tasks
             .Where(t => t.EventId == me.EventId

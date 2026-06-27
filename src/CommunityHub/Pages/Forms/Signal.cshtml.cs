@@ -1,61 +1,54 @@
 using CommunityHub.Auth;
-using CommunityHub.Core.Config;
-using CommunityHub.Core.Data;
-using CommunityHub.Core.Domain;
-using CommunityHub.Forms;
+using CommunityHub.Forms.Steps;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
-using Microsoft.EntityFrameworkCore;
 
 namespace CommunityHub.Pages.Forms;
 
 /// <summary>
-/// "Join Signal groups" Get-Started step (REQUIREMENTS §109). Renders the
-/// role-appropriate Signal chat + broadcast invite buttons (from
-/// config/signal-groups.&lt;edition&gt;.json) and a MANUAL "mark completed" control —
-/// joining is external, so completion is a manual mark-done, exactly like the upload
-/// tasks. Completion is tracked on a per-participant <c>signal:</c>
-/// <see cref="ParticipantTask"/> so it also surfaces in the participant's task list /
-/// reminders. Only roles in scope per the config see the step (Speakers, Volunteers,
-/// Event Partners get chat+broadcast; Media gets broadcast only).
+/// "Join Signal groups" Get-Started step (REQUIREMENTS §109). Renders the role-appropriate
+/// Signal chat + broadcast invite buttons (from config/signal-groups.&lt;edition&gt;.json) and a
+/// MANUAL "mark completed" toggle — joining is external, so completion is a manual mark-done,
+/// exactly like the upload tasks. Completion is tracked on a per-participant <c>signal:</c>
+/// <see cref="CommunityHub.Core.Domain.ParticipantTask"/> so it also surfaces in the
+/// participant's task list / reminders.
+///
+/// <para>REQUIREMENTS §148: this standalone page is now a thin SHELL — it renders the shared
+/// <c>_SignalFields</c> partial and delegates load + the on/off toggle to
+/// <see cref="SignalFormService"/>. The SAME service backs the inline wizard step
+/// (<c>SignalStepHandler</c>, whose Save&amp;next acts as mark-done), so the standalone page and
+/// the wizard behave identically. The page is still deep-linked from My Tasks / emails, so its
+/// behavior is unchanged.</para>
 /// </summary>
 [Authorize]
 public class SignalModel : PageModel
 {
-    private readonly CommunityHubDbContext _db;
+    private readonly SignalFormService _signal;
     private readonly ICurrentParticipantAccessor _participant;
-    private readonly SignalGroupsProvider _signal;
-    private readonly TimeProvider _clock;
 
-    public SignalModel(
-        CommunityHubDbContext db,
-        ICurrentParticipantAccessor participant,
-        SignalGroupsProvider signal,
-        TimeProvider clock)
+    public SignalModel(SignalFormService signal, ICurrentParticipantAccessor participant)
     {
-        _db = db;
-        _participant = participant;
         _signal = signal;
-        _clock = clock;
+        _participant = participant;
     }
 
-    public bool OutOfScope { get; private set; }
-    public SignalGroupLinks? Links { get; private set; }
-    public bool Done { get; private set; }
+    /// <summary>The shared render model rendered by the <c>_SignalFields</c> partial —
+    /// identical to the inline wizard step.</summary>
+    public SignalFormModel Form { get; private set; } = new();
+
+    /// <summary>True when the role has no Signal groups (the "not relevant" view, no toggle).</summary>
+    public bool OutOfScope => Form.OutOfScope;
+
+    /// <summary>True once this step is marked complete (drives the toggle button label).</summary>
+    public bool Done => Form.Done;
 
     public async Task<IActionResult> OnGetAsync(CancellationToken ct)
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
 
-        Links = _signal.GetForRole(me.Role);
-        if (Links is null) { OutOfScope = true; return Page(); }
-
-        // Ensure the "Join Signal groups" task exists (idempotent) so it also shows in
-        // the participant's task list + reminders (§109 "AND a task"), then read state.
-        var task = await EnsureTaskAsync(me.EventId, me.ParticipantId, ct);
-        Done = task.State == TaskState.Done;
+        Form = await _signal.LoadAsync(me.EventId, me.ParticipantId, me.Role, ct);
         return Page();
     }
 
@@ -64,45 +57,8 @@ public class SignalModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (_signal.GetForRole(me.Role) is null) return RedirectToPage();
 
-        var task = await EnsureTaskAsync(me.EventId, me.ParticipantId, ct);
-        if (task.State == TaskState.Done)
-        {
-            task.State = TaskState.Open;
-            task.CompletedAt = null;
-        }
-        else
-        {
-            task.State = TaskState.Done;
-            task.CompletedAt = _clock.GetUtcNow();
-        }
-        await _db.SaveChangesAsync(ct);
+        await _signal.ToggleAsync(me.EventId, me.ParticipantId, me.Role, ct);
         return RedirectToPage();
-    }
-
-    private async Task<ParticipantTask> EnsureTaskAsync(int eventId, int participantId, CancellationToken ct)
-    {
-        var sourceKey = WizardStepTasks.Signal(participantId);
-        var task = await _db.Tasks.FirstOrDefaultAsync(
-            t => t.EventId == eventId && t.AssignedParticipantId == participantId
-                 && t.SourceKey == sourceKey, ct);
-        if (task is null)
-        {
-            task = new ParticipantTask
-            {
-                EventId = eventId,
-                AssignedParticipantId = participantId,
-                Title = "Join Signal groups",
-                Description = "Join the ELDK27 Signal chat + broadcast group, then mark this done.",
-                State = TaskState.Open,
-                IsMandatory = false,
-                SourceKey = sourceKey,
-                CreatedAt = _clock.GetUtcNow(),
-            };
-            _db.Tasks.Add(task);
-            await _db.SaveChangesAsync(ct);
-        }
-        return task;
     }
 }

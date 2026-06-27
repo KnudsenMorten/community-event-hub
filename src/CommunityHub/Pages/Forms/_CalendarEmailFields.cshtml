@@ -1,0 +1,21 @@
+@model CommunityHub.Forms.Steps.CalendarEmailFormModel
+@*
+    Fields-ONLY partial for the Calendar-email step (REQUIREMENTS §148).
+    Contains NO <form>, no page chrome, no Back link, no success toast — the HOST
+    (the standalone /Forms/CalendarEmail page OR the generic /Forms/Wizard shell) owns those
+    and places this partial inside its single <form method="post">. Mobile-first.
+    Bound to CommunityHub.Forms.Steps.CalendarEmailFormModel; the input name stays flat
+    (CalendarEmail) so model binding (empty prefix) is unchanged. The optional value is
+    validated as an email only when provided.
+*@
+<div style="display:flex;flex-direction:column;gap:6px;max-width:420px;margin:14px 0;">
+    <label for="CalendarEmail">Calendar email (optional)</label>
+    <input type="email" id="CalendarEmail" asp-for="CalendarEmail"
+           placeholder="@Model.PrimaryEmail"
+           autocomplete="email" inputmode="email"
+           style="width:100%;padding:10px;border:1px solid #cbd5e1;border-radius:8px;" />
+    <span asp-validation-for="CalendarEmail" class="error"></span>
+    <span class="muted" style="font-size:13px;">
+        Blank = calendar invites/notifications go to your primary email.
+    </span>
+</div>

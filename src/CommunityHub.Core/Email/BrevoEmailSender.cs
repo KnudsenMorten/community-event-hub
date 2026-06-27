@@ -268,12 +268,29 @@ public class BrevoEmailSender : IEmailSender
         CancellationToken cancellationToken = default)
         => SendAsync(toEmail, subject, htmlBody, cc: null, cancellationToken);
 
-    public async Task SendAsync(
+    public Task SendAsync(
         string toEmail,
         string subject,
         string htmlBody,
         IReadOnlyCollection<string>? cc,
         CancellationToken cancellationToken = default)
+        => SendInternalAsync(toEmail, subject, htmlBody, cc, replyTo: null, cancellationToken);
+
+    public Task SendAsync(
+        string toEmail,
+        string subject,
+        string htmlBody,
+        EmailReplyTo? replyTo,
+        CancellationToken cancellationToken = default)
+        => SendInternalAsync(toEmail, subject, htmlBody, cc: null, replyTo, cancellationToken);
+
+    private async Task SendInternalAsync(
+        string toEmail,
+        string subject,
+        string htmlBody,
+        IReadOnlyCollection<string>? cc,
+        EmailReplyTo? replyTo,
+        CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(toEmail))
         {
@@ -303,6 +320,9 @@ public class BrevoEmailSender : IEmailSender
             IsBodyHtml = true,
         };
         message.To.Add(actualTo);
+        // Optional Reply-To (e.g. the AiHelper asker) so a "Reply" reaches the person,
+        // not the From mailbox. Never ring-gated — it is a header, not a recipient.
+        AddReplyTo(message, replyTo);
         // Each CC is its own recipient ⇒ ring-gate it too (a known out-of-ring CC
         // is dropped before the allowlist; unknown CCs defer to the allowlist).
         AddCc(message, await RingFilterCcAsync(cc, cancellationToken));
@@ -311,6 +331,24 @@ public class BrevoEmailSender : IEmailSender
         AddOperatorBcc(message);
 
         await DispatchAsync(message, cancellationToken);
+    }
+
+    // Add an optional Reply-To header (name optional). A bad address is skipped
+    // (logged) rather than failing the send. This is a header, not a recipient,
+    // so it is intentionally not ring/allowlist filtered.
+    private void AddReplyTo(MailMessage message, EmailReplyTo? replyTo)
+    {
+        if (replyTo is null || string.IsNullOrWhiteSpace(replyTo.Email)) return;
+        try
+        {
+            message.ReplyToList.Add(string.IsNullOrWhiteSpace(replyTo.Name)
+                ? new MailAddress(replyTo.Email.Trim())
+                : new MailAddress(replyTo.Email.Trim(), replyTo.Name.Trim()));
+        }
+        catch (FormatException)
+        {
+            _log?.LogInformation("Email Reply-To skipped (bad format): {ReplyTo}", replyTo.Email);
+        }
     }
 
     /// <summary>
