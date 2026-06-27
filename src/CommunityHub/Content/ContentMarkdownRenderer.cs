@@ -50,8 +50,8 @@ public sealed class ContentMarkdownRenderer
 
     /// <summary>
     /// Read the slug's RAW markdown source (un-rendered), or null when the file is
-    /// missing. Used by Otto's grounding builder to feed the role-scoped content to
-    /// the assistant as plain text — the caller is responsible for the role-gate.
+    /// missing. Used by the AI Helper's grounding builder to feed the role-scoped content
+    /// to the assistant as plain text — the caller is responsible for the role-gate.
     /// </summary>
     public string? TryReadMarkdown(string slug)
     {

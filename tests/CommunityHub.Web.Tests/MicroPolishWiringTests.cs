@@ -76,8 +76,8 @@ public sealed class MicroPolishWiringTests
     }
 
     [Theory]
-    // Public attendee no-login forms.
-    [InlineData("Sessions", "Ask.cshtml")]
+    // Public attendee no-login forms. (Sessions/Ask is now an inert notice — 1:1 questions
+    // disabled per §136 — so it no longer carries a form/guards.)
     [InlineData("Sessions", "Evaluate.cshtml")]
     // Public volunteer application.
     [InlineData("Volunteer", "Signup.cshtml")]
@@ -94,7 +94,7 @@ public sealed class MicroPolishWiringTests
 
     [Theory]
     // Each of these has a free-text field that should carry a live char counter.
-    [InlineData("Sessions", "Ask.cshtml")]
+    // (Sessions/Ask dropped — 1:1 questions disabled (§136), no free-text field anymore.)
     [InlineData("Sessions", "Evaluate.cshtml")]
     // Volunteer/Signup dropped — the 3-step wizard has no prominent free-text field.
     [InlineData("Forms", "Speaker.cshtml")]

@@ -163,7 +163,7 @@ internal static class WebRepoPaths
     [
         Pages("Sponsor", "CaptureLead.cshtml"),
         Pages("Sessions", "Evaluate.cshtml"),
-        Pages("Sessions", "Ask.cshtml"),
+        // Sessions/Ask dropped — 1:1 questions disabled (§136), the page no longer has a counter field.
         Pages("Forms", "Speaker.cshtml"),
     ];
 }

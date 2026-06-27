@@ -126,8 +126,10 @@
             </div>
         }
 
+        @* §136 (operator 2026-06-27): the attendee 1:1 "Ask the speaker" link is removed.
+           Questions are handled in the per-Master-Class Group Q&A (for Master Class
+           attendees) or by contacting the organizers. *@
         @if ((s.Type == SessionType.MasterClass && !string.IsNullOrWhiteSpace(s.PublicSlug))
-             || !string.IsNullOrWhiteSpace(s.AskToken)
              || s.StartsAt is not null)
         {
             <div class="sd-section">
@@ -146,10 +148,6 @@
                            aria-label="@Localizer["SessionDetail.AddToCalendar"]">
                             @Localizer["SessionDetail.AddToCalendar"]
                         </a>
-                    }
-                    @if (!string.IsNullOrWhiteSpace(s.AskToken))
-                    {
-                        <a class="secondary" href="/sessions/@s.AskToken/ask">@Localizer["SessionDetail.AskLink"]</a>
                     }
                 </div>
             </div>

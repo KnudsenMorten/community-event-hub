@@ -1,6 +1,8 @@
 using CommunityHub.Core.Audit;
 using CommunityHub.Core.Data;
+using CommunityHub.Core.Diagnostics;
 using CommunityHub.Core.Domain;
+using CommunityHub.Core.Email;
 using CommunityHub.Core.Integrations.Erp;
 using CommunityHub.Core.Settings;
 using Microsoft.Azure.Functions.Worker;
@@ -25,10 +27,15 @@ namespace CommunityHub.Jobs;
 /// </summary>
 public sealed class ErpWebshopReconcileJob
 {
+    /// <summary>The stable job key for the consecutive-failure marker + alert throttle.</summary>
+    private const string JobKey = "erp-webshop-reconcile";
+
     private readonly ErpWebshopContactSyncService _sync;
     private readonly CommunityHubDbContext _db;
     private readonly FeatureGateService _gate;
     private readonly IAuditTrail _audit;
+    private readonly JobFailureTracker _failures;
+    private readonly EngineAlertSender _alerts;
     private readonly ILogger<ErpWebshopReconcileJob> _log;
 
     public ErpWebshopReconcileJob(
@@ -36,12 +43,16 @@ public sealed class ErpWebshopReconcileJob
         CommunityHubDbContext db,
         FeatureGateService gate,
         IAuditTrail audit,
+        JobFailureTracker failures,
+        EngineAlertSender alerts,
         ILogger<ErpWebshopReconcileJob> log)
     {
         _sync = sync;
         _db = db;
         _gate = gate;
         _audit = audit;
+        _failures = failures;
+        _alerts = alerts;
         _log = log;
     }
 
@@ -78,7 +89,63 @@ public sealed class ErpWebshopReconcileJob
             return;
         }
 
-        var r = await _sync.SyncAsync(ct);
+        // RUN with the "alert only on 2 CONSECUTIVE failures" gate (operator 2026-06-27,
+        // the 503 incident: "a single failure is likely a backup/platform glitch — only
+        // alert if it fails twice in a row"). A whole-reconcile crash here (e.g. the
+        // initial ListCustomers/ListCompanies call) is caught, RECORDED for observability
+        // (log + Failure audit), and the consecutive-failure counter is bumped; the
+        // operator is paged only once the counter reaches 2. We deliberately do NOT
+        // re-throw — re-throwing would trip EngineErrorAlertMiddleware and page on the
+        // FIRST failure, defeating the gate. The marker survives restarts, so two genuine
+        // back-to-back failures still alert across a redeploy. (Per-company failures are
+        // already absorbed inside SyncAsync and do NOT count as a job failure.)
+        ErpWebshopContactSyncService.SyncResult r;
+        try
+        {
+            r = await _sync.SyncAsync(ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw; // host shutdown — not a job failure; let the platform see the cancel.
+        }
+        catch (Exception ex)
+        {
+            var decision = await _failures.RecordFailureAsync(JobKey, ex.Message, ct);
+            _log.LogError(ex,
+                "ErpWebshopReconcileJob: run FAILED (consecutive failure #{N}); alert {Alert}.",
+                decision.ConsecutiveFailures, decision.ShouldAlert ? "RAISED" : "suppressed");
+
+            // Always record the failure for observability, even when the alert is suppressed.
+            await _audit.RecordAsync(new AuditEntry
+            {
+                EventId = activeEventIds.FirstOrDefault(),
+                Category = AuditCategory.Engine,
+                Action = "erp-webshop-reconcile",
+                ActorEmail = "system",
+                Source = AuditSource.Job,
+                Outcome = AuditOutcome.Failure,
+                Summary = $"ERP→webshop reconcile FAILED (consecutive #{decision.ConsecutiveFailures}): {ex.Message}"
+                    + (decision.ShouldAlert ? " — operator alerted." : " — single failure, alert suppressed (likely transient)."),
+            }, ct);
+
+            if (decision.ShouldAlert)
+            {
+                var html =
+                    $"<p>The ERP→webshop reconcile engine has now FAILED <b>{decision.ConsecutiveFailures}</b> "
+                    + "times in a row, so this is no longer a one-off backup/platform glitch.</p>"
+                    + $"<pre>{System.Net.WebUtility.HtmlEncode(ex.ToString())}</pre>";
+                // Stable per-job throttle key so a job stuck failing every tick can't
+                // flood the inbox (EngineAlertSender suppresses repeats within its window).
+                await _alerts.AlertAsync(
+                    "[ELDK27] Engine FAILED (2x in a row): ErpWebshopReconcileJob",
+                    html, ct, throttleKey: $"engine-fail:{JobKey}");
+            }
+            return;
+        }
+
+        // Clean run — reset the consecutive-failure counter so the NEXT failure starts at 1.
+        await _failures.RecordSuccessAsync(JobKey, ct);
+
         _log.LogInformation(
             "ErpWebshopReconcileJob: {Customers} customers, {Users} user(s) created, {Defaults} default(s) set, {Alerts} alert(s).",
             r.Customers, r.UsersCreated, r.DefaultsSet, r.Alerts);

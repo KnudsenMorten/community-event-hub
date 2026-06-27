@@ -9,7 +9,7 @@ namespace CommunityHub.Core.Assistant;
 /// the on-disk file; tests fake it. The builder only ever ASKS for slugs a role may
 /// see, so this provider is never the authorization boundary — it just reads text.
 /// </summary>
-public interface IOttoContentProvider
+public interface IAiHelperContentProvider
 {
     /// <summary>The markdown body for a content slug, or null when the file is absent.</summary>
     string? GetContentMarkdown(string slug);
@@ -22,38 +22,38 @@ public interface IOttoContentProvider
 /// volunteer must never receive another person's rows. Implemented in the web layer
 /// over EF Core; faked in tests.
 /// </summary>
-public interface IOttoOwnDataProvider
+public interface IAiHelperOwnDataProvider
 {
-    Task<IReadOnlyList<OttoGroundingSection>> GetOwnDataAsync(
+    Task<IReadOnlyList<AiHelperGroundingSection>> GetOwnDataAsync(
         int eventId, int participantId, ParticipantRole role, CancellationToken ct = default);
 }
 
 /// <summary>
-/// Assembles the per-request <see cref="OttoContext"/> from the signed-in
+/// Assembles the per-request <see cref="AiHelperContext"/> from the signed-in
 /// participant's role + id. This is the authorization-at-retrieval seam.
 /// </summary>
-public interface IOttoGroundingBuilder
+public interface IAiHelperGroundingBuilder
 {
-    Task<OttoContext> BuildAsync(
+    Task<AiHelperContext> BuildAsync(
         int eventId, int participantId, ParticipantRole role, CancellationToken ct = default);
 }
 
 /// <summary>
-/// Builds Otto's grounding with AUTHORIZATION AT RETRIEVAL (REQUIREMENTS §129,
+/// Builds the assistant's grounding with AUTHORIZATION AT RETRIEVAL (REQUIREMENTS §129,
 /// security-critical). Two enforced rules:
 ///
 /// 1. <b>Role-scoped content.</b> Only the pages
 ///    <see cref="ContentPageRegistry.ForRole"/> returns for THIS role are ever
-///    requested from <see cref="IOttoContentProvider"/>. A volunteer's ForRole set
+///    requested from <see cref="IAiHelperContentProvider"/>. A volunteer's ForRole set
 ///    excludes every speaker/organizer-only page, so those pages are never even
 ///    read — a volunteer literally cannot retrieve speaker/organizer content.
 ///
-/// 2. <b>Own rows only.</b> User data comes from <see cref="IOttoOwnDataProvider"/>
+/// 2. <b>Own rows only.</b> User data comes from <see cref="IAiHelperOwnDataProvider"/>
 ///    keyed by the server-resolved <c>participantId</c>; no client-supplied id is
 ///    accepted anywhere in the chain.
 ///
 /// 3. <b>Organizer-only ops aggregates (REQUIREMENTS §133).</b> When an optional
-///    <see cref="IOttoOrganizerOpsProvider"/> is wired, its curated, read-only
+///    <see cref="IAiHelperOrganizerOpsProvider"/> is wired, its curated, read-only
 ///    operational aggregates (speaker readiness / missing slides, sponsor missing
 ///    deliverables, master-class non-selections, participation / task / attendee
 ///    counts) are added to the grounding <b>only</b> when the SERVER-resolved
@@ -64,26 +64,26 @@ public interface IOttoGroundingBuilder
 ///
 /// The result holds only already-authorized text; the model gets no raw DB access.
 /// </summary>
-public sealed class OttoGroundingBuilder : IOttoGroundingBuilder
+public sealed class AiHelperGroundingBuilder : IAiHelperGroundingBuilder
 {
-    private readonly IOttoContentProvider _content;
-    private readonly IOttoOwnDataProvider _ownData;
-    private readonly IOttoOrganizerOpsProvider? _organizerOps;
+    private readonly IAiHelperContentProvider _content;
+    private readonly IAiHelperOwnDataProvider _ownData;
+    private readonly IAiHelperOrganizerOpsProvider? _organizerOps;
 
-    public OttoGroundingBuilder(
-        IOttoContentProvider content,
-        IOttoOwnDataProvider ownData,
-        IOttoOrganizerOpsProvider? organizerOps = null)
+    public AiHelperGroundingBuilder(
+        IAiHelperContentProvider content,
+        IAiHelperOwnDataProvider ownData,
+        IAiHelperOrganizerOpsProvider? organizerOps = null)
     {
         _content = content;
         _ownData = ownData;
         _organizerOps = organizerOps;
     }
 
-    public async Task<OttoContext> BuildAsync(
+    public async Task<AiHelperContext> BuildAsync(
         int eventId, int participantId, ParticipantRole role, CancellationToken ct = default)
     {
-        var sections = new List<OttoGroundingSection>();
+        var sections = new List<AiHelperGroundingSection>();
 
         // (1) Role-scoped content: ONLY pages this role may view (ForRole is the gate).
         foreach (var page in ContentPageRegistry.ForRole(role))
@@ -91,7 +91,7 @@ public sealed class OttoGroundingBuilder : IOttoGroundingBuilder
             var md = _content.GetContentMarkdown(page.Slug);
             if (!string.IsNullOrWhiteSpace(md))
             {
-                sections.Add(new OttoGroundingSection($"Help page — {page.Title}", md.Trim()));
+                sections.Add(new AiHelperGroundingSection($"Help page — {page.Title}", md.Trim()));
             }
         }
 
@@ -108,6 +108,6 @@ public sealed class OttoGroundingBuilder : IOttoGroundingBuilder
             sections.AddRange(ops.Where(s => !string.IsNullOrWhiteSpace(s.Body)));
         }
 
-        return new OttoContext(role, participantId, sections);
+        return new AiHelperContext(role, participantId, sections);
     }
 }

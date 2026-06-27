@@ -96,52 +96,28 @@
             }
         </section>
 
-        <!-- ============ 1:1 private questions (attendee only) ============ -->
-        @if (Model.IsAttendeeViewer)
-        {
-            <section aria-labelledby="ask-h" style="margin:18px 0;">
-                <h2 id="ask-h" style="font-size:1.25rem;">Ask the speakers (private)</h2>
-                <p style="color:#666;margin:0 0 8px;">Only the Master Class speakers see this — other attendees do not.</p>
-                <form method="post" asp-page-handler="Ask" asp-route-sessionId="@Model.SessionId" asp-route-t="@Model.Token">
-                    <label for="qtext" style="display:block;font-weight:600;margin-bottom:4px;">Your question</label>
-                    <textarea id="qtext" name="QuestionText" rows="3" required maxlength="2000"
-                              style="width:100%;box-sizing:border-box;padding:8px;border:1px solid #ccc;border-radius:6px;"></textarea>
-                    <button type="submit" style="margin-top:8px;background:#1c6b35;color:#fff;border:0;border-radius:6px;padding:10px 18px;font-weight:600;">Send question</button>
-                </form>
+        @* §136 (operator 2026-06-27): the attendee 1:1 "Ask the speakers (private)"
+           section is removed. Attendees use the Group Q&A below — which is unique to
+           THIS Master Class — and (coming via §137) the AiHelper assistant to reach
+           the organizers. The 1:1 SessionQuestion data/history is kept; only the
+           ability to create new 1:1 questions is gone. *@
 
-                @if (Model.MyQuestions.Count > 0)
-                {
-                    <h3 style="font-size:1.05rem;margin:16px 0 6px;">Your questions</h3>
-                    <ul style="list-style:none;padding:0;margin:0;">
-                        @foreach (var q in Model.MyQuestions)
-                        {
-                            <li style="border:1px solid #e3e3e3;border-radius:8px;padding:10px 12px;margin-bottom:8px;">
-                                <div style="white-space:pre-wrap;">@q.QuestionText</div>
-                                @if (!string.IsNullOrWhiteSpace(q.ResponseText))
-                                {
-                                    <div style="margin-top:8px;padding-top:8px;border-top:1px dashed #ccc;">
-                                        <strong>Speaker reply:</strong>
-                                        <div style="white-space:pre-wrap;">@q.ResponseText</div>
-                                    </div>
-                                }
-                                else
-                                {
-                                    <div style="margin-top:6px;color:#888;font-size:.85rem;">Awaiting a reply.</div>
-                                }
-                            </li>
-                        }
-                    </ul>
-                }
-            </section>
-        }
-
-        <!-- ============ Q&A comments (public within the MC) ============ -->
+        <!-- ============ Group Q&A — unique to THIS Master Class ============ -->
         <section aria-labelledby="qa-h" style="margin:18px 0;">
-            <h2 id="qa-h" style="font-size:1.25rem;">Group Q&amp;A</h2>
-            <p style="color:#666;margin:0 0 8px;">Visible to everyone in this Master Class.</p>
+            <h2 id="qa-h" style="font-size:1.25rem;">Group Q&amp;A for this Master Class</h2>
+            <p style="color:#666;margin:0 0 4px;">
+                This is the question board for <strong>@Model.View.Title</strong> only — it is
+                shared with everyone in this Master Class and its speakers. Each Master Class has
+                its own separate board, so what you post here stays with this class.
+            </p>
+            <p style="color:#666;margin:0 0 8px;">
+                Post your questions here so the speakers and your fellow attendees can see and
+                answer them. There are no private 1:1 questions — to reach the organizers, please
+                <a href="/Contact">contact the organizers</a>.
+            </p>
 
             <form method="post" asp-page-handler="Comment" asp-route-sessionId="@Model.SessionId" asp-route-t="@Model.Token">
-                <label for="cbody" style="display:block;font-weight:600;margin-bottom:4px;">Add a comment</label>
+                <label for="cbody" style="display:block;font-weight:600;margin-bottom:4px;">Add a question or comment</label>
                 <textarea id="cbody" name="CommentBody" rows="2" required maxlength="2000"
                           style="width:100%;box-sizing:border-box;padding:8px;border:1px solid #ccc;border-radius:6px;"></textarea>
                 <button type="submit" style="margin-top:8px;background:#34507a;color:#fff;border:0;border-radius:6px;padding:10px 18px;font-weight:600;">Post comment</button>

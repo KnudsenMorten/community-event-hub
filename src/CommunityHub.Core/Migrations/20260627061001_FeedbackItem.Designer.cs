@@ -4,6 +4,7 @@ using CommunityHub.Core.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace CommunityHub.Core.Migrations
 {
     [DbContext(typeof(CommunityHubDbContext))]
-    partial class CommunityHubDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260627061001_FeedbackItem")]
+    partial class FeedbackItem
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -1232,43 +1235,6 @@ namespace CommunityHub.Core.Migrations
                     b.HasIndex("EventId", "TargetParticipantId");
 
                     b.ToTable("ImpersonationAudits");
-                });
-
-            modelBuilder.Entity("CommunityHub.Core.Domain.JobHealthMarker", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("int");
-
-                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
-
-                    b.Property<int>("ConsecutiveFailures")
-                        .HasColumnType("int");
-
-                    b.Property<string>("JobKey")
-                        .IsRequired()
-                        .HasMaxLength(80)
-                        .HasColumnType("nvarchar(80)");
-
-                    b.Property<string>("LastError")
-                        .HasMaxLength(1000)
-                        .HasColumnType("nvarchar(1000)");
-
-                    b.Property<DateTimeOffset?>("LastFailureAt")
-                        .HasColumnType("datetimeoffset");
-
-                    b.Property<DateTimeOffset?>("LastSuccessAt")
-                        .HasColumnType("datetimeoffset");
-
-                    b.Property<DateTimeOffset>("UpdatedAt")
-                        .HasColumnType("datetimeoffset");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("JobKey")
-                        .IsUnique();
-
-                    b.ToTable("JobHealthMarkers");
                 });
 
             modelBuilder.Entity("CommunityHub.Core.Domain.LoginPin", b =>

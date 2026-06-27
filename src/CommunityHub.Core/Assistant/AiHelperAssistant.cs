@@ -7,40 +7,45 @@ using Microsoft.Extensions.Logging;
 namespace CommunityHub.Core.Assistant;
 
 /// <summary>
-/// The Azure OpenAI implementation of <see cref="IOttoAssistant"/>. Calls the
+/// The Azure OpenAI implementation of <see cref="IAiHelperAssistant"/>. Calls the
 /// chat-completions REST API over a plain <see cref="HttpClient"/> (no SDK — the same
 /// no-extra-dependency approach the hub uses for every integration):
 /// <c>POST {Endpoint}/openai/deployments/{Deployment}/chat/completions?api-version={ApiVersion}</c>
 /// with the secret <c>api-key</c> header.
 ///
-/// GROUNDING: the fixed <see cref="SystemPrompt"/> plus the already-authorized
-/// <see cref="OttoContext"/> grounding are injected as the SYSTEM message; the user's
-/// question is the only USER message. The model is given no raw DB/table access — just
-/// the assembled, role-scoped, own-rows-only context.
+/// GROUNDING: the system prompt (built from the configurable display name via
+/// <see cref="BuildSystemPrompt"/>) plus the already-authorized <see cref="AiHelperContext"/>
+/// grounding are injected as the SYSTEM message; the user's question is the only USER
+/// message. The model is given no raw DB/table access — just the assembled, role-scoped,
+/// own-rows-only context.
 ///
 /// GATED + SAFE: when <see cref="OpenAiOptions.IsConfigured"/> is false it never calls
 /// out (returns a friendly "unavailable"); on any error (network / bad response /
 /// parse) it logs and returns a friendly message instead of throwing to the page.
 /// </summary>
-public sealed class OttoAssistant : IOttoAssistant
+public sealed class AiHelperAssistant : IAiHelperAssistant
 {
-    /// <summary>The role/scope guardrail injected ahead of the grounding (REQUIREMENTS §129).</summary>
-    public const string SystemPrompt =
-        "You are Otto, the friendly ELDK27 Community Helper. " +
+    /// <summary>
+    /// The role/scope guardrail injected ahead of the grounding (REQUIREMENTS §129),
+    /// built from the configurable display <paramref name="assistantName"/>.
+    /// </summary>
+    public static string BuildSystemPrompt(string assistantName) =>
+        $"You are {assistantName}, the friendly ELDK27 Community Helper. " +
         "Answer ONLY from the provided context. If the answer isn't there, say you don't have that " +
         "info and suggest who to contact. Never reveal data about other people or roles.";
 
-    private const string UnavailableMessage =
-        "Otto isn't available right now. Please reach out to the organizers for help.";
     private const string ErrorMessage =
         "Sorry, I'm having trouble answering right now. Please try again in a moment, " +
         "or contact the organizers.";
 
+    private string UnavailableMessage =>
+        $"{_options.AssistantName} isn't available right now. Please reach out to the organizers for help.";
+
     private readonly HttpClient _http;
     private readonly OpenAiOptions _options;
-    private readonly ILogger<OttoAssistant>? _log;
+    private readonly ILogger<AiHelperAssistant>? _log;
 
-    public OttoAssistant(HttpClient http, OpenAiOptions options, ILogger<OttoAssistant>? log = null)
+    public AiHelperAssistant(HttpClient http, OpenAiOptions options, ILogger<AiHelperAssistant>? log = null)
     {
         _http = http;
         _options = options;
@@ -49,41 +54,42 @@ public sealed class OttoAssistant : IOttoAssistant
 
     public bool Available => _options.IsConfigured;
 
-    public async Task<OttoAnswer> AskAsync(
-        string question, OttoContext context, CancellationToken ct = default)
+    public async Task<AiHelperAnswer> AskAsync(
+        string question, AiHelperContext context, CancellationToken ct = default)
     {
         var q = (question ?? string.Empty).Trim();
         if (q.Length == 0)
         {
-            return OttoAnswer.Unavailable("Ask me something and I'll do my best to help. 😊");
+            return AiHelperAnswer.Unavailable("Ask me something and I'll do my best to help. 😊");
         }
 
         // Gate: not configured ⇒ never call out.
         if (!_options.IsConfigured)
         {
-            return OttoAnswer.Unavailable(UnavailableMessage);
+            return AiHelperAnswer.Unavailable(UnavailableMessage);
         }
 
         try
         {
             var text = await CallAsync(q, context, ct);
             return string.IsNullOrWhiteSpace(text)
-                ? OttoAnswer.Unavailable(UnavailableMessage)
-                : new OttoAnswer(true, text!.Trim());
+                ? AiHelperAnswer.Unavailable(UnavailableMessage)
+                : new AiHelperAnswer(true, text!.Trim());
         }
         catch (Exception ex)
         {
-            _log?.LogWarning(ex, "Otto assistant call failed; returning friendly fallback.");
-            return OttoAnswer.Unavailable(ErrorMessage);
+            _log?.LogWarning(ex, "AI Community Helper call failed; returning friendly fallback.");
+            return AiHelperAnswer.Unavailable(ErrorMessage);
         }
     }
 
-    private async Task<string?> CallAsync(string question, OttoContext context, CancellationToken ct)
+    private async Task<string?> CallAsync(string question, AiHelperContext context, CancellationToken ct)
     {
         var grounding = context.ToGroundingText();
+        var systemPrompt = BuildSystemPrompt(_options.AssistantName);
         var system = string.IsNullOrWhiteSpace(grounding)
-            ? SystemPrompt
-            : SystemPrompt + "\n\n# Context you may use to answer\n" + grounding;
+            ? systemPrompt
+            : systemPrompt + "\n\n# Context you may use to answer\n" + grounding;
 
         var request = new ChatRequest
         {

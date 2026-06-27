@@ -1,0 +1,36 @@
+@model (System.Collections.Generic.IReadOnlyList<CommunityHub.Pages.Organizer.FeedModel.Row> Rows, bool Resolved)
+<div style="overflow-x:auto;position:relative;">
+<table style="width:100%;border-collapse:collapse;font-size:14px;min-width:520px;">
+    <thead>
+        <tr style="text-align:left;border-bottom:2px solid #e1e8f3;">
+            <th style="padding:6px 8px;">When</th>
+            <th style="padding:6px 8px;">Kind</th>
+            <th style="padding:6px 8px;">From</th>
+            <th style="padding:6px 8px;">Message</th>
+            <th style="padding:6px 8px;"></th>
+        </tr>
+    </thead>
+    <tbody>
+        @foreach (var r in Model.Rows)
+        {
+            <tr style="border-bottom:1px solid #eef2f8;vertical-align:top;">
+                <td style="padding:6px 8px;white-space:nowrap;color:#6b7a90;">@r.CreatedAt.ToString("yyyy-MM-dd HH:mm")</td>
+                <td style="padding:6px 8px;"><span style="background:#eef2ff;color:#3730a3;border-radius:8px;padding:2px 8px;font-size:12px;font-weight:600;">@r.Kind</span></td>
+                <td style="padding:6px 8px;">@r.Who<br><span style="color:#6b7a90;font-size:12px;">@r.Role@(r.Email is null ? "" : " · " + r.Email)</span></td>
+                <td style="padding:6px 8px;white-space:pre-wrap;overflow-wrap:anywhere;">@r.Message
+                    @if (!string.IsNullOrEmpty(r.PageUrl))
+                    {
+                        <div style="color:#6b7a90;font-size:12px;margin-top:3px;">@r.PageUrl</div>
+                    }
+                </td>
+                <td style="padding:6px 8px;white-space:nowrap;">
+                    <form method="post" asp-page-handler="@(Model.Resolved ? "Reopen" : "Resolve")" style="margin:0;">
+                        <input type="hidden" name="id" value="@r.Id" />
+                        <button type="submit" style="padding:4px 10px;">@(Model.Resolved ? "Re-open" : "Mark handled")</button>
+                    </form>
+                </td>
+            </tr>
+        }
+    </tbody>
+</table>
+</div>

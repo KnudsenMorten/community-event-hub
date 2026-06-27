@@ -98,7 +98,7 @@ else
                 <div class="mc">
                     <h3>@seat.Title</h3>
                     <p><span class="pill seat">Confirmed seat</span></p>
-                    <p><a href="/MasterClassPage/@seat.SessionId?t=@Model.Token">📋 How to prepare, Q&amp;A &amp; ask the speakers</a></p>
+                    <p><a href="/MasterClassPage/@seat.SessionId?t=@Model.Token">📋 How to prepare &amp; Group Q&amp;A</a></p>
                     <form method="post" asp-page-handler="ToggleReminder" style="margin:6px 0;">
                         <input type="hidden" name="t" value="@Model.Token" />
                         <input type="hidden" name="wants" value="@((!Model.MonthReminderOptIn).ToString().ToLower())" />

@@ -9,8 +9,13 @@ namespace CommunityHub.Pages;
 
 /// <summary>
 /// Master Class attendee LANDING PAGE (FEATURE 2): <c>/MasterClassPage/{sessionId}</c>.
-/// Shows the speaker-authored PREP content, the Q&amp;A comment thread (public within
-/// the MC), and the 1:1 private-question form + the attendee's own answered questions.
+/// Shows the speaker-authored PREP content and the Group Q&amp;A comment thread, which is
+/// unique to (scoped to) THIS Master Class session.
+///
+/// <b>§136 (operator 2026-06-27):</b> the attendee 1:1 private-question form is removed;
+/// <see cref="OnPostAsk"/> is now INERT (never writes a 1:1 question). The Group
+/// Q&amp;A (<see cref="MasterClassComment"/>, per <see cref="SessionId"/>) is the only
+/// attendee question channel.
 ///
 /// <b>Who can see it:</b> an attendee with a CONFIRMED <see cref="MasterClassSignup"/>
 /// for the session (reached by the emailed per-attendee bearer token <c>?t=</c>, or as
@@ -51,11 +56,8 @@ public class MasterClassPageModel : PageModel
     public MasterClassPrepService.LandingView? View { get; private set; }
     public IReadOnlyList<MasterClassComment> Comments { get; private set; } =
         Array.Empty<MasterClassComment>();
-    /// <summary>The viewing attendee's own 1:1 questions (when an attendee is viewing).</summary>
-    public IReadOnlyList<SessionQuestion> MyQuestions { get; private set; } =
-        Array.Empty<SessionQuestion>();
 
-    /// <summary>True when the viewer is the confirmed ATTENDEE (can ask a 1:1 question).</summary>
+    /// <summary>True when the viewer is the confirmed ATTENDEE (can post to the Group Q&amp;A).</summary>
     public bool IsAttendeeViewer { get; private set; }
     /// <summary>True when the viewer is a linked speaker / organizer of this MC.</summary>
     public bool IsParticipantViewer { get; private set; }
@@ -65,7 +67,6 @@ public class MasterClassPageModel : PageModel
 
     [BindProperty] public string? CommentBody { get; set; }
     [BindProperty] public int? ParentCommentId { get; set; }
-    [BindProperty] public string? QuestionText { get; set; }
 
     // Resolved viewer identity for the request (one of attendee / participant).
     private CommunityHub.Core.Domain.Attendee? _attendee;
@@ -107,29 +108,21 @@ public class MasterClassPageModel : PageModel
         return Page();
     }
 
-    public async Task<IActionResult> OnPostAskAsync(int sessionId, string? t, CancellationToken ct)
+    /// <summary>
+    /// INERT (§136): attendee 1:1 questions are disabled. The form is gone, but guard
+    /// the handler so any stray/replayed POST can NEVER create a 1:1
+    /// <see cref="SessionQuestion"/>. We simply redirect back to the page (the Group
+    /// Q&amp;A is the only question channel now).
+    /// </summary>
+    public IActionResult OnPostAsk(int sessionId, string? t)
     {
-        SessionId = sessionId;
-        Token = t ?? string.Empty;
-        if (!await ResolveAsync(ct)) return Page();
-
-        if (!IsAttendeeViewer || _attendee is null)
+        // No DB touch at all — the channel is gone. Bounce back to the page with a note.
+        return RedirectToPage("/MasterClassPage", null, new
         {
-            Error = "Only a confirmed attendee can ask a 1:1 question.";
-            await ReloadContentAsync(ct);
-            return Page();
-        }
-
-        try
-        {
-            await _prep.AskPrivateQuestionAsync(_eventId, sessionId, _attendee.Id, QuestionText ?? string.Empty, ct);
-            return Redirect(SelfUrl("Your private question was sent to the speakers."));
-        }
-        catch (MasterClassPrepAccessDeniedException ex) { Error = ex.Message; }
-        catch (MasterClassPrepValidationException ex) { Error = ex.Message; }
-
-        await ReloadContentAsync(ct);
-        return Page();
+            sessionId,
+            t = string.IsNullOrEmpty(t) ? null : t,
+            msg = "1:1 questions are no longer available — please use the Group Q&A below.",
+        });
     }
 
     /// <summary>
@@ -176,9 +169,6 @@ public class MasterClassPageModel : PageModel
     {
         if (View is null) return;
         Comments = await _prep.LoadCommentsAsync(_eventId, SessionId, ct);
-        MyQuestions = IsAttendeeViewer && _attendee is not null
-            ? await _prep.LoadMyPrivateQuestionsAsync(_eventId, SessionId, _attendee.Id, ct)
-            : Array.Empty<SessionQuestion>();
     }
 
     /// <summary>The page's own URL with the bearer token preserved + a status message.</summary>

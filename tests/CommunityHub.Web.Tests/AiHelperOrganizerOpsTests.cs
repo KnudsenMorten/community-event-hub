@@ -13,9 +13,9 @@ using Xunit;
 namespace CommunityHub.Web.Tests;
 
 /// <summary>
-/// End-to-end role-gating for Otto's ORGANIZER OPS MODE (REQUIREMENTS §133), exercising the
-/// REAL <see cref="WebOttoOrganizerOpsProvider"/> over the EF in-memory provider through the
-/// real <see cref="OttoGroundingBuilder"/>. Proves:
+/// End-to-end role-gating for the AI Community Helper's ORGANIZER OPS MODE (REQUIREMENTS §133),
+/// exercising the REAL <see cref="WebAiHelperOrganizerOpsProvider"/> over the EF in-memory
+/// provider through the real <see cref="AiHelperGroundingBuilder"/>. Proves:
 ///   • an ORGANIZER's grounding gains the curated ops aggregates — speaker readiness /
 ///     missing slides (§134), sponsor missing deliverables (§135), master-class
 ///     non-selections (§6), and participation / attendee counts (§11);
@@ -23,13 +23,13 @@ namespace CommunityHub.Web.Tests;
 ///     gate lives in the builder, keyed on the SERVER-resolved role, never the prompt).
 /// The aggregates are curated typed queries (no raw / text-to-SQL). FAKE names only.
 /// </summary>
-public sealed class OttoOrganizerOpsTests
+public sealed class AiHelperOrganizerOpsTests
 {
     private const int EventId = 1;
 
     private static CommunityHubDbContext NewDb() =>
         new(new DbContextOptionsBuilder<CommunityHubDbContext>()
-            .UseInMemoryDatabase($"otto-ops-{Guid.NewGuid():N}")
+            .UseInMemoryDatabase($"ai-helper-ops-{Guid.NewGuid():N}")
             .Options);
 
     private sealed class FixedClock : TimeProvider
@@ -39,27 +39,27 @@ public sealed class OttoOrganizerOpsTests
 
     // A content provider that returns nothing, so the only ops content in the grounding comes
     // from the real organizer-ops provider (keeps the assertions unambiguous).
-    private sealed class NoContentProvider : IOttoContentProvider
+    private sealed class NoContentProvider : IAiHelperContentProvider
     {
         public string? GetContentMarkdown(string slug) => null;
     }
 
-    private static WebOttoOrganizerOpsProvider NewOps(CommunityHubDbContext db)
+    private static WebAiHelperOrganizerOpsProvider NewOps(CommunityHubDbContext db)
     {
         var clock = new FixedClock();
-        return new WebOttoOrganizerOpsProvider(
+        return new WebAiHelperOrganizerOpsProvider(
             db,
             new OrganizerOverviewService(db, clock),
             new SpeakerReadinessService(db),
             new SponsorDeliverablesService(db),
             new MasterClassSignupService(db),
             clock,
-            NullLogger<WebOttoOrganizerOpsProvider>.Instance);
+            NullLogger<WebAiHelperOrganizerOpsProvider>.Instance);
     }
 
-    private static OttoGroundingBuilder NewBuilder(CommunityHubDbContext db) =>
+    private static AiHelperGroundingBuilder NewBuilder(CommunityHubDbContext db) =>
         new(new NoContentProvider(),
-            new WebOttoOwnDataProvider(db, new FixedClock()),
+            new WebAiHelperOwnDataProvider(db, new FixedClock(), new SponsorDeliverablesService(db)),
             NewOps(db));
 
     private static async Task SeedAsync(CommunityHubDbContext db)

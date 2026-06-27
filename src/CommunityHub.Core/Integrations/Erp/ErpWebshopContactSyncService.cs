@@ -60,6 +60,15 @@ public sealed class ErpWebshopContactSyncService
 
         foreach (var cu in customers)
         {
+          // PER-COMPANY GRACEFUL CATCH (mirrors SponsorOrderPullService's per-folder
+          // pattern): a single company's failed call — e.g. a transient 503 from
+          // GetCompanyUsersAsync that survives the HttpClient retry — becomes a logged
+          // warning + an alert-note (Alerts++) and the loop CONTINUES to the next
+          // company, instead of throwing out of the whole reconcile (the 2026-06-27
+          // incident, where one 503 crashed every remaining company). A real host
+          // shutdown (our ct) still propagates.
+          try
+          {
             var key = cu.CustomerNumber.ToString();
             if (!byErp.TryGetValue(key, out var company))
             {
@@ -118,6 +127,18 @@ public sealed class ErpWebshopContactSyncService
                 try { if (await _cm.UpdateCompanyAsync(company.Id, fields, ct)) defaultsSet++; }
                 catch (Exception ex) { _log.LogWarning(ex, "ERP sync: set defaults failed for company {Co}.", company.Id); }
             }
+          }
+          catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+          {
+            // One company failed (after the HttpClient already retried any transient
+            // upstream error). Log + note it and KEEP GOING so the rest of the fleet
+            // still reconciles; the next run reconverges this company.
+            _log.LogWarning(ex,
+                "ERP sync: company {Customer} (e-conomic #{Num}) failed; skipping and continuing.",
+                cu.Name, cu.CustomerNumber);
+            notes.Add($"{cu.Name} (e-conomic #{cu.CustomerNumber}): Company Manager call failed "
+                + $"({ex.Message}); skipped this company — it will retry on the next run.");
+          }
         }
 
         if (notes.Count > 0)

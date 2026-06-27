@@ -69,7 +69,7 @@
         </p>
         <p style="font-size:12.5px;color:#6b7280;margin:0 0 12px;line-height:1.6;">
             For each session: <strong>View public</strong> = your public listing &middot;
-            <strong>Attendee Questions</strong> = Q&amp;A sent in &middot;
+            <strong>Master Class Group Q&amp;A</strong> = your master-class question boards &middot;
             <strong>SoMe Promote</strong> = ready-made social graphics &middot;
             <strong>Calendar Sync</strong> = add to your calendar &middot;
             <strong>Evaluations</strong> = your post-session ratings (when published).
@@ -146,9 +146,10 @@
                         {
                             <span style="color:#6b7280;font-size:13px;align-self:center;">@Localizer["Speaker.SessionNotPublicYet"]</span>
                         }
-                        @* §86 (operator 2026-06-26): re-enabled — the speaker Master Class Q&A
-                           area (see audience questions on this session, reply, and for a Master
-                           Class edit the attendee landing page). *@
+                        @* §136 (operator 2026-06-27): the per-Master-Class Group Q&A area
+                           (one separate, labelled board per master class — read attendee
+                           questions, reply, and edit the attendee landing page). 1:1
+                           questions are disabled. *@
                         <a class="task-link-btn" asp-page="/Speaker/Questions">&#128172; @Localizer["Speaker.AttendeeQuestions"]</a>
                         <a class="task-link-btn" asp-page="/Speaker/Graphics">&#128241; @Localizer["Speaker.SoMePromote"]</a>
                         <a class="task-link-btn" href="/Sessions/@(s.SessionId).ics">&#128197; @Localizer["Speaker.CalendarSync"]</a>

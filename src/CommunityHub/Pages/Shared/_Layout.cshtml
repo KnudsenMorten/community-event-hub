@@ -498,12 +498,13 @@
        confirm modal falls back to a native confirm() (see _ConfirmModal).
        ---------------------------------------------------------------------- *@
     <partial name="_LayoutClientScripts" />
-    @* Otto, the corner Community Helper (REQUIREMENTS §129). AUTHENTICATED, non-standalone
-       pages only — same gate as the logged-in nav, so an anonymous survey/signup/login (or
-       any HidePublicNav page) shows NO Otto, preserving the anon-vs-auth chrome isolation (§27). *@
+    @* AI Community Helper widget (code-named AiHelper, configurable display name; REQUIREMENTS
+       §129). AUTHENTICATED, non-standalone pages only — same gate as the logged-in nav, so an
+       anonymous survey/signup/login (or any HidePublicNav page) shows NO helper, preserving the
+       anon-vs-auth chrome isolation (§27). *@
     @if (isLoggedIn && !hidePublicNav)
     {
-        <partial name="_OttoWidget" />
+        <partial name="_AiHelperWidget" />
     }
     @* Render any page-defined @@section Scripts. Without this, every page that defines one
        (e.g. Organizer/Hotels) 500s on render: "section 'Scripts' has not been rendered". *@

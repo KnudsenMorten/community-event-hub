@@ -9,8 +9,9 @@ using Xunit;
 namespace CommunityHub.Core.Tests;
 
 /// <summary>
-/// Otto (REQUIREMENTS §129) — the grounded AI Community Helper. These offline tests
-/// prove the security-critical behaviour with NO network:
+/// The AI Community Helper (code-named AiHelper; REQUIREMENTS §129) — the grounded AI
+/// Community Helper. These offline tests prove the security-critical behaviour with NO
+/// network:
 ///   • AUTHORIZATION AT RETRIEVAL — a volunteer's grounding excludes speaker/organizer
 ///     content because the builder only ever asks for ContentPageRegistry.ForRole(role)
 ///     slugs; a speaker's grounding DOES include speaker content.
@@ -20,11 +21,11 @@ namespace CommunityHub.Core.Tests;
 ///   • a configured assistant calls Azure OpenAI with the system prompt + grounding and
 ///     returns the model's answer (HTTP mocked).
 /// </summary>
-public sealed class OttoAssistantTests
+public sealed class AiHelperAssistantTests
 {
     // A content provider that would happily return text for EVERY registered slug —
     // so if the builder leaked a speaker-only slug to a volunteer, the test would see it.
-    private sealed class AllSlugsContentProvider : IOttoContentProvider
+    private sealed class AllSlugsContentProvider : IAiHelperContentProvider
     {
         public readonly List<string> Requested = new();
         public string? GetContentMarkdown(string slug)
@@ -34,32 +35,32 @@ public sealed class OttoAssistantTests
         }
     }
 
-    private sealed class FakeOwnDataProvider : IOttoOwnDataProvider
+    private sealed class FakeOwnDataProvider : IAiHelperOwnDataProvider
     {
         public int? SeenParticipantId;
         public ParticipantRole? SeenRole;
-        public Task<IReadOnlyList<OttoGroundingSection>> GetOwnDataAsync(
+        public Task<IReadOnlyList<AiHelperGroundingSection>> GetOwnDataAsync(
             int eventId, int participantId, ParticipantRole role, CancellationToken ct = default)
         {
             SeenParticipantId = participantId;
             SeenRole = role;
-            IReadOnlyList<OttoGroundingSection> rows =
-                new[] { new OttoGroundingSection("Your tasks", $"OWN-DATA[{participantId}]") };
+            IReadOnlyList<AiHelperGroundingSection> rows =
+                new[] { new AiHelperGroundingSection("Your tasks", $"OWN-DATA[{participantId}]") };
             return Task.FromResult(rows);
         }
     }
 
     // Organizer-only ops provider (§133). Records whether it was invoked so the tests can
     // prove the builder gate: it must be called for an organizer and NEVER for anyone else.
-    private sealed class FakeOpsProvider : IOttoOrganizerOpsProvider
+    private sealed class FakeOpsProvider : IAiHelperOrganizerOpsProvider
     {
         public int Calls;
-        public Task<IReadOnlyList<OttoGroundingSection>> GetOpsAggregatesAsync(
+        public Task<IReadOnlyList<AiHelperGroundingSection>> GetOpsAggregatesAsync(
             int eventId, CancellationToken ct = default)
         {
             Calls++;
-            IReadOnlyList<OttoGroundingSection> rows =
-                new[] { new OttoGroundingSection("Event ops overview (organizer)", "OPS-AGGREGATE") };
+            IReadOnlyList<AiHelperGroundingSection> rows =
+                new[] { new AiHelperGroundingSection("Event ops overview (organizer)", "OPS-AGGREGATE") };
             return Task.FromResult(rows);
         }
     }
@@ -74,7 +75,7 @@ public sealed class OttoAssistantTests
     {
         var content = new AllSlugsContentProvider();
         var own = new FakeOwnDataProvider();
-        var builder = new OttoGroundingBuilder(content, own);
+        var builder = new AiHelperGroundingBuilder(content, own);
 
         var ctx = await builder.BuildAsync(eventId: 7, participantId: 42, role: ParticipantRole.Volunteer);
 
@@ -91,7 +92,7 @@ public sealed class OttoAssistantTests
     public async Task Speaker_grounding_includes_speaker_content()
     {
         var content = new AllSlugsContentProvider();
-        var builder = new OttoGroundingBuilder(content, new FakeOwnDataProvider());
+        var builder = new AiHelperGroundingBuilder(content, new FakeOwnDataProvider());
 
         var ctx = await builder.BuildAsync(eventId: 7, participantId: 1, role: ParticipantRole.Speaker);
 
@@ -103,7 +104,7 @@ public sealed class OttoAssistantTests
     public async Task Grounding_requests_own_data_for_the_server_participant_id_only()
     {
         var own = new FakeOwnDataProvider();
-        var builder = new OttoGroundingBuilder(new AllSlugsContentProvider(), own);
+        var builder = new AiHelperGroundingBuilder(new AllSlugsContentProvider(), own);
 
         await builder.BuildAsync(eventId: 7, participantId: 99, role: ParticipantRole.Volunteer);
 
@@ -117,7 +118,7 @@ public sealed class OttoAssistantTests
     public async Task Organizer_grounding_includes_ops_aggregates()
     {
         var ops = new FakeOpsProvider();
-        var builder = new OttoGroundingBuilder(
+        var builder = new AiHelperGroundingBuilder(
             new AllSlugsContentProvider(), new FakeOwnDataProvider(), ops);
 
         var ctx = await builder.BuildAsync(eventId: 7, participantId: 1, role: ParticipantRole.Organizer);
@@ -137,7 +138,7 @@ public sealed class OttoAssistantTests
         ParticipantRole role)
     {
         var ops = new FakeOpsProvider();
-        var builder = new OttoGroundingBuilder(
+        var builder = new AiHelperGroundingBuilder(
             new AllSlugsContentProvider(), new FakeOwnDataProvider(), ops);
 
         var ctx = await builder.BuildAsync(eventId: 7, participantId: 1, role: role);
@@ -152,7 +153,7 @@ public sealed class OttoAssistantTests
     public async Task Builder_without_ops_provider_still_works_for_organizer()
     {
         // Backward-compatible: the ops provider is optional (null when not wired).
-        var builder = new OttoGroundingBuilder(
+        var builder = new AiHelperGroundingBuilder(
             new AllSlugsContentProvider(), new FakeOwnDataProvider());
 
         var ctx = await builder.BuildAsync(eventId: 7, participantId: 1, role: ParticipantRole.Organizer);
@@ -208,10 +209,10 @@ public sealed class OttoAssistantTests
     {
         var handler = new StubHandler(HttpStatusCode.OK, ChatJson("should not be called"));
         using var http = new HttpClient(handler);
-        var otto = new OttoAssistant(http, new OpenAiOptions { Enabled = false });
+        var assistant = new AiHelperAssistant(http, new OpenAiOptions { Enabled = false });
 
-        Assert.False(otto.Available);
-        var ans = await otto.AskAsync("hi", OttoContext.Empty(ParticipantRole.Volunteer, 1));
+        Assert.False(assistant.Available);
+        var ans = await assistant.AskAsync("hi", AiHelperContext.Empty(ParticipantRole.Volunteer, 1));
 
         Assert.False(ans.Available);
         Assert.Equal(0, handler.Calls); // never called the network
@@ -222,15 +223,15 @@ public sealed class OttoAssistantTests
     {
         var handler = new StubHandler(HttpStatusCode.OK, ChatJson("Your first task is due Friday."));
         using var http = new HttpClient(handler);
-        var otto = new OttoAssistant(http, LiveOptions());
+        var assistant = new AiHelperAssistant(http, LiveOptions());
 
-        var ctx = new OttoContext(ParticipantRole.Speaker, 5, new[]
+        var ctx = new AiHelperContext(ParticipantRole.Speaker, 5, new[]
         {
-            new OttoGroundingSection("Your tasks", "GROUNDED-TASK-TEXT"),
+            new AiHelperGroundingSection("Your tasks", "GROUNDED-TASK-TEXT"),
         });
 
-        Assert.True(otto.Available);
-        var ans = await otto.AskAsync("When is my task due?", ctx);
+        Assert.True(assistant.Available);
+        var ans = await assistant.AskAsync("When is my task due?", ctx);
 
         Assert.True(ans.Available);
         Assert.Equal("Your first task is due Friday.", ans.Text);
@@ -239,9 +240,23 @@ public sealed class OttoAssistantTests
         Assert.Contains("/openai/deployments/gpt-test/chat/completions", handler.LastRequest!.RequestUri!.ToString());
         Assert.Contains("api-version=2025-01-01-preview", handler.LastRequest!.RequestUri!.ToString());
         Assert.True(handler.LastRequest!.Headers.Contains("api-key"));
-        // The system message carries the guardrail + the grounding.
-        Assert.Contains(OttoAssistant.SystemPrompt, handler.LastRequestBody);
+        // The system message carries the guardrail (built from the default display name) + the grounding.
+        Assert.Contains(AiHelperAssistant.BuildSystemPrompt("Otto"), handler.LastRequestBody);
         Assert.Contains("GROUNDED-TASK-TEXT", handler.LastRequestBody);
+    }
+
+    [Fact]
+    public async Task System_prompt_uses_the_configured_display_name()
+    {
+        var handler = new StubHandler(HttpStatusCode.OK, ChatJson("ok"));
+        using var http = new HttpClient(handler);
+        var opts = LiveOptions();
+        opts.AssistantName = "Aurora";
+        var assistant = new AiHelperAssistant(http, opts);
+
+        await assistant.AskAsync("hi", AiHelperContext.Empty(ParticipantRole.Volunteer, 1));
+
+        Assert.Contains("You are Aurora,", handler.LastRequestBody);
     }
 
     [Fact]
@@ -249,9 +264,9 @@ public sealed class OttoAssistantTests
     {
         var handler = new StubHandler(HttpStatusCode.InternalServerError, "boom");
         using var http = new HttpClient(handler);
-        var otto = new OttoAssistant(http, LiveOptions());
+        var assistant = new AiHelperAssistant(http, LiveOptions());
 
-        var ans = await otto.AskAsync("hi", OttoContext.Empty(ParticipantRole.Volunteer, 1));
+        var ans = await assistant.AskAsync("hi", AiHelperContext.Empty(ParticipantRole.Volunteer, 1));
 
         Assert.False(ans.Available);
         Assert.False(string.IsNullOrWhiteSpace(ans.Text)); // a friendly message, no exception

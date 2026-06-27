@@ -175,6 +175,84 @@ public sealed class MasterClassPrepServiceTests
             () => svc.AskPrivateQuestionAsync(s.EventId, s.McId, s.NoSeatAttendeeId, "let me in"));
     }
 
+    // --------------------------------------------- §136 speaker per-MC Group Q&A ---
+
+    [Fact]
+    public async Task Speaker_master_class_boards_load_only_own_master_classes()
+    {
+        using var db = TestDb.New();
+        var s = await SeedAsync(db);
+        var svc = NewSvc(db);
+        var mgmt = new SessionManagementService(db, new NullRoomQrProvider(), new FixedClock(Now));
+
+        // A SECOND master class the linked speaker also presents.
+        var mc2 = await mgmt.AddHubSessionAsync(
+            s.EventId, "Second MC", SessionType.MasterClass, SessionLength.FullDay,
+            speakerParticipantIds: new[] { s.LinkedSpeakerId });
+        // A NORMAL session by the same speaker — must NOT appear (no 1:1 board).
+        var tech = await mgmt.AddHubSessionAsync(
+            s.EventId, "Normal talk", SessionType.TechnicalSession, SessionLength.SixtyMin,
+            speakerParticipantIds: new[] { s.LinkedSpeakerId });
+        // A master class by the OTHER speaker only — must NOT appear for the linked speaker.
+        var otherMc = await mgmt.AddHubSessionAsync(
+            s.EventId, "Other speaker MC", SessionType.MasterClass, SessionLength.FullDay,
+            speakerParticipantIds: new[] { s.OtherSpeakerId });
+        await db.SaveChangesAsync();
+
+        var mine = await svc.LoadSpeakerMasterClassesAsync(s.EventId, s.LinkedSpeakerId);
+
+        Assert.Equal(2, mine.Count);
+        Assert.Contains(mine, m => m.Id == s.McId);
+        Assert.Contains(mine, m => m.Id == mc2.Id);
+        Assert.DoesNotContain(mine, m => m.Id == tech.Id);
+        Assert.DoesNotContain(mine, m => m.Id == otherMc.Id);
+    }
+
+    [Fact]
+    public async Task Group_qa_is_scoped_per_master_class_and_speaker_can_reply()
+    {
+        using var db = TestDb.New();
+        var s = await SeedAsync(db);
+        var svc = NewSvc(db);
+        var mgmt = new SessionManagementService(db, new NullRoomQrProvider(), new FixedClock(Now));
+
+        var mc2 = await mgmt.AddHubSessionAsync(
+            s.EventId, "Second MC", SessionType.MasterClass, SessionLength.FullDay,
+            speakerParticipantIds: new[] { s.LinkedSpeakerId });
+        await db.SaveChangesAsync();
+
+        // The confirmed attendee asks on MC1 (top-level); the speaker REPLIES under it.
+        var q = await svc.AddAttendeeCommentAsync(s.EventId, s.McId, s.ConfirmedAttendeeId, "How long is the lab?");
+        await svc.AddParticipantCommentAsync(
+            s.EventId, s.McId, s.LinkedSpeakerId, ParticipantRole.Speaker, "About 90 minutes.", parentCommentId: q.Id);
+        // A separate post on MC2.
+        await svc.AddParticipantCommentAsync(
+            s.EventId, mc2.Id, s.LinkedSpeakerId, ParticipantRole.Speaker, "Welcome to the second MC.");
+
+        // Per-SessionId scoping: MC1 has the question + its threaded reply; MC2 only its own.
+        var mc1 = await svc.LoadCommentsAsync(s.EventId, s.McId);
+        Assert.Equal(2, mc1.Count);
+        Assert.Contains(mc1, c => c.Body == "How long is the lab?" && c.ParentCommentId is null);
+        Assert.Contains(mc1, c => c.Body == "About 90 minutes." && c.ParentCommentId == q.Id);
+
+        var mc2Comments = await svc.LoadCommentsAsync(s.EventId, mc2.Id);
+        Assert.Equal("Welcome to the second MC.", Assert.Single(mc2Comments).Body);
+        Assert.DoesNotContain(mc2Comments, c => c.Body.Contains("lab"));
+    }
+
+    [Fact]
+    public async Task Speaker_cannot_reply_on_a_master_class_they_do_not_present()
+    {
+        using var db = TestDb.New();
+        var s = await SeedAsync(db);
+        var svc = NewSvc(db);
+
+        // The OTHER speaker is NOT linked to the MC — replying is denied server-side.
+        await Assert.ThrowsAsync<MasterClassPrepAccessDeniedException>(
+            () => svc.AddParticipantCommentAsync(
+                s.EventId, s.McId, s.OtherSpeakerId, ParticipantRole.Speaker, "sneaky reply"));
+    }
+
     [Fact]
     public async Task Landing_view_loads_for_master_class_only()
     {

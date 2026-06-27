@@ -171,6 +171,25 @@ public sealed class MasterClassPrepService
         return session;
     }
 
+    /// <summary>
+    /// The MASTER-CLASS sessions a speaker is linked to in the edition (§136 — the
+    /// speaker Group Q&amp;A view loads one separate, per-session board for each). A
+    /// speaker sees only the master classes they present; co-speakers on the same MC
+    /// share the same board (it is keyed by <see cref="Session"/> id, not by speaker).
+    /// Ordered by title for a stable, labelled layout. Includes the linked speakers so
+    /// the page can show co-speakers without an extra round-trip.
+    /// </summary>
+    public async Task<List<Session>> LoadSpeakerMasterClassesAsync(
+        int eventId, int participantId, CancellationToken ct = default) =>
+        await _db.Sessions
+            .AsNoTracking()
+            .Include(s => s.SessionSpeakers).ThenInclude(ss => ss.Participant)
+            .Where(s => s.EventId == eventId
+                        && s.Type == SessionType.MasterClass
+                        && s.SessionSpeakers.Any(ss => ss.ParticipantId == participantId))
+            .OrderBy(s => s.Title)
+            .ToListAsync(ct);
+
     // =====================================================================
     //  Q&A comments (public within the MC).
     // =====================================================================

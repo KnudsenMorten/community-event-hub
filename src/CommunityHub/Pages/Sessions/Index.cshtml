@@ -228,14 +228,13 @@
                         {
                             <p class="so-abstract">@s.Abstract</p>
                         }
+                        @* §136 (operator 2026-06-27): the attendee 1:1 "Ask the speaker"
+                           link is removed — questions are handled in the per-Master-Class
+                           Group Q&A or by contacting the organizers. *@
                         <div class="so-links">
                             @if (s.Type == SessionType.MasterClass && !string.IsNullOrWhiteSpace(s.PublicSlug))
                             {
                                 <a href="/MasterClass/@s.PublicSlug">@Localizer["SessOv.MasterClassLink"] &rarr;</a>
-                            }
-                            @if (!string.IsNullOrWhiteSpace(s.AskToken))
-                            {
-                                <a href="/sessions/@s.AskToken/ask">@Localizer["SessOv.AskLink"] &rarr;</a>
                             }
                         </div>
                     </li>

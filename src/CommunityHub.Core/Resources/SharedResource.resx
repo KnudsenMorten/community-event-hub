@@ -276,7 +276,7 @@
   <data name="Speaker.WithCoSpeakers" xml:space="preserve"><value>With {0}</value></data>
   <data name="Speaker.ViewPublicSession" xml:space="preserve"><value>View public session page</value></data>
   <data name="Speaker.SessionNotPublicYet" xml:space="preserve"><value>Public page not available yet</value></data>
-  <data name="Speaker.AttendeeQuestions" xml:space="preserve"><value>Attendee questions</value></data>
+  <data name="Speaker.AttendeeQuestions" xml:space="preserve"><value>Master Class Group Q&amp;A</value></data>
   <data name="Speaker.PublicPreviewHeading" xml:space="preserve"><value>Your public profile</value></data>
   <data name="Speaker.PublicPreviewLive" xml:space="preserve"><value>Your profile is live on the public speaker line-up. Preview exactly how attendees see your bio and photo.</value></data>
   <data name="Speaker.PublicPreviewPending" xml:space="preserve"><value>Your public profile preview unlocks once the organizers announce the line-up. Until then, polish your bio and photo so you're ready — your edits are kept.</value></data>
@@ -1157,7 +1157,7 @@
   <data name="SessionDetail.SpeakersHeading" xml:space="preserve"><value>Speakers</value></data>
   <data name="SessionDetail.AbstractHeading" xml:space="preserve"><value>About this session</value></data>
   <data name="SessionDetail.MasterClassLink" xml:space="preserve"><value>Master class info &amp; setup</value></data>
-  <data name="SessionDetail.AskLink" xml:space="preserve"><value>Ask the speaker a question</value></data>
+  <data name="SessionDetail.AskLink" xml:space="preserve"><value>Master Class attendees: use the Group Q&amp;A</value></data>
   <data name="SessionDetail.AddToCalendar" xml:space="preserve"><value>Add to my calendar</value></data>
 
   <!-- Public speaker-detail page -->
@@ -1620,8 +1620,8 @@
   <data name="ReqChange.ErrGeneric" xml:space="preserve"><value>Sorry, your request could not be sent. Please try again.</value></data>
   <data name="ReqChange.LockedPrompt" xml:space="preserve"><value>Need this changed?</value></data>
   <data name="ReqChange.LockedCta" xml:space="preserve"><value>Request a change</value></data>
-  <data name="SpeakerQ.Title" xml:space="preserve"><value>Questions for my sessions</value></data>
-  <data name="SpeakerQ.DigestNote" xml:space="preserve"><value>We will email you a digest whenever attendees send new questions for your sessions, so you never have to keep checking back.</value></data>
+  <data name="SpeakerQ.Title" xml:space="preserve"><value>Master Class Group Q&amp;A</value></data>
+  <data name="SpeakerQ.DigestNote" xml:space="preserve"><value>Each of your master classes has its own Group Q&amp;A board — questions and replies stay with the master class they belong to and are never merged across your classes.</value></data>
   <data name="SpeakerQ.OpenCount" xml:space="preserve"><value>{0} open question(s) awaiting your reply.</value></data>
   <data name="SpeakerQ.AllAnswered" xml:space="preserve"><value>No open questions right now — you're all caught up.</value></data>
   <data name="SpeakerEval.Title" xml:space="preserve"><value>My session ratings</value></data>
@@ -1755,7 +1755,7 @@
   <data name="SessOv.RoomTag" xml:space="preserve"><value>Room</value></data>
   <data name="SessOv.With" xml:space="preserve"><value>With</value></data>
   <data name="SessOv.MasterClassLink" xml:space="preserve"><value>Master class info &amp; setup</value></data>
-  <data name="SessOv.AskLink" xml:space="preserve"><value>Ask the speaker a question</value></data>
+  <data name="SessOv.AskLink" xml:space="preserve"><value>Master Class attendees: use the Group Q&amp;A</value></data>
   <data name="SessOv.TypeMasterClass" xml:space="preserve"><value>Community Master Class</value></data>
   <data name="SessOv.TypeTechSession" xml:space="preserve"><value>Community Tech Session</value></data>
   <data name="SessOv.TypeSponsor" xml:space="preserve"><value>Sponsor Session</value></data>

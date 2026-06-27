@@ -1,0 +1,58 @@
+@page
+@model CommunityHub.Pages.Organizer.FeedModel
+@using CommunityHub.Core.Domain
+@{
+    ViewData["Title"] = "Community feed";
+}
+
+<div class="card">
+    <h1>Community feed</h1>
+    <p>Bug reports, feature ideas and questions that participants sent through the AiHelper
+       assistant (REQUIREMENTS §137). Bug/feature reports are emailed to the dev team;
+       questions go to the organizers. This is the durable record behind those emails.</p>
+
+    @if (Model.AccessDenied)
+    {
+        <p class="error">This area is for organizers only.</p>
+        <p><a asp-page="/Organizer/Index">&larr; Back to organizer area</a></p>
+        return;
+    }
+
+    @if (!string.IsNullOrEmpty(Model.Message))
+    {
+        <p style="color:#166534;font-weight:600;">@Model.Message</p>
+    }
+
+    <form method="get" style="display:flex;gap:8px;align-items:end;margin:10px 0 4px;">
+        <label style="font-size:12.5px;color:#4a5160;">Kind
+            <select name="Kind" onchange="this.form.submit()" style="display:block;padding:7px 9px;border:1px solid #c4c8d4;border-radius:6px;">
+                <option value="">All</option>
+                @foreach (var k in new[] { FeedbackKind.Bug, FeedbackKind.Feature, FeedbackKind.Question })
+                {
+                    <option value="@k" selected="@(Model.Kind == k)">@k</option>
+                }
+            </select>
+        </label>
+    </form>
+    <p><a asp-page="/Organizer/Index">&larr; Back to organizer area</a></p>
+</div>
+
+<div class="card">
+    <h2>Open (@Model.OpenItems.Count)</h2>
+    @if (Model.OpenItems.Count == 0)
+    {
+        <p>Nothing open. 🎉</p>
+    }
+    else
+    {
+        <partial name="_FeedTable" model="(Model.OpenItems, false)" />
+    }
+</div>
+
+@if (Model.ResolvedItems.Count > 0)
+{
+    <div class="card">
+        <h2>Handled (@Model.ResolvedItems.Count)</h2>
+        <partial name="_FeedTable" model="(Model.ResolvedItems, true)" />
+    </div>
+}

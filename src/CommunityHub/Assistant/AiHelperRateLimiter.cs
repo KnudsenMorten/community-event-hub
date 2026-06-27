@@ -3,13 +3,13 @@ using System.Collections.Concurrent;
 namespace CommunityHub.Assistant;
 
 /// <summary>
-/// A tiny in-memory, per-participant rate limiter for the Otto endpoint: at most
+/// A tiny in-memory, per-participant rate limiter for the assistant endpoint: at most
 /// <see cref="MaxPerWindow"/> questions per rolling <see cref="Window"/>. Singleton;
 /// best-effort (process-local — fine for the single-instance hub, and a generous
 /// limit anyway). Keeps a short ring of recent hit timestamps per participant and
 /// prunes on each check so memory stays bounded.
 /// </summary>
-public sealed class OttoRateLimiter
+public sealed class AiHelperRateLimiter
 {
     /// <summary>Max questions allowed per window per participant.</summary>
     public const int MaxPerWindow = 6;
@@ -20,7 +20,7 @@ public sealed class OttoRateLimiter
     private readonly TimeProvider _clock;
     private readonly ConcurrentDictionary<int, Queue<DateTimeOffset>> _hits = new();
 
-    public OttoRateLimiter(TimeProvider clock) => _clock = clock;
+    public AiHelperRateLimiter(TimeProvider clock) => _clock = clock;
 
     /// <summary>
     /// Record an attempt for <paramref name="participantId"/> and return false when

@@ -146,7 +146,9 @@ services.AddSingleton<EventEditionConfigLoader>();
 var cmOptions = new CompanyManagerOptions();
 config.GetSection(CompanyManagerOptions.SectionName).Bind(cmOptions);
 services.AddSingleton(cmOptions);
-services.AddHttpClient<CompanyManagerClient>();
+// Bounded, jittered transient-fault retry (5xx/408/429/timeout) for Company Manager calls.
+services.AddHttpClient<CompanyManagerClient>()
+    .AddHttpMessageHandler(() => new CommunityHub.Core.Integrations.TransientFaultRetryHandler());
 services.AddScoped<SponsorContactSyncService>();
 
 // SharePoint upload-folder provisioning + watcher (used by pull-sponsors to

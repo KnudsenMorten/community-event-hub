@@ -11,8 +11,8 @@ namespace CommunityHub.Pages.Attendee;
 /// Attendee "Master Class Q&amp;A" shortcut (operator 2026-06-24): resolves the
 /// signed-in attendee's CONFIRMED Master Class and redirects to its
 /// <c>/MasterClassPage/{sessionId}</c> page — the one that actually hosts the
-/// Q&amp;A: the group comment board (visible to everyone in the class + replies)
-/// and the attendee's own 1:1 questions to the speakers. A signed-in confirmed
+/// Group Q&amp;A board (unique to that master class; visible to everyone in the class
+/// + the speakers' replies). 1:1 questions are disabled (§136). A signed-in confirmed
 /// attendee is recognised there by email (no token needed). Falls back to the
 /// Master Class selection page when the attendee has no confirmed seat yet.
 /// </summary>

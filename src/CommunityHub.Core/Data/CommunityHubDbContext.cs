@@ -42,6 +42,10 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
     /// <summary>Last-successful-sync markers, one per (EventId, Key) — drives the
     /// telemetry "Updated &lt;t&gt;" footer (REQUIREMENTS §125/§127).</summary>
     public DbSet<SyncRun> SyncRuns => Set<SyncRun>();
+
+    /// <summary>Fleet-wide per-job health markers (consecutive-failure counter) that drive
+    /// the "alert only on 2 consecutive failures" gate for background jobs.</summary>
+    public DbSet<JobHealthMarker> JobHealthMarkers => Set<JobHealthMarker>();
     public DbSet<HotelBooking> HotelBookings => Set<HotelBooking>();
     public DbSet<Hotel> Hotels => Set<Hotel>();
     public DbSet<DinnerSignup> DinnerSignups => Set<DinnerSignup>();
@@ -163,6 +167,11 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
     // /Organizer/SyncQueue before they are applied (never auto-applied).
     public DbSet<SyncDelta> SyncDeltas => Set<SyncDelta>();
 
+    // --- AiHelper INTAKE "CEH feed" (REQUIREMENTS §137) -----------------------
+    // Bug/feature reports the AiHelper detected + questions users forwarded to the
+    // organizers; the durable record behind the intake email, reviewed in /Organizer/Feed.
+    public DbSet<FeedbackItem> FeedbackItems => Set<FeedbackItem>();
+
     protected override void OnModelCreating(ModelBuilder b)
     {
         base.OnModelCreating(b);
@@ -212,6 +221,29 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
             // (edition, entity type, entity id, change kind). Also the hot query for
             // the queue page (pending for an edition).
             e.HasIndex(x => new { x.EventId, x.Status, x.EntityType, x.EntityId, x.ChangeKind });
+        });
+
+        // --- FeedbackItem (AiHelper intake "CEH feed", §137) ------------------
+        b.Entity<FeedbackItem>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Role).HasConversion<int>();
+            e.Property(x => x.Kind).HasConversion<int>();
+            e.Property(x => x.Message).IsRequired().HasMaxLength(4000);
+            e.Property(x => x.PageUrl).HasMaxLength(2000);
+            e.Property(x => x.RoutedTo).HasMaxLength(320);
+
+            e.HasOne(x => x.Event).WithMany()
+                .HasForeignKey(x => x.EventId)
+                .OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.Participant).WithMany()
+                .HasForeignKey(x => x.ParticipantId)
+                // NoAction (not Cascade) — the Event already cascade-deletes the edition;
+                // SQL Server refuses a second cascade path to Participant from the same root.
+                .OnDelete(DeleteBehavior.NoAction);
+
+            // The feed view: newest-first per edition, with an open/resolved split.
+            e.HasIndex(x => new { x.EventId, x.ResolvedAt, x.CreatedAt });
         });
 
         // --- Event ----------------------------------------------------------
@@ -704,6 +736,18 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
 
             // One marker per (edition, sync) — the upsert key.
             e.HasIndex(x => new { x.EventId, x.Key }).IsUnique();
+        });
+
+        // --- JobHealthMarker (fleet-wide consecutive-failure counter per job) --
+        b.Entity<JobHealthMarker>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.JobKey).IsRequired().HasMaxLength(80);
+            e.Property(x => x.LastError).HasMaxLength(1000);
+
+            // One marker per job key — the upsert key. NOT event-scoped: the
+            // reconcile engines run once for the whole fleet.
+            e.HasIndex(x => x.JobKey).IsUnique();
         });
 
         // --- HotelBooking ---------------------------------------------------

@@ -1,0 +1,226 @@
+@inject CommunityHub.Core.Assistant.OpenAiOptions AiHelperOptions
+@{
+    // Display name is operator-configurable (OpenAI:AssistantName, default "Otto").
+    // Everything user-facing reads from this variable; the code is name-agnostic.
+    var assistantName = string.IsNullOrWhiteSpace(AiHelperOptions.AssistantName)
+        ? "Otto"
+        : AiHelperOptions.AssistantName.Trim();
+}
+@*
+    The corner Community Helper widget (REQUIREMENTS §129). Code-named AiHelper; the
+    user-facing display name comes from OpenAI:AssistantName ("@assistantName" here).
+
+    Rendered by _Layout for AUTHENTICATED, non-standalone pages only (the caller
+    gates on isLoggedIn && !HidePublicNav), so it respects the anon-vs-auth chrome
+    isolation (§27) and never appears on an anonymous survey/signup/login page.
+
+    The helper peeks from the bottom-right corner with a small speech bubble; clicking
+    it opens a chat panel. Pure vanilla JS fetch to /api/ai-helper (no new dependencies).
+    Mobile-first: on ~360px the panel is near-full-width and does not cover content
+    when collapsed. Progressive: with JS off, nothing pops.
+*@
+@Html.AntiForgeryToken()
+<div id="ai-helper-widget" class="ai-helper-widget"
+     data-endpoint="/api/ai-helper" data-assistant-name="@assistantName">
+    <button type="button" id="ai-helper-launcher" class="ai-helper-launcher"
+            aria-expanded="false" aria-controls="ai-helper-panel"
+            aria-label="Open @assistantName, the Community Helper">
+        <span class="ai-helper-bubble" aria-hidden="true">Hej! Need a hand? &#128075;</span>
+        <img class="ai-helper-avatar" src="~/img/otto.svg" alt="" width="72" height="78" />
+    </button>
+
+    <section id="ai-helper-panel" class="ai-helper-panel" role="dialog" aria-modal="false"
+             aria-labelledby="ai-helper-title" hidden>
+        <header class="ai-helper-header">
+            <img class="ai-helper-head-avatar" src="~/img/otto.svg" alt="" width="34" height="37" />
+            <span id="ai-helper-title" class="ai-helper-head-title">@assistantName &middot; Community Helper</span>
+            <button type="button" id="ai-helper-close" class="ai-helper-close"
+                    aria-label="Close @assistantName">&times;</button>
+        </header>
+
+        <div id="ai-helper-log" class="ai-helper-log" aria-live="polite">
+            <div class="ai-helper-msg ai-helper-msg-bot">
+                <img class="ai-helper-msg-avatar" src="~/img/otto.svg" alt="@assistantName" width="28" height="30" />
+                <div class="ai-helper-msg-text">Hej! I'm @assistantName. Ask me about your tasks, your sessions, or
+                    anything in your event info — I'll answer from what's relevant to you. &#128075;</div>
+            </div>
+        </div>
+
+        <form id="ai-helper-form" class="ai-helper-form" autocomplete="off">
+            <label for="ai-helper-input" class="visually-hidden">Ask @assistantName a question</label>
+            <input type="text" id="ai-helper-input" class="ai-helper-input" maxlength="1000"
+                   placeholder="Ask @assistantName&hellip;" />
+            <button type="submit" id="ai-helper-send" class="ai-helper-send"
+                    aria-label="Send question">&#10148;</button>
+        </form>
+
+        @* §137: explicit "reach a human" path — sends the typed message to the organizers. *@
+        <div class="ai-helper-foot">
+            <button type="button" id="ai-helper-contact-org" class="ai-helper-contact-org">
+                Send my message to the organizers
+            </button>
+        </div>
+    </section>
+</div>
+
+<style>
+    .ai-helper-widget { position: fixed; right: 16px; bottom: 16px; z-index: 1200; }
+    .ai-helper-launcher {
+        background: none; border: 0; padding: 0; cursor: pointer;
+        display: flex; align-items: flex-end; gap: 8px;
+    }
+    .ai-helper-bubble {
+        background: #fff; color: #14223a; border: 1px solid #cdd8ea;
+        border-radius: 14px 14px 2px 14px; padding: 8px 12px; font-size: .9rem;
+        box-shadow: 0 4px 14px rgba(20,34,58,.18); max-width: 190px; line-height: 1.25;
+    }
+    .ai-helper-avatar { display: block; filter: drop-shadow(0 3px 6px rgba(20,34,58,.25)); transition: transform .15s ease; }
+    .ai-helper-launcher:hover .ai-helper-avatar { transform: translateY(-3px); }
+
+    .ai-helper-panel {
+        position: fixed; right: 16px; bottom: 16px; width: 360px; max-width: calc(100vw - 24px);
+        height: 480px; max-height: calc(100vh - 80px);
+        background: #fff; border: 1px solid #cdd8ea; border-radius: 16px;
+        box-shadow: 0 12px 40px rgba(20,34,58,.30);
+        display: flex; flex-direction: column; overflow: hidden;
+    }
+    .ai-helper-panel[hidden] { display: none; }
+    .ai-helper-header {
+        display: flex; align-items: center; gap: 8px; padding: 10px 12px;
+        background: linear-gradient(180deg,#3aa0ff,#1b6fe0); color: #fff; flex: 0 0 auto;
+    }
+    .ai-helper-head-avatar { background: #fff; border-radius: 50%; }
+    .ai-helper-head-title { font-weight: 600; flex: 1 1 auto; }
+    .ai-helper-close { background: none; border: 0; color: #fff; font-size: 1.4rem; line-height: 1; cursor: pointer; padding: 0 4px; }
+    .ai-helper-log { flex: 1 1 auto; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 10px; background: #f5f8fd; }
+    .ai-helper-msg { display: flex; gap: 8px; align-items: flex-start; }
+    .ai-helper-msg-user { flex-direction: row-reverse; }
+    .ai-helper-msg-avatar { background: #fff; border-radius: 50%; flex: 0 0 auto; }
+    .ai-helper-msg-text {
+        background: #fff; border: 1px solid #e1e8f3; border-radius: 12px; padding: 8px 11px;
+        font-size: .92rem; line-height: 1.35; max-width: 80%; white-space: pre-wrap; word-wrap: break-word;
+    }
+    .ai-helper-msg-user .ai-helper-msg-text { background: #1b6fe0; color: #fff; border-color: #1b6fe0; }
+    .ai-helper-msg-bot.ai-helper-thinking .ai-helper-msg-text { color: #6b7a90; font-style: italic; }
+    .ai-helper-form { display: flex; gap: 8px; padding: 10px; border-top: 1px solid #e1e8f3; flex: 0 0 auto; }
+    .ai-helper-input { flex: 1 1 auto; border: 1px solid #cdd8ea; border-radius: 20px; padding: 9px 14px; font-size: .95rem; }
+    .ai-helper-send { background: #1b6fe0; color: #fff; border: 0; border-radius: 50%; width: 40px; height: 40px; font-size: 1.1rem; cursor: pointer; flex: 0 0 auto; }
+    .ai-helper-send:disabled { opacity: .5; cursor: default; }
+    .ai-helper-foot { padding: 0 10px 10px; background: #fff; text-align: center; flex: 0 0 auto; }
+    .ai-helper-contact-org {
+        background: none; border: 0; color: #1b6fe0; font-size: .82rem; cursor: pointer;
+        text-decoration: underline; padding: 2px 4px;
+    }
+    .ai-helper-contact-org:disabled { opacity: .5; cursor: default; }
+
+    @@media (max-width: 480px) {
+        .ai-helper-bubble { max-width: 150px; font-size: .82rem; }
+        .ai-helper-avatar { width: 60px; height: 65px; }
+        .ai-helper-panel { right: 8px; bottom: 8px; height: calc(100vh - 90px); }
+    }
+</style>
+
+<script>
+    (function () {
+        var widget = document.getElementById('ai-helper-widget');
+        if (!widget) return;
+        var endpoint = widget.getAttribute('data-endpoint');
+        var assistantName = widget.getAttribute('data-assistant-name') || 'Helper';
+        var launcher = document.getElementById('ai-helper-launcher');
+        var panel = document.getElementById('ai-helper-panel');
+        var closeBtn = document.getElementById('ai-helper-close');
+        var form = document.getElementById('ai-helper-form');
+        var input = document.getElementById('ai-helper-input');
+        var sendBtn = document.getElementById('ai-helper-send');
+        var contactOrgBtn = document.getElementById('ai-helper-contact-org');
+        var log = document.getElementById('ai-helper-log');
+        var tokenEl = widget.parentNode
+            ? widget.parentNode.querySelector('input[name="__RequestVerificationToken"]')
+            : document.querySelector('input[name="__RequestVerificationToken"]');
+
+        function open() {
+            panel.hidden = false;
+            launcher.setAttribute('aria-expanded', 'true');
+            launcher.style.display = 'none';
+            input.focus();
+        }
+        function close() {
+            panel.hidden = true;
+            launcher.setAttribute('aria-expanded', 'false');
+            launcher.style.display = '';
+        }
+        launcher.addEventListener('click', open);
+        closeBtn.addEventListener('click', close);
+        document.addEventListener('keydown', function (e) {
+            if ((e.key === 'Escape' || e.key === 'Esc') && !panel.hidden) close();
+        });
+
+        function bubble(text, who) {
+            var wrap = document.createElement('div');
+            wrap.className = 'ai-helper-msg ai-helper-msg-' + who;
+            if (who === 'bot') {
+                var av = document.createElement('img');
+                av.className = 'ai-helper-msg-avatar';
+                av.src = '/img/otto.svg'; av.alt = assistantName; av.width = 28; av.height = 30;
+                wrap.appendChild(av);
+            }
+            var t = document.createElement('div');
+            t.className = 'ai-helper-msg-text';
+            t.textContent = text;
+            wrap.appendChild(t);
+            log.appendChild(wrap);
+            log.scrollTop = log.scrollHeight;
+            return wrap;
+        }
+
+        function send(q, contactOrganizers, thinkingText) {
+            bubble(q, 'user');
+            input.value = '';
+            sendBtn.disabled = true;
+            contactOrgBtn.disabled = true;
+            var thinking = bubble(thinkingText, 'bot');
+            thinking.classList.add('ai-helper-thinking');
+
+            var headers = { 'Content-Type': 'application/json' };
+            if (tokenEl) headers['RequestVerificationToken'] = tokenEl.value;
+
+            fetch(endpoint, {
+                method: 'POST',
+                headers: headers,
+                body: JSON.stringify({
+                    question: q,
+                    contactOrganizers: !!contactOrganizers,
+                    pageUrl: (location.pathname + location.search)
+                })
+            })
+                .then(function (r) { return r.json().catch(function () { return {}; }); })
+                .then(function (data) {
+                    thinking.remove();
+                    bubble((data && data.answer) ? data.answer
+                        : 'Sorry, I could not answer that right now.', 'bot');
+                })
+                .catch(function () {
+                    thinking.remove();
+                    bubble('Sorry, I had trouble reaching the assistant. Please try again.', 'bot');
+                })
+                .finally(function () { sendBtn.disabled = false; contactOrgBtn.disabled = false; input.focus(); });
+        }
+
+        form.addEventListener('submit', function (e) {
+            e.preventDefault();
+            var q = (input.value || '').trim();
+            if (!q) return;
+            send(q, false, assistantName + ' is thinking…');
+        });
+
+        contactOrgBtn.addEventListener('click', function () {
+            var q = (input.value || '').trim();
+            if (!q) {
+                input.focus();
+                bubble('Type your message first, then tap “Send my message to the organizers”.', 'bot');
+                return;
+            }
+            send(q, true, 'Sending your message to the organizers…');
+        });
+    })();
+</script>

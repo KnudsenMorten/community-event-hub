@@ -10,11 +10,11 @@ using Microsoft.EntityFrameworkCore;
 namespace CommunityHub.Assistant;
 
 /// <summary>
-/// Web implementation of <see cref="IOttoOrganizerOpsProvider"/> — Otto's ORGANIZER OPS MODE
-/// grounding (REQUIREMENTS §133). Turns operational questions ("which speakers haven't
-/// uploaded slides?", "which sponsors are missing booth materials?", "how many master-class
-/// non-selections remain?", "how many attendees / orders?") into curated, TYPED, READ-ONLY
-/// aggregates by REUSING the existing crew aggregators:
+/// Web implementation of <see cref="IAiHelperOrganizerOpsProvider"/> — the assistant's
+/// ORGANIZER OPS MODE grounding (REQUIREMENTS §133). Turns operational questions ("which
+/// speakers haven't uploaded slides?", "which sponsors are missing booth materials?", "how
+/// many master-class non-selections remain?", "how many attendees / orders?") into curated,
+/// TYPED, READ-ONLY aggregates by REUSING the existing crew aggregators:
 /// <list type="bullet">
 ///   <item>§134 <see cref="SpeakerReadinessService"/> — speaker readiness roster + missing slides.</item>
 ///   <item>§135 <see cref="SponsorDeliverablesService"/> — sponsor deliverables board + at-risk.</item>
@@ -23,17 +23,17 @@ namespace CommunityHub.Assistant;
 /// </list>
 ///
 /// <para>It NEVER runs free-form / text-to-SQL — only these curated typed queries — and never
-/// writes. Every aggregate is wrapped so one failing section degrades gracefully (Otto stays
-/// available). Company display names are resolved from the locally-mirrored
+/// writes. Every aggregate is wrapped so one failing section degrades gracefully (the assistant
+/// stays available). Company display names are resolved from the locally-mirrored
 /// <see cref="SponsorInfo.EventCoordinatorCompanyName"/> (no external Company Manager call on
 /// the assistant path); a missing name falls back to the id.</para>
 ///
 /// <para><b>SECURITY.</b> This provider is organizer-only. The gate lives in
-/// <see cref="OttoGroundingBuilder"/>, which calls it ONLY for a SERVER-resolved
+/// <see cref="AiHelperGroundingBuilder"/>, which calls it ONLY for a SERVER-resolved
 /// <see cref="ParticipantRole.Organizer"/>. Nothing here trusts a client-supplied role/id;
 /// it is reached for organizers only, by construction.</para>
 /// </summary>
-public sealed class WebOttoOrganizerOpsProvider : IOttoOrganizerOpsProvider
+public sealed class WebAiHelperOrganizerOpsProvider : IAiHelperOrganizerOpsProvider
 {
     // Cap the named lists injected into grounding so a large event keeps the prompt bounded.
     private const int MaxNamed = 15;
@@ -44,16 +44,16 @@ public sealed class WebOttoOrganizerOpsProvider : IOttoOrganizerOpsProvider
     private readonly SponsorDeliverablesService _deliverables;
     private readonly MasterClassSignupService _masterClass;
     private readonly TimeProvider _clock;
-    private readonly ILogger<WebOttoOrganizerOpsProvider> _log;
+    private readonly ILogger<WebAiHelperOrganizerOpsProvider> _log;
 
-    public WebOttoOrganizerOpsProvider(
+    public WebAiHelperOrganizerOpsProvider(
         CommunityHubDbContext db,
         OrganizerOverviewService overview,
         SpeakerReadinessService readiness,
         SponsorDeliverablesService deliverables,
         MasterClassSignupService masterClass,
         TimeProvider clock,
-        ILogger<WebOttoOrganizerOpsProvider> log)
+        ILogger<WebAiHelperOrganizerOpsProvider> log)
     {
         _db = db;
         _overview = overview;
@@ -64,11 +64,11 @@ public sealed class WebOttoOrganizerOpsProvider : IOttoOrganizerOpsProvider
         _log = log;
     }
 
-    public async Task<IReadOnlyList<OttoGroundingSection>> GetOpsAggregatesAsync(
+    public async Task<IReadOnlyList<AiHelperGroundingSection>> GetOpsAggregatesAsync(
         int eventId, CancellationToken ct = default)
     {
         var today = DateOnly.FromDateTime(_clock.GetUtcNow().UtcDateTime);
-        var sections = new List<OttoGroundingSection>();
+        var sections = new List<AiHelperGroundingSection>();
 
         await AddAsync(sections, "Event ops overview (organizer)",
             () => BuildOverviewAsync(eventId, ct), ct);
@@ -84,20 +84,20 @@ public sealed class WebOttoOrganizerOpsProvider : IOttoOrganizerOpsProvider
 
     /// <summary>Run one aggregate, append it when it produced text; never throw to the builder.</summary>
     private async Task AddAsync(
-        List<OttoGroundingSection> into, string heading, Func<Task<string?>> build, CancellationToken ct)
+        List<AiHelperGroundingSection> into, string heading, Func<Task<string?>> build, CancellationToken ct)
     {
         try
         {
             var body = await build();
             if (!string.IsNullOrWhiteSpace(body))
             {
-                into.Add(new OttoGroundingSection(heading, body!.Trim()));
+                into.Add(new AiHelperGroundingSection(heading, body!.Trim()));
             }
         }
         catch (Exception ex)
         {
-            // Degrade gracefully — a single failing aggregate must not break Otto.
-            _log.LogWarning(ex, "Otto organizer ops: '{Heading}' aggregate failed.", heading);
+            // Degrade gracefully — a single failing aggregate must not break the assistant.
+            _log.LogWarning(ex, "AI Community Helper organizer ops: '{Heading}' aggregate failed.", heading);
         }
     }
 

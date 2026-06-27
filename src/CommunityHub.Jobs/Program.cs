@@ -242,8 +242,13 @@ var host = new HostBuilder()
         var cmOptions = new CompanyManagerOptions();
         config.GetSection(CompanyManagerOptions.SectionName).Bind(cmOptions);
         services.AddSingleton(cmOptions);
-        services.AddHttpClient<CompanyManagerClient>();
+        // Bounded, jittered transient-fault retry (5xx/408/429/timeout) so a momentary
+        // upstream blip from Company Manager doesn't crash a reconcile (2026-06-27 incident).
+        services.AddHttpClient<CompanyManagerClient>()
+            .AddHttpMessageHandler(() => new CommunityHub.Core.Integrations.TransientFaultRetryHandler());
         services.AddScoped<SponsorContactSyncService>();
+        // "Alert only on 2 consecutive failures" gate for background jobs.
+        services.AddScoped<CommunityHub.Core.Diagnostics.JobFailureTracker>();
 
         // --- SharePoint (per-sponsor upload folders + change watcher) ------
         var sharePointOptions = new SharePointUploadOptions();

@@ -456,10 +456,11 @@ else
         sp.GetRequiredService<CommunityHub.Core.Volunteers.HeuristicTaskGuidanceGenerator>());
 }
 
-// --- Otto: grounded AI Community Helper (REQUIREMENTS §129) -----------------
-// Azure OpenAI is wired via the "OpenAI" config section (ApiKey is a KV ref). Otto
-// is GATED on OpenAiOptions.IsConfigured (Enabled + endpoint + deployment + key) and
-// no-ops gracefully when off. The grounding builder enforces authorization-at-
+// --- AI Community Helper (code-named AiHelper; REQUIREMENTS §129) -----------
+// Display name is operator-configurable via OpenAI:AssistantName (default "Otto").
+// Azure OpenAI is wired via the "OpenAI" config section (ApiKey is a KV ref). The
+// assistant is GATED on OpenAiOptions.IsConfigured (Enabled + endpoint + deployment +
+// key) and no-ops gracefully when off. The grounding builder enforces authorization-at-
 // retrieval: role-scoped content (ContentPageRegistry.ForRole) + the participant's
 // OWN rows only — the assistant gets no raw DB access, just assembled context.
 var openAiOptions = new CommunityHub.Core.Assistant.OpenAiOptions();
@@ -470,25 +471,38 @@ builder.Services.AddSingleton(openAiOptions);
 builder.Services.Configure<CommunityHub.Core.Assistant.OpenAiOptions>(
     builder.Configuration.GetSection(CommunityHub.Core.Assistant.OpenAiOptions.SectionName));
 // Grounding sources (web): role-scoped content from disk + the participant's own rows.
-builder.Services.AddScoped<CommunityHub.Core.Assistant.IOttoContentProvider,
-    CommunityHub.Assistant.WebOttoContentProvider>();
-builder.Services.AddScoped<CommunityHub.Core.Assistant.IOttoOwnDataProvider,
-    CommunityHub.Assistant.WebOttoOwnDataProvider>();
+builder.Services.AddScoped<CommunityHub.Core.Assistant.IAiHelperContentProvider,
+    CommunityHub.Assistant.WebAiHelperContentProvider>();
+builder.Services.AddScoped<CommunityHub.Core.Assistant.IAiHelperOwnDataProvider,
+    CommunityHub.Assistant.WebAiHelperOwnDataProvider>();
 // §133 ORGANIZER OPS MODE: curated, read-only ops aggregates (speaker readiness / missing
 // slides, sponsor missing deliverables, master-class non-selections, participation/task/
 // attendee counts) reused from the existing §11/§134/§135/§6 aggregators. The grounding
 // builder injects these ONLY for a SERVER-resolved Organizer (the gate lives in the builder,
-// never the prompt) — non-organizer Otto never even calls this provider.
-builder.Services.AddScoped<CommunityHub.Core.Assistant.IOttoOrganizerOpsProvider,
-    CommunityHub.Assistant.WebOttoOrganizerOpsProvider>();
-builder.Services.AddScoped<CommunityHub.Core.Assistant.IOttoGroundingBuilder,
-    CommunityHub.Core.Assistant.OttoGroundingBuilder>();
+// never the prompt) — a non-organizer never even calls this provider.
+builder.Services.AddScoped<CommunityHub.Core.Assistant.IAiHelperOrganizerOpsProvider,
+    CommunityHub.Assistant.WebAiHelperOrganizerOpsProvider>();
+builder.Services.AddScoped<CommunityHub.Core.Assistant.IAiHelperGroundingBuilder,
+    CommunityHub.Core.Assistant.AiHelperGroundingBuilder>();
 // Per-participant in-memory rate limit on the endpoint.
-builder.Services.AddSingleton<CommunityHub.Assistant.OttoRateLimiter>();
+builder.Services.AddSingleton<CommunityHub.Assistant.AiHelperRateLimiter>();
 // The assistant: a typed HttpClient (absolute Azure OpenAI URL, no BaseAddress).
-builder.Services.AddHttpClient<CommunityHub.Core.Assistant.OttoAssistant>();
-builder.Services.AddScoped<CommunityHub.Core.Assistant.IOttoAssistant>(sp =>
-    sp.GetRequiredService<CommunityHub.Core.Assistant.OttoAssistant>());
+builder.Services.AddHttpClient<CommunityHub.Core.Assistant.AiHelperAssistant>();
+builder.Services.AddScoped<CommunityHub.Core.Assistant.IAiHelperAssistant>(sp =>
+    sp.GetRequiredService<CommunityHub.Core.Assistant.AiHelperAssistant>());
+
+// §137 AiHelper INTAKE: detect bug/feature reports in a user's message + forward explicit
+// "contact the organizers" messages — capture a FeedbackItem ("CEH feed") AND email the
+// right mailbox (bug/feature → dev mailbox, question → organizers). Keyword set + both
+// addresses are config-overridable via the "Feedback" section (defaults: ELDK27 wiring).
+var feedbackOptions = new CommunityHub.Core.Assistant.FeedbackIntakeOptions();
+builder.Configuration
+    .GetSection(CommunityHub.Core.Assistant.FeedbackIntakeOptions.SectionName)
+    .Bind(feedbackOptions);
+builder.Services.AddSingleton(feedbackOptions);
+builder.Services.AddSingleton(
+    new CommunityHub.Core.Assistant.FeedbackIntakeDetector(feedbackOptions));
+builder.Services.AddScoped<CommunityHub.Core.Assistant.FeedbackIntakeService>();
 
 // --- Calendar sync (per-user subscribable iCal feed) -----------------------
 // The token service mints/resolves the per-participant feed token; the builder
@@ -754,7 +768,10 @@ builder.Services.AddScoped<CommunityHub.Core.Attendees.AttendeePlanService>();
 var cmOptions = new CommunityHub.Core.Integrations.CompanyManagerOptions();
 builder.Configuration.GetSection(CommunityHub.Core.Integrations.CompanyManagerOptions.SectionName).Bind(cmOptions);
 builder.Services.AddSingleton(cmOptions);
-builder.Services.AddHttpClient<CommunityHub.Core.Integrations.CompanyManagerClient>();
+// Bounded, jittered transient-fault retry (5xx/408/429/timeout) so a momentary
+// upstream blip from Company Manager doesn't surface as a hard failure (2026-06-27 incident).
+builder.Services.AddHttpClient<CommunityHub.Core.Integrations.CompanyManagerClient>()
+    .AddHttpMessageHandler(() => new CommunityHub.Core.Integrations.TransientFaultRetryHandler());
 
 // --- Content Studio: WordPress + LinkedIn content connector & template engine (§31) --
 // DRAFT-ONLY: the WordPress connector always posts status=draft (operator validates
