@@ -7,7 +7,7 @@
 @if (Model.AccessDenied)
 {
     <div class="card">
-        <h2>Questions for my sessions</h2>
+        <h1>Questions for my sessions</h1>
         <p class="error">
             This area is for speakers
             (<strong>@CommunityHub.Branding.RoleDisplay.Name(Model.Role)</strong>).
@@ -23,6 +23,11 @@
     .sq-sess-head { background:var(--el-darkblue,#1D3380); color:#fff; padding:12px 14px; }
     .sq-sess-head h3 { margin:0; font-size:16.5px; line-height:1.3; }
     .sq-sess-head .meta { font-size:12.5px; opacity:.92; margin-top:4px; line-height:1.5; }
+    .sq-mc-links { margin-top:8px; display:flex; flex-wrap:wrap; gap:8px; }
+    .sq-mc-links a { display:inline-block; background:rgba(255,255,255,.18); color:#fff;
+        border:1px solid rgba(255,255,255,.4); border-radius:6px; padding:5px 10px;
+        font-size:12.5px; font-weight:600; text-decoration:none; }
+    .sq-mc-links a:hover { background:rgba(255,255,255,.3); }
     .sq-body { padding:12px 14px; }
     .sq-q { background:#f6f8fb; border-radius:8px; padding:10px 12px; margin:8px 0; }
     .sq-q .ask { font-size:14px; color:#1a1a2e; white-space:pre-wrap; }
@@ -51,7 +56,7 @@
 }
 
 <div class="card">
-    <h2>@Localizer["SpeakerQ.Title"]</h2>
+    <h1>@Localizer["SpeakerQ.Title"]</h1>
     <p>Attendees can ask questions for your session(s) before the event. They are private to
        you, your <strong>co-speakers on the same session</strong>, and the organizers. Reply here
        &mdash; your reply is visible to your co-speakers too.</p>
@@ -84,6 +89,16 @@
                 @if (t.SpeakerNames.Count > 1)
                 {
                     <div class="meta">Co-speakers: @string.Join(", ", t.SpeakerNames)</div>
+                }
+                @* §86(a): a Master Class speaker edits the attendee LANDING PAGE
+                   (prep content) right from the Q&A area. Only shown for Master
+                   Class sessions; the prep editor re-checks the link server-side. *@
+                @if (t.Session.Type == SessionType.MasterClass)
+                {
+                    <div class="sq-mc-links">
+                        <a asp-page="/Speaker/MasterClassPrep" asp-route-sessionId="@t.Session.Id">Edit attendee landing page</a>
+                        <a asp-page="/MasterClassPage" asp-route-sessionId="@t.Session.Id">View landing page</a>
+                    </div>
                 }
             </div>
             <div class="sq-body">

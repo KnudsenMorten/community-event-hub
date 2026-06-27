@@ -2,6 +2,7 @@ using System.Security.Claims;
 using CommunityHub.Auth;
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
+using CommunityHub.Core.Email;
 using CommunityHub.Core.Resources;
 using CommunityHub.Pages.Forms;
 using Microsoft.AspNetCore.Authentication.Cookies;
@@ -43,6 +44,15 @@ public sealed class TravelValidationTests
         public HttpContext? HttpContext { get => ctx; set { } }
     }
 
+    private sealed class NoOpEmailSender : IEmailSender
+    {
+        public Task SendAsync(string to, string s, string h, CancellationToken ct = default) => Task.CompletedTask;
+        public Task SendAsync(string to, string s, string h, IReadOnlyCollection<string>? cc, CancellationToken ct = default) => Task.CompletedTask;
+        public Task SendAsync(string to, string s, string h, string text, CancellationToken ct = default) => Task.CompletedTask;
+        public Task SendWithIcsAsync(string to, string s, string h, string ics, string fn, CancellationToken ct = default) => Task.CompletedTask;
+        public Task SendWithAttachmentsAsync(string to, string s, string h, IReadOnlyCollection<EmailAttachment> attachments, CancellationToken ct = default) => Task.CompletedTask;
+    }
+
     private static IStringLocalizer<SharedResource> MakeLocalizer()
     {
         var options = Options.Create(new LocalizationOptions { ResourcesPath = "" });
@@ -66,7 +76,8 @@ public sealed class TravelValidationTests
     private static TravelModel NewModel(CommunityHubDbContext db, DefaultHttpContext http)
     {
         var accessor = new HttpCurrentParticipantAccessor(new HttpContextAccessorOver(http));
-        return new TravelModel(db, accessor, new FixedClock(), MakeLocalizer())
+        return new TravelModel(db, accessor, new FixedClock(), MakeLocalizer(),
+            new NoOpEmailSender(), NullLogger<TravelModel>.Instance)
         {
             PageContext = new PageContext { HttpContext = http },
         };
@@ -97,6 +108,26 @@ public sealed class TravelValidationTests
             SpeakerFunding = SpeakerFunding.Supported,
             SpeakingPreDay = true, SpeakingMainDay = true,
         });
+        // Seed one uploaded receipt so the Step-2 reimbursement request is unlocked
+        // (REQUIREMENTS §48 gate). These tests exercise Step-2 FIELD validation, which
+        // only runs once Step 1 is satisfied. The dedicated gate test below seeds NO
+        // receipt to prove the gate blocks Step 2.
+        db.TravelReceipts.Add(new TravelReceipt
+        {
+            EventId = EventId, ParticipantId = speaker.Id,
+            FileName = "receipt.pdf", ContentType = "application/pdf",
+            Content = new byte[] { 1, 2, 3 }, SizeBytes = 3,
+        });
+        await db.SaveChangesAsync();
+        return speaker;
+    }
+
+    /// <summary>Seed a speaker WITHOUT any uploaded receipt (Step 1 not done).</summary>
+    private static async Task<Participant> SeedSpeakerNoReceiptAsync(CommunityHubDbContext db)
+    {
+        var speaker = await SeedSpeakerAsync(db);
+        db.TravelReceipts.RemoveRange(
+            db.TravelReceipts.Where(r => r.ParticipantId == speaker.Id));
         await db.SaveChangesAsync();
         return speaker;
     }
@@ -223,5 +254,29 @@ public sealed class TravelValidationTests
         Assert.True(model.ModelState.IsValid);
         var row = Assert.Single(await db.TravelReimbursements.ToListAsync());
         Assert.Null(row.ClaimAmountEur);
+    }
+
+    [Fact]
+    public async Task Step2_request_is_blocked_until_a_receipt_is_uploaded()
+    {
+        // REQUIREMENTS §48: Step 2 (request reimbursement) is gated on Step 1
+        // (>=1 receipt). The server rejects the POST when no receipt exists, with a
+        // clear error, and persists nothing.
+        using var db = NewDb();
+        var speaker = await SeedSpeakerNoReceiptAsync(db);
+        var http = new DefaultHttpContext { User = SpeakerSession(speaker) };
+        var model = NewModel(db, http);
+
+        model.RequestReimbursement = true;
+        model.OriginCity = "Oslo, Norway";
+        model.AmountChoice = TravelModel.Choice400;   // otherwise valid
+
+        var result = await model.OnPostAsync(default);
+
+        Assert.IsType<PageResult>(result);
+        Assert.False(model.HasReceipt);
+        Assert.NotNull(model.Error);
+        Assert.Null(model.Message);
+        Assert.Empty(await db.TravelReimbursements.ToListAsync());
     }
 }

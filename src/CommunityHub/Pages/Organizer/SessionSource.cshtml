@@ -56,3 +56,58 @@
         </div>
     }
 </div>
+
+<div class="card">
+    <h2 style="margin-top:0;">Session sync direction</h2>
+    <p>Choose the <strong>active sync stage</strong> for this edition. Only one stage is active at a time —
+       you import one way, then later flip the direction. The default (stage 1) is the only stage that runs
+       today; stage 3 is what activates the Zoho&nbsp;Backstage&nbsp;&rarr;&nbsp;CEH change-detection engine.</p>
+
+    @foreach (var d in Model.DirectionOptions)
+    {
+        var isActive = d.Direction == Model.ActiveDirection;
+        <div class="ss-opt @(isActive ? "active" : "")">
+            <h3>
+                Stage @d.Stage — @d.Label
+                @if (isActive) { <span class="ss-tag ss-on">Active</span> }
+                @if (!d.Implemented) { <span class="ss-tag ss-off">Not implemented yet</span> }
+            </h3>
+            <p class="ss-note">@d.Note</p>
+            @if (!isActive)
+            {
+                <form method="post" asp-page-handler="SetDirection" style="margin-top:8px;">
+                    <input type="hidden" name="stage" value="@d.Stage" />
+                    <button type="submit">Activate stage @d.Stage</button>
+                </form>
+            }
+        </div>
+    }
+</div>
+
+<div class="card">
+    <h2 style="margin-top:0;">Speaker sync direction</h2>
+    <p>Choose the <strong>active sync stage</strong> for this edition's <strong>speakers</strong> — separate from the
+       session direction above. Only one stage is active at a time. The default (stage 1) is the only stage that runs
+       today; stage 3 would activate a Zoho&nbsp;Backstage&nbsp;&rarr;&nbsp;CEH speaker change-detection engine (not
+       built yet).</p>
+
+    @foreach (var d in Model.SpeakerDirectionOptions)
+    {
+        var isActive = d.Direction == Model.ActiveSpeakerDirection;
+        <div class="ss-opt @(isActive ? "active" : "")">
+            <h3>
+                Stage @d.Stage — @d.Label
+                @if (isActive) { <span class="ss-tag ss-on">Active</span> }
+                @if (!d.Implemented) { <span class="ss-tag ss-off">Not implemented yet</span> }
+            </h3>
+            <p class="ss-note">@d.Note</p>
+            @if (!isActive)
+            {
+                <form method="post" asp-page-handler="SetSpeakerDirection" style="margin-top:8px;">
+                    <input type="hidden" name="stage" value="@d.Stage" />
+                    <button type="submit">Activate stage @d.Stage</button>
+                </form>
+            }
+        </div>
+    }
+</div>

@@ -3,6 +3,7 @@ using CommunityHub.Auth;
 using CommunityHub.Core.Data;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
 using Microsoft.EntityFrameworkCore;
@@ -12,6 +13,9 @@ namespace CommunityHub.Pages.Login;
 /// <summary>
 /// One-tap sign-in via signed magic-link token. /Login/Magic?token=...&amp;r=/Forms/Hotel
 /// </summary>
+// Anonymous: this is a sign-in entry point — the signed token IS the credential, so
+// it must be reachable without an existing cookie under the fail-closed FallbackPolicy.
+[AllowAnonymous]
 public class MagicModel : PageModel
 {
     private readonly MagicLinkService _magic;

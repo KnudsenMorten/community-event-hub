@@ -7,7 +7,7 @@
 @if (Model.AccessDenied)
 {
     <div class="card">
-        <h2>My share graphics</h2>
+        <h1>My share graphics</h1>
         <p class="error" role="alert">
             This page is for speakers
             (<strong>@CommunityHub.Branding.RoleDisplay.Name(Model.Role)</strong>).
@@ -21,6 +21,12 @@
     .btn { background:#008BD2; color:#fff; border:0; border-radius:6px;
            padding:8px 14px; font-size:14px; cursor:pointer; text-decoration:none; }
     .btn:hover { background:#0079b8; }
+    .btn-publish { background:#0a66c2; }
+    .btn-publish:hover { background:#084d92; }
+    @@media (max-width: 460px) {
+        .gfx-actions form { flex:1 1 100%; }
+        .gfx-actions form .btn { width:100%; }
+    }
     .gfx-list { list-style:none; padding:0; margin:0; }
     .gfx-item {
         border:1px solid #e5e7eb; border-radius:10px;
@@ -39,16 +45,36 @@
 </style>
 
 <div class="card">
-    <h2>My share graphics</h2>
+    <h1>My share graphics</h1>
     <p>
         Pre-made social graphics for you to share. Download the image or open a
         ready-to-edit draft on LinkedIn or X — you finalize and post it yourself.
         @if (!Model.CanPost)
         {
-            <span> (We never post on your behalf.)</span>
+            <span> (We never post to your personal profile.)</span>
         }
     </p>
+    @if (Model.CanPublishToLinkedIn)
+    {
+        <p style="margin-top:6px;">
+            You can also <strong>publish your announcement to the event's LinkedIn
+            page</strong> — pick a released graphic below and use “Publish to LinkedIn”.
+        </p>
+    }
 </div>
+
+@if (!string.IsNullOrEmpty(Model.PublishMessage))
+{
+    <div class="card">
+        <p role="alert"
+           style="margin:0; padding:10px 12px; border-radius:8px;
+                  background:@(Model.PublishIsError ? "#fef2f2" : Model.PublishQueuedNotLive ? "#fffbeb" : "#ecfdf5");
+                  color:@(Model.PublishIsError ? "#991b1b" : Model.PublishQueuedNotLive ? "#92400e" : "#065f46");
+                  border:1px solid @(Model.PublishIsError ? "#fecaca" : Model.PublishQueuedNotLive ? "#fde68a" : "#a7f3d0");">
+            @Model.PublishMessage
+        </p>
+    </div>
+}
 
 @* The "I'm speaking at ELDK27" announcement draft. Builds a LinkedIn DRAFT only. *@
 @if (Model.AnnouncementDraft is not null)
@@ -106,6 +132,15 @@
                             <a class="btn" href="@c.XDraft.IntentUrl" target="_blank" rel="noopener noreferrer">
                                 Share on X (draft)
                             </a>
+                            @if (Model.CanPublishToLinkedIn)
+                            {
+                                <form method="post" asp-page-handler="PublishLinkedIn" style="display:inline; margin:0;">
+                                    <input type="hidden" name="graphicAssetId" value="@c.Id" />
+                                    <button type="submit" class="btn btn-publish">
+                                        Publish to LinkedIn page
+                                    </button>
+                                </form>
+                            }
                         </div>
                     </div>
                 </li>

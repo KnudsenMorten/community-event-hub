@@ -69,7 +69,6 @@ public sealed class OrganizerOverview
 
     // --- Attendees ---------------------------------------------------------
     public int AttendeeTotal { get; set; }
-    public int AttendeeCheckedIn { get; set; }
 
     // --- "Needs attention" tiles ------------------------------------------
     public int OverdueTasks { get; set; }
@@ -294,7 +293,5 @@ public sealed class OrganizerOverviewService
         OrganizerOverview o, int eventId, CancellationToken ct)
     {
         o.AttendeeTotal = await _db.Attendees.CountAsync(a => a.EventId == eventId, ct);
-        o.AttendeeCheckedIn = await _db.Attendees
-            .CountAsync(a => a.EventId == eventId && a.CheckedInAt != null, ct);
     }
 }

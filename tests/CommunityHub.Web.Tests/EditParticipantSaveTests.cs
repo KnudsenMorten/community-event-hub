@@ -47,6 +47,8 @@ public sealed class EditParticipantSaveTests
             => Task.CompletedTask;
         public Task SendWithIcsAsync(string toEmail, string subject, string htmlBody, string icsContent, string icsFileName, CancellationToken cancellationToken = default)
             => Task.CompletedTask;
+        public Task SendWithAttachmentsAsync(string toEmail, string subject, string htmlBody, IReadOnlyCollection<EmailAttachment> attachments, CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
     }
 
     private sealed class HttpContextAccessorOver(HttpContext ctx) : IHttpContextAccessor

@@ -1,0 +1,75 @@
+@page
+@model CommunityHub.Pages.Sponsor.GetStartedModel
+@{
+    ViewData["Title"] = Localizer["SponsorWiz.Title"].Value;
+    string StepTitle(string key) => Localizer["SponsorWiz.Step." + key].Value;
+    string StepDesc(string key) => Localizer["SponsorWiz.Step." + key + ".Desc"].Value;
+}
+
+<div class="card">
+    <h1>@Localizer["SponsorWiz.Title"]</h1>
+
+    @if (Model.AccessDenied)
+    {
+        <p class="error">This page is for sponsors only.</p>
+        <p><a asp-page="/Index">@Localizer["Common.BackToHub"]</a></p>
+    }
+    else if (Model.NoCompanyLink || Model.View is null)
+    {
+        <p class="info">Your sponsor account is not yet linked to a company, so we can't show your steps. Please contact the organizers.</p>
+        <p><a asp-page="/Index">@Localizer["Common.BackToHub"]</a></p>
+    }
+    else
+    {
+        var v = Model.View;
+        <p>Welcome! Complete the steps below to get your company ready for the event. You can stop and come back any time — your progress is saved.</p>
+
+        <div style="margin:14px 0;">
+            <div style="display:flex;justify-content:space-between;font-size:13px;color:#4b5563;margin-bottom:4px;">
+                <span>@v.DoneCount of @v.TotalSteps steps done</span>
+                <span>@v.Percent%</span>
+            </div>
+            <div style="height:10px;background:#eef2f7;border-radius:999px;overflow:hidden;" role="progressbar"
+                 aria-valuenow="@v.Percent" aria-valuemin="0" aria-valuemax="100">
+                <div style="height:100%;width:@(v.Percent)%;background:var(--el-blue,#008BD2);border-radius:999px;"></div>
+            </div>
+        </div>
+
+        @if (v.AllDone)
+        {
+            <p class="success" style="font-size:16px;">🎉 All set — thank you! You can update any section below any time.</p>
+        }
+        else if (v.NextStep is not null)
+        {
+            <p>
+                <a asp-page="/Sponsor/CompanyDetails" asp-fragment="@v.NextStep.Anchor" class="btn-primary">
+                    Continue — step @v.NextStepNumber of @v.TotalSteps: @StepTitle(v.NextStep.Key)
+                </a>
+            </p>
+        }
+    }
+</div>
+
+@if (!Model.AccessDenied && !Model.NoCompanyLink && Model.View is not null)
+{
+    <ol class="card" style="list-style:none;padding:14px;margin-top:14px;display:flex;flex-direction:column;gap:10px;">
+        @{ var n = 0; }
+        @foreach (var step in Model.View.Steps)
+        {
+            n++;
+            var bg = step.Done == true ? "background:#f3fbf5;" : "";
+            var icon = step.Done switch { true => "✅", false => "⬜", _ => "🔗" };
+            <li style="display:flex;align-items:flex-start;gap:12px;padding:10px;border:1px solid #e6eaf2;border-radius:10px;@bg">
+                <span aria-hidden="true" style="font-size:20px;line-height:1.2;flex:0 0 auto;">@icon</span>
+                <span style="flex:1;">
+                    <strong>@n. @StepTitle(step.Key)</strong>
+                    <span class="muted" style="display:block;font-size:13px;">@StepDesc(step.Key)</span>
+                </span>
+                <a asp-page="/Sponsor/CompanyDetails" asp-fragment="@step.Anchor"
+                   class="@(step.Done == true ? "" : "btn-primary")" style="flex:0 0 auto;align-self:center;">
+                    @(step.Done == true ? "Edit" : "Open")
+                </a>
+            </li>
+        }
+    </ol>
+}

@@ -1,0 +1,44 @@
+@page
+@model CommunityHub.Pages.Forms.SignalModel
+@{
+    ViewData["Title"] = "Join Signal groups";
+}
+
+<div class="card">
+    <h1>Join Signal groups</h1>
+
+    @if (Model.OutOfScope || Model.Links is null)
+    {
+        <p class="info">There are no Signal groups for your role.</p>
+        <p><a asp-page="/Index">Back to hub</a></p>
+    }
+    else
+    {
+        <p>We coordinate the event on Signal. Tap the button(s) below to join, then
+           mark this step as completed.</p>
+
+        @if (Model.Done)
+        {
+            <p class="success" role="status">✅ You've marked this step complete.</p>
+        }
+
+        <div style="display:flex;flex-direction:column;gap:10px;margin:16px 0;">
+            @if (Model.Links.HasChat)
+            {
+                <a href="@Model.Links.ChatUrl" target="_blank" rel="noopener" class="btn-primary"
+                   style="display:inline-block;text-align:center;">@Model.Links.ChatLabel</a>
+            }
+            @if (Model.Links.HasBroadcast)
+            {
+                <a href="@Model.Links.BroadcastUrl" target="_blank" rel="noopener" class="btn-primary"
+                   style="display:inline-block;text-align:center;">@Model.Links.BroadcastLabel</a>
+            }
+        </div>
+
+        <form method="post" asp-page-handler="Toggle">
+            <button type="submit">@(Model.Done ? "Mark as not completed" : "Mark as completed")</button>
+        </form>
+    }
+
+    <p style="margin-top:14px;"><a asp-page="/Index">Back to hub</a></p>
+</div>

@@ -1,0 +1,28 @@
+@page
+@model CommunityHub.Pages.Sponsor.TelemetryModel
+@{
+    ViewData["Title"] = "Attendee telemetry";
+}
+
+@* §55: in-area sponsor telemetry. Reuses the SAME shared panel partial as the
+   public /attendee-telemetry page and the organizer page, so the ranked tables +
+   segment + topic-filter dropdowns are identical everywhere. *@
+<div class="card tl-wrap">
+    <h1 id="telemetry">Who's coming to Experts Live Denmark</h1>
+
+    @if (Model.AccessDenied)
+    {
+        <p class="error">This page is for sponsors only.</p>
+        <p><a asp-page="/Index">@Localizer["Common.BackToHub"]</a></p>
+        return;
+    }
+
+    <p style="color:#4b5563;margin-top:0;">
+        Aggregate-only attendee analytics for sponsors — pick a segment and drill into
+        the breakdown by job role, where attendees are from, ticket type and more.
+        No individual attendee data is shown.
+    </p>
+
+    <partial name="_AttendeeTelemetryPanel"
+             model="new CommunityHub.Pages.Shared.AttendeeTelemetryPanelModel(Model.Data, Model.Segments)" />
+</div>

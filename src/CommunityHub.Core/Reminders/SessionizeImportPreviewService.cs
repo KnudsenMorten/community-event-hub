@@ -87,8 +87,7 @@ public sealed record SessionizeImportPreviewResult(
 /// <summary>
 /// Computes a Sessionize import DRY-RUN (REQUIREMENTS §21 organizer "import
 /// dry-run/preview"). It reads the SAME source the real import reads — the v2 view
-/// API (<see cref="SessionizeApiClient"/>) or an uploaded Excel export
-/// (<see cref="SessionizeExcelParser"/>) — and applies the SAME upsert / bio-merge
+/// API (<see cref="SessionizeApiClient"/>) — and applies the SAME upsert / bio-merge
 /// rules as <see cref="SessionizeImportService"/>, but in a read-only pass that
 /// NEVER writes. It reports created / updated / skipped counts AND which speaker
 /// bios would be overwritten (and whether the speaker had curated them), so the
@@ -106,18 +105,15 @@ public sealed record SessionizeImportPreviewResult(
 public sealed class SessionizeImportPreviewService
 {
     private readonly CommunityHubDbContext _db;
-    private readonly SessionizeExcelParser _parser;
     private readonly SessionizeApiClient _apiClient;
     private readonly SessionizeApiOptions _apiOptions;
 
     public SessionizeImportPreviewService(
         CommunityHubDbContext db,
-        SessionizeExcelParser parser,
         SessionizeApiClient apiClient,
         SessionizeApiOptions apiOptions)
     {
         _db = db;
-        _parser = parser;
         _apiClient = apiClient;
         _apiOptions = apiOptions;
     }
@@ -145,26 +141,9 @@ public sealed class SessionizeImportPreviewService
         return await ComputeAsync(eventId, mode, fetched.Speakers, fetched.Warnings, ct);
     }
 
-    /// <summary>Dry-run an uploaded Excel export (no writes).</summary>
-    public async Task<SessionizeImportPreviewResult> PreviewExcelAsync(
-        int eventId,
-        Stream excelStream,
-        SessionizeImportMode mode,
-        CancellationToken ct = default)
-    {
-        var parsed = _parser.Parse(excelStream);
-        if (parsed.Error is not null)
-        {
-            return Empty(mode, parsed.Error, parsed.Warnings);
-        }
-
-        return await ComputeAsync(eventId, mode, parsed.Speakers, parsed.Warnings, ct);
-    }
-
     /// <summary>
     /// The read-only core: replays the upsert + bio-merge rules over the supplied
-    /// speakers against the current DB state and reports what WOULD change. Used by
-    /// both the API and Excel preview paths so the two sources preview identically.
+    /// speakers against the current DB state and reports what WOULD change.
     /// </summary>
     public async Task<SessionizeImportPreviewResult> ComputeAsync(
         int eventId,

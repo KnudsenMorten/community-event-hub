@@ -96,26 +96,11 @@ public sealed class WebTriggerFeatureGateTests
             Enabled = true, EndpointId = "endpoint-x",
         };
         return new SessionizeImportModel(
-            Accessor(http), import: null!, apiImport: null!, preview: null!,
+            Accessor(http), apiImport: null!, preview: null!,
             apiOptions, new FeatureGateService(db), new RingResolver(db))
         {
             PageContext = new PageContext { HttpContext = (DefaultHttpContext)http },
         };
-    }
-
-    [Fact]
-    public async Task SessionizeImport_excel_commit_noops_when_feature_disabled()
-    {
-        using var db = NewDb();
-        var http = OrganizerContext();
-        var model = NewSessionizeImport(db, http);
-
-        var result = await model.OnPostImportAsync(CancellationToken.None);
-
-        Assert.IsType<PageResult>(result);
-        Assert.Null(model.Result);                    // nothing imported
-        Assert.NotNull(model.ValidationError);        // clear "disabled" message
-        Assert.Contains("turned off", model.ValidationError!);
     }
 
     [Fact]

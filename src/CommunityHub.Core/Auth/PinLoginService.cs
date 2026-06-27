@@ -116,17 +116,9 @@ public sealed class PinLoginService
         _db.LoginPins.Add(loginPin);
         await _db.SaveChangesAsync(cancellationToken);
 
-        // Email the plaintext PIN. It is never logged or persisted.
-        // Prefix subject with the active event's code (e.g. "ELDK27") so the
-        // recipient's mail client groups + filters the hub's mail consistently.
-        var eventCode = await _db.Events
-            .Where(e => e.Id == eventId)
-            .Select(e => e.Code)
-            .FirstOrDefaultAsync(cancellationToken);
-        var subjectPrefix = string.IsNullOrWhiteSpace(eventCode)
-            ? "Event Hub"
-            : $"{eventCode} Event Hub";
-
+        // Email the plaintext PIN. It is never logged or persisted. The edition
+        // tag is appended centrally as a POSTFIX by EmailTemplateRenderer
+        // (REQUIREMENTS §103) — the subject here is content-only, no edition prefix.
         var firstName = FirstNameOf(participant.FullName);
         // SIGN-IN EXEMPTION (operator 2026-06-22): the on-demand PIN must reach a user
         // at ANY ring — mark this send ring-exempt so the gate never drops it. (The
@@ -140,7 +132,6 @@ public sealed class PinLoginService
                 tokens["firstName"] = firstName;
                 tokens["pin"] = plainPin;
                 tokens["expiryMinutes"] = ((int)PinLifetime.TotalMinutes).ToString();
-                tokens["subjectPrefix"] = subjectPrefix;
                 var rendered = _templates.Render("pin-signin", tokens);
                 // Send to the address the user typed (primary OR alternate) so they
                 // receive the PIN at the inbox they signed in with (§26d).
@@ -150,7 +141,7 @@ public sealed class PinLoginService
             else
             {
                 // Fallback: legacy inline HTML (older test constructions with no provider).
-                var subject = $"{subjectPrefix} - Your sign-in code";
+                var subject = $"Your sign-in code {EmailTemplateRenderer.SubjectTag}";
                 var body = BuildPinEmail(participant.FullName, plainPin);
                 await _emailSender.SendAsync(
                     normalizedEmail, subject, body, cancellationToken);

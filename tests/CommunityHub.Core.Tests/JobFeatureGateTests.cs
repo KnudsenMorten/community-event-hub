@@ -91,34 +91,42 @@ public sealed class JobFeatureGateTests
         await Assert.ThrowsAsync<NullReferenceException>(() => job.Run(Timer(), default));
     }
 
-    // ---- AttendeeReconcileJob ('attendee-reconcile') -----------------------
+    // ---- AttendeeBackstageSyncJob ('attendee-reconcile') -------------------
+    // The single authoritative Zoho→CEH attendee+order sync (REQUIREMENTS §125);
+    // it absorbed the retired AttendeeReconcileJob and keeps the same gate key.
 
     [Fact]
-    public async Task AttendeeReconcileJob_skips_when_feature_disabled()
+    public async Task AttendeeBackstageSyncJob_skips_when_feature_disabled()
     {
         using var db = NewDb();
         await SeedActiveEventAsync(db);
 
         var options = new CommunityHub.Core.Integrations.ZohoOptions { Enabled = true };
-        var job = new AttendeeReconcileJob(db, zoho: null!, options, reconciler: null!,
-            engine: null!, templates: null!, new FixedClock(Now), Gate(db), Audit(db),
-            NullLogger<AttendeeReconcileJob>.Instance);
+        var job = new AttendeeBackstageSyncJob(
+            db, zoho: null!, options, sync: null!, mcEmail: null!, promo: null!,
+            provisioning: null!, welcome: null!, engine: null!, templates: null!,
+            audit: null!, clock: null!, gate: Gate(db), config: null!,
+            NullLogger<AttendeeBackstageSyncJob>.Instance);
 
         await job.Run(Timer(), default); // no throw == gate short-circuited
     }
 
     [Fact]
-    public async Task AttendeeReconcileJob_runs_past_the_gate_when_enabled()
+    public async Task AttendeeBackstageSyncJob_runs_past_the_gate_when_enabled()
     {
         using var db = NewDb();
         var eventId = await SeedActiveEventAsync(db);
         await EnableAsync(db, eventId, "attendee-reconcile");
 
         var options = new CommunityHub.Core.Integrations.ZohoOptions { Enabled = true };
-        var job = new AttendeeReconcileJob(db, zoho: null!, options, reconciler: null!,
-            engine: null!, templates: null!, new FixedClock(Now), Gate(db), Audit(db),
-            NullLogger<AttendeeReconcileJob>.Instance);
+        var job = new AttendeeBackstageSyncJob(
+            db, zoho: null!, options, sync: null!, mcEmail: null!, promo: null!,
+            provisioning: null!, welcome: null!, engine: null!, templates: null!,
+            audit: null!, clock: null!, gate: Gate(db), config: null!,
+            NullLogger<AttendeeBackstageSyncJob>.Instance);
 
+        // Enabled ⇒ the run proceeds to the (null) Zoho client and throws — proof
+        // the gate let it through (the disabled run above did NOT throw).
         await Assert.ThrowsAsync<NullReferenceException>(() => job.Run(Timer(), default));
     }
 
@@ -163,7 +171,7 @@ public sealed class JobFeatureGateTests
         await SeedActiveEventAsync(db);
 
         var job = new WooCommercePullJob(service: null!, provision: null!, db, Gate(db), Audit(db),
-            NullLogger<WooCommercePullJob>.Instance);
+            alerts: null!, NullLogger<WooCommercePullJob>.Instance);
 
         await job.Run(Timer(), default); // no throw == gate short-circuited
     }
@@ -176,7 +184,7 @@ public sealed class JobFeatureGateTests
         await EnableAsync(db, eventId, "sponsor-order-pull");
 
         var job = new WooCommercePullJob(service: null!, provision: null!, db, Gate(db), Audit(db),
-            NullLogger<WooCommercePullJob>.Instance);
+            alerts: null!, NullLogger<WooCommercePullJob>.Instance);
 
         await Assert.ThrowsAsync<NullReferenceException>(() => job.Run(Timer(), default));
     }

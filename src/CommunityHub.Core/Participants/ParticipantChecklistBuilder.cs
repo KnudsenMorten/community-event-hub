@@ -42,24 +42,34 @@ public sealed record ParticipantChecklist(
 /// is not silently "all complete" while /Sponsor/Tasks shows pending work.
 ///
 /// The same SourceKey → form-page mapping the Hub used is centralised here so the
-/// deep-links stay consistent everywhere the checklist renders. Pure read over
-/// the DB; the form-auto-task backfill (which WRITES rows) stays on the Hub page
-/// — this builder never mutates.
+/// deep-links stay consistent everywhere the checklist renders. Before reading, it
+/// runs <see cref="FormTaskReconciler"/> so that every surface (Hub home, Tasks
+/// page, attendee My-event) auto-completes tasks whose form DATA is already
+/// present; that reconcile is the only write — the checklist projection itself is a
+/// pure read over the DB.
 /// </summary>
 public sealed class ParticipantChecklistBuilder
 {
     private readonly CommunityHubDbContext _db;
     private readonly TimeProvider _clock;
+    private readonly FormTaskReconciler _reconciler;
 
-    public ParticipantChecklistBuilder(CommunityHubDbContext db, TimeProvider clock)
+    public ParticipantChecklistBuilder(
+        CommunityHubDbContext db, TimeProvider clock, FormTaskReconciler reconciler)
     {
         _db = db;
         _clock = clock;
+        _reconciler = reconciler;
     }
 
     public async Task<ParticipantChecklist> BuildAsync(
         int eventId, int participantId, CancellationToken ct = default)
     {
+        // Auto-complete tasks from already-submitted form data first, so every
+        // checklist surface reflects the true state (idempotent; no-op when nothing
+        // needs changing).
+        await _reconciler.ReconcileAsync(eventId, participantId, ct);
+
         var sponsorCompanyId = await _db.Participants
             .Where(p => p.Id == participantId)
             .Select(p => p.SponsorCompanyId)
@@ -114,10 +124,21 @@ public sealed class ParticipantChecklistBuilder
         if (sourceKey.StartsWith("travel:submit-ticket-invoice:", StringComparison.Ordinal)) return "/Forms/Travel";
         if (sourceKey.StartsWith("hotel-form:",                   StringComparison.Ordinal)) return "/Forms/Hotel";
         if (sourceKey.StartsWith("dinner-form:",                  StringComparison.Ordinal)) return "/Forms/Dinner";
-        if (sourceKey.StartsWith("volunteer-form:",               StringComparison.Ordinal)) return "/Forms/VolunteerWizard";
+        if (sourceKey.StartsWith("volunteer-form:",               StringComparison.Ordinal)) return "/volunteer/availability";
         if (sourceKey.StartsWith("speaker-form:",                 StringComparison.Ordinal)) return "/Forms/Speaker";
-        if (sourceKey.StartsWith("speakerdl:",                    StringComparison.Ordinal)) return "/Tasks";
-        if (sourceKey.StartsWith("sponsor:",                      StringComparison.Ordinal)) return "/Sponsor/Tasks";
+        if (sourceKey.StartsWith("speakerdl:",                    StringComparison.Ordinal))
+        {
+            // A speaker-deadline task mirrors a logistics form: deep-link to the
+            // form that completes it (matched by the form keyword the slugger
+            // embeds, same as FormTaskReconciler). Upload-deck deadlines carry no
+            // form, so they stay on the generic tasks list.
+            if (sourceKey.Contains("hotel",  StringComparison.Ordinal)) return "/Forms/Hotel";
+            if (sourceKey.Contains("dinner", StringComparison.Ordinal)) return "/Forms/Dinner";
+            if (sourceKey.Contains("lunch",  StringComparison.Ordinal)) return "/Forms/Lunch";
+            if (sourceKey.Contains("swag",   StringComparison.Ordinal)) return "/Forms/Swag";
+            return "/Tasks";
+        }
+        if (sourceKey.StartsWith("sponsor:",                      StringComparison.Ordinal)) return "/Sponsor/CompanyDetails";
         return null;
     }
 }

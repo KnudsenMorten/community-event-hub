@@ -4,6 +4,7 @@ using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
 using CommunityHub.Core.Email;
 using CommunityHub.Core.Integrations;
+using CommunityHub.Core.Volunteers;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
@@ -71,11 +72,19 @@ public class SignupModel : PageModel
     public class DayInput
     {
         public DateOnly Day { get; set; }
-        public VolunteerAvailabilityLevel Level { get; set; }
+        /// <summary>The chosen option's stable slot id (see <see cref="VolunteerDayOptions"/>).</summary>
+        public string? Slot { get; set; }
         public string? Note { get; set; }
     }
 
-    public record DayRow(DateOnly Day, string Label, VolunteerAvailabilityLevel Level, string? Note);
+    /// <summary>
+    /// RawNote is the full stored Note (incl. any "[slot]" tag — used to re-select
+    /// the right option after a validation error); UserNote is the free text only.
+    /// </summary>
+    public record DayRow(DateOnly Day, string Label, VolunteerAvailabilityLevel Level, string? RawNote)
+    {
+        public string? UserNote => VolunteerDayOptions.StripSlot(RawNote);
+    }
     public IReadOnlyList<DayRow> Days { get; private set; } = Array.Empty<DayRow>();
 
     // --- Public profile step ------------------------------------------------
@@ -133,7 +142,17 @@ public class SignupModel : PageModel
         Days = dayList.Select(d =>
         {
             postedByDay.TryGetValue(d.Day, out var p);
-            return new DayRow(d.Day, d.Label, p?.Level ?? VolunteerAvailabilityLevel.Full, p?.Note);
+            // Re-derive the row from the posted slot so a validation error re-renders
+            // step 2 with the user's choice preserved.
+            var chosen = p?.Slot is null
+                ? null
+                : VolunteerDayOptions.For(d.Day).FirstOrDefault(o =>
+                    string.Equals(o.Slot, p.Slot, StringComparison.OrdinalIgnoreCase));
+            var level = chosen?.Level ?? VolunteerAvailabilityLevel.Full;
+            var rawNote = chosen is null
+                ? null
+                : VolunteerDayOptions.ComposeNote(chosen.Slot, p?.Note);
+            return new DayRow(d.Day, d.Label, level, rawNote);
         }).ToList();
 
         // --- Validate ------------------------------------------------------
@@ -244,7 +263,15 @@ public class SignupModel : PageModel
         foreach (var input in Availability)
         {
             if (!validDays.Contains(input.Day)) continue;
-            var note = string.IsNullOrWhiteSpace(input.Note) ? null : input.Note.Trim();
+
+            // The posted slot drives the capacity Level and (with the free note) the
+            // stored Note. Ignore an unknown/absent slot for this day.
+            var chosen = VolunteerDayOptions.For(input.Day).FirstOrDefault(o =>
+                string.Equals(o.Slot, input.Slot, StringComparison.OrdinalIgnoreCase));
+            if (chosen is null) continue;
+
+            var userNote = string.IsNullOrWhiteSpace(input.Note) ? null : input.Note.Trim();
+            var note = VolunteerDayOptions.ComposeNote(chosen.Slot, userNote);
             if (note is { Length: > 500 }) note = note[..500];
 
             var row = existing.FirstOrDefault(x => x.Day == input.Day);
@@ -253,11 +280,11 @@ public class SignupModel : PageModel
                 _db.VolunteerDayAvailabilities.Add(new VolunteerDayAvailability
                 {
                     EventId = eventId, ParticipantId = participantId,
-                    Day = input.Day, Level = input.Level, Note = note,
+                    Day = input.Day, Level = chosen.Level, Note = note,
                     UpdatedAt = DateTimeOffset.UtcNow,
                 });
             }
-            else { row.Level = input.Level; row.Note = note; row.UpdatedAt = DateTimeOffset.UtcNow; }
+            else { row.Level = chosen.Level; row.Note = note; row.UpdatedAt = DateTimeOffset.UtcNow; }
         }
         await _db.SaveChangesAsync(ct);
     }
@@ -335,8 +362,10 @@ public class SignupModel : PageModel
             var availRows = string.Concat(rows.Select(r =>
                 "<tr><td style=\"padding:3px 10px 3px 0;\">"
                 + Enc(labelByDay.TryGetValue(r.Day, out var l) ? l : r.Day.ToString("yyyy-MM-dd"))
-                + "</td><td style=\"padding:3px 10px;\"><b>" + LevelLabel(r.Level) + "</b></td><td style=\"padding:3px 0;color:#555;\">"
-                + Enc(r.Note) + "</td></tr>"));
+                + "</td><td style=\"padding:3px 10px;\"><b>"
+                + Enc(VolunteerDayOptions.DisplayLabel(r.Day, r.Level, r.Note))
+                + "</b></td><td style=\"padding:3px 0;color:#555;\">"
+                + Enc(VolunteerDayOptions.StripSlot(r.Note)) + "</td></tr>"));
 
             var html =
                 $"<p>New volunteer application from <b>{Enc(fullName)}</b>.</p><ul>"

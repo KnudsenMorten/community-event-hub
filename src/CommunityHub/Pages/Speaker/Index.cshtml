@@ -7,7 +7,7 @@
 @if (Model.AccessDenied)
 {
     <div class="card">
-        <h2>@Localizer["Speaker.Title"]</h2>
+        <h1>@Localizer["Speaker.Title"]</h1>
         <p class="error">
             @Localizer["Speaker.AccessDenied"]
             (<strong>@CommunityHub.Branding.RoleDisplay.Name(Model.Role)</strong>)
@@ -15,14 +15,6 @@
         <p><a asp-page="/Index">@Localizer["Common.BackToHub"]</a></p>
     </div>
     return;
-}
-
-@{
-    var p = Model.Progress;
-    string barColor = p.OverdueCount > 0 ? "#c0392b" : (p.AllDone ? "#0a6" : "var(--el-blue)");
-    // Localized aria-label prefixes for the per-milestone toggle buttons.
-    var reopenLabel   = Localizer["Speaker.Reopen"].Value;
-    var markDoneLabel = Localizer["Speaker.MarkDone"].Value;
 }
 
 <style>
@@ -70,7 +62,7 @@
 @if (Model.MySessions.Count > 0)
 {
     <div class="card">
-        <h2>@Localizer["Speaker.MySessions"]</h2>
+        <h1>@Localizer["Speaker.MySessions"]</h1>
         <p style="font-size:13.5px;color:#555;margin-top:0;">@Localizer["Speaker.MySessionsIntro"]</p>
         <p style="margin:0 0 12px;">
             <a class="task-link-btn" href="https://template.expertslive.dk/" target="_blank" rel="noopener">&#128196; @Localizer["Speaker.SessionTemplate"]<span class="visually-hidden">@Localizer["Common.OpensNewTab"]</span></a>
@@ -95,16 +87,27 @@
                     </div>
 
                     <div style="color:#4b5563;font-size:13px;margin-top:6px;display:flex;flex-wrap:wrap;gap:4px 16px;">
-                        @if (s.IsScheduled && s.StartsAt is { } start)
+                        @* §88: the TIME is always READ from CEH (StartsAt). When it is set, show
+                           the full date + time. When it is NOT yet synced, show the KNOWN day
+                           (Master Classes on the 9th, sessions on the 10th — FallbackDate) with
+                           a "TBD" time, so the speaker still sees WHEN their session is. *@
+                        @if (s.StartsAt is { } start)
                         {
                             <span>
                                 &#128197;
                                 @start.ToString("ddd dd MMM, HH:mm")@(s.EndsAt is { } end ? "–" + end.ToString("HH:mm") : "")
                             </span>
                         }
+                        else if (s.FallbackDate is { } day)
+                        {
+                            <span>
+                                &#128197;
+                                @day.ToString("ddd dd MMM"), <span style="color:#6b7280;">@Localizer["Speaker.TimeTbd"]</span>
+                            </span>
+                        }
                         else
                         {
-                            <span style="color:#6b7280;">@Localizer["Speaker.NotScheduledYet"]</span>
+                            <span style="color:#6b7280;">@Localizer["Speaker.TimeTbd"]</span>
                         }
                         @if (!string.IsNullOrWhiteSpace(s.Room))
                         {
@@ -124,7 +127,18 @@
                     }
 
                     <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;">
-                        @if (Model.PubliclyViewableSessionIds.Contains(s.SessionId))
+                        @* §52: "View public session page" links to the public ZOHO BACKSTAGE
+                           session page when this session carries a Backstage agenda id
+                           (Session.BackstageSessionId, captured by the §38e flow); else it
+                           keeps the internal /Sessions/{id} page. The Backstage URL is built
+                           from per-edition config (ZohoOptions.BackstagePublicBaseUrl) — never
+                           fabricated for a session with no Backstage id. *@
+                        @{ var backstageUrl = Model.BackstagePublicSessionUrl(s); }
+                        @if (!string.IsNullOrEmpty(backstageUrl))
+                        {
+                            <a class="task-link-btn" href="@backstageUrl" target="_blank" rel="noopener">@Localizer["Speaker.ViewPublicSession"]<span class="visually-hidden">@Localizer["Common.OpensNewTab"]</span></a>
+                        }
+                        else if (Model.PubliclyViewableSessionIds.Contains(s.SessionId))
                         {
                             <a class="task-link-btn" href="/Sessions/@s.SessionId">@Localizer["Speaker.ViewPublicSession"]</a>
                         }
@@ -132,18 +146,21 @@
                         {
                             <span style="color:#6b7280;font-size:13px;align-self:center;">@Localizer["Speaker.SessionNotPublicYet"]</span>
                         }
-                        <a class="task-link-btn" asp-page="/Speaker/Questions">
-                            @Localizer["Speaker.AttendeeQuestions"]
-                            @if (s.OpenQuestionCount > 0)
-                            {
-                                <span class="ms-badge due" style="margin-left:4px;">@s.OpenQuestionCount</span>
-                            }
-                        </a>
+                        @* §86 (operator 2026-06-26): re-enabled — the speaker Master Class Q&A
+                           area (see audience questions on this session, reply, and for a Master
+                           Class edit the attendee landing page). *@
+                        <a class="task-link-btn" asp-page="/Speaker/Questions">&#128172; @Localizer["Speaker.AttendeeQuestions"]</a>
                         <a class="task-link-btn" asp-page="/Speaker/Graphics">&#128241; @Localizer["Speaker.SoMePromote"]</a>
                         <a class="task-link-btn" href="/Sessions/@(s.SessionId).ics">&#128197; @Localizer["Speaker.CalendarSync"]</a>
                         @if (!string.IsNullOrWhiteSpace(s.EvaluationUrl))
                         {
                             <a class="task-link-btn" href="@s.EvaluationUrl" target="_blank" rel="noopener">&#128202; @Localizer["Speaker.EvaluationsDownload"]<span class="visually-hidden">@Localizer["Common.OpensNewTab"]</span></a>
+                        }
+                        @* §124: download this session's ROOM session-evaluation QR (served by the Evaluations page handler). *@
+                        @if (Model.RoomQr.TryGetValue(s.SessionId, out var roomQr))
+                        {
+                            <a class="task-link-btn" asp-page="/Speaker/Evaluations" asp-page-handler="Qr"
+                               asp-route-sessionId="@s.SessionId" download="@roomQr.FileName">&#128241; Evaluation QR</a>
                         }
                     </div>
                 </li>
@@ -154,71 +171,24 @@
 
 <div class="card">
     <h2>&#11088; @Localizer["Speaker.RatingsHeading"]</h2>
-    <p style="font-size:13.5px;color:#374151;margin-top:0;">@Localizer["Speaker.RatingsIntro"]</p>
-    <p>
-        <a class="task-link-btn" asp-page="/Speaker/Evaluations">@Localizer["Speaker.RatingsCta"]</a>
-    </p>
-</div>
-
-<div class="card">
-    <h2>@Localizer["Speaker.PublicPreviewHeading"]</h2>
-    @if (Model.PublicProfileLive && !string.IsNullOrEmpty(Model.PublicPreviewUrl))
+    @if (Model.HasRatings)
     {
-        <p style="font-size:13.5px;color:#374151;margin-top:0;">@Localizer["Speaker.PublicPreviewLive"]</p>
+        <p style="font-size:13.5px;color:#374151;margin-top:0;">@Localizer["Speaker.RatingsIntro"]</p>
         <p>
-            <a class="task-link-btn" href="@Model.PublicPreviewUrl" target="_blank" rel="noopener">
-                &#128065; @Localizer["Speaker.ViewPublicProfile"]
-            </a>
-            <a class="task-link-btn" asp-page="/Forms/Speaker">@Localizer["Speaker.EditBio"]</a>
+            <a class="task-link-btn" asp-page="/Speaker/Evaluations">@Localizer["Speaker.RatingsCta"]</a>
         </p>
     }
     else
     {
-        <p style="font-size:13.5px;color:#374151;margin-top:0;">@Localizer["Speaker.PublicPreviewPending"]</p>
-        <p>
-            <a class="task-link-btn" asp-page="/Forms/Speaker">@Localizer["Speaker.EditBio"]</a>
+        <p style="background:#fef9c3;border-left:4px solid #ca8a04;padding:10px 14px;border-radius:6px;font-size:13.5px;color:#713f12;margin:0;">
+            Your session ratings aren't available yet. They'll appear here once attendees rate your sessions (after the event).
         </p>
     }
 </div>
 
-@if (!string.IsNullOrEmpty(Model.CalendarWebcalUrl))
-{
-    <div class="card">
-        <h2>&#128197; @Localizer["Speaker.CalendarHeading"]</h2>
-        <p style="color:#4b5563;margin:0 0 8px;">@Localizer["Speaker.CalendarIntro"]</p>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
-            <input type="text" readonly aria-label="@Localizer["Speaker.CalendarHeading"]"
-                   id="sp-cal-url" value="@Model.CalendarWebcalUrl"
-                   onclick="this.select()"
-                   style="flex:1 1 220px;min-width:0;font-size:12.5px;background:#f3f4f6;box-sizing:border-box;" />
-            <button type="button" id="sp-cal-copy" data-ceh-copy="sp-cal-url"
-                    data-ceh-copied="@Localizer["Hub.Copied"]"
-                    data-ceh-copy-label="@Localizer["Hub.CopyLink"]">@Localizer["Hub.CopyLink"]</button>
-            <a class="task-link-btn" href="@Model.CalendarWebcalUrl" data-ceh-confirm="calSyncInfo">@Localizer["Hub.Subscribe"]</a>
-        </div>
-    </div>
-    @* Copy uses the shared data-ceh-copy behaviour in _Layout (REQUIREMENTS §21). *@
-}
-
-<div class="card">
-    <h2>@Localizer["Speaker.Details"]</h2>
-    <div class="sp-progress-meta" style="margin-bottom:8px;">
-        @if (Model.SpeakerDetailsSubmitted)
-        {
-            <span class="ms-badge ok">&#10003; @Localizer["Common.Submitted"]</span>
-            <span>@Localizer["Speaker.DetailsOnFile"]</span>
-        }
-        else
-        {
-            <span class="ms-badge due">&#9888; @Localizer["Common.Pending"]</span>
-            <span>@Localizer["Speaker.DetailsPending"]</span>
-        }
-    </div>
-    <p style="display:flex;gap:10px;flex-wrap:wrap;margin-top:8px;">
-        <a class="task-link-btn" asp-page="/Forms/Speaker">@(Model.SpeakerDetailsSubmitted ? Localizer["Speaker.UpdateDetails"] : Localizer["Speaker.CompleteDetails"])</a>
-        <a class="task-link-btn" asp-page="/Forms/Travel">@Localizer["Speaker.TravelReimbursement"]</a>
-    </p>
-</div>
+@* Removed (operator 2026-06-25, redundant): "Your public profile", "Add my deadlines
+   to my calendar", and "Speaker details" cards — Speaker Details is its own page, and
+   per-session calendar sync covers the dates. *@
 
 @if (Model.MasterClasses.Count > 0)
 {

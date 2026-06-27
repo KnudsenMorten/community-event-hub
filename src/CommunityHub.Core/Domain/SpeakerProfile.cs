@@ -191,6 +191,42 @@ public class SpeakerProfile
     /// <summary>When the speaker last edited any of their own bio fields.</summary>
     public DateTimeOffset? BioLastEditedBySpeakerAt { get; set; }
 
+    // --- §38e/§58 Zoho→CEH SPEAKER change tracking (operator 2026-06-26) ---
+    // The LAST-KNOWN Zoho Backstage speaker values, stored so the §58 stage-3
+    // (ZohoToCeh) SpeakerChangeDetectionService can diff the current Backstage
+    // speaker against the value CEH last saw — exactly as Session.Backstage*
+    // backs the §38e SESSION change detection. All NULLABLE: when every
+    // Backstage* field is null the detection engine treats it as a FIRST
+    // POPULATE (seed the baseline silently, no queue item); a later difference
+    // from the stored value is a real CHANGE that is ENQUEUED for approval.
+    // The CEH-owned bio fields (Tagline/Biography/…) stay authoritative; these
+    // are a separate last-seen snapshot used only for change detection.
+
+    /// <summary>Last-known Zoho Backstage speaker NAME (first + last as Zoho holds it).</summary>
+    public string? BackstageName { get; set; }
+
+    /// <summary>Last-known Zoho Backstage speaker TAGLINE (the Zoho <c>designation</c> field).</summary>
+    public string? BackstageTagline { get; set; }
+
+    /// <summary>Last-known Zoho Backstage speaker BIO (the Zoho <c>description</c> field).</summary>
+    public string? BackstageBio { get; set; }
+
+    /// <summary>Last-known Zoho Backstage speaker COUNTRY.</summary>
+    public string? BackstageCountry { get; set; }
+
+    /// <summary>Last-known Zoho Backstage speaker LINKEDIN url.</summary>
+    public string? BackstageLinkedIn { get; set; }
+
+    /// <summary>Last-known Zoho Backstage speaker TWITTER url.</summary>
+    public string? BackstageTwitter { get; set; }
+
+    /// <summary>
+    /// When the §58 Zoho→CEH speaker change-detection engine last checked this
+    /// speaker (stamped on every pass, proof the engine ran — even when nothing
+    /// changed). Mirrors <c>Session.BackstageChangeCheckedAt</c>.
+    /// </summary>
+    public DateTimeOffset? BackstageChangeCheckedAt { get; set; }
+
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? UpdatedAt { get; set; }
     public DateTimeOffset? LastSessionizeImportAt { get; set; }

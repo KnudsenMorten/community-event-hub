@@ -5,7 +5,7 @@
 }
 
 <div class="card">
-    <h2>@Localizer["Lunch.Title"]</h2>
+    <h1>@Localizer["Lunch.Title"]</h1>
 
     @if (Model.AccessDenied)
     {
@@ -56,12 +56,23 @@
 
                 @if (Model.ShowPreDay)
                 {
-                    <label style="font-weight:normal; display:flex; align-items:flex-start; gap:8px; margin:8px 0 14px;">
-                        <input type="checkbox" asp-for="LunchPreDay" style="width:auto;margin:5px 0 0;" />
-                        <span>
-                            <strong>@Localizer["Lunch.PreDay", Model.PreDayLabel]</strong>
-                        </span>
-                    </label>
+                    @* PRE-DAY lunch is a REQUIRED Yes/No choice (operator §62): a
+                       checkbox can't be counted (unchecked == no == not-answered),
+                       so submit must always record an explicit answer. *@
+                    <div style="margin:8px 0 14px;">
+                        <p style="font-weight:normal;margin:8px 0 6px;">
+                            <strong>@Localizer["Lunch.PreDayQuestion", Model.PreDayLabel]</strong>
+                        </p>
+                        <label style="font-weight:normal; display:block; margin:6px 0;">
+                            <input type="radio" asp-for="LunchPreDay" value="true" required />
+                            @Localizer["Common.Yes"]
+                        </label>
+                        <label style="font-weight:normal; display:block; margin:6px 0;">
+                            <input type="radio" asp-for="LunchPreDay" value="false" required />
+                            @Localizer["Common.No"]
+                        </label>
+                        <span asp-validation-for="LunchPreDay" class="ceh-field-error"></span>
+                    </div>
                 }
                 else if (Model.PreDayAutoCounted)
                 {
@@ -71,17 +82,11 @@
                 }
             </fieldset>
 
-            @if (!Model.ShowSetupDay)
-            {
-                <p style="color:#6b7280;font-size:12px;margin:-4px 0 14px;">
-                    @Localizer["Lunch.SetupVolNote"]
-                </p>
-            }
-
             <label for="Notes">@Localizer["Lunch.NotesLabel"]</label>
             <textarea asp-for="Notes" rows="3"></textarea>
 
             <button type="submit">@Localizer["Lunch.Save"]</button>
+            <partial name="_LastSaved" model="Model.LastSavedAt" />
         </form>
 
         <p style="color:#6b7280;font-size:12px;margin-top:14px;">

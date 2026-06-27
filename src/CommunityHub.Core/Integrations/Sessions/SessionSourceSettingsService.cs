@@ -48,4 +48,100 @@ public sealed class SessionSourceSettingsService
         await _db.SaveChangesAsync(ct);
         return key;
     }
+
+    /// <summary>
+    /// The active §57 session sync direction/stage for an edition. No row (or a row
+    /// that predates §57) ⇒ the default stage 1 (<see cref="SessionSyncDirection.SessionizeToCeh"/>),
+    /// so §38e stays inert until an organizer advances to stage 3.
+    /// </summary>
+    public async Task<SessionSyncDirection> GetSyncDirectionAsync(
+        int eventId, CancellationToken ct = default)
+    {
+        var stored = await _db.SessionSourceSettings.AsNoTracking()
+            .Where(s => s.EventId == eventId)
+            .Select(s => (SessionSyncDirection?)s.SyncDirection)
+            .FirstOrDefaultAsync(ct);
+        return stored ?? SessionSyncDirection.SessionizeToCeh;
+    }
+
+    /// <summary>
+    /// Set the active §57 sync direction/stage for an edition (upsert). Leaves the
+    /// active <see cref="SessionSourceSetting.Source"/> untouched (it has a NOT NULL
+    /// default of the shipped source) so flipping the stage alone is safe. Returns the
+    /// stored direction.
+    /// </summary>
+    public async Task<SessionSyncDirection> SetSyncDirectionAsync(
+        int eventId, SessionSyncDirection direction, string? byEmail, CancellationToken ct = default)
+    {
+        if (!Enum.IsDefined(direction))
+            throw new ArgumentException($"Unknown sync direction '{direction}'.", nameof(direction));
+
+        var row = await _db.SessionSourceSettings
+            .FirstOrDefaultAsync(s => s.EventId == eventId, ct);
+        if (row is null)
+        {
+            // A fresh row needs a valid Source (NOT NULL). Seed it to the shipped default.
+            row = new SessionSourceSetting { EventId = eventId, Source = SessionSourceKinds.Default };
+            _db.SessionSourceSettings.Add(row);
+        }
+        row.SyncDirection = direction;
+        row.UpdatedByEmail = byEmail;
+        row.UpdatedAt = DateTimeOffset.UtcNow;
+        await _db.SaveChangesAsync(ct);
+        return direction;
+    }
+
+    /// <summary>
+    /// REQUIREMENTS §58 — the active SPEAKER sync direction/stage for an edition. No row
+    /// (or a row that predates §58) ⇒ the default stage 1
+    /// (<see cref="SessionSyncDirection.SessionizeToCeh"/>), so any future Zoho→CEH speaker
+    /// change-detection stays inert until an organizer advances to stage 3. Independent of
+    /// the session <see cref="GetSyncDirectionAsync"/>.
+    /// </summary>
+    public async Task<SessionSyncDirection> GetSpeakerSyncDirectionAsync(
+        int eventId, CancellationToken ct = default)
+    {
+        var stored = await _db.SessionSourceSettings.AsNoTracking()
+            .Where(s => s.EventId == eventId)
+            .Select(s => (SessionSyncDirection?)s.SpeakerSyncDirection)
+            .FirstOrDefaultAsync(ct);
+        return stored ?? SessionSyncDirection.SessionizeToCeh;
+    }
+
+    /// <summary>
+    /// REQUIREMENTS §58 — set the active SPEAKER sync direction/stage for an edition
+    /// (upsert). Leaves the active <see cref="SessionSourceSetting.Source"/> and the session
+    /// <see cref="SessionSourceSetting.SyncDirection"/> untouched, so flipping the speaker
+    /// stage alone is safe. Returns the stored direction.
+    /// </summary>
+    public async Task<SessionSyncDirection> SetSpeakerSyncDirectionAsync(
+        int eventId, SessionSyncDirection direction, string? byEmail, CancellationToken ct = default)
+    {
+        if (!Enum.IsDefined(direction))
+            throw new ArgumentException($"Unknown sync direction '{direction}'.", nameof(direction));
+
+        var row = await _db.SessionSourceSettings
+            .FirstOrDefaultAsync(s => s.EventId == eventId, ct);
+        if (row is null)
+        {
+            // A fresh row needs a valid Source (NOT NULL). Seed it to the shipped default.
+            row = new SessionSourceSetting { EventId = eventId, Source = SessionSourceKinds.Default };
+            _db.SessionSourceSettings.Add(row);
+        }
+        row.SpeakerSyncDirection = direction;
+        row.UpdatedByEmail = byEmail;
+        row.UpdatedAt = DateTimeOffset.UtcNow;
+        await _db.SaveChangesAsync(ct);
+        return direction;
+    }
+
+    /// <summary>
+    /// REQUIREMENTS §58 GATE helper — true only when the edition's SPEAKER sync direction is
+    /// stage 3 (<see cref="SessionSyncDirection.ZohoToCeh"/>). A future Zoho→CEH speaker
+    /// change-detection engine MUST consult this before running, exactly as the §38e session
+    /// engine gates on the session direction. At the default stage 1 (and stage 2) this is
+    /// false, so the (not-yet-built) speaker engine stays inert.
+    /// </summary>
+    public async Task<bool> IsSpeakerZohoToCehActiveAsync(int eventId, CancellationToken ct = default) =>
+        await GetSpeakerSyncDirectionAsync(eventId, ct) == SessionSyncDirection.ZohoToCeh;
 }

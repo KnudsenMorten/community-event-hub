@@ -71,6 +71,10 @@ public sealed class OnboardingPersonaTests
     [Fact]
     public void Sponsor_only_requires_appreciation_and_swag_not_bio_or_hotel()
     {
+        // OnboardingStepSets still drives the GENERIC onboarding wizard for sponsors.
+        // The ORGANIZER dashboard, however, no longer derives sponsor completion from
+        // this set — it tracks the sponsor wizard's real data (company info / logos /
+        // booth members); see Sponsor_completes_from_wizard_data_not_appreciation_or_swag.
         var steps = OnboardingStepSets.For(ParticipantRole.Sponsor);
         Assert.Equal(new[] { OnboardingStep.Appreciation, OnboardingStep.Swag }, steps);
         Assert.DoesNotContain(OnboardingStep.Bio, steps);
@@ -90,22 +94,96 @@ public sealed class OnboardingPersonaTests
     // ----- persona-aware completion + timestamps ---------------------------
 
     [Fact]
-    public async Task Sponsor_is_complete_after_only_its_required_steps()
+    public async Task Sponsor_completes_from_wizard_data_not_appreciation_or_swag()
+    {
+        using var db = NewDb();
+        await SeedEventAsync(db);
+        var sponsor = await AddAsync(db, "s@example.test", ParticipantRole.Sponsor);
+        sponsor.SponsorCompanyId = "1001";
+        // Sponsor onboarding tracks the sponsor WIZARD's real data: company info +
+        // logos (no booth ⇒ those two are the whole set). Appreciation/Swag are
+        // irrelevant to a sponsor and must NOT move the dashboard.
+        db.SponsorInfos.Add(new SponsorInfo
+        {
+            EventId = EventId, SponsorCompanyId = "1001",
+            WebsiteUrl = "https://example.test",
+            LogoRasterPath = "uploads/sponsors/1001/logo.png",
+            SponsorPackage = SponsorPackage.Silver,   // digital, no booth
+        });
+        await db.SaveChangesAsync();
+        var svc = NewSvc(db);
+
+        // Even with Appreciation + Swag marked, that does not contribute.
+        await svc.MarkStepCompleteAsync(EventId, sponsor.Id, OnboardingStep.Appreciation);
+        await svc.MarkStepCompleteAsync(EventId, sponsor.Id, OnboardingStep.Swag);
+
+        var overview = await svc.BuildOverviewAsync(EventId);
+        var row = overview.Rows.Single(r => r.ParticipantId == sponsor.Id);
+        Assert.True(row.IsComplete);                       // company info + logos done
+        Assert.Equal(2, row.RequiredCount);                // not the Appreciation/Swag set
+        Assert.Equal(OnboardingStage.Completed, row.Stage);
+        Assert.Equal(100, row.Percent);
+        Assert.Equal(1, overview.FullyOnboarded);
+    }
+
+    [Fact]
+    public async Task Sponsor_with_no_wizard_data_is_invited_not_complete()
     {
         using var db = NewDb();
         await SeedEventAsync(db);
         var sponsor = await AddAsync(db, "s@example.test", ParticipantRole.Sponsor);
         var svc = NewSvc(db);
 
+        // Appreciation/Swag are the unreachable steps that used to pin sponsors at
+        // 0% — they must NOT make a sponsor "complete" now.
         await svc.MarkStepCompleteAsync(EventId, sponsor.Id, OnboardingStep.Appreciation);
         await svc.MarkStepCompleteAsync(EventId, sponsor.Id, OnboardingStep.Swag);
 
         var overview = await svc.BuildOverviewAsync(EventId);
         var row = overview.Rows.Single(r => r.ParticipantId == sponsor.Id);
-        Assert.True(row.IsComplete);                       // never did bio/picture/hotel
-        Assert.Equal(OnboardingStage.Completed, row.Stage);
-        Assert.Equal(100, row.Percent);
-        Assert.Equal(1, overview.FullyOnboarded);
+        Assert.False(row.IsComplete);
+        Assert.Equal(OnboardingStage.Invited, row.Stage);
+        Assert.Equal(0, row.DoneCount);
+        Assert.Equal(2, row.RequiredCount);                // company info + logos pending
+    }
+
+    [Fact]
+    public async Task Exhibitor_sponsor_also_requires_booth_members()
+    {
+        using var db = NewDb();
+        await SeedEventAsync(db);
+        var sponsor = await AddAsync(db, "ex@example.test", ParticipantRole.Sponsor);
+        sponsor.SponsorCompanyId = "2002";
+        db.SponsorInfos.Add(new SponsorInfo
+        {
+            EventId = EventId, SponsorCompanyId = "2002",
+            CompanyDescription = "We make widgets.",
+            LogoVectorPath = "uploads/sponsors/2002/logo.eps",
+            SponsorPackage = SponsorPackage.Gold,     // booth ⇒ booth members also required
+        });
+        await db.SaveChangesAsync();
+        var svc = NewSvc(db);
+
+        // Company info + logos done, but no booth members yet ⇒ 2 of 3.
+        var before = await svc.BuildOverviewAsync(EventId);
+        var rowBefore = before.Rows.Single(r => r.ParticipantId == sponsor.Id);
+        Assert.False(rowBefore.IsComplete);
+        Assert.Equal(2, rowBefore.DoneCount);
+        Assert.Equal(3, rowBefore.RequiredCount);
+        Assert.Equal(OnboardingStage.InProgress, rowBefore.Stage);
+
+        db.SponsorBoothMembers.Add(new SponsorBoothMember
+        {
+            EventId = EventId, SponsorCompanyId = "2002",
+            FirstName = "Booth", LastName = "Staff", Email = "booth@example.test",
+        });
+        await db.SaveChangesAsync();
+
+        var after = await svc.BuildOverviewAsync(EventId);
+        var rowAfter = after.Rows.Single(r => r.ParticipantId == sponsor.Id);
+        Assert.True(rowAfter.IsComplete);
+        Assert.Equal(3, rowAfter.DoneCount);
+        Assert.Equal(OnboardingStage.Completed, rowAfter.Stage);
     }
 
     [Fact]
@@ -215,10 +293,17 @@ public sealed class OnboardingPersonaTests
         using var db = NewDb();
         await SeedEventAsync(db);
         var a = await AddAsync(db, "a@example.test", ParticipantRole.Sponsor);  // will finish
+        a.SponsorCompanyId = "3003";
+        db.SponsorInfos.Add(new SponsorInfo
+        {
+            EventId = EventId, SponsorCompanyId = "3003",
+            WebsiteUrl = "https://a.test",
+            LogoVectorPath = "uploads/sponsors/3003/logo.eps",
+            SponsorPackage = SponsorPackage.Silver,
+        });
         await AddAsync(db, "b@example.test", ParticipantRole.Sponsor);          // won't
+        await db.SaveChangesAsync();
         var svc = NewSvc(db);
-        await svc.MarkStepCompleteAsync(EventId, a.Id, OnboardingStep.Appreciation);
-        await svc.MarkStepCompleteAsync(EventId, a.Id, OnboardingStep.Swag);
 
         var ov = await svc.BuildOverviewAsync(EventId);
         Assert.Equal(2, ov.TotalParticipants);

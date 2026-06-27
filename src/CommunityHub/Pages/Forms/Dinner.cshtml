@@ -5,7 +5,7 @@
 }
 
 <div class="card">
-    <h2>@Localizer["Dinner.Title"]</h2>
+    <h1>@Localizer["Dinner.Title"]</h1>
 
     @if (Model.AccessDenied)
     {
@@ -77,6 +77,7 @@
             <textarea asp-for="Comments" rows="3"></textarea>
 
             <button type="submit">@Localizer["Dinner.SaveRsvp"]</button>
+            <partial name="_LastSaved" model="Model.LastSavedAt" />
         </form>
         <p style="color:#6b7280;font-size:12px;margin-top:10px;">
             @Localizer["Dinner.IcsNote", Model.Email]

@@ -27,6 +27,10 @@ public sealed class JobsPauseMiddleware : IFunctionsWorkerMiddleware
     private static readonly HashSet<string> Exempt = new(StringComparer.OrdinalIgnoreCase)
     {
         nameof(EnableEmailFeaturesJob),
+        // HTTP webhook (§128): the pause middleware short-circuits with no HTTP response,
+        // which would surface as a host 500 to Zoho. The webhook handler enforces the pause
+        // itself and returns a clean 200 no-op, so it must bypass this middleware.
+        nameof(ZohoOrderWebhook),
     };
 
     public async Task Invoke(FunctionContext context, FunctionExecutionDelegate next)

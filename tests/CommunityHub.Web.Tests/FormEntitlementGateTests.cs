@@ -46,6 +46,7 @@ public sealed class FormEntitlementGateTests
         public Task SendAsync(string t, string s, string h, IReadOnlyCollection<string>? cc, CancellationToken ct = default) => Task.CompletedTask;
         public Task SendAsync(string t, string s, string h, string text, CancellationToken ct = default) => Task.CompletedTask;
         public Task SendWithIcsAsync(string t, string s, string h, string ics, string fn, CancellationToken ct = default) => Task.CompletedTask;
+        public Task SendWithAttachmentsAsync(string t, string s, string h, IReadOnlyCollection<EmailAttachment> attachments, CancellationToken ct = default) => Task.CompletedTask;
     }
 
     private sealed class HttpContextAccessorOver(HttpContext ctx) : IHttpContextAccessor
@@ -128,13 +129,14 @@ public sealed class FormEntitlementGateTests
             NullLogger<HotelModel>.Instance, Loc());
 
     private static TravelModel NewTravel(CommunityHubDbContext db, DefaultHttpContext http) =>
-        new(db, Accessor(http), new FixedClock(), Loc());
+        new(db, Accessor(http), new FixedClock(), Loc(), new NoOpEmailSender(),
+            NullLogger<TravelModel>.Instance);
 
     private static SwagModel NewSwag(CommunityHubDbContext db, DefaultHttpContext http) =>
         new(db, Accessor(http), new FixedClock(), Loc());
 
     private static LunchModel NewLunch(CommunityHubDbContext db, DefaultHttpContext http) =>
-        new(db, Accessor(http), new FixedClock());
+        new(db, Accessor(http), new FixedClock(), Loc());
 
     private static DinnerModel NewDinner(CommunityHubDbContext db, DefaultHttpContext http) =>
         new(db, Accessor(http), new FixedClock(), new NoOpEmailSender(),
@@ -232,10 +234,12 @@ public sealed class FormEntitlementGateTests
     // ===== Non-speaker roles keep their historical access ====================
 
     [Fact]
-    public async Task Organizer_keeps_hotel_even_though_not_hotel_entitled()
+    public async Task Organizer_is_entitled_to_hotel()
     {
-        // Organizer is NOT entitled to OrderItem.Hotel, but historically had the form;
-        // Feature B must never silently remove a non-speaker role's access.
+        // Operator 2026-06-26: organizers (and volunteers) ARE entitled to a hotel
+        // booking — OrderEntitlements now grants OrderItem.Hotel to the Organizer hat.
+        // (They also historically had the form via the non-speaker access guarantee,
+        // so access is doubly guaranteed.)
         using var db = NewDb();
         db.Events.Add(new Event
         {

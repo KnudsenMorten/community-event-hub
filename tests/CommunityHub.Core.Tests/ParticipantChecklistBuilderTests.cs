@@ -54,7 +54,7 @@ public sealed class ParticipantChecklistBuilderTests
     }
 
     private static ParticipantChecklistBuilder NewBuilder(CommunityHubDbContext db) =>
-        new(db, new FixedClock());
+        new(db, new FixedClock(), new CommunityHub.Core.Participants.FormTaskReconciler(db, new FixedClock()));
 
     [Fact]
     public async Task Splits_pending_and_completed()
@@ -128,7 +128,9 @@ public sealed class ParticipantChecklistBuilderTests
 
         var row = Assert.Single(cl.Pending);
         Assert.Equal("Upload booth logo", row.Title);
-        Assert.Equal("/Sponsor/Tasks", row.Link);   // SourceKey deep-link mapping
+        // P6: the sponsor: checklist deep-link now points at the Company Details
+        // form page (was /Sponsor/Tasks).
+        Assert.Equal("/Sponsor/CompanyDetails", row.Link);   // SourceKey deep-link mapping
     }
 
     [Fact]
@@ -143,7 +145,7 @@ public sealed class ParticipantChecklistBuilderTests
     [Theory]
     [InlineData("hotel-form:7", "/Forms/Hotel")]
     [InlineData("dinner-form:7", "/Forms/Dinner")]
-    [InlineData("volunteer-form:7", "/Forms/VolunteerWizard")]
+    [InlineData("volunteer-form:7", "/volunteer/availability")] // B8: retired /Forms/VolunteerWizard
     [InlineData("swag-form:7", "/Forms/Swag")]
     [InlineData("lunch-form:7", "/Forms/Lunch")]
     [InlineData(null, null)]

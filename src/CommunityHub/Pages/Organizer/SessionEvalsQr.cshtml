@@ -1,0 +1,96 @@
+@page
+@model CommunityHub.Pages.Organizer.SessionEvalsQrModel
+@{
+    ViewData["Title"] = "Session-evaluation QR codes";
+}
+
+<div class="card">
+    <h1>Session-evaluation QR codes</h1>
+    @if (Model.AccessDenied)
+    {
+        <p class="error">@Localizer["Common.OrganizersOnly"]</p>
+        <p><a asp-page="/Index">@Localizer["Common.BackToHub"]</a></p>
+        return;
+    }
+
+    <p>One QR per ROOM, scanned by attendees to rate a session. Files are named with the room in the
+        name (e.g. <code>Room-16-Floor-1-Device13.png</code>); speakers download the QR for their session's room
+        from their Session Evaluation page and My Sessions.</p>
+    <p><a asp-page="/Organizer/Logistics">&larr; @Localizer["Common.BackToOrganizerArea"]</a></p>
+
+    @if (!string.IsNullOrEmpty(Model.Message))
+    {
+        <p style="background:#ecfdf3;border-left:4px solid #16a34a;padding:10px 14px;border-radius:6px;color:#14532d;">@Model.Message</p>
+    }
+    @if (!string.IsNullOrEmpty(Model.Error))
+    {
+        <p class="error">@Model.Error</p>
+    }
+
+    @if (!Model.Configured)
+    {
+        <p style="background:#fef9c3;border-left:4px solid #ca8a04;padding:10px 14px;border-radius:6px;color:#713f12;">
+            The SharePoint session-evaluation QR folder is not configured yet, so there is nothing to manage.
+            Set <code>Graphics:SharePoint:SessionEvalsQrFolderPath</code> (and the SharePoint SPN) to enable it.
+        </p>
+    }
+</div>
+
+@if (!Model.AccessDenied && Model.Configured)
+{
+    <div class="card">
+        <h3 style="margin-top:0;">Upload / replace a QR</h3>
+        <p style="font-size:13px;color:#555;">Uploading a file with an existing name replaces it in place. Name the file with the room, e.g. <code>Room-16-Floor-1-Device13.png</code>.</p>
+        <form method="post" asp-page-handler="Upload" enctype="multipart/form-data">
+            <input type="file" name="Upload" accept="image/png,image/jpeg,image/gif,application/pdf" required />
+            <button type="submit" class="task-link-btn">Upload</button>
+        </form>
+    </div>
+
+    <div class="card">
+        <h3 style="margin-top:0;">Current QR files (@Model.Files.Count)</h3>
+        @if (Model.Files.Count == 0)
+        {
+            <p style="color:#6b7280;">No QR files uploaded yet.</p>
+        }
+        else
+        {
+            <div style="overflow-x:auto;">
+            <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                <thead>
+                    <tr style="text-align:left;border-bottom:2px solid #e5e7eb;">
+                        <th style="padding:6px 8px;">Room</th>
+                        <th style="padding:6px 8px;">File</th>
+                        <th style="padding:6px 8px;"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                @foreach (var f in Model.Files)
+                {
+                    <tr style="border-bottom:1px solid #eef0f4;">
+                        <td style="padding:6px 8px;font-weight:600;">@f.RoomDisplay</td>
+                        <td style="padding:6px 8px;">
+                            @if (!string.IsNullOrEmpty(f.WebUrl))
+                            {
+                                <a href="@f.WebUrl" target="_blank" rel="noopener noreferrer">@f.FileName</a>
+                            }
+                            else
+                            {
+                                <text>@f.FileName</text>
+                            }
+                        </td>
+                        <td style="padding:6px 8px;white-space:nowrap;">
+                            <form method="post" asp-page-handler="Delete" style="margin:0;"
+                                  onsubmit="return confirm('Delete @f.FileName?');">
+                                <input type="hidden" name="FileName" value="@f.FileName" />
+                                <button type="submit" class="task-link-btn" style="background:#fdecea;color:#9b261a;">Delete</button>
+                            </form>
+                        </td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+            </div>
+        }
+    </div>
+}

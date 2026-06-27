@@ -148,26 +148,8 @@ public class ProfileModel : PageModel
             return Page();
         }
 
-        var trimmedSecondary = string.IsNullOrWhiteSpace(SecondaryEmail)
-            ? null : SecondaryEmail.Trim();
-        if (trimmedSecondary is not null)
-        {
-            if (trimmedSecondary.Length > 320)
-            {
-                Message = "That secondary email is too long (max 320 characters).";
-                return Page();
-            }
-            // Cheap shape check: one @ with text either side, no spaces.
-            var at = trimmedSecondary.IndexOf('@');
-            if (at <= 0 || at >= trimmedSecondary.Length - 1
-                || trimmedSecondary.Contains(' '))
-            {
-                Message = "Please enter a valid secondary email (or leave it blank).";
-                FullName = p.FullName;
-                Phone = p.Phone;
-                return Page();
-            }
-        }
+        // The secondary CC email field was removed from the Profile UI as redundant
+        // (operator 2026-06-25). Any existing stored value is left untouched (not wiped).
 
         // Alternate LOGIN email (§26d): normalized; must be a valid shape, must not equal
         // your own primary, and must not collide with anyone else's primary/alt in the edition.
@@ -198,7 +180,6 @@ public class ProfileModel : PageModel
 
         p.FullName = trimmedName;
         p.Phone = trimmedPhone;
-        p.SecondaryEmail = trimmedSecondary;
         p.AlternateEmail = altEmail;
 
         // --- Speaker details (operator 2026-06-21): persisted on SpeakerProfile.

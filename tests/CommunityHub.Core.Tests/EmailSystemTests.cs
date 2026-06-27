@@ -87,13 +87,14 @@ public sealed class EmailSystemTests
         var result = await activation.ActivateAndOnboardAsync(eventId, new[] { p.Id });
 
         Assert.Equal(1, result.Queue.Changed);
-        // Volunteer set = getting-started + your-tasks (2 emails).
-        Assert.Equal(2, result.OnboardingEmailsSent);
+        // Volunteer set = getting-started (1 email; the redundant "your next steps"
+        // drip email was removed per REQUIREMENTS §84/§91).
+        Assert.Equal(1, result.OnboardingEmailsSent);
         // One .ics calendar invite is sent on activation (sync on by default).
         Assert.Equal(1, result.CalendarInvitesSent);
-        // 2 onboarding emails (Messages) + 1 ics invite = 3 total Sent rows.
-        Assert.Equal(2, sender.Messages.Count);
-        Assert.Equal(3, sender.Sent.Count);
+        // 1 onboarding email (Messages) + 1 ics invite = 2 total Sent rows.
+        Assert.Equal(1, sender.Messages.Count);
+        Assert.Equal(2, sender.Sent.Count);
         Assert.Equal(ParticipantLifecycleState.Active,
             (await db.Participants.FindAsync(p.Id))!.LifecycleState);
     }
@@ -239,7 +240,8 @@ public sealed class EmailSystemTests
         db.Tasks.Add(new ParticipantTask
         {
             EventId = eventId, AssignedParticipantId = p.Id,
-            Title = "Do the thing", DueDate = DateOnly.FromDateTime(Now.UtcDateTime).AddDays(3),
+            // §81: reminders fire only on the due day, so seed a task due today.
+            Title = "Do the thing", DueDate = DateOnly.FromDateTime(Now.UtcDateTime),
             State = TaskState.Open,
         });
         await db.SaveChangesAsync();
@@ -361,6 +363,8 @@ public sealed class EmailSystemTests
         public Task SendAsync(string to, string s, string h, string t, CancellationToken ct = default)
             => throw new InvalidOperationException("boom");
         public Task SendWithIcsAsync(string to, string s, string h, string ics, string fn, CancellationToken ct = default)
+            => throw new InvalidOperationException("boom");
+        public Task SendWithAttachmentsAsync(string to, string s, string h, IReadOnlyCollection<EmailAttachment> attachments, CancellationToken ct = default)
             => throw new InvalidOperationException("boom");
     }
 

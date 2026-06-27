@@ -7,7 +7,7 @@
 @if (Model.AccessDenied)
 {
     <div class="card">
-        <h2>SoMe graphics</h2>
+        <h1>SoMe graphics</h1>
         <p class="error" role="alert">This page is for organizers.</p>
         <p><a asp-page="/Index">Back to hub</a></p>
     </div>
@@ -43,12 +43,20 @@
 }
 
 <div class="card">
-    <h2>SoMe graphics — review &amp; release</h2>
+    <h1>SoMe graphics — review &amp; release</h1>
     <p>
         Generated speaker and session graphics wait here until you release them.
         A speaker cannot see a graphic until you release it. You can also replace a
         generated graphic with your own design — the link to it stays the same.
     </p>
+    <p>
+        Already uploaded the session graphics to SharePoint? Pull them in: each session
+        is matched to the file whose name matches the session title, then queued below
+        for review and release.
+    </p>
+    <form method="post" asp-page-handler="PullSharePointGraphics">
+        <button type="submit" class="btn">Pull session graphics from SharePoint</button>
+    </form>
 </div>
 
 <div class="card">

@@ -53,6 +53,33 @@ public sealed class EmailTemplateRenderer
             "heldMasterClass",
         };
 
+    /// <summary>The edition tag appended to every email subject (REQUIREMENTS §103).</summary>
+    internal const string SubjectTag = "[ELDK27]";
+
+    /// <summary>
+    /// Normalize a finished (token-substituted) subject line. Subjects are PLAIN TEXT,
+    /// so any raw HTML entity is wrong (REQUIREMENTS §95/§100): replace
+    /// <c>&amp;mdash;</c>/<c>&amp;ndash;</c>/<c>&amp;amp;</c> with the literal character.
+    /// Then append the edition tag <c>[ELDK27]</c> as a POSTFIX (REQUIREMENTS §103, updated
+    /// 2026-06-26: postfix, not prefix, so the subject leads with content). The tag appears
+    /// EXACTLY ONCE: any existing <c>[ELDK27]</c> occurrence (e.g. a template that still emits
+    /// it, or a re-normalized subject) is stripped first so it is never doubled. This is the ONE
+    /// central place — every templated subject passes through here.
+    /// </summary>
+    internal static string NormalizeSubject(string subject)
+    {
+        if (string.IsNullOrEmpty(subject)) return subject;
+        subject = subject
+            .Replace("&mdash;", "—")
+            .Replace("&ndash;", "–")
+            .Replace("&amp;", "&");
+        // Remove any pre-existing edition tag (anywhere), then re-append once at the end.
+        subject = subject.Replace(SubjectTag, " ");
+        subject = System.Text.RegularExpressions.Regex.Replace(subject, @"\s{2,}", " ");
+        subject = subject.Trim().TrimEnd('-', '–', '—').Trim();
+        return string.IsNullOrEmpty(subject) ? SubjectTag : $"{subject} {SubjectTag}";
+    }
+
     private static bool IsRawHtmlToken(string token) =>
         RawHtmlTokens.Contains(token)
         || token.EndsWith("Html", StringComparison.Ordinal)
@@ -90,6 +117,10 @@ public sealed class EmailTemplateRenderer
         // The Subject HEADER is plain text (no HTML context), so it is
         // substituted raw — never HTML-encoded.
         var subject = Substitute(subjectLine, tokens, encode: false);
+
+        // Central subject normalization (REQUIREMENTS §95/§100 + §103): subjects are
+        // plain text, so decode any raw HTML entities, then prefix the edition tag.
+        subject = NormalizeSubject(subject);
 
         // The HTML BODY is substituted with per-value HTML-encoding (the seam),
         // except for the explicit raw-HTML token set.

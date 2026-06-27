@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 220 240" width="220" height="240" role="img" aria-label="Otto — friendly AI helper robot leaning out of the corner, waving to help">
+  <defs>
+    <linearGradient id="g1" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3aa0ff"/>
+      <stop offset="1" stop-color="#1b6fe0"/>
+    </linearGradient>
+  </defs>
+
+  <!-- ground shadow stays flat -->
+  <ellipse cx="104" cy="228" rx="60" ry="8" fill="#1b3a8c" opacity=".12"/>
+
+  <!-- whole robot leans toward the content (upper-left) -->
+  <g transform="translate(10 4) rotate(-9 110 210)">
+
+    <!-- waving arm reaching out toward the content -->
+    <rect x="36" y="70" width="20" height="74" rx="10" transform="rotate(-38 46 107)" fill="url(#g1)"/>
+    <circle cx="30" cy="70" r="15" fill="url(#g1)"/>
+
+    <!-- trailing arm, relaxed by the side -->
+    <rect x="158" y="120" width="20" height="62" rx="10" transform="rotate(12 168 151)" fill="url(#g1)"/>
+    <circle cx="180" cy="184" r="14" fill="url(#g1)"/>
+
+    <!-- body -->
+    <rect x="62" y="110" width="96" height="100" rx="26" fill="url(#g1)"/>
+
+    <!-- Danish flag badge on chest (Dannebrog) -->
+    <rect x="84" y="146" width="52" height="36" rx="6" fill="#c8102e" stroke="#ffffff" stroke-width="2"/>
+    <rect x="98" y="146" width="8" height="36" fill="#ffffff"/>
+    <rect x="84" y="160" width="52" height="8" fill="#ffffff"/>
+
+    <!-- legs -->
+    <rect x="78" y="206" width="18" height="28" rx="8" fill="#1b6fe0"/>
+    <rect x="124" y="206" width="18" height="28" rx="8" fill="#1b6fe0"/>
+
+    <!-- head -->
+    <rect x="68" y="44" width="84" height="66" rx="22" fill="#5bb6ff"/>
+    <rect x="80" y="56" width="60" height="44" rx="14" fill="#04162e"/>
+    <!-- eyes glancing toward the content -->
+    <circle cx="98" cy="76" r="7" fill="#6fe3ff"/>
+    <circle cx="122" cy="76" r="7" fill="#6fe3ff"/>
+    <circle cx="95" cy="76" r="3" fill="#04162e"/>
+    <circle cx="119" cy="76" r="3" fill="#04162e"/>
+    <path d="M96 88 q14 12 28 0" stroke="#6fe3ff" stroke-width="4" fill="none" stroke-linecap="round"/>
+  </g>
+</svg>

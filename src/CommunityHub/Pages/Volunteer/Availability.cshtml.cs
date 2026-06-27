@@ -3,6 +3,8 @@ using CommunityHub.Core.Config;
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
 using CommunityHub.Core.Email;
+using CommunityHub.Core.Integrations.Sessions;
+using CommunityHub.Core.Volunteers;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
@@ -32,6 +34,7 @@ public class AvailabilityModel : PageModel
     private readonly EventEditionConfigLoader _cfg;
     private readonly EventConfigOptions _cfgOptions;
     private readonly IEmailSender _email;
+    private readonly SyncDeltaQueueService _queue;
     private readonly ILogger<AvailabilityModel> _logger;
 
     public AvailabilityModel(
@@ -40,6 +43,7 @@ public class AvailabilityModel : PageModel
         EventEditionConfigLoader cfg,
         EventConfigOptions cfgOptions,
         IEmailSender email,
+        SyncDeltaQueueService queue,
         ILogger<AvailabilityModel> logger)
     {
         _db = db;
@@ -47,20 +51,33 @@ public class AvailabilityModel : PageModel
         _cfg = cfg;
         _cfgOptions = cfgOptions;
         _email = email;
+        _queue = queue;
         _logger = logger;
     }
 
-    /// <summary>One editable row per event day, pre-filled with any saved value.</summary>
-    public record DayRow(DateOnly Day, string Label, VolunteerAvailabilityLevel Level, string? Note);
+    /// <summary>
+    /// One editable row per event day, pre-filled with any saved value. RawNote is
+    /// the full stored Note (incl. any "[slot]" tag — used to re-select the right
+    /// option); UserNote is the volunteer's free text only (shown in the textarea).
+    /// </summary>
+    public record DayRow(DateOnly Day, string Label, VolunteerAvailabilityLevel Level, string? RawNote)
+    {
+        public string? UserNote => VolunteerDayOptions.StripSlot(RawNote);
+    }
 
     public IReadOnlyList<DayRow> Days { get; private set; } = Array.Empty<DayRow>();
+
+    /// <summary>When this volunteer last saved their availability (UTC) — the latest
+    /// UpdatedAt across their day rows, for the "Last saved …" line (§51).</summary>
+    public DateTimeOffset? LastSavedAt { get; private set; }
 
     [BindProperty] public List<DayInput> Inputs { get; set; } = new();
 
     public class DayInput
     {
         public DateOnly Day { get; set; }
-        public VolunteerAvailabilityLevel Level { get; set; }
+        /// <summary>The chosen option's stable slot id (see <see cref="VolunteerDayOptions"/>).</summary>
+        public string? Slot { get; set; }
         public string? Note { get; set; }
     }
 
@@ -90,34 +107,73 @@ public class AvailabilityModel : PageModel
             .Where(x => x.EventId == me.EventId && x.ParticipantId == me.ParticipantId)
             .ToListAsync(ct);
 
+        // §59 DELTA-APPROVAL QUEUE (mirrors the §38e "first submission applies, a later
+        // CHANGE is queued" pattern). The presence of existing availability rows IS the
+        // "already submitted" baseline — no extra column needed. A FIRST-time submission
+        // (no rows yet) applies directly below; a later EDIT does NOT silently overwrite —
+        // it is enqueued as a Volunteer Update delta for the organizer to approve, and the
+        // volunteer keeps seeing their current (approved) availability until then.
+        var alreadySubmitted = existing.Count > 0;
+
+        // Resolve each valid posted day to its desired (Level, Note) once.
+        var desired = new List<(DateOnly Day, VolunteerAvailabilityLevel Level, string? Note)>();
         foreach (var input in Inputs)
         {
             if (!validDays.Contains(input.Day)) continue;
 
-            var note = string.IsNullOrWhiteSpace(input.Note)
-                ? null
-                : input.Note.Trim();
+            // The posted slot drives both the capacity Level and (combined with the
+            // volunteer's free note) the stored Note. Ignore an unknown/absent slot.
+            var options = VolunteerDayOptions.For(input.Day);
+            var chosen = options.FirstOrDefault(o =>
+                string.Equals(o.Slot, input.Slot, StringComparison.OrdinalIgnoreCase));
+            if (chosen is null) continue;
+
+            var userNote = string.IsNullOrWhiteSpace(input.Note) ? null : input.Note.Trim();
+            var note = VolunteerDayOptions.ComposeNote(chosen.Slot, userNote);
             if (note is { Length: > 500 }) note = note[..500];
 
-            var row = existing.FirstOrDefault(x => x.Day == input.Day);
-            if (row is null)
+            desired.Add((input.Day, chosen.Level, note));
+        }
+
+        if (alreadySubmitted)
+        {
+            // EDIT after an initial submission → build per-day old→new diffs and ENQUEUE.
+            var changes = BuildAvailabilityChanges(existing, desired);
+            if (changes.Count == 0)
             {
-                _db.VolunteerDayAvailabilities.Add(new VolunteerDayAvailability
-                {
-                    EventId = me.EventId,
-                    ParticipantId = me.ParticipantId,
-                    Day = input.Day,
-                    Level = input.Level,
-                    Note = note,
-                    UpdatedAt = DateTimeOffset.UtcNow,
-                });
+                Notice = "No changes detected — your current availability is unchanged.";
+                return RedirectToPage();
             }
-            else
+
+            var before = await _queue.CountPendingAsync(me.EventId, ct);
+            await _queue.EnqueueVolunteerAvailabilityUpdateAsync(
+                me.EventId, me.ParticipantId, me.FullName, changes, ct);
+            // Notify the organizer that a change is awaiting approval (throttled, never throws).
+            await _queue.NotifyNewAsync(me.EventId, before, ct);
+
+            _logger.LogInformation(
+                "Volunteer {ParticipantId} submitted an availability CHANGE for event {EventId} "
+                + "({Count} day(s)) — queued for organizer approval.",
+                me.ParticipantId, me.EventId, changes.Count);
+
+            Notice = "Your change has been submitted for organizer review. "
+                + "Until it is approved, your previously saved availability still applies — "
+                + "the days below show your current (approved) availability.";
+            return RedirectToPage();
+        }
+
+        // FIRST-time submission → apply directly (no queue).
+        foreach (var d in desired)
+        {
+            _db.VolunteerDayAvailabilities.Add(new VolunteerDayAvailability
             {
-                row.Level = input.Level;
-                row.Note = note;
-                row.UpdatedAt = DateTimeOffset.UtcNow;
-            }
+                EventId = me.EventId,
+                ParticipantId = me.ParticipantId,
+                Day = d.Day,
+                Level = d.Level,
+                Note = d.Note,
+                UpdatedAt = DateTimeOffset.UtcNow,
+            });
         }
 
         await _db.SaveChangesAsync(ct);
@@ -133,6 +189,45 @@ public class AvailabilityModel : PageModel
         Notice = "Your availability has been saved and emailed to Morten Leth. "
             + "Thank you — this helps us schedule you fairly.";
         return RedirectToPage();
+    }
+
+    /// <summary>
+    /// Build the per-day old→new diff list for a volunteer availability EDIT. Only days whose
+    /// (Level, Note) actually changed are included; an empty result means nothing changed. The
+    /// new value carries the machine payload an Approve will apply (see
+    /// <see cref="SyncDeltaQueueService.BuildVolunteerAvailabilityChanges"/>).
+    /// </summary>
+    private static IReadOnlyList<CommunityHub.Core.Domain.SyncFieldChange> BuildAvailabilityChanges(
+        IReadOnlyList<VolunteerDayAvailability> existing,
+        IReadOnlyList<(DateOnly Day, VolunteerAvailabilityLevel Level, string? Note)> desired)
+    {
+        var rows = new List<(string, string, string, VolunteerAvailabilityLevel, string?)>();
+        foreach (var d in desired)
+        {
+            var old = existing.FirstOrDefault(x => x.Day == d.Day);
+            var oldLevel = old?.Level ?? VolunteerAvailabilityLevel.Full;
+            var oldNote = old?.Note;
+            var noteChanged = !string.Equals(
+                NormalizeNote(oldNote), NormalizeNote(d.Note), StringComparison.Ordinal);
+            if (old is not null && old.Level == d.Level && !noteChanged) continue; // unchanged
+
+            var oldLabel = old is null
+                ? "(not set)"
+                : VolunteerDayLabel(d.Day, oldLevel, oldNote);
+            var newLabel = VolunteerDayLabel(d.Day, d.Level, d.Note);
+            rows.Add((d.Day.ToString("yyyy-MM-dd"), oldLabel, newLabel, d.Level, d.Note));
+        }
+        return SyncDeltaQueueService.BuildVolunteerAvailabilityChanges(rows);
+    }
+
+    private static string? NormalizeNote(string? n) => string.IsNullOrWhiteSpace(n) ? null : n.Trim();
+
+    /// <summary>A human availability label for the queue UI: the chosen slot plus the free note.</summary>
+    private static string VolunteerDayLabel(DateOnly day, VolunteerAvailabilityLevel level, string? note)
+    {
+        var slot = VolunteerDayOptions.DisplayLabel(day, level, note);
+        var free = VolunteerDayOptions.StripSlot(note);
+        return string.IsNullOrWhiteSpace(free) ? slot : $"{slot} — {free}";
     }
 
     private async Task NotifyLeadAsync(
@@ -151,8 +246,10 @@ public class AvailabilityModel : PageModel
             var lines = rows.Select(r =>
                 "<tr><td style=\"padding:4px 10px 4px 0;\">"
                 + System.Net.WebUtility.HtmlEncode(labelByDay.TryGetValue(r.Day, out var l) ? l : r.Day.ToString("yyyy-MM-dd"))
-                + "</td><td style=\"padding:4px 10px;\"><b>" + LevelLabel(r.Level) + "</b></td><td style=\"padding:4px 0;color:#555;\">"
-                + System.Net.WebUtility.HtmlEncode(r.Note ?? string.Empty) + "</td></tr>");
+                + "</td><td style=\"padding:4px 10px;\"><b>"
+                + System.Net.WebUtility.HtmlEncode(VolunteerDayOptions.DisplayLabel(r.Day, r.Level, r.Note))
+                + "</b></td><td style=\"padding:4px 0;color:#555;\">"
+                + System.Net.WebUtility.HtmlEncode(VolunteerDayOptions.StripSlot(r.Note) ?? string.Empty) + "</td></tr>");
 
             var html =
                 $"<p>Volunteer <b>{System.Net.WebUtility.HtmlEncode(me.FullName)}</b> "
@@ -195,6 +292,9 @@ public class AvailabilityModel : PageModel
         var saved = await _db.VolunteerDayAvailabilities
             .Where(x => x.EventId == eventId && x.ParticipantId == participantId)
             .ToDictionaryAsync(x => x.Day, ct);
+
+        // §51 — last saved = the latest UpdatedAt across this volunteer's day rows.
+        LastSavedAt = saved.Count == 0 ? null : saved.Values.Max(x => x.UpdatedAt);
 
         Days = days.Select(d =>
         {

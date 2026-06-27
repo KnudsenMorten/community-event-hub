@@ -5,7 +5,7 @@
 }
 
 <div class="card">
-    <h2>Sponsor Admin</h2>
+    <h1>Sponsor Admin</h1>
     @if (Model.AccessDenied)
     {
         <p class="error">This area is for organizers only.</p>
@@ -27,10 +27,11 @@
         new("/Organizer/SponsorAdmin/Tasks", "Sponsor tasks", "Catalog of tasks every sponsor company has to complete; create, delete, or shift deadlines.", "sponsor-tasks"),
         new("/Organizer/SponsorAdmin/Leads", "Sponsor leads", "Leads, inquiries, and booth-meeting requests pulled daily from Zoho CRM; view per sponsor and download as CSV.", "sponsor-leads"),
         new("/Organizer/SponsorAdmin/Dashboard", "Sponsor status dashboard", "Per-sponsor view of tasks done vs open, overdue items, lead volume, and last Zoho sync."),
+        new("/Organizer/SponsorDeliverables", "Sponsor deliverables", "Lifecycle-completion board per company — onboarding, logo, booth materials, booth members, tasks — with done % and at-risk (overdue) highlighting."),
         new("/Organizer/Sponsors", "Sponsor directory", "The full list of sponsor companies for this edition: contacts, tiers and onboarding status."),
         new("/Organizer/SponsorAdmin/Welcome", "Sponsor welcome", "Resend the sponsor welcome / intro email per company or to all sponsors, and reset the welcome flag.", "sponsor-welcome"),
         new("/Organizer/AppGame", "App game", "Track which sponsors take part in the attendee app game, the gift they committed, and send reminders.", "sponsor-reminders"),
-        new("/Organizer/EconomicContacts", "e-conomic sponsor contacts", "Manage the contacts (Signer / Event Coordinator) on any sponsor's e-conomic customer (group 1) straight from the hub."),
+        new("/Organizer/EconomicContacts", "backend sponsor contacts", "Manage the contacts (Signer / Event Coordinator) on any sponsor's backend customer (group 1) straight from the hub."),
         new("/Organizer/SponsorWebshopCompany", "Sponsor webshop company management", "Edit a sponsor's Company Manager record — default signer, default event coordinator, internal notes. A coordinator change cascades to CEH + Zoho."),
     };
     <partial name="_HubGrid" model="@tiles" />

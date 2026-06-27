@@ -20,9 +20,13 @@ public class AttendeeTelemetryModel : PageModel
     public AttendeeTelemetryModel(AttendeeTelemetryService svc) => _svc = svc;
 
     [BindProperty(SupportsGet = true)] public string? Segment { get; set; }
+    [BindProperty(SupportsGet = true)] public string? FilterKey { get; set; }
+    [BindProperty(SupportsGet = true)] public string? FilterValue { get; set; }
 
     public AttendeeTelemetry? Data { get; private set; }
     public IReadOnlyList<TelemetrySegment> Segments => AttendeeTelemetryService.Segments;
 
-    public async Task OnGetAsync(CancellationToken ct) => Data = await _svc.GetAsync(Segment, ct);
+    public async Task OnGetAsync(CancellationToken ct) =>
+        // Public/anonymous surface — never assemble the OrganizerOnly aggregates (defense-in-depth, §69).
+        Data = await _svc.GetAsync(Segment, FilterKey, FilterValue, isOrganizer: false, ct);
 }

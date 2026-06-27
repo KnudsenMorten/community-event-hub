@@ -120,14 +120,14 @@ public sealed class LiveEconomicContactAdminClient : IEconomicContactAdminClient
         int customerNumber, EconomicContactInput input, CancellationToken ct = default)
     {
         EnsureWritable();
-        var body = new
-        {
-            customer = new { customerNumber },
-            name = input.Name,
-            email = string.IsNullOrWhiteSpace(input.Email) ? null : input.Email,
-            phone = string.IsNullOrWhiteSpace(input.Phone) ? null : input.Phone,
-            notes = string.IsNullOrWhiteSpace(input.Notes) ? null : input.Notes,
-        };
+        // e-conomic POST /customers/{n}/contacts: the customer is in the URL path, so the
+        // body must NOT carry a nested customer object (that 400s), and blank fields are
+        // OMITTED rather than sent as null — matching the proven webhook integration
+        // (Create-ERP-Contact-via-Webhook.ps1). name is the only required field.
+        var body = new Dictionary<string, object> { ["name"] = input.Name };
+        if (!string.IsNullOrWhiteSpace(input.Email)) body["email"] = input.Email!;
+        if (!string.IsNullOrWhiteSpace(input.Phone)) body["phone"] = input.Phone!;
+        if (!string.IsNullOrWhiteSpace(input.Notes)) body["notes"] = input.Notes!;
         var req = Req(HttpMethod.Post, $"{Base}/customers/{customerNumber}/contacts");
         req.Content = JsonContent.Create(body);
         using var resp = await _http.SendAsync(req, ct);

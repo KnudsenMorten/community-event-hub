@@ -101,6 +101,9 @@ public sealed class ScheduleService
             E(D(start.AddDays(-1)),        "Setup day",                     "organizer,volunteer,media", true),
             // Pre-day / Master Class runs 09:00–16:00; main day 07:00–17:15 (operator 2026-06-24).
             E(D(start, 9, 0),              "Pre-day / Master Class",        "organizer,volunteer,speaker,media", false, D(start, 16, 0)),
+            // §122: media team photographs the exhibitor booths on the pre-day (pictures
+            // used in the welcome video) — a SPONSOR-only key date (11:00–14:00).
+            E(D(start, 11, 0),             "Media team booth photos (for welcome video)", "sponsor", false, D(start, 14, 0)),
             E(D(start, 16, 0),             "Party",                         "all", false),
             E(D(start, 17, 30),            "Group photo",                   "organizer,volunteer,speaker,media,attendee", false),
             E(D(start, 18, 0),             "Appreciation Dinner",           "all", false),

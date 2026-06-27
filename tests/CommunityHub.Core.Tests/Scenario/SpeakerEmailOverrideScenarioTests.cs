@@ -117,8 +117,8 @@ public sealed class SpeakerEmailOverrideScenarioTests
         var seed = await ScenarioSeed.SeedAsync(db);
         await SetOverrideAsync(db, seed.EventId, seed.SpeakerOneId, Override);
 
-        // A task due in 1 day -> inside the reminder window.
-        var due = DateOnly.FromDateTime(ScenarioFixture.Clock.GetUtcNow().UtcDateTime).AddDays(1);
+        // A task due TODAY -> §81: the reminder fires only on the due day.
+        var due = DateOnly.FromDateTime(ScenarioFixture.Clock.GetUtcNow().UtcDateTime);
         db.Tasks.Add(new ParticipantTask
         {
             EventId = seed.EventId,

@@ -7,7 +7,7 @@
 @if (Model.AccessDenied)
 {
     <div class="card">
-        <h2>Key Dates &amp; Times</h2>
+        <h1>Key Dates &amp; Times</h1>
         <p class="error">This page is for sponsors only.</p>
         <p><a asp-page="/Index">Back to hub</a></p>
     </div>
@@ -15,7 +15,7 @@
 }
 
 <div class="card">
-    <h2>Key Dates &amp; Times</h2>
+    <h1>Key Dates &amp; Times</h1>
     @if (!string.IsNullOrWhiteSpace(Model.CompanyDisplayName))
     {
         <p style="margin:-2px 0 10px;font-size:15px;color:var(--el-darkblue);font-weight:600;">@Model.CompanyDisplayName</p>
@@ -36,6 +36,7 @@
         <li><strong>07:30</strong> &mdash; Exhibitor check-in to booth (set up swag, demos, etc.)</li>
         <li><strong>09:00</strong> &mdash; Master Classes start</li>
         <li><strong>10:30</strong> &mdash; Coffee break (15 min)</li>
+        <li><strong>11:00&ndash;14:00</strong> &mdash; Media team will take pictures of the exhibitor booths (used in the welcome video)</li>
         <li><strong>12:00</strong> &mdash; Exhibitor ready for attendee lunch break (1 hr)</li>
         <li><strong>14:15</strong> &mdash; Coffee &amp; cake break (30 min)</li>
         <li><strong>16:00&ndash;18:30</strong> &mdash; Party in Expo / food area</li>

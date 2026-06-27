@@ -231,6 +231,7 @@ public class VolunteerWizardModel : PageModel
                  && t.SourceKey == sourceKey, ct);
         if (task is null || task.State == TaskState.Done) return;
         task.State = TaskState.Done;
+        task.CompletedAt = _clock.GetUtcNow();
         await _db.SaveChangesAsync(ct);
     }
 

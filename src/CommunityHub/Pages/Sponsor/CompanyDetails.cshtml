@@ -5,7 +5,7 @@
 }
 
 <div class="card">
-    <h2>Company Details</h2>
+    <h1 id="company">Company Details</h1>
 
     @if (Model.AccessDenied)
     {
@@ -98,7 +98,7 @@
             </p>
         }
 
-        <h3 style="margin:18px 0 6px;font-size:15px;color:var(--el-darkblue);">Event Coordinator</h3>
+        <h3 id="coordinator" style="margin:18px 0 6px;font-size:15px;color:var(--el-darkblue);">Event Coordinator</h3>
         <p style="font-size:12px;color:#6b7280;margin:0 0 10px;">Your primary contact for the event. Synced to Zoho Backstage as the @(Model.IsExhibitor ? "sponsor + exhibitor" : "sponsor") contact.</p>
 
         <label for="EventCoordinatorFirstName">First name</label>
@@ -118,21 +118,104 @@
         <p style="font-size:12px;color:#6b7280;margin:2px 0 14px;">Phone is sent to the exhibitor contact only (Zoho doesn't accept a phone on the sponsor record).</p>
 
         <button type="submit">Save &amp; Sync to Zoho</button>
-        <p style="font-size:12px;color:#6b7280;margin:8px 0 0;">Saving stores your details in the Event Hub and updates your Zoho Backstage records (overwriting what's there).</p>
+        <span id="autosaveStatus" class="ceh-autosave" aria-live="polite" style="margin-left:10px;font-size:12px;color:#6b7280;"></span>
+        <partial name="_LastSaved" model="Model.LastSavedAt" />
+        <p style="font-size:12px;color:#6b7280;margin:8px 0 0;">
+            Your text changes are saved automatically as you type. The
+            <strong>Save &amp; Sync to Zoho</strong> button also pushes them to your Zoho Backstage records (overwriting what's there).
+        </p>
     </form>
 </div>
+
+@* §41 — auto-SAVE the plain text fields to the hub on blur / ~1s debounce, WITHOUT
+   triggering the Zoho sync (that stays on the explicit button so the Zoho 3×-email
+   cap is protected). Pure progressive enhancement: with JS off the form still saves
+   normally via the Save button. Antiforgery: we post the form's hidden token as the
+   default RequestVerificationToken header. *@
+<script>
+(function () {
+    var form = document.querySelector('.card form[method="post"]');
+    if (!form) return;
+    var status = document.getElementById('autosaveStatus');
+    var tokenEl = form.querySelector('input[name="__RequestVerificationToken"]');
+    if (!tokenEl) return;
+
+    // Only the plain string fields auto-save (links, descriptions, coordinator
+    // fields). File inputs, the readonly identity fields and the Zoho button are
+    // excluded by selecting these ids explicitly.
+    var ids = ['WebsiteUrl','LinkedInUrl','TwitterUrl','CompanyOverview','SocialMediaBrandingText',
+               'CompanyShortDescription','EventCoordinatorFirstName','EventCoordinatorLastName',
+               'EventCoordinatorCompanyName','EventCoordinatorEmail','EventCoordinatorPhone'];
+    var fields = ids.map(function (id) { return document.getElementById(id); }).filter(Boolean);
+    if (fields.length === 0) return;
+
+    var timer = null, inFlight = false, pending = false;
+    function show(msg, kind) {
+        if (!status) return;
+        status.textContent = msg;
+        status.style.color = kind === 'error' ? '#b91c1c' : (kind === 'ok' ? '#166534' : '#6b7280');
+    }
+
+    function save() {
+        if (inFlight) { pending = true; return; }
+        inFlight = true; pending = false;
+        show('Saving…', 'busy');
+        var data = new FormData(form);
+        // Drop any file part — auto-save only persists the text fields.
+        var fileInputs = form.querySelectorAll('input[type="file"]');
+        fileInputs.forEach(function (f) { if (f.name) data.delete(f.name); });
+        // Always target the AutoSave handler (the form itself posts to the Zoho-sync handler).
+        var sep = window.location.pathname.indexOf('?') >= 0 ? '&' : '?';
+        fetch(window.location.pathname + sep + 'handler=AutoSave', {
+            method: 'POST',
+            headers: { 'RequestVerificationToken': tokenEl.value },
+            body: data,
+            credentials: 'same-origin'
+        }).then(function (r) {
+            return r.json().catch(function () { return { ok: r.ok }; });
+        }).then(function (j) {
+            inFlight = false;
+            if (j && j.ok) {
+                show('Saved ✓', 'ok');
+            } else {
+                show((j && j.error) ? j.error : 'Could not save — your last edit isn’t saved yet.', 'error');
+            }
+            if (pending) save();
+        }).catch(function () {
+            inFlight = false;
+            show('Could not save — your last edit isn’t saved yet.', 'error');
+        });
+    }
+
+    function schedule() {
+        show('Saving…', 'busy');
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(save, 1000);
+    }
+
+    fields.forEach(function (el) {
+        el.addEventListener('input', schedule);
+        el.addEventListener('blur', function () {
+            if (timer) { clearTimeout(timer); timer = null; }
+            save();
+        });
+    });
+})();
+</script>
 
 @if (Model.CanManageErpContacts)
 {
     <div class="card">
-        <h2>Your contacts (Signers &amp; Event Coordinators)</h2>
+        <h2 id="contacts">Your contacts (Contract Signers &amp; Event Coordinators)</h2>
         <p style="color:#4b5563;margin-top:0;font-size:13.5px;">
-            These are your company's contacts in our finance system (the source of truth). Add or remove people and set
-            their role — <strong>Signer</strong> and/or <strong>Event Coordinator</strong> (a person can hold both).
-            Changes save straight back to the master, and anything changed there shows here.
+            Add or remove people and set their role — <strong>Signer</strong> and/or
+            <strong>Event Coordinator</strong> (a person can hold both).
+            Signers can log in and sign the contract (if needed). Event coordinators can order from our webshop and
+            manage tasks in the hub.
         </p>
 
-        <table style="width:100%;border-collapse:collapse;font-size:13px;">
+        <div style="overflow-x:auto;">
+        <table style="width:100%;border-collapse:collapse;font-size:13px;min-width:520px;">
             <thead><tr style="text-align:left;border-bottom:1px solid #eef0f4;">
                 <th style="padding:6px;">Name</th><th style="padding:6px;">Email</th><th style="padding:6px;">Phone</th><th style="padding:6px;">Role</th><th></th><th></th>
             </tr></thead>
@@ -166,10 +249,18 @@
             }
             </tbody>
         </table>
+        </div>
 
         <details style="margin-top:10px;">
             <summary style="cursor:pointer;font-weight:600;color:var(--el-darkblue);">+ Add a contact</summary>
-            <form method="post" asp-page-handler="AddErpContact" style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:10px;">
+            @* §65 — column header above the NEW-contact inputs (matches the existing rows' Name/Email/Phone/Role header). *@
+            <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:10px;font-size:12px;font-weight:600;color:#6b7280;">
+                <span style="flex:1 1 140px;min-width:0;">Name</span>
+                <span style="flex:1 1 160px;min-width:0;">Email</span>
+                <span style="flex:1 1 120px;min-width:0;">Phone</span>
+                <span style="white-space:nowrap;">Role</span>
+            </div>
+            <form method="post" asp-page-handler="AddErpContact" style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:4px;">
                 <input type="text" name="name" placeholder="Full name" required style="flex:1 1 140px;min-width:0;" />
                 <input type="email" name="email" placeholder="Email" style="flex:1 1 160px;min-width:0;" />
                 <input type="tel" name="phone" placeholder="Phone" style="flex:1 1 120px;min-width:0;" />
@@ -184,7 +275,7 @@
 @if (Model.CanUploadSoMe || Model.CanUploadPrint || Model.CanUploadZoho || Model.CanUploadWall)
 {
     <div class="card">
-        <h2>Logos &amp; artwork</h2>
+        <h2 id="logos">Logos &amp; artwork</h2>
         <p style="color:#4b5563;margin-top:0;font-size:13.5px;">
             Each upload is versioned automatically (<code>_v1</code>, <code>_v2</code>, …) so the latest file is always clear.
             The organizers are notified on every upload.
@@ -199,6 +290,7 @@
                 <input type="file" name="UploadFile" accept=".png,image/png" required
                        style="display:block;margin-bottom:8px;" />
                 <button type="submit">Upload</button>
+                <partial name="_UploadedFile" model='Model.LatestUploads.GetValueOrDefault("some")' />
             </form>
         }
 
@@ -211,6 +303,7 @@
                 <input type="file" name="UploadFile" accept=".eps,.ai,.pdf" required
                        style="display:block;margin-bottom:8px;" />
                 <button type="submit">Upload</button>
+                <partial name="_UploadedFile" model='Model.LatestUploads.GetValueOrDefault("print")' />
             </form>
         }
 
@@ -223,6 +316,7 @@
                 <input type="file" name="UploadFile" accept=".png,image/png" required
                        style="display:block;margin-bottom:8px;" />
                 <button type="submit">Upload</button>
+                <partial name="_UploadedFile" model='Model.LatestUploads.GetValueOrDefault("zoho")' />
             </form>
         }
 
@@ -235,6 +329,7 @@
                 <input type="file" name="UploadFile" accept=".png,.jpg,.jpeg,.pdf" required
                        style="display:block;margin-bottom:8px;" />
                 <button type="submit">Upload</button>
+                <partial name="_UploadedFile" model='Model.LatestUploads.GetValueOrDefault("wall")' />
             </form>
         }
     </div>
@@ -243,7 +338,7 @@
 @if (Model.IsExhibitor)
 {
     <div class="card">
-        <h2>Booth members</h2>
+        <h2 id="booth-members">Booth members</h2>
         <p style="color:#4b5563;margin-top:0;font-size:13.5px;">
             Add the people who will staff your booth. <strong>Admin</strong> = update profile, invite/manage members,
             capture &amp; manage leads, export lead report, manage inquiries. <strong>Staff</strong> = update profile,
@@ -259,23 +354,33 @@
             <div style="overflow-x:auto;">
             @foreach (var m in Model.BoothMembers)
             {
-                <form method="post" asp-page-handler="UpdateMember"
-                      style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:0 0 8px;padding:8px;border:1px solid #eee;border-radius:6px;">
-                    <input type="hidden" name="memberId" value="@m.Id" />
-                    <input type="text" name="firstName" value="@m.FirstName" required placeholder="First name"
-                           style="flex:1 1 120px;min-width:0;" aria-label="First name" />
-                    <input type="text" name="lastName" value="@m.LastName" required placeholder="Last name"
-                           style="flex:1 1 120px;min-width:0;" aria-label="Last name" />
-                    <input type="email" name="email" value="@m.Email" required placeholder="Email"
-                           style="flex:1 1 180px;min-width:0;" aria-label="Email" />
-                    <select name="role" aria-label="Role" style="flex:0 0 auto;">
-                        <option value="Admin" selected="@(m.Role == CommunityHub.Core.Domain.BoothMemberRole.Admin ? "selected" : null)">Admin</option>
-                        <option value="Staff" selected="@(m.Role == CommunityHub.Core.Domain.BoothMemberRole.Staff ? "selected" : null)">Staff</option>
-                    </select>
-                    <button type="submit" class="secondary" style="flex:0 0 auto;">Save</button>
-                    <button type="submit" class="secondary" formaction="?handler=DeleteMember"
-                            style="flex:0 0 auto;color:#b91c1c;" aria-label="Delete @m.FirstName @m.LastName">Delete</button>
-                </form>
+                <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:0 0 8px;padding:8px;border:1px solid #eee;border-radius:6px;">
+                    @* §66 — auto-save+sync on change/blur (no per-row Save button). The JS at the
+                       bottom posts this form to UpdateMember and shows a Saving…/Synced status. *@
+                    <form method="post" asp-page-handler="UpdateMember" class="booth-member-form"
+                          style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;flex:1 1 auto;margin:0;">
+                        <input type="hidden" name="memberId" value="@m.Id" />
+                        <input type="text" name="firstName" value="@m.FirstName" required placeholder="First name"
+                               style="flex:1 1 120px;min-width:0;" aria-label="First name" />
+                        <input type="text" name="lastName" value="@m.LastName" required placeholder="Last name"
+                               style="flex:1 1 120px;min-width:0;" aria-label="Last name" />
+                        <input type="email" name="email" value="@m.Email" required placeholder="Email"
+                               style="flex:1 1 180px;min-width:0;" aria-label="Email" />
+                        <select name="role" aria-label="Role" style="flex:0 0 auto;width:auto;max-width:100%;">
+                            <option value="Admin" selected="@(m.Role == CommunityHub.Core.Domain.BoothMemberRole.Admin ? "selected" : null)">Admin</option>
+                            <option value="Staff" selected="@(m.Role == CommunityHub.Core.Domain.BoothMemberRole.Staff ? "selected" : null)">Staff</option>
+                        </select>
+                    </form>
+                    @* Delete is its OWN tag-helper form so it routes to DeleteMember correctly
+                       and isn't blocked by the Update form's required-field validation (the raw
+                       formaction button silently no-op'd). Operator 2026-06-25. *@
+                    <form method="post" asp-page-handler="DeleteMember" style="flex:0 0 auto;margin:0;"
+                          onsubmit="return confirm('Remove @(m.FirstName) @(m.LastName) from your booth members?');">
+                        <input type="hidden" name="memberId" value="@m.Id" />
+                        <button type="submit" class="secondary"
+                                style="color:#b91c1c;" aria-label="Delete @m.FirstName @m.LastName">Delete</button>
+                    </form>
+                </div>
             }
             </div>
         }
@@ -287,7 +392,7 @@
                 <input type="text" name="firstName" required placeholder="First name" style="flex:1 1 120px;min-width:0;" aria-label="First name" />
                 <input type="text" name="lastName" required placeholder="Last name" style="flex:1 1 120px;min-width:0;" aria-label="Last name" />
                 <input type="email" name="email" required placeholder="Email" style="flex:1 1 180px;min-width:0;" aria-label="Email" />
-                <select name="role" aria-label="Role" style="flex:0 0 auto;">
+                <select name="role" aria-label="Role" style="flex:0 0 auto;width:auto;max-width:100%;">
                     <option value="Staff">Staff</option>
                     <option value="Admin">Admin</option>
                 </select>
@@ -295,31 +400,45 @@
             </form>
         </details>
 
-        <form method="post" asp-page-handler="SyncMembers" style="margin-top:14px;">
-            <button type="submit">Save &amp; Sync booth members to Zoho</button>
-            <p style="font-size:12px;color:#6b7280;margin:6px 0 0;">
-                Syncs by email: new members are created in Zoho, and any members already in Zoho are pulled in here.
-                Removing a member must also be done in Zoho directly.
+        @* §66 — booth members auto-save + auto-sync (no manual Save/Sync button). Add and
+           Delete sync inline server-side; edits/role-changes auto-sync via the JS below. *@
+        <div style="margin-top:14px;">
+            <span id="boothMembersStatus" class="ceh-autosave" aria-live="polite" style="font-size:12px;color:#6b7280;"></span>
+            <p id="boothMembersLastSaved" class="ceh-last-saved" style="font-size:12px;color:#6b7280;margin:6px 0 0;">
+                @if (Model.BoothMembersLastSavedAt is { } bsa)
+                {
+                    <text>Last saved @bsa.ToUniversalTime().ToString("dd MMM yyyy HH:mm") UTC</text>
+                }
             </p>
-        </form>
+            <p style="font-size:12px;color:#6b7280;margin:6px 0 0;">
+                Booth-member changes are saved and synced to Zoho Backstage automatically — by email,
+                new members are created in Zoho and any members already in Zoho are pulled in here.
+            </p>
+        </div>
     </div>
 }
 
 @if (Model.IsExhibitor)
 {
     <div class="card">
-        <h2>Booth materials</h2>
+        <h2 id="booth-materials">Booth materials</h2>
 
         <h3 style="margin:6px 0 4px;font-size:15px;color:var(--el-darkblue);">Videos</h3>
         <p style="font-size:12px;color:#6b7280;margin:0 0 8px;">Up to @CommunityHub.Pages.Sponsor.CompanyDetailsModel.MaxVideos video links (full https URL).</p>
         @foreach (var v in Model.BoothVideos)
         {
-            <div style="display:flex;gap:8px;align-items:center;margin:0 0 6px;">
-                <a href="@v.Url" target="_blank" rel="noopener" style="flex:1 1 auto;min-width:0;word-break:break-all;font-size:13px;">@v.Url</a>
-                <form method="post" asp-page-handler="DeleteMaterial" style="margin:0;flex:0 0 auto;">
-                    <input type="hidden" name="materialId" value="@v.Id" />
-                    <button type="submit" class="secondary" style="color:#b91c1c;">Remove</button>
-                </form>
+            <div style="margin:0 0 8px;">
+                <div style="display:flex;gap:8px;align-items:center;">
+                    <a href="@v.Url" target="_blank" rel="noopener" style="flex:1 1 auto;min-width:0;word-break:break-all;font-size:13px;">@v.Url</a>
+                    <form method="post" asp-page-handler="DeleteMaterial" style="margin:0;flex:0 0 auto;">
+                        <input type="hidden" name="materialId" value="@v.Id" />
+                        <button type="submit" class="secondary" style="color:#b91c1c;">Remove</button>
+                    </form>
+                </div>
+                @* §68 — who/when so a shared team sees it's already added. *@
+                <p style="font-size:12px;color:#6b7280;margin:2px 0 0;">
+                    Added @v.CreatedAt.ToUniversalTime().ToString("dd MMM yyyy HH:mm") UTC@(string.IsNullOrWhiteSpace(v.CreatedByEmail) ? "" : $" by {v.CreatedByEmail}")
+                </p>
             </div>
         }
         @if (Model.BoothVideos.Count < CommunityHub.Pages.Sponsor.CompanyDetailsModel.MaxVideos)
@@ -335,12 +454,18 @@
         <p style="font-size:12px;color:#6b7280;margin:0 0 8px;">Up to @CommunityHub.Pages.Sponsor.CompanyDetailsModel.MaxCollateral files. Up to 25 MB. JPG, JPEG, PNG, PDF.</p>
         @foreach (var c in Model.BoothCollateral)
         {
-            <div style="display:flex;gap:8px;align-items:center;margin:0 0 6px;">
-                <a href="@c.Url" target="_blank" rel="noopener" style="flex:1 1 auto;min-width:0;word-break:break-all;font-size:13px;">@c.FileName</a>
-                <form method="post" asp-page-handler="DeleteMaterial" style="margin:0;flex:0 0 auto;">
-                    <input type="hidden" name="materialId" value="@c.Id" />
-                    <button type="submit" class="secondary" style="color:#b91c1c;">Remove</button>
-                </form>
+            <div style="margin:0 0 8px;">
+                <div style="display:flex;gap:8px;align-items:center;">
+                    <a href="@c.Url" target="_blank" rel="noopener" style="flex:1 1 auto;min-width:0;word-break:break-all;font-size:13px;">@c.FileName</a>
+                    <form method="post" asp-page-handler="DeleteMaterial" style="margin:0;flex:0 0 auto;">
+                        <input type="hidden" name="materialId" value="@c.Id" />
+                        <button type="submit" class="secondary" style="color:#b91c1c;">Remove</button>
+                    </form>
+                </div>
+                @* §68 — who/when so a shared team sees the file is already uploaded. *@
+                <p style="font-size:12px;color:#6b7280;margin:2px 0 0;">
+                    Uploaded @c.CreatedAt.ToUniversalTime().ToString("dd MMM yyyy HH:mm") UTC@(string.IsNullOrWhiteSpace(c.CreatedByEmail) ? "" : $" by {c.CreatedByEmail}")
+                </p>
             </div>
         }
         @if (Model.CanUploadCollateral && Model.BoothCollateral.Count < CommunityHub.Pages.Sponsor.CompanyDetailsModel.MaxCollateral)
@@ -357,6 +482,7 @@
 
         <form method="post" asp-page-handler="NotifyMaterials" style="margin-top:16px;">
             <button type="submit">Save &amp; Sync booth materials</button>
+            <partial name="_LastSaved" model="Model.BoothMaterialsLastSavedAt" />
             <p style="font-size:12px;color:#6b7280;margin:6px 0 0;">
                 Your videos and collateral are stored in the Event Hub. Saving notifies the organizers to place them on your Zoho Backstage exhibitor profile (Zoho has no materials API).
             </p>
@@ -367,3 +493,75 @@
 <div class="card">
     <p><a asp-page="/Sponsor/Index">&larr; Back to your sponsor area</a></p>
 </div>
+
+@* §66 — auto-save + auto-sync booth-member rows on change/blur (mirrors the §41 company
+   auto-save). Each row posts to UpdateMember as AJAX; the handler saves AND syncs to Zoho
+   (only when something actually changed — no redundant Zoho write) and returns JSON. With
+   JS off, add/delete still work via their own buttons. *@
+<script>
+(function () {
+    var forms = document.querySelectorAll('form.booth-member-form');
+    if (forms.length === 0) return;
+    var status = document.getElementById('boothMembersStatus');
+    var lastSaved = document.getElementById('boothMembersLastSaved');
+    function show(msg, kind) {
+        if (!status) return;
+        status.textContent = msg;
+        status.style.color = kind === 'error' ? '#b91c1c' : (kind === 'ok' ? '#166534' : '#6b7280');
+    }
+    forms.forEach(function (form) {
+        var timer = null, inFlight = false, pending = false;
+        function required(sel) {
+            var el = form.querySelector(sel);
+            return el && el.value.trim().length > 0;
+        }
+        function save() {
+            // Don't post a half-filled row (first/last/email are all required).
+            if (!required('input[name="firstName"]') || !required('input[name="lastName"]') || !required('input[name="email"]')) {
+                return;
+            }
+            if (inFlight) { pending = true; return; }
+            inFlight = true; pending = false;
+            show('Saving…', 'busy');
+            fetch(form.action, {
+                method: 'POST',
+                headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                body: new FormData(form),
+                credentials: 'same-origin'
+            }).then(function (r) {
+                return r.json().catch(function () { return { ok: r.ok }; });
+            }).then(function (j) {
+                inFlight = false;
+                if (j && j.ok) {
+                    show('Synced ✓', 'ok');
+                    if (j.savedAt && lastSaved) { lastSaved.textContent = 'Last saved ' + j.savedAt; }
+                } else {
+                    show((j && j.error) ? j.error : 'Could not save — your last change isn’t saved yet.', 'error');
+                }
+                if (pending) save();
+            }).catch(function () {
+                inFlight = false;
+                show('Could not save — your last change isn’t saved yet.', 'error');
+            });
+        }
+        function schedule() {
+            show('Saving…', 'busy');
+            if (timer) clearTimeout(timer);
+            timer = setTimeout(save, 800);
+        }
+        form.querySelectorAll('input[type="text"], input[type="email"]').forEach(function (el) {
+            el.addEventListener('input', schedule);
+            el.addEventListener('blur', function () {
+                if (timer) { clearTimeout(timer); timer = null; }
+                save();
+            });
+        });
+        form.querySelectorAll('select').forEach(function (el) {
+            el.addEventListener('change', function () {
+                if (timer) { clearTimeout(timer); timer = null; }
+                save();
+            });
+        });
+    });
+})();
+</script>

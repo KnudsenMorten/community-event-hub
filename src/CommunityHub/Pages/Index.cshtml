@@ -37,22 +37,6 @@
     .done-row { color:#0a6; }
     .done-row::before { content:"\2713"; margin-right:6px; font-weight:700; }
 
-    /* Calendar sync — mobile-first (~360px): everything wraps, full-width controls */
-    .cal-url-row { display:flex; gap:8px; flex-wrap:wrap; align-items:stretch; margin:8px 0; }
-    .cal-url-row input { flex:1 1 200px; min-width:0; padding:10px 12px; font-size:14px;
-        border:1px solid #cbd2d9; border-radius:8px; font-family:monospace; }
-    .cal-btn { display:inline-block; padding:10px 14px; border-radius:8px; font-size:14px;
-        font-weight:600; border:0; cursor:pointer; text-align:center; text-decoration:none; }
-    .cal-btn-primary { background:#2563eb; color:#fff; }
-    .cal-btn-ghost { background:#eef2ff; color:#2563eb; border:1px solid #c7d2fe; }
-    .cal-help { margin:10px 0 0; padding:0; }
-    .cal-help summary { cursor:pointer; font-weight:600; color:#374151; }
-    .cal-help ul { margin:8px 0 0 18px; padding:0; color:#4b5563; font-size:14px; line-height:1.5; }
-    .cal-dl-link { font-size:12px; color:#2563eb; white-space:nowrap; }
-    @@media (max-width: 380px) {
-        .cal-url-row input, .cal-btn { flex-basis:100%; }
-    }
-
     /* Task tables — mobile-first. The fixed date/status column widths plus the
        no-wrap "Overdue (N days)" cells pushed the table to ~336px, overflowing
        below the 360px baseline (it only fit on the 375px iPhone-SE the suite
@@ -71,56 +55,12 @@
 </style>
 
 <div class="card">
-    <h2>@Localizer["Hub.Welcome", Model.Me.FirstName]</h2>
+    <h1>@Localizer["Hub.Welcome", Model.Me.FirstName]</h1>
     <p>@Model.EventDisplayName &middot; @Localizer["Hub.SignedInAs"] <strong>@CommunityHub.Branding.RoleDisplay.Name(Model.Me.Role)</strong></p>
     @* "All tasks complete" lives ONLY on the checklist card below, and only when the
        role actually has tracked tasks — so attendees (no hub tasks) no longer see a
        confusing "All tasks complete!" with nothing behind it (operator 2026-06-23). *@
 </div>
-
-@{
-    // "Add to my calendar" applies to roles with time-bound items: speakers
-    // (milestone deadlines), volunteers (shifts/tasks), organizers (tasks).
-    var showCalendar = !string.IsNullOrEmpty(Model.CalendarToken)
-        && (Model.Me.Role == CommunityHub.Core.Domain.ParticipantRole.Speaker
-            || Model.Me.Role == CommunityHub.Core.Domain.ParticipantRole.Volunteer
-            || Model.Me.Role == CommunityHub.Core.Domain.ParticipantRole.Organizer);
-}
-@if (showCalendar)
-{
-    <div class="card">
-        <h2>&#128197; @Localizer["Hub.AddToCalendar"]</h2>
-        <p style="color:#4b5563;margin:0 0 4px;">
-            @Localizer["Hub.CalendarIntro"]
-        </p>
-        <div class="cal-url-row">
-            <input type="text" readonly aria-label="@Localizer["Hub.AddToCalendar"]"
-                   id="cal-url" value="@Model.CalendarWebcalUrl" />
-            <button type="button" class="cal-btn cal-btn-primary"
-                    id="cal-copy" data-ceh-copy="cal-url"
-                    data-ceh-copied="@Localizer["Hub.Copied"]"
-                    data-ceh-copy-label="@Localizer["Hub.CopyLink"]">@Localizer["Hub.CopyLink"]</button>
-            <a class="cal-btn cal-btn-ghost" href="@Model.CalendarWebcalUrl" data-ceh-confirm="calSyncInfo">@Localizer["Hub.Subscribe"]</a>
-        </div>
-        <details class="cal-help">
-            <summary>@Localizer["Hub.CalendarHowTo"]</summary>
-            <ul>
-                <li><strong>Outlook (web/desktop):</strong> Calendar &rarr; Add calendar
-                    &rarr; Subscribe from web &rarr; paste the link.</li>
-                <li><strong>Google Calendar:</strong> Other calendars &rarr; From URL
-                    &rarr; paste the link (use the
-                    <a href="@Model.CalendarHttpsUrl">https link</a>).</li>
-                <li><strong>Apple Calendar (iPhone/Mac):</strong> tap <em>Subscribe</em>
-                    above, or File &rarr; New Calendar Subscription &rarr; paste the link.</li>
-            </ul>
-            <p style="font-size:12px;color:#6b7280;margin:8px 0 0;">
-                This link is private to you. If you ever shared it by mistake, an
-                organizer can reset it.
-            </p>
-        </details>
-    </div>
-    @* Copy uses the shared data-ceh-copy behaviour in _Layout (REQUIREMENTS §21). *@
-}
 
 @* Unified "what's still needed" checklist — shared component (Top-8 #7).
    The Hub passes the CalendarItem page-handler so dated pending rows offer .ics.
@@ -156,6 +96,30 @@
     </div>
 }
 
+@if (Model.ShowLunch)
+{
+    <div class="card">
+        <h2>Lunch</h2>
+        <div class="status-row">
+            @if (Model.LunchSubmitted) { @Html.Raw(DoneBadge()) <span>Your lunch preference is on file.</span> }
+            else                       { @Html.Raw(PendingBadge()) <span>Let us know which lunches you'll join.</span> }
+        </div>
+        <a asp-page="/Forms/Lunch">@(Model.LunchSubmitted ? "Update lunch preference" : "Complete the lunch form")</a>
+    </div>
+}
+
+@if (Model.ShowSwag)
+{
+    <div class="card">
+        <h2>Swag</h2>
+        <div class="status-row">
+            @if (Model.SwagSubmitted) { @Html.Raw(DoneBadge()) <span>Your swag preference is on file.</span> }
+            else                      { @Html.Raw(PendingBadge()) <span>You have not picked your swag yet.</span> }
+        </div>
+        <a asp-page="/Forms/Swag">@(Model.SwagSubmitted ? "Update swag preference" : "Pick your swag")</a>
+    </div>
+}
+
 @if (Model.ShowVolunteerShifts)
 {
     <div class="card">
@@ -185,10 +149,6 @@
             }
         </div>
         <a asp-page="/Volunteer/MySchedule">@Localizer["Hub.VolWorkMySchedule"]</a>
-        <span> &middot; </span>
-        <a asp-page="/Volunteer/MyShifts">@Localizer["Hub.VolWorkMyShifts"]</a>
-        <span> &middot; </span>
-        <a asp-page="/Volunteer/MyTasks">@Localizer["Hub.VolWorkMyTasks"]</a>
         @if (Model.IsCategorySupervisor)
         {
             <span> &middot; </span>
@@ -230,7 +190,6 @@
 
         <p style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;">
             <a class="task-link-btn" asp-page="/Speaker/Index">@Localizer["Speaker.MySessions"]</a>
-            <a class="task-link-btn" asp-page="/Calendar">&#128197; @Localizer["Nav.ImportantDates"]</a>
             <a class="task-link-btn" asp-page="/Tasks/Index">@Localizer["Speaker.AllMyTasks"]</a>
         </p>
     </div>

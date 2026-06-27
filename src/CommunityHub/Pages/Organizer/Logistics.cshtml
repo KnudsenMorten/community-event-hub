@@ -5,7 +5,7 @@
 }
 
 <div class="card">
-    <h2>@Localizer["OrgLogistics.Title"]</h2>
+    <h1>@Localizer["OrgLogistics.Title"]</h1>
     @if (Model.AccessDenied)
     {
         <p class="error">@Localizer["Common.OrganizersOnly"]</p>
@@ -31,9 +31,11 @@
         new("/Organizer/GroupPhotos", Localizer["Nav.OrgGroupPhotos"].Value, Localizer["OrgLogistics.GroupPhotos"].Value, "group-photo-invites"),
         new("/Organizer/SpeakerReview", "Speaker & order review", "After a Sessionize import: classify each speaker (funding, days, same-person dedup, per-item overrides) and verify the deduped 'what to order' counts."),
         new("/Organizer/Schedule", Localizer["Nav.OrgSchedule"].Value, "The event schedule (move-in, setup, pre-day, party, dinner, main day, …) — role-tagged, shown on each participant's Key dates panel and synced to their calendar."),
+        new("/Organizer/SessionEvalsQr", "Session-evaluation QR codes", "Upload / replace the per-room QR codes attendees scan to rate sessions. Speakers download their session's room QR from their Session Evaluation page."),
         new("/Organizer/PartyRsvps", "Party RSVPs & headcount", "Anonymous Party sign-ups from the public /Party form — the attending headcount for the Bella Center food order, plus a CSV export."),
         new("/Organizer/Exports", Localizer["Nav.OrgExports"].Value, Localizer["OrgArea.Exports"].Value),
         new("/Organizer/DataFreshness", Localizer["Fresh.Title"].Value, Localizer["Fresh.Intro"].Value),
+        new("/Organizer/SyncHealth", Localizer["Sh.Title"].Value, Localizer["Sh.Intro"].Value),
     };
     <partial name="_HubGrid" model="@tiles" />
 }

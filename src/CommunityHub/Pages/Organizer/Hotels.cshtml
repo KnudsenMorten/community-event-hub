@@ -5,7 +5,7 @@
 }
 
 <div class="card">
-    <h2>@Localizer["OrgHotels.Title"]</h2>
+    <h1>@Localizer["OrgHotels.Title"]</h1>
     @if (Model.AccessDenied)
     {
         <p class="error">@Localizer["Common.OrganizersOnly"]</p>
@@ -30,6 +30,9 @@
                 <label for="RoomBlockSize">@Localizer["OrgHotels.RoomBlockSize"]</label>
                 <input asp-for="RoomBlockSize" type="number" min="0" inputmode="numeric" autocomplete="off" />
                 <small style="display:block;color:#6b7280;margin:-4px 0 8px;">@Localizer["OrgHotels.RoomBlockSizeHelp"]</small>
+                <label for="ConfirmationNumber">@Localizer["OrgHotels.ConfirmationNumber"]</label>
+                <input asp-for="ConfirmationNumber" maxlength="64" autocomplete="off" />
+                <small style="display:block;color:#6b7280;margin:-4px 0 8px;">@Localizer["OrgHotels.ConfirmationNumberHelp"]</small>
                 <label for="Notes">@Localizer["Common.NotesOptional"]</label>
                 <textarea asp-for="Notes" rows="2" maxlength="1000"></textarea>
                 <button type="submit">@Localizer["Common.Save"]</button>
@@ -73,6 +76,7 @@
                         <th style="padding:6px;">@Localizer["OrgHotels.Address"]</th>
                         <th style="padding:6px;">@Localizer["OrgHotels.ContactEmail"]</th>
                         <th style="padding:6px;text-align:right;">@Localizer["OrgHotels.RoomBlockColumn"]</th>
+                        <th style="padding:6px;">@Localizer["OrgHotels.ReservationStatus"]</th>
                         <th style="padding:6px;">@Localizer["Common.NotesOptional"]</th>
                         <th style="padding:6px;"></th>
                     </tr>
@@ -89,6 +93,17 @@
                             <td style="padding:6px;">@h.Address</td>
                             <td style="padding:6px;">@h.ContactEmail</td>
                             <td style="padding:6px;text-align:right;">@(h.RoomBlockSize.HasValue ? h.RoomBlockSize.Value.ToString() : "—")</td>
+                            <td style="padding:6px;white-space:nowrap;">
+                                @if (h.IsConfirmed)
+                                {
+                                    <span style="display:inline-block;background:#dcfce7;color:#166534;border-radius:4px;padding:2px 8px;font-weight:600;font-size:12px;">@Localizer["OrgHotels.StatusConfirmed"]</span>
+                                    <span style="display:block;color:#6b7280;font-size:11.5px;margin-top:2px;">@h.ConfirmationNumber</span>
+                                }
+                                else
+                                {
+                                    <span style="display:inline-block;background:#fef3c7;color:#92400e;border-radius:4px;padding:2px 8px;font-weight:600;font-size:12px;">@Localizer["OrgHotels.StatusNotConfirmed"]</span>
+                                }
+                            </td>
                             <td style="padding:6px;max-width:240px;">@h.Notes</td>
                             <td style="padding:6px;white-space:nowrap;">
                                 <a asp-page="/Organizer/Hotels" asp-route-EditId="@h.Id">@Localizer["Common.Edit"]</a>

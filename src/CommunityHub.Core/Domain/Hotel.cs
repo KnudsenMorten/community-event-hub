@@ -42,6 +42,23 @@ public class Hotel
     /// </summary>
     public int? RoomBlockSize { get; set; }
 
+    /// <summary>
+    /// The booking CONFIRMATION NUMBER the hotel releases for this room block
+    /// (REQUIREMENTS §46). An organizer enters it once, after the hotel confirms.
+    /// While null/blank the reservation is "not confirmed"; once a non-blank value
+    /// is recorded the reservation is treated as <c>[CONFIRMED]</c> and every
+    /// participant placed in this hotel who needs a room is re-sent their hotel
+    /// calendar invite carrying this number. Participant-facing surfaces show it
+    /// read-only; only organizers set it.
+    /// </summary>
+    public string? ConfirmationNumber { get; set; }
+
+    /// <summary>
+    /// True once a non-blank <see cref="ConfirmationNumber"/> has been recorded —
+    /// the reservation is CONFIRMED. Computed, not stored.
+    /// </summary>
+    public bool IsConfirmed => !string.IsNullOrWhiteSpace(ConfirmationNumber);
+
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? UpdatedAt { get; set; }
 

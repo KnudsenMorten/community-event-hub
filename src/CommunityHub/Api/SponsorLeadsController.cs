@@ -3,6 +3,7 @@ using System.Text;
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Integrations.Sponsors;
 using CommunityHub.Export;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -35,7 +36,12 @@ namespace CommunityHub.Api;
 /// by design — the rows stay in the DB (nothing is hard-deleted) but the
 /// sponsor only sees actionable leads.
 /// </summary>
+// Anonymous to the cookie scheme: each endpoint authenticates itself with a per-sponsor
+// API key (X-Sponsor-Api-Key header or ?key=) and returns 401 when it is missing/invalid
+// (see AuthAsync). It must opt out of the fail-closed FallbackPolicy so the key-based auth
+// runs instead of the cookie requirement (otherwise header/query-key sponsor clients break).
 [ApiController]
+[AllowAnonymous]
 [Route("api/v1/sponsors/{sponsorCompanyId}")]
 public sealed class SponsorLeadsController : ControllerBase
 {

@@ -51,6 +51,13 @@ public enum OnboardingStage
 }
 
 /// <summary>One participant's onboarding-completion line for the admin overview.</summary>
+/// <param name="OverrideDoneCount">
+/// When set, the persona's completion is NOT derived from the five
+/// <see cref="OnboardingStep"/> flags but supplied directly (with
+/// <paramref name="OverrideRequiredCount"/>). Used by the Sponsor persona, whose
+/// onboarding tracks the sponsor wizard's real signals (company info, logos,
+/// booth members) rather than the Appreciation/Swag steps a sponsor never does.
+/// </param>
 public sealed record OnboardingRow(
     int ParticipantId,
     string FullName,
@@ -63,7 +70,9 @@ public sealed record OnboardingRow(
     bool Picture,
     bool Hotel,
     bool Appreciation,
-    bool Swag)
+    bool Swag,
+    int? OverrideDoneCount = null,
+    int? OverrideRequiredCount = null)
 {
     /// <summary>Is a step done (regardless of whether the persona requires it)?</summary>
     public bool DoneOf(OnboardingStep step) => step switch
@@ -79,14 +88,14 @@ public sealed record OnboardingRow(
     /// <summary>Does this persona require the given step?</summary>
     public bool Requires(OnboardingStep step) => RequiredSteps.Contains(step);
 
-    /// <summary>True when every REQUIRED step for the persona is done.</summary>
-    public bool IsComplete => RequiredSteps.All(DoneOf);
-
     /// <summary>How many of the persona's REQUIRED steps are done.</summary>
-    public int DoneCount => RequiredSteps.Count(DoneOf);
+    public int DoneCount => OverrideDoneCount ?? RequiredSteps.Count(DoneOf);
 
     /// <summary>Total required steps for the persona.</summary>
-    public int RequiredCount => RequiredSteps.Count;
+    public int RequiredCount => OverrideRequiredCount ?? RequiredSteps.Count;
+
+    /// <summary>True when every REQUIRED step for the persona is done.</summary>
+    public bool IsComplete => RequiredCount == 0 || DoneCount >= RequiredCount;
 
     /// <summary>Completion % over the persona's required steps.</summary>
     public int Percent =>
@@ -357,10 +366,41 @@ public sealed class OnboardingService
             .ThenBy(p => p.FullName)
             .ToListAsync(ct);
 
+        // Derive completion from REAL hub data (the same signals the role/speaker
+        // wizards read), OR'd with the persisted OnboardingCompleted_* flags. This
+        // way a participant who finished a step via the normal nav — e.g. a
+        // media-team / event-partner who books a hotel or fills the swag form
+        // outside /Forms/OnboardingWizard — is reflected as done and stops being
+        // chased, even though no OnboardingCompleted_* bit was ever set.
+        var ids = entities.Select(p => p.Id).ToList();
+        var hotelDone = (await _db.HotelBookings
+            .Where(h => h.EventId == eventId && ids.Contains(h.ParticipantId))
+            .Select(h => h.ParticipantId).Distinct().ToListAsync(ct)).ToHashSet();
+        var dinnerDone = (await _db.DinnerSignups
+            .Where(d => d.EventId == eventId && ids.Contains(d.ParticipantId))
+            .Select(d => d.ParticipantId).Distinct().ToListAsync(ct)).ToHashSet();
+        var swagDone = (await _db.SwagPreferences
+            .Where(s => s.EventId == eventId && ids.Contains(s.ParticipantId))
+            .Select(s => s.ParticipantId).Distinct().ToListAsync(ct)).ToHashSet();
+        var bioDone = (await _db.SpeakerProfiles
+            .Where(s => s.EventId == eventId && ids.Contains(s.ParticipantId)
+                        && s.Biography != null && s.Biography != "")
+            .Select(s => s.ParticipantId).Distinct().ToListAsync(ct)).ToHashSet();
+        var pictureDone = (await _db.SpeakerProfiles
+            .Where(s => s.EventId == eventId && ids.Contains(s.ParticipantId)
+                        && s.PhotoUrl != null && s.PhotoUrl != "")
+            .Select(s => s.ParticipantId).Distinct().ToListAsync(ct)).ToHashSet();
+
+        // Sponsor onboarding tracks the sponsor WIZARD's real completion (company
+        // info, logos, booth members — the same SponsorInfo / booth data the
+        // sponsor "Get started" wizard reads), NOT the Appreciation/Swag steps a
+        // sponsor never does (those otherwise pin every sponsor at 0% forever).
+        var sponsorProgress = await BuildSponsorProgressAsync(eventId, entities, ct);
+
         var people = entities
             .Where(p => persona is null
                         || OnboardingEmailSets.PersonaFor(p.Role) == persona.Value)
-            .Select(ToRow)
+            .Select(p => ToRow(p, hotelDone, dinnerDone, swagDone, bioDone, pictureDone, sponsorProgress))
             .ToList();
 
         var overview = new OnboardingOverview
@@ -440,36 +480,175 @@ public sealed class OnboardingService
     }
 
     /// <summary>
-    /// Map a participant to a dashboard row, deriving its persona-aware stage.
+    /// Map a participant to a dashboard row, deriving its persona-aware stage. Each
+    /// step's completion is the persisted <c>OnboardingCompleted_*</c> flag OR'd
+    /// with the presence of REAL hub data for that step (the id-sets resolved once
+    /// in <see cref="BuildOverviewAsync"/>), so a person who onboarded via the
+    /// normal nav rather than the wizard still counts as done.
     /// </summary>
-    private static OnboardingRow ToRow(Participant p)
+    private static OnboardingRow ToRow(
+        Participant p,
+        HashSet<int> hotelDone, HashSet<int> dinnerDone, HashSet<int> swagDone,
+        HashSet<int> bioDone, HashSet<int> pictureDone,
+        IReadOnlyDictionary<int, SponsorProgress> sponsorProgress)
     {
         var persona = OnboardingEmailSets.PersonaFor(p.Role);
+
+        // The Sponsor persona derives its completion from the sponsor wizard's real
+        // signals (company info / logos / booth members), not the five generic
+        // OnboardingStep flags — so its row carries an explicit done/required
+        // override and the generic step grid shows n/a for it.
+        if (persona == PersonaGroup.Sponsor)
+            return ToSponsorRow(p, sponsorProgress.TryGetValue(p.Id, out var sp) ? sp : SponsorProgress.None);
+
         var required = OnboardingStepSets.For(persona);
-        var stage = DeriveStage(p, required);
+
+        // Effective per-step completion: persisted flag OR real data exists.
+        bool bio          = p.OnboardingCompleted_Bio          || bioDone.Contains(p.Id);
+        bool picture      = p.OnboardingCompleted_Picture      || pictureDone.Contains(p.Id);
+        bool hotel        = p.OnboardingCompleted_Hotel        || hotelDone.Contains(p.Id);
+        bool appreciation = p.OnboardingCompleted_Appreciation || dinnerDone.Contains(p.Id);
+        bool swag         = p.OnboardingCompleted_Swag         || swagDone.Contains(p.Id);
+
+        bool DoneOf(OnboardingStep step) => step switch
+        {
+            OnboardingStep.Bio          => bio,
+            OnboardingStep.Picture      => picture,
+            OnboardingStep.Hotel        => hotel,
+            OnboardingStep.Appreciation => appreciation,
+            OnboardingStep.Swag         => swag,
+            _ => false,
+        };
+
+        var stage = DeriveStage(p.LifecycleState, required, DoneOf);
         return new OnboardingRow(
             p.Id, p.FullName, p.Email, p.Role, persona, stage, required,
-            p.OnboardingCompleted_Bio,
-            p.OnboardingCompleted_Picture,
-            p.OnboardingCompleted_Hotel,
-            p.OnboardingCompleted_Appreciation,
-            p.OnboardingCompleted_Swag);
+            bio, picture, hotel, appreciation, swag);
     }
 
     /// <summary>
     /// Stage = Preselected (lifecycle Preselected) · else, once Active:
     /// Completed (all required done) · InProgress (some done) · Invited (none done).
+    /// Completion is read via <paramref name="doneOf"/> — the EFFECTIVE per-step
+    /// state (flag OR real data), not the raw participant flags.
     /// </summary>
     private static OnboardingStage DeriveStage(
-        Participant p, IReadOnlyList<OnboardingStep> required)
+        ParticipantLifecycleState lifecycle,
+        IReadOnlyList<OnboardingStep> required,
+        Func<OnboardingStep, bool> doneOf)
+        => DeriveStageFromCounts(lifecycle, required.Count(doneOf), required.Count);
+
+    /// <summary>
+    /// Stage from raw done/required COUNTS (the persona-agnostic core of
+    /// <see cref="DeriveStage"/>): Preselected (lifecycle) · else Completed (all
+    /// required done, or nothing required) · InProgress (some done) · Invited (none).
+    /// Used by personas whose completion is not the five-step grid (e.g. Sponsor).
+    /// </summary>
+    private static OnboardingStage DeriveStageFromCounts(
+        ParticipantLifecycleState lifecycle, int done, int required)
     {
-        if (p.LifecycleState == ParticipantLifecycleState.Preselected)
+        if (lifecycle == ParticipantLifecycleState.Preselected)
             return OnboardingStage.Preselected;
 
-        int done = required.Count(step => OnboardingStepSets.IsStepDone(p, step));
-        if (required.Count > 0 && done == required.Count) return OnboardingStage.Completed;
-        if (required.Count == 0) return OnboardingStage.Completed; // nothing required ⇒ done
+        if (required == 0) return OnboardingStage.Completed;   // nothing required ⇒ done
+        if (done >= required) return OnboardingStage.Completed;
         return done == 0 ? OnboardingStage.Invited : OnboardingStage.InProgress;
+    }
+
+    // ----- Sponsor onboarding (wizard-driven, not the five-step grid) ----------
+
+    /// <summary>
+    /// One sponsor's wizard completion, expressed as a done/required pair so it
+    /// plugs into <see cref="OnboardingRow"/>'s completion override. Mirrors the
+    /// hub-tracked steps of the sponsor "Get started" wizard the operator wants the
+    /// dashboard to track: company info + logos always, plus booth members for
+    /// exhibitor (booth) packages. (The ERP-contacts / coordinator / booth-material
+    /// steps are intentionally NOT counted here.)
+    /// </summary>
+    private sealed record SponsorProgress(int Done, int Required)
+    {
+        /// <summary>No SponsorInfo yet ⇒ company info + logos required, none done.</summary>
+        public static readonly SponsorProgress None = new(0, 2);
+    }
+
+    /// <summary>
+    /// Resolve each sponsor participant's wizard completion from the SAME underlying
+    /// data the sponsor wizard reads (SponsorInfo company info + logos, and live
+    /// booth members for booth packages), scoped to the edition. Sponsor contacts
+    /// share a company row via <see cref="Participant.SponsorCompanyId"/>.
+    /// </summary>
+    private async Task<IReadOnlyDictionary<int, SponsorProgress>> BuildSponsorProgressAsync(
+        int eventId, IReadOnlyList<Participant> entities, CancellationToken ct)
+    {
+        var companyByParticipant = entities
+            .Where(p => OnboardingEmailSets.PersonaFor(p.Role) == PersonaGroup.Sponsor
+                        && !string.IsNullOrWhiteSpace(p.SponsorCompanyId))
+            .ToDictionary(p => p.Id, p => p.SponsorCompanyId!);
+
+        var result = new Dictionary<int, SponsorProgress>();
+        if (companyByParticipant.Count == 0) return result;
+
+        var companyIds = companyByParticipant.Values.Distinct().ToList();
+
+        var infoByCompany = (await _db.SponsorInfos.AsNoTracking()
+                .Where(s => s.EventId == eventId && companyIds.Contains(s.SponsorCompanyId))
+                .ToListAsync(ct))
+            .GroupBy(s => s.SponsorCompanyId)
+            .ToDictionary(g => g.Key, g => g.First());
+
+        var companiesWithBoothMembers = (await _db.SponsorBoothMembers
+                .Where(m => m.EventId == eventId
+                            && companyIds.Contains(m.SponsorCompanyId)
+                            && m.DeletedAt == null)
+                .Select(m => m.SponsorCompanyId).Distinct().ToListAsync(ct))
+            .ToHashSet();
+
+        foreach (var (participantId, companyId) in companyByParticipant)
+        {
+            infoByCompany.TryGetValue(companyId, out var info);
+            result[participantId] =
+                SponsorProgressFrom(info, companiesWithBoothMembers.Contains(companyId));
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// Compute a sponsor's wizard completion from its company row + booth-member
+    /// presence: company info (website OR description) and logos (raster OR vector)
+    /// are always required; booth members are required ONLY for booth packages
+    /// (<see cref="SponsorInfo.HasBooth"/>).
+    /// </summary>
+    private static SponsorProgress SponsorProgressFrom(SponsorInfo? info, bool hasBoothMembers)
+    {
+        bool companyInfo = info is not null
+            && (!string.IsNullOrWhiteSpace(info.WebsiteUrl)
+                || !string.IsNullOrWhiteSpace(info.CompanyDescription));
+        bool logos = info is not null
+            && (!string.IsNullOrWhiteSpace(info.LogoRasterPath)
+                || !string.IsNullOrWhiteSpace(info.LogoVectorPath));
+        bool boothApplies = info?.HasBooth == true;
+
+        int required = 2 + (boothApplies ? 1 : 0);
+        int done = (companyInfo ? 1 : 0)
+                   + (logos ? 1 : 0)
+                   + (boothApplies && hasBoothMembers ? 1 : 0);
+        return new SponsorProgress(done, required);
+    }
+
+    /// <summary>
+    /// Build a sponsor's dashboard row from its wizard progress: stage + done/required
+    /// come from the sponsor signals, and the generic Bio/Picture/Hotel/Appreciation/
+    /// Swag grid does not apply (RequiredSteps empty ⇒ those columns render n/a).
+    /// </summary>
+    private static OnboardingRow ToSponsorRow(Participant p, SponsorProgress progress)
+    {
+        var stage = DeriveStageFromCounts(p.LifecycleState, progress.Done, progress.Required);
+        return new OnboardingRow(
+            p.Id, p.FullName, p.Email, p.Role, PersonaGroup.Sponsor, stage,
+            Array.Empty<OnboardingStep>(),
+            false, false, false, false, false,
+            OverrideDoneCount: progress.Done,
+            OverrideRequiredCount: progress.Required);
     }
 
     /// <summary>Human label for a dashboard stage.</summary>

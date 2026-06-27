@@ -88,7 +88,7 @@ public class EconomicContactsModel : PageModel
             return RedirectToPage(new { customer, msg = "Name is required." });
 
         await _admin.CreateAsync(customer, name, email, phone, signer, coordinator, ct);
-        return RedirectToPage(new { customer, msg = "Contact added in e-conomic." });
+        return RedirectToPage(new { customer, msg = "Contact added in backend." });
     }
 
     public async Task<IActionResult> OnPostUpdateAsync(
@@ -102,7 +102,7 @@ public class EconomicContactsModel : PageModel
 
         await _admin.UpdateAsync(customer, contact, name ?? string.Empty, email, phone,
             signer, coordinator, notes, ct);
-        return RedirectToPage(new { customer, msg = "Contact updated in e-conomic." });
+        return RedirectToPage(new { customer, msg = "Contact updated in backend." });
     }
 
     public async Task<IActionResult> OnPostDeleteAsync(int customer, int contact, CancellationToken ct)

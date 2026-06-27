@@ -37,8 +37,9 @@ public enum MasterClassBookingStatus
 /// <summary>
 /// An event attendee, reconciled from Zoho (CONTEXT.md 9z). Distinct from
 /// <see cref="Participant"/>: organizer-managed participants are entered by organizers; attendees are
-/// synced from Zoho Backstage orders + Zoho Bookings appointments by the
-/// AttendeeReconcileJob and are read-only from the hub's point of view.
+/// synced one-way from Zoho Backstage orders + tickets by the single authoritative
+/// AttendeeBackstageSyncJob (REQUIREMENTS §125) and are read-only from the hub's
+/// point of view (CEH never writes back to Zoho).
 ///
 /// Scoped to an edition by EventId. Email is the identity used both for PIN
 /// login to the attendee area and as the reconciliation key between the two
@@ -79,9 +80,31 @@ public class Attendee
     /// <summary>The ticket class name as seen in Zoho, for display / audit.</summary>
     public string? TicketClassName { get; set; }
 
+    // --- Mirror state (SOFT-CANCEL, §128) -----------------------------------
+    /// <summary>
+    /// Whether this ticket is still in Zoho's ACTIVE set (Active) or was
+    /// cancelled/changed away upstream (Cancelled — SOFT-cancelled: the MC seat is
+    /// released to the waitlist and the row is excluded from active counts, but the
+    /// row + its history are KEPT). This is the NEW cancellation flag (REQUIREMENTS
+    /// §128); it does NOT overload <see cref="TicketStatus"/>, which stays the 2-day
+    /// Master-Class eligibility marker (§126).
+    /// </summary>
+    public MirrorState MirrorState { get; set; } = MirrorState.Active;
+
+    /// <summary>When this ticket was soft-cancelled locally, or null while Active.</summary>
+    public DateTimeOffset? CancelledAt { get; set; }
+
     // --- Backstage attendee + order details (REQUIREMENTS §6) ---------------
-    /// <summary>The Backstage order id this ticket belongs to.</summary>
+    /// <summary>
+    /// The Backstage order id this ticket belongs to — also the foreign key to the
+    /// order-level mirror (<see cref="Order"/>) via the (EventId, OrderId) →
+    /// (EventId, BackstageOrderId) relationship. Null on legacy rows synced before
+    /// the order mirror existed (REQUIREMENTS §125).
+    /// </summary>
     public string? OrderId { get; set; }
+    /// <summary>The order-level mirror this ticket belongs to (REQUIREMENTS §125); null
+    /// when <see cref="OrderId"/> is unset (legacy rows).</summary>
+    public Order? Order { get; set; }
     /// <summary>Attendee's company (Backstage contact <c>company_name</c>).</summary>
     public string? CompanyName { get; set; }
     /// <summary>Job title (Backstage contact <c>designation</c>).</summary>

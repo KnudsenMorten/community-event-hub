@@ -12,3 +12,30 @@
     </p>
     <p style="color:#6b7280;font-size:13px;">We usually reply within a day. You can also reach us at <a href="mailto:@Model.OrganizerEmail">@Model.OrganizerEmail</a>.</p>
 </div>
+
+@* §107: organizer-team profile cards (picture + role + title + email), authored in
+   config/content/eldk27/organizers.md and rendered with the shared content renderer.
+   Mobile-first: the cards collapse to a single column on phones. *@
+@if (!string.IsNullOrEmpty(Model.OrganizerProfilesHtml.Value))
+{
+    <style>
+        /* Each "## Name" heading from organizers.md starts a card; CSS columns give a
+           responsive multi-column layout without restructuring the rendered markup. */
+        .organizer-profiles { margin-top: 18px; }
+        .organizer-profiles .organizer-grid {
+            columns: 2 320px; column-gap: 18px;
+        }
+        .organizer-profiles h1 { font-size: 1.25rem; color: var(--el-darkblue); column-span: all; }
+        .organizer-profiles h2 {
+            break-inside: avoid; -webkit-column-break-inside: avoid;
+            color: var(--el-darkblue); margin: 0 0 6px;
+        }
+        .organizer-profiles ul { break-inside: avoid; margin: 0 0 16px; padding-left: 18px; }
+        .organizer-profiles img { max-width: 100%; height: auto; border-radius: 8px; margin: 8px 0; column-span: all; }
+    </style>
+    <div class="card organizer-profiles">
+        <div class="organizer-grid">
+            @Model.OrganizerProfilesHtml
+        </div>
+    </div>
+}

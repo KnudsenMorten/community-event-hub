@@ -44,11 +44,13 @@ public sealed class GraphicsServiceScenarioTests
         CommunityHubDbContext db,
         ISharePointFileStore? store = null,
         ISpeakerPictureFetcher? fetcher = null,
-        ISocialShareGateway? share = null) =>
+        ISocialShareGateway? share = null,
+        GraphicsSharePointOptions? spOptions = null) =>
         new(db, new GraphicCompositor(),
             store ?? new FakeFileStore(),
             fetcher ?? new FakePictureFetcher(null),
-            share ?? new DraftOnlySocialShareGateway());
+            share ?? new DraftOnlySocialShareGateway(),
+            Microsoft.Extensions.Options.Options.Create(spOptions ?? new GraphicsSharePointOptions()));
 
     // ---- GENERATE: composites a PNG, stored, status Generated (not released) ----
 
@@ -337,6 +339,18 @@ public sealed class GraphicsServiceScenarioTests
         }
 
         public Task DeleteAsync(string relativePath, CancellationToken ct = default) => Task.CompletedTask;
+
+        // Read side unused by these (write-focused) tests.
+        public bool CanRead => false;
+        public Task<IReadOnlyList<SharePointFileRef>> ListAsync(
+            string relativeFolder, CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<SharePointFileRef>>(Array.Empty<SharePointFileRef>());
+        public Task<byte[]?> DownloadAsync(string itemId, CancellationToken ct = default) =>
+            Task.FromResult<byte[]?>(null);
+        public Task<StoredFile> UploadToFolderAsync(
+            string relativeFolder, string fileName, byte[] content, string contentType, CancellationToken ct = default) =>
+            Task.FromResult(new StoredFile($"{relativeFolder}/{fileName}", $"https://store.example.test/{relativeFolder}/{fileName}", "item"));
+        public Task DeleteFromFolderAsync(string relativeFolder, string fileName, CancellationToken ct = default) => Task.CompletedTask;
     }
 
     /// <summary>A picture fetcher returning a fixed image (or null).</summary>

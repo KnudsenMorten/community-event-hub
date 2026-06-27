@@ -173,13 +173,13 @@ public sealed class WelcomeEmailService
             "You have full access: participant management, sponsor orders, and "
             + "attendee reconciliation.",
         ParticipantRole.Speaker =>
-            "You will find your hotel and dinner forms and your session "
-            + "deadlines in the hub. Please complete the forms before the "
-            + "deadline.",
+            "Start with the \"Get Started\" flow in the hub — it walks you "
+            + "through everything you need to set up. Afterwards you can change "
+            + "anything under Event Logistics if needed.",
         ParticipantRole.Volunteer =>
-            "Please complete the volunteer sign-up in the hub to tell us which "
-            + "shifts you can work. You will also find your hotel and dinner "
-            + "forms there.",
+            "Start with the \"Get Started\" flow in the hub — it walks you "
+            + "through everything you need to set up. Afterwards you can change "
+            + "anything under Event Logistics if needed.",
         ParticipantRole.Sponsor =>
             "Your sponsor onboarding tasks and deadlines are in the hub. New "
             + "tasks appear as your order is processed.",

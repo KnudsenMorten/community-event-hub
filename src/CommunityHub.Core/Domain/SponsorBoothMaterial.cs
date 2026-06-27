@@ -33,5 +33,12 @@ public class SponsorBoothMaterial
     /// <summary>Original file name for Collateral; null for Video.</summary>
     public string? FileName { get; set; }
 
+    /// <summary>
+    /// Email of the coordinator who added this material (§68: a shared company must
+    /// see WHO added each video/file on reload). Null for rows created before the
+    /// column existed.
+    /// </summary>
+    public string? CreatedByEmail { get; set; }
+
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 }

@@ -233,17 +233,19 @@ public sealed class SponsorUploadWatchService
     private static string BuildEmailBody(SponsorUploadLocation loc, SharePointFileSnapshot file, string verb)
     {
         var when = (file.LastModifiedUtc ?? DateTimeOffset.UtcNow).ToString("yyyy-MM-dd HH:mm 'UTC'");
-        var folderLink = string.IsNullOrEmpty(loc.EditLinkUrl)
-            ? loc.FolderPath
-            : $"<a href=\"{System.Net.WebUtility.HtmlEncode(loc.EditLinkUrl)}\">Open folder</a>";
+        // §101: the "open" link is a visible BUTTON, placed BELOW the file/uploaded-by
+        // details (not a tiny inline link inside the list).
+        var openButton = string.IsNullOrEmpty(loc.EditLinkUrl)
+            ? string.Empty
+            : $"<p style=\"margin:20px 0;\"><a href=\"{System.Net.WebUtility.HtmlEncode(loc.EditLinkUrl)}\" style=\"display:inline-block;background:#1565c0;color:#ffffff;text-decoration:none;font-weight:700;font-size:16px;padding:14px 30px;border-radius:8px;\">Open folder</a></p>";
 
         return $@"<p>Sponsor <b>{System.Net.WebUtility.HtmlEncode(loc.CompanyName)}</b> {verb} a file in their <code>{System.Net.WebUtility.HtmlEncode(loc.Subfolder)}</code> folder.</p>
 <ul>
   <li><b>File:</b> {System.Net.WebUtility.HtmlEncode(file.Name)}</li>
   <li><b>When:</b> {when}</li>
   <li><b>Folder:</b> {System.Net.WebUtility.HtmlEncode(loc.FolderPath)}</li>
-  <li><b>Link:</b> {folderLink}</li>
 </ul>
+{openButton}
 <p>Please review the file for quality.</p>";
     }
 

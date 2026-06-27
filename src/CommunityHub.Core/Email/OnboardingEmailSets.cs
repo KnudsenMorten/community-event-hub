@@ -7,7 +7,8 @@ namespace CommunityHub.Core.Email;
 /// group collapses the finer <see cref="ParticipantRole"/> values into the
 /// audiences the requirement lists (volunteer / speaker / media-team / sponsor /
 /// organizer). Speaker covers <see cref="ParticipantRole.Speaker"/>; media-team
-/// covers <see cref="ParticipantRole.Media"/>. Event partners map to the organizer set.
+/// covers <see cref="ParticipantRole.Media"/>. Event partners map to the media-team
+/// (crew) set — like media-team they are housed/fed crew, not Organizer (who are not).
 /// Attendees are deliberately NOT an onboarding-set persona (they get the
 /// existing welcome flow, not a crew onboarding set).
 /// </summary>
@@ -43,17 +44,15 @@ public static class OnboardingEmailSets
 
     private static readonly OnboardingEmail GettingStarted =
         new("getting-started", "onboarding-getting-started");
-    private static readonly OnboardingEmail YourTasks =
-        new("your-tasks", "onboarding-your-tasks");
 
     private static readonly IReadOnlyDictionary<PersonaGroup, IReadOnlyList<OnboardingEmail>> Sets =
         new Dictionary<PersonaGroup, IReadOnlyList<OnboardingEmail>>
         {
             [PersonaGroup.Organizer] = new[] { GettingStarted },
-            [PersonaGroup.Speaker]   = new[] { GettingStarted, YourTasks },
-            [PersonaGroup.Volunteer] = new[] { GettingStarted, YourTasks },
-            [PersonaGroup.MediaTeam] = new[] { GettingStarted, YourTasks },
-            [PersonaGroup.Sponsor]   = new[] { GettingStarted, YourTasks },
+            [PersonaGroup.Speaker]   = new[] { GettingStarted },
+            [PersonaGroup.Volunteer] = new[] { GettingStarted },
+            [PersonaGroup.MediaTeam] = new[] { GettingStarted },
+            [PersonaGroup.Sponsor]   = new[] { GettingStarted },
         };
 
     /// <summary>The ordered onboarding set for a persona (empty for <see cref="PersonaGroup.None"/>).</summary>
@@ -67,7 +66,7 @@ public static class OnboardingEmailSets
         ParticipantRole.Speaker => PersonaGroup.Speaker,
         ParticipantRole.Volunteer => PersonaGroup.Volunteer,
         ParticipantRole.Media => PersonaGroup.MediaTeam,
-        ParticipantRole.EventPartner => PersonaGroup.Organizer,
+        ParticipantRole.EventPartner => PersonaGroup.MediaTeam,
         ParticipantRole.Sponsor => PersonaGroup.Sponsor,
         _ => PersonaGroup.None,
     };

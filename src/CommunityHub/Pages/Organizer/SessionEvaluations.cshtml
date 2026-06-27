@@ -7,7 +7,7 @@
 
 @if (Model.AccessDenied)
 {
-    <div class="card"><h2>Organizers only</h2><p>You need an organizer account to view evaluation results.</p></div>
+    <div class="card"><h1>Organizers only</h1><p>You need an organizer account to view evaluation results.</p></div>
     return;
 }
 
@@ -54,7 +54,7 @@
 </style>
 
 <div class="card">
-    <h2 style="margin-top:0;">Session evaluations</h2>
+    <h1 style="margin-top:0;">Session evaluations</h1>
     <p style="color:#4a5160; font-size:14px; margin-top:4px;">
         Attendee ratings collected from the public evaluate page (the room QR). Results are
         aggregated per session and per room; comments are anonymous.

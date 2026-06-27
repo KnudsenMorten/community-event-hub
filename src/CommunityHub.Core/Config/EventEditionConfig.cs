@@ -37,6 +37,16 @@ public sealed class EventEditionConfig
     public Dictionary<string, string> ZohoSponsorCategoryIds { get; set; } = new();
 
     /// <summary>
+    /// Pinned Zoho BOOTH (exhibitor) category ids, keyed by lower-case booth tier
+    /// (platinum/diamond/gold/feature). Zoho's `POST …/exhibitors` REQUIRES an
+    /// `exhibitor_category_id` (else HTTP 400 "Booth category ID is required"); these
+    /// ids are pinned in `zohoBoothCategoryIds` in the integrations config so we never
+    /// depend on a runtime API lookup. See REQUIREMENTS §41a.
+    /// </summary>
+    [JsonPropertyName("zohoBoothCategoryIds")]
+    public Dictionary<string, string> ZohoBoothCategoryIds { get; set; } = new();
+
+    /// <summary>
     /// Optional SharePoint Online block loaded from
     /// <c>event.&lt;edition&gt;.json -&gt; sharepoint</c>. Used to pre-create
     /// per-sponsor upload folders + mint anonymous edit-link URLs the sponsor
@@ -397,6 +407,15 @@ public sealed class EventEditionConfigLoader
             foreach (var prop in zc.EnumerateObject())
                 if (!prop.Name.StartsWith("_") && prop.Value.ValueKind == JsonValueKind.String)
                     cfg.ZohoSponsorCategoryIds[prop.Name] = prop.Value.GetString() ?? string.Empty;
+        }
+
+        // Pull the SIBLING "zohoBoothCategoryIds" map (tier → exhibitor category id).
+        if (doc.RootElement.TryGetProperty("zohoBoothCategoryIds", out var zb)
+            && zb.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var prop in zb.EnumerateObject())
+                if (!prop.Name.StartsWith("_") && prop.Value.ValueKind == JsonValueKind.String)
+                    cfg.ZohoBoothCategoryIds[prop.Name.ToLowerInvariant()] = prop.Value.GetString() ?? string.Empty;
         }
 
         // Pull the SIBLING "volunteer" object (extra availability days, etc.).

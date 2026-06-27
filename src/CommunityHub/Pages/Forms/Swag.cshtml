@@ -5,7 +5,7 @@
 }
 
 <div class="card">
-    <h2>@Localizer["Swag.Title"]</h2>
+    <h1>@Localizer["Swag.Title"]</h1>
 
     @if (Model.AccessDenied)
     {
@@ -61,6 +61,7 @@
                   placeholder="@Localizer["Swag.NotesPlaceholder"]"></textarea>
 
             <button type="submit">@Localizer["Swag.Save"]</button>
+            <partial name="_LastSaved" model="Model.LastSavedAt" />
         </form>
 
         <p style="color:#6b7280;font-size:12px;margin-top:14px;">

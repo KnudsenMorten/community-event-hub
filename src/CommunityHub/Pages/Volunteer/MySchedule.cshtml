@@ -36,21 +36,13 @@
     .ms-form button.withdraw { background:#6b7280; }
     .ms-flagged { font-size:12.5px; margin-top:6px; padding-left:10px;
         border-left:3px solid #d1d5db; color:#6e7681; }
-    .cal-url-row { display:flex; gap:8px; flex-wrap:wrap; align-items:stretch; margin:8px 0; }
-    .cal-url-row input { flex:1 1 200px; min-width:0; padding:10px 12px; font-size:14px;
-        border:1px solid #cbd2d9; border-radius:8px; font-family:monospace; }
-    .cal-btn { display:inline-block; padding:10px 14px; border-radius:8px; font-size:14px;
-        font-weight:600; border:0; cursor:pointer; text-align:center; text-decoration:none; }
-    .cal-btn-primary { background:#2563eb; color:#fff; }
-    .cal-btn-ghost { background:#eef2ff; color:#2563eb; border:1px solid #c7d2fe; }
     @@media (max-width: 600px) {
         .ms-form select, .ms-form input, .ms-form textarea, .ms-form button { flex:1 1 100%; }
-        .cal-url-row input, .cal-btn { flex-basis:100%; }
     }
 </style>
 
 <div class="card">
-    <h2>@Localizer["MySchedule.Title"]</h2>
+    <h1>@Localizer["MySchedule.Title"]</h1>
     <p>@Localizer["MySchedule.Intro"]</p>
 
     @if (!string.IsNullOrEmpty(Model.Notice))
@@ -70,25 +62,14 @@
         schedule your shifts around the days and hours you can help &mdash;
         <a asp-page="/Volunteer/Availability">validate my availability &rarr;</a>
     </div>
-</div>
 
-@if (!string.IsNullOrEmpty(Model.CalendarWebcalUrl))
-{
-    <div class="card">
-        <h2>&#128197; @Localizer["MySchedule.AddToCalendar"]</h2>
-        <p style="color:#4b5563;margin:0 0 4px;">@Localizer["MySchedule.CalendarIntro"]</p>
-        <div class="cal-url-row">
-            <input type="text" readonly aria-label="@Localizer["MySchedule.AddToCalendar"]"
-                   id="ms-cal-url" value="@Model.CalendarWebcalUrl" />
-            <button type="button" class="cal-btn cal-btn-primary"
-                    id="ms-cal-copy" data-ceh-copy="ms-cal-url"
-                    data-ceh-copied="@Localizer["Hub.Copied"]"
-                    data-ceh-copy-label="@Localizer["Hub.CopyLink"]">@Localizer["Hub.CopyLink"]</button>
-            <a class="cal-btn cal-btn-ghost" href="@Model.CalendarWebcalUrl" data-ceh-confirm="calSyncInfo">@Localizer["Hub.Subscribe"]</a>
-        </div>
-    </div>
-    @* Copy uses the shared data-ceh-copy behaviour in _Layout (REQUIREMENTS §21). *@
-}
+    @* Help / contact channel — shown REGARDLESS of whether any shifts are assigned yet,
+       so a volunteer with an empty schedule still has a way to reach the organizers (the
+       per-shift "Ask for help" affordance below only exists once shifts are assigned). *@
+    <p class="ms-meta" role="note" style="margin:10px 0 0;">
+        Need help or have a question? <a asp-page="/Contact">Contact the organizers &rarr;</a>
+    </p>
+</div>
 
 @{
     var today = DateOnly.FromDateTime(DateTime.UtcNow);

@@ -83,7 +83,7 @@ public class MasterClassEmailServiceTests
         var (email, sender, _) = Build(db);
         await email.SendCancelledAsync(ev, "p@x.dk", "Pat", "Lee", "Deep Dive MC", "https://hub.test", att);
         var m = Assert.Single(sender.Sent);
-        Assert.Contains("Cancelled", m.Subject);
+        Assert.Contains("Master Class cancelled", m.Subject);
     }
 
     [Fact]

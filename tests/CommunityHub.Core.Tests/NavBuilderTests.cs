@@ -291,31 +291,38 @@ public sealed class NavBuilderTests
         var hrefs = g.Items.Select(i => i.Href).ToList();
 
         // operator 2026-06-24 (§26c): Home, My Hub Profile, Speaker Details, My sessions,
-        // My tasks, Help Promote, Sync Calendar, Event-logistics fold-out, Contact.
+        // My tasks, Help Promote, Event-logistics fold-out, Contact.
+        // (Calendar entries removed: the user-facing calendar UI is retired.)
         Assert.Equal("Nav.MyProfile", g.Items.Single(i => i.Href == "/Profile").LabelKey);
         Assert.Equal("Nav.SpeakerDetails", g.Items.Single(i => i.Href == "/Speaker/Details").LabelKey);
         Assert.Equal("Nav.MySessions", g.Items.Single(i => i.Href == "/Speaker").LabelKey);
+        // §86: the speaker Master Class Q&A area is a top-level speaker nav entry.
+        Assert.Equal("Nav.MasterClassQa", g.Items.Single(i => i.Href == "/Speaker/Questions").LabelKey);
         Assert.Equal("Nav.HelpPromote", g.Items.Single(i => i.Href == "/Speaker/Graphics").LabelKey);
         Assert.DoesNotContain("/Forms/Speaker", hrefs);   // Bio replaced by Speaker Details
         Assert.Contains("/Contact", hrefs);
 
-        // /Calendar appears twice: a top-level "Sync Calendar" + a fold-out "Key Dates & Times".
-        var calLabels = g.Items.Where(i => i.Href == "/Calendar").Select(i => i.LabelKey).ToList();
-        Assert.Contains("Nav.SyncCalendar", calLabels);
-        Assert.Contains("Nav.KeyDatesTimes", calLabels);
+        // The calendar UI is retired: /Calendar no longer appears in the speaker menu.
+        Assert.DoesNotContain("/Calendar", hrefs);
 
         var logistics = g.Sections().SingleOrDefault(s => s.HeadingKey == "Nav.SectionEventLogistics");
         Assert.NotNull(logistics);
         var lh = logistics!.Items.Select(i => i.Href).ToList();
-        Assert.Equal(new[] { "/Forms/Hotel", "/Forms/Dinner", "/Forms/Lunch", "/Forms/Swag", "/Forms/Travel", "/Calendar" }, lh);
+        // The entitlement forms lead the Event-logistics fold-out, in order...
+        Assert.Equal(new[] { "/Forms/Hotel", "/Forms/Dinner", "/Forms/Lunch", "/Forms/Swag", "/Forms/Travel" }, lh.Take(5).ToList());
         Assert.Equal("Nav.SpeakerGift", logistics.Items.Single(i => i.Href == "/Forms/Swag").LabelKey);
-        Assert.Equal("Nav.KeyDatesTimes", logistics.Items.Single(i => i.Href == "/Calendar").LabelKey);
+        // ...then the §104–§123 content pages share the SAME fold-out: speakers see
+        // both the all-roles pages and the speaker-only pages (§123).
+        Assert.Contains("/Info/wayfinding", lh);        // all-roles
+        Assert.Contains("/Info/session-guidelines", lh); // speaker-only
+        Assert.Contains("/Info/help-promote", lh);       // speaker-only
 
         // Removed for speakers (operator 2026-06-23): My tasks, public Sessions, Resources.
         Assert.DoesNotContain("/Tasks", hrefs);
         Assert.DoesNotContain("/Sessions", hrefs);
         Assert.DoesNotContain("/Resources", hrefs);
-        Assert.DoesNotContain("/Speaker/Questions", hrefs);   // reached from My Sessions hub
+        // §86 (operator 2026-06-26): the Master Class Q&A area IS now a speaker nav entry.
+        Assert.Contains("/Speaker/Questions", hrefs);
         Assert.DoesNotContain("/Speaker/Evaluations", hrefs); // reached from My Sessions hub
         // /Speaker/Graphics is now surfaced as "Help Promote" (§26c) — asserted above.
     }
@@ -331,7 +338,15 @@ public sealed class NavBuilderTests
         // a complete page that previously had no menu/link path.
         // My plan removed (operator 2026-06-23 — Zoho Backstage); Master Class Q&A
         // shortcut added (operator 2026-06-24).
-        Assert.Equal(new[] { "/", "/Attendee", "/Attendee/Waitlist", "/Attendee/MasterClassQa", "/Contact" }, hrefs);
+        // §104–§123: the all-roles content pages (Event-logistics fold-out) appear for
+        // attendees too, between the attendee leaves and the Policies/Contact tail.
+        // Policies (Privacy Policy + Code of Conduct) precede Contact for every role (operator 2026-06-25).
+        Assert.Equal(new[]
+        {
+            "/", "/Attendee", "/Attendee/Waitlist", "/Attendee/MasterClassQa",
+            "/Info/wayfinding", "/Info/good-to-know", "/Info/addresses", "/Info/last-event-videos",
+            "https://expertslive.dk/privacy-policy/", "https://expertslive.dk/code-of-conduct/", "/Contact",
+        }, hrefs);
         Assert.Equal("Nav.MasterClass", attendee.Items.Single(i => i.Href == "/Attendee").LabelKey);
         Assert.Equal("Nav.Waitlist", attendee.Items.Single(i => i.Href == "/Attendee/Waitlist").LabelKey);
         Assert.Equal("Nav.MasterClassQa", attendee.Items.Single(i => i.Href == "/Attendee/MasterClassQa").LabelKey);
@@ -358,16 +373,23 @@ public sealed class NavBuilderTests
         Assert.Contains("/Forms/Travel", speaker);
         Assert.Contains("/Forms/Lunch", speaker);
         Assert.Contains("/Forms/Swag", speaker);
-        Assert.Contains("/Calendar", speaker);
         Assert.Contains("/Contact", speaker);
 
-        var sponsor = NavBuilder.Build(ParticipantRole.Sponsor).AllItems.Select(i => i.Href).ToList();
+        // P7: the booth/lead block (incl. /Sponsor/CaptureLead) is gated behind
+        // isExhibitor — an EXHIBITOR sponsor (HasBooth) sees it; a digital-only sponsor
+        // does not. Non-gated sponsor routes (Tasks/Logistics/Contact) appear for both.
+        var sponsor = NavBuilder.Build(ParticipantRole.Sponsor, isExhibitor: true).AllItems.Select(i => i.Href).ToList();
         Assert.Contains("/Sponsor/Tasks", sponsor);
         Assert.Contains("/Sponsor/Logistics", sponsor);   // "Event logistics"
         Assert.Contains("/Sponsor/Contact", sponsor);     // "Contact Organizers"
-        Assert.Contains("/Sponsor/CaptureLead", sponsor); // failover in the Leads fold-out
+        Assert.Contains("/Sponsor/CaptureLead", sponsor); // failover in the Leads fold-out (exhibitor-only)
         // A sponsor uses the company-shared tasks entry, not the generic /Tasks.
         Assert.DoesNotContain("/Tasks", sponsor);
+
+        // A digital-only (non-exhibitor) sponsor must NOT see the booth/lead items.
+        var digitalSponsor = NavBuilder.Build(ParticipantRole.Sponsor, isExhibitor: false).AllItems.Select(i => i.Href).ToList();
+        Assert.DoesNotContain("/Sponsor/CaptureLead", digitalSponsor);
+        Assert.Contains("/Sponsor/Tasks", digitalSponsor); // non-gated entries still present
 
         var attendee = NavBuilder.Build(ParticipantRole.Attendee).AllItems.Select(i => i.Href).ToList();
         Assert.Contains("/Attendee", attendee);          // in-hub Master Class chooser
@@ -382,7 +404,10 @@ public sealed class NavBuilderTests
     [Fact]
     public void Sponsor_menu_matches_redesign()
     {
-        var g = NavBuilder.Build(ParticipantRole.Sponsor).Groups[0];
+        // P7: the Exhibitor/Booth + Leads fold-outs are exhibitor-only — build an
+        // EXHIBITOR sponsor (HasBooth) so they appear; a digital-only sponsor is
+        // asserted not to get them at the end of this test.
+        var g = NavBuilder.Build(ParticipantRole.Sponsor, isExhibitor: true).Groups[0];
         var hrefs = g.Items.Select(i => i.Href).ToList();
 
         // Removed (operator 2026-06-21): Sponsor Portal, standalone Capture-lead tab,
@@ -412,6 +437,15 @@ public sealed class NavBuilderTests
         var leads = g.Sections().Single(s => s.HeadingKey == "Nav.SectionLeads");
         var failover = leads.Items.Single(i => i.Href == "/Sponsor/CaptureLead");
         Assert.False(failover.External);
+
+        // P7: a digital-only (non-exhibitor) sponsor gets NEITHER the Exhibitor/Booth
+        // nor the Leads fold-out (the booth/lead Zoho items would be dead links).
+        var digital = NavBuilder.Build(ParticipantRole.Sponsor, isExhibitor: false).Groups[0];
+        var digitalSections = digital.Sections().Where(s => s.HeadingKey is not null).Select(s => s.HeadingKey).ToList();
+        Assert.DoesNotContain("Nav.SectionExhibitorBooth", digitalSections);
+        Assert.DoesNotContain("Nav.SectionLeads", digitalSections);
+        // The non-gated Sponsor Webshop fold-out still shows for a digital sponsor.
+        Assert.Contains("Nav.SectionSponsorWebshop", digitalSections);
     }
 
     [Fact]
@@ -435,11 +469,18 @@ public sealed class NavBuilderTests
         Assert.True(hrefs.IndexOf("/volunteer/availability") < hrefs.IndexOf("/volunteer/myschedule"),
             "My availability comes before My schedule (operator 2026-06-23).");
 
-        // Event-logistics fold-out with Volunteer Gift + Important dates.
+        // Event-logistics fold-out with Volunteer Gift (the Important dates / Calendar
+        // entry was removed: the user-facing calendar UI is retired).
         var logistics = g.Sections().Single(s => s.HeadingKey == "Nav.SectionEventLogistics");
         var lh = logistics.Items.Select(i => i.Href).ToList();
-        Assert.Equal(new[] { "/Forms/Hotel", "/Forms/Dinner", "/Forms/Lunch", "/Forms/Swag", "/Calendar" }, lh);
+        // The entitlement forms lead the fold-out, in order...
+        Assert.Equal(new[] { "/Forms/Hotel", "/Forms/Dinner", "/Forms/Lunch", "/Forms/Swag" }, lh.Take(4).ToList());
         Assert.Equal("Nav.VolunteerGift", logistics.Items.Single(i => i.Href == "/Forms/Swag").LabelKey);
+        // ...then the all-roles content pages join the same fold-out, but a volunteer
+        // (non-speaker) must NOT get the speaker-only content pages (§123).
+        Assert.Contains("/Info/wayfinding", lh);
+        Assert.DoesNotContain("/Info/session-guidelines", lh);
+        Assert.DoesNotContain("/Calendar", hrefs);
     }
 
     [Fact]
@@ -514,6 +555,87 @@ public sealed class NavBuilderTests
 
         Assert.Equal(flat, viaSections);
         Assert.Equal(viaSections.Count, viaSections.Distinct(StringComparer.OrdinalIgnoreCase).Count());
+    }
+
+    // ---- §104–§123 content pages wired into the nav (role-scoped per §123) -----
+    // The operator-authored content pages (Wayfinding, Good to know, Addresses,
+    // Check out our last event, + the speaker-only Session Guidelines / A/V /
+    // template / preview / feedback / evaluations / Help Promote) are wired into the
+    // nav from the ContentPageRegistry under the Event-logistics fold-out. These lock
+    // the §123 audience gating: all-roles pages appear for every role; speaker-only
+    // pages appear ONLY for speakers (and organizers, who see everything).
+
+    private static readonly string[] AllRoleContentHrefs =
+    {
+        "/Info/wayfinding", "/Info/good-to-know", "/Info/addresses", "/Info/last-event-videos",
+    };
+
+    private static readonly string[] SpeakerOnlyContentHrefs =
+    {
+        "/Info/speaker-template", "/Info/session-guidelines", "/Info/av-stage-timer",
+        "/Info/session-preview-final", "/Info/session-feedback", "/Info/session-evaluations",
+        "/Info/help-promote",
+    };
+
+    [Fact]
+    public void All_role_content_pages_appear_for_every_role_under_event_logistics()
+    {
+        foreach (var role in Enum.GetValues<ParticipantRole>())
+        {
+            var group = NavBuilder.Build(role).Groups[0];
+            var logistics = group.Sections().SingleOrDefault(s => s.HeadingKey == "Nav.SectionEventLogistics");
+            Assert.NotNull(logistics);
+            var hrefs = logistics!.Items.Select(i => i.Href).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            foreach (var h in AllRoleContentHrefs)
+                Assert.True(hrefs.Contains(h), $"{role} should see all-roles content page {h}.");
+        }
+    }
+
+    [Fact]
+    public void Content_pages_use_the_title_as_label_and_point_at_the_info_page()
+    {
+        // Content nav items carry no resx key (operator copy lives in the .md), so the
+        // view falls back to the page Title; the href is the generic /Info/{slug} page.
+        var item = NavBuilder.Build(ParticipantRole.Attendee).AllItems
+            .Single(i => i.Href == "/Info/wayfinding");
+        Assert.Null(item.LabelKey);
+        Assert.False(string.IsNullOrWhiteSpace(item.FallbackLabel));
+        Assert.Equal("Nav.SectionEventLogistics", item.SectionKey);
+    }
+
+    [Theory]
+    [MemberData(nameof(NonOrganizerNonSpeakerRoleData))]
+    public void Speaker_only_content_pages_are_hidden_from_non_speaker_roles(ParticipantRole role)
+    {
+        var hrefs = NavBuilder.Build(role).AllItems.Select(i => i.Href).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var h in SpeakerOnlyContentHrefs)
+            Assert.False(hrefs.Contains(h), $"{role} must NOT see speaker-only content page {h}.");
+    }
+
+    [Theory]
+    [InlineData(ParticipantRole.Speaker)]
+    [InlineData(ParticipantRole.Organizer)] // organizers see every page (§123)
+    public void Speaker_only_content_pages_are_visible_to_speakers_and_organizers(ParticipantRole role)
+    {
+        var hrefs = NavBuilder.Build(role).AllItems.Select(i => i.Href).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var h in SpeakerOnlyContentHrefs)
+            Assert.True(hrefs.Contains(h), $"{role} should see speaker content page {h}.");
+        // ...and the all-roles pages too.
+        foreach (var h in AllRoleContentHrefs)
+            Assert.True(hrefs.Contains(h), $"{role} should see all-roles content page {h}.");
+    }
+
+    public static TheoryData<ParticipantRole> NonOrganizerNonSpeakerRoleData()
+    {
+        var data = new TheoryData<ParticipantRole>();
+        foreach (var r in new[]
+                 {
+                     ParticipantRole.Volunteer, ParticipantRole.Sponsor,
+                     ParticipantRole.Attendee, ParticipantRole.Media,
+                     ParticipantRole.EventPartner,
+                 })
+            data.Add(r);
+        return data;
     }
 
     public static TheoryData<ParticipantRole> NonOrganizerRoleData()

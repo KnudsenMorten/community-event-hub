@@ -139,7 +139,7 @@ public static class SendSampleEmailsCommand
         // Tasks + deadlines.
         t["taskTitle"] = "Upload your company logo (vector + raster)";
         t["dueDate"] = "30/06/2027";
-        t["state"] = "due in 3 days";
+        t["state"] = "due today"; // §81: deadline reminders fire only on the due day
         t["taskLink"] = "Open the hub to see and update this task.";
         t["formName"] = "Booth logistics form";
         t["formDeadline"] = "30/06/2027";
@@ -156,6 +156,24 @@ public static class SendSampleEmailsCommand
         // Volunteer help-raised.
         t["categoryName"] = "Registration desk";
         t["helpMessage"] = "We need one more pair of hands at the desk during the morning rush.";
+
+        // Session evaluation results (§87) — sessionTitle + the raw resultsHtml
+        // blockquote, so the sample doesn't render an empty evaluation.
+        t["sessionTitle"] = "Securing Azure at scale";
+        t["resultsHtml"] =
+            "<strong>Audience feedback:</strong><br>"
+            + "😀 Very good: 24<br>🙂 Good: 11<br>😐 Neutral: 3<br>🙁 Poor: 1";
+
+        // §83: session-time-location-changed renders a When/Where table from these
+        // tokens — without sample values both cells render BLANK in the preview. Fill
+        // them with a realistic before→after move (and the room change) so the sample
+        // email shows the actual schedule change.
+        t["oldTime"] = "Wed 09 Feb 2027, 10:00–10:50";
+        t["newTime"] = "Wed 09 Feb 2027, 13:00–13:50";
+        t["oldRoom"] = "Hall A";
+        t["newRoom"] = "Hall C";
+        t["timeChanged"] = "yes";
+        t["roomChanged"] = "yes";
 
         // Misc.
         t["amount"] = "1.250,00 DKK";
@@ -179,10 +197,14 @@ public static class SendSampleEmailsCommand
         t["descriptionBlock"] =
             "<p style=\"margin:0 0 16px;\">Please complete this before the deadline shown above.</p>";
         t["notesBlock"] =
-            "<p style=\"margin:0 0 16px;\">Reimbursement covers your train fare for both days.</p>";
+            "<p style=\"margin:0 0 16px;\">Reimbursement is based on the travel details you submitted.</p>";
         t["dueText"] = "<strong>due in 3 days</strong>";
         t["masterClassList"] =
             "<ul style=\"margin:0;padding-left:18px;\"><li>Master Class: Securing Azure at scale</li></ul>";
+        // §92: the masterclass-* templates (waitlisted/confirmed/cancelled/offer/
+        // promoted/month-reminder) render {{masterClassTitle}} — without a sample
+        // value the waitlist email reads "You're on the waitlist for ." (blank).
+        t["masterClassTitle"] = "Securing Azure at scale";
         t["magicLink"] = "https://example.invalid/Login/Magic?token=SAMPLE";
         t["loginUrl"] = "https://example.invalid/Login/Magic?token=SAMPLE";
 

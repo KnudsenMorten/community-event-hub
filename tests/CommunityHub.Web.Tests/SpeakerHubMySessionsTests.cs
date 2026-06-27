@@ -68,12 +68,17 @@ public sealed class SpeakerHubMySessionsTests
         var model = new IndexModel(
             db,
             accessor,
-            new SpeakerMilestoneService(db, TimeProvider.System),
             seeder,
+            new CommunityHub.Core.Participants.FormTaskReconciler(db, TimeProvider.System),
             new MasterClassLogisticsService(db, TimeProvider.System),
             new SpeakerSessionsService(db),
             new PublicSessionsService(db),
-            new CalendarFeedTokenService(db),
+            // §124: inert QR service (null store, no folder) — no QR links shown.
+            new CommunityHub.Core.Integrations.Graphics.SessionEvalsQrService(
+                new CommunityHub.Core.Integrations.Graphics.NullSharePointFileStore(),
+                Microsoft.Extensions.Options.Options.Create(
+                    new CommunityHub.Core.Integrations.Graphics.GraphicsSharePointOptions())),
+            new CommunityHub.Core.Integrations.ZohoOptions(),
             NullLogger<IndexModel>.Instance);
 
         var actionContext = new ActionContext(
@@ -163,33 +168,10 @@ public sealed class SpeakerHubMySessionsTests
         Assert.Equal("Alice Talk", mine.Title);
     }
 
-    [Fact]
-    public async Task Public_preview_is_pending_until_selected_for_publish()
-    {
-        using var db = NewDb();
-        var s = await SeedAsync(db, aliceSelected: false);
-        var http = new DefaultHttpContext { User = Session(s.Alice) };
-        var model = NewModel(db, http);
-
-        await model.OnGetAsync(default);
-
-        Assert.False(model.PublicProfileLive);
-        Assert.Equal(string.Empty, model.PublicPreviewUrl);
-    }
-
-    [Fact]
-    public async Task Public_preview_goes_live_once_selected_for_publish()
-    {
-        using var db = NewDb();
-        var s = await SeedAsync(db, aliceSelected: true);
-        var http = new DefaultHttpContext { User = Session(s.Alice) };
-        var model = NewModel(db, http);
-
-        await model.OnGetAsync(default);
-
-        Assert.True(model.PublicProfileLive);
-        Assert.False(string.IsNullOrEmpty(model.PublicPreviewUrl));
-    }
+    // NOTE: the speaker "public profile preview" (PublicProfileLive / PublicPreviewUrl)
+    // was removed as dead, never-rendered code (audit P15, §38 "remove Your public
+    // profile"); its two tests were deleted with it. The session-link visibility below
+    // (PubliclyViewableSessionIds) is the surviving, still-rendered behaviour.
 
     // BUG fix (speaker UX audit, P1): the per-session "view public session page"
     // link must be gated on the SESSION's actual public visibility (the same gate
@@ -208,10 +190,72 @@ public sealed class SpeakerHubMySessionsTests
 
         await model.OnGetAsync(default);
 
-        Assert.False(model.PublicProfileLive); // profile not published
         var mine = Assert.Single(model.MySessions);
         // Link is driven by the session's public visibility, so it SHOWS.
         Assert.Contains(mine.SessionId, model.PubliclyViewableSessionIds);
+    }
+
+    [Fact]
+    public async Task My_sessions_show_known_fallback_date_when_time_is_TBD()
+    {
+        // §88: the exact time is READ from CEH; until it is synced, My Sessions still shows
+        // the KNOWN day — a Master Class on the pre-day (the 9th), a regular session on the
+        // first main day (the 10th) — with a "TBD" time. The service exposes that day as
+        // FallbackDate (null once a real StartsAt is set).
+        using var db = NewDb();
+        var evt = new Event
+        {
+            Code = "SPK27", CommunityName = "C", DisplayName = "SPK 2027",
+            StartDate = new DateOnly(2027, 2, 10), EndDate = new DateOnly(2027, 2, 10),
+            PreDayDate = new DateOnly(2027, 2, 9), IsActive = true, CalendarSyncEnabled = false,
+        };
+        db.Events.Add(evt);
+        await db.SaveChangesAsync();
+
+        var spk = new Participant
+        {
+            EventId = evt.Id, FullName = "Alice Adams", Email = "alice@example.test",
+            Role = ParticipantRole.Speaker, IsActive = true,
+        };
+        db.Participants.Add(spk);
+        await db.SaveChangesAsync();
+
+        Session Sess(string id, string title, SessionType type)
+        {
+            var s = new Session
+            {
+                EventId = evt.Id, SessionizeId = id, Title = title, Type = type, StartsAt = null,
+            };
+            s.SessionSpeakers.Add(new SessionSpeaker { Session = s, Participant = spk });
+            db.Sessions.Add(s);
+            return s;
+        }
+        Sess("s-talk", "Talk", SessionType.TechnicalSession);
+        Sess("s-mc", "Workshop", SessionType.MasterClass);
+        await db.SaveChangesAsync();
+
+        var sessions = await new SpeakerSessionsService(db)
+            .GetMySessionsAsync(evt.Id, spk.Id, ParticipantRole.Speaker);
+
+        var talk = sessions.Single(s => s.Title == "Talk");
+        var mc = sessions.Single(s => s.Title == "Workshop");
+        Assert.Null(talk.StartsAt);
+        Assert.Equal(new DateOnly(2027, 2, 10), talk.FallbackDate); // session on the 10th
+        Assert.Equal(new DateOnly(2027, 2, 9), mc.FallbackDate);    // master class on the 9th
+    }
+
+    [Fact]
+    public async Task Fallback_date_is_null_once_the_real_time_is_set()
+    {
+        // When StartsAt IS set, the display uses the real time and FallbackDate is null
+        // (the known-day hint is only a stand-in for an unsynced time).
+        using var db = NewDb();
+        var s = await SeedAsync(db, aliceSelected: false); // SeedAsync gives sessions a StartsAt
+        var sessions = await new SpeakerSessionsService(db)
+            .GetMySessionsAsync(s.EventId, s.Alice.Id, ParticipantRole.Speaker);
+        var mine = Assert.Single(sessions);
+        Assert.NotNull(mine.StartsAt);
+        Assert.Null(mine.FallbackDate);
     }
 
     [Fact]
@@ -232,8 +276,7 @@ public sealed class SpeakerHubMySessionsTests
 
         await model.OnGetAsync(default);
 
-        Assert.True(model.PublicProfileLive); // profile published, but...
-        // ...the session is not publicly viewable, so its id is NOT in the set
+        // The session is not publicly viewable, so its id is NOT in the set
         // (the view then hides the link / shows the "not public yet" hint).
         Assert.DoesNotContain(aliceSession.Id, model.PubliclyViewableSessionIds);
     }

@@ -5,7 +5,7 @@
 }
 
 <div class="card">
-    <h2>Sponsor status dashboard</h2>
+    <h1>Sponsor status dashboard</h1>
     @if (Model.AccessDenied)
     {
         <p class="error">This area is for organizers only.</p>
@@ -51,7 +51,7 @@
         <partial name="_ConfirmModal" model='new CommunityHub.Pages.Shared.ConfirmModalModel(
             Id: "confirmReconcileErp",
             Title: "Reconcile ERP to webshop?",
-            Body: "This creates missing Company Manager users from the e-conomic group-1 contacts and sets each company default signer + event coordinator from the contact roles (never overwriting a curated default). Contacts missing a Role:1/Role:2 are emailed to the organizer. Continue?",
+            Body: "This creates missing Company Manager users from the backend group-1 contacts and sets each company default signer + event coordinator from the contact roles (never overwriting a curated default). Contacts missing a Role:1/Role:2 are emailed to the organizer. Continue?",
             ConfirmLabel: "Run it",
             CancelLabel: "Cancel")' />
         <partial name="_ConfirmModal" model='new CommunityHub.Pages.Shared.ConfirmModalModel(

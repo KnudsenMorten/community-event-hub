@@ -86,6 +86,17 @@ public sealed class LoggingEmailSender : IEmailSender
                 toEmail, subject, htmlBody, icsContent, icsFileName, cancellationToken));
     }
 
+    public async Task SendWithAttachmentsAsync(
+        string toEmail, string subject, string htmlBody,
+        IReadOnlyCollection<EmailAttachment> attachments,
+        CancellationToken cancellationToken = default)
+    {
+        await SendWithLogAsync(
+            toEmail, subject, cc: null,
+            () => _inner.SendWithAttachmentsAsync(
+                toEmail, subject, htmlBody, attachments, cancellationToken));
+    }
+
     private async Task SendWithLogAsync(
         string toEmail, string subject, IReadOnlyCollection<string>? cc,
         Func<Task> send)

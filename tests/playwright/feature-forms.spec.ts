@@ -47,7 +47,9 @@ test.describe('@gui §4 Self-service forms (speaker)', () => {
     test('lunch form renders the pre-day / main-day choices', async ({ page }) => {
         await gotoForm(page, '/Forms/Lunch');
         await expect(page.locator('h2', { hasText: 'Lunch logistics' })).toBeVisible();
-        await expect(page.locator('#LunchPreDay')).toBeVisible();
+        // PRE-DAY lunch is a required Yes/No radio group (operator §62), not a checkbox.
+        await expect(page.locator('input[name="LunchPreDay"][value="true"]')).toBeVisible();
+        await expect(page.locator('input[name="LunchPreDay"][value="false"]')).toBeVisible();
         await expect(page.getByRole('button', { name: /Save my lunch preferences/i })).toBeVisible();
     });
 

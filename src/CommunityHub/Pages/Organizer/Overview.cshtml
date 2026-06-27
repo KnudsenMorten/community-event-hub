@@ -62,7 +62,7 @@
 </style>
 
 <div class="card">
-    <h2>Event overview</h2>
+    <h1>Event overview</h1>
 
     @if (Model.AccessDenied)
     {
@@ -81,7 +81,6 @@
             <div class="ov-stat"><div class="num">@r.TotalPeople</div><div class="lbl">People</div></div>
             <div class="ov-stat"><div class="num">@r.ActivePeople</div><div class="lbl">Active</div></div>
             <div class="ov-stat"><div class="num">@r.TaskOverall.Percent%</div><div class="lbl">Tasks done</div></div>
-            <div class="ov-stat"><div class="num">@r.AttendeeCheckedIn / @r.AttendeeTotal</div><div class="lbl">Checked in</div></div>
         </div>
     }
 </div>
@@ -269,7 +268,7 @@
             <div class="ov-stat"><div class="num">@r.SponsorTaskDone / @r.SponsorTaskTotal</div><div class="lbl">Sponsor tasks done</div></div>
             <div class="ov-stat"><div class="num">@r.SponsorLeadTotal</div><div class="lbl">Sponsor leads</div></div>
             <div class="ov-stat"><div class="num">@r.SponsorLeadOpen</div><div class="lbl">Leads open</div></div>
-            <div class="ov-stat"><div class="num">@r.AttendeeCheckedIn / @r.AttendeeTotal</div><div class="lbl">Attendees checked in</div></div>
+            <div class="ov-stat"><div class="num">@r.AttendeeTotal</div><div class="lbl">Attendees</div></div>
         </div>
     </div>
 

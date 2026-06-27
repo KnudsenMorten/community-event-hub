@@ -89,6 +89,7 @@ SECRETS=(
   "zoho-client-id|Zoho OAuth client ID (attendee reconciliation)"
   "zoho-client-secret|Zoho OAuth client secret"
   "zoho-refresh-token|Zoho OAuth refresh token"
+  "zoho-webhook-secret|Zoho Backstage order-change webhook shared secret (REQUIREMENTS §128; surfaced as Zoho__WebhookSecret, used in the registered Backstage Endpoint URL ?token=)"
 )
 
 for entry in "${SECRETS[@]}"; do

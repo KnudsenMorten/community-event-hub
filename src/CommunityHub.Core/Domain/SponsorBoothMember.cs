@@ -39,4 +39,15 @@ public class SponsorBoothMember
 
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? UpdatedAt { get; set; }
+
+    /// <summary>
+    /// Soft-delete tombstone. Zoho Backstage NOW supports per-member delete
+    /// (<c>DELETE …/members/{id}</c> → <c>{"status":"success"}</c>), so the hub deletes the
+    /// member in Zoho too on removal (member ONLY — never the exhibitor/sponsor RECORD, §56).
+    /// We STILL tombstone rather than hard-delete: the row is hidden from the UI and counts,
+    /// and the add-only sync skips re-pulling a tombstoned email — belt-and-braces so a removal
+    /// can never be resurrected even if the Zoho delete fails. Re-adding the same email revives
+    /// the row. Null = active.
+    /// </summary>
+    public DateTimeOffset? DeletedAt { get; set; }
 }

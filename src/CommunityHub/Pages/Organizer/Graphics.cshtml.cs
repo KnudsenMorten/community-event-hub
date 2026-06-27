@@ -84,6 +84,28 @@ public class GraphicsModel : PageModel
         return Page();
     }
 
+    public async Task<IActionResult> OnPostPullSharePointGraphicsAsync(CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+        if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
+
+        var result = await _graphics.PullSessionGraphicsAsync(me.EventId, ct);
+        if (result.Matched == 0 && result.Unmatched == 0)
+        {
+            Message = "SharePoint graphics pull is not configured yet — nothing was pulled. "
+                + "Set the SharePoint site + the MasterClass / Sessions folder paths to enable it.";
+        }
+        else
+        {
+            Message = $"Pulled session graphics from SharePoint: {result.Matched} matched, "
+                + $"{result.Unmatched} session(s) had no matching file. Matched graphics are now "
+                + "in the review queue below.";
+        }
+        await LoadAsync(me.EventId, ct);
+        return Page();
+    }
+
     public async Task<IActionResult> OnPostOverruleAsync(CancellationToken ct)
     {
         var me = _participant.Current;

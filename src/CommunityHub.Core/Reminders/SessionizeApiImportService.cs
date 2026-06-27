@@ -4,11 +4,11 @@ using CommunityHub.Core.Integrations.Sessions;
 namespace CommunityHub.Core.Reminders;
 
 /// <summary>
-/// Imports Sessionize speakers by pulling the Sessionize v2 view API (JSON)
-/// instead of an uploaded Excel file. The fetch + JSON mapping lives in
-/// <see cref="SessionizeApiClient"/>; the upsert semantics (match on email,
-/// never overwrite roles, never delete, report skipped rows) are the SAME
-/// shared core as the Excel path - <see cref="SessionizeImportService.ImportSpeakersAsync"/>.
+/// Imports Sessionize speakers by pulling the Sessionize v2 view API (JSON) —
+/// the only import source (§82, Excel upload removed). The fetch + JSON mapping
+/// lives in <see cref="SessionizeApiClient"/>; the upsert semantics (match on
+/// email, never overwrite roles, never delete, report skipped rows) live in the
+/// shared core <see cref="SessionizeImportService.ImportSpeakersAsync"/>.
 ///
 /// This is schedulable from the Jobs app and runnable from the OneShot CLI; the
 /// web app also exposes a button that calls it. Disabled (no-op) unless
@@ -21,19 +21,25 @@ public sealed class SessionizeApiImportService
     private readonly SessionizeImportService _import;
     private readonly SessionImportService _sessions;
     private readonly SessionSourceResolver _sessionSource;
+    // §58: after the upsert, detect Sessionize-linked CEH speakers/sessions that vanished from
+    // the pull and EMAIL the operator (never delete). Optional: a null detector simply skips
+    // the check (e.g. minimal test wiring); the import behaviour is otherwise unchanged.
+    private readonly SessionizeDisappearanceDetector? _disappearance;
 
     public SessionizeApiImportService(
         SessionizeApiClient client,
         SessionizeApiOptions options,
         SessionizeImportService import,
         SessionImportService sessions,
-        SessionSourceResolver sessionSource)
+        SessionSourceResolver sessionSource,
+        SessionizeDisappearanceDetector? disappearance = null)
     {
         _client = client;
         _options = options;
         _import = import;
         _sessions = sessions;
         _sessionSource = sessionSource;
+        _disappearance = disappearance;
     }
 
     /// <summary>
@@ -87,6 +93,43 @@ public sealed class SessionizeApiImportService
             sessionResult = await _sessions.ImportSessionsAsync(
                 eventId, sessionFetch.Sessions, sessionFetch.LinkSpeakers,
                 sessionFetch.Warnings, ct);
+        }
+
+        // §58 NEVER-AUTO-DELETE disappearance alert. Compare the CEH entities LINKED to
+        // Sessionize against the ids actually present in THIS pull and email the operator
+        // for any that vanished — but only when the relevant fetch SUCCEEDED, so a fetch
+        // error never makes everything look "disappeared". Speakers always fetched here
+        // (speakerResult.Error would have returned earlier); sessions only when the source
+        // fetch had no error. Best-effort — never throws back into the import.
+        if (_disappearance is not null)
+        {
+            var presentSpeakerIds = fetched.Speakers
+                .Select(s => s.SessionizeId)
+                .Where(id => !string.IsNullOrWhiteSpace(id))
+                .Select(id => id!)
+                .ToList();
+            // Only treat sessions as "scanned" when the session fetch succeeded; otherwise we
+            // can't tell present-from-missing, so leave sessions out of the scan (pass the
+            // current CEH-linked ids so nothing is flagged as gone).
+            IReadOnlyCollection<string> presentSessionIds;
+            if (sessionFetch.Error is null)
+            {
+                presentSessionIds = sessionFetch.Sessions
+                    .Select(s => s.SessionizeId)
+                    .Where(id => !string.IsNullOrWhiteSpace(id))
+                    .Select(id => id!)
+                    .ToList();
+            }
+            else
+            {
+                presentSessionIds = await _disappearance.CurrentLinkedSessionIdsAsync(eventId, ct);
+            }
+
+            try
+            {
+                await _disappearance.ScanAsync(eventId, presentSpeakerIds, presentSessionIds, ct);
+            }
+            catch { /* best-effort: a disappearance-alert failure must not fail the import */ }
         }
 
         return speakerResult with { Sessions = sessionResult };

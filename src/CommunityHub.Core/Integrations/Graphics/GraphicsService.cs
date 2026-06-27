@@ -1,6 +1,7 @@
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 
 namespace CommunityHub.Core.Integrations.Graphics;
 
@@ -23,19 +24,22 @@ public sealed class GraphicsService
     private readonly ISharePointFileStore _store;
     private readonly ISpeakerPictureFetcher _pictureFetcher;
     private readonly ISocialShareGateway _share;
+    private readonly GraphicsSharePointOptions _spOptions;
 
     public GraphicsService(
         CommunityHubDbContext db,
         GraphicCompositor compositor,
         ISharePointFileStore store,
         ISpeakerPictureFetcher pictureFetcher,
-        ISocialShareGateway share)
+        ISocialShareGateway share,
+        IOptions<GraphicsSharePointOptions> spOptions)
     {
         _db = db;
         _compositor = compositor;
         _store = store;
         _pictureFetcher = pictureFetcher;
         _share = share;
+        _spOptions = spOptions.Value;
     }
 
     // ===================================================================
@@ -138,6 +142,109 @@ public sealed class GraphicsService
             eventId, key, GraphicAssetType.Session, png, existing,
             participantId: participantId, sessionId: sessionId, sponsorCompanyId: null,
             subfolder: "Sessions", ct);
+    }
+
+    // ===================================================================
+    //  Pull session graphics FROM SharePoint (operator pre-uploaded)
+    // ===================================================================
+
+    /// <summary>The outcome of a <see cref="PullSessionGraphicsAsync"/> run.</summary>
+    /// <param name="Matched">Active sessions whose title matched an uploaded file (one graphic each).</param>
+    /// <param name="Unmatched">Active sessions (with a configured folder) that found NO matching file.</param>
+    public sealed record PullSessionGraphicsResult(int Matched, int Unmatched);
+
+    /// <summary>
+    /// PULL operator-uploaded session graphics from SharePoint and surface them
+    /// through the existing organizer-review → speaker-download flow (REQUIREMENTS §18).
+    /// The operator has already uploaded one graphic per session into the configured
+    /// MasterClass / Sessions folders; this matches each ACTIVE session (with at least
+    /// one speaker) to the file whose NAME (sans extension), SLUGIFIED, equals the
+    /// SESSION TITLE slug (case-insensitive). A <see cref="SessionType.MasterClass"/>
+    /// session is matched against <see cref="GraphicsSharePointOptions.MasterClassFolderPath"/>;
+    /// every other session against <see cref="GraphicsSharePointOptions.SessionsFolderPath"/>.
+    /// For a match it UPSERTS (by stable key) one <see cref="GraphicAsset"/> per speaker
+    /// on the session — Type=Session, Status=Generated (the review gate) — pointing at
+    /// the SharePoint file (no compositor involved). Idempotent: a re-pull updates the
+    /// rows in place. INERT: a no-op returning zero when the store cannot read or no
+    /// folder is configured; a folder with no match leaves the session counted unmatched.
+    /// </summary>
+    public async Task<PullSessionGraphicsResult> PullSessionGraphicsAsync(
+        int eventId, CancellationToken ct = default)
+    {
+        // INERT until configured — never throws, never fakes a call.
+        if (!_store.CanRead)
+        {
+            return new PullSessionGraphicsResult(0, 0);
+        }
+
+        var mcFolder = _spOptions.MasterClassFolderPath;
+        var sessFolder = _spOptions.SessionsFolderPath;
+        if (string.IsNullOrWhiteSpace(mcFolder) && string.IsNullOrWhiteSpace(sessFolder))
+        {
+            return new PullSessionGraphicsResult(0, 0); // no folder configured ⇒ inert
+        }
+
+        // Active (non-service) sessions in this edition that have at least one speaker.
+        var sessions = await _db.Sessions
+            .Where(s => s.EventId == eventId
+                        && !s.IsServiceSession
+                        && s.SessionSpeakers.Any())
+            .Select(s => new
+            {
+                s.Id,
+                s.Title,
+                s.Type,
+                SpeakerIds = s.SessionSpeakers.Select(ss => ss.ParticipantId).ToList(),
+            })
+            .ToListAsync(ct);
+
+        // Cache each folder's listing (slug→file) so a folder is listed at most ONCE.
+        var folderCache = new Dictionary<string, IReadOnlyDictionary<string, SharePointFileRef>>(
+            StringComparer.OrdinalIgnoreCase);
+
+        async Task<IReadOnlyDictionary<string, SharePointFileRef>?> ListBySlugAsync(string folder)
+        {
+            if (string.IsNullOrWhiteSpace(folder)) return null;
+            if (folderCache.TryGetValue(folder, out var cached)) return cached;
+
+            var files = await _store.ListAsync(folder, ct);
+            var bySlug = new Dictionary<string, SharePointFileRef>(StringComparer.OrdinalIgnoreCase);
+            foreach (var f in files)
+            {
+                var nameSlug = Slug(StripExtension(f.Name));
+                if (!string.IsNullOrEmpty(nameSlug)) bySlug.TryAdd(nameSlug, f); // first wins
+            }
+            folderCache[folder] = bySlug;
+            return bySlug;
+        }
+
+        var matched = 0;
+        var unmatched = 0;
+
+        foreach (var s in sessions)
+        {
+            var folder = s.Type == SessionType.MasterClass ? mcFolder : sessFolder;
+            if (string.IsNullOrWhiteSpace(folder)) continue; // folder not configured for this type — skip
+
+            var listing = await ListBySlugAsync(folder);
+            if (listing is null) continue;
+
+            var titleSlug = Slug(s.Title);
+            if (string.IsNullOrEmpty(titleSlug) || !listing.TryGetValue(titleSlug, out var file))
+            {
+                unmatched++;
+                continue;
+            }
+
+            matched++;
+            var sharePointPath = $"{folder.Trim('/')}/{file.Name}";
+            foreach (var participantId in s.SpeakerIds)
+            {
+                await UpsertPulledSessionGraphicAsync(eventId, s.Id, participantId, file, sharePointPath, ct);
+            }
+        }
+
+        return new PullSessionGraphicsResult(matched, unmatched);
     }
 
     // ===================================================================
@@ -322,6 +429,96 @@ public sealed class GraphicsService
 
     private Task<GraphicAsset?> FindByKeyAsync(int eventId, string key, CancellationToken ct) =>
         _db.GraphicAssets.FirstOrDefaultAsync(g => g.EventId == eventId && g.StableKey == key, ct);
+
+    /// <summary>
+    /// Upsert (by stable key) the <see cref="GraphicAsset"/> for a PULLED session
+    /// graphic — same upsert-by-key shape as <see cref="StoreAndUpsertAsync"/>, but the
+    /// SharePoint location comes from the operator-uploaded file (no compositor, no
+    /// store write). A NEW row is created <see cref="GraphicAssetStatus.Generated"/>
+    /// (the review gate); a re-pull refreshes the file pointer in place and PRESERVES
+    /// the release status. An organizer OVERRULE is never clobbered.
+    /// </summary>
+    private async Task<GraphicAsset> UpsertPulledSessionGraphicAsync(
+        int eventId, int sessionId, int participantId,
+        SharePointFileRef file, string sharePointPath, CancellationToken ct)
+    {
+        var key = GraphicStableKey.ForSession(sessionId, participantId);
+        var existing = await FindByKeyAsync(eventId, key, ct);
+
+        // Respect a human replacement — a pull must not overwrite an organizer overrule.
+        if (existing is { IsOrganizerOverridden: true }) return existing;
+
+        var now = DateTimeOffset.UtcNow;
+        if (existing is null)
+        {
+            var asset = new GraphicAsset
+            {
+                EventId = eventId,
+                Type = GraphicAssetType.Session,
+                StableKey = key,
+                ParticipantId = participantId,
+                SessionId = sessionId,
+                Status = GraphicAssetStatus.Generated, // THE GATE — never auto-released
+                SharePointPath = sharePointPath,
+                SharePointUrl = string.IsNullOrEmpty(file.WebUrl) ? null : file.WebUrl,
+                StorageItemId = file.ItemId,
+                FileName = file.Name,
+                CreatedAt = now,
+                UpdatedAt = now,
+            };
+            _db.GraphicAssets.Add(asset);
+            await _db.SaveChangesAsync(ct);
+            return asset;
+        }
+
+        // Idempotent re-pull — refresh the file pointer, keep the stable key + status.
+        existing.SharePointPath = sharePointPath;
+        existing.SharePointUrl = string.IsNullOrEmpty(file.WebUrl) ? existing.SharePointUrl : file.WebUrl;
+        existing.StorageItemId = file.ItemId;
+        existing.FileName = file.Name;
+        existing.UpdatedAt = now;
+        await _db.SaveChangesAsync(ct);
+        return existing;
+    }
+
+    /// <summary>Drop a file extension (the last <c>.ext</c>) before slugifying the name.</summary>
+    private static string StripExtension(string fileName)
+    {
+        if (string.IsNullOrEmpty(fileName)) return string.Empty;
+        var dot = fileName.LastIndexOf('.');
+        return dot > 0 ? fileName[..dot] : fileName;
+    }
+
+    /// <summary>
+    /// Title / file-name slug — lower-cased, letters+digits kept, every run of anything
+    /// else (spaces, dashes, punctuation) collapsed to a SINGLE dash, with leading /
+    /// trailing dashes trimmed. The SAME function slugs BOTH the session title and the
+    /// uploaded file name, so an operator can name the file with spaces
+    /// (<c>Cloud Native Talk.png</c>) OR dashes (<c>cloud-native-talk.png</c>) and either
+    /// matches the title "Cloud Native Talk". Follows the established private <c>Slug</c>
+    /// convention elsewhere in Core (SpeakerDeadlineSeeder, etc.), hardened for matching.
+    /// </summary>
+    private static string Slug(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return string.Empty;
+        var sb = new System.Text.StringBuilder(text.Length);
+        var prevDash = false;
+        foreach (var ch in text.ToLowerInvariant())
+        {
+            if (char.IsLetterOrDigit(ch))
+            {
+                sb.Append(ch);
+                prevDash = false;
+            }
+            else if (!prevDash && sb.Length > 0)
+            {
+                sb.Append('-');
+                prevDash = true;
+            }
+        }
+        var slug = sb.ToString().TrimEnd('-');
+        return slug.Length > 80 ? slug[..80] : slug;
+    }
 
     /// <summary>The relative store path for an asset (subfolder/file), derived from its key/type.</summary>
     private static string RelativePathFor(GraphicAsset asset)

@@ -1,0 +1,24 @@
+@*
+    Shared "Last saved" timestamp — REQUIREMENTS §51.
+
+    A tiny, consistent line shown next to a primary Save button telling the user
+    when the row was last saved (the entity's UpdatedAt / last-saved field). With
+    no saved-at value (never saved) it renders nothing, so a brand-new form stays
+    clean.
+
+    HOW TO USE (place right after the primary Save button):
+        <partial name="_LastSaved" model="Model.SomeEntity.UpdatedAt" />
+
+    The model is the nullable saved-at instant. Times are stored UTC; we show them
+    in UTC with a clear suffix so there is no ambiguity (the hub has participants
+    across time zones) — matching the existing "Last Sessionize import … UTC" copy.
+
+    Mobile-first: a small, muted, wrapping inline line with no fixed height.
+*@
+@model DateTimeOffset?
+@if (Model is { } savedAt)
+{
+    <p class="ceh-last-saved" style="font-size:12px;color:#6b7280;margin:6px 0 0;">
+        Last saved @savedAt.ToUniversalTime().ToString("dd MMM yyyy HH:mm") UTC
+    </p>
+}

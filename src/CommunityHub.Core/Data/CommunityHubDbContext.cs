@@ -34,6 +34,14 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
     public DbSet<SentReminder> SentReminders => Set<SentReminder>();
     public DbSet<EmailLog> EmailLogs => Set<EmailLog>();
     public DbSet<Attendee> Attendees => Set<Attendee>();
+
+    /// <summary>Order-level mirror of the full Zoho Backstage dataset (REQUIREMENTS §125).
+    /// One order has many tickets/attendees; reconciled strictly one-way Zoho→CEH.</summary>
+    public DbSet<Order> Orders => Set<Order>();
+
+    /// <summary>Last-successful-sync markers, one per (EventId, Key) — drives the
+    /// telemetry "Updated &lt;t&gt;" footer (REQUIREMENTS §125/§127).</summary>
+    public DbSet<SyncRun> SyncRuns => Set<SyncRun>();
     public DbSet<HotelBooking> HotelBookings => Set<HotelBooking>();
     public DbSet<Hotel> Hotels => Set<Hotel>();
     public DbSet<DinnerSignup> DinnerSignups => Set<DinnerSignup>();
@@ -55,12 +63,14 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
     public DbSet<SpeakerBackstageEmailSync> SpeakerBackstageEmailSyncs => Set<SpeakerBackstageEmailSync>();
     public DbSet<SessionizeEndpointSetting> SessionizeEndpointSettings => Set<SessionizeEndpointSetting>();
     public DbSet<TravelReimbursement> TravelReimbursements => Set<TravelReimbursement>();
+    public DbSet<TravelReceipt> TravelReceipts => Set<TravelReceipt>();
     public DbSet<OrganizerActionItem> OrganizerActionItems => Set<OrganizerActionItem>();
     public DbSet<SponsorInfo> SponsorInfos => Set<SponsorInfo>();
     public DbSet<SponsorBoothMember> SponsorBoothMembers => Set<SponsorBoothMember>();
     public DbSet<SponsorBoothMaterial> SponsorBoothMaterials => Set<SponsorBoothMaterial>();
     public DbSet<SponsorUploadLocation> SponsorUploadLocations => Set<SponsorUploadLocation>();
     public DbSet<SponsorUploadFile> SponsorUploadFiles => Set<SponsorUploadFile>();
+    public DbSet<SponsorUploadAudit> SponsorUploadAudits => Set<SponsorUploadAudit>();
     public DbSet<SurveyResponse> SurveyResponses => Set<SurveyResponse>();
     public DbSet<SurveyResponsePick> SurveyResponsePicks => Set<SurveyResponsePick>();
     public DbSet<SurveyState> SurveyStates => Set<SurveyState>();
@@ -92,6 +102,9 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
 
     /// <summary>Anonymous (no-login) Party RSVPs.</summary>
     public DbSet<PartyRsvp> PartyRsvps => Set<PartyRsvp>();
+
+    /// <summary>Per-participant Code of Conduct + Privacy acceptance (§119, who/when).</summary>
+    public DbSet<ParticipantPolicyAcceptance> ParticipantPolicyAcceptances => Set<ParticipantPolicyAcceptance>();
 
     /// <summary>In-hub Master Class seat + waitlist signups (CEH-owned; replaces Zoho Bookings).</summary>
     public DbSet<MasterClassSignup> MasterClassSignups => Set<MasterClassSignup>();
@@ -145,6 +158,11 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
     // organizers in /Organizer/AuditTrail for troubleshooting + usage insight.
     public DbSet<AuditEntry> AuditEntries => Set<AuditEntry>();
 
+    // --- DELTA-APPROVAL QUEUE (REQUIREMENTS §59) ------------------------------
+    // Detected sync changes that need an operator's approve/reject in
+    // /Organizer/SyncQueue before they are applied (never auto-applied).
+    public DbSet<SyncDelta> SyncDeltas => Set<SyncDelta>();
+
     protected override void OnModelCreating(ModelBuilder b)
     {
         base.OnModelCreating(b);
@@ -167,6 +185,33 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
             // edition + category.
             e.HasIndex(x => new { x.EventId, x.OccurredUtc });
             e.HasIndex(x => new { x.EventId, x.Category });
+        });
+
+        // --- SyncDelta (delta-approval queue, §59) ----------------------------
+        b.Entity<SyncDelta>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.EntityType).HasConversion<int>();
+            e.Property(x => x.Source).HasConversion<int>();
+            e.Property(x => x.ChangeKind).HasConversion<int>();
+            e.Property(x => x.Status).HasConversion<int>();
+            e.Property(x => x.EntityId).HasMaxLength(128);
+            e.Property(x => x.EntityLabel).HasMaxLength(512);
+            // The serialized field-diff list — a single unbounded text column. No HasMaxLength
+            // (and no explicit HasColumnType) so EF maps it to nvarchar(max) on SQL Server and
+            // TEXT on SQLite (the relational test provider) — mirroring the SoMePost.AutoText
+            // pattern. An explicit "nvarchar(max)" type breaks the SQLite test provider.
+            e.Property(x => x.DecidedByEmail).HasMaxLength(320);
+            e.Property(x => x.Notes).HasMaxLength(2000);
+
+            e.HasOne(x => x.Event).WithMany()
+                .HasForeignKey(x => x.EventId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // The dedupe lookup: the single PENDING row per
+            // (edition, entity type, entity id, change kind). Also the hot query for
+            // the queue page (pending for an edition).
+            e.HasIndex(x => new { x.EventId, x.Status, x.EntityType, x.EntityId, x.ChangeKind });
         });
 
         // --- Event ----------------------------------------------------------
@@ -337,6 +382,20 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
         {
             e.HasKey(x => x.Id);
             e.Property(x => x.Source).IsRequired().HasMaxLength(32);
+            // §57 session sync direction/stage; stored as int, defaults to stage 1
+            // (SessionizeToCeh) so existing rows + new editions keep §38e inert. The CLR
+            // sentinel matches the default (stage 1 is the property's initial value) so EF
+            // applies the DB default only on a genuine insert-without-value, not on stage 1.
+            e.Property(x => x.SyncDirection)
+                .HasConversion<int>()
+                .HasDefaultValue(SessionSyncDirection.SessionizeToCeh)
+                .HasSentinel(SessionSyncDirection.SessionizeToCeh);
+            // §58 SPEAKER sync direction/stage; same encoding/default/sentinel as the
+            // session SyncDirection above so existing rows + new editions default to stage 1.
+            e.Property(x => x.SpeakerSyncDirection)
+                .HasConversion<int>()
+                .HasDefaultValue(SessionSyncDirection.SessionizeToCeh)
+                .HasSentinel(SessionSyncDirection.SessionizeToCeh);
             e.Property(x => x.UpdatedByEmail).HasMaxLength(320);
             e.HasOne(x => x.Event)
                 .WithMany()
@@ -370,6 +429,29 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
                 .OnDelete(DeleteBehavior.Cascade);
             // One RSVP per email per edition (upsert).
             e.HasIndex(x => new { x.EventId, x.Email }).IsUnique();
+        });
+
+        // --- ParticipantPolicyAcceptance (§119 CoC + Privacy "I accept") -----
+        b.Entity<ParticipantPolicyAcceptance>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.AcceptedByEmail).IsRequired().HasMaxLength(320);
+            e.Property(x => x.CodeOfConductUrl).HasMaxLength(500);
+            e.Property(x => x.PrivacyPolicyUrl).HasMaxLength(500);
+
+            e.HasOne(x => x.Event).WithMany()
+                .HasForeignKey(x => x.EventId)
+                .OnDelete(DeleteBehavior.Cascade);
+            // NoAction on the Participant FK: the Event root already cascade-deletes
+            // both Participants and these acceptance rows, so a second
+            // Participant→Acceptance cascade path would be a SQL Server
+            // multiple-cascade-path error (same pattern as the secretary-token table).
+            e.HasOne(x => x.Participant).WithMany()
+                .HasForeignKey(x => x.ParticipantId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            // One acceptance per participant per edition (upsert / "already accepted").
+            e.HasIndex(x => new { x.EventId, x.ParticipantId }).IsUnique();
         });
 
         // --- MasterClassSignup (in-hub MC seat + waitlist) ------------------
@@ -535,8 +617,10 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
             e.Property(x => x.LastName).HasMaxLength(200);
             e.Property(x => x.TicketClassName).HasMaxLength(200);
             e.Property(x => x.MasterClassName).HasMaxLength(200);
+            e.Property(x => x.OrderId).HasMaxLength(128);
             e.Property(x => x.TicketStatus).HasConversion<int>();
             e.Property(x => x.BookingStatus).HasConversion<int>();
+            e.Property(x => x.MirrorState).HasConversion<int>();
             e.Property(x => x.BackstageTicketId).HasMaxLength(128);
 
             e.HasOne(x => x.Event)
@@ -544,8 +628,23 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
                 .HasForeignKey(x => x.EventId)
                 .OnDelete(DeleteBehavior.Cascade);
 
+            // Order-level mirror link (REQUIREMENTS §125): a ticket belongs to its
+            // Backstage order via the (EventId, OrderId) → (EventId, BackstageOrderId)
+            // principal key. Optional — OrderId is nullable on legacy rows, so a null
+            // OrderId means "no linked order" rather than a dangling FK. NoAction (not
+            // Cascade): the Event root already cascade-deletes both Orders and Attendees,
+            // so a second Order→Attendee cascade path would be a SQL Server
+            // multiple-cascade-path error (same pattern as the other child tables).
+            e.HasOne(x => x.Order)
+                .WithMany(o => o.Attendees)
+                .HasForeignKey(x => new { x.EventId, x.OrderId })
+                .HasPrincipalKey(o => new { o.EventId, o.BackstageOrderId })
+                .OnDelete(DeleteBehavior.NoAction);
+
             // Email unique within an edition (legacy email-keyed reconcile path).
             e.HasIndex(x => new { x.EventId, x.Email }).IsUnique();
+            // Active-vs-cancelled split (§128): exclude soft-cancelled rows from counts.
+            e.HasIndex(x => new { x.EventId, x.MirrorState });
             // The STABLE ticket-id identity (REQUIREMENTS §6) — unique per edition
             // where present (filtered so legacy null-ticket rows don't collide), so
             // the ticket-keyed sync upserts by (EventId, BackstageTicketId) and a
@@ -555,6 +654,56 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
                 .HasFilter("[BackstageTicketId] IS NOT NULL");
             // Fast filter for the organizer mismatch view.
             e.HasIndex(x => new { x.EventId, x.HasReconciliationMismatch });
+        });
+
+        // --- Order (order-level Zoho Backstage mirror, REQUIREMENTS §125) ----
+        b.Entity<Order>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.BackstageOrderId).IsRequired().HasMaxLength(128);
+            e.Property(x => x.BuyerName).HasMaxLength(200);
+            e.Property(x => x.BuyerEmail).HasMaxLength(320);
+            e.Property(x => x.CompanyName).HasMaxLength(200);
+            e.Property(x => x.Country).HasMaxLength(100);
+            e.Property(x => x.CountryCode).HasMaxLength(10);
+            e.Property(x => x.City).HasMaxLength(200);
+            e.Property(x => x.Postcode).HasMaxLength(40);
+            e.Property(x => x.TaxId).HasMaxLength(100);
+            e.Property(x => x.OrderStatus).HasMaxLength(60);
+            e.Property(x => x.MirrorState).HasConversion<int>();
+            // RawJson — a single unbounded text column (full raw Zoho order). No
+            // HasMaxLength so EF maps it to nvarchar(max) on SQL Server and TEXT on
+            // SQLite (cf. SyncDelta.ChangesJson); an explicit "nvarchar(max)" type
+            // breaks the SQLite test provider.
+
+            e.HasOne(x => x.Event)
+                .WithMany()
+                .HasForeignKey(x => x.EventId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // The natural identity within an edition — also the principal key the
+            // Attendee→Order FK targets, so a ticket links to its order by the
+            // Backstage order id. The alternate key supplies the unique index over
+            // (EventId, BackstageOrderId), so no separate unique index is declared.
+            e.HasAlternateKey(x => new { x.EventId, x.BackstageOrderId });
+            // Active-vs-cancelled split (§128): exclude soft-cancelled orders from counts.
+            e.HasIndex(x => new { x.EventId, x.MirrorState });
+        });
+
+        // --- SyncRun (last-successful-sync marker, REQUIREMENTS §125/§127) ----
+        b.Entity<SyncRun>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Key).IsRequired().HasMaxLength(60);
+            e.Property(x => x.Summary).HasMaxLength(400);
+
+            e.HasOne(x => x.Event)
+                .WithMany()
+                .HasForeignKey(x => x.EventId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // One marker per (edition, sync) — the upsert key.
+            e.HasIndex(x => new { x.EventId, x.Key }).IsUnique();
         });
 
         // --- HotelBooking ---------------------------------------------------
@@ -586,6 +735,7 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
             e.Property(x => x.Address).HasMaxLength(500);
             e.Property(x => x.ContactEmail).HasMaxLength(320);
             e.Property(x => x.Notes).HasMaxLength(1000);
+            e.Property(x => x.ConfirmationNumber).HasMaxLength(64);
 
             e.HasOne(x => x.Event).WithMany()
                 .HasForeignKey(x => x.EventId)
@@ -683,6 +833,15 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
             // Comma-separated set of speaker-edited bio field tokens (the
             // per-field dirty set the delta sync reads). Small; 200 is ample.
             e.Property(x => x.SpeakerEditedFields).HasMaxLength(200);
+            // §38e/§58 Zoho→CEH speaker change-tracking: last-known Backstage
+            // speaker snapshot the detection engine diffs against. Same field
+            // sizes as the CEH-owned bio columns above.
+            e.Property(x => x.BackstageName).HasMaxLength(400);
+            e.Property(x => x.BackstageTagline).HasMaxLength(500);
+            e.Property(x => x.BackstageBio).HasMaxLength(4000);
+            e.Property(x => x.BackstageCountry).HasMaxLength(100);
+            e.Property(x => x.BackstageLinkedIn).HasMaxLength(500);
+            e.Property(x => x.BackstageTwitter).HasMaxLength(200);
             // Who funds the speaker's appreciation package (drives entitlements);
             // stored as int, defaults to Supported (0).
             e.Property(x => x.SpeakerFunding).HasConversion<int>();
@@ -743,6 +902,10 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
             e.Property(x => x.LogisticsText).HasMaxLength(8000);
             e.Property(x => x.LogisticsUpdatedByEmail).HasMaxLength(320);
             e.Property(x => x.BookingEndpointUri).HasMaxLength(2000);
+            // Zoho Backstage agenda id + last-known time/location (§38e/§52). The id
+            // shares the 64-char id cap used by SessionizeId; the room mirrors Room.
+            e.Property(x => x.BackstageSessionId).HasMaxLength(64);
+            e.Property(x => x.BackstageRoom).HasMaxLength(200);
 
             e.HasOne(x => x.Event).WithMany()
                 .HasForeignKey(x => x.EventId)
@@ -768,6 +931,12 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
             e.HasIndex(x => x.PublicSlug)
                 .IsUnique()
                 .HasFilter("[PublicSlug] IS NOT NULL");
+            // §38e: a Backstage agenda session maps to at most ONE CEH session per
+            // edition (the change-detection match key). Filtered unique so the many
+            // NULLs (sessions not yet matched to Backstage) don't collide.
+            e.HasIndex(x => new { x.EventId, x.BackstageSessionId })
+                .IsUnique()
+                .HasFilter("[BackstageSessionId] IS NOT NULL");
         });
 
         // --- MasterClassParticipant (Zoho Booking → hub, § 6c) ---------------
@@ -1001,6 +1170,7 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
             e.Property(x => x.EventCoordinatorCompanyName).HasMaxLength(200);
             e.Property(x => x.EventCoordinatorEmail).HasMaxLength(320);
             e.Property(x => x.EventCoordinatorPhone).HasMaxLength(60);
+            e.Property(x => x.ZohoContactEmail).HasMaxLength(320);
             e.Property(x => x.ZohoSponsorId).HasMaxLength(64);
             e.Property(x => x.ZohoExhibitorId).HasMaxLength(64);
             // Commercial sponsorship package (Silver/Gold/Diamond/Platinum):
@@ -1049,9 +1219,26 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
             e.Property(x => x.Kind).HasConversion<int>();
             e.Property(x => x.Url).IsRequired().HasMaxLength(1000);
             e.Property(x => x.FileName).HasMaxLength(400);
+            e.Property(x => x.CreatedByEmail).HasMaxLength(320);
             e.HasOne(x => x.Event).WithMany()
                 .HasForeignKey(x => x.EventId)
                 .OnDelete(DeleteBehavior.Cascade);
+            e.HasIndex(x => new { x.EventId, x.SponsorCompanyId, x.Kind });
+        });
+
+        // --- SponsorUploadAudit (§68) ---------------------------------------
+        b.Entity<SponsorUploadAudit>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.SponsorCompanyId).IsRequired().HasMaxLength(64);
+            e.Property(x => x.Kind).IsRequired().HasMaxLength(32);
+            e.Property(x => x.FileName).IsRequired().HasMaxLength(400);
+            e.Property(x => x.WebUrl).HasMaxLength(2000);
+            e.Property(x => x.UploadedByEmail).IsRequired().HasMaxLength(320);
+            e.HasOne(x => x.Event).WithMany()
+                .HasForeignKey(x => x.EventId)
+                .OnDelete(DeleteBehavior.Cascade);
+            // Page reads the latest row per (company, kind); index that lookup.
             e.HasIndex(x => new { x.EventId, x.SponsorCompanyId, x.Kind });
         });
 
@@ -1138,6 +1325,27 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
                 .OnDelete(DeleteBehavior.Restrict);
 
             e.HasIndex(x => new { x.EventId, x.ParticipantId }).IsUnique();
+        });
+
+        // --- TravelReceipt --------------------------------------------------
+        // Uploaded receipt / invoice files (bytes in DB) for a speaker's travel
+        // reimbursement. Gates the Step-2 request and is attached to the ERP-inbox
+        // email on submit (REQUIREMENTS §48).
+        b.Entity<TravelReceipt>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.FileName).HasMaxLength(300);
+            e.Property(x => x.ContentType).HasMaxLength(150);
+
+            e.HasOne(x => x.Event).WithMany()
+                .HasForeignKey(x => x.EventId)
+                .OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.Participant).WithMany()
+                .HasForeignKey(x => x.ParticipantId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // Many files per (event, participant) — NOT unique.
+            e.HasIndex(x => new { x.EventId, x.ParticipantId });
         });
 
         // --- LunchSignup ----------------------------------------------------

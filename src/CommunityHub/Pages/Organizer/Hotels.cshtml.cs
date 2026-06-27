@@ -1,9 +1,12 @@
 using CommunityHub.Auth;
+using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
 using CommunityHub.Core.Organizer;
+using CommunityHub.Notify;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
+using Microsoft.EntityFrameworkCore;
 
 namespace CommunityHub.Pages.Organizer;
 
@@ -19,15 +22,30 @@ public class HotelsModel : PageModel
     private readonly ICurrentParticipantAccessor _participant;
     private readonly HotelManagementService _hotels;
     private readonly HotelBulkOperationService _bulk;
+    private readonly CommunityHubDbContext _db;
+    private readonly HotelCalendarInviter _inviter;
+    private readonly CommunityHub.Core.Settings.FeatureGateService _gate;
+    private readonly CommunityHub.Core.Settings.RingResolver _rings;
+    private readonly ILogger<HotelsModel> _logger;
 
     public HotelsModel(
         ICurrentParticipantAccessor participant,
         HotelManagementService hotels,
-        HotelBulkOperationService bulk)
+        HotelBulkOperationService bulk,
+        CommunityHubDbContext db,
+        HotelCalendarInviter inviter,
+        CommunityHub.Core.Settings.FeatureGateService gate,
+        CommunityHub.Core.Settings.RingResolver rings,
+        ILogger<HotelsModel> logger)
     {
         _participant = participant;
         _hotels = hotels;
         _bulk = bulk;
+        _db = db;
+        _inviter = inviter;
+        _gate = gate;
+        _rings = rings;
+        _logger = logger;
     }
 
     public bool AccessDenied { get; private set; }
@@ -48,6 +66,13 @@ public class HotelsModel : PageModel
     /// <summary>Reserved room-block size (blank = not set / clear the block).</summary>
     [BindProperty] public int? RoomBlockSize { get; set; }
 
+    /// <summary>
+    /// Booking CONFIRMATION NUMBER from the hotel (REQUIREMENTS §46). Blank while
+    /// the hotel hasn't confirmed; once an organizer enters it, the reservation is
+    /// CONFIRMED and everyone placed here is re-sent their calendar invite.
+    /// </summary>
+    [BindProperty] public string? ConfirmationNumber { get; set; }
+
     public async Task<IActionResult> OnGetAsync(CancellationToken ct)
     {
         var me = _participant.Current;
@@ -67,6 +92,7 @@ public class HotelsModel : PageModel
                 ContactEmail = hotel.ContactEmail;
                 Notes = hotel.Notes;
                 RoomBlockSize = hotel.RoomBlockSize;
+                ConfirmationNumber = hotel.ConfirmationNumber;
             }
             else
             {
@@ -86,15 +112,48 @@ public class HotelsModel : PageModel
         {
             if (EditId is int id && id > 0)
             {
+                // Did this hotel already carry a confirmation number BEFORE the save?
+                // We compare to decide whether the reservation just became CONFIRMED
+                // (an organizer entered the number for the first time / changed it),
+                // which is what re-issues the calendar invites (REQUIREMENTS §46).
+                var before = await _hotels.GetHotelAsync(me.EventId, id, ct);
+                var hadNumber = !string.IsNullOrWhiteSpace(before?.ConfirmationNumber);
+                var newNumber = (ConfirmationNumber ?? "").Trim();
+                var nowSet = newNumber.Length > 0;
+                var numberChanged = before is not null
+                    && !string.Equals((before.ConfirmationNumber ?? "").Trim(), newNumber, StringComparison.Ordinal);
+
                 var ok = await _hotels.UpdateHotelAsync(
-                    me.EventId, id, Name ?? "", Address, ContactEmail, Notes, RoomBlockSize, ct);
+                    me.EventId, id, Name ?? "", Address, ContactEmail, Notes, RoomBlockSize,
+                    ConfirmationNumber, ct);
                 Message = ok ? "Hotel updated." : "Hotel not found.";
+
+                // Reservation just became / re-confirmed → re-send the CONFIRMED
+                // calendar invite to everyone placed in this hotel who needs a room.
+                if (ok && nowSet && numberChanged)
+                {
+                    var (sent, skipped) = await ReissueConfirmedInvitesAsync(
+                        me.EventId, id, Name ?? "", Address, newNumber, ct);
+                    Message += $" Reservation is now [CONFIRMED] (number {newNumber}).";
+                    Message += sent > 0
+                        ? $" Updated calendar invites sent to {sent} reserver(s)"
+                          + (skipped > 0 ? $", {skipped} skipped (above released ring)" : "")
+                          + "."
+                        : (skipped > 0
+                            ? $" No invites sent ({skipped} reserver(s) above the released ring)."
+                            : " No reservers needed a room here yet.");
+                }
             }
             else
             {
                 await _hotels.CreateHotelAsync(
-                    me.EventId, Name ?? "", Address, ContactEmail, Notes, RoomBlockSize, ct);
+                    me.EventId, Name ?? "", Address, ContactEmail, Notes, RoomBlockSize,
+                    ConfirmationNumber, ct);
                 Message = "Hotel added.";
+                if (!string.IsNullOrWhiteSpace(ConfirmationNumber))
+                {
+                    Message += " Reservation is [CONFIRMED]. (No one is placed in this hotel yet, so no invites were sent.)";
+                }
             }
         }
         catch (ArgumentException ex)
@@ -160,6 +219,87 @@ public class HotelsModel : PageModel
 
         await LoadAsync(me.EventId, ct);
         return Page();
+    }
+
+    /// <summary>
+    /// Re-issue the hotel calendar invite as [CONFIRMED] to everyone placed in
+    /// <paramref name="hotelId"/> who needs a room, carrying the new confirmation
+    /// number (REQUIREMENTS §46). These recipients ARE participants, so the normal
+    /// participant email path applies: each is filtered through the hotel-invite
+    /// feature's released ring (same gate as hotel assignment), and the invite is
+    /// sent via the ring-governed <see cref="HotelCalendarInviter"/> (DEV-redirected)
+    /// reusing the stable per-(participant,event) UID, so the recipient's existing
+    /// calendar entry UPDATES in place rather than duplicating. Returns how many
+    /// invites were sent and how many were skipped because the recipient is above
+    /// the released ring. One failed send never aborts the rest.
+    /// </summary>
+    private async Task<(int Sent, int Skipped)> ReissueConfirmedInvitesAsync(
+        int eventId, int hotelId, string hotelName, string? hotelAddress,
+        string confirmationNumber, CancellationToken ct)
+    {
+        var reservers = await _hotels.ListReserversForInviteAsync(eventId, hotelId, ct);
+        if (reservers.Count == 0) return (0, 0);
+
+        var eventCode = await _db.Events
+            .Where(e => e.Id == eventId)
+            .Select(e => e.Code)
+            .FirstOrDefaultAsync(ct) ?? "Event Hub";
+
+        var sent = 0;
+        var skipped = 0;
+        foreach (var r in reservers)
+        {
+            // Ring-scoped (REQUIREMENTS §23a): don't re-invite a participant above
+            // the hotel-invite feature's released ring. Broad default = everyone.
+            if (!await _gate.IsTargetInReleasedRingAsync(
+                    "hotel-invite", eventId, r.ParticipantId, _rings, ct))
+            {
+                skipped++;
+                continue;
+            }
+
+            try
+            {
+                // hotelConfirmationNumber non-blank → the builder renders [CONFIRMED]
+                // + the number; the inviter sets the gated hotel-invite EmailContext.
+                await _inviter.SendAsync(
+                    eventCode: eventCode,
+                    toEmail: r.Email,
+                    fullName: r.FullName,
+                    checkInDate: r.CheckInDate,
+                    checkOutDate: r.CheckOutDate,
+                    confirmed: true,
+                    confirmationNumber: confirmationNumber,
+                    roomType: null,
+                    participantId: r.ParticipantId,
+                    eventId: eventId,
+                    ct: ct,
+                    hotelName: string.IsNullOrWhiteSpace(hotelName) ? null : hotelName,
+                    hotelAddress: hotelAddress,
+                    hotelConfirmationNumber: confirmationNumber);
+
+                // Stamp the booking so the participant-side form knows the invite
+                // was re-issued (best-effort; never blocks the rest).
+                var booking = await _db.HotelBookings.FirstOrDefaultAsync(
+                    b => b.EventId == eventId && b.ParticipantId == r.ParticipantId, ct);
+                if (booking is not null)
+                {
+                    booking.ConfirmationState = HotelConfirmationState.Confirmed;
+                    booking.ConfirmationNumber = confirmationNumber;
+                    booking.ConfirmedAt = DateTimeOffset.UtcNow;
+                    booking.CalendarInviteSentAt = DateTimeOffset.UtcNow;
+                    await _db.SaveChangesAsync(ct);
+                }
+                sent++;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "Could not re-send CONFIRMED hotel invite to {Email} (participant {Pid})",
+                    r.Email, r.ParticipantId);
+            }
+        }
+        return (sent, skipped);
     }
 
     private async Task LoadAsync(int eventId, CancellationToken ct)

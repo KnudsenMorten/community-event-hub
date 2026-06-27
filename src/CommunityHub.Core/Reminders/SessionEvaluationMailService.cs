@@ -193,7 +193,6 @@ public sealed class SessionEvaluationMailService
             <blockquote style="border-left:3px solid #ccc;padding-left:12px;color:#333;">
             {safeResults}
             </blockquote>
-            <p>These results were collected from the on-site feedback box.</p>
             {SpeakerContactLine()}
             <p>— The organizer team</p>
             """;

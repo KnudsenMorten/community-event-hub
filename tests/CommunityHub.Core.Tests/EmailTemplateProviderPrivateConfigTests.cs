@@ -112,7 +112,7 @@ public sealed class EmailTemplateProviderPrivateConfigTests
         var rendered = provider.Render("welcome-sponsor", provider.NewTokenSet());
         Assert.Contains("db override wins", rendered.HtmlBody);
         Assert.DoesNotContain("private edition copy", rendered.HtmlBody);
-        Assert.Equal("DB", rendered.Subject);
+        Assert.Equal("DB [ELDK27]", rendered.Subject);  // §103: edition tag postfixed centrally
     }
 
     [Fact]

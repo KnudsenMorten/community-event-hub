@@ -24,7 +24,7 @@
             var toggleLabel = task.State == TaskState.Done
                 ? Localizer["Tasks.MarkNotDone"].Value
                 : Localizer["Tasks.MarkDone"].Value;
-            <div style="border-bottom:1px solid #eee;padding:10px 0;">
+            <div style="border-bottom:1px solid #eee;padding:10px 0;overflow-wrap:anywhere;">
                 <strong>@task.Title</strong>
                 @if (task.State == TaskState.Done)
                 {

@@ -111,7 +111,7 @@ public class DashboardModel : PageModel
         var svc = HttpContext.RequestServices.GetRequiredService<CommunityHub.Core.Integrations.Erp.ErpWebshopContactSyncService>();
         var r = await svc.SyncAsync(ct);
         ActionMessage = !r.Enabled
-            ? "e-conomic / Company Manager is not configured for this environment."
+            ? "Backend / Company Manager is not configured for this environment."
             : $"ERP→webshop reconcile: {r.Customers} sponsor customers, {r.UsersCreated} webshop user(s) created, " +
               $"{r.DefaultsSet} default(s) set, {r.Alerts} item(s) need attention" +
               (r.Alerts > 0 ? $" (alert emailed to {CommunityHub.Core.Integrations.Erp.ErpWebshopContactSyncService.AlertEmail}): {string.Join("; ", r.AlertNotes.Take(10))}" : ".");

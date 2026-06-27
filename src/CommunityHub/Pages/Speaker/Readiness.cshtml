@@ -1,0 +1,118 @@
+@page
+@model CommunityHub.Pages.Speaker.ReadinessModel
+@{
+    ViewData["Title"] = "Am I ready?";
+}
+
+@if (Model.AccessDenied)
+{
+    <div class="card">
+        <h1>Am I ready?</h1>
+        <p class="error">
+            This page is for speakers.
+            (<strong>@CommunityHub.Branding.RoleDisplay.Name(Model.Role)</strong>)
+        </p>
+        <p><a asp-page="/Index">@Localizer["Common.BackToHub"]</a></p>
+    </div>
+    return;
+}
+
+<style>
+    /* Mobile-first: cards + items stack and stay readable at ~360px. */
+    .rd-score { display:flex; flex-wrap:wrap; align-items:baseline; gap:6px 12px; }
+    .rd-score .rd-pct { font-size:34px; font-weight:800; color:var(--el-darkblue); line-height:1; }
+    .rd-score .rd-of  { font-size:15px; color:#4b5563; }
+    .rd-progress-wrap { background:#eef0f4; border-radius:999px; height:14px; overflow:hidden; margin:12px 0 4px; }
+    .rd-progress-bar  { height:100%; border-radius:999px; transition:width .3s ease; background:#0a6; }
+    .rd-ready { background:#0a6; color:#fff; border-radius:999px; padding:2px 12px; font-size:13px; font-weight:700; white-space:nowrap; }
+
+    .rd-list { list-style:none; padding:0; margin:0; }
+    .rd-item {
+        border:1px solid #e5e7eb; border-radius:10px;
+        padding:12px 14px; margin:10px 0;
+        display:flex; flex-wrap:wrap; gap:8px 14px; align-items:center;
+    }
+    .rd-item.done    { background:#f3fbf6; border-color:#c7ead7; }
+    .rd-item.missing { background:#fdf8f0; border-color:#f0dcb8; }
+    .rd-ico { font-size:18px; flex:0 0 auto; }
+    .rd-label { flex:1 1 180px; min-width:0; font-weight:600; color:var(--el-darkblue); overflow-wrap:anywhere; }
+    .rd-item.done .rd-label { color:#0a6; font-weight:600; }
+    .rd-fix { flex:0 0 auto; }
+    .rd-fix form, .rd-fix a { margin:0; }
+    @@media (max-width: 460px) {
+        .rd-fix { flex-basis:100%; }
+        .rd-fix .task-link-btn { display:block; text-align:center; }
+    }
+</style>
+
+<div class="card">
+    <h1>&#9989; Am I ready, @Model.FirstName?</h1>
+
+    @if (Model.Readiness is null)
+    {
+        <p style="background:#fef9c3;border-left:4px solid #ca8a04;padding:10px 14px;border-radius:6px;font-size:13.5px;color:#713f12;margin:0;">
+            We can't build your readiness checklist yet — your speaker profile isn't set up.
+            Start with your <a asp-page="/Speaker/Details">Speaker Details</a>.
+        </p>
+    }
+    else
+    {
+        var r = Model.Readiness!;
+        <p style="font-size:13.5px;color:#555;margin-top:0;">
+            A quick rollup of everything we need from you, pulled from what you've already
+            done. Tackle the missing items below — each one links straight to where you fix it.
+        </p>
+
+        <div class="rd-score">
+            <span class="rd-pct">@r.Percent%</span>
+            <span class="rd-of">&middot; @r.Summary</span>
+            @if (r.IsReady)
+            {
+                <span class="rd-ready">All set &#127881;</span>
+            }
+        </div>
+        <div class="rd-progress-wrap" role="progressbar"
+             aria-valuenow="@r.Percent" aria-valuemin="0" aria-valuemax="100"
+             aria-label="Readiness @r.Percent percent">
+            <div class="rd-progress-bar" style="width:@(r.Percent)%;"></div>
+        </div>
+
+        @if (r.MissingItems.Count > 0)
+        {
+            <h2 style="font-size:17px;margin:18px 0 6px;color:var(--el-darkblue);">Still to do (@r.MissingItems.Count)</h2>
+            <ul class="rd-list">
+                @foreach (var item in r.MissingItems)
+                {
+                    <li class="rd-item missing">
+                        <span class="rd-ico" aria-hidden="true">&#9633;</span>
+                        <span class="rd-label">@item.Label</span>
+                        @if (!string.IsNullOrEmpty(item.FixLink))
+                        {
+                            <span class="rd-fix">
+                                <a class="task-link-btn" href="@item.FixLink">Fix this</a>
+                            </span>
+                        }
+                    </li>
+                }
+            </ul>
+        }
+
+        @if (r.DoneItems.Count > 0)
+        {
+            <h2 style="font-size:17px;margin:18px 0 6px;color:#0a6;">Done (@r.DoneItems.Count)</h2>
+            <ul class="rd-list">
+                @foreach (var item in r.DoneItems)
+                {
+                    <li class="rd-item done">
+                        <span class="rd-ico" aria-hidden="true">&#9989;</span>
+                        <span class="rd-label">@item.Label</span>
+                    </li>
+                }
+            </ul>
+        }
+    }
+</div>
+
+<div class="card">
+    <p><a asp-page="/Index">&larr; @Localizer["Common.BackToHub"]</a> &middot; <a asp-page="/Speaker/Tasks">@Localizer["Nav.MyTasks"]</a></p>
+</div>

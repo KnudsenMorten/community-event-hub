@@ -77,7 +77,7 @@ public sealed class ContentStudioService
         {
             case ContentKind.TicketSales:
             {
-                var t = await _telemetry.GetAsync("all", ct);
+                var t = await _telemetry.GetAsync("all", ct: ct);
                 return t is null ? null : _engine.BuildTicketSales(t, ctx);
             }
             case ContentKind.MasterClasses:

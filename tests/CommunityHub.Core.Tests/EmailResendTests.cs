@@ -212,6 +212,8 @@ public sealed class EmailResendTests
             => throw new InvalidOperationException("kaboom");
         public Task SendWithIcsAsync(string to, string s, string h, string ics, string fn, CancellationToken ct = default)
             => throw new InvalidOperationException("kaboom");
+        public Task SendWithAttachmentsAsync(string to, string s, string h, IReadOnlyCollection<EmailAttachment> attachments, CancellationToken ct = default)
+            => throw new InvalidOperationException("kaboom");
     }
 
     private sealed class SingleContextScopeFactory

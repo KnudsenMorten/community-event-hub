@@ -3,6 +3,7 @@ using CommunityHub.Core.Auth;
 using CommunityHub.Core.Data;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
 using Microsoft.EntityFrameworkCore;
@@ -17,6 +18,11 @@ namespace CommunityHub.Pages;
 /// Designed to work inside the Backstage iframe: one tap to request the code
 /// (Option B, CONTEXT.md 5a).
 /// </summary>
+// Anonymous: this IS the sign-in page (email -> PIN request -> PIN verify). Under
+// the fail-closed FallbackPolicy it must be reachable without a cookie, otherwise
+// no one could ever log in. All POST handlers (request PIN / verify PIN) are on
+// this page model, so the attribute covers them too.
+[AllowAnonymous]
 public class LoginModel : PageModel
 {
     private readonly PinLoginService _pinLogin;

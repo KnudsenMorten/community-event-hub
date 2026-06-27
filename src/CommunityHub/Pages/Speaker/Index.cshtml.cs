@@ -2,6 +2,9 @@ using CommunityHub.Auth;
 using CommunityHub.Core.Config;
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
+using CommunityHub.Core.Integrations;
+using CommunityHub.Core.Integrations.Graphics;
+using CommunityHub.Core.Participants;
 using CommunityHub.Core.Reminders;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -27,34 +30,53 @@ public class IndexModel : PageModel
 {
     private readonly CommunityHubDbContext _db;
     private readonly ICurrentParticipantAccessor _participant;
-    private readonly SpeakerMilestoneService _milestones;
     private readonly SpeakerDeadlineSeeder _speakerDeadlines;
+    private readonly FormTaskReconciler _formTaskReconciler;
     private readonly MasterClassLogisticsService _logistics;
     private readonly SpeakerSessionsService _sessions;
     private readonly PublicSessionsService _publicSessions;
-    private readonly CalendarFeedTokenService _calendarTokens;
+    private readonly SessionEvalsQrService _qr;
+    private readonly ZohoOptions _zohoOptions;
     private readonly ILogger<IndexModel> _logger;
 
     public IndexModel(
         CommunityHubDbContext db,
         ICurrentParticipantAccessor participant,
-        SpeakerMilestoneService milestones,
         SpeakerDeadlineSeeder speakerDeadlines,
+        FormTaskReconciler formTaskReconciler,
         MasterClassLogisticsService logistics,
         SpeakerSessionsService sessions,
         PublicSessionsService publicSessions,
-        CalendarFeedTokenService calendarTokens,
+        SessionEvalsQrService qr,
+        ZohoOptions zohoOptions,
         ILogger<IndexModel> logger)
     {
         _db = db;
         _participant = participant;
-        _milestones = milestones;
         _speakerDeadlines = speakerDeadlines;
+        _formTaskReconciler = formTaskReconciler;
         _logistics = logistics;
         _sessions = sessions;
         _publicSessions = publicSessions;
-        _calendarTokens = calendarTokens;
+        _qr = qr;
+        _zohoOptions = zohoOptions;
         _logger = logger;
+    }
+
+    /// <summary>
+    /// The PUBLIC Zoho Backstage session page URL for a session (§52), or null when the
+    /// session has no Backstage agenda id — the caller then keeps the internal link. Built
+    /// as <c>{BackstagePublicBaseUrl}#/sessions/{id}</c> from per-edition config; never
+    /// fabricated for a session with no Backstage id.
+    /// </summary>
+    public string? BackstagePublicSessionUrl(MySpeakerSession s)
+    {
+        if (string.IsNullOrWhiteSpace(s.BackstageSessionId)) return null;
+        var baseUrl = string.IsNullOrWhiteSpace(_zohoOptions.BackstagePublicBaseUrl)
+            ? "https://eldk27.expertslive.dk/"
+            : _zohoOptions.BackstagePublicBaseUrl;
+        if (!baseUrl.EndsWith('/')) baseUrl += "/";
+        return $"{baseUrl}#/sessions/{Uri.EscapeDataString(s.BackstageSessionId)}";
     }
 
     /// <summary>One master class this speaker is linked to, with its public logistics + landing links.</summary>
@@ -78,11 +100,6 @@ public class IndexModel : PageModel
     public bool AccessDenied { get; private set; }
     public ParticipantRole Role { get; private set; }
     public string FirstName { get; private set; } = "there";
-    public SpeakerMilestoneProgress Progress { get; private set; } =
-        new(Array.Empty<SpeakerMilestone>());
-
-    /// <summary>True once the speaker has saved their speaker-form details.</summary>
-    public bool SpeakerDetailsSubmitted { get; private set; }
 
     /// <summary>The signed-in speaker's own sessions (room/time + question links).</summary>
     public IReadOnlyList<MySpeakerSession> MySessions { get; private set; } =
@@ -99,20 +116,17 @@ public class IndexModel : PageModel
         new HashSet<int>();
 
     /// <summary>
-    /// The speaker's PUBLIC preview URL (<c>/Speakers/{id}</c>) when their profile
-    /// is selected-for-publish (the hard gate). Empty while unselected — the page
-    /// then explains the preview unlocks once the lineup is announced.
+    /// True once at least one attendee rating exists for the speaker's sessions —
+    /// ratings only appear after attendees rate (post-event), so when false the hub
+    /// shows a "not ready yet" notice instead of a click-through (operator 2026-06-25).
     /// </summary>
-    public string PublicPreviewUrl { get; private set; } = string.Empty;
+    public bool HasRatings { get; private set; }
 
-    /// <summary>True once the speaker is SelectedForPublish (their public page is live).</summary>
-    public bool PublicProfileLive { get; private set; }
-
-    /// <summary>webcal:// subscribe URL for the speaker's personal deadline feed (empty if sync off).</summary>
-    public string CalendarWebcalUrl { get; private set; } = string.Empty;
-
-    /// <summary>True when the active edition has calendar sync enabled.</summary>
-    public bool CalendarSyncEnabled { get; private set; }
+    /// <summary>§124: sessionId → the matched per-room session-evaluation QR file
+    /// (only sessions whose room matched a QR file are present; empty when the QR
+    /// folder is not configured).</summary>
+    public IReadOnlyDictionary<int, SessionEvalQrFile> RoomQr { get; private set; } =
+        new Dictionary<int, SessionEvalQrFile>();
 
     public async Task<IActionResult> OnGetAsync(CancellationToken ct)
     {
@@ -145,27 +159,12 @@ public class IndexModel : PageModel
         return Page();
     }
 
-    /// <summary>Mark one of the speaker's own milestones done / not done.</summary>
-    public async Task<IActionResult> OnPostToggleAsync(int taskId, CancellationToken ct)
-    {
-        var me = _participant.Current;
-        if (me is null) return RedirectToPage("/Login");
-        if (!EligibleRoles.Contains(me.Role)) return RedirectToPage("/Index");
-
-        await _milestones.ToggleAsync(me.EventId, me.ParticipantId, taskId, ct);
-        return RedirectToPage();
-    }
-
     private async Task LoadAsync(CurrentParticipant me, CancellationToken ct)
     {
-        Progress = await _milestones.GetProgressAsync(me.EventId, me.ParticipantId, ct);
-
-        var profile = await _db.SpeakerProfiles.FirstOrDefaultAsync(
-            sp => sp.EventId == me.EventId && sp.ParticipantId == me.ParticipantId, ct);
-
-        SpeakerDetailsSubmitted = profile is not null
-            && (profile.Accreditation != null || profile.Country != null
-                || profile.SpeakingPreDay || profile.SpeakingMainDay);
+        // Bring this speaker's OPEN logistics tasks in line with form data they have
+        // already submitted (hotel/dinner/lunch/swag/travel) before anything is read.
+        // Idempotent + no-op when nothing needs changing.
+        await _formTaskReconciler.ReconcileAsync(me.EventId, me.ParticipantId, ct);
 
         // My sessions (own-row scoped server-side) — room/time + question links.
         MySessions = await _sessions.GetMySessionsAsync(
@@ -178,38 +177,19 @@ public class IndexModel : PageModel
         PubliclyViewableSessionIds = await _publicSessions.GetPubliclyViewableSessionIdsAsync(
             MySessions.Select(s => s.SessionId), ct);
 
-        // Public preview: only resolvable once the organizer has selected this
-        // speaker for publish (the §6 hard gate — an unselected /Speakers/{id}
-        // 404s, so we only surface the link when it actually resolves).
-        PublicProfileLive = profile?.SelectedForPublish == true;
-        if (PublicProfileLive)
+        // §124: per-room session-evaluation QR per session (inert until the QR folder
+        // is configured). The download itself is served by /Speaker/Evaluations?Qr.
+        if (_qr.CanRead)
         {
-            PublicPreviewUrl =
-                Url.Page("/Speakers/Detail", new { id = me.ParticipantId }) ?? string.Empty;
+            RoomQr = await _qr.MatchSessionsAsync(
+                MySessions.Select(s => new SessionRoomRef(s.SessionId, s.Room)), ct);
         }
 
-        // Calendar reminders: surface the speaker's personal deadline feed
-        // (the same per-user token feed the volunteer My-schedule uses), so a
-        // speaker can subscribe once and keep their milestone deadlines in sync.
-        CalendarSyncEnabled = await _db.Events
-            .Where(e => e.Id == me.EventId)
-            .Select(e => e.CalendarSyncEnabled)
-            .FirstOrDefaultAsync(ct);
-        if (CalendarSyncEnabled)
-        {
-            try
-            {
-                var token = await _calendarTokens.EnsureTokenAsync(me.ParticipantId, ct);
-                var host = Request.Host.Value ?? string.Empty;
-                CalendarWebcalUrl = $"webcal://{host}/cal/{token}.ics";
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex,
-                    "Speaker hub: failed to ensure calendar feed token for participant {Pid}",
-                    me.ParticipantId);
-            }
-        }
+        // Ratings only exist once attendees have rated (post-event) — drives the
+        // "not ready yet" notice vs. the click-through on the hub.
+        var mySessionIds = MySessions.Select(s => s.SessionId).ToList();
+        HasRatings = mySessionIds.Count > 0
+            && await _db.SessionEvaluations.AnyAsync(e => mySessionIds.Contains(e.SessionId), ct);
 
         // Master classes this speaker is linked to — surface the "show public
         // link" affordance (REQUIREMENTS § 6c). The slug is minted on first view.

@@ -24,13 +24,19 @@ namespace CommunityHub.Core.Tests.Scenario;
 /// </summary>
 public sealed class SpeakerMilestoneScenarioTests
 {
-    // The current speaker-task set (operator 2026-06-23): 7 tasks, all for ALL
-    // speakers (no masterclass-only task). Four share the 1 Oct 2026 date.
-    private static readonly DateOnly Oct1Due = new(2026, 10, 1);    // Bio, Hotel, Dinner, Swag
-    private static readonly DateOnly LunchDue = new(2027, 1, 10);   // Pre-day Lunch
-    private static readonly DateOnly PreviewDue = new(2027, 1, 20); // Upload preview
-    private static readonly DateOnly FinalDue = new(2027, 2, 3);    // Upload final
-    private const int TaskCount = 7;
+    // The current speaker-task set (operator 2026-06-25): the 6 configured speaker
+    // deadlines — Hotel, Appreciation Dinner, Swag/Speaker gift, Pre-day Lunch, plus
+    // the two KEPT presentation uploads (preview + final). Logistics deadlines are
+    // P12 entitlement-gated; the uploads are NEVER gated (every speaker gets them).
+    // A Master Class (pre-day) speaker is entitled to the Pre-day Lunch, so gets all
+    // 6; a plain speaker not on the pre-/main-day has no lunch entitlement, so the
+    // Lunch deadline is gated out and they get 5.
+    private static readonly DateOnly Oct1Due = new(2026, 10, 1);    // Hotel, Dinner, Swag
+    private static readonly DateOnly LunchDue = new(2027, 1, 10);   // Pre-day Lunch (pre-day speakers only)
+    private static readonly DateOnly PreviewDue = new(2027, 1, 20); // Upload preview presentation
+    private static readonly DateOnly FinalDue = new(2027, 2, 3);    // Upload final presentation
+    private const int MasterclassTaskCount = 6;   // + Pre-day Lunch (pre-day entitlement)
+    private const int SpeakerTaskCount = 5;       // no Pre-day Lunch (not entitled)
 
     private static SpeakerDeadlineSeeder NewSeeder(Data.CommunityHubDbContext db) =>
         new(db,
@@ -50,8 +56,10 @@ public sealed class SpeakerMilestoneScenarioTests
             .Where(t => t.AssignedParticipantId == seed.MasterclassSpeakerId)
             .ToListAsync();
 
-        Assert.Equal(TaskCount, mcTasks.Count);
-        Assert.Equal(4, mcTasks.Count(t => t.DueDate == Oct1Due));
+        // A Master Class (pre-day) speaker gets the full set of 6: Hotel/Dinner/Swag
+        // (1 Oct), Pre-day Lunch (10 Jan), upload preview (20 Jan), upload final (3 Feb).
+        Assert.Equal(MasterclassTaskCount, mcTasks.Count);
+        Assert.Equal(3, mcTasks.Count(t => t.DueDate == Oct1Due));
         Assert.Single(mcTasks, t => t.DueDate == LunchDue);
         Assert.Single(mcTasks, t => t.DueDate == PreviewDue);
         Assert.Single(mcTasks, t => t.DueDate == FinalDue);
@@ -65,17 +73,19 @@ public sealed class SpeakerMilestoneScenarioTests
         var seed = await ScenarioSeed.SeedAsync(db);
         await NewSeeder(db).SeedAsync(seed.EventId);
 
-        // No masterclass-only task in the current set (operator 2026-06-23): a plain
-        // session speaker gets exactly the same 7 tasks as a Master Class speaker.
+        // A plain session speaker (not pre-/main-day) is NOT entitled to lunch, so the
+        // Pre-day Lunch deadline is P12-gated out: they get 5 tasks — Hotel/Dinner/Swag
+        // (1 Oct) + the two presentation uploads — but NOT the Pre-day Lunch the Master
+        // Class speaker gets.
         var s1Tasks = await db.Tasks
             .Where(t => t.AssignedParticipantId == seed.SpeakerOneId)
             .ToListAsync();
 
-        Assert.Equal(TaskCount, s1Tasks.Count);
-        Assert.Equal(4, s1Tasks.Count(t => t.DueDate == Oct1Due));
-        Assert.Contains(s1Tasks, t => t.DueDate == LunchDue);
-        Assert.Contains(s1Tasks, t => t.DueDate == PreviewDue);
-        Assert.Contains(s1Tasks, t => t.DueDate == FinalDue);
+        Assert.Equal(SpeakerTaskCount, s1Tasks.Count);
+        Assert.Equal(3, s1Tasks.Count(t => t.DueDate == Oct1Due));
+        Assert.DoesNotContain(s1Tasks, t => t.DueDate == LunchDue); // P12: lunch gated out
+        Assert.Single(s1Tasks, t => t.DueDate == PreviewDue);
+        Assert.Single(s1Tasks, t => t.DueDate == FinalDue);
     }
 
     [Fact]

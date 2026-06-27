@@ -44,10 +44,8 @@ public static class ScenarioFixture
                 TemplateDirectory = RepoPaths.EmailTemplates(),
             }));
         var welcome = new WelcomeEmailService(db, templates, sender, Clock);
-        // The Excel parser is only used by the file-upload entry point; the
-        // scenario drives ImportSpeakersAsync directly with parsed speakers, so
-        // a parser instance is not required here.
-        var import = new SessionizeImportService(db, parser: null!, welcome, Clock);
+        // The scenario drives ImportSpeakersAsync directly with parsed speakers.
+        var import = new SessionizeImportService(db, welcome, Clock);
         return (import, sender);
     }
 
@@ -116,6 +114,21 @@ public sealed class CapturingEmailSender : IEmailSender
         Sent.Add((toEmail, subject));
         IcsMessages.Add((toEmail, subject, htmlBody));
         LastIcs = icsContent;
+        return Task.CompletedTask;
+    }
+
+    /// <summary>Full capture (To, Subject, Html, attachments) of every
+    /// SendWithAttachmentsAsync call — kept separate so attachment sends don't
+    /// change the non-attachment message count existing tests assert on.</summary>
+    public List<(string To, string Subject, string Html, IReadOnlyCollection<EmailAttachment> Attachments)> AttachmentMessages { get; } = new();
+
+    public Task SendWithAttachmentsAsync(
+        string toEmail, string subject, string htmlBody,
+        IReadOnlyCollection<EmailAttachment> attachments,
+        CancellationToken ct = default)
+    {
+        Sent.Add((toEmail, subject));
+        AttachmentMessages.Add((toEmail, subject, htmlBody, attachments ?? Array.Empty<EmailAttachment>()));
         return Task.CompletedTask;
     }
 }

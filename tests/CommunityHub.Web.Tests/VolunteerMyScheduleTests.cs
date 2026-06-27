@@ -60,7 +60,6 @@ public sealed class VolunteerMyScheduleTests
             structure,
             shifts: null!,                     // not reached by the .ics handler
             helpNotify: null!,                 // not reached by the .ics handler
-            new CalendarFeedTokenService(db),
             new ParticipantCalendarBuilder(db),
             NullLogger<MyScheduleModel>.Instance)
         {
@@ -165,7 +164,6 @@ public sealed class VolunteerMyScheduleTests
         Assert.IsType<PageResult>(result);
         var entry = Assert.Single(model.Schedule.Entries);
         Assert.Equal("Staff the desk", entry.Title);
-        Assert.False(string.IsNullOrEmpty(model.CalendarWebcalUrl));
     }
 
     // ---------------------------------------------------------------------

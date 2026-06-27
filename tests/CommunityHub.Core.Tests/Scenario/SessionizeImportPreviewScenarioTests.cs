@@ -45,7 +45,7 @@ public sealed class SessionizeImportPreviewScenarioTests
 
     private static SessionizeImportPreviewService NewPreview(
         Data.CommunityHubDbContext db) =>
-        new(db, parser: null!, apiClient: null!,
+        new(db, apiClient: null!,
             apiOptions: new SessionizeApiOptions());
 
     [Fact]

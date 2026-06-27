@@ -26,10 +26,24 @@
     .mc-confirmed { font-size:16px; color:#1f2430; background:#eef2fb; border:1px solid #c7d2f0;
         border-left:4px solid var(--el-darkblue,#1D3380); border-radius:8px; padding:10px 14px; margin:0 0 6px; }
     .mc-confirmed strong { color:var(--el-darkblue,#1D3380); }
+    /* Waitlist policy panel (operator §63) — readable copy at the top of the section. */
+    .mc-policy { background:#f5f7fc; border:1px solid #d7deef; border-left:4px solid var(--el-blue,#008BD2);
+        border-radius:8px; padding:10px 14px; margin:0 0 14px; }
+    .mc-policy p { margin:0 0 8px; font-size:14px; color:#374151; line-height:1.5; }
+    .mc-policy p:last-child { margin-bottom:0; }
 </style>
 
 <div class="card">
-    <h2>@Localizer["Nav.MasterClass"]</h2>
+    <h1>@Localizer["Nav.MasterClass"]</h1>
+
+    @* TempData-driven flash (e.g. the "reserve a seat first" notice redirected here
+       from /Attendee/MasterClassQa). _Flash REQUIRES a FlashModel — build it from
+       TempData and render only when a message is present (a bare <partial name="_Flash" />
+       passed the page's IndexModel and 500'd the whole hub). *@
+    @if (TempData["Flash"] is string flashMsg && !string.IsNullOrEmpty(flashMsg))
+    {
+        <partial name="_Flash" model='new CommunityHub.Pages.Shared.FlashModel(flashMsg, (TempData["FlashKind"] as string) ?? "success")' />
+    }
 
     @if (!string.IsNullOrEmpty(Model.Message))
     {
@@ -44,92 +58,116 @@
     {
         <p>Master Classes are part of the <strong>2-day ticket</strong> (pre-day deep-dive). Your current ticket doesn't include a Master Class.</p>
     }
-    else if (Model.Confirmed is not null)
-    {
-        <p class="mc-confirmed">&#10003; You're confirmed for your Master Class: <strong>@Model.Confirmed.Title</strong>.</p>
-
-        <div class="mc-actions">
-            @* Add to calendar that OPENS the entry (not a file download). Outlook/Google
-               open a pre-filled event in the browser; the .ics is the universal fallback. *@
-            @if (Model.OutlookCalUrl is not null)
-            {
-                <a class="task-link-btn" href="@Model.OutlookCalUrl" target="_blank" rel="noopener">&#128197; Add to Outlook</a>
-            }
-            @if (Model.GoogleCalUrl is not null)
-            {
-                <a class="task-link-btn" href="@Model.GoogleCalUrl" target="_blank" rel="noopener">&#128197; Add to Google Calendar</a>
-            }
-            <a class="task-link-btn" asp-page-handler="Ics">&#128197; Apple / other (.ics)</a>
-            <a class="task-link-btn" href="/MasterClassPage/@Model.Confirmed.SessionId">&#128203; Master Class info, what to bring &amp; Q&amp;A</a>
-        </div>
-
-        <form method="post" asp-page-handler="ToggleReminder" style="margin-top:12px;">
-            <input type="hidden" name="wants" value="@((!Model.MonthReminderOptIn).ToString().ToLowerInvariant())" />
-            <button type="submit" class="secondary">
-                @(Model.MonthReminderOptIn ? "Turn off the ~1-month-before reminder" : "Remind me ~1 month before")
-            </button>
-        </form>
-
-        <form method="post" asp-page-handler="GiveUp" style="margin-top:12px;"
-              data-ceh-confirm="mc-giveup-modal">
-            <input type="hidden" name="sessionId" value="@Model.Confirmed.SessionId" />
-            <button type="submit" class="secondary">Give up my Master Class seat</button>
-        </form>
-        <partial name="_ConfirmModal" model='new CommunityHub.Pages.Shared.ConfirmModalModel(
-            "mc-giveup-modal", "Give up your seat?",
-            "This frees your seat for the next person on the waitlist. You can pick another Master Class afterwards if seats remain.",
-            "Give up seat", "Keep my seat", true)' />
-    }
     else
     {
-        <p>Choose your Master Class — a full-day, hands-on pre-day deep dive. You can hold <strong>one</strong> confirmed seat.</p>
+        @* WAITLIST POLICY (operator §63) — readable copy at the top of the section,
+           before any seat/waitlist action. *@
+        <div class="mc-policy">
+            <p>@Localizer["MasterClass.WaitlistPolicy.1"]</p>
+            <p>@Localizer["MasterClass.WaitlistPolicy.2"]</p>
+            <p>@Localizer["MasterClass.WaitlistPolicy.3"]</p>
+        </div>
 
-        @if (Model.Options.Count == 0)
+        @if (Model.Confirmed is not null)
         {
-            <p class="error">The Master Classes haven't been published yet — please check back shortly.</p>
+            <p class="mc-confirmed">&#10003; You're confirmed for your Master Class: <strong>@Model.Confirmed.Title</strong>.</p>
+
+            <div class="mc-actions">
+                <a class="task-link-btn" href="/MasterClassPage/@Model.Confirmed.SessionId">&#128203; Master Class info, what to bring &amp; Q&amp;A</a>
+            </div>
+
+            <form method="post" asp-page-handler="ToggleReminder" style="margin-top:12px;">
+                <input type="hidden" name="wants" value="@((!Model.MonthReminderOptIn).ToString().ToLowerInvariant())" />
+                <button type="submit" class="secondary">
+                    @(Model.MonthReminderOptIn ? "Turn off the ~1-month-before reminder" : "Remind me ~1 month before")
+                </button>
+            </form>
+
+            <form method="post" asp-page-handler="GiveUp" style="margin-top:12px;"
+                  data-ceh-confirm="mc-giveup-modal">
+                <input type="hidden" name="sessionId" value="@Model.Confirmed.SessionId" />
+                <button type="submit" class="secondary">Give up my Master Class seat</button>
+            </form>
+            <partial name="_ConfirmModal" model='new CommunityHub.Pages.Shared.ConfirmModalModel(
+                "mc-giveup-modal", "Give up your seat?",
+                "This frees your seat for the next person on the waitlist. You can pick another Master Class afterwards if seats remain.",
+                "Give up seat", "Keep my seat", true)' />
         }
 
-        <div class="mc-cards">
-            @foreach (var o in Model.Options)
+        @* Cards to act on: choose a seat (no confirmed seat yet) OR — while already holding
+           a seat — join a FULL class's WAITLIST without giving the seat up (§63 bug fix:
+           keeping your seat is no longer a precondition for joining a waitlist). A seat-holder
+           can never take a 2nd confirmed seat, so only full (waitlist-only) classes are offered
+           to them. "One waitlist at a time" → join list hidden once already on a waitlist/offer.
+           NOTE: bare C# (no @{ }) — we're already inside the @if/else code-block body. *@
+        var canActOnCards = Model.Confirmed is null || Model.Pending is null;
+        var joinable = Model.Confirmed is null
+            ? Model.Options.ToList()
+            : Model.Options.Where(o => o.IsFull).ToList();
+
+        @if (canActOnCards)
+        {
+            if (Model.Confirmed is null)
             {
-                var cls = o.Availability == MasterClassSignupService.AvailabilityLevel.Full ? "full"
-                        : o.Availability == MasterClassSignupService.AvailabilityLevel.FillingUp ? "filling" : "available";
-                // Seat count when capacity is configured: "N of M seats left"; else a plain label.
-                var availText = o.Availability == MasterClassSignupService.AvailabilityLevel.Full
-                        ? (o.Capacity is int fc ? $"Full ({fc} seats) — join the waitlist" : "Full — join the waitlist")
-                    : (o.Free is int free && o.Capacity is int cap)
-                        ? $"{free} of {cap} seats available"
-                        : "Seats available";
-                <div class="mc-card">
-                    <h3>@o.Title</h3>
-                    <span class="mc-avail @cls">@availText</span>
-                    @if (o.SpeakerNames.Count > 0 || !string.IsNullOrWhiteSpace(o.Abstract))
-                    {
-                        <details class="mc-details">
-                            <summary>Session details</summary>
-                            @if (o.SpeakerNames.Count > 0)
-                            {
-                                <p class="mc-speakers">Presented by @string.Join(", ", o.SpeakerNames)</p>
-                            }
-                            @if (!string.IsNullOrWhiteSpace(o.Abstract))
-                            {
-                                <p class="mc-abstract">@o.Abstract</p>
-                            }
-                        </details>
-                    }
-                    <form method="post" asp-page-handler="Join" class="mc-actions">
-                        <input type="hidden" name="sessionId" value="@o.SessionId" />
-                        @* Already hold a seat elsewhere? Joining a different one (or its waitlist) needs
-                           consent to auto-switch (you never hold 2 confirmed). *@
-                        @if (Model.Pending is not null)
-                        {
-                            <input type="hidden" name="autoSwitchConsent" value="true" />
-                        }
-                        <button type="submit">@(o.IsFull ? "Join waitlist" : "Choose this Master Class")</button>
-                    </form>
-                </div>
+                <p>Choose your Master Class — a full-day, hands-on pre-day deep dive. You can hold <strong>one</strong> confirmed seat.</p>
+                if (Model.Options.Count == 0)
+                {
+                    <p class="error">The Master Classes haven't been published yet — please check back shortly.</p>
+                }
             }
-        </div>
+            else
+            {
+                <p style="margin-top:16px;">Want to line up another Master Class as well? You can join the waitlist for a full one and keep your current seat — it's only swapped if a place opens and you're moved in.</p>
+                if (joinable.Count == 0)
+                {
+                    <p class="info">No Master Class is full right now, so there are no waitlists to join.</p>
+                }
+            }
+
+            <div class="mc-cards">
+                @foreach (var o in joinable)
+                {
+                    var cls = o.Availability == MasterClassSignupService.AvailabilityLevel.Full ? "full"
+                            : o.Availability == MasterClassSignupService.AvailabilityLevel.FillingUp ? "filling" : "available";
+                    // Seat count when capacity is configured: "N of M seats left"; else a plain label.
+                    var availText = o.Availability == MasterClassSignupService.AvailabilityLevel.Full
+                            ? (o.Capacity is int fc ? $"Full ({fc} seats) — join the waitlist" : "Full — join the waitlist")
+                        : (o.Free is int free && o.Capacity is int cap)
+                            ? $"{free} of {cap} seats available"
+                            : "Seats available";
+                    <div class="mc-card">
+                        <h3>@o.Title</h3>
+                        <span class="mc-avail @cls">@availText</span>
+                        @if (o.SpeakerNames.Count > 0 || !string.IsNullOrWhiteSpace(o.Abstract))
+                        {
+                            <details class="mc-details">
+                                <summary>Session details</summary>
+                                @if (o.SpeakerNames.Count > 0)
+                                {
+                                    <p class="mc-speakers">Presented by @string.Join(", ", o.SpeakerNames)</p>
+                                }
+                                @if (!string.IsNullOrWhiteSpace(o.Abstract))
+                                {
+                                    <p class="mc-abstract">@o.Abstract</p>
+                                }
+                            </details>
+                        }
+                        <form method="post" asp-page-handler="Join" class="mc-actions">
+                            <input type="hidden" name="sessionId" value="@o.SessionId" />
+                            @* Joining a waitlist while already holding a seat opts into the
+                               auto-switch-on-promotion terms (disclosed in the policy above);
+                               the engine requires this consent. Nothing is cancelled just by
+                               joining — only if a place opens and you're moved in. *@
+                            @if (Model.Confirmed is not null)
+                            {
+                                <input type="hidden" name="autoSwitchConsent" value="true" />
+                            }
+                            <button type="submit">@(o.IsFull ? "Join waitlist" : "Choose this Master Class")</button>
+                        </form>
+                    </div>
+                }
+            </div>
+        }
 
         @if (Model.Pending is not null)
         {

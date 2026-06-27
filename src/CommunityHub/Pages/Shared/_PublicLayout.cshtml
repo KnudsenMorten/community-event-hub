@@ -11,6 +11,11 @@
 *@
 @{
     Layout = null;
+
+    // Display name only, kept in sync with _Layout (no shared injects here on
+    // purpose - this layout pulls in NO auth/nav services).
+    const string ProductName = "Community Event Hub";
+    const string ProductShortName = "CEH";
 }<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -31,6 +36,12 @@
     <main id="main" tabindex="-1">
         @RenderBody()
     </main>
+    @* Minimal contentinfo landmark (a11y landmark gate). Copyright / product
+       line only - NO internal nav, user identity, or Sign-out, to respect the
+       anonymous-isolation rule (REQUIREMENTS §27). *@
+    <footer style="text-align:center;">
+        <div>@ProductName (@ProductShortName)</div>
+    </footer>
     <partial name="_LayoutClientScripts" />
     @await RenderSectionAsync("Scripts", required: false)
 </body>

@@ -9,7 +9,7 @@
 @if (!Model.HotelRelevant)
 {
     <div class="card">
-        <h2>@Localizer["Hotel.Title"]</h2>
+        <h1>@Localizer["Hotel.Title"]</h1>
         <p style="background:#eef6ff;padding:10px 14px;border-radius:6px;font-size:14px;">
             @Localizer["Hotel.NotRelevant"]
         </p>
@@ -19,7 +19,7 @@
 }
 
 <div class="card">
-    <h2>@Localizer["Hotel.Title"]</h2>
+    <h1>@Localizer["Hotel.Title"]</h1>
 
     @* Role-specific policy. Organizers see no policy (not relevant to them); the
        lead sits on its own line above the body (two lines). *@
@@ -38,6 +38,22 @@
         <p style="background:#eef6ff;padding:10px 14px;border-radius:6px;font-size:14px;">
             <strong>@Localizer["Hotel.PolicyLead"]</strong><br />
             @Localizer[policyKey]
+        </p>
+    }
+
+    @* Read-only reservation confirmation (REQUIREMENTS §46). Once an organizer enters
+       the hotel's booking confirmation number, the reservation is [CONFIRMED]; the
+       participant sees the number here (read-only) and has been re-sent a calendar
+       invite carrying it. *@
+    @if (Model.IsReservationConfirmed)
+    {
+        <p style="background:#dcfce7;color:#166534;padding:10px 14px;border-radius:6px;font-size:14px;">
+            <strong>@Localizer["Hotel.Confirmed"]</strong><br />
+            @if (!string.IsNullOrWhiteSpace(Model.AssignedHotelName))
+            {
+                @Localizer["Hotel.ConfirmedHotel", Model.AssignedHotelName!]<br />
+            }
+            @Localizer["Hotel.ConfirmationNumberLabel"] <strong>@Model.HotelConfirmationNumber</strong>
         </p>
     }
 
@@ -84,6 +100,7 @@
             </div>
 
             <button type="submit">@Localizer["Common.Save"]</button>
+            <partial name="_LastSaved" model="Model.LastSavedAt" />
         </form>
         <script>
             // Show date/share/notes block only when "Yes" is chosen.

@@ -7,19 +7,21 @@
     var tiles = new List<HubTile>
     {
         new HubTile("/Organizer/Speakers", Localizer["Nav.OrgSpeakers"].Value, Localizer["OrgContent.Speakers"].Value),
+        new HubTile("/Organizer/SpeakerReadiness", "Speaker readiness", "Per-speaker \"am I ready?\" rollup — score + what's still missing, lowest readiness first (chase list)."),
         new HubTile("/Organizer/Sessions", Localizer["Nav.OrgSessions"].Value, Localizer["OrgContent.Sessions"].Value),
         new HubTile("/Organizer/SessionQuestions", Localizer["Nav.OrgSessionQuestions"].Value, Localizer["OrgContent.SessionQuestions"].Value),
         new HubTile("/Organizer/SessionEvaluations", Localizer["Nav.OrgSessionEvaluations"].Value, Localizer["OrgContent.SessionEvaluations"].Value),
         new HubTile("/Organizer/SessionizeImport", Localizer["Nav.OrgSessionizeImport"].Value, Localizer["OrgContent.SessionizeImport"].Value),
         new HubTile("/Organizer/SessionizeEndpointSettings", Localizer["Nav.OrgSessionizeEndpoint"].Value, "Configure the Sessionize API endpoint."),
         new HubTile("/Organizer/SessionSource", "Session source", "Choose the session source (Sessionize / Backstage)."),
+        new HubTile("/Organizer/SyncQueue", Localizer["Nav.OrgSyncQueue"].Value, Localizer["OrgContent.SyncQueue"].Value),
         new HubTile("/Organizer/MasterClasses", "Master Classes", "Seat capacity + waitlist rosters, set capacity, and attendee self-service links.", "masterclass-invites"),
         new HubTile("/Organizer/Surveys", Localizer["Nav.OrgSurveys"].Value, Localizer["OrgContent.Surveys"].Value, "surveys"),
     };
 }
 
 <div class="card">
-    <h2>@Localizer["OrgContent.Title"]</h2>
+    <h1>@Localizer["OrgContent.Title"]</h1>
     @if (Model.AccessDenied)
     {
         <p class="error">@Localizer["Common.OrganizersOnly"]</p>

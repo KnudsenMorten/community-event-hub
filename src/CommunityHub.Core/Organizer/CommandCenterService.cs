@@ -1,6 +1,8 @@
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
 using CommunityHub.Core.Email;
+using CommunityHub.Core.Participants;
+using CommunityHub.Core.Sponsors;
 using Microsoft.EntityFrameworkCore;
 
 namespace CommunityHub.Core.Organizer;
@@ -61,6 +63,26 @@ public sealed class CommandCenterSnapshot
     public int ActiveParticipants { get; set; }
     public int TotalAttendees { get; set; }
 
+    // --- Live event-day check-in (§131) -----------------------------------
+    /// <summary>The ACTIVE-mirror attendee set (soft-cancelled tickets excluded, §128) —
+    /// the "expected on-site" base check-in progress is measured against.</summary>
+    public int ExpectedAttendees { get; set; }
+
+    /// <summary>
+    /// Attendees who have checked in (the self-service <see cref="Attendee.CheckedInAt"/>
+    /// stamp), over the ACTIVE mirror. HONEST SCOPE: this is the only check-in signal the
+    /// hub captures today — the attendee taps "I'm here" on their My-Event dashboard. The
+    /// Zoho Backstage <c>attendeestatus.checkin</c>/<c>undocheckin</c> webhook is NOT wired
+    /// to this field (the §128 webhook is order-level only), so this reflects self-check-in,
+    /// not turnstile/badge scans. The view states this so the number is never read as a
+    /// full on-site count.
+    /// </summary>
+    public int CheckedInCount { get; set; }
+
+    /// <summary>Check-in progress as a percent of <see cref="ExpectedAttendees"/> (0 when none).</summary>
+    public int CheckedInPercent =>
+        ExpectedAttendees == 0 ? 0 : (int)Math.Round(100.0 * CheckedInCount / ExpectedAttendees);
+
     // --- Onboarding completion (overall + per persona) --------------------
     public int OnboardingOverallPercent { get; set; }
     public List<PersonaCompletion> OnboardingByPersona { get; set; } = new();
@@ -77,6 +99,45 @@ public sealed class CommandCenterSnapshot
     public int SponsorTasksDone { get; set; }
     public int SponsorTasksPercent =>
         SponsorTasksTotal == 0 ? 0 : (int)Math.Round(100.0 * SponsorTasksDone / SponsorTasksTotal);
+
+    // --- Master classes: fill + waitlist (§6/§131) ------------------------
+    /// <summary>Number of (non-service) master-class sessions in the edition.</summary>
+    public int MasterClassCount { get; set; }
+    /// <summary>True when at least one master class has a seat capacity configured.</summary>
+    public bool MasterClassHasCapacity { get; set; }
+    /// <summary>Sum of configured seat capacities (over classes that have one).</summary>
+    public int MasterClassCapacity { get; set; }
+    /// <summary>Confirmed seats across all master classes.</summary>
+    public int MasterClassConfirmed { get; set; }
+    /// <summary>Held offers in flight — seats moving from waitlist to confirmed (§93 movement).</summary>
+    public int MasterClassOffered { get; set; }
+    /// <summary>Attendees on a master-class waitlist.</summary>
+    public int MasterClassWaitlisted { get; set; }
+    /// <summary>Master classes that are full (capped and seats-taken &gt;= capacity).</summary>
+    public int MasterClassFull { get; set; }
+    /// <summary>Seats occupied = confirmed + offered (both hold a seat against capacity).</summary>
+    public int MasterClassSeatsTaken => MasterClassConfirmed + MasterClassOffered;
+    /// <summary>Fill % of configured capacity (0 when no capacity is configured).</summary>
+    public int MasterClassFillPercent =>
+        MasterClassHasCapacity && MasterClassCapacity > 0
+            ? (int)Math.Round(100.0 * MasterClassSeatsTaken / MasterClassCapacity) : 0;
+
+    // --- Speaker readiness summary (§134) ---------------------------------
+    public int SpeakerTotal { get; set; }
+    public int SpeakerReady { get; set; }
+    public int SpeakerReadinessAvgPercent { get; set; }
+
+    // --- Sponsor deliverables summary (§135) ------------------------------
+    public int SponsorCompaniesTotal { get; set; }
+    public int SponsorCompaniesComplete { get; set; }
+    public int SponsorCompaniesAtRisk { get; set; }
+    public int SponsorDeliverablesAvgPercent { get; set; }
+
+    // --- CEH⇄Zoho sync health badge (§132) --------------------------------
+    public SyncHealthStatus SyncStatus { get; set; } = SyncHealthStatus.NeverSynced;
+    public DateTimeOffset? SyncLastSuccessAt { get; set; }
+    public DateTimeOffset? SyncLastWebhookAt { get; set; }
+    public bool SyncHasDrift { get; set; }
 
     // --- "What needs my attention" tiles + task list ----------------------
     public List<CommandCenterTile> AttentionTiles { get; set; } = new();
@@ -109,15 +170,24 @@ public sealed class CommandCenterService
 
     private readonly CommunityHubDbContext _db;
     private readonly OnboardingService _onboarding;
+    private readonly SpeakerReadinessService _speakerReadiness;
+    private readonly SponsorDeliverablesService _sponsorDeliverables;
+    private readonly SyncHealthService _syncHealth;
     private readonly TimeProvider _clock;
 
     public CommandCenterService(
         CommunityHubDbContext db,
         OnboardingService onboarding,
+        SpeakerReadinessService speakerReadiness,
+        SponsorDeliverablesService sponsorDeliverables,
+        SyncHealthService syncHealth,
         TimeProvider clock)
     {
         _db = db;
         _onboarding = onboarding;
+        _speakerReadiness = speakerReadiness;
+        _sponsorDeliverables = sponsorDeliverables;
+        _syncHealth = syncHealth;
         _clock = clock;
     }
 
@@ -136,9 +206,12 @@ public sealed class CommandCenterService
         };
 
         await PopulateParticipationAsync(snap, eventId, ct);
+        await PopulateCheckInAsync(snap, eventId, ct);
         await PopulateOnboardingAsync(snap, eventId, ct);
         await PopulateHeadcountsAsync(snap, eventId, ct);
         await PopulateSessionsAndSponsorsAsync(snap, eventId, ct);
+        await PopulateMasterClassesAsync(snap, eventId, ct);
+        await PopulateOpsSummariesAsync(snap, eventId, today, ct);
         await PopulateAttentionAsync(snap, eventId, today, ct);
 
         return snap;
@@ -154,6 +227,88 @@ public sealed class CommandCenterService
         s.TotalParticipants = people.Count;
         s.ActiveParticipants = people.Count(active => active);
         s.TotalAttendees = await _db.Attendees.CountAsync(a => a.EventId == eventId, ct);
+    }
+
+    private async Task PopulateCheckInAsync(
+        CommandCenterSnapshot s, int eventId, CancellationToken ct)
+    {
+        // Expected base = the ACTIVE mirror set only (soft-cancelled tickets excluded, §128).
+        s.ExpectedAttendees = await _db.Attendees
+            .CountAsync(a => a.EventId == eventId && a.MirrorState == MirrorState.Active, ct);
+        // Checked-in = the self-service "I'm here" stamp on an active ticket (see the field
+        // doc: the Zoho attendeestatus webhook is NOT wired to CheckedInAt — honest gap).
+        s.CheckedInCount = await _db.Attendees
+            .CountAsync(a => a.EventId == eventId
+                             && a.MirrorState == MirrorState.Active
+                             && a.CheckedInAt != null, ct);
+    }
+
+    private async Task PopulateMasterClassesAsync(
+        CommandCenterSnapshot s, int eventId, CancellationToken ct)
+    {
+        var mcs = await _db.Sessions
+            .Where(x => x.EventId == eventId
+                        && x.Type == SessionType.MasterClass && !x.IsServiceSession)
+            .Select(x => new { x.Id, x.MasterClassCapacity })
+            .ToListAsync(ct);
+        s.MasterClassCount = mcs.Count;
+        if (mcs.Count == 0) return;
+
+        var counts = await _db.MasterClassSignups
+            .Where(x => x.EventId == eventId)
+            .GroupBy(x => new { x.SessionId, x.Status })
+            .Select(g => new { g.Key.SessionId, g.Key.Status, Count = g.Count() })
+            .ToListAsync(ct);
+
+        int C(int sid, MasterClassSignupStatus st) =>
+            counts.Where(c => c.SessionId == sid && c.Status == st).Sum(c => c.Count);
+
+        var capped = mcs.Where(m => m.MasterClassCapacity is int cap && cap > 0).ToList();
+        s.MasterClassHasCapacity = capped.Count > 0;
+        s.MasterClassCapacity = capped.Sum(m => m.MasterClassCapacity!.Value);
+
+        foreach (var m in mcs)
+        {
+            var confirmed = C(m.Id, MasterClassSignupStatus.Confirmed);
+            var offered = C(m.Id, MasterClassSignupStatus.Offered);
+            s.MasterClassConfirmed += confirmed;
+            s.MasterClassOffered += offered;
+            s.MasterClassWaitlisted += C(m.Id, MasterClassSignupStatus.Waitlisted);
+            // "Taken" (confirmed + offered) both hold a seat against the cap (§93).
+            if (m.MasterClassCapacity is int cap && cap > 0 && confirmed + offered >= cap)
+                s.MasterClassFull++;
+        }
+    }
+
+    /// <summary>
+    /// The event-day OPS rollups the §131 command center links to as tiles: speaker
+    /// readiness (§134), sponsor deliverables (§135), and the CEH⇄Zoho sync-health badge
+    /// (§132). Each reuses the SAME read-only service the dedicated page uses, so the tile
+    /// number and the page agree. None of them writes, so the snapshot stays repeatable.
+    /// </summary>
+    private async Task PopulateOpsSummariesAsync(
+        CommandCenterSnapshot s, int eventId, DateOnly today, CancellationToken ct)
+    {
+        var roster = await _speakerReadiness.BuildRosterAsync(eventId, ct);
+        s.SpeakerTotal = roster.Count;
+        s.SpeakerReady = roster.Count(r => r.IsReady);
+        s.SpeakerReadinessAvgPercent =
+            roster.Count == 0 ? 0 : (int)Math.Round(roster.Average(r => r.Percent));
+
+        // Summary counts only — names aren't needed, so pass null (skips the Company
+        // Manager name resolution the full /Organizer/SponsorDeliverables board does).
+        var board = await _sponsorDeliverables.BuildBoardAsync(eventId, today, companyNames: null, ct);
+        s.SponsorCompaniesTotal = board.Count;
+        s.SponsorCompaniesComplete = board.Count(c => c.IsComplete);
+        s.SponsorCompaniesAtRisk = board.Count(c => c.AtRisk);
+        s.SponsorDeliverablesAvgPercent =
+            board.Count == 0 ? 0 : (int)Math.Round(board.Average(c => c.Percent));
+
+        var health = await _syncHealth.BuildAsync(eventId, ct);
+        s.SyncStatus = health.Status;
+        s.SyncLastSuccessAt = health.LastSuccessAt;
+        s.SyncLastWebhookAt = health.LastWebhookAt;
+        s.SyncHasDrift = health.HasDrift;
     }
 
     private async Task PopulateOnboardingAsync(

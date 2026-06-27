@@ -246,7 +246,7 @@ public sealed class MasterClassEmailService
         // Fallback: legacy inline HTML (older test constructions with no provider).
         var html =
             $"<p>Dear {Enc(fn)},</p>" +
-            $"<p>You have been re-assigned a 2-day ticket with Master Class for <strong>{Enc(ev)}</strong>.</p>" +
+            $"<p>You have been re-assigned a <strong>2-day ticket with Master Class</strong> for <strong>{Enc(ev)}</strong>.</p>" +
             held +
             "<p>You can choose to log in to the Event Hub to:</p><ul>" +
             "<li>Cancel a Master Class</li><li>Sign up for waitlists</li>" +
@@ -441,10 +441,10 @@ public sealed class MasterClassEmailService
         // Fallback: legacy inline HTML (older test constructions with no provider).
         var html =
             $"<p>Hi {Enc(fn)},</p>" +
-            $"<p>Your place in <strong>{Enc(mcTitle)}</strong> for <strong>{Enc(eventName)}</strong> has been <strong>cancelled</strong>.</p>" +
+            $"<p>Your Master Class seat for <strong>{Enc(mcTitle)}</strong> at <strong>{Enc(eventName)}</strong> has been <strong>cancelled</strong>.</p>" +
             $"<p>You can sign up for another Master Class on your <a href=\"{Enc(url)}\">self-service page</a> " +
             "(subject to availability).</p>";
         await SendAsync(email, name, eventId,
-            $"Cancelled: {mcTitle}", html, ct);
+            $"Master Class cancelled: {mcTitle}", html, ct);
     }
 }

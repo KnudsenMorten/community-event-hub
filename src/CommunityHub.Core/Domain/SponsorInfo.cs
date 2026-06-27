@@ -70,6 +70,14 @@ public class SponsorInfo
     public BoothTier Tier { get; set; } = BoothTier.None;
 
     /// <summary>
+    /// The physical booth slot label (e.g. "E-26"), parsed from the booth product name
+    /// during the order pull. Sent to Zoho as <c>booth_label</c> on exhibitor create so
+    /// the booth is actually assigned (else Zoho shows "No booth selected"). Null when the
+    /// order carries no booth slot. REQUIREMENTS §41a.
+    /// </summary>
+    public string? BoothLabel { get; set; }
+
+    /// <summary>
     /// The commercial sponsorship package this company bought
     /// (Silver/Gold/Diamond/Platinum). Defaults to
     /// <see cref="SponsorPackage.Silver"/> (digital, no booth). Set from the
@@ -117,6 +125,17 @@ public class SponsorInfo
     public string? EventCoordinatorCompanyName { get; set; }
     public string? EventCoordinatorEmail { get; set; }
     public string? EventCoordinatorPhone { get; set; }
+
+    /// <summary>
+    /// The contact email LAST pushed to Zoho Backstage for this company (the
+    /// sponsor/exhibitor record's contact email). Zoho hard-caps email updates at
+    /// 3 attempts — even a no-op resend burns one — so the sync sends the contact
+    /// email on UPDATE ONLY when the desired email differs from this stored value,
+    /// then stamps the new value here on a successful email-changing update. Set on
+    /// create (the email is sent once at create) and never re-sent on a no-op sync.
+    /// Null until the company is created in / first synced to Zoho. REQUIREMENTS §41a.
+    /// </summary>
+    public string? ZohoContactEmail { get; set; }
 
     // --- Logos (relative paths under wwwroot, e.g. uploads/sponsors/<co>/logo.eps) -
     public string? LogoVectorPath { get; set; }

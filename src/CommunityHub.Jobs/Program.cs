@@ -1,10 +1,12 @@
 using CommunityHub.Jobs;
 using CommunityHub.Core.Config;
 using CommunityHub.Core.Data;
+using Microsoft.ApplicationInsights.Extensibility;
 using Microsoft.AspNetCore.DataProtection;
 using CommunityHub.Core.Email;
 using CommunityHub.Core.Integrations;
 using CommunityHub.Core.Reminders;
+using Microsoft.Azure.Functions.Worker;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -18,12 +20,31 @@ using Microsoft.Extensions.Hosting;
 // ===========================================================================
 
 var host = new HostBuilder()
-    // JobsPauseMiddleware: the org-admin "pause all jobs" master switch — one
-    // central guard so every timer job no-ops before doing any work when paused.
-    .ConfigureFunctionsWorkerDefaults(worker => worker.UseMiddleware<JobsPauseMiddleware>())
+    // Middleware order matters: EngineErrorAlertMiddleware is OUTERMOST so it catches
+    // any unhandled exception (incl. one in the pause check) and emails the developer;
+    // JobsPauseMiddleware is the org-admin "pause all jobs" master switch — one central
+    // guard so every timer job no-ops before doing any work when paused.
+    .ConfigureFunctionsWorkerDefaults(worker =>
+    {
+        worker.UseMiddleware<EngineErrorAlertMiddleware>();
+        worker.UseMiddleware<JobsPauseMiddleware>();
+    })
     .ConfigureServices((context, services) =>
     {
         var config = context.Configuration;
+
+        // --- Application Insights (isolated worker) + webhook-secret log hygiene -----
+        // Wire the worker's own AI telemetry pipeline so the redacting initializer below
+        // is actually applied. WebhookSecretRedactingTelemetryInitializer strips the Zoho
+        // webhook shared secret (?token=…, §128) out of telemetry URLs so it never lands
+        // in App Insights. CAVEAT: the Functions HOST emits its own RequestTelemetry for
+        // the HTTP trigger which does NOT pass through this worker pipeline and cannot be
+        // intercepted from worker DI; the durable host-side fix is to deliver the secret
+        // via the X-Webhook-Secret header (ZohoOrderWebhook already validates it) so it is
+        // never in a URL at all. See WebhookSecretRedactingTelemetryInitializer.
+        services.AddApplicationInsightsTelemetryWorkerService();
+        services.ConfigureFunctionsApplicationInsights();
+        services.AddSingleton<ITelemetryInitializer, WebhookSecretRedactingTelemetryInitializer>();
 
         // In Azure we authenticate to SQL with the Functions app's
         // system-assigned managed identity (passwordless). For local dev a SQL
@@ -91,6 +112,9 @@ var host = new HostBuilder()
             sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<EmailOptions>>(),
             sp.GetRequiredService<TimeProvider>(),
             sp.GetService<Microsoft.Extensions.Logging.ILogger<LoggingEmailSender>>()));
+        // Ops/engine ALERT mail (ring-exempt so it reaches the developer mailbox, which is
+        // not a ring-gated participant). Used by EngineErrorAlertMiddleware + the engines.
+        services.AddSingleton<EngineAlertSender>();
 
         // --- Email system services (10a) -----------------------------------
         services.AddScoped<ParticipantEmailService>();
@@ -192,8 +216,7 @@ var host = new HostBuilder()
         config.GetSection(SessionizeApiOptions.SectionName).Bind(sessionizeOptions);
         services.AddSingleton(sessionizeOptions);
         services.AddHttpClient<SessionizeApiClient>();
-        // Excel parser + welcome path are shared with the upload route.
-        services.AddSingleton<SessionizeExcelParser>();
+        // Welcome path is shared with the API import route.
         services.AddScoped<WelcomeEmailService>();
         // Desired-state sponsor welcome reconcile (SponsorWelcomeReconcileJob).
         services.AddScoped<CommunityHub.Core.Reminders.SponsorWelcomeEmailService>();
@@ -209,6 +232,10 @@ var host = new HostBuilder()
             CommunityHub.Core.Integrations.Sessions.BackstageSessionSource>();
         services.AddScoped<CommunityHub.Core.Integrations.Sessions.SessionSourceSettingsService>();
         services.AddScoped<CommunityHub.Core.Integrations.Sessions.SessionSourceResolver>();
+        // §58 NEVER-AUTO-DELETE: after each Sessionize import, alert the operator about
+        // speakers/sessions that disappeared from Sessionize (it never deletes them). Uses
+        // the ring-exempt EngineAlertSender (registered above) so the ops mail delivers.
+        services.AddScoped<SessionizeDisappearanceDetector>();
         services.AddScoped<SessionizeApiImportService>();
 
         // --- Company Manager (sponsor contact source of truth) -------------
@@ -222,7 +249,11 @@ var host = new HostBuilder()
         var sharePointOptions = new SharePointUploadOptions();
         config.GetSection(SharePointUploadOptions.SectionName).Bind(sharePointOptions);
         services.AddSingleton(sharePointOptions);
-        services.AddHttpClient<SharePointUploadClient>();
+        // §102: SharePoint folder provisioning can be slow (per-folder Graph
+        // walk + createLink). Raise the default 100s HttpClient timeout so a
+        // single slow Graph call doesn't TaskCanceled-fail the WooCommerce pull.
+        services.AddHttpClient<SharePointUploadClient>(c =>
+            c.Timeout = TimeSpan.FromMinutes(5));
         services.AddScoped<SponsorUploadWatchService>();
 
         // The single sponsor-pull engine, shared with CommunityHub.OneShot.
@@ -232,13 +263,65 @@ var host = new HostBuilder()
         var zohoOptions = new ZohoOptions();
         config.GetSection(ZohoOptions.SectionName).Bind(zohoOptions);
         services.AddSingleton(zohoOptions);
-        services.AddSingleton<AttendeeReconciler>();
         services.AddHttpClient<ZohoClient>();
+
+        // §59: delta-approval queue — sync engines ENQUEUE detected changes here for the
+        // operator to approve/reject in /Organizer/SyncQueue (never auto-applied). The push
+        // services are LAZILY resolved on apply (a CehToZoho Update pushes to Zoho on approve);
+        // resolving them here is safe because the push services capture the queue lazily, not
+        // in their constructor — so there is no construction cycle.
+        services.AddScoped(sp => new CommunityHub.Core.Integrations.Sessions.SyncDeltaQueueService(
+            sp.GetRequiredService<CommunityHub.Core.Data.CommunityHubDbContext>(),
+            clock: sp.GetService<TimeProvider>(),
+            audit: sp.GetService<CommunityHub.Core.Audit.IAuditTrail>(),
+            alerts: sp.GetService<CommunityHub.Core.Email.EngineAlertSender>(),
+            sender: sp.GetService<CommunityHub.Core.Email.IEmailSender>(),
+            context: sp.GetService<CommunityHub.Core.Email.IEmailContextAccessor>(),
+            templates: sp.GetService<CommunityHub.Core.Email.EmailTemplateProvider>(),
+            sessionPush: sp.GetService<CommunityHub.Core.Integrations.Sessions.SessionBackstagePushService>(),
+            speakerPush: sp.GetService<CommunityHub.Core.Integrations.Sessions.SpeakerBackstagePushService>()));
+
+        // §38e: session time/location change detection (Backstage agenda diff). A real change
+        // is ENQUEUED to the §59 delta-approval queue (not auto-applied/emailed inline). Run by
+        // SessionChangeDetectionJob (hourly).
+        services.AddScoped<CommunityHub.Core.Integrations.Sessions.SessionChangeDetectionService>();
+
+        // §38e/§58: SPEAKER change detection (Backstage speakers diff) — the speaker analogue.
+        // A real change (name/tagline/bio/country/social) is ENQUEUED to the §59 delta-approval
+        // queue (never auto-applied, never emails, never deletes). Gated per-edition on the
+        // SPEAKER sync direction == stage 3 (ZohoToCeh) + the speaker-change-alerts feature. Run
+        // by SpeakerChangeDetectionJob (hourly, :50). Inert until the speaker READ scope is
+        // granted (Zoho:SpeakerReadEnabled).
+        services.AddScoped<CommunityHub.Core.Integrations.Sessions.SpeakerChangeDetectionService>();
+
+        // §57/§58 STAGE 2 (CehToZoho) push engines: create/update Zoho Backstage agenda
+        // sessions + create speakers from CEH. Gated per-edition on the session/speaker sync
+        // direction == stage 2. Run by SessionBackstagePushJob (hourly); inert at the default
+        // stage 1 and at stage 3 (the §38e read engine).
+        // §59: the push services ENQUEUE updates of already-linked records to the delta queue
+        // (instead of pushing inline) and the queue pushes them on approve. A LAZY
+        // Func<SyncDeltaQueueService> breaks the otherwise-circular queue↔push DI graph.
+        services.AddScoped(sp => new CommunityHub.Core.Integrations.Sessions.SessionBackstagePushService(
+            sp.GetRequiredService<CommunityHub.Core.Data.CommunityHubDbContext>(),
+            sp.GetRequiredService<ZohoClient>(),
+            sp.GetRequiredService<ZohoOptions>(),
+            tokenOverride: null,
+            queueFactory: () => sp.GetRequiredService<CommunityHub.Core.Integrations.Sessions.SyncDeltaQueueService>()));
+        services.AddScoped(sp => new CommunityHub.Core.Integrations.Sessions.SpeakerBackstagePushService(
+            sp.GetRequiredService<CommunityHub.Core.Data.CommunityHubDbContext>(),
+            sp.GetRequiredService<ZohoClient>(),
+            sp.GetRequiredService<ZohoOptions>(),
+            tokenOverride: null,
+            queueFactory: () => sp.GetRequiredService<CommunityHub.Core.Integrations.Sessions.SyncDeltaQueueService>()));
 
         // STAGE 4b: create/link Zoho sponsor + exhibitor records from webshop data
         // after the order pull (replaces the legacy PowerShell sync). Run by
         // WooCommercePullJob, gated by 'sponsor-zoho-provision'.
         services.AddScoped<SponsorZohoProvisionService>();
+        // ProvisionAsync delegates the §41b blank-only Zoho←CEH social/web reconcile for
+        // ALREADY-LINKED companies to SyncAsync (same code the sponsor save uses), so the
+        // sync service must be resolvable here too.
+        services.AddScoped<SponsorZohoSyncService>();
 
         // --- Sponsor leads pipeline (nightly CRM pull + delta digests) ------
         services.AddSingleton<CommunityHub.Core.Integrations.Sponsors.SponsorLeadScreeningService>();
@@ -360,8 +443,22 @@ var host = new HostBuilder()
         // company-page id is operator config (NOT a secret); the LinkedIn OAuth
         // token is a Key Vault secret (read by the live publisher — never in the
         // repo). Swap in a live ILinkedInPostPublisher here once wired.
-        services.AddSingleton<CommunityHub.Core.Integrations.ILinkedInPostPublisher,
-            CommunityHub.Core.Integrations.NullLinkedInPostPublisher>();
+        // LinkedIn live publisher (§19/§31) — wired but INERT by default: registered
+        // only when enabled AND credentialed; LinkedIn:DryRun (default true) then still
+        // holds every post (logs intent, posts nothing). Unconfigured ⇒ Null no-op.
+        var liOptions = new CommunityHub.Core.Integrations.LinkedInOptions();
+        config.GetSection(CommunityHub.Core.Integrations.LinkedInOptions.SectionName).Bind(liOptions);
+        services.AddSingleton(liOptions);
+        if (liOptions.Enabled && liOptions.HasCredentials)
+        {
+            services.AddHttpClient<CommunityHub.Core.Integrations.ILinkedInPostPublisher,
+                CommunityHub.Core.Integrations.LiveLinkedInPostPublisher>();
+        }
+        else
+        {
+            services.AddSingleton<CommunityHub.Core.Integrations.ILinkedInPostPublisher,
+                CommunityHub.Core.Integrations.NullLinkedInPostPublisher>();
+        }
         services.AddScoped<CommunityHub.Core.Integrations.SoMeSettingsService>();
         services.AddScoped<CommunityHub.Core.Integrations.SoMeDispatchService>();
     })

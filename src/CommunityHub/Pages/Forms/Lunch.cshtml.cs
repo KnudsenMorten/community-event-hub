@@ -1,11 +1,13 @@
 using CommunityHub.Auth;
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
+using CommunityHub.Core.Resources;
 using CommunityHub.Forms;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Localization;
 
 namespace CommunityHub.Pages.Forms;
 
@@ -15,15 +17,18 @@ public class LunchModel : PageModel
     private readonly CommunityHubDbContext _db;
     private readonly ICurrentParticipantAccessor _participant;
     private readonly TimeProvider _clock;
+    private readonly IStringLocalizer<SharedResource> _loc;
 
     public LunchModel(
         CommunityHubDbContext db,
         ICurrentParticipantAccessor participant,
-        TimeProvider clock)
+        TimeProvider clock,
+        IStringLocalizer<SharedResource> loc)
     {
         _db = db;
         _participant = participant;
         _clock = clock;
+        _loc = loc;
     }
 
     /// <summary>
@@ -85,6 +90,17 @@ public class LunchModel : PageModel
     /// </summary>
     private async Task<bool> ResolveAccessAsync(CurrentParticipant me, CancellationToken ct)
     {
+        // §3 parity: a SPEAKER sees the Lunch form only when ENTITLED (LunchPreDay OR
+        // LunchMainDay) — the SAME gate the nav (_Layout) and the speaker wizard use, so
+        // all three agree. Non-speaker roles keep their historical role-based access below.
+        if (me.Role == ParticipantRole.Speaker
+            && !await FormEntitlementGate.IsEntitledToAnyAsync(
+                _db, me.EventId, me.ParticipantId, ct,
+                OrderItem.LunchPreDay, OrderItem.LunchMainDay))
+        {
+            return false;
+        }
+
         var speakingPreDay = me.Role == ParticipantRole.Speaker
             && (await _db.SpeakerProfiles
                     .Where(s => s.EventId == me.EventId && s.ParticipantId == me.ParticipantId)
@@ -103,7 +119,10 @@ public class LunchModel : PageModel
 
     [BindProperty] public bool LunchEarlySetupDay { get; set; }
     [BindProperty] public bool LunchSetupDay { get; set; }
-    [BindProperty] public bool LunchPreDay { get; set; }
+    // bool? so the required Yes/No radio is honored (operator §62): null = the
+    // speaker hasn't answered yet (rejected at post). The DB column
+    // LunchSignup.LunchPreDay stays a non-nullable bool — no migration.
+    [BindProperty] public bool? LunchPreDay { get; set; }
     [BindProperty] public string? Notes { get; set; }
 
     public string FullName { get; private set; } = string.Empty;
@@ -111,6 +130,9 @@ public class LunchModel : PageModel
     public ParticipantRole Role { get; private set; }
     public bool AccessDenied { get; private set; }
     public string? Message { get; private set; }
+
+    /// <summary>REQUIREMENTS §51 — when this lunch signup was last saved (UpdatedAt); null = never saved.</summary>
+    public DateTimeOffset? LastSavedAt { get; private set; }
 
     public string EarlySetupDayLabel { get; private set; } = "Setup day (Sun)";
     public string SetupDayLabel { get; private set; } = "Setup day (Mon)";
@@ -151,6 +173,7 @@ public class LunchModel : PageModel
             LunchSetupDay = existing.LunchSetupDay;
             LunchPreDay = existing.LunchPreDay;
             Notes = existing.Notes;
+            LastSavedAt = existing.UpdatedAt;
         }
         return Page();
     }
@@ -171,6 +194,16 @@ public class LunchModel : PageModel
 
         await ResolveDayLabelsAsync(me.EventId, ct);
 
+        // The PRE-DAY lunch is a REQUIRED Yes/No choice for the "must declare"
+        // group (operator §62): submit must record an explicit answer so the
+        // headcount and task completion are meaningful. Re-render with the field
+        // error when no radio was picked; nothing is persisted.
+        if (ShowPreDay && LunchPreDay is null)
+        {
+            ModelState.AddModelError(nameof(LunchPreDay), _loc["Lunch.ErrPickPreDay"]);
+            return Page();
+        }
+
         var signup = await _db.LunchSignups.FirstOrDefaultAsync(
             l => l.EventId == me.EventId && l.ParticipantId == me.ParticipantId, ct);
 
@@ -181,6 +214,7 @@ public class LunchModel : PageModel
                 EventId = me.EventId,
                 ParticipantId = me.ParticipantId,
                 CreatedAt = _clock.GetUtcNow(),
+                UpdatedAt = _clock.GetUtcNow(),
             };
             _db.LunchSignups.Add(signup);
         }
@@ -194,8 +228,10 @@ public class LunchModel : PageModel
         signup.LunchEarlySetupDay = ShowSetupDay && LunchEarlySetupDay;
         signup.LunchSetupDay = ShowSetupDay && LunchSetupDay;
         // Pre-day only persists for the "must declare" group; auto-counted roles
-        // never set it (it's added automatically in the organizer report).
-        signup.LunchPreDay = ShowPreDay && LunchPreDay;
+        // never set it (it's added automatically in the organizer report). The
+        // choice is validated above, so for that group LunchPreDay is non-null:
+        // Yes => true, No => false (organizer count = LunchPreDay == true).
+        signup.LunchPreDay = ShowPreDay && LunchPreDay == true;
         signup.Notes = Notes;
 
         await _db.SaveChangesAsync(ct);
@@ -249,6 +285,7 @@ public class LunchModel : PageModel
         if (task is null || task.State == TaskState.Done) return;
 
         task.State = TaskState.Done;
+        task.CompletedAt = _clock.GetUtcNow();
         await _db.SaveChangesAsync(ct);
     }
 

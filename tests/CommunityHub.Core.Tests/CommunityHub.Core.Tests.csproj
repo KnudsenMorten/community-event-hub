@@ -7,34 +7,41 @@
        ====================================================================== -->
 
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <IsPackable>false</IsPackable>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
-    <PackageReference Include="xunit" Version="2.9.2" />
-    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.7.0" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5" />
     <!-- EF in-memory provider: lets the scenario tests stand up a full DbContext
          with seeded data and exercise the real services / EF queries offline,
          with no SQLEXPRESS / secrets. -->
-    <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" Version="8.0.6" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" Version="10.0.9" />
     <!-- EF SQLite provider: a RELATIONAL provider (same query-translation pipeline
          as SQL Server) used by the public-sessions translation regression test. The
          in-memory provider never translates LINQ to SQL, so it cannot catch a query
          shape SQL Server rejects; SQLite reproduces the relational translation path
          offline (no SQLEXPRESS / secrets), guarding /Sessions + /Attendee/MyEvent. -->
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="8.0.6" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.9" />
+    <!-- EF Core 10.0.9's Sqlite provider pulls SQLitePCLRaw.bundle_e_sqlite3 ->
+         lib.e_sqlite3 2.1.11, which carries a known high-severity advisory
+         (NU1903: GHSA-2m69-gcr7-jv3q). Pin the patched 3.0.3 bundle (managed +
+         native matched, brings lib.e_sqlite3 3.50.3) so the test graph resolves
+         the fixed native. Test-only; the SQLite translation regression test
+         exercises it on every run. -->
+    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.3" />
     <!-- Standalone DataProtection provider for the magic-link token round-trip
          test (DataProtectionProvider.Create(DirectoryInfo)). The .Extensions
          package carries the convenience factory used outside an ASP.NET host. -->
-    <PackageReference Include="Microsoft.AspNetCore.DataProtection.Extensions" Version="8.0.6" />
+    <PackageReference Include="Microsoft.AspNetCore.DataProtection.Extensions" Version="10.0.9" />
     <!-- Localization: lets the localization tests stand up a real
          ResourceManagerStringLocalizerFactory against the SharedResource .resx
          (English) that ships in CommunityHub.Core. -->
-    <PackageReference Include="Microsoft.Extensions.Localization" Version="8.0.6" />
+    <PackageReference Include="Microsoft.Extensions.Localization" Version="10.0.9" />
   </ItemGroup>
 
   <ItemGroup>

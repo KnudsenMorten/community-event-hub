@@ -629,7 +629,11 @@ public sealed class OrganizerGridSearchSortPagingTests
     {
         var accessor = new HttpCurrentParticipantAccessor(new HttpContextAccessorOver(http));
         return new SponsorsModel(db, accessor, clock,
-            new CommunityHub.Core.Organizer.SponsorInfoDeletionService(db))
+            new CommunityHub.Core.Organizer.SponsorInfoDeletionService(db),
+            new CommunityHub.Core.Integrations.CompanyManagerClient(
+                new System.Net.Http.HttpClient(), new CommunityHub.Core.Integrations.CompanyManagerOptions { Enabled = false }),
+            new CommunityHub.Core.Integrations.CompanyManagerOptions { Enabled = false },
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<SponsorsModel>.Instance)
         {
             PageContext = new PageContext { HttpContext = http },
         };

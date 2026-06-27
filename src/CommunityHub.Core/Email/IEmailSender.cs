@@ -57,7 +57,31 @@ public interface IEmailSender
         string icsContent,
         string icsFileName,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Send an HTML email with one or more arbitrary file attachments
+    /// (REQUIREMENTS §48 — travel-reimbursement receipts/invoice to the ERP inbox).
+    /// Each attachment is added with its own content type; the same
+    /// redirect/allowlist/kill-switch + ring gating as the other overloads applies,
+    /// so attaching files never bypasses gating — set an <c>EmailContext</c> with
+    /// <c>RingExempt = true</c> when the recipient is a non-participant (e.g. the ERP
+    /// mailbox) that must not be ring-dropped.
+    /// </summary>
+    Task SendWithAttachmentsAsync(
+        string toEmail,
+        string subject,
+        string htmlBody,
+        IReadOnlyCollection<EmailAttachment> attachments,
+        CancellationToken cancellationToken = default);
 }
+
+/// <summary>
+/// One in-memory file attachment for <see cref="IEmailSender.SendWithAttachmentsAsync"/>.
+/// </summary>
+public sealed record EmailAttachment(
+    string FileName,
+    byte[] Content,
+    string ContentType);
 
 /// <summary>
 /// Brevo SMTP settings, bound from configuration. The username and key come

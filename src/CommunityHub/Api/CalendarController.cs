@@ -1,5 +1,6 @@
 using System.Text;
 using CommunityHub.Core.Reminders;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace CommunityHub.Api;
@@ -23,7 +24,11 @@ namespace CommunityHub.Api;
 /// moved deadlines and completed tasks sync automatically on the client's next
 /// poll. Caching is disabled to keep the feed fresh.
 /// </summary>
+// Anonymous to the cookie scheme: external calendar clients (Outlook/Google/Apple)
+// fetch this feed with no session — the unguessable per-user token IS the credential
+// (an unknown/revoked token returns 404). Must opt out of the fail-closed FallbackPolicy.
 [ApiController]
+[AllowAnonymous]
 public sealed class CalendarController : ControllerBase
 {
     private readonly CalendarFeedTokenService _tokens;

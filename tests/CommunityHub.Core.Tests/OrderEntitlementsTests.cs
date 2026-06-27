@@ -99,16 +99,18 @@ public sealed class OrderEntitlementsTests
         var set = OrderEntitlements.Base(
             p, Speaker(SpeakerFunding.Organizer, preDay: true, mainDay: true));
 
-        // Exactly the Organizer-role set; nothing from the speaker hat (e.g. no
-        // Hotel/Award/Travel which a Supported speaker would have).
+        // Exactly the Organizer-role set (which now INCLUDES Hotel — operator
+        // 2026-06-26: organizers + volunteers are entitled to a hotel booking);
+        // nothing EXTRA from the speaker hat (e.g. no Award/Travel which a Supported
+        // speaker would have).
         Assert.Equal(
             new[]
             {
-                OrderItem.Polo, OrderItem.Swag, OrderItem.AppreciationDinner,
+                OrderItem.Polo, OrderItem.Swag, OrderItem.Hotel, OrderItem.AppreciationDinner,
                 OrderItem.LunchPreDay, OrderItem.LunchMainDay,
             }.ToHashSet(),
             set.ToHashSet());
-        Assert.DoesNotContain(OrderItem.Hotel, set);
+        Assert.Contains(OrderItem.Hotel, set);
         Assert.DoesNotContain(OrderItem.Award, set);
         Assert.DoesNotContain(OrderItem.TravelReimbursement, set);
     }

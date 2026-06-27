@@ -120,7 +120,17 @@ public class MasterClassesModel : PageModel
         if (me is null) return RedirectToPage("/Login");
         if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
 
-        await _svc.SetCapacityAsync(me.EventId, session, capacity, ct);
+        // Raising the cap opens seats that the waitlist takes first (§93/§94); notify
+        // every attendee the engine promoted/moved as a result.
+        var promotions = await _svc.SetCapacityAsync(me.EventId, session, capacity, ct);
+        var baseUrl = $"{Request.Scheme}://{Request.Host}";
+        foreach (var p in promotions)
+        {
+            if (p.PromotedSignupId is int id)
+            {
+                try { await _promo.SendPromotionAsync(id, baseUrl, ct); } catch { /* retryable */ }
+            }
+        }
         return RedirectToPage(new { session, msg = "Capacity updated." });
     }
 

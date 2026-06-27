@@ -91,11 +91,31 @@ public class CompanyDetailsModel : PageModel
     public string? Message { get; private set; }
     public string? Error { get; private set; }
 
+    /// <summary>When this company's details row was last saved (UTC), for the
+    /// "Last saved …" line next to Save (§51). Null until the row exists.</summary>
+    public DateTimeOffset? LastSavedAt { get; private set; }
+
     // Which upload buttons are available (SharePoint configured + folder set).
     public bool CanUploadSoMe { get; private set; }
     public bool CanUploadPrint { get; private set; }
     public bool CanUploadZoho { get; private set; }
     public bool CanUploadWall { get; private set; }
+
+    /// <summary>
+    /// §68 — the latest upload per logo/wall kind ("some"/"print"/"zoho"/"wall"),
+    /// so the page can show the already-uploaded file (name + version + when + by
+    /// whom) under each upload control on load. Empty until something is uploaded.
+    /// </summary>
+    public IReadOnlyDictionary<string, SponsorUploadAudit> LatestUploads { get; private set; }
+        = new Dictionary<string, SponsorUploadAudit>();
+
+    /// <summary>§64 — when the booth-members section was last saved (max member
+    /// UpdatedAt/CreatedAt), for the "Last saved …" line by its Save &amp; Sync button.</summary>
+    public DateTimeOffset? BoothMembersLastSavedAt { get; private set; }
+
+    /// <summary>§64 — when the booth-materials section was last saved (max material
+    /// CreatedAt), for the "Last saved …" line by its Save &amp; Sync button.</summary>
+    public DateTimeOffset? BoothMaterialsLastSavedAt { get; private set; }
 
     /// <summary>This exhibitor's booth members (CEH-maintained; exhibitor-only).</summary>
     public List<SponsorBoothMember> BoothMembers { get; private set; } = new();
@@ -194,6 +214,57 @@ public class CompanyDetailsModel : PageModel
         return Page();
     }
 
+    /// <summary>
+    /// §41 auto-save: persist ONLY the plain string fields (links, descriptions,
+    /// event-coordinator fields) to <see cref="SponsorInfo"/> WITHOUT triggering the
+    /// Zoho Backstage sync. Wired to blur / ~1s-debounce on the page so a sponsor never
+    /// loses edits, while the Zoho 3×-email cap stays protected (the explicit
+    /// "Save &amp; Sync to Zoho" button is the only thing that syncs). Antiforgery is
+    /// enforced (Razor Pages default). Returns a tiny JSON status for the inline
+    /// "Saving…/Saved ✓" indicator; it never redirects.
+    /// </summary>
+    public async Task<IActionResult> OnPostAutoSaveAsync(CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return new JsonResult(new { ok = false, error = "not-signed-in" }) { StatusCode = 401 };
+        if (me.Role != ParticipantRole.Sponsor) return new JsonResult(new { ok = false, error = "forbidden" }) { StatusCode = 403 };
+
+        var companyId = await GetCompanyIdAsync(me.ParticipantId, ct);
+        if (companyId is null) return new JsonResult(new { ok = false, error = "no-company" }) { StatusCode = 400 };
+
+        var error = ValidateUrl("Website URL", WebsiteUrl)
+                    ?? ValidateUrl("LinkedIn URL", LinkedInUrl)
+                    ?? ValidateUrl("Twitter URL", TwitterUrl)
+                    ?? ValidateLen("Company Overview", CompanyOverview, MaxOverview)
+                    ?? ValidateLen("Social Media Branding Text", SocialMediaBrandingText, MaxSocial)
+                    ?? ValidateLen("Company Short Description", CompanyShortDescription, MaxShort)
+                    ?? (string.IsNullOrWhiteSpace(EventCoordinatorEmail) || LooksLikeEmail(EventCoordinatorEmail)
+                        ? null : "Event coordinator email is not a valid address.");
+        if (error is not null)
+            return new JsonResult(new { ok = false, error }) { StatusCode = 400 };
+
+        var info = await GetOrCreateInfoAsync(me.EventId, companyId!, ct);
+        info.WebsiteUrl              = NormaliseOrNull(WebsiteUrl);
+        info.LinkedInUrl             = NormaliseOrNull(LinkedInUrl);
+        info.TwitterUrl              = NormaliseOrNull(TwitterUrl);
+        info.CompanyDescription      = NormaliseOrNull(CompanyOverview);
+        info.SocialMediaIntro        = NormaliseOrNull(SocialMediaBrandingText);
+        if (info.HasBooth)
+            info.CompanyDescriptionShort = NormaliseOrNull(CompanyShortDescription);
+        info.EventCoordinatorFirstName   = NormaliseOrNull(EventCoordinatorFirstName);
+        info.EventCoordinatorLastName    = NormaliseOrNull(EventCoordinatorLastName);
+        info.EventCoordinatorCompanyName = NormaliseOrNull(EventCoordinatorCompanyName);
+        info.EventCoordinatorEmail       = NormaliseOrNull(EventCoordinatorEmail);
+        info.EventCoordinatorPhone       = NormaliseOrNull(EventCoordinatorPhone);
+        info.LastUpdatedByEmail      = me.Email;
+        // GetOrCreateInfoAsync stamps UpdatedAt only on the existing-row path; ensure a
+        // freshly-created row also carries a saved-at so the "Last saved" line appears.
+        info.UpdatedAt = _clock.GetUtcNow();
+        await _db.SaveChangesAsync(ct);
+
+        return new JsonResult(new { ok = true, savedAt = info.UpdatedAt?.ToUniversalTime().ToString("dd MMM yyyy HH:mm") + " UTC" });
+    }
+
     private static string BuildSyncMessage(SponsorZohoSyncService.SyncResult r)
     {
         if (!r.Enabled)
@@ -276,7 +347,45 @@ public class CompanyDetailsModel : PageModel
                 string.IsNullOrWhiteSpace(UploadFile.ContentType) ? "application/octet-stream" : UploadFile.ContentType,
                 ct);
 
-            await NotifyUploadAsync(spec, sponsorName, fileName, webUrl, me.Email, ct);
+            // Persist the uploaded LOGO's location so the sponsor "Get started"
+            // wizard's "Logos & artwork" step (SponsorWizardService, which checks
+            // LogoRasterPath / LogoVectorPath) can detect completion. SoMe + Zoho
+            // logos are raster PNGs -> LogoRasterPath; the print logo is vector
+            // (EPS/AI/PDF) -> LogoVectorPath. The exhibitor-wall upload is not a
+            // company logo, so it is intentionally NOT recorded on the logo fields.
+            if (kind is "some" or "zoho" or "print")
+            {
+                var logoInfo = await GetOrCreateInfoAsync(me.EventId, companyId!, ct);
+                if (kind == "print")
+                {
+                    logoInfo.LogoVectorPath = webUrl;
+                    logoInfo.LogoVectorFileName = fileName;
+                }
+                else
+                {
+                    logoInfo.LogoRasterPath = webUrl;
+                    logoInfo.LogoRasterFileName = fileName;
+                }
+                logoInfo.LastUpdatedByEmail = me.Email;
+                await _db.SaveChangesAsync(ct);
+            }
+
+            // §68 — record the upload (who/when/what) so every coordinator of this
+            // shared company sees the current file on load and doesn't re-upload.
+            _db.SponsorUploadAudits.Add(new SponsorUploadAudit
+            {
+                EventId = me.EventId,
+                SponsorCompanyId = companyId!,
+                Kind = kind,
+                FileName = fileName,
+                Version = ParseVersion(fileName),
+                WebUrl = webUrl,
+                UploadedByEmail = me.Email,
+                UploadedAt = _clock.GetUtcNow(),
+            });
+            await _db.SaveChangesAsync(ct);
+
+            await NotifyUploadAsync(spec, sponsorName ?? string.Empty, fileName, webUrl, me.Email, ct);
             Message = $"Uploaded {fileName}. The organizers have been notified.";
         }
         catch (Exception ex)
@@ -347,6 +456,13 @@ public class CompanyDetailsModel : PageModel
         return $"{stem}{next}{ext}";
     }
 
+    /// <summary>Parse the <c>_vN</c> version suffix from a versioned upload file name; defaults to 1.</summary>
+    private static int ParseVersion(string fileName)
+    {
+        var m = Regex.Match(fileName, @"_v(\d+)\b", RegexOptions.IgnoreCase);
+        return m.Success && int.TryParse(m.Groups[1].Value, out var n) && n > 0 ? n : 1;
+    }
+
     private async Task NotifyUploadAsync(
         UploadSpec spec, string sponsorName, string fileName, string? webUrl, string byEmail, CancellationToken ct)
     {
@@ -373,15 +489,15 @@ public class CompanyDetailsModel : PageModel
         var (me, companyId, redirect) = await GuardSponsorAsync(ct);
         if (redirect is not null) return redirect;
         var erpNo = await ResolveErpCustomerNumberAsync(companyId!, ct);
-        if (erpNo is null || !_erpContacts.CanWrite) { Error = "e-conomic isn't available for your company."; await LoadAsync(me!, prefill: true, ct); return Page(); }
+        if (erpNo is null || !_erpContacts.CanWrite) { Error = "backend isn't available for your company."; await LoadAsync(me!, prefill: true, ct); return Page(); }
         if (string.IsNullOrWhiteSpace(name)) { Error = "Name is required."; await LoadAsync(me!, prefill: true, ct); return Page(); }
 
         try
         {
             await _erpContacts.CreateAsync(erpNo.Value, name, email, phone, signer, coordinator, ct);
-            Message = "Contact added in e-conomic.";
+            Message = "Contact added in backend.";
         }
-        catch (Exception ex) { _log.LogWarning(ex, "AddErpContact failed."); Error = "Could not add the contact in e-conomic. Please try again."; }
+        catch (Exception ex) { _log.LogWarning(ex, "AddErpContact failed."); Error = "Could not add the contact in backend. Please try again."; }
         await LoadAsync(me!, prefill: true, ct);
         return Page();
     }
@@ -393,14 +509,14 @@ public class CompanyDetailsModel : PageModel
         var (me, companyId, redirect) = await GuardSponsorAsync(ct);
         if (redirect is not null) return redirect;
         var erpNo = await ResolveErpCustomerNumberAsync(companyId!, ct);
-        if (erpNo is null || !_erpContacts.CanWrite) { Error = "e-conomic isn't available for your company."; await LoadAsync(me!, prefill: true, ct); return Page(); }
+        if (erpNo is null || !_erpContacts.CanWrite) { Error = "backend isn't available for your company."; await LoadAsync(me!, prefill: true, ct); return Page(); }
 
         try
         {
             await _erpContacts.UpdateAsync(erpNo.Value, contactNumber, name ?? string.Empty, email, phone, signer, coordinator, notes, ct);
-            Message = "Contact updated in e-conomic.";
+            Message = "Contact updated in backend.";
         }
-        catch (Exception ex) { _log.LogWarning(ex, "UpdateErpContact failed."); Error = "Could not update the contact in e-conomic. Please try again."; }
+        catch (Exception ex) { _log.LogWarning(ex, "UpdateErpContact failed."); Error = "Could not update the contact in backend. Please try again."; }
         await LoadAsync(me!, prefill: true, ct);
         return Page();
     }
@@ -410,14 +526,14 @@ public class CompanyDetailsModel : PageModel
         var (me, companyId, redirect) = await GuardSponsorAsync(ct);
         if (redirect is not null) return redirect;
         var erpNo = await ResolveErpCustomerNumberAsync(companyId!, ct);
-        if (erpNo is null || !_erpContacts.CanWrite) { Error = "e-conomic isn't available for your company."; await LoadAsync(me!, prefill: true, ct); return Page(); }
+        if (erpNo is null || !_erpContacts.CanWrite) { Error = "backend isn't available for your company."; await LoadAsync(me!, prefill: true, ct); return Page(); }
 
         try
         {
             await _erpContacts.DeleteAsync(erpNo.Value, contactNumber, ct);
-            Message = "Contact removed from e-conomic.";
+            Message = "Contact removed from backend.";
         }
-        catch (Exception ex) { _log.LogWarning(ex, "DeleteErpContact failed."); Error = "Could not remove the contact in e-conomic. Please try again."; }
+        catch (Exception ex) { _log.LogWarning(ex, "DeleteErpContact failed."); Error = "Could not remove the contact in backend. Please try again."; }
         await LoadAsync(me!, prefill: true, ct);
         return Page();
     }
@@ -431,6 +547,8 @@ public class CompanyDetailsModel : PageModel
             s => s.EventId == me.EventId && s.SponsorCompanyId == companyId, ct);
 
         IsExhibitor = info?.HasBooth ?? false;
+        // §51 — surface the row's last-saved instant for the "Last saved …" line.
+        LastSavedAt = info?.UpdatedAt;
 
         if (prefill && info is not null)
         {
@@ -457,12 +575,60 @@ public class CompanyDetailsModel : PageModel
         CanUploadZoho  = ready && !string.IsNullOrWhiteSpace(sp!.LogoZohoFolderPath);
         CanUploadWall  = ready && IsExhibitor && !string.IsNullOrWhiteSpace(sp!.ExhibitorWallFolderPath);
 
+        // §68 — surface the latest upload per logo/wall kind so each upload control
+        // can show the already-uploaded file (name + version + when + by whom).
+        var audits = await _db.SponsorUploadAudits.AsNoTracking()
+            .Where(a => a.EventId == me.EventId && a.SponsorCompanyId == companyId)
+            .ToListAsync(ct);
+        var latest = audits
+            .GroupBy(a => a.Kind)
+            .ToDictionary(g => g.Key, g => g.OrderByDescending(a => a.UploadedAt).First());
+
+        // §68 FALLBACK: a logo can exist on the SponsorInfo row (LogoRasterPath /
+        // LogoVectorPath, e.g. uploaded before the per-upload audit was recorded) with NO
+        // audit row. Without this, the "current file" line would be blank on load even
+        // though a logo is on file. Synthesize a display entry from the stored logo so the
+        // raster controls ("some"/"zoho") and the vector control ("print") still show the
+        // already-uploaded file (name + when) on load, like the booth-materials controls.
+        if (info is not null)
+        {
+            var fallbacks = new[]
+            {
+                ("some",  info.LogoRasterPath, info.LogoRasterFileName),
+                ("zoho",  info.LogoRasterPath, info.LogoRasterFileName),
+                ("print", info.LogoVectorPath, info.LogoVectorFileName),
+            };
+            foreach (var (kind, path, fileName) in fallbacks)
+            {
+                if (latest.ContainsKey(kind) || string.IsNullOrWhiteSpace(fileName)) continue;
+                latest[kind] = new SponsorUploadAudit
+                {
+                    EventId = me.EventId,
+                    SponsorCompanyId = companyId!,
+                    Kind = kind,
+                    FileName = fileName!,
+                    Version = ParseVersion(fileName!),
+                    WebUrl = path,
+                    UploadedByEmail = info.LastUpdatedByEmail ?? string.Empty,
+                    UploadedAt = info.UpdatedAt ?? info.CreatedAt,
+                };
+            }
+        }
+
+        LatestUploads = latest;
+
         if (IsExhibitor)
         {
             BoothMembers = await _db.SponsorBoothMembers
-                .Where(m => m.EventId == me.EventId && m.SponsorCompanyId == companyId)
+                .Where(m => m.EventId == me.EventId && m.SponsorCompanyId == companyId && m.DeletedAt == null)
                 .OrderBy(m => m.LastName).ThenBy(m => m.FirstName)
                 .ToListAsync(ct);
+            // §64 — last-saved for the booth-members section (latest add/edit).
+            var lastMember = BoothMembers
+                .Select(m => m.UpdatedAt ?? m.CreatedAt)
+                .DefaultIfEmpty()
+                .Max();
+            BoothMembersLastSavedAt = lastMember == default ? (DateTimeOffset?)null : lastMember;
 
             var mats = await _db.SponsorBoothMaterials
                 .Where(m => m.EventId == me.EventId && m.SponsorCompanyId == companyId)
@@ -471,6 +637,8 @@ public class CompanyDetailsModel : PageModel
             BoothVideos = mats.Where(m => m.Kind == BoothMaterialKind.Video).ToList();
             BoothCollateral = mats.Where(m => m.Kind == BoothMaterialKind.Collateral).ToList();
             CanUploadCollateral = ready && !string.IsNullOrWhiteSpace(sp!.BoothCollateralFolderPath);
+            // §64 — last-saved for the booth-materials section (latest video/file add).
+            BoothMaterialsLastSavedAt = mats.Count > 0 ? mats.Max(m => m.CreatedAt) : (DateTimeOffset?)null;
         }
 
         // Sponsor's e-conomic contacts (ERP is the master). Read LIVE so any add /
@@ -518,6 +686,7 @@ public class CompanyDetailsModel : PageModel
             _db.SponsorBoothMaterials.Add(new SponsorBoothMaterial
             {
                 EventId = me!.EventId, SponsorCompanyId = companyId!, Kind = BoothMaterialKind.Video, Url = url,
+                CreatedByEmail = me.Email,
             });
             await _db.SaveChangesAsync(ct);
             Message = "Video added.";
@@ -557,7 +726,7 @@ public class CompanyDetailsModel : PageModel
             _db.SponsorBoothMaterials.Add(new SponsorBoothMaterial
             {
                 EventId = me!.EventId, SponsorCompanyId = companyId!, Kind = BoothMaterialKind.Collateral,
-                Url = webUrl ?? string.Empty, FileName = UploadFile.FileName,
+                Url = webUrl ?? string.Empty, FileName = UploadFile.FileName, CreatedByEmail = me.Email,
             });
             await _db.SaveChangesAsync(ct);
             Message = $"Uploaded {UploadFile.FileName}.";
@@ -638,18 +807,34 @@ public class CompanyDetailsModel : PageModel
         else
         {
             var em = email.Trim();
-            var dup = await _db.SponsorBoothMembers.AnyAsync(
+            // Match any row with this email (incl. a tombstoned one) so re-adding someone you
+            // removed REVIVES the original row rather than erroring or duplicating.
+            var existing = await _db.SponsorBoothMembers.FirstOrDefaultAsync(
                 m => m.EventId == me!.EventId && m.SponsorCompanyId == companyId && m.Email == em, ct);
-            if (dup) Error = "A booth member with that email already exists.";
+            if (existing is { DeletedAt: null })
+                Error = "A booth member with that email already exists.";
             else
             {
-                _db.SponsorBoothMembers.Add(new SponsorBoothMember
+                if (existing is not null)
                 {
-                    EventId = me!.EventId, SponsorCompanyId = companyId!,
-                    FirstName = firstName.Trim(), LastName = lastName.Trim(), Email = em, Role = role,
-                });
+                    existing.DeletedAt = null;   // revive
+                    existing.FirstName = firstName.Trim(); existing.LastName = lastName.Trim();
+                    existing.Role = role; existing.UpdatedAt = _clock.GetUtcNow();
+                    existing.SyncedToZoho = false;
+                }
+                else
+                {
+                    _db.SponsorBoothMembers.Add(new SponsorBoothMember
+                    {
+                        EventId = me!.EventId, SponsorCompanyId = companyId!,
+                        FirstName = firstName.Trim(), LastName = lastName.Trim(), Email = em, Role = role,
+                    });
+                }
                 await _db.SaveChangesAsync(ct);
-                Message = "Booth member added. Use “Sync booth members to Zoho” to push new members.";
+                // §66 — auto-sync on add (no manual Sync button). Only the new/revived
+                // member is unsynced, so this pushes just them (no redundant Zoho write).
+                var add = await SyncMembersInternalAsync(me!, companyId!, ct);
+                Message = "Booth member added. " + SummariseSync(add);
             }
         }
         await LoadAsync(me!, prefill: true, ct);
@@ -659,24 +844,57 @@ public class CompanyDetailsModel : PageModel
     public async Task<IActionResult> OnPostUpdateMemberAsync(
         int memberId, string? firstName, string? lastName, string? email, BoothMemberRole role, CancellationToken ct)
     {
+        var ajax = WantsJson();
         var (me, companyId, redirect) = await GuardSponsorAsync(ct);
-        if (redirect is not null) return redirect;
+        if (redirect is not null)
+            return ajax ? new JsonResult(new { ok = false, error = "not-available" }) { StatusCode = 403 } : redirect;
 
         var m = await _db.SponsorBoothMembers.FirstOrDefaultAsync(
-            x => x.Id == memberId && x.EventId == me!.EventId && x.SponsorCompanyId == companyId, ct);
-        if (m is null) Error = "That booth member was not found.";
+            x => x.Id == memberId && x.EventId == me!.EventId && x.SponsorCompanyId == companyId && x.DeletedAt == null, ct);
+
+        string? err = null;
+        if (m is null) err = "That booth member was not found.";
         else if (string.IsNullOrWhiteSpace(firstName) || string.IsNullOrWhiteSpace(lastName) || string.IsNullOrWhiteSpace(email))
-            Error = "First name, last name and email are required.";
+            err = "First name, last name and email are required.";
         else if (!LooksLikeEmail(email))
-            Error = "Please enter a valid email address.";
-        else
+            err = "Please enter a valid email address.";
+
+        if (err is not null)
+        {
+            if (ajax) return new JsonResult(new { ok = false, error = err }) { StatusCode = 400 };
+            Error = err;
+            await LoadAsync(me!, prefill: true, ct);
+            return Page();
+        }
+
+        // Only re-sync when something actually changed (respects the no-redundant-Zoho-write
+        // / email-is-key 3× cap rules): an unchanged row never touches Zoho.
+        var changed = m!.FirstName != firstName!.Trim()
+                      || m.LastName != lastName!.Trim()
+                      || !string.Equals(m.Email, email!.Trim(), StringComparison.OrdinalIgnoreCase)
+                      || m.Role != role;
+        if (changed)
         {
             m.FirstName = firstName.Trim(); m.LastName = lastName.Trim();
             m.Email = email.Trim(); m.Role = role; m.UpdatedAt = _clock.GetUtcNow();
             m.SyncedToZoho = false;   // re-sync needed
             await _db.SaveChangesAsync(ct);
-            Message = "Booth member updated.";
         }
+
+        var sync = changed ? await SyncMembersInternalAsync(me!, companyId!, ct) : (SponsorZohoSyncService.BoothSyncResult?)null;
+
+        if (ajax)
+        {
+            var savedAt = (m.UpdatedAt ?? m.CreatedAt).ToUniversalTime().ToString("dd MMM yyyy HH:mm") + " UTC";
+            return new JsonResult(new
+            {
+                ok = true,
+                savedAt,
+                sync = sync is null ? "No changes." : SummariseSync(sync),
+            });
+        }
+
+        Message = changed ? "Booth member updated. " + SummariseSync(sync!) : "No changes to save.";
         await LoadAsync(me!, prefill: true, ct);
         return Page();
     }
@@ -687,30 +905,58 @@ public class CompanyDetailsModel : PageModel
         if (redirect is not null) return redirect;
 
         var m = await _db.SponsorBoothMembers.FirstOrDefaultAsync(
-            x => x.Id == memberId && x.EventId == me!.EventId && x.SponsorCompanyId == companyId, ct);
+            x => x.Id == memberId && x.EventId == me!.EventId && x.SponsorCompanyId == companyId && x.DeletedAt == null, ct);
         if (m is not null)
         {
-            _db.SponsorBoothMembers.Remove(m);
+            var email = m.Email;
+
+            // Member delete ONLY — never the exhibitor/sponsor RECORD (REQUIREMENTS §56).
+            // Best-effort delete in Zoho FIRST (Zoho now supports member delete). A Zoho
+            // failure must NOT break the hub delete, so this is fully fail-soft.
+            var zoho = await _zohoSync.DeleteBoothMemberAsync(me!.EventId, companyId!, email, ct);
+
+            // Tombstone (soft-delete) regardless: the tombstone is the hub's record-keeping
+            // and ALSO blocks the add-only re-pull, so a removal can never be resurrected
+            // even if the Zoho call failed. The sync skips re-pulling a tombstoned email.
+            m.DeletedAt = _clock.GetUtcNow();
             await _db.SaveChangesAsync(ct);
-            Message = "Booth member removed from the Event Hub. (Remove them in Zoho directly if needed.)";
+
+            Message = zoho switch
+            {
+                SponsorZohoSyncService.BoothMemberDeleteResult.Deleted =>
+                    "Booth member removed from the Event Hub and from Zoho Backstage.",
+                SponsorZohoSyncService.BoothMemberDeleteResult.NotFoundInZoho =>
+                    "Booth member removed from the Event Hub. (They were not present in Zoho Backstage.)",
+                SponsorZohoSyncService.BoothMemberDeleteResult.SyncDisabled =>
+                    "Booth member removed from the Event Hub.",
+                _ => // Error
+                    "Booth member removed from the Event Hub, but removing them in Zoho Backstage "
+                    + "failed — please also remove them in Zoho directly. They will not re-appear here.",
+            };
         }
         await LoadAsync(me!, prefill: true, ct);
         return Page();
     }
 
-    public async Task<IActionResult> OnPostSyncMembersAsync(CancellationToken ct)
-    {
-        var (me, companyId, redirect) = await GuardSponsorAsync(ct);
-        if (redirect is not null) return redirect;
+    /// <summary>True when the request is an AJAX (fetch) post — used by the §66 booth-member
+    /// auto-save so it returns JSON instead of re-rendering the whole page.</summary>
+    private bool WantsJson() =>
+        string.Equals(Request.Headers["X-Requested-With"], "XMLHttpRequest", StringComparison.OrdinalIgnoreCase);
 
-        var name = await ResolveSponsorNameAsync(companyId!, ct);
-        var r = await _zohoSync.SyncBoothMembersAsync(me!.EventId, companyId!, name ?? string.Empty, ct);
-        Message = !r.Enabled ? "Zoho Backstage sync is not enabled for this environment."
-            : r.Error is not null ? r.Error
-            : $"Booth members synced — {r.AddedToZoho} added to Zoho, {r.PulledFromZoho} pulled from Zoho.";
-        await LoadAsync(me!, prefill: true, ct);
-        return Page();
+    /// <summary>§66 — run the Zoho booth-member sync inline (auto-sync). The sync itself is
+    /// add-only by email and skips members already flagged synced, so re-running it after a
+    /// single change never re-pushes unchanged members (no redundant Zoho write).</summary>
+    private async Task<SponsorZohoSyncService.BoothSyncResult> SyncMembersInternalAsync(
+        CurrentParticipant me, string companyId, CancellationToken ct)
+    {
+        var name = await ResolveSponsorNameAsync(companyId, ct);
+        return await _zohoSync.SyncBoothMembersAsync(me.EventId, companyId, name ?? string.Empty, ct);
     }
+
+    private static string SummariseSync(SponsorZohoSyncService.BoothSyncResult r) =>
+        !r.Enabled ? "Zoho Backstage sync is not enabled for this environment."
+        : r.Error is not null ? r.Error
+        : $"Synced to Zoho — {r.AddedToZoho} added, {r.PulledFromZoho} pulled.";
 
     /// <summary>Shared guard for the booth-member handlers: returns (me, companyId) or a redirect/page.</summary>
     private async Task<(CurrentParticipant? me, string? companyId, IActionResult? redirect)> GuardSponsorAsync(CancellationToken ct)
@@ -732,7 +978,7 @@ public class CompanyDetailsModel : PageModel
             s => s.EventId == eventId && s.SponsorCompanyId == companyId, ct);
         if (info is null)
         {
-            info = new SponsorInfo { EventId = eventId, SponsorCompanyId = companyId, CreatedAt = _clock.GetUtcNow() };
+            info = new SponsorInfo { EventId = eventId, SponsorCompanyId = companyId, CreatedAt = _clock.GetUtcNow(), UpdatedAt = _clock.GetUtcNow() };
             _db.SponsorInfos.Add(info);
         }
         else

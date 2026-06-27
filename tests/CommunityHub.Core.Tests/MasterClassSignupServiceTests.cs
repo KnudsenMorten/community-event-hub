@@ -8,8 +8,13 @@ namespace CommunityHub.Core.Tests;
 /// <summary>
 /// The CEH-owned Master Class seat + waitlist engine (<see cref="MasterClassSignupService"/>):
 /// 2-day-ticket eligibility, capacity → waitlist, ≤1 confirmed + ≤1 waitlist per
-/// person, instant promotion on a freed seat, and the offer/auto-switch decision
-/// modes (held seats count as full). EF in-memory.
+/// person, and the §93/§94 automatic atomic promotion: a freed/opened seat goes to the
+/// waitlist FIRST (public booking blocked while anyone waits), the highest waitlister is
+/// promoted and auto-switched out of any other class (no offer/choose step), cascading
+/// into the released class. EF in-memory — these cover the logic/ordering invariants;
+/// the serializable-transaction / real DB-locking path can only be exercised against
+/// SQL Server (the in-memory provider has no transactions, and the EF SQLite provider
+/// cannot translate the engine's DateTimeOffset ordering/comparisons).
 /// </summary>
 public class MasterClassSignupServiceTests
 {
@@ -30,9 +35,6 @@ public class MasterClassSignupServiceTests
         var a = new Attendee { EventId = ev, Email = email, FirstName = "F", LastName = email.Split('@')[0], TicketStatus = t };
         db.Attendees.Add(a); await db.SaveChangesAsync(); return a.Id;
     }
-
-    private static async Task SetModeAsync(MasterClassSignupService svc, int ev,
-        MasterClassPromotionMode mode, int hold = 12) => await svc.SaveSettingsAsync(ev, hold, mode, "org@x");
 
     [Theory]
     // capacity, confirmed, offered -> expected level (>20% free = Available; <20% = FillingUp; 0 = Full)
@@ -155,93 +157,130 @@ public class MasterClassSignupServiceTests
         Assert.Equal(MasterClassSignupStatus.Confirmed, a2sig.Status);
     }
 
-    [Fact]
-    public async Task Offer_mode_holds_a_seat_for_a_seat_holder_and_counts_as_full()
+    // --- §93 / §94 : automatic atomic promotion + waitlist priority ----------
+
+    [Fact] // §93: promotion of a seat-holder ALWAYS auto-switches — no offer/choose step.
+    public async Task Promotion_of_a_seat_holder_always_auto_switches_no_offer()
     {
         using var db = ScenarioFixture.NewDb();
         var (ev, mcA, mcB) = await SeedAsync(db, 1, 1);
         var svc = new MasterClassSignupService(db);
-        await SetModeAsync(svc, ev, MasterClassPromotionMode.OfferAndDecide, hold: 12);
+        var p = await Att(db, ev, "p@x.dk");
+        var bSeat = await Att(db, ev, "b@x.dk");
+        await svc.SignUpAsync(ev, p, mcA);                              // p confirmed in A
+        await svc.SignUpAsync(ev, bSeat, mcB);                         // B full
+        await svc.SignUpAsync(ev, p, mcB, autoSwitchConsent: true);    // p waitlists B (holds A)
 
-        var p = await Att(db, ev, "p@x.dk");      // will hold A + waitlist B
-        var bSeat = await Att(db, ev, "b@x.dk");  // holds B's only seat
-        await svc.SignUpAsync(ev, p, mcA);        // p confirmed in A
-        await svc.SignUpAsync(ev, bSeat, mcB);    // B full
-        await svc.SignUpAsync(ev, p, mcB, autoSwitchConsent: true);  // p waitlists B (consents to auto-switch)
+        var promo = await svc.RemoveAsync(ev, bSeat, mcB);            // B frees -> p auto-switched
+        Assert.Equal(MasterClassSignupService.PromotionKind.Confirmed, promo!.Kind);
+        Assert.Equal(p, promo.PromotedAttendeeId);
 
-        var promo = await svc.RemoveAsync(ev, bSeat, mcB);  // B seat frees -> p already holds A
-        Assert.Equal(MasterClassSignupService.PromotionKind.Offered, promo!.Kind);
-        var pB = (await svc.GetForAttendeeAsync(ev, p)).Single(s => s.SessionId == mcB);
-        Assert.Equal(MasterClassSignupStatus.Offered, pB.Status);
-        // The held offer occupies the seat -> B shows full.
-        var bOpt = (await svc.ListMasterClassesAsync(ev)).Single(m => m.SessionId == mcB);
-        Assert.True(bOpt.IsFull);
+        // §93: p ends with EXACTLY ONE active Master Class (B), confirmed, and NO waitlist.
+        var pSigs = await svc.GetForAttendeeAsync(ev, p);
+        var only = Assert.Single(pSigs);
+        Assert.Equal(mcB, only.SessionId);
+        Assert.Equal(MasterClassSignupStatus.Confirmed, only.Status);
+        Assert.DoesNotContain(pSigs, s => s.Status == MasterClassSignupStatus.Waitlisted
+                                          || s.Status == MasterClassSignupStatus.Offered);
+        // Nobody is ever left holding an Offered seat anymore.
+        Assert.Empty(db.MasterClassSignups.Where(x => x.Status == MasterClassSignupStatus.Offered));
     }
 
-    [Fact]
-    public async Task Accept_offer_switches_and_releases_the_old_seat()
+    [Fact] // §93: cancelling the promoted person's OLD seat cascades into THAT class's waitlist.
+    public async Task Auto_switch_cascades_into_the_released_classes_waitlist()
     {
         using var db = ScenarioFixture.NewDb();
         var (ev, mcA, mcB) = await SeedAsync(db, 1, 1);
         var svc = new MasterClassSignupService(db);
-        await SetModeAsync(svc, ev, MasterClassPromotionMode.OfferAndDecide);
         var p = await Att(db, ev, "p@x.dk");
         var bSeat = await Att(db, ev, "b@x.dk");
         var aWait = await Att(db, ev, "aw@x.dk");
-        await svc.SignUpAsync(ev, p, mcA);
-        await svc.SignUpAsync(ev, aWait, mcA);   // waits on A (A full)
-        await svc.SignUpAsync(ev, bSeat, mcB);
-        await svc.SignUpAsync(ev, p, mcB, autoSwitchConsent: true);  // p waitlists B (consents to auto-switch)
-        await svc.RemoveAsync(ev, bSeat, mcB);    // p offered B
+        await svc.SignUpAsync(ev, p, mcA);                             // p confirmed in A
+        await svc.SignUpAsync(ev, aWait, mcA);                        // aWait waitlists A (A full)
+        await svc.SignUpAsync(ev, bSeat, mcB);                        // B full
+        await svc.SignUpAsync(ev, p, mcB, autoSwitchConsent: true);   // p waitlists B (holds A)
 
-        var (ok, _, freed) = await svc.AcceptOfferAsync(ev, p);
-        Assert.True(ok);
-        Assert.Equal(MasterClassSignupStatus.Confirmed, (await svc.GetForAttendeeAsync(ev, p)).Single().Status);
-        Assert.Equal(mcB, (await svc.GetForAttendeeAsync(ev, p)).Single().SessionId);   // now in B
-        Assert.Equal(aWait, freed!.PromotedAttendeeId);                                  // A's waitlist promoted
-    }
+        await svc.RemoveAsync(ev, bSeat, mcB);   // B frees -> p switches A->B -> A frees -> aWait promoted
 
-    [Fact]
-    public async Task Default_mode_auto_switches_a_seat_holder()
-    {
-        using var db = ScenarioFixture.NewDb();
-        var (ev, mcA, mcB) = await SeedAsync(db, 1, 1);   // default mode = AutoSwitch
-        var svc = new MasterClassSignupService(db);
-        var p = await Att(db, ev, "p@x.dk");
-        var bSeat = await Att(db, ev, "b@x.dk");
-        await svc.SignUpAsync(ev, p, mcA);
-        await svc.SignUpAsync(ev, bSeat, mcB);
-        await svc.SignUpAsync(ev, p, mcB, autoSwitchConsent: true);  // p waitlists B (consents to auto-switch) while confirmed in A
-
-        var promo = await svc.RemoveAsync(ev, bSeat, mcB);  // auto-switch p into B
-        Assert.Equal(MasterClassSignupService.PromotionKind.Confirmed, promo!.Kind);
-        var pSig = (await svc.GetForAttendeeAsync(ev, p)).Single();
+        var pSig = Assert.Single(await svc.GetForAttendeeAsync(ev, p));
         Assert.Equal(mcB, pSig.SessionId);
-        Assert.Equal(MasterClassSignupStatus.Confirmed, pSig.Status);  // old A released
+        Assert.Equal(MasterClassSignupStatus.Confirmed, pSig.Status);
+
+        var awSig = Assert.Single(await svc.GetForAttendeeAsync(ev, aWait));
+        Assert.Equal(mcA, awSig.SessionId);
+        Assert.Equal(MasterClassSignupStatus.Confirmed, awSig.Status);   // A's waitlist cascaded in
     }
 
-    [Fact]
-    public async Task Expired_offer_auto_switches_by_default()
+    [Fact] // §93: promote the HIGHEST waitlist entry, and exactly one confirmation per freed seat.
+    public async Task Give_up_promotes_highest_waitlist_only_no_double_confirm()
     {
         using var db = ScenarioFixture.NewDb();
-        var (ev, mcA, mcB) = await SeedAsync(db, 1, 1);
+        var (ev, mcA, _) = await SeedAsync(db, 1, 10);
+        var seat = await Att(db, ev, "seat@x.dk");
+        var first = await Att(db, ev, "first@x.dk");
+        var second = await Att(db, ev, "second@x.dk");
         var svc = new MasterClassSignupService(db);
-        await SetModeAsync(svc, ev, MasterClassPromotionMode.OfferAndDecide, hold: 12);
-        var p = await Att(db, ev, "p@x.dk");
-        var bSeat = await Att(db, ev, "b@x.dk");
-        await svc.SignUpAsync(ev, p, mcA);
-        await svc.SignUpAsync(ev, bSeat, mcB);
-        await svc.SignUpAsync(ev, p, mcB, autoSwitchConsent: true);
-        await svc.RemoveAsync(ev, bSeat, mcB);   // p offered B
+        await svc.SignUpAsync(ev, seat, mcA);     // confirmed
+        await svc.SignUpAsync(ev, first, mcA);    // waitlist #1 (earliest)
+        await svc.SignUpAsync(ev, second, mcA);   // waitlist #2
 
-        // Force the offer past its window, then expire.
-        var off = db.MasterClassSignups.Single(x => x.AttendeeId == p && x.SessionId == mcB);
-        off.OfferExpiresAt = System.DateTimeOffset.UtcNow.AddHours(-1);
+        var promo = await svc.RemoveAsync(ev, seat, mcA);
+        Assert.Equal(first, promo!.PromotedAttendeeId);          // highest (earliest) wins
+
+        // Exactly ONE confirmed seat for the one freed seat; #2 still waiting.
+        Assert.Equal(1, db.MasterClassSignups.Count(x => x.SessionId == mcA
+                          && x.Status == MasterClassSignupStatus.Confirmed));
+        Assert.Equal(MasterClassSignupStatus.Confirmed,
+            (await svc.GetForAttendeeAsync(ev, first)).Single().Status);
+        Assert.Equal(MasterClassSignupStatus.Waitlisted,
+            (await svc.GetForAttendeeAsync(ev, second)).Single().Status);
+    }
+
+    [Fact] // §94: with a non-empty waitlist, a public booker is REFUSED the seat and waitlisted.
+    public async Task Public_booking_refused_while_a_waitlist_exists()
+    {
+        using var db = ScenarioFixture.NewDb();
+        var (ev, mcA, _) = await SeedAsync(db, 5, 10);   // plenty of room
+        var seat = await Att(db, ev, "seat@x.dk");
+        var waiter = await Att(db, ev, "wait@x.dk");
+        var publicBooker = await Att(db, ev, "pub@x.dk");
+        var svc = new MasterClassSignupService(db);
+        await svc.SignUpAsync(ev, seat, mcA);   // confirmed (free seat, no waitlist)
+
+        // Inject a waitlist entry directly (a race/leftover state the §94 guard must respect),
+        // even though there are free seats.
+        db.MasterClassSignups.Add(new MasterClassSignup
+        {
+            EventId = ev, SessionId = mcA, AttendeeId = waiter,
+            Status = MasterClassSignupStatus.Waitlisted,
+            CreatedAt = System.DateTimeOffset.UtcNow, UpdatedAt = System.DateTimeOffset.UtcNow,
+        });
         await db.SaveChangesAsync();
-        await svc.ExpireOffersAsync(System.DateTimeOffset.UtcNow, ev);
 
-        var pSig = (await svc.GetForAttendeeAsync(ev, p)).Single();
-        Assert.Equal(mcB, pSig.SessionId);                              // auto-switched to B
-        Assert.Equal(MasterClassSignupStatus.Confirmed, pSig.Status);
+        // Public booker must NOT jump the queue even though a seat is free → waitlisted.
+        var r = await svc.SignUpAsync(ev, publicBooker, mcA);
+        Assert.True(r.Ok);
+        Assert.Equal(MasterClassSignupStatus.Waitlisted, r.Signup!.Status);
+    }
+
+    [Fact] // §93/§94: raising the cap hands the opened seats to the waitlist (not the public).
+    public async Task Raising_capacity_promotes_from_the_waitlist()
+    {
+        using var db = ScenarioFixture.NewDb();
+        var (ev, mcA, _) = await SeedAsync(db, 1, 10);
+        var seat = await Att(db, ev, "seat@x.dk");
+        var w1 = await Att(db, ev, "w1@x.dk");
+        var w2 = await Att(db, ev, "w2@x.dk");
+        var svc = new MasterClassSignupService(db);
+        await svc.SignUpAsync(ev, seat, mcA);    // confirmed (cap 1)
+        await svc.SignUpAsync(ev, w1, mcA);      // waitlist
+        await svc.SignUpAsync(ev, w2, mcA);      // waitlist
+
+        var promotions = await svc.SetCapacityAsync(ev, mcA, capacity: 3);   // +2 seats
+        Assert.Equal(2, promotions.Count);
+        Assert.Equal(MasterClassSignupStatus.Confirmed, (await svc.GetForAttendeeAsync(ev, w1)).Single().Status);
+        Assert.Equal(MasterClassSignupStatus.Confirmed, (await svc.GetForAttendeeAsync(ev, w2)).Single().Status);
+        Assert.Empty(db.MasterClassSignups.Where(x => x.SessionId == mcA
+                          && x.Status == MasterClassSignupStatus.Waitlisted));
     }
 }

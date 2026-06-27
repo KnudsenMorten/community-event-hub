@@ -140,9 +140,8 @@
         <a class="brand" href="/" aria-label="@communityName">
             <img src="~/img/logo-experts-live-denmark-white.png" alt="Experts Live Denmark" style="height:48px; display:block;" />
         </a>
-        <a class="brand" href="/" aria-label="ELDK27 event logo" style="background:#fff; padding:6px 8px; border-radius:8px;">
-            <img src="~/img/logo-eldk27-event.png" alt="ELDK27" style="height:48px; display:block;" />
-        </a>
+        @* Round ELDK27 event badge removed (operator 2026-06-25): on mobile it overlapped
+           the Sign-out button; the wordmark above already brands the header. *@
         @* Hide the user identity + Sign-out on STANDALONE pages (HidePublicNav) — an
            anonymous survey / signup must show no internal chrome (operator 2026-06-24). *@
         @if (isLoggedIn && (ViewData["HidePublicNav"] as bool? ?? false) == false)
@@ -204,7 +203,26 @@
         {
             isVolunteerSupervisor = await VolunteerStructure.IsSupervisorAsync(me.EventId, me.ParticipantId);
         }
-        var nav = NavBuilder.Build(role!.Value, isVolunteerSupervisor);
+        // Show the exhibitor booth/leads nav blocks only to sponsors who actually have a
+        // physical booth (SponsorInfo.HasBooth, i.e. SponsorPackage >= Gold). A
+        // digital-only sponsor would otherwise see Zoho booth/lead links that don't
+        // apply to them. Resolved for sponsors only (cheap company lookup + AnyAsync).
+        var isExhibitor = false;
+        if (role == CommunityHub.Core.Domain.ParticipantRole.Sponsor && me is not null)
+        {
+            var sponsorCompanyId = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions
+                .FirstOrDefaultAsync(Db.Participants
+                    .Where(p => p.Id == me.ParticipantId)
+                    .Select(p => p.SponsorCompanyId));
+            if (sponsorCompanyId is not null)
+            {
+                isExhibitor = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions
+                    .AnyAsync(Db.SponsorInfos, s => s.EventId == me.EventId
+                        && s.SponsorCompanyId == sponsorCompanyId
+                        && s.SponsorPackage >= CommunityHub.Core.Domain.SponsorPackage.Gold);
+            }
+        }
+        var nav = NavBuilder.Build(role!.Value, isVolunteerSupervisor, isExhibitor);
         var participant = nav.Groups[0];
         var management = nav.ManagementGroup;
 
@@ -460,16 +478,6 @@
         <partial name="_Breadcrumb" />
         @RenderBody()
     </main>
-    @* Calendar-sync info dialog (global): any calendar Subscribe button opts in
-       with data-ceh-confirm="calSyncInfo". Reminds the person to subscribe with
-       the calendar account they actually watch — and points at the alternative
-       email if their reminders live on a different inbox. *@
-    <partial name="_ConfirmModal" model='new CommunityHub.Pages.Shared.ConfirmModalModel(
-        Id: "calSyncInfo",
-        Title: "Pick the calendar you actually use",
-        Body: "Don’t forget to choose the right calendar for your reminders, if you don’t normally keep calendar reminders with your primary email account. Tip: you can add an alternative email in My Hub Profile so reminder emails reach the inbox you watch.",
-        ConfirmLabel: "Got it — continue",
-        CancelLabel: "Cancel")' />
     <footer style="text-align:center;">
         <div>
             @ProductName (@ProductShortName) &mdash; @Localizer["Layout.FooterBuiltBy"]
@@ -490,6 +498,13 @@
        confirm modal falls back to a native confirm() (see _ConfirmModal).
        ---------------------------------------------------------------------- *@
     <partial name="_LayoutClientScripts" />
+    @* Otto, the corner Community Helper (REQUIREMENTS §129). AUTHENTICATED, non-standalone
+       pages only — same gate as the logged-in nav, so an anonymous survey/signup/login (or
+       any HidePublicNav page) shows NO Otto, preserving the anon-vs-auth chrome isolation (§27). *@
+    @if (isLoggedIn && !hidePublicNav)
+    {
+        <partial name="_OttoWidget" />
+    }
     @* Render any page-defined @@section Scripts. Without this, every page that defines one
        (e.g. Organizer/Hotels) 500s on render: "section 'Scripts' has not been rendered". *@
     @await RenderSectionAsync("Scripts", required: false)

@@ -58,7 +58,12 @@ public sealed class HotelsPageTests
         return new HotelsModel(
             accessor,
             new HotelManagementService(db, TimeProvider.System),
-            new HotelBulkOperationService(db));
+            new HotelBulkOperationService(db),
+            db,
+            null!,   // HotelCalendarInviter — only used on confirmation-number save, not these page tests
+            new CommunityHub.Core.Settings.FeatureGateService(db),
+            new CommunityHub.Core.Settings.RingResolver(db),
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<HotelsModel>.Instance);
     }
 
     private static async Task<Participant> SeedAsync(CommunityHubDbContext db)

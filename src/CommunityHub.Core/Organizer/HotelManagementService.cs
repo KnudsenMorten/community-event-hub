@@ -15,6 +15,17 @@ public sealed record HotelOccupant(
     bool NeedsRoom);
 
 /// <summary>
+/// A participant placed in a hotel who needs a room, with their own check-in/out
+/// dates — the recipient of the re-issued CONFIRMED hotel calendar invite (§46).
+/// </summary>
+public sealed record HotelReserver(
+    int ParticipantId,
+    string FullName,
+    string Email,
+    DateOnly CheckInDate,
+    DateOnly CheckOutDate);
+
+/// <summary>
 /// A hotel plus the participants placed in it — the "group everyone by hotel"
 /// view so organizers can manage the room block per hotel. <see cref="Hotel"/>
 /// is null for the synthetic "Not assigned" group.
@@ -58,7 +69,7 @@ public sealed class HotelManagementService
     /// <summary>Create a hotel. Throws <see cref="ArgumentException"/> on a blank name.</summary>
     public async Task<Hotel> CreateHotelAsync(
         int eventId, string name, string? address, string? contactEmail, string? notes,
-        int? roomBlockSize = null, CancellationToken ct = default)
+        int? roomBlockSize = null, string? confirmationNumber = null, CancellationToken ct = default)
     {
         name = (name ?? string.Empty).Trim();
         if (name.Length == 0) throw new ArgumentException("Hotel name is required.", nameof(name));
@@ -71,6 +82,7 @@ public sealed class HotelManagementService
             ContactEmail = Blank(contactEmail),
             Notes = Blank(notes),
             RoomBlockSize = NormalizeBlockSize(roomBlockSize),
+            ConfirmationNumber = Blank(confirmationNumber),
             CreatedAt = _clock.GetUtcNow(),
         };
         _db.Hotels.Add(hotel);
@@ -78,10 +90,12 @@ public sealed class HotelManagementService
         return hotel;
     }
 
-    /// <summary>Update a hotel in place. Returns false if it does not exist in the edition.</summary>
+    /// <summary>
+    /// Update a hotel in place. Returns false if it does not exist in the edition.
+    /// </summary>
     public async Task<bool> UpdateHotelAsync(
         int eventId, int hotelId, string name, string? address, string? contactEmail, string? notes,
-        int? roomBlockSize = null, CancellationToken ct = default)
+        int? roomBlockSize = null, string? confirmationNumber = null, CancellationToken ct = default)
     {
         name = (name ?? string.Empty).Trim();
         if (name.Length == 0) throw new ArgumentException("Hotel name is required.", nameof(name));
@@ -94,9 +108,75 @@ public sealed class HotelManagementService
         hotel.ContactEmail = Blank(contactEmail);
         hotel.Notes = Blank(notes);
         hotel.RoomBlockSize = NormalizeBlockSize(roomBlockSize);
+        hotel.ConfirmationNumber = Blank(confirmationNumber);
         hotel.UpdatedAt = _clock.GetUtcNow();
         await _db.SaveChangesAsync(ct);
         return true;
+    }
+
+    /// <summary>
+    /// Set (or clear) the hotel-level booking CONFIRMATION NUMBER (REQUIREMENTS §46)
+    /// and return whether the value actually CHANGED to a non-blank state — i.e. the
+    /// reservation just became CONFIRMED. The caller uses that signal to decide
+    /// whether to re-issue the calendar invites to everyone placed in the hotel.
+    /// Returns null when the hotel does not exist in the edition.
+    /// </summary>
+    public async Task<bool?> SetHotelConfirmationNumberAsync(
+        int eventId, int hotelId, string? confirmationNumber, CancellationToken ct = default)
+    {
+        var hotel = await GetHotelAsync(eventId, hotelId, ct);
+        if (hotel is null) return null;
+
+        var normalized = Blank(confirmationNumber);
+        var wasConfirmed = !string.IsNullOrWhiteSpace(hotel.ConfirmationNumber);
+        var nowConfirmed = !string.IsNullOrWhiteSpace(normalized);
+        var changed = !string.Equals(hotel.ConfirmationNumber, normalized, StringComparison.Ordinal);
+
+        hotel.ConfirmationNumber = normalized;
+        if (changed) hotel.UpdatedAt = _clock.GetUtcNow();
+        await _db.SaveChangesAsync(ct);
+
+        // "Just became confirmed" = a non-blank number is now set and the stored
+        // value changed (newly set, or replaced with a different number). Clearing
+        // or re-saving the same number does not re-fire the invites.
+        return nowConfirmed && changed && (!wasConfirmed || changed);
+    }
+
+    /// <summary>
+    /// Everyone placed in this hotel who needs a room — the recipients of the
+    /// re-issued CONFIRMED calendar invite (REQUIREMENTS §46). Pulls the
+    /// participant's own check-in/out dates from their <see cref="HotelBooking"/>;
+    /// people with no booking, no room need, or missing/zero-length dates are
+    /// skipped (there is nothing to put in a calendar invite for them).
+    /// </summary>
+    public async Task<IReadOnlyList<HotelReserver>> ListReserversForInviteAsync(
+        int eventId, int hotelId, CancellationToken ct = default)
+    {
+        var people = await _db.Participants
+            .Where(p => p.EventId == eventId && p.HotelId == hotelId
+                        && p.Role != ParticipantRole.Sponsor)
+            .Select(p => new { p.Id, p.FullName, p.Email })
+            .ToListAsync(ct);
+        if (people.Count == 0) return Array.Empty<HotelReserver>();
+
+        var ids = people.Select(p => p.Id).ToList();
+        var bookings = await _db.HotelBookings
+            .Where(hb => hb.EventId == eventId && ids.Contains(hb.ParticipantId) && hb.NeedsRoom)
+            .Select(hb => new { hb.ParticipantId, hb.CheckInDate, hb.CheckOutDate })
+            .ToListAsync(ct);
+
+        var byId = people.ToDictionary(p => p.Id);
+        var reservers = new List<HotelReserver>();
+        foreach (var b in bookings)
+        {
+            if (b.CheckInDate is null || b.CheckOutDate is null) continue;
+            if (b.CheckInDate.Value >= b.CheckOutDate.Value) continue;
+            if (!byId.TryGetValue(b.ParticipantId, out var p)) continue;
+            if (string.IsNullOrWhiteSpace(p.Email)) continue;
+            reservers.Add(new HotelReserver(
+                p.Id, p.FullName, p.Email, b.CheckInDate.Value, b.CheckOutDate.Value));
+        }
+        return reservers;
     }
 
     /// <summary>

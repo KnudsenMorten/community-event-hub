@@ -30,7 +30,18 @@ public sealed record MySpeakerSession(
     IReadOnlyList<string> CoSpeakerNames,
     /// <summary>The organizer-provided evaluation results link (Session.EvaluationFormUrl),
     /// or null. When set, the speaker grid shows an "Evaluations" download link.</summary>
-    string? EvaluationUrl = null);
+    string? EvaluationUrl = null,
+    /// <summary>The Zoho Backstage agenda/session id (§52), when this session has been
+    /// matched to Backstage. When set, the "View public session page" link points at the
+    /// public Zoho Backstage session page instead of the internal /Sessions/{id}.</summary>
+    string? BackstageSessionId = null,
+    /// <summary>§88: the KNOWN event day for this session when the exact <see cref="StartsAt"/>
+    /// time has not been synced yet — Master Classes are on the pre-day (the 9th), regular
+    /// sessions on the first main day (the 10th). The "My Sessions" view shows this date with
+    /// a "TBD" time so a speaker still sees WHEN their session is, even before the grid
+    /// publishes. Null only when the edition has no dates configured. Ignored once
+    /// <see cref="StartsAt"/> is set (the real time then drives the display).</summary>
+    DateOnly? FallbackDate = null);
 
 /// <summary>
 /// Builds the signed-in speaker's OWN session list for the Speaker hub
@@ -64,6 +75,17 @@ public sealed class SpeakerSessionsService
     {
         if (!SpeakerRoles.Contains(role)) return Array.Empty<MySpeakerSession>();
 
+        // §88: the KNOWN event days, so a session with no synced time still shows its date
+        // (+ a "TBD" time): Master Classes on the pre-day (PreDayDate, "the 9th"), regular
+        // sessions on the first main day (StartDate, "the 10th"). PreDayDate falls back to
+        // StartDate when an edition has not configured a separate pre-day.
+        var dates = await _db.Events
+            .Where(e => e.Id == eventId)
+            .Select(e => new { e.StartDate, e.PreDayDate })
+            .FirstOrDefaultAsync(ct);
+        DateOnly? mainDay = dates?.StartDate;
+        DateOnly? preDay = dates?.PreDayDate ?? dates?.StartDate;
+
         // Own-row scope: only sessions this participant is a SessionSpeaker on,
         // in this edition, excluding service sessions.
         var rows = await _db.Sessions
@@ -79,6 +101,7 @@ public sealed class SpeakerSessionsService
                 s.EndsAt,
                 s.Type,
                 s.EvaluationFormUrl,
+                s.BackstageSessionId,
                 OpenQuestionCount = s.Questions.Count(q => q.Status == SessionQuestionStatus.Open),
                 CoSpeakers = s.SessionSpeakers
                     .Where(ss => ss.ParticipantId != participantId)
@@ -104,7 +127,12 @@ public sealed class SpeakerSessionsService
                     .Where(n => !string.IsNullOrWhiteSpace(n))
                     .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
                     .ToList(),
-                string.IsNullOrWhiteSpace(r.EvaluationFormUrl) ? null : r.EvaluationFormUrl))
+                string.IsNullOrWhiteSpace(r.EvaluationFormUrl) ? null : r.EvaluationFormUrl,
+                string.IsNullOrWhiteSpace(r.BackstageSessionId) ? null : r.BackstageSessionId,
+                // §88: known fallback day only matters when the exact time is not set yet.
+                r.StartsAt is not null
+                    ? null
+                    : (r.Type == SessionType.MasterClass ? preDay : mainDay)))
             .ToList();
     }
 }

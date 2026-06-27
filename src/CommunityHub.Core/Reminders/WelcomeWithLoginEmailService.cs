@@ -264,17 +264,17 @@ public sealed class WelcomeWithLoginEmailService
         ParticipantRole.Organizer =>
             "As an organizer you get the full picture: participants, sponsors, attendee reconciliation and the live dashboards that run the whole event from one place.",
         ParticipantRole.Speaker =>
-            "As a speaker you will find your session details, your hotel and dinner forms, and your milestone deadlines — all in one place, with gentle reminders so nothing slips.",
+            "As a speaker, start with the \"Get Started\" flow in the hub — it walks you through everything you need to set up. Afterwards you can change anything under Event Logistics if needed.",
         ParticipantRole.Volunteer =>
-            "As a volunteer you can pick the shifts you can cover and fill in your hotel and dinner details — your tasks then appear in your own to-do list.",
+            "As a volunteer, start with the \"Get Started\" flow in the hub — it walks you through everything you need to set up. Afterwards you can change anything under Event Logistics if needed.",
         ParticipantRole.Sponsor =>
             "As a sponsor contact you get your company's onboarding tasks and deadlines, and you can capture the leads you meet at your booth — straight from your phone.",
         ParticipantRole.Attendee =>
             "As an attendee you get your own \"My Event\" page: a countdown, your Master Class status, the practical info, and a one-tap check-in on the day.",
         ParticipantRole.Media =>
-            "As part of the press / media crew you will find your hotel, dinner and lunch details and your crew schedule in one place.",
+            "As part of the press / media crew, start with the \"Get Started\" flow in the hub — it walks you through everything you need to set up. Afterwards you can change anything under Event Logistics if needed.",
         ParticipantRole.EventPartner =>
-            "As an event partner you will find your hotel, dinner and lunch details plus your task management in one place.",
+            "As an event partner, start with the \"Get Started\" flow in the hub — it walks you through everything you need to set up. Afterwards you can change anything under Event Logistics if needed.",
         _ =>
             "Sign in to see exactly the part of the event that is relevant to you.",
     };

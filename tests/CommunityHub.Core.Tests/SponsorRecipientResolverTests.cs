@@ -357,7 +357,7 @@ public class SponsorRecipientResolverTests
             new SentReminder { EventId = eventId, RecipientEmail = "coord@2linkit.net", ReminderType = "welcome", OccasionKey = "welcome:1" },
             new SentReminder { EventId = eventId, RecipientEmail = "signer@2linkit.net", ReminderType = "welcome", OccasionKey = "welcome:2" },
             // An unrelated reminder type must NOT be touched.
-            new SentReminder { EventId = eventId, RecipientEmail = "coord@2linkit.net", ReminderType = "task-deadline", OccasionKey = "task:5:m3" });
+            new SentReminder { EventId = eventId, RecipientEmail = "coord@2linkit.net", ReminderType = "task-deadline", OccasionKey = "task:5:due" });
         await db.SaveChangesAsync();
 
         var svc = NewWelcomeService(db, out var sender);
@@ -406,8 +406,9 @@ public class SponsorRecipientResolverTests
         db.Participants.AddRange(signerAssignee, coord1, coord2);
         await db.SaveChangesAsync();
 
-        // A sponsor task due within the reminder window, assigned to the signer.
-        var due = DateOnly.FromDateTime(ScenarioFixture.Clock.GetUtcNow().UtcDateTime).AddDays(2);
+        // A sponsor task due TODAY (§81: reminders fire only on the due day),
+        // assigned to the signer.
+        var due = DateOnly.FromDateTime(ScenarioFixture.Clock.GetUtcNow().UtcDateTime);
         db.Tasks.Add(new ParticipantTask
         {
             EventId = eventId,

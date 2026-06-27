@@ -104,9 +104,14 @@ public sealed class SpeakerBioBackstageSyncService
     /// <summary>
     /// Sync ONE speaker. Honours enabled flag, publish gate and the per-speaker ring gate.
     /// <paramref name="dryRun"/> builds the request but makes no live call.
+    /// <paramref name="alertOnExisting"/> controls whether the "needs a manual Backstage
+    /// update" email is sent when the speaker already exists in Backstage. Callers pass
+    /// <c>false</c> to DEDUPE the alert when nothing the speaker owns actually changed,
+    /// so organizers are not re-emailed on every save (the create path is unaffected).
     /// </summary>
     public async Task<SpeakerBioSyncResult> SyncOneAsync(
-        int eventId, int participantId, bool dryRun = false, CancellationToken ct = default)
+        int eventId, int participantId, bool dryRun = false,
+        bool alertOnExisting = true, CancellationToken ct = default)
     {
         var profile = await _db.SpeakerProfiles
             .FirstOrDefaultAsync(p => p.EventId == eventId && p.ParticipantId == participantId, ct)
@@ -149,7 +154,8 @@ public sealed class SpeakerBioBackstageSyncService
                         profile.BackstageSpeakerId = r.SpeakerId;
                         await _db.SaveChangesAsync(ct);
                     }
-                    await AlertManualUpdateAsync(participant, ct);
+                    if (alertOnExisting)
+                        await AlertManualUpdateAsync(participant, ct);
                     return new SpeakerBioSyncResult(participantId, SpeakerBioSyncOutcome.BlockedNeedsManualUpdate, request);
 
                 default:
@@ -173,7 +179,7 @@ public sealed class SpeakerBioBackstageSyncService
             .Where(p => p.EventId == eventId).Select(p => p.ParticipantId).ToListAsync(ct);
         var results = new List<SpeakerBioSyncResult>(ids.Count);
         foreach (var id in ids)
-            results.Add(await SyncOneAsync(eventId, id, dryRun, ct));
+            results.Add(await SyncOneAsync(eventId, id, dryRun, ct: ct));
         return results;
     }
 

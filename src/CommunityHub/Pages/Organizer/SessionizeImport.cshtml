@@ -7,7 +7,7 @@
 }
 
 <div class="card">
-    <h2>Import speakers from Sessionize</h2>
+    <h1>Import speakers from Sessionize</h1>
 
     @if (Model.AccessDenied)
     {
@@ -15,10 +15,10 @@
     }
     else
     {
-        <p>Export the speaker list from Sessionize as an Excel file, then
-           upload it here. The first row must contain column headers; the
-           import looks for <strong>Email</strong>, <strong>First Name</strong>
-           and <strong>Last Name</strong> columns (any order).</p>
+        <p>Speakers are imported straight from the Sessionize API &mdash; no file
+           upload. Speakers are matched by <strong>email</strong>; make sure the
+           <strong>speaker emails</strong> advanced field is enabled on the
+           Sessionize API view, or speakers will be skipped.</p>
         <p>New speakers are added with the Speaker role; existing speakers
            (matched by email) have their name + Sessionize-imported bio /
            social-link fields refreshed. Hub-collected fields (Accreditation,
@@ -93,20 +93,13 @@
                 ConfirmLabel: "Run full import",
                 CancelLabel: "Cancel",
                 Danger: true)' />
-
-            <hr />
-            <h3>Or upload an Excel export</h3>
         }
-
-        <form method="post" asp-page-handler="Import" enctype="multipart/form-data">
-            <label for="UploadFile">Sessionize Excel file (.xlsx)</label>
-            <input type="file" id="UploadFile" name="UploadFile"
-                   accept=".xlsx,.xlsm" />
-            <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;">
-                <button type="submit" asp-page-handler="PreviewUpload" class="secondary">@Localizer["Sezimport.PreviewUpload"]</button>
-                <button type="submit">Upload and import</button>
-            </div>
-        </form>
+        else
+        {
+            <p class="error">The Sessionize API integration is not configured for this
+               edition, so there is nothing to import. Configure the Sessionize API
+               endpoint in Settings to pull speakers.</p>
+        }
 
         @if (Model.Preview is not null && Model.Preview.Error is null)
         {

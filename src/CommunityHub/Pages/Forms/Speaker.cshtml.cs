@@ -40,8 +40,8 @@ public class SpeakerModel : PageModel
         "Microsoft Employee",
         "Microsoft Expert",
         "Microsoft MVP",
+        "Microsoft MCT",
         "Microsoft Regional Director",
-        "None / other",
     };
 
     public static readonly string[] GenderOptions =

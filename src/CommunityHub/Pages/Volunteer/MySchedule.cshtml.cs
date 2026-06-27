@@ -31,7 +31,6 @@ public class MyScheduleModel : PageModel
     private readonly VolunteerStructureService _svc;
     private readonly VolunteerShiftService _shifts;
     private readonly VolunteerHelpNotificationService _helpNotify;
-    private readonly CalendarFeedTokenService _calendarTokens;
     private readonly ParticipantCalendarBuilder _calendarBuilder;
     private readonly ILogger<MyScheduleModel> _logger;
 
@@ -42,7 +41,6 @@ public class MyScheduleModel : PageModel
         VolunteerStructureService svc,
         VolunteerShiftService shifts,
         VolunteerHelpNotificationService helpNotify,
-        CalendarFeedTokenService calendarTokens,
         ParticipantCalendarBuilder calendarBuilder,
         ILogger<MyScheduleModel> logger)
     {
@@ -52,7 +50,6 @@ public class MyScheduleModel : PageModel
         _svc = svc;
         _shifts = shifts;
         _helpNotify = helpNotify;
-        _calendarTokens = calendarTokens;
         _calendarBuilder = calendarBuilder;
         _logger = logger;
     }
@@ -69,12 +66,6 @@ public class MyScheduleModel : PageModel
         new(Array.Empty<VolunteerScheduleEntry>(), Array.Empty<VolunteerHelpRequest>());
 
     [TempData] public string? Notice { get; set; }
-
-    /// <summary>webcal:// subscribe URL for the personal feed (empty if sync off).</summary>
-    public string CalendarWebcalUrl { get; private set; } = string.Empty;
-    /// <summary>https:// download URL for the personal feed (empty if sync off).</summary>
-    public string CalendarHttpsUrl { get; private set; } = string.Empty;
-    public bool CalendarSyncEnabled { get; private set; }
 
     public async Task<IActionResult> OnGetAsync(CancellationToken ct)
     {
@@ -193,27 +184,5 @@ public class MyScheduleModel : PageModel
     private async Task LoadAsync(CurrentParticipant me, CancellationToken ct)
     {
         Schedule = await _schedule.BuildAsync(me.EventId, me.ParticipantId, ct);
-
-        CalendarSyncEnabled = await _db.Events
-            .Where(e => e.Id == me.EventId)
-            .Select(e => e.CalendarSyncEnabled)
-            .FirstOrDefaultAsync(ct);
-
-        if (CalendarSyncEnabled)
-        {
-            try
-            {
-                var token = await _calendarTokens.EnsureTokenAsync(me.ParticipantId, ct);
-                var host = Request.Host.Value ?? string.Empty;
-                CalendarHttpsUrl = $"{Request.Scheme}://{host}/cal/{token}.ics";
-                CalendarWebcalUrl = $"webcal://{host}/cal/{token}.ics";
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex,
-                    "MySchedule: failed to ensure calendar feed token for participant {Pid}",
-                    me.ParticipantId);
-            }
-        }
     }
 }

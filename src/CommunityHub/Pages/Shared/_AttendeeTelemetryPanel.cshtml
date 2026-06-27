@@ -1,0 +1,156 @@
+@model CommunityHub.Pages.Shared.AttendeeTelemetryPanelModel
+@*
+    Shared attendee-telemetry panel (§55). Renders the SAME ranked breakdown tables
+    + headline metrics + sales-over-time graph + segment / topic-filter dropdowns for
+    all three hosts:
+      • public anonymous  /attendee-telemetry
+      • sponsor (in-area)  /Sponsor/Telemetry   (Sponsor role)
+      • organizer          /Organizer/Telemetry  (Organizer role)
+    Each host supplies an AttendeeTelemetry (from AttendeeTelemetryService) + the
+    segment list; this partial owns the markup so the three never drift apart.
+
+    The filter form is method="get" with no action, so it posts back to whatever
+    page hosts the partial (the host page binds Segment/FilterKey/FilterValue from
+    the query string and re-queries) — identical behaviour on all three routes.
+*@
+@functions {
+    // A ranked table: # · full label (wraps, never truncated) · count · share bar.
+    static string RankedTable(IReadOnlyList<CommunityHub.Core.Integrations.TelemetrySlice> s)
+    {
+        if (s is null || s.Count == 0) return "<p class=\"info\">No data yet.</p>";
+        var total = System.Linq.Enumerable.Sum(s, x => x.Count);
+        var max = System.Linq.Enumerable.Max(s, x => x.Count);
+        var sb = new System.Text.StringBuilder("<table class=\"tl-table\"><tbody>");
+        var rank = 0;
+        foreach (var x in s)
+        {
+            rank++;
+            var barPct = max > 0 ? (int)System.Math.Round(100.0 * x.Count / max) : 0;
+            var sharePct = total > 0 ? System.Math.Round(100.0 * x.Count / total, 1) : 0;
+            sb.Append($"<tr><td class=\"tl-rank\">{rank}</td>"
+                + $"<td class=\"tl-lbl\">{System.Net.WebUtility.HtmlEncode(x.Label)}"
+                + $"<span class=\"tl-bar\"><span class=\"tl-fill\" style=\"width:{barPct}%\"></span></span></td>"
+                + $"<td class=\"tl-num\">{x.Count}</td>"
+                + $"<td class=\"tl-pct\">{sharePct}%</td></tr>");
+        }
+        sb.Append("</tbody></table>");
+        return sb.ToString();
+    }
+}
+
+<style>
+    .tl-wrap { max-width:960px; margin:0 auto; }
+    .tl-controls { display:flex; flex-wrap:wrap; gap:10px; align-items:center; justify-content:center; margin:6px 0 14px; }
+    .tl-controls select { padding:8px 10px; border:1px solid #c4c8d4; border-radius:8px; font-size:14px; min-width:260px; }
+    .tl-metrics { display:grid; grid-template-columns:repeat(2,1fr); gap:12px; margin:0 0 18px; }
+    @@media (min-width:620px) { .tl-metrics { grid-template-columns:repeat(4,1fr); } }
+    .tl-metric { background:#f7f9fc; border:1px solid #e6eaf2; border-radius:10px; padding:12px; text-align:center; }
+    .tl-metric .v { font-size:30px; font-weight:800; color:var(--el-darkblue,#1D3380); line-height:1; }
+    .tl-metric .k { color:#6b7280; font-size:12.5px; margin-top:4px; }
+    .tl-graph { display:flex; align-items:flex-end; gap:2px; height:120px; padding:8px 0; border-bottom:1px solid #e6eaf2; overflow-x:auto; }
+    .tl-gbar { flex:0 0 8px; background:var(--el-blue,#008BD2); border-radius:2px 2px 0 0; min-height:2px; }
+    .tl-grid { display:grid; gap:16px; grid-template-columns:1fr; margin-top:18px; }
+    @@media (min-width:760px) { .tl-grid { grid-template-columns:1fr 1fr; } }
+    .tl-card h3 { margin:0 0 10px; font-size:15.5px; color:var(--el-darkblue,#1D3380); }
+    .tl-table { width:100%; border-collapse:collapse; font-size:13.5px; }
+    .tl-table td { padding:5px 6px; vertical-align:top; border-bottom:1px solid #f0f2f6; }
+    .tl-rank { color:#9aa0aa; width:1%; white-space:nowrap; font-variant-numeric:tabular-nums; }
+    .tl-lbl { color:#374151; word-break:break-word; }   /* full text, wraps, never cut off */
+    .tl-bar { display:block; height:6px; margin-top:4px; background:#eef2f7; border-radius:999px; overflow:hidden; }
+    .tl-fill { display:block; height:100%; background:var(--el-blue,#008BD2); border-radius:999px; }
+    .tl-num { font-weight:700; color:#1f2430; text-align:right; white-space:nowrap; width:1%; font-variant-numeric:tabular-nums; }
+    .tl-pct { color:#6b7280; text-align:right; white-space:nowrap; width:1%; font-variant-numeric:tabular-nums; }
+    .tl-foot { color:#9aa0aa; font-size:12px; text-align:center; margin-top:18px; }
+</style>
+
+@if (Model.Data is null)
+{
+    <p class="info" style="text-align:center;">Live attendee numbers aren't available right now — please check back shortly.</p>
+}
+else
+{
+    var dims = Model.Data.FilterDimensions ?? new List<CommunityHub.Core.Integrations.TelemetryFilterDimension>();
+    var sel = dims.FirstOrDefault(d => d.Key == Model.Data.FilterKey);
+    <form method="get" class="tl-controls">
+        <label for="segment" style="font-size:13px;color:#4b5563;">Segment:</label>
+        <select id="segment" name="segment" onchange="this.form.submit()">
+            @foreach (var s in Model.Segments)
+            {
+                <option value="@s.Key" selected="@(s.Key == Model.Data.SegmentKey)">@s.Label</option>
+            }
+        </select>
+
+        @* Topic filter: pick a dimension, then a value. Changing the dimension
+           resets the value (value select re-populates from the chosen dimension). *@
+        <label for="filterKey" style="font-size:13px;color:#4b5563;">Filter by:</label>
+        <select id="filterKey" name="filterKey"
+                onchange="this.form.filterValue.value=''; this.form.submit()">
+            <option value="">(no topic filter)</option>
+            @foreach (var d in dims)
+            {
+                <option value="@d.Key" selected="@(d.Key == Model.Data.FilterKey)">@d.Label</option>
+            }
+        </select>
+        @if (sel is not null)
+        {
+            <select id="filterValue" name="filterValue" onchange="this.form.submit()">
+                <option value="">(any @sel.Label.ToLowerInvariant())</option>
+                @foreach (var v in sel.Values)
+                {
+                    <option value="@v" selected="@(v == Model.Data.FilterValue)">@v</option>
+                }
+            </select>
+        }
+        else
+        {
+            <input type="hidden" name="filterValue" value="" />
+        }
+        <noscript><button type="submit">Apply</button></noscript>
+    </form>
+
+    @if (sel is not null && !string.IsNullOrEmpty(Model.Data.FilterValue))
+    {
+        <p style="text-align:center;margin:0 0 12px;font-size:14px;color:var(--el-darkblue,#1D3380);">
+            Showing <strong>@Model.Segments.FirstOrDefault(s => s.Key == Model.Data.SegmentKey)?.Label</strong>
+            · filtered by <strong>@sel.Label</strong> = <strong>@Model.Data.FilterValue</strong>
+        </p>
+    }
+
+    <div class="tl-metrics">
+        <div class="tl-metric"><div class="v">@Model.Data.SegmentCount.ToString("N0")</div><div class="k">in this segment</div></div>
+        <div class="tl-metric"><div class="v">@Model.Data.PctOfTotal%</div><div class="k">of all @Model.Data.TotalAll.ToString("N0") tickets</div></div>
+        <div class="tl-metric"><div class="v">@Model.Data.Pct2DayInSegment%</div><div class="k">on a 2-day (pre-day) ticket</div></div>
+        <div class="tl-metric"><div class="v">@Model.Data.TotalAll.ToString("N0")</div><div class="k">tickets sold total</div></div>
+    </div>
+
+    @if (Model.Data.Daily.Count > 0)
+    {
+        var gmax = System.Linq.Enumerable.Max(Model.Data.Daily, d => d.Count);
+        <h3 style="font-size:15px;color:var(--el-darkblue);margin:0 0 4px;">Tickets sold per day</h3>
+        <div class="tl-graph">
+            @foreach (var d in Model.Data.Daily)
+            {
+                var h = gmax > 0 ? (int)System.Math.Round(100.0 * d.Count / gmax) : 0;
+                <span class="tl-gbar" style="height:@(h)%" title="@d.Day.ToString("d MMM yyyy"): @d.Count (running @d.Cumulative)"></span>
+            }
+        </div>
+        <p style="font-size:12px;color:#6b7280;margin:4px 0 0;">@Model.Data.Daily[0].Day.ToString("d MMM yyyy") – @Model.Data.Daily[^1].Day.ToString("d MMM yyyy") · running total @Model.Data.Daily[^1].Cumulative.ToString("N0")</p>
+    }
+
+    <div class="tl-grid">
+        @* §69 — organizer-only tables (e.g. "Top companies") never render on the
+           public / sponsor surfaces. *@
+        @foreach (var table in Model.Data.Tables.Where(t => Model.IsOrganizer || !t.OrganizerOnly))
+        {
+            <div class="tl-card">
+                <h3>@table.Title</h3>
+                @Html.Raw(RankedTable(table.Slices))
+            </div>
+        }
+    </div>
+
+    @* §69 — drop the "Aggregate figures from Zoho Backstage ·" prefix (don't expose the source system).
+       §127 — "Updated" is the last-successful-SYNC time (when the mirror was refreshed), not the
+       wall-clock the page rendered; fall back to render time only if the edition was never synced. *@
+    <p class="tl-foot">Updated @((Model.Data.LastSyncAtUtc ?? Model.Data.GeneratedAtUtc).ToString("d MMM yyyy HH:mm 'UTC'"))</p>
+}

@@ -1,6 +1,6 @@
 # Community Event Hub — Feature Catalog
 
-*Delivered feature set, as of 2026-06-22.*
+*Delivered feature set, as of 2026-06-25.*
 
 Community Event Hub (CEH) is the all-in-one workspace that runs a tech-community
 conference end to end: one home for your organizers, speakers, volunteers,
@@ -1100,11 +1100,12 @@ follow-up automatically.
 
 ## 9. Attendees & masterclass reconciliation — one clear picture
 
-| Attendee "My Event" | …on a phone |
-|---|---|
-| [![Attendee My Event hub](img/attendee-my-event.png)](img/attendee-my-event.png) | [![Attendee My Event on mobile](img/attendee-my-event-mobile.png)](img/attendee-my-event-mobile.png) |
-
-*The attendee hub: a live countdown, ticket and Master Class status, a personal agenda and self check-in — built phone-first for the person walking up to the venue.*
+> **Scope note (2026-06-26):** the Attendee **"My Event" dashboard** and **self check-in** are
+> **out of scope** — **event check-in (and live headcounts) are owned by Zoho Backstage**, not the
+> hub. The former `/Attendee/MyEvent` dashboard, its self check-in ("I'm here") and the retired
+> `/Attendee/MyPlan` personal-plan page were not delivered as hub features, and their screenshots have
+> been removed. What the hub owns for attendees is **reconciliation**, the in-hub **Master Class**
+> chooser / waitlist, and the organizer **attendee browser** (below).
 
 - **Tickets and masterclass seats reconciled automatically.** The hub compares
   two-day tickets against masterclass bookings and surfaces the mismatches — no
@@ -1126,51 +1127,9 @@ follow-up automatically.
 - **An attendee browser for organizers.** A clean, read-only view with tiles,
   search, filters and CSV export (correctly handling accented names). Corrections
   happen at the source system, keeping data trustworthy.
-- **A "My Event" dashboard for attendees (2026-06-14).** Every attendee gets one
-  mobile-first home that pulls together what they need: a live countdown to the
-  event (or a "Happening now" badge during it), their Master Class status at a
-  glance (reserved / not booked / double-booked, with a deep-link out to manage
-  the booking), and the practical info — pre-day and conference dates, plus the
-  venue as a one-tap map link.
-- **Self check-in — "I'm here" (2026-06-14).** On the event days, a ticket-holding
-  attendee can tap one button on the My Event dashboard to check themselves in;
-  the time is recorded and shown back to them. It is self-service and idempotent
-  (tapping again does nothing), opens only for ticket holders during the event
-  window, and never re-implements turnstiles or badge scanning — it is a
-  lightweight presence signal the attendee owns.
-- **A personal agenda on "My Event" (2026-06-16).** The same My Event home now also
-  pulls together each attendee's programme: a **My sessions** card showing the
-  session they reserved (their Master Class), the **full agenda** for the edition
-  with their own session clearly highlighted, and one-tap **quick links** to their
-  hotel, swag and lunch forms plus the public agenda. Every session lists its time,
-  room and speaker(s) and links straight to its details, to **ask the speaker a
-  question** before the event, and to **rate the session** afterwards. It is a
-  read-only, mobile-first view in English and Danish — booking still happens at the
-  source, the hub just gives attendees one tidy place to see their whole day.
-- **Build your own "My plan" of talks to attend (✅ 2026-06-17).** A new **My plan**
-  page lets each attendee curate their own running order: browse the programme and tap
-  **Save** to add the talks they want to attend, or **Remove** to take one out. Saved
-  talks appear together at the top — the scheduled ones in time order, with any
-  not-yet-timed talks listed after so nothing is forgotten — each showing its time,
-  room and speaker(s) and linking straight to the session details. It is a private,
-  personal bookmark list that is **only ever visible to that attendee** and **never
-  books a seat** (booking stays in the booking system) — it simply remembers the
-  sessions they care about. Saving the same talk twice does nothing, and a talk that
-  gets removed from the programme quietly drops off the plan. Phone-first, in English
-  and Danish.
-- **Add your whole plan to your calendar (✅ 2026-06-17).** From the My plan page an
-  attendee can **download their saved talks as a calendar file (.ics)** and open it in
-  Outlook, Google or Apple Calendar — one entry per saved talk that has a confirmed
-  time, with the room, the speaker(s) and a link back to the session details, plus a
-  reminder shortly before each talk starts. Re-download any time: your calendar
-  **updates in place** rather than creating duplicates, and a talk you remove from your
-  plan drops off your calendar on the next download. The file is **only ever your own**
-  plan, and when none of your saved talks has a confirmed time yet the page simply tells
-  you there's nothing to add to a calendar instead of offering an empty file.
-  Phone-first, in English and Danish.
 - **A focused attendee menu.** *(✅ 2026-06-21)* An attendee now sees a minimal,
-  uncluttered menu built around just what they need — **Home, Master Class, My plan**
-  and **Waitlist** — instead of a long mixed list, so the things an attendee actually
+  uncluttered menu built around just what they need — **Home, Master Class** and
+  **Waitlist** — instead of a long mixed list, so the things an attendee actually
   uses are one tap away. Mobile-first, English and Danish.
 - **Choose your Master Class right in the hub.** *(✅ 2026-06-21)* The external booking
   deep-link is replaced by an **in-hub Master Class chooser**: an attendee can **sign
@@ -1909,3 +1868,142 @@ time, test each, and never have a new release spring a surprise on a live event.
 - **Per-edition.** Every switch is set per edition, so a new edition starts clean and you tailor it to
   that event.
 - **Bilingual & mobile-first.** The whole page is available in English and Danish and works on a phone.
+
+## 17. Exhibitor & booth sync — sponsors who exhibit, kept in step *(✅ 2026-06-25)*
+
+When a sponsor's package includes a booth, the hub now treats them as a real **exhibitor** in your
+event-platform booth system and keeps the two sides in step automatically — with strong guards so a
+record is never lost and a contact's address is never accidentally locked out.
+
+- **Booth sponsors become exhibitors automatically.** The moment a sponsor with a booth package is
+  picked up from the webshop, the hub **creates the matching exhibitor** in your booth platform
+  (not just a request that waits for a human). A sponsor who buys a booth simply appears as an
+  exhibitor, with no manual step.
+- **Booth category and slot filled in for you.** Each new exhibitor is created with the right
+  **booth category** for its tier and its **booth slot** (e.g. `E-26`) read from the order — and an
+  existing exhibitor is updated in place when the slot is assigned later, never re-created.
+- **Manage booth members — add and really remove.** A sponsor can add the people staffing their
+  booth, and the **"remove" button now genuinely removes** that person from the booth in the
+  platform (it resolves the right person by email and deletes only that booth member). It is
+  member-only and belt-and-braces: the hub also remembers the removal locally, so a removed person
+  can never quietly re-appear on the next sync, and re-adding the same email brings them back.
+- **A record is never deleted — by anyone.** The sponsor/exhibitor record itself — which carries
+  their leads, inquiries and identity — is **never deleted by the hub**, not even to immediately
+  re-create it, because that would orphan everything tied to it. The sync only ever creates, links
+  and updates; removing booth *members* is the only delete it performs.
+- **Fill in the blanks across systems — never overwrite.** The hub reconciles a sponsor's
+  **website, LinkedIn, X/Twitter and company description** across the webshop, the hub and the booth
+  platform, filling **only the fields that are blank** on each side and **never overwriting a value
+  someone already set**. It pulls a missing value in from the webshop, then pushes it up to the
+  booth platform if that side is blank — so a sponsor's links and description quietly become complete
+  everywhere.
+- **The contact email is protected from a known lock-out.** The booth platform blocks a record after
+  a few updates to its contact email, so the hub sends the contact email **only when it has genuinely
+  changed** — a no-op re-send of the same address is never sent. A real change still goes through; a
+  pointless one can never burn an attempt and lock the sponsor out.
+- **Self-healing and honest alerts.** The sync **self-heals** a stale link (re-finding a record that
+  moved) and runs frequently so saves on either side don't drift. When something genuinely fails, an
+  **operator alert email** goes out that carries the **actual error** (not a "see logs" pointer), and
+  these engine/ops alerts are delivered **regardless of release-ring gating** so they always reach the
+  organizer. *(External booth-platform credentials and the one pinned booth-category id are operator
+  config; until they're set the sync runs in a safe no-write mode and reports what it would do.)*
+
+## 18. Get-started wizards for every role *(✅ 2026-06-25)*
+
+Every signed-in person now gets a guided **"Get started"** checklist tailored to exactly what they
+need to do — building on the speaker and sponsor wizards with the same shell for organizers,
+volunteers, event partners and media.
+
+- **A wizard for each role.** "Get started" now appears for **organizers, volunteers, event partners
+  and media** as well as speakers and sponsors. Each lists the steps that role should complete, in a
+  sensible guided order, with a clear *"Continue — step X of Y"* that always matches the list.
+- **Only the steps that apply to you.** The wizard shows **only the steps the person is actually
+  entitled to**, from their role and what they bought or were granted. A speaker who is funding their
+  own trip doesn't see hotel, travel or swag steps; a supported speaker does; a sponsor who also
+  speaks gets exactly the combined set — so no irrelevant step ever shows and no required one is
+  missing. The self-service forms enforce the same entitlement, so a form a person isn't entitled to
+  is genuinely closed, not just hidden.
+- **A saved value counts as done.** Every step (and its standalone page) is marked **complete
+  automatically once there is a saved entry for it** — no separate "mark complete" click. The wizard
+  and the task list always agree on what's finished.
+- **Consistent numbering, fail-soft steps.** Every step is numbered and counted, so the progress line
+  is always correct. A step that depends on an integration that isn't configured (for example the
+  sponsor "your contacts" step when accounting isn't connected) is shown as a gentle guided link
+  rather than blocking the wizard.
+
+## 19. Forms, saving and timeliness polish *(✅ 2026-06-25)*
+
+A cross-cutting pass over saving and the self-service forms so nothing is lost and everyone can see
+when something was last saved.
+
+- **"Last saved" on the key self-service save pages.** The hub shows the **date and time a record was
+  last saved** beside the Save button, read from the record itself, so a person can tell at a glance
+  whether their latest change is in. It now appears on the main self-service save pages: **Speaker
+  Details**, **Sponsor Company Details**, **Volunteer Availability**, and the participant forms
+  **Travel, Hotel, Dinner, Lunch and Swag**. (Pages whose underlying record has no "saved-at" stamp —
+  for example the basic profile — don't show the line.)
+- **Auto-save so nothing is forgotten.** On Company Details, **plain text fields auto-save** as you
+  move on (with a quiet *Saving… / Saved* status), and **adding or removing** something syncs
+  immediately — so the common "I forgot to press Save" mistake can't lose work. Saving to the hub is
+  kept separate from syncing out to external systems, which only happens on a real change.
+- **Policy links where they're needed.** A **Policies** menu (Privacy Policy + Code of Conduct) is
+  available to **every role**, and the **volunteer sign-up agreement** step links to the same two
+  policies so an applicant agrees with them in front of them.
+- **Travel reimbursement made clearer + a two-step gate.** The travel form is now an explicit
+  two-step flow — **Step 1: Upload Receipt**, then **Step 2: Request Travel Reimbursement** — with
+  Step 2 **blocked until at least one receipt is uploaded**, matching button styling, the covered /
+  not-covered guidance folded into the intro, and an added long-haul reimbursement option. On
+  submission the request (with receipts) is also emailed to the finance inbox for automatic
+  bookkeeping.
+- **Hotel confirmation numbers + an updated invite.** An organizer can enter a hotel's **booking
+  confirmation number** once the hotel releases it; the reservation flips to **CONFIRMED** and
+  **everyone placed in that hotel gets an updated calendar invite** carrying the number, updating
+  their existing entry in place. Participants see the number read-only on their hotel form.
+- **Volunteer availability that matches reality.** The volunteer availability options (in both the
+  portal form and the public survey) now match the real schedule day by day, with sensible
+  exclusivity (choosing "Full day" or "Not able to help" clears the other choices for that day).
+- **Clearer volunteer menu.** The volunteer menu reads **My Hub Profile → My Assignments → My
+  Onboarding Tasks**, renamed and reordered so it's obvious what each item is.
+- **Public company name everywhere — including admin.** Sponsor- and organizer-facing screens always
+  show the company's **chosen public name**, never an internal id or the legal/billing name, with a
+  sensible fallback only as a last resort.
+
+## 20. Attendee telemetry, for organizers and sponsors too *(✅ 2026-06-25)*
+
+The anonymous attendee-insights view now lives **inside the sponsor and organizer areas** as well as
+on the public page, so the people who plan the event can see the same picture.
+
+- **The same insights in three places.** A shared panel renders the **same ranked, full-text tables
+  and topic filters** (job roles, where attendees are from, and more) on the **public** page, in the
+  **sponsor** area and in the **organizer** area — all built from the same attendee-telemetry data,
+  so the numbers always agree.
+- **Ranked, readable breakdowns.** Each topic appears in the filter dropdown **and** as a ranked
+  table with full (never cut-off) labels, and the view shows which filter is in force.
+- **In-area links.** Sponsors and organizers reach it from their own menus, mobile-first and in
+  English and Danish.
+
+## 21. Speaker area — session truth, reminders and sharing *(✅ 2026-06-25)*
+
+A focused pass over the speaker experience: cleaner profile and tasks, session details that come from
+the live agenda, automatic notice when a session moves, and one-click sharing.
+
+- **Session time and place from the live agenda.** A speaker's session shows its **time and
+  location** from the event platform's agenda, the "view public session page" link points at the
+  **platform's session details**, and the calendar sync includes the session's when and where.
+- **Automatic notice when a session changes.** A background engine watches the agenda for **time or
+  location changes** and **emails the affected speaker** when their session moves. It is
+  organizer-controllable and ring-gated, and it seeds quietly the first time so no one is emailed for
+  a change that didn't really happen. It **activates once the Zoho Backstage agenda feed is connected**
+  (the `agenda.READ` scope) — until then it safely no-ops rather than guessing. The **broad rings
+  (ring 2/3) are auto-enabled by date — 1 Dec 2026 by default** (an organizer can override the date),
+  while **ring 0/1 are unrestricted for testing** and receive alerts immediately.
+- **A tidier profile and task list.** "My Hub Profile" drops duplicated email fields and surfaces the
+  read-only sign-in email and role up top; redundant speaker tasks are removed; each remaining task
+  gets an **"Add reminder to calendar"** button; and the wizard marks a step done from saved data.
+- **Friendlier ratings copy.** The evaluations and hub copy explains ratings come from the in-room
+  evaluation device and the QR code form, and shows a clear **"not released yet"** notice instead of a
+  dead click-through.
+- **Share to LinkedIn (held until connected).** From their graphics page a speaker can **publish a
+  released graphic to LinkedIn** through the existing reviewed/queued posting path. With no LinkedIn
+  credentials configured the announcement is **safely queued and nothing is posted or faked**; it goes
+  out automatically once the connection is enabled.

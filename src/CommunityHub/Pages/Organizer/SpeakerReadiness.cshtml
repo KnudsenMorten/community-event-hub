@@ -1,0 +1,112 @@
+@page
+@model CommunityHub.Pages.Organizer.SpeakerReadinessModel
+@{
+    ViewData["Title"] = "Speaker readiness";
+}
+
+<style>
+    /* Mobile-first: the roster collapses to stacked cards; the wide table (desktop)
+       is wrapped in an overflow-x scroller so it never overflows a ~360px phone. */
+    .sr-summary { font-size:13px;color:#6b7280;margin:0 0 12px; }
+    .sr-summary strong { color:var(--el-darkblue); }
+
+    .sr-bar-wrap { background:#eef0f4; border-radius:999px; height:10px; overflow:hidden; width:120px; max-width:40vw; }
+    .sr-bar { height:100%; border-radius:999px; }
+    .sr-bar.low  { background:#dc2626; }
+    .sr-bar.mid  { background:#d97706; }
+    .sr-bar.high { background:#0a6; }
+
+    .sr-pct { font-weight:700; color:var(--el-darkblue); }
+    .sr-miss { list-style:none; padding:0; margin:0; display:flex; flex-wrap:wrap; gap:4px 6px; }
+    .sr-chip { display:inline-block; background:#fdf3f2; border:1px solid #f1c4bf; color:#9b261a;
+               border-radius:999px; padding:1px 9px; font-size:12px; white-space:nowrap; }
+    .sr-allset { color:#0a6; font-size:12.5px; font-weight:600; }
+
+    .sr-table { border-collapse:collapse; width:100%; font-size:13px; min-width:760px; }
+    .sr-table th, .sr-table td { padding:8px; text-align:left; vertical-align:top; }
+    .sr-table thead tr { border-bottom:2px solid #ddd; }
+    .sr-table tbody tr { border-bottom:1px solid #eee; }
+</style>
+
+<div class="card">
+    <h1>Speaker readiness</h1>
+    @if (Model.AccessDenied)
+    {
+        <p class="error">@Localizer["Common.OrganizersOnly"]</p>
+        <p><a asp-page="/Index">@Localizer["Common.BackToHub"]</a></p>
+    }
+    else
+    {
+        if (!string.IsNullOrEmpty(Model.Error)) { <p class="error">@Model.Error</p> }
+
+        <p style="font-size:13.5px;color:#555;margin-top:0;">
+            Every speaker's "am I ready?" rollup, lowest readiness first — so the people
+            who need chasing are at the top. Each is computed from existing data (details,
+            headshot, hotel/dinner where entitled, the §120 presentation uploads, Master
+            Class prep, and remaining tasks).
+        </p>
+
+        <p class="sr-summary" role="status">
+            <strong>@Model.Speakers.Count</strong> speaker(s) &middot;
+            <strong>@Model.ReadyCount</strong> fully ready &middot;
+            average readiness <strong>@Model.AveragePercent%</strong>
+        </p>
+
+        @if (Model.Speakers.Count == 0)
+        {
+            <p style="color:#6b7280;">No speakers in this edition yet.</p>
+        }
+        else
+        {
+            <div style="overflow-x:auto;position:relative;">
+                <table class="sr-table">
+                    <thead>
+                        <tr>
+                            <th scope="col">Speaker</th>
+                            <th scope="col">Readiness</th>
+                            <th scope="col">Still missing</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var s in Model.Speakers)
+                        {
+                            var cls = s.Percent >= 100 ? "high" : s.Percent >= 50 ? "mid" : "low";
+                            <tr>
+                                <td>
+                                    <div style="font-weight:600;color:var(--el-darkblue);">@s.FullName</div>
+                                    <div style="color:#8a8f9c;font-size:12px;">@s.Email</div>
+                                </td>
+                                <td>
+                                    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                                        <span class="sr-pct">@s.Percent%</span>
+                                        <span class="sr-bar-wrap">
+                                            <span class="sr-bar @cls" style="display:block;width:@(s.Percent)%;"></span>
+                                        </span>
+                                    </div>
+                                    <div style="color:#6b7280;font-size:12px;margin-top:2px;">@s.Summary</div>
+                                </td>
+                                <td>
+                                    @if (s.MissingItems.Count == 0)
+                                    {
+                                        <span class="sr-allset">&#9989; All set</span>
+                                    }
+                                    else
+                                    {
+                                        <ul class="sr-miss">
+                                            @foreach (var item in s.MissingItems)
+                                            {
+                                                <li><span class="sr-chip">@item.Label</span></li>
+                                            }
+                                        </ul>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+
+        <p style="margin-top:16px;"><a asp-page="/Organizer/Index">&larr; @Localizer["Common.BackToOrganizerArea"]</a></p>
+    }
+</div>

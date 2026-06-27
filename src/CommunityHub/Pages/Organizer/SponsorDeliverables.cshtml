@@ -1,0 +1,139 @@
+@page
+@model CommunityHub.Pages.Organizer.SponsorDeliverablesModel
+@{
+    ViewData["Title"] = "Sponsor deliverables";
+}
+
+<style>
+    /* Mobile-first: the wide board is wrapped in an overflow-x scroller so it never
+       overflows a ~360px phone. */
+    .sd-summary { font-size:13px;color:#6b7280;margin:0 0 12px; }
+    .sd-summary strong { color:var(--el-darkblue); }
+
+    .sd-bar-wrap { background:#eef0f4; border-radius:999px; height:10px; overflow:hidden; width:110px; max-width:36vw; }
+    .sd-bar { height:100%; border-radius:999px; }
+    .sd-bar.low  { background:#dc2626; }
+    .sd-bar.mid  { background:#d97706; }
+    .sd-bar.high { background:#0a6; }
+    .sd-pct { font-weight:700; color:var(--el-darkblue); }
+
+    .sd-table { border-collapse:collapse; width:100%; font-size:13px; min-width:820px; }
+    .sd-table th, .sd-table td { padding:8px; text-align:left; vertical-align:top; }
+    .sd-table thead tr { border-bottom:2px solid #ddd; }
+    .sd-table tbody tr { border-bottom:1px solid #eee; }
+    .sd-table tbody tr.atrisk { background:#fdf6f5; }
+    .sd-cell { text-align:center; white-space:nowrap; }
+    .sd-st { display:inline-block; font-size:12px; border-radius:999px; padding:1px 9px; }
+    .sd-st.done    { background:#eafaf2; color:#0a6; }
+    .sd-st.missing { background:#fdf8f0; color:#9a6b00; }
+    .sd-st.overdue { background:#fdeceb; color:#9b261a; font-weight:700; }
+    .sd-st.na      { color:#aab0bb; }
+    .sd-due { display:block; font-size:11px; color:#9b261a; margin-top:1px; }
+</style>
+
+<div class="card">
+    <h1>Sponsor deliverables</h1>
+    @if (Model.AccessDenied)
+    {
+        <p class="error">@Localizer["Common.OrganizersOnly"]</p>
+        <p><a asp-page="/Index">@Localizer["Common.BackToHub"]</a></p>
+    }
+    else
+    {
+        if (!string.IsNullOrEmpty(Model.Error)) { <p class="error">@Model.Error</p> }
+
+        <p style="font-size:13.5px;color:#555;margin-top:0;">
+            A lifecycle-completion board for every sponsor company — at-risk (overdue) first.
+            Each stage (onboarding, logo, booth materials, booth members, assigned tasks) is
+            computed from existing hub data, with done / overdue against its deadline. This
+            complements Zoho exhibitor management; it does not replace it.
+        </p>
+
+        <p class="sd-summary" role="status">
+            <strong>@Model.Companies.Count</strong> compan@(Model.Companies.Count == 1 ? "y" : "ies") &middot;
+            <strong>@Model.CompleteCount</strong> fully complete &middot;
+            <strong>@Model.AtRiskCount</strong> at risk &middot;
+            average completion <strong>@Model.AveragePercent%</strong>
+        </p>
+
+        @if (Model.Companies.Count == 0)
+        {
+            <p style="color:#6b7280;">No sponsor companies in this edition yet.</p>
+        }
+        else
+        {
+            <div style="overflow-x:auto;position:relative;">
+                <table class="sd-table">
+                    <thead>
+                        <tr>
+                            <th scope="col">Company</th>
+                            <th scope="col">Completion</th>
+                            @foreach (var col in Model.StageColumns)
+                            {
+                                <th scope="col" class="sd-cell">@col.Label</th>
+                            }
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var c in Model.Companies)
+                        {
+                            var cls = c.Percent >= 100 ? "high" : c.Percent >= 50 ? "mid" : "low";
+                            var byKey = c.Stages.ToDictionary(s => s.Key);
+                            <tr class="@(c.AtRisk ? "atrisk" : "")">
+                                <td>
+                                    <div style="font-weight:600;color:var(--el-darkblue);">@c.CompanyName</div>
+                                    <div style="color:#8a8f9c;font-size:12px;">
+                                        @(c.IsExhibitor ? "Exhibitor" : "Sponsor")
+                                        @if (c.AtRisk) { <span style="color:#9b261a;font-weight:600;"> &middot; @c.OverdueCount overdue</span> }
+                                    </div>
+                                </td>
+                                <td>
+                                    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                                        <span class="sd-pct">@c.Percent%</span>
+                                        <span class="sd-bar-wrap">
+                                            <span class="sd-bar @cls" style="display:block;width:@(c.Percent)%;"></span>
+                                        </span>
+                                    </div>
+                                    <div style="color:#6b7280;font-size:12px;margin-top:2px;">@c.Summary</div>
+                                </td>
+                                @foreach (var col in Model.StageColumns)
+                                {
+                                    <td class="sd-cell">
+                                        @if (!byKey.TryGetValue(col.Key, out var s))
+                                        {
+                                            <span class="sd-st na" title="Not applicable">&ndash;</span>
+                                        }
+                                        else if (s.Done)
+                                        {
+                                            <span class="sd-st done">&#10003; done</span>
+                                        }
+                                        else if (s.Overdue)
+                                        {
+                                            <span class="sd-st overdue">overdue</span>
+                                            @if (s.Deadline is not null)
+                                            {
+                                                <span class="sd-due">@s.Deadline.Value.ToString("dd MMM")</span>
+                                            }
+                                        }
+                                        else
+                                        {
+                                            <span class="sd-st missing">open</span>
+                                            @if (s.Deadline is not null)
+                                            {
+                                                <span class="sd-due" style="color:#6b7280;">due @s.Deadline.Value.ToString("dd MMM")</span>
+                                            }
+                                        }
+                                    </td>
+                                }
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+
+        <p style="margin-top:16px;">
+            <a asp-page="/Organizer/SponsorAdmin/Index">&larr; Back to Sponsor Admin</a>
+        </p>
+    }
+</div>

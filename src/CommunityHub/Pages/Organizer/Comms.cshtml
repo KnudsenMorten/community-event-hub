@@ -23,7 +23,7 @@
 }
 
 <div class="card">
-    <h2>@Localizer["OrgComms.Title"]</h2>
+    <h1>@Localizer["OrgComms.Title"]</h1>
     @if (Model.AccessDenied)
     {
         <p class="error" role="alert">@Localizer["Common.OrganizersOnly"]</p>
@@ -88,7 +88,7 @@
         }
         else
         {
-            <div style="overflow-x:auto;">
+            <div style="overflow-x:auto;position:relative;">
                 <table style="width:100%;border-collapse:collapse;min-width:560px;">
                     <caption class="sr-only">@Localizer["Comms.ResendHeading"]</caption>
                     <thead>
@@ -120,9 +120,7 @@
                                         <input type="hidden" name="participantId" value="@r.ParticipantId" />
                                         <label class="sr-only" for="tpl-@r.ParticipantId">@Localizer["Comms.ResendTemplateLabel"]</label>
                                         <select id="tpl-@r.ParticipantId" name="template" style="max-width:200px;">
-                                            <option value="welcome-login">welcome-login</option>
                                             <option value="onboarding-getting-started">onboarding-getting-started</option>
-                                            <option value="onboarding-your-tasks">onboarding-your-tasks</option>
                                             <option value="invitation">invitation</option>
                                         </select>
                                         <button type="submit">@Localizer["Comms.Resend"]</button>
@@ -169,7 +167,7 @@
         }
         else
         {
-            <div style="overflow-x:auto;">
+            <div style="overflow-x:auto;position:relative;">
                 <table style="width:100%;border-collapse:collapse;min-width:600px;">
                     <caption class="sr-only">@Localizer["Comms.WhoGotWhat"]</caption>
                     <thead>
@@ -210,7 +208,7 @@
         }
         else
         {
-            <div style="overflow-x:auto;">
+            <div style="overflow-x:auto;position:relative;">
                 <table style="width:100%;border-collapse:collapse;min-width:520px;">
                     <caption class="sr-only">@Localizer["Comms.Campaigns"]</caption>
                     <thead>
@@ -247,7 +245,7 @@
         }
         else
         {
-            <div style="overflow-x:auto;">
+            <div style="overflow-x:auto;position:relative;">
                 <table style="width:100%;border-collapse:collapse;min-width:640px;">
                     <caption class="sr-only">@Localizer["Comms.Timeline"]</caption>
                     <thead>

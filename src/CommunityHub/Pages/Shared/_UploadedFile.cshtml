@@ -1,0 +1,35 @@
+@*
+    Shared "already-uploaded file" line — REQUIREMENTS §68.
+
+    Shows, under an upload control, the file that is ALREADY on record (name +
+    version + when + by whom) so a shared team (e.g. many sponsor coordinators for
+    one company) can see the upload is done and does not re-upload. With no recorded
+    upload (null model) it renders nothing, so a never-used control stays clean.
+
+    HOW TO USE (place right after the upload form's submit button):
+        <partial name="_UploadedFile" model="Model.LatestUploads.GetValueOrDefault(\"some\")" />
+
+    The model is the latest SponsorUploadAudit for that control. Times are stored
+    UTC and shown in UTC with a clear suffix (the hub spans time zones), matching
+    the _LastSaved convention.
+
+    Mobile-first: a small, muted, wrapping inline block with no fixed height.
+*@
+@model CommunityHub.Core.Domain.SponsorUploadAudit?
+@if (Model is { } f)
+{
+    <p class="ceh-uploaded-file" style="font-size:12px;color:#374151;margin:6px 0 0;">
+        Current file:
+        @if (!string.IsNullOrWhiteSpace(f.WebUrl))
+        {
+            <a href="@f.WebUrl" target="_blank" rel="noopener" style="word-break:break-all;">@f.FileName</a>
+        }
+        else
+        {
+            <span style="word-break:break-all;">@f.FileName</span>
+        }
+        <span style="color:#6b7280;">
+            (v@(f.Version)) — uploaded @f.UploadedAt.ToUniversalTime().ToString("dd MMM yyyy HH:mm") UTC@(string.IsNullOrWhiteSpace(f.UploadedByEmail) ? "" : $" by {f.UploadedByEmail}")
+        </span>
+    </p>
+}

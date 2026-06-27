@@ -5,7 +5,7 @@
 }
 
 <div class="card">
-    <h2>@(Model.IsNew ? "Add participant" : $"Edit participant #{Model.Id}")</h2>
+    <h1>@(Model.IsNew ? "Add participant" : $"Edit participant #{Model.Id}")</h1>
 
     @if (Model.AccessDenied)
     {

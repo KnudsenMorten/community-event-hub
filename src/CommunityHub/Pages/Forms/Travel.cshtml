@@ -5,7 +5,7 @@
 }
 
 <div class="card">
-    <h2>@Localizer["Travel.Title"]</h2>
+    <h1>@Localizer["Travel.Title"]</h1>
 
     @if (Model.AccessDenied)
     {
@@ -16,37 +16,26 @@
     }
     else
     {
+        @* Intro merges the former "Covered cost" and "Not covered" sections (operator
+           §54): all that information now lives in this single intro box. *@
         <div style="background:#eef6ff;padding:14px 16px;border-radius:8px;font-size:14px;line-height:1.55;">
             <p style="margin:0 0 8px;"><strong>Travel reimbursement — flights only.</strong>
-                We cover economy flights only: up to <strong>EUR 400</strong> per speaker for
-                single-speaker sessions, and max <strong>EUR 300</strong> per person for co-speaking
-                sessions. If you are not able to get flights within these boundaries, let us know and
-                we will work with you on this. You will get the reimbursement after the event and we
-                will give you instructions.</p>
-            <p style="margin:0;">We do <strong>not</strong> cover taxi, Uber, public transportation,
-                or own car in Denmark.</p>
+                We cover economy flights only. <strong>Covered:</strong> European air travel —
+                <strong>EUR 400</strong> for a single-speaker session (round trip), or
+                <strong>EUR 300</strong> per person for co-speaking sessions; intercontinental air
+                travel — <strong>EUR 800</strong> for a single-speaker session (round trip), or
+                <strong>EUR 600</strong> per person for co-speaking sessions (round trip). Economy
+                class only; booked at least 6 weeks before the event. If you are not able to get
+                flights within these boundaries, let us know and we will work with you on this. You
+                will get the reimbursement after the event and we will give you instructions.</p>
+            <p style="margin:0;"><strong>Not covered:</strong> taxi, Uber, public transportation, or
+                own car in Denmark; seat upgrades / business class; ground transport / parking;
+                meals / incidentals.</p>
         </div>
 
         <h3>Eligibility</h3>
         <p style="font-size:14px;">Reimbursement is available to <strong>international speakers only</strong>
             — defined as speakers travelling from outside Denmark.</p>
-
-        <h3>Covered cost</h3>
-        <ul style="font-size:14px;">
-            <li><strong>Air travel (European)</strong> — EUR 400 for a single-speaker session (round trip),
-                or EUR 300 per person for co-speaking sessions. Economy class only; booked at least
-                6 weeks before the event.</li>
-            <li><strong>Air travel (intercontinental)</strong> — EUR 800 for a single-speaker session
-                (round trip), or EUR 600 per person for co-speaking sessions (round trip). Economy class
-                only; booked at least 6 weeks before the event.</li>
-        </ul>
-
-        <h3>Not covered</h3>
-        <ul style="font-size:14px;">
-            <li>Seat upgrades / business class</li>
-            <li>Ground transport / parking</li>
-            <li>Meals / incidentals</li>
-        </ul>
 
         <h3>Booking requirements</h3>
         <ul style="font-size:14px;">
@@ -93,7 +82,63 @@
         @* Shared success toast (REQUIREMENTS §21): announced via role=status,
            auto-dismisses, dismissable. Replaces the bespoke <p class="info">. *@
         <partial name="_Flash" model='new CommunityHub.Pages.Shared.FlashModel(Model.Message, "success")' />
+        @if (!string.IsNullOrEmpty(Model.Error))
+        {
+            <partial name="_Flash" model='new CommunityHub.Pages.Shared.FlashModel(Model.Error, "error")' />
+        }
 
+        @* ============================ STEP 1 ============================ *@
+        @* Upload receipts/invoice. This MUST be completed (>=1 file) before the
+           Step-2 reimbursement request unlocks (REQUIREMENTS §48). Files are stored
+           in the hub and attached to the bookkeeping email on Step-2 submit. *@
+        <h3 style="margin-top:8px;">Step 1: Upload receipts</h3>
+        <p style="font-size:14px;">Upload your flight receipt(s) and invoice / personal
+            declaration here (PDF, JPG or PNG, max 15&nbsp;MB each). You must upload at
+            least one file before you can request reimbursement in Step 2.</p>
+
+        <form method="post" asp-page-handler="UploadReceipt" enctype="multipart/form-data"
+              style="margin:0 0 14px;">
+            <input type="file" asp-for="ReceiptFile" accept=".pdf,.jpg,.jpeg,.png" />
+            <button type="submit">Step 1: Upload Receipt</button>
+        </form>
+
+        @if (Model.Receipts.Count > 0)
+        {
+            <p style="font-size:14px;font-weight:600;margin:6px 0 4px;">Uploaded so far:</p>
+            <ul style="font-size:14px;list-style:none;padding:0;margin:0 0 16px;">
+                @foreach (var r in Model.Receipts)
+                {
+                    <li style="margin:4px 0;">
+                        <div style="display:flex;align-items:center;gap:10px;">
+                            <span>&#128206; @r.FileName <span style="color:#6b7280;">(@(((r.SizeBytes + 1023) / 1024)) KB)</span></span>
+                            <form method="post" asp-page-handler="DeleteReceipt" style="display:inline;margin:0;">
+                                <input type="hidden" name="receiptId" value="@r.Id" />
+                                <button type="submit" style="background:none;border:0;color:#b91c1c;cursor:pointer;text-decoration:underline;padding:0;font-size:13px;">remove</button>
+                            </form>
+                        </div>
+                        @* §68 — when the receipt was uploaded, so a returning speaker sees it's already on file. *@
+                        <span style="color:#6b7280;font-size:12px;">Uploaded @r.UploadedAt.ToUniversalTime().ToString("dd MMM yyyy HH:mm") UTC</span>
+                    </li>
+                }
+            </ul>
+        }
+        else
+        {
+            <p style="font-size:14px;color:#92400e;background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:10px 12px;margin:0 0 16px;">
+                No receipts uploaded yet. Step 2 (Request Travel Reimbursement) is locked
+                until you upload at least one receipt above.
+            </p>
+        }
+
+        @* ============================ STEP 2 ============================ *@
+        <h3 style="margin-top:4px;">Step 2: Request Travel Reimbursement
+            @if (!Model.HasReceipt)
+            {
+                <span style="font-size:13px;font-weight:600;color:#92400e;">&#128274; locked — complete Step 1 first</span>
+            }
+        </h3>
+
+        <fieldset id="Step2Fieldset" @(Model.HasReceipt ? "" : "disabled") style="border:0;padding:0;margin:0;@(Model.HasReceipt ? "" : "opacity:0.55;")">
         <form method="post">
 
             @* Shared inline-validation pattern: an error summary at the top of the
@@ -136,6 +181,9 @@
                     <option value="@CommunityHub.Pages.Forms.TravelModel.Choice300">
                         @Localizer["Travel.AmountCo", CommunityHub.Pages.Forms.TravelModel.Cap300]
                     </option>
+                    <option value="@CommunityHub.Pages.Forms.TravelModel.Choice800">
+                        @Localizer["Travel.AmountIntercontinental", CommunityHub.Pages.Forms.TravelModel.Cap800]
+                    </option>
                     <option value="@CommunityHub.Pages.Forms.TravelModel.ChoiceOther">
                         @Localizer["Travel.AmountOther"]
                     </option>
@@ -160,16 +208,14 @@
                 <span asp-validation-for="Explanation" class="ceh-field-error"></span>
             </div>
 
-            <h3 style="margin-top:8px;">Upload your invoice &amp; receipts</h3>
-            <p style="font-size:14px;">Upload your invoice and receipts (PDF) here:</p>
-            <p style="margin:6px 0 22px;">
-                <a href="https://expertslivedk.sharepoint.com/sites/ExpertsLiveDK/Shared%20Documents/Forms/AllItems.aspx?id=%2Fsites%2FExpertsLiveDK%2FShared%20Documents%2FGeneral%2FEvents%2FELDK%202027%2FEventHub%2FFinance%2FTravel%20Reimbursement&amp;viewid=e81e24c2%2Dda6f%2D49c4%2D8961%2D86ba9876779b"
-                   target="_blank" rel="noopener noreferrer"
-                   style="display:inline-block;background:#1565c0;color:#ffffff;text-decoration:none;font-weight:700;font-size:15px;padding:12px 26px;border-radius:8px;box-shadow:0 2px 6px rgba(0,0,0,0.18);">Upload invoice + receipts (PDF)</a>
-            </p>
-
-            <button type="submit">@Localizer["Travel.Save"]</button>
+            @* Both submit buttons use the SAME primary <button> style. Step 2 stays
+               DISABLED via the enclosing #Step2Fieldset gate (disabled until >=1 receipt
+               exists); the fieldset's opacity dims it, but the base button colour/class
+               is identical to Step 1. *@
+            <button type="submit">Step 2: Request Travel Reimbursement</button>
+            <partial name="_LastSaved" model="Model.LastSavedAt" />
         </form>
+        </fieldset>
 
         <script>
             (function () {

@@ -569,6 +569,9 @@ app) and Logic Apps (a separate no-code moving part) were considered and rejecte
 | `ReminderJob` | 08:00 | Seed speaker-deadline tasks (idempotent), then send all due reminders | always |
 | SponsorLeads | hourly :15 (CRM pull 05:15, digest 06:15) | Zoho CRM lead pull + digest | gated off by default |
 | SponsorUploadWatch | every 15 min | Watch per-sponsor SharePoint upload folders | SharePoint |
+| Sponsor/exhibitor provision (in `WooCommercePullJob`) + `SponsorZohoSyncService` | every 30 min (+ a 15-min reconcile) | Create/link exhibitors for booth sponsors, self-heal stale ids, fill-blank social/web reconcile, drift + new-record + error alerts (ring-exempt) | `sponsor-order-pull` (Engine, kill-switch only) |
+| `SessionChangeDetectionService` | hourly | Compare Backstage agenda session time/location vs CEH-stored; email affected speaker on a change | feature flag + released ring + date gate (§38e) |
+| `ZohoOrderWebhook` (**HTTP**, not timer) | on demand (POST from Zoho Backstage) | Real-time incremental single-order reconcile of the Zoho→CEH mirror when an order/attendee changes (§128); upsert + soft-cancel + reassignment for just that order | `Zoho:Enabled` + `Zoho:WebhookEnabled` + `attendee-reconcile` + valid shared secret |
 
 **Reminders are NOT daily.** The timer *wakes* daily so weekly/milestone rules can be checked, but
 whether anything *sends* follows the per-type cadence in `content.<edition>.json → reminders`:
@@ -586,6 +589,53 @@ the next run; nothing sends twice.
 
 `TestMode` makes all upstream integrations **read-only** in DEV (no writes to Zoho / Woo / Company
 Manager / Backstage / Bookings).
+
+### Real-time mirror: the Zoho Backstage order-change webhook (§128)
+
+The hourly `AttendeeBackstageSyncJob` is the authoritative FULL reconcile of the one-way Zoho→CEH
+mirror (§125). On top of it, `ZohoOrderWebhook` (`src/CommunityHub.Jobs/ZohoOrderWebhook.cs`) gives
+**real-time** convergence: Zoho Backstage POSTs to it whenever an order/attendee changes, and it runs
+an **incremental, single-order** reconcile via `AttendeeTicketSyncService.SyncOrderAsync` — the exact
+same upsert + soft-cancel + reassignment + reappear semantics as the full sync, but scoped to the one
+changed order so it never touches the rest of the mirror. The hourly job stays on as the **drift
+safety-net** for any missed/duplicated webhooks. It is the first (and only) HTTP-triggered Function in
+the otherwise timer-only Jobs worker, and like every other path it **never writes back to Zoho**.
+
+- **Endpoint:** `POST https://<jobs-host>/api/zoho/order-webhook?token=<shared-secret>`
+- **Auth:** a shared secret (Zoho Backstage webhooks expose no HMAC/signature), accepted as the
+  `token` query param OR the `X-Webhook-Secret` header (both names are config-overridable). The check
+  is constant-time; an unconfigured secret rejects every call. Bad/absent secret ⇒ `401`.
+- **Responses:** `200` on a processed reconcile OR a deliberate no-op (webhook disabled, jobs paused,
+  feature off, or no order id in the payload — drift is then left to the periodic reconcile); `503` on
+  a transient condition (no active event yet / Zoho token refresh failed) so Zoho retries.
+- **Payload:** parsed defensively (`ZohoWebhook.ParsePayload`) for the changed **order id** across the
+  documented Backstage shapes (Event Order / Attendee / Order Request) and common envelopes; the
+  current Zoho state for that order is then re-fetched and is authoritative (an order gone from the
+  active set ⇒ whole-order soft-cancel).
+
+**Configuration (no secrets in the repo):**
+
+| App setting | Meaning |
+|---|---|
+| `Zoho__WebhookEnabled` | Master switch for the receiver (default `false`). |
+| `Zoho__WebhookSecret` | Shared secret — **Key-Vault-backed app setting**, never committed. |
+| `Zoho__WebhookSecretQueryParam` | Query-param name carrying the secret (default `token`). |
+| `Zoho__WebhookSecretHeader` | Header name carrying the secret (default `X-Webhook-Secret`). |
+
+**Operator: register the webhook in Zoho Backstage** (one-time, per
+<https://help.zoho.com/portal/en/kb/backstage/portal-settings/webhooks/articles/webhooks-in-zoho-backstage>):
+
+1. Mint a strong random secret and store it as the `Zoho__WebhookSecret` app setting (Key Vault) on
+   the Jobs Function app; set `Zoho__WebhookEnabled=true`. (Ensure `Zoho__Enabled=true` and the
+   `attendee-reconcile` feature is on.)
+2. In Backstage go to **Portal Settings → Webhooks → Create Webhook**.
+3. Name it (e.g. `CEH order sync`) and set the **Endpoint URL** to
+   `https://<jobs-host>/api/zoho/order-webhook?token=<the-secret>`.
+4. Select the **Event Order** category and tick **Create, Update, Cancel, Delete**. Add the
+   **Attendee** category (**Create, Update, Reassign, Delete**) and **Attendee Status → Cancel** so
+   per-ticket changes also drive a reconcile of the owning order. (**Order Request → Place/Approve/Reject**
+   is optional.)
+5. Save. Use Backstage's **test** action to send a sample payload and confirm a `200`.
 
 ---
 
@@ -724,6 +774,73 @@ longer misses files past the first page).
 - Zoho is the **EU** data centre — token endpoint `accounts.zoho.eu`, API `zohoapis.eu`, OAuth
   refresh-token based. Config: a `zoho` block with the EU API domain, Backstage portal id + event
   id, the Bookings service-name regex and 2-day ticket-class regex, and KV secret names.
+
+#### Sponsor/exhibitor provision & reconcile engine (REQUIREMENTS §40/§41/§41a/§41b/§49/§56, 2026-06-25)
+
+`SponsorZohoProvisionService` (on the `WooCommercePullJob` order-pull path) and the per-sponsor
+`SponsorZohoSyncService` keep the hub's sponsors and their Backstage **exhibitor** records in step.
+The engine is **create/link/UPDATE only — it never deletes a sponsor or exhibitor RECORD** (§56:
+leads/inquiries/identity are tied to the Zoho id; a delete-and-recreate orphans them irreversibly).
+The only Zoho delete it performs is a booth **member** delete (below).
+
+- **Booth sponsors → exhibitors (§40/§41).** A sponsor classified `HasBooth` is created directly via
+  `ZohoClient.CreateExhibitorAsync` (`POST …/events/{id}/exhibitors`) instead of only filing an
+  approval `exhibitor_request`; the request seam stays as a fallback when the direct create isn't
+  available. **Locked Zoho facts (§41a):** the POST requires `exhibitor_category_id` (the *pinned*
+  booth-category id — categories are **not** API-listable on this account, so the id lives in config
+  `BackstageExhibitor:DefaultBoothCategoryId`, mirrored from `zoho-mapping`), `company_name`,
+  `website_url`, `booth_label`, `amount`, `currency_code` and `contact{first,last,email}`, and must
+  **drop** `exhibitor_type` (server-derived). A create that returns 2xx **without an id** is treated
+  as a FAILURE (Zoho keys on contact email; an existing email yields a no-create 200). Every create
+  now **logs the HTTP status + trimmed body on failure** and surfaces it to the provision notes →
+  the operator alert email, and the fall-through **increments a counter** so a silent failure can no
+  longer read as "0 created, 0 skipped".
+- **Booth slot / `booth_id` (§41a/§49).** `booth_label` = the `E-NN` slot parsed from the order
+  product name (`\bE-(\d{1,3})\b`). Assigning a booth to an EXISTING/linked exhibitor resolves the
+  slot **label → `booth_id`** via `GetBoothsAsync` and PUTs that (`AssignExhibitorBoothAsync`) rather
+  than re-creating. If the product name carries no slot (booth assigned later), `BoothLabel` stays
+  blank and nothing is pushed until a source supplies it.
+- **Contact-email 3× cap (§41a, CRITICAL).** Zoho hard-caps the sponsor/exhibitor **contact email**
+  at 3 UPDATE *attempts* (a no-op re-send still counts) then BLOCKS the record. CEH tracks the
+  last-synced value in `SponsorInfo.ZohoContactEmail` and sends the email **only when
+  `desiredEmail != ZohoContactEmail`**, storing the new value on success — a genuine change is
+  allowed, a same-value re-send is never sent.
+- **Fill-blank social/web reconcile (§41b).** For `WebsiteUrl` / `LinkedInUrl` / `TwitterUrl` /
+  `CompanyDescription` the engine fills **blank targets only, never overwriting a set value**, in
+  three directions: CEH ← webshop (Company Manager) → CEH → Zoho (when blank in Zoho) and webshop ←
+  CEH. Reading current Zoho state needs a get-by-id (`GetExhibitorByIdAsync`) since the list calls
+  return only id+name; the update sends **only the fields it is filling** (and the contact email only
+  under the §41a rule). Social URLs live under `company_social_pages.{linkedin,twitter}`; the read is
+  hardened to treat both a plain-string and an object-wrapped (`{url:…}`) value as "set", so
+  read↔write blank-detection stays symmetric and a second pass never re-pushes.
+- **Booth member delete — real Zoho delete (§41a/§56).** Zoho now supports per-member delete
+  (`DELETE …/exhibitors/{id}/members/{memberId}` → `200 {"status":"success"}`). On a hub delete the
+  member id is resolved by EMAIL (`GetBoothMembersAsync` captures each member `id`) and
+  `DeleteBoothMemberAsync` (via `SponsorZohoSyncService.DeleteBoothMemberAsync`) issues the delete;
+  the outcome is `Deleted / NotFoundInZoho / SyncDisabled / Error`. It is **fail-soft** (a Zoho error
+  never breaks the hub delete) and **belt-and-braces**: the hub also soft-deletes the member
+  (`SponsorBoothMember.DeletedAt` tombstone) so the add-only sync never re-pulls a removed email even
+  if the remote delete fails; re-adding the same email revives the tombstoned row.
+- **Self-heal + drift + cadence (§41).** A stale/missing Zoho id self-heals by re-finding the record
+  (never by deleting one); a drift alert + new-record email is raised; the provision/reconcile runs
+  on a short cadence so saves on either side don't drift.
+- **Engine alerts are ring-exempt (§41/§41a-5).** The order-pull / provision is **Engine-surface,
+  NOT ring-scoped** (kill-switch only, processes ALL orders). Its ops/engine/error/drift alert
+  emails MUST carry the actual error and be sent **ring-exempt** (`EmailContext.RingExempt`,
+  delivered via the dedicated engine-alert sender) — the transport ring-gate otherwise drops them as
+  "unknown recipient", which is why earlier alerts never arrived (see §7 Email).
+
+#### Session change-detection engine (REQUIREMENTS §38e/§52, 2026-06-25)
+
+`SessionChangeDetectionService` (hourly job) checks each speaker's session **time/location** in the
+Backstage agenda against the value stored on the CEH session and, on a change, emails the affected
+speaker. The CEH session stores **both** ids — `BackstageSessionId` (the agenda/session link) and the
+`SessionizeSpeakerId`/Sessionize id — so the public-session link and this engine resolve to Backstage,
+not Sessionize. Gating is threefold: the feature **kill switch**, the **released ring**, AND a
+**date gate** — ring 0/1 fire immediately (for testing), ring 2/3 only after the go-live date
+(1 Dec 2026). The **first populate seeds silently** (no email for a value that was simply never
+recorded), and with no agenda source the run is a graceful no-op. The engine is **inert until the
+agenda is in scope** — it does nothing for sessions/speakers outside the released ring + date window.
 
 ### Sessionize (speaker import)
 Two interchangeable sources feed **one** upsert core. The upsert semantics live once in
@@ -1934,6 +2051,27 @@ Built on the existing center: the shared `IEmailSender` + `EmailTemplateProvider
   table + `.sr-only` caption, `role="status"` count; the Email Center "send to a person" panel is a
   `<fieldset>`/`<legend>`; the Profile secondary-email field is labelled + `type="email"` validated.
 
+### Engine/ops alert email path — ring-exempt (REQUIREMENTS §41/§41a-5, 2026-06-25)
+
+Engine surfaces (the sponsor order-pull, the sponsor/exhibitor provision + reconcile, the
+session-change engine, the cross-cutting failure handler) need to email the **operator**, not a
+participant — and they must NOT be silenced by the participant **ring gate**. The problem: the
+ring-aware `BrevoEmailSender` drops a recipient outside the released ring, and an operator/ops
+address is "unknown" to the ring resolver, so engine alerts were being dropped as "unknown
+recipient" (the reason earlier alerts never arrived).
+
+- **`EmailContext.RingExempt`.** A new flag on the ambient `EmailContext`; when set, the sender's
+  ring gate is bypassed for that send. The allowlist + `RedirectAllTo` + global kill-switch still
+  apply on top — ring-exempt only skips the *ring* decision, never the safety floor.
+- **Engine-alert sender.** Engine alerts are emitted through the dedicated alert path with
+  `RingExempt` set, so an ops failure/drift/new-record/error alert reaches the configured operator
+  recipient regardless of any ring state upstream.
+- **The error is IN the email (§41a-4).** Every engine/error/drift/alert email carries the **actual
+  error message** (the upstream HTTP status + trimmed body), not a "see logs" pointer — Zoho create
+  methods surface the body to the provision notes → the alert. The operator works from the email.
+- **Cross-cutting failure alert.** A failure anywhere in the engine job raises a single
+  cross-cutting alert (ring-exempt) so a job that throws can no longer fail silently.
+
 ### Calendar sync (per-user subscribable iCal feed)
 
 Speakers, volunteers and organizers can **sync their reminders / deadlines to their own calendar**.
@@ -2018,6 +2156,31 @@ saving it. The Key Dates panel (`Calendar.cshtml`) is **grouped by month** with 
 404), and the subscribe link the copy button shares is the plain **`https`** feed URL (Google/Apple/
 Outlook "subscribe from URL" won't follow the `webcal://` → http → https redirect chain; `webcal://`
 is kept only as the one-click Apple/Outlook affordance).
+
+### Get-started wizards — entitlement-scoped guided onboarding (REQUIREMENTS §28/§32/§43/§44, 2026-06-25)
+
+A single "Get started" wizard shell now serves **every** role. Speakers (§28) and sponsors (§32) had
+bespoke wizards first; `RoleWizardService` is the generic design-A shell that adds **volunteers,
+organizers, event partners and media**, while `SponsorWizardService` keeps the sponsor variant
+(steps from the Company Details section headers, booth steps for exhibitors only). The two invariants
+the audit (§44) demands:
+
+- **Entitlement-scoped steps (§44a).** A step appears only when the participant is **entitled** to
+  it, from role **and** what they bought/were granted — resolved by
+  `CommunityHub.Core.Entitlements.OrderEntitlements`, the SAME authority that gates the self-service
+  forms. Profile is always step 1; logistics steps (hotel / travel / swag) appear only for an
+  entitled (supported) participant; the volunteer availability step is volunteer-only; a multi-hat
+  person (e.g. a volunteer who is also a supported speaker) gets exactly the union their effective
+  entitlement set grants. `FormEntitlementGate` enforces the same on the form page-model `OnGet`/
+  `OnPost`, so a form a person isn't entitled to (a self-funded speaker's Hotel/Travel/Swag) is
+  genuinely DENIED, not merely hidden.
+- **Auto-complete from saved data (§44b).** Every step (and its standalone page) is marked done
+  **once there is ≥1 persisted save for it** — completion is *read from each page's data*, never a
+  separate "mark complete" flag, so the wizard state and the task list always agree. Steps are
+  numbered + counted (`TotalSteps`/`NextStepNumber`) so "Continue — step X of Y" always equals the
+  displayed list. A step whose backing integration is unavailable (e.g. the sponsor "your contacts"
+  step when e-conomic isn't configured) is shown as a fail-soft guided link rather than blocking the
+  wizard.
 
 ### Role-tagged schedule / key-dates (2026-06-20)
 
@@ -3301,6 +3464,25 @@ first.
 **Zero-downtime prod:** S1 plan + a staging slot — deploy to the slot, warm it up, then swap. A bad
 deploy is rolled back by swapping the slot back.
 
+> **Runtime / framework version.** Both apps run on **.NET 10** (LTS) — the web app on Linux App
+> Service (`linuxFxVersion = DOTNETCORE|10.0`, set in `appservice.bicep`), the scheduler on Azure
+> Functions FlexConsumption (`functionAppConfig.runtime = dotnet-isolated 10.0`, set in
+> `functions.bicep`). The SDK is pinned by the repo-root `global.json` (`10.0.301`, `rollForward
+> latestMinor`) so every build + `dotnet publish` targets the same band. A new infra deploy or a
+> fresh provision lands on .NET 10 by default — there are no residual 8.0 references in the Bicep,
+> csproj, or CI.
+>
+> **Framework upgrades through the slot swap are zero-downtime — but only if the staging slot's
+> runtime is bumped first.** `linuxFxVersion` is *slot-specific* siteConfig. If you bump only
+> production's runtime (e.g. 8.0 → 10.0) and then deploy the new-framework build to the staging slot
+> while that slot still runs the old stack, the build 503s on the slot and the swap carries the
+> mismatch into production (this caused a ~10-min .NET 10 cutover blip on 2026-06-26).
+> `tools/deploy-app.ps1` now **mirrors production's `linuxFxVersion` onto the staging slot before
+> deploying code to it** (no-op when they already match), so a framework upgrade is zero-downtime
+> through the normal path. For a manual deploy, run
+> `az webapp config set -g <rg> -n <webApp> --slot staging --linux-fx-version "DOTNETCORE|10.0"`
+> before deploying to the slot.
+
 **Tear down:** `az group delete --name rg-<baseName>-<env> --yes` (KV is recoverable for 90 days via
 soft-delete/purge protection).
 
@@ -3470,6 +3652,22 @@ string. Keep dev↔prod schema in sync by applying this migration to both enviro
 - **Telemetry / logs** — Application Insights (named in the deploy outputs) collects requests,
   exceptions, and job run history. The reminder job is idempotent — it re-evaluates what is due and
   not-yet-sent each run, so a missed run self-heals on the next.
+  - **It is a *workspace-based* App Insights** (data lands in the linked Log Analytics workspace, in
+    the `App*` tables: `AppRequests`, `AppExceptions`, `AppTraces`, `AppDependencies`). The classic
+    `az monitor app-insights query` path returns **empty** against a workspace-based resource — query
+    the workspace instead, e.g.
+    `az monitor log-analytics query -w <workspaceCustomerId> --analytics-query "AppTraces | where TimeGenerated > ago(1h) | take 20"`,
+    or use the Logs blade on the workspace (not the Insights resource).
+  - **"No telemetry" after a deploy usually means a runtime/build mismatch, not a logging gap.** A
+    .NET-version mismatch (old-framework build on a new-framework runtime) crash-loops the worker
+    before it can emit anything (`dotnet exited with code 150`); fix by redeploying a build that
+    matches the runtime, then telemetry returns. Confirm a Functions run by checking `AppRequests`
+    for the timer invocations (e.g. `WooCommercePullJob`) rather than assuming silence = failure.
+  - **Functions runtime lives in `functionAppConfig.runtime`, not siteConfig.** `az functionapp show`
+    does **not** surface the FlexConsumption runtime; read it with
+    `az resource show --ids <fnResourceId> --query "properties.functionAppConfig.runtime"` (under Git
+    Bash, prefix `MSYS_NO_PATHCONV=1` so the resource id isn't path-mangled). To repair a blank/invalid
+    runtime: `az resource update --ids <fnResourceId> --set properties.functionAppConfig.runtime.name=dotnet-isolated properties.functionAppConfig.runtime.version=10.0`.
 - **Inspect what's deployed** — `az resource list --resource-group rg-<baseName>-<env> --output table`.
 - **Redeploy after a Bicep change** — `./scripts/deploy.sh <env>` (incremental; `--whatif` first).
 - **Tear down an environment** — `az group delete --name rg-<baseName>-<env> --yes` (KV recoverable

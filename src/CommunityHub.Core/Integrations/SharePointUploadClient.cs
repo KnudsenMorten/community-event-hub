@@ -58,7 +58,8 @@ public sealed record SharePointFileSnapshot(
     string ItemId,
     string Name,
     string? ETag,
-    DateTimeOffset? LastModifiedUtc);
+    DateTimeOffset? LastModifiedUtc,
+    string? WebUrl = null);
 
 /// <summary>
 /// Microsoft Graph client for SharePoint Online. Pre-creates per-sponsor
@@ -193,7 +194,15 @@ public sealed class SharePointUploadClient
                         lastMod = lmParsed;
                     }
 
-                    results.Add(new SharePointFileSnapshot(id!, name!, etag, lastMod));
+                    // webUrl is part of the default driveItem response (no $select set);
+                    // surfaced so the SoMe-graphics PULL has a display link per file.
+                    string? webUrl = null;
+                    if (item.TryGetProperty("webUrl", out var wu) && wu.ValueKind == JsonValueKind.String)
+                    {
+                        webUrl = wu.GetString();
+                    }
+
+                    results.Add(new SharePointFileSnapshot(id!, name!, etag, lastMod, webUrl));
                 }
             }
 

@@ -113,7 +113,7 @@ public sealed class SessionizeApiClient
     /// <summary>
     /// Fetch + parse speakers from the configured Sessionize view endpoint.
     /// Never throws for a bad response or bad data - problems come back in the
-    /// result, matching <c>SessionizeExcelParser.Parse</c>.
+    /// result.
     /// </summary>
     public async Task<SessionizeParseResult> FetchSpeakersAsync(
         CancellationToken ct = default)

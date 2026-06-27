@@ -1,6 +1,7 @@
 using CommunityHub.Auth;
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
+using CommunityHub.Core.Integrations;
 using CommunityHub.Core.Integrations.Graphics;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -10,14 +11,20 @@ using Microsoft.EntityFrameworkCore;
 namespace CommunityHub.Pages.Speaker;
 
 /// <summary>
-/// The speaker's SoMe-graphics page (REQUIREMENTS §18 step 5). Shows the speaker
+/// The speaker's SoMe-graphics page (REQUIREMENTS §18 step 5 + §52). Shows the speaker
 /// their PRE-STAGED, RELEASED graphics (their headshot graphic + per-session
 /// graphics) — and ONLY released ones (the organizer review gate). For each the
 /// speaker can DOWNLOAD the PNG or open a LinkedIn/X share DRAFT in their own
 /// context. Also the "I'm speaking at ELDK27" button that builds a LinkedIn DRAFT.
 ///
-/// NEVER an auto-post: the buttons either download or open the network composer
-/// prefilled; the speaker finalizes + posts himself.
+/// §52 adds a "Publish to LinkedIn" action: the speaker pushes the announcement
+/// (their released graphic + a generated post text) to the EVENT'S LinkedIn company
+/// page through the existing gated SoMe queue/publisher path
+/// (<see cref="SpeakerLinkedInPublishService"/>). It is offered only when the
+/// linkedin-queue feature + the SoMe company page are configured; and it posts
+/// nothing live until the LinkedIn OAuth app/credentials are wired — until then the
+/// announcement is queued. The DRAFT buttons remain (never an auto-post on the
+/// speaker's own profile).
 /// </summary>
 [Authorize]
 public class GraphicsModel : PageModel
@@ -25,15 +32,18 @@ public class GraphicsModel : PageModel
     private readonly CommunityHubDbContext _db;
     private readonly ICurrentParticipantAccessor _participant;
     private readonly GraphicsService _graphics;
+    private readonly SpeakerLinkedInPublishService _linkedInPublish;
 
     public GraphicsModel(
         CommunityHubDbContext db,
         ICurrentParticipantAccessor participant,
-        GraphicsService graphics)
+        GraphicsService graphics,
+        SpeakerLinkedInPublishService linkedInPublish)
     {
         _db = db;
         _participant = participant;
         _graphics = graphics;
+        _linkedInPublish = linkedInPublish;
     }
 
     public static readonly ParticipantRole[] EligibleRoles =
@@ -42,6 +52,19 @@ public class GraphicsModel : PageModel
     public bool AccessDenied { get; private set; }
     public ParticipantRole Role { get; private set; }
     public bool CanPost { get; private set; }
+
+    /// <summary>
+    /// Whether the "Publish to LinkedIn" action is offered (the linkedin-queue
+    /// feature is on AND the event's LinkedIn company page is configured). The
+    /// action may still QUEUE rather than post-live when credentials aren't wired —
+    /// that is reported back after the click, not hidden here.
+    /// </summary>
+    public bool CanPublishToLinkedIn { get; private set; }
+
+    /// <summary>Status line shown after a publish attempt.</summary>
+    public string? PublishMessage { get; private set; }
+    public bool PublishIsError { get; private set; }
+    public bool PublishQueuedNotLive { get; private set; }
 
     public string EventDisplayName { get; private set; } = "ELDK27";
     public string EventDates { get; private set; } = string.Empty;
@@ -61,7 +84,32 @@ public class GraphicsModel : PageModel
         SocialShareDraft LinkedInDraft,
         SocialShareDraft XDraft);
 
-    public async Task<IActionResult> OnGetAsync(CancellationToken ct)
+    public Task<IActionResult> OnGetAsync(CancellationToken ct) => LoadAsync(ct);
+
+    /// <summary>
+    /// §52: publish (or queue) the announcement for one of the speaker's OWN released
+    /// graphics to the event's LinkedIn page, via the gated SoMe queue/publisher path.
+    /// </summary>
+    public async Task<IActionResult> OnPostPublishLinkedInAsync(int graphicAssetId, CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+        Role = me.Role;
+        if (!EligibleRoles.Contains(me.Role)) { AccessDenied = true; return Page(); }
+
+        var result = await _linkedInPublish.PublishAsync(
+            me.EventId, me.ParticipantId, graphicAssetId, me.FullName, me.Email, ct);
+
+        PublishMessage = result.Message;
+        PublishIsError = result.Outcome is SpeakerLinkedInPublishOutcome.Failed
+            or SpeakerLinkedInPublishOutcome.GraphicNotAvailable;
+        PublishQueuedNotLive =
+            result.Outcome == SpeakerLinkedInPublishOutcome.QueuedAwaitingCredentials;
+
+        return await LoadAsync(ct);
+    }
+
+    private async Task<IActionResult> LoadAsync(CancellationToken ct)
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
@@ -69,6 +117,7 @@ public class GraphicsModel : PageModel
         if (!EligibleRoles.Contains(me.Role)) { AccessDenied = true; return Page(); }
 
         CanPost = _graphics.CanPostToSocial;
+        CanPublishToLinkedIn = await _linkedInPublish.IsOfferedAsync(me.EventId, ct);
         await LoadEventFactsAsync(me.EventId, ct);
 
         var visible = await _graphics.GetSpeakerVisibleAsync(me.EventId, me.ParticipantId, ct);
@@ -90,7 +139,6 @@ public class GraphicsModel : PageModel
                 _ => ("Speaker graphic", (string?)null),
             };
 
-            var liText = BuildText(title);
             cards.Add(new GraphicCard(
                 g.Id, kind, title, g.SharePointUrl,
                 !string.IsNullOrEmpty(g.SharePointUrl),
@@ -106,11 +154,6 @@ public class GraphicsModel : PageModel
 
         return Page();
     }
-
-    private string BuildText(string? sessionTitle) =>
-        string.IsNullOrWhiteSpace(sessionTitle)
-            ? $"Catch me at {EventDisplayName}!"
-            : $"Catch my session \"{sessionTitle}\" at {EventDisplayName}!";
 
     private async Task LoadEventFactsAsync(int eventId, CancellationToken ct)
     {

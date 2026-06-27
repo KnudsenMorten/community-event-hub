@@ -112,27 +112,24 @@ public sealed class MasterClassPromotionEmailService
         var encUrl = System.Net.WebUtility.HtmlEncode(url);
         if (isOffer)
         {
-            subject = $"A Master Class seat is held for you: {s.Session.Title}";
+            subject = $"You've been moved into {s.Session.Title}";
             htmlBody =
                 $"<p>Hi {encName},</p>" +
-                $"<p>A seat has opened in <strong>{encTitle}</strong> and we're holding it for you{when}. " +
-                "Since you can hold only one confirmed Master Class, taking this one means giving up your current class.</p>" +
-                $"<p><a href=\"{encUrl}\">Choose here</a> — switch to the new class or keep your current one. " +
-                "If you don't decide in time, we'll switch you automatically.</p>" +
-                ContactLine() +
-                "<p>The team</p>";
+                $"<p>A seat opened up and <strong>you've been moved into the Master Class {encTitle}</strong>.</p>" +
+                "<p><strong>Your previous Master Class seat has been released.</strong> You don't need to do anything — " +
+                $"this is just to let you know you now have one confirmed Master Class. You can review it here: " +
+                $"<a href=\"{encUrl}\">Review my Master Class</a>.</p>" +
+                ContactLine();
         }
         else
         {
-            subject = $"A seat opened up — you're in: {s.Session.Title}";
+            subject = $"You've been moved into {s.Session.Title}";
             htmlBody =
                 $"<p>Hi {encName},</p>" +
-                $"<p>Good news — a seat has opened up and <strong>you now have a confirmed place</strong> " +
-                $"in the Master Class <strong>{encTitle}</strong>. 🎉</p>" +
-                $"<p>You don't need to do anything to keep it. If your plans change, please " +
-                $"<a href=\"{encUrl}\">manage or give up your place here</a> so someone on the waitlist can take it.</p>" +
-                ContactLine() +
-                "<p>See you there,<br/>The team</p>";
+                $"<p>A seat opened up and <strong>you've been moved into the Master Class {encTitle}</strong>.</p>" +
+                "<p><strong>Your previous Master Class seat has been released.</strong> You don't need to do anything. " +
+                $"You can review or manage it here: <a href=\"{encUrl}\">Review my Master Class</a>.</p>" +
+                ContactLine();
         }
 
         using (_context.Set(new EmailContext(Category, s.EventId, null, name, FeatureKey: "masterclass-invites")))

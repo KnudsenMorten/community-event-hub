@@ -2,6 +2,7 @@ using ClosedXML.Excel;
 using CommunityHub.Auth;
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
+using CommunityHub.Core.Integrations;
 using CommunityHub.Core.Organizer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -17,15 +18,22 @@ public class SponsorsModel : PageModel
     private readonly ICurrentParticipantAccessor _participant;
     private readonly TimeProvider _clock;
     private readonly SponsorInfoDeletionService _infoDeletion;
+    private readonly CompanyManagerClient _cm;
+    private readonly CompanyManagerOptions _cmOptions;
+    private readonly ILogger<SponsorsModel> _logger;
 
     public SponsorsModel(
         CommunityHubDbContext db, ICurrentParticipantAccessor participant, TimeProvider clock,
-        SponsorInfoDeletionService infoDeletion)
+        SponsorInfoDeletionService infoDeletion,
+        CompanyManagerClient cm, CompanyManagerOptions cmOptions, ILogger<SponsorsModel> logger)
     {
         _db = db;
         _participant = participant;
         _clock = clock;
         _infoDeletion = infoDeletion;
+        _cm = cm;
+        _cmOptions = cmOptions;
+        _logger = logger;
     }
 
     public bool AccessDenied { get; private set; }
@@ -71,6 +79,7 @@ public class SponsorsModel : PageModel
 
     public record CompanyRow(
         string CompanyId,
+        string CompanyName,
         List<Contact> Contacts,
         int Open, int InProgress, int Done, int Overdue, int Total,
         DateOnly? NextDue);
@@ -257,6 +266,12 @@ public class SponsorsModel : PageModel
             .OrderBy(c => c, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
+        // Resolve each company's display NAME (don't show the raw id). Same
+        // Company Manager chain (public -> legal name) the sponsor-facing pages
+        // and the SponsorAdmin dashboard use; falls back to "Company {id}" only
+        // when the lookup is unavailable. Resolved once per company per request.
+        var names = await ResolveCompanyNamesAsync(allCompanyIds, ct);
+
         var allCompanies = allCompanyIds.Select(cid =>
         {
             var co = contacts
@@ -270,15 +285,17 @@ public class SponsorsModel : PageModel
             var done  = t.Count(x => x.State == TaskState.Done);
             var ovr   = t.Count(x => x.State != TaskState.Done && x.DueDate is not null && x.DueDate < today);
             var nxt   = t.Where(x => x.State != TaskState.Done && x.DueDate is not null).Min(x => (DateOnly?)x.DueDate);
-            return new CompanyRow(cid, co, open, ip, done, ovr, t.Count, nxt);
+            var name  = names.TryGetValue(cid, out var nm) ? nm : $"Company {cid}";
+            return new CompanyRow(cid, name, co, open, ip, done, ovr, t.Count, nxt);
         }).ToList();
 
-        // Free-text search over the company id + any contact name/email.
+        // Free-text search over the company name + id + any contact name/email.
         if (!string.IsNullOrWhiteSpace(Search))
         {
             var s = Search.Trim();
             allCompanies = allCompanies
-                .Where(r => r.CompanyId.Contains(s, StringComparison.OrdinalIgnoreCase)
+                .Where(r => r.CompanyName.Contains(s, StringComparison.OrdinalIgnoreCase)
+                            || r.CompanyId.Contains(s, StringComparison.OrdinalIgnoreCase)
                             || r.Contacts.Any(c => c.Name.Contains(s, StringComparison.OrdinalIgnoreCase)
                                                    || c.Email.Contains(s, StringComparison.OrdinalIgnoreCase)))
                 .ToList();
@@ -293,12 +310,12 @@ public class SponsorsModel : PageModel
             "overdue"  => r => r.Overdue,
             "total"    => r => r.Total,
             "nextdue"  => r => r.NextDue ?? DateOnly.MaxValue,
-            _          => r => r.CompanyId,
+            _          => r => r.CompanyName,
         };
         var ordered = (Desc
             ? allCompanies.OrderByDescending(key)
             : allCompanies.OrderBy(key))
-            .ThenBy(r => r.CompanyId, StringComparer.OrdinalIgnoreCase);
+            .ThenBy(r => r.CompanyName, StringComparer.OrdinalIgnoreCase);
 
         var sortedCompanies = ordered.ToList();
 
@@ -338,5 +355,35 @@ public class SponsorsModel : PageModel
             .OrderBy(s => s.SponsorCompanyId, StringComparer.OrdinalIgnoreCase)
             .Select(s => new OrphanedFacts(s.Id, s.SponsorCompanyId, s.CompanyDescriptionShort))
             .ToList();
+    }
+
+    /// <summary>
+    /// Map each sponsor company id to its display name via Company Manager
+    /// (public name -&gt; legal name, the canonical <see cref="SponsorCompanyName"/>
+    /// chain). Resilient: a failed/disabled lookup leaves the id out of the map so
+    /// the caller falls back to "Company {id}" rather than 500-ing the page.
+    /// Mirrors SponsorAdmin/Dashboard.ResolveCompanyNamesAsync.
+    /// </summary>
+    private async Task<Dictionary<string, string>> ResolveCompanyNamesAsync(
+        IEnumerable<string> companyIds, CancellationToken ct)
+    {
+        var map = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (!_cmOptions.Enabled) return map;
+
+        foreach (var cid in companyIds)
+        {
+            if (!int.TryParse(cid, out var idInt)) continue;
+            try
+            {
+                var c = await _cm.GetCompanyAsync(idInt, ct);
+                if (c is null) continue;
+                map[cid] = SponsorCompanyName.Resolve(c.PublicName, c.Name, billingName: null, companyId: cid);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Sponsors page: company-name lookup failed for {CompanyId}.", cid);
+            }
+        }
+        return map;
     }
 }

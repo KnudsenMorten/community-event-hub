@@ -162,7 +162,9 @@ public class AttendeesModel : PageModel
 
     private IQueryable<Core.Domain.Attendee> BuildQuery(int eventId)
     {
-        var q = _db.Attendees.Where(a => a.EventId == eventId);
+        // The ACTIVE mirror set only (§128): soft-cancelled rows are kept for history
+        // but excluded from the organizer attendee view + counts (CEH == Zoho active set).
+        var q = _db.Attendees.Where(a => a.EventId == eventId && a.MirrorState == MirrorState.Active);
 
         if (Enum.TryParse<TicketStatus>(Ticket, out var ts))
             q = q.Where(a => a.TicketStatus == ts);
@@ -183,7 +185,7 @@ public class AttendeesModel : PageModel
 
     private async Task LoadSummaryAsync(int eventId, CancellationToken ct)
     {
-        var all = _db.Attendees.Where(a => a.EventId == eventId);
+        var all = _db.Attendees.Where(a => a.EventId == eventId && a.MirrorState == MirrorState.Active);
         TotalCount    = await all.CountAsync(ct);
         TwoDayCount   = await all.CountAsync(a => a.TicketStatus == TicketStatus.TwoDay, ct);
         BookedCount   = await all.CountAsync(a => a.BookingStatus != MasterClassBookingStatus.NotBooked, ct);

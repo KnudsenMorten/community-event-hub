@@ -4,7 +4,9 @@ using CommunityHub.Core.Email;
 using CommunityHub.Core.Integrations;
 using CommunityHub.Core.Reminders;
 using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Localization;
 using Microsoft.EntityFrameworkCore;
 using System.Globalization;
@@ -57,6 +59,11 @@ builder.Services.AddHealthChecks()
 
 // Clock abstraction - lets the PIN expiry logic be tested deterministically.
 builder.Services.AddSingleton(TimeProvider.System);
+
+// Generic CONTENT-HUB markdown renderer for the /Info/{slug} pages
+// (REQUIREMENTS §104-§123). Stateless + thread-safe Markdig pipeline, so a
+// singleton is fine.
+builder.Services.AddSingleton<CommunityHub.Content.ContentMarkdownRenderer>();
 
 // --- Email (Brevo SMTP) ----------------------------------------------------
 //  SmtpUsername / SmtpKey are bound from Key Vault-backed config; the rest
@@ -159,12 +166,11 @@ builder.Services.AddScoped<CommunityHub.Core.Email.MasterClassPromotionEmailServ
 builder.Services.AddScoped<CommunityHub.Core.Email.MasterClassEmailService>();
 builder.Services.AddScoped<CommunityHub.Core.Reminders.WelcomeWithLoginEmailService>();
 
-// --- Sessionize speaker import (organizer uploads an Excel export) ---------
-builder.Services.AddSingleton<SessionizeExcelParser>();
+// --- Sessionize speaker import (shared upsert core) ------------------------
 builder.Services.AddScoped<SessionizeImportService>();
 
 // --- Sessionize speaker import via the v2 view API (JSON pull) -------------
-// Same upsert semantics as the Excel path; the endpoint id is plain operator
+// The only import source (§82 — Excel upload removed); the endpoint id is plain operator
 // config (NOT a secret), bound from the Sessionize section of
 // integrations.<edition>.json / the gitignored sessionize.<edition>.custom.json.
 var sessionizeApiOptions = new CommunityHub.Core.Integrations.SessionizeApiOptions();
@@ -183,6 +189,12 @@ builder.Services.AddScoped<CommunityHub.Core.Integrations.Sessions.ISessionSourc
     CommunityHub.Core.Integrations.Sessions.BackstageSessionSource>();
 builder.Services.AddScoped<CommunityHub.Core.Integrations.Sessions.SessionSourceSettingsService>();
 builder.Services.AddScoped<CommunityHub.Core.Integrations.Sessions.SessionSourceResolver>();
+// §58 NEVER-AUTO-DELETE: alert the operator about speakers/sessions that disappeared from
+// Sessionize after an import (the import never deletes them). Delivery uses the ring-exempt
+// EngineAlertSender (the ops mailbox is not a ring-gated participant), registered here so the
+// web-triggered import path can deliver the alert too.
+builder.Services.AddSingleton<CommunityHub.Core.Email.EngineAlertSender>();
+builder.Services.AddScoped<CommunityHub.Core.Reminders.SessionizeDisappearanceDetector>();
 builder.Services.AddScoped<SessionizeApiImportService>();
 // Import DRY-RUN / preview: reads the same source + applies the same merge rules
 // as the real import but never writes, so the organizer sees created/updated/skipped
@@ -287,7 +299,19 @@ builder.Services.AddDataProtection()
     .PersistKeysToDbContext<CommunityHubDbContext>()
     .SetApplicationName("CommunityHub-EventHub");
 
-builder.Services.AddAuthorization();
+// FAIL-CLOSED authorization backstop: every endpoint that does NOT carry its own
+// authorization metadata ([Authorize]/[AllowAnonymous]/RequireAuthorization) falls
+// back to "must be an authenticated user". This guarantees a future page added
+// without an explicit attribute is private by default rather than silently public.
+// The public surfaces (Index/Agenda/Sessions/Speakers/Sponsors/MasterClass/Party/
+// Volunteer-Signup/Survey/AttendeeTelemetry/Login/Login.Magic), the token-secured
+// API controllers (PublicSessionCalendar/Calendar/Secretary/SponsorLeads) and the
+// /health + /set-language endpoints are explicitly opted out with [AllowAnonymous]
+// / .AllowAnonymous() so they keep working without a cookie.
+builder.Services.AddAuthorization(o =>
+    o.FallbackPolicy = new AuthorizationPolicyBuilder()
+        .RequireAuthenticatedUser()
+        .Build());
 
 // --- Localization (i18n: English only) -------------------------------------
 // Resources live in CommunityHub.Core under /Resources (SharedResource.resx =
@@ -358,7 +382,36 @@ builder.Services.AddScoped<CommunityHub.Core.Organizer.VolunteerTaskBulkOperatio
 builder.Services.AddScoped<CommunityHub.Core.Organizer.OrganizerOverviewService>();
 builder.Services.AddScoped<CommunityHub.Core.Entitlements.OrderCountService>();
 builder.Services.AddScoped<CommunityHub.Core.Organizer.DataFreshnessService>();
+builder.Services.AddScoped<CommunityHub.Core.Organizer.SyncHealthService>();
 builder.Services.AddScoped<CommunityHub.Core.Organizer.PreselectionQueueService>();
+// §59: delta-approval queue — the /Organizer/SyncQueue page approves/rejects detected
+// sync changes (audited; approve applies + emails; never auto-applied). On approve, a
+// CehToZoho Update PUSHES to Zoho via the push services (lazily resolved — they capture the
+// queue lazily, so there is no construction cycle). The push services are registered below.
+builder.Services.AddScoped(sp => new CommunityHub.Core.Integrations.Sessions.SyncDeltaQueueService(
+    sp.GetRequiredService<CommunityHub.Core.Data.CommunityHubDbContext>(),
+    clock: sp.GetService<TimeProvider>(),
+    audit: sp.GetService<CommunityHub.Core.Audit.IAuditTrail>(),
+    alerts: sp.GetService<CommunityHub.Core.Email.EngineAlertSender>(),
+    sender: sp.GetService<CommunityHub.Core.Email.IEmailSender>(),
+    context: sp.GetService<CommunityHub.Core.Email.IEmailContextAccessor>(),
+    templates: sp.GetService<CommunityHub.Core.Email.EmailTemplateProvider>(),
+    sessionPush: sp.GetService<CommunityHub.Core.Integrations.Sessions.SessionBackstagePushService>(),
+    speakerPush: sp.GetService<CommunityHub.Core.Integrations.Sessions.SpeakerBackstagePushService>()));
+// §57/§58 stage-2 push services — needed so an approved CehToZoho Update on the SyncQueue
+// page can push to Zoho. They enqueue updates of linked records via a LAZY queue factory.
+builder.Services.AddScoped(sp => new CommunityHub.Core.Integrations.Sessions.SessionBackstagePushService(
+    sp.GetRequiredService<CommunityHub.Core.Data.CommunityHubDbContext>(),
+    sp.GetRequiredService<CommunityHub.Core.Integrations.ZohoClient>(),
+    sp.GetRequiredService<CommunityHub.Core.Integrations.ZohoOptions>(),
+    tokenOverride: null,
+    queueFactory: () => sp.GetRequiredService<CommunityHub.Core.Integrations.Sessions.SyncDeltaQueueService>()));
+builder.Services.AddScoped(sp => new CommunityHub.Core.Integrations.Sessions.SpeakerBackstagePushService(
+    sp.GetRequiredService<CommunityHub.Core.Data.CommunityHubDbContext>(),
+    sp.GetRequiredService<CommunityHub.Core.Integrations.ZohoClient>(),
+    sp.GetRequiredService<CommunityHub.Core.Integrations.ZohoOptions>(),
+    tokenOverride: null,
+    queueFactory: () => sp.GetRequiredService<CommunityHub.Core.Integrations.Sessions.SyncDeltaQueueService>()));
 builder.Services.AddScoped<CommunityHub.Core.Organizer.OnboardingService>();
 builder.Services.AddScoped<CommunityHub.Core.Organizer.CommandCenterService>();
 builder.Services.AddScoped<CommunityHub.Core.Organizer.CommsCockpitService>();
@@ -403,6 +456,40 @@ else
         sp.GetRequiredService<CommunityHub.Core.Volunteers.HeuristicTaskGuidanceGenerator>());
 }
 
+// --- Otto: grounded AI Community Helper (REQUIREMENTS §129) -----------------
+// Azure OpenAI is wired via the "OpenAI" config section (ApiKey is a KV ref). Otto
+// is GATED on OpenAiOptions.IsConfigured (Enabled + endpoint + deployment + key) and
+// no-ops gracefully when off. The grounding builder enforces authorization-at-
+// retrieval: role-scoped content (ContentPageRegistry.ForRole) + the participant's
+// OWN rows only — the assistant gets no raw DB access, just assembled context.
+var openAiOptions = new CommunityHub.Core.Assistant.OpenAiOptions();
+builder.Configuration
+    .GetSection(CommunityHub.Core.Assistant.OpenAiOptions.SectionName)
+    .Bind(openAiOptions);
+builder.Services.AddSingleton(openAiOptions);
+builder.Services.Configure<CommunityHub.Core.Assistant.OpenAiOptions>(
+    builder.Configuration.GetSection(CommunityHub.Core.Assistant.OpenAiOptions.SectionName));
+// Grounding sources (web): role-scoped content from disk + the participant's own rows.
+builder.Services.AddScoped<CommunityHub.Core.Assistant.IOttoContentProvider,
+    CommunityHub.Assistant.WebOttoContentProvider>();
+builder.Services.AddScoped<CommunityHub.Core.Assistant.IOttoOwnDataProvider,
+    CommunityHub.Assistant.WebOttoOwnDataProvider>();
+// §133 ORGANIZER OPS MODE: curated, read-only ops aggregates (speaker readiness / missing
+// slides, sponsor missing deliverables, master-class non-selections, participation/task/
+// attendee counts) reused from the existing §11/§134/§135/§6 aggregators. The grounding
+// builder injects these ONLY for a SERVER-resolved Organizer (the gate lives in the builder,
+// never the prompt) — non-organizer Otto never even calls this provider.
+builder.Services.AddScoped<CommunityHub.Core.Assistant.IOttoOrganizerOpsProvider,
+    CommunityHub.Assistant.WebOttoOrganizerOpsProvider>();
+builder.Services.AddScoped<CommunityHub.Core.Assistant.IOttoGroundingBuilder,
+    CommunityHub.Core.Assistant.OttoGroundingBuilder>();
+// Per-participant in-memory rate limit on the endpoint.
+builder.Services.AddSingleton<CommunityHub.Assistant.OttoRateLimiter>();
+// The assistant: a typed HttpClient (absolute Azure OpenAI URL, no BaseAddress).
+builder.Services.AddHttpClient<CommunityHub.Core.Assistant.OttoAssistant>();
+builder.Services.AddScoped<CommunityHub.Core.Assistant.IOttoAssistant>(sp =>
+    sp.GetRequiredService<CommunityHub.Core.Assistant.OttoAssistant>());
+
 // --- Calendar sync (per-user subscribable iCal feed) -----------------------
 // The token service mints/resolves the per-participant feed token; the builder
 // renders the participant's deadlines / shifts / tasks as an RFC 5545
@@ -411,6 +498,17 @@ else
 builder.Services.AddScoped<CommunityHub.Core.Reminders.CalendarFeedTokenService>();
 builder.Services.AddScoped<CommunityHub.Core.Reminders.ParticipantCalendarBuilder>();
 builder.Services.AddScoped<CommunityHub.Core.Participants.ParticipantChecklistBuilder>();
+// §134 Speaker Readiness: read-only aggregator that rolls up a speaker's "am I ready?"
+// signals (details/headshot/hotel/dinner/uploads/master-class/tasks) from existing data.
+builder.Services.AddScoped<CommunityHub.Core.Participants.SpeakerReadinessService>();
+// §135 Sponsor Deliverables Tracker: read-only aggregator that rolls up a sponsor company's
+// lifecycle stages (onboarding/logo/booth-materials/booth-members/tasks) with done + overdue
+// vs deadline, from existing SponsorInfo / uploads / booth members / ParticipantTask data.
+builder.Services.AddScoped<CommunityHub.Core.Sponsors.SponsorDeliverablesService>();
+// Reconciles per-form data signals (Hotel/Dinner/Lunch/Swag/Volunteer-day/Travel)
+// onto their OPEN form-owned + speaker-deadline tasks so a saved submission marks
+// the matching task(s) Done even when it was saved before the auto-task wiring.
+builder.Services.AddScoped<CommunityHub.Core.Participants.FormTaskReconciler>();
 // (Sponsor Portal retired 2026-06-21 — the dead /Sponsor/Portal page + its service
 // were removed; the sponsor self-service home is /Sponsor, the company landing card.)
 
@@ -476,7 +574,10 @@ builder.Configuration
     .GetSection(CommunityHub.Core.Integrations.SharePointUploadOptions.SectionName)
     .Bind(spUploadOptions);
 builder.Services.AddSingleton(spUploadOptions);
-builder.Services.AddHttpClient<CommunityHub.Core.Integrations.SharePointUploadClient>();
+// §102: raise the default 100s HttpClient timeout — SharePoint folder
+// provisioning (Graph folder walk + createLink) can exceed it on a slow site.
+builder.Services.AddHttpClient<CommunityHub.Core.Integrations.SharePointUploadClient>(c =>
+    c.Timeout = TimeSpan.FromMinutes(5));
 
 var graphicsSpOptions = new CommunityHub.Core.Integrations.Graphics.GraphicsSharePointOptions();
 builder.Configuration
@@ -499,6 +600,9 @@ else
 }
 
 builder.Services.AddScoped<CommunityHub.Core.Integrations.Graphics.GraphicsService>();
+// §124: per-room session-evaluation QR codes — reads/uploads via the same
+// SharePoint file-store seam; inert until the QR folder path is configured.
+builder.Services.AddScoped<CommunityHub.Core.Integrations.Graphics.SessionEvalsQrService>();
 builder.Services.AddScoped<CommunityHub.Core.Integrations.Graphics.AssetLocationService>();
 // Read-only contract that EXPOSES publishable branding graphics to a downstream
 // consumer (the §19 SoMe queue, or any other) — the release/visibility gate is
@@ -517,12 +621,34 @@ builder.Services.AddScoped<
 // (NOT a secret); the LinkedIn OAuth access token IS a secret (read from Key
 // Vault by the live publisher — secret name only in committed files). Swap in a
 // live ILinkedInPostPublisher here once wired — no caller changes.
-builder.Services.AddSingleton<
-    CommunityHub.Core.Integrations.ILinkedInPostPublisher,
-    CommunityHub.Core.Integrations.NullLinkedInPostPublisher>();
+// LinkedIn live publisher (§19/§31) — wired but INERT by default: registered only
+// when LinkedIn is enabled AND credentialed; and even then LinkedIn:DryRun (default
+// true) holds every post (logs intent, posts nothing). Unconfigured ⇒ Null no-op.
+var liOptions = new CommunityHub.Core.Integrations.LinkedInOptions();
+builder.Configuration.GetSection(CommunityHub.Core.Integrations.LinkedInOptions.SectionName).Bind(liOptions);
+builder.Services.AddSingleton(liOptions);
+if (liOptions.Enabled && liOptions.HasCredentials)
+{
+    builder.Services.AddHttpClient<
+        CommunityHub.Core.Integrations.ILinkedInPostPublisher,
+        CommunityHub.Core.Integrations.LiveLinkedInPostPublisher>();
+}
+else
+{
+    builder.Services.AddSingleton<
+        CommunityHub.Core.Integrations.ILinkedInPostPublisher,
+        CommunityHub.Core.Integrations.NullLinkedInPostPublisher>();
+}
 builder.Services.AddScoped<CommunityHub.Core.Integrations.SoMeSettingsService>();
 builder.Services.AddScoped<CommunityHub.Core.Integrations.SoMeQueueService>();
 builder.Services.AddScoped<CommunityHub.Core.Integrations.SoMeDispatchService>();
+// Speaker self-service LinkedIn publish (REQUIREMENTS §52): a speaker pushes their
+// RELEASED announcement graphic + generated text to the event's LinkedIn page
+// through the SAME gated queue/publisher path above — so the credential gate and
+// idempotency are identical and there is one publish code path. Gated by the
+// linkedin-queue feature flag + the SoMe settings; when LinkedIn creds aren't wired
+// the announcement is QUEUED (nothing posted live, nothing faked).
+builder.Services.AddScoped<CommunityHub.Core.Integrations.SpeakerLinkedInPublishService>();
 
 // Sponsor leads API auth: deterministic per-sponsor token derived from
 // (EventId, SponsorCompanyId, TokenVersion, GlobalSecret). Durable since
@@ -586,6 +712,17 @@ builder.Configuration
 builder.Services.AddSingleton(speakerDeadlineOptions);
 builder.Services.AddScoped<CommunityHub.Core.Config.SpeakerDeadlineSeeder>();
 
+// SignalGroupsProvider (§109): resolves the role-appropriate Signal chat + broadcast
+// invite links from config/signal-groups.<edition>.json for the "Join Signal groups"
+// Get-Started step + task. Operational invite links (not secrets); a missing config
+// just hides the step. Singleton — the file is read once + cached.
+var signalGroupsOptions = new CommunityHub.Core.Config.SignalGroupsOptions();
+builder.Configuration
+    .GetSection(CommunityHub.Core.Config.SignalGroupsOptions.SectionName)
+    .Bind(signalGroupsOptions);
+builder.Services.AddSingleton(signalGroupsOptions);
+builder.Services.AddSingleton<CommunityHub.Core.Config.SignalGroupsProvider>();
+
 // SpeakerMilestoneService: the read-model behind the /Speaker hub progress
 // tracker. Reads the speaker's seeded deadline tasks (speakerdl: SourceKey)
 // and derives countdown + status; also flips a speaker's own milestone
@@ -639,6 +776,12 @@ builder.Services.AddScoped<CommunityHub.Core.Integrations.ContentStudioService>(
 // speaker forms (Speaker Details → Hotel → Dinner → Lunch → Swag → Travel) with
 // entitlement + progress; reuses the forms untouched.
 builder.Services.AddScoped<CommunityHub.Forms.SpeakerWizardService>();
+// Sponsor "Get started" wizard (§32): guided shell over the Company Details sections.
+builder.Services.AddScoped<CommunityHub.Forms.SponsorWizardService>();
+// Generic "Get started" wizard (§43): guided shell for the remaining roles
+// (Volunteer / Organizer / Media / EventPartner); same design-A shell + entitlement
+// gating as the speaker wizard, reusing the existing pages untouched.
+builder.Services.AddScoped<CommunityHub.Forms.RoleWizardService>();
 
 // --- Read-only e-conomic ROLE source for the sponsor-email audience (§7c) --
 // The sponsor-email coordinator audience is resolved READ-ONLY from e-conomic
@@ -790,6 +933,19 @@ if (!app.Environment.IsDevelopment())
 // server is ISO either way.
 app.UseRequestLocalization(localizationOptions);
 
+// Honour the reverse-proxy's X-Forwarded-* headers BEFORE HTTPS redirection so
+// the app sees the original client scheme/IP (the proxy terminates TLS and
+// forwards over HTTP). KnownNetworks/KnownProxies are cleared because the proxy
+// hop is not on a known private range here; without this the forwarded headers
+// would be ignored and HTTPS redirection / scheme-sensitive URLs would break.
+var forwardedHeadersOptions = new ForwardedHeadersOptions
+{
+    ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto,
+};
+forwardedHeadersOptions.KnownNetworks.Clear();
+forwardedHeadersOptions.KnownProxies.Clear();
+app.UseForwardedHeaders(forwardedHeadersOptions);
+
 app.UseHttpsRedirection();
 app.UseStaticFiles();
 app.UseRouting();
@@ -836,7 +992,10 @@ app.Use(async (context, next) =>
     await next();
 });
 
-app.MapHealthChecks("/health");
+// Anonymous on purpose: the deploy script probes / and /health to confirm the site
+// is up. Under the fail-closed FallbackPolicy this endpoint would otherwise require
+// auth and fail every deploy health probe.
+app.MapHealthChecks("/health").AllowAnonymous();
 
 // Culture cookie endpoint. Persists a chosen culture in the standard ASP.NET
 // Core culture cookie (read back by CookieRequestCultureProvider on the next
@@ -865,7 +1024,9 @@ app.MapPost("/set-language", (HttpContext http, string culture, string? returnUr
         ? returnUrl
         : "/";
     return Results.LocalRedirect(target);
-});
+// Anonymous: the language switcher is used on the Login page before sign-in, so it
+// must opt out of the fail-closed FallbackPolicy (it only sets a culture cookie).
+}).AllowAnonymous();
 
 // Back-compat alias: the "Secure link" page was previously "/Organizer/SecretaryLink".
 // Redirect old bookmarks/shared links to the new path, preserving the query string

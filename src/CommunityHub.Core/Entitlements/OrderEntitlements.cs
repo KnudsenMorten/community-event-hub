@@ -38,12 +38,12 @@ public static class OrderEntitlements
     /// </list>
     /// <para>Primary role hat:</para>
     /// <list type="bullet">
-    ///   <item>Organizer: Polo, Swag, AppreciationDinner, LunchPreDay, LunchMainDay.</item>
+    ///   <item>Organizer: Polo, Swag, Hotel, AppreciationDinner, LunchPreDay, LunchMainDay.</item>
     ///   <item>Sponsor + <see cref="Participant.IsBoothMember"/>: Polo,
     ///   LunchMainDay (NO appreciation dinner — booth members are not invited;
     ///   one who also speaks gets the dinner via the speaker hat).</item>
     ///   <item>Sponsor (not a booth member): nothing from the sponsor hat.</item>
-    ///   <item>Volunteer: Polo, Swag, AppreciationDinner, LunchMainDay.</item>
+    ///   <item>Volunteer: Polo, Swag, Hotel, AppreciationDinner, LunchMainDay.</item>
     ///   <item>Media: Polo, Hotel, AppreciationDinner, LunchPreDay, LunchMainDay.</item>
     ///   <item>EventPartner: Polo, Hotel, AppreciationDinner, LunchPreDay, LunchMainDay.</item>
     ///   <item>Attendee: nothing (their ticket covers food).</item>
@@ -89,6 +89,7 @@ public static class OrderEntitlements
             case ParticipantRole.Organizer:
                 set.Add(OrderItem.Polo);
                 set.Add(OrderItem.Swag);
+                set.Add(OrderItem.Hotel);
                 set.Add(OrderItem.AppreciationDinner);
                 set.Add(OrderItem.LunchPreDay);
                 set.Add(OrderItem.LunchMainDay);
@@ -110,6 +111,7 @@ public static class OrderEntitlements
             case ParticipantRole.Volunteer:
                 set.Add(OrderItem.Polo);
                 set.Add(OrderItem.Swag);
+                set.Add(OrderItem.Hotel);
                 set.Add(OrderItem.AppreciationDinner);
                 set.Add(OrderItem.LunchMainDay);
                 break;

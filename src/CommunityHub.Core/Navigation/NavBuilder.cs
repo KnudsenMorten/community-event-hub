@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using CommunityHub.Core.Content;
 using CommunityHub.Core.Domain;
 
 namespace CommunityHub.Core.Navigation;
@@ -26,9 +27,16 @@ public static class NavBuilder
     /// caller (the layout) computes this for volunteers only; it is ignored for
     /// every other role.
     /// </param>
-    public static NavModel Build(ParticipantRole role, bool isVolunteerSupervisor = false)
+    /// <param name="isExhibitor">
+    /// True when the signed-in SPONSOR has a physical booth (SponsorInfo.HasBooth).
+    /// The exhibitor/booth + leads menu blocks are shown ONLY to real exhibitors —
+    /// a digital-only sponsor has no booth, so those Zoho booth/lead items would be
+    /// dead links for them. The caller (the layout) computes this for sponsors only;
+    /// it is ignored for every other role.
+    /// </param>
+    public static NavModel Build(ParticipantRole role, bool isVolunteerSupervisor = false, bool isExhibitor = false)
     {
-        var groups = new List<NavGroup> { BuildParticipantGroup(role, isVolunteerSupervisor) };
+        var groups = new List<NavGroup> { BuildParticipantGroup(role, isVolunteerSupervisor, isExhibitor) };
 
         // Server-side management gate: only an organizer ever gets these items.
         if (role == ParticipantRole.Organizer)
@@ -44,12 +52,23 @@ public static class NavBuilder
     /// per-role visibility exactly (no route added or dropped) — Home, My tasks,
     /// My profile, Resources, then the role-specific hubs + self-service forms.
     /// </summary>
-    private static NavGroup BuildParticipantGroup(ParticipantRole role, bool isVolunteerSupervisor)
+    private static NavGroup BuildParticipantGroup(ParticipantRole role, bool isVolunteerSupervisor, bool isExhibitor)
     {
         var items = new List<NavItem>
         {
             new("/", "Nav.Home", ExactMatch: true),
         };
+
+        // §43: generic "Get started" guided wizard for the roles WITHOUT a bespoke
+        // wizard — Organizer, Media, EventPartner (Volunteer gets it too, but placed
+        // inside its own §47-ordered block below; Speaker §28 + Sponsor §32 keep
+        // their own dedicated entries). Added right after Home so it's the obvious
+        // first action.
+        if (role is ParticipantRole.Organizer
+            or ParticipantRole.Media or ParticipantRole.EventPartner)
+        {
+            items.Add(new("/Forms/GetStarted", "Nav.GetStarted"));
+        }
 
         // Sponsors use the company-shared /Sponsor/Tasks entry, not the generic
         // assigned-to-me /Tasks list. Attendees get a deliberately MINIMAL menu
@@ -57,8 +76,11 @@ public static class NavBuilder
         // excluded from My tasks / My profile / Resources / Sessions here.
         // Speakers excluded too (operator 2026-06-23 menu: Home, My Hub Profile,
         // Bio, My sessions, Event Logistics, Contact — no top-level My tasks).
+        // Volunteers excluded here too (§47): they still get the /Tasks list, but
+        // relocated to AFTER "My Hub Profile" and relabelled "My Onboarding Tasks"
+        // inside the volunteer block below — so it does not appear before profile.
         if (role != ParticipantRole.Sponsor && role != ParticipantRole.Attendee
-            && role != ParticipantRole.Speaker)
+            && role != ParticipantRole.Speaker && role != ParticipantRole.Volunteer)
         {
             items.Add(new("/Tasks", "Nav.MyTasks"));
         }
@@ -89,9 +111,12 @@ public static class NavBuilder
             items.Add(new("/Forms/Dinner", "Nav.Dinner"));
         }
 
-        // Lunch + Swag: organizer (speakers + volunteers get these in their Event
-        // logistics fold-out below).
-        if (role is ParticipantRole.Organizer)
+        // Lunch + Swag: organizer + media crew + event partners — all entitled per
+        // OrderEntitlements (mirrors the Hotel/Dinner crew block above). Speakers +
+        // volunteers get these in their Event logistics fold-out below.
+        if (role is ParticipantRole.Organizer
+            or ParticipantRole.Media
+            or ParticipantRole.EventPartner)
         {
             items.Add(new("/Forms/Lunch", "Nav.Lunch"));
             items.Add(new("/Forms/Swag", "Nav.Swag"));
@@ -115,15 +140,23 @@ public static class NavBuilder
         {
             // operator 2026-06-24 (§26c): "Bio" replaced by the consolidated
             // "Speaker Details" page; "Help Promote" added (SoMe graphics). Then My
-            // sessions, Sync Calendar, the Event-logistics fold-out, Contact (last).
+            // sessions, the Event-logistics fold-out, Contact (last).
             // §28: guided onboarding wizard — the single entry point that chains the
             // speaker's initial tasks (Speaker Details, Hotel, Dinner, …) with progress.
+            // (Calendar entries removed: the user-facing calendar UI is retired.)
             items.Add(new("/Forms/SpeakerWizard", "Nav.SpeakerOnboarding"));
             items.Add(new("/Speaker/Details", "Nav.SpeakerDetails"));
             items.Add(new("/Speaker/Tasks", "Nav.MyTasks"));   // operator 2026-06-24: right after Speaker Details
+            // §134: the speaker's own "am I ready?" readiness rollup (score + what's
+            // missing), right after My Tasks so the journey reads details → tasks → ready.
+            items.Add(new("/Speaker/Readiness", "Nav.SpeakerReadiness"));
             items.Add(new("/Speaker", "Nav.MySessions"));
+            // §86 (operator 2026-06-26): the speaker Master Class Q&A area — see the
+            // audience questions on your session(s), reply (shared with co-speakers), and
+            // edit each Master Class attendee landing page. Re-surfaced as a top-level
+            // speaker entry (it was previously only reachable from the My Sessions hub).
+            items.Add(new("/Speaker/Questions", "Nav.MasterClassQa"));
             items.Add(new("/Speaker/Graphics", "Nav.HelpPromote"));
-            items.Add(new("/Calendar", "Nav.SyncCalendar"));
 
             const string EventLogistics = "Nav.SectionEventLogistics";
             items.Add(new("/Forms/Hotel", "Nav.Hotel", SectionKey: EventLogistics));
@@ -131,7 +164,6 @@ public static class NavBuilder
             items.Add(new("/Forms/Lunch", "Nav.Lunch", SectionKey: EventLogistics));
             items.Add(new("/Forms/Swag", "Nav.SpeakerGift", SectionKey: EventLogistics));
             items.Add(new("/Forms/Travel", "Nav.Travel", SectionKey: EventLogistics));
-            items.Add(new("/Calendar", "Nav.KeyDatesTimes", SectionKey: EventLogistics));
             // (Contact Organizers is appended LAST for every role — see end of method.)
         }
 
@@ -152,10 +184,24 @@ public static class NavBuilder
         // survey).
         if (role == ParticipantRole.Volunteer)
         {
+            // §43: guided "Get started" wizard — the single entry point that walks a
+            // volunteer through Profile → Availability → entitlement logistics with
+            // progress. Placed FIRST in the volunteer block (just after "My Hub
+            // Profile", which is added in the evergreen block above) so it leads, and
+            // the §47 order that follows — My Onboarding Tasks, My Availability, My
+            // Assignments — is preserved.
+            items.Add(new("/Forms/GetStarted", "Nav.GetStarted"));
+            // §47: "My Onboarding Tasks" (the generic /Tasks list, volunteer-only
+            // label) is placed here so it renders AFTER "My Hub Profile" (added
+            // above) instead of before it. The shared "Nav.MyTasks" key is left
+            // untouched (organizer/media/speaker still read it); volunteers use the
+            // dedicated "Nav.MyOnboardingTasks" label so other roles are unaffected.
+            items.Add(new("/Tasks", "Nav.MyOnboardingTasks"));
             // My Availability first (operator 2026-06-23) — volunteers set it before
             // they have a schedule to look at.
             items.Add(new("/volunteer/availability", "Nav.MyAvailability"));
-            items.Add(new("/volunteer/myschedule", "Nav.MySchedule"));
+            // §47: relabelled "My Assignments" (was "My schedule"); volunteer-only key.
+            items.Add(new("/volunteer/myschedule", "Nav.MyAssignments"));
             // Supervisor dashboard: shown ONLY to volunteers who actually supervise a
             // bucket (operator 2026-06-21). A non-supervisor volunteer would otherwise
             // see a menu item that lands on a "you are not a supervisor" dead end.
@@ -167,7 +213,7 @@ public static class NavBuilder
             items.Add(new("/Forms/Dinner", "Nav.Dinner", SectionKey: EventLogistics));
             items.Add(new("/Forms/Lunch", "Nav.Lunch", SectionKey: EventLogistics));
             items.Add(new("/Forms/Swag", "Nav.VolunteerGift", SectionKey: EventLogistics));
-            items.Add(new("/Calendar", "Nav.ImportantDates", SectionKey: EventLogistics));
+            // (Calendar "Important dates" entry removed: the user-facing calendar UI is retired.)
         }
 
         // Attendee area — MINIMAL menu (operator 2026-06-21): Home (added at top) +
@@ -196,6 +242,10 @@ public static class NavBuilder
         {
             const string Zoho = "https://eldk27.expertslive.dk/#/exhibitor-dashboard/";
 
+            // §32: guided "Get started" wizard — the single entry point that walks a
+            // sponsor through the Company Details sections with progress. First item.
+            items.Add(new("/Sponsor/GetStarted", "Nav.SponsorGetStarted"));
+
             // Sponsor Webshop (renamed from "Engagement details"): the external
             // webshop buy-flow + the internal hub sections for orders / linked contacts.
             const string Webshop = "Nav.SectionSponsorWebshop";
@@ -208,32 +258,76 @@ public static class NavBuilder
             // maintains vital company info (top-level so it's easy to find).
             items.Add(new("/Sponsor/CompanyDetails", "Nav.SponsorCompanyDetails"));
 
-            // Attendee telemetry — the public "who's coming" stats. Opens in a new tab
-            // (it's a standalone anonymous page) so the sponsor keeps their hub session.
-            items.Add(new("/attendee-telemetry", "Nav.AttendeeTelemetry", External: true));
+            // §135 Deliverables tracker — the company's own lifecycle-completion checklist
+            // (what's left / overdue, each linking to where it's fixed). FallbackLabel (no
+            // resx key yet), mirroring the operator-authored content pages.
+            items.Add(new("/Sponsor/Deliverables", LabelKey: null, FallbackLabel: "Deliverables"));
 
-            // Exhibitor & Booth Details (Zoho, external).
-            const string Booth = "Nav.SectionExhibitorBooth";
-            items.Add(new($"{Zoho}booth-info", "Nav.ExhibitorProfile", SectionKey: Booth, External: true));
-            items.Add(new($"{Zoho}booth-members", "Nav.BoothMembers", SectionKey: Booth, External: true));
-            items.Add(new($"{Zoho}booth-materials", "Nav.ExhibitorMaterials", SectionKey: Booth, External: true));
-            items.Add(new($"{Zoho}expo-promo-banner", "Nav.PromotionalBanner", SectionKey: Booth, External: true));
+            // Attendee telemetry — the "who's coming" stats. §55: link to the
+            // AUTHENTICATED in-area page (same ranked tables/filters as the public
+            // page, reached without leaving the hub), NOT the external public link.
+            items.Add(new("/Sponsor/Telemetry", "Nav.AttendeeTelemetry"));
+
+            // Exhibitor & Booth Details (Zoho, external) — booth-only. A digital-only
+            // sponsor (no physical booth) gets none of these, so they are gated behind
+            // isExhibitor (SponsorInfo.HasBooth, computed by the caller for sponsors).
+            if (isExhibitor)
+            {
+                const string Booth = "Nav.SectionExhibitorBooth";
+                items.Add(new($"{Zoho}booth-info", "Nav.ExhibitorProfile", SectionKey: Booth, External: true));
+                items.Add(new($"{Zoho}booth-members", "Nav.BoothMembers", SectionKey: Booth, External: true));
+                items.Add(new($"{Zoho}booth-materials", "Nav.ExhibitorMaterials", SectionKey: Booth, External: true));
+                items.Add(new($"{Zoho}expo-promo-banner", "Nav.PromotionalBanner", SectionKey: Booth, External: true));
+            }
 
             items.Add(new("/Sponsor/Tasks", "Nav.SponsorTasks"));
 
-            // Leads (Zoho, external) + the in-hub Capture-lead failover for when Zoho is down.
-            const string Leads = "Nav.SectionLeads";
-            items.Add(new($"{Zoho}lead-list", "Nav.LeadsZoho", SectionKey: Leads, External: true));
-            items.Add(new($"{Zoho}inquiry-list", "Nav.InquiriesZoho", SectionKey: Leads, External: true));
-            items.Add(new("/Sponsor/CaptureLead", "Nav.CaptureLeadFailover", SectionKey: Leads));
-            // "My leads (export)" removed from the menu (operator 2026-06-23): the
-            // leads API/export isn't live yet. Re-add the line below when it is.
-            // items.Add(new("/Sponsor/Leads", "Nav.SponsorLeadsExport", SectionKey: Leads));
+            // Leads — booth-only (lead capture happens at the physical booth). Same
+            // isExhibitor gate as the booth block above so digital-only sponsors don't
+            // see the Zoho lead/inquiry lists or the capture failover.
+            if (isExhibitor)
+            {
+                // Leads (Zoho, external) + the in-hub Capture-lead failover for when Zoho is down.
+                const string Leads = "Nav.SectionLeads";
+                items.Add(new($"{Zoho}lead-list", "Nav.LeadsZoho", SectionKey: Leads, External: true));
+                items.Add(new($"{Zoho}inquiry-list", "Nav.InquiriesZoho", SectionKey: Leads, External: true));
+                items.Add(new("/Sponsor/CaptureLead", "Nav.CaptureLeadFailover", SectionKey: Leads));
+                // §P9: "My leads (export)" — /Sponsor/Leads + SponsorLeadsController ship
+                // and work, so the menu entry is live.
+                items.Add(new("/Sponsor/Leads", "Nav.SponsorLeadsExport", SectionKey: Leads));
+            }
 
             // Dedicated leaf label (was reusing the "Event logistics" SECTION key).
             items.Add(new("/Sponsor/Logistics", "Nav.SponsorEventLogistics"));
             // (Contact Organizers is appended LAST for every role — see end of method.)
         }
+
+        // §104–§123: operator-authored CONTENT pages, wired in entirely from the
+        // ContentPageRegistry (the single source of truth) so a new .md + registry row
+        // surfaces in the nav with no further wiring. They render under the SAME
+        // "Event logistics" fold-out used by the entitlement forms above (so speakers/
+        // volunteers see one combined fold-out), and are ROLE-SCOPED per §123:
+        // ForRole() returns only the pages this role may see — the all-roles pages
+        // (Wayfinding, Good to know, Addresses, Check out our last event) for everyone,
+        // plus the speaker-only pages (Speaker template, Session Guidelines, A/V &
+        // Stage-timer, Session Preview/Final, Session feedback / evaluations, Help
+        // Promote) for speakers; organizers see every page. Each links to the generic
+        // /Info/{slug} content page and uses the page Title as its label (no resx key —
+        // operator-authored copy lives in the Markdown, not the resx).
+        // (A different SectionKey local name avoids colliding with the inner-scope
+        // "EventLogistics" consts declared in the speaker/volunteer blocks above.)
+        const string ContentLogisticsSection = "Nav.SectionEventLogistics";
+        foreach (var page in ContentPageRegistry.ForRole(role))
+        {
+            items.Add(new($"/Info/{page.Slug}", LabelKey: null,
+                FallbackLabel: page.Title, SectionKey: ContentLogisticsSection));
+        }
+
+        // Policies — a foldout menu (Privacy Policy + Code of Conduct) for EVERY role,
+        // just before Contact Organizers (operator 2026-06-25). External links.
+        const string Policies = "Nav.SectionPolicies";
+        items.Add(new("https://expertslive.dk/privacy-policy/", "Nav.PrivacyPolicy", SectionKey: Policies, External: true));
+        items.Add(new("https://expertslive.dk/code-of-conduct/", "Nav.CodeOfConduct", SectionKey: Policies, External: true));
 
         // Contact Organizers — ALWAYS the furthest-right (last) menu item, for every
         // role (operator 2026-06-21). Sponsors keep their sponsor-specific contact
@@ -285,8 +379,10 @@ public static class NavBuilder
             new("/Organizer", "Nav.OrgArea"),
             new("/Organizer/CommandCenter", "Nav.OrgCommandCenter"),
             new("/Organizer/Dashboard", "Nav.OrgDashboard"),
-            // Public "who's coming" attendee telemetry — standalone page, new tab.
-            new("/attendee-telemetry", "Nav.AttendeeTelemetry", External: true),
+            // §55: "who's coming" attendee telemetry — the AUTHENTICATED in-area
+            // organizer page (same ranked tables/filters as the public page), not the
+            // external public link.
+            new("/Organizer/Telemetry", "Nav.AttendeeTelemetry"),
             new("/Organizer/FindPerson", "Nav.OrgFindPerson"),
 
             new("/Organizer/People", "Nav.OrgPeople"),

@@ -34,6 +34,7 @@ public sealed class VolunteerSignupSurveyTests
         public Task SendAsync(string to, string s, string h, string t, CancellationToken ct = default) => Task.CompletedTask;
         public Task SendAsync(string to, string s, string h, IReadOnlyCollection<string>? cc, CancellationToken ct = default) => Task.CompletedTask;
         public Task SendWithIcsAsync(string to, string s, string h, string ics, string fn, CancellationToken ct = default) => Task.CompletedTask;
+        public Task SendWithAttachmentsAsync(string to, string s, string h, IReadOnlyCollection<EmailAttachment> attachments, CancellationToken ct = default) => Task.CompletedTask;
     }
 
     private static CommunityHubDbContext NewDb() =>
@@ -93,8 +94,10 @@ public sealed class VolunteerSignupSurveyTests
         m.AgreementAccepted = true;
         m.Availability = new()
         {
-            new() { Day = PreDay, Level = VolunteerAvailabilityLevel.Full },
-            new() { Day = MainDay, Level = VolunteerAvailabilityLevel.Unavailable, Note = "family" },
+            // Slots map to the per-day option sets (REQUIREMENTS §45): "Full day" =>
+            // Full, "Not able to help" => Unavailable.
+            new() { Day = PreDay, Slot = "Full day" },
+            new() { Day = MainDay, Slot = "Not able to help", Note = "family" },
         };
 
         await m.OnPostAsync(default);
@@ -107,7 +110,11 @@ public sealed class VolunteerSignupSurveyTests
 
         var days = await db.VolunteerDayAvailabilities.Where(x => x.ParticipantId == p.Id).ToListAsync();
         Assert.Equal(2, days.Count);
-        Assert.Equal(VolunteerAvailabilityLevel.Unavailable, days.Single(d => d.Day == MainDay).Level);
+        var mainDay = days.Single(d => d.Day == MainDay);
+        Assert.Equal(VolunteerAvailabilityLevel.Unavailable, mainDay.Level);
+        // The chosen slot is persisted as a "[slot]" tag in Note, with the free note after it.
+        Assert.Contains("[Not able to help]", mainDay.Note);
+        Assert.Contains("family", mainDay.Note);
 
         var meta = await db.VolunteerAvailabilities.SingleAsync(x => x.ParticipantId == p.Id);
         Assert.Equal("https://www.linkedin.com/in/avery", meta.LinkedInUrl);

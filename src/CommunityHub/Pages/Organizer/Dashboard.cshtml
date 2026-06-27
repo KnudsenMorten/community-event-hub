@@ -35,7 +35,7 @@
 </style>
 
 <div class="card">
-    <h2>Dashboard</h2>
+    <h1>Dashboard</h1>
 
     @if (Model.AccessDenied)
     {
@@ -106,6 +106,7 @@
         }
         else
         {
+            <div style="overflow-x:auto;">
             <table class="vol-pending">
                 <thead>
                     <tr>
@@ -143,6 +144,7 @@
                     }
                 </tbody>
             </table>
+            </div>
         }
     </div>
 
@@ -411,6 +413,7 @@
         @if (Model.TopOverdueSpeakers.Count > 0)
         {
             <h3 style="color:var(--el-darkblue);margin-top:18px;">Top overdue speakers</h3>
+            <div style="overflow-x:auto;">
             <table style="border-collapse:collapse;width:100%;font-size:14px;">
                 <thead>
                     <tr style="border-bottom:2px solid #ddd;text-align:left;">
@@ -428,6 +431,7 @@
                     }
                 </tbody>
             </table>
+            </div>
             <p style="margin-top:10px;"><a asp-page="/Organizer/SpeakerReminders" asp-route-Filter="overdue">Open Speaker reminders &rarr;</a></p>
         }
     </div>

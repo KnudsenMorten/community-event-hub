@@ -68,6 +68,9 @@ public class DinnerModel : PageModel
     public bool IsLocked { get; private set; }
     public string? Message { get; private set; }
 
+    /// <summary>REQUIREMENTS §51 — when this dinner RSVP was last saved (UpdatedAt); null = never saved.</summary>
+    public DateTimeOffset? LastSavedAt { get; private set; }
+
     /// <summary>FEATURE B: true when the participant is not entitled to the appreciation dinner.</summary>
     public bool AccessDenied { get; private set; }
 
@@ -108,6 +111,7 @@ public class DinnerModel : PageModel
             PlusOneCount = existing.PlusOneCount;
             AllergyNotes = existing.AllergyNotes;
             Comments = existing.Comments;
+            LastSavedAt = existing.UpdatedAt;
         }
 
         var diet = await _db.DietaryRequirements.FirstOrDefaultAsync(
@@ -158,6 +162,7 @@ public class DinnerModel : PageModel
                 EventId = me.EventId,
                 ParticipantId = me.ParticipantId,
                 CreatedAt = _clock.GetUtcNow(),
+                UpdatedAt = _clock.GetUtcNow(),
             };
             _db.DinnerSignups.Add(signup);
         }
@@ -291,6 +296,7 @@ public class DinnerModel : PageModel
                  && t.SourceKey == sourceKey, ct);
         if (task is null || task.State == TaskState.Done) return;
         task.State = TaskState.Done;
+        task.CompletedAt = _clock.GetUtcNow();
         await _db.SaveChangesAsync(ct);
     }
 

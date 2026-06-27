@@ -49,6 +49,8 @@ public class DetailsModel : PageModel
     public bool IsError { get; private set; }
     public DateTimeOffset? LastSessionizeImportAt { get; private set; }
     public string? PhotoStoredPath { get; private set; }
+    /// <summary>When this speaker profile was last saved (UTC), for the "Last saved …" line (§51).</summary>
+    public DateTimeOffset? LastSavedAt { get; private set; }
 
     // --- Identity / name ---
     [BindProperty][StringLength(200)] public string? FirstName { get; set; }
@@ -96,33 +98,49 @@ public class DetailsModel : PageModel
 
         // Normalise the country to an upper 2-letter code.
         Country = string.IsNullOrWhiteSpace(Country) ? null : Country.Trim().ToUpperInvariant();
-        if (!ModelState.IsValid) { var pp = await Load(me, ct); if (pp is not null) { LastSessionizeImportAt = pp.LastSessionizeImportAt; PhotoStoredPath = pp.PhotoSharePointPath; } return Page(); }
+        if (!ModelState.IsValid) { var pp = await Load(me, ct); if (pp is not null) { LastSessionizeImportAt = pp.LastSessionizeImportAt; PhotoStoredPath = pp.PhotoSharePointPath; LastSavedAt = pp.UpdatedAt; } return Page(); }
 
         var now = _clock.GetUtcNow();
         var profile = await _db.SpeakerProfiles.FirstOrDefaultAsync(
             sp => sp.EventId == me.EventId && sp.ParticipantId == me.ParticipantId, ct);
         if (profile is null)
         {
-            profile = new SpeakerProfile { EventId = me.EventId, ParticipantId = me.ParticipantId, CreatedAt = now };
+            profile = new SpeakerProfile { EventId = me.EventId, ParticipantId = me.ParticipantId, CreatedAt = now, UpdatedAt = now };
             _db.SpeakerProfiles.Add(profile);
         }
         else { profile.UpdatedAt = now; }
 
+        // Track whether anything that maps to Zoho Backstage actually changed, so the
+        // "Save & sync" path only re-emails the organizers' manual-update alert when
+        // there's a real change (dedupe — it used to fire on EVERY save).
+        var syncRelevantChanged = false;
+
         // Bio fields: mark speaker-edited on change so the delta re-import won't flush them.
-        ApplyBio(profile, SpeakerProfile.BioFields.Tagline,   profile.Tagline,   N(Tagline),   v => profile.Tagline = v,   now);
-        ApplyBio(profile, SpeakerProfile.BioFields.Biography, profile.Biography, N(Biography), v => profile.Biography = v, now);
-        ApplyBio(profile, SpeakerProfile.BioFields.Blog,      profile.Blog,      N(Blog),      v => profile.Blog = v,      now);
-        ApplyBio(profile, SpeakerProfile.BioFields.LinkedIn,  profile.LinkedIn,  N(LinkedIn),  v => profile.LinkedIn = v,  now);
-        ApplyBio(profile, SpeakerProfile.BioFields.Twitter,   profile.Twitter,   N(Twitter),   v => profile.Twitter = v,   now);
+        syncRelevantChanged |= ApplyBio(profile, SpeakerProfile.BioFields.Tagline,   profile.Tagline,   N(Tagline),   v => profile.Tagline = v,   now);
+        syncRelevantChanged |= ApplyBio(profile, SpeakerProfile.BioFields.Biography, profile.Biography, N(Biography), v => profile.Biography = v, now);
+        syncRelevantChanged |= ApplyBio(profile, SpeakerProfile.BioFields.Blog,      profile.Blog,      N(Blog),      v => profile.Blog = v,      now);
+        syncRelevantChanged |= ApplyBio(profile, SpeakerProfile.BioFields.LinkedIn,  profile.LinkedIn,  N(LinkedIn),  v => profile.LinkedIn = v,  now);
+        syncRelevantChanged |= ApplyBio(profile, SpeakerProfile.BioFields.Twitter,   profile.Twitter,   N(Twitter),   v => profile.Twitter = v,   now);
+        // PhotoUrl is a speaker-owned bio field but is NOT pushed to Backstage, so a
+        // photo-only change must not count as a Zoho-sync change (no re-alert).
         ApplyBio(profile, SpeakerProfile.BioFields.PhotoUrl,  profile.PhotoUrl,  N(PhotoUrl),  v => profile.PhotoUrl = v,  now);
 
         // Identity + details (hub-collected; not part of the Sessionize delta dirty set).
+        // FirstName/LastName/Country/Skills(Accreditation) DO map to Backstage, so a change
+        // to any of them is also a real Zoho-sync change.
+        var accred = SelectedAccreditations.Where(a => !string.IsNullOrWhiteSpace(a)).Select(a => a.Trim()).Distinct().ToList();
+        var accredCsv = accred.Count > 0 ? string.Join(", ", accred) : null;
+        syncRelevantChanged |=
+            !string.Equals(profile.FirstName, N(FirstName), StringComparison.Ordinal)
+            || !string.Equals(profile.LastName, N(LastName), StringComparison.Ordinal)
+            || !string.Equals(profile.Country, Country, StringComparison.Ordinal)
+            || !string.Equals(profile.Accreditation, accredCsv, StringComparison.Ordinal);
+
         profile.FirstName = N(FirstName);
         profile.LastName = N(LastName);
         // Accreditation is multi-select; the joined CSV IS the speaker's "skills" that
         // sync to Zoho as comma-separated Skills (operator 2026-06-24).
-        var accred = SelectedAccreditations.Where(a => !string.IsNullOrWhiteSpace(a)).Select(a => a.Trim()).Distinct().ToList();
-        profile.Accreditation = accred.Count > 0 ? string.Join(", ", accred) : null;
+        profile.Accreditation = accredCsv;
         profile.Country = Country;
         profile.Gender = N(Gender);
         profile.IsFirstTimeSpeaker = IsFirstTimeSpeaker;
@@ -136,19 +154,30 @@ public class DetailsModel : PageModel
         {
             try
             {
-                var r = await _sync.SyncOneAsync(me.EventId, me.ParticipantId, ct: ct);
-                Message += r.Outcome switch
+                // DEDUPE: only let the sync re-email the organizers' manual-update alert
+                // when something the speaker owns actually changed. A no-change re-sync of
+                // an already-in-Backstage speaker stays silent.
+                var r = await _sync.SyncOneAsync(
+                    me.EventId, me.ParticipantId, alertOnExisting: syncRelevantChanged, ct: ct);
+                if (r.Outcome == SpeakerBioSyncOutcome.BlockedNeedsManualUpdate && !syncRelevantChanged)
                 {
-                    SpeakerBioSyncOutcome.PushedPublic => " Created in Zoho Backstage (public).",
-                    SpeakerBioSyncOutcome.PushedDraft  => " Created in Zoho Backstage (not featured — awaiting publish approval).",
-                    SpeakerBioSyncOutcome.BlockedNeedsManualUpdate =>
-                        " You're already in Zoho Backstage — its API can't update an existing speaker, so the organizers were emailed to update you there by hand.",
-                    SpeakerBioSyncOutcome.RingGated    => " Saved. Zoho sync is held for you until the organizers enable it for your group.",
-                    SpeakerBioSyncOutcome.Disabled     => " Saved. (Zoho speaker sync is off for this edition.)",
-                    SpeakerBioSyncOutcome.BuiltOnly    => " Saved. (Zoho speaker sync isn't configured yet.)",
-                    SpeakerBioSyncOutcome.Failed       => " Saved, but the Zoho sync failed: " + (r.Error ?? "unknown error") + ".",
-                    _ => string.Empty,
-                };
+                    Message += " You're already in Zoho Backstage and nothing changed since your last save, so the organizers were not re-notified.";
+                }
+                else
+                {
+                    Message += r.Outcome switch
+                    {
+                        SpeakerBioSyncOutcome.PushedPublic => " Created in Zoho Backstage (public).",
+                        SpeakerBioSyncOutcome.PushedDraft  => " Created in Zoho Backstage (not featured — awaiting publish approval).",
+                        SpeakerBioSyncOutcome.BlockedNeedsManualUpdate =>
+                            " You're already in Zoho Backstage — its API can't update an existing speaker, so the organizers were emailed to update you there by hand.",
+                        SpeakerBioSyncOutcome.RingGated    => " Saved. Zoho sync is held for you until the organizers enable it for your group.",
+                        SpeakerBioSyncOutcome.Disabled     => " Saved. (Zoho speaker sync is off for this edition.)",
+                        SpeakerBioSyncOutcome.BuiltOnly    => " Saved. (Zoho speaker sync isn't configured yet.)",
+                        SpeakerBioSyncOutcome.Failed       => " Saved, but the Zoho sync failed: " + (r.Error ?? "unknown error") + ".",
+                        _ => string.Empty,
+                    };
+                }
                 if (r.Outcome == SpeakerBioSyncOutcome.Failed) IsError = true;
             }
             catch (Exception ex) { IsError = true; Message += " Zoho sync error: " + ex.Message; }
@@ -171,16 +200,19 @@ public class DetailsModel : PageModel
         Country = p.Country;
         Gender = p.Gender; IsFirstTimeSpeaker = p.IsFirstTimeSpeaker; ContactEmailOverride = p.ContactEmailOverride;
         LastSessionizeImportAt = p.LastSessionizeImportAt;
+        LastSavedAt = p.UpdatedAt;
     }
 
     private static string? N(string? v) => string.IsNullOrWhiteSpace(v) ? null : v.Trim();
 
-    private static void ApplyBio(
+    /// <summary>Applies a bio field if it changed; returns true when a change was made.</summary>
+    private static bool ApplyBio(
         SpeakerProfile profile, string field, string? current, string? incoming,
         Action<string?> setter, DateTimeOffset now)
     {
-        if (string.Equals(current, incoming, StringComparison.Ordinal)) return;
+        if (string.Equals(current, incoming, StringComparison.Ordinal)) return false;
         setter(incoming);
         profile.MarkSpeakerEdited(field, now);
+        return true;
     }
 }

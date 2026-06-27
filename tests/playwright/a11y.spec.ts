@@ -74,7 +74,7 @@ const AUTHED: { role: string; email: string; pin: string; paths: string[] }[] = 
     { role: 'volunteer', email: USERS.volunteer, pin: PINS.volunteer,
       paths: ['/', '/Volunteer/MyTasks', '/Forms/Lunch', '/Forms/Swag', '/Profile'] },
     { role: 'attendee',  email: USERS.attendee,  pin: PINS.attendee,
-      paths: ['/', '/Attendee', '/Attendee/MyEvent', '/Profile'] },
+      paths: ['/', '/Attendee', '/Profile'] },
     { role: 'sponsor',   email: USERS.sponsor,   pin: PINS.sponsor,
       paths: ['/', '/Sponsor', '/Sponsor/Tasks', '/Sponsor/CaptureLead', '/Profile'] },
 ];

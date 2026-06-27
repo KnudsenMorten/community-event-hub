@@ -1,5 +1,6 @@
 @page "/volunteer/signup"
 @using CommunityHub.Core.Domain
+@using CommunityHub.Core.Volunteers
 @model CommunityHub.Pages.Volunteer.SignupModel
 @{
     // Anonymous public signup (operator 2026-06-24, §27): dedicated public layout —
@@ -51,6 +52,7 @@
     .av-opt label .av-pct { display:block; font-weight:700; color:var(--el-darkblue,#1D3380); font-size:13.5px; }
     .av-opt label .av-sub { display:block; color:#6e7681; font-size:11.5px; margin-top:2px; }
     .av-opt input:checked + label { border-color:#008BD2; background:#e6f4fb; box-shadow:0 0 0 1px #008BD2 inset; }
+    .av-opt input:disabled + label { opacity:.4; cursor:not-allowed; }
     .av-note { width:100%; box-sizing:border-box; padding:9px 11px; font-size:13.5px; border:1px solid #c4c8d4;
         border-radius:6px; font-family:inherit; min-height:48px; resize:vertical; }
     .av-note-lbl { display:block; font-size:12px; color:#6e7681; margin:0 0 4px; }
@@ -145,40 +147,32 @@
                 @* ---- Step 2: availability ---- *@
                 <section class="step-section" data-step="2">
                     <p class="vol-fineprint" style="margin:0 0 12px;">
-                        Tell us how much you can help each day — Full, Half, attending-only (Blocked), or not at all.
+                        Tell us how much you can help each day — pick the option that fits.
                         We schedule you only inside your available windows.
                     </p>
                     @for (var i = 0; i < Model.Days.Count; i++)
                     {
                         var d = Model.Days[i];
-                        <div class="av-day">
+                        var opts = VolunteerDayOptions.For(d.Day);
+                        var selected = VolunteerDayOptions.Resolve(d.Day, d.Level, d.RawNote);
+                        <div class="av-day" data-av-day>
                             <h3>@d.Label</h3>
                             <input type="hidden" name="Availability[@i].Day" value="@d.Day.ToString("yyyy-MM-dd")" />
                             <div class="av-opts">
-                                <div class="av-opt">
-                                    <input type="radio" id="s@(i)_full" name="Availability[@i].Level"
-                                           value="@((int)VolunteerAvailabilityLevel.Full)" checked="@(d.Level == VolunteerAvailabilityLevel.Full)" />
-                                    <label for="s@(i)_full"><span class="av-pct">Full day</span><span class="av-sub">100% available</span></label>
-                                </div>
-                                <div class="av-opt">
-                                    <input type="radio" id="s@(i)_half" name="Availability[@i].Level"
-                                           value="@((int)VolunteerAvailabilityLevel.Half)" checked="@(d.Level == VolunteerAvailabilityLevel.Half)" />
-                                    <label for="s@(i)_half"><span class="av-pct">Half day</span><span class="av-sub">~50% — split</span></label>
-                                </div>
-                                <div class="av-opt">
-                                    <input type="radio" id="s@(i)_blocked" name="Availability[@i].Level"
-                                           value="@((int)VolunteerAvailabilityLevel.Blocked)" checked="@(d.Level == VolunteerAvailabilityLevel.Blocked)" />
-                                    <label for="s@(i)_blocked"><span class="av-pct">Blocked</span><span class="av-sub">attending only</span></label>
-                                </div>
-                                <div class="av-opt">
-                                    <input type="radio" id="s@(i)_unavail" name="Availability[@i].Level"
-                                           value="@((int)VolunteerAvailabilityLevel.Unavailable)" checked="@(d.Level == VolunteerAvailabilityLevel.Unavailable)" />
-                                    <label for="s@(i)_unavail"><span class="av-pct">Not able</span><span class="av-sub">can&rsquo;t help</span></label>
-                                </div>
+                                @for (var j = 0; j < opts.Count; j++)
+                                {
+                                    var o = opts[j];
+                                    <div class="av-opt">
+                                        <input type="radio" id="s@(i)_@j" name="Availability[@i].Slot"
+                                               value="@o.Slot" data-exclusive="@(o.IsExclusive ? "1" : "0")"
+                                               checked="@(o.Slot == selected.Slot)" />
+                                        <label for="s@(i)_@j"><span class="av-pct">@o.Title</span>@if (o.Sub is not null) {<span class="av-sub">@o.Sub</span>}</label>
+                                    </div>
+                                }
                             </div>
                             <label class="av-note-lbl" for="s@(i)_note">Note (optional)</label>
                             <textarea class="av-note" id="s@(i)_note" name="Availability[@i].Note" rows="1"
-                                      maxlength="500" placeholder="e.g. free after 13:00">@d.Note</textarea>
+                                      maxlength="500" placeholder="e.g. free after 13:00">@d.UserNote</textarea>
                         </div>
                     }
                 </section>
@@ -317,6 +311,20 @@
             form.addEventListener('change', render);
             form.addEventListener('submit', function (e) { if (!valid(total)) { e.preventDefault(); step = total; render(); } });
             render();
+
+            // Per-day availability exclusivity (REQUIREMENTS §45). Radios make the
+            // options inherently single-select; this disables the rest of a day when
+            // an EXCLUSIVE option (Full day / Not able / packing Yes·No) is chosen.
+            form.querySelectorAll('[data-av-day]').forEach(function (day) {
+                var radios = Array.prototype.slice.call(day.querySelectorAll('input[type=radio]'));
+                function applyEx() {
+                    var chosen = radios.filter(function (r) { return r.checked; })[0];
+                    var lock = chosen && chosen.getAttribute('data-exclusive') === '1';
+                    radios.forEach(function (r) { r.disabled = lock && r !== chosen; });
+                }
+                radios.forEach(function (r) { r.addEventListener('change', applyEx); });
+                applyEx();
+            });
         })();
     </script>
 }

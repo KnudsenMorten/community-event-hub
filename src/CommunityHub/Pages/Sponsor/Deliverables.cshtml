@@ -1,0 +1,153 @@
+@page
+@model CommunityHub.Pages.Sponsor.DeliverablesModel
+@{
+    ViewData["Title"] = "Your deliverables";
+}
+
+@if (Model.AccessDenied)
+{
+    <div class="card">
+        <h1>Your deliverables</h1>
+        <p class="error">This page is for sponsors only.</p>
+        <p><a asp-page="/Index">@Localizer["Common.BackToHub"]</a></p>
+    </div>
+    return;
+}
+@if (Model.NoCompanyLink)
+{
+    <div class="card">
+        <h1>Your deliverables</h1>
+        <p class="error">Your sponsor account is not yet linked to a company,
+           so we cannot show your deliverables. Please contact the organizers.</p>
+        <p><a asp-page="/Index">@Localizer["Common.BackToHub"]</a></p>
+    </div>
+    return;
+}
+
+<style>
+    /* Mobile-first: cards + items stack and stay readable at ~360px. */
+    .dl-score { display:flex; flex-wrap:wrap; align-items:baseline; gap:6px 12px; }
+    .dl-score .dl-pct { font-size:34px; font-weight:800; color:var(--el-darkblue); line-height:1; }
+    .dl-score .dl-of  { font-size:15px; color:#4b5563; }
+    .dl-progress-wrap { background:#eef0f4; border-radius:999px; height:14px; overflow:hidden; margin:12px 0 4px; }
+    .dl-progress-bar  { height:100%; border-radius:999px; transition:width .3s ease; background:#0a6; }
+    .dl-complete { background:#0a6; color:#fff; border-radius:999px; padding:2px 12px; font-size:13px; font-weight:700; white-space:nowrap; }
+    .dl-atrisk { background:#fdeceb; color:#9b261a; border:1px solid #f1c4bf; border-radius:999px; padding:2px 12px; font-size:13px; font-weight:700; white-space:nowrap; }
+
+    .dl-list { list-style:none; padding:0; margin:0; }
+    .dl-item {
+        border:1px solid #e5e7eb; border-radius:10px;
+        padding:12px 14px; margin:10px 0;
+        display:flex; flex-wrap:wrap; gap:8px 14px; align-items:center;
+    }
+    .dl-item.done    { background:#f3fbf6; border-color:#c7ead7; }
+    .dl-item.missing { background:#fdf8f0; border-color:#f0dcb8; }
+    .dl-item.overdue { background:#fdeceb; border-color:#f1c4bf; }
+    .dl-ico { font-size:18px; flex:0 0 auto; }
+    .dl-label { flex:1 1 180px; min-width:0; font-weight:600; color:var(--el-darkblue); overflow-wrap:anywhere; }
+    .dl-item.done .dl-label { color:#0a6; font-weight:600; }
+    .dl-due { font-size:12.5px; color:#6b7280; }
+    .dl-due.overdue { color:#9b261a; font-weight:700; }
+    .dl-fix { flex:0 0 auto; }
+    .dl-fix a { margin:0; }
+    @@media (max-width: 460px) {
+        .dl-fix { flex-basis:100%; }
+        .dl-fix .task-link-btn { display:block; text-align:center; }
+    }
+</style>
+
+<div class="card">
+    <h1>&#128203; Your deliverables, @Model.FirstName</h1>
+
+    @if (!string.IsNullOrEmpty(Model.Error))
+    {
+        <p class="error">@Model.Error</p>
+    }
+    else if (Model.Deliverables is null)
+    {
+        <p style="color:#6b7280;">There are no deliverables on file for your company yet.</p>
+    }
+    else
+    {
+        var d = Model.Deliverables!;
+        <p style="font-size:13.5px;color:#555;margin-top:0;">
+            A quick rollup of everything we need from your company, pulled from what you've
+            already done. Tackle what's left below — each item links straight to where you fix it.
+        </p>
+
+        <div class="dl-score">
+            <span class="dl-pct">@d.Percent%</span>
+            <span class="dl-of">&middot; @d.Summary</span>
+            @if (d.IsComplete)
+            {
+                <span class="dl-complete">All done &#127881;</span>
+            }
+            else if (d.AtRisk)
+            {
+                <span class="dl-atrisk">@d.OverdueCount overdue</span>
+            }
+        </div>
+        <div class="dl-progress-wrap" role="progressbar"
+             aria-valuenow="@d.Percent" aria-valuemin="0" aria-valuemax="100"
+             aria-label="Deliverables @d.Percent percent complete">
+            <div class="dl-progress-bar" style="width:@(d.Percent)%;"></div>
+        </div>
+
+        @if (d.MissingStages.Count > 0)
+        {
+            <h2 style="font-size:17px;margin:18px 0 6px;color:var(--el-darkblue);">Still to do (@d.MissingStages.Count)</h2>
+            <ul class="dl-list">
+                @foreach (var s in d.MissingStages)
+                {
+                    <li class="dl-item @(s.Overdue ? "overdue" : "missing")">
+                        @if (s.Overdue)
+                        {
+                            <span class="dl-ico" aria-hidden="true">&#9888;</span>
+                        }
+                        else
+                        {
+                            <span class="dl-ico" aria-hidden="true">&#9633;</span>
+                        }
+                        <span class="dl-label">
+                            @s.Label
+                            @if (s.Deadline is not null)
+                            {
+                                <span class="dl-due @(s.Overdue ? "overdue" : "")">
+                                    &middot; due @s.Deadline.Value.ToString("dd MMM yyyy")@(s.Overdue ? " (overdue)" : "")
+                                </span>
+                            }
+                        </span>
+                        @if (!string.IsNullOrEmpty(s.FixLink))
+                        {
+                            <span class="dl-fix">
+                                <a class="task-link-btn" href="@s.FixLink">Fix this</a>
+                            </span>
+                        }
+                    </li>
+                }
+            </ul>
+        }
+
+        @if (d.DoneStages.Count > 0)
+        {
+            <h2 style="font-size:17px;margin:18px 0 6px;color:#0a6;">Done (@d.DoneStages.Count)</h2>
+            <ul class="dl-list">
+                @foreach (var s in d.DoneStages)
+                {
+                    <li class="dl-item done">
+                        <span class="dl-ico" aria-hidden="true">&#9989;</span>
+                        <span class="dl-label">@s.Label</span>
+                    </li>
+                }
+            </ul>
+        }
+    }
+</div>
+
+<div class="card">
+    <p>
+        <a asp-page="/Index">&larr; @Localizer["Common.BackToHub"]</a> &middot;
+        <a asp-page="/Sponsor/CompanyDetails">Company details</a> &middot;
+        <a asp-page="/Sponsor/Tasks">Sponsor Tasks</a>
+    </p>
+</div>

@@ -38,7 +38,8 @@ public sealed class BrandingGraphicsProviderScenarioTests
 
     private static GraphicsService NewGraphics(CommunityHubDbContext db, ISharePointFileStore store) =>
         new(db, new GraphicCompositor(), store,
-            new FakePictureFetcher(), new DraftOnlySocialShareGateway());
+            new FakePictureFetcher(), new DraftOnlySocialShareGateway(),
+            Microsoft.Extensions.Options.Options.Create(new GraphicsSharePointOptions()));
 
     private static async Task<Session> AddSessionAsync(
         CommunityHubDbContext db, ScenarioSeed.SeedResult s, string title, int speakerId)
@@ -219,6 +220,18 @@ public sealed class BrandingGraphicsProviderScenarioTests
             Task.FromResult(new StoredFile(
                 relativePath, $"https://store.example.test/{relativePath}", "item-" + relativePath));
         public Task DeleteAsync(string relativePath, CancellationToken ct = default) => Task.CompletedTask;
+
+        // Read side unused by these (write-focused) tests.
+        public bool CanRead => false;
+        public Task<IReadOnlyList<SharePointFileRef>> ListAsync(
+            string relativeFolder, CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<SharePointFileRef>>(Array.Empty<SharePointFileRef>());
+        public Task<byte[]?> DownloadAsync(string itemId, CancellationToken ct = default) =>
+            Task.FromResult<byte[]?>(null);
+        public Task<StoredFile> UploadToFolderAsync(
+            string relativeFolder, string fileName, byte[] content, string contentType, CancellationToken ct = default) =>
+            Task.FromResult(new StoredFile($"{relativeFolder}/{fileName}", $"https://store.example.test/{relativeFolder}/{fileName}", "item"));
+        public Task DeleteFromFolderAsync(string relativeFolder, string fileName, CancellationToken ct = default) => Task.CompletedTask;
     }
 
     /// <summary>A picture fetcher that never returns an image (not used by these tests).</summary>

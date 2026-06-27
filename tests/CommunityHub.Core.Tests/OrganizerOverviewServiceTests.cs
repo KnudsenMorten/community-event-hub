@@ -287,7 +287,6 @@ public sealed class OrganizerOverviewServiceTests
         Assert.Equal(2, o.SponsorLeadOpen);
 
         Assert.Equal(3, o.AttendeeTotal);          // ghost attendee excluded
-        Assert.Equal(2, o.AttendeeCheckedIn);
     }
 
     [Fact]

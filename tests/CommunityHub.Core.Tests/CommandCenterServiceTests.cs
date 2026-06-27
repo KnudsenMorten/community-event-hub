@@ -2,7 +2,9 @@ using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
 using CommunityHub.Core.Email;
 using CommunityHub.Core.Organizer;
+using CommunityHub.Core.Participants;
 using CommunityHub.Core.Reminders;
+using CommunityHub.Core.Sponsors;
 using Microsoft.EntityFrameworkCore;
 using Xunit;
 
@@ -43,7 +45,11 @@ public sealed class CommandCenterServiceTests
         var clock = new FixedClock(Now);
         var actions = new OrganizerActionItemService(db, clock);
         var onboarding = new OnboardingService(db, actions, clock);
-        return new CommandCenterService(db, onboarding, clock);
+        var speakerReadiness = new SpeakerReadinessService(db);
+        var sponsorDeliverables = new SponsorDeliverablesService(db);
+        var syncHealth = new SyncHealthService(db, clock);
+        return new CommandCenterService(
+            db, onboarding, speakerReadiness, sponsorDeliverables, syncHealth, clock);
     }
 
     /// <summary>Mark every onboarding step done — satisfies any persona's required subset.</summary>
@@ -99,6 +105,10 @@ public sealed class CommandCenterServiceTests
         var vol2 = P("vol2", ParticipantRole.Volunteer, onboarded: false);
         var volPending = P("volp", ParticipantRole.Volunteer, active: false, onboarded: false);
         var spon = P("spon", ParticipantRole.Sponsor, onboarded: true);
+        // Sponsor onboarding is wizard-driven (company info + logos), not the
+        // Appreciation/Swag flags MarkFullyOnboarded sets — link spon to its
+        // company so the enriched SponsorInfo "42" below makes it complete.
+        spon.SponsorCompanyId = "42";
         var org = P("org", ParticipantRole.Organizer, onboarded: true);
         // Other-edition participant — must never leak into EventId counts.
         P("ghost", ParticipantRole.Speaker, ev: OtherEventId, onboarded: true);
@@ -158,7 +168,13 @@ public sealed class CommandCenterServiceTests
         db.Sessions.Add(new Session { EventId = OtherEventId, Title = "Ghost session", StartsAt = Now, Room = "X" }); // scope guard
 
         // --- Sponsors -------------------------------------------------------
-        db.SponsorInfos.Add(new SponsorInfo { EventId = EventId, SponsorCompanyId = "42" });
+        // Company info + logos present ⇒ spon's wizard onboarding is complete (Silver, no booth).
+        db.SponsorInfos.Add(new SponsorInfo
+        {
+            EventId = EventId, SponsorCompanyId = "42",
+            WebsiteUrl = "https://co42.test",
+            LogoRasterPath = "uploads/sponsors/42/logo.png",
+        });
         db.SponsorInfos.Add(new SponsorInfo { EventId = OtherEventId, SponsorCompanyId = "99" }); // scope guard
 
         // --- Attendees (with a reconciliation mismatch) ---------------------
@@ -394,5 +410,123 @@ public sealed class CommandCenterServiceTests
         // Every attention tile reads 0 and the snapshot reports a calm all-clear.
         Assert.All(s.AttentionTiles, t => Assert.Equal(0, t.Count));
         Assert.True(s.AllClear);
+
+        // §131 live event-day surfaces are all-zero / never-synced on an empty edition.
+        Assert.Equal(0, s.ExpectedAttendees);
+        Assert.Equal(0, s.CheckedInCount);
+        Assert.Equal(0, s.CheckedInPercent);          // no divide-by-zero
+        Assert.Equal(0, s.MasterClassCount);
+        Assert.Equal(0, s.MasterClassFillPercent);    // no divide-by-zero
+        Assert.Equal(0, s.SpeakerTotal);
+        Assert.Equal(0, s.SponsorCompaniesTotal);
+        Assert.Equal(SyncHealthStatus.NeverSynced, s.SyncStatus);
+        Assert.Null(s.SyncLastSuccessAt);
+    }
+
+    [Fact]
+    public async Task EventDay_checkin_masterclass_and_ops_summaries_scoped()
+    {
+        using var db = NewDb();
+        db.Events.Add(new Event
+        {
+            Id = EventId, Code = "CC27", CommunityName = "CC", DisplayName = "CC 2027",
+            StartDate = new DateOnly(2027, 2, 9), EndDate = new DateOnly(2027, 2, 10), IsActive = true,
+        });
+        db.Events.Add(new Event
+        {
+            Id = OtherEventId, Code = "OTH", CommunityName = "Oth", DisplayName = "Oth 2027",
+            StartDate = new DateOnly(2027, 5, 1), EndDate = new DateOnly(2027, 5, 2), IsActive = false,
+        });
+
+        // --- Attendees / check-in (active mirror is the expected base) ----------
+        // 3 active (2 checked in), 1 cancelled-but-checked-in (excluded), 1 other-edition.
+        db.Attendees.Add(new Attendee { EventId = EventId, Email = "a1@x", FirstName = "A", LastName = "1", MirrorState = MirrorState.Active, CheckedInAt = Now });
+        db.Attendees.Add(new Attendee { EventId = EventId, Email = "a2@x", FirstName = "A", LastName = "2", MirrorState = MirrorState.Active, CheckedInAt = null });
+        db.Attendees.Add(new Attendee { EventId = EventId, Email = "a3@x", FirstName = "A", LastName = "3", MirrorState = MirrorState.Active, CheckedInAt = Now });
+        db.Attendees.Add(new Attendee { EventId = EventId, Email = "ax@x", FirstName = "A", LastName = "X", MirrorState = MirrorState.Cancelled, CheckedInAt = Now });
+        db.Attendees.Add(new Attendee { EventId = OtherEventId, Email = "g@x", FirstName = "G", LastName = "h", MirrorState = MirrorState.Active, CheckedInAt = Now });
+
+        // --- Master classes (fill + waitlist) ----------------------------------
+        // MC1 cap 2: 2 confirmed -> full. MC2 cap 5: 1 confirmed + 1 offered + 3 waitlisted.
+        var mc1 = new Session { EventId = EventId, Title = "MC One", Type = SessionType.MasterClass, MasterClassCapacity = 2 };
+        var mc2 = new Session { EventId = EventId, Title = "MC Two", Type = SessionType.MasterClass, MasterClassCapacity = 5 };
+        var mcGhost = new Session { EventId = OtherEventId, Title = "Ghost MC", Type = SessionType.MasterClass, MasterClassCapacity = 9 };
+        db.Sessions.AddRange(mc1, mc2, mcGhost);
+        await db.SaveChangesAsync();
+
+        int seat = 1;
+        void Signup(Session mc, MasterClassSignupStatus st, int ev = EventId) =>
+            db.MasterClassSignups.Add(new MasterClassSignup
+            {
+                EventId = ev, SessionId = mc.Id, AttendeeId = seat++, Status = st,
+            });
+        Signup(mc1, MasterClassSignupStatus.Confirmed);
+        Signup(mc1, MasterClassSignupStatus.Confirmed);
+        Signup(mc2, MasterClassSignupStatus.Confirmed);
+        Signup(mc2, MasterClassSignupStatus.Offered);
+        Signup(mc2, MasterClassSignupStatus.Waitlisted);
+        Signup(mc2, MasterClassSignupStatus.Waitlisted);
+        Signup(mc2, MasterClassSignupStatus.Waitlisted);
+        Signup(mcGhost, MasterClassSignupStatus.Waitlisted, OtherEventId); // scope guard
+
+        // --- Speaker readiness roster (§134): one un-ready speaker ---------------
+        var sp = new Participant
+        {
+            EventId = EventId, Email = "sp@x", FullName = "Speaker One",
+            Role = ParticipantRole.Speaker, IsActive = true,
+            LifecycleState = ParticipantLifecycleState.Active,
+        };
+        db.Participants.Add(sp);
+        await db.SaveChangesAsync();
+        db.SpeakerProfiles.Add(new SpeakerProfile { EventId = EventId, ParticipantId = sp.Id });
+
+        // --- Sponsor deliverables board (§135): one incomplete company ----------
+        db.SponsorInfos.Add(new SponsorInfo { EventId = EventId, SponsorCompanyId = "77" });
+
+        // --- Sync health (§132): a fresh successful sync -> In-sync -------------
+        db.SyncRuns.Add(new SyncRun
+        {
+            EventId = EventId, Key = SyncRun.AttendeeBackstageKey,
+            LastSuccessAt = Now.AddHours(-1), LastWebhookAt = Now.AddMinutes(-5),
+            Summary = "ok",
+        });
+        db.SyncRuns.Add(new SyncRun
+        {
+            EventId = OtherEventId, Key = SyncRun.AttendeeBackstageKey,
+            LastSuccessAt = Now.AddDays(-30), // stale on the other edition (scope guard)
+        });
+        await db.SaveChangesAsync();
+
+        var s = await NewSvc(db).BuildAsync(EventId);
+
+        // Check-in: active mirror only; cancelled + other-edition excluded.
+        Assert.Equal(3, s.ExpectedAttendees);
+        Assert.Equal(2, s.CheckedInCount);
+        Assert.Equal(67, s.CheckedInPercent);   // round(2/3*100)
+
+        // Master classes: scoped, capacity summed, full counted, waitlist + offers split.
+        Assert.Equal(2, s.MasterClassCount);    // ghost excluded
+        Assert.True(s.MasterClassHasCapacity);
+        Assert.Equal(7, s.MasterClassCapacity); // 2 + 5
+        Assert.Equal(3, s.MasterClassConfirmed);
+        Assert.Equal(1, s.MasterClassOffered);
+        Assert.Equal(3, s.MasterClassWaitlisted); // ghost waitlist excluded
+        Assert.Equal(4, s.MasterClassSeatsTaken); // 3 confirmed + 1 offered
+        Assert.Equal(1, s.MasterClassFull);       // MC1 only
+        Assert.Equal(57, s.MasterClassFillPercent); // round(4/7*100)
+
+        // Speaker readiness summary (one speaker, not ready: only "other to-dos" satisfied).
+        Assert.Equal(1, s.SpeakerTotal);
+        Assert.Equal(0, s.SpeakerReady);
+        Assert.InRange(s.SpeakerReadinessAvgPercent, 1, 99);
+
+        // Sponsor deliverables summary (one incomplete, not overdue).
+        Assert.Equal(1, s.SponsorCompaniesTotal);
+        Assert.Equal(0, s.SponsorCompaniesComplete);
+        Assert.Equal(0, s.SponsorCompaniesAtRisk);
+
+        // Sync-health badge: scoped to this edition's fresh run.
+        Assert.Equal(SyncHealthStatus.InSync, s.SyncStatus);
+        Assert.Equal(Now.AddHours(-1), s.SyncLastSuccessAt);
     }
 }

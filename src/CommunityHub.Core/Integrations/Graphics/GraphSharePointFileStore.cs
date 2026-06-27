@@ -26,6 +26,31 @@ public sealed class GraphicsSharePointOptions
     /// <summary>Root folder under the drive for all generated graphics (e.g. <c>/Graphics</c>).</summary>
     public string RootFolderPath { get; set; } = "Graphics";
 
+    /// <summary>
+    /// Drive-relative folder the operator uploads MASTER CLASS session graphics into
+    /// (the PULL source for <see cref="CommunityHub.Core.Domain.SessionType.MasterClass"/>
+    /// sessions — REQUIREMENTS §18). EMPTY by default so the pull is INERT (no folder ⇒ nothing
+    /// listed) until an operator configures it.
+    /// </summary>
+    public string MasterClassFolderPath { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Drive-relative folder the operator uploads ALL OTHER session graphics into (the
+    /// PULL source for non-master-class sessions). EMPTY by default ⇒ inert until set.
+    /// </summary>
+    public string SessionsFolderPath { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Drive-relative folder holding the per-ROOM session-evaluation QR codes
+    /// (REQUIREMENTS §124) — e.g.
+    /// <c>General/Events/ELDK 2027/EventHub/Speakers/SessionEvals-QR</c>. Files are
+    /// named with the room in the name (<c>Room-16-Floor-1-Device13.png</c>); a speaker
+    /// downloads the QR for their session's ROOM, and an org-admin uploads / replaces
+    /// the files here. EMPTY by default ⇒ the feature is INERT (nothing listed,
+    /// nothing to download / upload) until an operator configures it.
+    /// </summary>
+    public string SessionEvalsQrFolderPath { get; set; } = string.Empty;
+
     /// <summary>True when enabled AND a site URL is present (the live store can run).</summary>
     public bool IsConfigured => Enabled && !string.IsNullOrWhiteSpace(SiteUrl);
 }
@@ -63,4 +88,50 @@ public sealed class GraphSharePointFileStore : ISharePointFileStore
     public Task DeleteAsync(string relativePath, CancellationToken ct = default) =>
         _client.DeleteFileAsync(
             _options.SiteUrl, _options.DriveName, _options.RootFolderPath, relativePath, ct);
+
+    public bool CanRead => _options.IsConfigured && _client.IsConfigured;
+
+    public async Task<IReadOnlyList<SharePointFileRef>> ListAsync(
+        string relativeFolder, CancellationToken ct = default)
+    {
+        if (!CanRead || string.IsNullOrWhiteSpace(relativeFolder))
+        {
+            return Array.Empty<SharePointFileRef>();
+        }
+
+        // The configured folder paths are drive-relative (NOT under RootFolderPath),
+        // so they are passed straight to the client's folder listing. A missing folder
+        // yields an empty list (the client tolerates 404) — the pull stays inert.
+        var files = await _client.ListFolderFilesAsync(
+            _options.SiteUrl, _options.DriveName, relativeFolder, ct);
+
+        return files
+            .Select(f => new SharePointFileRef(f.ItemId, f.Name, f.WebUrl ?? string.Empty))
+            .ToList();
+    }
+
+    public Task<byte[]?> DownloadAsync(string itemId, CancellationToken ct = default) =>
+        !CanRead || string.IsNullOrWhiteSpace(itemId)
+            ? Task.FromResult<byte[]?>(null)
+            : _client.DownloadItemContentAsync(_options.SiteUrl, _options.DriveName, itemId, ct);
+
+    public async Task<StoredFile> UploadToFolderAsync(
+        string relativeFolder, string fileName, byte[] content, string contentType,
+        CancellationToken ct = default)
+    {
+        // The folder is DRIVE-RELATIVE (like ListAsync), so pass an empty root and let
+        // the relative path carry "<folder>/<file>" — the bytes land in the folder the
+        // operator configured, not under the graphics RootFolderPath.
+        var relative = $"{relativeFolder.Trim('/')}/{fileName}";
+        var (path, webUrl, itemId) = await _client.UploadFileAsync(
+            _options.SiteUrl, _options.DriveName, rootFolderPath: string.Empty,
+            relative, content, contentType, ct);
+        return new StoredFile(path, webUrl, itemId);
+    }
+
+    public Task DeleteFromFolderAsync(
+        string relativeFolder, string fileName, CancellationToken ct = default) =>
+        _client.DeleteFileAsync(
+            _options.SiteUrl, _options.DriveName, rootFolderPath: string.Empty,
+            $"{relativeFolder.Trim('/')}/{fileName}", ct);
 }

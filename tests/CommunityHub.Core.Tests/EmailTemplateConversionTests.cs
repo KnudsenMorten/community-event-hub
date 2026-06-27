@@ -79,7 +79,7 @@ public sealed class EmailTemplateConversionTests
         Assert.Contains("MC2", m.Subject);                          // {{masterClassTitle}}
         Assert.Contains("MyMasterClass?t=", m.Html);                // {{selfServiceUrl}}
         Assert.Contains("cancelled", m.Html, StringComparison.OrdinalIgnoreCase); // {{waitlistTerms}}
-        Assert.Contains("The team", m.Html);                        // neutral sign-off
+        Assert.DoesNotContain("The team", m.Html);                  // §89: sign-off removed
     }
 
     // 2 --------------------------------------------------------------- cancelled ----
@@ -95,7 +95,7 @@ public sealed class EmailTemplateConversionTests
         await email.SendCancelledAsync(ev, "p@x.dk", "Pat", "Lee", "Deep Dive MC", "https://hub.test", att);
         var m = Assert.Single(sender.Messages);
         Assert.Equal("p@x.dk", m.To);
-        Assert.Contains("Cancelled", m.Subject);
+        Assert.Contains("Master Class cancelled", m.Subject);       // §99: explicit subject
         Assert.Contains("Deep Dive MC", m.Subject);                 // {{masterClassTitle}}
         Assert.Contains("C 2027", m.Html);                          // {{eventDisplayName}}
         Assert.Contains("MyMasterClass?t=", m.Html);                // {{signupUrl}}
@@ -122,7 +122,7 @@ public sealed class EmailTemplateConversionTests
         Assert.Contains("C 2027", m.Subject);                       // {{eventDisplayName}}
         Assert.Contains("Deep Dive MC", m.Html);                    // {{heldMasterClass}} raw block
         Assert.Contains("MyMasterClass?t=", m.Html);                // {{selfServiceUrl}}
-        Assert.Contains("The team", m.Html);
+        Assert.DoesNotContain("The team", m.Html);                  // §89: sign-off removed
     }
 
     // 4a ------------------------------------------------------------------ offer ----
@@ -152,11 +152,12 @@ public sealed class EmailTemplateConversionTests
 
         Assert.True(await email.SendPromotionAsync(offered.Id, "https://hub.test"));
         var m = Assert.Single(sender.Messages);
-        Assert.Contains("held for you", m.Subject);
+        Assert.Contains("moved into", m.Subject);                   // §93: notification, not a chooser
         Assert.Contains("Deep Dive MC", m.Subject);                 // {{masterClassTitle}}
         Assert.Contains("MyMasterClass?t=", m.Html);                // {{selfServiceUrl}}
-        Assert.Contains("holding it for you by", m.Html);           // {{offerDeadline}}
-        Assert.Contains("The team", m.Html);
+        Assert.Contains("previous Master Class seat has been released", m.Html); // §93: previous seat released
+        Assert.DoesNotContain("choose to switch", m.Html);          // §93: no choose-to-switch offer
+        Assert.DoesNotContain("The team", m.Html);                  // §89: sign-off removed
     }
 
     // 4b -------------------------------------------------------------- promoted ----
@@ -184,10 +185,11 @@ public sealed class EmailTemplateConversionTests
         Assert.True(await email.SendPromotionAsync(signup.Id, "https://hub.test"));
         var m = Assert.Single(sender.Messages);
         Assert.Equal("a2@x.dk", m.To);
-        Assert.Contains("you're in", m.Subject, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("moved into", m.Subject, StringComparison.OrdinalIgnoreCase); // §93: notification
         Assert.Contains("Deep Dive MC", m.Subject);                 // {{masterClassTitle}}
         Assert.Contains("MyMasterClass?t=", m.Html);                // {{selfServiceUrl}}
-        Assert.Contains("The team", m.Html);
+        Assert.Contains("previous Master Class seat has been released", m.Html); // §93: previous seat released
+        Assert.DoesNotContain("The team", m.Html);                  // §89: sign-off removed
     }
 
     // 5 ------------------------------------------------------------ month-reminder ----
@@ -240,7 +242,8 @@ public sealed class EmailTemplateConversionTests
         var m = Assert.Single(sender.Messages);
         Assert.Equal("u@x.dk", m.To);
         Assert.Contains("sign-in code", m.Subject, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("C27 Event Hub", m.Subject);                // {{subjectPrefix}} (event code)
+        Assert.EndsWith("[ELDK27]", m.Subject);                     // §103: edition tag is a POSTFIX
+        Assert.DoesNotContain("Event Hub", m.Subject);             // no inline edition prefix (no double)
         Assert.Contains("Sam", m.Html);                             // {{firstName}}
         Assert.Contains("15 minutes", m.Html);                      // {{expiryMinutes}}
         // The PIN body token = the stored hash's plaintext; assert a 6-digit code shows.
@@ -276,7 +279,7 @@ public sealed class EmailTemplateConversionTests
         Assert.Equal("v@x.dk", m.To);
         Assert.Contains("C 2027", m.Subject);                       // {{eventDisplayName}}
         Assert.Contains("Val", m.Html);                             // {{firstName}}
-        Assert.Contains("The team", m.Html);
+        Assert.DoesNotContain("The team", m.Html);                  // §89: sign-off removed
         Assert.NotNull(sender.LastIcs);                             // .ics attachment preserved
         Assert.Contains("BEGIN:VCALENDAR", sender.LastIcs!);
         Assert.False(await svc.SendActivationInviteAsync(p.Id));    // idempotent

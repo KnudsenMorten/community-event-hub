@@ -227,6 +227,32 @@ public static class FeatureCatalog
             FeatureGroup.SpeakersSessions, FeatureTier.Advanced, DefaultEnabled: false,
             DependsOn: Array.Empty<string>(), DefaultReleasedToRing: Ring.Broad),
 
+        // §38e (operator 2026-06-25): an automatic engine that detects when a session's
+        // TIME or LOCATION changed in Zoho Backstage vs what CEH stored, and EMAILS the
+        // affected speaker(s). USER-IMPACT (a speaker receives mail) ⇒ ring-scoped; off
+        // by default; born at Ring1 so ring-0/ring-1 testers exercise it NOW. The
+        // additional DATE gate (FeatureSetting.ActiveFromForBroadRings = 1 Dec 2026)
+        // holds ring-2/ring-3 participants out until that date — ring 0/1 are never
+        // date-limited. Depends on outbound email.
+        new("session-change-alerts", "Settings.Feat.SessionChangeAlerts.Name",
+            "Settings.Feat.SessionChangeAlerts.Desc",
+            FeatureGroup.SpeakersSessions, FeatureTier.Advanced, DefaultEnabled: false,
+            DependsOn: new[] { OutboundEmailKey }, DefaultReleasedToRing: Ring.Ring1,
+            Surface: FeatureSurface.UserImpact),
+
+        // §38e/§58 (operator 2026-06-26): the SPEAKER analogue of session-change-alerts —
+        // an engine that detects when a speaker's name/tagline/bio/country/social changed in
+        // Zoho Backstage vs what CEH stored, and ENQUEUES the change to the §59 approval queue
+        // (it never emails or auto-applies; the operator approves it). Off by default. A
+        // Queue-surface engine (kill switch only, not ring-scoped) — its effect reaches a user
+        // only after an operator approves the queued delta. Gated additionally on the §58
+        // SPEAKER sync direction being stage 3 (ZohoToCeh).
+        new("speaker-change-alerts", "Settings.Feat.SpeakerChangeAlerts.Name",
+            "Settings.Feat.SpeakerChangeAlerts.Desc",
+            FeatureGroup.SpeakersSessions, FeatureTier.Advanced, DefaultEnabled: false,
+            DependsOn: Array.Empty<string>(), DefaultReleasedToRing: Ring.Broad,
+            Surface: FeatureSurface.Queue),
+
         // --- Sponsors -------------------------------------------------------
         // GA (operator 2026-06-22): tested backend syncs — released to Broad, unscoped.
         new("backstage-sync", "Settings.Feat.BackstageSync.Name",

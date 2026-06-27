@@ -125,6 +125,20 @@ if ($App -eq 'jobs') {
 $slots = Invoke-Az @('webapp','deployment','slot','list','-g',$t.rg,'-n',$t.app,'--query','[].name','-o','tsv')
 if ($slots -contains 'staging') {
     Write-Host ">> 'staging' slot found -- slot-swap deploy (near-zero downtime)" -ForegroundColor Green
+
+    # Keep the staging slot's runtime stack in lockstep with production BEFORE
+    # deploying code to it. A framework upgrade (e.g. .NET 8 -> 10) bumps prod's
+    # linuxFxVersion; if the staging slot still runs the old stack, the new build
+    # 503s on the slot and the swap then carries the mismatch into production
+    # (this caused a ~10-min .NET 10 cutover blip on 2026-06-26). Mirroring the
+    # runtime to staging first makes a framework upgrade zero-downtime.
+    $prodFx = Invoke-Az @('webapp','config','show','-g',$t.rg,'-n',$t.app,'--query','linuxFxVersion','-o','tsv')
+    $slotFx = Invoke-Az @('webapp','config','show','-g',$t.rg,'-n',$t.app,'--slot','staging','--query','linuxFxVersion','-o','tsv')
+    if ($prodFx -and (("$prodFx").Trim() -ne ("$slotFx").Trim())) {
+        Write-Host ">> Aligning staging slot runtime '$slotFx' -> '$prodFx' before deploy ..." -ForegroundColor Cyan
+        [void](Invoke-Az @('webapp','config','set','-g',$t.rg,'-n',$t.app,'--slot','staging','--linux-fx-version',$prodFx,'--output','none'))
+    }
+
     [void](Invoke-Az @('webapp','deploy','-g',$t.rg,'-n',$t.app,'--slot','staging','--src-path',$zip,'--type','zip','--clean','true','--output','none'))
     if ($script:AzExit -ne 0) { throw "slot deploy failed." }
 

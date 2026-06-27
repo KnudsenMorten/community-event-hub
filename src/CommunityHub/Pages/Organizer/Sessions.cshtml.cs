@@ -406,7 +406,7 @@ public class SessionsModel : PageModel
         if (me is null) return AccessDenied ? Page() : RedirectToPage("/Login");
 
         // GATE (REQUIREMENTS §23): the master-class booking sync is the same Zoho
-        // attendee/booking integration the AttendeeReconcileJob runs, so it honours
+        // attendee/booking integration the AttendeeBackstageSyncJob runs, so it honours
         // the 'attendee-reconcile' switch. Disabled ⇒ no-op (NOT a green success),
         // GUI state == actual behaviour.
         if (!await _gate.IsFeatureEnabledAsync("attendee-reconcile", me.EventId, ct))

@@ -117,7 +117,8 @@ public class EmailTemplateRendererEncodingTests
             Tokens(("taskTitle", "Pay R&D <invoice>")));
 
         // The email Subject header is a text header, not HTML — keep it literal.
-        Assert.Equal("Reminder: Pay R&D <invoice>", rendered.Subject);
+        // §103: every subject is postfixed with the edition tag.
+        Assert.Equal("Reminder: Pay R&D <invoice> [ELDK27]", rendered.Subject);
     }
 
     [Fact]
@@ -127,7 +128,7 @@ public class EmailTemplateRendererEncodingTests
             "Subject: {{taskTitle}}\n<p>{{taskTitle}}</p>",
             Tokens(("taskTitle", "A & B")));
 
-        Assert.Equal("A & B", rendered.Subject);            // header: literal
+        Assert.Equal("A & B [ELDK27]", rendered.Subject);   // header: literal (+ §103 postfix)
         Assert.Contains("<p>A &amp; B</p>", rendered.HtmlBody); // body: encoded
     }
 

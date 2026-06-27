@@ -1,0 +1,40 @@
+@page
+@model CommunityHub.Pages.Forms.AcceptModel
+@{
+    ViewData["Title"] = "Code of Conduct & Privacy";
+}
+
+<div class="card">
+    <h1>Code of Conduct &amp; Privacy</h1>
+
+    @if (!string.IsNullOrEmpty(Model.Message))
+    {
+        <p class="@(Model.IsError ? "error" : "info")" role="@(Model.IsError ? "alert" : "status")">@Model.Message</p>
+    }
+
+    <p>Please review and accept our policies:</p>
+    <ul>
+        <li><a href="@CommunityHub.Pages.Forms.AcceptModel.CodeOfConductUrl" target="_blank" rel="noopener">Code of Conduct</a></li>
+        <li><a href="@CommunityHub.Pages.Forms.AcceptModel.PrivacyPolicyUrl" target="_blank" rel="noopener">Privacy Policy</a></li>
+    </ul>
+
+    @if (Model.AlreadyAccepted)
+    {
+        <p class="success" role="status">
+            ✅ Accepted on @Model.AcceptedAt?.ToString("dd MMM yyyy HH:mm 'UTC'")
+            @if (!string.IsNullOrEmpty(Model.AcceptedByEmail)) { <text>by @Model.AcceptedByEmail</text> }.
+        </p>
+        <p><a asp-page="/Index">Back to hub</a></p>
+    }
+    else
+    {
+        <form method="post">
+            <label style="display:flex;align-items:flex-start;gap:10px;font-weight:600;">
+                <input type="checkbox" asp-for="Accept" required style="width:auto;margin-top:3px;" />
+                <span>I accept the Code of Conduct and the Privacy Policy.</span>
+            </label>
+            <button type="submit" style="margin-top:14px;">Confirm</button>
+        </form>
+        <p style="margin-top:14px;"><a asp-page="/Index">Back to hub</a></p>
+    }
+</div>

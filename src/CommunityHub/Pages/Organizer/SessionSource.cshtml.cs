@@ -37,6 +37,44 @@ public class SessionSourceModel : PageModel
     public sealed record SourceOption(string Key, string Label, bool Available, string Note);
     public IReadOnlyList<SourceOption> Options { get; private set; } = Array.Empty<SourceOption>();
 
+    // §57 session sync DIRECTION / stage (only one active at a time).
+    public SessionSyncDirection ActiveDirection { get; private set; } = SessionSyncDirection.SessionizeToCeh;
+
+    // §58 SPEAKER sync DIRECTION / stage (separate from the session one, only one active).
+    public SessionSyncDirection ActiveSpeakerDirection { get; private set; } = SessionSyncDirection.SessionizeToCeh;
+
+    public sealed record DirectionOption(
+        SessionSyncDirection Direction, int Stage, string Label, string Note, bool Implemented);
+
+    public IReadOnlyList<DirectionOption> DirectionOptions { get; } = new[]
+    {
+        new DirectionOption(SessionSyncDirection.SessionizeToCeh, 1, "Sessionize → CEH",
+            "Import speakers and sessions from Sessionize into CEH. This is the current default and the only "
+            + "stage that runs today.", Implemented: true),
+        new DirectionOption(SessionSyncDirection.CehToZoho, 2, "CEH → Zoho Backstage",
+            "Push sessions from CEH up to Zoho Backstage. Not yet implemented — selecting this records the "
+            + "intended stage but performs no push (the operator will build/test that later).", Implemented: false),
+        new DirectionOption(SessionSyncDirection.ZohoToCeh, 3, "Zoho Backstage → CEH",
+            "Pull the finalized Zoho Backstage agenda (session time/location) back into CEH and alert affected "
+            + "speakers (the §38e change-detection engine). Inactive until this stage is selected.", Implemented: true),
+    };
+
+    // §58: the SPEAKER stages mirror the session ones. Stage 3 (Zoho→CEH speaker change
+    // detection) has NO engine yet — selecting it only records the stage + arms the gate.
+    public IReadOnlyList<DirectionOption> SpeakerDirectionOptions { get; } = new[]
+    {
+        new DirectionOption(SessionSyncDirection.SessionizeToCeh, 1, "Sessionize → CEH",
+            "Import speakers from Sessionize into CEH. This is the current default and the only "
+            + "stage that runs today.", Implemented: true),
+        new DirectionOption(SessionSyncDirection.CehToZoho, 2, "CEH → Zoho Backstage",
+            "Push speakers from CEH up to Zoho Backstage. Not yet implemented — selecting this records the "
+            + "intended stage but performs no push (the operator will build/test that later).", Implemented: false),
+        new DirectionOption(SessionSyncDirection.ZohoToCeh, 3, "Zoho Backstage → CEH",
+            "Pull Zoho Backstage speaker changes back into CEH and alert affected speakers (a future "
+            + "change-detection engine). Inactive until this stage is selected; no speaker engine runs yet.",
+            Implemented: false),
+    };
+
     private bool Available(string key) =>
         _sources.FirstOrDefault(s => s.Key == key)?.IsAvailable ?? false;
 
@@ -59,8 +97,52 @@ public class SessionSourceModel : PageModel
 
         Message = msg;
         ActiveKey = await _settings.GetActiveKeyAsync(me.EventId, ct);
+        ActiveDirection = await _settings.GetSyncDirectionAsync(me.EventId, ct);
+        ActiveSpeakerDirection = await _settings.GetSpeakerSyncDirectionAsync(me.EventId, ct);
         BuildOptions();
         return Page();
+    }
+
+    public async Task<IActionResult> OnPostSetDirectionAsync(int stage, CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+
+        if (!Enum.IsDefined(typeof(SessionSyncDirection), stage))
+            return RedirectToPage(new { msg = "Unknown sync direction." });
+
+        var direction = (SessionSyncDirection)stage;
+        await _settings.SetSyncDirectionAsync(me.EventId, direction, me.Email, ct);
+
+        // Stage 2 (CEH→Zoho) push is not yet implemented — record the stage only.
+        // TODO §57 stage 2: implement the CEH→Zoho push (operator will build/test it later).
+        var note = direction == SessionSyncDirection.CehToZoho
+            ? $"Sync direction set to stage {stage} (CEH → Zoho). Note: the CEH→Zoho push is not yet implemented."
+            : $"Sync direction set to stage {stage} ({direction}).";
+        return RedirectToPage(new { msg = note });
+    }
+
+    public async Task<IActionResult> OnPostSetSpeakerDirectionAsync(int stage, CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+
+        if (!Enum.IsDefined(typeof(SessionSyncDirection), stage))
+            return RedirectToPage(new { msg = "Unknown speaker sync direction." });
+
+        var direction = (SessionSyncDirection)stage;
+        await _settings.SetSpeakerSyncDirectionAsync(me.EventId, direction, me.Email, ct);
+
+        // §58: stages 2 (CEH→Zoho push) and 3 (Zoho→CEH speaker change detection) are not yet
+        // implemented — record the stage only. Stage 3 only ARMS the gate for the future engine.
+        // TODO §58 stage 2/3: implement the CEH→Zoho speaker push + the Zoho→CEH speaker
+        // change-detection engine (operator will build/test them later).
+        var note = direction == SessionSyncDirection.SessionizeToCeh
+            ? $"Speaker sync direction set to stage {stage} ({direction})."
+            : $"Speaker sync direction set to stage {stage} ({direction}). Note: this stage is not yet implemented.";
+        return RedirectToPage(new { msg = note });
     }
 
     public async Task<IActionResult> OnPostSetAsync(string source, CancellationToken ct)

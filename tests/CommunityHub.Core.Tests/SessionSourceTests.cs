@@ -43,6 +43,84 @@ public class SessionSourceTests
     }
 
     [Fact]
+    public async Task SyncDirection_default_is_stage1_and_set_is_persisted()
+    {
+        using var db = ScenarioFixture.NewDb();
+        var svc = new SessionSourceSettingsService(db);
+
+        // §57: no row ⇒ stage 1 (SessionizeToCeh).
+        Assert.Equal(CommunityHub.Core.Domain.SessionSyncDirection.SessionizeToCeh,
+            await svc.GetSyncDirectionAsync(1));
+
+        await svc.SetSyncDirectionAsync(
+            1, CommunityHub.Core.Domain.SessionSyncDirection.ZohoToCeh, "mok@expertslive.dk");
+        Assert.Equal(CommunityHub.Core.Domain.SessionSyncDirection.ZohoToCeh,
+            await svc.GetSyncDirectionAsync(1));
+
+        // Upsert (not a duplicate row) on a second set; Source stays valid.
+        await svc.SetSyncDirectionAsync(
+            1, CommunityHub.Core.Domain.SessionSyncDirection.CehToZoho, "mok@expertslive.dk");
+        Assert.Equal(CommunityHub.Core.Domain.SessionSyncDirection.CehToZoho,
+            await svc.GetSyncDirectionAsync(1));
+        Assert.Single(db.SessionSourceSettings);
+        Assert.Equal(SessionSourceKinds.Default, db.SessionSourceSettings.Single().Source);
+    }
+
+    [Fact]
+    public async Task SpeakerSyncDirection_default_is_stage1_and_is_independent_of_session_direction()
+    {
+        using var db = ScenarioFixture.NewDb();
+        var svc = new SessionSourceSettingsService(db);
+
+        // §58: no row ⇒ speaker stage 1 (SessionizeToCeh); the Zoho→CEH gate is INACTIVE.
+        Assert.Equal(CommunityHub.Core.Domain.SessionSyncDirection.SessionizeToCeh,
+            await svc.GetSpeakerSyncDirectionAsync(1));
+        Assert.False(await svc.IsSpeakerZohoToCehActiveAsync(1));
+
+        // Flipping the SESSION direction must NOT move the speaker direction (independent).
+        await svc.SetSyncDirectionAsync(
+            1, CommunityHub.Core.Domain.SessionSyncDirection.ZohoToCeh, "mok@expertslive.dk");
+        Assert.Equal(CommunityHub.Core.Domain.SessionSyncDirection.SessionizeToCeh,
+            await svc.GetSpeakerSyncDirectionAsync(1));
+        Assert.False(await svc.IsSpeakerZohoToCehActiveAsync(1));
+
+        // Set the SPEAKER direction to stage 3 ⇒ the gate arms; the session direction is unchanged.
+        await svc.SetSpeakerSyncDirectionAsync(
+            1, CommunityHub.Core.Domain.SessionSyncDirection.ZohoToCeh, "mok@expertslive.dk");
+        Assert.Equal(CommunityHub.Core.Domain.SessionSyncDirection.ZohoToCeh,
+            await svc.GetSpeakerSyncDirectionAsync(1));
+        Assert.True(await svc.IsSpeakerZohoToCehActiveAsync(1));
+        Assert.Equal(CommunityHub.Core.Domain.SessionSyncDirection.ZohoToCeh,
+            await svc.GetSyncDirectionAsync(1));
+
+        // Upsert (single row); Source stays valid after speaker-only writes.
+        await svc.SetSpeakerSyncDirectionAsync(
+            1, CommunityHub.Core.Domain.SessionSyncDirection.CehToZoho, "mok@expertslive.dk");
+        Assert.Equal(CommunityHub.Core.Domain.SessionSyncDirection.CehToZoho,
+            await svc.GetSpeakerSyncDirectionAsync(1));
+        Assert.False(await svc.IsSpeakerZohoToCehActiveAsync(1));
+        Assert.Single(db.SessionSourceSettings);
+        Assert.Equal(SessionSourceKinds.Default, db.SessionSourceSettings.Single().Source);
+    }
+
+    [Fact]
+    public async Task SpeakerSyncDirection_set_first_seeds_a_valid_source_row()
+    {
+        // §58: setting the speaker direction with NO existing row must seed a valid Source
+        // (NOT NULL) and leave the session direction at its stage-1 default.
+        using var db = ScenarioFixture.NewDb();
+        var svc = new SessionSourceSettingsService(db);
+
+        await svc.SetSpeakerSyncDirectionAsync(
+            1, CommunityHub.Core.Domain.SessionSyncDirection.CehToZoho, null);
+
+        var row = db.SessionSourceSettings.Single();
+        Assert.Equal(SessionSourceKinds.Default, row.Source);
+        Assert.Equal(CommunityHub.Core.Domain.SessionSyncDirection.CehToZoho, row.SpeakerSyncDirection);
+        Assert.Equal(CommunityHub.Core.Domain.SessionSyncDirection.SessionizeToCeh, row.SyncDirection);
+    }
+
+    [Fact]
     public async Task Settings_set_rejects_an_unknown_key()
     {
         using var db = ScenarioFixture.NewDb();
@@ -74,10 +152,19 @@ public class SessionSourceTests
     [Fact]
     public void Backstage_source_is_not_available_and_returns_a_clear_error()
     {
-        var src = new BackstageSessionSource();
+        // Default ZohoOptions ⇒ AgendaReadEnabled=false ⇒ source not selectable.
+        var src = new BackstageSessionSource(new ZohoOptions());
         Assert.False(src.IsAvailable);
         var r = src.FetchSessionsAsync(1, Array.Empty<SessionizeSpeaker>()).Result;
         Assert.NotNull(r.Error);
         Assert.Empty(r.Sessions);
+    }
+
+    [Fact]
+    public void Backstage_source_becomes_selectable_when_agenda_read_enabled()
+    {
+        // Flipping the §38e gate makes the Organizer source selector offer Backstage.
+        var src = new BackstageSessionSource(new ZohoOptions { AgendaReadEnabled = true });
+        Assert.True(src.IsAvailable);
     }
 }

@@ -1,0 +1,165 @@
+@page
+@using CommunityHub.Core.Domain
+@using CommunityHub.Core.Integrations.Sessions
+@using Microsoft.AspNetCore.Mvc.Localization
+@inject IHtmlLocalizer<CommunityHub.Core.Resources.SharedResource> Localizer
+@model CommunityHub.Pages.Organizer.SyncQueueModel
+@{
+    ViewData["Title"] = Localizer["Nav.OrgSyncQueue"].Value;
+
+    // Session deltas use logical field names; a Volunteer delta uses a yyyy-MM-dd day key as
+    // the field. Render the day key as a friendly date for Volunteer rows.
+    static string FieldLabel(SyncDeltaEntityType type, SyncFieldChange c)
+    {
+        if (type == SyncDeltaEntityType.Volunteer
+            && DateOnly.TryParse(c.Field, out var day))
+        {
+            return day.ToString("ddd dd MMM");
+        }
+        return c.Field switch
+        {
+            "StartsAt" => "Start",
+            "EndsAt" => "End",
+            "Room" => "Room",
+            _ => c.Field,
+        };
+    }
+    // A Volunteer delta's NewValue carries a machine payload after a unit separator — show only
+    // the human label half. Session values are plain strings (decode is a no-op for them).
+    static string ShowNew(SyncDeltaEntityType type, string? v)
+    {
+        if (type == SyncDeltaEntityType.Volunteer)
+            v = SyncDeltaQueueService.VolunteerDisplay(v);
+        return string.IsNullOrWhiteSpace(v) ? "(not set)" : v!;
+    }
+    static string Show(string? v) => string.IsNullOrWhiteSpace(v) ? "(not set)" : v!;
+}
+
+<div class="card">
+    <h1>@Localizer["Nav.OrgSyncQueue"]</h1>
+    <p class="info" style="margin-top:0;">
+        Detected sync changes wait here for your approval — they are
+        <strong>never auto-applied</strong>. Approve to apply a change (and notify the
+        affected person); reject to keep the current value. A disappeared item is only
+        acknowledged on approve — CEH never auto-deletes.
+    </p>
+
+    @if (Model.AccessDenied)
+    {
+        <p class="error">@Localizer["Common.OrganizersOnly"]</p>
+    }
+    else
+    {
+        @if (!string.IsNullOrEmpty(Model.ActionMessage))
+        {
+            <p class="info" role="status">@Model.ActionMessage</p>
+        }
+
+        <h3>Pending</h3>
+        @if (Model.Pending.Count == 0)
+        {
+            <p>Nothing waiting for approval.</p>
+        }
+        else
+        {
+            <p>@Model.Pending.Count change(s) need a decision.</p>
+
+            <div style="overflow-x:auto;">
+            <table style="width:100%;border-collapse:collapse;min-width:640px;">
+                <tr style="text-align:left;border-bottom:2px solid #ddd;">
+                    <th>Item</th><th>Type</th><th>Change</th><th>Source</th>
+                    <th>What changes</th><th>Detected</th><th></th>
+                </tr>
+                @foreach (var d in Model.Pending)
+                {
+                    <tr style="border-bottom:1px solid #eee;vertical-align:top;">
+                        <td><strong>@d.EntityLabel</strong></td>
+                        <td>@d.EntityType</td>
+                        <td>@d.ChangeKind</td>
+                        <td>@d.Source</td>
+                        <td>
+                            @if (d.ChangeKind == SyncDeltaChangeKind.Disappeared)
+                            {
+                                <span class="error">Gone upstream — review manually (no auto-delete).</span>
+                            }
+                            else if (d.Changes.Count == 0)
+                            {
+                                <span>—</span>
+                            }
+                            else
+                            {
+                                <ul style="margin:0;padding-left:18px;">
+                                    @foreach (var c in d.Changes)
+                                    {
+                                        <li>
+                                            @FieldLabel(d.EntityType, c):
+                                            <s>@Show(c.OldValue)</s> &rarr;
+                                            <strong>@ShowNew(d.EntityType, c.NewValue)</strong>
+                                        </li>
+                                    }
+                                </ul>
+                            }
+                        </td>
+                        <td style="white-space:nowrap;">@d.CreatedAt.ToString("dd MMM HH:mm")</td>
+                        <td style="white-space:nowrap;">
+                            <form method="post" style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:0;">
+                                <input type="hidden" name="id" value="@d.Id" />
+                                <input type="text" name="reason" placeholder="Reason (for reject)"
+                                       style="max-width:160px;" aria-label="Rejection reason" />
+                                <button type="submit" asp-page-handler="Approve" asp-route-id="@d.Id">Approve</button>
+                                <button type="submit" asp-page-handler="Reject" class="secondary"
+                                        style="background:#b91c1c;color:#fff;">Reject</button>
+                            </form>
+                        </td>
+                    </tr>
+                }
+            </table>
+            </div>
+        }
+
+        <h3 style="margin-top:24px;">Recently decided</h3>
+        @if (Model.RecentlyDecided.Count == 0)
+        {
+            <p>No decisions yet.</p>
+        }
+        else
+        {
+            <div style="overflow-x:auto;">
+            <table style="width:100%;border-collapse:collapse;min-width:560px;">
+                <tr style="text-align:left;border-bottom:2px solid #ddd;">
+                    <th>Item</th><th>Type</th><th>Change</th>
+                    <th>Decision</th><th>By</th><th>When</th>
+                </tr>
+                @foreach (var d in Model.RecentlyDecided)
+                {
+                    <tr style="border-bottom:1px solid #eee;">
+                        <td>@d.EntityLabel</td>
+                        <td>@d.EntityType</td>
+                        <td>@d.ChangeKind</td>
+                        <td>
+                            @switch (d.Status)
+                            {
+                                case SyncDeltaStatus.Applied:
+                                    <span class="info">Applied</span>
+                                    break;
+                                case SyncDeltaStatus.Approved:
+                                    <span class="info">Approved</span>
+                                    break;
+                                case SyncDeltaStatus.Rejected:
+                                    <span class="error">Rejected</span>
+                                    break;
+                                default:
+                                    <span>@d.Status</span>
+                                    break;
+                            }
+                        </td>
+                        <td>@d.DecidedByEmail</td>
+                        <td style="white-space:nowrap;">@(d.DecidedAt?.ToString("dd MMM HH:mm"))</td>
+                    </tr>
+                }
+            </table>
+            </div>
+        }
+    }
+    <p style="margin-top:16px;"><a asp-page="/Organizer/Index">&larr; @Localizer["Common.BackToOrganizerArea"]</a></p>
+</div>

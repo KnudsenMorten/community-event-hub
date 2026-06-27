@@ -1,0 +1,31 @@
+Subject: Your session schedule changed: {{sessionTitle}}
+<p style="margin:0 0 16px;">Hi {{firstName}},</p>
+<p style="margin:0 0 16px;">The schedule for your session <strong>{{sessionTitle}}</strong> at <strong>{{eventDisplayName}}{{eventCodeParens}}</strong> has just changed. Here is what is different:</p>
+<table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:8px 0 20px;border-collapse:collapse;">
+  <tr>
+    <td style="padding:10px 12px;border:1px solid #e5e7eb;background:#f9fafb;font-weight:bold;width:34%;">When</td>
+    <td style="padding:10px 12px;border:1px solid #e5e7eb;">
+      <span style="color:#9ca3af;text-decoration:line-through;">{{oldTime}}</span><br>
+      <strong style="color:{{brandColor}};">{{newTime}}</strong>
+    </td>
+  </tr>
+  <tr>
+    <td style="padding:10px 12px;border:1px solid #e5e7eb;background:#f9fafb;font-weight:bold;">Where</td>
+    <td style="padding:10px 12px;border:1px solid #e5e7eb;">
+      <span style="color:#9ca3af;text-decoration:line-through;">{{oldRoom}}</span><br>
+      <strong style="color:{{brandColor}};">{{newRoom}}</strong>
+    </td>
+  </tr>
+</table>
+<p style="margin:0 0 16px;">No action is needed from you — we just want to make sure you have the latest time and location. Open your speaker hub any time for the current details and to add the updated session to your calendar.</p>
+<table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:8px 0 20px;"><tr>
+  <td align="center">
+    <table role="presentation" cellpadding="0" cellspacing="0"><tr>
+      <td style="background-color:{{brandColor}};border-radius:6px;">
+        <a href="{{hubUrl}}" style="display:inline-block;padding:14px 30px;color:#ffffff;font-size:16px;font-weight:bold;text-decoration:none;">Open my speaker hub</a>
+      </td>
+    </tr></table>
+  </td>
+</tr></table>
+<p style="margin:6px 0 16px;color:#6b7280;font-size:13px;text-align:center;">(Log in with your email, if prompted)</p>
+<p style="margin:16px 0 0;color:#6b7280;font-size:14px;">Questions? Email <a href="mailto:{{supportEmail}}">{{supportEmail}}</a>.</p>

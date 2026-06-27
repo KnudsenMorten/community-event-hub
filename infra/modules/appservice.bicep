@@ -23,7 +23,7 @@ param tags object
 param planSku string = 'B1'
 
 @description('.NET runtime version on Linux.')
-param dotnetVersion string = 'DOTNETCORE|8.0'
+param dotnetVersion string = 'DOTNETCORE|10.0'
 
 @description('Key Vault URI - used to build @Microsoft.KeyVault secret references.')
 param keyVaultUri string

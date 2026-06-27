@@ -247,6 +247,46 @@ public class Session
     /// </summary>
     public int? MasterClassCapacity { get; set; }
 
+    // --- Zoho Backstage agenda id + last-known time/location (REQUIREMENTS §38e/§52) ---
+
+    /// <summary>
+    /// The Zoho Backstage agenda/session id for this talk (REQUIREMENTS §38e/§52
+    /// "store BOTH the Backstage agenda/session id AND the Sessionize id"). Distinct
+    /// from <see cref="SessionizeId"/> (the Sessionize identity) — Sessionize remains
+    /// the speaker/session SOURCE, while Backstage owns the finalized SCHEDULE (time +
+    /// hall). Set when the session is matched to a Backstage agenda session; null until
+    /// then. Used (a) to address the public Backstage session page from the Speaker hub
+    /// (§52 "View public session page" → Zoho Backstage, not Sessionize), and (b) as the
+    /// match key for the §38e change-detection engine. Filtered-unique within an edition.
+    /// </summary>
+    public string? BackstageSessionId { get; set; }
+
+    /// <summary>
+    /// The LAST-KNOWN Backstage start time for this session (the value CEH stored on
+    /// the previous change-detection pass). The §38e engine compares the CURRENT Zoho
+    /// Backstage start against this; a difference (when this was already non-null) is a
+    /// real schedule CHANGE that emails the affected speaker(s). Null = not yet seeded
+    /// (the first populate seeds silently and NEVER emails).
+    /// </summary>
+    public DateTimeOffset? BackstageStartsAt { get; set; }
+
+    /// <summary>The LAST-KNOWN Backstage end time — see <see cref="BackstageStartsAt"/>.</summary>
+    public DateTimeOffset? BackstageEndsAt { get; set; }
+
+    /// <summary>
+    /// The LAST-KNOWN Backstage room / hall name (the value CEH stored on the previous
+    /// pass). A change vs the current Backstage hall (when already non-null) triggers a
+    /// §38e change email. Null = not yet seeded.
+    /// </summary>
+    public string? BackstageRoom { get; set; }
+
+    /// <summary>
+    /// When the §38e change-detection engine last compared this session against Zoho
+    /// Backstage (and refreshed the stored <c>Backstage*</c> values). Null = never
+    /// checked. Stamped on every pass whether or not anything changed.
+    /// </summary>
+    public DateTimeOffset? BackstageChangeCheckedAt { get; set; }
+
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? UpdatedAt { get; set; }
 

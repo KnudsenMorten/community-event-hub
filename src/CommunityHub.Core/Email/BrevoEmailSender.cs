@@ -551,4 +551,70 @@ public class BrevoEmailSender : IEmailSender
             icsStream.Dispose();
         }
     }
+
+    public async Task SendWithAttachmentsAsync(
+        string toEmail,
+        string subject,
+        string htmlBody,
+        IReadOnlyCollection<EmailAttachment> attachments,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(toEmail))
+        {
+            throw new ArgumentException("Recipient address is required.", nameof(toEmail));
+        }
+
+        // RING GATE (REQUIREMENTS §23) — in front of the allowlist (attachments path).
+        // A RingExempt EmailContext (e.g. the ERP-inbox send) bypasses this, exactly
+        // as it does for every other overload.
+        if (await ShouldRingDropAsync(toEmail, cancellationToken)) return;
+
+        var (actualTo, finalSubject) = ApplyRedirect(toEmail, subject);
+
+        if (_options.KillSwitch)
+        {
+            _log?.LogInformation(
+                "Email DROP (KILL SWITCH, attachments): original={Original} actual={Actual} subject='{Subject}'",
+                toEmail, actualTo, subject);
+            return;
+        }
+
+        using var message = new MailMessage
+        {
+            From = new MailAddress(_options.FromAddress, _options.FromDisplayName),
+            Subject = finalSubject,
+            Body = htmlBody,
+            IsBodyHtml = true,
+        };
+        message.To.Add(actualTo);
+
+        var streams = new List<MemoryStream>();
+        var added = new List<Attachment>();
+        try
+        {
+            foreach (var a in attachments ?? Array.Empty<EmailAttachment>())
+            {
+                if (a is null || a.Content is null || a.Content.Length == 0) continue;
+                var stream = new MemoryStream(a.Content);
+                streams.Add(stream);
+                var fileName = string.IsNullOrWhiteSpace(a.FileName) ? "attachment" : a.FileName;
+                var contentType = string.IsNullOrWhiteSpace(a.ContentType)
+                    ? "application/octet-stream"
+                    : a.ContentType;
+                var attachment = new Attachment(stream, fileName, contentType);
+                message.Attachments.Add(attachment);
+                added.Add(attachment);
+            }
+
+            // Actually sending (passed ring gate + allowlist) ⇒ add the operator BCC.
+            AddOperatorBcc(message);
+
+            await DispatchAsync(message, cancellationToken);
+        }
+        finally
+        {
+            foreach (var a in added) a.Dispose();
+            foreach (var s in streams) s.Dispose();
+        }
+    }
 }

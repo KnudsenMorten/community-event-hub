@@ -5,97 +5,13 @@
     ViewData["Title"] = "Attendee telemetry — Experts Live Denmark";
 }
 
-@functions {
-    static string Bars(IReadOnlyList<CommunityHub.Core.Integrations.TelemetrySlice> s, int take)
-    {
-        if (s is null || s.Count == 0) return "<p class=\"info\">No data yet.</p>";
-        var top = System.Linq.Enumerable.ToList(System.Linq.Enumerable.Take(s, take));
-        var max = System.Linq.Enumerable.Max(top, x => x.Count);
-        var sb = new System.Text.StringBuilder("<ul class=\"tl-bars\">");
-        foreach (var x in top)
-        {
-            var pct = max > 0 ? (int)System.Math.Round(100.0 * x.Count / max) : 0;
-            sb.Append($"<li><span class=\"tl-lbl\">{System.Net.WebUtility.HtmlEncode(x.Label)}</span><span class=\"tl-bar\"><span class=\"tl-fill\" style=\"width:{pct}%\"></span></span><span class=\"tl-num\">{x.Count}</span></li>");
-        }
-        sb.Append("</ul>");
-        return sb.ToString();
-    }
-}
-
-<style>
-    .tl-wrap { max-width:960px; margin:0 auto; }
-    .tl-controls { display:flex; flex-wrap:wrap; gap:10px; align-items:center; justify-content:center; margin:6px 0 14px; }
-    .tl-controls select { padding:8px 10px; border:1px solid #c4c8d4; border-radius:8px; font-size:14px; min-width:260px; }
-    .tl-metrics { display:grid; grid-template-columns:repeat(2,1fr); gap:12px; margin:0 0 18px; }
-    @@media (min-width:620px) { .tl-metrics { grid-template-columns:repeat(4,1fr); } }
-    .tl-metric { background:#f7f9fc; border:1px solid #e6eaf2; border-radius:10px; padding:12px; text-align:center; }
-    .tl-metric .v { font-size:30px; font-weight:800; color:var(--el-darkblue,#1D3380); line-height:1; }
-    .tl-metric .k { color:#6b7280; font-size:12.5px; margin-top:4px; }
-    .tl-graph { display:flex; align-items:flex-end; gap:2px; height:120px; padding:8px 0; border-bottom:1px solid #e6eaf2; overflow-x:auto; }
-    .tl-gbar { flex:0 0 8px; background:var(--el-blue,#008BD2); border-radius:2px 2px 0 0; min-height:2px; }
-    .tl-grid { display:grid; gap:16px; grid-template-columns:1fr; margin-top:18px; }
-    @@media (min-width:680px) { .tl-grid { grid-template-columns:1fr 1fr; } }
-    .tl-card h3 { margin:0 0 10px; font-size:15.5px; color:var(--el-darkblue,#1D3380); }
-    .tl-bars { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:7px; }
-    .tl-bars li { display:flex; align-items:center; gap:8px; font-size:13.5px; }
-    .tl-lbl { flex:0 0 40%; color:#374151; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-    .tl-bar { flex:1; height:12px; background:#eef2f7; border-radius:999px; overflow:hidden; }
-    .tl-fill { display:block; height:100%; background:var(--el-blue,#008BD2); border-radius:999px; }
-    .tl-num { flex:0 0 auto; font-weight:700; color:#1f2430; min-width:34px; text-align:right; }
-    .tl-foot { color:#9aa0aa; font-size:12px; text-align:center; margin-top:18px; }
-</style>
-
+@* §55: the ranked tables + controls live in the shared _AttendeeTelemetryPanel
+   partial, reused IDENTICALLY by the sponsor (/Sponsor/Telemetry) and organizer
+   (/Organizer/Telemetry) in-area pages. This public page keeps its standalone
+   anonymous layout + heading and just hosts the panel. *@
 <div class="card tl-wrap">
     <h2 style="text-align:center;">Who's coming to Experts Live Denmark</h2>
 
-    @if (Model.Data is null)
-    {
-        <p class="info" style="text-align:center;">Live attendee numbers aren't available right now — please check back shortly.</p>
-    }
-    else
-    {
-        <form method="get" class="tl-controls">
-            <label for="segment" style="font-size:13px;color:#4b5563;">Analyze segment:</label>
-            <select id="segment" name="segment" onchange="this.form.submit()">
-                @foreach (var s in Model.Segments)
-                {
-                    <option value="@s.Key" selected="@(s.Key == Model.Data.SegmentKey)">@s.Label</option>
-                }
-            </select>
-            <noscript><button type="submit">Apply</button></noscript>
-        </form>
-
-        <div class="tl-metrics">
-            <div class="tl-metric"><div class="v">@Model.Data.SegmentCount.ToString("N0")</div><div class="k">in this segment</div></div>
-            <div class="tl-metric"><div class="v">@Model.Data.PctOfTotal%</div><div class="k">of all @Model.Data.TotalAll.ToString("N0") tickets</div></div>
-            <div class="tl-metric"><div class="v">@Model.Data.Pct2DayInSegment%</div><div class="k">on a 2-day (pre-day) ticket</div></div>
-            <div class="tl-metric"><div class="v">@Model.Data.TotalAll.ToString("N0")</div><div class="k">tickets sold total</div></div>
-        </div>
-
-        @if (Model.Data.Daily.Count > 0)
-        {
-            var gmax = System.Linq.Enumerable.Max(Model.Data.Daily, d => d.Count);
-            <h3 style="font-size:15px;color:var(--el-darkblue);margin:0 0 4px;">Tickets sold per day</h3>
-            <div class="tl-graph">
-                @foreach (var d in Model.Data.Daily)
-                {
-                    var h = gmax > 0 ? (int)System.Math.Round(100.0 * d.Count / gmax) : 0;
-                    <span class="tl-gbar" style="height:@(h)%" title="@d.Day.ToString("d MMM yyyy"): @d.Count (running @d.Cumulative)"></span>
-                }
-            </div>
-            <p style="font-size:12px;color:#6b7280;margin:4px 0 0;">@Model.Data.Daily[0].Day.ToString("d MMM yyyy") – @Model.Data.Daily[^1].Day.ToString("d MMM yyyy") · running total @Model.Data.Daily[^1].Cumulative.ToString("N0")</p>
-        }
-
-        <div class="tl-grid">
-            @foreach (var table in Model.Data.Tables)
-            {
-                <div class="tl-card">
-                    <h3>@table.Title</h3>
-                    @Html.Raw(Bars(table.Slices, 15))
-                </div>
-            }
-        </div>
-
-        <p class="tl-foot">Aggregate figures from Zoho Backstage · updated @Model.Data.GeneratedAtUtc.ToString("d MMM yyyy HH:mm 'UTC'")</p>
-    }
+    <partial name="_AttendeeTelemetryPanel"
+             model="new CommunityHub.Pages.Shared.AttendeeTelemetryPanelModel(Model.Data, Model.Segments)" />
 </div>

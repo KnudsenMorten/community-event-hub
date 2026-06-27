@@ -79,6 +79,9 @@ public class SwagModel : PageModel
     public bool AccessDenied { get; private set; }
     public string? Message { get; private set; }
 
+    /// <summary>REQUIREMENTS §51 — when these swag preferences were last saved (UpdatedAt); null = never saved.</summary>
+    public DateTimeOffset? LastSavedAt { get; private set; }
+
     public async Task<IActionResult> OnGetAsync(CancellationToken ct)
     {
         var me = _participant.Current;
@@ -104,6 +107,7 @@ public class SwagModel : PageModel
             WantsGift = existing.WantsGift;
             WantsCredlyBadge = existing.WantsCredlyBadge;
             Notes = existing.Notes;
+            LastSavedAt = existing.UpdatedAt;
         }
         return Page();
     }
@@ -144,6 +148,7 @@ public class SwagModel : PageModel
                 EventId = me.EventId,
                 ParticipantId = me.ParticipantId,
                 CreatedAt = _clock.GetUtcNow(),
+                UpdatedAt = _clock.GetUtcNow(),
             };
             _db.SwagPreferences.Add(pref);
         }
@@ -224,6 +229,7 @@ public class SwagModel : PageModel
                  && t.SourceKey == sourceKey, ct);
         if (task is null || task.State == TaskState.Done) return;
         task.State = TaskState.Done;
+        task.CompletedAt = _clock.GetUtcNow();
         await _db.SaveChangesAsync(ct);
     }
 }

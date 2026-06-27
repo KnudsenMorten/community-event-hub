@@ -17,7 +17,7 @@ public sealed record SessionizeImportResult(
     IReadOnlyList<string> Warnings,
     string? Error,
     // The companion SESSIONS import result, when the run also imported sessions
-    // (the combined API pull). Null for the Excel upload (speakers only).
+    // (the combined API pull). Null for a speakers-only import.
     SessionImportResult? Sessions = null);
 
 /// <summary>
@@ -46,10 +46,9 @@ public enum SessionizeImportMode
 }
 
 /// <summary>
-/// Imports Sessionize speakers from an uploaded Excel file as
-/// <see cref="Participant"/> rows (CONTEXT.md / DESIGN_NOTES). The organizer
-/// exports speakers from Sessionize to .xlsx and uploads it - no API endpoint,
-/// no network dependency.
+/// Imports Sessionize speakers (from the Sessionize v2 view API via
+/// <see cref="SessionizeApiImportService"/>) as <see cref="Participant"/> rows.
+/// (The legacy Excel/.xlsx upload entry point was removed — §82, API-only now.)
 ///
 /// Rules (the documented defaults):
 ///  - Match on email within the edition (the existing unique key).
@@ -63,7 +62,6 @@ public enum SessionizeImportMode
 public sealed class SessionizeImportService
 {
     private readonly CommunityHubDbContext _db;
-    private readonly SessionizeExcelParser _parser;
     private readonly WelcomeEmailService _welcome;
     private readonly TimeProvider _clock;
     // Optional (§26c): used to copy the Sessionize profile picture into SharePoint.
@@ -75,47 +73,21 @@ public sealed class SessionizeImportService
 
     public SessionizeImportService(
         CommunityHubDbContext db,
-        SessionizeExcelParser parser,
         WelcomeEmailService welcome,
         TimeProvider clock,
         ISharePointFileStore? pictureStore = null)
     {
         _db = db;
-        _parser = parser;
         _welcome = welcome;
         _clock = clock;
         _pictureStore = pictureStore;
     }
 
     /// <summary>
-    /// Run the import for an edition from an uploaded Excel stream. Returns
-    /// counts + warnings; never throws for a bad file - the error is in the
-    /// result.
-    /// </summary>
-    public async Task<SessionizeImportResult> ImportAsync(
-        int eventId,
-        Stream excelStream,
-        CancellationToken ct = default,
-        bool sendWelcome = true,
-        SessionizeImportMode mode = SessionizeImportMode.Delta)
-    {
-        var parsed = _parser.Parse(excelStream);
-        if (parsed.Error is not null)
-        {
-            return new SessionizeImportResult(
-                0, 0, 0, 0, parsed.Warnings, parsed.Error);
-        }
-
-        return await ImportSpeakersAsync(
-            eventId, parsed.Speakers, parsed.Warnings, ct, sendWelcome, mode);
-    }
-
-    /// <summary>
     /// Run the import for an edition from an already-parsed speaker list. This
-    /// is the shared core used by BOTH the Excel upload path (above) and the
-    /// Sessionize API path (<c>SessionizeApiImportService</c>): the upsert /
-    /// match-on-email / never-change-role / never-delete semantics live here
-    /// once, so the two sources behave identically. <paramref name="warnings"/>
+    /// is the shared core used by the Sessionize API path
+    /// (<c>SessionizeApiImportService</c>): the upsert / match-on-email /
+    /// never-change-role / never-delete semantics live here. <paramref name="warnings"/>
     /// from the source (e.g. rows skipped for a missing email) are carried
     /// through into the result.
     /// </summary>

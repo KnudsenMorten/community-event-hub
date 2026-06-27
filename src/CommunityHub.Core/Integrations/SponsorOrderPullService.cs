@@ -189,6 +189,15 @@ public sealed class SponsorOrderPullService
                     {
                         companyBoothNumber = cls.BoothNumber;
                     }
+                    // Fallback (matches the legacy Resolve-ProductBoothLabel): parse the booth
+                    // slot from ANY product name, not only one classified Kind=Booth — some booth
+                    // products carry "… Booth E-NN" in the name but match a non-Booth rule.
+                    if (companyBoothNumber is null && !string.IsNullOrWhiteSpace(item.ProductName))
+                    {
+                        var bm = System.Text.RegularExpressions.Regex.Match(
+                            item.ProductName, @"\bE-(\d{1,3})\b", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                        if (bm.Success) companyBoothNumber = "E-" + bm.Groups[1].Value;
+                    }
                     if (BoothTierRanking.Weight(cls.Tier) > BoothTierRanking.Weight(companyTier))
                     {
                         companyTier = cls.Tier;
@@ -209,6 +218,12 @@ public sealed class SponsorOrderPullService
                  !string.IsNullOrWhiteSpace(cmLegalName)  ? cmLegalName  :
                  !string.IsNullOrWhiteSpace(billingName)  ? billingName  :
                  $"Company {companyId}");
+
+            // Log the resolved PUBLIC name (not the raw numeric id) so diagnostics read
+            // as real companies (operator 2026-06-25: never surface "Company {id}").
+            _log.LogInformation(
+                "SponsorOrderPull: '{Company}' (id {Co}) -> tier {Tier}, booth {Booth}.",
+                companyName, companyId, companyTier, companyBoothNumber ?? "(none)");
 
             // Provision per-task SharePoint upload folders BEFORE substitution
             // so the resulting anonymous edit-link URL can be threaded into the
@@ -325,6 +340,7 @@ public sealed class SponsorOrderPullService
                         SponsorCompanyId = companyId,
                         Tier = companyTier,
                         SponsorPackage = companyPackage,
+                        BoothLabel = companyBoothNumber,
                     });
                 }
                 else
@@ -335,12 +351,66 @@ public sealed class SponsorOrderPullService
                         info.Tier = companyTier;
                         changed = true;
                     }
+                    // Fill the booth slot from the order (e.g. "E-26") when present + changed.
+                    if (!string.IsNullOrWhiteSpace(companyBoothNumber) && info.BoothLabel != companyBoothNumber)
+                    {
+                        info.BoothLabel = companyBoothNumber;
+                        changed = true;
+                    }
                     if (companyPackage > info.SponsorPackage)
                     {
                         info.SponsorPackage = companyPackage;
                         changed = true;
                     }
                     if (changed) info.UpdatedAt = DateTimeOffset.UtcNow;
+                }
+            }
+
+            // --- Auto-close sponsor tasks whose deliverable is already on file ----
+            // When the hub already holds the data a task asks for, mark the matching
+            // OPEN sponsor task Done so a sponsor who did the work via Company Details
+            // doesn't keep seeing a stale "to-do". DIRECTION-GUARDED: this only ever
+            // flips Open -> Done and NEVER reopens, so a task a sponsor manually
+            // reopened (or an organizer closed) is left exactly as they set it
+            // (respecting manual reopen). Idempotent: re-running only touches rows
+            // that still need it; CompletedAt is stamped only when still null. The
+            // SourceKey slugs below are the Slug() of the JSON task titles
+            // ("Register booth members", "Upload sponsor wall design in vector
+            // format", "Initial onboarding of sponsor"). Signals are hub data only:
+            //   • booth members  -> >=1 active (non-tombstoned) SponsorBoothMember
+            //   • wall upload     -> >=1 file seen by the watcher in the SPONSORWALL folder
+            //   • company overview-> a saved SponsorInfo.CompanyDescription
+            var boothMembersOnFile = await _db.SponsorBoothMembers.AnyAsync(
+                m => m.EventId == activeEvent.Id
+                     && m.SponsorCompanyId == companyId
+                     && m.DeletedAt == null, ct);
+            var wallUploadOnFile = await _db.SponsorUploadFiles.AnyAsync(
+                f => f.Location.EventId == activeEvent.Id
+                     && f.Location.SponsorCompanyId == companyId
+                     && f.Location.FolderKey == "SPONSORWALL", ct);
+            var overviewOnFile = await _db.SponsorInfos.AnyAsync(
+                s => s.EventId == activeEvent.Id
+                     && s.SponsorCompanyId == companyId
+                     && s.CompanyDescription != null
+                     && s.CompanyDescription != "", ct);
+
+            var keysToClose = new HashSet<string>(StringComparer.Ordinal);
+            if (boothMembersOnFile) keysToClose.Add($"sponsor:{companyId}:register-booth-members");
+            if (wallUploadOnFile)   keysToClose.Add($"sponsor:{companyId}:upload-sponsor-wall-design-in-vector-format");
+            if (overviewOnFile)     keysToClose.Add($"sponsor:{companyId}:initial-onboarding-of-sponsor");
+
+            if (keysToClose.Count > 0)
+            {
+                var toClose = await _db.Tasks
+                    .Where(t => t.EventId == activeEvent.Id
+                                && t.State == TaskState.Open
+                                && t.SourceKey != null
+                                && keysToClose.Contains(t.SourceKey))
+                    .ToListAsync(ct);
+                foreach (var t in toClose)
+                {
+                    t.State = TaskState.Done;
+                    t.CompletedAt ??= DateTimeOffset.UtcNow;
                 }
             }
         }
@@ -517,6 +587,21 @@ public sealed class SponsorOrderPullService
                 _log.LogWarning(ex,
                     "SponsorOrderPullService: failed to provision SharePoint folder '{Path}' for {Co}; "
                     + "task description will fall back to {{uploadPortalUrl}}.",
+                    relPath, companyName);
+            }
+            // §102: a slow SharePoint call can surface a TaskCanceledException
+            // (HttpClient timeout) rather than a SharePointUploadException — that
+            // previously bubbled out and FAILED the whole WooCommerce pull (the
+            // 13:32 engine alert). Treat any non-shutdown transient failure as a
+            // per-folder skip + continue so one slow SharePoint call never aborts
+            // the pull. A REAL host-shutdown cancellation (our ct) still propagates.
+            catch (Exception ex) when (ex is not OperationCanceledException
+                                       || !ct.IsCancellationRequested)
+            {
+                _log.LogWarning(ex,
+                    "SponsorOrderPullService: transient/slow SharePoint failure provisioning "
+                    + "'{Path}' for {Co} (e.g. Graph HttpClient timeout); skipping this folder "
+                    + "and continuing the pull.",
                     relPath, companyName);
             }
         }

@@ -2,6 +2,7 @@ using CommunityHub.Auth;
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
 using CommunityHub.Core.Organizer;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -24,7 +25,11 @@ namespace CommunityHub.Api;
 /// own data), is NOT an organizer (cannot reach organizer-only areas), and
 /// cannot start a further impersonation.
 /// </summary>
+// Anonymous to the cookie scheme: the secure secretary token IS the credential and no
+// prior login is required (it MINTS the acting-as session). An invalid/expired token
+// returns 404. Must opt out of the fail-closed FallbackPolicy.
 [ApiController]
+[AllowAnonymous]
 public sealed class SecretaryController : ControllerBase
 {
     private readonly SecretaryTokenService _tokens;

@@ -130,8 +130,8 @@ test.describe('@gui §9/§10/§11 Organizer hub', () => {
 
         await page.goto(`${BASE}/Organizer/SessionizeImport`, { waitUntil: 'domcontentloaded' });
         await expect(page.locator('h2', { hasText: /Import speakers/i })).toBeVisible();
-        // The import is a file upload (no network dependency) — the file input exists.
-        await expect(page.locator('input[type="file"][name="UploadFile"]')).toBeVisible();
+        // §82 — Excel upload removed; speakers are imported via the Sessionize API only.
+        await expect(page.locator('input[type="file"][name="UploadFile"]')).toHaveCount(0);
 
         await page.goto(`${BASE}/Organizer/SendInvitations`, { waitUntil: 'domcontentloaded' });
         await expect(page.locator('h2', { hasText: 'Send invitations' })).toBeVisible();

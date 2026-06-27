@@ -52,6 +52,7 @@ public sealed class FormsUxBatchTests
         public Task SendAsync(string toEmail, string subject, string htmlBody, IReadOnlyCollection<string>? cc, CancellationToken ct = default) => Task.CompletedTask;
         public Task SendAsync(string toEmail, string subject, string htmlBody, string textBody, CancellationToken ct = default) => Task.CompletedTask;
         public Task SendWithIcsAsync(string toEmail, string subject, string htmlBody, string ics, string icsFileName, CancellationToken ct = default) => Task.CompletedTask;
+        public Task SendWithAttachmentsAsync(string toEmail, string subject, string htmlBody, IReadOnlyCollection<EmailAttachment> attachments, CancellationToken ct = default) => Task.CompletedTask;
     }
 
     private sealed class HttpContextAccessorOver(HttpContext ctx) : IHttpContextAccessor

@@ -34,10 +34,11 @@ public class IndexModel : PageModel
     private readonly SpeakerDeadlineSeeder _speakerDeadlines;
     private readonly EventEditionConfigLoader _eventConfigLoader;
     private readonly EventConfigOptions _eventConfigOptions;
-    private readonly CommunityHub.Core.Reminders.CalendarFeedTokenService _calendarTokens;
     private readonly CommunityHub.Core.Reminders.ParticipantCalendarBuilder _calendarBuilder;
     private readonly CommunityHub.Core.Participants.ParticipantChecklistBuilder _checklist;
     private readonly CommunityHub.Core.Reminders.SpeakerSessionsService _speakerSessions;
+    private readonly CommunityHub.Core.Domain.VolunteerStructureService _volunteerStructure;
+    private readonly CommunityHub.Core.Participants.FormTaskReconciler _formTaskReconciler;
     private readonly ILogger<IndexModel> _logger;
 
     public IndexModel(
@@ -46,11 +47,12 @@ public class IndexModel : PageModel
         SpeakerDeadlineSeeder speakerDeadlines,
         EventEditionConfigLoader eventConfigLoader,
         EventConfigOptions eventConfigOptions,
-        CommunityHub.Core.Reminders.CalendarFeedTokenService calendarTokens,
         CommunityHub.Core.Reminders.ParticipantCalendarBuilder calendarBuilder,
         CommunityHub.Core.Participants.ParticipantChecklistBuilder checklist,
         CommunityHub.Core.Reminders.SpeakerSessionsService speakerSessions,
         CommunityHub.Core.Reminders.MasterClassSignupService masterClassSignups,
+        CommunityHub.Core.Domain.VolunteerStructureService volunteerStructure,
+        CommunityHub.Core.Participants.FormTaskReconciler formTaskReconciler,
         ILogger<IndexModel> logger)
     {
         _db = db;
@@ -58,11 +60,12 @@ public class IndexModel : PageModel
         _speakerDeadlines = speakerDeadlines;
         _eventConfigLoader = eventConfigLoader;
         _eventConfigOptions = eventConfigOptions;
-        _calendarTokens = calendarTokens;
         _calendarBuilder = calendarBuilder;
         _checklist = checklist;
         _speakerSessions = speakerSessions;
         _masterClassSignups = masterClassSignups;
+        _volunteerStructure = volunteerStructure;
+        _formTaskReconciler = formTaskReconciler;
         _logger = logger;
     }
 
@@ -81,6 +84,11 @@ public class IndexModel : PageModel
     // --- Section visibility (driven by role) --------------------------------
     public bool ShowHotel { get; private set; }
     public bool ShowDinner { get; private set; }
+    /// <summary>Show the Lunch staff card — crew roles (Media + Event partner) who are
+    /// on site and have a lunch headcount, mirroring their Hotel/Dinner cards.</summary>
+    public bool ShowLunch { get; private set; }
+    /// <summary>Show the Swag staff card — same crew roles as <see cref="ShowLunch"/>.</summary>
+    public bool ShowSwag { get; private set; }
     public bool ShowVolunteerShifts { get; private set; }
     /// <summary>Show the "Volunteer work" card (assigned tasks + help): volunteers
     /// (and organizers, who also see the structure tools).</summary>
@@ -99,11 +107,22 @@ public class IndexModel : PageModel
     public int OpenTaskCount { get; private set; }
     public bool HotelSubmitted { get; private set; }
     public bool DinnerSubmitted { get; private set; }
+    public bool LunchSubmitted { get; private set; }
+    public bool SwagSubmitted { get; private set; }
     public bool VolunteerSubmitted { get; private set; }
     public MasterClassBookingStatus? AttendeeBookingStatus { get; private set; }
 
     /// <summary>Title of the attendee's CONFIRMED Master Class (null if none) — same source as /Attendee/Index.</summary>
     public string? AttendeeConfirmedTitle { get; private set; }
+
+    /// <summary>
+    /// True only when the attendee holds the 2-day ticket
+    /// (<see cref="TicketStatus.TwoDay"/>) that grants a Master Class seat. When
+    /// false the card shows a neutral "no Master Class with this ticket" message
+    /// instead of the red "no seat reserved" warning — that warning only makes
+    /// sense for an eligible attendee who has not yet booked.
+    /// </summary>
+    public bool AttendeeMasterClassEligible { get; private set; }
 
     /// <summary>
     /// The unified participant checklist (REQUIREMENTS Top-8 #7) — the SAME shape
@@ -114,20 +133,6 @@ public class IndexModel : PageModel
     public CommunityHub.Core.Participants.ParticipantChecklist Checklist { get; private set; } =
         new(System.Array.Empty<CommunityHub.Core.Participants.ChecklistRow>(),
             System.Array.Empty<CommunityHub.Core.Participants.ChecklistRow>());
-
-    // --- Calendar sync ------------------------------------------------------
-    /// <summary>The participant's iCal feed token (minted on first hub view).</summary>
-    public string CalendarToken { get; private set; } = string.Empty;
-    /// <summary>https://host/cal/{token}.ics — the subscribe/download URL.</summary>
-    public string CalendarHttpsUrl { get; private set; } = string.Empty;
-    /// <summary>webcal://host/cal/{token}.ics — one-click subscribe URL.</summary>
-    public string CalendarWebcalUrl { get; private set; } = string.Empty;
-    /// <summary>
-    /// Whether the organizer has calendar sync enabled for this edition
-    /// (<see cref="Event.CalendarSyncEnabled"/>). When false the "Add to my
-    /// calendar" card is hidden — the feed itself also 404s.
-    /// </summary>
-    public bool CalendarSyncEnabled { get; private set; }
 
     public async Task<IActionResult> OnGetAsync(CancellationToken ct)
     {
@@ -157,13 +162,12 @@ public class IndexModel : PageModel
 
         var ev = await _db.Events
             .Where(e => e.Id == me.EventId)
-            .Select(e => new { e.CommunityName, e.DisplayName, e.CalendarSyncEnabled })
+            .Select(e => new { e.CommunityName, e.DisplayName })
             .FirstOrDefaultAsync(ct);
         if (ev is not null)
         {
             CommunityName = ev.CommunityName;
             EventDisplayName = ev.DisplayName;
-            CalendarSyncEnabled = ev.CalendarSyncEnabled;
         }
 
         // Auto-seed speaker-deadline tasks on every visit by a speaker /
@@ -190,8 +194,7 @@ public class IndexModel : PageModel
         await LoadSectionDataAsync(me, ct);
 
         // Speaker landing card (operator 2026-06-21): show the speaker their own
-        // sessions right on the hub (pending tasks already render via the checklist;
-        // important dates link out to the Calendar).
+        // sessions right on the hub (pending tasks already render via the checklist).
         if (me.Role is ParticipantRole.Speaker)
         {
             SpeakerSessions = await _speakerSessions.GetMySessionsAsync(me.EventId, me.ParticipantId, me.Role, ct);
@@ -203,30 +206,6 @@ public class IndexModel : PageModel
         try { EventDates = _eventConfigLoader.Load(_eventConfigOptions.EventConfigPath).Dates; }
         catch (Exception ex)
         { _logger.LogWarning(ex, "Index: failed to load event dates from {Path}", _eventConfigOptions.EventConfigPath); }
-
-        // Calendar sync: mint (idempotently) the participant's feed token and
-        // build the subscribe/download URLs from the current request host so the
-        // base URL is per-environment (dev vs prod) with no extra config. Skipped
-        // entirely when the organizer has disabled calendar sync for the edition
-        // (CalendarSyncEnabled) — the feed itself 404s, and the card stays hidden.
-        if (CalendarSyncEnabled)
-        {
-            try
-            {
-                CalendarToken = await _calendarTokens.EnsureTokenAsync(me.ParticipantId, ct);
-                var host = Request.Host.Value ?? string.Empty;
-                CalendarHttpsUrl = $"{Request.Scheme}://{host}/cal/{CalendarToken}.ics";
-                // webcal:// makes Outlook/Apple offer "Subscribe" directly; it is the
-                // same path over the same TLS endpoint, just a scheme the OS handles.
-                CalendarWebcalUrl = $"webcal://{host}/cal/{CalendarToken}.ics";
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex,
-                    "Index: failed to ensure calendar feed token for participant {Pid}",
-                    me.ParticipantId);
-            }
-        }
 
         return Page();
     }
@@ -276,7 +255,10 @@ public class IndexModel : PageModel
                 ShowHotel = ShowDinner = ShowSpeakerDeadlines = true;
                 break;
             case ParticipantRole.Volunteer:
-                ShowHotel = ShowDinner = ShowVolunteerShifts = true;
+                // Shift self-signup wizard is deprecated, so ShowVolunteerShifts
+                // is no longer set (operator). Volunteers still get hotel + dinner
+                // + the volunteer-work card.
+                ShowHotel = ShowDinner = true;
                 ShowVolunteerWork = true;
                 break;
             case ParticipantRole.Sponsor:
@@ -284,6 +266,16 @@ public class IndexModel : PageModel
                 break;
             case ParticipantRole.Attendee:
                 ShowAttendeeArea = true;
+                break;
+            case ParticipantRole.Media:
+            case ParticipantRole.EventPartner:
+                // Press/photo/video crew and event-partner orgs attend like staff:
+                // hotel + dinner + the lunch headcount + swag (ParticipantRole.cs /
+                // OrderEntitlements). They are entitled to Lunch + Swag and the nav shows
+                // both, so the hub home surfaces the Lunch/Swag staff cards too (bug fix:
+                // EventPartner was missing the staff surface that Media should also have).
+                ShowHotel = ShowDinner = true;
+                ShowLunch = ShowSwag = true;
                 break;
         }
     }
@@ -297,6 +289,13 @@ public class IndexModel : PageModel
         // per-form cards: Hotel/Dinner/Volunteer-shifts "Submitted" cards <->
         // matching Done task rows.
         await BackfillFormAutoTasksAsync(me, ct);
+
+        // Bring OPEN form-owned + mirroring speaker-deadline tasks in line with the
+        // actual per-form data the participant has already submitted (Hotel/Dinner/
+        // Lunch/Swag/Volunteer/Travel) BEFORE the checklist + cards are computed, so
+        // a submission saved before its form wired up auto-completion isn't shown as
+        // still pending. Idempotent + no-op when nothing needs changing.
+        await _formTaskReconciler.ReconcileAsync(me.EventId, me.ParticipantId, ct);
 
         // The unified checklist (pending/completed + overdue + form deep-links) is
         // built by the SHARED ParticipantChecklistBuilder so the Hub, the Tasks page
@@ -327,6 +326,20 @@ public class IndexModel : PageModel
                      && d.ParticipantId == me.ParticipantId, ct);
         }
 
+        if (ShowLunch)
+        {
+            LunchSubmitted = await _db.LunchSignups.AnyAsync(
+                l => l.EventId == me.EventId
+                     && l.ParticipantId == me.ParticipantId, ct);
+        }
+
+        if (ShowSwag)
+        {
+            SwagSubmitted = await _db.SwagPreferences.AnyAsync(
+                s => s.EventId == me.EventId
+                     && s.ParticipantId == me.ParticipantId, ct);
+        }
+
         if (ShowVolunteerShifts)
         {
             VolunteerSubmitted = await _db.VolunteerAvailabilities.AnyAsync(
@@ -339,9 +352,10 @@ public class IndexModel : PageModel
             MyVolunteerTaskCount = await _db.VolunteerTaskAssignments
                 .CountAsync(a => a.EventId == me.EventId
                                  && a.ParticipantId == me.ParticipantId, ct);
-            IsCategorySupervisor = await _db.VolunteerCategories
-                .AnyAsync(c => c.EventId == me.EventId
-                               && c.SupervisorParticipantId == me.ParticipantId, ct);
+            // Same authority the nav uses — covers the legacy single-supervisor
+            // column AND the multi-supervisor Buckets join table.
+            IsCategorySupervisor = await _volunteerStructure
+                .IsSupervisorAsync(me.EventId, me.ParticipantId, ct);
         }
 
         if (ShowAttendeeArea)
@@ -353,6 +367,10 @@ public class IndexModel : PageModel
             var attendee = await _masterClassSignups.ResolveByEmailAsync(me.EventId, me.Email, ct);
             if (attendee is not null)
             {
+                // Only a 2-day ticket grants a Master Class seat. Drives the card's
+                // neutral-vs-red messaging when no seat is booked.
+                AttendeeMasterClassEligible = attendee.TicketStatus == TicketStatus.TwoDay;
+
                 var mine = await _masterClassSignups.GetForAttendeeAsync(attendee.EventId, attendee.Id, ct);
                 var confirmed = mine.Where(s => s.Status == MasterClassSignupStatus.Confirmed).ToList();
                 AttendeeConfirmedTitle = confirmed.FirstOrDefault()?.Title;
@@ -396,6 +414,26 @@ public class IndexModel : PageModel
         {
             entries.Add(($"dinner-form:{me.ParticipantId}",
                 "Complete the Appreciation Dinner RSVP", null, true));
+        }
+
+        // Lunch: a saved signup row (pre-day and/or main-day) is the completion
+        // signal, mirroring the Hotel/Dinner backfill so entitled roles get the
+        // task proactively.
+        var lunch = await _db.LunchSignups.FirstOrDefaultAsync(
+            l => l.EventId == me.EventId && l.ParticipantId == me.ParticipantId, ct);
+        if (lunch is not null)
+        {
+            entries.Add(($"lunch-form:{me.ParticipantId}",
+                "Complete the Lunch form", null, true));
+        }
+
+        // Swag: a saved preference row is the completion signal.
+        var swag = await _db.SwagPreferences.FirstOrDefaultAsync(
+            s => s.EventId == me.EventId && s.ParticipantId == me.ParticipantId, ct);
+        if (swag is not null)
+        {
+            entries.Add(($"swag-form:{me.ParticipantId}",
+                "Complete the Swag form", null, true));
         }
 
         // Volunteer-shifts: at least one shift picked.

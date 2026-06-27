@@ -7,7 +7,7 @@
 @if (Model.AccessDenied)
 {
     <div class="card">
-        <h2>@Localizer["SpeakerEval.Title"]</h2>
+        <h1>@Localizer["SpeakerEval.Title"]</h1>
         <p class="error">
             @Localizer["SpeakerEval.NotASpeaker", CommunityHub.Branding.RoleDisplay.Name(Model.Role)]
         </p>
@@ -45,8 +45,44 @@
     }
 }
 
+@if (Model.QrConfigured && Model.MySessions.Count > 0)
+{
+    <div class="card">
+        <h2>&#128241; Session-evaluation QR codes</h2>
+        <p style="font-size:13.5px;color:#374151;margin-top:0;">
+            Each room has a printed QR attendees scan to rate your session. Download the QR for your
+            session's room and show it on your closing slide (or have it on hand) so attendees can leave feedback.
+        </p>
+        <ul style="list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:10px;">
+            @foreach (var s in Model.MySessions)
+            {
+                <li style="border:1px solid #e5e7eb;border-radius:10px;padding:12px;display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;justify-content:space-between;">
+                    <div style="min-width:0;flex:1 1 220px;">
+                        <div style="font-weight:700;color:var(--el-darkblue);font-size:15px;">@s.Title</div>
+                        <div style="color:#6b7280;font-size:12.5px;margin-top:2px;">
+                            @if (!string.IsNullOrWhiteSpace(s.Room)) { <text>&#128205; @s.Room</text> }
+                            else { <text>Room to be confirmed</text> }
+                        </div>
+                    </div>
+                    <div style="flex:0 0 auto;">
+                        @if (Model.RoomQr.TryGetValue(s.SessionId, out var qr))
+                        {
+                            <a class="task-link-btn" asp-page-handler="Qr" asp-route-sessionId="@s.SessionId"
+                               download="@qr.FileName">&#11015;&#65039; Download room QR</a>
+                        }
+                        else
+                        {
+                            <span style="color:#6b7280;font-size:12.5px;">QR not available yet</span>
+                        }
+                    </div>
+                </li>
+            }
+        </ul>
+    </div>
+}
+
 <div class="card">
-    <h2>@Localizer["SpeakerEval.Title"]</h2>
+    <h1>@Localizer["SpeakerEval.Title"]</h1>
     <p>@Localizer["SpeakerEval.Intro"]</p>
 
     @if (Model.Result.TotalCount == 0)

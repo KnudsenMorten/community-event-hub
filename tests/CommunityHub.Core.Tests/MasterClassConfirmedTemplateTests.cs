@@ -76,7 +76,7 @@ public sealed class MasterClassConfirmedTemplateTests
         Assert.Contains($"/MasterClassPage/{mc}", m.Html);          // {{landingPageUrl}}
         Assert.Contains("MyMasterClass.ics", m.Html);               // {{icsUrl}}
         Assert.Contains("MyMasterClass?t=", m.Html);                // {{selfServiceUrl}}
-        // Generic publish-safe default: neutral sign-off, no ELDK-specific names.
-        Assert.Contains("The team", m.Html);
+        // §89: the "See you there, / The team" sign-off has been removed.
+        Assert.DoesNotContain("The team", m.Html);
     }
 }

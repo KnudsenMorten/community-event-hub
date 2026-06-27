@@ -5,7 +5,7 @@
     string Stamp(DateTimeOffset at) => at.UtcDateTime.ToString("d MMM yyyy HH:mm 'UTC'");
 }
 
-<div style="max-width:760px;margin:0 auto;padding:16px;">
+<div style="max-width:760px;margin:0 auto;padding:16px;box-sizing:border-box;overflow-wrap:anywhere;">
     @if (Model.NotFoundState)
     {
         <h1>Master Class not found</h1>
@@ -71,7 +71,7 @@
             }
             else
             {
-                <div style="white-space:pre-wrap;line-height:1.55;">@Model.View.LogisticsText</div>
+                <div style="white-space:pre-wrap;line-height:1.55;overflow-wrap:anywhere;">@Model.View.LogisticsText</div>
                 @if (Model.View.LogisticsUpdatedAt is { } lu)
                 {
                     <p style="color:#888;font-size:.85rem;margin-top:8px;">Last updated @Stamp(lu)</p>
@@ -88,7 +88,7 @@
             }
             else
             {
-                <div style="white-space:pre-wrap;line-height:1.55;">@Model.View.PrepContent</div>
+                <div style="white-space:pre-wrap;line-height:1.55;overflow-wrap:anywhere;">@Model.View.PrepContent</div>
                 @if (Model.View.PrepUpdatedAt is { } pu)
                 {
                     <p style="color:#888;font-size:.85rem;margin-top:8px;">Last updated @Stamp(pu)</p>

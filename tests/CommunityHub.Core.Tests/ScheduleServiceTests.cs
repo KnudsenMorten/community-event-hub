@@ -39,7 +39,15 @@ public class ScheduleServiceTests
     {
         var d = ScheduleService.BuildDefault(1, Start, End);
 
-        Assert.Equal(9, d.Count);
+        Assert.Equal(10, d.Count);
+
+        // §122: a SPONSOR-only "booth photos" key date on the pre-day, 11:00–14:00.
+        var booth = Assert.Single(d, e => e.Title.Contains("booth photos"));
+        Assert.Equal("sponsor", booth.Roles);
+        Assert.False(booth.AllDay);
+        Assert.Equal(11, booth.StartsAt.Hour);
+        Assert.Equal(14, booth.EndsAt!.Value.Hour);
+        Assert.Equal(Start, DateOnly.FromDateTime(booth.StartsAt.DateTime));
         // Move-in is 4 days before the pre-day; main day is the end date.
         Assert.Equal(Start.AddDays(-4), DateOnly.FromDateTime(d.First().StartsAt.DateTime));
         Assert.Contains(d, e => e.Title.Contains("Move-in") && e.Roles == "organizer" && e.AllDay);
@@ -72,6 +80,8 @@ public class ScheduleServiceTests
         var sponsor = await svc.GetForRoleAsync(ev, ParticipantRole.Sponsor);
         Assert.DoesNotContain(sponsor, e => e.Title == "Group photo");    // all except sponsors
         Assert.Contains(sponsor, e => e.Title == "Appreciation Dinner");  // 'all'
+        Assert.Contains(sponsor, e => e.Title.Contains("booth photos"));  // §122 sponsor-only
+        Assert.DoesNotContain(speaker, e => e.Title.Contains("booth photos")); // not for speakers
 
         var organizer = await svc.GetForRoleAsync(ev, ParticipantRole.Organizer);
         Assert.Contains(organizer, e => e.Title.Contains("Move-in"));
@@ -84,9 +94,9 @@ public class ScheduleServiceTests
         var ev = await SeedEventAsync(db);
         var svc = new ScheduleService(db);
 
-        // No rows yet -> derived default (9), not persisted.
+        // No rows yet -> derived default (10), not persisted.
         var derived = await svc.GetEffectiveAsync(ev);
-        Assert.Equal(9, derived.Count);
+        Assert.Equal(10, derived.Count);
         Assert.Empty(await svc.GetAllAsync(ev));
 
         // Persist one custom row -> effective becomes the persisted set only.
@@ -110,12 +120,12 @@ public class ScheduleServiceTests
         var svc = new ScheduleService(db);
 
         var first = await svc.EnsureSeededAsync(ev, "mok@expertslive.dk");
-        Assert.Equal(9, first);
-        Assert.Equal(9, (await svc.GetAllAsync(ev)).Count);
+        Assert.Equal(10, first);
+        Assert.Equal(10, (await svc.GetAllAsync(ev)).Count);
         Assert.All(await svc.GetAllAsync(ev), e => Assert.Equal("mok@expertslive.dk", e.LastUpdatedByEmail));
 
         var second = await svc.EnsureSeededAsync(ev, "someone@else");
         Assert.Equal(0, second);                       // already seeded -> no-op
-        Assert.Equal(9, (await svc.GetAllAsync(ev)).Count);
+        Assert.Equal(10, (await svc.GetAllAsync(ev)).Count);
     }
 }

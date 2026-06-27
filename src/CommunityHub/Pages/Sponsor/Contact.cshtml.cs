@@ -42,8 +42,12 @@ public class ContactModel : PageModel
     /// <summary>Set when a non-sponsor reaches the page (server-side gate, not CSS).</summary>
     public bool AccessDenied { get; private set; }
 
-    public string LeadName  { get; private set; } = "Morten Knudsen";
-    public string LeadEmail { get; private set; } = "mok@expertslive.dk";
+    // Neutral, no-real-name fallbacks. The real lead name/email come from the
+    // edition config placeholders (leadContactName / leadContactEmail) in
+    // OnGetAsync; these defaults only apply when an edition hasn't set them, so
+    // we never bake a personal name/address into the code.
+    public string LeadName  { get; private set; } = "Sponsor Team";
+    public string LeadEmail { get; private set; } = string.Empty;
     public string? BookingsUrl { get; private set; }
     public string EditionCode { get; private set; } = string.Empty;
 
@@ -63,6 +67,10 @@ public class ContactModel : PageModel
         EditionCode = cfg.Code ?? string.Empty;
         if (cfg.Placeholders.TryGetValue("leadContactName", out var n) && !string.IsNullOrWhiteSpace(n)) LeadName = n;
         if (cfg.Placeholders.TryGetValue("leadContactEmail", out var e) && !string.IsNullOrWhiteSpace(e)) LeadEmail = e;
+        // Fall back to the edition's generic support mailbox (no personal name) so the
+        // mailto still works when no specific lead contact email is configured.
+        if (string.IsNullOrWhiteSpace(LeadEmail)
+            && cfg.Placeholders.TryGetValue("supportEmail", out var se) && !string.IsNullOrWhiteSpace(se)) LeadEmail = se;
         if (cfg.Placeholders.TryGetValue("bookingsUrl", out var b) && !string.IsNullOrWhiteSpace(b)) BookingsUrl = b;
 
         // Resolve the sponsor's company display name for the mailto subject

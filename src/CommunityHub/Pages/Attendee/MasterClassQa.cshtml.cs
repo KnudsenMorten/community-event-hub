@@ -30,8 +30,6 @@ public class MasterClassQaModel : PageModel
         _svc = svc;
     }
 
-    [TempData] public string? Notice { get; set; }
-
     public async Task<IActionResult> OnGetAsync(CancellationToken ct)
     {
         var me = _participant.Current;
@@ -49,7 +47,10 @@ public class MasterClassQaModel : PageModel
             }
         }
 
-        Notice = "Reserve a Master Class seat first — its Q&A opens once you're confirmed.";
+        // No confirmed seat — flash an INFO notice (a no-op redirect, not a green
+        // "done") via the shared TempData flash so /Attendee/Index actually shows it.
+        TempData["Flash"] = "Reserve a Master Class seat first — its Q&A opens once you're confirmed.";
+        TempData["FlashKind"] = "info";
         return RedirectToPage("/Attendee/Index");
     }
 }

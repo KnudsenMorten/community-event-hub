@@ -5,7 +5,7 @@
 }
 
 <div class="card">
-    <h2>@Localizer["VolWiz.Title"]</h2>
+    <h1>@Localizer["VolWiz.Title"]</h1>
 
     @* Shared success/error toast (REQUIREMENTS §21): success when a step/finish
        saved, error when editing is locked. role=status/alert, dismissable. *@
@@ -94,6 +94,13 @@
             </p>
             <p>@Localizer["VolWiz.PreferredRoleLabel"] @(string.IsNullOrWhiteSpace(Model.PreferredRole) ? Localizer["Common.None"].Value : Model.PreferredRole)</p>
             <p>@Localizer["VolWiz.MaxHoursLabel"] @Model.MaxHoursPerDay</p>
+
+            <p style="color:#6b7280;font-size:13px;line-height:1.6;margin:12px 0;">
+                By confirming, you agree to our
+                <a href="https://expertslive.dk/code-of-conduct/" target="_blank" rel="noopener">Code of Conduct</a>
+                and
+                <a href="https://expertslive.dk/privacy-policy/" target="_blank" rel="noopener">Privacy Policy</a>.
+            </p>
 
             <form method="post" asp-page-handler="Finish">
                 <input type="hidden" name="Step" value="3" />

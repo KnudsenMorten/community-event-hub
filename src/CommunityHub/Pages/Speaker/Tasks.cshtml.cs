@@ -2,6 +2,7 @@ using CommunityHub.Auth;
 using CommunityHub.Core.Config;
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
+using CommunityHub.Core.Participants;
 using CommunityHub.Core.Reminders;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -25,17 +26,20 @@ public class TasksModel : PageModel
     private readonly CommunityHubDbContext _db;
     private readonly ICurrentParticipantAccessor _participant;
     private readonly SpeakerDeadlineSeeder _seeder;
+    private readonly FormTaskReconciler _formTaskReconciler;
     private readonly SpeakerMilestoneService _milestones;
 
     public TasksModel(
         CommunityHubDbContext db,
         ICurrentParticipantAccessor participant,
         SpeakerDeadlineSeeder seeder,
+        FormTaskReconciler formTaskReconciler,
         SpeakerMilestoneService milestones)
     {
         _db = db;
         _participant = participant;
         _seeder = seeder;
+        _formTaskReconciler = formTaskReconciler;
         _milestones = milestones;
     }
 
@@ -50,6 +54,11 @@ public class TasksModel : PageModel
 
         // Ensure this speaker's deadline tasks exist (idempotent), then load them.
         try { await _seeder.SeedAsync(me.EventId, ct); } catch { /* tolerate seed hiccup */ }
+
+        // Mark any OPEN logistics deadline tasks Done where the speaker has already
+        // submitted the matching form data (hotel/dinner/lunch/swag/travel), so the
+        // list reflects real completion. Idempotent + no-op when nothing changed.
+        await _formTaskReconciler.ReconcileAsync(me.EventId, me.ParticipantId, ct);
 
         Tasks = await _db.Tasks
             .Where(t => t.EventId == me.EventId

@@ -1,0 +1,38 @@
+@* Absolute route so the URL is /Info/{slug} (not /Info/Page/{slug}, the
+   default for a file named Page.cshtml). Nav links: asp-page="/Info/Page"
+   asp-route-slug="wayfinding". *@
+@page "/Info/{slug}"
+@model CommunityHub.Pages.Info.InfoPageModel
+@{
+    ViewData["Title"] = Model.Content.Title;
+}
+
+<style>
+    /* Mobile-first: keep floor-plan / feedback images inside the card on phones. */
+    .content-page img { max-width: 100%; height: auto; border-radius: 8px; margin: 8px 0; }
+    .content-page h2 { color: var(--el-darkblue); }
+    .content-page h3 { color: var(--el-darkblue); margin: 18px 0 4px; }
+    .content-page blockquote {
+        border-left: 4px solid var(--el-darkblue);
+        margin: 12px 0; padding: 4px 14px; background: #f7f9fc; color: #374151;
+    }
+</style>
+
+<div class="card content-page">
+    @if (Model.ContentMissing)
+    {
+        <h2>@Model.Content.Title</h2>
+        <p class="info" style="background:#eef6ff;padding:10px 14px;border-radius:6px;">
+            This content is not available yet &mdash; the organizers will add it
+            closer to the event. Please check back soon.
+        </p>
+    }
+    else
+    {
+        @* Trusted, in-repo operator markdown rendered to HTML by ContentMarkdownRenderer.
+           The leading H1 in each .md file serves as the page heading. *@
+        @Model.BodyHtml
+    }
+
+    <p><a asp-page="/Index">Back to hub</a></p>
+</div>

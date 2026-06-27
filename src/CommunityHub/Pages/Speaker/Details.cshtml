@@ -5,7 +5,7 @@
 }
 
 <div class="card">
-    <h2>Speaker Details</h2>
+    <h1>Speaker Details</h1>
 
     @if (Model.AccessDenied)
     {
@@ -77,7 +77,7 @@
             }
 
             <h3 style="color:var(--el-darkblue);margin-top:20px;">Microsoft accreditation</h3>
-            <p style="color:#6b7280;font-size:12px;margin-top:0;">Tick all that apply — these become your Zoho speaker <strong>Skills</strong> (comma-separated) when you sync.</p>
+            <p style="color:#6b7280;font-size:12px;margin-top:0;">Tick all that apply.</p>
             <div style="display:flex;flex-direction:column;gap:6px;margin:4px 0 6px;">
                 @foreach (var opt in CommunityHub.Pages.Speaker.DetailsModel.AccreditationOptions)
                 {
@@ -124,8 +124,13 @@
                 <p style="color:#6b7280;font-size:12px;margin-top:14px;">Last Sessionize import: @Model.LastSessionizeImportAt?.ToString("dd/MM/yyyy HH:mm 'UTC'")</p>
             }
 
-            <div style="margin-top:14px;">
-                <button type="submit" asp-page-handler="SaveAndSync" data-ceh-loading-text="Saving &amp; syncing…">Save &amp; sync to Zoho</button>
+            <div style="margin-top:14px;display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+                @* Plain "Save" keeps your edits in the hub WITHOUT touching Zoho — so a
+                   small tweak never re-emails the organizers (the manual-update alert).
+                   "Save & sync to Zoho" also pushes to Backstage. *@
+                <button type="submit" asp-page-handler="Save" data-ceh-loading-text="Saving…">Save</button>
+                <button type="submit" asp-page-handler="SaveAndSync" class="secondary" data-ceh-loading-text="Saving &amp; syncing…">Save &amp; sync to Zoho</button>
+                <partial name="_LastSaved" model="Model.LastSavedAt" />
             </div>
         </form>
 

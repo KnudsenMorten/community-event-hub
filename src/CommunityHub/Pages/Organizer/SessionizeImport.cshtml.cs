@@ -8,20 +8,14 @@ using Microsoft.AspNetCore.Mvc.RazorPages;
 namespace CommunityHub.Pages.Organizer;
 
 /// <summary>
-/// Organizer page to import speakers from a Sessionize Excel export
-/// (CONTEXT.md / DESIGN_NOTES). The organizer downloads the speaker list from
-/// Sessionize as .xlsx and uploads it here; the import upserts Participant
-/// rows (role Speaker). Organizer-only.
+/// Organizer page to import speakers from the Sessionize v2 view API. The pull
+/// upserts Participant rows (role Speaker), matched by email. Organizer-only.
+/// (The legacy Excel/.xlsx upload path was removed — §82, API-only now.)
 /// </summary>
 [Authorize]
 public class SessionizeImportModel : PageModel
 {
-    // Accept only spreadsheet uploads, and cap the size - a speaker list is small.
-    private const long MaxUploadBytes = 5 * 1024 * 1024; // 5 MB
-    private static readonly string[] AllowedExtensions = { ".xlsx", ".xlsm" };
-
     private readonly ICurrentParticipantAccessor _participant;
-    private readonly SessionizeImportService _import;
     private readonly SessionizeApiImportService _apiImport;
     private readonly SessionizeImportPreviewService _preview;
     private readonly CommunityHub.Core.Integrations.SessionizeApiOptions _apiOptions;
@@ -30,7 +24,6 @@ public class SessionizeImportModel : PageModel
 
     public SessionizeImportModel(
         ICurrentParticipantAccessor participant,
-        SessionizeImportService import,
         SessionizeApiImportService apiImport,
         SessionizeImportPreviewService preview,
         CommunityHub.Core.Integrations.SessionizeApiOptions apiOptions,
@@ -38,16 +31,12 @@ public class SessionizeImportModel : PageModel
         CommunityHub.Core.Settings.RingResolver rings)
     {
         _participant = participant;
-        _import = import;
         _apiImport = apiImport;
         _preview = preview;
         _apiOptions = apiOptions;
         _gate = gate;
         _rings = rings;
     }
-
-    [BindProperty]
-    public IFormFile? UploadFile { get; set; }
 
     public bool AccessDenied { get; private set; }
     public SessionizeImportResult? Result { get; private set; }
@@ -81,40 +70,6 @@ public class SessionizeImportModel : PageModel
         {
             AccessDenied = true;
         }
-        return Page();
-    }
-
-    public async Task<IActionResult> OnPostImportAsync(CancellationToken ct)
-    {
-        var me = _participant.Current;
-        if (me is null) return RedirectToPage("/Login");
-        if (!OrganizerAuth.IsRealOrganizer(me))
-        {
-            AccessDenied = true;
-            return Page();
-        }
-
-        // GATE (REQUIREMENTS §23): the manual import honours the SAME per-edition
-        // 'sessionize-import' switch as the scheduled job, AND the same ring-aware
-        // rollout — the organizer only runs it when their effective ring ≤ the
-        // feature's released ring (GUI state == actual behaviour). Disabled / not
-        // yet released to their ring ⇒ no-op with a clear message.
-        if (!await IsSessionizeImportActiveForMeAsync(me, ct))
-        {
-            ValidationError = "Sessionize import is turned off for this event. "
-                + "Enable it in Settings to import speakers.";
-            return Page();
-        }
-
-        if (!ValidateUpload())
-        {
-            return Page();
-        }
-
-        await using var stream = UploadFile!.OpenReadStream();
-        // sendWelcome:false -- this organizer-driven button never emails anyone.
-        // Welcome emails are sent manually from the participants page when ready.
-        Result = await _import.ImportAsync(me.EventId, stream, ct, sendWelcome: false);
         return Page();
     }
 
@@ -158,65 +113,10 @@ public class SessionizeImportModel : PageModel
     }
 
     /// <summary>
-    /// DRY-RUN an uploaded Excel export in FULL mode (no writes): the same
-    /// counts + would-overwrite preview as the API path, for the file source.
-    /// Organizer-only.
-    /// </summary>
-    public async Task<IActionResult> OnPostPreviewUploadAsync(CancellationToken ct)
-    {
-        var me = _participant.Current;
-        if (me is null) return RedirectToPage("/Login");
-        if (!OrganizerAuth.IsRealOrganizer(me))
-        {
-            AccessDenied = true;
-            return Page();
-        }
-
-        if (!ValidateUpload())
-        {
-            return Page();
-        }
-
-        await using var stream = UploadFile!.OpenReadStream();
-        Preview = await _preview.PreviewExcelAsync(
-            me.EventId, stream, SessionizeImportMode.Full, ct);
-        if (Preview.Error is not null)
-        {
-            ValidationError = Preview.Error;
-        }
-        return Page();
-    }
-
-    /// <summary>
-    /// Validate the uploaded file (presence, size, extension). Sets
-    /// <see cref="ValidationError"/> and returns false on failure.
-    /// </summary>
-    private bool ValidateUpload()
-    {
-        if (UploadFile is null || UploadFile.Length == 0)
-        {
-            ValidationError = "Please choose a file to upload.";
-            return false;
-        }
-        if (UploadFile.Length > MaxUploadBytes)
-        {
-            ValidationError = "The file is too large (limit 5 MB).";
-            return false;
-        }
-        var ext = Path.GetExtension(UploadFile.FileName).ToLowerInvariant();
-        if (!AllowedExtensions.Contains(ext))
-        {
-            ValidationError = "Please upload an Excel file (.xlsx).";
-            return false;
-        }
-        return true;
-    }
-
-    /// <summary>
     /// Pull speakers straight from the configured Sessionize v2 view API
     /// (no file), DELTA mode: add new speakers + fill empty/untouched bio
-    /// fields, never flush a speaker's own edits. Same sendWelcome:false safety
-    /// as the upload path. Organizer-only.
+    /// fields, never flush a speaker's own edits. sendWelcome:false — the
+    /// organizer-driven pull never emails anyone. Organizer-only.
     /// </summary>
     public Task<IActionResult> OnPostApiAsync(CancellationToken ct) =>
         RunApiImportAsync(SessionizeImportMode.Delta, ct);
@@ -249,8 +149,8 @@ public class SessionizeImportModel : PageModel
         }
 
         // GATE (REQUIREMENTS §23): same ring-aware 'sessionize-import' gate as the
-        // scheduled pull + the Excel import above. Disabled / not released to the
-        // organizer's ring ⇒ no-op with a clear "feature disabled" message.
+        // scheduled pull. Disabled / not released to the organizer's ring ⇒ no-op
+        // with a clear "feature disabled" message.
         if (!await IsSessionizeImportActiveForMeAsync(me, ct))
         {
             ValidationError = "Sessionize import is turned off for this event. "

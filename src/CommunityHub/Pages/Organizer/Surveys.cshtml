@@ -9,7 +9,7 @@
 @if (Model.AccessDenied)
 {
     <div class="card">
-        <h2>@Localizer["Common.OrganizersOnly"]</h2>
+        <h1>@Localizer["Common.OrganizersOnly"]</h1>
         <p><a asp-page="/Index">@Localizer["Common.BackToHub"]</a></p>
     </div>
     return;
@@ -85,7 +85,7 @@
 </style>
 
 <div class="card">
-    <h2 style="margin-top:0;">@Localizer["OrgSurveys.Title"]</h2>
+    <h1 style="margin-top:0;">@Localizer["OrgSurveys.Title"]</h1>
     <p class="sv-intro">@Localizer["OrgSurveys.Intro"]</p>
     <p><a asp-page="/Organizer/Content">&larr; @Localizer["Common.BackToOrganizerArea"]</a></p>
 </div>

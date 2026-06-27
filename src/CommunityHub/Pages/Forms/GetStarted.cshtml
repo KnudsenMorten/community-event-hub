@@ -1,0 +1,76 @@
+@page
+@model CommunityHub.Pages.Forms.GetStartedModel
+@{
+    ViewData["Title"] = Localizer["RoleWiz.Title"].Value;
+
+    // Resx label/description per step key (design A — keys come from the service).
+    string StepTitle(string key) => Localizer["RoleWiz.Step." + key].Value;
+    string StepDesc(string key) => Localizer["RoleWiz.Step." + key + ".Desc"].Value;
+}
+
+<div class="card">
+    <h1>@Localizer["RoleWiz.Title"]</h1>
+
+    @if (Model.AccessDenied)
+    {
+        <p class="error">@Localizer["RoleWiz.AccessDenied"]</p>
+        <p><a asp-page="/Index">@Localizer["Common.BackToHub"]</a></p>
+    }
+    else if (Model.View is null || Model.View.EntitledCount == 0)
+    {
+        <p class="info">@Localizer["RoleWiz.Nothing"]</p>
+        <p><a asp-page="/Index">@Localizer["Common.BackToHub"]</a></p>
+    }
+    else
+    {
+        var v = Model.View;
+        <p>@Localizer["RoleWiz.Intro"]</p>
+
+        @* Progress bar + chips *@
+        <div style="margin:14px 0;">
+            <div style="display:flex;justify-content:space-between;font-size:13px;color:#4b5563;margin-bottom:4px;">
+                <span>@Localizer["RoleWiz.Progress", v.DoneCount, v.EntitledCount]</span>
+                <span>@v.Percent%</span>
+            </div>
+            <div style="height:10px;background:#eef2f7;border-radius:999px;overflow:hidden;" role="progressbar"
+                 aria-valuenow="@v.Percent" aria-valuemin="0" aria-valuemax="100">
+                <div style="height:100%;width:@(v.Percent)%;background:var(--el-blue,#008BD2);border-radius:999px;"></div>
+            </div>
+        </div>
+
+        @if (v.AllDone)
+        {
+            <p class="success" style="font-size:16px;">🎉 @Localizer["RoleWiz.AllDone"]</p>
+            <p><a asp-page="/Index" class="btn-primary">@Localizer["Onboard.GoToHub"]</a></p>
+        }
+        else if (v.NextStep is not null)
+        {
+            <p>
+                <a asp-page="@v.NextStep.Route" class="btn-primary">
+                    @Localizer["RoleWiz.Continue", v.NextStepNumber, v.EntitledCount]: @StepTitle(v.NextStep.Key)
+                </a>
+            </p>
+        }
+    }
+</div>
+
+@if (!Model.AccessDenied && Model.View is not null && Model.View.EntitledCount > 0)
+{
+    <ol class="card" style="list-style:none;padding:14px;margin-top:14px;display:flex;flex-direction:column;gap:10px;">
+        @{ var n = 0; }
+        @foreach (var step in Model.View.Steps)
+        {
+            n++;
+            <li style="display:flex;align-items:flex-start;gap:12px;padding:10px;border:1px solid #e6eaf2;border-radius:10px;@(step.Done ? "background:#f3fbf5;" : "")">
+                <span aria-hidden="true" style="font-size:20px;line-height:1.2;flex:0 0 auto;">@(step.Done ? "✅" : "⬜")</span>
+                <span style="flex:1;">
+                    <strong>@n. @StepTitle(step.Key)</strong>
+                    <span class="muted" style="display:block;font-size:13px;">@StepDesc(step.Key)</span>
+                </span>
+                <a asp-page="@step.Route" class="@(step.Done ? "" : "btn-primary")" style="flex:0 0 auto;align-self:center;">
+                    @(step.Done ? Localizer["RoleWiz.Edit"].Value : Localizer["RoleWiz.Start"].Value)
+                </a>
+            </li>
+        }
+    </ol>
+}

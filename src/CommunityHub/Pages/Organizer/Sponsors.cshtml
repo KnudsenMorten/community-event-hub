@@ -7,7 +7,7 @@
 @* data-ceh-grid: animated loading skeleton while a filter/sort/page navigation
    is in flight (REQUIREMENTS §21). Pure progressive enhancement. *@
 <div class="card ceh-grid" data-ceh-grid data-ceh-grid-loading="@Localizer["OrgGrid.Loading"]">
-    <h2>Sponsors</h2>
+    <h1>Sponsors</h1>
     @if (Model.AccessDenied)
     {
         <p class="error">This area is for organizers only.</p>
@@ -87,7 +87,7 @@
                 <thead>
                     <tr style="border-bottom:2px solid #ddd;text-align:left;">
                         <th scope="col" style="padding:6px;" aria-sort="@Model.AriaSort("company")">
-                            <a asp-page="/Organizer/Sponsors" asp-route-Search="@Model.Search" asp-route-Sort="company" asp-route-Desc="@Model.NextDescFor("company")" asp-route-PageNo="1">Company id@Model.SortIndicator("company")</a>
+                            <a asp-page="/Organizer/Sponsors" asp-route-Search="@Model.Search" asp-route-Sort="company" asp-route-Desc="@Model.NextDescFor("company")" asp-route-PageNo="1">Company@Model.SortIndicator("company")</a>
                         </th>
                         <th scope="col" style="padding:6px;" aria-sort="@Model.AriaSort("contacts")">
                             <a asp-page="/Organizer/Sponsors" asp-route-Search="@Model.Search" asp-route-Sort="contacts" asp-route-Desc="@Model.NextDescFor("contacts")" asp-route-PageNo="1">Contacts@Model.SortIndicator("contacts")</a>
@@ -115,13 +115,15 @@
                     {
                         var rowBg = c.Overdue > 0 ? "background:#fff5f5;" : "";
                         <tr style="border-bottom:1px solid #eee;@(rowBg)">
-                            <td style="padding:6px;font-family:monospace;">
-                                @* Drill down to this company's sponsor contacts on the Participants grid. *@
+                            <td style="padding:6px;">
+                                @* Drill down to this company's sponsor contacts on the Participants grid.
+                                   Show the resolved public company name; keep the raw id as a small subline. *@
                                 <a asp-page="/Organizer/Participants"
                                    asp-route-SponsorCompanyFilter="@c.CompanyId"
                                    asp-route-RoleFilter="Sponsor"
                                    asp-route-ActiveFilter="all"
-                                   title="View this company's participants">@c.CompanyId</a>
+                                   title="View this company's participants">@c.CompanyName</a>
+                                <div style="color:#8a8f9c;font-size:11px;font-family:monospace;">id @c.CompanyId</div>
                             </td>
                             <td style="padding:6px;">
                                 @if (c.Contacts.Count == 0)

@@ -60,6 +60,24 @@ public class HotelModel : PageModel
     public bool IsLocked { get; private set; }
     public string? Message { get; private set; }
 
+    /// <summary>REQUIREMENTS §51 — when this hotel booking was last saved (UpdatedAt); null = never saved.</summary>
+    public DateTimeOffset? LastSavedAt { get; private set; }
+
+    /// <summary>
+    /// The booking confirmation number for the participant's assigned hotel
+    /// (REQUIREMENTS §46). Read-only on this form — organizers set it on
+    /// <c>/Organizer/Hotels</c>; null/blank until the hotel confirms. When set, the
+    /// reservation is [CONFIRMED] and the participant has been re-sent an updated
+    /// calendar invite carrying this number.
+    /// </summary>
+    public string? HotelConfirmationNumber { get; private set; }
+
+    /// <summary>The name of the hotel the participant is placed in (for the read-only confirmation block).</summary>
+    public string? AssignedHotelName { get; private set; }
+
+    /// <summary>True once the assigned hotel carries a confirmation number — the reservation is CONFIRMED.</summary>
+    public bool IsReservationConfirmed => !string.IsNullOrWhiteSpace(HotelConfirmationNumber);
+
     /// <summary>The signed-in participant's role — drives the role-specific hotel policy text.</summary>
     public ParticipantRole Role { get; private set; }
 
@@ -111,6 +129,28 @@ public class HotelModel : PageModel
             CheckOutDate = existing.CheckOutDate;
             RoomShareWith = existing.RoomShareWith;
             Notes = existing.Notes;
+            LastSavedAt = existing.UpdatedAt;
+        }
+
+        // Read-only reservation confirmation (REQUIREMENTS §46): surface the assigned
+        // hotel's booking confirmation number + name. Set by organizers; the
+        // participant only views it. The hotel-level number wins; if it is blank we
+        // fall back to the per-person number an organizer may have set in assignments.
+        var placement = await _db.Participants
+            .Where(p => p.Id == me.ParticipantId && p.EventId == me.EventId)
+            .Select(p => new
+            {
+                HotelName = p.Hotel != null ? p.Hotel.Name : null,
+                HotelLevelNumber = p.Hotel != null ? p.Hotel.ConfirmationNumber : null,
+                PerPersonNumber = p.HotelConfirmationNumber,
+            })
+            .FirstOrDefaultAsync(ct);
+        if (placement is not null)
+        {
+            AssignedHotelName = placement.HotelName;
+            HotelConfirmationNumber = !string.IsNullOrWhiteSpace(placement.HotelLevelNumber)
+                ? placement.HotelLevelNumber
+                : placement.PerPersonNumber;
         }
         return Page();
     }
@@ -170,6 +210,7 @@ public class HotelModel : PageModel
                 EventId = me.EventId,
                 ParticipantId = me.ParticipantId,
                 CreatedAt = _clock.GetUtcNow(),
+                UpdatedAt = _clock.GetUtcNow(),
             };
             _db.HotelBookings.Add(booking);
         }
@@ -300,6 +341,7 @@ public class HotelModel : PageModel
                  && t.SourceKey == sourceKey, ct);
         if (task is null || task.State == TaskState.Done) return;
         task.State = TaskState.Done;
+        task.CompletedAt = _clock.GetUtcNow();
         await _db.SaveChangesAsync(ct);
     }
 

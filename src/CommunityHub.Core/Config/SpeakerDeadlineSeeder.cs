@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
+using CommunityHub.Core.Entitlements;
 using Microsoft.EntityFrameworkCore;
 
 namespace CommunityHub.Core.Config;
@@ -116,9 +117,20 @@ public sealed class SpeakerDeadlineSeeder
 
         var now = _clock.GetUtcNow();
         var created = 0;
+        var removed = 0;
 
         foreach (var speaker in speakers)
         {
+            // P12: this speaker's EFFECTIVE entitlement set, computed once, so the
+            // per-deadline logistics gate (below) can drop tasks they can't act on.
+            var entitled = await EffectiveItemsAsync(eventId, speaker.Id, ct);
+
+            // The speakerdl SourceKeys that SHOULD exist for this speaker after this
+            // run — every deadline that still applies once the masterclass + P12
+            // entitlement gates are honoured. Drives both the add (missing keys) and
+            // the orphan-prune (no-longer-desired keys) below.
+            var desiredKeys = new HashSet<string>(StringComparer.Ordinal);
+
             foreach (var dl in config.Deadlines)
             {
                 // A masterclass-only deadline is skipped unless this speaker is
@@ -128,7 +140,21 @@ public sealed class SpeakerDeadlineSeeder
                     continue;
                 }
 
-                var sourceKey = $"speakerdl:{speaker.Id}:{Slug(dl.Title)}";
+                var slug = Slug(dl.Title);
+
+                // P12 ENTITLEMENT GATE: a logistics deadline (hotel/dinner/swag/lunch)
+                // is seeded only when the speaker is entitled to the underlying item —
+                // a sponsor-self-funded / organizer-funded speaker should not get a
+                // hotel/travel/swag task they cannot act on. Non-logistics deadlines
+                // (e.g. presentation uploads) are never entitlement-gated.
+                if (!DeadlineAllowedByEntitlement(slug, entitled))
+                {
+                    continue;
+                }
+
+                var sourceKey = $"speakerdl:{speaker.Id}:{slug}";
+                desiredKeys.Add(sourceKey);
+
                 var exists = await _db.Tasks.AnyAsync(
                     t => t.EventId == eventId && t.SourceKey == sourceKey, ct);
                 if (exists)
@@ -149,13 +175,85 @@ public sealed class SpeakerDeadlineSeeder
                 });
                 created++;
             }
+
+            // M1 PRUNE orphans: delete this speaker's speakerdl-managed tasks whose
+            // SourceKey the CURRENT config + entitlement set no longer produces —
+            // e.g. a deadline renamed (the slug, hence the SourceKey, changes,
+            // leaving the old row orphaned) or a speaker who lost an entitlement
+            // (P12). GUARD: only prune when this run produced a non-empty desired
+            // set, so a transient empty/missing config can never wipe a speaker's
+            // tasks. Mirrors the orphan-prune precedent in SponsorOrderPullService.
+            if (desiredKeys.Count > 0)
+            {
+                var keyPrefix = $"speakerdl:{speaker.Id}:";
+                var orphans = await _db.Tasks
+                    .Where(t => t.EventId == eventId
+                                && t.SourceKey != null
+                                && t.SourceKey.StartsWith(keyPrefix)
+                                && !desiredKeys.Contains(t.SourceKey))
+                    .ToListAsync(ct);
+                if (orphans.Count > 0)
+                {
+                    _db.Tasks.RemoveRange(orphans);
+                    removed += orphans.Count;
+                }
+            }
         }
 
-        if (created > 0)
+        if (created > 0 || removed > 0)
         {
             await _db.SaveChangesAsync(ct);
         }
         return created;
+    }
+
+    /// <summary>
+    /// P12 entitlement gate for a deadline, keyed off its slug. A logistics
+    /// deadline (hotel / dinner / swag / lunch) is allowed only when the speaker is
+    /// entitled to the underlying <see cref="OrderItem"/> — mirroring the per-form
+    /// gates (Hotel→Hotel, Dinner→AppreciationDinner, Swag→Swag|Polo,
+    /// Lunch→LunchPreDay|LunchMainDay). Any other deadline (e.g. a presentation
+    /// upload) is NOT entitlement-gated and is always allowed.
+    /// </summary>
+    private static bool DeadlineAllowedByEntitlement(string slug, IReadOnlySet<OrderItem> entitled)
+    {
+        if (slug.Contains("hotel", StringComparison.Ordinal))
+            return entitled.Contains(OrderItem.Hotel);
+        if (slug.Contains("dinner", StringComparison.Ordinal))
+            return entitled.Contains(OrderItem.AppreciationDinner);
+        if (slug.Contains("swag", StringComparison.Ordinal))
+            return entitled.Contains(OrderItem.Swag) || entitled.Contains(OrderItem.Polo);
+        if (slug.Contains("lunch", StringComparison.Ordinal))
+            return entitled.Contains(OrderItem.LunchPreDay) || entitled.Contains(OrderItem.LunchMainDay);
+        return true; // non-logistics deadline (e.g. presentation upload) — no gate
+    }
+
+    /// <summary>
+    /// Compute a participant's EFFECTIVE <see cref="OrderItem"/> entitlement set —
+    /// the role + speaker hats with their per-person overrides applied. This mirrors
+    /// the Web-layer <c>FormEntitlementGate.EffectiveItemsAsync</c>; the logic is
+    /// replicated here (rather than referenced) because that helper lives in the
+    /// CommunityHub web project, which this Core seeder cannot reference. Both
+    /// delegate to the shared <see cref="OrderEntitlements.Effective"/> rules.
+    /// </summary>
+    private async Task<IReadOnlySet<OrderItem>> EffectiveItemsAsync(
+        int eventId, int participantId, CancellationToken ct)
+    {
+        var participant = await _db.Participants
+            .FirstOrDefaultAsync(p => p.Id == participantId && p.EventId == eventId, ct);
+        if (participant is null)
+        {
+            return new HashSet<OrderItem>();
+        }
+
+        var speaker = await _db.SpeakerProfiles
+            .FirstOrDefaultAsync(sp => sp.EventId == eventId && sp.ParticipantId == participantId, ct);
+
+        var overrides = await _db.ParticipantOrderOverrides
+            .Where(o => o.EventId == eventId && o.ParticipantId == participantId)
+            .ToListAsync(ct);
+
+        return OrderEntitlements.Effective(participant, speaker, overrides);
     }
 
     private static string Slug(string title)

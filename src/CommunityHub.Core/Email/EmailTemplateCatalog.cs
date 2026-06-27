@@ -15,7 +15,6 @@ public static class EmailTemplateCatalog
         new Dictionary<string, (string, string)>(StringComparer.OrdinalIgnoreCase)
         {
             ["welcome"]                    = ("Welcome", "welcome-email"),
-            ["welcome-login"]              = ("Welcome (auto-login)", "welcome-email"),
             ["welcome-speaker"]            = ("Welcome: speaker", "welcome-email"),
             ["welcome-volunteer"]          = ("Welcome: volunteer", "welcome-email"),
             ["welcome-sponsor"]            = ("Welcome: sponsor", "welcome-email"),
@@ -38,7 +37,6 @@ public static class EmailTemplateCatalog
             ["task-manual-reminder"]       = ("Manual task reminder", "reminder-jobs"),
             ["speaker-question-digest"]    = ("Speaker Q&A digest", "digest-emails"),
             ["onboarding-getting-started"] = ("Onboarding: getting started", "welcome-email"),
-            ["onboarding-your-tasks"]      = ("Onboarding: your tasks", "welcome-email"),
             ["onboarding-step-reset"]      = ("Onboarding step reset", "onboarding-step-reset"),
             ["travel-reimbursement-paid"]  = ("Travel reimbursement paid", "travel-reimbursement-email"),
             ["group-photo-invite"]         = ("Group-photo invite", "group-photo-invites"),

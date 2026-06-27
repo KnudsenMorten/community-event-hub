@@ -7,20 +7,30 @@
        ====================================================================== -->
 
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>CommunityHub</RootNamespace>
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- Markdown -> HTML renderer for the generic CONTENT-HUB pages
+         (/Info/{slug}). Operators paste plain Markdown into
+         config/content/<edition>/{slug}.md and the Info page renders it inside
+         the normal hub layout. Markdig is the standard, dependency-free .NET
+         Markdown processor. -->
+    <PackageReference Include="Markdig" Version="0.41.*" />
     <PackageReference Include="ClosedXML" Version="0.104.*" />
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="8.*">
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.9">
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
-    <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks.EntityFrameworkCore" Version="8.0.6" />
-    <PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="8.0.2" />
+    <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks.EntityFrameworkCore" Version="10.0.9" />
+    <!-- Microsoft.Extensions.Configuration.Binder is NOT referenced here: it is
+         part of the ASP.NET Core shared framework (Microsoft.NET.Sdk.Web), so a
+         direct PackageReference is redundant and warns NU1510. The isolated-worker
+         scheduler (CommunityHub.Jobs) is NOT an ASP.NET host, so it keeps its own
+         direct reference. -->
   </ItemGroup>
 
   <ItemGroup>
@@ -35,6 +45,16 @@
              Link="config\%(Filename)%(Extension)"
              CopyToOutputDirectory="PreserveNewest"
              CopyToPublishDirectory="PreserveNewest" />
+    <!-- Operator-authored CONTENT-HUB markdown (REQUIREMENTS §104-§123). The
+         /Info/{slug} page reads config/content/<edition>/{slug}.md at runtime
+         via ConfigPaths.Resolve (AppContext.BaseDirectory), so ship the .md
+         into the publish output next to the DLLs. Recursive to keep the
+         per-edition sub-folder. -->
+    <None Include="..\..\config\content\**\*.md">
+      <Link>config\content\%(RecursiveDir)%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>Always</CopyToPublishDirectory>
+    </None>
     <!-- Survey definitions read at runtime by SurveyDefinitionProvider via
          {ContentRoot}\App_Data\Surveys\<slug>.json. Editing the JSON
          changes survey copy without a code change or DB migration.

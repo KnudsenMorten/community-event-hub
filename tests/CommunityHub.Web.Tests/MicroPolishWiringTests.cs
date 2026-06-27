@@ -13,9 +13,7 @@ namespace CommunityHub.Web.Tests;
 /// spirit as <see cref="LayoutSectionsTests"/>. It proves:
 ///   1. the four shared behaviours exist in the layout script, and
 ///   2. the high-value participant/attendee/speaker/sponsor forms actually opt in
-///      (so a future edit that drops the attribute is caught), and
-///   3. the two calendar copy buttons use the SHARED data-ceh-copy behaviour
-///      (the old bespoke per-page copy JS was removed — no regression to it).
+///      (so a future edit that drops the attribute is caught).
 /// </summary>
 public sealed class MicroPolishWiringTests
 {
@@ -107,18 +105,7 @@ public sealed class MicroPolishWiringTests
         Assert.Contains("data-ceh-counter", page);
     }
 
-    [Theory]
-    // The three subscribable-calendar copy buttons.
-    [InlineData("Index.cshtml")]
-    [InlineData("Speaker/Index.cshtml")]
-    [InlineData("Volunteer/MySchedule.cshtml")]
-    public void Calendar_copy_buttons_use_the_shared_copy_behaviour(string relative)
-    {
-        var page = Page(relative.Split('/'));
-        Assert.Contains("data-ceh-copy", page);
-        // The bespoke per-page copy helpers were removed in favour of the shared one.
-        Assert.DoesNotContain("function cehCopyCal", page);
-        Assert.DoesNotContain("function spCopyCal", page);
-        Assert.DoesNotContain("function msCopyCal", page);
-    }
+    // (Removed: Calendar_copy_buttons_use_the_shared_copy_behaviour — the user-facing
+    // "Add to my calendar" subscribe cards on Index/MySchedule were retired, so there
+    // are no calendar copy buttons left to assert.)
 }

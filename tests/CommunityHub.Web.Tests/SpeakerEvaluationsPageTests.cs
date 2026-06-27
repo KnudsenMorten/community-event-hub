@@ -50,8 +50,14 @@ public sealed class SpeakerEvaluationsPageTests
     private static EvaluationsModel NewModel(CommunityHubDbContext db, HttpContext http)
     {
         var accessor = new HttpCurrentParticipantAccessor(new HttpContextAccessorOver(http));
+        // §124: inert QR service (null store, no folder) — the QR card stays hidden.
+        var qr = new CommunityHub.Core.Integrations.Graphics.SessionEvalsQrService(
+            new CommunityHub.Core.Integrations.Graphics.NullSharePointFileStore(),
+            Microsoft.Extensions.Options.Options.Create(
+                new CommunityHub.Core.Integrations.Graphics.GraphicsSharePointOptions()));
         return new EvaluationsModel(
-            accessor, new SpeakerEvaluationsService(db), new PublicSessionsService(db));
+            accessor, new SpeakerEvaluationsService(db), new PublicSessionsService(db),
+            new SpeakerSessionsService(db), qr);
     }
 
     private sealed record Seeded(int EventId, Participant Alice, Participant Bob);

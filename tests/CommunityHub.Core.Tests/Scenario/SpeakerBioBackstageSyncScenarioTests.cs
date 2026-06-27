@@ -166,6 +166,26 @@ public sealed class SpeakerBioBackstageSyncScenarioTests
         Assert.Equal(SpeakerBioBackstageSyncService.AlertEmail, msg.To);
     }
 
+    [Fact]
+    public async Task Existing_speaker_alert_is_suppressed_when_alertOnExisting_is_false()
+    {
+        // Bug fix (#2 dedupe): the Speaker Details "Save & sync" path passes
+        // alertOnExisting=false when nothing the speaker owns changed, so an
+        // already-in-Backstage speaker is still reported BlockedNeedsManualUpdate but the
+        // organizers are NOT re-emailed on every save.
+        using var db = ScenarioFixture.NewDb();
+        var seed = await ScenarioSeed.SeedAsync(db);
+        await EnableSpeakerSyncAsync(db, seed.EventId);
+        var live = new FakeLiveBackstageSpeakerBioApi { Action = BackstageSpeakerAction.ExistsBlocked };
+        var email = new CapturingEmailSender();
+        var svc = NewService(db, live, enabled: true, email);
+
+        var result = await svc.SyncOneAsync(seed.EventId, seed.SpeakerOneId, alertOnExisting: false);
+
+        Assert.Equal(SpeakerBioSyncOutcome.BlockedNeedsManualUpdate, result.Outcome);
+        Assert.Empty(email.Messages);   // no manual-update email when suppressed
+    }
+
     // ---- No live writer wired (Null): build only, no faked call ------------
 
     [Fact]

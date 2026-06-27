@@ -71,6 +71,17 @@ public sealed class SponsorZohoSyncService
 
         try
         {
+            // FILL-BLANK reconcile (REQUIREMENTS §41b): pull blank CEH social/web fields
+            // from the webshop, and push CEH values back to a blank webshop field. Runs
+            // before the Zoho push so a freshly-pulled WebsiteUrl is sent on this same sync.
+            if (await ReconcileWithWebshopAsync(info, ct)) changedIds = true;
+
+            // The contact email is sent to Zoho ONLY when it actually CHANGED vs the last
+            // value we pushed (Zoho hard-caps email updates at 3 — a no-op resend burns one).
+            var desiredEmail = NullIf(info.EventCoordinatorEmail);
+            var emailChanged = desiredEmail is not null
+                && !string.Equals(desiredEmail, info.ZohoContactEmail, StringComparison.OrdinalIgnoreCase);
+
             // --- Sponsor record (all paying companies) ---
             if (string.IsNullOrWhiteSpace(info.ZohoSponsorId))
             {
@@ -80,14 +91,16 @@ public sealed class SponsorZohoSyncService
             }
             if (!string.IsNullOrWhiteSpace(info.ZohoSponsorId))
             {
+                // Zoho ← CEH fill-blank: only push fields that are BLANK in Zoho today.
+                var z = await _zoho.GetSponsorByIdAsync(token!, info.ZohoSponsorId!, ct);
                 sponsorSynced = await _zoho.UpdateSponsorAsync(
                     token!, info.ZohoSponsorId!,
-                    description: info.CompanyDescription,
-                    websiteUrl: info.WebsiteUrl,
+                    description: BlankInZoho(z?.Description) ? info.CompanyDescription : null,
+                    websiteUrl: BlankInZoho(z?.WebsiteUrl) ? info.WebsiteUrl : null,
                     companyName: companyName, ct,
                     contactFirstName: info.EventCoordinatorFirstName,
                     contactLastName: info.EventCoordinatorLastName,
-                    contactEmail: info.EventCoordinatorEmail);
+                    contactEmail: emailChanged ? desiredEmail : null);
             }
 
             // --- Exhibitor record (booth companies only) ---
@@ -101,20 +114,30 @@ public sealed class SponsorZohoSyncService
                 }
                 if (!string.IsNullOrWhiteSpace(info.ZohoExhibitorId))
                 {
+                    // Zoho ← CEH fill-blank: only push fields that are BLANK in Zoho today.
+                    var z = await _zoho.GetExhibitorByIdAsync(token!, info.ZohoExhibitorId!, ct);
                     exhibitorSynced = await _zoho.UpdateExhibitorAsync(
                         token!, info.ZohoExhibitorId!,
-                        companyOverview: info.CompanyDescription,
+                        companyOverview: BlankInZoho(z?.Description) ? info.CompanyDescription : null,
                         companyShortDescription: info.CompanyDescriptionShort,
                         ct,
                         companyName: companyName,
                         contactFirstName: info.EventCoordinatorFirstName,
                         contactLastName: info.EventCoordinatorLastName,
-                        websiteUrl: info.WebsiteUrl,
-                        linkedInUrl: info.LinkedInUrl,
-                        twitterUrl: info.TwitterUrl,
-                        contactEmail: info.EventCoordinatorEmail,
+                        websiteUrl: BlankInZoho(z?.WebsiteUrl) ? info.WebsiteUrl : null,
+                        linkedInUrl: BlankInZoho(z?.LinkedInUrl) ? info.LinkedInUrl : null,
+                        twitterUrl: BlankInZoho(z?.TwitterUrl) ? info.TwitterUrl : null,
+                        contactEmail: emailChanged ? desiredEmail : null,
                         contactMobile: info.EventCoordinatorPhone);
                 }
+            }
+
+            // Stamp the email we just pushed so a future no-op sync won't re-send it
+            // (only when an email-changing update actually succeeded).
+            if (emailChanged && (sponsorSynced || exhibitorSynced))
+            {
+                info.ZohoContactEmail = desiredEmail;
+                changedIds = true;
             }
         }
         catch (Exception ex)
@@ -139,11 +162,12 @@ public sealed class SponsorZohoSyncService
         bool Enabled, bool IsExhibitor, int AddedToZoho, int PulledFromZoho, string? Error);
 
     /// <summary>
-    /// Reconcile this exhibitor's booth members with Zoho Backstage by EMAIL
-    /// (there is no update/delete-member API, so this is add-only both ways):
-    /// members present in Zoho but not in CEH are pulled INTO CEH; members in CEH
-    /// but not in Zoho are created in Zoho (create-bulk). Matched members are
-    /// flagged synced. Removals must be done in Zoho directly.
+    /// Reconcile this exhibitor's booth members with Zoho Backstage by EMAIL. The
+    /// re-pull/create flow is add-only both ways: members present in Zoho but not in CEH
+    /// are pulled INTO CEH; members in CEH but not in Zoho are created in Zoho
+    /// (create-bulk). Matched members are flagged synced. Per-member DELETE is handled
+    /// out-of-band by <see cref="DeleteBoothMemberAsync"/> (Zoho now supports member
+    /// delete); the CEH tombstone still blocks re-pull so a removal can't resurrect.
     /// </summary>
     public async Task<BoothSyncResult> SyncBoothMembersAsync(
         int eventId, string companyId, string companyName, CancellationToken ct = default)
@@ -180,16 +204,23 @@ public sealed class SponsorZohoSyncService
             var zoho = await _zoho.GetBoothMembersAsync(token!, info.ZohoExhibitorId!, ct);
             var zohoEmails = zoho.Select(z => z.Email).ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-            var ceh = await _db.SponsorBoothMembers
+            // Active members reconcile both ways; tombstoned (soft-deleted) members are excluded
+            // from CEH but their emails BLOCK the re-pull below — even though the hub now also
+            // deletes the member in Zoho (DeleteBoothMemberAsync), the tombstone is belt-and-braces
+            // so a removed member can never be resurrected by an add-only re-pull.
+            var all = await _db.SponsorBoothMembers
                 .Where(m => m.EventId == eventId && m.SponsorCompanyId == companyId)
                 .ToListAsync(ct);
+            var ceh = all.Where(m => m.DeletedAt == null).ToList();
             var cehEmails = ceh.Select(c => c.Email).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var tombstonedEmails = all.Where(m => m.DeletedAt != null)
+                .Select(m => m.Email).ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-            // Zoho-only → pull into CEH.
+            // Zoho-only → pull into CEH (but never re-pull a member the sponsor tombstoned).
             var pulled = 0;
             foreach (var z in zoho)
             {
-                if (cehEmails.Contains(z.Email)) continue;
+                if (cehEmails.Contains(z.Email) || tombstonedEmails.Contains(z.Email)) continue;
                 _db.SponsorBoothMembers.Add(new SponsorBoothMember
                 {
                     EventId = eventId,
@@ -236,6 +267,65 @@ public sealed class SponsorZohoSyncService
         {
             _log.LogWarning(ex, "Booth sync failed for company {Co}.", companyId);
             return new(true, true, 0, 0, "Booth member sync hit an error — please try again.");
+        }
+    }
+
+    /// <summary>Outcome of a Zoho booth-member delete (REQUIREMENTS §41a/§56 — member only).</summary>
+    public enum BoothMemberDeleteResult
+    {
+        /// <summary>The member was found in Zoho and deleted there.</summary>
+        Deleted,
+        /// <summary>No Zoho member matched the email (already gone / never synced) — nothing to delete.</summary>
+        NotFoundInZoho,
+        /// <summary>Zoho integration is disabled for this environment — no Zoho call made.</summary>
+        SyncDisabled,
+        /// <summary>Auth/HTTP/Zoho error (logged); the hub delete should still proceed.</summary>
+        Error,
+    }
+
+    /// <summary>
+    /// Delete ONE booth MEMBER from the company's Zoho exhibitor by email (REQUIREMENTS
+    /// §41a/§56 — member delete ONLY; this never touches the exhibitor/sponsor RECORD).
+    /// CEH stores the member's email (not the Zoho member id), so this resolves the
+    /// company's <c>ZohoExhibitorId</c>, GETs the exhibitor's Zoho members, finds the one
+    /// whose email matches (OrdinalIgnoreCase) and DELETEs it by its Zoho member id.
+    /// Fail-soft: returns a <see cref="BoothMemberDeleteResult"/> and NEVER throws, so a
+    /// Zoho failure can't break the caller's hub-side delete.
+    /// </summary>
+    public async Task<BoothMemberDeleteResult> DeleteBoothMemberAsync(
+        int eventId, string companyId, string email, CancellationToken ct = default)
+    {
+        if (!_options.Enabled) return BoothMemberDeleteResult.SyncDisabled;
+        if (string.IsNullOrWhiteSpace(email)) return BoothMemberDeleteResult.NotFoundInZoho;
+
+        try
+        {
+            var info = await _db.SponsorInfos.FirstOrDefaultAsync(
+                s => s.EventId == eventId && s.SponsorCompanyId == companyId, ct);
+            // No exhibitor id cached ⇒ the member was never synced to Zoho ⇒ nothing to delete.
+            if (info is null || string.IsNullOrWhiteSpace(info.ZohoExhibitorId))
+                return BoothMemberDeleteResult.NotFoundInZoho;
+
+            string? token = await _zoho.GetAccessTokenAsync(ct);
+            if (string.IsNullOrWhiteSpace(token))
+            {
+                _log.LogWarning("Zoho member delete: could not authenticate (company {Co}).", companyId);
+                return BoothMemberDeleteResult.Error;
+            }
+
+            var members = await _zoho.GetBoothMembersAsync(token!, info.ZohoExhibitorId!, ct);
+            var match = members.FirstOrDefault(
+                m => string.Equals(m.Email, email, StringComparison.OrdinalIgnoreCase));
+            if (match is null || string.IsNullOrWhiteSpace(match.Id))
+                return BoothMemberDeleteResult.NotFoundInZoho;
+
+            var ok = await _zoho.DeleteBoothMemberAsync(token!, info.ZohoExhibitorId!, match.Id, ct);
+            return ok ? BoothMemberDeleteResult.Deleted : BoothMemberDeleteResult.Error;
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex, "Zoho member delete failed for company {Co} ({Email}).", companyId, email);
+            return BoothMemberDeleteResult.Error;
         }
     }
 
@@ -307,6 +397,54 @@ public sealed class SponsorZohoSyncService
 
         return new BulkResult(infos.Count, filled, sponsorsSynced, exhibitorsSynced, failed, notes);
     }
+
+    /// <summary>
+    /// FILL-BLANK reconcile of social/web fields between the webshop (Company Manager)
+    /// and CEH (SponsorInfo) — REQUIREMENTS §41b. NEVER overwrites a non-blank value.
+    ///   • CEH ← webshop: a field blank in CEH is pulled from the webshop company
+    ///     (website/linkedin/twitter; description is CEH-only on the webshop side).
+    ///   • webshop ← CEH: a field blank in the webshop is pushed from CEH.
+    /// Returns true if any CEH field changed (caller persists). Description has no
+    /// webshop counterpart, so only the three URLs reconcile with the webshop.
+    /// </summary>
+    private async Task<bool> ReconcileWithWebshopAsync(Domain.SponsorInfo info, CancellationToken ct)
+    {
+        if (!_cmOptions.Enabled || !int.TryParse(info.SponsorCompanyId, out var cid)) return false;
+
+        CompanyManagerCompany? company;
+        try { company = await _cm.GetCompanyAsync(cid, ct); }
+        catch (Exception ex) { _log.LogWarning(ex, "Reconcile: GetCompany failed for {Co}.", info.SponsorCompanyId); return false; }
+        if (company is null) return false;
+
+        var cehChanged = false;
+
+        // CEH ← webshop: fill a blank CEH field from the webshop company.
+        if (string.IsNullOrWhiteSpace(info.WebsiteUrl) && !string.IsNullOrWhiteSpace(company.WebsiteUrl))
+        { info.WebsiteUrl = company.WebsiteUrl.Trim(); cehChanged = true; }
+        if (string.IsNullOrWhiteSpace(info.LinkedInUrl) && !string.IsNullOrWhiteSpace(company.LinkedInUrl))
+        { info.LinkedInUrl = company.LinkedInUrl.Trim(); cehChanged = true; }
+        if (string.IsNullOrWhiteSpace(info.TwitterUrl) && !string.IsNullOrWhiteSpace(company.TwitterUrl))
+        { info.TwitterUrl = company.TwitterUrl.Trim(); cehChanged = true; }
+
+        // webshop ← CEH: push a CEH value to a blank webshop field (only the keys we fill).
+        var push = new Dictionary<string, object?>();
+        if (!string.IsNullOrWhiteSpace(info.WebsiteUrl) && string.IsNullOrWhiteSpace(company.WebsiteUrl))
+            push["web_address"] = info.WebsiteUrl;
+        if (!string.IsNullOrWhiteSpace(info.LinkedInUrl) && string.IsNullOrWhiteSpace(company.LinkedInUrl))
+            push["linkedin_url"] = info.LinkedInUrl;
+        if (!string.IsNullOrWhiteSpace(info.TwitterUrl) && string.IsNullOrWhiteSpace(company.TwitterUrl))
+            push["twitter_url"] = info.TwitterUrl;
+        if (push.Count > 0)
+        {
+            try { await _cm.UpdateCompanyAsync(cid, push, ct); }
+            catch (Exception ex) { _log.LogWarning(ex, "Reconcile: UpdateCompany failed for {Co}.", info.SponsorCompanyId); }
+        }
+
+        return cehChanged;
+    }
+
+    /// <summary>A Zoho field is "blank" (safe to fill) when it is null/empty/whitespace.</summary>
+    private static bool BlankInZoho(string? zohoValue) => string.IsNullOrWhiteSpace(zohoValue);
 
     private static bool CoordinatorEmpty(Domain.SponsorInfo i) =>
         string.IsNullOrWhiteSpace(i.EventCoordinatorFirstName)

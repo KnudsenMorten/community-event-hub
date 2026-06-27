@@ -1,0 +1,193 @@
+@page
+@using CommunityHub.Core.Organizer
+@model CommunityHub.Pages.Organizer.SyncHealthModel
+@{
+    ViewData["Title"] = Localizer["Sh.Title"].Value;
+
+    // A human, localized "how long ago" from an age TimeSpan (reuses the freshness strings).
+    string AgeText(TimeSpan age)
+    {
+        if (age.TotalDays >= 1)
+            return string.Format(Localizer["Fresh.AgeDays"].Value, (int)Math.Floor(age.TotalDays));
+        if (age.TotalHours >= 1)
+            return string.Format(Localizer["Fresh.AgeHours"].Value, (int)Math.Floor(age.TotalHours));
+        return string.Format(Localizer["Fresh.AgeMinutes"].Value, Math.Max(0, (int)Math.Floor(age.TotalMinutes)));
+    }
+
+    string Stamp(DateTimeOffset t) => t.UtcDateTime.ToString("yyyy-MM-dd HH:mm") + " UTC";
+}
+
+<style>
+    .sh-sub { color:#6b7280; margin:0 0 4px; }
+    .sh-updated { color:#6b7280; font-size:12.5px; margin:0 0 12px; }
+    .sh-banner { border-radius:8px; padding:11px 14px; margin:0 0 14px; font-weight:600; }
+    .sh-banner.ok { background:#f0fdf4; border:1px solid #bbf7d0; color:#15803d; }
+    .sh-banner.warn { background:#fef2f2; border:1px solid #fca5a5; color:#b91c1c; }
+    .sh-banner.none { background:#f8fafc; border:1px solid #e2e8f0; color:#475569; }
+    .sh-badge { display:inline-block; border-radius:999px; padding:3px 12px; font-size:13px; font-weight:700; vertical-align:middle; margin-left:8px; }
+    .sh-badge.ok { background:#dcfce7; color:#15803d; }
+    .sh-badge.stale { background:#fee2e2; color:#b91c1c; }
+    .sh-badge.none { background:#eef0f4; color:#6b7280; }
+    .sh-h2 { font-size:14px; text-transform:uppercase; letter-spacing:.04em; color:#6b7280; margin:18px 0 8px; }
+    /* Mobile-first: each wide table scrolls horizontally inside its card on narrow phones. */
+    .sh-scroll { position:relative; overflow-x:auto; -webkit-overflow-scrolling:touch; }
+    table.sh-tbl { width:100%; border-collapse:collapse; min-width:420px; }
+    .sh-tbl th, .sh-tbl td { padding:9px 11px; text-align:left; border-bottom:1px solid #e6e8ee; font-size:13.5px; vertical-align:top; }
+    .sh-tbl th { font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:#6b7280; background:#f9fafb; }
+    .sh-metric { font-weight:600; color:#1a1a2e; }
+    .sh-when { color:#374151; white-space:nowrap; }
+    .sh-age { color:#6b7280; white-space:nowrap; }
+    .sh-num { font-variant-numeric:tabular-nums; text-align:right; white-space:nowrap; }
+    .sh-tbl td.sh-num, .sh-tbl th.sh-num { text-align:right; }
+    .sh-tbl tr.is-drift td { background:#fef2f2; }
+    .sh-drift-val { font-weight:700; color:#b91c1c; }
+</style>
+
+<div class="card">
+    <h1>@Localizer["Sh.Title"]</h1>
+
+    @if (Model.AccessDenied)
+    {
+        <p class="error" role="alert">@Localizer["Cc.AccessDenied"]</p>
+    }
+    else if (Model.Snapshot is null)
+    {
+        <p class="sh-age">@Localizer["Sh.NeverBanner"]</p>
+    }
+    else
+    {
+        var s = Model.Snapshot;
+        var now = s.GeneratedAtUtc;
+        var staleHours = (int)Math.Round(s.StaleAfter.TotalHours);
+
+        <p class="sh-sub">
+            @Localizer["Sh.Intro"]
+            @switch (s.Status)
+            {
+                case SyncHealthStatus.InSync:
+                    <span class="sh-badge ok" role="status">@Localizer["Sh.InSync"]</span>
+                    break;
+                case SyncHealthStatus.Stale:
+                    <span class="sh-badge stale" role="status">@Localizer["Sh.Stale"]</span>
+                    break;
+                default:
+                    <span class="sh-badge none" role="status">@Localizer["Sh.NeverSynced"]</span>
+                    break;
+            }
+        </p>
+        <p class="sh-updated">@string.Format(Localizer["Fresh.GeneratedAt"].Value, Stamp(now))</p>
+
+        @switch (s.Status)
+        {
+            case SyncHealthStatus.InSync:
+                <div class="sh-banner ok" role="status">@Localizer["Sh.InSyncBanner"]</div>
+                break;
+            case SyncHealthStatus.Stale:
+                <div class="sh-banner warn" role="status">
+                    @string.Format(Localizer["Sh.StaleBanner"].Value,
+                        s.SyncAge is not null ? AgeText(s.SyncAge.Value) : "—", staleHours)
+                </div>
+                break;
+            default:
+                <div class="sh-banner none" role="status">@Localizer["Sh.NeverBanner"]</div>
+                break;
+        }
+
+        <!-- Sync timing -->
+        <h2 class="sh-h2">@Localizer["Sh.TimingHeading"]</h2>
+        <div class="sh-scroll">
+            <table class="sh-tbl">
+                <caption class="sr-only">@Localizer["Sh.TimingHeading"]</caption>
+                <thead>
+                    <tr>
+                        <th scope="col">@Localizer["Sh.ColEvent"]</th>
+                        <th scope="col">@Localizer["Fresh.ColLast"]</th>
+                        <th scope="col">@Localizer["Fresh.ColAge"]</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td class="sh-metric">@Localizer["Sh.LastSync"]</td>
+                        <td class="sh-when">@(s.LastSuccessAt is not null ? Stamp(s.LastSuccessAt.Value) : Localizer["Sh.Never"].Value)</td>
+                        <td class="sh-age">@(s.SyncAge is not null ? AgeText(s.SyncAge.Value) : "—")</td>
+                    </tr>
+                    <tr>
+                        <td class="sh-metric">@Localizer["Sh.LastWebhook"]</td>
+                        <td class="sh-when">@(s.LastWebhookAt is not null ? Stamp(s.LastWebhookAt.Value) : Localizer["Sh.NoWebhook"].Value)</td>
+                        <td class="sh-age">@(s.WebhookAge is not null ? AgeText(s.WebhookAge.Value) : "—")</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Mirror counts -->
+        <h2 class="sh-h2">@Localizer["Sh.CountsHeading"]</h2>
+        <div class="sh-scroll">
+            <table class="sh-tbl">
+                <caption class="sr-only">@Localizer["Sh.CountsHeading"]</caption>
+                <thead>
+                    <tr>
+                        <th scope="col">@Localizer["Sh.ColEntity"]</th>
+                        <th scope="col" class="sh-num">@Localizer["Sh.Active"]</th>
+                        <th scope="col" class="sh-num">@Localizer["Sh.Cancelled"]</th>
+                        <th scope="col" class="sh-num">@Localizer["Sh.Total"]</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td class="sh-metric">@Localizer["Sh.Orders"]</td>
+                        <td class="sh-num">@s.OrdersActive</td>
+                        <td class="sh-num">@s.OrdersCancelled</td>
+                        <td class="sh-num">@s.OrdersTotal</td>
+                    </tr>
+                    <tr>
+                        <td class="sh-metric">@Localizer["Sh.Attendees"]</td>
+                        <td class="sh-num">@s.AttendeesActive</td>
+                        <td class="sh-num">@s.AttendeesCancelled</td>
+                        <td class="sh-num">@s.AttendeesTotal</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+        @if (!string.IsNullOrWhiteSpace(s.LastRunSummary))
+        {
+            <p class="sh-updated">@Localizer["Sh.LastRun"]: @s.LastRunSummary</p>
+        }
+
+        <!-- Drift indicators -->
+        <h2 class="sh-h2">@Localizer["Sh.DriftHeading"]</h2>
+        @if (!s.HasDrift)
+        {
+            <div class="sh-banner ok" role="status">@Localizer["Sh.NoDrift"]</div>
+        }
+        <div class="sh-scroll">
+            <table class="sh-tbl">
+                <caption class="sr-only">@Localizer["Sh.DriftHeading"]</caption>
+                <thead>
+                    <tr>
+                        <th scope="col">@Localizer["Sh.ColIndicator"]</th>
+                        <th scope="col" class="sh-num">@Localizer["Sh.ColCount"]</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr class="@(s.AttendeesWithoutOrder > 0 ? "is-drift" : null)">
+                        <td class="sh-metric">@Localizer["Sh.AttendeesNoOrder"]</td>
+                        <td class="sh-num @(s.AttendeesWithoutOrder > 0 ? "sh-drift-val" : null)">@s.AttendeesWithoutOrder</td>
+                    </tr>
+                    <tr class="@(s.OrdersWithoutAttendees > 0 ? "is-drift" : null)">
+                        <td class="sh-metric">@Localizer["Sh.OrdersNoAttendees"]</td>
+                        <td class="sh-num @(s.OrdersWithoutAttendees > 0 ? "sh-drift-val" : null)">@s.OrdersWithoutAttendees</td>
+                    </tr>
+                    <tr>
+                        <td class="sh-metric">@Localizer["Sh.OrdersCancelledRow"]</td>
+                        <td class="sh-num">@s.OrdersCancelled</td>
+                    </tr>
+                    <tr>
+                        <td class="sh-metric">@Localizer["Sh.AttendeesCancelledRow"]</td>
+                        <td class="sh-num">@s.AttendeesCancelled</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    }
+</div>

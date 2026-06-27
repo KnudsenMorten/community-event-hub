@@ -167,7 +167,6 @@ var sessionizeOptions = new SessionizeApiOptions();
 config.GetSection(SessionizeApiOptions.SectionName).Bind(sessionizeOptions);
 services.AddSingleton(sessionizeOptions);
 services.AddHttpClient<SessionizeApiClient>();
-services.AddSingleton<SessionizeExcelParser>();
 services.AddScoped<WelcomeEmailService>();
 services.AddScoped<SessionizeImportService>();
 // Sessions are pulled from the same v2 view API and linked to speakers.
