@@ -89,18 +89,35 @@ Every screenshot below is captured **headlessly** against a locally-run instance
 | Volunteer "My schedule" | Sponsor self-service |
 |---|---|
 | [![Volunteer schedule](docs/img/volunteer-schedule.png)](docs/img/volunteer-schedule.png) | [![Sponsor self-service](docs/img/sponsor-portal.png)](docs/img/sponsor-portal.png) |
-| *Every shift, time-ordered, with who to ask and one-tap calendar subscribe.* | *The in-hub Sponsor area: company details, booth, tasks, leads and order status (screenshot refresh pending).* |
+| *Every shift, time-ordered, with who to ask and one-tap calendar subscribe.* | *The in-hub Sponsor area: company details, booth, tasks, leads and order status.* |
 
 | Volunteer schedule (mobile) | Attendee "My Event" (mobile) |
 |---|---|
 | [![Volunteer schedule on mobile](docs/img/volunteer-schedule-mobile.png)](docs/img/volunteer-schedule-mobile.png) | [![Attendee My Event on mobile](docs/img/attendee-my-event-mobile.png)](docs/img/attendee-my-event-mobile.png) |
-| *Built for someone standing at the venue: a volunteer checks their next shift on their phone.* | *Every attendee's home — countdown, Master Class status and a personal agenda — in the palm of their hand.* |
+| *Built for someone standing at the venue: a volunteer checks their next shift on their phone.* | *Every attendee's home — the in-hub Master Class chooser (pick / switch / waitlist) and status — in the palm of their hand.* |
 
 > Every persona surface is designed phone-first (~360px) and tested headlessly at that width, so the experience above is the same on a laptop at the organizer desk and a phone on the show floor.
 
 > ℹ️ The role menus were redesigned in the 2026 edition (see the menu maps below). Fresh screenshots of each redesigned menu are being captured; the maps below are the source of truth in the meantime.
 
-> 📸 **Screenshot refresh in progress.** Several newly-built views deserve their own capture and are pending a separate capture step (no image files are added here yet): the **in-wizard inline stepper** ("Step X of N" with Prev/Next), the **AI Community Helper chat panel**, the sponsor **"Our Booth"** page, a **unified task page** showing the "Task checklist" completion %, and the **`/Organizer/OrganizerAllocation`** task-allocation queue. Two existing shots are **now stale** and will be re-captured: `docs/img/speaker-hub.png` (readiness moved into My Tasks) and the attendee `docs/img/attendee-my-event*.png` shots (the Master Class section is now the in-hub 3-section page).
+### More of the experience
+
+| Unified task list | In-wizard inline stepper |
+|---|---|
+| [![Unified task list with a completion percentage](docs/img/unified-task-checklist.png)](docs/img/unified-task-checklist.png) | [![In-wizard inline stepper showing Step X of N](docs/img/wizard-inline-stepper.png)](docs/img/wizard-inline-stepper.png) |
+| *One task list per person — a "Task checklist" with a live completion %, so everyone sees what's left in one place.* | *A guided, one-step-at-a-time wizard: "Step X of N", a progress bar and Previous / Save&next — onboarding without a wall of fields.* |
+
+| Sponsor "Our Booth" | Organizer task-allocation queue |
+|---|---|
+| [![Sponsor Our Booth page with booth number](docs/img/sponsor-our-booth.png)](docs/img/sponsor-our-booth.png) | [![Organizer task-allocation queue with live coverage](docs/img/organizer-allocation-queue.png)](docs/img/organizer-allocation-queue.png) |
+| *Each sponsor sees their own booth number and the expo map — no email thread needed.* | *Allocate organizer-owned tasks with live red/green coverage, queue a draft, then commit (nobody is notified until commit).* |
+
+| AI Community Helper | AI Community Helper (mobile) |
+|---|---|
+| [![AI Community Helper chat panel with a question and answer](docs/img/ai-community-helper.png)](docs/img/ai-community-helper.png) | [![AI Community Helper chat panel on mobile](docs/img/ai-community-helper-mobile.png)](docs/img/ai-community-helper-mobile.png) |
+| *A grounded, role-aware assistant — it answers only from the public programme and the signed-in person's own data.* | *Phone-first: the helper opens to a near-full-width chat panel on a phone.* |
+
+> The new views above are also phone-first — mobile captures: [unified task list](docs/img/unified-task-checklist-mobile.png), [inline stepper](docs/img/wizard-inline-stepper-mobile.png), [sponsor "Our Booth"](docs/img/sponsor-our-booth-mobile.png) and the [organizer allocation queue](docs/img/organizer-allocation-queue-mobile.png).
 
 ## Role menus (2026 redesign)
 
@@ -251,7 +268,7 @@ A gentle, reliable reminder engine sends on a per-type cadence — speaker miles
 **Sync to your own calendar.** Every speaker, volunteer and organizer can subscribe their hub deadlines and shifts to the calendar they already use (Outlook / Google / Apple) with a short, friendly subscribe link (private per person, resettable), or download a single item as `.ics` — new and moved deadlines flow through automatically, with a pop-up a week and a day before each due date. When an organizer **activates** a person, their activation email even carries a calendar invite for the event itself. A single edition-wide switch (on by default) turns calendar sync on or off.
 
 ![Speaker hub milestone tracker](docs/img/speaker-hub.png)
-*The speaker hub turns deadlines into a progress tracker with live countdowns, "My sessions" and a public-profile preview (screenshot refresh pending — "Am I ready?" readiness now lives in My Tasks).*
+*The speaker hub centres on "My sessions" — when and where each talk is, with public-page, social-promote and calendar-sync links; deadlines and "Am I ready?" readiness now live in My Tasks.*
 
 → [`docs/FEATURES.md` §5](docs/FEATURES.md#5-tasks--reminders--nothing-slips-no-inbox-spam) · jobs in [`docs/DESIGN.md` §5](docs/DESIGN.md#5-jobs-scheduled-timers)
 
@@ -302,7 +319,7 @@ A sponsor is a **company, not a single contact** — every contact at a company 
 | Public sponsors page | Sponsor self-service |
 |---|---|
 | [![Public sponsors page](docs/img/public-sponsors.png)](docs/img/public-sponsors.png) | [![Sponsor self-service](docs/img/sponsor-portal.png)](docs/img/sponsor-portal.png) |
-| *Sponsors grouped by tier, with an initials badge when no logo is uploaded.* | *The in-hub Sponsor area — company details, booth, tasks, leads and orders (screenshot refresh pending).* |
+| *Sponsors grouped by tier, with an initials badge when no logo is uploaded.* | *The in-hub Sponsor area — company details, booth, tasks, leads and orders.* |
 
 → [`docs/FEATURES.md` §7](docs/FEATURES.md#7-sponsors--managed-as-companies-with-the-right-tasks) · integrations in [`docs/DESIGN.md` §6](docs/DESIGN.md#6-integrations)
 
@@ -325,7 +342,7 @@ The hub compares two-day tickets against masterclass bookings and surfaces the m
 |---|---|
 | [![Attendee hub](docs/img/attendee-my-event.png)](docs/img/attendee-my-event.png) | [![Attendee hub on mobile](docs/img/attendee-my-event-mobile.png)](docs/img/attendee-my-event-mobile.png) |
 
-*The attendee hub: a live countdown, ticket and Master Class status, a personal agenda and self check-in — with a deep-link out to manage the booking. Built phone-first for the person walking up to the venue (screenshot refresh pending — the Master Class section is now the in-hub 3-section `/MyMasterClass` page).*
+*The attendee hub leads with the in-hub Master Class chooser — pick, switch or join the waitlist on one page — alongside ticket and booking status. Built phone-first for the person walking up to the venue.*
 
 → [`docs/FEATURES.md` §9](docs/FEATURES.md#9-attendees--masterclass-reconciliation--one-clear-picture) · reconciler in [`docs/DESIGN.md` §6](docs/DESIGN.md#6-integrations)
 
