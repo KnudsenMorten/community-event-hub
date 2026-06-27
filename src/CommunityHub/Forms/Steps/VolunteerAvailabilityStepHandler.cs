@@ -17,8 +17,12 @@ public sealed class VolunteerAvailabilityStepHandler : IWizardStepHandler
     /// <summary>Matches the "availability" step key emitted by RoleWizardService + the resx key.</summary>
     public string Key => "availability";
 
-    /// <summary>Fields-only partial (no &lt;form&gt;/chrome) rendered inside the host's one form.</summary>
-    public string PartialName => "_AvailabilityFields";
+    /// <summary>Fields-only partial (no &lt;form&gt;/chrome) rendered inside the host's one form.
+    /// FULLY-QUALIFIED: this partial lives in Pages/Volunteer/ — a SIBLING of Pages/Forms/ where
+    /// the wizard host renders — so a bare name is unresolvable from the host and throws HTTP 500
+    /// at the Availability step. Mirror the Speaker handlers, which qualify their /Pages/Speaker/
+    /// partials for exactly this reason.</summary>
+    public string PartialName => "/Pages/Volunteer/_AvailabilityFields.cshtml";
 
     /// <summary>The render model handed to the partial; carries posted values back on re-render.</summary>
     public object? Model { get; private set; }

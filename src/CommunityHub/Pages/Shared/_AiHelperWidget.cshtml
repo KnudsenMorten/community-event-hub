@@ -29,12 +29,18 @@
 @Html.AntiForgeryToken()
 <div id="ai-helper-widget" class="ai-helper-widget"
      data-endpoint="/api/ai-helper" data-assistant-name="@assistantName">
-    <button type="button" id="ai-helper-launcher" class="ai-helper-launcher"
-            aria-expanded="false" aria-controls="ai-helper-panel"
-            aria-label="Open the Community Helper">
-        <span class="ai-helper-bubble" aria-hidden="true">@ahGreeting</span>
-        <img class="ai-helper-avatar" src="~/img/otto.svg" alt="" width="72" height="78" />
-    </button>
+    <div class="ai-helper-peek">
+        <div class="ai-helper-bubble" id="ai-helper-bubble">
+            <button type="button" id="ai-helper-dismiss" class="ai-helper-dismiss"
+                    aria-label="Hide the Community Helper greeting" title="Hide">&times;</button>
+            <span class="ai-helper-bubble-text" id="ai-helper-bubble-text">@ahGreeting</span>
+        </div>
+        <button type="button" id="ai-helper-launcher" class="ai-helper-launcher"
+                aria-expanded="false" aria-controls="ai-helper-panel"
+                aria-label="Open the Community Helper">
+            <img class="ai-helper-avatar" src="~/img/otto.svg" alt="" width="72" height="78" />
+        </button>
+    </div>
 
     <section id="ai-helper-panel" class="ai-helper-panel" role="dialog" aria-modal="false"
              aria-labelledby="ai-helper-title" hidden>
@@ -71,15 +77,25 @@
 
 <style>
     .ai-helper-widget { position: fixed; right: 16px; bottom: 16px; z-index: 1200; }
+    .ai-helper-peek { display: flex; align-items: flex-end; gap: 8px; }
     .ai-helper-launcher {
-        background: none; border: 0; padding: 0; cursor: pointer;
-        display: flex; align-items: flex-end; gap: 8px;
+        background: none; border: 0; padding: 0; cursor: pointer; flex: 0 0 auto;
     }
     .ai-helper-bubble {
+        position: relative; cursor: pointer;
         background: #fff; color: #14223a; border: 1px solid #cdd8ea;
         border-radius: 14px 14px 2px 14px; padding: 8px 12px; font-size: .9rem;
         box-shadow: 0 4px 14px rgba(20,34,58,.18); max-width: 190px; line-height: 1.25;
     }
+    /* Dismiss the greeting on small screens — collapses the peek to just the avatar. */
+    .ai-helper-dismiss {
+        position: absolute; top: -9px; right: -9px; width: 22px; height: 22px; padding: 0;
+        border: 1px solid #cdd8ea; border-radius: 50%; background: #fff; color: #4b5563;
+        font-size: 16px; line-height: 1; cursor: pointer; display: flex; align-items: center;
+        justify-content: center; box-shadow: 0 2px 6px rgba(20,34,58,.20);
+    }
+    .ai-helper-dismiss:hover { background: #f1f5fb; color: #14223a; }
+    .ai-helper-bubble[hidden] { display: none; }
     .ai-helper-avatar { display: block; filter: drop-shadow(0 3px 6px rgba(20,34,58,.25)); transition: transform .15s ease; }
     .ai-helper-launcher:hover .ai-helper-avatar { transform: translateY(-3px); }
 
@@ -164,6 +180,24 @@
         }
         launcher.addEventListener('click', open);
         closeBtn.addEventListener('click', close);
+
+        // Dismiss the greeting bubble (small-screen footprint) — collapses the peek to just the
+        // avatar; remembered across pages so it stays hidden until the avatar is tapped to chat.
+        var bubbleEl = document.getElementById('ai-helper-bubble');
+        var dismissBtn = document.getElementById('ai-helper-dismiss');
+        var DISMISS_KEY = 'ceh.aihelper.greetingHidden';
+        try { if (localStorage.getItem(DISMISS_KEY) === '1' && bubbleEl) bubbleEl.hidden = true; } catch (e) {}
+        if (dismissBtn) dismissBtn.addEventListener('click', function (e) {
+            e.stopPropagation();
+            if (bubbleEl) bubbleEl.hidden = true;
+            try { localStorage.setItem(DISMISS_KEY, '1'); } catch (e2) {}
+        });
+        // Tapping the greeting itself (not the ×) opens the chat.
+        if (bubbleEl) bubbleEl.addEventListener('click', function (e) {
+            if (e.target.closest('#ai-helper-dismiss')) return;
+            open();
+        });
+
         document.addEventListener('keydown', function (e) {
             if ((e.key === 'Escape' || e.key === 'Esc') && !panel.hidden) close();
         });
