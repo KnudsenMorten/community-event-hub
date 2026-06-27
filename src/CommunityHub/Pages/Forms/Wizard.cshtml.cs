@@ -110,7 +110,10 @@ public class WizardModel : PageModel
 
         FullName = me.FullName;
         Plan = await BuildPlanAsync(me, ct);
-        if (Plan is null) { AccessDenied = true; return Page(); }
+        // A null plan means the role simply has no generic wizard (e.g. Attendee) — that is NOT a
+        // denial, so show the neutral "nothing to set up" copy, not the speaker-only access-denied
+        // string (which misleadingly told attendees they "do not have a speaker profile").
+        if (Plan is null) { NothingToDo = true; return Page(); }
         if (Plan.EntitledCount == 0) { NothingToDo = true; return Page(); }
 
         // Current step: an in-plan ?step= wins (so completed steps are revisitable);
@@ -137,7 +140,8 @@ public class WizardModel : PageModel
 
         // Stateless: rebuild the plan from current data so re-entry / refresh is always correct.
         Plan = await BuildPlanAsync(me, ct);
-        if (Plan is null) { AccessDenied = true; return Page(); }
+        // Null plan = role has no generic wizard (not a denial) → neutral "nothing to do" copy.
+        if (Plan is null) { NothingToDo = true; return Page(); }
         if (Plan.EntitledCount == 0) return RedirectToPage("/Index");   // nothing left to do
 
         var stepKey = Request.Form["__step"].ToString();

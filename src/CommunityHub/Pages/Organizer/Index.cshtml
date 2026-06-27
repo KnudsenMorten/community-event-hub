@@ -43,20 +43,24 @@
         <div class="card">
             <h2>@Localizer["OrgArea.MismatchesTitle"]</h2>
             <p>@Model.Mismatches.Count @Localizer["OrgArea.MismatchesNeedReview"]</p>
-            <table style="width:100%;border-collapse:collapse;">
-                <tr style="text-align:left;border-bottom:2px solid #ddd;">
-                    <th>@Localizer["OrgArea.ColName"]</th><th>@Localizer["OrgArea.ColEmail"]</th><th>@Localizer["OrgArea.ColTicket"]</th><th>@Localizer["OrgArea.ColBooking"]</th>
-                </tr>
-                @foreach (var a in Model.Mismatches)
-                {
-                    <tr style="border-bottom:1px solid #eee;">
-                        <td>@a.FirstName @a.LastName</td>
-                        <td>@a.Email</td>
-                        <td>@a.TicketStatus</td>
-                        <td>@a.BookingStatus</td>
+            <!-- overflow-x so the table scrolls sideways on phones instead of pushing the whole
+                 page wider than the viewport (matches every other Organizer table). -->
+            <div style="overflow-x:auto;-webkit-overflow-scrolling:touch;">
+                <table style="width:100%;border-collapse:collapse;">
+                    <tr style="text-align:left;border-bottom:2px solid #ddd;">
+                        <th>@Localizer["OrgArea.ColName"]</th><th>@Localizer["OrgArea.ColEmail"]</th><th>@Localizer["OrgArea.ColTicket"]</th><th>@Localizer["OrgArea.ColBooking"]</th>
                     </tr>
-                }
-            </table>
+                    @foreach (var a in Model.Mismatches)
+                    {
+                        <tr style="border-bottom:1px solid #eee;">
+                            <td>@a.FirstName @a.LastName</td>
+                            <td>@a.Email</td>
+                            <td>@a.TicketStatus</td>
+                            <td>@a.BookingStatus</td>
+                        </tr>
+                    }
+                </table>
+            </div>
         </div>
     }
 }
