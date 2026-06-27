@@ -283,4 +283,90 @@ public class MasterClassSignupServiceTests
         Assert.Empty(db.MasterClassSignups.Where(x => x.SessionId == mcA
                           && x.Status == MasterClassSignupStatus.Waitlisted));
     }
+
+    // --- Operator end-to-end walkthrough (2026-06-28) ------------------------
+    // "chg max seats to 2 and make 2 sample signups; next person must get a
+    //  warning so he cannot book if it becomes full; cancel; auto-cancel the MC
+    //  when a seat becomes available." One narrative with named sample attendees.
+
+    [Fact]
+    public async Task Sample_cap2_fills_then_waitlists_next_then_giveup_promotes_then_autoswitch()
+    {
+        using var db = ScenarioFixture.NewDb();
+        var (ev, mcA, mcB) = await SeedAsync(db, capA: 2, capB: 1);   // A holds 2, B holds 1
+        var svc = new MasterClassSignupService(db);
+
+        // Two sample, 2-day-ticket attendees fill MC A (capacity 2).
+        var alex = await Att(db, ev, "alex.rivera@example.test");
+        var sam = await Att(db, ev, "sam.taylor@example.test");
+        Assert.Equal(MasterClassSignupStatus.Confirmed, (await svc.SignUpAsync(ev, alex, mcA)).Signup!.Status);
+        Assert.Equal(MasterClassSignupStatus.Confirmed, (await svc.SignUpAsync(ev, sam, mcA)).Signup!.Status);
+
+        // MC A is now FULL: 0 free, traffic light Full.
+        var aFull = (await svc.ListMasterClassesAsync(ev)).Single(m => m.SessionId == mcA);
+        Assert.Equal(0, aFull.Free);
+        Assert.Equal(MasterClassSignupService.AvailabilityLevel.Full, aFull.Availability);
+
+        // The NEXT person cannot take a seat — they are WAITLISTED (the warning), never
+        // silently overbooked. SignupResult is OK but the status is Waitlisted, not Confirmed.
+        var jordan = await Att(db, ev, "jordan.lee@example.test");
+        var r3 = await svc.SignUpAsync(ev, jordan, mcA);
+        Assert.True(r3.Ok);
+        Assert.Equal(MasterClassSignupStatus.Waitlisted, r3.Signup!.Status);
+        Assert.Equal(1, r3.Signup.WaitlistPosition);
+
+        // HARD INVARIANT: confirmed seats NEVER exceed capacity (no overbook).
+        Assert.Equal(2, db.MasterClassSignups.Count(
+            x => x.SessionId == mcA && x.Status == MasterClassSignupStatus.Confirmed));
+
+        // CANCEL: Alex gives up his seat → the freed seat goes to the waitlist FIRST,
+        // promoting Jordan into a confirmed seat (and Alex's row is gone).
+        var promo = await svc.RemoveAsync(ev, alex, mcA);
+        Assert.Equal(jordan, promo!.PromotedAttendeeId);
+        Assert.Equal(MasterClassSignupService.PromotionKind.Confirmed, promo.Kind);
+        Assert.Equal(MasterClassSignupStatus.Confirmed,
+            (await svc.GetForAttendeeAsync(ev, jordan)).Single().Status);
+        Assert.Empty(await svc.GetForAttendeeAsync(ev, alex));
+        // A is full again (Sam + Jordan).
+        Assert.Equal(0, (await svc.ListMasterClassesAsync(ev)).Single(m => m.SessionId == mcA).Free);
+
+        // AUTO-SWITCH: Priya confirms in MC B (cap 1 → B full), then waitlists the (full) MC A
+        // WITH the auto-switch consent. When a seat frees in A (Sam gives up), Priya is promoted
+        // into A AND her MC B seat is auto-cancelled — she ends with exactly ONE active MC.
+        var priya = await Att(db, ev, "priya.nair@example.test");
+        Assert.Equal(MasterClassSignupStatus.Confirmed, (await svc.SignUpAsync(ev, priya, mcB)).Signup!.Status);
+        Assert.True((await svc.SignUpAsync(ev, priya, mcA, autoSwitchConsent: true)).Ok);   // waitlists A
+
+        await svc.RemoveAsync(ev, sam, mcA);   // A frees → Priya auto-switched A, B seat cancelled
+
+        var priyaSig = Assert.Single(await svc.GetForAttendeeAsync(ev, priya));
+        Assert.Equal(mcA, priyaSig.SessionId);
+        Assert.Equal(MasterClassSignupStatus.Confirmed, priyaSig.Status);
+        // Her old MC B seat was auto-cancelled → B now has a free seat again.
+        Assert.Equal(1, (await svc.ListMasterClassesAsync(ev)).Single(m => m.SessionId == mcB).Free);
+        // No leftover Offered rows anywhere (auto-switch has no offer/hold step).
+        Assert.Empty(db.MasterClassSignups.Where(x => x.Status == MasterClassSignupStatus.Offered));
+    }
+
+    [Fact] // The race the operator called out: a SWITCH into a class that filled before submit
+           // must FAIL with a clear error and leave the attendee's existing seat intact.
+    public async Task Switching_into_a_room_that_just_filled_errors_and_keeps_the_existing_seat()
+    {
+        using var db = ScenarioFixture.NewDb();
+        var (ev, mcA, mcB) = await SeedAsync(db, capA: 1, capB: 1);
+        var svc = new MasterClassSignupService(db);
+        var morgan = await Att(db, ev, "morgan.diaz@example.test");
+        var taken = await Att(db, ev, "chris.bauer@example.test");
+
+        await svc.SignUpAsync(ev, morgan, mcB);   // Morgan confirmed in B
+        await svc.SignUpAsync(ev, taken, mcA);     // A is now full (cap 1)
+
+        // Morgan tries to switch into the now-full A → refused, A unchanged, B seat kept.
+        var (ok, error, _) = await svc.SwitchAsync(ev, morgan, mcA);
+        Assert.False(ok);
+        Assert.Equal(MasterClassSignupService.NowFullError, error);
+        var still = Assert.Single(await svc.GetForAttendeeAsync(ev, morgan));
+        Assert.Equal(mcB, still.SessionId);
+        Assert.Equal(MasterClassSignupStatus.Confirmed, still.Status);
+    }
 }

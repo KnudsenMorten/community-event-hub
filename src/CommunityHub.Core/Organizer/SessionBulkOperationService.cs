@@ -79,13 +79,13 @@ public sealed class SessionBulkOperationService
         var withEvaluations = await _db.SessionEvaluations
             .Where(e => targetIds.Contains(e.SessionId)).Select(e => e.SessionId)
             .Distinct().ToListAsync(ct);
-        var withBookings = await _db.MasterClassParticipants
+        var withSignups = await _db.MasterClassSignups
             .Where(m => targetIds.Contains(m.SessionId)).Select(m => m.SessionId)
             .Distinct().ToListAsync(ct);
 
         var blocked = new HashSet<int>(withQuestions);
         blocked.UnionWith(withEvaluations);
-        blocked.UnionWith(withBookings);
+        blocked.UnionWith(withSignups);
 
         var deletable = targets.Where(s => !blocked.Contains(s.Id)).ToList();
         int importedDeleted = 0;

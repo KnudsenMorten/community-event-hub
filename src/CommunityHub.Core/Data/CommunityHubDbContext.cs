@@ -63,7 +63,6 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
     /// <summary>Q&amp;A comments on a master class's attendee landing page (FEATURE 2).</summary>
     public DbSet<MasterClassComment> MasterClassComments => Set<MasterClassComment>();
     public DbSet<SessionEvaluation> SessionEvaluations => Set<SessionEvaluation>();
-    public DbSet<MasterClassParticipant> MasterClassParticipants => Set<MasterClassParticipant>();
     public DbSet<SpeakerBackstageEmailSync> SpeakerBackstageEmailSyncs => Set<SpeakerBackstageEmailSync>();
     public DbSet<SessionizeEndpointSetting> SessionizeEndpointSettings => Set<SessionizeEndpointSetting>();
     public DbSet<TravelReimbursement> TravelReimbursements => Set<TravelReimbursement>();
@@ -944,11 +943,10 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
             e.Property(x => x.RoomQrUrl).HasMaxLength(2000);
             e.Property(x => x.EvaluationFormUrl).HasMaxLength(2000);
             e.Property(x => x.PublicToken).HasMaxLength(64);
-            // Master-class public logistics page + Zoho Booking endpoint (§ 6c).
+            // Master-class public logistics page (§6).
             e.Property(x => x.PublicSlug).HasMaxLength(64);
             e.Property(x => x.LogisticsText).HasMaxLength(8000);
             e.Property(x => x.LogisticsUpdatedByEmail).HasMaxLength(320);
-            e.Property(x => x.BookingEndpointUri).HasMaxLength(2000);
             // Zoho Backstage agenda id + last-known time/location (§38e/§52). The id
             // shares the 64-char id cap used by SessionizeId; the room mirrors Room.
             e.Property(x => x.BackstageSessionId).HasMaxLength(64);
@@ -984,37 +982,6 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
             e.HasIndex(x => new { x.EventId, x.BackstageSessionId })
                 .IsUnique()
                 .HasFilter("[BackstageSessionId] IS NOT NULL");
-        });
-
-        // --- MasterClassParticipant (Zoho Booking → hub, § 6c) ---------------
-        b.Entity<MasterClassParticipant>(e =>
-        {
-            e.HasKey(x => x.Id);
-            e.Property(x => x.BookingRecordId).IsRequired().HasMaxLength(128);
-            e.Property(x => x.BookedEmail).IsRequired().HasMaxLength(320);
-            e.Property(x => x.BookedName).HasMaxLength(200);
-            e.Property(x => x.BookingStatus).HasMaxLength(60);
-
-            e.HasOne(x => x.Event).WithMany()
-                .HasForeignKey(x => x.EventId)
-                .OnDelete(DeleteBehavior.Cascade);
-            // NoAction on Session + Participant: the Event already cascade-deletes
-            // the edition's sessions AND participants, so a second cascade path from
-            // the same root would be ambiguous to SQL Server (same reasoning as
-            // SessionSpeaker).
-            e.HasOne(x => x.Session).WithMany(s => s.MasterClassParticipants)
-                .HasForeignKey(x => x.SessionId)
-                .OnDelete(DeleteBehavior.NoAction);
-            e.HasOne(x => x.Participant).WithMany()
-                .HasForeignKey(x => x.ParticipantId)
-                .OnDelete(DeleteBehavior.NoAction);
-
-            // Idempotency key: a Zoho Booking record links to a session at most
-            // once. Re-syncing the same booking updates the row in place.
-            e.HasIndex(x => new { x.EventId, x.SessionId, x.BookingRecordId }).IsUnique();
-            // "Booked participants for this master class" + "my master classes".
-            e.HasIndex(x => new { x.EventId, x.SessionId });
-            e.HasIndex(x => x.ParticipantId);
         });
 
         // --- SessionSpeaker (Session <-> speaker, many-many) -----------------
@@ -2048,7 +2015,7 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
             // Participant + Session are NoAction (not Cascade): the Event already
             // cascade-deletes the edition's participants AND its sessions, so a
             // second cascade path to either from the same root would be ambiguous
-            // to SQL Server (same reasoning as SessionSpeaker / MasterClassParticipant).
+            // to SQL Server (same reasoning as SessionSpeaker).
             e.HasOne(x => x.Participant).WithMany()
                 .HasForeignKey(x => x.ParticipantId)
                 .OnDelete(DeleteBehavior.NoAction);

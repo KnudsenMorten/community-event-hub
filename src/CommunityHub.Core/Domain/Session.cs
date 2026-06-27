@@ -224,20 +224,7 @@ public class Session
     /// </summary>
     public int? PrepUpdatedByParticipantId { get; set; }
 
-    // --- Master class: Zoho Booking participant sync (REQUIREMENTS § 6c) -----
-
-    /// <summary>
-    /// The per-master-class Zoho Booking endpoint URI an organizer configures in
-    /// the admin "master class management" area. The Booking fetch seam reads
-    /// this to pull the master class's booked participants (one-way Booking →
-    /// hub). Plain config (NOT a secret); null/blank = not yet mapped, so the
-    /// sync for this session is a no-op. Only meaningful for a
-    /// <see cref="SessionType.MasterClass"/> session.
-    /// </summary>
-    public string? BookingEndpointUri { get; set; }
-
-    /// <summary>When the Zoho Booking participant sync for this master class last ran.</summary>
-    public DateTimeOffset? BookingLastSyncedAt { get; set; }
+    // --- Master class: in-hub seat capacity (REQUIREMENTS §6) ----------------
 
     /// <summary>
     /// Seat capacity for the in-hub Master Class signup + waitlist (REQUIREMENTS §6).
@@ -298,10 +285,6 @@ public class Session
 
     /// <summary>Attendee questions asked for this session (hub-only; never public).</summary>
     public ICollection<SessionQuestion> Questions { get; set; } = new List<SessionQuestion>();
-
-    /// <summary>The participants booked into this master class (Zoho Booking sync).</summary>
-    public ICollection<MasterClassParticipant> MasterClassParticipants { get; set; }
-        = new List<MasterClassParticipant>();
 }
 
 /// <summary>

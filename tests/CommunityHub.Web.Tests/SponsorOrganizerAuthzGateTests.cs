@@ -131,7 +131,7 @@ public sealed class SponsorOrganizerAuthzGateTests
     private static SessionsModel NewSessions(CommunityHubDbContext db, DefaultHttpContext http)
     {
         var accessor = new HttpCurrentParticipantAccessor(new HttpContextAccessorOver(http));
-        return new SessionsModel(db, accessor, null!, null!, null!, null!, null!, null!, null!,
+        return new SessionsModel(db, accessor, null!, null!, null!, null!, null!, null!,
             new FixedClock(), Loc(), new CommunityHub.Core.Settings.FeatureGateService(db))
         {
             PageContext = new PageContext { HttpContext = http },

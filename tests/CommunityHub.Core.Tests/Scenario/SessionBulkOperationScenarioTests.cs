@@ -79,10 +79,10 @@ public sealed class SessionBulkOperationScenarioTests
             {
                 EventId = seed.EventId, SessionId = withEval.Id, Rating = 5,
             });
-            db.MasterClassParticipants.Add(new MasterClassParticipant
+            db.MasterClassSignups.Add(new MasterClassSignup
             {
-                EventId = seed.EventId, SessionId = withBooking.Id, ParticipantId = 0,
-                BookingRecordId = "booking-1", BookedEmail = "guest@example.test", BookedName = "Guest",
+                EventId = seed.EventId, SessionId = withBooking.Id, AttendeeId = 0,
+                Status = MasterClassSignupStatus.Confirmed,
             });
             await db.SaveChangesAsync();
 

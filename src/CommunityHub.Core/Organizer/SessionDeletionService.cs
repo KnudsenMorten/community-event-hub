@@ -9,7 +9,7 @@ namespace CommunityHub.Core.Organizer;
 /// (REQUIREMENTS §21 organizer "Sessions delete / CRUD gap"). It mirrors the
 /// participant-delete pattern (<see cref="ParticipantDeletionService"/>): the safe
 /// default is to refuse a delete that would destroy attendee-supplied engagement
-/// (questions, ratings, master-class bookings) and tell the organizer why; a clean
+/// (questions, ratings, master-class signups) and tell the organizer why; a clean
 /// delete removes the session and its always-safe import-state links.
 ///
 /// Semantics (all enforced HERE, not in the page):
@@ -149,9 +149,9 @@ public sealed class SessionDeletionService
         if (evaluations > 0)
             blockers.Add($"{evaluations} attendee evaluation(s)");
 
-        var bookings = await _db.MasterClassParticipants.CountAsync(m => m.SessionId == sessionId, ct);
-        if (bookings > 0)
-            blockers.Add($"{bookings} master-class booking(s)");
+        var signups = await _db.MasterClassSignups.CountAsync(m => m.SessionId == sessionId, ct);
+        if (signups > 0)
+            blockers.Add($"{signups} master-class signup(s)");
 
         return blockers;
     }

@@ -231,23 +231,15 @@ builder.Services.AddScoped<CommunityHub.Core.Domain.SessionQuestionService>();
 // ingestion would populate the same SessionEvaluation rows — no caller changes.
 builder.Services.AddScoped<CommunityHub.Core.Domain.SessionEvaluationService>();
 
-// --- Master-class master-class features (REQUIREMENTS § 6c) ----------------
-// 1) Public logistics page: per-master-class no-auth page where an involved
-//    speaker OR an organizer publishes/edits setup instructions; minted slug.
-// 2) Zoho Booking 1-way participant sync (Booking -> hub), per-master-class
-//    endpoint mapped by organizers in master-class management. The fetch seam
-//    defaults to the no-op Null fetcher (CanFetch=false): the real Booking
-//    endpoint URI is per-master-class operator config and the creds are Key
-//    Vault, so no Booking call is faked (🟡 pending). Swap in a live
-//    IMasterClassBookingFetcher here once wired — no caller changes.
+// --- Master-class features (REQUIREMENTS §6) -------------------------------
+// Public logistics page: per-master-class no-auth page where an involved
+// speaker OR an organizer publishes/edits setup instructions; minted slug.
+// (The legacy Zoho Booking 1-way participant sync was retired — CEH now OWNS
+// master-class seats + waitlist via MasterClassSignup; see REQUIREMENTS §6.)
 builder.Services.AddScoped<CommunityHub.Core.Reminders.MasterClassLogisticsService>();
 // Master Class attendee LANDING PAGE (FEATURE 2): prep content + Q&A comments + 1:1
 // private questions — the single server-side authority for that page's access model.
 builder.Services.AddScoped<CommunityHub.Core.Reminders.MasterClassPrepService>();
-builder.Services.AddSingleton<
-    CommunityHub.Core.Integrations.IMasterClassBookingFetcher,
-    CommunityHub.Core.Integrations.NullMasterClassBookingFetcher>();
-builder.Services.AddScoped<CommunityHub.Core.Integrations.MasterClassBookingSyncService>();
 
 // --- Reporting / dashboard -------------------------------------------------
 builder.Services.AddScoped<CommunityHub.Core.Reporting.ReportingService>();

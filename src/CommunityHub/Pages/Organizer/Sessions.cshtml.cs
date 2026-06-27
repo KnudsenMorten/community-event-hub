@@ -30,7 +30,6 @@ public class SessionsModel : PageModel
     private readonly SessionEvaluationMailService _evalMail;
 
     private readonly MasterClassLogisticsService _logistics;
-    private readonly CommunityHub.Core.Integrations.MasterClassBookingSyncService _bookingSync;
     private readonly CommunityHub.Core.Domain.SessionEvaluationService _eval;
     private readonly CommunityHub.Core.Organizer.SessionDeletionService _deletion;
     private readonly CommunityHub.Core.Organizer.SessionBulkOperationService _bulk;
@@ -44,7 +43,6 @@ public class SessionsModel : PageModel
         SessionManagementService mgmt,
         SessionEvaluationMailService evalMail,
         MasterClassLogisticsService logistics,
-        CommunityHub.Core.Integrations.MasterClassBookingSyncService bookingSync,
         CommunityHub.Core.Domain.SessionEvaluationService eval,
         CommunityHub.Core.Organizer.SessionDeletionService deletion,
         CommunityHub.Core.Organizer.SessionBulkOperationService bulk,
@@ -57,7 +55,6 @@ public class SessionsModel : PageModel
         _mgmt = mgmt;
         _evalMail = evalMail;
         _logistics = logistics;
-        _bookingSync = bookingSync;
         _eval = eval;
         _deletion = deletion;
         _bulk = bulk;
@@ -128,9 +125,6 @@ public class SessionsModel : PageModel
 
     [BindProperty] public string? EvalResultsText { get; set; }
 
-    // --- Master-class management (REQUIREMENTS § 6c) -----------------------
-    [BindProperty] public string? BookingEndpointUri { get; set; }
-
     /// <summary>The public logistics link for the last session a "show link" was requested for.</summary>
     public string? PublicLink { get; private set; }
     public int? PublicLinkSessionId { get; private set; }
@@ -144,18 +138,17 @@ public class SessionsModel : PageModel
         int Id, string Title, SessionType Type, SessionLength Length,
         string? Room, bool IsHubAdded, string? RoomQrUrl, string? EvaluationFormUrl,
         DateTimeOffset? EvaluationEmailedAt, IReadOnlyList<string> Speakers,
-        string? PublicSlug, string? BookingEndpointUri,
-        DateTimeOffset? BookingLastSyncedAt, int BookedCount,
-        int QuestionCount, int EvaluationCount, int TotalBookingCount)
+        string? PublicSlug,
+        int QuestionCount, int EvaluationCount, int SignupCount)
     {
         /// <summary>
         /// True when this session can be deleted with no attendee data loss
-        /// (no questions, evaluations, or master-class bookings of any state).
+        /// (no questions, evaluations, or master-class signups of any state).
         /// Drives whether the grid offers a delete button or a "has attendee
         /// data" note. Matches <see cref="CommunityHub.Core.Organizer.SessionDeletionService"/>.
         /// </summary>
         public bool CanDelete =>
-            QuestionCount == 0 && EvaluationCount == 0 && TotalBookingCount == 0;
+            QuestionCount == 0 && EvaluationCount == 0 && SignupCount == 0;
     }
 
     public int TotalCount { get; private set; }
@@ -368,69 +361,6 @@ public class SessionsModel : PageModel
         return Page();
     }
 
-    /// <summary>Map (or clear) a master class's Zoho Booking endpoint URI (§ 6c).</summary>
-    public async Task<IActionResult> OnPostBookingEndpointAsync(CancellationToken ct)
-    {
-        var me = Guard();
-        if (me is null) return AccessDenied ? Page() : RedirectToPage("/Login");
-
-        var session = await _db.Sessions
-            .FirstOrDefaultAsync(s => s.Id == SessionId && s.EventId == me.EventId, ct);
-        if (session is null)
-        {
-            Error = "Session not found.";
-        }
-        else if (session.Type != SessionType.MasterClass)
-        {
-            Error = "A Zoho Booking endpoint can only be mapped to a master-class session.";
-        }
-        else
-        {
-            session.BookingEndpointUri =
-                string.IsNullOrWhiteSpace(BookingEndpointUri) ? null : BookingEndpointUri.Trim();
-            session.UpdatedAt = DateTimeOffset.UtcNow;
-            await _db.SaveChangesAsync(ct);
-            Message = string.IsNullOrWhiteSpace(BookingEndpointUri)
-                ? "Booking endpoint cleared."
-                : "Booking endpoint saved for this master class.";
-        }
-
-        await LoadAsync(me.EventId, ct);
-        return Page();
-    }
-
-    /// <summary>Run the one-way Zoho Booking → hub participant sync for a master class (§ 6c).</summary>
-    public async Task<IActionResult> OnPostSyncBookingsAsync(CancellationToken ct)
-    {
-        var me = Guard();
-        if (me is null) return AccessDenied ? Page() : RedirectToPage("/Login");
-
-        // GATE (REQUIREMENTS §23): the master-class booking sync is the same Zoho
-        // attendee/booking integration the AttendeeBackstageSyncJob runs, so it honours
-        // the 'attendee-reconcile' switch. Disabled ⇒ no-op (NOT a green success),
-        // GUI state == actual behaviour.
-        if (!await _gate.IsFeatureEnabledAsync("attendee-reconcile", me.EventId, ct))
-        {
-            Result = ActionResultSummarizer.NoOp(
-                "Attendee reconciliation is turned off for this event. "
-                + "Enable it in Settings to sync bookings.", Formats);
-            await LoadAsync(me.EventId, ct);
-            return Page();
-        }
-
-        var result = await _bookingSync.SyncSessionAsync(me.EventId, SessionId, ct);
-        // Honest confirmation: a real sync shows "done at <time>" + its counts; a
-        // not-wired / nothing-to-do sync is a no-op (NOT a green success).
-        Result = result.Ran
-            ? ActionResultSummarizer.ForProvision(
-                provisioned: true, at: _clock.GetUtcNow(),
-                url: null, reason: result.Message, formats: Formats) with { Message = result.Message }
-            : ActionResultSummarizer.NoOp(result.Message, Formats);
-
-        await LoadAsync(me.EventId, ct);
-        return Page();
-    }
-
     /// <summary>Mint + show the public logistics link for a master class (§ 6c).</summary>
     public async Task<IActionResult> OnPostShowPublicLinkAsync(CancellationToken ct)
     {
@@ -550,11 +480,11 @@ public class SessionsModel : PageModel
             {
                 s.Id, s.Title, s.Type, s.Length, s.Room, s.IsHubAdded,
                 s.RoomQrUrl, s.EvaluationFormUrl, s.EvaluationEmailedAt,
-                s.PublicSlug, s.BookingEndpointUri, s.BookingLastSyncedAt,
-                BookedCount = s.MasterClassParticipants.Count(m => m.IsActive),
+                s.PublicSlug,
                 // Engagement counts so the grid can offer a SAFE delete only when
                 // there is no attendee data to lose (matches SessionDeletionService).
-                TotalBookingCount = s.MasterClassParticipants.Count,
+                // MC seats are CEH-owned now (MasterClassSignup), not Zoho bookings.
+                SignupCount = _db.MasterClassSignups.Count(m => m.SessionId == s.Id),
                 QuestionCount = s.Questions.Count,
                 EvaluationCount = _db.SessionEvaluations.Count(e => e.SessionId == s.Id),
                 Speakers = s.SessionSpeakers
@@ -566,8 +496,8 @@ public class SessionsModel : PageModel
         Rows = rows.Select(r => new Row(
             r.Id, r.Title, r.Type, r.Length, r.Room, r.IsHubAdded,
             r.RoomQrUrl, r.EvaluationFormUrl, r.EvaluationEmailedAt, r.Speakers,
-            r.PublicSlug, r.BookingEndpointUri, r.BookingLastSyncedAt, r.BookedCount,
-            r.QuestionCount, r.EvaluationCount, r.TotalBookingCount)).ToList();
+            r.PublicSlug,
+            r.QuestionCount, r.EvaluationCount, r.SignupCount)).ToList();
 
         TotalCount = await _db.Sessions
             .CountAsync(s => s.EventId == eventId && !s.IsServiceSession, ct);

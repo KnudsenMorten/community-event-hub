@@ -200,28 +200,6 @@ public sealed class WebTriggerFeatureGateTests
             () => model.OnPostSyncNowAsync(CancellationToken.None));
     }
 
-    // ---- Sessions master-class booking sync ('attendee-reconcile') --------
-
-    private static SessionsModel NewSessions(CommunityHubDbContext db, HttpContext http) =>
-        new(db, Accessor(http), mgmt: null!, evalMail: null!, logistics: null!,
-            bookingSync: null!, eval: null!, deletion: null!, bulk: null!,
-            new FixedClock(), Loc(), new FeatureGateService(db))
-        {
-            PageContext = new PageContext { HttpContext = http },
-        };
-
-    [Fact]
-    public async Task Sessions_booking_sync_noops_when_feature_disabled()
-    {
-        using var db = NewDb();
-        var http = OrganizerContext();
-        var model = NewSessions(db, http);
-
-        var result = await model.OnPostSyncBookingsAsync(CancellationToken.None);
-
-        // Disabled ⇒ a NoOp action result (NOT a green success), no _bookingSync call.
-        Assert.IsType<PageResult>(result);
-        Assert.NotNull(model.Result);
-        Assert.Contains("turned off", model.Result!.Message);
-    }
+    // (The Sessions master-class Zoho Booking sync was RETIRED — CEH owns MC seats
+    //  via MasterClassSignup; its gate test was removed with the handler.)
 }

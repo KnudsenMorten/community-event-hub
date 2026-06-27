@@ -61,9 +61,6 @@ public sealed class DataFreshnessServiceTests
         db.Attendees.Add(new Attendee { EventId = EventId, Email = "att1@x.test", FirstName = "Att", LastName = "One", LastSyncedAt = DaysAgo(9) });
         db.Attendees.Add(new Attendee { EventId = EventId, Email = "att2@x.test", FirstName = "Att", LastName = "Two", LastSyncedAt = DaysAgo(5) });
 
-        // --- Master-class booking sync: newest at 10 hours ago (fresh; window 36h).
-        db.MasterClassParticipants.Add(new MasterClassParticipant { EventId = EventId, BookedEmail = "mc@x.test", BookedName = "MC One", LastSyncedAt = HoursAgo(10) });
-
         // --- Sponsor leads: capture 9 days ago, last CRM sync 2 days ago →
         //     freshness = the LATER (2 days ago; fresh, window 7d).
         db.SponsorLeads.Add(new SponsorLead
@@ -125,7 +122,6 @@ public sealed class DataFreshnessServiceTests
 
         Assert.Equal(DaysAgo(1),  Row(snap, FreshnessFeed.Email).LastActivityUtc);
         Assert.Equal(DaysAgo(5),  Row(snap, FreshnessFeed.AttendeeSync).LastActivityUtc);
-        Assert.Equal(HoursAgo(10), Row(snap, FreshnessFeed.MasterClassBookingSync).LastActivityUtc);
         Assert.Equal(DaysAgo(2),  Row(snap, FreshnessFeed.SponsorLeads).LastActivityUtc); // later of capture/sync
         Assert.Equal(DaysAgo(2),  Row(snap, FreshnessFeed.SpeakerImport).LastActivityUtc);
         Assert.Equal(DaysAgo(2),  Row(snap, FreshnessFeed.SessionImport).LastActivityUtc);
@@ -163,7 +159,6 @@ public sealed class DataFreshnessServiceTests
         Assert.True(Row(snap, FreshnessFeed.AttendeeSync).IsStale(Now));
         Assert.True(Row(snap, FreshnessFeed.SessionEvaluations).IsStale(Now));
         Assert.False(Row(snap, FreshnessFeed.Email).IsStale(Now));
-        Assert.False(Row(snap, FreshnessFeed.MasterClassBookingSync).IsStale(Now));
         Assert.False(Row(snap, FreshnessFeed.SponsorLeads).IsStale(Now));
 
         // The snapshot rolls these up.

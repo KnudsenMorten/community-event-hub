@@ -14,8 +14,6 @@ public enum FreshnessFeed
     Email,
     /// <summary>Most recent attendee reconciliation sync (Zoho Backstage → hub).</summary>
     AttendeeSync,
-    /// <summary>Most recent master-class booking sync (Zoho Booking → hub).</summary>
-    MasterClassBookingSync,
     /// <summary>Most recent sponsor-lead capture or CRM sync.</summary>
     SponsorLeads,
     /// <summary>Most recent Sessionize speaker import.</summary>
@@ -109,7 +107,6 @@ public sealed class DataFreshnessService
     // not hard SLAs — kept as plain constants (no config/secret).
     public static readonly TimeSpan EmailStale            = TimeSpan.FromDays(3);
     public static readonly TimeSpan AttendeeSyncStale     = TimeSpan.FromHours(36);
-    public static readonly TimeSpan BookingSyncStale      = TimeSpan.FromHours(36);
     public static readonly TimeSpan SponsorLeadsStale     = TimeSpan.FromDays(7);
     public static readonly TimeSpan SpeakerImportStale    = TimeSpan.FromDays(7);
     public static readonly TimeSpan SessionImportStale    = TimeSpan.FromDays(7);
@@ -139,10 +136,6 @@ public sealed class DataFreshnessService
         var attendeeSync = await _db.Attendees
             .Where(a => a.EventId == eventId)
             .MaxAsync(a => (DateTimeOffset?)a.LastSyncedAt, ct);
-
-        var bookingSync = await _db.MasterClassParticipants
-            .Where(m => m.EventId == eventId)
-            .MaxAsync(m => m.LastSyncedAt, ct);
 
         // A lead's freshness = the later of its capture and its last CRM sync.
         var leadCaptured = await _db.SponsorLeads
@@ -177,7 +170,6 @@ public sealed class DataFreshnessService
         {
             new(FreshnessFeed.Email,                  email,            EmailStale),
             new(FreshnessFeed.AttendeeSync,           attendeeSync,     AttendeeSyncStale),
-            new(FreshnessFeed.MasterClassBookingSync, bookingSync,      BookingSyncStale),
             new(FreshnessFeed.SponsorLeads,           sponsorLeads,     SponsorLeadsStale),
             new(FreshnessFeed.SpeakerImport,          speakerImport,    SpeakerImportStale),
             new(FreshnessFeed.SessionImport,          sessionImport,    SessionImportStale),

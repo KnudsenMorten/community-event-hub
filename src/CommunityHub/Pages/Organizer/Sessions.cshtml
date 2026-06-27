@@ -330,27 +330,10 @@
                                                        target="_blank" rel="noopener" style="font-size:12.5px;">Open public page ↗</a>
                                                 }
                                             </form>
-                                            <!-- Zoho Booking endpoint + sync -->
-                                            <form method="post" asp-page-handler="BookingEndpoint"
-                                                  style="flex:1 1 280px;min-width:240px;display:flex;flex-direction:column;gap:6px;">
-                                                <input type="hidden" name="SessionId" value="@r.Id" />
-                                        @{ GridStateFields(); }
-                                                <label for="BookingEndpoint_@r.Id" style="font-size:12.5px;">Zoho Booking endpoint URI</label>
-                                                <input id="BookingEndpoint_@r.Id" name="BookingEndpointUri" type="url"
-                                                       maxlength="2000" value="@r.BookingEndpointUri" placeholder="https://…" />
-                                                <div><button type="submit">Save endpoint</button></div>
-                                            </form>
-                                            <form method="post" asp-page-handler="SyncBookings"
-                                                  style="flex:1 1 200px;min-width:180px;display:flex;flex-direction:column;gap:6px;">
-                                                <input type="hidden" name="SessionId" value="@r.Id" />
-                                        @{ GridStateFields(); }
-                                                <span style="font-size:12.5px;color:#6b7280;">
-                                                    @r.BookedCount booked
-                                                    @if (r.BookingLastSyncedAt is not null) { <text>· synced @r.BookingLastSyncedAt.Value.ToString("yyyy-MM-dd HH:mm")</text> }
-                                                </span>
-                                                <div><button type="submit">Sync bookings now</button></div>
-                                                <span style="font-size:11.5px;color:#9ca3af;">One-way Zoho Booking → hub. Reports "not configured" until the endpoint + creds are wired (no faked participants).</span>
-                                            </form>
+                                            <span style="flex:1 1 280px;min-width:240px;font-size:12px;color:#9ca3af;">
+                                                Master Class seats &amp; waitlist are managed on
+                                                <a asp-page="/Organizer/MasterClasses">Master Classes</a>.
+                                            </span>
                                         </div>
                                     </div>
                                 }
@@ -381,7 +364,7 @@
                                     {
                                         <p style="font-size:12.5px;color:#9ca3af;margin:6px 0;" role="note">
                                             This session has attendee data
-                                            (@(r.QuestionCount) question(s), @(r.EvaluationCount) evaluation(s), @(r.TotalBookingCount) booking(s))
+                                            (@(r.QuestionCount) question(s), @(r.EvaluationCount) evaluation(s), @(r.SignupCount) master-class signup(s))
                                             and cannot be deleted. Handle that data first.
                                         </p>
                                     }

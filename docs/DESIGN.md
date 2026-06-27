@@ -1173,7 +1173,7 @@ pattern. `DeleteAsync(eventId, sessionId)` is **edition-scoped** and:
   removed with the session (never orphaned). The FK from `SessionSpeaker` → `Session` is `Cascade`; removing
   them explicitly keeps the single `SaveChanges` atomic and the intent clear.
 - **Refuses on attendee engagement** — a session with `SessionQuestion`s, `SessionEvaluation`s, or
-  `MasterClassParticipant` bookings returns `DeletionStatus.Blocked` with human-readable counts and is left
+  `MasterClassSignup`s returns `DeletionStatus.Blocked` with human-readable counts and is left
   untouched, so attendee-supplied data is never silently destroyed. (Those FKs are `NoAction`, so a blind
   delete would fail the FK anyway — this turns that into a clear, safe refusal the UI explains.)
 - **Flags imported sessions** — a deleted non-`IsHubAdded` session sets `WasImported=true` so the page warns
@@ -1488,12 +1488,18 @@ states. **No secret** (a sponsorship contact is public) but the shipped `appsett
 **blank placeholder** so no real address reaches the public mirror — operators set it per edition in private
 config. **No schema change.** Mobile-first; copy bilingual via `Sponsors.Become*` resx keys (en + da-DK).
 
-**Master-class master-class features (public logistics page + Zoho Booking participant sync) — 2026-06-15.**
-Built on `Session` + `SessionType.CommunityMasterClass`. Schema additions (migration `MasterClassFeatures`):
-`Session.{PublicSlug, LogisticsText, LogisticsUpdatedAt, LogisticsUpdatedByEmail, BookingEndpointUri,
-BookingLastSyncedAt}` (filtered-unique index on `PublicSlug`), and a new `MasterClassParticipant`
-link entity (`(EventId, SessionId, BookingRecordId)` **unique** = the idempotency key; `Session` +
-`Participant` FKs are `NoAction` because the `Event` cascade already covers the edition root).
+**Master-class public logistics page — 2026-06-15.** Built on `Session` + `SessionType.MasterClass`.
+Schema additions (migration `MasterClassFeatures`): `Session.{PublicSlug, LogisticsText,
+LogisticsUpdatedAt, LogisticsUpdatedByEmail}` (filtered-unique index on `PublicSlug`).
+
+> **RETIRED 2026-06-28 — Zoho Booking participant sync.** The original §6c design also added a
+> one-way Zoho Booking → hub participant sync (`MasterClassBookingSyncService` /
+> `IMasterClassBookingFetcher` / the `MasterClassParticipant` link entity / `Session.BookingEndpointUri`
+> + `BookingLastSyncedAt`). It was **always gated off** (Null fetcher, never wired for ELDK27) and is now
+> **removed** — CEH OWNS master-class seats + waitlist via `MasterClassSignup` (see the Master Class
+> signup engine). Migration `RetireZohoMcBookingSync` drops the table + the two `Session.Booking*`
+> columns; the session-deletion/bulk-delete guards and the data-freshness dashboard now read
+> `MasterClassSignup` instead.
 - **Public logistics page.** `MasterClassLogisticsService` mints an unguessable URL-safe `PublicSlug`
   (144-bit, lazy on first "show public link"), resolves it to a read-only view, and applies edits gated
   by `CanEditAsync` (TRUE for an **Organizer** in the edition, or a participant **linked as a speaker of
@@ -1504,19 +1510,8 @@ link entity (`(EventId, SessionId, BookingRecordId)` **unique** = the idempotenc
   construction). The organizer session view + the speaker hub both expose a **"show public link"**
   affordance (the speaker hub adds a "My master classes" card listing each linked master class with its
   public link + an edit/view shortcut).
-- **Zoho Booking 1-way participant sync.** The per-master-class **Booking endpoint URI** is
-  organizer-set in master-class management (stored on `Session.BookingEndpointUri`; plain config, not a
-  secret). `MasterClassBookingSyncService.SyncSessionAsync` pulls bookings through the
-  `IMasterClassBookingFetcher` seam — **no-op default `NullMasterClassBookingFetcher`** (`CanFetch=false`,
-  **no faked call**, same clean-seam pattern as `IRoomQrProvider`) — then **upserts** each booking by
-  `(EventId, SessionId, BookingRecordId)`: matches/creates the hub participant by email (lower-cased),
-  links it, and is **idempotent** (re-sync updates in place, never duplicates). A brand-new booked
-  participant is created `LifecycleState=Inactive` / `Role=Attendee` so it **cannot sign in** until an
-  organizer validates it in the pre-selection queue; a cancelled booking flips the link's `IsActive`
-  to false rather than deleting it (history preserved). **Live wiring is 🟡 pending (operator config):**
-  the real Booking endpoint URI is per-master-class config and the fetch creds (OAuth) are Key Vault —
-  register a live `IMasterClassBookingFetcher` (e.g. over the existing `ZohoClient` Bookings call) once
-  wired, no caller changes.
+- **Master-class seats.** Seats + waitlist are CEH-owned via `MasterClassSignup` (see the Master Class
+  signup engine) — the legacy Zoho Booking participant sync was retired (see the note above).
 
 **Public how-to — get a Sessionize API endpoint id:** in Sessionize open the event → **API/Embed** →
 create a new API endpoint → name it → choose **JSON** → include all built-in fields → enable the
@@ -2811,7 +2806,7 @@ landing surfaces. Two parts:
   (REQUIREMENTS §21 Organizer [M] "last synced at"). Answers a different question than the count
   dashboards: *is each data source still being fed, or has a sync silently stopped?* For each
   `FreshnessFeed` (Email ← `EmailLog.SentAt`; AttendeeSync ← `Attendee.LastSyncedAt`;
-  MasterClassBookingSync ← `MasterClassParticipant.LastSyncedAt`; SponsorLeads ← the later of
+  SponsorLeads ← the later of
   `SponsorLead.CapturedAt` / `LastSyncedAt`; SpeakerImport ← `SpeakerProfile.LastSessionizeImportAt`;
   SessionImport ← `Session.LastSessionizeImportAt`; SessionQuestions ← `SessionQuestion.CreatedAt`;
   SessionEvaluations ← `SessionEvaluation.CreatedAt`; SoMePublished ← `SoMePost.PublishedAtUtc`) it

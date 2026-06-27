@@ -120,17 +120,16 @@ public sealed class SessionDeletionScenarioTests
     }
 
     [Fact]
-    public async Task Session_with_masterclass_bookings_is_blocked()
+    public async Task Session_with_masterclass_signups_is_blocked()
     {
         var (db, eventId, session) = await SeedWithSessionAsync();
         using (db)
         {
-            db.MasterClassParticipants.Add(new MasterClassParticipant
+            db.MasterClassSignups.Add(new MasterClassSignup
             {
                 EventId = eventId, SessionId = session.Id,
-                ParticipantId = 0,    // synthetic booking row
-                BookingRecordId = "booking-1",
-                BookedEmail = "guest@example.test", BookedName = "Guest",
+                AttendeeId = 0,    // synthetic signup row
+                Status = MasterClassSignupStatus.Confirmed,
             });
             await db.SaveChangesAsync();
 
@@ -138,7 +137,7 @@ public sealed class SessionDeletionScenarioTests
             var result = await svc.DeleteAsync(eventId, session.Id);
 
             Assert.Equal(SessionDeletionService.DeletionStatus.Blocked, result.Status);
-            Assert.Contains(result.BlockingDependencies, d => d.Contains("booking"));
+            Assert.Contains(result.BlockingDependencies, d => d.Contains("signup"));
         }
     }
 

@@ -33,7 +33,7 @@ public sealed record LinkedInPublishResult(
 /// NOTHING posts until this is wired AND enabled: the default
 /// <see cref="NullLinkedInPostPublisher"/> is a no-op (<see cref="CanPublish"/> =
 /// false) that performs NO LinkedIn call. This mirrors the established repo
-/// gated-seam pattern (cf. <see cref="IMasterClassBookingFetcher"/> /
+/// gated-seam pattern (cf. <see cref="IBackstageSpeakerEmailApi"/> /
 /// <see cref="Graphics.ISharePointFileStore"/>).
 ///
 /// <b>Distinct from <see cref="Graphics.ISocialShareGateway"/>:</b> that seam
