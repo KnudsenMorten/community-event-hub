@@ -34,7 +34,7 @@ test.describe('@feature switch-user is real impersonation', () => {
         // Open the Participants grid (the v2 grid that carries the Switch action).
         await page.goto(`${BASE}/Organizer/Participants`, { waitUntil: 'domcontentloaded' });
         expect(onLoginPage(page), 'organizer should reach the grid').toBeFalsy();
-        await expect(page.locator('h2', { hasText: 'Participants' }).first()).toBeVisible();
+        await expect(page.locator('h1', { hasText: 'Participants' }).first()).toBeVisible();
 
         // Find a row whose persona is NOT Organizer (so switching is meaningful
         // and "switch to yourself" is not rejected), then click its

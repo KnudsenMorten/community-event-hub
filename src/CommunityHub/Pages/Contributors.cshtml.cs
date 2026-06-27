@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc.RazorPages;
 
 namespace CommunityHub.Pages;
@@ -16,7 +17,12 @@ namespace CommunityHub.Pages;
 ///     express in a JSON file.
 /// Editing this list is a one-line code change with a tag-driven
 /// publish; that's a fair trade for the clarity.
+///
+/// Public credits page: opt OUT of the fail-closed FallbackPolicy so anonymous
+/// visitors can see it (operator 2026-06-27). No personal data beyond name +
+/// public LinkedIn + role, which is the whole point of a credits page.
 /// </summary>
+[AllowAnonymous]
 public class ContributorsModel : PageModel
 {
     /// <summary>Organizer team -- the people running the event year-round.</summary>
