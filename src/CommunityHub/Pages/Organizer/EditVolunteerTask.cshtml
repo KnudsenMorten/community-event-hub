@@ -1,0 +1,167 @@
+@page
+@using CommunityHub.Core.Domain
+@model CommunityHub.Pages.Organizer.EditVolunteerTaskModel
+@{
+    ViewData["Title"] = "Edit task";
+}
+
+<style>
+    /* Mobile-first (~360px): single column, full-width fields that wrap. */
+    .et-card { border:1px solid #d7dbe4; border-radius:10px; margin:0 0 16px 0; padding:14px; }
+    .et-field { margin:0 0 12px 0; }
+    .et-field label { display:block; font-weight:600; font-size:13.5px; margin-bottom:4px; }
+    .et-field input[type=text], .et-field input[type=number], .et-field input[type=date],
+    .et-field select, .et-field textarea {
+        width:100%; box-sizing:border-box; padding:8px 10px; font-size:14px;
+        border:1px solid #c4c8d4; border-radius:6px; }
+    .et-field textarea { min-height:80px; resize:vertical; }
+    .et-hint { color:#6e7681; font-size:12px; margin-top:3px; }
+    .et-actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; }
+    .et-actions button { background:#008BD2; color:#fff; border:0; border-radius:6px;
+        padding:9px 16px; font-size:14px; font-weight:600; cursor:pointer; }
+    .et-actions a.ghost { background:#fff; color:#1D3380; border:1px solid #c4c8d4;
+        border-radius:6px; padding:9px 16px; font-size:14px; font-weight:600;
+        text-decoration:none; display:inline-block; }
+    .et-note { background:#f0fdf4; border-left:4px solid #16a34a; padding:10px 12px;
+        border-radius:6px; margin-bottom:14px; font-size:13.5px; color:#166534; }
+    .et-error { background:#fef2f2; border-left:4px solid #c0392b; padding:10px 12px;
+        border-radius:6px; margin-bottom:14px; font-size:13.5px; color:#991b1b; }
+    .et-list { list-style:none; padding:0; margin:0; }
+    .et-list li { border-bottom:1px solid #eef0f4; padding:8px 0; font-size:14px; }
+    .et-list .bucket { color:#6e7681; font-size:12px; }
+    .et-list .nodesc { color:#b45309; font-size:12px; }
+</style>
+
+<div class="card">
+    <h1>Edit task</h1>
+    <p>Edit the <strong>shared task definition</strong> &mdash; any organizer can change a
+       task&rsquo;s content here, no matter who created it. Leave the detailed description
+       blank and it is generated automatically from the title. (Your allocation draft queue
+       is not affected.)</p>
+
+    @if (Model.AccessDenied)
+    {
+        <p class="error">This area is for organizers only.</p>
+        return;
+    }
+
+    @if (!string.IsNullOrEmpty(Model.Notice))
+    {
+        <div class="et-note">@Model.Notice</div>
+    }
+    @if (!string.IsNullOrEmpty(Model.Error))
+    {
+        <div class="et-error">@Model.Error</div>
+    }
+</div>
+
+@if (Model.Editing is null)
+{
+    @* ---- Picker: choose a task to edit ---- *@
+    <div class="et-card">
+        <h2 style="margin-top:0;font-size:18px;">Choose a task to edit</h2>
+        @if (Model.AllTasks.Count == 0)
+        {
+            <p style="font-size:14px;color:#6e7681;">No tasks yet. Import the plan on the
+                <a asp-page="/Organizer/BucketAllocation">Buckets &amp; allocation</a> page first.</p>
+        }
+        else
+        {
+            <ul class="et-list">
+                @foreach (var t in Model.AllTasks)
+                {
+                    <li>
+                        <a asp-page="/Organizer/EditVolunteerTask" asp-route-TaskId="@t.Id">@t.Title</a>
+                        <span class="bucket"> &middot; @t.Bucket</span>
+                        @if (!t.HasDescription)
+                        {
+                            <span class="nodesc"> &middot; no description yet</span>
+                        }
+                    </li>
+                }
+            </ul>
+        }
+    </div>
+}
+else
+{
+    @* ---- Editor for the selected task ---- *@
+    <form method="post" asp-page-handler="Save" class="et-card">
+        <input type="hidden" asp-for="Input.TaskId" />
+        <p style="margin-top:0;font-size:13px;color:#6e7681;">
+            Bucket: <strong>@Model.Editing.Bucket</strong> &middot; @Model.Editing.Subcategory
+        </p>
+
+        <div class="et-field">
+            <label asp-for="Input.Title">Title</label>
+            <input type="text" asp-for="Input.Title" required />
+        </div>
+
+        <div class="et-field">
+            <label asp-for="Input.Description">Detailed description</label>
+            <textarea asp-for="Input.Description"
+                      placeholder="Leave blank to auto-generate from the title&hellip;"></textarea>
+            <div class="et-hint">
+                Shown wherever the task appears so everyone understands what is expected.
+                If blank, it is generated from the title
+                (@(Model.AiEnabled ? "AI" : "heuristic")) when you save.
+            </div>
+        </div>
+
+        <div class="et-field">
+            <label asp-for="Input.Criticality">Criticality</label>
+            <select asp-for="Input.Criticality"
+                    asp-items="Html.GetEnumSelectList<VolunteerTaskCriticality>()"></select>
+        </div>
+
+        <div class="et-field">
+            <label asp-for="Input.ResponsibleTeam">Responsible team</label>
+            <input type="text" asp-for="Input.ResponsibleTeam" />
+        </div>
+
+        <div class="et-field">
+            <label asp-for="Input.ResourcesNeeded">Resources needed</label>
+            <input type="number" asp-for="Input.ResourcesNeeded" min="0" />
+        </div>
+
+        <div class="et-field">
+            <label asp-for="Input.Prerequisites">Pre-requisites</label>
+            <textarea asp-for="Input.Prerequisites"></textarea>
+        </div>
+
+        <div class="et-field">
+            <label asp-for="Input.Expectations">Expectations</label>
+            <textarea asp-for="Input.Expectations"></textarea>
+        </div>
+
+        <div class="et-field">
+            <label asp-for="Input.Instructions">Instructions</label>
+            <textarea asp-for="Input.Instructions"></textarea>
+        </div>
+
+        <div class="et-field">
+            <label asp-for="Input.EldkLeadName">ELDK lead (task)</label>
+            <input type="text" asp-for="Input.EldkLeadName" />
+        </div>
+
+        <div class="et-field">
+            <label asp-for="Input.TimeEnd">Time end</label>
+            <input type="text" asp-for="Input.TimeEnd" placeholder="e.g. 12:00" />
+        </div>
+
+        <div class="et-field">
+            <label asp-for="Input.Shift">Shift / window</label>
+            <input type="text" asp-for="Input.Shift" placeholder="e.g. Day 1, 08:00&ndash;10:00" />
+        </div>
+
+        <div class="et-field">
+            <label asp-for="Input.DueDate">Due date</label>
+            <input type="date" asp-for="Input.DueDate" />
+        </div>
+
+        <div class="et-actions">
+            <button type="submit">Save task</button>
+            <a class="ghost" asp-page="/Organizer/EditVolunteerTask">Back to list</a>
+        </div>
+    </form>
+}

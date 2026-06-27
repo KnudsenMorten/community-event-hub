@@ -44,6 +44,16 @@ public class VolunteerTask
 {
     public int Id { get; set; }
 
+    /// <summary>
+    /// Stable, immutable EXTERNAL key (§151) that the Excel export ALWAYS writes
+    /// and the importer UPSERTS by: a row carrying this id UPDATEs the matching
+    /// task; a blank id CREATEs a new one. Deliberately a GUID (not the raw
+    /// <see cref="Id"/>) so it survives a re-seed / DB rebuild and stays the same
+    /// across migrations. Defaulted here so every task always has one even before
+    /// the row is persisted; a UNIQUE index enforces no duplicates.
+    /// </summary>
+    public Guid ExternalKey { get; set; } = Guid.NewGuid();
+
     // --- Edition scope (denormalized up the tree) ---------------------------
     public int EventId { get; set; }
     public Event Event { get; set; } = null!;

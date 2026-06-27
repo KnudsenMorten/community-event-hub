@@ -3,9 +3,9 @@
 @using CommunityHub.Pages.Shared
 @using Microsoft.AspNetCore.Mvc.Localization
 @inject IHtmlLocalizer<CommunityHub.Core.Resources.SharedResource> Localizer
-@model CommunityHub.Pages.Organizer.BucketAllocationModel
+@model CommunityHub.Pages.Organizer.OrganizerAllocationModel
 @{
-    ViewData["Title"] = "Buckets & allocation";
+    ViewData["Title"] = Localizer["Alloc.Organizer.Title"].Value;
 }
 
 <style>
@@ -23,7 +23,7 @@
     .gap.red { background:#fee2e2; color:#991b1b; }
     .gap.sim { background:#fef9c3; color:#854d0e; }
     .ba-form { display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin-top:8px; }
-    .ba-form select, .ba-form input[type=file] {
+    .ba-form select {
         flex:1 1 160px; min-width:0; box-sizing:border-box; padding:7px 9px;
         font-size:13.5px; border:1px solid #c4c8d4; border-radius:6px; }
     .ba-form button { background:#008BD2; color:#fff; border:0; border-radius:6px;
@@ -46,20 +46,17 @@
     .ba-engine { background:#eef2ff; border-left:4px solid #4f46e5; padding:10px 12px;
         border-radius:6px; margin:12px 0 0; font-size:13.5px; color:#3730a3; }
     @@media (max-width: 600px) {
-        .ba-form select, .ba-form input[type=file], .ba-form button { flex:1 1 100%; }
+        .ba-form select, .ba-form button { flex:1 1 100%; }
     }
 </style>
 
 <div class="card">
-    <h1>Buckets &amp; allocation</h1>
-    <p>Group volunteer tasks into <strong>buckets</strong>, see each task&rsquo;s resource
-       gap (green = enough people, red = short), and map people&rarr;tasks. Mapping queues a
-       <strong>draft</strong> you can simulate and tweak &mdash; nothing is assigned until you
-       <strong>commit</strong>.</p>
+    <h1>@Localizer["Alloc.Organizer.Title"]</h1>
+    <p>@Localizer["Alloc.Organizer.Intro"]</p>
 
     @if (Model.AccessDenied)
     {
-        <p class="error">This area is for organizers only.</p>
+        <p class="error">@Localizer["Alloc.OrganizersOnly"]</p>
         return;
     }
 
@@ -68,33 +65,22 @@
         <div class="ba-note">@Model.Notice</div>
     }
 
-    @* ---- Import plan ---- *@
-    <form method="post" asp-page-handler="Import" enctype="multipart/form-data" class="ba-form" aria-label="Import plan">
-        <label for="planFile" style="flex:1 1 100%;font-weight:600;">Import plan (CSV)</label>
-        <input type="file" id="planFile" name="planFile" accept=".csv,text/csv" aria-label="Plan CSV file" />
-        <button type="submit">Import plan</button>
-    </form>
-    <p class="meta" style="color:#6e7681;font-size:12px;margin-top:4px;">
-        Buckets are derived from the plan&rsquo;s Responsible Team column. AI guidance:
-        <strong>@(Model.AiEnabled ? "enabled (LLM)" : "heuristic fallback")</strong>.
-    </p>
-
     @* ---- §150 step 2: availability auto-assign (seeds the draft queue with proposals) ---- *@
     <div class="ba-engine">
         <form method="post" asp-page-handler="RunAutoAssign" class="ba-form" aria-label="Run availability auto-assign">
             <strong style="flex:1 1 100%;">@Localizer["Alloc.AutoAssignHeading"]</strong>
-            <span style="flex:1 1 100%;color:#3730a3;">@Localizer["Alloc.AutoAssignVolunteerHelp"]</span>
+            <span style="flex:1 1 100%;color:#3730a3;">@Localizer["Alloc.AutoAssignOrganizerHelp"]</span>
             <button type="submit">@Localizer["Alloc.RunAutoAssign"]</button>
         </form>
     </div>
 </div>
 
-@* ---- Draft tray (sticky): the pending allocation queue ---- *@
+@* ---- Draft tray (sticky): the pending organizer-allocation queue ---- *@
 <div class="ba-tray" aria-live="polite">
-    <h3>Draft allocations (@Model.DraftCount pending)</h3>
+    <h3>@Localizer["Alloc.DraftHeading", Model.DraftCount]</h3>
     @if (Model.DraftCount == 0)
     {
-        <p style="margin:0;font-size:13px;color:#6e7681;">No pending allocations. Add people to tasks below to build a draft, then commit.</p>
+        <p style="margin:0;font-size:13px;color:#6e7681;">@Localizer["Alloc.DraftEmpty"]</p>
     }
     else
     {
@@ -114,7 +100,7 @@
                     &rarr; @d.Task.Title
                     <form method="post" asp-page-handler="RemoveDraft" style="display:inline">
                         <input type="hidden" name="taskId" value="@d.TaskId" />
-                        <input type="hidden" name="volunteerId" value="@d.ParticipantId" />
+                        <input type="hidden" name="organizerId" value="@d.ParticipantId" />
                         <button type="submit" title="Remove from draft"
                                 style="background:none;border:0;color:#c0392b;cursor:pointer;font-weight:700;">&times;</button>
                     </form>
@@ -124,41 +110,26 @@
         <div class="ba-form" style="margin-top:10px;">
             <form method="post" asp-page-handler="Commit" style="display:inline">
                 <button type="submit" class="green"
-                        data-ceh-confirm="confirmCommitAlloc" data-ceh-count="@Model.DraftCount">Commit draft</button>
+                        data-ceh-confirm="confirmCommitOrgAlloc" data-ceh-count="@Model.DraftCount">@Localizer["Alloc.CommitDraft"]</button>
             </form>
             <form method="post" asp-page-handler="Discard" style="display:inline">
-                <button type="submit" class="danger">Discard draft</button>
+                <button type="submit" class="danger">@Localizer["Alloc.DiscardDraft"]</button>
             </form>
         </div>
         @* Second confirmation before the real commit (REQUIREMENTS §23a, category 3
            Queue safety): states the consequence + count, and that impact is RING-SCOPED. *@
         <partial name="_ConfirmModal" model='new ConfirmModalModel(
-            Id: "confirmCommitAlloc",
-            Title: "Commit volunteer allocations?",
-            Body: "This turns {count} draft allocation(s) into real assignments now. Only volunteers within the feature’s released ring are committed (others stay in the queue). This affects real people — are you sure?",
-            ConfirmLabel: "Yes, commit",
-            CancelLabel: "Cancel",
+            Id: "confirmCommitOrgAlloc",
+            Title: Localizer["Alloc.Organizer.CommitConfirmTitle"].Value,
+            Body: Localizer["Alloc.Organizer.CommitConfirmBody"].Value,
+            ConfirmLabel: Localizer["Alloc.CommitConfirmYes"].Value,
+            CancelLabel: Localizer["Common.Cancel"].Value,
             Danger: false,
             DefaultCount: Model.DraftCount.ToString())' />
     }
-
-    @* ---- Drop-out re-plan: free a leaver's slots + queue backfill candidates ---- *@
-    <div style="margin-top:14px;border-top:1px solid #e6e8ee;padding-top:10px;">
-        <h3 style="font-size:14px;margin:0 0 4px;">Someone dropped out?</h3>
-        <p style="margin:0 0 8px;font-size:13px;color:#6e7681;">
-            Free their shifts and auto-queue backfill candidates (available volunteers preferred)
-            as drafts — review the red/green simulation below, then Commit.
-        </p>
-        <form method="post" asp-page-handler="ReplanDropout" class="ba-form">
-            <select name="volunteerId" aria-label="Volunteer who dropped out" asp-items="Model.VolunteerOptions">
-                <option value="">— who dropped out? —</option>
-            </select>
-            <button type="submit" class="danger">Free slots &amp; queue backfill</button>
-        </form>
-    </div>
 </div>
 
-@* ---- Buckets with gap indicators + the task-mapper ---- *@
+@* ---- Buckets with gap indicators + the organizer task-mapper ---- *@
 @foreach (var bucket in Model.Buckets)
 {
     <div class="ba-bucket">
@@ -192,28 +163,14 @@
                         }
                     </div>
 
-                    @* Map a person into the DRAFT for this task. *@
+                    @* Map an organizer into the DRAFT for this task. *@
                     <form method="post" asp-page-handler="AddDraft" class="ba-form" aria-label="Add to draft">
                         <input type="hidden" name="taskId" value="@t.Id" />
-                        <select name="volunteerId" aria-label="Volunteer" asp-items="Model.VolunteerOptions">
-                            <option value="">Add person to draft&hellip;</option>
+                        <select name="organizerId" aria-label="Organizer" asp-items="Model.OrganizerOptions">
+                            <option value="">@Localizer["Alloc.Organizer.AddPerson"]</option>
                         </select>
-                        <button type="submit" class="ghost">Queue</button>
+                        <button type="submit" class="ghost">@Localizer["Alloc.Queue"]</button>
                     </form>
-
-                    <div class="ba-form">
-                        @if (t.Status != VolunteerTaskStatus.Done)
-                        {
-                            <form method="post" asp-page-handler="Complete" style="display:inline">
-                                <input type="hidden" name="taskId" value="@t.Id" />
-                                <button type="submit" class="green">Mark completed (lead)</button>
-                            </form>
-                        }
-                        <form method="post" asp-page-handler="RegenerateGuidance" style="display:inline">
-                            <input type="hidden" name="taskId" value="@t.Id" />
-                            <button type="submit" class="ghost">@(Model.AiEnabled ? "Regenerate guidance (AI)" : "Suggest guidance")</button>
-                        </form>
-                    </div>
                 </div>
             }
             @if (bucket.Tasks.Count == 0)
@@ -226,6 +183,5 @@
 
 @if (Model.Buckets.Count == 0)
 {
-    <div class="card"><p>No buckets yet. Import the plan CSV above, or create buckets on the
-        <a asp-page="/Organizer/VolunteerStructure">Volunteer structure</a> page.</p></div>
+    <div class="card"><p>@Localizer["Alloc.Organizer.NoTasks"]</p></div>
 }

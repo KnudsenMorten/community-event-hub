@@ -1,0 +1,76 @@
+@page
+@model CommunityHub.Pages.Organizer.VolunteerTasksExcelModel
+@{
+    ViewData["Title"] = "Tasks — Excel export / import";
+}
+
+<style>
+    /* Mobile-first (~360px): cards stack, forms go full-width and wrap. */
+    .tx-form { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-top:10px; }
+    .tx-form input[type=file] {
+        flex:1 1 200px; min-width:0; box-sizing:border-box; padding:8px 9px;
+        font-size:13.5px; border:1px solid #c4c8d4; border-radius:6px; }
+    .tx-btn { display:inline-block; background:#008BD2; color:#fff; border:0; border-radius:6px;
+        padding:10px 16px; font-size:14px; font-weight:600; cursor:pointer; text-decoration:none;
+        white-space:nowrap; }
+    .tx-btn.green { background:#16a34a; }
+    .tx-btn:hover { filter:brightness(.95); }
+    .tx-note { border-left:4px solid #16a34a; background:#f0fdf4; color:#166534;
+        padding:10px 12px; border-radius:6px; margin:14px 0; font-size:13.5px; }
+    .tx-note.err { border-left-color:#c0392b; background:#fef2f2; color:#991b1b; }
+    .tx-cols { font-size:12.5px; color:#6e7681; }
+    .tx-cols code { background:#f1f3f8; border-radius:4px; padding:1px 5px; }
+    @@media (max-width: 600px) {
+        .tx-form input[type=file], .tx-form .tx-btn { flex:1 1 100%; }
+    }
+</style>
+
+<div class="card">
+    <h1>Tasks &mdash; Excel export / import</h1>
+
+    @if (Model.AccessDenied)
+    {
+        <p class="error">This area is for organizers only.</p>
+        return;
+    }
+
+    <p>Export <strong>every</strong> volunteer task to an Excel sheet, make bulk edits, then import it
+       back. Each task carries a stable id in the first column (<code>ExternalKey</code>): keep it to
+       <strong>update</strong> that task, or leave it <strong>blank</strong> on a new row to
+       <strong>create</strong> a task. A blank Description is filled in automatically from the title.</p>
+
+    @if (!string.IsNullOrEmpty(Model.Notice))
+    {
+        <div class="tx-note @(Model.IsError ? "err" : "")">@Model.Notice</div>
+    }
+
+    @if (Model.Result is not null)
+    {
+        <ul style="font-size:13.5px;margin:0 0 10px 18px;">
+            <li><strong>@Model.Result.Created</strong> created</li>
+            <li><strong>@Model.Result.Updated</strong> updated</li>
+            <li><strong>@Model.Result.Skipped</strong> skipped (id not found in this edition)</li>
+        </ul>
+    }
+
+    @* ---- Export ---- *@
+    <h2 style="font-size:16px;margin-top:18px;">1. Export</h2>
+    <a class="tx-btn" asp-page-handler="Export" role="button">Export all tasks (.xlsx)</a>
+
+    @* ---- Import ---- *@
+    <h2 style="font-size:16px;margin-top:22px;">2. Import edited sheet</h2>
+    <form method="post" asp-page-handler="Import" enctype="multipart/form-data" class="tx-form"
+          aria-label="Import edited task sheet">
+        <input type="file" id="taskFile" name="taskFile" accept=".xlsx,.xlsm"
+               aria-label="Edited task .xlsx file" />
+        <button type="submit" class="tx-btn green">Import</button>
+    </form>
+
+    <p class="tx-cols" style="margin-top:14px;">
+        Columns (order is stable; <code>ExternalKey</code> is always first):
+        <code>ExternalKey</code> &middot; <code>Title</code> &middot; <code>Description</code> &middot;
+        <code>Criticality</code> &middot; <code>ResponsibleTeam</code> &middot; <code>ResourcesNeeded</code>
+        &middot; <code>Prerequisites</code> &middot; <code>Expectations</code> &middot; <code>DueDate</code>
+        &middot; <code>Bucket</code>.
+    </p>
+</div>

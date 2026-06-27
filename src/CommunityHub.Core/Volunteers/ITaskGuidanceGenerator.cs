@@ -1,8 +1,9 @@
 namespace CommunityHub.Core.Volunteers;
 
 /// <summary>
-/// The AI seam for generating a task's <b>Pre-req</b> and <b>Expectations</b>
-/// from its name. Deliberately an interface with two implementations:
+/// The AI seam for generating a task's <b>Pre-req</b>, <b>Expectations</b> and a
+/// detailed <b>Description</b> from its name. Deliberately an interface with two
+/// implementations:
 ///
 ///  - <see cref="HeuristicTaskGuidanceGenerator"/> — a no-dependency, always-on
 ///    fallback that derives sensible defaults from keywords in the title. Used
@@ -23,8 +24,8 @@ public interface ITaskGuidanceGenerator
     bool IsAiBacked { get; }
 
     /// <summary>
-    /// Produce suggested Pre-req + Expectations text for a task title. The
-    /// optional <paramref name="bucketName"/> / <paramref name="responsibleTeam"/>
+    /// Produce suggested Pre-req + Expectations + a detailed Description for a task
+    /// title. The optional <paramref name="bucketName"/> / <paramref name="responsibleTeam"/>
     /// give the generator context. Never throws on a provider failure — falls back
     /// to the heuristic so a bad key or a network blip never breaks an import.
     /// </summary>
@@ -35,9 +36,12 @@ public interface ITaskGuidanceGenerator
         CancellationToken ct = default);
 }
 
-/// <summary>The generated guidance for one task. Either field may be blank if the
-/// generator could not produce useful text for it.</summary>
-public readonly record struct TaskGuidance(string Prerequisites, string Expectations)
+/// <summary>The generated guidance for one task. Any field may be blank if the
+/// generator could not produce useful text for it. <see cref="Description"/> is the
+/// §151 detailed description, auto-generated from the title when the organizer left
+/// it blank. <c>Description</c> is positional-optional so existing two-arg
+/// constructions keep compiling.</summary>
+public readonly record struct TaskGuidance(string Prerequisites, string Expectations, string Description = "")
 {
-    public static readonly TaskGuidance Empty = new(string.Empty, string.Empty);
+    public static readonly TaskGuidance Empty = new(string.Empty, string.Empty, string.Empty);
 }

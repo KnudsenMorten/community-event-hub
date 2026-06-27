@@ -1,4 +1,5 @@
 using CommunityHub.Core.Data;
+using CommunityHub.Core.Volunteers;
 using Microsoft.EntityFrameworkCore;
 
 namespace CommunityHub.Core.Domain;
@@ -28,11 +29,21 @@ public sealed class VolunteerStructureService
 {
     private readonly CommunityHubDbContext _db;
     private readonly TimeProvider _clock;
+    private readonly ITaskGuidanceGenerator _guidance;
 
-    public VolunteerStructureService(CommunityHubDbContext db, TimeProvider clock)
+    /// <summary>
+    /// <paramref name="guidance"/> is injected by DI (the registered
+    /// <see cref="ITaskGuidanceGenerator"/>) so <see cref="UpdateTaskContentAsync"/>
+    /// can auto-generate a blank §151 Description from the title. It is optional so
+    /// existing two-arg constructions (tests, schedule builders) keep compiling; when
+    /// not supplied it falls back to the always-on heuristic generator.
+    /// </summary>
+    public VolunteerStructureService(
+        CommunityHubDbContext db, TimeProvider clock, ITaskGuidanceGenerator? guidance = null)
     {
         _db = db;
         _clock = clock;
+        _guidance = guidance ?? new HeuristicTaskGuidanceGenerator();
     }
 
     /// <summary>The signed-in actor, as the pages know them from the session.</summary>
@@ -409,6 +420,83 @@ public sealed class VolunteerStructureService
         task.Expectations = Clean(expectations);
         task.Instructions = Clean(instructions);
         task.TimeEnd = Clean(timeEnd);
+        task.UpdatedAt = _clock.GetUtcNow();
+        await _db.SaveChangesAsync(ct);
+        return true;
+    }
+
+    /// <summary>
+    /// §151 — edit the SHARED task DEFINITION (title, detailed description, criticality,
+    /// responsible team, resources-needed, pre-req, expectations, instructions, ELDK lead,
+    /// time window, due date). The task definition is shared, so ANY organizer may call
+    /// this (it is NOT scoped to a creator/owner); the per-organizer draft allocation
+    /// queue is untouched. The bucket's supervisor may also edit, mirroring
+    /// <see cref="UpdateTaskDetailsAsync"/>.
+    ///
+    /// When <paramref name="description"/> is left blank it is AUTO-GENERATED from the
+    /// <paramref name="title"/> via <see cref="ITaskGuidanceGenerator"/> (the same
+    /// generator that fills Pre-req/Expectations), so every task always carries a
+    /// detailed description. This is a full-form edit: the surfaced fields are replaced
+    /// with the supplied values (blank string fields are cleared to null). Nullable
+    /// value fields (<paramref name="criticality"/>, <paramref name="resourcesNeeded"/>)
+    /// are only changed when supplied.
+    /// </summary>
+    public async Task<bool> UpdateTaskContentAsync(
+        ActorContext actor, int taskId,
+        string title,
+        string? description = null,
+        VolunteerTaskCriticality? criticality = null,
+        string? responsibleTeam = null,
+        int? resourcesNeeded = null,
+        string? prerequisites = null,
+        DateOnly? dueDate = null,
+        string? expectations = null,
+        string? instructions = null,
+        string? eldkLeadName = null,
+        string? timeEnd = null,
+        string? shift = null,
+        CancellationToken ct = default)
+    {
+        var task = await _db.VolunteerTasks
+            .Include(t => t.Subcategory).ThenInclude(s => s.Category)
+            .FirstOrDefaultAsync(t => t.Id == taskId && t.EventId == actor.EventId, ct);
+        if (task is null) return false;
+        // Organizer anywhere, or the bucket's supervisor — the shared definition is
+        // editable by any organizer, never restricted to whoever created the task.
+        await RequireManageCategoryAsync(actor, task.Subcategory.CategoryId, ct);
+
+        title = (title ?? string.Empty).Trim();
+        if (title.Length < 2) throw new VolunteerValidationException("Task title is required.");
+        if (resourcesNeeded is < 0)
+            throw new VolunteerValidationException("Resources needed cannot be negative.");
+
+        static string? Clean(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();
+
+        task.Title = title;
+
+        // §151: auto-generate the detailed description from the title when blank, reusing
+        // the guidance generator (Description field, with a sensible expectation fallback).
+        if (string.IsNullOrWhiteSpace(description))
+        {
+            var g = await _guidance.GenerateAsync(
+                title, task.Subcategory.Category.Name, responsibleTeam ?? task.ResponsibleTeam, ct);
+            task.Description = Clean(g.Description) ?? Clean(g.Expectations);
+        }
+        else
+        {
+            task.Description = description.Trim();
+        }
+
+        if (criticality is not null) task.Criticality = criticality.Value;
+        if (resourcesNeeded is not null) task.ResourcesNeeded = resourcesNeeded.Value;
+        task.ResponsibleTeam = Clean(responsibleTeam);
+        task.Prerequisites = Clean(prerequisites);
+        task.Expectations = Clean(expectations);
+        task.Instructions = Clean(instructions);
+        task.EldkLeadName = Clean(eldkLeadName);
+        task.TimeEnd = Clean(timeEnd);
+        task.Shift = Clean(shift);
+        task.DueDate = dueDate;
         task.UpdatedAt = _clock.GetUtcNow();
         await _db.SaveChangesAsync(ct);
         return true;

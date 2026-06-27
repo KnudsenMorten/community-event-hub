@@ -2,6 +2,7 @@ using System.Text;
 using CommunityHub.Auth;
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
+using CommunityHub.Core.Email;
 using CommunityHub.Core.Volunteers;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -27,6 +28,8 @@ public class BucketAllocationModel : PageModel
     private readonly VolunteerPlanImportService _import;
     private readonly VolunteerPlanParser _parser;
     private readonly ITaskGuidanceGenerator _guidance;
+    private readonly AvailabilityAutoAssignEngine _engine;
+    private readonly ICommitNotificationService _notify;
     private readonly ILogger<BucketAllocationModel> _logger;
 
     public BucketAllocationModel(
@@ -36,6 +39,8 @@ public class BucketAllocationModel : PageModel
         VolunteerPlanImportService import,
         VolunteerPlanParser parser,
         ITaskGuidanceGenerator guidance,
+        AvailabilityAutoAssignEngine engine,
+        ICommitNotificationService notify,
         ILogger<BucketAllocationModel> logger)
     {
         _db = db;
@@ -44,6 +49,8 @@ public class BucketAllocationModel : PageModel
         _import = import;
         _parser = parser;
         _guidance = guidance;
+        _engine = engine;
+        _notify = notify;
         _logger = logger;
     }
 
@@ -107,6 +114,30 @@ public class BucketAllocationModel : PageModel
         }
     }
 
+    /// <summary>
+    /// §150 STEP 2 — run the availability auto-assign engine for the VOLUNTEER queue.
+    /// Reads each volunteer's <c>VolunteerDayAvailability</c> and PROPOSES assignments to
+    /// cover each task's <c>ResourcesNeeded</c>, seeding the existing draft queue with
+    /// <see cref="DraftSource.EngineProposed"/> rows (stage 1 = proposed). The lead reviews
+    /// the proposals in the same red/green simulation and edits/commits them. SILENT — no
+    /// email is sent for a proposal (only Commit notifies).
+    /// </summary>
+    public async Task<IActionResult> OnPostRunAutoAssignAsync(CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+        if (!OrganizerAuth.IsRealOrganizer(me)) return Forbid();
+        try
+        {
+            var seeded = await _engine.SeedProposalsAsync(Actor(me), ParticipantRole.Volunteer, me.ParticipantId, ct);
+            var msg = seeded == 0
+                ? "Auto-assign found nothing new to propose (tasks already covered or no matching availability)."
+                : $"Auto-assign proposed {seeded} assignment(s) from availability — review the queue below, then Commit.";
+            return RedirectToPage(new { Msg = msg });
+        }
+        catch (VolunteerAccessDeniedException) { return Forbid(); }
+    }
+
     public async Task<IActionResult> OnPostAddDraftAsync(int taskId, int volunteerId, CancellationToken ct)
     {
         var me = _participant.Current;
@@ -132,6 +163,13 @@ public class BucketAllocationModel : PageModel
         try
         {
             var r = await _alloc.CommitAsync(Actor(me), ct);
+
+            // §150 — COMMIT is the ONLY email path. Notify exactly once per commit, BATCHED
+            // one summary per affected person of their FINAL committed assignment/changes.
+            // The queue (proposals + lead edits) stays SILENT; the notifier respects the ring
+            // gate like all prod mail and no-ops on an empty affected set.
+            await _notify.NotifyCommitAsync(Actor(me), r.AffectedParticipantIds, ParticipantRole.Volunteer, ct);
+
             var msg = $"Committed {r.Committed} allocation(s).";
             if (r.SkippedDuplicate > 0) msg += $" {r.SkippedDuplicate} already assigned (skipped).";
             if (r.SkippedOutOfRing > 0)

@@ -1660,7 +1660,9 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
         {
             e.HasKey(x => x.Id);
             e.Property(x => x.Title).IsRequired().HasMaxLength(300);
-            e.Property(x => x.Description).HasMaxLength(2000);
+            // §151: reuse Description as the "detailed description"; bumped to 4000
+            // to match Prerequisites/Expectations (auto-generated guidance text).
+            e.Property(x => x.Description).HasMaxLength(4000);
             e.Property(x => x.Shift).HasMaxLength(200);
             e.Property(x => x.Status).HasConversion<int>();
             // Buckets / plan fields (2026-06-15).
@@ -1682,6 +1684,8 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
 
             e.HasIndex(x => new { x.EventId, x.SubcategoryId });
             e.HasIndex(x => new { x.EventId, x.Status });
+            // §151: the stable external key the Excel round-trip upserts by — unique.
+            e.HasIndex(x => x.ExternalKey).IsUnique();
         });
 
         // --- VolunteerTaskAssignment (Task <-> volunteer, many-many) --------
@@ -1765,6 +1769,9 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
         b.Entity<TaskAllocationDraft>(e =>
         {
             e.HasKey(x => x.Id);
+            // §150 route-by-team discriminator + lifecycle stage marker (stored int).
+            e.Property(x => x.TargetRole).HasConversion<int>().HasDefaultValue(ParticipantRole.Volunteer);
+            e.Property(x => x.Source).HasConversion<int>().HasDefaultValue(DraftSource.Manual);
 
             e.HasOne(x => x.Event).WithMany()
                 .HasForeignKey(x => x.EventId)

@@ -1427,6 +1427,8 @@
   <data name="Settings.Feat.VolunteerTasks.Desc" xml:space="preserve"><value>Create volunteer tasks and assign volunteers — tasks appear to the assigned people.</value></data>
   <data name="Settings.Feat.VolunteerAllocation.Name" xml:space="preserve"><value>Volunteer shift allocation</value></data>
   <data name="Settings.Feat.VolunteerAllocation.Desc" xml:space="preserve"><value>Commit volunteer shift / bucket allocations to many volunteers at once.</value></data>
+  <data name="Settings.Feat.OrganizerAllocation.Name" xml:space="preserve"><value>Organizer task allocation</value></data>
+  <data name="Settings.Feat.OrganizerAllocation.Desc" xml:space="preserve"><value>Commit task allocations to many organizers at once (the organizer-side mirror of volunteer allocation).</value></data>
   <data name="Settings.Feat.HotelAssignment.Name" xml:space="preserve"><value>Hotel assignment</value></data>
   <data name="Settings.Feat.HotelAssignment.Desc" xml:space="preserve"><value>Assign hotels and rooms to participants.</value></data>
   <data name="Settings.Feat.GroupPhotoInvites.Name" xml:space="preserve"><value>Group-photo invites</value></data>
@@ -1811,4 +1813,27 @@
   <data name="Broadcast.TokenFirstNameExample" xml:space="preserve"><value>Hi {FirstName}, a quick update…</value></data>
   <data name="Broadcast.TokenEventNameMeaning" xml:space="preserve"><value>the edition's display name</value></data>
   <data name="Broadcast.TokenEventNameExample" xml:space="preserve"><value>See you at {EventName}!</value></data>
+  <!-- §150/§151 task allocation — labels shared by the volunteer queue (Buckets &amp;
+       allocation) and the organizer queue (Organizer allocation). Mobile-first (~360px). -->
+  <data name="Alloc.AutoAssignHeading" xml:space="preserve"><value>Run availability auto-assign</value></data>
+  <data name="Alloc.AutoAssignVolunteerHelp" xml:space="preserve"><value>Reads each volunteer's day availability and proposes assignments to cover every task's needed resources. Proposals land in the queue below for you to review and edit — nobody is notified until you commit.</value></data>
+  <data name="Alloc.AutoAssignOrganizerHelp" xml:space="preserve"><value>Reads each organizer's day availability and proposes assignments to cover organizer-owned tasks. Proposals land in the queue below for you to review and edit — nobody is notified until you commit.</value></data>
+  <data name="Alloc.RunAutoAssign" xml:space="preserve"><value>Run auto-assign</value></data>
+  <data name="Alloc.SourceProposed" xml:space="preserve"><value>Proposed</value></data>
+  <data name="Alloc.SourceProposedTitle" xml:space="preserve"><value>Auto-proposed by the availability engine — review before committing.</value></data>
+  <data name="Alloc.SourceQueued" xml:space="preserve"><value>Queued</value></data>
+  <data name="Alloc.SourceQueuedTitle" xml:space="preserve"><value>Hand-queued by a lead or organizer.</value></data>
+  <data name="Alloc.DraftHeading" xml:space="preserve"><value>Draft allocations ({0} pending)</value></data>
+  <data name="Alloc.DraftEmpty" xml:space="preserve"><value>No pending allocations. Run auto-assign or add people to tasks below to build a draft, then commit.</value></data>
+  <data name="Alloc.CommitDraft" xml:space="preserve"><value>Commit draft</value></data>
+  <data name="Alloc.DiscardDraft" xml:space="preserve"><value>Discard draft</value></data>
+  <data name="Alloc.CommitConfirmYes" xml:space="preserve"><value>Yes, commit</value></data>
+  <data name="Alloc.Queue" xml:space="preserve"><value>Queue</value></data>
+  <data name="Alloc.OrganizersOnly" xml:space="preserve"><value>This area is for organizers only.</value></data>
+  <data name="Alloc.Organizer.Title" xml:space="preserve"><value>Organizer allocation</value></data>
+  <data name="Alloc.Organizer.Intro" xml:space="preserve"><value>Allocate organizer-owned tasks to the organizing team. Run availability auto-assign to propose coverage, tweak the queue (green = enough people, red = short), then commit — assignments only become real, and people only get notified, on commit.</value></data>
+  <data name="Alloc.Organizer.AddPerson" xml:space="preserve"><value>Add organizer to draft…</value></data>
+  <data name="Alloc.Organizer.NoTasks" xml:space="preserve"><value>No tasks yet. Import the plan on the Buckets &amp; allocation page first.</value></data>
+  <data name="Alloc.Organizer.CommitConfirmTitle" xml:space="preserve"><value>Commit organizer allocations?</value></data>
+  <data name="Alloc.Organizer.CommitConfirmBody" xml:space="preserve"><value>This turns {count} draft allocation(s) into real assignments now. Only organizers within the feature’s released ring are committed (others stay in the queue). This affects real people — are you sure?</value></data>
 </root>

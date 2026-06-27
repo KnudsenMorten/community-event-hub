@@ -4,10 +4,11 @@ namespace CommunityHub.Core.Volunteers;
 
 /// <summary>
 /// The always-on, no-dependency fallback for <see cref="ITaskGuidanceGenerator"/>.
-/// Derives a sensible Pre-req + Expectations from keywords in the task title — no
-/// network, no secret, deterministic (so tests can assert it). It is intentionally
-/// generic: the organizer edits the result, and the AI provider replaces it when a
-/// key is configured.
+/// Derives a sensible Pre-req + Expectations + a detailed Description from keywords
+/// in the task title — no network, no secret, deterministic (so tests can assert it).
+/// It is intentionally generic: the organizer edits the result, and the AI provider
+/// replaces it when a key is configured. The §151 Description reuses the same
+/// keyword-derived prereq/expectation so it never needs a separate rule table.
 /// </summary>
 public sealed class HeuristicTaskGuidanceGenerator : ITaskGuidanceGenerator
 {
@@ -61,17 +62,42 @@ public sealed class HeuristicTaskGuidanceGenerator : ITaskGuidanceGenerator
         foreach (var (keyword, prereq, expectation) in Rules)
         {
             if (lower.Contains(keyword))
+            {
+                var decoratedPrereq = Decorate(prereq, bucketName, responsibleTeam);
                 return Task.FromResult(new TaskGuidance(
-                    Decorate(prereq, bucketName, responsibleTeam),
-                    expectation));
+                    decoratedPrereq,
+                    expectation,
+                    BuildDescription(title, decoratedPrereq, expectation)));
+            }
         }
 
         // Generic fallback when no keyword matches.
+        var genericPrereq = Decorate(
+            "Everything needed to start the task is available and the responsible people are briefed.",
+            bucketName, responsibleTeam);
+        var genericExpectation =
+            $"\"{title}\" is completed to the agreed standard and the supervisor is informed.";
         return Task.FromResult(new TaskGuidance(
-            Decorate(
-                "Everything needed to start the task is available and the responsible people are briefed.",
-                bucketName, responsibleTeam),
-            $"\"{title}\" is completed to the agreed standard and the supervisor is informed."));
+            genericPrereq,
+            genericExpectation,
+            BuildDescription(title, genericPrereq, genericExpectation)));
+    }
+
+    /// <summary>
+    /// Compose a detailed, human-readable Description (§151) from the task title and
+    /// the already-derived prereq/expectation. Reuses the keyword logic above rather
+    /// than maintaining a second rule table, so the Description always aligns with the
+    /// Pre-req/Expectations shown alongside it. Always non-empty for a non-blank title.
+    /// </summary>
+    private static string BuildDescription(string title, string prereq, string expectation)
+    {
+        var sb = new StringBuilder();
+        sb.Append("Task: ").Append(title).Append('.');
+        if (!string.IsNullOrWhiteSpace(expectation))
+            sb.Append(" Goal: ").Append(expectation);
+        if (!string.IsNullOrWhiteSpace(prereq))
+            sb.Append(" Before you start: ").Append(prereq);
+        return sb.ToString();
     }
 
     private static string Decorate(string prereq, string? bucketName, string? team)

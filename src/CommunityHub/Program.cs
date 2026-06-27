@@ -433,6 +433,18 @@ builder.Services.AddScoped<CommunityHub.Core.Volunteers.VolunteerAllocationServi
 builder.Services.AddScoped<CommunityHub.Core.Volunteers.VolunteerPlanImportService>();
 builder.Services.AddSingleton<CommunityHub.Core.Volunteers.VolunteerPlanParser>();
 
+// --- §150/§151 task allocation pipeline: organizer-side queue (mirrors the volunteer
+// one over the organizer target role), the availability auto-assign engine + team
+// router (step 2), the batched commit notifier (commit-only mail), and the Excel
+// task round-trip. This is the single composition root for all of the new services.
+// (ResponsibleTeamRouter is a static helper — no DI registration needed.)
+builder.Services.AddScoped<CommunityHub.Core.Volunteers.OrganizerAllocationService>();
+builder.Services.AddScoped<CommunityHub.Core.Volunteers.AvailabilityAutoAssignEngine>();
+builder.Services.AddScoped<CommunityHub.Core.Email.CommitNotificationService>();
+builder.Services.AddScoped<CommunityHub.Core.Email.ICommitNotificationService>(
+    sp => sp.GetRequiredService<CommunityHub.Core.Email.CommitNotificationService>());
+builder.Services.AddScoped<CommunityHub.Core.Volunteers.VolunteerTaskExcelService>();
+
 // AI task-guidance seam: heuristic fallback always available; the real LLM
 // provider activates only when an API key is configured (secret via the existing
 // config mechanism, NEVER committed). The bound key gates which generator is used.

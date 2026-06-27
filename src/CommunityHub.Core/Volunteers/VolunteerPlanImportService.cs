@@ -26,8 +26,9 @@ public sealed record PlanImportResult(
 ///    rows by FullName (case-insensitive) and linked as real assignments;
 ///    unmatched names are reported back (and NEVER auto-created — and never put in
 ///    the repo). The CSV may carry REAL names, but only the dev DB receives them.
-///  - Blank Pre-req / Expectations are filled via <see cref="ITaskGuidanceGenerator"/>
-///    (heuristic by default, AI when configured) so every imported task has guidance.
+///  - Blank Pre-req / Expectations / detailed Description (§151) are filled via
+///    <see cref="ITaskGuidanceGenerator"/> (heuristic by default, AI when configured)
+///    so every imported task has guidance and a description.
 ///
 /// Importing the real file into the DEV DB is fine (operational data); the file is
 /// never copied into the repo.
@@ -106,15 +107,20 @@ public sealed class VolunteerPlanImportService
             if (string.IsNullOrWhiteSpace(bucket.EldkLeadName) && !string.IsNullOrWhiteSpace(pt.EldkLeadName))
                 bucket.EldkLeadName = pt.EldkLeadName;
 
-            // Fill missing guidance (heuristic or AI).
+            // Fill missing guidance (heuristic or AI): Pre-req, Expectations, and the
+            // §151 detailed Description — all auto-generated from the title when blank.
             if (fillGuidance &&
-                (string.IsNullOrWhiteSpace(task.Prerequisites) || string.IsNullOrWhiteSpace(task.Expectations)))
+                (string.IsNullOrWhiteSpace(task.Prerequisites)
+                 || string.IsNullOrWhiteSpace(task.Expectations)
+                 || string.IsNullOrWhiteSpace(task.Description)))
             {
                 var g = await _guidance.GenerateAsync(pt.Title, pt.BucketName, pt.ResponsibleTeam, ct);
                 if (string.IsNullOrWhiteSpace(task.Prerequisites) && !string.IsNullOrWhiteSpace(g.Prerequisites))
                     task.Prerequisites = g.Prerequisites;
                 if (string.IsNullOrWhiteSpace(task.Expectations) && !string.IsNullOrWhiteSpace(g.Expectations))
                     task.Expectations = g.Expectations;
+                if (string.IsNullOrWhiteSpace(task.Description) && !string.IsNullOrWhiteSpace(g.Description))
+                    task.Description = g.Description;
                 guidanceFilled++;
             }
 

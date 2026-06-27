@@ -34,8 +34,17 @@ public sealed record TaskCoverage(
 /// <summary>The outcome of committing a draft queue into real assignments.
 /// <paramref name="SkippedOutOfRing"/> drafts target a volunteer whose ring is above
 /// the feature's released ring — they are LEFT in the queue (committed-but-dormant),
-/// so promoting the ring in /Organizer/Settings and re-committing picks them up.</summary>
-public sealed record CommitResult(int Committed, int SkippedDuplicate, int SkippedOutOfRing = 0);
+/// so promoting the ring in /Organizer/Settings and re-committing picks them up.
+/// <paramref name="AffectedParticipantIds"/> is the DISTINCT set of target participant
+/// ids whose committed assignments changed this commit (a NEW real assignment was
+/// created) — the ONLY input the §150 batched commit-notifier (unit D) needs to mail
+/// one summary per affected person. Empty when nothing changed; never the proposals or
+/// the lead's queue edits (those are mail-free).</summary>
+public sealed record CommitResult(int Committed, int SkippedDuplicate, int SkippedOutOfRing = 0)
+{
+    /// <summary>Distinct committed targets (never null — empty when none changed).</summary>
+    public IReadOnlyList<int> AffectedParticipantIds { get; init; } = Array.Empty<int>();
+}
 
 /// <summary>
 /// The outcome of seeding a drop-out re-plan: how many of the dropped volunteer's
@@ -106,7 +115,8 @@ public sealed class VolunteerAllocationService
             .ToDictionaryAsync(x => x.TaskId, x => x.Count, ct);
 
         var draftCounts = await _db.TaskAllocationDrafts
-            .Where(d => d.EventId == actor.EventId && d.OwnerParticipantId == actor.ParticipantId)
+            .Where(d => d.EventId == actor.EventId && d.OwnerParticipantId == actor.ParticipantId
+                        && d.TargetRole == ParticipantRole.Volunteer)
             .GroupBy(d => d.TaskId)
             .Select(g => new { TaskId = g.Key, Count = g.Count() })
             .ToDictionaryAsync(x => x.TaskId, x => x.Count, ct);
@@ -132,7 +142,8 @@ public sealed class VolunteerAllocationService
             .CountAsync(a => a.TaskId == taskId && a.EventId == actor.EventId, ct);
         var draft = await _db.TaskAllocationDrafts
             .CountAsync(d => d.TaskId == taskId && d.EventId == actor.EventId
-                             && d.OwnerParticipantId == actor.ParticipantId, ct);
+                             && d.OwnerParticipantId == actor.ParticipantId
+                             && d.TargetRole == ParticipantRole.Volunteer, ct);
 
         return new TaskCoverage(task.Id, task.Title, task.ResourcesNeeded, assigned, draft);
     }
@@ -166,7 +177,8 @@ public sealed class VolunteerAllocationService
 
         var alreadyDrafted = await _db.TaskAllocationDrafts.AnyAsync(
             d => d.TaskId == taskId && d.ParticipantId == volunteerId
-                 && d.OwnerParticipantId == actor.ParticipantId, ct);
+                 && d.OwnerParticipantId == actor.ParticipantId
+                 && d.TargetRole == ParticipantRole.Volunteer, ct);
         if (alreadyDrafted) return true; // idempotent
 
         _db.TaskAllocationDrafts.Add(new TaskAllocationDraft
@@ -175,6 +187,7 @@ public sealed class VolunteerAllocationService
             OwnerParticipantId = actor.ParticipantId,
             TaskId = taskId,
             ParticipantId = volunteerId,
+            TargetRole = ParticipantRole.Volunteer,
             CreatedAt = _clock.GetUtcNow(),
         });
         await _db.SaveChangesAsync(ct);
@@ -188,7 +201,8 @@ public sealed class VolunteerAllocationService
         RequireOrganizer(actor);
         var row = await _db.TaskAllocationDrafts.FirstOrDefaultAsync(
             d => d.TaskId == taskId && d.ParticipantId == volunteerId
-                 && d.OwnerParticipantId == actor.ParticipantId && d.EventId == actor.EventId, ct);
+                 && d.OwnerParticipantId == actor.ParticipantId && d.EventId == actor.EventId
+                 && d.TargetRole == ParticipantRole.Volunteer, ct);
         if (row is null) return false;
         _db.TaskAllocationDrafts.Remove(row);
         await _db.SaveChangesAsync(ct);
@@ -199,7 +213,8 @@ public sealed class VolunteerAllocationService
     public async Task<List<TaskAllocationDraft>> LoadDraftAsync(
         VolunteerStructureService.ActorContext actor, CancellationToken ct = default) =>
         await _db.TaskAllocationDrafts
-            .Where(d => d.EventId == actor.EventId && d.OwnerParticipantId == actor.ParticipantId)
+            .Where(d => d.EventId == actor.EventId && d.OwnerParticipantId == actor.ParticipantId
+                        && d.TargetRole == ParticipantRole.Volunteer)
             .Include(d => d.Participant)
             .Include(d => d.Task)
             .OrderBy(d => d.Task.Title)
@@ -217,7 +232,8 @@ public sealed class VolunteerAllocationService
         RequireOrganizer(actor);
 
         var drafts = await _db.TaskAllocationDrafts
-            .Where(d => d.EventId == actor.EventId && d.OwnerParticipantId == actor.ParticipantId)
+            .Where(d => d.EventId == actor.EventId && d.OwnerParticipantId == actor.ParticipantId
+                        && d.TargetRole == ParticipantRole.Volunteer)
             .ToListAsync(ct);
         if (drafts.Count == 0) return new CommitResult(0, 0);
 
@@ -232,6 +248,7 @@ public sealed class VolunteerAllocationService
         int committed = 0, skipped = 0, outOfRing = 0;
         var now = _clock.GetUtcNow();
         var consumed = new List<TaskAllocationDraft>();
+        var affected = new HashSet<int>();   // distinct targets whose committed set changed
         foreach (var d in drafts)
         {
             var targetRing = await _rings.GetEffectiveRingAsync(d.ParticipantId, ct);
@@ -256,12 +273,13 @@ public sealed class VolunteerAllocationService
                 CreatedAt = now,
             });
             committed++;
+            affected.Add(d.ParticipantId);   // §150: this person needs a commit summary
         }
 
         // Consume only the in-ring drafts; out-of-ring drafts stay queued.
         _db.TaskAllocationDrafts.RemoveRange(consumed);
         await _db.SaveChangesAsync(ct);
-        return new CommitResult(committed, skipped, outOfRing);
+        return new CommitResult(committed, skipped, outOfRing) { AffectedParticipantIds = affected.ToList() };
     }
 
     /// <summary>
@@ -322,7 +340,8 @@ public sealed class VolunteerAllocationService
                 .CountAsync(a => a.TaskId == taskId && a.EventId == actor.EventId, ct);
             var draftedNow = await _db.TaskAllocationDrafts
                 .CountAsync(d => d.TaskId == taskId && d.EventId == actor.EventId
-                                 && d.OwnerParticipantId == actor.ParticipantId, ct);
+                                 && d.OwnerParticipantId == actor.ParticipantId
+                                 && d.TargetRole == ParticipantRole.Volunteer, ct);
             var shortfall = Math.Max(0, task.ResourcesNeeded - assignedNow - draftedNow);
             if (shortfall == 0) continue;
 
@@ -333,7 +352,8 @@ public sealed class VolunteerAllocationService
                     .Select(a => a.ParticipantId).ToListAsync(ct))
                 .Concat(await _db.TaskAllocationDrafts
                     .Where(d => d.TaskId == taskId && d.EventId == actor.EventId
-                                && d.OwnerParticipantId == actor.ParticipantId)
+                                && d.OwnerParticipantId == actor.ParticipantId
+                                && d.TargetRole == ParticipantRole.Volunteer)
                     .Select(d => d.ParticipantId).ToListAsync(ct)));
 
             foreach (var candidateId in pool)
@@ -346,6 +366,7 @@ public sealed class VolunteerAllocationService
                     OwnerParticipantId = actor.ParticipantId,
                     TaskId = taskId,
                     ParticipantId = candidateId,
+                    TargetRole = ParticipantRole.Volunteer,
                     CreatedAt = now,
                 });
                 onTask.Add(candidateId);
@@ -364,7 +385,8 @@ public sealed class VolunteerAllocationService
     {
         RequireOrganizer(actor);
         var drafts = await _db.TaskAllocationDrafts
-            .Where(d => d.EventId == actor.EventId && d.OwnerParticipantId == actor.ParticipantId)
+            .Where(d => d.EventId == actor.EventId && d.OwnerParticipantId == actor.ParticipantId
+                        && d.TargetRole == ParticipantRole.Volunteer)
             .ToListAsync(ct);
         if (drafts.Count == 0) return 0;
         _db.TaskAllocationDrafts.RemoveRange(drafts);

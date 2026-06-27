@@ -56,12 +56,14 @@ public sealed class LlmTaskGuidanceGenerator : ITaskGuidanceGenerator
             var guidance = await CallClaudeAsync(title, bucketName, responsibleTeam, ct);
             // If the model returned nothing useful for a field, backfill from the heuristic.
             if (string.IsNullOrWhiteSpace(guidance.Prerequisites) ||
-                string.IsNullOrWhiteSpace(guidance.Expectations))
+                string.IsNullOrWhiteSpace(guidance.Expectations) ||
+                string.IsNullOrWhiteSpace(guidance.Description))
             {
                 var h = await _fallback.GenerateAsync(title, bucketName, responsibleTeam, ct);
                 guidance = new TaskGuidance(
                     string.IsNullOrWhiteSpace(guidance.Prerequisites) ? h.Prerequisites : guidance.Prerequisites,
-                    string.IsNullOrWhiteSpace(guidance.Expectations) ? h.Expectations : guidance.Expectations);
+                    string.IsNullOrWhiteSpace(guidance.Expectations) ? h.Expectations : guidance.Expectations,
+                    string.IsNullOrWhiteSpace(guidance.Description) ? h.Description : guidance.Description);
             }
             return guidance;
         }
@@ -81,15 +83,17 @@ public sealed class LlmTaskGuidanceGenerator : ITaskGuidanceGenerator
                 string.IsNullOrWhiteSpace(team) ? null : $"Responsible team: {team}.",
             }.Where(s => s is not null));
 
-        // Structured-output request: ask for strict JSON with the two fields.
+        // Structured-output request: ask for strict JSON with the three fields.
         var prompt =
             $"You help organize volunteers for a community tech conference. " +
             $"For the volunteer task titled \"{title}\"{(context.Length > 0 ? $" ({context})" : "")}, " +
-            "write a short Pre-requisite (what must be true/ready before the task can start) " +
-            "and a short Expectation (what 'done' looks like). " +
-            "Each must be 1-2 plain sentences, practical and specific. " +
+            "write a short Pre-requisite (what must be true/ready before the task can start), " +
+            "a short Expectation (what 'done' looks like), " +
+            "and a detailed Description that explains the task so anyone reading it understands " +
+            "what is expected. " +
+            "Each must be 1-3 plain sentences, practical and specific. " +
             "Respond ONLY with JSON of the form " +
-            "{\"prerequisites\":\"...\",\"expectations\":\"...\"}.";
+            "{\"prerequisites\":\"...\",\"expectations\":\"...\",\"description\":\"...\"}.";
 
         var request = new MessagesRequest
         {
@@ -120,7 +124,8 @@ public sealed class LlmTaskGuidanceGenerator : ITaskGuidanceGenerator
         var parsed = JsonSerializer.Deserialize<GuidanceJson>(json, JsonOpts);
         return new TaskGuidance(
             (parsed?.Prerequisites ?? string.Empty).Trim(),
-            (parsed?.Expectations ?? string.Empty).Trim());
+            (parsed?.Expectations ?? string.Empty).Trim(),
+            (parsed?.Description ?? string.Empty).Trim());
     }
 
     private static string? ExtractJsonObject(string text)
@@ -165,5 +170,6 @@ public sealed class LlmTaskGuidanceGenerator : ITaskGuidanceGenerator
     {
         [JsonPropertyName("prerequisites")] public string? Prerequisites { get; set; }
         [JsonPropertyName("expectations")] public string? Expectations { get; set; }
+        [JsonPropertyName("description")] public string? Description { get; set; }
     }
 }

@@ -460,6 +460,18 @@ public static class FeatureCatalog
             DependsOn: Array.Empty<string>(), DefaultReleasedToRing: Ring.Broad,
             Surface: FeatureSurface.Queue),
 
+        // §150 ORGANIZER allocation queue — the organizer-side mirror of
+        // volunteer-allocation (allocates ELDK / ELDK-MOK organizers to tasks). Same
+        // QUEUE surface (category 3: organizer stages + Commits, ring-scoped impact at
+        // commit; the task BECOMING VISIBLE to the organizer is the user-impact, gated
+        // per target). Released to Broad (GA) so every target is in scope; lower it to
+        // Ring1 in /Organizer/Settings to ring-TEST a change.
+        new("organizer-allocation", "Settings.Feat.OrganizerAllocation.Name",
+            "Settings.Feat.OrganizerAllocation.Desc",
+            FeatureGroup.Incubation, FeatureTier.Advanced, DefaultEnabled: false,
+            DependsOn: Array.Empty<string>(), DefaultReleasedToRing: Ring.Broad,
+            Surface: FeatureSurface.Queue),
+
         new("hotel-assignment", "Settings.Feat.HotelAssignment.Name",
             "Settings.Feat.HotelAssignment.Desc",
             FeatureGroup.Incubation, FeatureTier.Advanced, DefaultEnabled: false,
