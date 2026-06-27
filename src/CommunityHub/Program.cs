@@ -501,6 +501,16 @@ builder.Services.AddScoped<CommunityHub.Core.Assistant.IAiHelperOrganizerOpsProv
 // "when is lunch?".
 builder.Services.AddScoped<CommunityHub.Core.Assistant.IAiHelperPublicInfoProvider,
     CommunityHub.Assistant.WebAiHelperPublicInfoProvider>();
+// §152 SHAREPOINT GROUNDING for EVERY role: operator-dropped md/txt/docx/pdf/xlsx files in
+// the configured SharePoint grounding folder (Graphics:SharePoint:GroundingFolderPath),
+// extracted to text and grounded for ALL roles (no role gate) via the existing
+// ISharePointFileStore read seam. MUST be registered (not just defaulted) because the
+// grounding builder is a concrete type whose ctor the DI container fills from registrations —
+// the C# default param is only for tests. Depends on ISharePointFileStore (already registered
+// gated/null), GraphicsSharePointOptions (already Configure'd) + IMemoryCache (already in the
+// container); inert via CanRead when the null store is active or the folder path is blank.
+builder.Services.AddScoped<CommunityHub.Core.Assistant.IAiHelperSharePointGroundingProvider,
+    CommunityHub.Core.Assistant.SharePointGroundingProvider>();
 builder.Services.AddScoped<CommunityHub.Core.Assistant.IAiHelperGroundingBuilder,
     CommunityHub.Core.Assistant.AiHelperGroundingBuilder>();
 // Per-participant in-memory rate limit on the endpoint.

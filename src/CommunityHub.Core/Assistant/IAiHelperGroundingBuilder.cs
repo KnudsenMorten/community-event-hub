@@ -70,17 +70,20 @@ public sealed class AiHelperGroundingBuilder : IAiHelperGroundingBuilder
     private readonly IAiHelperOwnDataProvider _ownData;
     private readonly IAiHelperOrganizerOpsProvider? _organizerOps;
     private readonly IAiHelperPublicInfoProvider? _publicInfo;
+    private readonly IAiHelperSharePointGroundingProvider? _sharePointGrounding;
 
     public AiHelperGroundingBuilder(
         IAiHelperContentProvider content,
         IAiHelperOwnDataProvider ownData,
         IAiHelperOrganizerOpsProvider? organizerOps = null,
-        IAiHelperPublicInfoProvider? publicInfo = null)
+        IAiHelperPublicInfoProvider? publicInfo = null,
+        IAiHelperSharePointGroundingProvider? sharePointGrounding = null)
     {
         _content = content;
         _ownData = ownData;
         _organizerOps = organizerOps;
         _publicInfo = publicInfo;
+        _sharePointGrounding = sharePointGrounding;
     }
 
     /// <summary>
@@ -137,6 +140,18 @@ public sealed class AiHelperGroundingBuilder : IAiHelperGroundingBuilder
         {
             var pub = await _publicInfo.GetPublicInfoAsync(eventId, ct);
             sections.AddRange(pub.Where(s => !string.IsNullOrWhiteSpace(s.Body)));
+        }
+
+        // (2c) SHAREPOINT grounding docs for EVERY role (REQUIREMENTS §152): the operator-
+        // dropped md/txt/docx/pdf/xlsx files in the configured SharePoint grounding folder,
+        // extracted to text. Added for ALL roles with NO role gate (mirrors the §149 public-
+        // info block above) — it is curated PUBLIC reference material the operator wants
+        // anyone to be able to ask about. INERT until configured: the provider returns empty
+        // when the SharePoint read seam is not wired or the folder path is blank.
+        if (_sharePointGrounding is not null)
+        {
+            var sp = await _sharePointGrounding.GetGroundingAsync(ct);
+            sections.AddRange(sp.Where(s => !string.IsNullOrWhiteSpace(s.Body)));
         }
 
         // (3) ORGANIZER-ONLY ops aggregates (REQUIREMENTS §133). THE GATE: keyed on the

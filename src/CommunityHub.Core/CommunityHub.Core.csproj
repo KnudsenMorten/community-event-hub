@@ -55,6 +55,11 @@
          carries the security-advisory fixes (GHSA-2cmq-823j-5qj8 et al). -->
     <PackageReference Include="SixLabors.ImageSharp" Version="3.1.12" />
     <PackageReference Include="SixLabors.ImageSharp.Drawing" Version="2.1.7" />
+    <!-- PDF text extraction for the §152 AI-helper SharePoint grounding docs
+         (DocumentTextExtractor, namespace UglyToad.PdfPig.*). NuGet id is "PdfPig";
+         Apache-2.0 (safe for the public community mirror). .xlsx/.docx are already
+         covered by ClosedXML 0.102.2 + its transitive DocumentFormat.OpenXml. -->
+    <PackageReference Include="PdfPig" Version="0.1.10" />
   </ItemGroup>
 
 </Project>

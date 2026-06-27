@@ -64,6 +64,18 @@ public sealed class GraphicsSharePointOptions
     /// </summary>
     public string VenueRootFolderPath { get; set; } = string.Empty;
 
+    /// <summary>
+    /// Drive-relative folder of operator-dropped AI-helper GROUNDING documents
+    /// (md / txt / docx / pdf / xlsx — REQUIREMENTS §152) — e.g.
+    /// <c>General/Events/ELDK 2027/EventHub/ExtraAIGroundingInfo</c>. The
+    /// <see cref="CommunityHub.Core.Assistant.SharePointGroundingProvider"/> reads this
+    /// folder through the app's own creds, extracts each file's text and grounds the AI
+    /// Community Helper for ALL roles; edits propagate within the provider's cache TTL
+    /// (~15 min) with no deploy. EMPTY by default ⇒ the §152 grounding source is INERT
+    /// (nothing listed / read) until an operator configures it.
+    /// </summary>
+    public string GroundingFolderPath { get; set; } = string.Empty;
+
     /// <summary>True when enabled AND a site URL is present (the live store can run).</summary>
     public bool IsConfigured => Enabled && !string.IsNullOrWhiteSpace(SiteUrl);
 }
