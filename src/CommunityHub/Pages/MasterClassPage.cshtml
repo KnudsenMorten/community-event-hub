@@ -67,7 +67,7 @@
             <h2 id="mc-bring-h" style="font-size:1.25rem;">Before you arrive — what to bring</h2>
             @if (string.IsNullOrWhiteSpace(Model.View.LogisticsText))
             {
-                <p style="color:#666;">The speakers haven't posted specifics for this class yet — check back soon.</p>
+                <p style="color:#374151;">The speakers haven't posted specifics for this class yet — check back soon.</p>
             }
             else
             {
@@ -84,7 +84,7 @@
             <h2 id="prep-h" style="font-size:1.25rem;">How to prepare</h2>
             @if (string.IsNullOrWhiteSpace(Model.View.PrepContent))
             {
-                <p style="color:#666;">The speakers have not posted preparation notes yet — check back soon.</p>
+                <p style="color:#374151;">The speakers have not posted preparation notes yet — check back soon.</p>
             }
             else
             {
@@ -105,12 +105,12 @@
         <!-- ============ Group Q&A — unique to THIS Master Class ============ -->
         <section aria-labelledby="qa-h" style="margin:18px 0;">
             <h2 id="qa-h" style="font-size:1.25rem;">Group Q&amp;A for this Master Class</h2>
-            <p style="color:#666;margin:0 0 4px;">
+            <p style="color:#374151;margin:0 0 4px;">
                 This is the question board for <strong>@Model.View.Title</strong> only — it is
                 shared with everyone in this Master Class and its speakers. Each Master Class has
                 its own separate board, so what you post here stays with this class.
             </p>
-            <p style="color:#666;margin:0 0 8px;">
+            <p style="color:#374151;margin:0 0 8px;">
                 Post your questions here so the speakers and your fellow attendees can see and
                 answer them. To reach the organizers privately, please
                 <a href="/Contact">contact the organizers</a>.
@@ -125,7 +125,7 @@
 
             @if (Model.Comments.Count == 0)
             {
-                <p style="color:#666;margin-top:12px;">No comments yet — start the conversation.</p>
+                <p style="color:#374151;margin-top:12px;">No comments yet — start the conversation.</p>
             }
             else
             {

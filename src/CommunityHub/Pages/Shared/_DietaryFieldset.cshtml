@@ -38,25 +38,18 @@
 </style>
 
 <label for="Dietary_DietChoice">@Localizer["Diet.DietChoiceLabel"]</label>
+@* The "None" choice already renders as "No special diet" (the default), so the empty
+   "-- no special diet --" placeholder was a confusing duplicate and is removed. *@
 <select asp-for="DietChoice" id="Dietary_DietChoice" name="Dietary.DietChoice">
-    <option value="">@Localizer["Diet.DietChoiceNone"]</option>
     @foreach (var choice in DietaryRequirement.DietChoices)
     {
         <option value="@choice">@Localizer[$"Diet.Choice.{choice}"]</option>
     }
 </select>
 
-<fieldset class="ceh-diet-allergens">
-    <legend style="font-weight:600;font-size:14px;margin-top:6px;">@Localizer["Diet.AllergensLegend"]</legend>
-    @foreach (var (token, isSet) in Model.Allergens())
-    {
-        var id = $"Dietary_{token}";
-        <label for="@id">
-            <input type="checkbox" id="@id" name="Dietary.@token" value="true" @(isSet ? "checked" : "") />
-            @Localizer[$"Diet.Allergen.{token}"]
-        </label>
-    }
-</fieldset>
+@* The 14-allergen "tick all that apply" checkbox grid was removed (operator 2026-06-28);
+   the diet dropdown + the free-text box below capture dietary needs. The allergen columns
+   remain on DietaryInput (unset) so persisted data + the aggregator are unaffected. *@
 
 <label for="Dietary_OtherAllergens">@Localizer["Diet.OtherLabel"]</label>
 <textarea id="Dietary_OtherAllergens" name="Dietary.OtherAllergens" rows="2"

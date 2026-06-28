@@ -37,7 +37,10 @@ public sealed class SpeakerDetailsFormModel
     public string? Country { get; set; }
     public string? Gender { get; set; }
     public bool? IsFirstTimeSpeaker { get; set; }
-    [StringLength(320)] public string? ContactEmailOverride { get; set; }
+    // Display/legacy only — no longer edited on this step (the input was removed; the
+    // get-started Step 1 "Calendar email" owns the alternate email). BindNever so a POST
+    // can never null it out.
+    [BindNever][StringLength(320)] public string? ContactEmailOverride { get; set; }
 
     // ----- display-only (set by the service; never bound) -----------------
     /// <summary>The sign-in / Sessionize match email — read-only identity key, shown but never edited here.</summary>
@@ -199,7 +202,10 @@ public sealed class SpeakerDetailsFormService : IWizardFormService
         profile.Country = model.Country;
         profile.Gender = N(model.Gender);
         profile.IsFirstTimeSpeaker = model.IsFirstTimeSpeaker;
-        profile.ContactEmailOverride = N(model.ContactEmailOverride);
+        // ContactEmailOverride is no longer edited on this step (operator 2026-06-28 — the
+        // get-started Step 1 "Calendar email" is the single alternate-email field). Do NOT
+        // write it here: the input is gone, so model binding leaves it null and a save would
+        // WIPE any existing override. The persisted value is left untouched.
 
         await _db.SaveChangesAsync(ct);
         BindFromProfile(model, profile);

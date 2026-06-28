@@ -126,6 +126,20 @@ public sealed class ContentPageRegistryTests
             ContentPageRegistry.ForRole(ParticipantRole.Organizer).Count);
     }
 
+    [Theory]
+    // The SPEAKER-only `{slug}-speaker.md` supplements (e.g. the speaker hotel on the Addresses
+    // page) must NOT be registered as standalone pages — otherwise /Info/{slug}-speaker would be
+    // directly browsable. They render ONLY as a role-gated supplement inside their parent page.
+    [InlineData("addresses-speaker")]
+    public void Speaker_supplement_slugs_are_not_directly_browsable_pages(string supplementSlug)
+    {
+        Assert.False(ContentPageRegistry.Exists(supplementSlug));
+        Assert.Null(ContentPageRegistry.Get(supplementSlug));
+        foreach (ParticipantRole role in System.Enum.GetValues<ParticipantRole>())
+            Assert.False(ContentPageRegistry.CanAccess(supplementSlug, role),
+                $"{role} must not be able to open the supplement '{supplementSlug}' as a page.");
+    }
+
     public static TheoryData<string> AllRoleSlugData()
     {
         var data = new TheoryData<string>();

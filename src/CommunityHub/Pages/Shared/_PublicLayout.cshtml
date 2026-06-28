@@ -36,11 +36,23 @@
     <main id="main" tabindex="-1">
         @RenderBody()
     </main>
-    @* Minimal contentinfo landmark (a11y landmark gate). Copyright / product
-       line only - NO internal nav, user identity, or Sign-out, to respect the
-       anonymous-isolation rule (REQUIREMENTS §27). *@
+    @* Contentinfo landmark (a11y). The SAME open-source credit line as _Layout, but
+       still NO internal nav, user identity, or Sign-out — the anonymous-isolation rule
+       (REQUIREMENTS §27) is about auth chrome, not the public product/credit footer.
+       English literals (no localizer is injected here on purpose). *@
     <footer style="text-align:center;">
-        <div>@ProductName (@ProductShortName)</div>
+        <div>
+            @ProductName (@ProductShortName) &mdash; Built as open-source by
+            <a href="https://aka.ms/morten" target="_blank" rel="noopener">Morten Knudsen<span class="visually-hidden"> (opens in a new tab)</span></a>
+            &middot; free for any community to use.
+        </div>
+        <div style="margin-top:4px;">
+            <a href="https://github.com/KnudsenMorten/community-event-hub" target="_blank" rel="noopener">GitHub<span class="visually-hidden"> (opens in a new tab)</span></a>
+            &middot;
+            <a href="https://github.com/KnudsenMorten/community-event-hub/issues" target="_blank" rel="noopener">Submit a bug<span class="visually-hidden"> (opens in a new tab)</span></a>
+            &middot;
+            <a href="/Contributors">Contributors</a>
+        </div>
     </footer>
     <partial name="_LayoutClientScripts" />
     @await RenderSectionAsync("Scripts", required: false)

@@ -13,8 +13,8 @@
 
 <style>
     .volunteer-hero {
-        background: var(--el-darkblue, #1D3380); color: #fff; padding: 0 22px;
-        border-radius: 10px 10px 0 0; margin: -20px -20px 0 -20px; text-align: center;
+        background: var(--el-darkblue, #1D3380); color: #fff; padding: 20px 22px;
+        border-radius: 10px 10px 0 0; margin: 0; text-align: center;
         min-height: 90px; display: flex; flex-direction: column; align-items: center; justify-content: center;
     }
     .volunteer-hero h1 { margin: 0; font-size: 22px; font-weight: 700; line-height: 1.2; }
@@ -84,7 +84,6 @@
 <div class="card" style="padding:0; overflow:hidden;">
     <div class="volunteer-hero">
         <h1>Volunteer at @(string.IsNullOrEmpty(Model.EventDisplayName) ? "our community event" : Model.EventDisplayName)</h1>
-        <p>Hands-on, social, and the best seat in the house. Three quick steps and you&rsquo;re on the team.</p>
     </div>
 
     <div class="volunteer-card">
@@ -180,9 +179,10 @@
                 @* ---- Step 3: public profile (opt-in) ---- *@
                 <section class="step-section" data-step="3">
                     <p class="vol-fineprint" style="margin:0 0 12px;">
-                        We love celebrating our volunteers publicly — see last year's wall:
-                        <a href="https://expertslive.dk/volunteers-eldk26/" target="_blank" rel="noopener">expertslive.dk/volunteers-eldk26</a>.
-                        With your consent we'll feature you with your <strong>name, photo and LinkedIn</strong>. This is optional.
+                        We love celebrating our volunteers publicly. With your consent we'll feature you — with your
+                        <strong>name, photo and LinkedIn</strong> — on this year's volunteer page:
+                        <a href="https://expertslive.dk/volunteers-eldk27/" target="_blank" rel="noopener">expertslive.dk/volunteers-eldk27</a>
+                        (see last year's wall: <a href="https://expertslive.dk/volunteers-eldk26/" target="_blank" rel="noopener">volunteers-eldk26</a>). This is optional.
                     </p>
                     <label class="agree-accept" style="margin-bottom:14px;">
                         <input type="checkbox" id="ProfileConsent" asp-for="ProfileConsent" />
@@ -214,8 +214,8 @@
                             <li><strong>Coaching &amp; guidance</strong> — We&rsquo;re happy to support you with career, job, and personal development conversations.</li>
                             <li><strong>Lunch</strong> — Lunch is on us on the days you&rsquo;re helping.</li>
                             <li><strong>Volunteer polo</strong> — You&rsquo;ll get an exclusive ELDK27 volunteer T-shirt or jacket — practical for the day and a nice keepsake.</li>
-                            <li><strong>Gift</strong></li>
-                            <li><strong>Award</strong></li>
+                            <li><strong>Gift</strong> &mdash; A thank-you gift for your help on the day.</li>
+                            <li><strong>Award</strong> &mdash; A nice little keepsake award you can showcase to show you helped make ELDK27 happen.</li>
                             <li><strong>Sessions you care about</strong> — We do our best not to schedule you during the sessions or master classes you most want to attend, so let us know your top picks in advance.</li>
                             <li><strong>Plenty of time to network</strong> — Volunteering puts you right in the middle of the action, with lots of time to connect with speakers, sponsors, and fellow attendees you&rsquo;d otherwise only see on stage.</li>
                             <li><strong>A reference when you need one</strong> — Need a LinkedIn recommendation or a personal reference for a job search? Just ask an organizer.</li>
@@ -312,19 +312,11 @@
             form.addEventListener('submit', function (e) { if (!valid(total)) { e.preventDefault(); step = total; render(); } });
             render();
 
-            // Per-day availability exclusivity (REQUIREMENTS §45). Radios make the
-            // options inherently single-select; this disables the rest of a day when
-            // an EXCLUSIVE option (Full day / Not able / packing Yes·No) is chosen.
-            form.querySelectorAll('[data-av-day]').forEach(function (day) {
-                var radios = Array.prototype.slice.call(day.querySelectorAll('input[type=radio]'));
-                function applyEx() {
-                    var chosen = radios.filter(function (r) { return r.checked; })[0];
-                    var lock = chosen && chosen.getAttribute('data-exclusive') === '1';
-                    radios.forEach(function (r) { r.disabled = lock && r !== chosen; });
-                }
-                radios.forEach(function (r) { r.addEventListener('change', applyEx); });
-                applyEx();
-            });
+            // Per-day availability is a single-select radio group, so the options are
+            // inherently mutually exclusive — picking one clears the others. We must NOT
+            // disable the unchosen options: the day defaults to an "exclusive" option
+            // (Full day), and disabling the rest LOCKED the user in with no way to switch
+            // (the options showed greyed-out and unclickable). Every option stays selectable.
         })();
     </script>
 }

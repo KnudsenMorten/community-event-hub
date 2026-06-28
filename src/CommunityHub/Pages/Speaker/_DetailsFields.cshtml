@@ -99,11 +99,10 @@
     <input type="checkbox" name="IsFirstTimeSpeaker" value="true" @(Model.IsFirstTimeSpeaker == true ? "checked" : "") />
     This is my first time speaking at Experts Live Denmark
 </label>
-
-<label asp-for="ContactEmailOverride" style="margin-top:14px;">Preferred contact email (optional)</label>
-<input type="email" asp-for="ContactEmailOverride" placeholder="Where we send mail + calendar invites" />
-<span asp-validation-for="ContactEmailOverride" class="error"></span>
-<p style="color:#6b7280;font-size:12px;">Leave blank to use your sign-in email. This only changes where mail is sent — not your login.</p>
+@* Preferred contact email removed here (operator 2026-06-28): the get-started Step 1
+   "Calendar email (optional)" is the single place to set an alternate email, so this
+   duplicate-looking field is gone. Any previously-saved ContactEmailOverride is preserved
+   (this step no longer reads or writes that column). *@
 
 @if (Model.LastSessionizeImportAt is not null)
 {

@@ -37,6 +37,9 @@
         @* Trusted, in-repo operator markdown rendered to HTML by ContentMarkdownRenderer.
            The leading H1 in each .md file serves as the page heading. *@
         @Model.BodyHtml
+        @* Speaker-only supplement (e.g. the speaker hotel on the all-roles Addresses page):
+           rendered only for Speakers/Organizers, hidden from everyone else. *@
+        @Model.SpeakerSupplementHtml
     }
 
     @* §146: LIVE SharePoint venue images (server-proxied via /venue-image/{folder}/{name};
