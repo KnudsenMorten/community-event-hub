@@ -403,10 +403,13 @@ public sealed class GraphicsService
             ? string.Empty
             : $" with my session \"{sessionTitle.Trim()}\"";
 
+        // Operator-authored format (2026-06-28): a multi-line post with the date, an agenda
+        // line and a ticket line (both the public event site), then the hashtags.
         var text =
-            $"I'm speaking at {eventDisplayName}{sessionLine}! "
-            + $"Join us {eventDates}. Get your ticket: {ticketUrl} "
-            + "#ELDK27 #ExpertsLive";
+            $"I'm speaking at {eventDisplayName}{sessionLine} on {eventDates}!\n\n"
+            + $"Check out the agenda on {ticketUrl}\n\n"
+            + $"Get your ticket: {ticketUrl}\n\n"
+            + "#ELDK27 #ExpertsLiveDK";
 
         return _share.BuildDraft(network, text, graphicUrl);
     }

@@ -1209,7 +1209,7 @@
   <data name="Nav.OrgSectionLogistics" xml:space="preserve"><value>Logistics</value></data>
   <data name="Nav.OrgSectionSetup" xml:space="preserve"><value>Setup &amp; audit</value></data>
   <data name="Nav.SponsorEventLogistics" xml:space="preserve"><value>Event logistics</value></data>
-  <data name="Nav.SponsorBoothRunOfShow" xml:space="preserve"><value>Booth run-of-show</value></data>
+  <data name="Nav.SponsorBoothRunOfShow" xml:space="preserve"><value>Key Dates &amp; times</value></data>
   <data name="Nav.OurBooth" xml:space="preserve"><value>Our Booth</value></data>
   <data name="Nav.SponsorLeadsExport" xml:space="preserve"><value>My leads (export)</value></data>
   <data name="OrgArea.Title" xml:space="preserve"><value>Organizer area</value></data>

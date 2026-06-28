@@ -1121,6 +1121,37 @@ app.MapGet("/schedule/{id:int}.ics", async (
     return Results.File(System.Text.Encoding.UTF8.GetBytes(ics), "text/calendar; charset=utf-8");
 }).RequireAuthorization();
 
+// SYNC ONE SESSION as an .ics (the "Calendar sync" button on a speaker's session / the
+// public session detail). The link is /Sessions/{id}.ics; this route was missing, so the
+// button 404'd. Authenticated + edition-scoped. 404 when the session is unknown or not yet
+// scheduled (no start time => nothing to put on a calendar).
+app.MapGet("/Sessions/{id:int}.ics", async (
+        int id, HttpContext http,
+        CommunityHub.Core.Data.CommunityHubDbContext db,
+        CommunityHub.Auth.ICurrentParticipantAccessor pa,
+        CancellationToken ct) =>
+{
+    var me = pa.Current;
+    if (me is null) return Results.Redirect("/Login");
+    var s = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions
+        .FirstOrDefaultAsync(db.Sessions, x => x.Id == id && x.EventId == me.EventId, ct);
+    if (s is null || s.StartsAt is null) return Results.NotFound();
+
+    var host = http.Request.Host.Value ?? "communityhub";
+    var item = new CommunityHub.Core.Email.CalendarItem(
+        Uid: $"session-{s.Id}@{host}",
+        Summary: s.Title,
+        Description: null,
+        Location: string.IsNullOrWhiteSpace(s.Room) ? null : s.Room,
+        Start: s.StartsAt.Value,
+        End: s.EndsAt ?? s.StartsAt.Value.AddHours(1),
+        AllDay: false,
+        AlarmsDaysBefore: System.Array.Empty<int>());
+    var ics = CommunityHub.Core.Email.IcsCalendarBuilder.BuildFeed(s.Title, me.Email, me.FullName, new[] { item });
+    // Inline (no filename) so the OS opens the entry in the calendar app, not download.
+    return Results.File(System.Text.Encoding.UTF8.GetBytes(ics), "text/calendar; charset=utf-8");
+}).RequireAuthorization();
+
 // §146: SERVER-PROXIED venue image. Streams an allowlisted Venue SUBFOLDER image
 // (wayfinding / good-to-know / evaluations / expo) fetched with the app's OWN SharePoint
 // credentials, with a committed-wwwroot fallback — end users have no SharePoint access and

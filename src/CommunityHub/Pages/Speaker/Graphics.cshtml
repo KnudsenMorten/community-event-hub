@@ -1,13 +1,13 @@
 @page
 @model CommunityHub.Pages.Speaker.GraphicsModel
 @{
-    ViewData["Title"] = "My share graphics";
+    ViewData["Title"] = "Help Promote";
 }
 
 @if (Model.AccessDenied)
 {
     <div class="card">
-        <h1>My share graphics</h1>
+        <h1>Help Promote</h1>
         <p class="error" role="alert">
             This page is for speakers
             (<strong>@CommunityHub.Branding.RoleDisplay.Name(Model.Role)</strong>).
@@ -45,20 +45,17 @@
 </style>
 
 <div class="card">
-    <h1>My share graphics</h1>
-    <p>
-        Pre-made social graphics for you to share. Download the image or open a
-        ready-to-edit draft on LinkedIn or X — you finalize and post it yourself.
-        @if (!Model.CanPost)
-        {
-            <span> (We never post to your personal profile.)</span>
-        }
-    </p>
-    @if (Model.CanPublishToLinkedIn)
+    <h1>Help Promote</h1>
+    @if (Model.AnnouncementDraft is not null)
     {
-        <p style="margin-top:6px;">
-            You can also <strong>publish your announcement to the event's LinkedIn
-            page</strong> — pick a released graphic below and use “Publish to LinkedIn”.
+        <p style="margin-top:0;">Here's a ready-made post — review it and share when you're ready.</p>
+        <label for="announce-text"><strong>Your post</strong></label>
+        <textarea id="announce-text" rows="7" readonly aria-label="Draft post text"
+                  style="width:100%; box-sizing:border-box;">@Model.AnnouncementDraft.Text</textarea>
+        <p style="margin-top:8px;">
+            <a class="btn" href="@Model.AnnouncementDraft.IntentUrl" target="_blank" rel="noopener noreferrer">
+                Open LinkedIn draft (opens in a new tab)
+            </a>
         </p>
     }
 </div>
@@ -76,26 +73,13 @@
     </div>
 }
 
-@* The "I'm speaking at ELDK27" announcement draft. Builds a LinkedIn DRAFT only. *@
-@if (Model.AnnouncementDraft is not null)
-{
-    <div class="card">
-        <h3>Announce you're speaking</h3>
-        <p>Create a LinkedIn draft saying you're speaking at @Model.EventDisplayName.
-           Includes the date and ticket link — review it and post when you're ready.</p>
-        <label for="announce-text"><strong>Draft text</strong></label>
-        <textarea id="announce-text" rows="4" readonly aria-label="Draft post text"
-                  style="width:100%; box-sizing:border-box;">@Model.AnnouncementDraft.Text</textarea>
-        <p style="margin-top:8px;">
-            <a class="btn" href="@Model.AnnouncementDraft.IntentUrl" target="_blank" rel="noopener noreferrer">
-                Open LinkedIn draft (opens in a new tab)
-            </a>
-        </p>
-    </div>
-}
-
 <div class="card">
-    <h3>Your graphics</h3>
+    <h3>Graphics to go with your post</h3>
+    @if (Model.CanPublishToLinkedIn)
+    {
+        <p style="margin-top:0;font-size:13.5px;color:#4b5563;">You can also <strong>publish to the event's
+           LinkedIn page</strong> — pick a released graphic and use "Publish to LinkedIn page".</p>
+    }
     @if (Model.Cards.Count == 0)
     {
         <p class="gfx-empty">
