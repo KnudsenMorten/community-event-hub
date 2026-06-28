@@ -128,6 +128,8 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
     // Buckets feature (2026-06-15): multi-supervisor + draft→commit allocation.
     public DbSet<VolunteerBucketSupervisor> VolunteerBucketSupervisors => Set<VolunteerBucketSupervisor>();
     public DbSet<TaskAllocationDraft> TaskAllocationDrafts => Set<TaskAllocationDraft>();
+    public DbSet<AllocationScenario> AllocationScenarios => Set<AllocationScenario>();
+    public DbSet<AllocationScenarioMove> AllocationScenarioMoves => Set<AllocationScenarioMove>();
 
     // --- Attendee personal session plan ("My plan" — saved sessions) ---------
     public DbSet<SavedSession> SavedSessions => Set<SavedSession>();
@@ -1757,6 +1759,56 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
             e.HasIndex(x => new { x.TaskId, x.ParticipantId }).IsUnique();
             // The organizer's whole draft queue for an edition (Commit/Discard).
             e.HasIndex(x => new { x.EventId, x.OwnerParticipantId });
+        });
+
+        // --- AllocationScenario + moves (generic stage→simulate→commit, §129) -
+        b.Entity<AllocationScenario>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Kind).HasConversion<int>();
+            e.Property(x => x.Status).HasConversion<int>().HasDefaultValue(AllocationScenarioStatus.Draft);
+            e.Property(x => x.Title).HasMaxLength(200);
+            e.Property(x => x.Notes).HasMaxLength(2000);
+            e.Property(x => x.CommittedByEmail).HasMaxLength(320);
+
+            e.HasOne(x => x.Event).WithMany()
+                .HasForeignKey(x => x.EventId)
+                .OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(x => x.OwnerParticipant).WithMany()
+                .HasForeignKey(x => x.OwnerParticipantId)
+                .OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(x => x.DroppedParticipant).WithMany()
+                .HasForeignKey(x => x.DroppedParticipantId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            // An organizer's scenarios for an edition (list/owner scope).
+            e.HasIndex(x => new { x.EventId, x.OwnerParticipantId, x.Status });
+        });
+
+        b.Entity<AllocationScenarioMove>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Op).HasConversion<int>().HasDefaultValue(AllocationMoveOp.Assign);
+            e.Property(x => x.TargetRole).HasConversion<int>().HasDefaultValue(ParticipantRole.Volunteer);
+
+            // The moves cascade-delete with their parent scenario (a scenario owns them).
+            e.HasOne(x => x.Scenario).WithMany(s => s.Moves)
+                .HasForeignKey(x => x.ScenarioId)
+                .OnDelete(DeleteBehavior.Cascade);
+            // Task/Hotel/Participant FKs are NoAction (the Event cascade already covers the
+            // edition root; a scenario move is staging, not live state).
+            e.HasOne(x => x.Participant).WithMany()
+                .HasForeignKey(x => x.ParticipantId)
+                .OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(x => x.Task).WithMany()
+                .HasForeignKey(x => x.TaskId)
+                .OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(x => x.Hotel).WithMany()
+                .HasForeignKey(x => x.HotelId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            // Same staged move at most once per scenario.
+            e.HasIndex(x => new { x.ScenarioId, x.ParticipantId, x.TaskId, x.HotelId }).IsUnique();
         });
 
         // --- ErpCustomerLink (e-conomic ERP customer sync, REQUIREMENTS §7a) -

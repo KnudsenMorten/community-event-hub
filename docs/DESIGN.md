@@ -3109,6 +3109,22 @@ commit** pipeline that is **silent until commit** and routed by responsible team
   emits **batched, per-person** notifications (one mail per assignee summarizing their tasks),
   **ring-gated** through `IEmailSender`. Nothing else in the pipeline mails.
 
+**Allocation scenarios (§129) — generic stage → simulate → commit.** A NAMED, persisted, auditable
+reshuffle layered on the same models (no parallel stack): `AllocationScenario` + `AllocationScenarioMove`
+(migration `AllocationScenarios`), driven by `AllocationScenarioService`. A scenario has a `Kind`
+(`VolunteerAllocation` / `DropOutBackfill`; `HotelAllocation` is the modelled phase-2 — the move already
+carries `HotelId`), an owner, a `Status` (Draft/Committed/Discarded) and its staged moves (each an
+Assign/Unassign of a person to a task). `SeedDropOutBackfillAsync` auto-creates a backfill scenario with
+one Unassign per task the dropped person covers. `SimulateAsync` is **strictly read-only** — it computes
+per-task before/after coverage deltas (live ± staged vs `ResourcesNeeded`), under-staffed **gaps**,
+over-capacity **breaches**, and same-due-date **double-booking conflicts**, surfaced as a "what breaks"
+gate — and **writes nothing**. `CommitAsync` applies every move to the live `VolunteerTaskAssignment`
+table inside one transaction (the execution-strategy + a relational transaction; a no-op on the in-memory
+test provider), stamps `Committed`/`CommittedAt`/`CommittedByEmail` (the audit), **refuses an empty
+scenario**, and **gates over-capacity** behind an explicit acknowledgement; `DiscardAsync` marks it
+Discarded with no live effect. Organizer-only; surfaced at `/Organizer/AllocationScenarios` (Volunteers
+hub) with an "assign me" quick action.
+
 **Task management (§151).** Alongside the pipeline: a task gets an **auto-generated detailed
 description** from its title via the guidance seam (`HeuristicTaskGuidanceGenerator` always-on,
 `LlmTaskGuidanceGenerator` when a key is configured); **any organizer** can edit any task; and

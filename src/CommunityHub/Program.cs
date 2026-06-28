@@ -431,6 +431,9 @@ builder.Services.AddSingleton<CommunityHub.Core.Volunteers.VolunteerPlanParser>(
 // task round-trip. This is the single composition root for all of the new services.
 // (ResponsibleTeamRouter is a static helper — no DI registration needed.)
 builder.Services.AddScoped<CommunityHub.Core.Volunteers.OrganizerAllocationService>();
+// Generic stage→simulate→commit allocation scenarios (§129) — bulk reshuffles staged + proven
+// safe before they touch the live assignment tables; auto-seeds a backfill on a drop-out.
+builder.Services.AddScoped<CommunityHub.Core.Volunteers.AllocationScenarioService>();
 builder.Services.AddScoped<CommunityHub.Core.Volunteers.AvailabilityAutoAssignEngine>();
 builder.Services.AddScoped<CommunityHub.Core.Email.CommitNotificationService>();
 builder.Services.AddScoped<CommunityHub.Core.Email.ICommitNotificationService>(

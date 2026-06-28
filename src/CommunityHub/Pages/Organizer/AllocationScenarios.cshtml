@@ -1,0 +1,191 @@
+@page
+@model CommunityHub.Pages.Organizer.AllocationScenariosModel
+@{
+    ViewData["Title"] = "Allocation scenarios";
+}
+
+<div class="card" style="max-width:920px;margin:0 auto;">
+    <h1>Allocation scenarios</h1>
+
+    @if (Model.AccessDenied)
+    {
+        <p class="error">This area is for organizers.</p>
+        <p><a asp-page="/Index">Back to hub</a></p>
+        return;
+    }
+
+    <p class="muted" style="font-size:13.5px;">
+        Stage a bulk reshuffle, <strong>simulate</strong> it (coverage gaps, over-capacity, double-bookings)
+        and only then <strong>commit</strong> — nothing touches the live assignments until you do.
+    </p>
+
+    @if (!string.IsNullOrWhiteSpace(Model.Notice)) { <p class="info" role="status">@Model.Notice</p> }
+    @if (!string.IsNullOrWhiteSpace(Model.Error)) { <p class="error" role="alert">@Model.Error</p> }
+
+    @* ---- Create + seed-backfill ---------------------------------------- *@
+    <div style="display:flex;flex-wrap:wrap;gap:16px;margin:14px 0;">
+        <form method="post" asp-page-handler="Create" style="flex:1 1 320px;display:flex;flex-direction:column;gap:6px;">
+            <strong style="font-size:13.5px;">New scenario</strong>
+            <input name="NewTitle" maxlength="200" placeholder="e.g. Friday registration reshuffle" required />
+            <select name="NewKind">
+                <option value="@((int)CommunityHub.Core.Domain.AllocationScenarioKind.VolunteerAllocation)">Volunteer / organizer allocation</option>
+                <option value="@((int)CommunityHub.Core.Domain.AllocationScenarioKind.DropOutBackfill)">Drop-out backfill (manual)</option>
+            </select>
+            <div><button type="submit" class="btn-primary">Create scenario</button></div>
+        </form>
+
+        <form method="post" asp-page-handler="SeedBackfill" style="flex:1 1 320px;display:flex;flex-direction:column;gap:6px;">
+            <strong style="font-size:13.5px;">Auto-seed a drop-out backfill</strong>
+            <span class="muted" style="font-size:12px;">Pick the person who dropped — we stage an un-assign for every task they cover so you start from exactly what's now uncovered.</span>
+            <input name="DroppedPersonId" type="number" min="1" placeholder="Dropped person's id" required />
+            <div><button type="submit">Seed backfill</button></div>
+        </form>
+    </div>
+
+    @* ---- Scenario list ------------------------------------------------- *@
+    <h2 style="font-size:17px;">Your scenarios</h2>
+    @if (Model.Scenarios.Count == 0)
+    {
+        <p class="muted">No scenarios yet — create one above.</p>
+    }
+    else
+    {
+        <div style="overflow-x:auto;-webkit-overflow-scrolling:touch;">
+            <table style="width:100%;border-collapse:collapse;font-size:13.5px;">
+                <tr style="text-align:left;border-bottom:2px solid #ddd;">
+                    <th>Title</th><th>Kind</th><th>Status</th><th>Moves</th><th>Created</th><th></th>
+                </tr>
+                @foreach (var s in Model.Scenarios)
+                {
+                    <tr style="border-bottom:1px solid #eee;@(Model.Id == s.Id ? "background:#eef6ff;" : "")">
+                        <td>@s.Title</td>
+                        <td>@s.Kind</td>
+                        <td>@s.Status</td>
+                        <td>@s.Moves.Count</td>
+                        <td>@s.CreatedAt.ToString("yyyy-MM-dd HH:mm")</td>
+                        <td><a asp-page="/Organizer/AllocationScenarios" asp-route-id="@s.Id">Open</a></td>
+                    </tr>
+                }
+            </table>
+        </div>
+    }
+
+    @* ---- Selected scenario -------------------------------------------- *@
+    @if (Model.Selected is { } scn)
+    {
+        var sim = Model.Sim!;
+        <hr style="margin:18px 0;border:0;border-top:1px solid #e6eaf2;" />
+        <h2 style="font-size:18px;margin-bottom:2px;">@scn.Title</h2>
+        <p class="muted" style="font-size:12.5px;margin-top:0;">
+            @scn.Kind · @scn.Status
+            @if (scn.Notes is not null) { <text> · @scn.Notes</text> }
+            @if (scn.CommittedAt is not null) { <text> · committed @scn.CommittedAt.Value.ToString("yyyy-MM-dd HH:mm") by @scn.CommittedByEmail</text> }
+        </p>
+
+        @* What breaks summary *@
+        @if (sim.IsEmpty)
+        {
+            <p class="muted">No moves staged yet.</p>
+        }
+        else if (sim.HasProblems)
+        {
+            <p class="error" role="alert" style="font-size:13.5px;">
+                ⚠ What breaks: @sim.Gaps.Count under-staffed, @sim.Breaches.Count over capacity, @sim.Conflicts.Count double-booking(s). Review before committing.
+            </p>
+        }
+        else
+        {
+            <p class="info" role="status" style="font-size:13.5px;">✓ Looks clean — no gaps, no over-capacity, no double-bookings.</p>
+        }
+
+        @* Before/after coverage diff *@
+        @if (sim.TaskDeltas.Count > 0)
+        {
+            <div style="overflow-x:auto;-webkit-overflow-scrolling:touch;">
+                <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                    <tr style="text-align:left;border-bottom:2px solid #ddd;">
+                        <th>Task</th><th>Needs</th><th>Now</th><th>+/−</th><th>After</th><th></th>
+                    </tr>
+                    @foreach (var d in sim.TaskDeltas)
+                    {
+                        var tag = d.IsGap ? "#b91c1c" : d.IsBreach ? "#b45309" : "#166534";
+                        <tr style="border-bottom:1px solid #eee;">
+                            <td>@d.Title</td>
+                            <td>@d.ResourcesNeeded</td>
+                            <td>@d.LiveAssigned</td>
+                            <td>+@d.Added / −@d.Removed</td>
+                            <td style="color:@tag;font-weight:600;">@d.Projected</td>
+                            <td style="color:@tag;font-size:12px;">@(d.IsGap ? $"short {d.Shortfall}" : d.IsBreach ? $"over {d.Overage}" : "ok")</td>
+                        </tr>
+                    }
+                </table>
+            </div>
+        }
+
+        @if (sim.Conflicts.Count > 0)
+        {
+            <ul style="font-size:12.5px;color:#b91c1c;">
+                @foreach (var c in sim.Conflicts) { <li>@c.PersonName — @c.Detail</li> }
+            </ul>
+        }
+
+        @if (scn.Status == CommunityHub.Core.Domain.AllocationScenarioStatus.Draft)
+        {
+            @* Staged moves list *@
+            <h3 style="font-size:15px;">Staged moves (@scn.Moves.Count)</h3>
+            @if (scn.Moves.Count > 0)
+            {
+                <ul style="font-size:13px;">
+                    @foreach (var m in scn.Moves.OrderBy(m => m.Task?.Title))
+                    {
+                        <li style="margin-bottom:4px;">
+                            <strong>@(m.Op == CommunityHub.Core.Domain.AllocationMoveOp.Assign ? "Assign" : "Un-assign")</strong>
+                            @m.Participant?.FullName → @m.Task?.Title
+                            <form method="post" asp-page-handler="RemoveMove" asp-route-id="@scn.Id" style="display:inline;">
+                                <input type="hidden" name="moveId" value="@m.Id" />
+                                <button type="submit" style="font-size:11px;padding:1px 7px;">remove</button>
+                            </form>
+                        </li>
+                    }
+                </ul>
+            }
+
+            @* Add a move *@
+            <form method="post" asp-page-handler="AddMove" asp-route-id="@scn.Id"
+                  style="display:flex;flex-wrap:wrap;gap:8px;align-items:end;margin:8px 0;">
+                <label style="font-size:12px;">Person<br /><select name="MovePersonId" asp-items="Model.PersonOptions" required></select></label>
+                <label style="font-size:12px;">Task<br /><select name="MoveTaskId" asp-items="Model.TaskOptions" required></select></label>
+                <label style="font-size:12px;">Action<br />
+                    <select name="MoveOp">
+                        <option value="@((int)CommunityHub.Core.Domain.AllocationMoveOp.Assign)">Assign</option>
+                        <option value="@((int)CommunityHub.Core.Domain.AllocationMoveOp.Unassign)">Un-assign</option>
+                    </select>
+                </label>
+                <button type="submit">Stage move</button>
+            </form>
+            <form method="post" asp-page-handler="AssignMe" asp-route-id="@scn.Id" style="margin:-2px 0 12px;">
+                <label style="font-size:12px;">Quick: stage ME onto <select name="MoveTaskId" asp-items="Model.TaskOptions" required></select></label>
+                <button type="submit" style="font-size:12px;">Assign me</button>
+            </form>
+
+            @* Commit / discard *@
+            <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:center;border-top:1px solid #e6eaf2;padding-top:12px;">
+                <form method="post" asp-page-handler="Commit" asp-route-id="@scn.Id" style="display:flex;align-items:center;gap:8px;">
+                    @if (sim.Breaches.Count > 0)
+                    {
+                        <label style="font-size:12px;color:#b45309;">
+                            <input type="checkbox" name="AckOverCapacity" value="true" /> I accept the over-capacity
+                        </label>
+                    }
+                    <button type="submit" class="btn-primary" @(sim.IsEmpty ? "disabled" : "")>Commit scenario</button>
+                </form>
+                <form method="post" asp-page-handler="Discard" asp-route-id="@scn.Id"
+                      onsubmit="return confirm('Discard this scenario? Nothing is assigned.');">
+                    <button type="submit">Discard</button>
+                </form>
+            </div>
+        }
+    }
+
+    <p style="margin-top:16px;"><a asp-page="/Index">← Back to hub</a></p>
+</div>

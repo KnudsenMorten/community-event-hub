@@ -2096,6 +2096,17 @@ A complete pipeline for getting work onto the right people's plates and keeping 
 from an availability-driven auto-assign engine, through role-routed queues, to a single batched
 notification only when an organizer actually commits.
 
+- **Allocation scenarios — stage → simulate → commit a bulk reshuffle.** *(✅ phase 1, 2026-06-28)*
+  Beyond the live per-organizer draft queue, an organizer can build a **named, saved scenario** of staged
+  people→task moves (by hand, or **auto-seeded from a drop-out** — one un-assign per task that person
+  covered, so you start from exactly what's now uncovered), **simulate** it strictly read-only — a
+  per-task **before/after coverage diff**, **under-staffed gaps**, **over-capacity breaches**, and
+  **same-day double-booking** conflicts, with an explicit **"what breaks"** summary — and only then
+  **commit** it. Commit applies every move to the live assignments **atomically** with an audit stamp,
+  **refuses an empty scenario**, and **gates an over-capacity commit** behind an explicit acknowledgement;
+  **discard** drops it with no effect. Organizer page `/Organizer/AllocationScenarios` (via the Volunteers
+  hub), with an **"assign me"** quick action. Nothing touches the live tables until commit (§129). *(Hotel
+  allocation is the additive phase 2.)*
 - **Availability-driven auto-assign.** An engine proposes assignments from each volunteer's recorded
   **day availability**, so organizers start from a sensible draft allocation instead of a blank sheet
   (§150).
