@@ -108,7 +108,11 @@ public sealed class CalendarInviteEmailService
         {
             if (_templates is not null)
             {
-                var tokens = _templates.NewTokenSet();
+                // §169: addressed to a single known participant — pass the id so any
+                // hub CTA ({{hubUrl}}) becomes their personal auto-login magic-link
+                // (the ambient EmailContext above already carries p.Id; this makes it
+                // explicit + robust). Fail-safe to the plain hub URL when not wired.
+                var tokens = _templates.NewTokenSet(p.Id);
                 tokens["firstName"] = firstName;
                 tokens["eventDisplayName"] = p.Event.DisplayName;
                 var rendered = _templates.Render("calendar-invite", tokens);

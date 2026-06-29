@@ -193,7 +193,7 @@ public sealed class SpeakerBioBackstageSyncService
                 + "details in the hub, but Zoho Backstage's speakers API is <strong>create-only</strong> — it has no "
                 + "update endpoint, so the change could not be synced automatically.</p>"
                 + "<p>Please update this speaker manually in the Backstage UI so the two stay in sync.</p>";
-            await _email.SendAsync(AlertEmail, $"[ELDK27] Speaker needs a manual Backstage update — {participant.FullName}", html, ct);
+            await _email.SendAsync(AlertEmail, $"Speaker needs a manual Backstage update — {participant.FullName} [ELDK27]", html, ct);
         }
         catch { /* alert is best-effort; the sync result already records the blocked state */ }
     }

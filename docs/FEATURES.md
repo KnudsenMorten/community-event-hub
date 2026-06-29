@@ -2126,3 +2126,70 @@ notification only when an organizer actually commits.
   keyed on a **stable GUID (`ExternalKey`)** that **upserts** — a **blank id creates** a new task and a
   **present id updates** the existing one — so bulk edits in a spreadsheet flow back cleanly without
   duplicating anything (§151). *(The 304-task data import itself is operator-run and not yet executed.)*
+
+## 24. Richer session catalog — track, level, length and live filters *(✅ 2026-06-29)*
+
+- **Every session carries its track, level and real length.** Imported straight from the
+  call-for-speakers tool's own category groups, each session shows its **track** (e.g. Security,
+  Cloud), its **audience level**, and an **actual length in minutes** — type and length are kept as
+  **separate facts**, never mashed into one label (§154).
+- **Filter the public programme the way attendees think.** The sessions overview filters by
+  **type, length, room, track, level** and a **date-and-time slot** (a friendly "9 Feb 07:20–08:10"
+  dropdown), with a free-text search — so someone can narrow to, say, the Security master classes in
+  one tap (§154).
+- **Speaker names stand out, with a direct LinkedIn link.** Each session lists its speakers in bold
+  with a clean link to their LinkedIn, and friendly type/length wording instead of raw codes (§154/§156).
+
+## 25. One-tap sign-in from email, and stay signed in *(✅ 2026-06-29)*
+
+- **Email buttons sign you straight in.** Every button in a hub email that takes you into the hub now
+  carries a **personal one-tap sign-in link** — open it and you're in, landing on the right page, with
+  no code to copy. The link works for a **year** and is reusable across all of that person's emails (§169).
+- **Safe by design.** The link only establishes a normal sign-in (it never bypasses any in-app check),
+  is stored only as a one-way hash, records when it was last used, and can be **revoked or rotated**
+  per person from the organizer's sign-in-links page. A stale or revoked link simply lands on the normal
+  sign-in page — never an error (§169).
+- **"Remember me" is on by default.** On your own phone or laptop you stay signed in between visits;
+  the choice is still yours to uncheck, and Sign-out is always one tap away for shared devices (§170).
+
+## 26. Get-started, your way — edit any step, any time *(✅ 2026-06-29)*
+
+- **One consistent get-started experience for every role.** Speakers, volunteers, organizers, sponsors
+  and partners all see the same friendly stepper: a **progress bar** and **every step as a card** you can
+  open or **edit** — even after you've finished it. No more dead-end "all done" screen that locks you out
+  of a step you want to revisit (§161).
+- **Your get-started and your task list always agree.** Each get-started step links to the very same
+  place as its matching task, so the two views never tell different stories (§161).
+
+## 27. Party RSVP — a quick yes or no, and a head count *(✅ 2026-06-29)*
+
+- **A simple party sign-up for the crew.** Speakers, volunteers, organizers, partners and sponsors get a
+  one-tap **Yes / No** RSVP for the event party, surfaced as its own get-started step and task; sponsors
+  can add a **head count** for their team. Answering it ticks the task off automatically (§164).
+
+## 28. Final session evaluations, delivered to speakers *(✅ 2026-06-29)*
+
+- **Upload each session's evaluation PDF, and the speaker gets it.** Organizers see every session with an
+  upload button and status, drop in the final **evaluation PDF**, and the hub **emails the speakers** and
+  links the result to their session — downloaded safely through the hub, never a raw file-store link (§166).
+
+## 29. A tidy graphics hand-off for your designer *(✅ 2026-06-29)*
+
+- **Per-track promo graphics for speakers.** Alongside each session's own graphic, the hub can pull a
+  **per-track** promotion image (matched by the session's track) and surface it on the speaker's
+  Help-Promote page, ready to share — all through the hub's safe download (§158).
+- **One organized pack for an external designer.** Organizers can generate a tidy structure for a
+  designer: every **speaker photo pulled and named by speaker**, a **folder per session, master class and
+  track** with the right photo inside, and an **Excel brief** listing each session with its details and
+  folder link. If a speaker has uploaded their own photo, **that photo always wins** — a re-pull never
+  overwrites it (§165).
+
+## 30. Fun, timed learning games with a leaderboard *(✅ 2026-06-29)*
+
+- **Three quick quizzes for attendees — AI, Intune and Security.** Short, genuinely educational, and
+  fun: each player gets a **randomly drawn, randomly ordered** set of questions (so neighbours can't copy),
+  one at a time against a **countdown**. After each answer the correct option and a short "why" are
+  revealed, so the games **teach, not just test** (§171).
+- **Score on speed and accuracy, climb the leaderboard.** A correct answer earns more the faster it's
+  given; each topic has a **leaderboard** showing the top players and **your own rank**, with the top five
+  in line for a prize. Organizers can edit or add questions, and a ready-made starter set ships in the box (§171).

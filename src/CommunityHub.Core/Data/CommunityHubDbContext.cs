@@ -173,6 +173,15 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
     // organizers; the durable record behind the intake email, reviewed in /Organizer/Feed.
     public DbSet<FeedbackItem> FeedbackItems => Set<FeedbackItem>();
 
+    // --- Attendee "fun IT games" quizzes (REQUIREMENTS §171) ------------------
+    // Three timed, learning quizzes (AI / Intune / Security) per edition: a pool of
+    // questions per quiz, per-participant attempts that draw N at random (anti-copy),
+    // server-authoritative speed scoring, and a per-topic leaderboard.
+    public DbSet<Quiz> Quizzes => Set<Quiz>();
+    public DbSet<QuizQuestion> QuizQuestions => Set<QuizQuestion>();
+    public DbSet<QuizAttempt> QuizAttempts => Set<QuizAttempt>();
+    public DbSet<QuizAttemptAnswer> QuizAttemptAnswers => Set<QuizAttemptAnswer>();
+
     protected override void OnModelCreating(ModelBuilder b)
     {
         base.OnModelCreating(b);
@@ -245,6 +254,86 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
 
             // The feed view: newest-first per edition, with an open/resolved split.
             e.HasIndex(x => new { x.EventId, x.ResolvedAt, x.CreatedAt });
+        });
+
+        // --- Quiz (attendee "fun IT games", §171) ----------------------------
+        b.Entity<Quiz>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Topic).HasConversion<int>();
+            e.Property(x => x.Title).IsRequired().HasMaxLength(200);
+            e.Property(x => x.Slug).IsRequired().HasMaxLength(64);
+
+            e.HasOne(x => x.Event).WithMany()
+                .HasForeignKey(x => x.EventId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // One quiz per slug per edition (the seeder's idempotent upsert key).
+            e.HasIndex(x => new { x.EventId, x.Slug }).IsUnique();
+            // The Games index lists an edition's quizzes by topic.
+            e.HasIndex(x => new { x.EventId, x.Topic });
+        });
+
+        // --- QuizQuestion (the pool a quiz draws from) -----------------------
+        b.Entity<QuizQuestion>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Prompt).IsRequired().HasMaxLength(1000);
+            // OptionsJson — a single unbounded text column (the JSON option array).
+            // No HasMaxLength so EF maps it to nvarchar(max) on SQL Server and TEXT on
+            // SQLite (cf. SyncDelta.ChangesJson); an explicit "nvarchar(max)" breaks SQLite.
+            e.Property(x => x.Explanation).HasMaxLength(2000);
+
+            e.HasOne(x => x.Quiz).WithMany(q => q.Questions)
+                .HasForeignKey(x => x.QuizId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // The authoring + draw order within a quiz.
+            e.HasIndex(x => new { x.QuizId, x.SortOrder });
+        });
+
+        // --- QuizAttempt (one participant's run at a quiz) -------------------
+        b.Entity<QuizAttempt>(e =>
+        {
+            e.HasKey(x => x.Id);
+
+            e.HasOne(x => x.Event).WithMany()
+                .HasForeignKey(x => x.EventId)
+                .OnDelete(DeleteBehavior.Cascade);
+            // NoAction on Quiz + Participant FKs: the Event root already cascade-
+            // deletes Quizzes, Participants AND these attempts, so a second cascade
+            // path would be a SQL Server multiple-cascade-path error.
+            e.HasOne(x => x.Quiz).WithMany()
+                .HasForeignKey(x => x.QuizId)
+                .OnDelete(DeleteBehavior.NoAction);
+            e.HasOne(x => x.Participant).WithMany()
+                .HasForeignKey(x => x.ParticipantId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            // Leaderboard read: best-per-participant for a quiz, ranked by score then
+            // elapsed (Score/ElapsedMs columns carried so the ranking projects cheaply).
+            e.HasIndex(x => new { x.QuizId, x.Score, x.ElapsedMs });
+            // The player's own attempts for a quiz (resume in-progress + own-rank).
+            e.HasIndex(x => new { x.EventId, x.QuizId, x.ParticipantId });
+        });
+
+        // --- QuizAttemptAnswer (per-question record within an attempt) -------
+        b.Entity<QuizAttemptAnswer>(e =>
+        {
+            e.HasKey(x => x.Id);
+
+            e.HasOne(x => x.QuizAttempt).WithMany(a => a.Answers)
+                .HasForeignKey(x => x.QuizAttemptId)
+                .OnDelete(DeleteBehavior.Cascade);
+            // NoAction on the Question FK: the Event root cascade-deletes Quizzes →
+            // Questions AND Attempts → Answers, so a second Question→Answer cascade
+            // path would be a SQL Server multiple-cascade-path error.
+            e.HasOne(x => x.Question).WithMany()
+                .HasForeignKey(x => x.QuestionId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            // The play sequence: one row per drawn position, walked in order.
+            e.HasIndex(x => new { x.QuizAttemptId, x.OrderIndex }).IsUnique();
         });
 
         // --- Event ----------------------------------------------------------
@@ -389,6 +478,11 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
             // SHA-256 hex of the random token id (64 chars).
             e.Property(x => x.TokenIdHash).IsRequired().HasMaxLength(64);
             e.Property(x => x.RecipientEmail).HasMaxLength(320);
+            // §169 email magic-link columns (additive). TokenProtected is a
+            // DataProtection ciphertext blob (no length cap); MultiUse/UseCount get
+            // EF's bool/int defaults, LastUsedAt is nullable — legacy single-use
+            // welcome grants leave them all at their defaults.
+            e.Property(x => x.TokenProtected);
 
             e.HasOne(x => x.Event)
                 .WithMany()
@@ -460,6 +554,16 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
                 .WithMany()
                 .HasForeignKey(x => x.EventId)
                 .OnDelete(DeleteBehavior.Cascade);
+            // §164: optional participant link (signed-in RSVP). NoAction on the
+            // Participant FK — the Event root already cascade-deletes both
+            // Participants and these RSVP rows, so a second Participant→RSVP cascade
+            // path would be a SQL Server multiple-cascade-path error (same pattern as
+            // the policy-acceptance / secretary-token tables).
+            e.HasOne(x => x.Participant)
+                .WithMany()
+                .HasForeignKey(x => x.ParticipantId)
+                .OnDelete(DeleteBehavior.NoAction);
+            e.HasIndex(x => x.ParticipantId);
             // One RSVP per email per edition (upsert).
             e.HasIndex(x => new { x.EventId, x.Email }).IsUnique();
         });
@@ -936,6 +1040,8 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
             e.Property(x => x.Abstract).HasMaxLength(8000);
             e.Property(x => x.Room).HasMaxLength(200);
             e.Property(x => x.Track).HasMaxLength(200);
+            // §154: audience level label (e.g. "Expert (400)"), mirrors Track's cap.
+            e.Property(x => x.Level).HasMaxLength(200);
             // Type + Length are enums stored as int (consistent with the rest of the
             // model, e.g. Participant.Role / Attendee.TicketStatus).
             e.Property(x => x.Type).HasConversion<int>();

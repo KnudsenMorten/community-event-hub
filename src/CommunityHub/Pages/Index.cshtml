@@ -72,53 +72,10 @@
     @await Html.PartialAsync("Shared/_ChecklistCard", Model.Checklist)
 }
 
-@if (Model.ShowHotel)
-{
-    <div class="card">
-        <h2>@Localizer["Hub.HotelTitle"]</h2>
-        <div class="status-row">
-            @if (Model.HotelSubmitted) { @Html.Raw(DoneBadge()) <span>@Localizer["Hub.HotelOnFile"]</span> }
-            else                       { @Html.Raw(PendingBadge()) <span>@Localizer["Hub.HotelNotYet"]</span> }
-        </div>
-        <a asp-page="/Forms/Hotel">@(Model.HotelSubmitted ? Localizer["Hub.HotelUpdateLink"] : Localizer["Hub.HotelSubmitLink"])</a>
-    </div>
-}
-
-@if (Model.ShowDinner)
-{
-    <div class="card">
-        <h2>@Localizer["Hub.DinnerTitle"]</h2>
-        <div class="status-row">
-            @if (Model.DinnerSubmitted) { @Html.Raw(DoneBadge()) <span>@Localizer["Hub.DinnerOnFile"]</span> }
-            else                        { @Html.Raw(PendingBadge()) <span>@Localizer["Hub.DinnerNotYet"]</span> }
-        </div>
-        <a asp-page="/Forms/Dinner">@(Model.DinnerSubmitted ? Localizer["Hub.DinnerUpdateLink"] : Localizer["Hub.DinnerSubmitLink"])</a>
-    </div>
-}
-
-@if (Model.ShowLunch)
-{
-    <div class="card">
-        <h2>Lunch</h2>
-        <div class="status-row">
-            @if (Model.LunchSubmitted) { @Html.Raw(DoneBadge()) <span>Your lunch preference is on file.</span> }
-            else                       { @Html.Raw(PendingBadge()) <span>Let us know which lunches you'll join.</span> }
-        </div>
-        <a asp-page="/Forms/Lunch">@(Model.LunchSubmitted ? "Update lunch preference" : "Complete the lunch form")</a>
-    </div>
-}
-
-@if (Model.ShowSwag)
-{
-    <div class="card">
-        <h2>Swag</h2>
-        <div class="status-row">
-            @if (Model.SwagSubmitted) { @Html.Raw(DoneBadge()) <span>Your swag preference is on file.</span> }
-            else                      { @Html.Raw(PendingBadge()) <span>You have not picked your swag yet.</span> }
-        </div>
-        <a asp-page="/Forms/Swag">@(Model.SwagSubmitted ? "Update swag preference" : "Pick your swag")</a>
-    </div>
-}
+@* §161 (operator 2026-06-28): the separate Hotel / Dinner / Lunch / Swag status cards were removed
+   from the hub — they duplicated the same entitlements already shown in the task list (each is a
+   "Complete the … form" task that links to the form). One source of truth: the tasks. The forms
+   stay reachable from the tasks + the Event-logistics nav. *@
 
 @if (Model.ShowVolunteerShifts)
 {

@@ -41,9 +41,9 @@ public class ScheduleServiceTests
 
         Assert.Equal(10, d.Count);
 
-        // §122: a SPONSOR-only "booth photos" key date on the pre-day, 11:00–14:00.
+        // §122: a sponsor + media "booth photos" key date on the pre-day, 11:00–14:00.
         var booth = Assert.Single(d, e => e.Title.Contains("booth photos"));
-        Assert.Equal("sponsor", booth.Roles);
+        Assert.Equal("sponsor,media", booth.Roles);
         Assert.False(booth.AllDay);
         Assert.Equal(11, booth.StartsAt.Hour);
         Assert.Equal(14, booth.EndsAt!.Value.Hour);
@@ -57,12 +57,14 @@ public class ScheduleServiceTests
         Assert.Equal(16, party.StartsAt.Hour);
         Assert.Equal("all", party.Roles);
         var photo = Assert.Single(d, e => e.Title == "Group photo");
-        Assert.Equal(17, photo.StartsAt.Hour);
-        Assert.Equal(30, photo.StartsAt.Minute);
+        Assert.Equal(18, photo.StartsAt.Hour);            // +30 min (operator 2026-06-28)
+        Assert.Equal(0, photo.StartsAt.Minute);
         Assert.DoesNotContain("sponsor", photo.Roles);   // all except sponsors
         var dinner = Assert.Single(d, e => e.Title == "Appreciation Dinner");
-        Assert.Equal(18, dinner.StartsAt.Hour);
-        Assert.Equal("all", dinner.Roles);
+        Assert.Equal(18, dinner.StartsAt.Hour);           // +30 min -> 18:30
+        Assert.Equal(30, dinner.StartsAt.Minute);
+        Assert.DoesNotContain("attendee", dinner.Roles);  // all roles EXCEPT attendees
+        Assert.Contains("sponsor", dinner.Roles);
     }
 
     [Fact]

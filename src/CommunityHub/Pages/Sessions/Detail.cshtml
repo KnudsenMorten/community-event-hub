@@ -76,7 +76,8 @@
 
         <div class="sd-tags">
             <span class="sd-tag @typeClass">@CommunityHub.Pages.Sessions.DetailModel.Display(s.Type)</span>
-            <span class="sd-tag">@CommunityHub.Pages.Sessions.DetailModel.Display(s.Length)</span>
+            @* §154: prefer the exact numeric length ("60 min") when known, else the bucket. *@
+            <span class="sd-tag">@(s.LengthMinutes is int lm ? $"{lm} min" : CommunityHub.Pages.Sessions.DetailModel.Display(s.Length))</span>
             @if (!string.IsNullOrWhiteSpace(s.Room))
             {
                 <span class="sd-tag">@Localizer["SessionDetail.Room", s.Room]</span>
@@ -84,6 +85,11 @@
             @if (!string.IsNullOrWhiteSpace(s.Track))
             {
                 <span class="sd-tag">@s.Track</span>
+            }
+            @* §154: audience level (e.g. "Expert (400)"). *@
+            @if (!string.IsNullOrWhiteSpace(s.Level))
+            {
+                <span class="sd-tag">@s.Level</span>
             }
         </div>
 
@@ -144,7 +150,7 @@
                            (an unscheduled talk has nothing to put on a calendar). *@
                         @* No download="" attr so the browser opens the .ics in the calendar
                            app instead of saving it (operator 2026-06-24). *@
-                        <a class="secondary" href="/Sessions/@(s.Id).ics" rel="nofollow"
+                        <a class="secondary" href="/sessions/@(s.Id)/calendar.ics" rel="nofollow"
                            aria-label="@Localizer["SessionDetail.AddToCalendar"]">
                             @Localizer["SessionDetail.AddToCalendar"]
                         </a>

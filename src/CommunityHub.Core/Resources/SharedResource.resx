@@ -112,6 +112,7 @@
   <data name="Nav.SpeakerEvaluations" xml:space="preserve"><value>My session ratings</value></data>
   <data name="Nav.ShareGraphics" xml:space="preserve"><value>Share graphics</value></data>
   <data name="Nav.Home" xml:space="preserve"><value>Home</value></data>
+  <data name="Nav.Party" xml:space="preserve"><value>Party</value></data>
   <data name="Nav.MyTasks" xml:space="preserve"><value>My tasks</value></data>
   <data name="Nav.MyProfile" xml:space="preserve"><value>My Hub Profile</value></data>
   <data name="Nav.Resources" xml:space="preserve"><value>Resources</value></data>
@@ -146,6 +147,37 @@
   <data name="MasterClass.WaitlistPolicy.2" xml:space="preserve"><value>You can be on one waitlist at a time.</value></data>
   <data name="MasterClass.WaitlistPolicy.3" xml:space="preserve"><value>If you join a waitlist while already holding a seat in another master class, joining alone won't cancel anything. Your existing seat is only cancelled if a spot opens up in the waitlisted class and you're moved into it. Waitlisted participants are admitted in the order they signed up.</value></data>
   <data name="Nav.MasterClassQa" xml:space="preserve"><value>Master Class Q&amp;A</value></data>
+  <data name="Nav.Games" xml:space="preserve"><value>Fun IT Games</value></data>
+  <!-- §171: attendee "fun IT games" quizzes (AI / Intune / Security) + leaderboard. -->
+  <data name="Games.Title" xml:space="preserve"><value>Fun IT Games</value></data>
+  <data name="Games.Intro" xml:space="preserve"><value>Three quick, timed quizzes — AI, Intune and Security. Answer fast and correctly to climb the leaderboard. Top scorers win prizes!</value></data>
+  <data name="Games.None" xml:space="preserve"><value>No games are available right now.</value></data>
+  <data name="Games.QuestionsInPool" xml:space="preserve"><value>questions in the pool</value></data>
+  <data name="Games.YourBest" xml:space="preserve"><value>Your best</value></data>
+  <data name="Games.Resume" xml:space="preserve"><value>Resume</value></data>
+  <data name="Games.Play" xml:space="preserve"><value>Play</value></data>
+  <data name="Games.PlayAgain" xml:space="preserve"><value>Play again</value></data>
+  <data name="Games.Leaderboard" xml:space="preserve"><value>Leaderboard</value></data>
+  <data name="Games.NotAvailable" xml:space="preserve"><value>This game isn't available right now.</value></data>
+  <data name="Games.BackToGames" xml:space="preserve"><value>Back to games</value></data>
+  <data name="Games.Finished" xml:space="preserve"><value>Quiz complete!</value></data>
+  <data name="Games.FinalScore" xml:space="preserve"><value>Your score</value></data>
+  <data name="Games.Question" xml:space="preserve"><value>Question</value></data>
+  <data name="Games.Correct" xml:space="preserve"><value>Correct!</value></data>
+  <data name="Games.Incorrect" xml:space="preserve"><value>Not quite.</value></data>
+  <data name="Games.RunningScore" xml:space="preserve"><value>Score</value></data>
+  <data name="Games.SeeResults" xml:space="preserve"><value>See results</value></data>
+  <data name="Games.Next" xml:space="preserve"><value>Next</value></data>
+  <data name="Games.Submit" xml:space="preserve"><value>Submit answer</value></data>
+  <data name="Games.SpeedHint" xml:space="preserve"><value>Faster correct answers score more — beat the clock!</value></data>
+  <data name="Games.LeaderboardIntro" xml:space="preserve"><value>Top players by score (ties broken by fastest time)</value></data>
+  <data name="Games.Players" xml:space="preserve"><value>players</value></data>
+  <data name="Games.NoScoresYet" xml:space="preserve"><value>No one has finished this quiz yet — be the first!</value></data>
+  <data name="Games.Player" xml:space="preserve"><value>Player</value></data>
+  <data name="Games.Score" xml:space="preserve"><value>Score</value></data>
+  <data name="Games.Time" xml:space="preserve"><value>Time</value></data>
+  <data name="Games.You" xml:space="preserve"><value>(you)</value></data>
+  <data name="Games.NotPlayedYet" xml:space="preserve"><value>You haven't finished this quiz yet.</value></data>
   <data name="Nav.MySessions" xml:space="preserve"><value>My Sessions</value></data>
   <data name="Nav.Bio" xml:space="preserve"><value>Bio</value></data>
   <data name="Nav.SpeakerDetails" xml:space="preserve"><value>Speaker Details</value></data>
@@ -491,7 +523,7 @@
   <data name="Nav.OrgAssetLocations" xml:space="preserve"><value>Asset locations</value></data>
   <data name="Nav.OrgGroupPhotos" xml:space="preserve"><value>Group photos</value></data>
   <data name="Nav.OrgAppGame" xml:space="preserve"><value>App game</value></data>
-  <data name="Nav.OrgImpersonationLog" xml:space="preserve"><value>Acting-as log</value></data>
+  <data name="Nav.OrgImpersonationLog" xml:space="preserve"><value>Switch User Log</value></data>
   <data name="Nav.OrgDataFreshness" xml:space="preserve"><value>Data freshness</value></data>
 
   <!-- Organizer: data-freshness panel (REQUIREMENTS §21 "last synced at") -->
@@ -512,7 +544,6 @@
   <data name="Fresh.AgeMinutes" xml:space="preserve"><value>{0} minute(s) ago</value></data>
   <data name="Fresh.Feed.Email" xml:space="preserve"><value>Outbound email</value></data>
   <data name="Fresh.Feed.AttendeeSync" xml:space="preserve"><value>Attendee sync</value></data>
-  <data name="Fresh.Feed.MasterClassBookingSync" xml:space="preserve"><value>Master-class bookings</value></data>
   <data name="Fresh.Feed.SponsorLeads" xml:space="preserve"><value>Sponsor leads</value></data>
   <data name="Fresh.Feed.SpeakerImport" xml:space="preserve"><value>Speaker import</value></data>
   <data name="Fresh.Feed.SessionImport" xml:space="preserve"><value>Session import</value></data>
@@ -737,6 +768,8 @@
   <data name="SpeakerWiz.Step.promote.Desc" xml:space="preserve"><value>Share your session(s) on LinkedIn with #ELDK27 #ExpertsLiveDK.</value></data>
   <data name="SpeakerWiz.Step.signal" xml:space="preserve"><value>Join Signal chat &amp; broadcast group</value></data>
   <data name="SpeakerWiz.Step.signal.Desc" xml:space="preserve"><value>Join the ELDK27 Signal chat and broadcast group, then mark this done.</value></data>
+  <data name="SpeakerWiz.Step.party" xml:space="preserve"><value>Party sign-up</value></data>
+  <data name="SpeakerWiz.Step.party.Desc" xml:space="preserve"><value>RSVP yes or no for the party (16:00–18:30 on the pre-day). You can change your answer any time.</value></data>
   <data name="SpeakerWiz.Step.accept" xml:space="preserve"><value>Code of Conduct &amp; Privacy</value></data>
   <data name="SpeakerWiz.Step.accept.Desc" xml:space="preserve"><value>Review and accept our Code of Conduct and Privacy Policy.</value></data>
   <data name="RoleWiz.Title" xml:space="preserve"><value>Get started</value></data>
@@ -764,6 +797,8 @@
   <data name="RoleWiz.Step.travel.Desc" xml:space="preserve"><value>Submit your travel details for reimbursement.</value></data>
   <data name="RoleWiz.Step.signal" xml:space="preserve"><value>Join Signal chat &amp; broadcast group</value></data>
   <data name="RoleWiz.Step.signal.Desc" xml:space="preserve"><value>Join the ELDK27 Signal chat and broadcast group, then mark this done.</value></data>
+  <data name="RoleWiz.Step.party" xml:space="preserve"><value>Party sign-up</value></data>
+  <data name="RoleWiz.Step.party.Desc" xml:space="preserve"><value>RSVP yes or no for the party (16:00–18:30 on the pre-day). You can change your answer any time.</value></data>
   <data name="RoleWiz.Step.accept" xml:space="preserve"><value>Code of Conduct &amp; Privacy</value></data>
   <data name="RoleWiz.Step.accept.Desc" xml:space="preserve"><value>Review and accept our Code of Conduct and Privacy Policy.</value></data>
   <data name="Wizard.Next" xml:space="preserve"><value>Save &amp; next</value></data>
@@ -905,7 +940,7 @@
   <data name="Attendee.Reserved" xml:space="preserve"><value>You have reserved: &lt;strong&gt;{0}&lt;/strong&gt;</value></data>
   <data name="Attendee.Multiple" xml:space="preserve"><value>You have more than one Master Class booking: {0}. Please keep one and cancel the others.</value></data>
   <data name="Attendee.NotReserved" xml:space="preserve"><value>You have not reserved a Master Class seat yet.</value></data>
-  <data name="Attendee.ManageBooking" xml:space="preserve"><value>Manage your Master Class booking in Zoho Bookings</value></data>
+  <data name="Attendee.ManageBooking" xml:space="preserve"><value>Manage your Master Class</value></data>
 
   <!-- Survey: wizard -->
   <data name="Survey.NotFound" xml:space="preserve"><value>Survey not found</value></data>
@@ -1190,7 +1225,7 @@
   <data name="OrgArea.CommandCenter" xml:space="preserve"><value>Your &quot;what needs my attention&quot; landing: registrations, onboarding completion per persona, hotel/swag/lunch/dinner headcounts, session and sponsor status, and today's / overdue tasks — every tile clicks through to the relevant grid.</value></data>
   <data name="Common.BackToOrganizerArea" xml:space="preserve"><value>Back to Organizer area</value></data>
   <data name="Nav.OrgPeople" xml:space="preserve"><value>People</value></data>
-  <data name="Nav.OrgComms" xml:space="preserve"><value>Comms</value></data>
+  <data name="Nav.OrgComms" xml:space="preserve"><value>Emails</value></data>
   <data name="Nav.OrgSessionsHub" xml:space="preserve"><value>Sessions &amp; speakers</value></data>
   <data name="Nav.OrgSponsorsHub" xml:space="preserve"><value>Sponsors</value></data>
   <data name="Nav.OrgVolunteers" xml:space="preserve"><value>Volunteers</value></data>
@@ -1199,6 +1234,7 @@
   <data name="Nav.OrgSoMe" xml:space="preserve"><value>Marketing / SoMe</value></data>
   <data name="Nav.OrgContentStudio" xml:space="preserve"><value>Content Studio</value></data>
   <data name="Nav.OrgSetup" xml:space="preserve"><value>Setup</value></data>
+  <data name="Nav.OrgQuizzes" xml:space="preserve"><value>Fun IT Games</value></data>
   <data name="Nav.OrgCalendarSettings" xml:space="preserve"><value>Calendar sync</value></data>
   <!-- REQUIREMENTS §21: collapsible organizer-nav section headings (group the ~40-link menu). -->
   <data name="Nav.OrgSectionPeople" xml:space="preserve"><value>People</value></data>
@@ -1210,7 +1246,7 @@
   <data name="Nav.OrgSectionSetup" xml:space="preserve"><value>Setup &amp; audit</value></data>
   <data name="Nav.SponsorEventLogistics" xml:space="preserve"><value>Event logistics</value></data>
   <data name="Nav.SponsorBoothRunOfShow" xml:space="preserve"><value>Key Dates &amp; times</value></data>
-  <data name="Nav.OurBooth" xml:space="preserve"><value>Our Booth</value></data>
+  <data name="Nav.OurBooth" xml:space="preserve"><value>Your Booth</value></data>
   <data name="Nav.SponsorLeadsExport" xml:space="preserve"><value>My leads (export)</value></data>
   <data name="OrgArea.Title" xml:space="preserve"><value>Organizer area</value></data>
   <data name="OrgArea.Intro" xml:space="preserve"><value>Everything for running the event, grouped into hubs. Pick an area to drill in.</value></data>
@@ -1231,7 +1267,7 @@
   <data name="OrgPeople.Onboarding" xml:space="preserve"><value>Who has — and hasn't — completed each onboarding step (bio, picture, hotel, appreciation, swag). Re-open a step to queue a reminder.</value></data>
   <data name="OrgPeople.Attendees" xml:space="preserve"><value>Browse the full reconciled attendee list with filters, search and CSV export.</value></data>
   <data name="OrgPeople.ActionQueue" xml:space="preserve"><value>Late participant changes (hotel, dinner) made near the lock date that need re-confirming with a vendor.</value></data>
-  <data name="OrgComms.Title" xml:space="preserve"><value>Comms</value></data>
+  <data name="OrgComms.Title" xml:space="preserve"><value>Emails</value></data>
   <data name="OrgComms.Intro" xml:space="preserve"><value>Everything that sends mail: the email center, the delivery ledger, broadcasts, invitations, welcome logins and speaker reminders.</value></data>
   <data name="OrgComms.EmailCenter" xml:space="preserve"><value>Preview every branded email template, send yourself a test copy, and browse the delivery ledger.</value></data>
   <data name="OrgComms.EmailLog" xml:space="preserve"><value>The full delivery ledger of what the reminder engine actually sent.</value></data>
@@ -1458,7 +1494,7 @@
   <data name="Sessions.DeleteConfirmTitle" xml:space="preserve"><value>Delete this session?</value></data>
   <data name="Sessions.DeleteBlocked" xml:space="preserve"><value>This session has attendee data and cannot be deleted. Handle that data first.</value></data>
   <data name="Sessions.BulkDelete" xml:space="preserve"><value>Delete selected sessions</value></data>
-  <data name="Sessions.BulkDeleteHint" xml:space="preserve"><value>Only sessions with no attendee data can be selected. Sessions with questions, evaluations or bookings are protected.</value></data>
+  <data name="Sessions.BulkDeleteHint" xml:space="preserve"><value>Only sessions with no attendee data can be selected. Sessions with questions, evaluations or master-class signups are protected.</value></data>
   <data name="Sessions.BulkDeleteConfirmTitle" xml:space="preserve"><value>Delete the selected sessions?</value></data>
   <data name="Sessions.BulkDeleteConfirmBody" xml:space="preserve"><value>This permanently removes {0} selected session(s) and their speaker links. Imported sessions return on the next Sessionize import. This cannot be undone.</value></data>
   <data name="Queue.Delete" xml:space="preserve"><value>Delete</value></data>
@@ -1781,8 +1817,8 @@
   <data name="SessOv.With" xml:space="preserve"><value>With</value></data>
   <data name="SessOv.MasterClassLink" xml:space="preserve"><value>Master class info &amp; setup</value></data>
   <data name="SessOv.AskLink" xml:space="preserve"><value>Master Class attendees: use the Group Q&amp;A</value></data>
-  <data name="SessOv.TypeMasterClass" xml:space="preserve"><value>Community Master Class</value></data>
-  <data name="SessOv.TypeTechSession" xml:space="preserve"><value>Community Tech Session</value></data>
+  <data name="SessOv.TypeMasterClass" xml:space="preserve"><value>Master Class</value></data>
+  <data name="SessOv.TypeTechSession" xml:space="preserve"><value>Technical Session</value></data>
   <data name="SessOv.TypeSponsor" xml:space="preserve"><value>Sponsor Session</value></data>
   <data name="SessOv.LenFullDay" xml:space="preserve"><value>Full day</value></data>
   <data name="SessOv.Len20" xml:space="preserve"><value>20 min</value></data>

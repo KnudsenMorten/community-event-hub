@@ -24,6 +24,10 @@
     .wl-revoked { background:#fdecec; color:#b3261e; }
     .wl-expired { background:#fef6e7; color:#8a5a00; }
     .wl-revoke  { background:#fff; border:1px solid #e3a3a3; color:#b3261e; border-radius:6px; padding:4px 10px; font-size:12px; cursor:pointer; }
+    .wl-rotate  { background:#fff; border:1px solid #b9c2cf; color:#33415c; border-radius:6px; padding:4px 10px; font-size:12px; cursor:pointer; }
+    .wl-acts    { display:flex; flex-wrap:wrap; gap:6px; }
+    /* Mobile-first: let the table scroll horizontally on narrow phones rather than overflow. */
+    .wl-scroll  { width:100%; overflow-x:auto; -webkit-overflow-scrolling:touch; }
 </style>
 
 @if (!string.IsNullOrEmpty(Model.Message))
@@ -87,5 +91,71 @@
             }
             </tbody>
         </table>
+    }
+</div>
+
+<div class="card">
+    <h2 style="margin-top:0;">Personal email sign-in links</h2>
+    <p>The <strong>reusable</strong> auto-login links carried in every in-hub email CTA (§169). Each person has
+       ONE link, valid for a year, that signs them in with no email + code. It is <strong>sign-in only</strong>
+       (it never bypasses a per-action check) and bound to that person in this edition. If a mailbox is shared or
+       a link leaks, <strong>revoke</strong> it (kills it now) or <strong>rotate</strong> it (kills the old one and
+       issues a new link that the next email carries). <strong>@Model.EmailActiveCount</strong> currently active.</p>
+
+    @if (Model.EmailLinks.Count == 0)
+    {
+        <p style="color:#6b7280;">No personal email sign-in links have been issued yet.</p>
+    }
+    else
+    {
+        <div class="wl-scroll">
+        <table class="wl-tbl">
+            <thead>
+                <tr><th>Recipient</th><th>Role</th><th>Issued</th><th>Expires</th><th>Last used</th><th>Uses</th><th>Status</th><th></th></tr>
+            </thead>
+            <tbody>
+            @foreach (var r in Model.EmailLinks)
+            {
+                <tr>
+                    <td>@r.FullName<br><span style="color:#6b7280;">@r.RecipientEmail</span></td>
+                    <td>@r.Role</td>
+                    <td style="white-space:nowrap;">@r.CreatedAt.ToString("dd MMM yyyy, HH:mm")</td>
+                    <td style="white-space:nowrap;">@r.ExpiresAt.ToString("dd MMM yyyy")</td>
+                    <td style="white-space:nowrap;">@(r.LastUsedAt?.ToString("dd MMM yyyy, HH:mm") ?? "—")</td>
+                    <td>@r.UseCount</td>
+                    <td>
+                        @switch (r.State)
+                        {
+                            case EmailMagicLinkService.LinkState.Active:
+                                <span class="wl-badge wl-active">Active</span>
+                                break;
+                            case EmailMagicLinkService.LinkState.Revoked:
+                                <span class="wl-badge wl-revoked" title="@r.RevokedAt?.ToString("dd MMM yyyy, HH:mm")">Revoked</span>
+                                break;
+                            default:
+                                <span class="wl-badge wl-expired">Expired</span>
+                                break;
+                        }
+                    </td>
+                    <td>
+                        <div class="wl-acts">
+                            @if (r.CanRevoke)
+                            {
+                                <form method="post" asp-page-handler="RevokeEmail" onsubmit="return confirm('Revoke this person\'s sign-in link? Their emailed links stop working immediately.');">
+                                    <input type="hidden" name="id" value="@r.Id" />
+                                    <button type="submit" class="wl-revoke">Revoke</button>
+                                </form>
+                            }
+                            <form method="post" asp-page-handler="RotateEmail" onsubmit="return confirm('Rotate this person\'s sign-in link? The current link stops working and the next email carries a new one.');">
+                                <input type="hidden" name="id" value="@r.Id" />
+                                <button type="submit" class="wl-rotate">Rotate</button>
+                            </form>
+                        </div>
+                    </td>
+                </tr>
+            }
+            </tbody>
+        </table>
+        </div>
     }
 </div>

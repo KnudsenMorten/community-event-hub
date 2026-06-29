@@ -1,0 +1,57 @@
+@model CommunityHub.Forms.WizardStepperVm
+@*
+    Shared Get-Started STEPPER (REQUIREMENTS §161). One layout for EVERY role's
+    "Get started" page (speaker / role / sponsor) so they can never drift: a progress
+    header + bar, a "Continue" CTA (or the all-done banner), then EVERY step as a card
+    showing its Done/Pending state with an Edit (done) / Open (pending) link. At 100%
+    the cards STILL list with Edit links — there is no "all done, go to hub" dead-end.
+    Mobile-first (single column, wraps at ~360px).
+*@
+<div class="card">
+    <h1>@Model.Heading</h1>
+    <p>@Model.Intro</p>
+
+    @* Progress: "{done} of {total} steps done" + percent + bar. *@
+    <div style="margin:14px 0;">
+        <div style="display:flex;justify-content:space-between;font-size:13px;color:#4b5563;margin-bottom:4px;">
+            <span>@Model.DoneCount of @Model.TotalSteps steps done</span>
+            <span>@Model.Percent%</span>
+        </div>
+        <div style="height:10px;background:#eef2f7;border-radius:999px;overflow:hidden;" role="progressbar"
+             aria-valuenow="@Model.Percent" aria-valuemin="0" aria-valuemax="100">
+            <div style="height:100%;width:@(Model.Percent)%;background:var(--el-blue,#008BD2);border-radius:999px;"></div>
+        </div>
+    </div>
+
+    @if (Model.AllDone)
+    {
+        <p class="success" style="font-size:16px;">@Model.AllDoneMessage</p>
+    }
+    else if (Model.ContinueUrl is not null)
+    {
+        <p><a href="@Model.ContinueUrl" class="btn-primary">@Model.ContinueLabel</a></p>
+    }
+</div>
+
+@if (Model.Cards.Count > 0)
+{
+    <ol class="card" style="list-style:none;padding:14px;margin-top:14px;display:flex;flex-direction:column;gap:10px;">
+        @foreach (var step in Model.Cards)
+        {
+            var bg = step.Done == true ? "background:#f3fbf5;" : "";
+            var icon = step.Done switch { true => "✅", false => "⬜", _ => "🔗" };
+            var label = step.Done == true ? Model.EditLabel : Model.OpenLabel;
+            <li style="display:flex;align-items:flex-start;gap:12px;padding:10px;border:1px solid #e6eaf2;border-radius:10px;@bg">
+                <span aria-hidden="true" style="font-size:20px;line-height:1.2;flex:0 0 auto;">@icon</span>
+                <span style="flex:1;">
+                    <strong>@step.Number. @step.Title</strong>
+                    <span class="muted" style="display:block;font-size:13px;">@step.Description</span>
+                </span>
+                <a href="@step.Url"
+                   class="@(step.Done == true ? "" : "btn-primary")" style="flex:0 0 auto;align-self:center;">
+                    @label
+                </a>
+            </li>
+        }
+    </ol>
+}

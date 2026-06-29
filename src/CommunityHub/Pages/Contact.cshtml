@@ -2,40 +2,68 @@
 @model CommunityHub.Pages.ContactModel
 @{
     ViewData["Title"] = Localizer["Nav.ContactOrganizers"].Value;
+    string Tel(string p) => "tel:" + System.Text.RegularExpressions.Regex.Replace(p, "[^0-9+]", "");
 }
 
 <div class="card">
     <h2>@Localizer["Nav.ContactOrganizers"]</h2>
-    <p>Questions about the event, your sessions, logistics or anything else? The organizing team is here to help.</p>
+    <p>Questions about the event, logistics or anything else? The organizing team is here to help.</p>
     <p style="margin-top:14px;">
         <a class="task-link-btn" href="mailto:@Model.OrganizerEmail">&#9993; Email the organizers</a>
     </p>
-    <p style="color:#6b7280;font-size:13px;">We usually reply within a day. You can also reach us at <a href="mailto:@Model.OrganizerEmail">@Model.OrganizerEmail</a>.</p>
 </div>
 
-@* §107: organizer-team profile cards (picture + role + title + email), authored in
-   config/content/eldk27/organizers.md and rendered with the shared content renderer.
-   Mobile-first: the cards collapse to a single column on phones. *@
-@if (!string.IsNullOrEmpty(Model.OrganizerProfilesHtml.Value))
+@if (Model.Organizers.Count > 0)
 {
     <style>
-        /* Each "## Name" heading from organizers.md starts a card; CSS columns give a
-           responsive multi-column layout without restructuring the rendered markup. */
-        .organizer-profiles { margin-top: 18px; }
-        .organizer-profiles .organizer-grid {
-            columns: 2 320px; column-gap: 18px;
-        }
-        .organizer-profiles h1 { font-size: 1.25rem; color: var(--el-darkblue); column-span: all; }
-        .organizer-profiles h2 {
-            break-inside: avoid; -webkit-column-break-inside: avoid;
-            color: var(--el-darkblue); margin: 0 0 6px;
-        }
-        .organizer-profiles ul { break-inside: avoid; margin: 0 0 16px; padding-left: 18px; }
-        .organizer-profiles img { max-width: 100%; height: auto; border-radius: 8px; margin: 8px 0; column-span: all; }
+        .org-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(240px,1fr)); gap:16px; margin-top:4px; }
+        .org-card { border:1px solid #e6eaf2; border-radius:12px; overflow:hidden; background:#fff; display:flex; flex-direction:column; }
+        /* Top-align the cover-crop so a headshot never loses the top of the head (e.g. MLH). */
+        .org-card .org-photo { width:100%; aspect-ratio:1/1; object-fit:cover; object-position:center top; display:block; background:#f0f2f6; }
+        .org-card .org-body { padding:12px 14px; }
+        .org-card .org-name { font-size:1.05rem; font-weight:700; color:var(--el-darkblue,#1D3380); margin:0 0 4px; }
+        .org-card .org-bio { font-size:12.5px; color:#4b5563; line-height:1.45; margin:0 0 10px; }
+        .org-card .org-links { display:flex; flex-direction:column; gap:5px; font-size:13px; }
+        .org-card .org-links a { color:var(--el-blue,#008BD2); text-decoration:none; word-break:break-word; }
+        .org-card .org-links a:hover { text-decoration:underline; }
     </style>
-    <div class="card organizer-profiles">
-        <div class="organizer-grid">
-            @Model.OrganizerProfilesHtml
+    <div class="card">
+        <h2 style="margin-top:0;">Organizer team</h2>
+        <div class="org-grid">
+            @foreach (var o in Model.Organizers)
+            {
+                <div class="org-card">
+                    @if (!string.IsNullOrWhiteSpace(o.PhotoUrl))
+                    {
+                        <img class="org-photo" src="@o.PhotoUrl" alt="@o.Name" loading="lazy" />
+                    }
+                    <div class="org-body">
+                        <p class="org-name">@o.Name</p>
+                        @if (!string.IsNullOrWhiteSpace(o.Bio))
+                        {
+                            <p class="org-bio">@o.Bio</p>
+                        }
+                        <div class="org-links">
+                            @if (!string.IsNullOrWhiteSpace(o.Email))
+                            {
+                                <a href="mailto:@o.Email">&#9993; @o.Email</a>
+                            }
+                            @if (!string.IsNullOrWhiteSpace(o.Phone))
+                            {
+                                <a href="@Tel(o.Phone)">&#128222; @o.Phone</a>
+                            }
+                            @if (!string.IsNullOrWhiteSpace(o.Website))
+                            {
+                                <a href="@o.Website" target="_blank" rel="noopener noreferrer">&#127760; @o.Website</a>
+                            }
+                            @if (!string.IsNullOrWhiteSpace(o.LinkedIn))
+                            {
+                                <a href="@o.LinkedIn" target="_blank" rel="noopener noreferrer">LinkedIn</a>
+                            }
+                        </div>
+                    </div>
+                </div>
+            }
         </div>
     </div>
 }

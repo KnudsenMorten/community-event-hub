@@ -56,7 +56,7 @@ public sealed class VenueImageService
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
             ["wayfinding"]          = "wayfinding",
-            ["good-to-know"]        = "good-to-know",
+            // §162: the "Venue images" gallery dropped from /Info/good-to-know (not relevant there).
             ["session-evaluations"] = "evaluations",
         };
 

@@ -1,3 +1,4 @@
+using CommunityHub.Core.Auth;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 
@@ -113,23 +114,74 @@ public sealed class EmailTemplateProvider
     /// A fresh token map pre-filled with the edition's branding tokens
     /// (brandColor, logoUrl, supportEmail, hubUrl). Callers add their
     /// content-specific tokens to this and pass it to <see cref="Render"/>.
+    ///
+    /// <para>§169 (personal email magic-link): when the email is addressed to a
+    /// KNOWN participant — supplied explicitly via <paramref name="participantId"/>
+    /// or read from the ambient <see cref="EmailContext"/> — the <c>hubUrl</c> CTA
+    /// is rewritten to that participant's <b>auto-login magic-link</b>
+    /// (<c>{HubUrl}/go/{token}</c>) so the recipient lands signed-in. Because the
+    /// <c>/go/{token}/{**target}</c> route also accepts a trailing path, templates
+    /// that append a deep-link (e.g. <c>{{hubUrl}}/Speaker/Graphics</c>) keep
+    /// working — they become <c>{HubUrl}/go/{token}/Speaker/Graphics</c>.</para>
+    ///
+    /// <para>Best-effort + fail-safe: with no magic-link service wired, no origin
+    /// configured, no participant, or any error, the plain hub URL is left in
+    /// place — a send never breaks on this layer. Multi-recipient / unaddressed
+    /// sends (broadcast) pass no participant and keep the plain URL.</para>
     /// </summary>
-    public Dictionary<string, string> NewTokenSet() => new()
+    public Dictionary<string, string> NewTokenSet(int? participantId = null)
     {
-        ["brandColor"] = _options.BrandColor,
-        ["logoUrl"] = _options.LogoUrl,
-        ["supportEmail"] = _options.SupportEmail,
-        ["hubUrl"] = _options.HubUrl,
-        // Base/footer fallbacks; a caller may overwrite eventDisplayName with the
-        // live Event row value. eventCodeParens has no per-send override and is
-        // supplied here so the layout footer always resolves. It is empty-safe:
-        // blank code ⇒ "" (no stray "()"), otherwise " (ELDK27)".
-        ["eventDisplayName"] = _options.EventDisplayName,
-        ["eventCode"] = _options.EventCode,
-        ["eventCodeParens"] = string.IsNullOrWhiteSpace(_options.EventCode)
-            ? string.Empty
-            : $" ({_options.EventCode})",
-    };
+        var tokens = new Dictionary<string, string>
+        {
+            ["brandColor"] = _options.BrandColor,
+            ["logoUrl"] = _options.LogoUrl,
+            ["supportEmail"] = _options.SupportEmail,
+            ["hubUrl"] = _options.HubUrl,
+            // Base/footer fallbacks; a caller may overwrite eventDisplayName with the
+            // live Event row value. eventCodeParens has no per-send override and is
+            // supplied here so the layout footer always resolves. It is empty-safe:
+            // blank code ⇒ "" (no stray "()"), otherwise " (ELDK27)".
+            ["eventDisplayName"] = _options.EventDisplayName,
+            ["eventCode"] = _options.EventCode,
+            ["eventCodeParens"] = string.IsNullOrWhiteSpace(_options.EventCode)
+                ? string.Empty
+                : $" ({_options.EventCode})",
+        };
+        ApplyMagicHubUrl(tokens, participantId);
+        return tokens;
+    }
+
+    /// <summary>
+    /// §169 central seam: rewrite the <c>hubUrl</c> (and add a <c>magicHubUrl</c>)
+    /// token to the participant's personal auto-login magic-link. Best-effort +
+    /// fail-safe — see <see cref="NewTokenSet"/>.
+    /// </summary>
+    private void ApplyMagicHubUrl(Dictionary<string, string> tokens, int? participantIdOverride)
+    {
+        var origin = (_options.HubUrl ?? string.Empty).TrimEnd('/');
+        if (string.IsNullOrEmpty(origin) || _scopes is null) return;
+
+        var pid = participantIdOverride ?? _emailContext?.Current?.ParticipantId;
+        if (pid is not int id || id <= 0) return;
+
+        try
+        {
+            using var scope = _scopes.CreateScope();
+            var magic = scope.ServiceProvider
+                .GetService<IEmailMagicLinkService>();
+            if (magic is null) return;
+
+            var url = magic.BuildUrlForParticipantAsync(id, origin)
+                .GetAwaiter().GetResult();
+            tokens["hubUrl"] = url;
+            tokens["magicHubUrl"] = url;
+        }
+        catch
+        {
+            // Fail-safe: a magic-link hiccup must never break a send — keep the
+            // plain hub URL so the recipient can still sign in with email + PIN.
+        }
+    }
 
     /// <summary>
     /// Render the named content template (e.g. "task-deadline-reminder")

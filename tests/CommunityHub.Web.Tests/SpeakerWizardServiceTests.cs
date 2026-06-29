@@ -85,7 +85,7 @@ public sealed class SpeakerWizardServiceTests
         var view = await Wizard(db).BuildAsync(ev, pid);
 
         Assert.Equal(
-            new[] { "calendar", "details", "hotel", "promote", "signal", "accept" },
+            new[] { "calendar", "details", "hotel", "promote", "signal", "party", "accept" },
             view.Steps.Select(s => s.Key).ToArray());
         Assert.DoesNotContain(view.Steps, s => s.Key == "travel");
         Assert.DoesNotContain(view.Steps, s => s.Key == "upload-preview");
@@ -127,7 +127,7 @@ public sealed class SpeakerWizardServiceTests
         var view = await Wizard(db).BuildAsync(ev, pid);
 
         Assert.Equal(
-            new[] { "calendar", "details", "hotel", "dinner", "swag", "lunch", "promote", "signal", "accept" },
+            new[] { "calendar", "details", "hotel", "dinner", "swag", "lunch", "promote", "signal", "party", "accept" },
             view.Steps.Select(s => s.Key).ToArray());
         Assert.Equal("lunch", view.Steps[5].Key);
     }
@@ -145,12 +145,12 @@ public sealed class SpeakerWizardServiceTests
         Assert.True(view.Steps.Single(s => s.Key == "hotel").Done);
         Assert.False(view.Steps.Single(s => s.Key == "calendar").Done);
         Assert.False(view.Steps.Single(s => s.Key == "details").Done);
-        // 7 entitled steps now: calendar (always) + details (always) + hotel + lunch
-        // (entitled) + promote (§116) + signal (§109) + accept (§119). Uploads + travel
-        // are no longer wizard steps. Only hotel is done.
-        Assert.Equal(7, view.EntitledCount);
+        // 8 entitled steps now: calendar (always) + details (always) + hotel + lunch
+        // (entitled) + promote (§116) + signal (§109) + party (§164) + accept (§119).
+        // Uploads + travel are no longer wizard steps. Only hotel is done.
+        Assert.Equal(8, view.EntitledCount);
         Assert.Equal(1, view.DoneCount);
-        Assert.Equal(14, view.Percent); // round(100/7) = 14
+        Assert.Equal(12, view.Percent); // round(100/8) = 12 (banker's rounding of 12.5)
         // Next incomplete step is Calendar email (now first in order).
         Assert.Equal("calendar", view.NextStep!.Key);
         Assert.False(view.AllDone);
@@ -199,6 +199,11 @@ public sealed class SpeakerWizardServiceTests
         {
             EventId = ev, ParticipantId = pid, AcceptedByEmail = "s@x.dk",
             AcceptedAt = DateTimeOffset.UtcNow,
+        });
+        // §164 party: a saved RSVP row (Yes or No) for this speaker = the party step done.
+        db.PartyRsvps.Add(new PartyRsvp
+        {
+            EventId = ev, ParticipantId = pid, Name = "Speaker One", Email = "s@x.dk", Attending = true,
         });
         await db.SaveChangesAsync();
 

@@ -183,9 +183,11 @@ public sealed class WelcomeWithLoginEmailService
     /// Render the welcome email for a participant against an already-built sign-in
     /// URL (an auto-login magic-link when auto-login is enabled, otherwise the plain
     /// hub URL). Renders the per-role VARIANT template (by the participant's PRIMARY
-    /// role via <see cref="WelcomeVariants"/>). Public + pure (no DB / no send / no
-    /// token mint / no guard) so the per-role copy can be unit-tested directly. Also
-    /// exposes the plain-text alternative on the returned record.
+    /// role via <see cref="WelcomeVariants"/>). Public + side-effect-light (no DB / no
+    /// send / no guard) so the per-role copy can be unit-tested directly — the only
+    /// effect is that, when a magic-link service is wired, the §169 hub CTA seam may
+    /// mint/reuse the participant's standing reusable grant. Also exposes the
+    /// plain-text alternative on the returned record.
     /// </summary>
     public RenderedWelcomeEmail RenderForUrl(Participant participant, string loginUrl)
     {
@@ -197,7 +199,11 @@ public sealed class WelcomeWithLoginEmailService
             ?? throw new InvalidOperationException(
                 $"No welcome template for role {participant.Role} — the caller must guard before rendering.");
 
-        var tokens = _templates.NewTokenSet();
+        // §169: seed the token set FOR this participant so the generic hub CTA
+        // ({{hubUrl}}, used by the welcome-* variants) is the recipient's personal
+        // REUSABLE auto-login magic-link — fail-safe to the plain hub URL when no
+        // magic-link service / origin is wired.
+        var tokens = _templates.NewTokenSet(participant.Id);
         tokens["firstName"] = firstName;
         tokens["communityName"] = participant.Event.CommunityName;
         tokens["eventDisplayName"] = participant.Event.DisplayName;
@@ -209,12 +215,18 @@ public sealed class WelcomeWithLoginEmailService
         // coordinator / signer / booth member), not a static value.
         tokens["sponsorRole"] = WelcomeVariants.SponsorRoleLabel(
             participant.IsEventCoordinator, participant.IsSigner, participant.IsBoothMember);
-        // Both loginUrl and hubUrl resolve to the same sign-in URL the caller built:
-        // the magic-link when auto-login is on, the plain hub URL when off. Templates
-        // may reference either token. (NewTokenSet already seeds the branding hubUrl;
-        // override it so the variant always points at the same place as loginUrl.)
+        // loginUrl is the welcome's OWN sign-in link (the hardened single-use auto-login
+        // magic-link when auto-login is ENABLED, else the plain per-environment hub URL).
         tokens["loginUrl"] = loginUrl;
-        tokens["hubUrl"] = loginUrl;
+        // The hub CTA ({{hubUrl}}): KEEP the hardened single-use link as the button when
+        // auto-login is enabled (never downgrade it). When auto-login is DISABLED (the
+        // default) the email still auto-logs via the §169 reusable magic-link that
+        // NewTokenSet placed on hubUrl; if that link is unavailable (no service/origin)
+        // fall back to the plain per-environment hub URL so the CTA still points home.
+        if (_options.AutoLoginEnabled || !tokens.ContainsKey("magicHubUrl"))
+        {
+            tokens["hubUrl"] = loginUrl;
+        }
 
         var html = _templates.Render(templateKey, tokens);
         var text = BuildPlainText(

@@ -18,10 +18,10 @@
 <div class="card">
     <h1 style="margin-top:0;">@ViewData["Title"]</h1>
     <p style="color:#6b7280;">
-        Anonymous sign-ups from the public form at <code>/Party</code>.
+        Sign-ups from the public form at <code>/Party</code> and from signed-in participants.
         @if (p is not null)
         {
-            @($"Party: {p.Date.ToDateTime(new TimeOnly(0,0)):dddd, d MMMM yyyy} · {p.StartHour:00}:00–{p.EndHour:00}:00.")
+            @($"Party: {p.Date.ToDateTime(new TimeOnly(0,0)):dddd, d MMMM yyyy} · {p.StartHour:00}:{p.StartMinute:00}–{p.EndHour:00}:{p.EndMinute:00}.")
         }
         Share the link: <a href="/Party">/Party</a>.
     </p>
@@ -46,7 +46,8 @@
     <table style="width:100%;border-collapse:collapse;font-size:13px;margin-top:10px;">
         <thead><tr style="text-align:left;border-bottom:2px solid #ddd;">
             <th style="padding:6px 8px;">Name</th><th style="padding:6px 8px;">Email</th>
-            <th style="padding:6px 8px;">Attending</th><th style="padding:6px 8px;">When</th>
+            <th style="padding:6px 8px;">Attending</th><th style="padding:6px 8px;">Company head count</th>
+            <th style="padding:6px 8px;">When</th>
         </tr></thead>
         <tbody>
         @foreach (var r in Model.Rows)
@@ -55,12 +56,13 @@
                 <td style="padding:6px 8px;">@r.Name</td>
                 <td style="padding:6px 8px;">@r.Email</td>
                 <td style="padding:6px 8px;">@(r.Attending ? "✅ yes" : "—")</td>
+                <td style="padding:6px 8px;">@(r.HeadCount?.ToString() ?? "—")</td>
                 <td style="padding:6px 8px;white-space:nowrap;">@r.UpdatedAt.ToString("dd MMM, HH:mm")</td>
             </tr>
         }
         @if (Model.Rows.Count == 0)
         {
-            <tr><td colspan="4" style="padding:6px 8px;color:#6b7280;">No RSVPs yet.</td></tr>
+            <tr><td colspan="5" style="padding:6px 8px;color:#6b7280;">No RSVPs yet.</td></tr>
         }
         </tbody>
     </table>

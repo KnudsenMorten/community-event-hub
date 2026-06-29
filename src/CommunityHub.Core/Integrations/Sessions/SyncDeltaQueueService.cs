@@ -596,14 +596,14 @@ public sealed class SyncDeltaQueueService
         {
             var speakers = await _db.SessionSpeakers
                 .Where(ss => ss.SessionId == session.Id)
-                .Select(ss => new { ss.Participant.Email, ss.Participant.FullName })
+                .Select(ss => new { ss.ParticipantId, ss.Participant.Email, ss.Participant.FullName })
                 .ToListAsync(ct);
 
             foreach (var sp in speakers)
             {
                 if (string.IsNullOrWhiteSpace(sp.Email)) continue;
                 await SendChangeEmailAsync(
-                    delta.EventId, sp.Email, sp.FullName, session.Title,
+                    delta.EventId, sp.ParticipantId, sp.Email, sp.FullName, session.Title,
                     oldStart, oldEnd, oldRoom, newStart, newEnd, newRoom,
                     timeChanged, roomChanged, ct);
                 emailedCount++;
@@ -761,7 +761,7 @@ public sealed class SyncDeltaQueueService
     // -------------------------------------------------------------------------
 
     private async Task SendChangeEmailAsync(
-        int eventId, string email, string fullName, string title,
+        int eventId, int participantId, string email, string fullName, string title,
         DateTimeOffset? oldStart, DateTimeOffset? oldEnd, string? oldRoom,
         DateTimeOffset? newStart, DateTimeOffset? newEnd, string? newRoom,
         bool timeChanged, bool roomChanged, CancellationToken ct)
@@ -786,7 +786,10 @@ public sealed class SyncDeltaQueueService
         {
             if (_templates is not null)
             {
-                var tokens = _templates.NewTokenSet();
+                // §169: the recipient IS the session's speaker Participant — pass their id
+                // so the {{hubUrl}} CTA is their personal /go/{token} auto-login magic-link
+                // (fail-safe: no participant / any error ⇒ plain hub URL, never throws).
+                var tokens = _templates.NewTokenSet(participantId);
                 tokens["firstName"] = firstName;
                 tokens["sessionTitle"] = title;
                 tokens["oldTime"] = oldTime;

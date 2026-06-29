@@ -1,13 +1,13 @@
 @page
 @model CommunityHub.Pages.Sponsor.BoothModel
 @{
-    ViewData["Title"] = "Our Booth";
+    ViewData["Title"] = "Your Booth";
 }
 
 @if (Model.AccessDenied)
 {
     <div class="card">
-        <h1>Our Booth</h1>
+        <h1>Your Booth</h1>
         <p class="error">This page is for sponsors only.</p>
         <p><a asp-page="/Index">Back to hub</a></p>
     </div>
@@ -33,7 +33,7 @@
 </style>
 
 <div class="card">
-    <h1>Our Booth</h1>
+    <h1>Your Booth</h1>
 
     <h2 style="color:var(--el-darkblue);">Your booth number</h2>
     @if (Model.BoothNumber is not null)

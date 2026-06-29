@@ -22,7 +22,7 @@ public sealed class ContentPageRegistryTests
     private static readonly string[] SpeakerSlugs =
     {
         "speaker-template", "session-guidelines", "av-stage-timer",
-        "session-preview-final", "session-feedback", "session-evaluations",
+        "session-preview-final", "session-feedback",
         "help-promote",
     };
 

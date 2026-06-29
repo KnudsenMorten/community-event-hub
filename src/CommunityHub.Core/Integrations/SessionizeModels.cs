@@ -38,15 +38,25 @@ public sealed record SessionizeSession(
     string Title,
     string? Abstract,
     string? Room,
+    // The CLEAN track (§154): resolved from the Sessionize "Suggested Event Track"
+    // category GROUP (NOT the first/Format category, which the parser used to grab
+    // by mistake). Null when the source carries no track group for the session.
     string? Track,
     DateTimeOffset? StartsAt,
     DateTimeOffset? EndsAt,
     bool IsServiceSession,
     IReadOnlyList<string> SpeakerIds,
-    // Source category / format label (Sessionize categoryItems / Backstage format),
+    // Source category / format label (Sessionize Format group / Backstage format),
     // when present, used to derive the hub SessionType (see SessionDefaultsMapper).
     // Null when the source carries no category/format for the session.
-    string? Category = null);
+    string? Category = null,
+    // §154: audience level from the Sessionize "Level" category GROUP (e.g.
+    // "Expert (400)"). Null when the source carries no level group.
+    string? Level = null,
+    // §154: numeric length in minutes, parsed from the Format label's "(NN min)"
+    // (or the scheduled duration when the grid is published). Null when no minutes
+    // can be determined (e.g. a Master Class with no "(NN min)" hint).
+    int? LengthMinutes = null);
 
 /// <summary>The outcome of parsing the Sessionize sessions view.</summary>
 public sealed record SessionizeSessionsParseResult(

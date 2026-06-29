@@ -91,7 +91,11 @@ public sealed class MasterClassPromotionEmailService
         if (_templates is not null)
         {
             // The service already branches on status: render the matching key.
-            var tokens = _templates.NewTokenSet();
+            // §169: the participant id makes the generic {{hubUrl}} CTA the recipient's
+            // personal auto-login magic-link (the selfServiceUrl deep-link is unchanged).
+            var pid = await MasterClassEmailService.ResolveAttendeeParticipantIdAsync(
+                _db, s.Attendee.Email, s.EventId, ct);
+            var tokens = _templates.NewTokenSet(pid);
             tokens["firstName"] = firstName;
             tokens["masterClassTitle"] = s.Session.Title;
             tokens["selfServiceUrl"] = url;

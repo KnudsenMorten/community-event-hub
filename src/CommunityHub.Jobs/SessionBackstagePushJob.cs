@@ -64,7 +64,7 @@ public sealed class SessionBackstagePushJob
                     .Where(i => i.Action == SessionBackstagePushService.PushAction.Failed)
                     .Select(i => $"<li>{Enc(i.Title)} — {Enc(i.Error)}</li>"));
                 await _alerts.AlertAsync(
-                    "[ELDK27] Stage-2 CEH→Zoho session push: failures",
+                    "Stage-2 CEH→Zoho session push: failures [ELDK27]",
                     $"<p>{sr.Failed} session push(es) failed:</p><ul>{lines}</ul>",
                     ct, throttleKey: "SessionBackstagePushJob.sessions");
             }
@@ -91,7 +91,7 @@ public sealed class SessionBackstagePushJob
                     .Where(i => i.Action == SpeakerBackstagePushService.PushAction.Failed)
                     .Select(i => $"<li>{Enc(i.Email)} — {Enc(i.Error)}</li>"));
                 await _alerts.AlertAsync(
-                    "[ELDK27] Stage-2 CEH→Zoho speaker push: failures",
+                    "Stage-2 CEH→Zoho speaker push: failures [ELDK27]",
                     $"<p>{spr.Failed} speaker push(es) failed:</p><ul>{lines}</ul>",
                     ct, throttleKey: "SessionBackstagePushJob.speakers");
             }

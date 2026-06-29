@@ -56,8 +56,9 @@ public static class ContentPageRegistry
             new ContentPage("session-guidelines", "Session Guidelines", EventLogistics, SpeakersOnly),
             new ContentPage("av-stage-timer", "A/V, Comfort Screen, HDMI Switchers, Stage-timer", EventLogistics, SpeakersOnly),
             new ContentPage("session-preview-final", "Session Preview / Final guidelines", EventLogistics, SpeakersOnly),
-            new ContentPage("session-feedback", "Session feedback", EventLogistics, SpeakersOnly),
-            new ContentPage("session-evaluations", "Session Evaluations", EventLogistics, SpeakersOnly),
+            // §161 (operator 2026-06-28): one entry — "Session feedback" page kept but relabelled
+            // "Session Evaluations"; the duplicate "session-evaluations" nav entry dropped.
+            new ContentPage("session-feedback", "Session Evaluations", EventLogistics, SpeakersOnly),
             new ContentPage("help-promote", "Help Promote", EventLogistics, SpeakersOnly),
         }
         .ToDictionary(p => p.Slug, StringComparer.OrdinalIgnoreCase);

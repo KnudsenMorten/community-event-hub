@@ -1,0 +1,45 @@
+@page
+@model CommunityHub.Pages.Games.IndexModel
+@{
+    ViewData["Title"] = Localizer["Games.Title"].Value;
+}
+
+<div class="card">
+    <h1 style="margin-top:0;">🎮 @Localizer["Games.Title"]</h1>
+    <p style="color:#5b636e;max-width:60ch;">
+        @Localizer["Games.Intro"]
+    </p>
+
+    @if (Model.Games.Count == 0)
+    {
+        <p class="muted">@Localizer["Games.None"]</p>
+    }
+    else
+    {
+        <div style="display:grid;gap:14px;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));margin-top:8px;">
+            @foreach (var g in Model.Games)
+            {
+                <div style="border:1px solid #e2e6ec;border-radius:14px;padding:18px;background:#fff;display:flex;flex-direction:column;gap:10px;">
+                    <h2 style="margin:0;font-size:19px;">@g.Title</h2>
+                    <div style="color:#6b7280;font-size:13.5px;">
+                        @g.QuestionCount @Localizer["Games.QuestionsInPool"]
+                        @if (g.MyBestScore is int best)
+                        {
+                            <span> · @Localizer["Games.YourBest"]: <strong>@best</strong></span>
+                        }
+                    </div>
+                    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:auto;">
+                        <a class="btn" asp-page="/Games/Play" asp-route-topic="@g.Slug"
+                           style="background:#1c6b35;color:#fff;padding:9px 14px;border-radius:9px;text-decoration:none;font-weight:600;">
+                            @(g.HasInProgress ? Localizer["Games.Resume"] : Localizer["Games.Play"])
+                        </a>
+                        <a class="btn" asp-page="/Games/Leaderboard" asp-route-topic="@g.Slug"
+                           style="background:#eef0f4;color:#1f2430;padding:9px 14px;border-radius:9px;text-decoration:none;font-weight:600;">
+                            🏆 @Localizer["Games.Leaderboard"]
+                        </a>
+                    </div>
+                </div>
+            }
+        </div>
+    }
+</div>

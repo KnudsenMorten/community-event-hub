@@ -80,19 +80,15 @@
                     Enter only the id, not the full URL.
                 </p>
             </div>
-            <div style="margin-bottom:14px;">
-                <label for="View">View</label>
-                <select id="View" name="View" style="max-width:100%;">
-                    @foreach (var v in new[] { "Speakers", "All", "Sessions", "SpeakerWall", "GridSmart" })
-                    {
-                        <option value="@v" selected="@(string.Equals(Model.View, v, StringComparison.OrdinalIgnoreCase))">@v</option>
-                    }
-                </select>
-                <p style="color:#6b7280;font-size:12px;margin-top:4px;">
-                    Which Sessionize view to pull. <code>Speakers</code> for speakers
-                    only; <code>All</code> brings speakers and their sessions in one pull.
-                </p>
-            </div>
+            @* §167: the single "View" selector was misleading — the hub already pulls EVERY view it
+               needs from the one endpoint id (speakers, sessions, the schedule grid). It's kept as a
+               hidden value so the saved config is unchanged; the operator only needs the endpoint id. *@
+            <input type="hidden" name="View" value="@Model.View" />
+            <p style="color:#6b7280;font-size:12.5px;margin:0 0 14px;background:#f1f5f9;border:1px solid #dbe2ea;border-radius:8px;padding:10px 12px;">
+                You only need the <strong>endpoint id</strong> above. From it, the hub automatically pulls
+                everything it needs — speakers, sessions and the published schedule grid — so there's nothing
+                else to configure here.
+            </p>
             <button type="submit">Save endpoint settings</button>
         </form>
 

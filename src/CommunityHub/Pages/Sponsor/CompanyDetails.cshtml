@@ -22,7 +22,7 @@
 
     <p style="color:#4b5563;margin-top:0;">
         Maintain your company's vital information here. This is the single place to keep it up to date —
-        it drives your exposure on the Zoho Backstage ticket/lead system and ELDK's social-media promotion.
+        it drives your exposure on the Event System (Zoho) ticket/lead system and ELDK's social-media promotion.
     </p>
 
     <partial name="_Flash" model='new CommunityHub.Pages.Shared.FlashModel(Model.Message, "success")' />
@@ -40,11 +40,6 @@
 
         <label>Type</label>
         <input type="text" value="@Model.TypeLabel" readonly />
-        <p style="font-size:12px;color:#6b7280;margin:2px 0 14px;">
-            @(Model.IsExhibitor
-                ? "You bought booth products, so you appear as an Exhibitor (and a sponsor) on Zoho Backstage."
-                : "You appear as a Sponsor on Zoho Backstage.")
-        </p>
 
         <!-- Links -->
         <label for="WebsiteUrl">Website URL</label>
@@ -68,7 +63,7 @@
                   maxlength="@CommunityHub.Pages.Sponsor.CompanyDetailsModel.MaxOverview"
                   oninput="document.getElementById('overviewCount').textContent=this.value.length;"></textarea>
         <p style="font-size:12px;color:#6b7280;margin:2px 0 14px;">
-            Used for exposure on Zoho Backstage ticket/lead system. A detailed overview of the
+            Used for exposure on Event System (Zoho) ticket/lead system. A detailed overview of the
             @(Model.IsExhibitor ? "exhibitor's" : "company's") company. This description helps attendees learn about the
             mission, services, and background (max 1000 chars).
             <span id="overviewCount">@(Model.CompanyOverview?.Length ?? 0)</span> / 1000
@@ -80,7 +75,7 @@
                   maxlength="@CommunityHub.Pages.Sponsor.CompanyDetailsModel.MaxSocial"
                   oninput="document.getElementById('socialCount').textContent=this.value.length;"></textarea>
         <p style="font-size:12px;color:#6b7280;margin:2px 0 14px;">
-            Text is used by ELDK in social media promotion (max 600 chars). This is NOT sent to Zoho Backstage.
+            Text is used by ELDK in social media promotion (max 600 chars). This is NOT sent to Event System (Zoho).
             <span id="socialCount">@(Model.SocialMediaBrandingText?.Length ?? 0)</span> / 600
         </p>
 
@@ -92,14 +87,14 @@
                       maxlength="@CommunityHub.Pages.Sponsor.CompanyDetailsModel.MaxShort"
                       oninput="document.getElementById('shortCount').textContent=this.value.length;"></textarea>
             <p style="font-size:12px;color:#6b7280;margin:2px 0 14px;">
-                Used for exposure on Zoho Backstage ticket/lead system. A concise version of the company
+                Used for exposure on Event System (Zoho) ticket/lead system. A concise version of the company
                 description suitable for sections with limited space, such as event listings or the mobile app (max 80 chars).
                 <span id="shortCount">@(Model.CompanyShortDescription?.Length ?? 0)</span> / 80
             </p>
         }
 
         <h3 id="coordinator" style="margin:18px 0 6px;font-size:15px;color:var(--el-darkblue);">Event Coordinator</h3>
-        <p style="font-size:12px;color:#6b7280;margin:0 0 10px;">Your primary contact for the event. Synced to Zoho Backstage as the @(Model.IsExhibitor ? "sponsor + exhibitor" : "sponsor") contact.</p>
+        <p style="font-size:12px;color:#6b7280;margin:0 0 10px;">Your primary contact for the event. Synced to the Event System (Zoho) as the @(Model.IsExhibitor ? "sponsor + exhibitor" : "sponsor") contact.</p>
 
         <label for="EventCoordinatorFirstName">First name</label>
         <input type="text" id="EventCoordinatorFirstName" asp-for="EventCoordinatorFirstName" maxlength="120" />
@@ -115,14 +110,14 @@
 
         <label for="EventCoordinatorPhone">Phone</label>
         <input type="tel" id="EventCoordinatorPhone" asp-for="EventCoordinatorPhone" maxlength="60" />
-        <p style="font-size:12px;color:#6b7280;margin:2px 0 14px;">Phone is sent to the exhibitor contact only (Zoho doesn't accept a phone on the sponsor record).</p>
+        <p style="font-size:12px;color:#6b7280;margin:2px 0 14px;">Phone is sent to the exhibitor contact only (the Event System (Zoho) doesn't accept a phone on the sponsor record).</p>
 
-        <button type="submit">Save &amp; Sync to Zoho</button>
+        <button type="submit">Save &amp; Sync to Event System (Zoho)</button>
         <span id="autosaveStatus" class="ceh-autosave" aria-live="polite" style="margin-left:10px;font-size:12px;color:#6b7280;"></span>
         <partial name="_LastSaved" model="Model.LastSavedAt" />
         <p style="font-size:12px;color:#6b7280;margin:8px 0 0;">
             Your text changes are saved automatically as you type. The
-            <strong>Save &amp; Sync to Zoho</strong> button also pushes them to your Zoho Backstage records (overwriting what's there).
+            <strong>Save &amp; Sync to Event System (Zoho)</strong> button also pushes them to your Event System (Zoho) records (overwriting what's there).
         </p>
     </form>
 </div>
@@ -275,10 +270,16 @@
 @if (Model.CanUploadSoMe || Model.CanUploadPrint || Model.CanUploadZoho || Model.CanUploadWall)
 {
     <div class="card">
+        @{ var wallLocked = DateTimeOffset.UtcNow > new DateTimeOffset(2027, 1, 10, 23, 59, 59, TimeSpan.Zero); }
         <h2 id="logos">Logos &amp; artwork</h2>
         <p style="color:#4b5563;margin-top:0;font-size:13.5px;">
-            Each upload is versioned automatically (<code>_v1</code>, <code>_v2</code>, …) so the latest file is always clear.
+            Each upload is versioned automatically (<code>_v1</code>, <code>_v2</code>, …): when you upload a new
+            file it <strong>automatically becomes the newest version</strong> — the latest file is always the one we use.
             The organizers are notified on every upload.
+        </p>
+        <p style="color:#8a5a00;background:#fff8e6;border:1px solid #f0dcb8;border-radius:6px;padding:9px 12px;font-size:13px;">
+            <strong>NOTE:</strong> Due to the ordering of sponsor walls, changes are <strong>not accepted after
+            10 January 2027</strong> — we send everything for printing after that date.
         </p>
 
         @if (Model.CanUploadSoMe)
@@ -311,7 +312,7 @@
         {
             <form method="post" asp-page-handler="Upload" asp-route-kind="zoho" enctype="multipart/form-data"
                   style="margin:0 0 18px;@(Model.CanUploadWall ? "padding-bottom:16px;border-bottom:1px solid #eee;" : "")">
-                <label style="display:block;font-weight:600;margin-bottom:2px;">Upload Logo for Zoho Backstage lead system</label>
+                <label style="display:block;font-weight:600;margin-bottom:2px;">Upload Logo for Event System (Zoho) lead system</label>
                 <p style="font-size:12px;color:#6b7280;margin:0 0 6px;">PNG, optimal dimension 200×160px, max 5 MB.</p>
                 <input type="file" name="UploadFile" accept=".png,image/png" required
                        style="display:block;margin-bottom:8px;" />
@@ -325,10 +326,22 @@
             <form method="post" asp-page-handler="Upload" asp-route-kind="wall" enctype="multipart/form-data"
                   style="margin:0;">
                 <label style="display:block;font-weight:600;margin-bottom:2px;">Upload Exhibitor Wall</label>
-                <p style="font-size:12px;color:#6b7280;margin:0 0 6px;">Your booth wall artwork (PNG, JPG or PDF, max 25 MB).</p>
-                <input type="file" name="UploadFile" accept=".png,.jpg,.jpeg,.pdf" required
-                       style="display:block;margin-bottom:8px;" />
-                <button type="submit">Upload</button>
+                <p style="font-size:12px;color:#6b7280;margin:0 0 6px;">Your booth wall artwork (.eps, .ai or .pdf, max 1 GB).</p>
+                @if (wallLocked)
+                {
+                    <p style="font-size:12.5px;color:#8a5a00;background:#fff8e6;border:1px solid #f0dcb8;border-radius:6px;padding:8px 10px;">
+                        Exhibitor-wall changes closed on 10 January 2027 (sent for printing). Contact the organizers if you need help.
+                    </p>
+                    <input type="file" name="UploadFile" accept=".eps,.ai,.pdf" disabled
+                           style="display:block;margin-bottom:8px;opacity:.5;" />
+                    <button type="submit" disabled style="opacity:.5;cursor:not-allowed;">Upload</button>
+                }
+                else
+                {
+                    <input type="file" name="UploadFile" accept=".eps,.ai,.pdf" required
+                           style="display:block;margin-bottom:8px;" />
+                    <button type="submit">Upload</button>
+                }
                 <partial name="_UploadedFile" model='Model.LatestUploads.GetValueOrDefault("wall")' />
             </form>
         }
@@ -411,8 +424,8 @@
                 }
             </p>
             <p style="font-size:12px;color:#6b7280;margin:6px 0 0;">
-                Booth-member changes are saved and synced to Zoho Backstage automatically — by email,
-                new members are created in Zoho and any members already in Zoho are pulled in here.
+                Booth-member changes are saved and synced to the Event System (Zoho) automatically — by email,
+                new members are created there and any existing members are pulled in here.
             </p>
         </div>
     </div>
@@ -484,7 +497,7 @@
             <button type="submit">Save &amp; Sync booth materials</button>
             <partial name="_LastSaved" model="Model.BoothMaterialsLastSavedAt" />
             <p style="font-size:12px;color:#6b7280;margin:6px 0 0;">
-                Your videos and collateral are stored in the Event Hub. Saving notifies the organizers to place them on your Zoho Backstage exhibitor profile (Zoho has no materials API).
+                Your videos and collateral are stored in the Event Hub and submitted to the Event System (Zoho) for your exhibitor profile — you don't need to do anything else.
             </p>
         </form>
     </div>

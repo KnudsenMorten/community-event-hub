@@ -137,7 +137,7 @@ public sealed class ErpWebshopReconcileJob
                 // Stable per-job throttle key so a job stuck failing every tick can't
                 // flood the inbox (EngineAlertSender suppresses repeats within its window).
                 await _alerts.AlertAsync(
-                    "[ELDK27] Engine FAILED (2x in a row): ErpWebshopReconcileJob",
+                    "Engine FAILED (2x in a row): ErpWebshopReconcileJob [ELDK27]",
                     html, ct, throttleKey: $"engine-fail:{JobKey}");
             }
             return;

@@ -148,6 +148,10 @@ public sealed class ParticipantChecklistBuilderTests
     [InlineData("volunteer-form:7", "/volunteer/availability")] // B8: retired /Forms/VolunteerWizard
     [InlineData("swag-form:7", "/Forms/Swag")]
     [InlineData("lunch-form:7", "/Forms/Lunch")]
+    // §161: manual mark-done steps now deep-link to the same page their Get-Started card opens.
+    [InlineData("signal:7", "/Forms/Signal")]
+    [InlineData("promote:7", "/Speaker/Promote")]
+    [InlineData("party-form:7", "/Party")]
     [InlineData(null, null)]
     [InlineData("unknown:7", null)]
     public void SourceKey_maps_to_form_page(string? key, string? expected)

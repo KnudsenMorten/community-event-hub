@@ -41,18 +41,17 @@
         </div>
         @if (Model.LinkedContacts.Count > 0)
         {
-            <p style="margin:6px 0 14px;color:#555;font-size:14px;">
-                @Localizer["SponsorTasks.ManagedBy"]
-                @for (var i = 0; i < Model.LinkedContacts.Count; i++)
+            <p style="margin:14px 0 4px;color:#24292f;font-size:14px;font-weight:600;">Linked Event Coordinators who can manage tasks</p>
+            <ul style="margin:0 0 8px;padding-left:20px;color:#555;font-size:14px;line-height:1.6;">
+                @foreach (var c in Model.LinkedContacts)
                 {
-                    var c = Model.LinkedContacts[i];
-                    <strong>@c.FullName</strong>
-                    <span style="color:#888;">(@c.Email)</span>
-                    @if (i < Model.LinkedContacts.Count - 1)
-                    {
-                        <span>, </span>
-                    }
+                    <li><strong>@c.FullName</strong> <span style="color:#888;">(@c.Email)</span></li>
                 }
+            </ul>
+            @* §162: manage these contacts (Signers / Event Coordinators — NOT booth members)
+               from Company Details. *@
+            <p style="margin:0 0 14px;">
+                <a class="task-link-btn" href="/Sponsor/CompanyDetails#contacts">Manage contacts</a>
             </p>
         }
         @* §147: the unified task list (completion % header → pending at the top →

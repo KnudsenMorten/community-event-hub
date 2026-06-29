@@ -418,6 +418,107 @@ public sealed class PublicSessionsServiceTests
         Assert.Empty(view.Rooms);
     }
 
+    // §154: an edition whose sessions carry Track + Level, used to prove the new
+    // Track/Level facets + filters. Two tracks (Security/Azure), two levels.
+    private static async Task<int> SeedWithTrackLevelAsync(CommunityHubDbContext db)
+    {
+        var evt = new Event
+        {
+            Code = "TL27", CommunityName = "TL", DisplayName = "TL 2027",
+            StartDate = new DateOnly(2027, 2, 9), EndDate = new DateOnly(2027, 2, 10),
+            IsActive = true,
+        };
+        db.Events.Add(evt);
+        await db.SaveChangesAsync();
+
+        void Sess(string id, string title, string? track, string? level, int? minutes)
+        {
+            db.Sessions.Add(new Session
+            {
+                EventId = evt.Id, SessionizeId = id, Title = title,
+                Type = SessionType.TechnicalSession, Length = SessionLength.SixtyMin,
+                Track = track, Level = level, LengthMinutes = minutes,
+            });
+        }
+
+        Sess("s-sec1", "Securing Identity", "Security", "Expert (400)", 60);
+        Sess("s-sec2", "Threat Hunting", "Security", "Intermediate (200)", 50);
+        Sess("s-az1", "Landing Zones", "Azure", "Intermediate (200)", 60);
+        Sess("s-none", "Opening", null, null, null);
+        await db.SaveChangesAsync();
+        return evt.Id;
+    }
+
+    [Fact]
+    public async Task Track_and_level_facets_are_distinct_and_sorted()
+    {
+        using var db = TestDb.New();
+        await SeedWithTrackLevelAsync(db);
+        var svc = new PublicSessionsService(db);
+
+        var view = await svc.BuildAsync();
+
+        Assert.NotNull(view);
+        Assert.Equal(new[] { "Azure", "Security" }, view!.Tracks);
+        Assert.Equal(new[] { "Expert (400)", "Intermediate (200)" }, view.Levels);
+    }
+
+    [Fact]
+    public async Task Filter_by_track_narrows_the_list()
+    {
+        using var db = TestDb.New();
+        await SeedWithTrackLevelAsync(db);
+        var svc = new PublicSessionsService(db);
+
+        // Case-insensitive, matches across all sessions of that track.
+        var view = await svc.BuildAsync(track: "security");
+
+        Assert.NotNull(view);
+        Assert.Equal(2, view!.MatchCount);
+        Assert.All(view.Sessions, s => Assert.Equal("Security", s.Track));
+    }
+
+    [Fact]
+    public async Task Filter_by_level_narrows_the_list()
+    {
+        using var db = TestDb.New();
+        await SeedWithTrackLevelAsync(db);
+        var svc = new PublicSessionsService(db);
+
+        var view = await svc.BuildAsync(level: "Expert (400)");
+
+        Assert.NotNull(view);
+        Assert.Single(view!.Sessions);
+        Assert.Equal("Securing Identity", view.Sessions[0].Title);
+    }
+
+    [Fact]
+    public async Task Filter_by_track_and_level_combine()
+    {
+        using var db = TestDb.New();
+        await SeedWithTrackLevelAsync(db);
+        var svc = new PublicSessionsService(db);
+
+        // Security AND Intermediate → exactly the Threat Hunting talk.
+        var view = await svc.BuildAsync(track: "Security", level: "Intermediate (200)");
+
+        Assert.Single(view!.Sessions);
+        Assert.Equal("Threat Hunting", view.Sessions[0].Title);
+    }
+
+    [Fact]
+    public async Task LengthMinutes_surfaces_on_the_row()
+    {
+        using var db = TestDb.New();
+        await SeedWithTrackLevelAsync(db);
+        var svc = new PublicSessionsService(db);
+
+        var view = await svc.BuildAsync();
+        var row = view!.Sessions.Single(s => s.Title == "Threat Hunting");
+        Assert.Equal(50, row.LengthMinutes);
+        Assert.Equal("Intermediate (200)", row.Level);
+    }
+
     // The single public-visibility signal both speaker surfaces (hub + evaluations)
     // now reuse: GetPubliclyViewableSessionIdsAsync returns exactly the candidate
     // ids whose /Sessions/{id} would resolve under the SAME gate GetByIdAsync uses

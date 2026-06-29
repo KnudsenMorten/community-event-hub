@@ -89,7 +89,10 @@ public class WelcomeModel : PageModel
             return RedirectToPage("/Index");
         }
 
-        var tokens = _templates.NewTokenSet();
+        // §169: this welcome content is the signed-in participant's own — pass their id so
+        // any {{hubUrl}} CTA is their personal /go/{token} auto-login magic-link (fail-safe:
+        // no participant / any error ⇒ plain hub URL, never throws).
+        var tokens = _templates.NewTokenSet(me.ParticipantId);
         tokens["firstName"] = FirstName;
         tokens["roleName"] = me.Role.ToString();
         tokens["communityName"] = communityName;

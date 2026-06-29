@@ -32,6 +32,7 @@ public class IndexModel : PageModel
     private readonly CommunityHubDbContext _db;
     private readonly ICurrentParticipantAccessor _participant;
     private readonly SpeakerDeadlineSeeder _speakerDeadlines;
+    private readonly CommunityHub.Core.Config.PartyTaskSeeder _partyTasks;
     private readonly EventEditionConfigLoader _eventConfigLoader;
     private readonly EventConfigOptions _eventConfigOptions;
     private readonly CommunityHub.Core.Reminders.ParticipantCalendarBuilder _calendarBuilder;
@@ -45,6 +46,7 @@ public class IndexModel : PageModel
         CommunityHubDbContext db,
         ICurrentParticipantAccessor participant,
         SpeakerDeadlineSeeder speakerDeadlines,
+        CommunityHub.Core.Config.PartyTaskSeeder partyTasks,
         EventEditionConfigLoader eventConfigLoader,
         EventConfigOptions eventConfigOptions,
         CommunityHub.Core.Reminders.ParticipantCalendarBuilder calendarBuilder,
@@ -58,6 +60,7 @@ public class IndexModel : PageModel
         _db = db;
         _participant = participant;
         _speakerDeadlines = speakerDeadlines;
+        _partyTasks = partyTasks;
         _eventConfigLoader = eventConfigLoader;
         _eventConfigOptions = eventConfigOptions;
         _calendarBuilder = calendarBuilder;
@@ -188,6 +191,19 @@ public class IndexModel : PageModel
                 _logger.LogWarning(ex,
                     "Speaker-deadline seeding failed for event {EventId}", me.EventId);
             }
+        }
+
+        // §164: ensure the per-participant "party sign-up" task exists for the staff
+        // roles (Sponsor/Speaker/Volunteer/EventPartner/Organizer) on their first hub
+        // visit — idempotent, so it surfaces in My Tasks + Get Started without waiting
+        // for the nightly reminder job. No-op for attendees + when no party is active.
+        try
+        {
+            await _partyTasks.EnsureForParticipantAsync(me.EventId, me.ParticipantId, me.Role, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Party-task seeding failed for event {EventId}", me.EventId);
         }
 
         ApplyRoleVisibility(me.Role);

@@ -29,10 +29,10 @@
                 then re-sync every sponsor record to Zoho Backstage. This also corrects the older UTF-8 mojibake (æ/ø/å) in Zoho.
             </p>
             <form method="post" asp-page-handler="MigrateResync" style="display:inline;margin:0;">
-                <button type="submit" data-ceh-confirm="confirmMigrateResync" data-ceh-count="@Model.Rows.Count">Migrate coordinators &amp; re-sync all to Zoho</button>
+                <button type="submit" data-ceh-confirm="confirmMigrateResync" data-ceh-count="@Model.Rows.Count">Migrate coordinators &amp; re-sync all to Event System (Zoho)</button>
             </form>
             <form method="post" asp-page-handler="Provision" style="display:inline;margin:0 0 0 8px;">
-                <button type="submit" data-ceh-confirm="confirmProvision" data-ceh-count="@Model.Rows.Count">Create / link missing in Zoho</button>
+                <button type="submit" data-ceh-confirm="confirmProvision" data-ceh-count="@Model.Rows.Count">Create / link missing in Event System (Zoho)</button>
             </form>
             <form method="post" asp-page-handler="ReconcileErp" style="display:inline;margin:0 0 0 8px;">
                 <button type="submit" data-ceh-confirm="confirmReconcileErp">Reconcile ERP → webshop (users + defaults)</button>

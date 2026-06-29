@@ -80,6 +80,14 @@ public class LoginModel : PageModel
     /// </summary>
     public IActionResult OnGet(string? email, string? returnUrl)
     {
+        // "Remember me" defaults to CHECKED on the initial sign-in form (operator
+        // 2026-06-28 §170): most people sign in on their own phone/laptop and want
+        // to stay signed in. Only the first GET renders the step-1 form; the later
+        // PIN/RequestPin POSTs carry the user's actual choice via a hidden field, so
+        // setting it here only pre-checks the box — it never overrides an explicit
+        // un-check. The obvious Sign-out remains for shared/kiosk devices.
+        RememberMe = true;
+
         if (!string.IsNullOrWhiteSpace(email))
         {
             Email = email.Trim();
@@ -154,38 +162,17 @@ public class LoginModel : PageModel
             return Page();
         }
 
-        // Build the signed session cookie: identity + role + active event.
+        // Build the signed session cookie via the shared sign-in path (claims +
+        // cookie lifetime identical to the magic-link entry points). Session
+        // lifetime from the single "Remember me" checkbox: CHECKED ⇒ persistent
+        // (IsPersistent + 365-day expiry, survives browser restarts), UNCHECKED ⇒ a
+        // normal non-persistent 8-hour session cookie.
         var participant = result.Profile;
-        var claims = new List<Claim>
-        {
-            new(ClaimTypes.NameIdentifier, participant.Id.ToString()),
-            new(ClaimTypes.Email, participant.Email),
-            new(ClaimTypes.Name, participant.FullName),
-            new(ClaimTypes.Role, participant.Role.ToString()),
-            new("EventId", participant.EventId.ToString()),
-        };
-        var identity = new ClaimsIdentity(
-            claims, CookieAuthenticationDefaults.AuthenticationScheme);
-
-        // Session lifetime from the single "Remember me" checkbox.
-        //   CHECKED   -> IsPersistent + 365-day expiry — the ASP.NET Core idiom for
-        //               "until explicit sign-out"; the cookie survives browser restarts.
-        //   UNCHECKED -> a normal non-persistent session cookie (cleared when the
-        //               browser closes) with the default 8-hour sliding expiry.
-        var (expiresUtc, isPersistent) = RememberMe
-            ? (DateTimeOffset.UtcNow.AddDays(365), true)
-            : (DateTimeOffset.UtcNow.AddHours(8),  false);
-        var authProps = new AuthenticationProperties
-        {
-            IsPersistent = isPersistent,
-            ExpiresUtc   = expiresUtc,
-            AllowRefresh = true,
-        };
-
-        await HttpContext.SignInAsync(
-            CookieAuthenticationDefaults.AuthenticationScheme,
-            new ClaimsPrincipal(identity),
-            authProps);
+        await CommunityHub.Auth.ParticipantSessionSignIn.SignInAsync(
+            HttpContext,
+            participant.Id, participant.Email, participant.FullName,
+            participant.Role, participant.EventId,
+            persistent: RememberMe);
 
         var safeReturn = SafeLocalReturnUrl(ReturnUrl);
         return safeReturn is not null ? Redirect(safeReturn) : RedirectToPage("/Index");

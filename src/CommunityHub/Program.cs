@@ -156,6 +156,14 @@ builder.Services.AddScoped<CommunityHub.Core.Auth.IWelcomeAutoLoginTokenService,
     CommunityHub.Core.Auth.WelcomeAutoLoginTokenService>();
 // Organizer admin (list / revoke) + housekeeping (prune) for welcome grants.
 builder.Services.AddScoped<CommunityHub.Core.Auth.WelcomeGrantAdminService>();
+// §169 personal email magic-link: the long-lived (365-day), REUSABLE, per-
+// participant auto-login link that every in-hub email CTA routes through (via the
+// EmailTemplateProvider hubUrl seam) and that the /go page redeems. Distinct
+// DataProtection purpose + grant Purpose ("email") from the single-use welcome
+// grants above. Resolved per-send (scoped) by the singleton EmailTemplateProvider.
+builder.Services.AddScoped<CommunityHub.Core.Auth.EmailMagicLinkService>();
+builder.Services.AddScoped<CommunityHub.Core.Auth.IEmailMagicLinkService>(sp =>
+    sp.GetRequiredService<CommunityHub.Core.Auth.EmailMagicLinkService>());
 // Anonymous Party RSVP (public /Party form + organizer headcount).
 builder.Services.AddScoped<CommunityHub.Core.Reminders.PartyRsvpService>();
 // In-hub Master Class signup + waitlist (CEH-owned; replaces Zoho Bookings).
@@ -647,6 +655,20 @@ builder.Services.AddScoped<CommunityHub.Core.Integrations.Graphics.SessionEvalsQ
 // is set (then the committed wwwroot images are the fallback via VenueImageProvider).
 builder.Services.AddScoped<CommunityHub.Core.Integrations.Graphics.VenueImageService>();
 builder.Services.AddScoped<CommunityHub.Venue.VenueImageProvider>();
+// §153: server-proxied DIRECT download of the speaker presentation template (.potx) from the
+// configured SharePoint folder — speakers get the file, never a SharePoint-site link. Inert until
+// Graphics:SharePoint:SpeakerTemplateFolderPath is set (the page then falls back to the URL).
+builder.Services.AddScoped<CommunityHub.Core.Integrations.Graphics.SpeakerTemplateService>();
+// §166: final per-session evaluation PDFs — organizer upload + speaker download via the same
+// SharePoint file-store seam (app creds); inert until Graphics:SharePoint:SessionEvalPdfFolderPath
+// is set. Speakers get the file through the /session-eval/{id}/download proxy, never a SharePoint URL.
+builder.Services.AddScoped<CommunityHub.Core.Integrations.Graphics.SessionEvalPdfService>();
+// §165: external-designer graphics pipeline — pulls speaker photos NAMED BY NAME (speaker-upload
+// wins over Sessionize), builds per-session/master-class/track folders, and generates an Excel
+// brief. Organizer-only; reuses the SharePoint file-store + picture-fetch seams. Inert until the
+// relevant Graphics:SharePoint folder paths (SpeakerPhotosFolderPath / Sessions / MasterClass /
+// TracksFolderPath) are configured — every stage independently no-ops when its folder is unset.
+builder.Services.AddScoped<CommunityHub.Core.Integrations.Graphics.ExternalDesignerGraphicsService>();
 builder.Services.AddScoped<CommunityHub.Core.Integrations.Graphics.AssetLocationService>();
 // Read-only contract that EXPOSES publishable branding graphics to a downstream
 // consumer (the §19 SoMe queue, or any other) — the release/visibility gate is
@@ -755,6 +777,22 @@ builder.Configuration
     .Bind(speakerDeadlineOptions);
 builder.Services.AddSingleton(speakerDeadlineOptions);
 builder.Services.AddScoped<CommunityHub.Core.Config.SpeakerDeadlineSeeder>();
+
+// PartyTaskSeeder (§164): ensures the per-participant "party sign-up" task exists for
+// the staff roles (Sponsor/Speaker/Volunteer/EventPartner/Organizer) so it surfaces in
+// My Tasks + Get Started and the reminder job nags until answered. Idempotent
+// (SourceKey-keyed), so it is safe to call from /Index on every hub page-load.
+builder.Services.AddScoped<CommunityHub.Core.Config.PartyTaskSeeder>();
+
+// --- Attendee "fun IT games" quizzes (REQUIREMENTS §171) -------------------
+// The server-authoritative play engine (draw/score/timing), the per-topic
+// leaderboard reader, organizer authoring, and the starter-pool seeder. The
+// seeder is idempotent (slug-keyed), so it is safe to call on every Games/
+// authoring page-load to guarantee a fresh DB has playable quizzes.
+builder.Services.AddScoped<CommunityHub.Core.Quizzes.QuizPlayService>();
+builder.Services.AddScoped<CommunityHub.Core.Quizzes.QuizLeaderboardService>();
+builder.Services.AddScoped<CommunityHub.Core.Quizzes.QuizAuthoringService>();
+builder.Services.AddScoped<CommunityHub.Core.Config.QuizSeeder>();
 
 // SignalGroupsProvider (§109): resolves the role-appropriate Signal chat + broadcast
 // invite links from config/signal-groups.<edition>.json for the "Join Signal groups"
@@ -1168,6 +1206,53 @@ app.MapGet("/venue-image/{folder}/{file}", async (
     return img is null
         ? Results.NotFound()
         : Results.File(img.Content, img.ContentType);
+}).RequireAuthorization();
+
+// §153: DIRECT download of the speaker presentation template — streamed from SharePoint with the
+// app's own creds (no SharePoint-site link). 404s when the proxy isn't configured/available; the
+// speaker page only links here when the service reports IsAvailable, else it uses the fallback URL.
+app.MapGet("/speaker-template/download", async (
+        CommunityHub.Core.Integrations.Graphics.SpeakerTemplateService templates,
+        CancellationToken ct) =>
+{
+    var tpl = await templates.GetTemplateAsync(ct);
+    return tpl is null
+        ? Results.NotFound()
+        : Results.File(tpl.Content, tpl.ContentType, fileDownloadName: tpl.FileName);
+}).RequireAuthorization();
+
+// §160: server-proxied download of ONE of the signed-in speaker's OWN released graphics — streamed
+// from SharePoint with the app's creds so the speaker (who has no SharePoint permission) actually
+// gets the file. Ownership + release gate enforced in the service; 404 otherwise.
+app.MapGet("/speaker-graphic/{id:int}", async (
+        int id,
+        CommunityHub.Core.Integrations.Graphics.GraphicsService graphics,
+        CommunityHub.Auth.ICurrentParticipantAccessor participant,
+        CancellationToken ct) =>
+{
+    var me = participant.Current;
+    if (me is null) return Results.Unauthorized();
+    var f = await graphics.GetSpeakerGraphicFileAsync(me.EventId, me.ParticipantId, id, ct);
+    return f is null
+        ? Results.NotFound()
+        : Results.File(f.Content, f.ContentType, fileDownloadName: f.FileName);
+}).RequireAuthorization();
+
+// §166: server-proxied download of a session's FINAL evaluation PDF — streamed from SharePoint
+// with the app's creds so a speaker (no SharePoint permission) actually gets the file. Access gate
+// (organizer in the edition OR a speaker on this session) is enforced in the service; 404 otherwise.
+app.MapGet("/session-eval/{id:int}/download", async (
+        int id,
+        CommunityHub.Core.Integrations.Graphics.SessionEvalPdfService evalPdfs,
+        CommunityHub.Auth.ICurrentParticipantAccessor participant,
+        CancellationToken ct) =>
+{
+    var me = participant.Current;
+    if (me is null) return Results.Unauthorized();
+    var f = await evalPdfs.GetPdfForParticipantAsync(me.EventId, me.ParticipantId, me.Role, id, ct);
+    return f is null
+        ? Results.NotFound()
+        : Results.File(f.Content, "application/pdf", fileDownloadName: f.FileName);
 }).RequireAuthorization();
 
 app.MapRazorPages();

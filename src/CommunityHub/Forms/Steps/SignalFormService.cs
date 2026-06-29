@@ -79,7 +79,7 @@ public sealed class SignalFormService : IWizardFormService
         if (links is null) { model.OutOfScope = true; return model; }
         model.Links = links;
 
-        var task = await EnsureTaskAsync(eventId, participantId, ct);
+        var task = await EnsureTaskAsync(eventId, participantId, links, ct);
         model.Done = task.State == TaskState.Done;
         return model;
     }
@@ -96,7 +96,7 @@ public sealed class SignalFormService : IWizardFormService
         if (links is null) { model.OutOfScope = true; return model; }
         model.Links = links;
 
-        var task = await EnsureTaskAsync(eventId, participantId, ct);
+        var task = await EnsureTaskAsync(eventId, participantId, links, ct);
         if (task.State == TaskState.Done)
         {
             task.State = TaskState.Open;
@@ -129,7 +129,7 @@ public sealed class SignalFormService : IWizardFormService
         if (links is null) { model.OutOfScope = true; return WizardStepOutcome.NotRelevant; }
         model.Links = links;
 
-        var task = await EnsureTaskAsync(eventId, participantId, ct);
+        var task = await EnsureTaskAsync(eventId, participantId, links, ct);
         if (task.State != TaskState.Done)
         {
             task.State = TaskState.Done;
@@ -141,9 +141,14 @@ public sealed class SignalFormService : IWizardFormService
     }
 
     /// <summary>Ensure the "Join Signal groups" task exists (idempotent), per-participant scoped.</summary>
-    private async Task<ParticipantTask> EnsureTaskAsync(int eventId, int participantId, CancellationToken ct)
+    private async Task<ParticipantTask> EnsureTaskAsync(
+        int eventId, int participantId, SignalGroupLinks links, CancellationToken ct)
     {
         var sourceKey = WizardStepTasks.Signal(participantId);
+        // §162: embed the actual signal.group join URLs in the description — the task row's
+        // linkifier turns them into clickable join buttons, so the person can join straight from
+        // the task (they were missing the links before).
+        var description = BuildSignalTaskDescription(links);
         var task = await _db.Tasks.FirstOrDefaultAsync(
             t => t.EventId == eventId && t.AssignedParticipantId == participantId
                  && t.SourceKey == sourceKey, ct);
@@ -154,7 +159,7 @@ public sealed class SignalFormService : IWizardFormService
                 EventId = eventId,
                 AssignedParticipantId = participantId,
                 Title = "Join Signal groups",
-                Description = "Join the ELDK27 Signal chat + broadcast group, then mark this done.",
+                Description = description,
                 State = TaskState.Open,
                 IsMandatory = false,
                 SourceKey = sourceKey,
@@ -163,6 +168,21 @@ public sealed class SignalFormService : IWizardFormService
             _db.Tasks.Add(task);
             await _db.SaveChangesAsync(ct);
         }
+        else if (task.Description != description)
+        {
+            // Refresh existing tasks so they pick up the join links (idempotent).
+            task.Description = description;
+            await _db.SaveChangesAsync(ct);
+        }
         return task;
+    }
+
+    private static string BuildSignalTaskDescription(SignalGroupLinks links)
+    {
+        var sb = new System.Text.StringBuilder(
+            "Join the ELDK27 Signal group(s) below, then mark this done.");
+        if (links.HasChat) sb.Append("\n\nChat group: ").Append(links.ChatUrl);
+        if (links.HasBroadcast) sb.Append("\n\nBroadcast group: ").Append(links.BroadcastUrl);
+        return sb.ToString();
     }
 }

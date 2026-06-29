@@ -1,0 +1,39 @@
+@model CommunityHub.Forms.Steps.PartyFormModel
+@*
+    Fields-ONLY partial for the Party sign-up step (REQUIREMENTS §164, §148, REFERENCE: _DinnerFields).
+    Contains NO <form>, no buttons, no page chrome — the HOST (the generic /Forms/Wizard shell)
+    owns those and places this partial inside its single <form>. Renders the YES/NO opt-in plus,
+    for sponsors only, the company head-count input. Mobile-first. Bound to PartyFormModel.
+*@
+
+@if (Model.NoParty)
+{
+    <p class="info">There's no party taking sign-ups right now.</p>
+}
+else
+{
+    <p>Join us for the party@(string.IsNullOrEmpty(Model.DateLine) ? "" : $" on {Model.DateLine}")
+       (@Model.TimeWindow). Let us know if you'll be there — you can change your answer any time.</p>
+
+    @if (Model.Done)
+    {
+        <p class="success" role="status">✅ Your RSVP is saved. Update it below if your plans change.</p>
+    }
+
+    <div class="optin" style="display:flex;gap:10px;align-items:flex-start;margin:16px 0 4px;background:#f3f6fb;border:1px solid #dde4ee;border-radius:10px;padding:12px;">
+        <input type="checkbox" id="Attending" name="Attending" value="true" checked="@Model.Attending"
+               style="margin-top:2px;width:18px;height:18px;" />
+        <label for="Attending" style="font-weight:500;">Yes, I'll attend the party (@Model.TimeWindow).</label>
+    </div>
+
+    @if (Model.IsSponsor)
+    {
+        <label for="HeadCount" style="display:block;font-weight:600;font-size:14px;margin:14px 0 5px;">
+            How many will attend from your company?
+        </label>
+        <input type="number" id="HeadCount" name="HeadCount" min="1" step="1"
+               value="@(Model.HeadCount?.ToString())" inputmode="numeric"
+               style="width:100%;box-sizing:border-box;padding:11px 12px;border:1px solid #cbd2d9;border-radius:9px;font-size:16px;" />
+        <p class="muted" style="font-size:12.5px;margin:4px 0 0;">Include yourself in the count.</p>
+    }
+}

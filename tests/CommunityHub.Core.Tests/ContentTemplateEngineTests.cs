@@ -23,6 +23,7 @@ public sealed class ContentTemplateEngineTests
         var slices = countries.Select(c => new TelemetrySlice(c.Country, c.N)).ToList();
         var tables = new List<TelemetryTable> { new("Where attendees are from", slices) };
         return new AttendeeTelemetry("all", "All attendees", total, total, 100, pct2Day,
+            pct2Day, 0, 0,
             Array.Empty<TelemetryDay>(), tables, DateTimeOffset.UnixEpoch);
     }
 

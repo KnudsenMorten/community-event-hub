@@ -51,43 +51,12 @@ public class ContactModel : PageModel
     public string? BookingsUrl { get; private set; }
     public string EditionCode { get; private set; } = string.Empty;
 
-    public async Task<IActionResult> OnGetAsync(CancellationToken ct)
+    public IActionResult OnGet()
     {
-        var me = _participant.Current;
-        if (me is null) return RedirectToPage("/Login");
-
-        // Server-enforced role gate — the sponsor contact page is for the Sponsor role only.
-        if (me.Role != ParticipantRole.Sponsor)
-        {
-            AccessDenied = true;
-            return Page();
-        }
-
-        var cfg = _eventConfigLoader.Load(_eventConfigOptions.EventConfigPath);
-        EditionCode = cfg.Code ?? string.Empty;
-        if (cfg.Placeholders.TryGetValue("leadContactName", out var n) && !string.IsNullOrWhiteSpace(n)) LeadName = n;
-        if (cfg.Placeholders.TryGetValue("leadContactEmail", out var e) && !string.IsNullOrWhiteSpace(e)) LeadEmail = e;
-        // Fall back to the edition's generic support mailbox (no personal name) so the
-        // mailto still works when no specific lead contact email is configured.
-        if (string.IsNullOrWhiteSpace(LeadEmail)
-            && cfg.Placeholders.TryGetValue("supportEmail", out var se) && !string.IsNullOrWhiteSpace(se)) LeadEmail = se;
-        if (cfg.Placeholders.TryGetValue("bookingsUrl", out var b) && !string.IsNullOrWhiteSpace(b)) BookingsUrl = b;
-
-        // Resolve the sponsor's company display name for the mailto subject
-        // (so the lead sees "from <Company>"). Same source the pull stamps.
-        var companyId = await _db.Participants
-            .Where(p => p.Id == me.ParticipantId)
-            .Select(p => p.SponsorCompanyId)
-            .FirstOrDefaultAsync(ct);
-        if (!string.IsNullOrWhiteSpace(companyId))
-        {
-            CompanyName = await _db.SponsorUploadLocations
-                .Where(l => l.EventId == me.EventId && l.SponsorCompanyId == companyId
-                            && l.CompanyName != null && l.CompanyName != string.Empty)
-                .Select(l => l.CompanyName)
-                .FirstOrDefaultAsync(ct);
-        }
-
-        return Page();
+        // Unified contact page (operator 2026-06-28): every role — including sponsors —
+        // uses the same shared /Contact page now, so this old sponsor-specific route just
+        // redirects there (bookmarks/old links keep working).
+        if (_participant.Current is null) return RedirectToPage("/Login");
+        return RedirectToPage("/Contact");
     }
 }

@@ -88,6 +88,22 @@ public sealed class AttendeeBackstageSyncJob
 
         var result = await _sync.SyncAsync(eventId, rows, orders, ct);
 
+        // §169 RE-ENABLED (operator 2026-06-29): attendees ARE participants. Provision an
+        // Active, login-capable, Attendee-role Participant for every 2-day-ticket holder
+        // that lacks one — BEFORE any attendee email is built below — so the magic-link
+        // seam can bind each attendee's {{hubUrl}} CTA to their personal /go/{token}.
+        // Idempotent (skips holders who already have a Participant); a provisioning failure
+        // must NEVER break the sync, so it is best-effort.
+        var provisioned = 0;
+        try
+        {
+            provisioned = (await _provisioning.ProvisionAsync(eventId, ct)).Count;
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex, "AttendeeBackstageSyncJob: attendee provisioning failed (continuing).");
+        }
+
         var domain = _config["Hub:CustomDomain"];
         var baseUrl = string.IsNullOrWhiteSpace(domain) ? "https://eldk27.eventhub.expertslive.dk" : $"https://{domain}";
 
@@ -110,10 +126,10 @@ public sealed class AttendeeBackstageSyncJob
         _log.LogInformation(
             "AttendeeBackstageSyncJob: {Orders} orders ({OC} new, {OX} cancelled), {Pulled} attendees — "
             + "created {C}, updated {U}, reassigned {R} ({RE} validated), cancelled {X} ({PE} promoted), "
-            + "reactivated {RA}, {CH} chaser(s) sent.",
+            + "reactivated {RA}, provisioned {PV} login participant(s), {CH} chaser(s) sent.",
             orders.Count, result.OrdersCreated, result.OrdersCancelled, rows.Count,
             result.Created, result.Updated, result.Reassigned, reEmails, result.Cancelled, promoEmails,
-            result.Reactivated, chasers);
+            result.Reactivated, provisioned, chasers);
 
         // Named Engine event (REQUIREMENTS §24) — the sync RUN summary.
         await _audit.RecordAsync(new AuditEntry
@@ -129,9 +145,12 @@ public sealed class AttendeeBackstageSyncJob
                 + $"cancelled {result.Cancelled}, reactivated {result.Reactivated}); {chasers} chaser(s) sent",
         }, ct);
 
-        // Attendee welcome auto-provisioning REMOVED (operator 2026-06-23): there is
-        // no separate attendee welcome — the only attendee mail is the Master Class
-        // confirmed-seat email (masterclass-confirmed), sent on seat confirmation.
+        // Attendee provisioning was REMOVED 2026-06-23 (no separate attendee welcome) but
+        // RE-ENABLED above 2026-06-29 for §169: attendees ARE participants, so every 2-day
+        // holder needs a login-capable Participant for their attendee emails (Master Class
+        // confirm/chaser) to carry a personal magic-link. Provisioning mints NO welcome of
+        // its own — it only creates the login identity; the emails are still the existing
+        // Master-Class sends. See the ProvisionAsync call right after the sync above.
     }
 
     /// <summary>
@@ -161,6 +180,20 @@ public sealed class AttendeeBackstageSyncJob
                         && a.MirrorState == MirrorState.Active)
             .ToListAsync(ct);
 
+        // §169: map each chased attendee's email to their provisioned login Participant
+        // id (Attendee-role preferred, any same-email match accepted) so the
+        // pending-selection email's {{hubUrl}} CTA is the recipient's personal
+        // auto-login magic-link. One query for the edition's participants, looked up in
+        // the loop. Fail-safe: no participant (e.g. not provisioned yet) ⇒ plain hub URL.
+        var participantIdByEmail = (await _db.Participants
+                .Where(p => p.EventId == eventId)
+                .Select(p => new { p.Id, p.Email, p.Role })
+                .ToListAsync(ct))
+            .GroupBy(p => p.Email.Trim().ToLowerInvariant())
+            .ToDictionary(
+                g => g.Key,
+                g => (g.FirstOrDefault(p => p.Role == ParticipantRole.Attendee) ?? g.First()).Id);
+
         var due = new List<ReminderMessage>();
         foreach (var a in twoDay)
         {
@@ -171,7 +204,9 @@ public sealed class AttendeeBackstageSyncJob
             a.LastSyncedAt = now;
             if (hasSelection) continue;
 
-            var tokens = _templates.NewTokenSet();
+            int? pid = participantIdByEmail.TryGetValue(
+                (a.Email ?? string.Empty).Trim().ToLowerInvariant(), out var found) ? found : null;
+            var tokens = _templates.NewTokenSet(pid);
             tokens["firstName"] = string.IsNullOrWhiteSpace(a.FirstName) ? "there" : a.FirstName;
             tokens["eventDisplayName"] = eventDisplayName;
             var rendered = _templates.Render("pending-master-class-selection", tokens);

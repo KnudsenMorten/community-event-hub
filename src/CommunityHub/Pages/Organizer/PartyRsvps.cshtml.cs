@@ -68,9 +68,10 @@ public class PartyRsvpsModel : PageModel
     {
         var rows = await _svc.GetAllAsync(eventId, ct);
         var sb = new StringBuilder();
-        sb.Append("Name,Email,Attending,SubmittedUtc\r\n");
+        sb.Append("Name,Email,Attending,HeadCount,SubmittedUtc\r\n");
         foreach (var r in rows)
-            sb.Append($"{Csv(r.Name)},{Csv(r.Email)},{(r.Attending ? "yes" : "no")},{r.UpdatedAt:yyyy-MM-dd HH:mm}\r\n");
+            sb.Append($"{Csv(r.Name)},{Csv(r.Email)},{(r.Attending ? "yes" : "no")}," +
+                      $"{(r.HeadCount?.ToString() ?? "")},{r.UpdatedAt:yyyy-MM-dd HH:mm}\r\n");
         return sb.ToString();
     }
 

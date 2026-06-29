@@ -151,23 +151,31 @@ public sealed class TaskReminderBuilder
             // Single wording now the reminder only goes out on the due day (§81).
             var state = "due today";
 
-            // Build the token set: branding tokens + this task's tokens.
-            var tokens = _templates.NewTokenSet();
-            tokens["firstName"] = firstName;
-            tokens["communityName"] = communityName;
-            tokens["eventDisplayName"] = eventDisplayName;
-            tokens["taskTitle"] = t.Title;
-            tokens["dueDate"] = t.DueDate.ToString("dd/MM/yyyy");
-            tokens["state"] = state;
-            tokens["taskLink"] = "Open the hub to see and update this task.";
-
             // Per-role organizer-lead contact footer (config → token bridge). The
             // names/emails live ONLY in the edition config; here we just resolve
             // the recipient's role to contactName/contactEmail/supportEmail tokens.
             var (placeholders, supportEmail) = ContactConfig();
-            RoleContact.AddTo(tokens, t.Participant.Role, placeholders, supportEmail);
 
-            var rendered = _templates.Render(TemplateName, tokens);
+            // §169: render the reminder for a SPECIFIC recipient participant so the
+            // hub CTA ({{hubUrl}}) becomes THAT recipient's personal auto-login
+            // magic-link. The sponsor branch below sends one body PER coordinator
+            // (each a known participant), so it renders once PER coordinator — every
+            // coordinator gets their OWN link instead of one shared plain URL. The
+            // seam is fail-safe: with no participant / no magic-link service wired,
+            // the plain hub URL is kept (see EmailTemplateProvider.NewTokenSet).
+            RenderedEmail RenderForRecipient(int? recipientParticipantId)
+            {
+                var tokens = _templates.NewTokenSet(recipientParticipantId);
+                tokens["firstName"] = firstName;
+                tokens["communityName"] = communityName;
+                tokens["eventDisplayName"] = eventDisplayName;
+                tokens["taskTitle"] = t.Title;
+                tokens["dueDate"] = t.DueDate.ToString("dd/MM/yyyy");
+                tokens["state"] = state;
+                tokens["taskLink"] = "Open the hub to see and update this task.";
+                RoleContact.AddTo(tokens, t.Participant.Role, placeholders, supportEmail);
+                return _templates.Render(TemplateName, tokens);
+            }
 
             // Persona-aware reminder (10a-4): the persona group is derived from the
             // assigned participant's role so the send is categorised per persona
@@ -196,12 +204,14 @@ public sealed class TaskReminderBuilder
                     var cCc = string.IsNullOrWhiteSpace(c.SecondaryEmail)
                         ? null
                         : new[] { c.SecondaryEmail!.Trim() };
+                    // §169: render PER coordinator so each carries THEIR own magic-link.
+                    var cRendered = RenderForRecipient(c.ParticipantId);
                     messages.Add(new ReminderMessage(
                         RecipientEmail: c.Email,
                         ReminderType: "task-deadline",
                         OccasionKey: $"{occasionKey}:{c.Email}",
-                        Subject: rendered.Subject,
-                        HtmlBody: rendered.HtmlBody,
+                        Subject: cRendered.Subject,
+                        HtmlBody: cRendered.HtmlBody,
                         DeliverToEmail: c.Email,
                         Persona: persona,
                         ParticipantId: c.ParticipantId,
@@ -215,6 +225,8 @@ public sealed class TaskReminderBuilder
                 ? null
                 : new[] { t.Participant.SecondaryEmail!.Trim() };
 
+            // §169: the assignee's own personal magic-link body.
+            var rendered = RenderForRecipient(t.Participant.Id);
             messages.Add(new ReminderMessage(
                 RecipientEmail: t.Participant.Email,
                 ReminderType: "task-deadline",

@@ -45,6 +45,10 @@ public sealed record AttendeeTelemetry(
     int SegmentCount,
     int PctOfTotal,
     int Pct2DayInSegment,
+    // Dashboard headline KPIs (2026-06-28) — computed over ALL attendees, not the segment:
+    int Pct2DayAll,        // % who bought a 2-day ticket
+    int WordOfMouthCount,  // people who heard via word of mouth
+    int FirstTimerCount,   // first-timers ("No, ELDK27 is my first…")
     IReadOnlyList<TelemetryDay> Daily,
     IReadOnlyList<TelemetryTable> Tables,
     DateTimeOffset GeneratedAtUtc,
@@ -76,7 +80,6 @@ public sealed class AttendeeTelemetryService
         new TelemetrySegment("architect", "Architects & consultants"),
         new TelemetrySegment("developer", "Developers & engineers"),
         new TelemetrySegment("itpro", "IT professionals & admins"),
-        new TelemetrySegment("groups", "Group buyers (companies with 2+ tickets)"),
     };
 
     // The "2-day" (Master-Class eligibility) definition is UNIFIED through the single
@@ -126,10 +129,6 @@ public sealed class AttendeeTelemetryService
         var activeFilterValue = activeFilterKey is null ? null : filterValue;
 
         var seg = Segments.FirstOrDefault(s => s.Key == segmentKey) ?? Segments[0];
-        var companyCounts = all
-            .Where(a => !string.IsNullOrWhiteSpace(a.CompanyName))
-            .GroupBy(a => a.CompanyName!.Trim(), StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(g => g.Key, g => g.Count(), StringComparer.OrdinalIgnoreCase);
 
         Func<BackstageAttendee, bool> pred = seg.Key switch
         {
@@ -141,7 +140,6 @@ public sealed class AttendeeTelemetryService
             "architect" => a => ArchitectRx.IsMatch(a.JobTitle ?? ""),
             "developer" => a => DeveloperRx.IsMatch(a.JobTitle ?? ""),
             "itpro" => a => ItProRx.IsMatch(a.JobTitle ?? ""),
-            "groups" => a => !string.IsNullOrWhiteSpace(a.CompanyName) && companyCounts.TryGetValue(a.CompanyName!.Trim(), out var n) && n >= 2,
             _ => _ => true,
         };
 
@@ -154,6 +152,19 @@ public sealed class AttendeeTelemetryService
         var count = segData.Count;
         var twoDay = segData.Count(Is2Day);
 
+        // Dashboard KPIs over the WHOLE attendee base (not the segment): 2-day %, word-of-mouth
+        // count, and first-timer count. After the 2026-06-28 field-label swap, single_choice_3 is
+        // the "how did you hear" answer and multiple_choice is the "attended before?" answer.
+        var twoDayAll = all.Count(Is2Day);
+        var wordOfMouth = all.Count(a =>
+            (DimensionValue(a, "cf:single_choice_3") ?? "").Contains("word of mouth", StringComparison.OrdinalIgnoreCase));
+        var firstTimers = all.Count(a =>
+        {
+            var v = DimensionValue(a, "cf:multiple_choice") ?? "";
+            return v.Contains("my first", StringComparison.OrdinalIgnoreCase)
+                || v.StartsWith("no", StringComparison.OrdinalIgnoreCase);
+        });
+
         return new AttendeeTelemetry(
             SegmentKey: seg.Key,
             SegmentLabel: seg.Label,
@@ -161,6 +172,9 @@ public sealed class AttendeeTelemetryService
             SegmentCount: count,
             PctOfTotal: total > 0 ? (int)Math.Round(100.0 * count / total) : 0,
             Pct2DayInSegment: count > 0 ? (int)Math.Round(100.0 * twoDay / count) : 0,
+            Pct2DayAll: total > 0 ? (int)Math.Round(100.0 * twoDayAll / total) : 0,
+            WordOfMouthCount: wordOfMouth,
+            FirstTimerCount: firstTimers,
             Daily: BuildDaily(segData),
             Tables: BuildTables(segData, isOrganizer),
             GeneratedAtUtc: DateTimeOffset.UtcNow,
@@ -425,8 +439,11 @@ public sealed class AttendeeTelemetryService
         ["single_choice"]   = "Attendee interest / primary track",
         ["single_choice_1"] = "Job role of attendees",
         ["single_choice_2"] = "Type of attendee",
-        ["single_choice_3"] = "Have you attended ELDK before?",
-        ["multiple_choice"] = "How did attendee learn about the event?",
+        // Swapped 2026-06-28: single_choice_3 actually holds the "how did you hear" answer
+        // (e.g. "Word of mouth"), and multiple_choice holds the "first time?" answer — the
+        // labels were on the wrong keys, so the two cards showed each other's data.
+        ["single_choice_3"] = "How did attendee learn about the event?",
+        ["multiple_choice"] = "Have you attended ELDK before?",
     };
 
     /// <summary>Friendly label for a raw Zoho custom-field key (space/dash/underscore-insensitive).</summary>

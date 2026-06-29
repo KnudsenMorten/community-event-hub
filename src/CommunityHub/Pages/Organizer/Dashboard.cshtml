@@ -256,6 +256,20 @@
             @if (r.OverdueTasks > 0)
             {
                 <p class="warn">@r.OverdueTasks task(s) are past their due date.</p>
+                @* §163: drill into WHO is overdue (and how many) instead of just a count. Each name
+                   links to act on that person's tasks. *@
+                @if (Model.TopOverdueSpeakers.Count > 0)
+                {
+                    <ul style="margin:6px 0 0;padding-left:18px;font-size:14px;">
+                        @foreach (var s in Model.TopOverdueSpeakers)
+                        {
+                            <li>
+                                <a href="/Organizer/Participants?Search=@Uri.EscapeDataString(s.Email)">@s.Name</a>
+                                <span style="color:#6b7280;">— @s.OverdueCount overdue</span>
+                            </li>
+                        }
+                    </ul>
+                }
             }
         }
     </div>

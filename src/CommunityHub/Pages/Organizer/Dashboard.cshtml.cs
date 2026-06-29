@@ -178,15 +178,39 @@ public class DashboardModel : PageModel
         var applicant = await _db.Participants.FirstOrDefaultAsync(
             p => p.Id == id && p.EventId == me.EventId
                  && p.Role == ParticipantRole.Volunteer && !p.IsActive, ct);
-        if (applicant is not null)
+        if (applicant is null)
         {
+            PendingActionMessage = "That applicant was not found (or was already processed).";
+            return RedirectToPage(new { msg = PendingActionMessage });
+        }
+
+        // The "an applicant has no children" assumption isn't always true (test/seed rows can
+        // carry tasks, pins or volunteer availability), and a hard delete then FK-fails -> 500.
+        // Clear the dependent rows first (unassign tasks, drop pins/availability), then delete;
+        // wrap in a guard so a remaining FK can never 500 — it reports cleanly instead.
+        try
+        {
+            var assignedTasks = await _db.Tasks
+                .Where(t => t.AssignedParticipantId == applicant.Id).ToListAsync(ct);
+            foreach (var t in assignedTasks) t.AssignedParticipantId = null;
+
+            _db.LoginPins.RemoveRange(_db.LoginPins.Where(x => x.ParticipantId == applicant.Id));
+            _db.VolunteerAvailabilities.RemoveRange(_db.VolunteerAvailabilities.Where(x => x.ParticipantId == applicant.Id));
+            _db.VolunteerDayAvailabilities.RemoveRange(_db.VolunteerDayAvailabilities.Where(x => x.ParticipantId == applicant.Id));
+            _db.VolunteerTaskAssignments.RemoveRange(_db.VolunteerTaskAssignments.Where(x => x.ParticipantId == applicant.Id));
+
             _db.Participants.Remove(applicant);
             await _db.SaveChangesAsync(ct);
             PendingActionMessage = $"Declined {applicant.FullName} ({applicant.Email}). Row removed.";
         }
-        else
+        catch (DbUpdateException)
         {
-            PendingActionMessage = "That applicant was not found (or was already processed).";
+            // Still linked to data we don't unwind here — never 500. The row is already
+            // inactive, so it stays out of the way; the organizer can clean it up elsewhere.
+            _db.ChangeTracker.Clear();
+            PendingActionMessage =
+                $"Couldn't fully remove {applicant.FullName} — they still have linked data; "
+                + "left deactivated (they can't sign in).";
         }
         return RedirectToPage(new { msg = PendingActionMessage });
     }

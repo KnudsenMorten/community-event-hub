@@ -7,12 +7,27 @@
     ViewData["Title"] = "Pre-selection queue";
 }
 
+<style>
+    /* §167: align the filter Apply button with the dropdown, and give the per-row
+       actions consistent, uncramped spacing. */
+    .psq-filter select, .psq-filter button { height:40px; box-sizing:border-box; }
+    .psq-actions { display:inline-flex; flex-wrap:wrap; gap:6px; }
+    .psq-actions button { padding:6px 12px; font-size:13px; line-height:1.2; white-space:nowrap; }
+    .psq-help { background:#f1f5f9; border:1px solid #dbe2ea; border-radius:8px; padding:10px 12px;
+                font-size:12.5px; color:#475569; margin:0 0 14px; }
+    .psq-help strong { color:#1f2937; }
+</style>
 <div class="card">
     <h1>Pre-selection queue</h1>
     <p class="info" style="margin-top:0;">
         Prospective volunteers, speakers and media-team land here from the
         Sessionize sync and the interest form. Validate the data, then preselect
         or activate. Only an <strong>Active</strong> row can sign in.
+    </p>
+    <p class="psq-help">
+        <strong>Preselect</strong> = shortlist this person but keep them <em>inactive</em> — they
+        <strong>cannot sign in yet</strong> (a "we intend to include them, not confirmed" state).
+        <strong>Activate</strong> = make them <em>active</em> so they <strong>can sign in</strong> and get hub access.
     </p>
 
     @if (Model.AccessDenied)
@@ -27,7 +42,7 @@
         }
 
         <!-- Source filter -->
-        <form method="get" style="margin-bottom:16px;display:flex;flex-wrap:wrap;gap:8px;align-items:end;">
+        <form method="get" class="psq-filter" style="margin-bottom:16px;display:flex;flex-wrap:wrap;gap:8px;align-items:end;">
             <span style="display:flex;flex-direction:column;gap:2px;">
                 <label for="SourceFilter">Source</label>
                 <select id="SourceFilter" name="SourceFilter">
@@ -92,7 +107,8 @@
                                     <span class="error">Inactive</span>
                                 }
                             </td>
-                            <td style="white-space:nowrap;">
+                            <td>
+                                <span class="psq-actions">
                                 @if (p.LifecycleState == ParticipantLifecycleState.Inactive)
                                 {
                                     <button type="submit" class="secondary"
@@ -111,6 +127,7 @@
                                         asp-route-SourceFilter="@Model.SourceFilter"
                                         data-ceh-confirm="confirmDeleteQueueRow"
                                         data-ceh-summary="@p.FullName">@Localizer["Queue.Delete"]</button>
+                                </span>
                             </td>
                         </tr>
                     }

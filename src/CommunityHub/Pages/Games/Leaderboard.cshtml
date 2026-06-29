@@ -1,0 +1,77 @@
+@page
+@model CommunityHub.Pages.Games.LeaderboardModel
+@{
+    ViewData["Title"] = Model.Title + " · " + Localizer["Games.Leaderboard"].Value;
+}
+
+@if (Model.NoQuiz)
+{
+    <div class="card">
+        <h1 style="margin-top:0;">@Localizer["Games.Leaderboard"]</h1>
+        <p class="muted">@Localizer["Games.NotAvailable"]</p>
+        <p><a asp-page="/Games/Index">← @Localizer["Games.BackToGames"]</a></p>
+    </div>
+    return;
+}
+
+@{
+    var board = Model.Board!;
+    bool ownInTop = board.Own is not null && board.Top.Any(e => e.Rank == board.Own!.Rank);
+}
+
+<div class="card">
+    <h1 style="margin-top:0;">🏆 @Model.Title — @Localizer["Games.Leaderboard"]</h1>
+    <p style="color:#6b7280;font-size:13.5px;">
+        @Localizer["Games.LeaderboardIntro"] · @board.TotalPlayers @Localizer["Games.Players"]
+    </p>
+
+    @if (board.Top.Count == 0)
+    {
+        <p class="muted">@Localizer["Games.NoScoresYet"]</p>
+    }
+    else
+    {
+        <table style="width:100%;border-collapse:collapse;">
+            <thead>
+                <tr style="text-align:left;color:#6b7280;font-size:12.5px;border-bottom:2px solid #eef0f4;">
+                    <th style="padding:8px 6px;width:48px;">#</th>
+                    <th style="padding:8px 6px;">@Localizer["Games.Player"]</th>
+                    <th style="padding:8px 6px;text-align:right;">@Localizer["Games.Score"]</th>
+                    <th style="padding:8px 6px;text-align:right;">@Localizer["Games.Time"]</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var e in board.Top)
+                {
+                    var medal = e.Rank == 1 ? "🥇" : e.Rank == 2 ? "🥈" : e.Rank == 3 ? "🥉" : e.Rank.ToString();
+                    <tr style="border-bottom:1px solid #f1f3f6;@(e.IsViewer ? "background:#eef4ff;font-weight:600;" : "")">
+                        <td style="padding:9px 6px;font-size:16px;">@medal</td>
+                        <td style="padding:9px 6px;">@e.DisplayName @(e.IsViewer ? Localizer["Games.You"].Value : "")</td>
+                        <td style="padding:9px 6px;text-align:right;">@e.Score</td>
+                        <td style="padding:9px 6px;text-align:right;color:#6b7280;">@CommunityHub.Pages.Games.LeaderboardModel.FormatElapsed(e.ElapsedMs)</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+
+        @* Own rank, shown separately when the player is outside the visible top N. *@
+        @if (board.Own is { } own && !ownInTop)
+        {
+            <div style="margin-top:14px;padding:11px 13px;background:#eef4ff;border:1px solid #d7e3fb;border-radius:10px;display:flex;justify-content:space-between;">
+                <span><strong>#@own.Rank</strong> · @own.DisplayName @Localizer["Games.You"]</span>
+                <span>@own.Score · <span style="color:#6b7280;">@CommunityHub.Pages.Games.LeaderboardModel.FormatElapsed(own.ElapsedMs)</span></span>
+            </div>
+        }
+        else if (board.Own is null)
+        {
+            <p style="margin-top:14px;color:#6b7280;font-size:13.5px;">@Localizer["Games.NotPlayedYet"]</p>
+        }
+    }
+
+    <div style="margin-top:16px;display:flex;gap:10px;flex-wrap:wrap;">
+        <a class="btn" asp-page="/Games/Play" asp-route-topic="@Model.Topic"
+           style="background:#1c6b35;color:#fff;padding:10px 16px;border-radius:10px;text-decoration:none;font-weight:600;">@Localizer["Games.Play"]</a>
+        <a class="btn" asp-page="/Games/Index"
+           style="background:#eef0f4;color:#1f2430;padding:10px 16px;border-radius:10px;text-decoration:none;font-weight:600;">@Localizer["Games.BackToGames"]</a>
+    </div>
+</div>

@@ -1,0 +1,100 @@
+@page
+@model CommunityHub.Pages.Organizer.DesignerGraphicsModel
+@{
+    ViewData["Title"] = "Designer graphics pipeline";
+}
+
+@if (Model.AccessDenied)
+{
+    <div class="card">
+        <h1>Designer graphics pipeline</h1>
+        <p class="error" role="alert">This page is for organizers.</p>
+        <p><a asp-page="/Index">Back to hub</a></p>
+    </div>
+    return;
+}
+
+<style>
+    .btn { background:#008BD2; color:#fff; border:0; border-radius:6px;
+           padding:10px 16px; font-size:15px; cursor:pointer; text-decoration:none;
+           display:inline-block; }
+    .btn:hover { background:#0079b8; }
+    .btn.secondary { background:#e6f3fb; color:#055f86; }
+    .dg-counts { list-style:none; padding:0; margin:8px 0 0; }
+    .dg-counts li { padding:4px 0; border-bottom:1px solid #eee; }
+    .dg-counts b { display:inline-block; min-width:2.5em; }
+    @@media (max-width: 600px) {
+        .btn { display:block; width:100%; box-sizing:border-box; text-align:center; margin:6px 0; }
+    }
+</style>
+
+@if (Model.Message is not null)
+{
+    <div class="card"><p role="status" style="color:#0a6;">@Model.Message</p></div>
+}
+@if (Model.Error is not null)
+{
+    <div class="card"><p role="alert" class="error">@Model.Error</p></div>
+}
+
+<div class="card">
+    <h1>Designer graphics pipeline</h1>
+    <p>
+        Hand an external designer a tidy SharePoint structure and an Excel brief so they can
+        produce per-session graphics. Running the pipeline will:
+    </p>
+    <ul>
+        <li>Pull each speaker's photo into the <b>Speakers/Photos</b> folder, named by the speaker
+            (e.g. <code>Firstname-Lastname.jpg</code>). A speaker who uploaded their own photo in
+            the hub <b>wins</b> — their picture is never overwritten by the Sessionize one.</li>
+        <li>Build one folder per <b>session</b>, per <b>master class</b> and per <b>track</b>, each
+            holding the relevant speaker photo(s). Re-running reconciles in place (no duplicates).</li>
+        <li>Let you download an <b>Excel brief</b> — one row per session with its facts, speaker
+            name(s), the SharePoint folder link and the photo file name(s).</li>
+    </ul>
+
+    @if (!Model.Configured)
+    {
+        <p class="error" role="alert">
+            The designer-graphics SharePoint folders are not configured yet, so a run writes
+            nothing. Set the <code>Graphics:SharePoint</code> site and the Speaker-photos /
+            Sessions / Master-class / Tracks folder paths to enable it. The brief still downloads
+            (with the facts it can compute) below.
+        </p>
+    }
+
+    <form method="post" asp-page-handler="Run">
+        <button type="submit" class="btn">Run the pipeline now</button>
+    </form>
+</div>
+
+@if (Model.LastRun is not null)
+{
+    <div class="card">
+        <h3>Last run</h3>
+        <ul class="dg-counts">
+            <li><b>@Model.LastRun.PhotosPulled</b> speaker photo(s) pulled</li>
+            <li><b>@Model.LastRun.UploadsPreserved</b> speaker upload(s) preserved (won over Sessionize)</li>
+            <li><b>@Model.LastRun.PhotosSkipped</b> speaker(s) skipped (no usable photo)</li>
+            <li><b>@Model.LastRun.SessionFolders</b> session folder(s) built</li>
+            <li><b>@Model.LastRun.MasterClassFolders</b> master-class folder(s) built</li>
+            <li><b>@Model.LastRun.TrackFolders</b> track folder(s) built</li>
+        </ul>
+    </div>
+}
+
+<div class="card">
+    <h3>Designer brief (Excel)</h3>
+    <p>
+        One row per session — title, type, track, level, length, time, room, speaker name(s),
+        the build-folder link and the photo file name(s). These folder links are for the
+        designer/organizer only; speakers never receive a SharePoint link.
+    </p>
+    <a class="btn secondary" asp-page-handler="Brief" download>Download the brief (.xlsx)</a>
+</div>
+
+<p>
+    <a asp-page="/Organizer/AssetLocations">Configure SharePoint asset locations</a> ·
+    <a asp-page="/Organizer/SoMe">Back to marketing &amp; SoMe</a> ·
+    <a asp-page="/Index">Back to hub</a>
+</p>

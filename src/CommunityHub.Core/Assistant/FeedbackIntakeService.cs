@@ -131,7 +131,7 @@ public sealed class FeedbackIntakeService
         // participant); never throws back to the caller.
         try
         {
-            var subject = $"{_options.SubjectPrefix} AiHelper {KindWord(kind)} from {who}";
+            var subject = $"AiHelper {KindWord(kind)} from {who} {_options.SubjectPrefix}";
             // Reply-To = the asker, so an organizer hitting "Reply" reaches the person
             // (the To stays the configured dev/organizer mailbox). Null when unresolved.
             EmailReplyTo? replyTo = askerEmail is null ? null : new EmailReplyTo(askerEmail, askerName);

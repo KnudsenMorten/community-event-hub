@@ -1,5 +1,46 @@
 @page
 @model CommunityHub.Pages.Forms.SpeakerWizardModel
-@* §148: thin redirect — OnGet sends speakers to the in-wizard stepper host (/Forms/Wizard),
-   which renders each entitled step's fields inline. This body never renders; it is kept only
-   so the Nav.SpeakerOnboarding entry + any /Forms/SpeakerWizard deep links stay alive. *@
+@using CommunityHub.Forms
+@{
+    ViewData["Title"] = Localizer["SpeakerWiz.Title"].Value;
+    string StepTitle(string key) => Localizer["SpeakerWiz.Step." + key].Value;
+    string StepDesc(string key) => Localizer["SpeakerWiz.Step." + key + ".Desc"].Value;
+}
+
+@* §161: the speaker Get-Started is the same sponsor-style stepper as every other role —
+   a progress bar + every step as an Edit/Open card, fed through the shared partial. *@
+@if (Model.AccessDenied || Model.View is null)
+{
+    <div class="card">
+        <h1>@Localizer["SpeakerWiz.Title"]</h1>
+        <p class="info">@Localizer["SpeakerWiz.Nothing"]</p>
+        <p><a asp-page="/Index">@Localizer["Common.BackToHub"]</a></p>
+    </div>
+}
+else
+{
+    var v = Model.View;
+    var cards = new List<WizardStepperCard>();
+    var n = 0;
+    foreach (var step in v.Steps)
+    {
+        n++;
+        cards.Add(new WizardStepperCard(n, StepTitle(step.Key), StepDesc(step.Key), step.Done, Url.Page(step.Route)!));
+    }
+    string? continueUrl = null, continueLabel = null;
+    if (!v.AllDone && v.NextStep is not null)
+    {
+        continueUrl = Url.Page(v.NextStep.Route);
+        continueLabel = $"{Localizer["SpeakerWiz.Continue", v.NextStepNumber, v.EntitledCount].Value}: {StepTitle(v.NextStep.Key)}";
+    }
+    var vm = new WizardStepperVm(
+        Heading: Localizer["SpeakerWiz.Title"].Value,
+        Intro: Localizer["SpeakerWiz.Intro"].Value,
+        Cards: cards,
+        ContinueUrl: continueUrl,
+        ContinueLabel: continueLabel,
+        AllDoneMessage: Localizer["SpeakerWiz.AllDone"].Value,
+        EditLabel: Localizer["SpeakerWiz.Edit"].Value,
+        OpenLabel: Localizer["SpeakerWiz.Start"].Value);
+    <partial name="_WizardStepper" model="vm" />
+}

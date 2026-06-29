@@ -1,0 +1,141 @@
+@page
+@model CommunityHub.Pages.Organizer.QuizzesModel
+@{
+    ViewData["Title"] = "Fun IT Games";
+}
+
+@if (Model.AccessDenied)
+{
+    <div class="card">
+        <h2>@ViewData["Title"]</h2>
+        <p class="error" role="alert">@Localizer["Common.OrganizersOnly"]</p>
+        <p><a asp-page="/Index">@Localizer["Common.BackToHub"]</a></p>
+    </div>
+    return;
+}
+
+<div class="card">
+    <h1 style="margin-top:0;">🎮 @ViewData["Title"]</h1>
+    <p style="color:#6b7280;max-width:70ch;">
+        The three attendee quizzes (AI / Intune / Security). Each attempt draws a random subset
+        from the pool and shuffles the options (anti-copy); scoring rewards correct + fast answers.
+        Edit prompts, options, the correct answer and the "why", or disable a quiz/question.
+    </p>
+    @if (Model.Message is not null)
+    {
+        <p class="error" role="alert">@Model.Message</p>
+    }
+
+    <table style="width:100%;border-collapse:collapse;margin-top:8px;">
+        <thead>
+            <tr style="text-align:left;color:#6b7280;font-size:12.5px;border-bottom:2px solid #eef0f4;">
+                <th style="padding:8px 6px;">Quiz</th>
+                <th style="padding:8px 6px;text-align:center;">Active</th>
+                <th style="padding:8px 6px;text-align:right;">Questions</th>
+                <th style="padding:8px 6px;text-align:right;">Plays</th>
+                <th style="padding:8px 6px;"></th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var s in Model.Quizzes)
+            {
+                <tr style="border-bottom:1px solid #f1f3f6;">
+                    <td style="padding:9px 6px;"><strong>@s.Quiz.Title</strong> <span style="color:#9aa3ad;">(@s.Quiz.Topic)</span></td>
+                    <td style="padding:9px 6px;text-align:center;">@(s.Quiz.IsActive ? "✅" : "—")</td>
+                    <td style="padding:9px 6px;text-align:right;">@s.ActiveQuestionCount / @s.TotalQuestionCount</td>
+                    <td style="padding:9px 6px;text-align:right;">@s.AttemptCount</td>
+                    <td style="padding:9px 6px;text-align:right;">
+                        <a asp-page="/Organizer/Quizzes" asp-route-quizId="@s.Quiz.Id">Edit</a>
+                        · <a asp-page="/Games/Leaderboard" asp-route-topic="@s.Quiz.Slug">Leaderboard</a>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+</div>
+
+@if (Model.SelectedQuiz is { } quiz)
+{
+    <div class="card">
+        <h2 style="margin-top:0;">Settings — @quiz.Title</h2>
+        <form method="post" asp-page-handler="UpdateQuiz">
+            <input type="hidden" name="quizId" value="@quiz.Id" />
+            <div style="display:flex;flex-wrap:wrap;gap:14px;">
+                <label style="flex:1 1 240px;">Title
+                    <input type="text" name="title" value="@quiz.Title" required style="width:100%;padding:9px;border:1px solid #cbd2d9;border-radius:8px;" />
+                </label>
+                <label style="flex:0 0 150px;">Questions / attempt
+                    <input type="number" name="questionsPerAttempt" min="1" value="@quiz.QuestionsPerAttempt" style="width:100%;padding:9px;border:1px solid #cbd2d9;border-radius:8px;" />
+                </label>
+                <label style="flex:0 0 150px;">Seconds / question
+                    <input type="number" name="perQuestionSeconds" min="5" value="@quiz.PerQuestionSeconds" style="width:100%;padding:9px;border:1px solid #cbd2d9;border-radius:8px;" />
+                </label>
+                <label style="flex:0 0 150px;">Base points
+                    <input type="number" name="basePoints" min="1" value="@quiz.BasePoints" style="width:100%;padding:9px;border:1px solid #cbd2d9;border-radius:8px;" />
+                </label>
+            </div>
+            <label style="display:flex;gap:8px;align-items:center;margin:12px 0;">
+                <input type="checkbox" name="isActive" value="true" checked="@quiz.IsActive" /> Active (players can see + play it)
+            </label>
+            <button type="submit" style="padding:10px 16px;border:0;border-radius:9px;background:#1c6b35;color:#fff;font-weight:600;cursor:pointer;">Save settings</button>
+        </form>
+    </div>
+
+    <div class="card">
+        <h2 style="margin-top:0;">Questions (@quiz.Questions.Count)</h2>
+        @foreach (var q in quiz.Questions)
+        {
+            var opts = q.Options;
+            <details style="border:1px solid #e2e6ec;border-radius:10px;padding:10px 12px;margin-bottom:10px;@(q.IsActive ? "" : "opacity:.6;")">
+                <summary style="cursor:pointer;font-weight:600;">
+                    @(q.IsActive ? "" : "🚫 ")@q.Prompt
+                </summary>
+                <form method="post" asp-page-handler="UpdateQuestion" style="margin-top:12px;">
+                    <input type="hidden" name="quizId" value="@quiz.Id" />
+                    <input type="hidden" name="questionId" value="@q.Id" />
+                    <label style="display:block;">Prompt
+                        <input type="text" name="prompt" value="@q.Prompt" required style="width:100%;padding:9px;border:1px solid #cbd2d9;border-radius:8px;" />
+                    </label>
+                    <p style="margin:10px 0 4px;color:#6b7280;font-size:13px;">Options (mark the correct one):</p>
+                    @for (var i = 0; i < 4; i++)
+                    {
+                        <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px;">
+                            <input type="radio" name="correctIndex" value="@i" checked="@(q.CorrectIndex == i)" title="Correct answer" />
+                            <input type="text" name="opt@i" value="@(i < opts.Count ? opts[i] : "")"
+                                   placeholder="Option @(i + 1)@(i >= 2 ? " (optional)" : "")"
+                                   style="flex:1;padding:8px;border:1px solid #cbd2d9;border-radius:8px;" />
+                        </div>
+                    }
+                    <label style="display:block;margin-top:8px;">Why (shown after answering)
+                        <textarea name="explanation" rows="2" style="width:100%;padding:9px;border:1px solid #cbd2d9;border-radius:8px;">@q.Explanation</textarea>
+                    </label>
+                    <label style="display:flex;gap:8px;align-items:center;margin:10px 0;">
+                        <input type="checkbox" name="isActive" value="true" checked="@q.IsActive" /> Active (included in the draw)
+                    </label>
+                    <button type="submit" style="padding:9px 14px;border:0;border-radius:9px;background:#1c6b35;color:#fff;font-weight:600;cursor:pointer;">Save question</button>
+                </form>
+            </details>
+        }
+
+        <h3 style="margin:18px 0 8px;">Add a question</h3>
+        <form method="post" asp-page-handler="AddQuestion">
+            <input type="hidden" name="quizId" value="@quiz.Id" />
+            <label style="display:block;">Prompt
+                <input type="text" name="prompt" required style="width:100%;padding:9px;border:1px solid #cbd2d9;border-radius:8px;" />
+            </label>
+            <p style="margin:10px 0 4px;color:#6b7280;font-size:13px;">Options (mark the correct one):</p>
+            @for (var i = 0; i < 4; i++)
+            {
+                <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px;">
+                    <input type="radio" name="correctIndex" value="@i" checked="@(i == 0)" title="Correct answer" />
+                    <input type="text" name="opt@i" placeholder="Option @(i + 1)@(i >= 2 ? " (optional)" : "")"
+                           style="flex:1;padding:8px;border:1px solid #cbd2d9;border-radius:8px;" />
+                </div>
+            }
+            <label style="display:block;margin-top:8px;">Why (shown after answering)
+                <textarea name="explanation" rows="2" style="width:100%;padding:9px;border:1px solid #cbd2d9;border-radius:8px;"></textarea>
+            </label>
+            <button type="submit" style="margin-top:10px;padding:9px 14px;border:0;border-radius:9px;background:#1c6b35;color:#fff;font-weight:600;cursor:pointer;">Add question</button>
+        </form>
+    </div>
+}

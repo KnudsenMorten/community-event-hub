@@ -52,11 +52,19 @@
         <label for="announce-text"><strong>Your post</strong></label>
         <textarea id="announce-text" rows="7" readonly aria-label="Draft post text"
                   style="width:100%; box-sizing:border-box;">@Model.AnnouncementDraft.Text</textarea>
-        <p style="margin-top:8px;">
+        @* §160: the two share buttons live UNDER the post text and carry the SAME (correct) post text. *@
+        <p style="margin-top:8px;display:flex;flex-wrap:wrap;gap:8px;">
             <a class="btn" href="@Model.AnnouncementDraft.IntentUrl" target="_blank" rel="noopener noreferrer">
-                Open LinkedIn draft (opens in a new tab)
+                Share on LinkedIn (draft)
             </a>
+            @if (Model.AnnouncementDraftX is not null)
+            {
+                <a class="btn" href="@Model.AnnouncementDraftX.IntentUrl" target="_blank" rel="noopener noreferrer">
+                    Share on X (draft)
+                </a>
+            }
         </p>
+        <p style="font-size:12.5px;color:#6b7280;margin:4px 0 0;">Tip: download a graphic below and attach it to your post.</p>
     }
 </div>
 
@@ -100,22 +108,17 @@
                             <div class="gfx-title">@c.Title</div>
                         }
                         <div class="gfx-actions">
+                            @* §160: per-graphic action is ONLY the direct download (proxied through the
+                               hub). The per-graphic "Share on LinkedIn/X" buttons were removed — sharing
+                               is done from the post text above; download the image and attach it. *@
                             @if (c.HasStoredFile)
                             {
-                                <a class="btn" href="@c.DownloadUrl" target="_blank" rel="noopener noreferrer">
-                                    Download PNG (opens in a new tab)
-                                </a>
+                                <a class="btn" href="@c.DownloadUrl">Download graphic</a>
                             }
                             else
                             {
                                 <span class="gfx-empty">Image not yet stored.</span>
                             }
-                            <a class="btn" href="@c.LinkedInDraft.IntentUrl" target="_blank" rel="noopener noreferrer">
-                                Share on LinkedIn (draft)
-                            </a>
-                            <a class="btn" href="@c.XDraft.IntentUrl" target="_blank" rel="noopener noreferrer">
-                                Share on X (draft)
-                            </a>
                             @if (Model.CanPublishToLinkedIn)
                             {
                                 <form method="post" asp-page-handler="PublishLinkedIn" style="display:inline; margin:0;">

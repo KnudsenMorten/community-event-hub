@@ -83,7 +83,7 @@ public sealed class ScheduleService
     /// <summary>
     /// The default ELDK schedule derived from StartDate (pre-day / Master Class) +
     /// EndDate (main day): four prep days, the pre-day, the social events (Party 16:00,
-    /// Group photo 17:30 — all except sponsors, Appreciation Dinner 18:00), and main day.
+    /// Group photo 18:00 — all except sponsors, Appreciation Dinner 18:30), and main day.
     /// </summary>
     public static List<ScheduleEntry> BuildDefault(int eventId, DateOnly start, DateOnly end)
     {
@@ -100,14 +100,18 @@ public sealed class ScheduleService
             E(D(start.AddDays(-2)),        "Packing day",                   "organizer,volunteer", true),
             E(D(start.AddDays(-1)),        "Setup day",                     "organizer,volunteer,media", true),
             // Pre-day / Master Class runs 09:00–16:00; main day 07:00–17:15 (operator 2026-06-24).
-            E(D(start, 9, 0),              "Pre-day / Master Class",        "organizer,volunteer,speaker,media", false, D(start, 16, 0)),
+            // Audiences refined (operator 2026-06-28): pre-day now includes attendees.
+            E(D(start, 9, 0),              "Pre-day / Master Class",        "organizer,volunteer,speaker,media,attendee", false, D(start, 16, 0)),
             // §122: media team photographs the exhibitor booths on the pre-day (pictures
-            // used in the welcome video) — a SPONSOR-only key date (11:00–14:00).
-            E(D(start, 11, 0),             "Media team booth photos (for welcome video)", "sponsor", false, D(start, 14, 0)),
+            // used in the welcome video) — sponsors + media (11:00–14:00).
+            E(D(start, 11, 0),             "Media team booth photos (for welcome video)", "sponsor,media", false, D(start, 14, 0)),
             E(D(start, 16, 0),             "Party",                         "all", false),
-            E(D(start, 17, 30),            "Group photo",                   "organizer,volunteer,speaker,media,attendee", false),
-            E(D(start, 18, 0),             "Appreciation Dinner",           "all", false),
-            E(D(end, 7, 0),                "Main day",                      "organizer,volunteer,speaker,media", false, D(end, 17, 15)),
+            // Group photo + Appreciation Dinner pushed +30 min (operator 2026-06-28). Group photo
+            // excludes attendees; Appreciation Dinner is all roles EXCEPT attendees.
+            E(D(start, 18, 0),             "Group photo",                   "organizer,volunteer,speaker,media", false),
+            E(D(start, 18, 30),            "Appreciation Dinner",           "organizer,volunteer,speaker,media,sponsor", false),
+            // Main day is for everyone (incl. attendees).
+            E(D(end, 7, 0),                "Main day",                      "all", false, D(end, 17, 15)),
         };
     }
 }

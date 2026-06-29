@@ -65,6 +65,44 @@ public sealed class MasterClassEmailService
     private string ContactLine() =>
         $"<p>Questions? Email {Enc(SupportEmail())}.</p>";
 
+    /// <summary>
+    /// §169: the recipient attendee's login <see cref="Participant"/> id, so a Master
+    /// Class email's hub CTA can carry their PERSONAL auto-login magic-link
+    /// (<see cref="EmailTemplateProvider.NewTokenSet"/> with a participant id rewrites
+    /// the <c>{{hubUrl}}</c> token to <c>{HubUrl}/go/{token}</c>). The 2-day-ticket
+    /// holders are provisioned a login-capable, Attendee-role Participant — matched on
+    /// Email + EventId — by <see cref="AttendeeWelcomeProvisioningService"/>; the
+    /// Attendee-role match is preferred, but any same-email Participant for the edition
+    /// is accepted as a fallback.
+    ///
+    /// <para>Best-effort + FAIL-SAFE: no Participant yet (e.g. the email fired before
+    /// provisioning) or any error ⇒ <c>null</c> ⇒ the §169 seam keeps the PLAIN hub
+    /// URL and the attendee self-service <c>selectionUrl</c> is untouched. Never throws.</para>
+    /// </summary>
+    internal static async Task<int?> ResolveAttendeeParticipantIdAsync(
+        CommunityHubDbContext db, string? email, int eventId, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(email)) return null;
+        try
+        {
+            var norm = email.Trim().ToLowerInvariant();
+            var matches = await db.Participants
+                .Where(p => p.EventId == eventId && p.Email.ToLower() == norm)
+                .Select(p => new { p.Id, p.Role })
+                .ToListAsync(ct);
+            if (matches.Count == 0) return null;
+            // Prefer the provisioned Attendee-role login participant; else any match.
+            var pick = matches.FirstOrDefault(m => m.Role == ParticipantRole.Attendee)
+                       ?? matches[0];
+            return pick.Id;
+        }
+        catch
+        {
+            // Fail-safe: never let participant resolution break a Master Class send.
+            return null;
+        }
+    }
+
     internal static string ResolveSupportEmail(
         EventEditionConfigLoader? loader, EventConfigOptions? options)
     {
@@ -158,7 +196,10 @@ public sealed class MasterClassEmailService
             // wins; generic shipped default is the fallback). The renderer encodes
             // the tokens at the seam, so no per-value Enc(...) here. The .ics/branding
             // tokens are seeded by NewTokenSet(); selectionUrl carries the secure link.
-            var tokens = _templates.NewTokenSet();
+            // §169: the participant id makes the generic {{hubUrl}} CTA the recipient's
+            // personal auto-login magic-link (the selectionUrl deep-link is unchanged).
+            var pid = await ResolveAttendeeParticipantIdAsync(_db, a.Email, a.EventId, ct);
+            var tokens = _templates.NewTokenSet(pid);
             tokens["firstName"] = fn;
             tokens["eventDisplayName"] = ev;
             tokens["selectionUrl"] = url;
@@ -230,7 +271,10 @@ public sealed class MasterClassEmailService
 
         if (_templates is not null)
         {
-            var tokens = _templates.NewTokenSet();
+            // §169: the participant id makes the generic {{hubUrl}} CTA the recipient's
+            // personal auto-login magic-link (the selfServiceUrl deep-link is unchanged).
+            var pid = await ResolveAttendeeParticipantIdAsync(_db, a.Email, a.EventId, ct);
+            var tokens = _templates.NewTokenSet(pid);
             tokens["firstName"] = fn;
             tokens["eventDisplayName"] = ev;
             tokens["heldMasterClass"] = held;     // raw-HTML token (renderer keeps verbatim)
@@ -292,7 +336,10 @@ public sealed class MasterClassEmailService
         string html;
         if (_templates is not null)
         {
-            var tokens = _templates.NewTokenSet();
+            // §169: the participant id makes the generic {{hubUrl}} CTA the recipient's
+            // personal auto-login magic-link (the landing/self-service deep-links are unchanged).
+            var pid = await ResolveAttendeeParticipantIdAsync(_db, c.Email, c.EventId, ct);
+            var tokens = _templates.NewTokenSet(pid);
             tokens["firstName"] = c.FirstName;
             tokens["masterClassTitle"] = c.Title;
             tokens["eventDisplayName"] = eventName;
@@ -348,7 +395,10 @@ public sealed class MasterClassEmailService
 
         if (_templates is not null)
         {
-            var tokens = _templates.NewTokenSet();
+            // §169: the participant id makes the generic {{hubUrl}} CTA the recipient's
+            // personal auto-login magic-link (the selfServiceUrl deep-link is unchanged).
+            var pid = await ResolveAttendeeParticipantIdAsync(_db, c.Email, c.EventId, ct);
+            var tokens = _templates.NewTokenSet(pid);
             tokens["firstName"] = c.FirstName;
             tokens["masterClassTitle"] = c.Title;
             tokens["selfServiceUrl"] = url;
@@ -396,7 +446,10 @@ public sealed class MasterClassEmailService
         string html;
         if (_templates is not null)
         {
-            var tokens = _templates.NewTokenSet();
+            // §169: the participant id makes the generic {{hubUrl}} CTA the recipient's
+            // personal auto-login magic-link.
+            var pid = await ResolveAttendeeParticipantIdAsync(_db, s.Attendee.Email, s.EventId, ct);
+            var tokens = _templates.NewTokenSet(pid);
             tokens["firstName"] = fn;
             tokens["masterClassTitle"] = s.Session.Title;
             using (_context.Set(new EmailContext(Category, s.EventId, null, name, FeatureKey: "masterclass-invites")))
@@ -436,7 +489,10 @@ public sealed class MasterClassEmailService
 
         if (_templates is not null)
         {
-            var tokens = _templates.NewTokenSet();
+            // §169: the participant id makes the generic {{hubUrl}} CTA the recipient's
+            // personal auto-login magic-link (the signupUrl deep-link is unchanged).
+            var pid = await ResolveAttendeeParticipantIdAsync(_db, email, eventId, ct);
+            var tokens = _templates.NewTokenSet(pid);
             tokens["firstName"] = fn;
             tokens["masterClassTitle"] = mcTitle;
             tokens["eventDisplayName"] = eventName;

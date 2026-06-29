@@ -95,6 +95,7 @@ public static class BreadcrumbBuilder
 
             // Marketing / SoMe hub
             ["/organizer/graphics"]              = "/organizer/some",
+            ["/organizer/designergraphics"]      = "/organizer/some",
             ["/organizer/assetlocations"]        = "/organizer/some",
             ["/organizer/groupphotos"]           = "/organizer/some",
 

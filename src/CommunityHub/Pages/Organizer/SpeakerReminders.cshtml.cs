@@ -170,7 +170,7 @@ public class SpeakerRemindersModel : PageModel
             .Select(e => e.Code)
             .FirstOrDefaultAsync(ct) ?? "Event Hub";
 
-        var rendered = BuildReminderEmail(p.FullName, task.Title, task.Description, task.DueDate, eventCode);
+        var rendered = BuildReminderEmail(p.Id, p.FullName, task.Title, task.Description, task.DueDate, eventCode);
         try
         {
             // Ring-governed by the reminder-jobs feature (operator 2026-06-22).
@@ -271,6 +271,7 @@ public class SpeakerRemindersModel : PageModel
     }
 
     private RenderedEmail BuildReminderEmail(
+        int participantId,
         string fullName, string taskTitle, string? description, DateOnly? due, string eventCode)
     {
         var firstName = string.IsNullOrWhiteSpace(fullName) ? "there" : fullName.Split(' ')[0];
@@ -285,7 +286,9 @@ public class SpeakerRemindersModel : PageModel
             ? string.Empty
             : $"<p style=\"margin:0 0 16px;\">{System.Net.WebUtility.HtmlEncode(description)}</p>";
 
-        var tokens = _templates.NewTokenSet();
+        // §169: addressed to a single known speaker — pass the id so the {{hubUrl}}
+        // CTA becomes their personal auto-login magic-link (fail-safe to plain URL).
+        var tokens = _templates.NewTokenSet(participantId);
         tokens["firstName"] = firstName;
         tokens["eventCode"] = eventCode;
         tokens["taskTitle"] = taskTitle;

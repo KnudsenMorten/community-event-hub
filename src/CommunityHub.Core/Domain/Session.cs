@@ -94,8 +94,31 @@ public class Session
     /// <summary>Room / location name, when the Sessionize grid assigns one.</summary>
     public string? Room { get; set; }
 
-    /// <summary>Track / category label, when available (best-effort from categories).</summary>
+    /// <summary>
+    /// Track / category label, when available. Sourced from the Sessionize
+    /// "Suggested Event Track" category GROUP (called just "Track" in CEH, §154),
+    /// e.g. "Security". Import-owned (refreshed each pull). Null when the source
+    /// carries no track for the session.
+    /// </summary>
     public string? Track { get; set; }
+
+    /// <summary>
+    /// Audience level label (§154), sourced from the Sessionize "Level" category
+    /// GROUP, e.g. "Expert (400)". Import-owned (refreshed each pull). Null when the
+    /// source carries no level for the session.
+    /// </summary>
+    public string? Level { get; set; }
+
+    /// <summary>
+    /// The session's length in NUMERIC minutes (§154), parsed from the Sessionize
+    /// Format label (e.g. "Technical Session (60 min)" → 60) or, once the grid is
+    /// published, derived from the scheduled start/end. Distinct from the coarse
+    /// <see cref="Length"/> bucket: this carries the exact figure for display
+    /// ("60 min"). Null when no minutes can be determined (e.g. a Master Class with
+    /// no "(NN min)" hint and no times → handled as full-day via <see cref="Length"/>).
+    /// Import-owned (refreshed each pull).
+    /// </summary>
+    public int? LengthMinutes { get; set; }
 
     /// <summary>
     /// The session kind. Imported sessions get a default mapping from the source

@@ -101,29 +101,15 @@ public class MagicModel : PageModel
             return Page();
         }
 
-        var claims = new List<Claim>
-        {
-            new(ClaimTypes.NameIdentifier, participant.Id.ToString()),
-            new(ClaimTypes.Email, participant.Email),
-            new(ClaimTypes.Name, participant.FullName),
-            new(ClaimTypes.Role, participant.Role.ToString()),
-            new("EventId", participant.EventId.ToString()),
-        };
-        var identity = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
-        // A magic-link is a deliberate personal sign-in -> give it a FOREVER session:
-        // IsPersistent + a 365-day expiry + AllowRefresh (sliding), the ASP.NET Core
-        // idiom for "stay signed in until explicit sign-out". The default cookie
-        // ExpireTimeSpan (Program.cs, 8h) otherwise logs the user out after 8h idle,
-        // even from a magic-link. The session lasts until the participant signs out.
-        await HttpContext.SignInAsync(
-            CookieAuthenticationDefaults.AuthenticationScheme,
-            new ClaimsPrincipal(identity),
-            new AuthenticationProperties
-            {
-                IsPersistent = true,
-                ExpiresUtc = DateTimeOffset.UtcNow.AddDays(365),
-                AllowRefresh = true,
-            });
+        // A magic-link is a deliberate personal sign-in -> give it a FOREVER session
+        // (persistent: true = IsPersistent + 365-day expiry, the §170 idiom for "stay
+        // signed in until explicit sign-out"). Shared sign-in path so claims + cookie
+        // lifetime match the PIN login and the §169 /go link exactly.
+        await ParticipantSessionSignIn.SignInAsync(
+            HttpContext,
+            participant.Id, participant.Email, participant.FullName,
+            participant.Role, participant.EventId,
+            persistent: true);
 
         // Only redirect to local URLs starting with '/'; block absolute / cross-site.
         // Default lands on '/' = the hub main menu.

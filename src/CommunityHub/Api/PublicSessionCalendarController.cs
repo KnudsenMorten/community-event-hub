@@ -31,7 +31,11 @@ public sealed class PublicSessionCalendarController : ControllerBase
     public PublicSessionCalendarController(PublicSessionsService sessions) =>
         _sessions = sessions;
 
-    [HttpGet("/Sessions/{id:int}.ics")]
+    // Distinct route segment (literal "calendar.ics" under /sessions/{id}/) so it never
+    // collides with the /Sessions/{id:int} detail PAGE — a `/Sessions/{id}.ics` request was
+    // falling through to the fail-closed auth fallback (anon → login, authed → 500) instead of
+    // matching this AllowAnonymous endpoint.
+    [HttpGet("/sessions/{id:int}/calendar.ics")]
     public async Task<IActionResult> GetSessionIcsAsync(int id, CancellationToken ct)
     {
         var host = Request.Host.Value ?? "communityhub";

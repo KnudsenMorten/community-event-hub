@@ -41,6 +41,41 @@ public sealed class GraphicsSharePointOptions
     public string SessionsFolderPath { get; set; } = string.Empty;
 
     /// <summary>
+    /// Drive-relative folder the operator uploads pre-made per-TRACK promo graphics into —
+    /// the THIRD pull source (REQUIREMENTS §158), e.g. <c>…/Grahics-SoMe/Tracks</c>. Holds
+    /// ONE file per track, named by the track (e.g. <c>Security.png</c>); the pull matches
+    /// each active session that HAS a <see cref="CommunityHub.Core.Domain.Session.Track"/>
+    /// to the file whose name slug equals the TRACK-name slug (case-insensitive) and gives
+    /// every speaker on that track the shared graphic, IN ADDITION to their title-matched
+    /// session graphic. DISTINCT from <see cref="TracksFolderPath"/> (the §165 external-designer
+    /// BUILD root) — this is a finished-graphics PULL source. EMPTY by default ⇒ the track
+    /// pull is INERT (nothing listed) until an operator configures it.
+    /// </summary>
+    public string TrackGraphicsFolderPath { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Drive-relative ROOT folder the EXTERNAL-DESIGNER pipeline (REQUIREMENTS §165) writes
+    /// each speaker's PHOTO into, NAMED BY THE SPEAKER (e.g. <c>Firstname-Lastname.jpg</c>) —
+    /// e.g. <c>General/Events/ELDK 2027/EventHub/Speakers/Photos</c>. The pull fetches each
+    /// speaker's current photo URL (Sessionize <c>profilePicture</c> OR the speaker's own
+    /// hub-edited photo, the latter WINS) and drops a name-keyed copy here so a designer has
+    /// a tidy "photos by name" folder. EMPTY by default ⇒ the photo pull is INERT (nothing
+    /// fetched / written) until an operator configures it.
+    /// </summary>
+    public string SpeakerPhotosFolderPath { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Drive-relative ROOT folder under which the EXTERNAL-DESIGNER pipeline (REQUIREMENTS
+    /// §165) builds one BUILD FOLDER per TRACK (named by the track title), each holding the
+    /// photos of every speaker on that track's sessions — e.g.
+    /// <c>General/Events/ELDK 2027/EventHub/DesignerBuild/Tracks</c>. The per-SESSION and
+    /// per-MASTER-CLASS build folders reuse <see cref="SessionsFolderPath"/> /
+    /// <see cref="MasterClassFolderPath"/>. EMPTY by default ⇒ no track folders are built
+    /// (the rest of the pipeline still runs) until an operator configures it.
+    /// </summary>
+    public string TracksFolderPath { get; set; } = string.Empty;
+
+    /// <summary>
     /// Drive-relative folder holding the per-ROOM session-evaluation QR codes
     /// (REQUIREMENTS §124) — e.g.
     /// <c>General/Events/ELDK 2027/EventHub/Speakers/SessionEvals-QR</c>. Files are
@@ -75,6 +110,29 @@ public sealed class GraphicsSharePointOptions
     /// (nothing listed / read) until an operator configures it.
     /// </summary>
     public string GroundingFolderPath { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Drive-relative folder holding the speaker PRESENTATION TEMPLATE (§153) — e.g.
+    /// <c>General/Events/ELDK 2027/Speaker Info/Speaker Templates</c>. The server-proxied
+    /// <see cref="SpeakerTemplateService"/> streams the single template file (e.g.
+    /// <c>ELDK27_PPT_Template.potx</c>) through CEH with the app's own credentials, so the
+    /// speaker gets a DIRECT download instead of a link to the SharePoint site. EMPTY by
+    /// default ⇒ the proxy is INERT and the page falls back to the configured template URL.
+    /// </summary>
+    public string SpeakerTemplateFolderPath { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Drive-relative folder the operator drops the FINAL per-session EVALUATION PDFs into
+    /// (REQUIREMENTS §166) — e.g.
+    /// <c>General/Events/ELDK 2027/EventHub/Speakers/SessionEvals-PDF</c>. The
+    /// <see cref="SessionEvalPdfService"/> writes one deterministic file per session
+    /// (<c>session-{id}.pdf</c>) here on an organizer upload and streams it back to the
+    /// session's speakers through a HUB PROXY (<c>/session-eval/{id}/download</c>) using the
+    /// app's own credentials — speakers never get a SharePoint link. EMPTY by default ⇒ the
+    /// feature is INERT (nothing uploaded / streamed; the page shows a "not configured" note)
+    /// until an operator configures it.
+    /// </summary>
+    public string SessionEvalPdfFolderPath { get; set; } = string.Empty;
 
     /// <summary>True when enabled AND a site URL is present (the live store can run).</summary>
     public bool IsConfigured => Enabled && !string.IsNullOrWhiteSpace(SiteUrl);

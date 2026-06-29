@@ -45,6 +45,12 @@ public sealed class ContentMarkdownRenderer
 
         var markdown = File.ReadAllText(path);
         html = Markdown.ToHtml(markdown, _pipeline);
+        // External (http/https) links open in a NEW TAB (operator 2026-06-28 — e.g. the
+        // last-event video links). Internal/relative links (/content/…, /Info/…) are untouched.
+        html = System.Text.RegularExpressions.Regex.Replace(
+            html,
+            "<a href=\"(https?://[^\"]*)\"",
+            "<a href=\"$1\" target=\"_blank\" rel=\"noopener noreferrer\"");
         return true;
     }
 

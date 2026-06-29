@@ -1,0 +1,166 @@
+@page
+@model CommunityHub.Pages.Games.PlayModel
+@{
+    ViewData["Title"] = Model.Title;
+}
+
+@if (Model.NoQuiz)
+{
+    <div class="card">
+        <h1 style="margin-top:0;">@Model.Title</h1>
+        <p class="muted">@Localizer["Games.NotAvailable"]</p>
+        <p><a asp-page="/Games/Index">← @Localizer["Games.BackToGames"]</a></p>
+    </div>
+    return;
+}
+
+@if (Model.Finished)
+{
+    <div class="card" style="text-align:center;">
+        <h1 style="margin-top:0;">🎉 @Localizer["Games.Finished"]</h1>
+        <p style="font-size:15px;color:#5b636e;">@Localizer["Games.FinalScore"]</p>
+        <div style="font-size:46px;font-weight:800;color:#1c6b35;margin:6px 0 14px;">@Model.FinalScore</div>
+        <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap;">
+            <a class="btn" asp-page="/Games/Leaderboard" asp-route-topic="@Model.Topic"
+               style="background:#1c6b35;color:#fff;padding:11px 18px;border-radius:10px;text-decoration:none;font-weight:600;">🏆 @Localizer["Games.Leaderboard"]</a>
+            <a class="btn" asp-page="/Games/Play" asp-route-topic="@Model.Topic"
+               style="background:#eef0f4;color:#1f2430;padding:11px 18px;border-radius:10px;text-decoration:none;font-weight:600;">@Localizer["Games.PlayAgain"]</a>
+            <a class="btn" asp-page="/Games/Index"
+               style="background:#eef0f4;color:#1f2430;padding:11px 18px;border-radius:10px;text-decoration:none;font-weight:600;">@Localizer["Games.BackToGames"]</a>
+        </div>
+    </div>
+    return;
+}
+
+@if (Model.Reveal is { } r)
+{
+    <div class="card">
+        <div style="color:#6b7280;font-size:13px;font-weight:600;">@Model.Title · @Localizer["Games.Question"] @r.QuestionNumber / @r.TotalQuestions</div>
+        <h2 style="margin:6px 0 14px;">@r.Prompt</h2>
+        <ul style="list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:8px;">
+            @for (var i = 0; i < r.DisplayedOptions.Count; i++)
+            {
+                var isCorrect = i == r.CorrectDisplayedIndex;
+                var isPicked = i == r.SelectedDisplayedIndex;
+                var bg = isCorrect ? "#e7f6ec" : (isPicked ? "#fdecec" : "#f7f8fa");
+                var border = isCorrect ? "#1c6b35" : (isPicked ? "#b3261e" : "#e2e6ec");
+                <li style="border:1.5px solid @border;background:@bg;border-radius:10px;padding:11px 13px;display:flex;justify-content:space-between;align-items:center;gap:10px;">
+                    <span>@r.DisplayedOptions[i]</span>
+                    @if (isCorrect) { <span aria-label="correct">✅</span> }
+                    else if (isPicked) { <span aria-label="your answer">❌</span> }
+                </li>
+            }
+        </ul>
+
+        <div style="margin:16px 0;padding:13px 14px;background:#eef4ff;border:1px solid #d7e3fb;border-radius:10px;">
+            <strong>@(r.IsCorrect ? Localizer["Games.Correct"] : Localizer["Games.Incorrect"])</strong>
+            <span style="color:#1c6b35;font-weight:700;margin-left:6px;">+@r.PointsAwarded</span>
+            <p style="margin:7px 0 0;color:#36404f;font-size:14.5px;">💡 @r.Explanation</p>
+        </div>
+
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+            <span style="color:#6b7280;font-size:13.5px;">@Localizer["Games.RunningScore"]: <strong>@r.RunningScore</strong></span>
+            @if (r.IsLast)
+            {
+                @* The attempt is complete — go to the leaderboard (revisiting Play would
+                   start a fresh attempt; the leaderboard keeps each player's best). *@
+                <a class="btn" asp-page="/Games/Leaderboard" asp-route-topic="@Model.Topic"
+                   style="background:#1c6b35;color:#fff;padding:11px 18px;border-radius:10px;text-decoration:none;font-weight:600;">
+                    🏆 @Localizer["Games.SeeResults"] →
+                </a>
+            }
+            else
+            {
+                <a class="btn" asp-page="/Games/Play" asp-route-topic="@Model.Topic"
+                   style="background:#1c6b35;color:#fff;padding:11px 18px;border-radius:10px;text-decoration:none;font-weight:600;">
+                    @Localizer["Games.Next"] →
+                </a>
+            }
+        </div>
+    </div>
+    return;
+}
+
+@if (Model.Step is { } s)
+{
+    <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;color:#6b7280;font-size:13px;font-weight:600;">
+            <span>@Model.Title · @Localizer["Games.Question"] @s.QuestionNumber / @s.TotalQuestions</span>
+            <span id="timer" style="font-variant-numeric:tabular-nums;font-size:16px;color:#1c6b35;">@s.PerQuestionSeconds s</span>
+        </div>
+        <div style="height:6px;background:#e9edf2;border-radius:99px;margin:8px 0 14px;overflow:hidden;">
+            <div id="timerbar" style="height:100%;width:100%;background:#1c6b35;transition:width 1s linear;"></div>
+        </div>
+        <h2 style="margin:0 0 14px;">@s.Prompt</h2>
+
+        <form method="post" asp-page-handler="Answer" id="answerForm">
+            <input type="hidden" name="topic" value="@Model.Topic" />
+            <input type="hidden" name="attemptId" value="@s.AttemptId" />
+            <input type="hidden" name="questionId" value="@s.QuestionId" />
+            <input type="hidden" name="selectedIndex" id="selectedIndex" value="-1" />
+
+            <div style="display:flex;flex-direction:column;gap:9px;">
+                @for (var i = 0; i < s.DisplayedOptions.Count; i++)
+                {
+                    <label class="opt" data-idx="@i"
+                           style="border:1.5px solid #e2e6ec;background:#f7f8fa;border-radius:10px;padding:12px 14px;cursor:pointer;display:flex;gap:11px;align-items:center;">
+                        <input type="radio" name="opt" value="@i" style="width:18px;height:18px;" />
+                        <span>@s.DisplayedOptions[i]</span>
+                    </label>
+                }
+            </div>
+
+            <button type="submit" id="submitBtn" disabled
+                    style="width:100%;margin-top:18px;padding:13px;border:0;border-radius:10px;background:#1c6b35;color:#fff;font-size:16px;font-weight:600;cursor:pointer;opacity:.5;">
+                @Localizer["Games.Submit"]
+            </button>
+        </form>
+        <p style="margin-top:10px;color:#9aa3ad;font-size:12.5px;">@Localizer["Games.SpeedHint"]</p>
+    </div>
+
+    <script>
+        (function () {
+            var total = @s.PerQuestionSeconds;
+            var remaining = total;
+            var sel = document.getElementById('selectedIndex');
+            var btn = document.getElementById('submitBtn');
+            var form = document.getElementById('answerForm');
+            var timer = document.getElementById('timer');
+            var bar = document.getElementById('timerbar');
+            var submitted = false;
+
+            document.querySelectorAll('.opt input[type=radio]').forEach(function (radio) {
+                radio.addEventListener('change', function () {
+                    sel.value = this.value;
+                    btn.disabled = false; btn.style.opacity = '1';
+                    document.querySelectorAll('.opt').forEach(function (l) {
+                        l.style.borderColor = '#e2e6ec'; l.style.background = '#f7f8fa';
+                    });
+                    var lbl = this.closest('.opt');
+                    if (lbl) { lbl.style.borderColor = '#1c6b35'; lbl.style.background = '#e7f6ec'; }
+                });
+            });
+
+            function go() {
+                if (submitted) return;
+                submitted = true;
+                form.submit(); // server scores; -1 (no pick) counts as wrong/0
+            }
+            form.addEventListener('submit', function () { submitted = true; });
+
+            var iv = setInterval(function () {
+                remaining -= 1;
+                if (remaining <= 0) {
+                    if (timer) timer.textContent = '0 s';
+                    if (bar) bar.style.width = '0%';
+                    clearInterval(iv);
+                    go();
+                    return;
+                }
+                if (timer) timer.textContent = remaining + ' s';
+                if (bar) bar.style.width = (100 * remaining / total) + '%';
+            }, 1000);
+        })();
+    </script>
+    return;
+}

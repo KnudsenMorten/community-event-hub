@@ -1,3 +1,4 @@
+using CommunityHub.Core.Config;
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
 using Microsoft.EntityFrameworkCore;
@@ -45,6 +46,14 @@ public sealed class FormTaskReconciler
     /// </summary>
     public async Task ReconcileAsync(int eventId, int participantId, CancellationToken ct)
     {
+        // --- §164 Party RSVP — the ONE two-way signal -----------------------
+        // Unlike every other form below (which only ever CLOSES a task), the party
+        // sign-up task must always end up Yes or No: a saved RSVP ⇒ Done, and an
+        // un-answer (the RSVP row removed) ⇒ reopen, so the reminder job nags again.
+        // Handled before the early-returns so it runs even when no other form has
+        // data. The task itself is created by PartyTaskSeeder for the staff roles.
+        await ReconcilePartyAsync(eventId, participantId, ct);
+
         // --- Compute the per-form DATA signals -------------------------------
         var hotel = await _db.HotelBookings.AnyAsync(
             x => x.EventId == eventId && x.ParticipantId == participantId, ct);
@@ -122,6 +131,42 @@ public sealed class FormTaskReconciler
 
             task.State = TaskState.Done;
             task.CompletedAt ??= now;
+            changed = true;
+        }
+
+        if (changed) await _db.SaveChangesAsync(ct);
+    }
+
+    /// <summary>
+    /// §164: bring the participant's party sign-up task in line with their RSVP — the
+    /// only signal here that reopens. A PartyRsvp row stamped with this participant ⇒
+    /// the <c>party-form:{pid}</c> task is Done; no row (they un-answered) ⇒ the task
+    /// reopens (cleared CompletedAt) so it nags again. No-op when the task doesn't
+    /// exist (the role doesn't get a party task) or when it already matches.
+    /// </summary>
+    private async Task ReconcilePartyAsync(int eventId, int participantId, CancellationToken ct)
+    {
+        var sourceKey = PartyTaskSeeder.SourceKeyFor(participantId);
+        var task = await _db.Tasks.FirstOrDefaultAsync(
+            t => t.EventId == eventId
+                 && t.AssignedParticipantId == participantId
+                 && t.SourceKey == sourceKey, ct);
+        if (task is null) return;
+
+        var answered = await _db.PartyRsvps.AnyAsync(
+            r => r.EventId == eventId && r.ParticipantId == participantId, ct);
+
+        var changed = false;
+        if (answered && task.State == TaskState.Open)
+        {
+            task.State = TaskState.Done;
+            task.CompletedAt ??= _clock.GetUtcNow();
+            changed = true;
+        }
+        else if (!answered && task.State == TaskState.Done)
+        {
+            task.State = TaskState.Open;
+            task.CompletedAt = null;
             changed = true;
         }
 

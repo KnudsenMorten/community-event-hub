@@ -102,9 +102,10 @@ public sealed class RoleWizardServiceTests
         var (db, ev, pid) = await SeedAsync(ParticipantRole.Volunteer);
         var view = await Wizard(db).BuildAsync(ev, pid);
 
-        // §109 signal (volunteers are in scope) + §119 accept (always last) close the list.
+        // §109 signal (volunteers are in scope) + §164 party (staff role) + §119 accept
+        // (always last) close the list.
         Assert.Equal(
-            new[] { "profile", "availability", "hotel", "dinner", "lunch", "swag", "signal", "accept" },
+            new[] { "profile", "availability", "hotel", "dinner", "lunch", "swag", "signal", "party", "accept" },
             view.Steps.Select(s => s.Key).ToArray());
         Assert.Contains(view.Steps, s => s.Key == "hotel");         // now entitled (operator 2026-06-26)
         Assert.DoesNotContain(view.Steps, s => s.Key == "travel");  // not entitled
@@ -247,6 +248,40 @@ public sealed class RoleWizardServiceTests
 
         Assert.True(view.Steps.Single(s => s.Key == "signal").Done);
         Assert.True(view.Steps.Single(s => s.Key == "accept").Done);
+    }
+
+    [Fact]
+    public async Task Party_step_is_present_for_staff_roles_but_not_media()
+    {
+        // §164: Volunteer / Organizer / EventPartner get the party step; Media does NOT
+        // (the operator's party-task role list excludes Media).
+        var (dbV, evV, pidV) = await SeedAsync(ParticipantRole.Volunteer);
+        Assert.Contains((await Wizard(dbV).BuildAsync(evV, pidV)).Steps, s => s.Key == "party");
+
+        var (dbO, evO, pidO) = await SeedAsync(ParticipantRole.Organizer);
+        Assert.Contains((await Wizard(dbO).BuildAsync(evO, pidO)).Steps, s => s.Key == "party");
+
+        var (dbE, evE, pidE) = await SeedAsync(ParticipantRole.EventPartner);
+        Assert.Contains((await Wizard(dbE).BuildAsync(evE, pidE)).Steps, s => s.Key == "party");
+
+        var (dbM, evM, pidM) = await SeedAsync(ParticipantRole.Media);
+        Assert.DoesNotContain((await Wizard(dbM).BuildAsync(evM, pidM)).Steps, s => s.Key == "party");
+    }
+
+    [Fact]
+    public async Task Party_step_is_done_once_an_rsvp_row_exists_for_the_participant()
+    {
+        // §164: completion is a Party RSVP row stamped with the participant (Yes OR No).
+        var (db, ev, pid) = await SeedAsync(ParticipantRole.Volunteer);
+        Assert.False((await Wizard(db).BuildAsync(ev, pid)).Steps.Single(s => s.Key == "party").Done);
+
+        db.PartyRsvps.Add(new PartyRsvp
+        {
+            EventId = ev, ParticipantId = pid, Name = "Vol", Email = "p@x.dk", Attending = false,
+        });
+        await db.SaveChangesAsync();
+
+        Assert.True((await Wizard(db).BuildAsync(ev, pid)).Steps.Single(s => s.Key == "party").Done);
     }
 
     [Fact]

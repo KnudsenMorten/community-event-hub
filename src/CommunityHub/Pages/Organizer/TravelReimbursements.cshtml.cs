@@ -102,7 +102,10 @@ public class TravelReimbursementsModel : PageModel
                         ? ""
                         : $"<p style=\"margin:0 0 16px;\">Organizer note: {System.Net.WebUtility.HtmlEncode(row.PaidNotes)}</p>";
 
-                    var tokens = _templates.NewTokenSet();
+                    // §169: the claimant IS a Participant — pass their id so the {{hubUrl}}
+                    // CTA is their personal /go/{token} auto-login magic-link (fail-safe:
+                    // no participant / any error ⇒ plain hub URL, never throws).
+                    var tokens = _templates.NewTokenSet(row.ParticipantId);
                     tokens["firstName"] = firstName;
                     tokens["eventCode"] = eventCode;
                     tokens["amount"] = amount;

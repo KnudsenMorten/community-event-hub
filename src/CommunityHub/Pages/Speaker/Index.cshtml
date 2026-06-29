@@ -2,6 +2,24 @@
 @model CommunityHub.Pages.Speaker.IndexModel
 @{
     ViewData["Title"] = Localizer["Speaker.Title"].Value;
+
+    // Friendly TYPE + LENGTH labels — the SAME labels the public Sessions overview uses, so the
+    // speaker sees the kind of EVERY session (not just master classes). MasterClass + Technical
+    // keep their localized keys; the remaining standardized types share the back-office display.
+    Func<SessionType, string> typeLabel = t => t switch
+    {
+        SessionType.MasterClass => Localizer["SessOv.TypeMasterClass"].Value,
+        SessionType.TechnicalSession => Localizer["SessOv.TypeTechSession"].Value,
+        _ => CommunityHub.Pages.Sessions.IndexModel.Display(t),
+    };
+    Func<SessionLength, string> lengthLabel = l => l switch
+    {
+        SessionLength.FullDay => Localizer["SessOv.LenFullDay"].Value,
+        SessionLength.TwentyMin => Localizer["SessOv.Len20"].Value,
+        SessionLength.FiftyMin => Localizer["SessOv.Len50"].Value,
+        SessionLength.SixtyMin => Localizer["SessOv.Len60"].Value,
+        _ => l.ToString(),
+    };
 }
 
 @if (Model.AccessDenied)
@@ -65,14 +83,11 @@
         <h1>@Localizer["Speaker.MySessions"]</h1>
         <p style="font-size:13.5px;color:#555;margin-top:0;">@Localizer["Speaker.MySessionsIntro"]</p>
         <p style="margin:0 0 12px;">
-            <a class="task-link-btn" href="https://template.expertslive.dk/" target="_blank" rel="noopener">&#128196; @Localizer["Speaker.SessionTemplate"]<span class="visually-hidden">@Localizer["Common.OpensNewTab"]</span></a>
-        </p>
-        <p style="font-size:12.5px;color:#6b7280;margin:0 0 12px;line-height:1.6;">
-            For each session: <strong>View public</strong> = your public listing &middot;
-            <strong>Master Class Group Q&amp;A</strong> = your master-class question boards &middot;
-            <strong>SoMe Promote</strong> = ready-made social graphics &middot;
-            <strong>Calendar Sync</strong> = add to your calendar &middot;
-            <strong>Evaluations</strong> = your post-session ratings (when published).
+            @* §153: DIRECT download of the .potx (streamed from SharePoint via /speaker-template/download),
+               not a link to the SharePoint site. Includes the load-bearing reminder that sponsor slides
+               are mandatory (a speaker hitting the bare button would otherwise miss it). *@
+            <a class="task-link-btn" href="/speaker-template/download">&#128196; @Localizer["Speaker.SessionTemplate"]</a>
+            <span style="display:block;font-size:12px;color:#6b7280;margin-top:4px;">The template includes white &amp; dark layouts — and the sponsor slides, which are mandatory in every presentation.</span>
         </p>
         <ul style="list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:12px;">
             @foreach (var s in Model.MySessions)
@@ -80,10 +95,18 @@
                 <li style="border:1px solid #e5e7eb;border-radius:10px;padding:14px;">
                     <div style="font-weight:700;color:var(--el-darkblue);font-size:16px;">
                         @s.Title
-                        @if (s.IsMasterClass)
-                        {
-                            <span class="ms-badge soon" style="margin-left:6px;">@Localizer["Speaker.MasterClassBadge"]</span>
-                        }
+                    </div>
+                    @* Type + length tags on EVERY session (operator 2026-06-28 §153) — a master class
+                       keeps its highlighted badge, every other type now shows its kind too, instead of
+                       only master classes being labelled. *@
+                    <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;">
+                        <span class="ms-badge @(s.IsMasterClass ? "soon" : "")"
+                              style="@(s.IsMasterClass ? "" : "background:#eef2f7;color:#374151;border:1px solid #d8dee9;")">
+                            @typeLabel(s.Type)
+                        </span>
+                        <span class="ms-badge" style="background:#f3f4f6;color:#4b5563;border:1px solid #e5e7eb;">
+                            @lengthLabel(s.Length)
+                        </span>
                     </div>
 
                     <div style="color:#4b5563;font-size:13px;margin-top:6px;display:flex;flex-wrap:wrap;gap:4px 16px;">
@@ -157,7 +180,7 @@
                             <a class="task-link-btn" asp-page="/Speaker/Questions">&#128172; @Localizer["Speaker.AttendeeQuestions"]</a>
                         }
                         <a class="task-link-btn" asp-page="/Speaker/Graphics">&#128241; @Localizer["Speaker.SoMePromote"]</a>
-                        <a class="task-link-btn" href="/Sessions/@(s.SessionId).ics">&#128197; @Localizer["Speaker.CalendarSync"]</a>
+                        <a class="task-link-btn" href="/sessions/@(s.SessionId)/calendar.ics">&#128197; @Localizer["Speaker.CalendarSync"]</a>
                         @if (!string.IsNullOrWhiteSpace(s.EvaluationUrl))
                         {
                             <a class="task-link-btn" href="@s.EvaluationUrl" target="_blank" rel="noopener">&#128202; @Localizer["Speaker.EvaluationsDownload"]<span class="visually-hidden">@Localizer["Common.OpensNewTab"]</span></a>

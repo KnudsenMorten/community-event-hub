@@ -143,6 +143,10 @@ var host = new HostBuilder()
         services.AddSingleton<CommunityHub.Core.Email.IEnvironmentInfo, CommunityHub.Jobs.JobsEnvironmentInfo>();
         services.AddScoped<CommunityHub.Core.Auth.IWelcomeAutoLoginTokenService,
             CommunityHub.Core.Auth.WelcomeAutoLoginTokenService>();
+        // §169 personal email magic-link, so reminders sent from the Jobs host carry
+        // the recipient's auto-login link (resolved per-send by EmailTemplateProvider).
+        services.AddScoped<CommunityHub.Core.Auth.IEmailMagicLinkService,
+            CommunityHub.Core.Auth.EmailMagicLinkService>();
         services.AddScoped<CommunityHub.Core.Reminders.WelcomeWithLoginEmailService>();
         services.AddScoped<CommunityHub.Core.Reminders.AttendeeWelcomeProvisioningService>();
 
@@ -178,6 +182,10 @@ var host = new HostBuilder()
             .Bind(speakerDeadlineOptions);
         services.AddSingleton(speakerDeadlineOptions);
         services.AddScoped<SpeakerDeadlineSeeder>();
+
+        // §164: party sign-up task seeding — ensures the staff-role "party sign-up"
+        // tasks exist so the reminder run below nags anyone who hasn't answered Yes/No.
+        services.AddScoped<PartyTaskSeeder>();
 
         // --- WooCommerce (sponsor pipeline) ---------------------------------
         var wooOptions = new WooCommerceOptions();
@@ -249,6 +257,9 @@ var host = new HostBuilder()
         services.AddScoped<SponsorContactSyncService>();
         // "Alert only on 2 consecutive failures" gate for background jobs.
         services.AddScoped<CommunityHub.Core.Diagnostics.JobFailureTracker>();
+        // Central wrapper used by EngineErrorAlertMiddleware so the same consecutive-failure
+        // gate covers EVERY function uniformly (not just the one job that self-gates).
+        services.AddScoped<CommunityHub.Core.Diagnostics.EngineFailureAlertGate>();
 
         // --- SharePoint (per-sponsor upload folders + change watcher) ------
         var sharePointOptions = new SharePointUploadOptions();
@@ -260,6 +271,31 @@ var host = new HostBuilder()
         services.AddHttpClient<SharePointUploadClient>(c =>
             c.Timeout = TimeSpan.FromMinutes(5));
         services.AddScoped<SponsorUploadWatchService>();
+
+        // --- SoMe graphics store (§18/§158): the SharePoint PULL + auto-release sync job
+        // needs GraphicsService + the LIVE Graph file store, same gating as the web app
+        // (live store only when Graphics:SharePoint is configured; else the null store).
+        services.AddSingleton<CommunityHub.Core.Integrations.Graphics.GraphicCompositor>();
+        services.AddHttpClient<
+            CommunityHub.Core.Integrations.Graphics.ISpeakerPictureFetcher,
+            CommunityHub.Core.Integrations.Graphics.HttpSpeakerPictureFetcher>();
+        services.AddSingleton<
+            CommunityHub.Core.Integrations.Graphics.ISocialShareGateway,
+            CommunityHub.Core.Integrations.Graphics.DraftOnlySocialShareGateway>();
+        services.Configure<CommunityHub.Core.Integrations.Graphics.GraphicsSharePointOptions>(
+            config.GetSection(CommunityHub.Core.Integrations.Graphics.GraphicsSharePointOptions.SectionName));
+        var graphicsSpOptions = new CommunityHub.Core.Integrations.Graphics.GraphicsSharePointOptions();
+        config.GetSection(CommunityHub.Core.Integrations.Graphics.GraphicsSharePointOptions.SectionName)
+            .Bind(graphicsSpOptions);
+        if (graphicsSpOptions.IsConfigured)
+            services.AddScoped<
+                CommunityHub.Core.Integrations.Graphics.ISharePointFileStore,
+                CommunityHub.Core.Integrations.Graphics.GraphSharePointFileStore>();
+        else
+            services.AddSingleton<
+                CommunityHub.Core.Integrations.Graphics.ISharePointFileStore,
+                CommunityHub.Core.Integrations.Graphics.NullSharePointFileStore>();
+        services.AddScoped<CommunityHub.Core.Integrations.Graphics.GraphicsService>();
 
         // The single sponsor-pull engine, shared with CommunityHub.OneShot.
         services.AddScoped<SponsorOrderPullService>();

@@ -159,6 +159,18 @@ public sealed class RoleWizardService
             steps.Add(new("signal", "/Forms/Signal", done));
         }
 
+        // n+1b. Party sign-up (§164) — the staff roles that get a tracked party task
+        //       (Volunteer / Organizer / Event Partner; NOT Media per the operator's
+        //       list) RSVP Yes/No to the pre-day party. Done once a Party RSVP row
+        //       stamped with this participant exists; the party-form: task + reminder is
+        //       seeded by PartyTaskSeeder.
+        if (role is { } pr && CommunityHub.Core.Config.PartyTaskSeeder.RoleGetsPartyTask(pr))
+        {
+            var partyDone = await _db.PartyRsvps.AnyAsync(
+                r => r.EventId == eventId && r.ParticipantId == participantId, ct);
+            steps.Add(new("party", "/Party", partyDone));
+        }
+
         // n+2. Accept Code of Conduct + Privacy (§119) — ALL roles, always last. Done
         //      once the participant has a persisted acceptance row (who/when).
         var acceptDone = await _db.ParticipantPolicyAcceptances.AnyAsync(

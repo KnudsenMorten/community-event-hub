@@ -29,6 +29,9 @@ public class IndexModel : PageModel
     [BindProperty(SupportsGet = true)] public SessionType? FilterType { get; set; }
     [BindProperty(SupportsGet = true)] public SessionLength? FilterLength { get; set; }
     [BindProperty(SupportsGet = true)] public string? FilterRoom { get; set; }
+    [BindProperty(SupportsGet = true)] public string? FilterTimeslot { get; set; }
+    [BindProperty(SupportsGet = true)] public string? FilterTrack { get; set; }
+    [BindProperty(SupportsGet = true)] public string? FilterLevel { get; set; }
     [BindProperty(SupportsGet = true)] public string? Search { get; set; }
 
     // --- View state --------------------------------------------------------
@@ -39,7 +42,8 @@ public class IndexModel : PageModel
 
     public async Task<IActionResult> OnGetAsync(CancellationToken ct)
     {
-        View = await _svc.BuildAsync(FilterType, FilterLength, FilterRoom, Search, ct);
+        View = await _svc.BuildAsync(
+            FilterType, FilterLength, FilterRoom, Search, FilterTimeslot, FilterTrack, FilterLevel, ct);
         NoActiveEvent = View is null;
         return Page();
     }

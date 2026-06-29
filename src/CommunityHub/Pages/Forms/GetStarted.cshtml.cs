@@ -8,44 +8,46 @@ using Microsoft.AspNetCore.Mvc.RazorPages;
 namespace CommunityHub.Pages.Forms;
 
 /// <summary>
-/// Generic "Get started" entry (REQUIREMENTS §43 + §148) for the roles WITHOUT a bespoke
-/// wizard (Volunteer, Organizer, Media, EventPartner). This was the link-list that sent the
-/// participant OUT to each standalone form page; it is now a THIN ROUTER to the generic
-/// in-wizard stepper host (<see cref="WizardModel"/> at <c>/Forms/Wizard</c>), which asks
-/// <see cref="RoleWizardService"/> for the SAME ordered, entitlement-gated, done-marked plan
-/// and renders each step's fields INLINE (a true stepper) — the gates/ordering are untouched.
+/// Generic "Get started" wizard (REQUIREMENTS §43 + §161) for the roles WITHOUT a bespoke
+/// wizard — Volunteer, Organizer, Media, EventPartner. §161 makes it the SAME sponsor-style
+/// STEPPER landing page as the speaker + sponsor pages: a progress bar + EVERY entitled step
+/// as a card with its Done/Pending state and an Edit/Open link into that step's form, even at
+/// 100% (no "all done — go to hub" dead-end). It asks <see cref="RoleWizardService"/> for the
+/// SAME ordered, entitlement-gated, done-marked plan and renders it through the shared
+/// <c>_WizardStepper</c> partial all three pages use, so they can never drift.
 ///
-/// <para>Speakers and Sponsors are sent to their own dedicated entries
-/// (<c>/Forms/SpeakerWizard</c> and <c>/Sponsor/GetStarted</c>). A role with no generic wizard
-/// (<see cref="RoleWizardService.Handles"/> is false, e.g. Attendee) still sees the
-/// access-denied note rendered by this page. Kept (not deleted) so the nav entry
-/// (<c>Nav.GetStarted</c> → <c>/Forms/GetStarted</c>) and deep links stay alive.</para>
+/// <para>Speakers and Sponsors are routed to their own entries (<c>/Forms/SpeakerWizard</c>
+/// and <c>/Sponsor/GetStarted</c>). A role with no generic wizard
+/// (<see cref="RoleWizardService.Handles"/> is false, e.g. Attendee) sees the access note.</para>
 /// </summary>
 [Authorize]
 public class GetStartedModel : PageModel
 {
     private readonly ICurrentParticipantAccessor _participant;
+    private readonly RoleWizardService _wizard;
 
-    public GetStartedModel(ICurrentParticipantAccessor participant)
+    public GetStartedModel(ICurrentParticipantAccessor participant, RoleWizardService wizard)
     {
         _participant = participant;
+        _wizard = wizard;
     }
 
     public bool AccessDenied { get; private set; }
+    public RoleWizardView? View { get; private set; }
 
-    public IActionResult OnGet()
+    public async Task<IActionResult> OnGetAsync(CancellationToken ct)
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
 
-        // Roles with a bespoke wizard are routed to it (single canonical "Get started").
+        // Roles with a bespoke wizard are routed to their canonical "Get started".
         if (me.Role == ParticipantRole.Speaker) return RedirectToPage("/Forms/SpeakerWizard");
         if (me.Role == ParticipantRole.Sponsor) return RedirectToPage("/Sponsor/GetStarted");
 
         // A role this generic wizard does not serve (e.g. Attendee) sees the access note.
         if (!RoleWizardService.Handles(me.Role)) { AccessDenied = true; return Page(); }
 
-        // §148: the generic roles now flow through the true in-wizard stepper host.
-        return RedirectToPage("/Forms/Wizard");
+        View = await _wizard.BuildAsync(me.EventId, me.ParticipantId, ct);
+        return Page();
     }
 }

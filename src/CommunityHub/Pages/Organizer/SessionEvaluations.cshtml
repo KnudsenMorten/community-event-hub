@@ -63,9 +63,9 @@
     @if (Model.Dashboard is null)
     {
         <div class="se-empty">No data.</div>
-        return;
     }
-
+    else
+    {
     <div class="se-summary" role="status">
         <div class="se-tile">
             <div class="lbl">Total ratings</div>
@@ -199,4 +199,105 @@
             </tbody>
         </table>
     </div>
+    }
 </div>
+
+<div class="card" style="margin-top:18px;">
+    <h2 style="margin-top:0;">Final evaluation PDFs</h2>
+    <p style="color:#4a5160; font-size:14px; margin-top:4px;">
+        Upload the final evaluation PDF for each session (e.g. the HappyOrNot summary). Once
+        uploaded, the session's speaker(s) can download it from their My Sessions page and are
+        emailed that it is ready. Speakers never see the SharePoint location — the file is served
+        through the hub.
+    </p>
+
+    @if (!string.IsNullOrEmpty(Model.PdfMessage))
+    {
+        <div class="se-note ok" role="status">@Model.PdfMessage</div>
+    }
+    @if (!string.IsNullOrEmpty(Model.PdfError))
+    {
+        <div class="se-note err" role="alert">@Model.PdfError</div>
+    }
+
+    @if (!Model.PdfConfigured)
+    {
+        <div class="se-note warn">
+            The SharePoint folder for final evaluation PDFs is not configured yet
+            (<code>Graphics:SharePoint:SessionEvalPdfFolderPath</code>). Uploads are disabled until
+            an operator sets it; the session list below still shows which sessions already have a PDF.
+        </div>
+    }
+
+    <div class="se-scroll">
+        <table class="se-table">
+            <caption class="sr-only">Final evaluation PDF status + upload per session</caption>
+            <thead>
+                <tr>
+                    <th scope="col">Session</th>
+                    <th scope="col">Speakers</th>
+                    <th scope="col">PDF</th>
+                    <th scope="col">Upload</th>
+                </tr>
+            </thead>
+            <tbody>
+                @if (Model.PdfSessions.Count == 0)
+                {
+                    <tr><td colspan="4" class="se-empty">No sessions yet.</td></tr>
+                }
+                else
+                {
+                    foreach (var s in Model.PdfSessions)
+                    {
+                        <tr>
+                            <th scope="row">@s.Title</th>
+                            <td>@(s.SpeakerNames.Count == 0 ? "—" : string.Join(", ", s.SpeakerNames))</td>
+                            <td>
+                                @if (s.HasPdf)
+                                {
+                                    <span class="se-badge ok">Uploaded</span>
+                                }
+                                else
+                                {
+                                    <span class="se-badge no">Not uploaded</span>
+                                }
+                            </td>
+                            <td>
+                                @if (Model.PdfConfigured)
+                                {
+                                    <form method="post" asp-page-handler="UploadPdf" enctype="multipart/form-data"
+                                          class="se-upload">
+                                        <input type="hidden" name="UploadSessionId" value="@s.SessionId" />
+                                        <input type="file" name="Pdf" accept="application/pdf,.pdf" required
+                                               aria-label="Final evaluation PDF for @s.Title" />
+                                        <button type="submit">@(s.HasPdf ? "Replace" : "Upload")</button>
+                                    </form>
+                                }
+                                else
+                                {
+                                    <span class="se-empty" style="padding:0;">—</span>
+                                }
+                            </td>
+                        </tr>
+                    }
+                }
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<style>
+    .se-note { padding: 10px 14px; border-radius: 8px; font-size: 14px; margin: 0 0 14px 0; }
+    .se-note.ok { background: #e8f7ee; border: 1px solid #b7e3c6; color: #1c6b3a; }
+    .se-note.err { background: #fdecea; border: 1px solid #f5b9b3; color: #97231b; }
+    .se-note.warn { background: #fff7e6; border: 1px solid #f3dea6; color: #7a5a00; }
+    .se-badge { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 12px; font-weight: 700; }
+    .se-badge.ok { background: #e8f7ee; color: #1c6b3a; }
+    .se-badge.no { background: #f1f2f5; color: #6a7280; }
+    .se-upload { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    .se-upload input[type=file] { font-size: 13px; max-width: 220px; }
+    .se-upload button {
+        padding: 8px 16px; border-radius: 7px; font-size: 14px; font-weight: 600; cursor: pointer;
+        border: 1px solid var(--el-blue, #008BD2); background: var(--el-blue, #008BD2); color: #fff;
+    }
+</style>

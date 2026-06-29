@@ -151,7 +151,10 @@ public sealed class GraphicsService
     /// <summary>The outcome of a <see cref="PullSessionGraphicsAsync"/> run.</summary>
     /// <param name="Matched">Active sessions whose title matched an uploaded file (one graphic each).</param>
     /// <param name="Unmatched">Active sessions (with a configured folder) that found NO matching file.</param>
-    public sealed record PullSessionGraphicsResult(int Matched, int Unmatched);
+    /// <param name="TracksMatched">DISTINCT tracks whose name matched a file in the track-graphics
+    /// folder (REQUIREMENTS §158) — one shared graphic per track, regardless of how many sessions /
+    /// speakers reference it. Zero when the track folder is unset (inert).</param>
+    public sealed record PullSessionGraphicsResult(int Matched, int Unmatched, int TracksMatched = 0);
 
     /// <summary>
     /// PULL operator-uploaded session graphics from SharePoint and surface them
@@ -164,9 +167,18 @@ public sealed class GraphicsService
     /// every other session against <see cref="GraphicsSharePointOptions.SessionsFolderPath"/>.
     /// For a match it UPSERTS (by stable key) one <see cref="GraphicAsset"/> per speaker
     /// on the session — Type=Session, Status=Generated (the review gate) — pointing at
-    /// the SharePoint file (no compositor involved). Idempotent: a re-pull updates the
-    /// rows in place. INERT: a no-op returning zero when the store cannot read or no
-    /// folder is configured; a folder with no match leaves the session counted unmatched.
+    /// the SharePoint file (no compositor involved).
+    ///
+    /// REQUIREMENTS §158 — the THIRD pull source: each active session that ALSO has a
+    /// <see cref="CommunityHub.Core.Domain.Session.Track"/> is matched, IN ADDITION, against
+    /// <see cref="GraphicsSharePointOptions.TrackGraphicsFolderPath"/> by its TRACK-name slug
+    /// (one shared file per track) and gets a Type=Track graphic per speaker — distinguishable
+    /// from the session graphic and released through the SAME gate. The track folder is empty ⇒
+    /// the track pull stays inert.
+    ///
+    /// Idempotent: a re-pull updates the rows in place. INERT: a no-op returning zero when the
+    /// store cannot read or no folder is configured; a (session) folder with no match leaves the
+    /// session counted unmatched.
     /// </summary>
     public async Task<PullSessionGraphicsResult> PullSessionGraphicsAsync(
         int eventId, CancellationToken ct = default)
@@ -179,7 +191,10 @@ public sealed class GraphicsService
 
         var mcFolder = _spOptions.MasterClassFolderPath;
         var sessFolder = _spOptions.SessionsFolderPath;
-        if (string.IsNullOrWhiteSpace(mcFolder) && string.IsNullOrWhiteSpace(sessFolder))
+        var trackFolder = _spOptions.TrackGraphicsFolderPath;
+        if (string.IsNullOrWhiteSpace(mcFolder)
+            && string.IsNullOrWhiteSpace(sessFolder)
+            && string.IsNullOrWhiteSpace(trackFolder))
         {
             return new PullSessionGraphicsResult(0, 0); // no folder configured ⇒ inert
         }
@@ -194,6 +209,7 @@ public sealed class GraphicsService
                 s.Id,
                 s.Title,
                 s.Type,
+                s.Track,
                 SpeakerIds = s.SessionSpeakers.Select(ss => ss.ParticipantId).ToList(),
             })
             .ToListAsync(ct);
@@ -220,31 +236,56 @@ public sealed class GraphicsService
 
         var matched = 0;
         var unmatched = 0;
+        // DISTINCT track slugs that matched a file — so two sessions sharing a track count once.
+        var matchedTrackSlugs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var s in sessions)
         {
+            // ----- title-matched SESSION graphic (MasterClass vs Sessions folder) -----
             var folder = s.Type == SessionType.MasterClass ? mcFolder : sessFolder;
-            if (string.IsNullOrWhiteSpace(folder)) continue; // folder not configured for this type — skip
-
-            var listing = await ListBySlugAsync(folder);
-            if (listing is null) continue;
-
-            var titleSlug = Slug(s.Title);
-            if (string.IsNullOrEmpty(titleSlug) || !listing.TryGetValue(titleSlug, out var file))
+            if (!string.IsNullOrWhiteSpace(folder)) // folder configured for this type
             {
-                unmatched++;
-                continue;
+                var listing = await ListBySlugAsync(folder);
+                var titleSlug = Slug(s.Title);
+                if (listing is not null
+                    && !string.IsNullOrEmpty(titleSlug)
+                    && listing.TryGetValue(titleSlug, out var file))
+                {
+                    matched++;
+                    var sharePointPath = $"{folder.Trim('/')}/{file.Name}";
+                    foreach (var participantId in s.SpeakerIds)
+                    {
+                        await UpsertPulledSessionGraphicAsync(eventId, s.Id, participantId, file, sharePointPath, ct);
+                    }
+                }
+                else
+                {
+                    unmatched++;
+                }
             }
 
-            matched++;
-            var sharePointPath = $"{folder.Trim('/')}/{file.Name}";
-            foreach (var participantId in s.SpeakerIds)
+            // ----- track-matched TRACK graphic (§158, third pull source) -----
+            // ADDITIONAL to the session graphic; matched by the session's Track name, not its title.
+            if (!string.IsNullOrWhiteSpace(trackFolder) && !string.IsNullOrWhiteSpace(s.Track))
             {
-                await UpsertPulledSessionGraphicAsync(eventId, s.Id, participantId, file, sharePointPath, ct);
+                var trackListing = await ListBySlugAsync(trackFolder);
+                var trackSlug = Slug(s.Track!);
+                if (trackListing is not null
+                    && !string.IsNullOrEmpty(trackSlug)
+                    && trackListing.TryGetValue(trackSlug, out var trackFile))
+                {
+                    matchedTrackSlugs.Add(trackSlug);
+                    var trackPath = $"{trackFolder.Trim('/')}/{trackFile.Name}";
+                    foreach (var participantId in s.SpeakerIds)
+                    {
+                        await UpsertPulledTrackGraphicAsync(
+                            eventId, s.Id, participantId, trackSlug, trackFile, trackPath, ct);
+                    }
+                }
             }
         }
 
-        return new PullSessionGraphicsResult(matched, unmatched);
+        return new PullSessionGraphicsResult(matched, unmatched, matchedTrackSlugs.Count);
     }
 
     // ===================================================================
@@ -285,6 +326,35 @@ public sealed class GraphicsService
         asset.UpdatedAt = DateTimeOffset.UtcNow;
         await _db.SaveChangesAsync(ct);
         return asset;
+    }
+
+    /// <summary>
+    /// BULK-release every generated, non-sponsor (speaker/session) graphic for an edition that is
+    /// still <see cref="GraphicAssetStatus.Generated"/>. Used by the SharePoint sync (the operator
+    /// already curated by placing the finished file in the folder, so a pulled graphic is released
+    /// straight to the speaker) and by the organizer "Release all" action. Sponsor graphics stay
+    /// internal-only and are never touched. Returns the number released.
+    /// </summary>
+    public async Task<int> ReleaseAllGeneratedAsync(
+        int eventId, string releasedByEmail, CancellationToken ct = default)
+    {
+        var pending = await _db.GraphicAssets
+            .Where(g => g.EventId == eventId
+                        && g.Status == GraphicAssetStatus.Generated
+                        && g.Type != GraphicAssetType.Sponsor)
+            .ToListAsync(ct);
+        if (pending.Count == 0) return 0;
+
+        var now = DateTimeOffset.UtcNow;
+        foreach (var asset in pending)
+        {
+            asset.Status = GraphicAssetStatus.Released;
+            asset.ReleasedAt = now;
+            asset.ReleasedByEmail = releasedByEmail;
+            asset.UpdatedAt = now;
+        }
+        await _db.SaveChangesAsync(ct);
+        return pending.Count;
     }
 
     // ===================================================================
@@ -388,6 +458,46 @@ public sealed class GraphicsService
     /// <summary>Whether per-user OAuth posting is wired (false by default → download/draft only).</summary>
     public bool CanPostToSocial => _share.CanPost;
 
+    /// <summary>One speaker graphic's bytes, ready to stream as a download.</summary>
+    public sealed record SpeakerGraphicFile(byte[] Content, string ContentType, string FileName);
+
+    /// <summary>
+    /// SERVER-PROXIED download of ONE of the signed-in speaker's OWN released graphics (§160).
+    /// Verifies ownership (their participant id), the release gate (Released), and that it is not a
+    /// sponsor graphic, then streams the bytes from SharePoint via the app's creds — so the speaker
+    /// gets the file WITHOUT any SharePoint permission (the raw SharePoint URL 'Access Denied'd
+    /// them). Returns null when the asset isn't theirs / not released / not stored / the store
+    /// can't read.
+    /// </summary>
+    public async Task<SpeakerGraphicFile?> GetSpeakerGraphicFileAsync(
+        int eventId, int participantId, int graphicAssetId, CancellationToken ct = default)
+    {
+        var asset = await _db.GraphicAssets.FirstOrDefaultAsync(g =>
+            g.EventId == eventId
+            && g.Id == graphicAssetId
+            && g.ParticipantId == participantId
+            && g.Status == GraphicAssetStatus.Released
+            && g.Type != GraphicAssetType.Sponsor, ct);
+        if (asset?.StorageItemId is null || !_store.CanRead) return null;
+
+        byte[]? bytes;
+        try { bytes = await _store.DownloadAsync(asset.StorageItemId, ct); }
+        catch { return null; }
+        if (bytes is null || bytes.Length == 0) return null;
+
+        var name = string.IsNullOrWhiteSpace(asset.FileName) ? $"graphic-{asset.Id}.png" : asset.FileName!;
+        var ext = System.IO.Path.GetExtension(name).ToLowerInvariant();
+        var ctype = ext switch
+        {
+            ".png" => "image/png",
+            ".gif" => "image/gif",
+            ".jpg" or ".jpeg" => "image/jpeg",
+            ".webp" => "image/webp",
+            _ => "application/octet-stream",
+        };
+        return new SpeakerGraphicFile(bytes, ctype, name);
+    }
+
     /// <summary>
     /// Build the "I'm speaking at ELDK27" LinkedIn DRAFT for a speaker. The text
     /// carries the event date(s), the ticket URL <c>eldk27.expertslive.dk</c> and
@@ -484,6 +594,61 @@ public sealed class GraphicsService
         return existing;
     }
 
+    /// <summary>
+    /// Upsert (by stable key) the <see cref="GraphicAsset"/> for a PULLED TRACK graphic
+    /// (REQUIREMENTS §158). Same shape as <see cref="UpsertPulledSessionGraphicAsync"/> but
+    /// keyed by (track, speaker) via <see cref="GraphicStableKey.ForTrack"/> and tagged
+    /// <see cref="GraphicAssetType.Track"/> so the speaker page can LABEL it as the track
+    /// graphic and it never collides with the session graphic. <paramref name="sessionId"/>
+    /// is recorded as a REPRESENTATIVE session (so the page can resolve the track name); the
+    /// stable key keeps a speaker on two same-track sessions to ONE row. Created
+    /// <see cref="GraphicAssetStatus.Generated"/> (the gate); a re-pull refreshes the file
+    /// pointer in place and PRESERVES the release status. An organizer OVERRULE is never clobbered.
+    /// </summary>
+    private async Task<GraphicAsset> UpsertPulledTrackGraphicAsync(
+        int eventId, int sessionId, int participantId,
+        string trackSlug, SharePointFileRef file, string sharePointPath, CancellationToken ct)
+    {
+        var key = GraphicStableKey.ForTrack(trackSlug, participantId);
+        var existing = await FindByKeyAsync(eventId, key, ct);
+
+        // Respect a human replacement — a pull must not overwrite an organizer overrule.
+        if (existing is { IsOrganizerOverridden: true }) return existing;
+
+        var now = DateTimeOffset.UtcNow;
+        if (existing is null)
+        {
+            var asset = new GraphicAsset
+            {
+                EventId = eventId,
+                Type = GraphicAssetType.Track,
+                StableKey = key,
+                ParticipantId = participantId,
+                SessionId = sessionId,                  // representative session (resolves the track name)
+                Status = GraphicAssetStatus.Generated,  // THE GATE — never auto-released
+                SharePointPath = sharePointPath,
+                SharePointUrl = string.IsNullOrEmpty(file.WebUrl) ? null : file.WebUrl,
+                StorageItemId = file.ItemId,
+                FileName = file.Name,
+                CreatedAt = now,
+                UpdatedAt = now,
+            };
+            _db.GraphicAssets.Add(asset);
+            await _db.SaveChangesAsync(ct);
+            return asset;
+        }
+
+        // Idempotent re-pull — refresh the file pointer, keep the stable key + status.
+        existing.SessionId = sessionId;
+        existing.SharePointPath = sharePointPath;
+        existing.SharePointUrl = string.IsNullOrEmpty(file.WebUrl) ? existing.SharePointUrl : file.WebUrl;
+        existing.StorageItemId = file.ItemId;
+        existing.FileName = file.Name;
+        existing.UpdatedAt = now;
+        await _db.SaveChangesAsync(ct);
+        return existing;
+    }
+
     /// <summary>Drop a file extension (the last <c>.ext</c>) before slugifying the name.</summary>
     private static string StripExtension(string fileName)
     {
@@ -531,6 +696,7 @@ public sealed class GraphicsService
             GraphicAssetType.Speaker => "Speakers",
             GraphicAssetType.Sponsor => "Sponsors",
             GraphicAssetType.Session => "Sessions",
+            GraphicAssetType.Track => "Tracks",
             _ => "Other",
         };
         var file = asset.FileName ?? GraphicStableKey.FileName(asset.StableKey);

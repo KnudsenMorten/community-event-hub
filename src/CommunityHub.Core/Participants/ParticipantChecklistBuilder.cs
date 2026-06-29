@@ -126,6 +126,12 @@ public sealed class ParticipantChecklistBuilder
         if (sourceKey.StartsWith("dinner-form:",                  StringComparison.Ordinal)) return "/Forms/Dinner";
         if (sourceKey.StartsWith("volunteer-form:",               StringComparison.Ordinal)) return "/volunteer/availability";
         if (sourceKey.StartsWith("speaker-form:",                 StringComparison.Ordinal)) return "/Forms/Speaker";
+        // §161: keep My-Tasks rows in step with the Get-Started cards — the manual mark-done
+        // steps (Signal join §109, speaker Promote §116, Party RSVP §164) deep-link to the
+        // SAME page their Get-Started card opens, so both surfaces tell one story.
+        if (sourceKey.StartsWith("signal:",                       StringComparison.Ordinal)) return "/Forms/Signal";
+        if (sourceKey.StartsWith("promote:",                      StringComparison.Ordinal)) return "/Speaker/Promote";
+        if (sourceKey.StartsWith("party-form:",                   StringComparison.Ordinal)) return "/Party";
         if (sourceKey.StartsWith("speakerdl:",                    StringComparison.Ordinal))
         {
             // A speaker-deadline task mirrors a logistics form: deep-link to the

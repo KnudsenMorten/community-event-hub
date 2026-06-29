@@ -18,6 +18,15 @@ public enum GraphicAssetType
 
     /// <summary>A per-session graphic linked to a session the speaker is on (download/share).</summary>
     Session = 2,
+
+    /// <summary>
+    /// A per-TRACK promo graphic (REQUIREMENTS §158): one operator-uploaded file shared by
+    /// every session in a track (e.g. "Security"/"Azure"), matched by the session's
+    /// <see cref="Session.Track"/> name (NOT by session title). Speaker-facing like a
+    /// <see cref="Session"/> graphic (released through the SAME gate, never sponsor-internal),
+    /// but labelled as the track graphic so the speaker can tell the two apart.
+    /// </summary>
+    Track = 3,
 }
 
 /// <summary>
@@ -148,6 +157,15 @@ public static class GraphicStableKey
 
     public static string ForSession(int sessionId, int participantId) =>
         $"session:{sessionId}:speaker:{participantId}";
+
+    /// <summary>
+    /// The stable key for a per-TRACK promo graphic (REQUIREMENTS §158), keyed by the
+    /// track-name SLUG + speaker — NOT by session. So a speaker on two sessions in the
+    /// SAME track gets ONE track graphic (idempotent), while a speaker spanning two
+    /// tracks gets one per track, e.g. <c>track:security:speaker:42</c>.
+    /// </summary>
+    public static string ForTrack(string trackSlug, int participantId) =>
+        $"track:{trackSlug}:speaker:{participantId}";
 
     public static string ForSponsor(string sponsorCompanyId) => $"sponsor:{sponsorCompanyId}";
 

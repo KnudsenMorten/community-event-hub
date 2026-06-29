@@ -129,7 +129,10 @@ public sealed class SessionImportService
             session.Title = src.Title;
             session.Abstract = src.Abstract;
             session.Room = src.Room;
+            // §154: Track (now correctly sourced from the "Suggested Event Track" group,
+            // not the Format) + Level (from the "Level" group) are import-owned labels.
             session.Track = src.Track;
+            session.Level = src.Level;
             session.StartsAt = src.StartsAt;
             session.EndsAt = src.EndsAt;
             session.IsServiceSession = src.IsServiceSession;
@@ -137,7 +140,13 @@ public sealed class SessionImportService
             // from the source category/format + duration (these are import-owned,
             // refreshed each run).
             session.IsHubAdded = false;
-            session.Length = SessionDefaultsMapper.MapLength(src.StartsAt, src.EndsAt);
+            // Length prefers the scheduled times, then the Format label's duration hint
+            // ("(60 min)" / "Master Class") — the times are empty until the Sessionize grid
+            // is published, so without the label every imported session looked like 60 min.
+            session.Length = SessionDefaultsMapper.MapLength(src.StartsAt, src.EndsAt, src.Category);
+            // §154: the exact numeric minutes for display ("60 min"). The parser already
+            // resolved it (scheduled duration, else the Format "(NN min)" hint); persist it.
+            session.LengthMinutes = src.LengthMinutes;
             // Respect an organizer's MANUAL type override — a re-import never clobbers
             // it. Otherwise derive the type from the source category/format + duration.
             if (!session.TypeIsManualOverride)

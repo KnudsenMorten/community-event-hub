@@ -156,7 +156,7 @@ public sealed class ErpWebshopContactSyncService
             var html = "<p>The ERP→webshop sponsor reconcile found items needing attention "
                 + "(mostly contacts missing a Signer/Event-Coordinator role in e-conomic):</p>"
                 + $"<ul>{items}</ul><p>Fix the role in e-conomic (contact notes <code>Role:1,2</code>) and the next sync will set the default.</p>";
-            await _email.SendAsync(AlertEmail, "[ELDK27] Sponsor ERP/webshop reconcile — action needed", html, ct);
+            await _email.SendAsync(AlertEmail, "Sponsor ERP/webshop reconcile — action needed [ELDK27]", html, ct);
         }
         catch (Exception ex) { _log.LogWarning(ex, "ERP sync: alert email to {To} failed.", AlertEmail); }
     }

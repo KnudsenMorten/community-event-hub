@@ -1,7 +1,7 @@
 @page
 @model CommunityHub.Pages.Organizer.EconomicContactsModel
 @{
-    ViewData["Title"] = "backend sponsor contacts";
+    ViewData["Title"] = "E-conomic Contact management";
 }
 
 @if (Model.AccessDenied)
@@ -46,9 +46,8 @@
 {
     <div class="card">
         <h1 style="margin-top:0;">@ViewData["Title"]</h1>
-        <p>Sponsor customers from the backend (<strong>customer group 1</strong>). Pick one to manage its contacts —
-           name, email, phone and role write straight to the backend (the master). Roles: <strong>Signer</strong>
-           and/or <strong>Event Coordinator</strong> (a person can hold both).</p>
+        <p>Sponsor &amp; contacts are managed in E-conomic. Below you can manage the details — name, email, phone and
+           role. Roles: <strong>Signer</strong> and/or <strong>Event Coordinator</strong> (a person can hold both).</p>
         <p><a asp-page="/Organizer/Index">&larr; @Localizer["Common.BackToOrganizerArea"]</a></p>
 
         <form method="get" class="ec-search" style="margin:10px 0;">

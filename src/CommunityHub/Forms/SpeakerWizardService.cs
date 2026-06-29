@@ -153,7 +153,14 @@ public sealed class SpeakerWizardService
             steps.Add(new("signal", "/Forms/Signal", signalDone));
         }
 
-        // 9. Accept Code of Conduct + Privacy (§119) — all roles, always last. Done
+        // 9. Party sign-up (§164) — every speaker RSVPs Yes/No to the pre-day party.
+        //    Done once the speaker has a saved Party RSVP row (stamped with their id).
+        //    The matching party-form: task + reminder is seeded by PartyTaskSeeder.
+        var partyDone = await _db.PartyRsvps.AnyAsync(
+            r => r.EventId == eventId && r.ParticipantId == participantId, ct);
+        steps.Add(new("party", "/Party", partyDone));
+
+        // 10. Accept Code of Conduct + Privacy (§119) — all roles, always last. Done
         //    once the speaker has a persisted acceptance row (who/when).
         var acceptDone = await _db.ParticipantPolicyAcceptances.AnyAsync(
             a => a.EventId == eventId && a.ParticipantId == participantId, ct);

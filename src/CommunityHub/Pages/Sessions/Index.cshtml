@@ -79,7 +79,7 @@
         background: #eef1f7; color: #344; white-space: nowrap;
     }
     .so-tag.type-mc { background: #ece6fb; color: #4527a0; }
-    .so-tag.type-sponsor { background: #fdeede; color: #8a4b00; }
+    .so-tag.type-tech { background: #e6f3fb; color: #055f86; }
     .so-card .so-when { font-size: 12.5px; color: #5a6270; margin: 0 0 6px; }
     .so-card .so-speakers { font-size: 13px; color: #24292f; margin: 0 0 8px; }
     .so-card .so-speakers .lbl { color: #6a7280; }
@@ -123,16 +123,23 @@
             <form method="get" class="so-filters" role="search" aria-label="@Localizer["SessOv.FilterAria"]">
             <div class="f-field">
                 <label for="FilterType">@Localizer["SessOv.Type"]</label>
-                <select id="FilterType" name="FilterType" asp-for="FilterType"
-                        asp-items="Html.GetEnumSelectList<SessionType>()">
+                @* Friendly labels, not raw enum identifiers (TechnicalSession/MasterClass/…). *@
+                <select id="FilterType" name="FilterType" asp-for="FilterType">
                     <option value="">@Localizer["SessOv.AllTypes"]</option>
+                    @foreach (var t in Enum.GetValues<SessionType>())
+                    {
+                        <option value="@t">@typeLabel(t)</option>
+                    }
                 </select>
             </div>
             <div class="f-field">
                 <label for="FilterLength">@Localizer["SessOv.Length"]</label>
-                <select id="FilterLength" name="FilterLength" asp-for="FilterLength"
-                        asp-items="Html.GetEnumSelectList<SessionLength>()">
+                <select id="FilterLength" name="FilterLength" asp-for="FilterLength">
                     <option value="">@Localizer["SessOv.AnyLength"]</option>
+                    @foreach (var l in Enum.GetValues<SessionLength>())
+                    {
+                        <option value="@l">@lengthLabel(l)</option>
+                    }
                 </select>
             </div>
             @if (view.Rooms.Count > 0)
@@ -144,6 +151,48 @@
                         @foreach (var r in view.Rooms)
                         {
                             <option value="@r" selected="@(string.Equals(Model.FilterRoom, r, StringComparison.OrdinalIgnoreCase))">@r</option>
+                        }
+                    </select>
+                </div>
+            }
+            @* §154: date / timeslot filter — only when sessions are scheduled (times exist). *@
+            @if (view.Timeslots.Count > 0)
+            {
+                <div class="f-field">
+                    <label for="FilterTimeslot">Date &amp; time</label>
+                    <select id="FilterTimeslot" name="FilterTimeslot" asp-for="FilterTimeslot">
+                        <option value="">All dates &amp; times</option>
+                        @foreach (var t in view.Timeslots)
+                        {
+                            <option value="@t.Key" selected="@(string.Equals(Model.FilterTimeslot, t.Key, StringComparison.Ordinal))">@t.Label</option>
+                        }
+                    </select>
+                </div>
+            }
+            @* §154: Track filter — works across ALL sessions, incl. master classes. *@
+            @if (view.Tracks.Count > 0)
+            {
+                <div class="f-field">
+                    <label for="FilterTrack">Track</label>
+                    <select id="FilterTrack" name="FilterTrack" asp-for="FilterTrack">
+                        <option value="">All tracks</option>
+                        @foreach (var t in view.Tracks)
+                        {
+                            <option value="@t" selected="@(string.Equals(Model.FilterTrack, t, StringComparison.OrdinalIgnoreCase))">@t</option>
+                        }
+                    </select>
+                </div>
+            }
+            @* §154: Level filter — works across ALL sessions, incl. master classes. *@
+            @if (view.Levels.Count > 0)
+            {
+                <div class="f-field">
+                    <label for="FilterLevel">Level</label>
+                    <select id="FilterLevel" name="FilterLevel" asp-for="FilterLevel">
+                        <option value="">All levels</option>
+                        @foreach (var l in view.Levels)
+                        {
+                            <option value="@l" selected="@(string.Equals(Model.FilterLevel, l, StringComparison.OrdinalIgnoreCase))">@l</option>
                         }
                     </select>
                 </div>
@@ -182,12 +231,13 @@
                 @foreach (var s in view.Sessions)
                 {
                     var typeClass = s.Type == SessionType.MasterClass ? "type-mc"
-                        : s.Type == SessionType.TechnicalSession ? "type-sponsor" : "";
+                        : s.Type == SessionType.TechnicalSession ? "type-tech" : "";
                     <li class="so-card">
                         <h2><a href="/Sessions/@s.Id">@s.Title</a></h2>
                         <div class="so-tags">
                             <span class="so-tag @typeClass">@typeLabel(s.Type)</span>
-                            <span class="so-tag">@lengthLabel(s.Length)</span>
+                            @* §154: prefer the exact numeric length ("60 min") when known, else the bucket. *@
+                            <span class="so-tag">@(s.LengthMinutes is int lm ? $"{lm} min" : lengthLabel(s.Length))</span>
                             @if (!string.IsNullOrWhiteSpace(s.Room))
                             {
                                 <span class="so-tag">@Localizer["SessOv.RoomTag"] @s.Room</span>
@@ -195,6 +245,11 @@
                             @if (!string.IsNullOrWhiteSpace(s.Track))
                             {
                                 <span class="so-tag">@s.Track</span>
+                            }
+                            @* §154: audience level (e.g. "Expert (400)"). *@
+                            @if (!string.IsNullOrWhiteSpace(s.Level))
+                            {
+                                <span class="so-tag">@s.Level</span>
                             }
                         </div>
                         @if (s.StartsAt is not null)
@@ -210,15 +265,21 @@
                                 @for (var i = 0; i < s.Speakers.Count; i++)
                                 {
                                     var sp = s.Speakers[i];
-                                    @* Link only to a PUBLISHED speaker (the hard gate); an
-                                       unpublished co-speaker shows as plain text. *@
-                                    if (sp.IsPublished)
+                                    @* §156: the speaker name is BOLD, and hyperlinked to their
+                                       LinkedIn when we have one; otherwise a PUBLISHED speaker links
+                                       to the internal /Speakers hub page (hard gate), and an
+                                       unpublished co-speaker shows as bold plain text. *@
+                                    if (!string.IsNullOrWhiteSpace(sp.LinkedIn))
                                     {
-                                        <a href="/Speakers/@sp.ParticipantId">@sp.Name</a>
+                                        <a href="@sp.LinkedIn" target="_blank" rel="noopener noreferrer"><strong>@sp.Name</strong></a>
+                                    }
+                                    else if (sp.IsPublished)
+                                    {
+                                        <a href="/Speakers/@sp.ParticipantId"><strong>@sp.Name</strong></a>
                                     }
                                     else
                                     {
-                                        <span>@sp.Name</span>
+                                        <strong>@sp.Name</strong>
                                     }
                                     @(i < s.Speakers.Count - 1 ? ", " : "")
                                 }

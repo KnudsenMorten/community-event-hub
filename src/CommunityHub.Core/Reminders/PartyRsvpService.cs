@@ -5,21 +5,29 @@ using Microsoft.EntityFrameworkCore;
 namespace CommunityHub.Core.Reminders;
 
 /// <summary>
-/// Backs the anonymous Party RSVP (REQUIREMENTS §6): resolves the active edition +
-/// the Party window (16:00–18:00 on the edition's pre-day = <see cref="Event.StartDate"/>),
-/// upserts an RSVP by email, and lists/counts them for organizers. No login, no
-/// Participant created. Basic validation only (name + a plausible email).
+/// Backs the Party RSVP (REQUIREMENTS §6, §164): resolves the active edition +
+/// the Party window (16:00–18:30 on the edition's pre-day = <see cref="Event.StartDate"/>),
+/// upserts an RSVP by email, and lists/counts them for organizers. Serves BOTH the
+/// anonymous public form (no login, no Participant) AND a signed-in participant who
+/// RSVPs as themselves (carries their <c>ParticipantId</c> + a sponsor head count).
+/// Basic validation only (name + a plausible email).
 /// </summary>
 public sealed class PartyRsvpService
 {
     private readonly CommunityHubDbContext _db;
     public PartyRsvpService(CommunityHubDbContext db) => _db = db;
 
-    /// <summary>The Party start/end hour (local), per the operator: 16:00–18:00.</summary>
+    /// <summary>The Party window (local), per the operator (§164): 16:00–18:30. The end
+    /// minute is a first-class part of the window so the display + the .ics DTEND stay
+    /// data-driven from this ONE source rather than three hardcoded ":00"/":30" spots.</summary>
     public const int PartyStartHour = 16;
+    public const int PartyStartMinute = 0;
     public const int PartyEndHour = 18;
+    public const int PartyEndMinute = 30;
 
-    public sealed record PartyInfo(int EventId, string EventName, DateOnly Date, int StartHour, int EndHour);
+    public sealed record PartyInfo(
+        int EventId, string EventName, DateOnly Date,
+        int StartHour, int EndHour, int StartMinute = 0, int EndMinute = 0);
 
     /// <summary>The active edition's Party, or null when there is no active edition.</summary>
     public async Task<PartyInfo?> GetActivePartyAsync(CancellationToken ct = default)
@@ -29,7 +37,8 @@ public sealed class PartyRsvpService
             .Select(e => new { e.Id, e.DisplayName, e.StartDate })
             .FirstOrDefaultAsync(ct);
         return ev is null ? null
-            : new PartyInfo(ev.Id, ev.DisplayName, ev.StartDate, PartyStartHour, PartyEndHour);
+            : new PartyInfo(ev.Id, ev.DisplayName, ev.StartDate,
+                PartyStartHour, PartyEndHour, PartyStartMinute, PartyEndMinute);
     }
 
     public sealed record SubmitResult(bool Ok, string? Error);
@@ -37,9 +46,13 @@ public sealed class PartyRsvpService
     /// <summary>
     /// Record an RSVP for the active edition (upsert by email). Validates name +
     /// a basic email shape. Returns an error message the form shows; never throws.
+    /// <paramref name="headCount"/> (sponsor "how many from your company") and
+    /// <paramref name="participantId"/> (set when a signed-in participant RSVPs) are
+    /// stamped on the row; both are null for an anonymous single-person RSVP (§164).
     /// </summary>
     public async Task<SubmitResult> SubmitAsync(
-        string? name, string? email, bool attending, string? ipHash, CancellationToken ct = default)
+        string? name, string? email, bool attending, string? ipHash,
+        int? headCount = null, int? participantId = null, CancellationToken ct = default)
     {
         var party = await GetActivePartyAsync(ct);
         if (party is null) return new SubmitResult(false, "There is no active event right now.");
@@ -49,6 +62,10 @@ public sealed class PartyRsvpService
         if (name.Length < 2) return new SubmitResult(false, "Please enter your name.");
         if (!LooksLikeEmail(email)) return new SubmitResult(false, "Please enter a valid email address.");
 
+        // A head count is only meaningful when the person is actually attending; a
+        // declined RSVP carries none. Clamp to a sane minimum of 1 when supplied.
+        var resolvedHeadCount = (attending && headCount is { } hc) ? Math.Max(1, hc) : (int?)null;
+
         var existing = await _db.PartyRsvps
             .FirstOrDefaultAsync(r => r.EventId == party.EventId && r.Email == email, ct);
         var now = DateTimeOffset.UtcNow;
@@ -57,19 +74,30 @@ public sealed class PartyRsvpService
             _db.PartyRsvps.Add(new PartyRsvp
             {
                 EventId = party.EventId, Name = name, Email = email,
-                Attending = attending, IpHash = ipHash, CreatedAt = now, UpdatedAt = now,
+                Attending = attending, HeadCount = resolvedHeadCount, ParticipantId = participantId,
+                IpHash = ipHash, CreatedAt = now, UpdatedAt = now,
             });
         }
         else
         {
             existing.Name = name;
             existing.Attending = attending;
+            existing.HeadCount = resolvedHeadCount;
+            // Stamp the participant link when a signed-in person re-submits a row that
+            // may have started life anonymous (same email); never null it back out.
+            if (participantId is not null) existing.ParticipantId = participantId;
             existing.IpHash = ipHash;
             existing.UpdatedAt = now;
         }
         await _db.SaveChangesAsync(ct);
         return new SubmitResult(true, null);
     }
+
+    /// <summary>§164: the signed-in participant's own RSVP for the edition (so the form can
+    /// prefill their prior answer + head count), or null when they haven't answered yet.</summary>
+    public Task<PartyRsvp?> GetForParticipantAsync(int eventId, int participantId, CancellationToken ct = default) =>
+        _db.PartyRsvps.AsNoTracking()
+            .FirstOrDefaultAsync(r => r.EventId == eventId && r.ParticipantId == participantId, ct);
 
     public Task<List<PartyRsvp>> GetAllAsync(int eventId, CancellationToken ct = default) =>
         _db.PartyRsvps.AsNoTracking().Where(r => r.EventId == eventId)

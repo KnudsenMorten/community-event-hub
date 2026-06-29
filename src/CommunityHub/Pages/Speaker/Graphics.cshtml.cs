@@ -75,14 +75,15 @@ public class GraphicsModel : PageModel
     /// <summary>The "I'm speaking at ELDK27" announcement draft (LinkedIn).</summary>
     public SocialShareDraft? AnnouncementDraft { get; private set; }
 
+    /// <summary>The same announcement as an X (Twitter) draft (§160 — share buttons live under the post text).</summary>
+    public SocialShareDraft? AnnouncementDraftX { get; private set; }
+
     public sealed record GraphicCard(
         int Id,
         string Kind,
         string? Title,
         string? DownloadUrl,
-        bool HasStoredFile,
-        SocialShareDraft LinkedInDraft,
-        SocialShareDraft XDraft);
+        bool HasStoredFile);
 
     public Task<IActionResult> OnGetAsync(CancellationToken ct) => LoadAsync(ct);
 
@@ -122,11 +123,12 @@ public class GraphicsModel : PageModel
 
         var visible = await _graphics.GetSpeakerVisibleAsync(me.EventId, me.ParticipantId, ct);
 
-        // Resolve session titles for per-session cards.
+        // Resolve session titles (per-session cards) + track names (§158 per-track cards). A Track
+        // graphic carries a REPRESENTATIVE SessionId, so its track name is read from that session.
         var sessionIds = visible.Where(g => g.SessionId is not null).Select(g => g.SessionId!.Value).ToList();
-        var sessionTitles = await _db.Sessions
+        var sessionInfo = await _db.Sessions
             .Where(s => sessionIds.Contains(s.Id))
-            .ToDictionaryAsync(s => s.Id, s => s.Title, ct);
+            .ToDictionaryAsync(s => s.Id, s => new { s.Title, s.Track }, ct);
 
         var cards = new List<GraphicCard>();
         foreach (var g in visible)
@@ -135,22 +137,35 @@ public class GraphicsModel : PageModel
             {
                 GraphicAssetType.Session =>
                     ("Session graphic",
-                     g.SessionId is not null && sessionTitles.TryGetValue(g.SessionId.Value, out var t) ? t : "Session"),
+                     g.SessionId is not null && sessionInfo.TryGetValue(g.SessionId.Value, out var s) ? s.Title : "Session"),
+                // §158: the per-track promo graphic, labelled with the track name so the speaker
+                // can tell it apart from their session graphic.
+                GraphicAssetType.Track =>
+                    ("Track graphic",
+                     g.SessionId is not null && sessionInfo.TryGetValue(g.SessionId.Value, out var ts)
+                        && !string.IsNullOrWhiteSpace(ts.Track) ? ts.Track : "Track"),
                 _ => ("Speaker graphic", (string?)null),
             };
 
+            // §160: the PNG is served through the hub proxy (/speaker-graphic/{id}) — NEVER the raw
+            // SharePoint URL (the speaker has no SharePoint permission). HasStoredFile keys off the
+            // stored Graph item id, which is what the proxy streams.
             cards.Add(new GraphicCard(
-                g.Id, kind, title, g.SharePointUrl,
-                !string.IsNullOrEmpty(g.SharePointUrl),
-                _graphics.BuildSessionShareDraft(EventDisplayName, TicketUrl, title ?? EventDisplayName, g.SharePointUrl, SocialNetwork.LinkedIn),
-                _graphics.BuildSessionShareDraft(EventDisplayName, TicketUrl, title ?? EventDisplayName, g.SharePointUrl, SocialNetwork.X)));
+                g.Id, kind, title,
+                DownloadUrl: $"/speaker-graphic/{g.Id}",
+                HasStoredFile: !string.IsNullOrEmpty(g.StorageItemId)));
         }
         Cards = cards;
 
+        // The announcement (the speaker's "Your post") share drafts — LinkedIn + X — shown UNDER the
+        // post text. No graphicUrl is attached (share-intent can't carry an arbitrary image; the
+        // speaker downloads the PNG and attaches it themselves).
         AnnouncementDraft = _graphics.BuildSpeakingAnnouncementDraft(
             EventDisplayName, EventDates, TicketUrl, me.FullName, sessionTitle: null,
-            graphicUrl: visible.FirstOrDefault(g => g.Type == GraphicAssetType.Speaker)?.SharePointUrl,
-            SocialNetwork.LinkedIn);
+            graphicUrl: null, SocialNetwork.LinkedIn);
+        AnnouncementDraftX = _graphics.BuildSpeakingAnnouncementDraft(
+            EventDisplayName, EventDates, TicketUrl, me.FullName, sessionTitle: null,
+            graphicUrl: null, SocialNetwork.X);
 
         return Page();
     }

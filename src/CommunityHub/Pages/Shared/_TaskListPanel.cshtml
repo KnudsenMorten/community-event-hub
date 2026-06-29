@@ -66,15 +66,16 @@
         @await Html.PartialAsync(Model.RowPartialName, task)
     }
 
-    @* 3. COMPLETED at the bottom, collapsed. *@
+    @* 3. COMPLETED — a CLEARLY SEPARATE section (divider + own bordered/tinted box), collapsed. *@
     @if (Model.Completed.Count > 0)
     {
-        <details style="margin-top:14px;padding-top:4px;">
-            <summary style="font-size:18px;font-weight:700;color:var(--el-darkblue);cursor:pointer;">
-                @Localizer["TaskList.Completed", Model.Completed.Count]
+        <div style="border-top:2px solid #e5e7eb;margin:22px 0 0;"></div>
+        <details style="margin-top:16px;background:#f3fbf6;border:1px solid #c7ead7;border-radius:10px;padding:12px 14px;">
+            <summary style="font-size:18px;font-weight:700;color:#0a6;cursor:pointer;">
+                &#9989; @Localizer["TaskList.Completed", Model.Completed.Count]
                 <span style="font-size:13px;font-weight:400;color:#666;margin-left:6px;">@Localizer["TaskList.ClickToExpand"]</span>
             </summary>
-            <div style="margin-top:8px;">
+            <div style="margin-top:10px;">
                 @foreach (var task in Model.Completed)
                 {
                     @await Html.PartialAsync(Model.RowPartialName, task)

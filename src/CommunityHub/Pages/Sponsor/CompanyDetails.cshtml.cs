@@ -26,7 +26,12 @@ namespace CommunityHub.Pages.Sponsor;
 /// auto-incrementing version so the latest file is obvious. STAGE 3 will add the
 /// live "Save &amp; Sync to Zoho" + booth members + booth materials.
 /// </summary>
+// Exhibitor-wall artwork can be up to 1 GB (operator 2026-06-28). Raise BOTH the request-body
+// ceiling and the multipart limit on this page — otherwise the framework rejects anything over
+// the ~28.6 MB Kestrel/Form default with HTTP 413 during binding, BEFORE the handler's size check.
 [Authorize]
+[RequestSizeLimit(1_073_741_824)]
+[RequestFormLimits(MultipartBodyLengthLimit = 1_073_741_824)]
 public class CompanyDetailsModel : PageModel
 {
     public const int MaxOverview = 1000;
@@ -419,8 +424,9 @@ public class CompanyDetailsModel : PageModel
                 new(sp.LogoZohoFolderPath, "ZohoLogo_", sp.SponsorUploadNotifyZoho,
                     new[] { ".png" }, 5 * Mb, false),
             "wall" when !string.IsNullOrWhiteSpace(sp.ExhibitorWallFolderPath) =>
+                // Exhibitor wall = print artwork: vector/PDF only, up to 1 GB (operator 2026-06-28).
                 new(sp.ExhibitorWallFolderPath, "ExhibitorWall_", sp.SponsorUploadNotify,
-                    new[] { ".png", ".jpg", ".jpeg", ".pdf" }, 25 * Mb, true),
+                    new[] { ".eps", ".ai", ".pdf" }, 1024 * Mb, true),
             _ => null,
         };
     }
@@ -468,12 +474,20 @@ public class CompanyDetailsModel : PageModel
     {
         if (spec.Notify.Count == 0) return;
         string Enc(string? s) => System.Net.WebUtility.HtmlEncode(s ?? string.Empty);
-        var link = string.IsNullOrWhiteSpace(webUrl) ? "" : $" <a href=\"{Enc(webUrl)}\">open</a>";
+        // §155: the file link moved OUT of the "File:" line into a bigger, prominent button
+        // BELOW the details (was an inline "open" link next to the filename).
+        var button = string.IsNullOrWhiteSpace(webUrl)
+            ? ""
+            : $"<p style=\"margin:18px 0 4px;\"><a href=\"{Enc(webUrl)}\" "
+              + "style=\"display:inline-block;padding:12px 22px;background:#008BD2;color:#ffffff;"
+              + "font-weight:700;font-size:15px;border-radius:6px;text-decoration:none;\">"
+              + "Open file</a></p>";
         var html =
             $"<p>Sponsor <b>{Enc(sponsorName)}</b> uploaded a new file via Company Details.</p>"
-            + $"<ul><li><b>File:</b> {Enc(fileName)}{link}</li>"
-            + $"<li><b>Uploaded by:</b> {Enc(byEmail)}</li></ul>";
-        var subject = $"[ELDK27] Sponsor upload — {sponsorName} — {fileName}";
+            + $"<ul><li><b>File:</b> {Enc(fileName)}</li>"
+            + $"<li><b>Uploaded by:</b> {Enc(byEmail)}</li></ul>"
+            + button;
+        var subject = $"Sponsor upload — {sponsorName} — {fileName} [ELDK27]";
         foreach (var to in spec.Notify)
         {
             try { await _email.SendAsync(to, subject, html, ct); }
@@ -779,10 +793,10 @@ public class CompanyDetailsModel : PageModel
                 + "<p>(Zoho Backstage has no materials API — please place these into the exhibitor profile.)</p>";
             foreach (var to in recipients)
             {
-                try { await _email.SendAsync(to, $"[ELDK27] Booth materials updated — {name}", html, ct); }
+                try { await _email.SendAsync(to, $"Booth materials updated — {name} [ELDK27]", html, ct); }
                 catch (Exception ex) { _log.LogWarning(ex, "Booth materials notify {To} failed.", to); }
             }
-            Message = "Booth materials saved. The organizers have been notified to place them in Zoho Backstage.";
+            Message = "Booth materials saved and submitted to the Event System (Zoho) — you don't need to do anything else.";
         }
         else
         {

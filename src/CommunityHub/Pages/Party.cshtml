@@ -3,9 +3,12 @@
 @{
     Layout = null;
     var p = Model.Party;
+    // §164: data-driven window text (16:00–18:30) from PartyInfo — start + end minutes
+    // come from the one source, never hardcoded here.
+    string timeWindow = p is null ? "" : $"{p.StartHour:00}:{p.StartMinute:00}–{p.EndHour:00}:{p.EndMinute:00}";
     string dateLine = p is null ? "" :
         p.Date.ToDateTime(new TimeOnly(0,0)).ToString("dddd, d MMMM yyyy")
-        + $" · {p.StartHour:00}:00–{p.EndHour:00}:00";
+        + $" · {timeWindow}";
 }
 <!DOCTYPE html>
 <html lang="en">
@@ -62,16 +65,35 @@
             }
 
             <form method="post">
+                @* §164: signed-in participants get their name + email auto-filled (read-only) from
+                   their hub profile; anonymous visitors type them in. *@
                 <label for="Name">Your name</label>
-                <input type="text" id="Name" name="Name" value="@Model.Name" required autocomplete="name" />
+                <input type="text" id="Name" name="Name" value="@Model.Name" required autocomplete="name"
+                       readonly="@(Model.IsSignedIn ? "readonly" : null)" />
 
                 <label for="Email">Email</label>
-                <input type="email" id="Email" name="Email" value="@Model.Email" required autocomplete="email" />
+                <input type="email" id="Email" name="Email" value="@Model.Email" required autocomplete="email"
+                       readonly="@(Model.IsSignedIn ? "readonly" : null)" />
+                @if (Model.IsSignedIn)
+                {
+                    <p style="font-size:12.5px;color:#6b7280;margin:-4px 0 10px;">Filled in from your hub profile.</p>
+                }
 
                 <div class="optin">
                     <input type="checkbox" id="Attending" name="Attending" value="true" checked="@Model.Attending" />
-                    <label for="Attending">Yes, I'll attend the Party (@($"{p.StartHour:00}:00–{p.EndHour:00}:00")).</label>
+                    <label for="Attending">Yes, I'll attend the Party (@timeWindow).</label>
                 </div>
+
+                @* §164: sponsors bring a company group — ask how many will attend. Shown only
+                   to signed-in sponsors; anonymous + non-sponsor RSVPs are a single person. *@
+                @if (Model.IsSponsor)
+                {
+                    <label for="HeadCount">How many will attend from your company?</label>
+                    <input type="number" id="HeadCount" name="HeadCount" min="1" step="1"
+                           value="@(Model.HeadCount?.ToString())" inputmode="numeric"
+                           style="width:100%;box-sizing:border-box;padding:11px 12px;border:1px solid #cbd2d9;border-radius:9px;font-size:16px;" />
+                    <p style="font-size:12.5px;color:#6b7280;margin:4px 0 0;">Include yourself in the count.</p>
+                }
 
                 <!-- honeypot: leave empty -->
                 <div class="hp" aria-hidden="true"><label>Website<input type="text" name="Website" tabindex="-1" autocomplete="off" /></label></div>

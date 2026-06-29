@@ -88,7 +88,10 @@ public sealed class SpeakerGraphicsReadyJob
         var due = new List<ReminderMessage>();
         foreach (var s in speakers)
         {
-            var tokens = _templates.NewTokenSet();
+            // §169: one body per speaker (a known participant) → their personal
+            // auto-login magic-link on the {{hubUrl}}/Speaker/Graphics CTA. Fail-safe
+            // to the plain hub URL when no magic-link service is wired.
+            var tokens = _templates.NewTokenSet(s.Id);
             tokens["firstName"] = string.IsNullOrWhiteSpace(s.FullName) ? "there" : s.FullName.Split(' ')[0];
             tokens["eventDisplayName"] = activeEvent.DisplayName;
             var rendered = _templates.Render("speaker-graphics-ready", tokens);

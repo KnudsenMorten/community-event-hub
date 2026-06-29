@@ -150,7 +150,7 @@ public sealed class WooCommercePullJob
                 _log.LogError(ex, "Zoho provision failed for event {Event}.", id);
                 var failLabel = await EventLabelAsync(id, ct);
                 await _alerts.AlertAsync(
-                    $"[ELDK27] Sponsor→Zoho provision FAILED ({failLabel})",
+                    $"Sponsor→Zoho provision FAILED ({failLabel}) [ELDK27]",
                     $"<p>The sponsor/exhibitor provision engine threw an exception for {System.Net.WebUtility.HtmlEncode(failLabel)}.</p>"
                     + $"<pre>{System.Net.WebUtility.HtmlEncode(ex.ToString())}</pre>", ct, throttleKey: $"provision-fail:{id}");
             }
@@ -170,7 +170,7 @@ public sealed class WooCommercePullJob
             + $"<li><b>{pr.ExhibitorsCreated}</b> exhibitor(s) created, {pr.ExhibitorsRequested} request(s), {pr.ExhibitorsLinked} linked</li></ul>"
             + (items.Length > 0 ? $"<p><b>Records:</b></p><ul>{items}</ul>" : "");
         // No throttle: creation fires once per record, so this never floods.
-        await _alerts.AlertAsync($"[ELDK27] New sponsor/exhibitor records created in Zoho ({label})", html, ct);
+        await _alerts.AlertAsync($"New sponsor/exhibitor records created in Zoho ({label}) [ELDK27]", html, ct);
     }
 
     /// <summary>Email the developer the list of webshop sponsors/exhibitors that are NOT in
@@ -191,7 +191,7 @@ public sealed class WooCommercePullJob
             + "<p>Next run is in ≤15 min. Check the Function logs (ZohoClient CreateSponsor/CreateExhibitor) "
             + "for the exact Zoho response body.</p>";
         await _alerts.AlertAsync(
-            $"[ELDK27] Sponsor/exhibitor NOT in Zoho — {pr.Skipped} need attention ({label})",
+            $"Sponsor/exhibitor NOT in Zoho — {pr.Skipped} need attention ({label}) [ELDK27]",
             html, ct, throttleKey: $"sponsor-drift:{eventId}");
     }
 

@@ -69,6 +69,114 @@ public sealed class SessionizeSessionsParseTests
     ]
     """;
 
+    // Real All-view shape once the schedule is ANNOUNCED: the room is given as a numeric
+    // "roomId" + a top-level "rooms" map, NOT an inline "room" string. The parser must
+    // resolve roomId -> room name (else every scheduled session reads "Room TBD").
+    private const string AllViewWithRoomIdJson = """
+    {
+      "sessions": [
+        {
+          "id": "s-900",
+          "title": "Intune Master Class",
+          "description": "Full-day deep dive.",
+          "startsAt": "2027-02-09T09:00:00",
+          "endsAt": "2027-02-09T16:00:00",
+          "isServiceSession": false,
+          "room": "",
+          "roomId": 84241,
+          "speakers": [ "spk-9" ],
+          "categoryItems": [ 30 ]
+        }
+      ],
+      "speakers": [],
+      "rooms": [
+        { "id": 84241, "name": "MC-Auditorium (582)" },
+        { "id": 84230, "name": "MC-A3 (200)" }
+      ],
+      "categories": []
+    }
+    """;
+
+    // §154: the real All view exposes SEPARATE category GROUPS — "Format" (kind +
+    // "(NN min)"), "Suggested Event Track" (the track), and "Level". The parser must
+    // route each item by its GROUP TITLE: Track ← the track group (NOT the first/Format
+    // category, the old bug), Level ← the level group, and LengthMinutes ← the Format
+    // label's "(NN min)". The Format label also drives the hub Type via the importer.
+    private const string AllViewWithGroupsJson = """
+    {
+      "sessions": [
+        {
+          "id": "s-grp",
+          "title": "Securing Identity",
+          "description": "Identity hardening.",
+          "isServiceSession": false,
+          "speakers": [ "spk-7" ],
+          "categoryItems": [ 40, 50, 60 ]
+        }
+      ],
+      "speakers": [],
+      "categories": [
+        {
+          "id": 1, "title": "Format",
+          "items": [ { "id": 40, "name": "Technical Session (60 min)" } ]
+        },
+        {
+          "id": 2, "title": "Suggested Event Track",
+          "items": [ { "id": 50, "name": "Security" }, { "id": 51, "name": "Azure" } ]
+        },
+        {
+          "id": 3, "title": "Level",
+          "items": [ { "id": 60, "name": "Expert (400)" } ]
+        }
+      ]
+    }
+    """;
+
+    [Fact]
+    public void Track_comes_from_the_track_group_not_the_format()
+    {
+        var result = SessionizeApiClient.ParseSessions(AllViewWithGroupsJson);
+        var s = result.Sessions.Single(x => x.SessionizeId == "s-grp");
+
+        // The OLD parser set Track = the first category (the Format). Now it must be
+        // the "Suggested Event Track" group's value.
+        Assert.Equal("Security", s.Track);
+        Assert.NotEqual("Technical Session (60 min)", s.Track);
+    }
+
+    [Fact]
+    public void Level_comes_from_the_level_group()
+    {
+        var result = SessionizeApiClient.ParseSessions(AllViewWithGroupsJson);
+        var s = result.Sessions.Single(x => x.SessionizeId == "s-grp");
+
+        Assert.Equal("Expert (400)", s.Level);
+    }
+
+    [Fact]
+    public void LengthMinutes_and_category_come_from_the_format_group()
+    {
+        var result = SessionizeApiClient.ParseSessions(AllViewWithGroupsJson);
+        var s = result.Sessions.Single(x => x.SessionizeId == "s-grp");
+
+        // Numeric minutes parsed out of the Format label "(60 min)".
+        Assert.Equal(60, s.LengthMinutes);
+        // The Category fed to the Type/Length mapper is the Format label only (not the
+        // track/level labels joined in).
+        Assert.Equal("Technical Session (60 min)", s.Category);
+    }
+
+    [Fact]
+    public void Resolves_room_from_roomId_when_inline_room_is_empty()
+    {
+        var result = SessionizeApiClient.ParseSessions(AllViewWithRoomIdJson);
+        var s = result.Sessions.Single(x => x.SessionizeId == "s-900");
+
+        Assert.Equal("MC-Auditorium (582)", s.Room);
+        Assert.NotNull(s.StartsAt);
+        Assert.NotNull(s.EndsAt);
+    }
+
     [Fact]
     public void Parses_all_view_flat_sessions_array()
     {

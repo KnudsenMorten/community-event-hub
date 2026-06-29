@@ -160,9 +160,21 @@ public class GroupPhotosModel : PageModel
         var endUtc = startUtc.AddMinutes(row.DurationMinutes);
         var slotLocal = ToLocal(startUtc);
 
+        // §169: the invite goes to the company's appointed lead. When that lead is a
+        // known Participant in this edition, their {{hubUrl}} CTA becomes their personal
+        // /go/{token} auto-login magic-link; an external lead with no Participant keeps the
+        // plain hub URL (fail-safe — NewTokenSet swallows a null id and never throws).
+        var leadNorm = (row.ContactEmail ?? string.Empty).Trim().ToLowerInvariant();
+        int? leadPid = leadNorm.Length == 0
+            ? null
+            : await _db.Participants
+                .Where(p => p.EventId == row.EventId && p.Email.ToLower() == leadNorm)
+                .Select(p => (int?)p.Id)
+                .FirstOrDefaultAsync(ct);
+
         // Token values are HTML-encoded by the renderer at the seam
         // (EmailTemplateRenderer, REQUIREMENTS §10c-4) — pass raw text.
-        var tokens = _templates.NewTokenSet();
+        var tokens = _templates.NewTokenSet(leadPid);
         tokens["contactName"] = string.IsNullOrWhiteSpace(row.ContactName) ? "there" : row.ContactName.Split(' ')[0];
         tokens["companyName"] = row.CompanyName;
         tokens["eventDisplayName"] = row.Event.DisplayName;

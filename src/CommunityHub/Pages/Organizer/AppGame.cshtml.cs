@@ -159,7 +159,7 @@ public class AppGameModel : PageModel
                         && p.IsActive
                         && p.Role == ParticipantRole.Sponsor
                         && p.SponsorCompanyId == row.SponsorCompanyId)
-            .Select(p => new { p.Email, p.FullName })
+            .Select(p => new { p.Id, p.Email, p.FullName })
             .ToListAsync(ct);
         if (contacts.Count == 0)
         {
@@ -173,7 +173,10 @@ public class AppGameModel : PageModel
             {
                 // Token values are HTML-encoded by the renderer at the seam
                 // (EmailTemplateRenderer, REQUIREMENTS §10c-4) — pass raw text.
-                var tokens = _templates.NewTokenSet();
+                // §169: this fan-out sends ONE body PER sponsor contact (each is a
+                // Participant) — pass their id so every recipient's {{hubUrl}} CTA is
+                // their OWN /go/{token} magic-link (fail-safe: none ⇒ plain hub URL).
+                var tokens = _templates.NewTokenSet(c.Id);
                 tokens["firstName"] = string.IsNullOrWhiteSpace(c.FullName) ? "there" : c.FullName.Split(' ')[0];
                 tokens["companyName"] = row.CompanyName;
                 tokens["eventDisplayName"] = row.Event.DisplayName;

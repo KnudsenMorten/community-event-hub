@@ -34,11 +34,25 @@ public static class SessionDefaultsMapper
     /// (the safe default for an untimed talk).
     /// </summary>
     public static SessionLength MapLength(DateTimeOffset? startsAt, DateTimeOffset? endsAt)
+        => MapLength(startsAt, endsAt, null);
+
+    /// <summary>
+    /// Derive the default <see cref="SessionLength"/> for an imported session. Prefers the
+    /// scheduled start/end (rounded to the nearest 20/50/60 bucket; ≥ 4 h ⇒ Full day). When the
+    /// times are absent — which is the norm until the organizer PUBLISHES the Sessionize schedule
+    /// grid (the API returns empty <c>startsAt</c>/<c>endsAt</c> for unscheduled sessions) — fall
+    /// back to the source FORMAT label: a duration written into the label (e.g. "Technical Session
+    /// (60 min)", "(50 min)") wins, and a "Master Class"/"workshop" format maps to
+    /// <see cref="SessionLength.FullDay"/>. Only when neither a time nor a label hint exists does it
+    /// default to <see cref="SessionLength.SixtyMin"/>.
+    /// </summary>
+    public static SessionLength MapLength(
+        DateTimeOffset? startsAt, DateTimeOffset? endsAt, string? category)
     {
-        if (startsAt is null || endsAt is null) return SessionLength.SixtyMin;
+        if (startsAt is null || endsAt is null) return LengthFromCategory(category);
 
         var minutes = (endsAt.Value - startsAt.Value).TotalMinutes;
-        if (minutes <= 0) return SessionLength.SixtyMin;
+        if (minutes <= 0) return LengthFromCategory(category);
 
         if (minutes >= FullDayThresholdMinutes) return SessionLength.FullDay;
 
@@ -56,6 +70,85 @@ public static class SessionDefaultsMapper
             }
         }
         return best;
+    }
+
+    /// <summary>
+    /// Length hint from the source FORMAT/category label when no usable start/end exists.
+    /// A "(NN min)" duration written in the label maps to the nearest 20/50/60 bucket; a
+    /// "master class"/"masterclass"/"workshop" format is a full day. No hint ⇒ the safe
+    /// <see cref="SessionLength.SixtyMin"/> default (the historic untimed-talk fallback).
+    /// </summary>
+    private static SessionLength LengthFromCategory(string? category)
+    {
+        if (string.IsNullOrWhiteSpace(category)) return SessionLength.SixtyMin;
+
+        var c = category.ToLowerInvariant();
+        if (c.Contains("master class") || c.Contains("masterclass") || c.Contains("workshop"))
+            return SessionLength.FullDay;
+
+        // A duration written into the format label, e.g. "Technical Session (60 min)" or
+        // "Technical Session (morning 07:20-08:10 - 50 min)". Take the LAST "<n> min" match so a
+        // label that also contains a clock range ("07:20-08:10") doesn't capture the wrong number.
+        var matches = System.Text.RegularExpressions.Regex.Matches(c, @"(\d{1,3})\s*min");
+        if (matches.Count > 0
+            && int.TryParse(matches[^1].Groups[1].Value, out var minutes)
+            && minutes > 0)
+        {
+            if (minutes >= FullDayThresholdMinutes) return SessionLength.FullDay;
+            var candidates = new[] { SessionLength.TwentyMin, SessionLength.FiftyMin, SessionLength.SixtyMin };
+            var best = candidates[0];
+            var bestDelta = double.MaxValue;
+            foreach (var cand in candidates)
+            {
+                var delta = Math.Abs(minutes - (int)cand);
+                if (delta < bestDelta) { bestDelta = delta; best = cand; }
+            }
+            return best;
+        }
+
+        return SessionLength.SixtyMin;
+    }
+
+    /// <summary>
+    /// §154: the session's NUMERIC length in minutes, for display ("60 min") and the
+    /// new <c>Session.LengthMinutes</c> column. Prefers the scheduled start/end when
+    /// the grid is published; otherwise parses a "(NN min)" duration out of the source
+    /// Format label (e.g. "Technical Session (60 min)" → 60). Returns <c>null</c> when
+    /// neither a usable time nor a "(NN min)" hint exists — e.g. a "Master Class" with
+    /// no minutes, which is a full-day handled via the <see cref="SessionLength"/>
+    /// bucket rather than a numeric figure.
+    /// </summary>
+    public static int? MapLengthMinutes(
+        DateTimeOffset? startsAt, DateTimeOffset? endsAt, string? category)
+    {
+        if (startsAt is { } start && endsAt is { } end)
+        {
+            var minutes = (end - start).TotalMinutes;
+            if (minutes > 0) return (int)Math.Round(minutes);
+        }
+        return ParseLengthMinutes(category);
+    }
+
+    /// <summary>
+    /// §154: parse a "(NN min)" duration out of the source Format label, returning the
+    /// numeric minutes or <c>null</c> when the label has no such hint. Takes the LAST
+    /// "<n> min" match so a label that also contains a clock range ("07:20-08:10")
+    /// doesn't capture the wrong number (same rule as <see cref="LengthFromCategory"/>).
+    /// A "Master Class"/"workshop" with no "(NN min)" → null (full-day, not a figure).
+    /// </summary>
+    public static int? ParseLengthMinutes(string? category)
+    {
+        if (string.IsNullOrWhiteSpace(category)) return null;
+
+        var matches = System.Text.RegularExpressions.Regex.Matches(
+            category.ToLowerInvariant(), @"(\d{1,3})\s*min");
+        if (matches.Count > 0
+            && int.TryParse(matches[^1].Groups[1].Value, out var minutes)
+            && minutes > 0)
+        {
+            return minutes;
+        }
+        return null;
     }
 
     /// <summary>

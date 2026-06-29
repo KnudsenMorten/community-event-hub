@@ -65,6 +65,9 @@ public static class NavBuilder
         var items = new List<NavItem>
         {
             new("/", "Nav.Home", ExactMatch: true),
+            // §164: the Party RSVP — visible to EVERY role + every ticket type so anyone can sign up
+            // and edit their answer. Placed right after Home so it's easy to find.
+            new("/Party", "Nav.Party"),
         };
 
         // §43: generic "Get started" guided wizard for the roles WITHOUT a bespoke
@@ -102,11 +105,8 @@ public static class NavBuilder
             if (role is not ParticipantRole.Speaker
                      and not ParticipantRole.Sponsor and not ParticipantRole.Volunteer)
                 items.Add(new("/Resources", "Nav.Resources"));
-            // Public Sessions list removed for sponsors + volunteers (only relevant to
-            // speakers + organizers/crew).
-            if (role is not ParticipantRole.Sponsor and not ParticipantRole.Volunteer
-                     and not ParticipantRole.Speaker)
-                items.Add(new("/Sessions", "Nav.Sessions"));
+            // The public Sessions catalogue moved into the shared "Event logistics" fold-out for
+            // EVERY role (operator 2026-06-28 §153) — see just before the content pages below.
         }
 
         // Hotel + Dinner: organizer + media crew. Speakers AND volunteers get these
@@ -243,6 +243,10 @@ public static class NavBuilder
             // Master Class Q&A shortcut (operator 2026-06-24): redirects to the
             // attendee's confirmed Master Class page, which hosts the shared Q&A board.
             items.Add(new("/Attendee/MasterClassQa", "Nav.MasterClassQa"));
+            // §171: the attendee "fun IT games" — three timed learning quizzes (AI /
+            // Intune / Security) with a leaderboard. Player-facing entry, default ON for
+            // attendees (ungated — a fun core surface, like the Party RSVP).
+            items.Add(new("/Games", "Nav.Games"));
         }
 
         // Sponsor menu (operator 2026-06-21). The redundant Sponsor Portal + the
@@ -286,6 +290,11 @@ public static class NavBuilder
             // Exhibitor & Booth Details (Zoho, external) — booth-only. A digital-only
             // sponsor (no physical booth) gets none of these, so they are gated behind
             // isExhibitor (SponsorInfo.HasBooth, computed by the caller for sponsors).
+            // §162 (operator 2026-06-28): "Exhibitor & Booth Details" is now the SINGLE booth
+            // fold-out — the booth profile/members/materials/banner, "Your Booth" (booth number +
+            // expo map), AND the whole Leads group (Leads / Inquiries / Capture-leads) all live
+            // here, instead of Leads being a separate fold-out and "Your Booth" sitting under Event
+            // logistics. All booth-only (isExhibitor); kept contiguous so they group as one section.
             if (isExhibitor)
             {
                 const string Booth = "Nav.SectionExhibitorBooth";
@@ -293,24 +302,18 @@ public static class NavBuilder
                 items.Add(new($"{Zoho}booth-members", "Nav.BoothMembers", SectionKey: Booth, External: true));
                 items.Add(new($"{Zoho}booth-materials", "Nav.ExhibitorMaterials", SectionKey: Booth, External: true));
                 items.Add(new($"{Zoho}expo-promo-banner", "Nav.PromotionalBanner", SectionKey: Booth, External: true));
+                // "Your Booth" — booth number + expo map (moved here from Event logistics).
+                items.Add(new("/Sponsor/Booth", "Nav.OurBooth", SectionKey: Booth));
+                // Leads group (moved here from its own "Leads" fold-out): the Zoho lead/inquiry
+                // lists + the in-hub Capture-lead failover for when Zoho is down. §163: the whole
+                // group is gated behind the "sponsor-leads" feature (DEFAULT OFF) — the Zoho leads
+                // API doesn't exist yet, so the operator turns this ON only to expose the failover.
+                items.Add(new($"{Zoho}lead-list", "Nav.LeadsZoho", SectionKey: Booth, External: true, FeatureKey: "sponsor-leads"));
+                items.Add(new($"{Zoho}inquiry-list", "Nav.InquiriesZoho", SectionKey: Booth, External: true, FeatureKey: "sponsor-leads"));
+                items.Add(new("/Sponsor/CaptureLead", "Nav.CaptureLeadFailover", SectionKey: Booth, FeatureKey: "sponsor-leads"));
             }
 
             items.Add(new("/Sponsor/Tasks", "Nav.SponsorTasks"));
-
-            // Leads — booth-only (lead capture happens at the physical booth). Same
-            // isExhibitor gate as the booth block above so digital-only sponsors don't
-            // see the Zoho lead/inquiry lists or the capture failover.
-            if (isExhibitor)
-            {
-                // Leads (Zoho, external) + the in-hub Capture-lead failover for when Zoho is down.
-                const string Leads = "Nav.SectionLeads";
-                items.Add(new($"{Zoho}lead-list", "Nav.LeadsZoho", SectionKey: Leads, External: true));
-                items.Add(new($"{Zoho}inquiry-list", "Nav.InquiriesZoho", SectionKey: Leads, External: true));
-                items.Add(new("/Sponsor/CaptureLead", "Nav.CaptureLeadFailover", SectionKey: Leads));
-                // §P9: "My leads (export)" — /Sponsor/Leads + SponsorLeadsController ship
-                // and work, so the menu entry is live.
-                items.Add(new("/Sponsor/Leads", "Nav.SponsorLeadsExport", SectionKey: Leads));
-            }
 
             // §135 (operator 2026-06-27): the booth run-of-show (key dates & times) is now a
             // LEAF inside the SHARED "Event logistics" fold-out (Nav.SectionEventLogistics) —
@@ -319,13 +322,7 @@ public static class NavBuilder
             // content pages join the same section) so it LEADS the fold-out; the order then reads
             // Booth run-of-show, Wayfinding, Good to know, Addresses, Check out last event.
             items.Add(new("/Sponsor/Logistics", "Nav.SponsorBoothRunOfShow", SectionKey: "Nav.SectionEventLogistics"));
-            // §146: "Our Booth" — the sponsor's physical booth number + the expo map image(s).
-            // Inside the SAME merged Event-logistics fold-out (after Booth run-of-show, before the
-            // §104–§123 content pages). EXHIBITOR-only (isExhibitor = SponsorInfo.HasBooth): a
-            // digital-only sponsor has no booth/expo presence, so the item would be a near-dead
-            // link for them; the page stays reachable by direct URL and shows "Booth TBD".
-            if (isExhibitor)
-                items.Add(new("/Sponsor/Booth", "Nav.OurBooth", SectionKey: "Nav.SectionEventLogistics"));
+            // ("Your Booth" moved up into the Exhibitor & Booth Details fold-out — §162.)
             // (Contact Organizers is appended LAST for every role — see end of method.)
         }
 
@@ -344,6 +341,11 @@ public static class NavBuilder
         // (A different SectionKey local name avoids colliding with the inner-scope
         // "EventLogistics" consts declared in the speaker/volunteer blocks above.)
         const string ContentLogisticsSection = "Nav.SectionEventLogistics";
+        // §153 (operator 2026-06-28): the public Sessions catalogue is a LEAF inside the shared
+        // "Event logistics" fold-out for EVERY role (was a top-level item, hidden for sponsors/
+        // volunteers/speakers). Added at the head of the content-logistics cluster so it sits with
+        // the other Event-logistics leaves regardless of role.
+        items.Add(new("/Sessions", "Nav.Sessions", SectionKey: ContentLogisticsSection));
         foreach (var page in ContentPageRegistry.ForRole(role))
         {
             items.Add(new($"/Info/{page.Slug}", LabelKey: null,
@@ -356,12 +358,11 @@ public static class NavBuilder
         items.Add(new("https://expertslive.dk/privacy-policy/", "Nav.PrivacyPolicy", SectionKey: Policies, External: true));
         items.Add(new("https://expertslive.dk/code-of-conduct/", "Nav.CodeOfConduct", SectionKey: Policies, External: true));
 
-        // Contact Organizers — ALWAYS the furthest-right (last) menu item, for every
-        // role (operator 2026-06-21). Sponsors keep their sponsor-specific contact
-        // page; everyone else uses the shared /Contact page.
-        items.Add(new(
-            role == ParticipantRole.Sponsor ? "/Sponsor/Contact" : "/Contact",
-            "Nav.ContactOrganizers"));
+        // Contact Organizers — ALWAYS the furthest-right (last) menu item, and the SAME
+        // shared /Contact page for EVERY role (operator 2026-06-28: one consistent contact
+        // page — generic email + phone, then the organizer-team cards). Sponsors no longer
+        // get a separate page.
+        items.Add(new("/Contact", "Nav.ContactOrganizers"));
 
         // No heading on the primary group — it IS the primary nav.
         return new NavGroup(HeadingKey: null, Items: items, IsManagement: false);
@@ -410,7 +411,8 @@ public static class NavBuilder
             // organizer page (same ranked tables/filters as the public page), not the
             // external public link.
             new("/Organizer/Telemetry", "Nav.AttendeeTelemetry"),
-            new("/Organizer/FindPerson", "Nav.OrgFindPerson"),
+            // §167: "Find a person" dropped from the nav — the Participants page already searches by
+            // name/email. The page stays reachable by URL; it's no longer a redundant menu entry.
 
             new("/Organizer/People", "Nav.OrgPeople"),
             new("/Organizer/Content", "Nav.OrgSessionsHub"),
@@ -420,6 +422,10 @@ public static class NavBuilder
             new("/Organizer/Volunteers", "Nav.OrgVolunteers"),
             new("/Organizer/Logistics", "Nav.OrgLogistics"),
             new("/Organizer/Setup", "Nav.OrgSetup"),
+            // §171: authoring for the attendee "fun IT games" quizzes — view/add/edit/
+            // disable quizzes + questions + see the leaderboards. A direct organizer entry
+            // (its own page, not fronted by a hub); flat (no SectionKey) like the others.
+            new("/Organizer/Quizzes", "Nav.OrgQuizzes"),
 
             new("/Organizer/ImpersonationLog", "Nav.OrgImpersonationLog"),
         };

@@ -1,17 +1,46 @@
 @page
 @model CommunityHub.Pages.Forms.GetStartedModel
+@using CommunityHub.Forms
 @{
     ViewData["Title"] = Localizer["RoleWiz.Title"].Value;
+    string StepTitle(string key) => Localizer["RoleWiz.Step." + key].Value;
+    string StepDesc(string key) => Localizer["RoleWiz.Step." + key + ".Desc"].Value;
 }
 
-@* §148: thin router — OnGet redirects handled roles to the in-wizard stepper host
-   (/Forms/Wizard), which renders each entitled step's fields inline. Only the access-denied
-   case (a role this generic wizard does not serve, e.g. Attendee) renders here. *@
-<div class="card">
-    <h1>@Localizer["RoleWiz.Title"]</h1>
-    @if (Model.AccessDenied)
-    {
+@* §161: the generic-role Get-Started is the same sponsor-style stepper as every other role —
+   a progress bar + every step as an Edit/Open card, fed through the shared partial. *@
+@if (Model.AccessDenied || Model.View is null)
+{
+    <div class="card">
+        <h1>@Localizer["RoleWiz.Title"]</h1>
         <p class="error">@Localizer["RoleWiz.AccessDenied"]</p>
+        <p><a asp-page="/Index">@Localizer["Common.BackToHub"]</a></p>
+    </div>
+}
+else
+{
+    var v = Model.View;
+    var cards = new List<WizardStepperCard>();
+    var n = 0;
+    foreach (var step in v.Steps)
+    {
+        n++;
+        cards.Add(new WizardStepperCard(n, StepTitle(step.Key), StepDesc(step.Key), step.Done, Url.Page(step.Route)!));
     }
-    <p><a asp-page="/Index">@Localizer["Common.BackToHub"]</a></p>
-</div>
+    string? continueUrl = null, continueLabel = null;
+    if (!v.AllDone && v.NextStep is not null)
+    {
+        continueUrl = Url.Page(v.NextStep.Route);
+        continueLabel = $"{Localizer["RoleWiz.Continue", v.NextStepNumber, v.EntitledCount].Value}: {StepTitle(v.NextStep.Key)}";
+    }
+    var vm = new WizardStepperVm(
+        Heading: Localizer["RoleWiz.Title"].Value,
+        Intro: Localizer["RoleWiz.Intro"].Value,
+        Cards: cards,
+        ContinueUrl: continueUrl,
+        ContinueLabel: continueLabel,
+        AllDoneMessage: Localizer["RoleWiz.AllDone"].Value,
+        EditLabel: Localizer["RoleWiz.Edit"].Value,
+        OpenLabel: Localizer["RoleWiz.Start"].Value);
+    <partial name="_WizardStepper" model="vm" />
+}

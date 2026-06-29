@@ -56,6 +56,83 @@ public sealed class SessionTypeMappingTests
             SessionDefaultsMapper.MapType("Keynote", SessionLength.FullDay));
     }
 
+    // -------------------------------------------------- length from format -----
+
+    [Theory]
+    // The Sessionize agenda grid is usually unpublished (no start/end on the API), so the length
+    // must come from the FORMAT label's own duration / master-class hint instead of defaulting to 60.
+    [InlineData("Technical Session (60 min)", SessionLength.SixtyMin)]
+    [InlineData("Technical Session (morning 07:20-08:10 - 50 min)", SessionLength.FiftyMin)]
+    [InlineData("Lightning (20 min)", SessionLength.TwentyMin)]
+    [InlineData("Master Class", SessionLength.FullDay)]
+    [InlineData("Master Class | Azure | Expert (400)", SessionLength.FullDay)]
+    [InlineData("Hands-on Workshop", SessionLength.FullDay)]
+    [InlineData("Security", SessionLength.SixtyMin)]   // no duration + not a master class → safe default
+    [InlineData(null, SessionLength.SixtyMin)]
+    public void MapLength_from_category_when_untimed(string? category, SessionLength expected)
+    {
+        Assert.Equal(expected, SessionDefaultsMapper.MapLength(null, null, category));
+    }
+
+    [Fact]
+    public void MapLength_prefers_real_times_over_label()
+    {
+        // When the grid IS published, the actual start/end wins over the label's "(60 min)".
+        Assert.Equal(SessionLength.TwentyMin,
+            SessionDefaultsMapper.MapLength(Now, Now.AddMinutes(20), "Technical Session (60 min)"));
+    }
+
+    // -------------------------------------------- numeric LengthMinutes (§154) --
+
+    [Theory]
+    [InlineData("Technical Session (60 min)", 60)]
+    [InlineData("Technical Session (morning 07:20-08:10 - 50 min)", 50)] // last "min" wins, not the clock
+    [InlineData("Lightning (20 min)", 20)]
+    [InlineData("Master Class", null)]   // no "(NN min)" → full-day, no numeric figure
+    [InlineData("Security", null)]
+    [InlineData("", null)]
+    [InlineData(null, null)]
+    public void ParseLengthMinutes_from_format_label(string? category, int? expected)
+    {
+        Assert.Equal(expected, SessionDefaultsMapper.ParseLengthMinutes(category));
+    }
+
+    [Fact]
+    public void MapLengthMinutes_prefers_real_times_over_label()
+    {
+        // Grid published → exact duration from start/end (not the label's "(60 min)").
+        Assert.Equal(45,
+            SessionDefaultsMapper.MapLengthMinutes(Now, Now.AddMinutes(45), "Technical Session (60 min)"));
+        // Untimed → fall back to the label's "(NN min)".
+        Assert.Equal(60,
+            SessionDefaultsMapper.MapLengthMinutes(null, null, "Technical Session (60 min)"));
+        // Untimed master class → null (full-day handled by the Length bucket).
+        Assert.Null(SessionDefaultsMapper.MapLengthMinutes(null, null, "Master Class"));
+    }
+
+    [Fact]
+    public async Task Import_persists_track_level_and_length_minutes()
+    {
+        using var db = TestDb.New();
+        var eventId = await SeedEventAsync(db);
+        var svc = new SessionImportService(db, new FixedClock(Now));
+
+        // A source session carrying a clean Track, a Level and numeric minutes
+        // (as the parser now produces from the Sessionize category groups).
+        var src = new SessionizeSession(
+            "s-tl", "Securing Identity", null, "Room A", "Security",
+            null, null, false, Array.Empty<string>(),
+            Category: "Technical Session (60 min)", Level: "Expert (400)", LengthMinutes: 60);
+        await svc.ImportSessionsAsync(eventId, new[] { src },
+            Array.Empty<SessionizeSpeaker>(), Array.Empty<string>());
+
+        var stored = await db.Sessions.SingleAsync(s => s.SessionizeId == "s-tl");
+        Assert.Equal("Security", stored.Track);
+        Assert.Equal("Expert (400)", stored.Level);
+        Assert.Equal(60, stored.LengthMinutes);
+        Assert.Equal(SessionType.TechnicalSession, stored.Type);
+    }
+
     // ------------------------------------------------------- import behaviour ---
 
     private static async Task<int> SeedEventAsync(CommunityHubDbContext db)
@@ -95,6 +172,28 @@ public sealed class SessionTypeMappingTests
         Assert.Equal(SessionType.MasterClass, (await db.Sessions.SingleAsync(s => s.SessionizeId == "s-mc")).Type);
         Assert.Equal(SessionType.AskTheExperts, (await db.Sessions.SingleAsync(s => s.SessionizeId == "s-ate")).Type);
         Assert.Equal(SessionType.TechnicalSession, (await db.Sessions.SingleAsync(s => s.SessionizeId == "s-plain")).Type);
+    }
+
+    [Fact]
+    public async Task Import_maps_length_from_format_label_when_untimed()
+    {
+        using var db = TestDb.New();
+        var eventId = await SeedEventAsync(db);
+        var svc = new SessionImportService(db, new FixedClock(Now));
+
+        // No start/end (grid unpublished) — length must come from the format label, not default to 60.
+        var sessions = new[]
+        {
+            Src("s-mc", "Azure Master Class", "Master Class | Azure | Expert (400)"),
+            Src("s-50", "Morning Talk", "Technical Session (morning 07:20-08:10 - 50 min)"),
+            Src("s-60", "Welcome", "Technical Session (60 min)"),
+        };
+        await svc.ImportSessionsAsync(eventId, sessions,
+            Array.Empty<SessionizeSpeaker>(), Array.Empty<string>());
+
+        Assert.Equal(SessionLength.FullDay, (await db.Sessions.SingleAsync(s => s.SessionizeId == "s-mc")).Length);
+        Assert.Equal(SessionLength.FiftyMin, (await db.Sessions.SingleAsync(s => s.SessionizeId == "s-50")).Length);
+        Assert.Equal(SessionLength.SixtyMin, (await db.Sessions.SingleAsync(s => s.SessionizeId == "s-60")).Length);
     }
 
     [Fact]

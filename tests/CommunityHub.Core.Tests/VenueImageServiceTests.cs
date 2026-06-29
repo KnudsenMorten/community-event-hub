@@ -63,7 +63,7 @@ public class VenueImageServiceTests
 
     [Theory]
     [InlineData("wayfinding", "wayfinding")]
-    [InlineData("good-to-know", "good-to-know")]
+    [InlineData("good-to-know", null)]                  // §162: good-to-know gallery dropped (no venue folder)
     [InlineData("session-evaluations", "evaluations")] // slug differs from folder key
     [InlineData("addresses", null)]                    // a content slug with no venue folder
     [InlineData("expo", null)]                          // folder key is not an /Info slug

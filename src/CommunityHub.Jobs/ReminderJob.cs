@@ -22,6 +22,7 @@ public sealed class ReminderJob
 {
     private readonly CommunityHubDbContext _db;
     private readonly SpeakerDeadlineSeeder _speakerDeadlines;
+    private readonly PartyTaskSeeder _partyTasks;
     private readonly TaskReminderBuilder _taskReminders;
     private readonly ReminderEngine _engine;
     private readonly CommunityHub.Core.Email.OnboardingStepResetEmailService _stepResetEmails;
@@ -33,6 +34,7 @@ public sealed class ReminderJob
     public ReminderJob(
         CommunityHubDbContext db,
         SpeakerDeadlineSeeder speakerDeadlines,
+        PartyTaskSeeder partyTasks,
         TaskReminderBuilder taskReminders,
         ReminderEngine engine,
         CommunityHub.Core.Email.OnboardingStepResetEmailService stepResetEmails,
@@ -43,6 +45,7 @@ public sealed class ReminderJob
     {
         _db = db;
         _speakerDeadlines = speakerDeadlines;
+        _partyTasks = partyTasks;
         _taskReminders = taskReminders;
         _engine = engine;
         _stepResetEmails = stepResetEmails;
@@ -79,6 +82,10 @@ public sealed class ReminderJob
             // Seed speaker-deadline tasks first - idempotent, so this only
             // creates tasks for speakers who do not yet have them.
             var seeded = await _speakerDeadlines.SeedAsync(eventId, ct);
+
+            // §164: seed the staff-role party sign-up tasks (idempotent) so the reminder
+            // computation below picks them up and nags anyone still unanswered.
+            seeded += await _partyTasks.SeedAsync(eventId, ct);
 
             var due = await _taskReminders.BuildDueAsync(eventId, ct);
             var sent = await _engine.SendDueAsync(eventId, due, ct);

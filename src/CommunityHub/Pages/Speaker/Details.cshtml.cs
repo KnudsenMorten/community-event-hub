@@ -93,28 +93,31 @@ public class DetailsModel : PageModel
                 // an already-in-Backstage speaker stays silent.
                 var r = await _sync.SyncOneAsync(
                     me.EventId, me.ParticipantId, alertOnExisting: result.SyncRelevantChanged, ct: ct);
+                // Speaker-facing copy: never names the backend (Zoho/Backstage) or leaks an
+                // exception — a speaker only needs to know whether their details reached the
+                // public event site.
                 if (r.Outcome == SpeakerBioSyncOutcome.BlockedNeedsManualUpdate && !result.SyncRelevantChanged)
                 {
-                    Message += " You're already in Zoho Backstage and nothing changed since your last save, so the organizers were not re-notified.";
+                    Message += " You're already on the public event site and nothing changed since your last save.";
                 }
                 else
                 {
                     Message += r.Outcome switch
                     {
-                        SpeakerBioSyncOutcome.PushedPublic => " Created in Zoho Backstage (public).",
-                        SpeakerBioSyncOutcome.PushedDraft  => " Created in Zoho Backstage (not featured — awaiting publish approval).",
+                        SpeakerBioSyncOutcome.PushedPublic => " Your details are now live on the public event site.",
+                        SpeakerBioSyncOutcome.PushedDraft  => " Your details were sent to the public event site (awaiting the organizers' publish approval).",
                         SpeakerBioSyncOutcome.BlockedNeedsManualUpdate =>
-                            " You're already in Zoho Backstage — its API can't update an existing speaker, so the organizers were emailed to update you there by hand.",
-                        SpeakerBioSyncOutcome.RingGated    => " Saved. Zoho sync is held for you until the organizers enable it for your group.",
-                        SpeakerBioSyncOutcome.Disabled     => " Saved. (Zoho speaker sync is off for this edition.)",
-                        SpeakerBioSyncOutcome.BuiltOnly    => " Saved. (Zoho speaker sync isn't configured yet.)",
-                        SpeakerBioSyncOutcome.Failed       => " Saved, but the Zoho sync failed: " + (r.Error ?? "unknown error") + ".",
+                            " Saved. The organizers have been notified to update your public event-site listing.",
+                        SpeakerBioSyncOutcome.RingGated    => " Saved. Publishing to the public event site is held until the organizers enable it for your group.",
+                        SpeakerBioSyncOutcome.Disabled     => " Saved.",
+                        SpeakerBioSyncOutcome.BuiltOnly    => " Saved.",
+                        SpeakerBioSyncOutcome.Failed       => " Saved, but publishing to the public event site didn't go through — the organizers have been notified.",
                         _ => string.Empty,
                     };
                 }
                 if (r.Outcome == SpeakerBioSyncOutcome.Failed) IsError = true;
             }
-            catch (Exception ex) { IsError = true; Message += " Zoho sync error: " + ex.Message; }
+            catch { IsError = true; Message += " Saved, but publishing to the public event site didn't go through — the organizers have been notified."; }
         }
 
         return Page();

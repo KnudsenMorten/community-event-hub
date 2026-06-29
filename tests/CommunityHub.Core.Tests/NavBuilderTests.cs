@@ -35,7 +35,7 @@ public sealed class NavBuilderTests
         "/Organizer",                    // Organizer home / landing root
         "/Organizer/CommandCenter",      // prominent "what needs my attention" overview
         "/Organizer/Dashboard",          // prominent dashboard (Overview folded in)
-        "/Organizer/FindPerson",         // prominent global "find a person" search
+        // §167: /Organizer/FindPerson dropped from the nav (Participants already searches).
         "/Organizer/People",             // hub
         "/Organizer/Comms",              // hub
         "/Organizer/Content",            // Sessions & speakers hub
@@ -322,10 +322,12 @@ public sealed class NavBuilderTests
         Assert.Contains("/Info/session-guidelines", lh); // speaker-only
         Assert.Contains("/Info/help-promote", lh);       // speaker-only
 
-        // Removed for speakers (operator 2026-06-23): My tasks, public Sessions, Resources.
+        // Removed for speakers (operator 2026-06-23): My tasks, Resources.
         Assert.DoesNotContain("/Tasks", hrefs);
-        Assert.DoesNotContain("/Sessions", hrefs);
         Assert.DoesNotContain("/Resources", hrefs);
+        // §153 (operator 2026-06-28): the public Sessions catalogue now lives in the SHARED
+        // Event-logistics fold-out for every role (no longer removed for speakers).
+        Assert.Contains("/Sessions", lh);
         // §86/§138: the Master Class Q&A area IS a speaker nav entry (for a master-class speaker).
         Assert.Contains("/Speaker/Questions", hrefs);
         Assert.DoesNotContain("/Speaker/Evaluations", hrefs); // reached from My Sessions hub
@@ -374,9 +376,14 @@ public sealed class NavBuilderTests
         // §104–§123: the all-roles content pages (Event-logistics fold-out) appear for
         // attendees too, between the attendee leaves and the Policies/Contact tail.
         // Policies (Privacy Policy + Code of Conduct) precede Contact for every role (operator 2026-06-25).
+        // §153 (operator 2026-06-28): the public Sessions catalogue leads the shared
+        // Event-logistics fold-out for every role (attendees included).
         Assert.Equal(new[]
         {
-            "/", "/Attendee", "/Attendee/Waitlist", "/Attendee/MasterClassQa",
+            "/", "/Party", "/Attendee", "/Attendee/Waitlist", "/Attendee/MasterClassQa",
+            // §171: the attendee "fun IT games" entry sits in the attendee block.
+            "/Games",
+            "/Sessions",
             "/Info/wayfinding", "/Info/good-to-know", "/Info/addresses", "/Info/last-event-videos",
             "https://expertslive.dk/privacy-policy/", "https://expertslive.dk/code-of-conduct/", "/Contact",
         }, hrefs);
@@ -389,8 +396,10 @@ public sealed class NavBuilderTests
         Assert.DoesNotContain("/Tasks", hrefs);
         Assert.DoesNotContain("/Profile", hrefs);
         Assert.DoesNotContain("/Resources", hrefs);
-        Assert.DoesNotContain("/Sessions", hrefs);
         Assert.DoesNotContain("/Attendee/MyEvent", hrefs);
+        // §153 (operator 2026-06-28): Sessions is now in the shared Event-logistics fold-out for
+        // EVERY role, attendees included.
+        Assert.Contains("/Sessions", hrefs);
     }
 
     [Fact]
@@ -413,8 +422,8 @@ public sealed class NavBuilderTests
         // does not. Non-gated sponsor routes (Tasks/Logistics/Contact) appear for both.
         var sponsor = NavBuilder.Build(ParticipantRole.Sponsor, isExhibitor: true).AllItems.Select(i => i.Href).ToList();
         Assert.Contains("/Sponsor/Tasks", sponsor);
-        Assert.Contains("/Sponsor/Logistics", sponsor);   // booth run-of-show, in the Event-logistics fold-out
-        Assert.Contains("/Sponsor/Contact", sponsor);     // "Contact Organizers"
+        Assert.Contains("/Sponsor/Logistics", sponsor);   // Key Dates & times, in the Event-logistics fold-out
+        Assert.Contains("/Contact", sponsor);             // "Contact Organizers" — unified shared page (2026-06-28)
         Assert.Contains("/Sponsor/CaptureLead", sponsor); // failover in the Leads fold-out (exhibitor-only)
         // A sponsor uses the company-shared tasks entry, not the generic /Tasks.
         Assert.DoesNotContain("/Tasks", sponsor);
@@ -444,32 +453,37 @@ public sealed class NavBuilderTests
         var hrefs = g.Items.Select(i => i.Href).ToList();
 
         // Removed (operator 2026-06-21): Sponsor Portal, standalone Capture-lead tab,
-        // the plain /Sponsor engagement link, Resources, Sessions.
+        // the plain /Sponsor engagement link, Resources.
         Assert.DoesNotContain("/Sponsor/Portal", hrefs);
         Assert.DoesNotContain("/Resources", hrefs);
-        Assert.DoesNotContain("/Sessions", hrefs);
+        // §153 (operator 2026-06-28): the public Sessions catalogue is now in the shared
+        // Event-logistics fold-out for sponsors too.
+        Assert.Contains("/Sessions", hrefs);
         // Orders + Linked-contacts merged into ONE Webshop item -> the /Sponsor page
         // (operator 2026-06-23). The old per-anchor entries are gone.
         Assert.Contains("/Sponsor", hrefs);
         Assert.DoesNotContain("/Sponsor#orders", hrefs);
         Assert.DoesNotContain("/Sponsor#linked-contacts", hrefs);
 
-        // Fold-outs present with the right sections.
+        // Fold-outs present with the right sections. §162: Leads no longer has its own fold-out —
+        // the Leads group + "Your Booth" were merged INTO "Exhibitor & Booth Details".
         var sections = g.Sections().Where(s => s.HeadingKey is not null).Select(s => s.HeadingKey).ToList();
         Assert.Contains("Nav.SectionSponsorWebshop", sections);
         Assert.Contains("Nav.SectionExhibitorBooth", sections);
-        Assert.Contains("Nav.SectionLeads", sections);
+        Assert.DoesNotContain("Nav.SectionLeads", sections);
 
-        // External Zoho links open in a new tab.
+        // The single "Exhibitor & Booth Details" fold-out now carries: the 4 external Zoho booth
+        // links, "Your Booth" (internal), and the Leads group (2 external Zoho + the internal
+        // Capture-lead failover) = 8 items.
         var booth = g.Sections().Single(s => s.HeadingKey == "Nav.SectionExhibitorBooth");
-        Assert.Equal(4, booth.Items.Count);
-        Assert.All(booth.Items, i => Assert.True(i.External));
-        Assert.All(booth.Items, i => Assert.StartsWith("https://eldk27.expertslive.dk/#/exhibitor-dashboard/", i.Href));
-
-        // Capture-lead failover is INTERNAL (same-tab) inside the Leads fold-out.
-        var leads = g.Sections().Single(s => s.HeadingKey == "Nav.SectionLeads");
-        var failover = leads.Items.Single(i => i.Href == "/Sponsor/CaptureLead");
-        Assert.False(failover.External);
+        var boothHrefs = booth.Items.Select(i => i.Href).ToList();
+        Assert.Equal(8, booth.Items.Count);
+        Assert.Contains("/Sponsor/Booth", boothHrefs);          // Your Booth moved here
+        Assert.Contains("/Sponsor/CaptureLead", boothHrefs);    // Leads failover moved here
+        // The Zoho links open in a new tab; the two in-hub pages are same-tab.
+        Assert.All(booth.Items.Where(i => i.Href.StartsWith("https://eldk27.expertslive.dk/")), i => Assert.True(i.External));
+        Assert.False(booth.Items.Single(i => i.Href == "/Sponsor/CaptureLead").External);
+        Assert.False(booth.Items.Single(i => i.Href == "/Sponsor/Booth").External);
 
         // Operator 2026-06-27 (BUG): there is exactly ONE "Event logistics" entry. The booth
         // run-of-show (/Sponsor/Logistics) is now a LEAF inside the SHARED
@@ -484,14 +498,9 @@ public sealed class NavBuilderTests
         var elHrefs = eventLogistics.Items.Select(i => i.Href).ToList();
         Assert.Contains("/Info/wayfinding", elHrefs);  // content-hub pages share the SAME fold-out
 
-        // §146: "Our Booth" is a LEAF inside the SAME Event-logistics fold-out for an exhibitor
-        // sponsor (after Booth run-of-show, before the content pages).
-        var ourBooth = eventLogistics.Items.Single(i => i.Href == "/Sponsor/Booth");
-        Assert.Equal("Nav.OurBooth", ourBooth.LabelKey);
-        Assert.True(elHrefs.IndexOf("/Sponsor/Booth") > elHrefs.IndexOf("/Sponsor/Logistics"),
-            "Our Booth follows the Booth run-of-show leaf.");
-        Assert.True(elHrefs.IndexOf("/Sponsor/Booth") < elHrefs.IndexOf("/Info/wayfinding"),
-            "Our Booth precedes the content-hub pages.");
+        // §162: "Your Booth" (/Sponsor/Booth) is NO LONGER under Event logistics — it moved into the
+        // Exhibitor & Booth Details fold-out (asserted above), so it must NOT appear here.
+        Assert.DoesNotContain("/Sponsor/Booth", elHrefs);
 
         // Operator 2026-06-27: the standalone "Deliverables" nav entry is removed (the rollup
         // moved to the top of Sponsor My Tasks). The page route stays reachable by direct URL.
@@ -515,11 +524,13 @@ public sealed class NavBuilderTests
         var g = NavBuilder.Build(ParticipantRole.Volunteer, isVolunteerSupervisor: true).Groups[0];
         var hrefs = g.Items.Select(i => i.Href).ToList();
 
-        // Removed: Resources, Sessions, the shift-signup wizard, the separate
+        // Removed: Resources, the shift-signup wizard, the separate
         // My-shifts / My-volunteer-tasks tabs (merged into My schedule).
         Assert.DoesNotContain("/Resources", hrefs);
-        Assert.DoesNotContain("/Sessions", hrefs);
         Assert.DoesNotContain("/Forms/VolunteerWizard", hrefs);
+        // §153 (operator 2026-06-28): Sessions is now in the shared Event-logistics fold-out for
+        // volunteers too.
+        Assert.Contains("/Sessions", hrefs);
         Assert.DoesNotContain("/volunteer/myshifts", hrefs);
         Assert.DoesNotContain("/volunteer/mytasks", hrefs);
 
@@ -573,8 +584,24 @@ public sealed class NavBuilderTests
             var participant = NavBuilder.Build(role).Groups[0];
             var last = participant.Items[^1];
             Assert.Equal("Nav.ContactOrganizers", last.LabelKey);
-            Assert.Equal(role == ParticipantRole.Sponsor ? "/Sponsor/Contact" : "/Contact", last.Href);
+            Assert.Equal("/Contact", last.Href);   // unified shared contact page for EVERY role (2026-06-28)
         }
+    }
+
+    [Fact]
+    public void Games_entry_is_present_for_attendees_and_authoring_for_organizers()
+    {
+        // §171: the player-facing "fun IT games" entry is in the attendee menu (default ON
+        // for attendees, ungated); the organizer authoring entry is in the management group.
+        var attendee = NavBuilder.Build(ParticipantRole.Attendee).AllItems.Select(i => i.Href).ToList();
+        Assert.Contains("/Games", attendee);
+        Assert.Equal("Nav.Games", NavBuilder.Build(ParticipantRole.Attendee)
+            .AllItems.Single(i => i.Href == "/Games").LabelKey);
+
+        var organizer = NavBuilder.Build(ParticipantRole.Organizer);
+        Assert.Contains("/Organizer/Quizzes", organizer.ManagementGroup!.Items.Select(i => i.Href));
+        // The authoring entry is flat (no sub-fold) like every other management item.
+        Assert.Null(organizer.ManagementGroup!.Items.Single(i => i.Href == "/Organizer/Quizzes").SectionKey);
     }
 
     [Fact]
@@ -634,7 +661,7 @@ public sealed class NavBuilderTests
     private static readonly string[] SpeakerOnlyContentHrefs =
     {
         "/Info/speaker-template", "/Info/session-guidelines", "/Info/av-stage-timer",
-        "/Info/session-preview-final", "/Info/session-feedback", "/Info/session-evaluations",
+        "/Info/session-preview-final", "/Info/session-feedback",
         "/Info/help-promote",
     };
 

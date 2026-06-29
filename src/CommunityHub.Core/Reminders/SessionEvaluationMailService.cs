@@ -110,8 +110,9 @@ public sealed class SessionEvaluationMailService
                          && sp.ContactEmailOverride != "")
             .ToDictionaryAsync(sp => sp.ParticipantId, sp => sp.ContactEmailOverride!, ct);
 
-        // Address + the speaker's first name (for a per-speaker greeting token).
-        var recipients = new List<(string Addr, string FirstName)>();
+        // Address + the speaker's first name (for a per-speaker greeting token) + their
+        // Participant id (§169: the hub CTA becomes that speaker's personal magic-link).
+        var recipients = new List<(string Addr, string FirstName, int ParticipantId)>();
         foreach (var link in session.SessionSpeakers)
         {
             var p = link.Participant;
@@ -123,7 +124,7 @@ public sealed class SessionEvaluationMailService
                 && !recipients.Any(r => string.Equals(r.Addr, addr, StringComparison.OrdinalIgnoreCase)))
             {
                 var first = string.IsNullOrWhiteSpace(p.FullName) ? "there" : p.FullName.Split(' ')[0];
-                recipients.Add((addr, first));
+                recipients.Add((addr, first, link.ParticipantId));
             }
         }
 
@@ -144,10 +145,10 @@ public sealed class SessionEvaluationMailService
         using (_context?.Set(new EmailContext(
             "session-eval", FeatureKey: "session-eval-email")))
         {
-            foreach (var (addr, firstName) in recipients)
+            foreach (var (addr, firstName, participantId) in recipients)
             {
                 var htmlBody = _templates is not null
-                    ? RenderResults(firstName, session.Title, resultsText, eventName)
+                    ? RenderResults(firstName, session.Title, resultsText, eventName, participantId)
                     : BuildHtmlBody(session.Title, resultsText);
                 await _emailSender.SendAsync(addr, subject, htmlBody, ct);
             }
@@ -167,12 +168,15 @@ public sealed class SessionEvaluationMailService
     /// The raw results text becomes the <c>resultsHtml</c> raw token (encoded here,
     /// with newlines turned into &lt;br&gt;, so the renderer inserts it verbatim).
     /// </summary>
-    private string RenderResults(string firstName, string title, string resultsText, string eventName)
+    private string RenderResults(
+        string firstName, string title, string resultsText, string eventName, int participantId)
     {
         var safeResults = System.Net.WebUtility.HtmlEncode(resultsText)
             .Replace("\r\n", "\n")
             .Replace("\n", "<br>");
-        var tokens = _templates!.NewTokenSet();
+        // §169: the recipient is the speaker Participant — pass their id so the hub CTA is
+        // their personal /go/{token} magic-link (fail-safe: 0/none ⇒ plain hub URL).
+        var tokens = _templates!.NewTokenSet(participantId);
         tokens["firstName"] = firstName;
         tokens["sessionTitle"] = title;
         tokens["resultsHtml"] = safeResults;   // raw-HTML token (renderer keeps verbatim)

@@ -25,7 +25,11 @@ public sealed record PublicSessionRow(
     DateTimeOffset? EndsAt,
     IReadOnlyList<PublicSessionSpeaker> Speakers,
     string? PublicSlug,
-    string? AskToken);
+    string? AskToken,
+    // §154: audience level ("Expert (400)") + the exact numeric length in minutes
+    // (preferred over the coarse Length bucket for the "60 min" label when present).
+    string? Level = null,
+    int? LengthMinutes = null);
 
 /// <summary>The whole public overview: the rows plus the filter facets to render.</summary>
 public sealed record PublicSessionsView(
@@ -33,7 +37,16 @@ public sealed record PublicSessionsView(
     IReadOnlyList<PublicSessionRow> Sessions,
     IReadOnlyList<string> Rooms,
     int TotalCount,
-    int MatchCount);
+    int MatchCount,
+    IReadOnlyList<TimeslotFacet> Timeslots,
+    // §154: distinct Track + Level values across the edition, for the filter dropdowns
+    // (built like Rooms — stable across filtering).
+    IReadOnlyList<string> Tracks,
+    IReadOnlyList<string> Levels);
+
+/// <summary>One date/timeslot the Sessions overview can filter by (§154). <paramref name="Key"/> is
+/// the stable filter value (start, invariant); <paramref name="Label"/> is the human "ddd dd MMM, HH:mm–HH:mm".</summary>
+public sealed record TimeslotFacet(string Key, string Label);
 
 /// <summary>
 /// One speaker linked to a session on the PUBLIC session-detail page. Carries the
@@ -43,7 +56,8 @@ public sealed record PublicSessionsView(
 /// <see cref="IsPublished"/> is true (never expose an unselected speaker); an
 /// unpublished co-speaker still shows as plain text so the line-up reads honestly.
 /// </summary>
-public sealed record PublicSessionSpeaker(int ParticipantId, string Name, bool IsPublished);
+public sealed record PublicSessionSpeaker(
+    int ParticipantId, string Name, bool IsPublished, string? LinkedIn = null);
 
 /// <summary>
 /// The PUBLIC, no-login detail view of a single session (<c>/Sessions/{id}</c>):
@@ -65,7 +79,10 @@ public sealed record PublicSessionDetail(
     DateTimeOffset? EndsAt,
     IReadOnlyList<PublicSessionSpeaker> Speakers,
     string? PublicSlug,
-    string? AskToken);
+    string? AskToken,
+    // §154: audience level + exact numeric length in minutes (see PublicSessionRow).
+    string? Level = null,
+    int? LengthMinutes = null);
 
 /// <summary>
 /// Builds the data for the PUBLIC, no-login sessions overview page
@@ -94,11 +111,16 @@ public sealed class PublicSessionsService
     /// <param name="length">Narrow to one session length, or null for all.</param>
     /// <param name="room">Narrow to one room (exact, case-insensitive), or null for all.</param>
     /// <param name="search">Free-text search over title/abstract/speaker/room/track.</param>
+    /// <param name="track">Narrow to one track (exact, case-insensitive), or null for all (§154).</param>
+    /// <param name="level">Narrow to one level (exact, case-insensitive), or null for all (§154).</param>
     public async Task<PublicSessionsView?> BuildAsync(
         SessionType? type = null,
         SessionLength? length = null,
         string? room = null,
         string? search = null,
+        string? timeslot = null,
+        string? track = null,
+        string? level = null,
         CancellationToken ct = default)
     {
         var active = await _db.Events
@@ -127,6 +149,15 @@ public sealed class PublicSessionsService
             .ToListAsync(ct);
         var publishedSpeakers = new HashSet<int>(publishedSpeakerIds);
 
+        // §156: each session speaker's LinkedIn (from SpeakerProfile, imported from Sessionize),
+        // so the "With {speaker}" line can hyperlink the name. Resolved once as a flat id->url map.
+        var linkedInById = (await _db.SpeakerProfiles
+                .Where(sp => sp.EventId == eventId && sp.LinkedIn != null && sp.LinkedIn != "")
+                .Select(sp => new { sp.ParticipantId, sp.LinkedIn })
+                .ToListAsync(ct))
+            .GroupBy(x => x.ParticipantId)
+            .ToDictionary(g => g.Key, g => NormalizeLinkedIn(g.First().LinkedIn));
+
         // Base set: this edition's non-service sessions, projected to a flat,
         // translatable shape (the speakers come back as raw id/name pairs). The
         // per-speaker publish gate + ordering are applied CLIENT-SIDE below, after
@@ -143,6 +174,8 @@ public sealed class PublicSessionsService
                 s.Length,
                 s.Room,
                 s.Track,
+                s.Level,
+                s.LengthMinutes,
                 s.StartsAt,
                 s.EndsAt,
                 Speakers = s.SessionSpeakers
@@ -170,13 +203,16 @@ public sealed class PublicSessionsService
                         ss.FullName,
                         // Same hard gate as the public speakers page — published iff a
                         // selected, active, speaker-role profile exists in this edition.
-                        publishedSpeakers.Contains(ss.ParticipantId)))
+                        publishedSpeakers.Contains(ss.ParticipantId),
+                        linkedInById.TryGetValue(ss.ParticipantId, out var li) ? li : null))
                     .OrderBy(n => n.Name, StringComparer.OrdinalIgnoreCase)
                     .ToList(),
                 // Only a master class exposes a public logistics page; for any other
                 // type the slug is irrelevant to the public overview.
                 s.Type == SessionType.MasterClass ? s.PublicSlug : null,
-                s.PublicToken))
+                s.PublicToken,
+                s.Level,
+                s.LengthMinutes))
             .ToList();
 
         var total = all.Count;
@@ -184,10 +220,23 @@ public sealed class PublicSessionsService
         IEnumerable<PublicSessionRow> q = all;
         if (type is not null) q = q.Where(r => r.Type == type);
         if (length is not null) q = q.Where(r => r.Length == length);
+        if (!string.IsNullOrWhiteSpace(timeslot))
+            q = q.Where(r => TimeslotKey(r.StartsAt) == timeslot.Trim());
         if (!string.IsNullOrWhiteSpace(room))
         {
             var r = room.Trim();
             q = q.Where(x => string.Equals(x.Room, r, StringComparison.OrdinalIgnoreCase));
+        }
+        // §154: Track + Level filters (work across ALL session types, incl. master classes).
+        if (!string.IsNullOrWhiteSpace(track))
+        {
+            var t = track.Trim();
+            q = q.Where(x => string.Equals(x.Track, t, StringComparison.OrdinalIgnoreCase));
+        }
+        if (!string.IsNullOrWhiteSpace(level))
+        {
+            var l = level.Trim();
+            q = q.Where(x => string.Equals(x.Level, l, StringComparison.OrdinalIgnoreCase));
         }
         if (!string.IsNullOrWhiteSpace(search))
         {
@@ -218,8 +267,44 @@ public sealed class PublicSessionsService
             .OrderBy(r => r, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
-        return new PublicSessionsView(active.DisplayName, rows, rooms, total, rows.Count);
+        // §154: Track + Level facets — distinct values across the whole edition (same
+        // stable-as-you-filter rule as Rooms), feeding the two new filter dropdowns.
+        var tracks = all
+            .Select(r => r.Track)
+            .Where(t => !string.IsNullOrWhiteSpace(t))
+            .Select(t => t!.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(t => t, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var levels = all
+            .Select(r => r.Level)
+            .Where(l => !string.IsNullOrWhiteSpace(l))
+            .Select(l => l!.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(l => l, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        // Date/timeslot facet (§154): every distinct scheduled start across the edition, ordered,
+        // so the dropdown is stable as the user filters. Label shows day + start–end.
+        var timeslots = all
+            .Where(r => r.StartsAt is not null)
+            .GroupBy(r => r.StartsAt!.Value)
+            .OrderBy(g => g.Key)
+            .Select(g => new TimeslotFacet(
+                TimeslotKey(g.Key)!,
+                g.Key.ToString("ddd dd MMM, HH:mm", System.Globalization.CultureInfo.InvariantCulture)
+                    + (g.Where(r => r.EndsAt is not null).Select(r => r.EndsAt!.Value).DefaultIfEmpty().Max() is { } end && end != default
+                        ? "–" + end.ToString("HH:mm", System.Globalization.CultureInfo.InvariantCulture)
+                        : "")))
+            .ToList();
+
+        return new PublicSessionsView(
+            active.DisplayName, rows, rooms, total, rows.Count, timeslots, tracks, levels);
     }
+
+    /// <summary>Stable invariant filter key for a session's start (null when unscheduled).</summary>
+    private static string? TimeslotKey(DateTimeOffset? startsAt) =>
+        startsAt?.ToString("yyyy-MM-ddTHH:mm", System.Globalization.CultureInfo.InvariantCulture);
 
     /// <summary>
     /// Resolve one session's PUBLIC detail by its numeric id, scoped to the active
@@ -265,6 +350,7 @@ public sealed class PublicSessionsService
             .Select(x => new
             {
                 x.Id, x.Title, x.Abstract, x.Type, x.Length, x.Room, x.Track,
+                x.Level, x.LengthMinutes,
                 x.StartsAt, x.EndsAt, x.PublicSlug, x.PublicToken,
                 // Flat, translatable speaker rows; the publish gate is applied
                 // client-side below against the published-id set.
@@ -296,7 +382,9 @@ public sealed class PublicSessionsService
             speakers,
             // Only a master class exposes a public logistics page.
             s.Type == SessionType.MasterClass ? s.PublicSlug : null,
-            s.PublicToken);
+            s.PublicToken,
+            s.Level,
+            s.LengthMinutes);
     }
 
     /// <summary>
@@ -398,4 +486,31 @@ public sealed class PublicSessionsService
     private static bool Contains(string? haystack, string needle) =>
         !string.IsNullOrEmpty(haystack)
         && haystack.Contains(needle, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Normalise a stored LinkedIn value (Sessionize may give a full URL, a bare
+    /// "linkedin.com/in/x", or a handle) to a safe absolute https URL, or null when it is
+    /// blank or doesn't look like a LinkedIn address. Only http/https are emitted (no
+    /// javascript: etc.), so the value is safe to drop straight into an href.
+    /// </summary>
+    private static string? NormalizeLinkedIn(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return null;
+        var v = raw.Trim();
+
+        if (v.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
+            || v.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+        {
+            return Uri.TryCreate(v, UriKind.Absolute, out var u)
+                   && (u.Scheme == Uri.UriSchemeHttp || u.Scheme == Uri.UriSchemeHttps)
+                ? v
+                : null;
+        }
+
+        // Bare host/handle: only accept something that looks like a LinkedIn address.
+        if (v.Contains("linkedin.", StringComparison.OrdinalIgnoreCase))
+            return "https://" + v.TrimStart('/');
+
+        return null;
+    }
 }

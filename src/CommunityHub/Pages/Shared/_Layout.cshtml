@@ -63,9 +63,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>@ViewData["Title"] - @communityName</title>
     <partial name="_LayoutStyles" />
-    <!-- Danish-locale date picker (Monday-first, dd/mm/yyyy).
-         Browser-native <input type="date"> ignores html lang and uses OS locale,
-         so we replace every date input with flatpickr forced to da. -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.css">
     <script defer src="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/l10n/da.js"></script>
@@ -240,6 +237,18 @@
         var participant = nav.Groups[0];
         var management = nav.ManagementGroup;
 
+        // §163 (operator 2026-06-28): for ORGANIZERS, SWAP the two nav groups — the admin /
+        // management menu becomes the prominent PRIMARY top bar, and the personal "My event" menu
+        // moves into the dropdown. (An organizer's personal tasks are usually done, so the top bar
+        // is better spent on the admin hubs.) Every other role is unchanged: personal-primary, and
+        // no management dropdown. Both render-blocks below already handle a sectioned group, so the
+        // swap is just feeding each block the other group + flipping the labels.
+        var isOrganizerNav = role!.Value == CommunityHub.Core.Domain.ParticipantRole.Organizer && management is not null;
+        var primaryGroup = isOrganizerNav ? management! : participant;
+        var dropdownGroup = isOrganizerNav ? participant : management;
+        var primaryAriaKey = isOrganizerNav ? "Nav.OrgAreaMenu" : "Nav.MyEvent";
+        var dropdownLabelKey = isOrganizerNav ? "Nav.MyEvent" : "Nav.OrgAreaMenu";
+
         // Ring scope (org-managed via /Organizer/Settings): each feature carries an
         // Enabled flag + a released ring. For nav items tagged with a FeatureKey:
         //   • the ORG turns it OFF (Enabled=false) -> hidden for everyone;
@@ -321,7 +330,7 @@
         // Combined nav-item hide: ring scope OR (Feature B) form entitlement.
         Func<CommunityHub.Core.Navigation.NavItem, bool> navHidden = it =>
             ringHidden(it) || formEntitlementHidden(it);
-        <nav class="primary" aria-label="@Localizer["Nav.MyEvent"]">
+        <nav class="primary" aria-label="@Localizer[primaryAriaKey]">
             @* Render the participant group by SECTION (mirrors the management
                bar). Items with no SectionKey collapse into the leading
                null-heading bucket and render as plain links exactly as before —
@@ -334,8 +343,8 @@
                section dropdowns — operator 2026-06-23. It is a leaf, so the
                null-heading bucket would otherwise render it among the leading
                links; pull it out here and emit it after the loop. *@
-            @{ var contactItem = participant.Items.FirstOrDefault(i => i.LabelKey == "Nav.ContactOrganizers"); }
-            @foreach (var section in participant.Sections())
+            @{ var contactItem = primaryGroup.Items.FirstOrDefault(i => i.LabelKey == "Nav.ContactOrganizers"); }
+            @foreach (var section in primaryGroup.Sections())
             {
                 if (section.HeadingKey is null)
                 {
@@ -376,7 +385,7 @@
                 <a href="@contactItem.Href" target="@(contactItem.External ? "_blank" : null)" rel="@(contactItem.External ? "noopener noreferrer" : null)" aria-current="@ariaCurrent(contactItem.Href)">@navLabel(contactItem)@if (contactItem.External) {<span class="visually-hidden">@Localizer["Common.OpensNewTab"]</span>}</a>
             }
         </nav>
-        @if (management is not null)
+        @if (dropdownGroup is not null)
         {
             @* Organizer/management group as a collapsible disclosure. <details>/
                <summary> gives a working dropdown with NO JavaScript, native
@@ -384,10 +393,10 @@
                control on ~360px so the long admin list never floods the phone
                nav. A distinct second-level bar visually separates management
                tools from the participant nav above. *@
-            <nav class="manage-bar" aria-label="@Localizer["Nav.OrgAreaMenu"]">
+            <nav class="manage-bar" aria-label="@Localizer[dropdownLabelKey]">
                 <details class="org-menu">
-                    <summary aria-label="@Localizer["Nav.OrgAreaMenuToggle"]">
-                        <span class="org-menu-label">@Localizer["Nav.OrgAreaMenu"]</span>
+                    <summary aria-label="@Localizer[dropdownLabelKey]">
+                        <span class="org-menu-label">@Localizer[dropdownLabelKey]</span>
                         <span class="org-menu-caret" aria-hidden="true">&#9662;</span>
                     </summary>
                     @* REQUIREMENTS §21 "Group the organizer nav": the management
@@ -404,14 +413,19 @@
                        contains the current page is rendered open so aria-current is
                        visible without a click. *@
                     <div class="org-menu-items">
-                        @foreach (var section in management.Sections())
+                        @foreach (var section in dropdownGroup.Sections())
                         {
+                            @* Apply the same ring/entitlement hide-filter as the primary bar — the
+                               swapped dropdown can now carry the participant group, whose items may be
+                               ring- or form-gated (management items never were). *@
+                            var dvisible = section.Items.Where(i => !navHidden(i)).ToList();
+                            if (dvisible.Count == 0) { continue; }
                             if (section.HeadingKey is null)
                             {
                                 @* Prominent, ungrouped entries — no disclosure. *@
-                                foreach (var item in section.Items)
+                                foreach (var item in dvisible)
                                 {
-                                    <a href="@item.Href" aria-current="@ariaCurrent(item.Href)">@navLabel(item)</a>
+                                    <a href="@item.Href" target="@(item.External ? "_blank" : null)" rel="@(item.External ? "noopener noreferrer" : null)" aria-current="@ariaCurrent(item.Href)">@navLabel(item)</a>
                                 }
                             }
                             else
@@ -428,9 +442,9 @@
                                         <span class="org-section-caret" aria-hidden="true">&#9662;</span>
                                     </summary>
                                     <div class="org-section-items">
-                                        @foreach (var item in section.Items)
+                                        @foreach (var item in dvisible)
                                         {
-                                            <a href="@item.Href" aria-current="@ariaCurrent(item.Href)">@navLabel(item)</a>
+                                            <a href="@item.Href" target="@(item.External ? "_blank" : null)" rel="@(item.External ? "noopener noreferrer" : null)" aria-current="@ariaCurrent(item.Href)">@navLabel(item)</a>
                                         }
                                     </div>
                                 </details>

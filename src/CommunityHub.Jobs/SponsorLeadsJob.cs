@@ -151,19 +151,36 @@ public sealed class SponsorLeadsJob
                 continue;
             }
 
-            // Plain-text tokens are HTML-encoded by the renderer at the seam
-            // (EmailTemplateRenderer, REQUIREMENTS §10c-4); leadListHtml is a
-            // sender-built HTML fragment (raw-HTML token) so it stays verbatim.
-            var tokens = _templates.NewTokenSet();
-            tokens["eventDisplayName"] = activeEvent.DisplayName;
-            tokens["sponsorCompany"] = pref.SponsorCompanyId;
-            tokens["leadCount"] = fresh.Count.ToString();
-            tokens["leadListHtml"] = BuildLeadListHtml(fresh);
+            // §169: render the digest PER recipient so each coordinator's {{hubUrl}} CTA is
+            // their OWN /go/{token} auto-login magic-link (a recipient must never sign in AS
+            // another). Resolve each recipient address to a Participant in this edition; an
+            // external/free-text recipient with no Participant keeps the plain hub URL
+            // (fail-safe — NewTokenSet swallows a null id and never throws). The lead list
+            // body is identical for everyone, so the per-recipient cost is just the token map.
+            var pidByEmail = (await _db.Participants
+                    .Where(p => p.EventId == activeEvent.Id)
+                    .Select(p => new { p.Id, p.Email })
+                    .ToListAsync(ct))
+                .GroupBy(p => p.Email.Trim().ToLowerInvariant())
+                .ToDictionary(g => g.Key, g => g.First().Id);
+            var leadListHtml = BuildLeadListHtml(fresh);
 
-            var rendered = _templates.Render("sponsor-leads-digest", tokens);
             var ok = false;
             foreach (var to in recipients)
             {
+                int? pid = pidByEmail.TryGetValue(to.Trim().ToLowerInvariant(), out var found)
+                    ? found : null;
+
+                // Plain-text tokens are HTML-encoded by the renderer at the seam
+                // (EmailTemplateRenderer, REQUIREMENTS §10c-4); leadListHtml is a
+                // sender-built HTML fragment (raw-HTML token) so it stays verbatim.
+                var tokens = _templates.NewTokenSet(pid);
+                tokens["eventDisplayName"] = activeEvent.DisplayName;
+                tokens["sponsorCompany"] = pref.SponsorCompanyId;
+                tokens["leadCount"] = fresh.Count.ToString();
+                tokens["leadListHtml"] = leadListHtml;
+                var rendered = _templates.Render("sponsor-leads-digest", tokens);
+
                 try
                 {
                     await _emailSender.SendAsync(to, rendered.Subject, rendered.HtmlBody, ct);

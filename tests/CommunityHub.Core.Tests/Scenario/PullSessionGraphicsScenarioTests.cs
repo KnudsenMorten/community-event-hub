@@ -29,6 +29,7 @@ public sealed class PullSessionGraphicsScenarioTests
 {
     private const string MasterClassFolder = "Graphics/MasterClass";
     private const string SessionsFolder = "Graphics/Sessions";
+    private const string TrackFolder = "Graphics/Tracks";
 
     private static GraphicsService NewService(
         CommunityHubDbContext db, ISharePointFileStore store, GraphicsSharePointOptions options) =>
@@ -44,8 +45,17 @@ public sealed class PullSessionGraphicsScenarioTests
         SessionsFolderPath = SessionsFolder,
     };
 
+    /// <summary>Session + Track folders both wired (§158 — the third pull source live).</summary>
+    private static GraphicsSharePointOptions ConfiguredOptionsWithTracks()
+    {
+        var o = ConfiguredOptions();
+        o.TrackGraphicsFolderPath = TrackFolder;
+        return o;
+    }
+
     private static async Task<Session> AddSessionAsync(
-        CommunityHubDbContext db, int eventId, string title, SessionType type, params int[] speakerIds)
+        CommunityHubDbContext db, int eventId, string title, SessionType type,
+        string? track = null, params int[] speakerIds)
     {
         var session = new Session
         {
@@ -53,6 +63,7 @@ public sealed class PullSessionGraphicsScenarioTests
             SessionizeId = Guid.NewGuid().ToString("N"),
             Title = title,
             Type = type,
+            Track = track,
             CreatedAt = ScenarioFixture.Clock.GetUtcNow(),
         };
         db.Sessions.Add(session);
@@ -75,10 +86,10 @@ public sealed class PullSessionGraphicsScenarioTests
 
         // A MasterClass session (single speaker) and a regular session (TWO speakers).
         var mc = await AddSessionAsync(
-            db, seed.EventId, "Deep Dive Workshop", SessionType.MasterClass, seed.MasterclassSpeakerId);
+            db, seed.EventId, "Deep Dive Workshop", SessionType.MasterClass, null, seed.MasterclassSpeakerId);
         var talk = await AddSessionAsync(
             db, seed.EventId, "Cloud Native Talk", SessionType.TechnicalSession,
-            seed.SpeakerOneId, seed.SpeakerTwoId);
+            null, seed.SpeakerOneId, seed.SpeakerTwoId);
 
         var store = new FakePullStore(canRead: true)
         {
@@ -129,7 +140,7 @@ public sealed class PullSessionGraphicsScenarioTests
         using var db = ScenarioFixture.NewDb();
         var seed = await ScenarioSeed.SeedAsync(db);
         var talk = await AddSessionAsync(
-            db, seed.EventId, "Cloud Native Talk", SessionType.TechnicalSession, seed.SpeakerOneId);
+            db, seed.EventId, "Cloud Native Talk", SessionType.TechnicalSession, null, seed.SpeakerOneId);
 
         var store = new FakePullStore(canRead: true)
         {
@@ -157,9 +168,9 @@ public sealed class PullSessionGraphicsScenarioTests
         using var db = ScenarioFixture.NewDb();
         var seed = await ScenarioSeed.SeedAsync(db);
         var matched = await AddSessionAsync(
-            db, seed.EventId, "Cloud Native Talk", SessionType.TechnicalSession, seed.SpeakerOneId);
+            db, seed.EventId, "Cloud Native Talk", SessionType.TechnicalSession, null, seed.SpeakerOneId);
         var orphan = await AddSessionAsync(
-            db, seed.EventId, "No Graphic Here", SessionType.TechnicalSession, seed.SpeakerTwoId);
+            db, seed.EventId, "No Graphic Here", SessionType.TechnicalSession, null, seed.SpeakerTwoId);
 
         var store = new FakePullStore(canRead: true)
         {
@@ -183,9 +194,9 @@ public sealed class PullSessionGraphicsScenarioTests
         using var db = ScenarioFixture.NewDb();
         var seed = await ScenarioSeed.SeedAsync(db);
         await AddSessionAsync(
-            db, seed.EventId, "Cloud Native Talk", SessionType.TechnicalSession, seed.SpeakerOneId);
+            db, seed.EventId, "Cloud Native Talk", SessionType.TechnicalSession, null, seed.SpeakerOneId);
 
-        // CanRead=false: even with files "present", nothing is listed or pulled.
+        // (no track on this session) CanRead=false: even with files "present", nothing is listed or pulled.
         var store = new FakePullStore(canRead: false)
         {
             [SessionsFolder] = { File("Cloud Native Talk.png") },
@@ -206,7 +217,7 @@ public sealed class PullSessionGraphicsScenarioTests
         using var db = ScenarioFixture.NewDb();
         var seed = await ScenarioSeed.SeedAsync(db);
         await AddSessionAsync(
-            db, seed.EventId, "Cloud Native Talk", SessionType.TechnicalSession, seed.SpeakerOneId);
+            db, seed.EventId, "Cloud Native Talk", SessionType.TechnicalSession, null, seed.SpeakerOneId);
 
         var store = new FakePullStore(canRead: true)
         {
@@ -223,12 +234,241 @@ public sealed class PullSessionGraphicsScenarioTests
         Assert.Empty(await db.GraphicAssets.Where(g => g.EventId == seed.EventId).ToListAsync());
     }
 
+    // ========================================================================
+    //  §158 — the THIRD pull source: per-TRACK promo graphics (matched by Track)
+    // ========================================================================
+
+    [Fact]
+    public async Task Track_pull_matches_by_track_name_and_upserts_a_DISTINCT_track_graphic()
+    {
+        using var db = ScenarioFixture.NewDb();
+        var seed = await ScenarioSeed.SeedAsync(db);
+
+        // One session with BOTH a title (→ session graphic) and a Track (→ track graphic).
+        var talk = await AddSessionAsync(
+            db, seed.EventId, "Cloud Native Talk", SessionType.TechnicalSession, "Security", seed.SpeakerOneId);
+
+        var store = new FakePullStore(canRead: true)
+        {
+            [SessionsFolder] = { File("Cloud Native Talk.png") },
+            [TrackFolder] = { File("Security.png") },
+        };
+        var svc = NewService(db, store, ConfiguredOptionsWithTracks());
+
+        var result = await svc.PullSessionGraphicsAsync(seed.EventId);
+
+        Assert.Equal(1, result.Matched);        // the session title matched
+        Assert.Equal(0, result.Unmatched);
+        Assert.Equal(1, result.TracksMatched);  // the track matched too
+
+        // TWO distinct rows for the speaker: the SESSION graphic and the TRACK graphic.
+        var sessionRow = await GetRowAsync(db, seed.EventId, talk.Id, seed.SpeakerOneId);
+        var trackRow = await GetTrackRowAsync(db, seed.EventId, "security", seed.SpeakerOneId);
+        Assert.NotNull(sessionRow);
+        Assert.NotNull(trackRow);
+        Assert.NotEqual(sessionRow!.Id, trackRow!.Id);
+        Assert.Equal(GraphicAssetType.Session, sessionRow.Type);
+        Assert.Equal(GraphicAssetType.Track, trackRow.Type);
+        Assert.Equal("Cloud Native Talk.png", sessionRow.FileName);
+        Assert.Equal("Security.png", trackRow.FileName);
+        Assert.Equal($"{TrackFolder}/Security.png", trackRow.SharePointPath);
+        Assert.Equal(GraphicAssetStatus.Generated, trackRow.Status); // the review gate
+        Assert.Equal(talk.Id, trackRow.SessionId);                   // representative session
+    }
+
+    [Fact]
+    public async Task Two_sessions_sharing_a_track_share_the_ONE_track_file()
+    {
+        using var db = ScenarioFixture.NewDb();
+        var seed = await ScenarioSeed.SeedAsync(db);
+
+        // Two different sessions, SAME track "Security", different speakers; plus speaker one is
+        // on BOTH → must still get a SINGLE track graphic (keyed by track+speaker, not session).
+        var a = await AddSessionAsync(
+            db, seed.EventId, "Talk A", SessionType.TechnicalSession, "Security", seed.SpeakerOneId);
+        var b = await AddSessionAsync(
+            db, seed.EventId, "Talk B", SessionType.TechnicalSession, "Security", seed.SpeakerOneId, seed.SpeakerTwoId);
+
+        var store = new FakePullStore(canRead: true)
+        {
+            [TrackFolder] = { File("Security.png") },
+        };
+        var svc = NewService(db, store, ConfiguredOptionsWithTracks());
+
+        var result = await svc.PullSessionGraphicsAsync(seed.EventId);
+
+        Assert.Equal(1, result.TracksMatched);         // ONE track matched (not two)
+        Assert.Equal(1, store.ListCount(TrackFolder));  // track folder listed exactly once
+
+        // Speaker one: a SINGLE track row (shared across both their sessions).
+        var s1Rows = await db.GraphicAssets
+            .Where(g => g.EventId == seed.EventId
+                        && g.Type == GraphicAssetType.Track
+                        && g.ParticipantId == seed.SpeakerOneId)
+            .ToListAsync();
+        Assert.Single(s1Rows);
+        Assert.Equal("Security.png", s1Rows[0].FileName);
+
+        // Speaker two (only on Talk B) gets their own track row, same shared file.
+        var s2 = await GetTrackRowAsync(db, seed.EventId, "security", seed.SpeakerTwoId);
+        Assert.NotNull(s2);
+        Assert.Equal("Security.png", s2!.FileName);
+    }
+
+    [Fact]
+    public async Task Session_without_a_track_gets_no_track_graphic_and_is_not_miscounted()
+    {
+        using var db = ScenarioFixture.NewDb();
+        var seed = await ScenarioSeed.SeedAsync(db);
+
+        // A tracked session and a track-LESS session; the track folder holds only "Security".
+        var tracked = await AddSessionAsync(
+            db, seed.EventId, "Talk A", SessionType.TechnicalSession, "Security", seed.SpeakerOneId);
+        var untracked = await AddSessionAsync(
+            db, seed.EventId, "Talk B", SessionType.TechnicalSession, null, seed.SpeakerTwoId);
+
+        var store = new FakePullStore(canRead: true)
+        {
+            [SessionsFolder] = { File("Talk A.png"), File("Talk B.png") },
+            [TrackFolder] = { File("Security.png") },
+        };
+        var svc = NewService(db, store, ConfiguredOptionsWithTracks());
+
+        var result = await svc.PullSessionGraphicsAsync(seed.EventId);
+
+        Assert.Equal(2, result.Matched);        // both sessions matched a TITLE file
+        Assert.Equal(0, result.Unmatched);
+        Assert.Equal(1, result.TracksMatched);  // only the tracked session contributed a track
+
+        Assert.NotNull(await GetTrackRowAsync(db, seed.EventId, "security", seed.SpeakerOneId));
+        // The track-less session's speaker has NO track graphic at all.
+        var s2Tracks = await db.GraphicAssets
+            .Where(g => g.EventId == seed.EventId
+                        && g.Type == GraphicAssetType.Track
+                        && g.ParticipantId == seed.SpeakerTwoId)
+            .ToListAsync();
+        Assert.Empty(s2Tracks);
+    }
+
+    [Fact]
+    public async Task Track_pull_is_inert_when_the_track_folder_is_unset()
+    {
+        using var db = ScenarioFixture.NewDb();
+        var seed = await ScenarioSeed.SeedAsync(db);
+        await AddSessionAsync(
+            db, seed.EventId, "Cloud Native Talk", SessionType.TechnicalSession, "Security", seed.SpeakerOneId);
+
+        var store = new FakePullStore(canRead: true)
+        {
+            [SessionsFolder] = { File("Cloud Native Talk.png") },
+            [TrackFolder] = { File("Security.png") }, // present, but folder NOT configured
+        };
+        // ConfiguredOptions() leaves TrackGraphicsFolderPath blank → track pull stays inert.
+        var svc = NewService(db, store, ConfiguredOptions());
+
+        var result = await svc.PullSessionGraphicsAsync(seed.EventId);
+
+        Assert.Equal(1, result.Matched);
+        Assert.Equal(0, result.TracksMatched);
+        Assert.Equal(0, store.ListCount(TrackFolder)); // never even listed
+        Assert.Empty(await db.GraphicAssets
+            .Where(g => g.EventId == seed.EventId && g.Type == GraphicAssetType.Track)
+            .ToListAsync());
+    }
+
+    [Fact]
+    public async Task Track_name_match_is_case_insensitive()
+    {
+        using var db = ScenarioFixture.NewDb();
+        var seed = await ScenarioSeed.SeedAsync(db);
+        await AddSessionAsync(
+            db, seed.EventId, "Cloud Native Talk", SessionType.TechnicalSession, "Security", seed.SpeakerOneId);
+
+        var store = new FakePullStore(canRead: true)
+        {
+            // Different casing + extension casing — must still match the "Security" track slug.
+            [TrackFolder] = { File("security.PNG") },
+        };
+        var svc = NewService(db, store, ConfiguredOptionsWithTracks());
+
+        var result = await svc.PullSessionGraphicsAsync(seed.EventId);
+
+        Assert.Equal(1, result.TracksMatched);
+        var row = await GetTrackRowAsync(db, seed.EventId, "security", seed.SpeakerOneId);
+        Assert.NotNull(row);
+        Assert.Equal("security.PNG", row!.FileName);
+    }
+
+    [Fact]
+    public async Task Track_pull_is_idempotent_no_duplicate_rows_on_re_run()
+    {
+        using var db = ScenarioFixture.NewDb();
+        var seed = await ScenarioSeed.SeedAsync(db);
+        await AddSessionAsync(
+            db, seed.EventId, "Cloud Native Talk", SessionType.TechnicalSession, "Security", seed.SpeakerOneId);
+
+        var store = new FakePullStore(canRead: true)
+        {
+            [TrackFolder] = { File("Security.png") },
+        };
+        var svc = NewService(db, store, ConfiguredOptionsWithTracks());
+
+        var first = await svc.PullSessionGraphicsAsync(seed.EventId);
+        var second = await svc.PullSessionGraphicsAsync(seed.EventId);
+
+        Assert.Equal(1, first.TracksMatched);
+        Assert.Equal(1, second.TracksMatched);
+
+        var rows = await db.GraphicAssets
+            .Where(g => g.EventId == seed.EventId && g.Type == GraphicAssetType.Track)
+            .ToListAsync();
+        Assert.Single(rows); // upsert by (track, speaker) stable key — no second row
+    }
+
+    [Fact]
+    public async Task Released_track_graphic_is_speaker_visible_and_streams_through_the_proxy()
+    {
+        using var db = ScenarioFixture.NewDb();
+        var seed = await ScenarioSeed.SeedAsync(db);
+        await AddSessionAsync(
+            db, seed.EventId, "Cloud Native Talk", SessionType.TechnicalSession, "Security", seed.SpeakerOneId);
+
+        var store = new FakePullStore(canRead: true)
+        {
+            [TrackFolder] = { File("Security.png") },
+        };
+        var svc = NewService(db, store, ConfiguredOptionsWithTracks());
+
+        await svc.PullSessionGraphicsAsync(seed.EventId);
+        // The sync job's bulk release (Type != Sponsor) covers the track graphic too.
+        await svc.ReleaseAllGeneratedAsync(seed.EventId, "system (SharePoint sync)");
+
+        // The speaker now SEES the track graphic (renders as a card on Help Promote)...
+        var visible = await svc.GetSpeakerVisibleAsync(seed.EventId, seed.SpeakerOneId);
+        var trackCard = Assert.Single(visible, g => g.Type == GraphicAssetType.Track);
+        Assert.Equal(GraphicAssetStatus.Released, trackCard.Status);
+
+        // ...and the /speaker-graphic/{id} hub proxy streams its bytes (never a SharePoint URL).
+        var file = await svc.GetSpeakerGraphicFileAsync(seed.EventId, seed.SpeakerOneId, trackCard.Id);
+        Assert.NotNull(file);
+        Assert.NotEmpty(file!.Content);
+        Assert.Equal("Security.png", file.FileName);
+    }
+
     // ---- helpers -----------------------------------------------------------
 
     private static Task<GraphicAsset?> GetRowAsync(
         CommunityHubDbContext db, int eventId, int sessionId, int participantId)
     {
         var key = GraphicStableKey.ForSession(sessionId, participantId);
+        return db.GraphicAssets.FirstOrDefaultAsync(
+            g => g.EventId == eventId && g.StableKey == key);
+    }
+
+    private static Task<GraphicAsset?> GetTrackRowAsync(
+        CommunityHubDbContext db, int eventId, string trackSlug, int participantId)
+    {
+        var key = GraphicStableKey.ForTrack(trackSlug, participantId);
         return db.GraphicAssets.FirstOrDefaultAsync(
             g => g.EventId == eventId && g.StableKey == key);
     }

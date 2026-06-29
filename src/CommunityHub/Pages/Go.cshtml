@@ -1,0 +1,7 @@
+@page "/go/{token}/{**target}"
+@model CommunityHub.Pages.GoModel
+@*
+    §169 personal email magic-link resolver. This page never renders meaningful
+    content: OnGetAsync always redirects (signed-in → the target, or fail-safe →
+    the Login page). The markup exists only so Razor Pages routes /go/{token}.
+*@

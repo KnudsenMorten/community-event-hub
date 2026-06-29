@@ -26,6 +26,12 @@ public sealed record MySpeakerSession(
     DateTimeOffset? EndsAt,
     bool IsMasterClass,
     bool IsScheduled,
+    /// <summary>The session's standardized type (MasterClass / TechnicalSession / Keynote /
+    /// AskTheExperts / PanelDiscussion / Welcome / Other) — shown as a tag on every row so the
+    /// speaker sees the kind of every session, not only master classes.</summary>
+    SessionType Type,
+    /// <summary>The session's length bucket (20/50/60 min / Full day) — shown alongside the type.</summary>
+    SessionLength Length,
     int OpenQuestionCount,
     IReadOnlyList<string> CoSpeakerNames,
     /// <summary>The organizer-provided evaluation results link (Session.EvaluationFormUrl),
@@ -100,6 +106,7 @@ public sealed class SpeakerSessionsService
                 s.StartsAt,
                 s.EndsAt,
                 s.Type,
+                s.Length,
                 s.EvaluationFormUrl,
                 s.BackstageSessionId,
                 OpenQuestionCount = s.Questions.Count(q => q.Status == SessionQuestionStatus.Open),
@@ -122,6 +129,8 @@ public sealed class SpeakerSessionsService
                 r.EndsAt,
                 r.Type == SessionType.MasterClass,
                 r.StartsAt is not null,
+                r.Type,
+                r.Length,
                 r.OpenQuestionCount,
                 r.CoSpeakers
                     .Where(n => !string.IsNullOrWhiteSpace(n))

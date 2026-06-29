@@ -112,7 +112,8 @@ public sealed class WelcomeEmailService
             ? "there"
             : participant.FullName.Split(' ')[0];
 
-        var tokens = _templates.NewTokenSet();
+        // §169: the welcome CTA becomes the recipient's personal auto-login link.
+        var tokens = _templates.NewTokenSet(participant.Id);
         tokens["firstName"] = firstName;
         tokens["communityName"] = participant.Event.CommunityName;
         tokens["eventDisplayName"] = participant.Event.DisplayName;

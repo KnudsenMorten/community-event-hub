@@ -416,6 +416,12 @@ public sealed class SessionizeApiClient
             // can be resolved to a human track label (All view only).
             var categoryItemNames = BuildCategoryItemNames(root);
 
+            // roomId -> room name, so a scheduled session's numeric roomId resolves to
+            // a human room label. The All view carries the room ONLY as a numeric
+            // "roomId" plus a top-level "rooms" map (the inline "room" string is empty),
+            // so without this every scheduled session would still read "Room TBD".
+            var roomNames = BuildRoomNames(root);
+
             // Dedupe on the Sessionize session id, keeping the first occurrence.
             var seen = new Dictionary<string, SessionizeSession>(
                 StringComparer.OrdinalIgnoreCase);
@@ -427,7 +433,7 @@ public sealed class SessionizeApiClient
                 // All view: a flat sessions array.
                 foreach (var sess in flat.EnumerateArray())
                 {
-                    AddSession(ParseOneSession(sess, categoryItemNames), seen);
+                    AddSession(ParseOneSession(sess, categoryItemNames, roomNames), seen);
                 }
             }
             else if (root.ValueKind == JsonValueKind.Array)
@@ -443,7 +449,7 @@ public sealed class SessionizeApiClient
                     }
                     foreach (var sess in grouped.EnumerateArray())
                     {
-                        AddSession(ParseOneSession(sess, categoryItemNames), seen);
+                        AddSession(ParseOneSession(sess, categoryItemNames, roomNames), seen);
                     }
                 }
             }
@@ -483,7 +489,9 @@ public sealed class SessionizeApiClient
     }
 
     private static SessionizeSession ParseOneSession(
-        JsonElement sess, IReadOnlyDictionary<string, string> categoryItemNames)
+        JsonElement sess,
+        IReadOnlyDictionary<string, CategoryItem> categoryItemNames,
+        IReadOnlyDictionary<string, string> roomNames)
     {
         var speakerIds = new List<string>();
         if (sess.TryGetProperty("speakers", out var sp)
@@ -505,13 +513,17 @@ public sealed class SessionizeApiClient
             }
         }
 
-        // Category labels: every resolvable categoryItems label (All view
-        // "categories"). The FIRST is the Track (best-effort); the joined set is the
-        // Category used to derive the hub SessionType (format/level/type categories
-        // all contribute, so a "Master Class" / "Keynote" format label is detected
-        // even when it is not the first category).
-        string? track = null;
-        var categoryLabels = new List<string>();
+        // §154: resolve each categoryItems id to its GROUP, then route by group TITLE
+        // instead of joining every label. The Sessionize "All" view exposes a
+        // category GROUP per facet — "Format" (the kind + "(NN min)"), "Suggested
+        // Event Track" (the track), "Level" (the audience level). Old behaviour set
+        // Track = the FIRST resolved category, which grabbed the Format — fixed here.
+        //  - Format group  → the Category (drives Type + LengthMinutes via the mapper).
+        //  - Track group    → Track (in CEH this is just "Track", §154).
+        //  - Level group    → Level.
+        //  - anything else  → an extra label kept ONLY as a Category fallback (below).
+        string? track = null, level = null, formatLabel = null;
+        var otherLabels = new List<string>();
         if (sess.TryGetProperty("categoryItems", out var ci)
             && ci.ValueKind == JsonValueKind.Array)
         {
@@ -520,36 +532,84 @@ public sealed class SessionizeApiClient
                 var key = item.ValueKind == JsonValueKind.Number
                     ? item.GetRawText()
                     : item.GetString() ?? string.Empty;
-                if (categoryItemNames.TryGetValue(key, out var name))
-                {
-                    track ??= name;
-                    categoryLabels.Add(name);
-                }
+                if (!categoryItemNames.TryGetValue(key, out var cat)) continue;
+
+                var group = cat.GroupTitle.ToLowerInvariant();
+                if (group.Contains("format"))
+                    formatLabel ??= cat.Name;
+                // "Suggested Event Track" and a plainly-titled "Track" both map to Track.
+                else if (group.Contains("track"))
+                    track ??= cat.Name;
+                else if (group.Contains("level"))
+                    level ??= cat.Name;
+                else
+                    otherLabels.Add(cat.Name);
             }
         }
+
+        // The Category that drives the hub Type/Length mapping: the Format label when
+        // we found one, else the joined remaining labels (a grouped view with no group
+        // titles still gets a best-effort Category, preserving the old detection).
+        var category = !string.IsNullOrEmpty(formatLabel)
+            ? formatLabel
+            : (otherLabels.Count > 0 ? string.Join(" | ", otherLabels) : null);
+
+        // Room: prefer an inline "room" string (grouped views sometimes carry it);
+        // otherwise resolve the numeric "roomId" via the top-level rooms map (the All view
+        // only gives roomId + a rooms array — the inline string is empty there).
+        var room = NullIfEmpty(GetString(sess, "room"));
+        if (room is null && sess.TryGetProperty("roomId", out var roomIdEl))
+        {
+            var roomId = roomIdEl.ValueKind == JsonValueKind.Number
+                ? roomIdEl.GetRawText()
+                : roomIdEl.ValueKind == JsonValueKind.String ? roomIdEl.GetString() : null;
+            if (!string.IsNullOrEmpty(roomId)
+                && roomNames.TryGetValue(roomId, out var roomName))
+            {
+                room = roomName;
+            }
+        }
+
+        var startsAt = GetDateTimeOffset(sess, "startsAt");
+        var endsAt = GetDateTimeOffset(sess, "endsAt");
 
         return new SessionizeSession(
             SessionizeId:     GetString(sess, "id").Trim(),
             Title:            GetString(sess, "title").Trim(),
             Abstract:         NullIfEmpty(GetString(sess, "description")),
-            Room:             NullIfEmpty(GetString(sess, "room")),
-            Track:            track,
-            StartsAt:         GetDateTimeOffset(sess, "startsAt"),
-            EndsAt:           GetDateTimeOffset(sess, "endsAt"),
+            Room:             room,
+            Track:            NullIfEmpty(track ?? string.Empty),
+            StartsAt:         startsAt,
+            EndsAt:           endsAt,
             IsServiceSession: GetBool(sess, "isServiceSession"),
             SpeakerIds:       speakerIds,
-            Category:         categoryLabels.Count > 0 ? string.Join(" | ", categoryLabels) : null);
+            Category:         category,
+            Level:            NullIfEmpty(level ?? string.Empty),
+            // §154: numeric minutes from the scheduled times when published, else the
+            // Format label's "(NN min)" hint.
+            LengthMinutes:    SessionDefaultsMapper.MapLengthMinutes(startsAt, endsAt, formatLabel));
     }
 
     /// <summary>
-    /// Build a category-item-id -> name map from the All view's <c>categories</c>
-    /// array, so a session's categoryItems ids resolve to a track label. Empty for
-    /// the grouped Sessions view (no categories block) - track is then left null.
+    /// One resolved Sessionize category item: its display <paramref name="Name"/>
+    /// (e.g. "Security") plus the TITLE of the GROUP it belongs to (e.g. "Format",
+    /// "Suggested Event Track", "Level"). §154 routes the item to Type/Length, Track
+    /// or Level by its group title instead of joining every label together.
     /// </summary>
-    private static IReadOnlyDictionary<string, string> BuildCategoryItemNames(
+    private readonly record struct CategoryItem(string GroupTitle, string Name);
+
+    /// <summary>
+    /// Build a category-item-id -> {group title, name} map from the All view's
+    /// <c>categories</c> array (each entry is a GROUP with a <c>title</c> and an
+    /// <c>items</c> list). So a session's categoryItems ids resolve to both their
+    /// label AND which group (Format / Suggested Event Track / Level / …) they came
+    /// from. Empty for the grouped Sessions view (no categories block) — Track/Level
+    /// are then left null.
+    /// </summary>
+    private static IReadOnlyDictionary<string, CategoryItem> BuildCategoryItemNames(
         JsonElement root)
     {
-        var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var map = new Dictionary<string, CategoryItem>(StringComparer.OrdinalIgnoreCase);
         if (root.ValueKind != JsonValueKind.Object
             || !root.TryGetProperty("categories", out var cats)
             || cats.ValueKind != JsonValueKind.Array)
@@ -559,6 +619,7 @@ public sealed class SessionizeApiClient
 
         foreach (var cat in cats.EnumerateArray())
         {
+            var groupTitle = GetString(cat, "title").Trim();
             if (!cat.TryGetProperty("items", out var items)
                 || items.ValueKind != JsonValueKind.Array)
             {
@@ -573,8 +634,38 @@ public sealed class SessionizeApiClient
                 var name = GetString(item, "name").Trim();
                 if (!string.IsNullOrEmpty(id) && !string.IsNullOrEmpty(name))
                 {
-                    map[id] = name;
+                    map[id] = new CategoryItem(groupTitle, name);
                 }
+            }
+        }
+        return map;
+    }
+
+    /// <summary>
+    /// Build a roomId -> room name map from the All view's top-level <c>rooms</c> array
+    /// (<c>[{ id, name }]</c>), so a scheduled session's numeric <c>roomId</c> resolves to a
+    /// human room label. Empty for views without a rooms block (room is then left null).
+    /// </summary>
+    private static IReadOnlyDictionary<string, string> BuildRoomNames(JsonElement root)
+    {
+        var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (root.ValueKind != JsonValueKind.Object
+            || !root.TryGetProperty("rooms", out var rooms)
+            || rooms.ValueKind != JsonValueKind.Array)
+        {
+            return map;
+        }
+
+        foreach (var room in rooms.EnumerateArray())
+        {
+            if (!room.TryGetProperty("id", out var idEl)) continue;
+            var id = idEl.ValueKind == JsonValueKind.Number
+                ? idEl.GetRawText()
+                : idEl.GetString() ?? string.Empty;
+            var name = GetString(room, "name").Trim();
+            if (!string.IsNullOrEmpty(id) && !string.IsNullOrEmpty(name))
+            {
+                map[id] = name;
             }
         }
         return map;

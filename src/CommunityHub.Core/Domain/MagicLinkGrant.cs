@@ -69,9 +69,46 @@ public class MagicLinkGrant
     /// <summary>Set when the grant is revoked; null = still usable (subject to expiry/consumption).</summary>
     public DateTimeOffset? RevokedAt { get; set; }
 
+    // --- §169 personal email magic-link (long-lived, MULTI-USE) ---------------
+    // The columns below are added (all nullable / safe-defaulted) so the SAME
+    // table can also back the §169 email auto-login link: a per-participant,
+    // per-edition, 365-day, REUSABLE sign-in token carried in every in-hub email
+    // CTA. Such grants set <see cref="MultiUse"/> = true and
+    // <see cref="Purpose"/> = "email"; they NEVER set <see cref="ConsumedAt"/>
+    // (reuse is the whole point), so usage is tracked by
+    // <see cref="UseCount"/> + <see cref="LastUsedAt"/> instead. Legacy
+    // single-use "welcome" grants leave all of these at their defaults, so their
+    // behaviour is byte-for-byte unchanged.
+
+    /// <summary>
+    /// True for a REUSABLE link (the §169 email magic-link): redemption does NOT
+    /// consume it; it stays redeemable until it expires or is revoked. False (the
+    /// default) keeps the original SINGLE-USE welcome semantics.
+    /// </summary>
+    public bool MultiUse { get; set; }
+
+    /// <summary>
+    /// DataProtection-encrypted copy of the random token, kept ONLY so the same
+    /// reusable link can be re-embedded across that participant's many emails
+    /// without minting a new one each time. The cleartext token still lives only
+    /// in the emailed URL: this column is ciphertext (decryptable only with the
+    /// app's DataProtection key ring), and the redeem path matches by
+    /// <see cref="TokenIdHash"/>, never by decrypting this. Null for the
+    /// single-use welcome grants (which are never re-embedded).
+    /// </summary>
+    public string? TokenProtected { get; set; }
+
+    /// <summary>Last time a (multi-use) link successfully signed someone in — abuse visibility.</summary>
+    public DateTimeOffset? LastUsedAt { get; set; }
+
+    /// <summary>How many times this link has successfully signed someone in (multi-use logging).</summary>
+    public int UseCount { get; set; }
+
     /// <summary>
     /// True only when the grant may still be redeemed at <paramref name="now"/>:
-    /// not revoked, not already consumed, and not yet expired.
+    /// not revoked, not already consumed, and not yet expired. A multi-use grant
+    /// never sets <see cref="ConsumedAt"/>, so the consumed check is a no-op for
+    /// it and it stays redeemable for its whole (1-year) lifetime.
     /// </summary>
     public bool IsRedeemableAt(DateTimeOffset now) =>
         RevokedAt is null && ConsumedAt is null && now < ExpiresAt;

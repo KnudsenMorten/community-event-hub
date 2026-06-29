@@ -80,7 +80,11 @@ public sealed class ParticipantEmailService
             ? "there"
             : p.FullName.Split(' ')[0];
 
-        var tokens = _templates.NewTokenSet();
+        // §169: pass the participant so the hub CTA (hubUrl) becomes their personal
+        // auto-login magic-link. This is the shared per-participant seam (onboarding,
+        // step-reset, volunteer-help, speaker-question digest, manual re-send), so
+        // every email through it carries the recipient's sign-in link.
+        var tokens = _templates.NewTokenSet(p.Id);
         tokens["firstName"] = firstName;
         tokens["communityName"] = p.Event?.CommunityName ?? string.Empty;
         tokens["eventDisplayName"] = p.Event?.DisplayName ?? string.Empty;
