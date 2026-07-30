@@ -16,14 +16,18 @@ namespace CommunityHub.Core.Tests;
 public sealed class ContentPageRegistryTests
 {
     // §123 audience buckets.
+    // §326ag: "ceh-introduction" (what CEH is / architecture / features per role) is an
+    // ALL-ROLES Event Info page.
     private static readonly string[] AllRoleSlugs =
-        { "wayfinding", "good-to-know", "addresses", "last-event-videos" };
+        { "wayfinding", "good-to-know", "addresses", "last-event-videos", "ceh-introduction" };
 
+    // §289 (operator 2026-07-10): the "help-promote" ("Social Media Guidelines") page was
+    // REMOVED from the registry — its copy lives on the Help Promote page (/Speaker/Graphics).
+    // §326e (operator 2026-07-25): "key-dates-times" added (speaker Key Dates & Times page).
     private static readonly string[] SpeakerSlugs =
     {
         "speaker-template", "session-guidelines", "av-stage-timer",
-        "session-preview-final", "session-feedback",
-        "help-promote",
+        "session-preview-final", "session-feedback", "key-dates-times",
     };
 
     private static readonly ParticipantRole[] NonOrganizerNonSpeakerRoles =
@@ -56,7 +60,17 @@ public sealed class ContentPageRegistryTests
     {
         Assert.NotNull(ContentPageRegistry.Get("Wayfinding"));
         Assert.NotNull(ContentPageRegistry.Get("  wayfinding  "));
-        Assert.Equal("Wayfinding – conference venue", ContentPageRegistry.Get("wayfinding")!.Title);
+        // §317 (operator 2026-07-24): menu-order retitle.
+        Assert.Equal("Wayfinding Inside Conference Venue", ContentPageRegistry.Get("wayfinding")!.Title);
+    }
+
+    [Fact]
+    public void Session_feedback_page_is_titled_how_we_do_session_evaluations()
+    {
+        // §290 (operator 2026-07-10): the "Session Evaluations" content page was renamed
+        // "How We Do Session Evaluations?" (same slug, title only).
+        Assert.Equal("How We Do Session Evaluations?",
+            ContentPageRegistry.Get("session-feedback")!.Title);
     }
 
     [Theory]

@@ -23,7 +23,10 @@ public class MasterClassEmailServiceTests
     private static async Task<(int ev, int mc, int att)> SeedAsync(
         CommunityHub.Core.Data.CommunityHubDbContext db, bool consent = false)
     {
-        var e = new Event { CommunityName = "C", DisplayName = "C 2027", Code = "C27", IsActive = true, StartDate = new DateOnly(2027, 2, 9), EndDate = new DateOnly(2027, 2, 10) };
+        // §257: these tests verify the ATTACHED-invite path (full-day METHOD:REQUEST .ics),
+        // which is now gated behind the organizer's auto-invite switch — enable it here so
+        // the confirmed email attaches the invite as these assertions expect.
+        var e = new Event { CommunityName = "C", DisplayName = "C 2027", Code = "C27", IsActive = true, StartDate = new DateOnly(2027, 2, 9), EndDate = new DateOnly(2027, 2, 10), AutoCalendarInvitesEnabled = true };
         db.Events.Add(e); await db.SaveChangesAsync();
         var s = new Session { EventId = e.Id, Title = "Deep Dive MC", Type = SessionType.MasterClass, MasterClassCapacity = 5 };
         db.Sessions.Add(s); await db.SaveChangesAsync();
@@ -41,7 +44,7 @@ public class MasterClassEmailServiceTests
     }
 
     [Fact]
-    public async Task Confirmed_email_has_title_and_ics_link()
+    public async Task Confirmed_email_has_title_and_attaches_a_calendar_invite()
     {
         using var db = ScenarioFixture.NewDb();
         var (ev, mc, att) = await SeedAsync(db);
@@ -50,10 +53,14 @@ public class MasterClassEmailServiceTests
         var id = (await svc.SignupIdAsync(ev, att, mc))!.Value;
 
         await email.SendConfirmedAsync(id, "https://hub.test");
-        var m = Assert.Single(sender.Messages);
+        // §193: the confirmation no longer links a .ics download — it ATTACHES the
+        // calendar invitation, so the send goes through SendWithIcsAsync.
+        var m = Assert.Single(sender.IcsMessages);
         Assert.Equal("p@x.dk", m.To);
         Assert.Contains("Deep Dive MC", m.Subject);
-        Assert.Contains("MyMasterClass.ics", m.Html);   // .ics download link
+        Assert.DoesNotContain("MyMasterClass.ics", m.Html);   // no download link
+        Assert.NotNull(sender.LastIcs);
+        Assert.Contains("BEGIN:VCALENDAR", sender.LastIcs!);
     }
 
     [Fact]
@@ -134,6 +141,75 @@ public class MasterClassEmailServiceTests
         Assert.Contains("BEGIN:VEVENT", ics);
         Assert.Contains("DTSTART;VALUE=DATE:20270209", ics);
         Assert.Contains("SUMMARY:Master Class — MC", ics);
+        // Legacy shape (no organizer/attendee supplied) stays a PUBLISH attachment.
+        Assert.Contains("METHOD:PUBLISH", ics);
+    }
+
+    [Fact]
+    public void BuildIcs_with_organizer_and_attendee_is_a_real_request_invitation()
+    {
+        // §234 6: ORGANIZER = sender, ATTENDEE = recipient ⇒ mail clients process the
+        // METHOD:REQUEST as a real invitation (auto-add / Accept). Stable per-session UID.
+        var ics = MasterClassEmailService.BuildIcs(
+            "hub.test", 5, "MC", null, null, new DateOnly(2027, 2, 9),
+            organizerEmail: "info@expertslive.dk", organizerName: "Experts Live Denmark",
+            attendeeEmail: "p@x.dk", attendeeName: "Pat Lee");
+        Assert.Contains("METHOD:REQUEST", ics);
+        Assert.Contains("ORGANIZER;CN=Experts Live Denmark:mailto:info@expertslive.dk", ics);
+        Assert.Contains("ATTENDEE;ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;RSVP=FALSE;CN=Pat Lee:mailto:p@x.dk", ics);
+        Assert.Contains("UID:mc-5@hub.test", ics);
+        Assert.DoesNotContain("METHOD:PUBLISH", ics);
+    }
+
+    [Fact]
+    public void MasterClassDay_ics_spans_08_to_16_local_on_the_master_class_day()
+    {
+        // §210b: the confirmed-seat invite blocks 08:00–16:00 in the event's local zone
+        // (Europe/Copenhagen → +01:00 in February), not the slot — registration/breakfast
+        // open at 07:00, the class runs 09:00–16:00, the invite starts at 08:00 to nudge
+        // early arrival.
+        var ics = MasterClassEmailService.BuildMasterClassDayIcs(
+            "hub.test", 5, "MC", "Europe/Copenhagen",
+            new DateOnly(2027, 2, 9), new TimeOnly(8, 0), new TimeOnly(16, 0));
+        Assert.Contains("BEGIN:VEVENT", ics);
+        Assert.Contains("DTSTART;TZID=Europe/Copenhagen:20270209T080000", ics);
+        Assert.Contains("DTEND;TZID=Europe/Copenhagen:20270209T160000", ics);
+        Assert.Contains("BEGIN:VTIMEZONE", ics);
+        Assert.Contains("TZOFFSETTO:+0100", ics);          // derived from the zone, not hardcoded UTC
+        Assert.Contains("SUMMARY:Master Class — MC", ics);
+    }
+
+    [Fact]
+    public async Task Confirmed_email_invite_is_the_full_master_class_day_and_nudges_early_arrival()
+    {
+        using var db = ScenarioFixture.NewDb();
+        var (ev, mc, att) = await SeedAsync(db);
+        var (email, sender, svc) = Build(db);
+        await svc.SignUpAsync(ev, att, mc);
+        var id = (await svc.SignupIdAsync(ev, att, mc))!.Value;
+
+        await email.SendConfirmedAsync(id, "https://hub.test");
+        var m = Assert.Single(sender.IcsMessages);
+
+        // Subject carries the "see the calendar invite" pointer (the [ELDK27] postfix is
+        // added downstream by the send chokepoint, not here).
+        Assert.Contains("see the calendar invite", m.Subject);
+        // §210b: body has the prominent registration/breakfast-from-07:00 / come-early block.
+        Assert.Contains("Registration", m.Html);
+        Assert.Contains("07:00", m.Html);
+        Assert.Contains("breakfast", m.Html);
+        Assert.DoesNotContain("Doors open at 08:00", m.Html);
+        // §210b: calendar attachment = the full Master Class day 08:00–16:00 (local), not a slot.
+        Assert.NotNull(sender.LastIcs);
+        Assert.Contains("20270209T080000", sender.LastIcs!);
+        Assert.Contains("20270209T160000", sender.LastIcs!);
+        Assert.DoesNotContain("20270209T090000", sender.LastIcs!);
+        // §234 6: the confirmed-seat .ics is a REAL invitation — METHOD:REQUEST with the
+        // hub's from-address as ORGANIZER and the recipient attendee as ATTENDEE.
+        Assert.Contains("METHOD:REQUEST", sender.LastIcs!);
+        Assert.Contains("ORGANIZER;CN=Experts Live Denmark:mailto:info@expertslive.dk", sender.LastIcs!);
+        Assert.Contains("ATTENDEE", sender.LastIcs!);
+        Assert.Contains("mailto:p@x.dk", sender.LastIcs!);
     }
 
     [Fact]

@@ -46,7 +46,13 @@ public sealed class WooCommercePullJob
     }
 
     /// <summary>Every 15 minutes (operator 2026-06-25: tightened from 30 so new
-    /// sponsors/exhibitors reconcile to Zoho sooner).</summary>
+    /// sponsors/exhibitors reconcile to Zoho sooner).
+    /// <para>§595 — NOT the ERP customer/contact sync. That is <c>ErpSyncCustomerContactJob</c>
+    /// (operator 2026-07-28: <i>"but the webshop pull is different job … there is a different job
+    /// that handles the customer + contact sync from erp"</i>). This job is the WEBSHOP ORDER pull:
+    /// orders → tasks → SharePoint folders, and the leg that captures a company's public name
+    /// (§593). Its cadence was deliberately left at 15.</para>
+    /// </summary>
     [Function("WooCommercePullJob")]
     public async Task Run(
         [TimerTrigger("0 */15 * * * *")] TimerInfo timer,

@@ -47,13 +47,8 @@ public class ContactModel : PageModel
 
     public void OnGet()
     {
-        try
-        {
-            var c = _cfg.Load(_opt.EventConfigPath);
-            if (c.Placeholders.TryGetValue("organizerEmail", out var e) && !string.IsNullOrWhiteSpace(e))
-                OrganizerEmail = e.Trim();
-        }
-        catch { /* keep the fallback address */ }
+        // §660 — one shared resolver, so the tasks page and this page cannot drift apart.
+        OrganizerEmail = OrganizerContact.Resolve(_cfg, _opt);
 
         var md = _renderer.TryReadMarkdown(OrganizersSlug);
         if (!string.IsNullOrWhiteSpace(md))

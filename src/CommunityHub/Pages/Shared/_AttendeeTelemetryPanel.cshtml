@@ -41,6 +41,7 @@
 <style>
     .tl-wrap { max-width:960px; margin:0 auto; }
     .tl-controls { display:flex; flex-wrap:wrap; gap:10px; align-items:center; justify-content:center; margin:6px 0 14px; }
+    .tl-print-title { display:none; }   /* shown only in print (see global @@media print) */
     .tl-controls select { padding:8px 10px; border:1px solid #c4c8d4; border-radius:8px; font-size:14px; min-width:260px; }
     .tl-metrics { display:grid; grid-template-columns:1fr; gap:12px; margin:0 0 18px; }
     @@media (min-width:620px) { .tl-metrics { grid-template-columns:repeat(3,1fr); } }
@@ -71,6 +72,15 @@ else
 {
     var dims = Model.Data.FilterDimensions ?? new List<CommunityHub.Core.Integrations.TelemetryFilterDimension>();
     var sel = dims.FirstOrDefault(d => d.Key == Model.Data.FilterKey);
+    @* §298: "Save as PDF" — opens the browser print dialog on a print-styled view (chrome hidden by
+       the global @@media print rules), so the current status can be saved/shared as a PDF. *@
+    <div class="tl-actions no-print" style="text-align:center;margin:2px 0 12px;">
+        <button type="button" onclick="window.print()"
+                style="background:var(--el-blue);color:#fff;border:0;padding:9px 18px;border-radius:8px;font-size:14px;cursor:pointer;">
+            &#128196; Save as PDF
+        </button>
+    </div>
+    <p class="tl-print-title">Attendee telemetry — current status</p>
     <form method="get" class="tl-controls">
         <label for="segment" style="font-size:13px;color:#4b5563;">Segment:</label>
         <select id="segment" name="segment" onchange="this.form.submit()">
@@ -85,10 +95,14 @@ else
         <noscript><button type="submit">Apply</button></noscript>
     </form>
 
+    @* §181: EVERY headline stat card shows a PERCENTAGE (of all attendees), never a raw count.
+       With no attendees the denominator is 0, so we render "—" instead of "0%". *@
+    var hasAttendees = Model.Data.TotalAll > 0;
+    Func<int, string> pctCard = p => hasAttendees ? $"{p}%" : "—";
     <div class="tl-metrics">
-        <div class="tl-metric"><div class="v">@Model.Data.Pct2DayAll%</div><div class="k">bought a 2-day ticket</div></div>
-        <div class="tl-metric"><div class="v">@Model.Data.WordOfMouthCount.ToString("N0")</div><div class="k">heard via word of mouth</div></div>
-        <div class="tl-metric"><div class="v">@Model.Data.FirstTimerCount.ToString("N0")</div><div class="k">first-timers (ELDK27 is their first)</div></div>
+        <div class="tl-metric"><div class="v">@pctCard(Model.Data.Pct2DayAll)</div><div class="k">bought a 2-day ticket</div></div>
+        <div class="tl-metric"><div class="v">@pctCard(Model.Data.WordOfMouthPct)</div><div class="k">heard via word of mouth</div></div>
+        <div class="tl-metric"><div class="v">@pctCard(Model.Data.FirstTimerPct)</div><div class="k">first-timers (ELDK27 is their first)</div></div>
     </div>
 
     <div class="tl-grid">

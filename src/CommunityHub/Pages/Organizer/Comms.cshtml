@@ -82,6 +82,33 @@
     <div class="card">
         <h2>@Localizer["Comms.ResendHeading"]</h2>
         <p>@Localizer["Comms.ResendIntro"]</p>
+        @* §650 — RING-DROPPED MAIL IS HIDDEN BY DEFAULT. A ring drop is the system obeying the
+           operator, not a fault; 1,242 of them buried the 2 real failures. The toggle is here
+           because "show me everything" is occasionally the right question — just not the default
+           one when you are troubleshooting. *@
+        <p style="margin:-6px 0 14px;font-size:13.5px;">
+            @if (Model.ShowDropped)
+            {
+                <a asp-page="/Organizer/Comms" asp-route-showDropped="false">
+                    &#10003; Showing everything &mdash; hide the non-problems again
+                </a>
+                <span style="color:#6b7280;">
+                    &middot; including mail that was ring-dropped, and failures that were
+                    <strong>delivered on a later attempt</strong>.
+                </span>
+            }
+            else
+            {
+                <a asp-page="/Organizer/Comms" asp-route-showDropped="true">
+                    Also show ring-dropped and already-delivered mail
+                </a>
+                <span style="color:#6b7280;">
+                    &middot; hidden by default: ring drops were not sent <em>on purpose</em>, and a
+                    failure that succeeded on the next attempt <em>did reach the person</em>. Neither
+                    is a problem to chase.
+                </span>
+            }
+        </p>
         @if (snap.ResendCandidates.Count == 0)
         {
             <p class="info" role="status">@Localizer["Comms.NoResend"]</p>
@@ -106,6 +133,16 @@
                                 <td style="word-break:break-all;">
                                     <div>@r.Name</div>
                                     <div style="color:#6b7280;font-size:13px;">@r.Email</div>
+                                    @* §644 — SAY WHERE IT WILL ACTUALLY GO. The logged address can be
+                                       historical; the resend targets the person's CURRENT one, which
+                                       is right, but looked wrong when the confirmation named an
+                                       address the operator had never seen on this page. *@
+                                    @if (r.GoesToADifferentAddress)
+                                    {
+                                        <div style="color:#b45309;font-size:12px;margin-top:2px;">
+                                            now <strong>@r.CurrentEmail</strong> &mdash; the resend goes here
+                                        </div>
+                                    }
                                 </td>
                                 <td style="word-break:break-word;">
                                     <div>@r.Subject</div>
@@ -113,18 +150,57 @@
                                 </td>
                                 <td>
                                     <span style="color:@OutcomeColor(r.Outcome);" title="@r.Error">@OutcomeLabel(r.Outcome)</span>
+                                    @* §650 — WHY it failed, in words. Operator: "i still dont
+                                       understand WHY an email failed … i need a way to understand
+                                       WHY it failed like unknown recipient or similar". Classified
+                                       from the stored error on READ, so every row already in the
+                                       log gains its reason without a migration or a backfill. *@
+                                    @{
+                                        var why = CommunityHub.Core.Email.EmailFailureReason.Classify(r.Error);
+                                    }
+                                    @* §656 — only visible when the toggle is on. Without this the
+                                       row reads as a real failure, which is exactly the confusion
+                                       that made a delivered hotel invite look lost. *@
+                                    @if (r.WasSuperseded)
+                                    {
+                                        <div style="font-size:12.5px;color:#1f6d3a;margin-top:3px;font-weight:600;">
+                                            ✓ Delivered on a later attempt &mdash; this row is the
+                                            failed try, not a lost message.
+                                        </div>
+                                    }
+                                    else if (why.Kind != CommunityHub.Core.Email.EmailFailureKind.None)
+                                    {
+                                        <div style="font-size:12.5px;color:#374151;margin-top:3px;max-width:340px;">
+                                            @why.Summary
+                                        </div>
+                                        <div style="font-size:12px;color:#6b7280;margin-top:2px;max-width:340px;">
+                                            @why.WhatToDo
+                                        </div>
+                                    }
                                 </td>
                                 <td>
-                                    <form method="post" asp-page-handler="Resend"
-                                          style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;">
-                                        <input type="hidden" name="participantId" value="@r.ParticipantId" />
-                                        <label class="sr-only" for="tpl-@r.ParticipantId">@Localizer["Comms.ResendTemplateLabel"]</label>
-                                        <select id="tpl-@r.ParticipantId" name="template" style="max-width:200px;">
-                                            <option value="onboarding-getting-started">onboarding-getting-started</option>
-                                            <option value="invitation">invitation</option>
-                                        </select>
-                                        <button type="submit">@Localizer["Comms.Resend"]</button>
-                                    </form>
+                                    @* 🔒 §644 — RESEND THE MAIL THAT FAILED. This was a hard-coded
+                                       two-option dropdown (onboarding-getting-started / invitation)
+                                       regardless of what had actually failed — so a failed
+                                       calendar-invite could not be resent at all, and one click sent
+                                       a real speaker an unrelated onboarding mail. *@
+                                    @if (string.IsNullOrWhiteSpace(r.ResendTemplate))
+                                    {
+                                        <span style="color:#6b7280;font-size:13px;">
+                                            No template recorded for this mail, so it cannot be resent
+                                            safely. Use Email Center to pick one deliberately.
+                                        </span>
+                                    }
+                                    else
+                                    {
+                                        <form method="post" asp-page-handler="Resend"
+                                              style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;">
+                                            <input type="hidden" name="participantId" value="@r.ParticipantId" />
+                                            <input type="hidden" name="template" value="@r.ResendTemplate" />
+                                            <button type="submit">@Localizer["Comms.Resend"]</button>
+                                            <span style="color:#6b7280;font-size:12px;">@r.ResendTemplate</span>
+                                        </form>
+                                    }
                                 </td>
                             </tr>
                         }
@@ -283,11 +359,17 @@
         @{
             var tiles = new List<CommunityHub.Pages.Shared.HubTile>
             {
-                new("/Organizer/EmailCenter", Localizer["Nav.OrgEmailCenter"].Value, "Compose and send templated email to participants.", "broadcast-email"),
+                @* 🗑 §705.12 — the Broadcast and Send-Invitations tiles are GONE with their pages.
+                   Leaving a tile pointing at a deleted page is a 404 an organizer finds by clicking.
+
+                   EmailCenter's "broadcast-email" gate key is REMOVED, not replaced. It is organizer
+                   tooling on an organizer-only page, so its gate is the ROLE — the same reasoning
+                   §569 used to take rings off organizer surfaces. Every neighbour here (EmailLog,
+                   EmailTemplates, SoMeQueue, Feed) already carries no key; EmailCenter was the odd
+                   one out. A switch nobody needs is one more thing to reason about. *@
+                new("/Organizer/EmailCenter", Localizer["Nav.OrgEmailCenter"].Value, "Preview, test-send and re-send templated email."),
                 new("/Organizer/EmailLog", Localizer["Nav.OrgEmailLog"].Value, "The full delivery log of every email sent."),
                 new("/Organizer/EmailTemplates", "Email templates", "Verify, edit + preview every email template per edition, and set each one's release ring."),
-                new("/Organizer/Broadcast", Localizer["Nav.OrgBroadcast"].Value, "Send a one-off broadcast message to a chosen audience.", "broadcast-email"),
-                new("/Organizer/SendInvitations", Localizer["Nav.OrgSendInvitations"].Value, "Send the event invitation to invitees.", "invitation-email"),
                 new("/Organizer/SendWelcomeLogin", Localizer["Nav.OrgSendWelcome"].Value, "Send welcome-login emails so people can sign in.", "welcome-email"),
                 new("/Organizer/SpeakerReminders", Localizer["Nav.OrgSpeakerReminders"].Value, "Remind speakers about pending tasks and deadlines.", "reminder-jobs"),
                 new("/Organizer/SoMeQueue", Localizer["Nav.OrgSoMeQueue"].Value, "The queue of social posts ready to publish across channels."),

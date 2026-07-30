@@ -44,6 +44,8 @@ public sealed class MasterClassConfirmedTemplateTests
         {
             CommunityName = "C", DisplayName = "C 2027", Code = "C27", IsActive = true,
             StartDate = new DateOnly(2027, 2, 9), EndDate = new DateOnly(2027, 2, 10),
+            // §257: verify the ATTACHED-invite path (gated behind the auto-invite switch).
+            AutoCalendarInvitesEnabled = true,
         };
         db.Events.Add(e); await db.SaveChangesAsync();
         var s = new Session { EventId = e.Id, Title = "Deep Dive MC", Type = SessionType.MasterClass, MasterClassCapacity = 5 };
@@ -68,15 +70,39 @@ public sealed class MasterClassConfirmedTemplateTests
 
         await svc.SendConfirmedAsync(id, "https://hub.test");
 
-        var m = Assert.Single(sender.Messages);
+        // §193: the confirmation ATTACHES the calendar invite, so it sends via SendWithIcsAsync.
+        var m = Assert.Single(sender.IcsMessages);
         Assert.Equal("p@x.dk", m.To);
         // Subject + body come from the masterclass-confirmed template tokens.
         Assert.Contains("Deep Dive MC", m.Subject);                 // {{masterClassTitle}}
         Assert.Contains("Deep Dive MC", m.Html);
-        Assert.Contains($"/MasterClassPage/{mc}", m.Html);          // {{landingPageUrl}}
-        Assert.Contains("MyMasterClass.ics", m.Html);               // {{icsUrl}}
-        Assert.Contains("MyMasterClass?t=", m.Html);                // {{selfServiceUrl}}
+        // §418 (operator 2026-07-27: "the button should redirect to the q&a page (which is the
+        // topic) … it goes wrongly to master class selection"). REVERSED from §341-6/§351-7, and
+        // that reversal is the point: the button has always read "Open my Master Class page", but
+        // §365's sweep of every /Attendee link carried it to the SELECTION step along with the
+        // genuinely-retired ones. Its destination was never the selection screen.
+        //
+        // It must be the per-class page AND a magic link, so the shape is the magic-link origin
+        // plus the deep path: /go/{token}/MasterClassPage/{id}. Pinned as BOTH halves — the id is
+        // what makes it *their* class, and losing the magic-link origin would silently drop people
+        // on a login screen.
+        Assert.Contains($"/MasterClassPage/{mc}", m.Html);
+        Assert.DoesNotContain("/Forms/Wizard?step=masterclass", m.Html);
+        Assert.DoesNotContain("MyMasterClass.ics", m.Html);         // §193: no .ics download link
+        Assert.NotNull(sender.LastIcs);                             // calendar invite attached
         // §89: the "See you there, / The team" sign-off has been removed.
         Assert.DoesNotContain("The team", m.Html);
+
+        // §210b: the body still carries the prominent registration/breakfast-from-07:00
+        // come-early block. §341-1 retired the §210 "see the calendar invite" subject
+        // pointer — the mail no longer mentions a calendar invite at all.
+        Assert.DoesNotContain("see the calendar invite", m.Subject);
+        // 369: the registration/breakfast call-out was REMOVED at the operator request.
+        Assert.DoesNotContain("Registration &amp; breakfast", m.Html);
+        Assert.DoesNotContain("Doors open at 08:00", m.Html);
+        // §210b: the attached invite is the full Master Class day 08:00–16:00 (local).
+        Assert.Contains("20270209T080000", sender.LastIcs!);
+        Assert.Contains("20270209T160000", sender.LastIcs!);
+        Assert.DoesNotContain("20270209T090000", sender.LastIcs!);
     }
 }

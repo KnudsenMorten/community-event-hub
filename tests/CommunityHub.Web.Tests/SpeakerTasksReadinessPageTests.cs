@@ -59,10 +59,18 @@ public sealed class SpeakerTasksReadinessPageTests
             db, new SpeakerDeadlineOptions { ConfigPath = "does-not-exist.json" },
             TimeProvider.System);
 
+        var wizardStepTasks = new CommunityHub.Forms.WizardStepTaskSeeder(
+            db,
+            new CommunityHub.Forms.SpeakerWizardService(db),
+            new CommunityHub.Forms.RoleWizardService(db),
+            TimeProvider.System);
+
         var model = new TasksModel(
             db,
             accessor,
             seeder,
+            wizardStepTasks,
+            new CommunityHub.Core.Config.PartyTaskSeeder(db, TimeProvider.System),
             new FormTaskReconciler(db, TimeProvider.System),
             new SpeakerMilestoneService(db, TimeProvider.System),
             new SpeakerReadinessService(db));

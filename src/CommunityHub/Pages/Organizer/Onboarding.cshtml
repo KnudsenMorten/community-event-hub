@@ -176,8 +176,12 @@
                                 }
                                 else if (r.DoneOf(step))
                                 {
-                                    <!-- Done + "re-open" (flip to 0) hand-off button. -->
-                                    <form method="post" style="margin:0;">
+                                    <!-- Done + "re-open" (flip to 0) hand-off button. Confirmed
+                                         like the bulk sibling above: one click queues a REAL
+                                         reminder email to the participant, so a stray tap on the
+                                         dense mobile table must never fire it silently. -->
+                                    <form method="post" style="margin:0;"
+                                          onsubmit="return confirm('Re-open the @step step for @Html.Raw(Html.Encode(r.FullName).Replace("&#x27;", "\\&#x27;")) and queue a reminder email to them?');">
                                         <input type="hidden" name="participantId" value="@r.ParticipantId" />
                                         <input type="hidden" name="step" value="@step" />
                                         <input type="hidden" name="persona" value="@(Model.Persona?.ToString())" />

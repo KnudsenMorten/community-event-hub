@@ -62,10 +62,13 @@ public class SessionQuestionsModel : PageModel
 
     private SessionQuestionService.ActorContext? Actor()
     {
+        // Used ONLY by the OnPost* (write) handlers — the OnGet view keeps its own
+        // role-only gate. Writes require a REAL organizer: an acting-as / secretary
+        // session carries Role==Organizer but must never mutate (§234 / OrganizerAuth).
         var me = _participant.Current;
-        if (me is null || me.Role != ParticipantRole.Organizer) return null;
+        if (!OrganizerAuth.IsRealOrganizer(me)) return null;
         return new SessionQuestionService.ActorContext(
-            me.ParticipantId, me.Email, me.Role, me.EventId);
+            me!.ParticipantId, me.Email, me.Role, me.EventId);
     }
 
     private async Task<IActionResult> RunAsync(Func<SessionQuestionService.ActorContext, Task<string>> op)

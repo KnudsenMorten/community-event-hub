@@ -1,0 +1,120 @@
+@using CommunityHub.Core.Domain
+@model ParticipantTask
+@{
+    // §688.12 / §671 — THE BOOTH-MEMBERS EDITOR, INSIDE THE TASK.
+    //
+    // Operator §671: "if possible embed the booth members into the task (if room permits in the
+    // page), otherwise link to page in ceh", restated as "make it more embedded". The task becomes
+    // the place the work is DONE instead of a signpost to another page — §600's original complaint.
+    //
+    // 🔒 It carries DELETE and SPONSOR-VISIBLE SYNC ERRORS deliberately: §689 found both existed
+    // ONLY on /Sponsor/CompanyDetails, and §689.1 requires the new home to be PREFERABLE before the
+    // old one is decommissioned. Embedding a weaker editor would have made retirement a downgrade.
+    //
+    // Mobile-first: the rows are a flex wrap, not a table, so they hold at ~360px — §671 judges
+    // "if room permits" on the NARROW viewport, not the desktop one.
+    var page = ViewData["BoothMembersPage"] as CommunityHub.Pages.Sponsor.TasksModel;
+    var members = page?.BoothMembers ?? new List<SponsorBoothMember>();
+
+    // §690 — the contracted allowance for this company's tier. NULL means the edition has not
+    // stated one, and the line is omitted entirely: "0 included" would read as "your package
+    // includes nobody", which is a different — and wrong — claim.
+    var included = page?.BoothMembersIncluded;
+    var overAllowance = included is int inc && members.Count > inc;
+}
+
+@* §688.15 — A TINTED PANEL WITH A REAL TABLE. Operator: "maybe make this in a table with different
+   color so it is easier to read - compared to the text … the booth members is easy to not see".
+   🔒 The problem was that an interactive editor rendered at the same visual weight as the prose
+   around it, so the one part of the task the sponsor must ACT on disappeared into the paragraphs.
+   Structured data belongs in a table, and a component you can act on should not look like a
+   sentence — that is §600.4's "data presented as sentences" complaint, in the new format. *@
+<div class="booth-members">
+    <div class="booth-members__head">Your booth members (@members.Count)</div>
+
+    @* §690 — THE ALLOWANCE, stated BEFORE the list. Operator: "this is optional outside of the
+       agreed booth members count per contract. feature/gold = 2, diamond = 4, platinum = 6".
+       Without this line the "Extra booth members" purchase block below reads as something every
+       sponsor must do; with it, extras are visibly the exception they are. *@
+    @if (included is int allowance)
+    {
+        <p class="booth-members__allowance">
+            Your package includes <strong>@allowance booth member@(allowance == 1 ? "" : "s")</strong>
+            — you have registered <strong>@members.Count</strong>.
+            @if (overAllowance)
+            {
+                <span class="booth-members__over">
+                    That is @(members.Count - allowance) more than your package covers — buy extra
+                    staff tickets below, or remove someone.
+                </span>
+            }
+        </p>
+    }
+
+    @if (members.Count == 0)
+    {
+        @* A POSITIVE empty state. "Nothing here" must read as an answer, not as a page that
+           failed to load — the same rule the :::data blocks follow (§555). *@
+        <p class="booth-members__empty">No booth members registered yet — add the people who will
+            staff your booth below.</p>
+    }
+    else
+    {
+        <table class="booth-members__table">
+            <thead>
+                <tr><th>Name</th><th>Email</th><th>Role</th><th><span class="visually-hidden">Actions</span></th></tr>
+            </thead>
+            <tbody>
+                @foreach (var m in members)
+                {
+                    <tr>
+                        <td data-label="Name"><strong>@m.FirstName @m.LastName</strong></td>
+                        <td data-label="Email" class="booth-members__email">@m.Email</td>
+                        <td data-label="Role">
+                            <span class="booth-members__role">@(m.Role == BoothMemberRole.Admin ? "Admin" : "Staff")</span>
+                        </td>
+                        <td class="booth-members__actions">
+                            <form method="post" asp-page-handler="DeleteBoothMember">
+                                <input type="hidden" name="memberId" value="@m.Id" />
+                                @* No confirm dialog: removal is reversible — re-adding the same
+                                   e-mail revives the tombstoned row rather than duplicating it. *@
+                                <button type="submit" class="task-act task-act--secondary">Remove</button>
+                            </form>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+
+    <details class="booth-members__add">
+        <summary>+ Add a booth member</summary>
+        <form method="post" asp-page-handler="AddBoothMember" class="booth-members__form">
+            <label>
+                First name
+                <input type="text" name="firstName" required autocomplete="given-name" />
+            </label>
+            <label>
+                Last name
+                <input type="text" name="lastName" required autocomplete="family-name" />
+            </label>
+            <label>
+                Email
+                <input type="email" name="email" required autocomplete="email" />
+            </label>
+            <label>
+                Role
+                <select name="role">
+                    <option value="@((int)BoothMemberRole.Staff)" selected>Staff — scan leads, manage inquiries</option>
+                    <option value="@((int)BoothMemberRole.Admin)">Admin — also invite/manage members and export leads</option>
+                </select>
+            </label>
+            <button type="submit" class="task-act task-act--complete">Add booth member</button>
+        </form>
+    </details>
+
+    <p class="task-actions__note task-actions__note--muted">
+        Booth members are synced to the event system automatically — new members are created there,
+        and any existing ones are pulled in here.
+    </p>
+</div>

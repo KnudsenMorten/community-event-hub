@@ -27,7 +27,9 @@ namespace CommunityHub.Core.Settings;
 /// <param name="GroupRing">The effective group's ring (for display).</param>
 public sealed record FeatureState(
     FeatureDescriptor Descriptor, bool Enabled, bool IsPersisted, Ring ReleasedToRing,
-    Ring? OverrideRing, FeatureGroup EffectiveGroup, Ring GroupRing)
+    Ring? OverrideRing, FeatureGroup EffectiveGroup, Ring GroupRing,
+    // §514 — the outbound-email master ring, so the page can tell when it overrules this one.
+    Ring? TransportRing = null)
 {
     public string Key => Descriptor.Key;
     public bool IsAdvanced => Descriptor.IsAdvanced;
@@ -37,6 +39,30 @@ public sealed record FeatureState(
 
     /// <summary>True when the feature has been re-homed out of its catalog group (graduated/incubating).</summary>
     public bool IsReHomed => EffectiveGroup != Descriptor.Group;
+
+    /// <summary>
+    /// §514 — TRUE when this feature's mail is released BROADER than the outbound-email master
+    /// switch, so the transport clamps it and the ring shown here is NOT the audience.
+    ///
+    /// <para><c>BrevoEmailSender</c> resolves the audience as
+    /// <c>MIN(ring(outbound-email), ring(feature))</c> and, by its own comment, "never LOOSENS".
+    /// Releasing a feature to Broad while the master sits at Ring 2 therefore changes nothing —
+    /// the operator's example was *Speaker profile change alerts* at Ring 3 (broad) whose mail
+    /// "will not arrive". Two screens, each truthful alone, together stating something false.</para>
+    ///
+    /// <para>The condition MIRRORS the transport's own (<c>IsRingScoped</c>) rather than the
+    /// narrower e-mail grouping, so it cannot claim a cap the sender would not apply, nor miss one
+    /// it would.</para>
+    /// </summary>
+    public bool IsCappedByTransport =>
+        Descriptor.IsRingScoped
+        && Key != FeatureCatalog.OutboundEmailKey
+        && TransportRing is Ring cap
+        && (int)ReleasedToRing > (int)cap;
+
+    /// <summary>§514 — the ring really in force for this feature's mail, once the cap applies.</summary>
+    public Ring EffectiveMailRing =>
+        IsCappedByTransport ? TransportRing!.Value : ReleasedToRing;
 }
 
 /// <summary>The effective lifecycle ring of one feature GROUP for an edition (REQUIREMENTS §23a).</summary>
@@ -78,6 +104,21 @@ public sealed class FeatureSettingsService
 
         var groupRings = await GetGroupRingMapAsync(eventId, ct);
 
+        // §514 — the outbound-email master ring, resolved EXACTLY as the transport resolves it, so
+        // a feature released above it can be shown as capped rather than silently clamped at send
+        // time. Local function because the same resolution is needed twice (master + each feature).
+        Ring ResolveRing(FeatureDescriptor d)
+        {
+            var has = persisted.TryGetValue(d.Key, out var row);
+            var effGroup = (has ? row!.GroupOverride : null) ?? d.Group;
+            return (has ? row!.ReleasedToRingOverride : null)
+                ?? (groupRings.TryGetValue(effGroup, out var gr) ? gr : (Ring?)null)
+                ?? d.DefaultReleasedToRing;
+        }
+
+        var master = FeatureCatalog.Find(FeatureCatalog.OutboundEmailKey);
+        Ring? transportRing = master is null ? null : ResolveRing(master);
+
         return FeatureCatalog.All
             .Select(d =>
             {
@@ -99,7 +140,8 @@ public sealed class FeatureSettingsService
 
                 return new FeatureState(d, enabled, IsPersisted: has,
                     ReleasedToRing: effective, OverrideRing: overrideRing,
-                    EffectiveGroup: effGroup, GroupRing: groupRing);
+                    EffectiveGroup: effGroup, GroupRing: groupRing,
+                    TransportRing: transportRing);
             })
             .ToList();
     }
@@ -310,6 +352,65 @@ public sealed class FeatureSettingsService
         await _db.SaveChangesAsync(ct);
         return paused;
     }
+
+    /// <summary>
+    /// §340-H — set or CLEAR the organizer's per-edition override for outbound writes to
+    /// third-party systems (operator 2026-07-26: "i can as organizer control this on the
+    /// settings page"). Reserved non-catalog key, same shape as
+    /// <see cref="SetJobsPausedAsync"/>.
+    ///
+    /// <para><b>Three states, and the third is the important one.</b>
+    /// <paramref name="allow"/> <c>true</c> ⇒ force writes ON for this edition;
+    /// <c>false</c> ⇒ force them OFF; <b><c>null</c> ⇒ DELETE the row and inherit the
+    /// ENVIRONMENT default</b> (dev false / prod true). Without the null case an organizer
+    /// who toggled once could never get back to "whatever this environment says", and DEV's
+    /// out-of-the-box safety would depend on remembering to toggle it back.</para>
+    /// </summary>
+    public async Task SetExternalWritesOverrideAsync(
+        int eventId, bool? allow, string? byEmail, CancellationToken ct = default)
+    {
+        var row = await _db.FeatureSettings.FirstOrDefaultAsync(
+            f => f.EventId == eventId
+                 && f.FeatureKey == Integrations.ExternalWriteGuard.OverrideKey, ct);
+
+        if (allow is null)
+        {
+            if (row is not null)
+            {
+                _db.FeatureSettings.Remove(row);
+                await _db.SaveChangesAsync(ct);
+            }
+            return;
+        }
+
+        if (row is null)
+        {
+            row = new FeatureSetting
+            {
+                EventId = eventId,
+                FeatureKey = Integrations.ExternalWriteGuard.OverrideKey,
+                ReleasedToRing = Rings.Default,
+            };
+            _db.FeatureSettings.Add(row);
+        }
+
+        row.Enabled = allow.Value;
+        Stamp(row, byEmail);
+        await _db.SaveChangesAsync(ct);
+    }
+
+    /// <summary>
+    /// §340-H — the organizer's current override, or null when none is set (⇒ the edition
+    /// inherits the environment default). Used by the Settings page to show all three
+    /// states honestly rather than collapsing "inherit" into a bare on/off.
+    /// </summary>
+    public async Task<bool?> GetExternalWritesOverrideAsync(
+        int eventId, CancellationToken ct = default) =>
+        await _db.FeatureSettings
+            .Where(f => f.EventId == eventId
+                        && f.FeatureKey == Integrations.ExternalWriteGuard.OverrideKey)
+            .Select(f => (bool?)f.Enabled)
+            .FirstOrDefaultAsync(ct);
 
     private async Task<FeatureSetting> UpsertRowAsync(
         int eventId, string featureKey, FeatureDescriptor descriptor, CancellationToken ct)

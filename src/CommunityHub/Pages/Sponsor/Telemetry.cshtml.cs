@@ -41,7 +41,10 @@ public class TelemetryModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Sponsor) { AccessDenied = true; return Page(); }
+        // §290 (operator 2026-07-10): the limited "who's coming" telemetry is shared with CREW —
+        // sponsors, speakers, volunteers, media and event partners all see this same non-organizer
+        // view. Attendees are excluded. Organizers use /Organizer/Telemetry (the fuller view).
+        if (me.Role == ParticipantRole.Attendee) { AccessDenied = true; return Page(); }
 
         // Sponsor surface — never assemble the OrganizerOnly aggregates (defense-in-depth, §69).
         Data = await _svc.GetAsync(Segment, FilterKey, FilterValue, isOrganizer: false, ct);

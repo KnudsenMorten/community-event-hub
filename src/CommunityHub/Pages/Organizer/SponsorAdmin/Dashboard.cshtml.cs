@@ -30,6 +30,7 @@ public class DashboardModel : PageModel
     private readonly ZohoOptions _zoho;
     private readonly CompanyManagerClient _cm;
     private readonly CompanyManagerOptions _cmOptions;
+    private readonly CommunityHub.Core.Settings.FeatureGateService _gate;
     private readonly ILogger<DashboardModel> _logger;
 
     public DashboardModel(
@@ -39,6 +40,7 @@ public class DashboardModel : PageModel
         ZohoOptions zoho,
         CompanyManagerClient cm,
         CompanyManagerOptions cmOptions,
+        CommunityHub.Core.Settings.FeatureGateService gate,
         ILogger<DashboardModel> logger)
     {
         _db = db;
@@ -47,6 +49,7 @@ public class DashboardModel : PageModel
         _zoho = zoho;
         _cm = cm;
         _cmOptions = cmOptions;
+        _gate = gate;
         _logger = logger;
     }
 
@@ -59,11 +62,74 @@ public class DashboardModel : PageModel
     /// from the webshop default coordinator where empty, then re-sync every sponsor
     /// record to Zoho Backstage (fixes the legacy UTF-8 mojibake + pushes contacts).
     /// </summary>
+    /// <summary>
+    /// §496c — pull sponsor CONTACTS from Company Manager into the hub, on demand.
+    ///
+    /// <para><b>Why this is needed.</b> §493b syncs immediately when a sponsor edits contacts on
+    /// the hub's Company Details page — but a contact added DIRECTLY in Company Manager (or in the
+    /// ERP, then pushed to CM) raises no event the hub can see. Until the next scheduled
+    /// <c>SponsorOrderPullService</c> run, the person exists in CM and is invisible in CEH, with no
+    /// way to hurry it along. The operator hit exactly that: <i>"i see the new contact in CM module
+    /// - mh@2linkit.net - fix so i also see in ceh"</i>.</para>
+    ///
+    /// <para>Idempotent — it is the same per-company sync the scheduled pull runs, so pressing it
+    /// twice changes nothing the second time.</para>
+    /// </summary>
+    public async Task<IActionResult> OnPostSyncContactsAsync(CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+        if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
+
+        var db = HttpContext.RequestServices.GetRequiredService<CommunityHub.Core.Data.CommunityHubDbContext>();
+        var sync = HttpContext.RequestServices.GetRequiredService<CommunityHub.Core.Integrations.SponsorContactSyncService>();
+
+        // Every sponsor company the hub knows about for this edition.
+        var companyIds = await db.Participants
+            .Where(p => p.EventId == me.EventId
+                        && p.Role == CommunityHub.Core.Domain.ParticipantRole.Sponsor
+                        && p.SponsorCompanyId != null)
+            .Select(p => p.SponsorCompanyId!)
+            .Distinct()
+            .ToListAsync(ct);
+
+        int companies = 0, created = 0, updated = 0, failed = 0;
+        foreach (var idStr in companyIds)
+        {
+            if (!int.TryParse(idStr, out var cmId)) continue;
+            try
+            {
+                // One company's Company Manager hiccup must not abandon the rest — the same
+                // per-company tolerance the scheduled pull uses.
+                var r = await sync.SyncCompanyAsync(me.EventId, cmId, ct);
+                companies++;
+                created += r.ParticipantsCreated;
+                updated += r.ParticipantsUpdated;
+            }
+            catch { failed++; }
+        }
+
+        ActionMessage = $"Contact sync: {companies} company(ies) checked, {created} contact(s) created, "
+                        + $"{updated} updated"
+                        + (failed > 0 ? $", {failed} company(ies) could not be reached." : ".");
+        return RedirectToPage();
+    }
+
     public async Task<IActionResult> OnPostMigrateResyncAsync(CancellationToken ct)
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+        if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
+
+        // GATE (§16/§234): the manual "do it now" resync honours the SAME per-edition
+        // 'backstage-sync' kill-switch as the scheduled Backstage/Zoho sync, so GUI
+        // state == actual behaviour. Disabled ⇒ no-op with a clear notice.
+        if (!await _gate.IsFeatureEnabledAsync("backstage-sync", me.EventId, ct))
+        {
+            ActionMessage = "The Backstage / Zoho exhibitor sync feature is turned off for this event. "
+                + "Enable it in Settings to run the migrate + re-sync.";
+            return RedirectToPage();
+        }
 
         var svc = HttpContext.RequestServices.GetRequiredService<SponsorZohoSyncService>();
         var r = await svc.MigrateCoordinatorsAndResyncAsync(me.EventId, ct);
@@ -85,7 +151,16 @@ public class DashboardModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+        if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
+
+        // GATE (§16/§234): same per-edition 'sponsor-zoho-provision' kill-switch the
+        // scheduled WooCommercePullJob provisioning leg checks.
+        if (!await _gate.IsFeatureEnabledAsync("sponsor-zoho-provision", me.EventId, ct))
+        {
+            ActionMessage = "The Zoho sponsor/exhibitor provisioning feature is turned off for this event. "
+                + "Enable it in Settings to run the provision.";
+            return RedirectToPage();
+        }
 
         var svc = HttpContext.RequestServices.GetRequiredService<SponsorZohoProvisionService>();
         var r = await svc.ProvisionAsync(me.EventId, ct);
@@ -106,10 +181,20 @@ public class DashboardModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+        if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
+
+        // GATE (§16/§234): same per-edition 'erp-webshop-reconcile' kill-switch the
+        // scheduled ErpSyncCustomerContactJob checks.
+        if (!await _gate.IsFeatureEnabledAsync("erp-webshop-reconcile", me.EventId, ct))
+        {
+            ActionMessage = "The ERP-to-webshop contact reconcile feature is turned off for this event. "
+                + "Enable it in Settings to run the reconcile.";
+            return RedirectToPage();
+        }
 
         var svc = HttpContext.RequestServices.GetRequiredService<CommunityHub.Core.Integrations.Erp.ErpWebshopContactSyncService>();
-        var r = await svc.SyncAsync(ct);
+        // §482b: the organizer's manual reconcile stays a FULL sweep across all sponsor customers.
+        var r = await svc.SyncAsync(ct: ct);
         ActionMessage = !r.Enabled
             ? "Backend / Company Manager is not configured for this environment."
             : $"ERP→webshop reconcile: {r.Customers} sponsor customers, {r.UsersCreated} webshop user(s) created, " +
@@ -207,11 +292,10 @@ public class DashboardModel : PageModel
         foreach (var cid in contactsByCompany.Keys) allCompanyIds.Add(cid);
         foreach (var cid in leadAgg.Keys) allCompanyIds.Add(cid);
 
-        // Resolve each company's display NAME (don't show the raw id). Authoritative
-        // source is Company Manager (public -> legal name), the same chain the
-        // sponsor-facing pages use; falls back to "Company {id}" only when the lookup
-        // is unavailable. Resolved once per company per request.
-        var names = await ResolveCompanyNamesAsync(allCompanyIds, ct);
+        // Resolve each company's display NAME (don't show the raw id) from CEH SQL — the copy
+        // the CM → CEH sync captured — in one query. Falls back to "Company {id}" for a company
+        // the sync has not captured yet (§443).
+        var names = await ResolveCompanyNamesAsync(me.EventId, allCompanyIds, ct);
 
         Rows = allCompanyIds
             .Select(cid =>
@@ -238,31 +322,15 @@ public class DashboardModel : PageModel
     }
 
     /// <summary>
-    /// Map each sponsor company id to its display name via Company Manager
-    /// (public name -&gt; legal name, the canonical <see cref="SponsorCompanyName"/>
-    /// chain). Resilient: a failed/disabled lookup leaves the id out of the map so
-    /// the caller falls back to "Company {id}" rather than 500-ing the dashboard.
+    /// Map each sponsor company id to its display name — from CEH SQL, in ONE query.
+    ///
+    /// <para>§443 (operator 2026-07-27): this used to call Company Manager once per company,
+    /// sequentially, while rendering, which made this page take ~7.9 s warm on PROD. The name is
+    /// already synced into CEH by <c>SponsorOrderPullService</c> (through the same
+    /// <see cref="SponsorCompanyName"/> chain), so the admin interface reads the local copy and
+    /// never reaches the WordPress plugin on the request path.</para>
     /// </summary>
-    private async Task<Dictionary<string, string>> ResolveCompanyNamesAsync(
-        IEnumerable<string> companyIds, CancellationToken ct)
-    {
-        var map = new Dictionary<string, string>(StringComparer.Ordinal);
-        if (!_cmOptions.Enabled) return map;
-
-        foreach (var cid in companyIds)
-        {
-            if (!int.TryParse(cid, out var idInt)) continue;
-            try
-            {
-                var c = await _cm.GetCompanyAsync(idInt, ct);
-                if (c is null) continue;
-                map[cid] = SponsorCompanyName.Resolve(c.PublicName, c.Name, billingName: null, companyId: cid);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Sponsor dashboard: company-name lookup failed for {CompanyId}.", cid);
-            }
-        }
-        return map;
-    }
+    private Task<Dictionary<string, string>> ResolveCompanyNamesAsync(
+        int eventId, IEnumerable<string> companyIds, CancellationToken ct) =>
+        SponsorCompanyNameService.ResolveFromLocalAsync(_db, eventId, companyIds, ct);
 }

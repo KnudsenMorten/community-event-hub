@@ -93,7 +93,7 @@ public class SponsorDeliverablesModel : PageModel
             // then build again WITH names. The board build is cheap (batch-loaded, in-memory),
             // so the extra pass keeps name resolution out of the pure service.
             var bare = await _deliverables.BuildBoardAsync(me.EventId, today, companyNames: null, ct);
-            var names = await ResolveCompanyNamesAsync(bare.Select(b => b.CompanyId), ct);
+            var names = await ResolveCompanyNamesAsync(me.EventId, bare.Select(b => b.CompanyId), ct);
             Companies = await _deliverables.BuildBoardAsync(me.EventId, today, names, ct);
         }
         catch (Exception ex)
@@ -105,30 +105,16 @@ public class SponsorDeliverablesModel : PageModel
     }
 
     /// <summary>
-    /// Map each sponsor company id to its display name via Company Manager (public → legal
-    /// name, the same chain the other sponsor pages use). A failed/disabled lookup leaves the
-    /// id out of the map so the board falls back to the id rather than 500-ing.
+    /// Map each sponsor company id to its display name — from CEH SQL, in ONE query.
+    ///
+    /// <para>§443 (operator 2026-07-27: <i>"it must newer pull data from company manager (cm) in
+    /// the admin interface"</i>). This used to call Company Manager once per company while
+    /// rendering, which made the board ~7.8 s warm on PROD. The name is already synced into CEH by
+    /// <c>SponsorOrderPullService</c> through the same <c>SponsorCompanyName</c> chain, so the
+    /// admin interface reads the local copy and never reaches the WordPress plugin on the request
+    /// path. Falls back to "Company {id}" for a company the sync has not captured yet.</para>
     /// </summary>
-    private async Task<Dictionary<string, string>> ResolveCompanyNamesAsync(
-        IEnumerable<string> companyIds, CancellationToken ct)
-    {
-        var map = new Dictionary<string, string>(StringComparer.Ordinal);
-        if (!_cmOptions.Enabled) return map;
-
-        foreach (var cid in companyIds)
-        {
-            if (!int.TryParse(cid, out var idInt)) continue;
-            try
-            {
-                var c = await _cm.GetCompanyAsync(idInt, ct);
-                if (c is null) continue;
-                map[cid] = SponsorCompanyName.Resolve(c.PublicName, c.Name, billingName: null, companyId: cid);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Sponsor deliverables: company-name lookup failed for {CompanyId}.", cid);
-            }
-        }
-        return map;
-    }
+    private Task<Dictionary<string, string>> ResolveCompanyNamesAsync(
+        int eventId, IEnumerable<string> companyIds, CancellationToken ct) =>
+        SponsorCompanyNameService.ResolveFromLocalAsync(_db, eventId, companyIds, ct);
 }

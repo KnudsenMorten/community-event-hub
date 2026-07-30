@@ -6,10 +6,17 @@ using System.Text.Json;
 namespace CommunityHub.Core.Integrations;
 
 /// <summary>A WooCommerce order line item, as the hub needs it.</summary>
+/// <param name="Quantity">
+/// §666 — HOW MANY of this product the line carries. The operator asked for the amount, not just
+/// yes/no: <i>"did he buy TV (amount) or did he not"</i>, and a sponsor may have bought two on one
+/// line. Defaulted to 1 so every existing construction site keeps its meaning (one line ⇒ one item)
+/// rather than silently becoming zero.
+/// </param>
 public sealed record WooLineItem(
     long ProductId,
     string ProductName,
-    string CategoriesText);
+    string CategoriesText,
+    int Quantity = 1);
 
 /// <summary>A WooCommerce order, flattened to what the sponsor pipeline uses.</summary>
 public sealed record WooOrder(
@@ -89,13 +96,18 @@ public sealed class WooCommerceClient
     }
 
     /// <summary>
-    /// Fetch all orders with the given status (default "completed"), following
+    /// Fetch all orders with the given status (default "completed"; WooCommerce
+    /// accepts a comma-separated list, e.g. "cancelled,refunded"), following
     /// pagination, then enrich every line item with its product's categories
     /// (one batched products call per 100 distinct product ids).
+    /// <paramref name="enrichCategories"/> = false skips that second pass —
+    /// used by the §253 G8d refund-visibility probe, which only needs order
+    /// ids/status/company, not the classifier's category text.
     /// </summary>
     public async Task<IReadOnlyList<WooOrder>> GetOrdersAsync(
         string status = "completed",
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        bool enrichCategories = true)
     {
         var orders = new List<WooOrder>();
         var page = 1;
@@ -155,7 +167,7 @@ public sealed class WooCommerceClient
             .Distinct()
             .ToList();
 
-        if (distinctProductIds.Count == 0)
+        if (!enrichCategories || distinctProductIds.Count == 0)
         {
             return orders;
         }
@@ -258,7 +270,11 @@ public sealed class WooCommerceClient
                     ProductName: GetString(item, "name"),
                     // Categories are not in the order payload; enriched later
                     // in GetOrdersAsync via the products endpoint.
-                    CategoriesText: string.Empty));
+                    CategoriesText: string.Empty,
+                    // §666 — a missing/zero quantity falls back to 1. WooCommerce always sends
+                    // "quantity", but a line that somehow lacks it still represents a purchase, and
+                    // counting it as 0 would tell a sponsor they had booked nothing when they had.
+                    Quantity: Math.Max(1, (int)GetLong(item, "quantity"))));
             }
         }
 

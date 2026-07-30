@@ -206,8 +206,13 @@
 
         @if (e.Due is not null)
         {
-            <a class="ms-dl" asp-page-handler="CalendarItem" asp-route-taskId="@e.TaskId"
-               title="@Localizer["Hub.DownloadIcs"]">&#128197; @Localizer["Hub.DownloadIcs"]</a>
+            <form method="post" asp-page-handler="AddReminder" style="display:inline;margin:0;">
+                <input type="hidden" name="taskId" value="@e.TaskId" />
+                <button type="submit" class="ms-dl" title="@Localizer["TaskRow.AddReminder"]"
+                        style="background:none;border:none;padding:0;cursor:pointer;">
+                    &#128197; @Localizer["TaskRow.AddReminder"]
+                </button>
+            </form>
         }
 
         @foreach (var h in Model.Schedule.MyHelp.Where(h => h.TaskId == e.TaskId))

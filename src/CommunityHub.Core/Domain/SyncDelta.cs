@@ -152,6 +152,24 @@ public enum SyncDeltaChangeKind
     Disappeared = 1,
     /// <summary>The entity appeared upstream — for a future create-on-approve flow.</summary>
     New = 2,
+
+    /// <summary>
+    /// §559 — CEH holds an external id that a COMPLETE live read confirms no longer exists.
+    /// Approve CLEARS the dead id so the next sync pass re-creates the record; reject leaves it.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Why this is not <see cref="Disappeared"/>.</b> Disappeared means the ENTITY vanished
+    /// upstream and approve merely acknowledges — CEH never auto-deletes. StaleLink is the opposite
+    /// act: the entity is fine, the LINK is dead, and approve performs a real, irreversible write.
+    /// Overloading one word for "acknowledge" and "re-create" would put a destructive apply behind a
+    /// kind documented as never destructive.</para>
+    ///
+    /// <para>🔒 <b>Why it needs a human at all.</b> Clearing the id IS the re-create — it is what
+    /// makes the create path fire on the next pass. The Backstage API cannot delete, so a wrong
+    /// re-create duplicates the live agenda permanently. §546 settled the principle: updates should
+    /// not be gated, but an irreversible act needs a person.</para>
+    /// </remarks>
+    StaleLink = 3,
 }
 
 /// <summary>The lifecycle status of a <see cref="SyncDelta"/>.</summary>

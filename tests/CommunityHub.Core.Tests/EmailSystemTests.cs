@@ -69,6 +69,14 @@ public sealed class EmailSystemTests
         CommunityHubDbContext db, CapturingEmailSender sender) =>
         new(db, RealTemplates(), sender, new EmailContextAccessor());
 
+    /// <summary>
+    /// §707.21 — activation sends the WELCOME now (the approved per-role copy), not the retired
+    /// shared onboarding mail, so these tests build the welcome service.
+    /// </summary>
+    private static CommunityHub.Core.Reminders.WelcomeEmailService NewWelcome(
+        CommunityHubDbContext db, CapturingEmailSender sender) =>
+        new(db, RealTemplates(), sender, Clock, new EmailContextAccessor());
+
     // ----- 10a-1 auto-send on activation + idempotency ----------------------
 
     [Fact]
@@ -79,10 +87,9 @@ public sealed class EmailSystemTests
             db, ParticipantRole.Volunteer, state: ParticipantLifecycleState.Inactive);
         var sender = new CapturingEmailSender();
         var onboarding = new OnboardingEmailService(db, NewParticipantEmail(db, sender), Clock);
-        var calendarInvite = new CalendarInviteEmailService(
-            db, sender, new EmailContextAccessor(), Clock);
+        // §707.21 — activation sends the WELCOME (approved per-role copy) now.
         var activation = new ParticipantActivationService(
-            new PreselectionQueueService(db), onboarding, calendarInvite);
+            new PreselectionQueueService(db), NewWelcome(db, sender));
 
         var result = await activation.ActivateAndOnboardAsync(eventId, new[] { p.Id });
 
@@ -90,11 +97,10 @@ public sealed class EmailSystemTests
         // Volunteer set = getting-started (1 email; the redundant "your next steps"
         // drip email was removed per REQUIREMENTS §84/§91).
         Assert.Equal(1, result.OnboardingEmailsSent);
-        // One .ics calendar invite is sent on activation (sync on by default).
-        Assert.Equal(1, result.CalendarInvitesSent);
-        // 1 onboarding email (Messages) + 1 ics invite = 2 total Sent rows.
+        // §201: no calendar-attach welcome is sent on activation any more — only the
+        // single onboarding email goes out.
         Assert.Equal(1, sender.Messages.Count);
-        Assert.Equal(2, sender.Sent.Count);
+        Assert.Equal(1, sender.Sent.Count);
         Assert.Equal(ParticipantLifecycleState.Active,
             (await db.Participants.FindAsync(p.Id))!.LifecycleState);
     }
@@ -107,10 +113,9 @@ public sealed class EmailSystemTests
             db, ParticipantRole.Speaker, state: ParticipantLifecycleState.Inactive);
         var sender = new CapturingEmailSender();
         var onboarding = new OnboardingEmailService(db, NewParticipantEmail(db, sender), Clock);
-        var calendarInvite = new CalendarInviteEmailService(
-            db, sender, new EmailContextAccessor(), Clock);
+        // §707.21 — activation sends the WELCOME (approved per-role copy) now.
         var activation = new ParticipantActivationService(
-            new PreselectionQueueService(db), onboarding, calendarInvite);
+            new PreselectionQueueService(db), NewWelcome(db, sender));
 
         await activation.ActivateAndOnboardAsync(eventId, new[] { p.Id });
         var firstCount = sender.Sent.Count;

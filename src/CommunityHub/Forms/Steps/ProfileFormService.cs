@@ -157,38 +157,30 @@ public sealed class ProfileFormService : IWizardFormService
         var trimmedPhone = string.IsNullOrWhiteSpace(model.Phone) ? null : model.Phone.Trim();
         if (trimmedPhone is { Length: > 40 })
             return Fail(model, modelState, nameof(model.Phone), "That phone number is too long (max 40 characters).");
+        // §262: phone is REQUIRED for volunteers (we must be able to reach them on the day),
+        // OPTIONAL for every other role. Enforce it server-side so the profile step can only
+        // complete for a volunteer once a phone is on file.
+        if (role == ParticipantRole.Volunteer && trimmedPhone is null)
+        {
+            model.FullName = trimmedName;
+            return Fail(model, modelState, nameof(model.Phone), "Please enter your phone number.");
+        }
 
         // The secondary CC email field was removed from the Profile UI as redundant
         // (operator 2026-06-25). Any existing stored value is left untouched (not wiped).
 
-        // Alternate LOGIN email (§26d): normalized; must be a valid shape, must not equal
+        // Alternate email (§26d, §422): normalized; must be a valid shape, must not equal
         // your own primary, and must not collide with anyone else's primary/alt in the edition.
-        var altEmail = string.IsNullOrWhiteSpace(model.AlternateEmail)
-            ? null : PinLoginService.NormalizeEmail(model.AlternateEmail);
-        if (altEmail is not null)
+        // §422 moved these rules into AlternateEmailPolicy so the speaker wizard's "extra email"
+        // step applies the IDENTICAL bar — the two screens set the same column and must not be
+        // able to disagree about what is acceptable in it.
+        var altEmail = CommunityHub.Core.Participants.AlternateEmailPolicy.Normalize(model.AlternateEmail);
+        var altError = await CommunityHub.Core.Participants.AlternateEmailPolicy.ValidateAsync(
+            _db, eventId, p.Id, p.Email, altEmail, ct);
+        if (altError is not null)
         {
-            var atA = altEmail.IndexOf('@');
-            if (altEmail.Length > 320 || atA <= 0 || atA >= altEmail.Length - 1 || altEmail.Contains(' '))
-            {
-                model.FullName = p.FullName; model.Phone = p.Phone;
-                return Fail(model, modelState, nameof(model.AlternateEmail),
-                    "Please enter a valid alternate email (or leave it blank).");
-            }
-            if (altEmail == p.Email)
-            {
-                model.FullName = p.FullName; model.Phone = p.Phone;
-                return Fail(model, modelState, nameof(model.AlternateEmail),
-                    "Your alternate email can't be the same as your sign-in email.");
-            }
-            var clash = await _db.Participants.AnyAsync(
-                x => x.EventId == eventId && x.Id != p.Id
-                     && (x.Email == altEmail || x.AlternateEmail == altEmail), ct);
-            if (clash)
-            {
-                model.FullName = p.FullName; model.Phone = p.Phone;
-                return Fail(model, modelState, nameof(model.AlternateEmail),
-                    "That alternate email is already used by another participant in this event.");
-            }
+            model.FullName = p.FullName; model.Phone = p.Phone;
+            return Fail(model, modelState, nameof(model.AlternateEmail), altError);
         }
 
         p.FullName = trimmedName;
@@ -211,6 +203,12 @@ public sealed class ProfileFormService : IWizardFormService
                 _db.SpeakerProfiles.Add(sp);
             }
             else { sp.UpdatedAt = now; }
+
+            // §422 — the mirror of the wizard step's write-through. A speaker who sets their
+            // alternate address HERE must find it on the Get Started "extra email" step too, and
+            // their calendar invites must follow it; otherwise the two screens hold different
+            // answers to the same question and only one of them steers the invites.
+            sp.CalendarEmail = altEmail;
 
             var types = await _db.Sessions
                 .Where(s => s.EventId == eventId && !s.IsServiceSession

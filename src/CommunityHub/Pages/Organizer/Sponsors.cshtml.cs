@@ -18,6 +18,7 @@ public class SponsorsModel : PageModel
     private readonly ICurrentParticipantAccessor _participant;
     private readonly TimeProvider _clock;
     private readonly SponsorInfoDeletionService _infoDeletion;
+    private readonly ParticipantDeactivationService _cascade;
     private readonly CompanyManagerClient _cm;
     private readonly CompanyManagerOptions _cmOptions;
     private readonly ILogger<SponsorsModel> _logger;
@@ -25,12 +26,14 @@ public class SponsorsModel : PageModel
     public SponsorsModel(
         CommunityHubDbContext db, ICurrentParticipantAccessor participant, TimeProvider clock,
         SponsorInfoDeletionService infoDeletion,
+        ParticipantDeactivationService cascade,
         CompanyManagerClient cm, CompanyManagerOptions cmOptions, ILogger<SponsorsModel> logger)
     {
         _db = db;
         _participant = participant;
         _clock = clock;
         _infoDeletion = infoDeletion;
+        _cascade = cascade;
         _cm = cm;
         _cmOptions = cmOptions;
         _logger = logger;
@@ -82,7 +85,8 @@ public class SponsorsModel : PageModel
         string CompanyName,
         List<Contact> Contacts,
         int Open, int InProgress, int Done, int Overdue, int Total,
-        DateOnly? NextDue);
+        DateOnly? NextDue,
+        bool IsWithdrawn);
 
     public record Contact(int ParticipantId, string Name, string Email, bool IsActive);
 
@@ -94,6 +98,96 @@ public class SponsorsModel : PageModel
         await LoadAsync(me.EventId, ct);
         return Page();
     }
+
+    /// <summary>
+    /// WITHDRAW a whole sponsor company (REQUIREMENTS §253, G8b): marks the
+    /// company's <see cref="SponsorInfo.Status"/> Withdrawn (drops off the public
+    /// sponsors page + sponsor counts) and runs the full deactivation cascade over
+    /// every contact — logins locked, party group reservation cancelled, open
+    /// tasks closed. Zoho/ERP records are never touched (§56). Organizer-only,
+    /// edition-scoped, idempotent; the row's confirm dialog gates the click.
+    /// </summary>
+    public async Task<IActionResult> OnPostWithdrawCompanyAsync(
+        string companyId, string? confirmPhrase, CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+        if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
+
+        // §334: this deactivates EVERY contact at the company, cancels their group party
+        // reservation and drops the company off the public sponsors page — the widest blast
+        // radius on this page, and it was one JS confirm() away.
+        if (!TypedConfirmation.Matches(confirmPhrase, TypedConfirmation.ConfirmPhrase))
+        {
+            Error = TypedConfirmation.Rejection(
+                TypedConfirmation.ConfirmPhrase, $"withdraw {companyId}");
+            await LoadAsync(me.EventId, ct);
+            return Page();
+        }
+
+        var result = await _cascade.WithdrawSponsorCompanyAsync(
+            me.EventId, companyId, me.Email, ct);
+        if (result.Found)
+        {
+            Message = $"Company {companyId} withdrawn: {result.ContactsDeactivated} contact(s) "
+                      + $"deactivated, {result.GroupRsvpsCancelled} lingering party reservation(s) "
+                      + "cancelled. Zoho/ERP records were not touched.";
+        }
+        else
+        {
+            Error = "That company could not be found in this edition.";
+        }
+
+        await LoadAsync(me.EventId, ct);
+        return Page();
+    }
+
+    /// <summary>
+    /// §366 — put one sponsor COMPANY back to "freshly onboarded" so the operator can re-test the
+    /// sponsor journey (operator 2026-07-26: <i>"does the organizer interface reset functionality fix
+    /// this for the future, so a reset handles everything"</i> — this is that fix, in the UI).
+    ///
+    /// <para>Unlike <see cref="WithdrawSponsorCompanyAsync"/> above this is NOT destructive to the
+    /// company's standing: the facts row, package, tier, logo, contacts and logins all stay. It only
+    /// clears the onboarding ANSWERS so they get asked again. No external system is touched.</para>
+    ///
+    /// <para>Guarded on <see cref="OrganizerAuth.IsRealOrganizer"/> (§337) — it re-arms mail and
+    /// re-opens another company's tasks, so an acting-as session must not be able to run it.</para>
+    /// </summary>
+    [CommunityHub.Audit.Audit("Reset sponsor onboarding",
+        Category = CommunityHub.Core.Domain.AuditCategory.Admin, TargetType = "SponsorCompany")]
+    public async Task<IActionResult> OnPostResetSponsorOnboardingAsync(
+        string companyId, bool resetWelcome, bool resetOverview, bool resetBoothMembers,
+        bool resetAllTasks,
+        [FromServices] SponsorOnboardingResetService reset,
+        CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+        if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
+
+        var r = await reset.ResetAsync(
+            me.EventId, companyId, resetWelcome, resetOverview, resetBoothMembers, resetAllTasks, ct);
+
+        if (r.Ok)
+        {
+            Message = r.Detail;
+            // The warnings are the whole point of the service being honest — surface them, never
+            // swallow them, or the operator re-reports "the reset didn't reset" when a sync pass
+            // legitimately re-closes a data-backed task.
+            ResetWarnings = r.Warnings;
+        }
+        else
+        {
+            Error = r.Detail;
+        }
+
+        await LoadAsync(me.EventId, ct);
+        return Page();
+    }
+
+    /// <summary>§366 — things the last reset could not undo (see SponsorResetResult.Warnings).</summary>
+    public IReadOnlyList<string> ResetWarnings { get; private set; } = Array.Empty<string>();
 
     /// <summary>
     /// Delete a stale / orphaned sponsor company-facts row (REQUIREMENTS §22).
@@ -266,11 +360,19 @@ public class SponsorsModel : PageModel
             .OrderBy(c => c, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
-        // Resolve each company's display NAME (don't show the raw id). Same
-        // Company Manager chain (public -> legal name) the sponsor-facing pages
-        // and the SponsorAdmin dashboard use; falls back to "Company {id}" only
-        // when the lookup is unavailable. Resolved once per company per request.
-        var names = await ResolveCompanyNamesAsync(allCompanyIds, ct);
+        // Resolve each company's display NAME (don't show the raw id) from CEH SQL — the copy the
+        // CM → CEH sync captured — in one query. Falls back to "Company {id}" for a company the
+        // sync has not captured yet (§443).
+        var names = await ResolveCompanyNamesAsync(eventId, allCompanyIds, ct);
+
+        // Withdrawn companies (§253 G8b) — drives the row badge + hides the
+        // "Withdraw" action for already-withdrawn rows.
+        var withdrawnIds = new HashSet<string>(
+            await _db.SponsorInfos
+                .Where(s => s.EventId == eventId && s.Status == SponsorStatus.Withdrawn)
+                .Select(s => s.SponsorCompanyId)
+                .ToListAsync(ct),
+            StringComparer.OrdinalIgnoreCase);
 
         var allCompanies = allCompanyIds.Select(cid =>
         {
@@ -285,8 +387,13 @@ public class SponsorsModel : PageModel
             var done  = t.Count(x => x.State == TaskState.Done);
             var ovr   = t.Count(x => x.State != TaskState.Done && x.DueDate is not null && x.DueDate < today);
             var nxt   = t.Where(x => x.State != TaskState.Done && x.DueDate is not null).Min(x => (DateOnly?)x.DueDate);
-            var name  = names.TryGetValue(cid, out var nm) ? nm : $"Company {cid}";
-            return new CompanyRow(cid, name, co, open, ip, done, ovr, t.Count, nxt);
+            // §528b — the honest "(name not synced …)" label now lives in SponsorCompanyName.Resolve,
+            // the single chain every surface funnels through. Handling the miss HERE was dead code:
+            // ResolveAllAsync already applies the fallback, so TryGetValue never misses.
+            var name  = names.TryGetValue(cid, out var nm) ? nm : SponsorCompanyName.UnresolvedName(cid);
+            return new CompanyRow(
+                cid, name, co, open, ip, done, ovr, t.Count, nxt,
+                withdrawnIds.Contains(cid));
         }).ToList();
 
         // Free-text search over the company name + id + any contact name/email.
@@ -364,26 +471,10 @@ public class SponsorsModel : PageModel
     /// the caller falls back to "Company {id}" rather than 500-ing the page.
     /// Mirrors SponsorAdmin/Dashboard.ResolveCompanyNamesAsync.
     /// </summary>
-    private async Task<Dictionary<string, string>> ResolveCompanyNamesAsync(
-        IEnumerable<string> companyIds, CancellationToken ct)
-    {
-        var map = new Dictionary<string, string>(StringComparer.Ordinal);
-        if (!_cmOptions.Enabled) return map;
-
-        foreach (var cid in companyIds)
-        {
-            if (!int.TryParse(cid, out var idInt)) continue;
-            try
-            {
-                var c = await _cm.GetCompanyAsync(idInt, ct);
-                if (c is null) continue;
-                map[cid] = SponsorCompanyName.Resolve(c.PublicName, c.Name, billingName: null, companyId: cid);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Sponsors page: company-name lookup failed for {CompanyId}.", cid);
-            }
-        }
-        return map;
-    }
+    /// §443 (operator 2026-07-27): resolved from CEH SQL in ONE query. This used to call Company
+    /// Manager once per company while rendering (~7.0 s warm on PROD); the name is already synced
+    /// into CEH by SponsorOrderPullService through this same chain.
+    private Task<Dictionary<string, string>> ResolveCompanyNamesAsync(
+        int eventId, IEnumerable<string> companyIds, CancellationToken ct) =>
+        SponsorCompanyNameService.ResolveFromLocalAsync(_db, eventId, companyIds, ct);
 }

@@ -8,6 +8,36 @@
         : Model.Session.Title;
 }
 
+@* §172: OpenGraph + Twitter-card meta so a shared /Sessions/{id} link renders a rich
+   preview. og:image is the session's RELEASED graphic, served from the PUBLIC no-auth
+   endpoint (social crawlers can't use the auth proxy), and is emitted ONLY when such a
+   graphic exists — so the card never shows a broken image. All URLs are absolute. *@
+@section Head {
+    @if (Model.Session is not null && Model.OgUrl is not null)
+    {
+        <meta property="og:type" content="article" />
+        <meta property="og:title" content="@Model.Session.Title" />
+        @if (!string.IsNullOrWhiteSpace(Model.OgDescription))
+        {
+            <meta property="og:description" content="@Model.OgDescription" />
+            <meta name="twitter:description" content="@Model.OgDescription" />
+        }
+        <meta property="og:url" content="@Model.OgUrl" />
+        <meta property="og:site_name" content="@Model.Session.EventDisplayName" />
+        <meta name="twitter:title" content="@Model.Session.Title" />
+        @if (Model.OgImageUrl is not null)
+        {
+            <meta property="og:image" content="@Model.OgImageUrl" />
+            <meta name="twitter:card" content="summary_large_image" />
+            <meta name="twitter:image" content="@Model.OgImageUrl" />
+        }
+        else
+        {
+            <meta name="twitter:card" content="summary" />
+        }
+    }
+}
+
 <style>
     /* Mobile-first: single column, readable at ~360px. */
     .sd-head {
@@ -91,6 +121,15 @@
             {
                 <span class="sd-tag">@s.Level</span>
             }
+            @* §299.8/b7: the source's session TAGS (comma-separated in the model),
+               rendered as small chips. Absent when the API carries no tags. *@
+            @if (!string.IsNullOrWhiteSpace(s.Tags))
+            {
+                foreach (var tag in s.Tags.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                {
+                    <span class="sd-tag">@tag</span>
+                }
+            }
         </div>
 
         @if (s.StartsAt is not null)
@@ -144,17 +183,10 @@
                     {
                         <a href="/MasterClass/@s.PublicSlug">@Localizer["SessionDetail.MasterClassLink"]</a>
                     }
-                    @if (s.StartsAt is not null)
-                    {
-                        @* Public per-session .ics — only when the talk is scheduled
-                           (an unscheduled talk has nothing to put on a calendar). *@
-                        @* No download="" attr so the browser opens the .ics in the calendar
-                           app instead of saving it (operator 2026-06-24). *@
-                        <a class="secondary" href="/sessions/@(s.Id)/calendar.ics" rel="nofollow"
-                           aria-label="@Localizer["SessionDetail.AddToCalendar"]">
-                            @Localizer["SessionDetail.AddToCalendar"]
-                        </a>
-                    }
+                    @* §193: the public per-session "Download .ics" link was removed —
+                       calendar entries now arrive as e-mailed invitations to signed-in
+                       participants (e.g. the speaker's "Email me a calendar invite" on
+                       My Sessions), not as an anonymous file download. *@
                 </div>
             </div>
         }

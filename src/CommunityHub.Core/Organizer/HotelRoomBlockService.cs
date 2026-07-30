@@ -147,8 +147,11 @@ public sealed class HotelRoomBlockService
             .Select(hb => new { hb.ParticipantId, hb.NeedsRoom })
             .ToDictionaryAsync(x => x.ParticipantId, x => x.NeedsRoom, ct);
 
+        // ACTIVE people only (§253 G2): a deactivated participant's placement /
+        // room need must not consume the block or inflate the unassigned count —
+        // the rooming-list export (DataGrid.OnGetRoomingListAsync) set the pattern.
         var placements = await _db.Participants
-            .Where(p => p.EventId == eventId)
+            .Where(p => p.EventId == eventId && p.IsActive)
             .Select(p => new { p.Id, p.HotelId, p.HotelConfirmationNumber })
             .ToListAsync(ct);
 

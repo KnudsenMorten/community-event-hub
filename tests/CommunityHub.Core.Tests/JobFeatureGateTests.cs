@@ -70,6 +70,7 @@ public sealed class JobFeatureGateTests
         // no-op BEFORE _service.ImportAsync — proven by null services not throwing.
         var options = new CommunityHub.Core.Integrations.SessionizeApiOptions { Enabled = true };
         var job = new SessionizeImportJob(service: null!, options, db, Gate(db), Audit(db),
+            approval: null!, alerts: null!, config: null!,
             NullLogger<SessionizeImportJob>.Instance);
 
         await job.Run(Timer(), default); // no throw == gate short-circuited
@@ -84,6 +85,7 @@ public sealed class JobFeatureGateTests
 
         var options = new CommunityHub.Core.Integrations.SessionizeApiOptions { Enabled = true };
         var job = new SessionizeImportJob(service: null!, options, db, Gate(db), Audit(db),
+            approval: null!, alerts: null!, config: null!,
             NullLogger<SessionizeImportJob>.Instance);
 
         // Enabled ⇒ the run proceeds to the (null) import service and throws —
@@ -104,9 +106,9 @@ public sealed class JobFeatureGateTests
         var options = new CommunityHub.Core.Integrations.ZohoOptions { Enabled = true };
         var job = new AttendeeBackstageSyncJob(
             db, zoho: null!, options, sync: null!, mcEmail: null!, promo: null!,
-            provisioning: null!, welcome: null!, engine: null!, templates: null!,
+            provisioning: null!, welcome: null!, oneDayWelcome: null!, engine: null!, templates: null!,
             audit: null!, clock: null!, gate: Gate(db), config: null!,
-            NullLogger<AttendeeBackstageSyncJob>.Instance);
+            NullLogger<AttendeeBackstageSyncJob>.Instance, signups: null!);
 
         await job.Run(Timer(), default); // no throw == gate short-circuited
     }
@@ -121,9 +123,9 @@ public sealed class JobFeatureGateTests
         var options = new CommunityHub.Core.Integrations.ZohoOptions { Enabled = true };
         var job = new AttendeeBackstageSyncJob(
             db, zoho: null!, options, sync: null!, mcEmail: null!, promo: null!,
-            provisioning: null!, welcome: null!, engine: null!, templates: null!,
+            provisioning: null!, welcome: null!, oneDayWelcome: null!, engine: null!, templates: null!,
             audit: null!, clock: null!, gate: Gate(db), config: null!,
-            NullLogger<AttendeeBackstageSyncJob>.Instance);
+            NullLogger<AttendeeBackstageSyncJob>.Instance, signups: null!);
 
         // Enabled ⇒ the run proceeds to the (null) Zoho client and throws — proof
         // the gate let it through (the disabled run above did NOT throw).

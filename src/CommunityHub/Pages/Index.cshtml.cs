@@ -33,37 +33,50 @@ public class IndexModel : PageModel
     private readonly ICurrentParticipantAccessor _participant;
     private readonly SpeakerDeadlineSeeder _speakerDeadlines;
     private readonly CommunityHub.Core.Config.PartyTaskSeeder _partyTasks;
+    private readonly CommunityHub.Forms.WizardStepTaskSeeder _wizardStepTasks;
     private readonly EventEditionConfigLoader _eventConfigLoader;
     private readonly EventConfigOptions _eventConfigOptions;
-    private readonly CommunityHub.Core.Reminders.ParticipantCalendarBuilder _calendarBuilder;
+    private readonly CommunityHub.Core.Email.CalendarInviteEmailService _calendarInvite;
     private readonly CommunityHub.Core.Participants.ParticipantChecklistBuilder _checklist;
     private readonly CommunityHub.Core.Reminders.SpeakerSessionsService _speakerSessions;
     private readonly CommunityHub.Core.Domain.VolunteerStructureService _volunteerStructure;
     private readonly CommunityHub.Core.Participants.FormTaskReconciler _formTaskReconciler;
     private readonly ILogger<IndexModel> _logger;
 
+    private readonly CommunityHub.Core.Tasks.TaskBodyService _taskBodies;
+    private readonly CommunityHub.Core.Tasks.SponsorTaskPlaceholderBuilder _taskPlaceholders;
+
     public IndexModel(
         CommunityHubDbContext db,
         ICurrentParticipantAccessor participant,
         SpeakerDeadlineSeeder speakerDeadlines,
         CommunityHub.Core.Config.PartyTaskSeeder partyTasks,
+        CommunityHub.Forms.WizardStepTaskSeeder wizardStepTasks,
         EventEditionConfigLoader eventConfigLoader,
         EventConfigOptions eventConfigOptions,
-        CommunityHub.Core.Reminders.ParticipantCalendarBuilder calendarBuilder,
+        CommunityHub.Core.Email.CalendarInviteEmailService calendarInvite,
         CommunityHub.Core.Participants.ParticipantChecklistBuilder checklist,
         CommunityHub.Core.Reminders.SpeakerSessionsService speakerSessions,
         CommunityHub.Core.Reminders.MasterClassSignupService masterClassSignups,
         CommunityHub.Core.Domain.VolunteerStructureService volunteerStructure,
         CommunityHub.Core.Participants.FormTaskReconciler formTaskReconciler,
+        // §684 — the migrated-body pipeline. The home page's "add to calendar" can reach a SPONSOR
+        // company task (see the query in OnPostAddTaskReminderAsync), so it has to know about
+        // migrated bodies too or that one entry point silently sends an empty calendar entry.
+        CommunityHub.Core.Tasks.TaskBodyService taskBodies,
+        CommunityHub.Core.Tasks.SponsorTaskPlaceholderBuilder taskPlaceholders,
         ILogger<IndexModel> logger)
     {
+        _taskBodies = taskBodies;
+        _taskPlaceholders = taskPlaceholders;
         _db = db;
         _participant = participant;
         _speakerDeadlines = speakerDeadlines;
         _partyTasks = partyTasks;
+        _wizardStepTasks = wizardStepTasks;
         _eventConfigLoader = eventConfigLoader;
         _eventConfigOptions = eventConfigOptions;
-        _calendarBuilder = calendarBuilder;
+        _calendarInvite = calendarInvite;
         _checklist = checklist;
         _speakerSessions = speakerSessions;
         _masterClassSignups = masterClassSignups;
@@ -92,6 +105,10 @@ public class IndexModel : PageModel
     public bool ShowLunch { get; private set; }
     /// <summary>Show the Swag staff card — same crew roles as <see cref="ShowLunch"/>.</summary>
     public bool ShowSwag { get; private set; }
+    /// <summary>Show the crew intro card (Media + Event partner): a short orienting block
+    /// pointing first-time visitors at the Get-Started wizard — their hub home otherwise
+    /// has no role card at all after §161 removed the per-form status cards.</summary>
+    public bool ShowCrewIntro { get; private set; }
     public bool ShowVolunteerShifts { get; private set; }
     /// <summary>Show the "Volunteer work" card (assigned tasks + help): volunteers
     /// (and organizers, who also see the structure tools).</summary>
@@ -149,17 +166,12 @@ public class IndexModel : PageModel
             return RedirectToPage("/Login");
         }
 
-        // First-time-after-login welcome: redirect once, then never again.
-        // The /Welcome page sets WelcomeShownAt to UtcNow when the user clicks
-        // OK, so subsequent /Index loads skip this branch.
-        var welcomeShown = await _db.Participants
-            .Where(p => p.Id == me.ParticipantId)
-            .Select(p => p.WelcomeShownAt)
-            .FirstOrDefaultAsync(ct);
-        if (welcomeShown is null)
-        {
-            return RedirectToPage("/Welcome");
-        }
+        // §248: the /Welcome first-sign-in interstitial is RETIRED (operator
+        // 2026-07-07, fewest-clicks §249) — every arrival (magic-link deep link or
+        // hub home) lands directly on the target page; the welcome EMAIL carries the
+        // orientation (primary Get-Started + secondary Browse-the-hub buttons). The
+        // /Welcome page itself stays routable for the curious, and still stamps
+        // WelcomeShownAt on Continue — but nothing redirects there any more.
 
         Me = me;
 
@@ -206,6 +218,19 @@ public class IndexModel : PageModel
             _logger.LogWarning(ex, "Party-task seeding failed for event {EventId}", me.EventId);
         }
 
+        // §173e: ensure My-Tasks MIRRORS the Get-Started journey — seed a task for every
+        // Get-Started step this role has (idempotent; no-op for roles without a
+        // per-participant wizard). FormTaskReconciler (run by the checklist) keeps each
+        // task's done-state synced to its step's completion signal.
+        try
+        {
+            await _wizardStepTasks.EnsureForParticipantAsync(me.EventId, me.ParticipantId, me.Role, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Wizard-step task seeding failed for event {EventId}", me.EventId);
+        }
+
         ApplyRoleVisibility(me.Role);
         await LoadSectionDataAsync(me, ct);
 
@@ -227,21 +252,170 @@ public class IndexModel : PageModel
     }
 
     /// <summary>
-    /// One-off "Download .ics" for a single task (its own VEVENT, same stable
-    /// UID as the feed so a later subscribe does not duplicate it). Scoped to
-    /// the signed-in participant's own (or their sponsor company's) task.
+    /// §193b "Add Reminder": e-mail the signed-in participant a calendar INVITATION
+    /// for one task's due date (replacing the old "Download .ics"). Scoped to the
+    /// participant's own (or their sponsor company's) dated task; the invite goes to
+    /// their chosen calendar / override e-mail. Re-clicking updates the same entry
+    /// (stable UID). Fail-safe: a send failure still redirects with a soft message.
     /// </summary>
-    public async Task<IActionResult> OnGetCalendarItemAsync(int taskId, CancellationToken ct)
+    public async Task<IActionResult> OnPostAddReminderAsync(int taskId, CancellationToken ct)
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
 
         var host = Request.Host.Value ?? "communityhub";
-        var ics = await _calendarBuilder.BuildSingleTaskAsync(me.ParticipantId, taskId, host, ct);
-        if (ics is null) return NotFound();
+        var sponsorCompanyId = await _db.Participants
+            .AsNoTracking()
+            .Where(x => x.Id == me.ParticipantId)
+            .Select(x => x.SponsorCompanyId)
+            .FirstOrDefaultAsync(ct);
+        var task = await _db.Tasks
+            .AsNoTracking()
+            .Where(t => t.Id == taskId
+                        && t.EventId == me.EventId
+                        && t.DueDate != null
+                        && (t.AssignedParticipantId == me.ParticipantId
+                            || (sponsorCompanyId != null
+                                && t.SponsorCompanyId == sponsorCompanyId)))
+            .FirstOrDefaultAsync(ct);
 
-        // Inline (no filename) so it opens in the calendar app rather than downloading.
-        return File(System.Text.Encoding.UTF8.GetBytes(ics), "text/calendar; charset=utf-8");
+        if (task is null || task.DueDate is null)
+        {
+            TempData["CalendarInviteMessage"] = "That task could not be found.";
+            return RedirectToPage();
+        }
+
+        var start = new DateTimeOffset(task.DueDate.Value.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
+
+        // 🔒 §684.21 — a MIGRATED task carries Description = null (§684.14), so without this it would
+        // fall through to the generic "Deadline from your Event Hub" line and drop the whole body
+        // from the calendar entry. §684.10's PLAIN-TEXT flavour: a button becomes "label: url", and
+        // no emphasis marker leaks (§685).
+        string description;
+        try
+        {
+            var rendered = await _taskBodies.RenderAsync(
+                task,
+                CommunityHub.Core.Tasks.TaskBodyFlavour.PlainText,
+                await _taskPlaceholders.BuildAsync(me.EventId, sponsorCompanyId, ct),
+                ct: ct);
+
+            description = rendered is not null && !string.IsNullOrWhiteSpace(rendered.Html)
+                ? rendered.Html
+                : LegacyDescription(task.Description);
+        }
+        catch (Exception ex)
+        {
+            // Fail-soft (§682): a body that will not render must not stop the DATE reaching the
+            // sponsor's calendar, which is the point of the invite.
+            _logger.LogError(
+                ex, "Could not render the migrated body for task {TaskId} into a calendar invite.",
+                task.Id);
+            description = LegacyDescription(task.Description);
+        }
+
+        static string LegacyDescription(string? stored) =>
+            string.IsNullOrWhiteSpace(stored)
+                ? "Deadline from your Event Hub. Open the hub to update this item."
+                : CommunityHub.Core.Email.TaskMarkup.ToPlainText(stored);
+
+        try
+        {
+            var sent = await _calendarInvite.SendItemInviteAsync(
+                me.ParticipantId,
+                uid: $"task-{task.Id}@{host}",
+                summary: task.Title,
+                description: description,
+                location: null,
+                start: start,
+                end: start.AddDays(1),
+                allDay: true,
+                fileName: "reminder.ics",
+                introHtml: $"Here is a reminder for <strong>{System.Net.WebUtility.HtmlEncode(task.Title)}</strong>, due {task.DueDate.Value:d MMM yyyy}.",
+                ct: ct);
+            TempData["CalendarInviteMessage"] = sent
+                ? sent.Confirmation("Reminder")
+                : "Calendar invitations are turned off for this event.";
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Add Reminder failed for task {TaskId}", taskId);
+            TempData["CalendarInviteMessage"] = "We couldn't send that reminder just now — please try again.";
+        }
+
+        return RedirectToPage();
+    }
+
+    /// <summary>
+    /// §321 (operator 2026-07-24): ONE button, one calendar invitation PER dated pending
+    /// task (own + the sponsor company's). Same per-task UID as the single-task handler
+    /// (<c>task-{id}@{host}</c>), so re-clicking updates the same calendar entries instead
+    /// of duplicating them. Fail-soft per task; reports the sent count.
+    /// </summary>
+    public async Task<IActionResult> OnPostAddReminderAllAsync(CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+
+        var host = Request.Host.Value ?? "communityhub";
+        var sponsorCompanyId = await _db.Participants
+            .AsNoTracking()
+            .Where(x => x.Id == me.ParticipantId)
+            .Select(x => x.SponsorCompanyId)
+            .FirstOrDefaultAsync(ct);
+        var tasks = await _db.Tasks
+            .AsNoTracking()
+            .Where(t => t.EventId == me.EventId
+                        && t.DueDate != null
+                        && t.State != TaskState.Done
+                        && (t.AssignedParticipantId == me.ParticipantId
+                            || (sponsorCompanyId != null
+                                && t.SponsorCompanyId == sponsorCompanyId)))
+            .OrderBy(t => t.DueDate)
+            .Select(t => new { t.Id, t.Title, t.Description, t.DueDate })
+            .ToListAsync(ct);
+        if (tasks.Count == 0)
+        {
+            TempData["CalendarInviteMessage"] = "No dated pending tasks to send reminders for.";
+            return RedirectToPage();
+        }
+
+        var sent = 0;
+        var invitesOff = false;
+        foreach (var task in tasks)
+        {
+            var start = new DateTimeOffset(task.DueDate!.Value.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
+            var description = string.IsNullOrWhiteSpace(task.Description)
+                ? "Deadline from your Event Hub. Open the hub to update this item."
+                : CommunityHub.Core.Email.TaskMarkup.ToPlainText(task.Description);
+            try
+            {
+                var ok = await _calendarInvite.SendItemInviteAsync(
+                    me.ParticipantId,
+                    uid: $"task-{task.Id}@{host}",
+                    summary: task.Title,
+                    description: description,
+                    location: null,
+                    start: start,
+                    end: start.AddDays(1),
+                    allDay: true,
+                    fileName: "reminder.ics",
+                    introHtml: $"Here is a reminder for <strong>{System.Net.WebUtility.HtmlEncode(task.Title)}</strong>, due {task.DueDate.Value:d MMM yyyy}.",
+                    ct: ct);
+                if (ok) sent++; else invitesOff = true;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Add-all reminders: send failed for task {TaskId}", task.Id);
+            }
+        }
+
+        TempData["CalendarInviteMessage"] = sent == 0
+            ? (invitesOff
+                ? "Calendar invitations are turned off for this event."
+                : "We couldn't send the reminders just now — please try again.")
+            : $"Sent {sent} calendar invitation{(sent == 1 ? "" : "s")} — one per pending task. Check your inbox.";
+        return RedirectToPage();
     }
 
     /// <summary>
@@ -292,6 +466,10 @@ public class IndexModel : PageModel
                 // EventPartner was missing the staff surface that Media should also have).
                 ShowHotel = ShowDinner = true;
                 ShowLunch = ShowSwag = true;
+                // After §161 removed the per-form status cards these roles' hub home had
+                // no orienting block at all (every other role gets one) — show the crew
+                // intro card pointing first-time visitors at Get started.
+                ShowCrewIntro = true;
                 break;
         }
     }

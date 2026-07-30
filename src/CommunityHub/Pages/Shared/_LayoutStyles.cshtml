@@ -40,6 +40,16 @@
             padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0);
             white-space: nowrap; border: 0;
         }
+        /* §354 (operator 2026-07-26): "it would be nice to show an indicator in the menu for any
+           page that opens up a SEPARATE page … this should reflect for ALL roles / all pages".
+           ↗ is the conventional glyph for "opens elsewhere". Rendered aria-hidden BESIDE the
+           existing screen-reader-only "opens in a new tab" text, so the meaning reaches sighted
+           and assistive users without being announced twice. Driven purely by NavItem.External,
+           so every role — and every future external leaf — gets it automatically. */
+        .ext-ico {
+            font-size: .78em; line-height: 1; margin-left: .32em;
+            opacity: .72; vertical-align: baseline;
+        }
         header {
             background: var(--el-darkblue); color: #fff;
             padding: 14px 20px;
@@ -108,6 +118,50 @@
         header .user-tools button.signout:hover {
             background: rgba(255,255,255,.12);
         }
+        /* §283: the signed-in NAME as a dropdown (My Hub Profile + Sign out). Native
+           <details>/<summary>, no JS. Summary sits on the dark header; the panel is a light
+           card floating under it (right-aligned so it never overflows the viewport edge). */
+        details.user-menu { position: relative; display: inline-block; }
+        details.user-menu > summary {
+            list-style: none; cursor: pointer; user-select: none;
+            display: inline-flex; align-items: center; gap: 8px;
+            padding: 6px 12px; border-radius: 6px; font-size: 13px; color: #fff;
+            border: 1px solid rgba(255,255,255,.6); background: transparent; white-space: nowrap;
+        }
+        details.user-menu > summary::-webkit-details-marker { display: none; }
+        details.user-menu > summary:hover { background: rgba(255,255,255,.12); }
+        details.user-menu[open] > summary { background: rgba(255,255,255,.15); }
+        .user-menu-caret { font-size: 11px; opacity: .85; transition: transform .15s ease; }
+        details.user-menu[open] .user-menu-caret { transform: rotate(180deg); }
+        .user-menu-items {
+            position: absolute; right: 0; top: calc(100% + 6px); z-index: 60;
+            min-width: 210px; display: flex; flex-direction: column;
+            background: #fff; border: 1px solid #c4c8d4; border-radius: 8px;
+            padding: 6px; box-shadow: 0 6px 18px rgba(0,0,0,.2);
+        }
+        .user-menu-items a {
+            display: block; padding: 9px 12px; border-radius: 6px;
+            text-decoration: none; color: var(--el-darkblue); font-size: 14px; font-weight: 500;
+        }
+        .user-menu-items a:hover { background: var(--el-grey); }
+        .user-menu-items form { margin: 4px 0 0; border-top: 1px solid #e6eaf2; padding-top: 4px; }
+        /* §385 (operator 2026-07-26: "for all roles: i'm missing a logout feature here").
+           Sign out was NOT missing — it was INVISIBLE. `header .user-tools button.signout` sets
+           color:#fff, from when Sign out sat directly on the DARK header; §283 moved it into this
+           dropdown, whose panel is WHITE, and that older rule OUT-SPECIFIES this one
+           (0,2,2 beats 0,2,1) — so every role got white text on a white panel. Qualified with the
+           header/user-tools ancestors so this wins (0,3,2), rather than reaching for !important,
+           which would only move the collision somewhere harder to find. */
+        header .user-tools .user-menu-items button.signout {
+            width: 100%; text-align: left; background: transparent; color: var(--el-darkblue);
+            border: 0; padding: 9px 12px; border-radius: 6px; font-size: 14px; font-weight: 500; cursor: pointer;
+        }
+        header .user-tools .user-menu-items button.signout:hover { background: var(--el-grey); }
+        @@media (max-width: 700px) {
+            /* Header is centred + stacked on phones; keep the panel from spilling off-screen. */
+            details.user-menu { display: block; }
+            .user-menu-items { right: auto; left: 50%; transform: translateX(-50%); }
+        }
         nav.primary {
             background: #fff; border-bottom: 1px solid #d6d8e0;
             padding: 6px 24px; display: flex; flex-wrap: wrap; gap: 4px;
@@ -154,6 +208,49 @@
         }
         .nav-section-items a:hover { background: var(--el-grey); }
         .nav-section-items a[aria-current="page"] { background: var(--el-darkblue); color: #fff; }
+        /* §297: a NESTED sub-fold-out inside a nav section (e.g. Event Info -> Policies -> CoC + Privacy). */
+        details.nav-subsection { display: block; margin-top: 2px; }
+        details.nav-subsection > summary {
+            list-style: none; cursor: pointer; user-select: none;
+            display: flex; align-items: center; justify-content: space-between; gap: 6px;
+            padding: 8px 12px; border-radius: 6px;
+            color: var(--el-darkblue); font-size: 13.5px; font-weight: 600;
+        }
+        details.nav-subsection > summary::-webkit-details-marker { display: none; }
+        details.nav-subsection > summary:hover { background: var(--el-grey); }
+        details.nav-subsection[open] > summary { background: var(--el-grey); }
+        details.nav-subsection[open] .nav-section-caret { transform: rotate(180deg); }
+        .nav-subsection-items { display: flex; flex-direction: column; gap: 2px; padding-left: 10px; }
+        .nav-subsection-items a {
+            display: block; padding: 8px 12px; border-radius: 6px;
+            text-decoration: none; color: var(--el-darkblue); font-size: 14px; font-weight: 500; white-space: nowrap;
+        }
+        .nav-subsection-items a:hover { background: var(--el-grey); }
+        .nav-subsection-items a[aria-current="page"] { background: var(--el-darkblue); color: #fff; }
+
+        /* §484 — Zoho Backstage interstitial. [hidden] must WIN over the flex display,
+           or the dialog would render over every page on load. */
+        .zoho-interstitial {
+            position: fixed; inset: 0; z-index: 1000; display: flex;
+            align-items: center; justify-content: center; padding: 16px;
+            background: rgba(15, 23, 42, .55);
+        }
+        .zoho-interstitial[hidden] { display: none; }
+        .zoho-interstitial-card {
+            background: #fff; border-radius: 12px; padding: 22px 24px;
+            max-width: 560px; width: 100%; max-height: 90vh; overflow-y: auto;
+            box-shadow: 0 18px 48px rgba(15, 23, 42, .28);
+        }
+        .zoho-interstitial-card h2 { margin: 0 0 12px; font-size: 19px; color: var(--el-darkblue); }
+        .zoho-interstitial-card p { margin: 0 0 12px; font-size: 14.5px; line-height: 1.6; color: #334155; }
+        .zoho-interstitial-hide {
+            display: flex; align-items: center; gap: 8px;
+            margin: 14px 0 4px; font-size: 13.5px; color: #475569; cursor: pointer;
+        }
+        .zoho-interstitial-hide input { width: 16px; height: 16px; margin: 0; }
+        .zoho-interstitial-actions {
+            display: flex; flex-wrap: wrap; gap: 10px; justify-content: flex-end; margin-top: 16px;
+        }
         @@media (max-width: 700px) {
             details.nav-section { display: block; }
             details.nav-section > summary { display: flex; justify-content: space-between; }
@@ -243,6 +340,15 @@
             }
         }
         main { max-width: 880px; margin: 24px auto; padding: 0 16px; }
+        /* §301d/§308b (operator 2026-07-24 ×2: "why is the menu still so small on windows
+           devices? we waste so much space"): the column is now FLUID on desktop — 94% of
+           the viewport up to 1700px — so big monitors actually get used. Form fields keep
+           sane reading widths; phones/tablets are untouched. */
+        /* §309: the fluid content column for desktop — field widths live in the BASE
+           rules above (§309c), so only the column itself is breakpointed. */
+        @@media (min-width: 1000px) {
+            main, footer { max-width: min(94vw, 1700px); }
+        }
         .card {
             background: #fff; border-radius: 10px;
             padding: 20px; margin-bottom: 16px;
@@ -281,14 +387,22 @@
            visible even on cards/pages that sit directly on the body. */
         button.secondary { background: #c4c8d4; color: var(--el-darkblue); }
         button.secondary:hover { background: #aab0c0; }
+        /* §309c (operator caught PhotoUrl still narrow): the generous widths are the
+           BASE rule, not a desktop media query — breakpoints kept failing on scaled
+           Windows screens, and width:100% already caps fields at the container on
+           phones, so a small base max-width never served any purpose. */
         input[type=email], input[type=text], input[type=number],
         input[type=date], input[type=tel], input[type=url],
         select, textarea {
-            display: block; width: 100%; max-width: 360px;
+            display: block; width: 100%; max-width: 640px;
             padding: 8px; margin: 6px 0 14px;
             border: 1px solid #c4c8d4; border-radius: 6px;
             font-size: 15px; box-sizing: border-box;
         }
+        textarea { max-width: 960px; }
+        /* Plain FIELD forms stay readable; forms hosting a TABLE (admin grids) keep
+           the full fluid width. */
+        main .card form:not(:has(table)) { max-width: 1100px; }
         /* Each label sits on its own line so it labels the input BELOW it,
            not the input to the LEFT of it. Form-rows that want side-by-side
            (e.g. checkbox + text) override with their own display:flex.       */
@@ -317,6 +431,233 @@
             background: var(--el-darkblue);
             color: #fff !important;
         }
+
+        /* ------------------------------------------------------------------
+           REQUIREMENTS §684.8 — THE MIGRATED TASK BODY. Structure now comes
+           from BLOCK TYPES, not from underline/caps conventions in the prose,
+           so each block gets a real style instead of inheriting whatever the
+           surrounding <p style="white-space:pre-line"> happened to be.
+
+           §669 is the reason the section title is BOLD and sized rather than
+           underlined: the operator's complaint was that the emphasis was
+           INVERTED — "STEP 1 — ORDER" was only underlined while lesser details
+           below it were bold, so the scannable structure was the quietest
+           thing on the page.
+
+           Mobile-first: every rule here holds at ~360px, and nothing uses a
+           fixed width.
+           ------------------------------------------------------------------ */
+        .task-body { font-size: 15px; line-height: 1.55; }
+        .task-body__p { margin: 8px 0; }
+        .task-body__section { margin: 18px 0 8px; }
+        .task-body__section-title {
+            font-size: 16px;
+            font-weight: 700;
+            color: var(--el-darkblue);
+            margin-bottom: 6px;
+        }
+        .task-body__list { margin: 8px 0; padding-left: 22px; }
+        .task-body__list li { margin: 0 0 6px; }
+        /* §677 — a button gets its OWN LINE. The sponsor-wall task rendered an
+           empty "•" followed by a block button, because a button could be
+           inferred from a bare URL inside a bullet. */
+        .task-body__btn-row { margin: 10px 0; }
+        /* 🔴 §688.4 — "i cannot see the specs link". This was WHITE TEXT ON NEAR-WHITE, and the
+           cause is §673's lesson repeating: `a.task-link-btn` above sets `color:#fff !important`
+           and is ANCHOR-QUALIFIED (specificity 0,1,1), so it outranks a bare class (0,1,0) even
+           when both carry !important. The button worked and was completely unreadable.
+           🔒 Qualified with `a.` + both classes so it can never lose that contest again. */
+        a.task-link-btn.task-link-btn--secondary {
+            background: #f3f4f6 !important;
+            color: #334155 !important;
+            border: 1px solid #cbd5e1;
+        }
+        a.task-link-btn.task-link-btn--secondary:hover {
+            background: #e5e7eb !important;
+            color: #334155 !important;
+        }
+        .task-body__callout {
+            margin: 12px 0;
+            padding: 10px 14px;
+            border-radius: 6px;
+            border: 1px solid;
+        }
+        .task-body__callout .task-body__p:first-child { margin-top: 0; }
+        .task-body__callout .task-body__p:last-child { margin-bottom: 0; }
+        .task-body__callout--info { background: #eef5fc; border-color: #c3d9ef; }
+        /* 🔒 §555/§666 — "we could not check your orders" renders through this
+           tone. It must never read as ordinary prose, because the alternative
+           reading ("you have not booked a TV") pushes a sponsor into buying a
+           second one. */
+        .task-body__callout--warning { background: #fff8e6; border-color: #f0d878; }
+        .task-body__address {
+            margin: 12px 0;
+            padding: 10px 14px;
+            background: #f7f8fa;
+            border: 1px solid #dfe3e8;
+            border-radius: 6px;
+        }
+        .task-body__address-label { font-weight: 700; margin-bottom: 4px; }
+        .task-body__address-marking { margin-top: 8px; }
+        /* §688.12 / §671 — THE EMBEDDED BOOTH-MEMBERS EDITOR.
+           Rows are a flex WRAP, not a table: §671 judges "if room permits" on the ~360px viewport,
+           and a table of name/email/role/remove cannot hold there. At narrow widths each row
+           becomes a stack; at desktop it reads as a line. */
+        /* §688.15 — the panel. Operator: "make this in a table with different color so it is easier
+           to read … the booth members is easy to not see". An interactive editor rendered at the
+           same visual weight as the prose around it, so the one part of the task the sponsor must
+           ACT on vanished into the paragraphs. Tinted + bordered so it reads as a component. */
+        .booth-members {
+            margin: 14px 0 6px;
+            background: #f2f6fb;
+            border: 1px solid #cfdcea;
+            border-radius: 8px;
+            padding: 12px 14px;
+        }
+        .booth-members__head {
+            font-weight: 700;
+            color: var(--el-darkblue);
+            margin-bottom: 8px;
+        }
+        .booth-members__empty { margin: 4px 0 0; font-style: italic; color: #4a5568; }
+        /* §690 — the contracted allowance. Stated plainly above the list so the extras block below
+           reads as the exception it is. */
+        .booth-members__allowance { margin: 0 0 10px; font-size: 14.5px; color: #33415a; }
+        .booth-members__over { display: block; margin-top: 4px; color: #8a5a00; font-weight: 600; }
+        .booth-members__table { width: 100%; border-collapse: collapse; background: #fff; }
+        .booth-members__table th {
+            text-align: left;
+            font-size: 12.5px;
+            text-transform: uppercase;
+            letter-spacing: .03em;
+            color: #5a6472;
+            border-bottom: 2px solid #cfdcea;
+            padding: 6px 8px;
+        }
+        .booth-members__table td { padding: 8px; border-bottom: 1px solid #e6ecf3; vertical-align: middle; }
+        .booth-members__table tbody tr:nth-child(even) { background: #fafcfe; }
+        .booth-members__actions { text-align: right; white-space: nowrap; }
+        .booth-members__actions form { margin: 0; }
+        .booth-members__email { font-size: 13px; color: #5a6472; word-break: break-all; }
+        /* 🔒 Mobile: the table becomes STACKED CARDS rather than scrolling sideways. §671 judges
+           "if room permits" at ~360px, and a 4-column table cannot hold there. Each cell carries
+           its own label so the meaning survives losing the header row. */
+        @@media (max-width: 640px) {
+            .booth-members__table thead { display: none; }
+            .booth-members__table, .booth-members__table tbody,
+            .booth-members__table tr, .booth-members__table td { display: block; width: 100%; }
+            .booth-members__table tr {
+                border: 1px solid #e6ecf3;
+                border-radius: 6px;
+                margin-bottom: 8px;
+                padding: 4px 0;
+            }
+            .booth-members__table td { border: 0; padding: 4px 10px; }
+            .booth-members__table td[data-label]::before {
+                content: attr(data-label) ": ";
+                font-weight: 600;
+                color: #5a6472;
+            }
+            .booth-members__actions { text-align: left; padding-top: 8px; }
+        }
+        .booth-members__role {
+            font-size: 12.5px;
+            font-weight: 600;
+            padding: 2px 9px;
+            border-radius: 9px;
+            background: #eef2f7;
+            color: #33415a;
+        }
+        .booth-members__remove { margin: 0; }
+        .booth-members__add { margin: 12px 0 0; }
+        .booth-members__add > summary {
+            cursor: pointer;
+            font-weight: 600;
+            color: var(--el-blue);
+            padding: 6px 0;
+        }
+        .booth-members__form { display: flex; flex-direction: column; gap: 4px; max-width: 460px; }
+        .booth-members__form label { font-weight: 600; font-size: 14px; margin-top: 8px; }
+        .booth-members__form input,
+        .booth-members__form select { width: 100%; max-width: 100%; }
+        .booth-members__form button { margin-top: 12px; align-self: flex-start; }
+
+        .task-body__decision { display: flex; gap: 10px; flex-wrap: wrap; margin: 14px 0; }
+        .task-body__decision-answered { flex-basis: 100%; margin-bottom: 4px; color: #1f6d3a; }
+
+        /* ------------------------------------------------------------------
+           §673 — THE TASK ACTION ROW. One rhythm for every button on it, for
+           every role.
+
+           The bug the operator saw ("it looks odd, that one is bld and the
+           other is not"): "Mark complete" carried an inline font-weight:600,
+           while "Send Reminder to My Calendar" was a <button class="task-link-btn">
+           — and that class is declared above as `a.task-link-btn`, an
+           ANCHOR-only selector. The button therefore matched NOTHING and fell
+           back to the browser default button weight (400) and font-family.
+           Side by side, one looked bold and one did not. It was never a
+           per-task problem, which is why fixing it per task never worked.
+
+           font-family and font-size are set explicitly because <button> does
+           NOT inherit either from the page by default — that alone made the
+           pair read as two different components.
+           ------------------------------------------------------------------ */
+        .task-act {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-family: inherit;
+            font-size: 14px;
+            font-weight: 600;
+            line-height: 1.2;
+            padding: 9px 18px;
+            border-radius: 6px;
+            border: 1px solid transparent;
+            text-decoration: none;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+        /* Long labels wrap rather than push the row wide at 360px. */
+        @@media (max-width: 480px) {
+            .task-act { white-space: normal; }
+        }
+        .task-act--complete { background: #198754; border-color: #198754; color: #fff; }
+        .task-act--complete:hover { background: #146c45; color: #fff; }
+        .task-act--primary  { background: #1565c0; border-color: #1565c0; color: #fff; }
+        .task-act--primary:hover { background: #0f4c93; color: #fff; }
+        .task-act--calendar { background: #15803d; border-color: #15803d; color: #fff; }
+        .task-act--calendar:hover { background: #116530; color: #fff; }
+        .task-act--secondary { background: #f3f4f6; border-color: #cbd5e1; color: #334155; }
+        .task-act--secondary:hover { background: #e5e7eb; color: #334155; }
+        /* §688.6 — the DECLINE half of a §670/§676 decision. Operator: "color button is missing for
+           no interest. make it red like cancel master class for attendees." Same #c0392b the
+           master-class cancel uses (.ceh-modal--danger), so "this is the negative choice" reads the
+           same everywhere.
+           🔒 Red here means "the declining option", NOT "danger" — declining is a legitimate,
+           recorded answer (§670), so it is a normal-weight button beside the accept, never a
+           warning. */
+        .task-act--decline { background: #c0392b; border-color: #c0392b; color: #fff; }
+        .task-act--decline:hover { background: #962d22; color: #fff; }
+
+        /* §677 — the action row was a jumble: file picker + Upload + a long
+           amber sentence + the calendar button all competing on ONE flex line
+           at different heights and weights. Actions belong together on their
+           own line; the explanatory note goes underneath, where it reads as a
+           note instead of as another control. */
+        .task-actions {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex-wrap: wrap;
+            margin-top: 22px;
+        }
+        .task-actions form { margin: 0; display: inline-flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+        .task-actions input[type=file] { font-size: 14px; max-width: 100%; }
+        .task-actions__note { margin-top: 10px; font-size: 14px; line-height: 1.45; }
+        .task-actions__note--pending { color: #7a5b00; font-weight: 600; }
+        .task-actions__note--done { color: #1f6d3a; font-weight: 600; }
+        .task-actions__note--muted { color: #555; font-style: italic; font-size: 13px; }
+
         footer { max-width: 880px; margin: 24px auto; padding: 0 16px;
             font-size: 12px; color: #6b7280; }
         /* Visually hidden but available to screen readers. left:0 pins it to the
@@ -517,5 +858,41 @@
         @@media (prefers-reduced-motion: reduce) {
             .ceh-grid__bar { animation: none; background: #e9ecf2; }
             .ceh-grid[data-ceh-grid-busy] > * { transition: none; }
+        }
+
+        /* §298: print / "Save as PDF" — strip the app chrome so the printed page (e.g. the attendee
+           telemetry status) is clean. Anything marked .no-print is hidden; .tl-print-title (and any
+           other .print-only element) is revealed. */
+        @@media print {
+            header, .topbar, nav.primary, nav.manage-bar, footer,
+            .no-print, .ceh-flash, .skip-link,
+            [class*="chat"], [id*="chat"], [class*="helper"], [id*="helper"] {
+                display: none !important;
+            }
+            body { background: #fff !important; }
+            main { max-width: 100% !important; margin: 0 !important; padding: 0 !important; }
+            .card { box-shadow: none !important; border: 0 !important; }
+            .tl-print-title, .print-only { display: block !important; text-align: center;
+                font-weight: 700; color: #1D3380; font-size: 18px; margin: 0 0 10px; }
+            a[href]::after { content: ""; }   /* don't print raw URLs after links */
+        }
+
+        /* §421 — the in-progress spinner for long uploads (operator 2026-07-27: "as some files are
+           big, is it possible to show a turning something showing that things are happening").
+           A 1 GB slide deck uploads for minutes with no feedback at all, so the natural reaction
+           is to press the button a second time. Lives here rather than inline so any other slow
+           submit can reuse the one class.
+
+           Honours prefers-reduced-motion: for someone who has asked the OS to stop animations, a
+           spinning element is not reassurance. The LABEL still says "Uploading…", which is the
+           part that actually carries the meaning — the spin is decoration on top of it. */
+        .ceh-spin {
+            display: inline-block; width: 12px; height: 12px; vertical-align: -1px;
+            border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%;
+            animation: ceh-spin-kf 0.7s linear infinite;
+        }
+        @@keyframes ceh-spin-kf { to { transform: rotate(360deg); } }
+        @@media (prefers-reduced-motion: reduce) {
+            .ceh-spin { animation: none; opacity: 0.6; }
         }
     </style>

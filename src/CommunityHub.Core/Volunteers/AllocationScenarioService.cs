@@ -222,9 +222,13 @@ public sealed class AllocationScenarioService
             .Select(t => new { t.Id, t.Title, t.ResourcesNeeded, t.DueDate })
             .ToListAsync(ct);
 
-        // Live assignment counts per touched task, and the live (task→people) map for conflicts.
+        // Live assignment counts per touched task, and the live (task→people) map for
+        // conflicts. EFFECTIVE assignments only (§253 G7): a deactivated volunteer's
+        // ghost-held (or declined) shift is not live coverage.
         var liveAssignments = await _db.VolunteerTaskAssignments
-            .Where(a => a.EventId == actor.EventId && taskIds.Contains(a.TaskId))
+            .Where(a => a.EventId == actor.EventId && taskIds.Contains(a.TaskId)
+                        && a.Participant.IsActive
+                        && a.DecisionStatus != ShiftDecisionStatus.Declined)
             .Select(a => new { a.TaskId, a.ParticipantId })
             .ToListAsync(ct);
 

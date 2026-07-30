@@ -25,7 +25,22 @@ public sealed record SessionizeSpeaker(
 public sealed record SessionizeParseResult(
     IReadOnlyList<SessionizeSpeaker> Speakers,
     IReadOnlyList<string> Warnings,
-    string? Error);
+    string? Error)
+{
+    /// <summary>
+    /// §204 — speakers the source carried WITHOUT an email but WITH a Sessionize
+    /// speaker id (almost always: they haven't accepted their Sessionize invite
+    /// yet). These are NOT importable as login-capable participants (no email),
+    /// but instead of being silently dropped they are surfaced here so the import
+    /// pipeline can land them in the PRE-SELECTION QUEUE (inactive, keyed by
+    /// Sessionize id) — the organizer can then SEE and act on them. Empty by
+    /// default so every existing construction is unaffected. An email-less speaker
+    /// with NO Sessionize id stays a plain skip+warning (there is no stable key to
+    /// dedup/reconcile it on).
+    /// </summary>
+    public IReadOnlyList<SessionizeSpeaker> EmailLessSpeakers { get; init; }
+        = Array.Empty<SessionizeSpeaker>();
+}
 
 /// <summary>
 /// A session read from the Sessionize v2 view API (the <c>All</c>/<c>Sessions</c>
@@ -56,7 +71,11 @@ public sealed record SessionizeSession(
     // §154: numeric length in minutes, parsed from the Format label's "(NN min)"
     // (or the scheduled duration when the grid is published). Null when no minutes
     // can be determined (e.g. a Master Class with no "(NN min)" hint).
-    int? LengthMinutes = null);
+    int? LengthMinutes = null,
+    // §299.8/b7: comma-separated tag labels from the Sessionize "Tags" category
+    // GROUP, when the v2 payload provides one. Null when the API omits tags (the
+    // default — every existing construction is unaffected).
+    string? Tags = null);
 
 /// <summary>The outcome of parsing the Sessionize sessions view.</summary>
 public sealed record SessionizeSessionsParseResult(

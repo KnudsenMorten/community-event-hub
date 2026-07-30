@@ -46,9 +46,26 @@ public sealed class VolunteerStructureService
         _guidance = guidance ?? new HeuristicTaskGuidanceGenerator();
     }
 
-    /// <summary>The signed-in actor, as the pages know them from the session.</summary>
+    /// <summary>
+    /// The signed-in actor, as the pages know them from the session.
+    ///
+    /// <para><b>§337 — <c>IsActingAs</c> is the acting-as marker, and it exists because
+    /// <c>Role</c> cannot answer the question.</b> A §234 acting-as session carries the
+    /// TARGET participant's claims, Role included, so <c>Role == Organizer</c> is TRUE
+    /// while an organizer is impersonating another organizer. Every service check of the
+    /// form <c>actor.Role != Organizer</c> therefore PASSED for an acting-as session,
+    /// which made the page layer the only place able to block it — and the two allocation
+    /// pages that forgot the guard silently granted full organizer write access (including
+    /// Commit, which assigns real shifts and mails real people) while attributing all of
+    /// it to the impersonated person.</para>
+    ///
+    /// <para>Defaults to <c>false</c> so existing constructions — and every test — are
+    /// unchanged: only the page helpers that read a real session pass
+    /// <c>me.IsActingAs</c>.</para>
+    /// </summary>
     public readonly record struct ActorContext(
-        int ParticipantId, string Email, ParticipantRole Role, int EventId);
+        int ParticipantId, string Email, ParticipantRole Role, int EventId,
+        bool IsActingAs = false);
 
     // =====================================================================
     //  Capability checks (also used by the UIs to show/hide controls).
@@ -713,6 +730,23 @@ public sealed class VolunteerStructureService
             .Include(c => c.SupervisorParticipant)
             .Include(c => c.Subcategories).ThenInclude(s => s.Tasks)
             .OrderBy(c => c.Name)
+            .ToListAsync(ct);
+
+    /// <summary>
+    /// §199 — EVERY volunteer task in an edition as a flat, read-only list with its
+    /// owning subcategory + category loaded, so the organizer can review all defined
+    /// tasks (name, description, expectations, responsible team, time/shift, …) in
+    /// one place. Ordered Category → Subcategory → Title for a stable display. Pure
+    /// read; no permission mutation (the page is organizer-gated).
+    /// </summary>
+    public async Task<List<VolunteerTask>> LoadAllTasksAsync(int eventId, CancellationToken ct = default) =>
+        await _db.VolunteerTasks
+            .Where(t => t.EventId == eventId)
+            .Include(t => t.Subcategory).ThenInclude(s => s.Category)
+            .Include(t => t.Assignments)
+            .OrderBy(t => t.Subcategory.Category.Name)
+            .ThenBy(t => t.Subcategory.Name)
+            .ThenBy(t => t.Title)
             .ToListAsync(ct);
 
     /// <summary>Categories a volunteer supervises in an edition (for the

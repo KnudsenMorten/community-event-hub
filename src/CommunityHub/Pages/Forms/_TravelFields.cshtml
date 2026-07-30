@@ -14,20 +14,38 @@
     the Step-2 client validation.
 *@
 
-@* Intro merges the former "Covered cost" and "Not covered" sections (operator §54). *@
+@* §205: the former dense intro paragraph, split into headed BULLET sections so it
+   reads clearly on mobile. Exact figures unchanged. (Intro merges the former
+   "Covered cost" and "Not covered" sections — operator §54.) *@
 <div style="background:#eef6ff;padding:14px 16px;border-radius:8px;font-size:14px;line-height:1.55;">
     <p style="margin:0 0 8px;"><strong>Travel reimbursement — flights only.</strong>
-        We cover economy flights only. <strong>Covered:</strong> European air travel —
-        <strong>EUR 400</strong> for a single-speaker session (round trip), or
-        <strong>EUR 300</strong> per person for co-speaking sessions; intercontinental air
-        travel — <strong>EUR 800</strong> for a single-speaker session (round trip), or
-        <strong>EUR 600</strong> per person for co-speaking sessions (round trip). Economy
-        class only; booked at least 6 weeks before the event. If you are not able to get
-        flights within these boundaries, let us know and we will work with you on this. You
-        will get the reimbursement after the event and we will give you instructions.</p>
-    <p style="margin:0;"><strong>Not covered:</strong> taxi, Uber, public transportation, or
-        own car in Denmark; seat upgrades / business class; ground transport / parking;
-        meals / incidentals.</p>
+        Here is what we cover and how it works.</p>
+
+    <ul style="margin:0 0 10px;padding-left:20px;">
+        <li><strong>We cover economy flights only.</strong></li>
+        <li><strong>European air travel</strong> — <strong>EUR 400</strong> for a
+            single-speaker session (round trip), or <strong>EUR 300</strong> per person for
+            co-speaking sessions.</li>
+        <li><strong>Intercontinental air travel</strong> — <strong>EUR 800</strong> for a
+            single-speaker session (round trip), or <strong>EUR 600</strong> per person for
+            co-speaking sessions (round trip).</li>
+        <li>If you cannot get flights within these boundaries, let us know and we will work
+            with you on this.</li>
+        <li>Flights must be booked <strong>at least 6 weeks before the event</strong>. Booked
+            later, they are reimbursed up to the economy price available at the 6-week mark,
+            unless a documented exception is pre-approved by an organizer.</li>
+    </ul>
+
+    <p style="margin:0 0 6px;"><strong>Not covered:</strong></p>
+    <ul style="margin:0 0 10px;padding-left:20px;">
+        <li>Taxi, Uber, public transportation, or own car in Denmark.</li>
+        <li>Seat upgrades / business class.</li>
+        <li>Ground transport / parking.</li>
+        <li>Meals / incidentals.</li>
+    </ul>
+
+    <p style="margin:0;">You will get the reimbursement <strong>after the event</strong> — we
+        will give you the instructions via the hub.</p>
 </div>
 
 <h3>Eligibility</h3>
@@ -41,7 +59,7 @@
     <li><strong>Advance booking</strong> — tickets must be booked at least six weeks before the
         event date. Tickets booked later will only be reimbursed up to the equivalent economy
         price available at the six-week mark, unless a documented exception has been approved in
-        advance by the organizing committee.</li>
+        advance by the organizers.</li>
     <li><strong>Original receipts or payment confirmations</strong> (PDF, JPG or PNG) showing
         name, route, dates and total amount paid are required. Booking confirmations without
         payment details are not sufficient.</li>
@@ -134,12 +152,8 @@ else
 </h3>
 
 <fieldset id="Step2Fieldset" @(Model.HasReceipt ? "" : "disabled") style="border:0;padding:0;margin:0;@(Model.HasReceipt ? "" : "opacity:0.55;")">
-    <label for="TravelName">@Localizer["Common.Name"]</label>
-    <input type="text" id="TravelName" value="@Model.FullName" readonly />
-
-    <label for="TravelEmail">@Localizer["Common.Email"]</label>
-    <input type="text" id="TravelEmail" value="@Model.Email" readonly />
-
+    @* §326i: read-only Name/Email removed — authenticated session, the claim is keyed
+       to the signed-in participant. *@
     <fieldset style="border:0;padding:0;margin:0;">
         <legend style="font-weight:600;font-size:14px;margin-top:10px;">@Localizer["Travel.ClaimLegend"]</legend>
         <div style="display:flex; gap:18px; margin:6px 0 14px;">

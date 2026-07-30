@@ -90,6 +90,17 @@
                         // name/value (asp-page-handler etc.) is included.
                         var form = trigger.form || trigger.closest('form');
                         if (form) {
+                            // §370: asp-page-handler on a <button> renders as FORMACTION, not as
+                            // name/value — and a bare requestSubmit() drops the submitter, so the
+                            // post lands on the form's DEFAULT handler. On the Get Started wizard
+                            // that is "save this step", not "give up the seat": the confirm dialog
+                            // would appear to work while doing something else entirely. Passing the
+                            // submitter is the only replay that keeps formaction (it does NOT
+                            // re-fire the trigger's click, so this cannot loop).
+                            if (trigger.hasAttribute('formaction') && form.requestSubmit) {
+                                form.requestSubmit(trigger);
+                                return;
+                            }
                             if (trigger.name) {
                                 var hidden = document.createElement('input');
                                 hidden.type = 'hidden';
@@ -285,6 +296,96 @@
                 if (href === '' || href.charAt(0) === '#') return;
                 setBusy();
             });
+        });
+
+        // ---- 9. Native confirm() before a third-party redirect (§175/§176) --
+        // A nav link with data-confirm="<message>" leaves the hub for a system that
+        // needs its own login (the Zoho exhibitor dashboard, the sponsor webshop).
+        // Show the message in a native confirm(): OK lets the link proceed exactly as
+        // today (external links keep their target="_blank"); Cancel stays put. One
+        // delegated listener so it also covers links inside collapsed nav fold-outs.
+        // Pure enhancement — with JS off the links navigate straight through.
+        document.addEventListener('click', function (e) {
+            var a = e.target.closest && e.target.closest('a[data-confirm]');
+            if (!a) return;
+            // Honour real navigations only — ignore modified clicks (new tab / etc.).
+            if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+            var msg = a.getAttribute('data-confirm');
+            if (msg && !window.confirm(msg)) { e.preventDefault(); }
+        }, true);
+
+        // ---- 9b. §484: interstitial before opening Zoho Backstage -----------
+        // Operator: every (Zoho) menu item must EXPLAIN why the hub is handing them
+        // over (leads/inquiries have no API yet) and how the one-time-PIN sign-in
+        // works, BEFORE the tab opens — with an opt-out for people who now know.
+        //
+        // "Continue" is what calls window.open, so the popup is tied to a real user
+        // gesture and is never blocked (the §464 lesson: open on the click the user
+        // makes AFTER reading, not the one that renders the text).
+        // §653 — PARAMETERISED, so the sponsor-webshop hand-off reuses this exact behaviour rather
+        // than being a second copy of it. One implementation means the popup-blocker fix (§464), the
+        // exact-value selector fix (§486) and the storage guard below cannot be repaired in one
+        // dialog and forgotten in the other.
+        function cehInterstitial(opts) {
+            var KEY = opts.storageKey;
+            var box = document.getElementById(opts.boxId);
+            if (!box) return;
+            var hideBox   = document.getElementById(opts.boxId + '-hide');
+            var goBtn     = document.getElementById(opts.boxId + '-continue');
+            var cancelBtn = document.getElementById(opts.boxId + '-cancel');
+            if (!goBtn || !cancelBtn) return;
+            var pending   = null;
+
+            // localStorage can throw (private mode / blocked storage). A failure must
+            // never break the link — it only means the notice keeps showing.
+            function suppressed() {
+                try { return window.localStorage.getItem(KEY) === '1'; } catch (err) { return false; }
+            }
+            function close() { box.hidden = true; pending = null; }
+
+            document.addEventListener('click', function (e) {
+                // §486 — match the exact VALUE, not merely the attribute's presence. Razor wrote an
+                // explicit conditional expression out as data-zoho-interstitial="" rather than
+                // omitting it, so a presence selector matched EVERY nav link and preventDefault()
+                // blocked ordinary navigation (Get Started, live on prod).
+                var a = e.target.closest && e.target.closest('a[' + opts.attr + '="1"]');
+                if (!a) return;
+                // A modified click (ctrl/cmd-click, middle-click) is the user opening a
+                // tab deliberately — never intercept those.
+                if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+                if (suppressed()) return;      // opted out → straight through, unchanged
+                e.preventDefault();
+                pending = a.getAttribute('href');
+                box.hidden = false;
+                goBtn.focus();
+            }, true);
+
+            goBtn.addEventListener('click', function () {
+                if (hideBox && hideBox.checked) {
+                    try { window.localStorage.setItem(KEY, '1'); } catch (err) { /* ignore */ }
+                }
+                var href = pending;
+                close();
+                if (href) { window.open(href, '_blank', 'noopener'); }
+            });
+            cancelBtn.addEventListener('click', close);
+            box.addEventListener('click', function (e) { if (e.target === box) close(); });
+            document.addEventListener('keydown', function (e) {
+                if (e.key === 'Escape' && !box.hidden) close();
+            });
+        }
+
+        // The two hand-offs. Separate storage keys: dismissing the Zoho notice must NOT silently
+        // dismiss the webshop one — they explain different systems and different sign-ins.
+        cehInterstitial({
+            boxId: 'zoho-interstitial',
+            attr: 'data-zoho-interstitial',
+            storageKey: 'ceh-zoho-interstitial-hidden'
+        });
+        cehInterstitial({
+            boxId: 'webshop-interstitial',
+            attr: 'data-webshop-interstitial',
+            storageKey: 'ceh-webshop-interstitial-hidden'
         });
 
         // The browser's bfcache can restore a busy grid when the user navigates

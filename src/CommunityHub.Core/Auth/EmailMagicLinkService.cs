@@ -90,7 +90,34 @@ public sealed class EmailMagicLinkService : IEmailMagicLinkService
         if (live is not null)
         {
             var recovered = TryUnprotect(live.TokenProtected!);
-            if (recovered is not null) return recovered;
+            if (recovered is not null)
+            {
+                // §419 — SLIDING EXPIRY (operator requirement 2026-07-27, stated as the outcome
+                // rather than the mechanism: "a person must be able to find an email fx in august
+                // 2026 with welcome mail and then be able to use that button in feb 2027 and be
+                // able to login").
+                //
+                // The TTL is 365 days from FIRST creation and was never renewed, so the clock
+                // starts when the person is PROVISIONED, not when the mail is sent. Today that is
+                // safe (oldest grant 29 Jun 2026 ⇒ expires 29 Jun 2027; event 9 Feb 2027; zero
+                // grants expiring before it) — but safe by luck of the calendar. Provision someone
+                // 13 months before an event, or run an edition with a longer lead time, and every
+                // link in every mail they ever received dies silently on the same day.
+                //
+                // Because the token is REUSED, pushing the expiry forward on each build also
+                // revives the August mail — it carries the same token. So "any link we have ever
+                // e-mailed keeps working as long as we are still e-mailing them" becomes true by
+                // construction, which is the requirement as he phrased it.
+                //
+                // Only ever EXTENDS, never shortens.
+                var renewed = now.Add(DefaultTtl);
+                if (renewed > live.ExpiresAt)
+                {
+                    live.ExpiresAt = renewed;
+                    await _db.SaveChangesAsync(ct);
+                }
+                return recovered;
+            }
             // Ciphertext somehow unreadable (e.g. key rotated away): fall through and
             // mint a fresh grant rather than fail the email send.
         }
@@ -304,9 +331,12 @@ public sealed class EmailMagicLinkService : IEmailMagicLinkService
     public static string HashToken(string token) =>
         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(token))).ToLowerInvariant();
 
-    /// <summary>Honour only local ("/"-prefixed, non-protocol-relative) deep-link targets — mirrors SafeLocalReturnUrl.</summary>
+    /// <summary>Honour only local ("/"-prefixed, non-protocol-relative) deep-link targets — mirrors SafeLocalReturnUrl.
+    /// Backslashes are rejected outright: browsers treat "/\evil.com" as protocol-relative,
+    /// so any '\' makes the URL an open-redirect vector (§234).</summary>
     public static string? SafeLocalPath(string? url) =>
         !string.IsNullOrWhiteSpace(url) && url.StartsWith('/') && !url.StartsWith("//")
+            && !url.Contains('\\')
             ? url
             : null;
 

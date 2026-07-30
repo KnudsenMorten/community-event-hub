@@ -18,7 +18,12 @@ public sealed record SessionizeImportResult(
     string? Error,
     // The companion SESSIONS import result, when the run also imported sessions
     // (the combined API pull). Null for a speakers-only import.
-    SessionImportResult? Sessions = null);
+    SessionImportResult? Sessions = null,
+    // §204 — how many email-less Sessionize speakers were brought into the
+    // PRE-SELECTION QUEUE this run (created as inactive prospective participants
+    // keyed by Sessionize id), as opposed to skipped. Reported to the organizer
+    // as "added to pre-selection (no email yet)". Default 0.
+    int PreselectedNoEmail = 0);
 
 /// <summary>
 /// How a Sessionize import treats the speaker bio fields (Tagline, Biography,
@@ -97,18 +102,40 @@ public sealed class SessionizeImportService
         IReadOnlyList<string> warnings,
         CancellationToken ct = default,
         bool sendWelcome = true,
-        SessionizeImportMode mode = SessionizeImportMode.Delta)
+        SessionizeImportMode mode = SessionizeImportMode.Delta,
+        IReadOnlyList<SessionizeSpeaker>? emailLessSpeakers = null)
     {
         var parsed = new SessionizeParseResult(speakers, warnings, null);
 
-        // Existing speakers for this edition, by email.
-        var existing = await _db.Participants
+        // Existing speakers for this edition, by email — CASE-INSENSITIVE (§253
+        // G17): other entry paths historically stored raw casing (e.g. the sponsor
+        // contact sync before its normalization fix), and an Ordinal miss here
+        // created a near-duplicate participant row for the same address. First
+        // row wins if legacy rows differ only by case (the DB collation treats
+        // them as one identity anyway).
+        var existingRows = await _db.Participants
             .Where(p => p.EventId == eventId)
-            .ToDictionaryAsync(p => p.Email, p => p, ct);
+            .ToListAsync(ct);
+        var existing = new Dictionary<string, Participant>(StringComparer.OrdinalIgnoreCase);
+        foreach (var row in existingRows) existing.TryAdd(row.Email, row);
 
         var existingProfiles = await _db.SpeakerProfiles
             .Where(sp => sp.EventId == eventId)
             .ToDictionaryAsync(sp => sp.ParticipantId, sp => sp, ct);
+
+        // §204: existing participants keyed by their Sessionize speaker id (via the
+        // SpeakerProfile id-link). Used to (a) reconcile an email-less PLACEHOLDER
+        // queue row onto its real email once the speaker accepts the invite, and
+        // (b) avoid creating a duplicate queue row for an id we already hold.
+        var bySessionizeId = await (
+            from sp in _db.SpeakerProfiles
+            join p in _db.Participants on sp.ParticipantId equals p.Id
+            where sp.EventId == eventId && sp.SessionizeSpeakerId != null
+            select new { sp.SessionizeSpeakerId, Participant = p })
+            .ToListAsync(ct);
+        var participantBySessionizeId = bySessionizeId
+            .GroupBy(x => x.SessionizeSpeakerId!)
+            .ToDictionary(g => g.Key, g => g.First().Participant, StringComparer.OrdinalIgnoreCase);
 
         var now = _clock.GetUtcNow();
         int created = 0, updated = 0, skipped = 0;
@@ -135,6 +162,22 @@ public sealed class SessionizeImportService
                     skipped++;
                 }
             }
+            else if (!string.IsNullOrWhiteSpace(s.SessionizeId)
+                     && participantBySessionizeId.TryGetValue(s.SessionizeId, out var placeholder)
+                     && IsPlaceholderEmail(placeholder.Email))
+            {
+                // §204 RECONCILE: this speaker previously had no email and was parked in
+                // the pre-selection queue under a placeholder address; their real email
+                // has now appeared (invite accepted). Merge onto the SAME row (keyed by
+                // Sessionize id) — set the real email + name — so there is no duplicate.
+                // Email is the match key from here on. We DO NOT auto-activate: the row
+                // stays in the pre-selection queue for the organizer to review/activate
+                // (pairs with §203 pending-approval notifications).
+                placeholder.Email = s.Email;
+                if (!string.IsNullOrWhiteSpace(fullName)) placeholder.FullName = fullName;
+                existing[s.Email] = placeholder; // so a duplicate row in the same pull is a no-op
+                updated++;
+            }
             else
             {
                 var fresh = new Participant
@@ -143,12 +186,13 @@ public sealed class SessionizeImportService
                     Email = s.Email,
                     FullName = fullName,
                     Role = ParticipantRole.Speaker,
-                    // Active by default — set BOTH fields so ParticipantActivation.IsActive
-                    // is true. IsActive alone left LifecycleState defaulting to Inactive,
-                    // so imported speakers read inactive everywhere (same dual-field bug
-                    // fixed for synced sponsors). Ring gating still controls their emails.
-                    IsActive = true,
-                    LifecycleState = ParticipantLifecycleState.Active,
+                    // §299 6.1: NEW imported speakers land as PRESELECTED (not Active)
+                    // so the activation hard gate applies — they sit in the
+                    // pre-selection queue until an organizer sets their
+                    // SpeakerCategory (Community / Sponsor / Guest) and activates.
+                    // EXISTING participants are never touched on re-import.
+                    IsActive = false,
+                    LifecycleState = ParticipantLifecycleState.Preselected,
                     // §26c: imported speakers default to the LOCKED ring (Broad = released
                     // last) so NOTHING ring-gated (email, Zoho sync) fires for them until an
                     // organizer explicitly promotes them. Set explicitly, not relying on the
@@ -246,6 +290,60 @@ public sealed class SessionizeImportService
 
         await _db.SaveChangesAsync(ct);
 
+        // §204: bring email-less Sessionize speakers (those with a stable speaker id
+        // but no email yet — almost always: invite not accepted) into the
+        // PRE-SELECTION QUEUE as INACTIVE prospective participants keyed by Sessionize
+        // id, instead of dropping them. The organizer then SEES them and can act; when
+        // their real email later appears it reconciles onto the same row (above). A row
+        // we already hold for that id (placeholder OR a real participant) is a no-op, so
+        // this is idempotent.
+        int preselectedNoEmail = 0;
+        if (emailLessSpeakers is { Count: > 0 })
+        {
+            foreach (var s in emailLessSpeakers)
+            {
+                if (string.IsNullOrWhiteSpace(s.SessionizeId)) continue; // no key — can't queue/reconcile
+                if (participantBySessionizeId.ContainsKey(s.SessionizeId)) continue; // already held
+
+                var fullName = $"{s.FirstName} {s.LastName}".Trim();
+                var placeholderEmail = BuildPlaceholderEmail(s.SessionizeId);
+                // Guard against a stale placeholder row from a prior run (its profile
+                // id-link may be missing): never create a duplicate placeholder address.
+                if (existing.ContainsKey(placeholderEmail)) continue;
+
+                var prospect = new Participant
+                {
+                    EventId = eventId,
+                    Email = placeholderEmail,
+                    FullName = string.IsNullOrWhiteSpace(fullName) ? "(name pending)" : fullName,
+                    Role = ParticipantRole.Speaker,
+                    // Pre-selection queue entry: cannot sign in (no real email yet),
+                    // lands Inactive in the queue, tagged as a Sessionize-sync arrival.
+                    IsActive = false,
+                    LifecycleState = ParticipantLifecycleState.Inactive,
+                    QueueSource = ParticipantQueueSource.SessionizeSync,
+                    Ring = Ring.Broad,
+                    CreatedAt = now,
+                };
+                _db.Participants.Add(prospect);
+                _db.SpeakerProfiles.Add(new SpeakerProfile
+                {
+                    EventId = eventId,
+                    Participant = prospect,
+                    SessionizeSpeakerId = s.SessionizeId,
+                    FirstName = string.IsNullOrWhiteSpace(s.FirstName) ? null : s.FirstName,
+                    LastName = string.IsNullOrWhiteSpace(s.LastName) ? null : s.LastName,
+                    CreatedAt = now,
+                    UpdatedAt = now,
+                    LastSessionizeImportAt = now,
+                });
+                existing[placeholderEmail] = prospect;
+                participantBySessionizeId[s.SessionizeId] = prospect;
+                preselectedNoEmail++;
+            }
+            if (preselectedNoEmail > 0) await _db.SaveChangesAsync(ct);
+        }
+
         // Send the welcome email to each newly-created speaker. Idempotent via
         // SentReminder ledger; re-imports never re-welcome. A send failure for
         // one person must not fail the whole import.
@@ -263,8 +361,38 @@ public sealed class SessionizeImportService
 
         return new SessionizeImportResult(
             parsed.Speakers.Count, created, updated, skipped,
-            parsed.Warnings, null);
+            parsed.Warnings, null, PreselectedNoEmail: preselectedNoEmail);
     }
+
+    /// <summary>
+    /// §204 — the synthetic, deterministic, non-deliverable placeholder address a
+    /// queued email-less Sessionize speaker is parked under (keyed by their stable
+    /// Sessionize id). Uses the RFC 2606 reserved <c>.invalid</c> TLD so it can
+    /// never be mailed, and is recognizable via <see cref="IsPlaceholderEmail"/> so
+    /// the queue UI shows the "no email yet" flag and the importer reconciles the
+    /// row onto the real email once it appears.
+    /// </summary>
+    public const string PlaceholderEmailDomain = "no-email.sessionize.invalid";
+
+    /// <summary>Build the placeholder address for a Sessionize speaker id (§204).</summary>
+    public static string BuildPlaceholderEmail(string sessionizeId)
+    {
+        var slug = new string((sessionizeId ?? string.Empty)
+            .ToLowerInvariant()
+            .Select(c => char.IsLetterOrDigit(c) || c == '-' ? c : '-')
+            .ToArray());
+        if (string.IsNullOrEmpty(slug)) slug = "unknown";
+        return $"sessionize-{slug}@{PlaceholderEmailDomain}";
+    }
+
+    /// <summary>
+    /// True when an address is a §204 placeholder for an email-less, not-yet-invited
+    /// Sessionize speaker (so the pre-selection queue can flag it and the importer
+    /// can reconcile it onto the speaker's real email when that appears).
+    /// </summary>
+    public static bool IsPlaceholderEmail(string? email) =>
+        !string.IsNullOrEmpty(email)
+        && email.EndsWith("@" + PlaceholderEmailDomain, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// Delta-merge a single bio field: keep the current value when the speaker

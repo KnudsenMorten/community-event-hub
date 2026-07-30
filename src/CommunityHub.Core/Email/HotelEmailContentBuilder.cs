@@ -34,7 +34,9 @@ public static class HotelEmailContentBuilder
         string? roomType,
         string? hotelName,
         string? hotelAddress,
-        string? hotelConfirmationNumber)
+        string? hotelConfirmationNumber,
+        bool inviteAttached = true,
+        string? addToCalendarHtml = null)
     {
         var hasAssignedHotel = !string.IsNullOrWhiteSpace(hotelName);
         var hotelLabel = hasAssignedHotel ? hotelName!.Trim() : "your assigned hotel";
@@ -50,7 +52,9 @@ public static class HotelEmailContentBuilder
             : (string.IsNullOrWhiteSpace(vendorConfirmationNumber) ? null : vendorConfirmationNumber!.Trim());
         var isConfirmed = vendorConfirmed || effectiveConf is not null;
 
-        var stateTag = isConfirmed ? "[CONFIRMED]" : "[NOT CONFIRMED]";
+        // Operator 2026-07-07 (REQUIREMENTS 238): unconfirmed hotel mail is tagged [PLACEHOLDER], not
+        // [NOT CONFIRMED] - reads as "hold the dates", not as an alarming problem.
+        var stateTag = isConfirmed ? "[CONFIRMED]" : "[PLACEHOLDER]";
         var subject = $"{stateTag} {eventCode} Hotel - {hotelLabel}";
 
         var confLine = isConfirmed
@@ -62,8 +66,8 @@ public static class HotelEmailContentBuilder
             $"Your hotel reservation at {location} for {eventCode}.\n\n" +
             $"Hotel:     {hotelLabel}\n" +
             (address is null ? "" : $"Address:   {address}\n") +
-            $"Check-in:  {checkInDate:dd/MM/yyyy}\n" +
-            $"Check-out: {checkOutDate:dd/MM/yyyy}\n" +
+            $"Check-in:  {checkInDate:d MMM yyyy}\n" +
+            $"Check-out: {checkOutDate:d MMM yyyy}\n" +
             confLine + roomTypeLine + "\n" +
             "Questions: info@expertslive.dk\n\nCheers,\nELDK-team";
 
@@ -72,19 +76,27 @@ public static class HotelEmailContentBuilder
         var encHotelName = System.Net.WebUtility.HtmlEncode(hotelLabel);
         var encAddress = System.Net.WebUtility.HtmlEncode(address ?? "");
 
+        // §257: the intro sentence only claims "we've added a calendar invitation to your
+        // inbox" when the automatic invite is actually attached; otherwise the mail carries
+        // a manual "Add to calendar" link block (addToCalendarHtml) instead.
+        var introLine = isConfirmed
+            ? $"<p>Your hotel reservation at <strong>{encHotelName}</strong> for {eventCode} is now <strong>CONFIRMED</strong>.</p>"
+            : (inviteAttached
+                ? $"<p>Thanks for submitting your hotel preference for {eventCode}. We've added a placeholder calendar invitation to your inbox.</p>"
+                : $"<p>Thanks for submitting your hotel preference for {eventCode}. This holds your dates &mdash; we'll confirm once the hotel returns the reservation number.</p>");
+
         var htmlBody =
             $"<p>Hi {encName},</p>" +
-            (isConfirmed
-                ? $"<p>Your hotel reservation at <strong>{encHotelName}</strong> for {eventCode} is now <strong>CONFIRMED</strong>.</p>"
-                : $"<p>Thanks for submitting your hotel preference for {eventCode}. We've added a placeholder calendar invitation to your inbox.</p>") +
+            introLine +
             $"<p><strong>Hotel:</strong> {encHotelName}<br/>" +
             (address is null ? "" : $"<strong>Address:</strong> {encAddress}<br/>") +
-            $"<strong>Check-in:</strong> {checkInDate:dd/MM/yyyy}<br/>" +
-            $"<strong>Check-out:</strong> {checkOutDate:dd/MM/yyyy}<br/>" +
+            $"<strong>Check-in:</strong> {checkInDate:d MMM yyyy}<br/>" +
+            $"<strong>Check-out:</strong> {checkOutDate:d MMM yyyy}<br/>" +
             (isConfirmed
                 ? $"<strong>Confirmation number:</strong> {System.Net.WebUtility.HtmlEncode(effectiveConf ?? "")}<br/>" +
                   (string.IsNullOrWhiteSpace(roomType) ? "" : $"<strong>Room type:</strong> {System.Net.WebUtility.HtmlEncode(roomType.Trim())}") + "</p>"
                 : "<strong>Status:</strong> Awaiting hotel confirmation &mdash; we'll update this entry once the hotel returns the confirmation number.</p>") +
+            (string.IsNullOrEmpty(addToCalendarHtml) ? "" : addToCalendarHtml) +
             "<p>Cheers,<br/>ELDK-team</p>";
 
         return new HotelEmailContent(subject, htmlBody, description, location, isConfirmed, effectiveConf);

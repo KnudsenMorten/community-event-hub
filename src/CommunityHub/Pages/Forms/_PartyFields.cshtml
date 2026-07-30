@@ -12,18 +12,60 @@
 }
 else
 {
-    <p>Join us for the party@(string.IsNullOrEmpty(Model.DateLine) ? "" : $" on {Model.DateLine}")
-       (@Model.TimeWindow). Let us know if you'll be there — you can change your answer any time.</p>
+    @* §312 (operator 2026-07-24): date/time in BOLD, and the DATE repeated on the
+       sign-up line itself — easier to read at a glance. *@
+    <p>Join us for the party@(string.IsNullOrEmpty(Model.DateLine) ? "" : " on ")<strong>@Model.DateLine</strong>
+       (<strong>@Model.TimeWindow</strong>).</p>
+    @if (!string.IsNullOrEmpty(Model.Location))
+    {
+        <p style="color:#5b636e;font-size:14px;margin:2px 0 10px;">📍 @Model.Location</p>
+    }
+    @* §316 (operator 2026-07-24): the SAME role-matched intro copy the /Party page shows
+       (§227, verbatim — one source: PartyModel.RoleIntro). *@
+    <p style="color:#3a4250;font-size:14.5px;line-height:1.55;">@CommunityHub.Pages.PartyModel.RoleIntro(Model.Role)</p>
 
     @if (Model.Done)
     {
         <p class="success" role="status">✅ Your RSVP is saved. Update it below if your plans change.</p>
     }
 
+    @* §316: offer the calendar option right on the step (the /Party page only showed it on its own
+       confirmation screen, so wizard users missed it). The e-mail button posts to the HOST page's
+       PartyInvite handler via formaction — never a nested form.
+
+       §352 (operator 2026-07-26: "you forgot the 2 buttons 'Send Calendar Invite' for both the
+       master class + party so people can choose to send invite to their calendar"). The condition
+       was `Done && Attending`, so the button VANISHED for anyone whose saved RSVP was "No", and was
+       absent entirely before the first save. It now shows whenever there is a party to invite to —
+       the choice is the attendee's, not ours. This is also the real explanation for §343, where the
+       button looked inexplicably missing: that RSVP was saved as No. *@
+    @if (!Model.NoParty)
+    {
+        @if (TempData["PartyInviteMessage"] is string pim)
+        {
+            <p role="status" style="margin:6px 0;padding:8px 12px;border-radius:8px;background:#ecfdf5;color:#065f46;border:1px solid #a7f3d0;">@pim</p>
+        }
+        @* §326j (operator 2026-07-25): the Google Calendar / Outlook links are GONE —
+           only the e-mail invite remains, in the readable green the dinner/hotel
+           buttons share (was a hard-to-read slate). The Google/Outlook open-in-browser
+           links still ride INSIDE the invitation e-mail itself. *@
+        <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:10px 0 4px;">
+            <button type="submit" asp-page-handler="PartyInvite"
+                    style="padding:8px 14px;border-radius:6px;background:#15803d;color:#fff;border:none;font-size:13.5px;font-weight:600;cursor:pointer;">
+                📅 Email me a calendar invite
+            </button>
+        </div>
+    }
+
     <div class="optin" style="display:flex;gap:10px;align-items:flex-start;margin:16px 0 4px;background:#f3f6fb;border:1px solid #dde4ee;border-radius:10px;padding:12px;">
         <input type="checkbox" id="Attending" name="Attending" value="true" checked="@Model.Attending"
                style="margin-top:2px;width:18px;height:18px;" />
-        <label for="Attending" style="font-weight:500;">Yes, I'll attend the party (@Model.TimeWindow).</label>
+        @* §479 — a SPONSOR answers for the whole company (§228: one reservation covers everyone),
+           so "I'll" misdescribes what the tick actually does. Everyone else really is answering
+           for themselves, so the first person stays for them. *@
+        <label for="Attending" style="font-weight:500;">Yes, @(Model.IsSponsor ? "we'll" : "I'll") attend the party
+            @if (!string.IsNullOrEmpty(Model.DateLine)) { <text>on <strong>@Model.DateLine</strong> </text> }
+            (<strong>@Model.TimeWindow</strong>).</label>
     </div>
 
     @if (Model.IsSponsor)
@@ -34,6 +76,12 @@ else
         <input type="number" id="HeadCount" name="HeadCount" min="1" step="1"
                value="@(Model.HeadCount?.ToString())" inputmode="numeric"
                style="width:100%;box-sizing:border-box;padding:11px 12px;border:1px solid #cbd2d9;border-radius:9px;font-size:16px;" />
-        <p class="muted" style="font-size:12.5px;margin:4px 0 0;">Include yourself in the count.</p>
+        @* §478 — "include yourself" was too narrow: this is ONE group reservation for the whole
+           company (§228), so it must also cover a sponsor-session speaker who is not booth staff. *@
+        <p class="muted" style="font-size:12.5px;margin:4px 0 0;">
+            Please include everyone who will be onsite, including booth staff and any speaker(s) if
+            you've purchased a session. Write to
+            <a href="mailto:mok@expertslive.dk">mok@expertslive.dk</a> with any additional requests.
+        </p>
     }
 }

@@ -16,9 +16,12 @@ namespace CommunityHub.Core.Email;
 ///
 /// It enriches each row from the ambient <see cref="EmailContext"/> (category,
 /// edition, participant, name) when a caller set one, and computes the
-/// actually-delivered address + drop outcome via
-/// <see cref="BrevoEmailSender.ResolveDelivery"/> so the log mirrors the real
-/// redirect/allowlist behaviour. Logging never breaks a send: a send failure is
+/// actually-delivered address via <see cref="BrevoEmailSender.ResolveDelivery"/>
+/// so the log mirrors the real redirect behaviour. §234: when the
+/// <see cref="IEmailDeliveryOutcome"/> seam is wired, the row's Success reflects
+/// the TRANSPORT's real outcome — a ring-dropped or kill-switched send is recorded
+/// as a DROP (<c>Success=false</c> + the drop reason in Error), NEVER as a
+/// successful send. Logging never breaks a send: a send failure is
 /// recorded then re-thrown (so callers that depend on the throw still see it),
 /// and a log-write failure is swallowed (an audit miss must not drop mail).
 ///
@@ -34,6 +37,10 @@ public sealed class LoggingEmailSender : IEmailSender
     private readonly EmailOptions _options;
     private readonly TimeProvider _clock;
     private readonly ILogger<LoggingEmailSender>? _log;
+    // §234: the delivered-vs-dropped seam. Null in legacy/test wiring ⇒ the log
+    // falls back to the old kill-switch-only outcome. When wired (and the inner
+    // sender records into it), the row reflects the transport's REAL outcome.
+    private readonly IEmailDeliveryOutcome? _outcome;
 
     public LoggingEmailSender(
         IEmailSender inner,
@@ -41,7 +48,8 @@ public sealed class LoggingEmailSender : IEmailSender
         IEmailContextAccessor context,
         IOptions<EmailOptions> options,
         TimeProvider clock,
-        ILogger<LoggingEmailSender>? log = null)
+        ILogger<LoggingEmailSender>? log = null,
+        IEmailDeliveryOutcome? outcome = null)
     {
         _inner = inner;
         _scopes = scopes;
@@ -49,6 +57,7 @@ public sealed class LoggingEmailSender : IEmailSender
         _options = options.Value;
         _clock = clock;
         _log = log;
+        _outcome = outcome;
     }
 
     public Task SendAsync(
@@ -113,16 +122,34 @@ public sealed class LoggingEmailSender : IEmailSender
         var ctx = _context.Current;
         var (actualTo, allowed) = BrevoEmailSender.ResolveDelivery(_options, toEmail);
 
+        // §234: make sure the current flow has an outcome holder BEFORE the send so
+        // the transport always has somewhere to record its real result (reuses the
+        // caller's holder when a scoped IEmailDeliveryOutcome was already resolved).
+        if (_outcome is not null)
+        {
+            EmailDeliveryOutcome.EnsureAmbient();
+        }
+
         bool success;
         string? error;
         try
         {
             await send();
-            // Audience is rings-only now; ResolveDelivery's "allowed" reflects the
-            // kill switch (a ring drop is logged separately by the sender as
-            // RING-DROP). A silent kill-switch drop is not a real delivery.
-            success = allowed;
-            error = allowed ? null : "Dropped by global email kill switch (Email:KillSwitch).";
+            if (_outcome is not null)
+            {
+                // §234: the TRANSPORT's real outcome — a ring-dropped / kill-switched
+                // send is a DROP (Success=false + reason), never a successful send.
+                success = _outcome.LastSendDelivered;
+                error = success ? null : DropError(_outcome.LastDropReason);
+            }
+            else
+            {
+                // Legacy wiring (no outcome seam): ResolveDelivery's "allowed"
+                // reflects the kill switch (a ring drop is only visible in the
+                // sender's RING-DROP log). A kill-switch drop is not a delivery.
+                success = allowed;
+                error = allowed ? null : "Dropped by global email kill switch (Email:KillSwitch).";
+            }
         }
         catch (Exception ex)
         {
@@ -134,6 +161,17 @@ public sealed class LoggingEmailSender : IEmailSender
 
         await WriteLogAsync(ctx, toEmail, actualTo, cc, subject, success, error);
     }
+
+    // §234: human-readable drop marker for the EmailLog row / audit line, keyed on
+    // the transport's recorded reason.
+    private static string DropError(string? reason) => reason switch
+    {
+        "ring-drop" =>
+            "Ring-dropped (recipient outside the released ring) — not sent.",
+        "kill-switch" =>
+            "Dropped by global email kill switch (Email:KillSwitch).",
+        _ => $"Dropped — not sent ({reason ?? "unknown reason"}).",
+    };
 
     private async Task WriteLogAsync(
         EmailContext? ctx, string toEmail, string actualTo,

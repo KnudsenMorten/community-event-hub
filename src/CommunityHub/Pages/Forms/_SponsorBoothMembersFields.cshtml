@@ -1,0 +1,46 @@
+@model CommunityHub.Forms.Steps.SponsorBoothMembersModel
+@using CommunityHub.Core.Domain
+@*
+    §297 — fields-only partial for the inline sponsor Booth-members step. Shows the current members
+    and up to three add rows (name + email + role). The shared wizard host owns the <form>.
+*@
+<p style="font-size:13.5px;color:#4b5563;margin-top:0;">
+    List the team members staffing your booth. They're saved to the hub (and synced to the exhibitor
+    system). You can add more later, or manage/remove members on the Company Details page.
+</p>
+
+@if (Model.CurrentMembers.Count > 0)
+{
+    <h3 style="color:var(--el-darkblue);margin-top:14px;font-size:15px;">Current booth members (@Model.CurrentMembers.Count)</h3>
+    <ul style="list-style:none;padding:0;margin:0 0 10px;display:flex;flex-direction:column;gap:6px;">
+        @foreach (var m in Model.CurrentMembers)
+        {
+            <li style="border:1px solid #e6eaf2;border-radius:8px;padding:8px 12px;font-size:14px;">
+                ✓ <strong>@m.Name</strong> <span style="color:#6b7280;">&lt;@m.Email&gt; · @m.Role</span>
+            </li>
+        }
+    </ul>
+}
+else
+{
+    <p style="color:#b45309;font-size:13px;margin:4px 0 10px;">No booth members added yet — add at least one below.</p>
+}
+
+<h3 style="color:var(--el-darkblue);margin-top:14px;font-size:15px;">Add booth members</h3>
+@for (var i = 1; i <= 3; i++)
+{
+    var nameField = $"Name{i}"; var emailField = $"Email{i}"; var roleField = $"Role{i}";
+    var nameVal = i == 1 ? Model.Name1 : i == 2 ? Model.Name2 : Model.Name3;
+    var emailVal = i == 1 ? Model.Email1 : i == 2 ? Model.Email2 : Model.Email3;
+    var roleVal = i == 1 ? Model.Role1 : i == 2 ? Model.Role2 : Model.Role3;
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin:6px 0;align-items:flex-start;">
+        <input type="text" name="@nameField" value="@nameVal" placeholder="Member @i name" style="flex:1 1 160px;margin:0;" />
+        <input type="email" inputmode="email" name="@emailField" value="@emailVal" placeholder="name@@company.com" style="flex:1 1 180px;margin:0;" />
+        <select name="@roleField" style="flex:0 0 110px;margin:0;">
+            @foreach (var r in Enum.GetValues<BoothMemberRole>())
+            {
+                <option value="@r" selected="@(r == roleVal)">@r</option>
+            }
+        </select>
+    </div>
+}

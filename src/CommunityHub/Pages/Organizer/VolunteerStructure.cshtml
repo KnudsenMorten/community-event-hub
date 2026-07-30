@@ -31,6 +31,14 @@
     @@media (max-width: 600px) {
         .vs-form input, .vs-form select, .vs-form button { flex:1 1 100%; }
     }
+    /* §199 read-only "All volunteer tasks" review cards (mobile-first). */
+    .vat-task { border:1px solid #e2e6ee; border-radius:8px; padding:10px 12px; margin:10px 0; background:#fff; }
+    .vat-head { display:flex; flex-wrap:wrap; gap:6px 10px; align-items:baseline; }
+    .vat-head strong { font-size:14.5px; }
+    .vat-path { font-size:12px; color:#6e7681; }
+    .vat-meta { margin:6px 0 2px; }
+    .vat-field { margin:6px 0 0; font-size:13.5px; line-height:1.5; }
+    .vat-label { color:#1D3380; font-weight:600; }
 </style>
 
 <div class="card">
@@ -205,13 +213,91 @@
                     <button type="submit">Add subcategory</button>
                 </form>
 
-                <form method="post" asp-page-handler="DeleteCategory" class="vs-form" style="margin-top:10px;">
-                    <input type="hidden" name="categoryId" value="@cat.Id" />
-                    <button type="submit" class="danger" onclick="return confirm('Delete this category and everything under it?');">Delete category</button>
-                </form>
+                @* §334: this takes every subcategory and every task under the category —
+                   two-step, and the phrase is verified server-side. *@
+                <details style="margin-top:10px;">
+                    <summary style="cursor:pointer;color:#b91c1c;">Delete category</summary>
+                    <form method="post" asp-page-handler="DeleteCategory" class="vs-form" style="margin-top:8px;max-width:320px;">
+                        <input type="hidden" name="categoryId" value="@cat.Id" />
+                        <partial name="_TypedConfirm" model="@(new CommunityHub.Pages.Shared.TypedConfirmField(
+                            CommunityHub.Core.Organizer.TypedConfirmation.ConfirmPhrase,
+                            $"Deletes \"{cat.Name}\" and every subcategory and task under it.",
+                            InputId: $"delCat{cat.Id}"))" />
+                        <button type="submit" class="danger" style="margin-top:8px;">Delete category</button>
+                    </form>
+                </details>
             </div>
         </div>
     }
+
+    @* §199: a clear, READ-ONLY review of ALL defined volunteer tasks with their full
+       detail (description, expectations, responsible team, time/shift, …) in one place,
+       so the organizer can see exactly what every task asks of a volunteer. *@
+    <div class="card" id="all-volunteer-tasks">
+        <h2 style="margin-top:0;">All volunteer tasks</h2>
+        <p style="font-size:13.5px;color:#475569;margin-top:0;">
+            A read-only overview of every defined task and what it involves
+            (@Model.AllTasks.Count task@(Model.AllTasks.Count == 1 ? "" : "s") total). Use the
+            tree above to edit.
+        </p>
+        @if (Model.AllTasks.Count == 0)
+        {
+            <p class="info">No tasks defined yet — add a category, subcategory and task above.</p>
+        }
+        else
+        {
+            foreach (var t in Model.AllTasks)
+            {
+                var assigned = t.Assignments?.Count ?? 0;
+                <div class="vat-task">
+                    <div class="vat-head">
+                        <strong>@t.Title</strong>
+                        <span class="vat-path">@t.Subcategory.Category.Name &rsaquo; @t.Subcategory.Name</span>
+                    </div>
+                    <div class="vat-meta">
+                        <span class="vs-pill">@t.Status</span>
+                        @if (t.Criticality != CommunityHub.Core.Domain.VolunteerTaskCriticality.Unspecified)
+                        {
+                            <span class="vs-pill">@(t.Criticality == CommunityHub.Core.Domain.VolunteerTaskCriticality.NeedToHave ? "Need-to-have" : "Nice-to-have")</span>
+                        }
+                        @if (!string.IsNullOrWhiteSpace(t.ResponsibleTeam))
+                        {
+                            <span class="vs-pill">Team: @t.ResponsibleTeam</span>
+                        }
+                        @if (!string.IsNullOrWhiteSpace(t.EldkLeadName))
+                        {
+                            <span class="vs-pill">Lead: @t.EldkLeadName</span>
+                        }
+                        @if (t.DueDate is not null)
+                        {
+                            <span class="vs-pill">Due @t.DueDate.Value.ToString("dd-MM-yyyy")</span>
+                        }
+                        @if (!string.IsNullOrWhiteSpace(t.Shift) || !string.IsNullOrWhiteSpace(t.TimeEnd))
+                        {
+                            <span class="vs-pill">@(string.Join(" – ", new[] { t.Shift, t.TimeEnd }.Where(x => !string.IsNullOrWhiteSpace(x))))</span>
+                        }
+                        <span class="vs-pill">@assigned/@t.ResourcesNeeded assigned</span>
+                    </div>
+                    @if (!string.IsNullOrWhiteSpace(t.Description))
+                    {
+                        <p class="vat-field"><span class="vat-label">Description:</span> @t.Description</p>
+                    }
+                    @if (!string.IsNullOrWhiteSpace(t.Expectations))
+                    {
+                        <p class="vat-field"><span class="vat-label">Expectations (what &ldquo;done&rdquo; looks like):</span> @t.Expectations</p>
+                    }
+                    @if (!string.IsNullOrWhiteSpace(t.Prerequisites))
+                    {
+                        <p class="vat-field"><span class="vat-label">Prerequisites:</span> @t.Prerequisites</p>
+                    }
+                    @if (!string.IsNullOrWhiteSpace(t.Instructions))
+                    {
+                        <p class="vat-field"><span class="vat-label">Instructions:</span> @t.Instructions</p>
+                    }
+                </div>
+            }
+        }
+    </div>
 
     <div class="card"><p><a asp-page="/Organizer/Index">Back to organizer area</a></p></div>
 

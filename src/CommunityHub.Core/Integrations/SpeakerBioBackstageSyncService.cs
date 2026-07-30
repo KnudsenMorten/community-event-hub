@@ -60,13 +60,19 @@ public sealed class SpeakerBioBackstageSyncService
     private readonly FeatureGateService _gate;
     private readonly RingResolver _rings;
 
+    // RULE (operator 2026-07-23): every CEH-made Zoho write must notify info@expertslive.dk
+    // (the operator must publish/delete manually in Backstage). Optional so tests/legacy
+    // constructions keep compiling; null ⇒ no notification.
+    private readonly ZohoChangeNotifier? _zohoChanges;
+
     public SpeakerBioBackstageSyncService(
         CommunityHubDbContext db,
         IBackstageSpeakerBioApi backstage,
         IOptions<BackstageSpeakerBioSyncOptions> options,
         IEmailSender email,
         FeatureGateService gate,
-        RingResolver rings)
+        RingResolver rings,
+        ZohoChangeNotifier? zohoChanges = null)
     {
         _db = db;
         _backstage = backstage;
@@ -74,6 +80,7 @@ public sealed class SpeakerBioBackstageSyncService
         _email = email;
         _gate = gate;
         _rings = rings;
+        _zohoChanges = zohoChanges;
     }
 
     public bool IsEnabled => _options.Enabled;
@@ -97,8 +104,11 @@ public sealed class SpeakerBioBackstageSyncService
             FirstName: profile.FirstName,
             LastName: profile.LastName,
             Country: profile.Country,
-            Skills: profile.Accreditation,
-            BackstageSpeakerId: profile.BackstageSpeakerId);
+            // §302b: skills + company come from the ONE ZohoFieldMap derivation —
+            // accreditation first, MVP categories complement, full labels.
+            Skills: ZohoFieldMap.SpeakerSkills(profile),
+            BackstageSpeakerId: profile.BackstageSpeakerId,
+            Company: profile.CompanyName);
     }
 
     /// <summary>
@@ -108,10 +118,14 @@ public sealed class SpeakerBioBackstageSyncService
     /// update" email is sent when the speaker already exists in Backstage. Callers pass
     /// <c>false</c> to DEDUPE the alert when nothing the speaker owns actually changed,
     /// so organizers are not re-emailed on every save (the create path is unaffected).
+    /// <paramref name="notifyZohoChange"/> controls the operator-2026-07-23 CEH→Zoho
+    /// change mail on a successful create; <see cref="SyncAllAsync"/> passes <c>false</c>
+    /// so a whole pass sends ONE batched mail instead of one per speaker.
     /// </summary>
     public async Task<SpeakerBioSyncResult> SyncOneAsync(
         int eventId, int participantId, bool dryRun = false,
-        bool alertOnExisting = true, CancellationToken ct = default)
+        bool alertOnExisting = true, bool notifyZohoChange = true,
+        CancellationToken ct = default)
     {
         var profile = await _db.SpeakerProfiles
             .FirstOrDefaultAsync(p => p.EventId == eventId && p.ParticipantId == participantId, ct)
@@ -143,6 +157,12 @@ public sealed class SpeakerBioBackstageSyncService
                         profile.BackstageSpeakerId = r.SpeakerId;
                         await _db.SaveChangesAsync(ct);
                     }
+                    // Operator 2026-07-23: a successful Zoho write must notify the ops
+                    // mailbox (publish/delete is manual in Backstage). Suppressed by
+                    // SyncAllAsync, which sends ONE batched mail for the whole pass.
+                    if (notifyZohoChange && _zohoChanges is not null)
+                        await _zohoChanges.NotifyAsync("Speakers",
+                            new[] { DescribeCreate(participant, r.SpeakerId) }, ct);
                     return new SpeakerBioSyncResult(participantId,
                         request.PublishState == SpeakerPublishState.Public
                             ? SpeakerBioSyncOutcome.PushedPublic : SpeakerBioSyncOutcome.PushedDraft,
@@ -178,10 +198,28 @@ public sealed class SpeakerBioBackstageSyncService
         var ids = await _db.SpeakerProfiles
             .Where(p => p.EventId == eventId).Select(p => p.ParticipantId).ToListAsync(ct);
         var results = new List<SpeakerBioSyncResult>(ids.Count);
+        // Operator 2026-07-23: suppress the per-speaker change mail; ONE batched mail for
+        // the whole pass follows below (batch-per-run, never per item).
         foreach (var id in ids)
-            results.Add(await SyncOneAsync(eventId, id, dryRun, ct: ct));
+            results.Add(await SyncOneAsync(eventId, id, dryRun, notifyZohoChange: false, ct: ct));
+
+        if (_zohoChanges is not null)
+        {
+            var created = results
+                .Where(r => r.Outcome is SpeakerBioSyncOutcome.PushedDraft or SpeakerBioSyncOutcome.PushedPublic)
+                .Select(r => $"Created speaker '{r.Request.FirstName} {r.Request.LastName}".Trim()
+                             + $"' ({r.Request.IdentityEmail}) in Backstage")
+                .ToList();
+            await _zohoChanges.NotifyAsync("Speakers", created, ct);
+        }
         return results;
     }
+
+    /// <summary>The human change line for a created Backstage speaker (ops change mail).</summary>
+    private static string DescribeCreate(Participant participant, string? speakerId) =>
+        string.IsNullOrWhiteSpace(speakerId)
+            ? $"Created speaker '{participant.FullName}' ({participant.Email}) in Backstage"
+            : $"Created speaker '{participant.FullName}' ({participant.Email}) (Backstage id {speakerId})";
 
     private async Task AlertManualUpdateAsync(Participant participant, CancellationToken ct)
     {

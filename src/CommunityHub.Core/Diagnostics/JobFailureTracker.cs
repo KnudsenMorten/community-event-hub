@@ -76,6 +76,44 @@ public sealed class JobFailureTracker
         await _db.SaveChangesAsync(ct);
     }
 
+    /// <summary>
+    /// §545(b) INACTIVE — record what a clean run actually ACHIEVED, which
+    /// <see cref="RecordSuccessAsync"/> cannot express.
+    /// </summary>
+    /// <param name="jobKey">The function name.</param>
+    /// <param name="inactiveReason">
+    /// Why the run did nothing, or null when it did real work. 🔒 Pass null for "did work" — this
+    /// method must never be called for a job that reported NOTHING, because silence is UNKNOWN and
+    /// must not reset a streak the job is genuinely still in.
+    /// </param>
+    /// <returns>The consecutive no-op count after this run (0 when it did work).</returns>
+    public async Task<int> RecordActivityAsync(
+        string jobKey, string? inactiveReason, CancellationToken ct = default)
+    {
+        var marker = await GetOrCreateAsync(jobKey, ct);
+
+        if (string.IsNullOrWhiteSpace(inactiveReason))
+        {
+            // Did work. Whatever it was stuck on, it isn't now.
+            marker.ConsecutiveNoOps = 0;
+            marker.LastNoOpReason = null;
+        }
+        else
+        {
+            // A DIFFERENT reason restarts the count: "feature off" for 40 runs and then "no active
+            // edition" are two separate stories, and merging them would report the wrong one.
+            if (!string.Equals(marker.LastNoOpReason, inactiveReason, StringComparison.Ordinal))
+                marker.ConsecutiveNoOps = 0;
+
+            marker.ConsecutiveNoOps += 1;
+            marker.LastNoOpReason = Truncate(inactiveReason, 400);
+        }
+
+        marker.UpdatedAt = _clock.GetUtcNow();
+        await _db.SaveChangesAsync(ct);
+        return marker.ConsecutiveNoOps;
+    }
+
     private async Task<JobHealthMarker> GetOrCreateAsync(string jobKey, CancellationToken ct)
     {
         var marker = await _db.JobHealthMarkers.FirstOrDefaultAsync(m => m.JobKey == jobKey, ct);

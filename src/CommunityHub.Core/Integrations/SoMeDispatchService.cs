@@ -57,6 +57,10 @@ public sealed class SoMeDispatchService
     private readonly TimeProvider _clock;
     private readonly ILogger<SoMeDispatchService>? _log;
 
+    // §707.27 C1 — the organizer-inbox fallback for the pre-alert. Optional so every existing
+    // construction (and every test) is unchanged; wired by DI at runtime.
+    private readonly Microsoft.Extensions.Options.IOptions<EmailOptions>? _emailOptions;
+
     public SoMeDispatchService(
         CommunityHubDbContext db,
         ILinkedInPostPublisher publisher,
@@ -64,7 +68,11 @@ public sealed class SoMeDispatchService
         IEmailSender email,
         TimeProvider clock,
         IEmailContextAccessor? emailContext = null,
-        ILogger<SoMeDispatchService>? log = null)
+        ILogger<SoMeDispatchService>? log = null,
+        // §324: optional store — resolves a post's ImageRef graphic to RAW BYTES for the
+        // native LinkedIn image upload. Absent (tests) ⇒ text-only, as before.
+        Graphics.ISharePointFileStore? fileStore = null,
+        Microsoft.Extensions.Options.IOptions<EmailOptions>? emailOptions = null)
     {
         _db = db;
         _publisher = publisher;
@@ -73,6 +81,59 @@ public sealed class SoMeDispatchService
         _clock = clock;
         _emailContext = emailContext;
         _log = log;
+        _fileStore = fileStore;
+        _emailOptions = emailOptions;
+    }
+
+    private static string? FirstNonBlank(params string?[] candidates) =>
+        candidates.FirstOrDefault(c => !string.IsNullOrWhiteSpace(c));
+
+    /// <summary>
+    /// §707.27 C3 — the edition name for the ops-mail subjects. Operator 2026-07-30: *"subject for
+    /// these 2 should shown ELDK27 (eventname) instead of [SOME]"*.
+    /// </summary>
+    /// <remarks>
+    /// Falls back to no prefix rather than to a hard-coded edition name: a subject that names the
+    /// WRONG event is worse than one that names none, and this code is evergreen (§ guardrail —
+    /// code is <c>CommunityHub</c>, never <c>eldk27</c>).
+    /// </remarks>
+    private async Task<string?> EventDisplayNameAsync(int eventId, CancellationToken ct) =>
+        await _db.Events.AsNoTracking()
+            .Where(e => e.Id == eventId)
+            .Select(e => e.DisplayName)
+            .FirstOrDefaultAsync(ct);
+
+    /// <summary>Prefix an ops subject with the edition name, or leave it bare when unknown.</summary>
+    private static string WithEventPrefix(string? eventName, string subject) =>
+        string.IsNullOrWhiteSpace(eventName) ? subject : $"{eventName}: {subject}";
+
+    private readonly Graphics.ISharePointFileStore? _fileStore;
+
+    /// <summary>
+    /// §324: resolve a post's ImageRef (the graphic's SharePoint URL/path) to raw
+    /// bytes via the GraphicAsset's stored item id. Fail-soft null (text-only post)
+    /// when unresolvable — never blocks the publish on a missing image source.
+    /// </summary>
+    private async Task<(byte[]? Bytes, string? Alt)> ResolveImageAsync(
+        SoMePost post, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(post.ImageRef) || _fileStore is null || !_fileStore.CanRead)
+            return (null, null);
+        try
+        {
+            var graphic = await _db.GraphicAssets.AsNoTracking().FirstOrDefaultAsync(
+                g => g.EventId == post.EventId
+                     && (g.SharePointUrl == post.ImageRef || g.SharePointPath == post.ImageRef),
+                ct);
+            if (graphic?.StorageItemId is not { Length: > 0 } itemId) return (null, null);
+            var bytes = await _fileStore.DownloadAsync(itemId, ct);
+            return (bytes is { Length: > 0 } ? bytes : null, "Session graphic");
+        }
+        catch (Exception ex)
+        {
+            _log?.LogWarning(ex, "SoMeDispatch: image resolve failed for post {PostId}.", post.Id);
+            return (null, null);
+        }
     }
 
     /// <summary>
@@ -122,13 +183,40 @@ public sealed class SoMeDispatchService
                 + $"LinkedIn publisher); {due.Count} due post(s) left Queued, nothing faked.");
         }
 
-        int published = 0, failed = 0;
+        int published = 0, failed = 0, withdrawn = 0;
         foreach (var post in due)
         {
             try
             {
+                // §329 — RE-VALIDATE THE SUBJECT IMMEDIATELY BEFORE PUBLISHING.
+                //
+                // A post is composed once and published later, sometimes weeks later. In
+                // between, the speaker may withdraw, the session may be deleted or the
+                // sponsor may pull out — and until now nothing re-checked: the queue would
+                // happily announce someone who is no longer coming, publicly and
+                // irreversibly. SoMePost.IsActive is DOCUMENTED for exactly this case ("a
+                // speaker drops out, the organizer flips it off") but relied on a human
+                // remembering, at the one moment nobody is watching: a bulk queue run.
+                var reason = await RevalidateSubjectAsync(post, ct);
+                if (reason is not null)
+                {
+                    // Deactivate rather than Fail: nothing failed, the subject went away.
+                    // This also stops the post being re-picked on every later pass.
+                    post.IsActive = false;
+                    post.LastError = Truncate("Withdrawn before publishing: " + reason, 2000);
+                    withdrawn++;
+                    await _db.SaveChangesAsync(ct);
+                    _log?.LogWarning(
+                        "SoMeDispatch: post {PostId} NOT published and deactivated — {Reason}",
+                        post.Id, reason);
+                    continue;
+                }
+
+                // §324: attach the graphic's raw bytes for the native image upload.
+                var (imageBytes, imageAlt) = await ResolveImageAsync(post, ct);
                 var result = await _publisher.PublishAsync(
-                    new LinkedInPost(page!, post.EffectiveText, post.ImageRef, post.TagList), ct);
+                    new LinkedInPost(page!, post.EffectiveText, post.ImageRef, post.TagList,
+                        imageBytes, imageAlt), ct);
 
                 if (result.Published)
                 {
@@ -157,9 +245,62 @@ public sealed class SoMeDispatchService
             }
         }
 
-        var msg = $"Dispatch complete: {published} published, {failed} failed, {preAlerts} pre-alert(s) sent.";
+        var msg = $"Dispatch complete: {published} published, {failed} failed, "
+                  + (withdrawn > 0 ? $"{withdrawn} withdrawn (subject gone), " : string.Empty)
+                  + $"{preAlerts} pre-alert(s) sent.";
         _log?.LogInformation("SoMeDispatch: event {EventId} — {Message}", eventId, msg);
         return new SoMeDispatchResult(published, failed, 0, preAlerts, msg);
+    }
+
+    /// <summary>
+    /// §329 — is this queued post's SUBJECT still real and still coming? Returns a
+    /// human-readable reason when it is not, or null when the post is safe to publish.
+    ///
+    /// <para>Checked at publish time, not compose time, because that is the only moment
+    /// that matters: a LinkedIn post can be deleted afterwards but never unsent, so
+    /// announcing a withdrawn speaker is not recoverable by an organizer noticing later.</para>
+    ///
+    /// <para>Only the links the post actually carries are checked — a post with no
+    /// participant, session or company (a plain announcement) is always valid. Each check
+    /// is deliberately narrow: <b>absence</b> or an explicit <b>withdrawal</b>, never a
+    /// heuristic, so a normal post is never silently suppressed.</para>
+    /// </summary>
+    private async Task<string?> RevalidateSubjectAsync(SoMePost post, CancellationToken ct)
+    {
+        if (post.ParticipantId is int pid)
+        {
+            var p = await _db.Participants.AsNoTracking()
+                .Where(x => x.Id == pid)
+                .Select(x => new { x.IsActive, x.FullName })
+                .FirstOrDefaultAsync(ct);
+
+            if (p is null) return $"participant {pid} no longer exists";
+            if (!p.IsActive)
+                return $"{(string.IsNullOrWhiteSpace(p.FullName) ? $"participant {pid}" : p.FullName)} "
+                       + "is no longer active (withdrawn)";
+        }
+
+        if (post.SessionId is int sid)
+        {
+            var exists = await _db.Sessions.AsNoTracking().AnyAsync(s => s.Id == sid, ct);
+            if (!exists) return $"session {sid} no longer exists";
+        }
+
+        if (!string.IsNullOrWhiteSpace(post.SponsorCompanyId))
+        {
+            // §253 G8b: a withdrawn company stops being a sponsor — do not announce it.
+            var company = await _db.SponsorInfos.AsNoTracking()
+                .Where(s => s.EventId == post.EventId
+                            && s.SponsorCompanyId == post.SponsorCompanyId)
+                .Select(s => new { s.Status })
+                .FirstOrDefaultAsync(ct);
+
+            if (company is null) return $"sponsor company '{post.SponsorCompanyId}' no longer exists";
+            if (company.Status != SponsorStatus.Active)
+                return $"sponsor company '{post.SponsorCompanyId}' is {company.Status} (withdrawn)";
+        }
+
+        return null;
     }
 
     /// <summary>
@@ -171,8 +312,18 @@ public sealed class SoMeDispatchService
     private async Task<int> SendSpeakerPreAlertsAsync(
         int eventId, SoMeSettings? settings, DateTimeOffset now, CancellationToken ct)
     {
-        var organizer = settings?.SpeakerPreAlertOrganizerEmail;
-        if (string.IsNullOrWhiteSpace(organizer)) return 0;  // no designated organizer => no pre-alert
+        // §707.27 C1 (operator 2026-07-30: *"some-speaker-prealert MUST GO TO info@expertslive.dk"*).
+        // 🔒 The recipient is the edition's ORGANIZER INBOX, not one designated person. The per-edition
+        // override remains for an edition that really does route this elsewhere, but an EMPTY override
+        // no longer means "send nothing": this is a time-critical ops alert with a ~5 minute window, and
+        // silently not sending it is the worst of the three outcomes.
+        var organizer = FirstNonBlank(
+            settings?.SpeakerPreAlertOrganizerEmail,
+            _emailOptions?.Value.OrganizerInbox,
+            _emailOptions?.Value.FromAddress);
+        if (string.IsNullOrWhiteSpace(organizer)) return 0;  // nothing configured at all => no pre-alert
+
+        var eventName = await EventDisplayNameAsync(eventId, ct);
 
         var window = now.Add(PreAlertLeadTime);
         var soon = await _db.SoMePosts
@@ -188,7 +339,11 @@ public sealed class SoMeDispatchService
         int sent = 0;
         foreach (var post in soon)
         {
-            var subject = "[SoMe] Speaker post publishes in ~5 min — insert the LinkedIn handle";
+            // §707.27 C3 — the EVENT NAME, not "[SoMe]". 🔒 Kept in step with
+            // `EmailTemplateCatalog.InlineSubjects` in the same commit: the Settings page reads the
+            // catalog, so changing one alone makes that row lie about what actually goes out.
+            var subject = WithEventPrefix(
+                eventName, "Speaker post publishes in ~5 min — insert the LinkedIn handle");
             var body =
                 "<p>A scheduled LinkedIn company-page post for a speaker is about to publish "
                 + $"(at {post.ScheduledAtUtc:u}).</p>"
@@ -198,7 +353,12 @@ public sealed class SoMeDispatchService
 
             try
             {
-                using (_emailContext?.Set(new EmailContext(PreAlertCategory, eventId)))
+                // §326ca — RING-EXEMPT, stated explicitly. Goes to ONE designated ORGANIZER
+                // (SoMeSettings.SpeakerPreAlertOrganizerEmail), never a participant, and it
+                // is time-critical: ~5 minutes to paste the speaker's handle before the post
+                // goes live. An ops alert must not be silenceable by a participant rollout ring.
+                using (_emailContext?.Set(new EmailContext(
+                    PreAlertCategory, eventId, RingExempt: true)))
                 {
                     await _email.SendAsync(organizer!, subject, body, ct);
                 }
@@ -227,7 +387,10 @@ public sealed class SoMeDispatchService
         var recipients = settings.NotificationEmailList;
         if (recipients.Count == 0) return;
 
-        var subject = "[SoMe] A LinkedIn company-page post was published";
+        // §707.27 C3 — the EVENT NAME, not "[SoMe]" (see the pre-alert above; the catalog's
+        // InlineSubjects entry moves with it).
+        var subject = WithEventPrefix(
+            await EventDisplayNameAsync(eventId, ct), "A LinkedIn company-page post was published");
         var body =
             "<p>A scheduled LinkedIn company-page post has just been published.</p>"
             + $"<p><strong>Type:</strong> {post.Type}</p>"
@@ -237,7 +400,11 @@ public sealed class SoMeDispatchService
         {
             try
             {
-                using (_emailContext?.Set(new EmailContext(NotifyCategory, eventId)))
+                // §326ca — RING-EXEMPT, stated explicitly. Goes to the configured SoMe
+                // notification list (organizers), never a participant: it reports that a
+                // company-page post already went live. Same reasoning as the pre-alert above.
+                using (_emailContext?.Set(new EmailContext(
+                    NotifyCategory, eventId, RingExempt: true)))
                 {
                     await _email.SendAsync(to, subject, body, ct);
                 }

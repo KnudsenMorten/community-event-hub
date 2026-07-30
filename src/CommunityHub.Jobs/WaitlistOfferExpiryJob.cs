@@ -9,12 +9,16 @@ using Microsoft.Extensions.Logging;
 namespace CommunityHub.Jobs;
 
 /// <summary>
-/// Backstop for the Master Class waitlist OFFER hold (REQUIREMENTS §6). Held offers
-/// expire lazily on any attendee/organizer interaction; this job guarantees they
-/// also expire with no activity — an undecided offer past its window falls back to
-/// the operator default (auto-switch), freeing the old seat and promoting its
-/// waitlist. Any seat freed that way is notified via the ring-gated promotion email.
-/// Runs every 15 minutes.
+/// RETIRED (§252 gap audit F2, 2026-07-07). This job was the backstop for the
+/// Master Class waitlist OFFER hold (REQUIREMENTS §6) — but the <c>Offered</c>
+/// signup state is RESERVED/UNUSED: no code path ever assigns
+/// <c>Status = Offered</c> (only comparison reads exist), and the
+/// PromotionMode/OfferHoldHours settings have a save helper but no UI writes and
+/// no engine reads. Promotion happens directly; no offers ever occur, so the
+/// 15-minute timer polled for a state that cannot exist. The <c>[Function]</c>
+/// timer trigger has been REMOVED so the Functions host never discovers or
+/// schedules it — the class is kept compiling (and manually invokable) so the
+/// expiry path and its semantics remain intact if offers are ever introduced.
 /// </summary>
 public sealed class WaitlistOfferExpiryJob
 {
@@ -33,8 +37,10 @@ public sealed class WaitlistOfferExpiryJob
         _db = db; _svc = svc; _promo = promo; _config = config; _clock = clock; _log = log;
     }
 
-    [Function("WaitlistOfferExpiryJob")]
-    public async Task Run([TimerTrigger("0 */15 * * * *")] TimerInfo timer, CancellationToken ct)
+    // §252 F2: NO [Function]/[TimerTrigger] attribute — the job is retired and must
+    // never be scheduled (the Offered state it polls for is reserved/unused).
+    // (Was: every 15 minutes, "0 */15 * * * *".)
+    public async Task Run(TimerInfo timer, CancellationToken ct)
     {
         var promotions = await _svc.ExpireOffersAsync(_clock.GetUtcNow(), eventId: null, ct);
         if (promotions.Count == 0) return;
@@ -46,7 +52,7 @@ public sealed class WaitlistOfferExpiryJob
         foreach (var p in promotions)
         {
             if (p.PromotedSignupId is not int id) continue;
-            try { if (await _promo.SendPromotionAsync(id, baseUrl, ct)) sent++; } catch { /* retryable next run */ }
+            try { if (await _promo.SendPromotionAsync(id, baseUrl, ct, p.ReleasedTitle)) sent++; } catch { /* retryable next run */ }
         }
         _log.LogInformation(
             "WaitlistOfferExpiryJob: {Expired} offer(s) expired/auto-switched, {Sent} promotion email(s) sent.",

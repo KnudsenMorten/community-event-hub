@@ -122,8 +122,10 @@ public class AttendeeTicketSyncServiceTests
         await mcSvc.SignUpAsync(ev, waiter, mc);                    // waitlisted
         var sync = new AttendeeTicketSyncService(db, mcSvc);
 
-        // Pull no longer contains T1 (cancelled); T2 still present.
+        // §326as: Zoho KEEPS a cancelled ticket in the feed and marks it "not_attending" —
+        // T1 is present-but-cancelled, T2 unchanged.
         var r = await sync.SyncAsync(ev, new[] {
+            new TR("T1", "H", "H", "h@x.dk", TicketStatus.TwoDay, "2-day", CancelledUpstream: true),
             new TR("T2", "W", "W", "w@x.dk", TicketStatus.TwoDay, "2-day"),
         });
 
@@ -133,6 +135,52 @@ public class AttendeeTicketSyncServiceTests
         var wSig = db.MasterClassSignups.Single(s => s.AttendeeId == waiter);
         Assert.Equal(MasterClassSignupStatus.Confirmed, wSig.Status);
         Assert.NotEmpty(r.FreedPromotions);
+    }
+
+    // --- §234 5: one email may hold SEVERAL tickets (non-unique (EventId, Email)) ---
+
+    [Fact]
+    public async Task Two_tickets_sharing_one_email_sync_without_throwing()
+    {
+        // Zoho legitimately allows ONE email to hold TWO tickets. The old unique
+        // (EventId, Email) index made SaveChanges throw here and killed the ENTIRE
+        // reconcile run — the sync must complete and mirror both rows.
+        using var db = ScenarioFixture.NewDb();
+        var (ev, _) = await SeedAsync(db, 5);
+        var sync = new AttendeeTicketSyncService(db, new MasterClassSignupService(db));
+
+        var r = await sync.SyncAsync(ev, new[] {
+            new TR("T1", "Same", "Person", "same@x.dk", TicketStatus.TwoDay, "2-day"),
+            new TR("T2", "Same", "Person", "same@x.dk", TicketStatus.Other, "1-day"),
+        });
+
+        Assert.Equal(2, r.Created);
+        Assert.Equal(2, db.Attendees.Count(a => a.EventId == ev && a.Email == "same@x.dk"));
+        Assert.Equal(2, r.AttendeesActive);
+    }
+
+    [Fact]
+    public async Task Reassignment_onto_an_email_that_already_holds_a_ticket_completes()
+    {
+        // T1 stays with a@x.dk; Zoho reassigns T2 (b@x.dk) to a@x.dk — the retarget
+        // lands on an email that ALREADY has a mirror row. Must not throw; both
+        // rows survive under the same email and the reassignment is reported.
+        using var db = ScenarioFixture.NewDb();
+        var (ev, _) = await SeedAsync(db, 5);
+        await SeedTicketAttendeeAsync(db, ev, "T1", "a@x.dk");
+        await SeedTicketAttendeeAsync(db, ev, "T2", "b@x.dk");
+        var sync = new AttendeeTicketSyncService(db, new MasterClassSignupService(db));
+
+        var r = await sync.SyncAsync(ev, new[] {
+            new TR("T1", "A", "A", "a@x.dk", TicketStatus.TwoDay, "2-day"),
+            new TR("T2", "A", "A", "a@x.dk", TicketStatus.TwoDay, "2-day"),
+        });
+
+        Assert.Equal(1, r.Reassigned);
+        Assert.Equal(0, r.Cancelled);
+        Assert.Equal(2, db.Attendees.Count(a => a.EventId == ev && a.Email == "a@x.dk"));
+        var re = Assert.Single(r.Reassignments);
+        Assert.Equal("a@x.dk", re.NewEmail);
     }
 
     // --- §125/§128 authoritative one-way mirror (orders + soft-cancel + reappear) ---
@@ -171,7 +219,7 @@ public class AttendeeTicketSyncServiceTests
     }
 
     [Fact]
-    public async Task Vanished_two_day_holder_is_soft_cancelled_keeps_row_and_releases_seat()
+    public async Task Not_attending_two_day_holder_is_soft_cancelled_keeps_row_and_releases_seat()
     {
         using var db = ScenarioFixture.NewDb();
         var (ev, mc) = await SeedAsync(db, 1);                       // capacity 1
@@ -182,9 +230,13 @@ public class AttendeeTicketSyncServiceTests
         await mcSvc.SignUpAsync(ev, waiter, mc);                     // waitlisted
         var sync = new AttendeeTicketSyncService(db, mcSvc);
 
-        // Pull no longer contains T1 (cancelled upstream); orders empty too.
+        // §326as: T1 is STILL IN THE PULL, flagged not_attending by Zoho itself.
         var r = await sync.SyncAsync(ev,
-            new[] { new TR("T2", "W", "W", "w@x.dk", TicketStatus.TwoDay, "2-day") },
+            new[]
+            {
+                new TR("T1", "H", "H", "h@x.dk", TicketStatus.TwoDay, "2-day", CancelledUpstream: true),
+                new TR("T2", "W", "W", "w@x.dk", TicketStatus.TwoDay, "2-day"),
+            },
             System.Array.Empty<OR>());
 
         Assert.Equal(1, r.Cancelled);
@@ -211,7 +263,10 @@ public class AttendeeTicketSyncServiceTests
         await sync.SyncAsync(ev,
             new[] { new TR("T1", "A", "A", "a@x.dk", TicketStatus.TwoDay, "2-day") },
             System.Array.Empty<OR>());
-        await sync.SyncAsync(ev, System.Array.Empty<TR>(), System.Array.Empty<OR>()); // vanish
+        // §326as: cancel by Zoho's own status, not by vanishing.
+        await sync.SyncAsync(ev,
+            new[] { new TR("T1", "A", "A", "a@x.dk", TicketStatus.TwoDay, "2-day", CancelledUpstream: true) },
+            System.Array.Empty<OR>());
         Assert.Equal(MirrorState.Cancelled, db.Attendees.Single(a => a.BackstageTicketId == "T1").MirrorState);
 
         var r = await sync.SyncAsync(ev,
@@ -225,7 +280,7 @@ public class AttendeeTicketSyncServiceTests
     }
 
     [Fact]
-    public async Task Order_vanished_from_pull_is_soft_cancelled()
+    public async Task Order_marked_cancelled_by_zoho_is_soft_cancelled()
     {
         using var db = ScenarioFixture.NewDb();
         var (ev, _) = await SeedAsync(db, 5);
@@ -234,12 +289,143 @@ public class AttendeeTicketSyncServiceTests
         await sync.SyncAsync(ev, System.Array.Empty<TR>(), new[] { Ord("O1") });
         Assert.Equal(MirrorState.Active, db.Orders.Single().MirrorState);
 
-        var r = await sync.SyncAsync(ev, System.Array.Empty<TR>(), System.Array.Empty<OR>());
+        // §326as: confirmed on real Zoho data — a cancelled order STAYS in the feed with
+        // status_string "cancelled" (vs "placed"). That string is the cancellation trigger.
+        var r = await sync.SyncAsync(ev, System.Array.Empty<TR>(),
+            new[] { Ord("O1") with { OrderStatus = "cancelled" } });
 
         Assert.Equal(1, r.OrdersCancelled);
         var o = db.Orders.Single();
         Assert.Equal(MirrorState.Cancelled, o.MirrorState);
         Assert.NotNull(o.CancelledAt);
+    }
+
+    // ---- §326as: ABSENCE IS NOT CANCELLATION ------------------------------------------
+    // The rule this replaces cost us the worst near-miss in the project: because
+    // ZohoClient's pager looked for an e-conomic-style "nextPage" that Zoho never returns,
+    // every read stopped after page 1 (500 attendees / 100 orders). Once ticket sales
+    // crossed a page, everyone beyond it would have looked "absent" and been cancelled —
+    // seats released, waitlist promotion mail sent, logins revoked. Verified against the
+    // real ELDK26 event: Zoho KEEPS cancelled tickets in the feed as "not_attending"
+    // (1158 attending / 46 not_attending of 1204), so absence NEVER meant cancellation.
+
+    [Fact]
+    public async Task Ticket_missing_from_the_pull_is_reported_but_NEVER_cancelled()
+    {
+        using var db = ScenarioFixture.NewDb();
+        var (ev, mc) = await SeedAsync(db, 5);
+        var holder = await SeedTicketAttendeeAsync(db, ev, "T1", "h@x.dk");
+        var mcSvc = new MasterClassSignupService(db);
+        await mcSvc.SignUpAsync(ev, holder, mc);
+        var sync = new AttendeeTicketSyncService(db, mcSvc);
+
+        // An EMPTY pull (a truncated read, a wrong event id, an API blip) must not touch
+        // a single row — it is reported for the operator instead.
+        var r = await sync.SyncAsync(ev, System.Array.Empty<TR>(), System.Array.Empty<OR>());
+
+        Assert.Equal(0, r.Cancelled);
+        Assert.Equal(1, r.AbsentNotCancelled);
+        var a = db.Attendees.Single();
+        Assert.Equal(MirrorState.Active, a.MirrorState);
+        Assert.Null(a.CancelledAt);
+        Assert.NotEmpty(db.MasterClassSignups.Where(s => s.AttendeeId == holder));   // seat KEPT
+        Assert.Empty(r.FreedPromotions);                                             // no waitlist mail
+    }
+
+    [Fact]
+    public async Task A_ticket_already_not_attending_when_first_seen_is_mirrored_cancelled_without_side_effects()
+    {
+        using var db = ScenarioFixture.NewDb();
+        var (ev, _) = await SeedAsync(db, 5);
+        var sync = new AttendeeTicketSyncService(db, new MasterClassSignupService(db));
+
+        var r = await sync.SyncAsync(ev,
+            new[] { new TR("T1", "A", "A", "a@x.dk", TicketStatus.TwoDay, "2-day", CancelledUpstream: true) },
+            System.Array.Empty<OR>());
+
+        // Created straight into the Cancelled state — never Active-then-cancelled, which
+        // would have released a seat it never held and mailed a waitlist it never blocked.
+        Assert.Equal(1, r.Created);
+        Assert.Equal(0, r.Cancelled);
+        var a = db.Attendees.Single();
+        Assert.Equal(MirrorState.Cancelled, a.MirrorState);
+        Assert.NotNull(a.CancelledAt);
+        Assert.Empty(r.FreedPromotions);
+    }
+
+    [Fact]
+    public async Task A_cancelled_ticket_staying_in_the_feed_does_not_look_like_a_repurchase()
+    {
+        using var db = ScenarioFixture.NewDb();
+        var (ev, _) = await SeedAsync(db, 5);
+        var sync = new AttendeeTicketSyncService(db, new MasterClassSignupService(db));
+        var live = new TR("T1", "A", "A", "a@x.dk", TicketStatus.TwoDay, "2-day");
+        var dead = live with { CancelledUpstream = true };
+
+        await sync.SyncAsync(ev, new[] { live }, System.Array.Empty<OR>());
+        await sync.SyncAsync(ev, new[] { dead }, System.Array.Empty<OR>());
+
+        // A cancelled ticket is present in EVERY later pull. Presence alone must not
+        // reactivate it, or the mirror would flap Cancelled→Active every 10 minutes and
+        // re-welcome the person on each cycle.
+        var again = await sync.SyncAsync(ev, new[] { dead }, System.Array.Empty<OR>());
+
+        Assert.Equal(0, again.Reactivated);
+        Assert.Equal(MirrorState.Cancelled, db.Attendees.Single().MirrorState);
+
+        // ...and a REAL re-purchase (Zoho says attending again) still restores them.
+        var back = await sync.SyncAsync(ev, new[] { live }, System.Array.Empty<OR>());
+        Assert.Equal(1, back.Reactivated);
+        Assert.Equal(MirrorState.Active, db.Attendees.Single().MirrorState);
+    }
+
+    [Fact]
+    public void Only_zohos_documented_status_strings_cancel()
+    {
+        // A WHITELIST on purpose: an unknown or new status must never be read as "cancel
+        // this person". Confirmed live — a Backstage "Refund in Progress" order still
+        // reports status_string "placed" and its attendee "attending", so an
+        // anything-but-placed rule would have cancelled a refund that never completed.
+        Assert.True(AttendeeTicketSyncService.IsCancelledTicketStatus("not_attending"));
+        Assert.True(AttendeeTicketSyncService.IsCancelledTicketStatus("  NOT_ATTENDING "));
+        Assert.False(AttendeeTicketSyncService.IsCancelledTicketStatus("attending"));
+        Assert.False(AttendeeTicketSyncService.IsCancelledTicketStatus("refund_in_progress"));
+        Assert.False(AttendeeTicketSyncService.IsCancelledTicketStatus(null));
+        Assert.False(AttendeeTicketSyncService.IsCancelledTicketStatus(""));
+
+        Assert.True(AttendeeTicketSyncService.IsCancelledOrderStatus("cancelled"));
+        Assert.True(AttendeeTicketSyncService.IsCancelledOrderStatus("Canceled"));
+        Assert.False(AttendeeTicketSyncService.IsCancelledOrderStatus("placed"));
+        Assert.False(AttendeeTicketSyncService.IsCancelledOrderStatus("refunded"));
+        Assert.False(AttendeeTicketSyncService.IsCancelledOrderStatus(null));
+    }
+
+    [Fact]
+    public void FromBackstage_reads_the_cancellation_from_zohos_status_string()
+    {
+        static CommunityHub.Core.Integrations.BackstageAttendee Ba(string? status) =>
+            new(TicketId: "T", OrderId: "O", Email: "x@x.dk", FirstName: "X", LastName: "Y",
+                TicketClassName: "2-day", Attending: status == "attending", CompanyName: null,
+                JobTitle: null, Phone: null, Country: null, CountryCode: null, City: null,
+                Postcode: null, TaxId: null, CustomFieldsJson: null, StatusString: status);
+
+        Assert.True(AttendeeTicketSyncService.FromBackstage(Ba("not_attending")).CancelledUpstream);
+        Assert.False(AttendeeTicketSyncService.FromBackstage(Ba("attending")).CancelledUpstream);
+        Assert.False(AttendeeTicketSyncService.FromBackstage(Ba(null)).CancelledUpstream);
+    }
+
+    [Fact]
+    public async Task Order_missing_from_the_pull_is_never_cancelled()
+    {
+        using var db = ScenarioFixture.NewDb();
+        var (ev, _) = await SeedAsync(db, 5);
+        var sync = new AttendeeTicketSyncService(db, new MasterClassSignupService(db));
+
+        await sync.SyncAsync(ev, System.Array.Empty<TR>(), new[] { Ord("O1") });
+        var r = await sync.SyncAsync(ev, System.Array.Empty<TR>(), System.Array.Empty<OR>());
+
+        Assert.Equal(0, r.OrdersCancelled);
+        Assert.Equal(MirrorState.Active, db.Orders.Single().MirrorState);
     }
 
     [Fact]

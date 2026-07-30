@@ -130,6 +130,31 @@ public sealed class VolunteerAvailabilityQueueTests
     }
 
     [Fact]
+    public async Task A_day_without_a_choice_is_rejected_and_nothing_is_saved()
+    {
+        // §234 UX: the radios render with NO pre-selected default, so the server must
+        // enforce the explicit choice (client `required` can be bypassed). A POST whose
+        // day carries no slot is rejected: nothing saved, nothing queued, error flash.
+        using var db = NewDb();
+        var vol = await SeedVolunteerAsync(db);
+        var http = new DefaultHttpContext { User = Session(vol) };
+
+        var model = NewModel(db, http);
+        model.Inputs = new List<AvailabilityModel.DayInput>
+        {
+            new() { Day = Day1, Slot = null, Note = "note without a choice" },
+        };
+        var result = await model.OnPostAsync(default);
+
+        Assert.IsType<RedirectToPageResult>(result);   // PRG with the error flash
+        Assert.Empty(db.VolunteerDayAvailabilities);
+        Assert.Empty(db.SyncDeltas);
+        Assert.True(model.Form.NoticeIsError);
+        Assert.Contains("choose", model.Form.Notice, StringComparison.OrdinalIgnoreCase);
+        Assert.False(model.ModelState.IsValid);
+    }
+
+    [Fact]
     public async Task Chosen_slot_persists_exclusively_and_reselects_on_load()
     {
         // Bug fix #1: the per-day options are radios sharing one name, so exactly ONE slot

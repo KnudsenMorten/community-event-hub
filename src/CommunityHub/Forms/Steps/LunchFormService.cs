@@ -19,10 +19,11 @@ public sealed class LunchFormModel
     // ----- editable (bound from the POST) --------------------------------
     public bool LunchEarlySetupDay { get; set; }
     public bool LunchSetupDay { get; set; }
-    // bool? so the required Yes/No radio is honored (operator §62): null = the
-    // person hasn't answered yet (rejected at post). The DB column
-    // LunchSignup.LunchPreDay stays a non-nullable bool — no migration.
-    public bool? LunchPreDay { get; set; }
+    // §178c: now a plain CHECKBOX like the setup-day lunches (operator wants ONE
+    // select/unselect style) — checked = yes, unchecked = no. The DB column
+    // LunchSignup.LunchPreDay is a non-nullable bool, so this round-trips with no
+    // migration. (Was a bool? Yes/No radio under the old §62 "must declare" rule.)
+    public bool LunchPreDay { get; set; }
     public string? Notes { get; set; }
 
     // ----- display-only (set by the service; never bound) -----------------
@@ -46,10 +47,20 @@ public sealed class LunchFormModel
     /// <summary>REQUIREMENTS §51 — when this signup was last saved (UpdatedAt); null = never.</summary>
     [BindNever] public DateTimeOffset? LastSavedAt { get; set; }
 
-    [BindNever] public string EarlySetupDayLabel { get; set; } = "Setup day (Sun)";
+    [BindNever] public string EarlySetupDayLabel { get; set; } = "Packing day (Sun)";
     [BindNever] public string SetupDayLabel { get; set; } = "Setup day (Mon)";
     [BindNever] public string PreDayLabel { get; set; } = "Pre-day (Master Class)";
     [BindNever] public string MainDayLabel { get; set; } = "main day";
+
+    // §178b: per-day availability gate. True when the person is explicitly marked
+    // UNAVAILABLE (VolunteerDayAvailability.Level == Unavailable) on that day — they
+    // are not on site, so they can't have lunch. The view dims + disables that day's
+    // checkbox; the service force-unchecks it on load and never persists a checked
+    // value for it. False (the default) when availability is not recorded or the day
+    // is available — never block in that case.
+    [BindNever] public bool EarlySetupDayUnavailable { get; set; }
+    [BindNever] public bool SetupDayUnavailable { get; set; }
+    [BindNever] public bool PreDayUnavailable { get; set; }
 
     /// <summary>Success message after a save (the standalone page surfaces it via the shared flash toast).</summary>
     [BindNever] public string? Message { get; set; }
@@ -127,18 +138,30 @@ public sealed class LunchFormService : IWizardFormService
             return false;
         }
 
-        var speakingPreDay = role == ParticipantRole.Speaker
-            && (await _db.SpeakerProfiles
-                    .Where(s => s.EventId == eventId && s.ParticipantId == participantId)
-                    .Select(s => (bool?)s.SpeakingPreDay)
-                    .FirstOrDefaultAsync(ct) ?? false);
-
-        model.PreDayAutoCounted = PreDayAutoCountedRole(role) || speakingPreDay;
+        // §294 (operator 2026-07-11): pre-day lunch is NOT gated and NOT auto-counted for
+        // speakers — ANY speaker can participate in the pre-day, but some arrive after lunch, so
+        // every speaker gets the opt-in checkbox and tells us if they're there. Only the always-
+        // on-site crew (Organizer/Media/EventPartner) are auto-counted (no checkbox). The old
+        // SpeakingPreDay flag is not populated from the schedule; master-class status is now
+        // validated by a real MasterClass session (see PresentsMasterClassAsync) and drives only
+        // the DEFAULT (checked) in LoadAsync, not visibility.
+        model.PreDayAutoCounted = PreDayAutoCountedRole(role);
         model.ShowPreDay = !model.PreDayAutoCounted
             && role is ParticipantRole.Speaker or ParticipantRole.Sponsor or ParticipantRole.Volunteer;
         model.ShowSetupDay = ShowSetupDayFor(role);
         return model.ShowPreDay || model.ShowSetupDay;
     }
+
+    /// <summary>
+    /// §294 — a "master class speaker" is validated by an ACTUAL <see cref="SessionType.MasterClass"/>
+    /// session they present (via <see cref="SessionSpeaker"/>), NOT the un-populated
+    /// <see cref="SpeakerProfile.SpeakingPreDay"/> flag. Such speakers default the pre-day lunch
+    /// checkbox to YES; every other speaker defaults to NO (opt-in).
+    /// </summary>
+    private Task<bool> PresentsMasterClassAsync(int eventId, int participantId, CancellationToken ct) =>
+        _db.Sessions.AnyAsync(s => s.EventId == eventId
+            && s.Type == SessionType.MasterClass
+            && s.SessionSpeakers.Any(ss => ss.ParticipantId == participantId), ct);
 
     /// <summary>Relevance gate (REQUIREMENTS §148) — true when at least one lunch day applies to
     /// this participant. False (no applicable day / MC auto-counted) skips the inline step.</summary>
@@ -170,7 +193,7 @@ public sealed class LunchFormService : IWizardFormService
             return model;
         }
 
-        await ResolveDayLabelsAsync(model, eventId, ct);
+        await ResolveDayLabelsAsync(model, eventId, participantId, ct);
 
         // Make sure the "complete the lunch form" task exists on first visit so it shows
         // up under My tasks even before the form is filled in.
@@ -186,16 +209,31 @@ public sealed class LunchFormService : IWizardFormService
             model.Notes = existing.Notes;
             model.LastSavedAt = existing.UpdatedAt;
         }
+        else if (model.ShowPreDay && role == ParticipantRole.Speaker)
+        {
+            // §294: no prior answer yet — a MASTER-CLASS speaker defaults to YES for the pre-day
+            // lunch (they're on-site for their master class); every other speaker defaults to NO
+            // and opts in. Validated by a real MasterClass session, not the SpeakingPreDay flag.
+            model.LunchPreDay = await PresentsMasterClassAsync(eventId, participantId, ct);
+        }
+
+        // §178b: a day the person is no longer available on shows UNCHECKED (and the
+        // view disables it) even if a stale Yes was saved before their availability
+        // changed — you can't have lunch on a day you're not on site.
+        if (model.EarlySetupDayUnavailable) model.LunchEarlySetupDay = false;
+        if (model.SetupDayUnavailable)      model.LunchSetupDay = false;
+        if (model.PreDayUnavailable)        model.LunchPreDay = false;
         return model;
     }
 
     /// <summary>
-    /// Validate + persist + run all side-effects (REQUIREMENTS §148) — the SAME logic the
-    /// standalone page's OnPost ran. Visibility/relevance is RE-DERIVED from the DB here, so
-    /// a crafted POST can never bypass it. Returns <see cref="WizardStepOutcome.NotRelevant"/>
-    /// when no day applies, <see cref="WizardStepOutcome.Invalid"/> when the required pre-day
-    /// answer is missing (field error in <paramref name="modelState"/>), otherwise upserts the
-    /// signup, marks the auto-task done, and returns <see cref="WizardStepOutcome.Advance"/>.
+    /// Persist + run all side-effects (REQUIREMENTS §148) — the SAME logic the standalone
+    /// page's OnPost ran. Visibility/relevance is RE-DERIVED from the DB here, so a crafted
+    /// POST can never bypass it. Returns <see cref="WizardStepOutcome.NotRelevant"/> when no
+    /// day applies; otherwise upserts the signup (every day is a checkbox now — §178c — so
+    /// there is always a definite Yes/No, no required-answer rejection), marks the auto-task
+    /// done, and returns <see cref="WizardStepOutcome.Advance"/>. <paramref name="modelState"/>
+    /// is retained for parity with the other wizard form services.
     /// </summary>
     public async Task<WizardStepOutcome> SaveAsync(
         LunchFormModel model, int eventId, int participantId, string fullName, string email,
@@ -212,17 +250,11 @@ public sealed class LunchFormService : IWizardFormService
             return WizardStepOutcome.NotRelevant;
         }
 
-        await ResolveDayLabelsAsync(model, eventId, ct);
+        await ResolveDayLabelsAsync(model, eventId, participantId, ct);
 
-        // The PRE-DAY lunch is a REQUIRED Yes/No choice for the "must declare" group
-        // (operator §62): submit must record an explicit answer so the headcount and task
-        // completion are meaningful. Re-render with the field error when no radio was
-        // picked; nothing is persisted.
-        if (model.ShowPreDay && model.LunchPreDay is null)
-        {
-            modelState.AddModelError(nameof(model.LunchPreDay), _loc["Lunch.ErrPickPreDay"]);
-            return WizardStepOutcome.Invalid;
-        }
+        // §178c: the pre-day lunch is now a CHECKBOX (checked = yes, unchecked = no), so
+        // there is always a definite answer — no "you must pick" validation is needed
+        // (it dropped with the Yes/No radio).
 
         var signup = await _db.LunchSignups.FirstOrDefaultAsync(
             l => l.EventId == eventId && l.ParticipantId == participantId, ct);
@@ -244,12 +276,14 @@ public sealed class LunchFormService : IWizardFormService
         }
 
         // Setup-day values only persist for on-site crew (defensive against tampering).
-        signup.LunchEarlySetupDay = model.ShowSetupDay && model.LunchEarlySetupDay;
-        signup.LunchSetupDay = model.ShowSetupDay && model.LunchSetupDay;
+        // §178b: a day the person is marked Unavailable on can never be saved as a Yes,
+        // even from a crafted POST (the view disables it; this is the server guard).
+        signup.LunchEarlySetupDay = model.ShowSetupDay && model.LunchEarlySetupDay && !model.EarlySetupDayUnavailable;
+        signup.LunchSetupDay = model.ShowSetupDay && model.LunchSetupDay && !model.SetupDayUnavailable;
         // Pre-day only persists for the "must declare" group; auto-counted roles never set
-        // it (it's added automatically in the organizer report). The choice is validated
-        // above, so for that group LunchPreDay is non-null: Yes => true, No => false.
-        signup.LunchPreDay = model.ShowPreDay && model.LunchPreDay == true;
+        // it (it's added automatically in the organizer report). §178c: it's a checkbox now,
+        // so checked => true, unchecked => false.
+        signup.LunchPreDay = model.ShowPreDay && model.LunchPreDay && !model.PreDayUnavailable;
         signup.Notes = model.Notes;
 
         await _db.SaveChangesAsync(ct);
@@ -281,7 +315,7 @@ public sealed class LunchFormService : IWizardFormService
             AssignedParticipantId = participantId,
             Title = "Complete the Lunch logistics form",
             Description = "Tell us which lunches you'll join (Pre-day / Master Class -- " +
-                          "plus Setup day if you're a volunteer or organizer). " +
+                          "plus the Packing/Setup days if your role helps before the event). " +
                           "Saving the form marks this task Done.",
             DueDate = due,
             State = TaskState.Open,
@@ -305,11 +339,13 @@ public sealed class LunchFormService : IWizardFormService
     }
 
     /// <summary>
-    /// Resolve display labels for Setup-day and Pre-day from the Event row. The conference
-    /// StartDate IS the pre-day / Master Class day; the two days before it are setup days.
-    /// The EndDate is the main day -- its lunch is booked for everyone, so it's a note.
+    /// Resolve display labels for Setup-day and Pre-day from the Event row, plus the
+    /// per-day availability gate (§178b). The conference StartDate IS the pre-day /
+    /// Master Class day; the day before it is the setup day, and the day before THAT is
+    /// the packing day (§178a — that Sunday is for packing, not setup). The EndDate is
+    /// the main day -- its lunch is booked for everyone, so it's a note.
     /// </summary>
-    private async Task ResolveDayLabelsAsync(LunchFormModel model, int eventId, CancellationToken ct)
+    private async Task ResolveDayLabelsAsync(LunchFormModel model, int eventId, int participantId, CancellationToken ct)
     {
         var evt = await _db.Events
             .Where(e => e.Id == eventId)
@@ -321,9 +357,24 @@ public sealed class LunchFormService : IWizardFormService
         var setupDay      = evt.StartDate.AddDays(-1);
         var earlySetupDay = evt.StartDate.AddDays(-2);
 
-        model.EarlySetupDayLabel = $"Setup day ({earlySetupDay:dddd, MMM d yyyy})";
+        // §178a: the earliest day (Sunday) is the PACKING day, not a setup day.
+        model.EarlySetupDayLabel = $"Packing day ({earlySetupDay:dddd, MMM d yyyy})";
         model.SetupDayLabel      = $"Setup day ({setupDay:dddd, MMM d yyyy})";
         model.PreDayLabel        = $"Pre-day / Master Class ({preDay:dddd, MMM d yyyy})";
         model.MainDayLabel       = $"{evt.EndDate:dddd, MMM d yyyy}";
+
+        // §178b: a lunch day is gated off only when the person is EXPLICITLY marked
+        // Unavailable (absent) on it — the same per-day signal volunteer scheduling
+        // uses. Missing rows (availability never recorded) leave every day enabled, so
+        // we only ever DISABLE on a positive "not on site" signal — we never block by
+        // default.
+        var unavailableDays = await _db.VolunteerDayAvailabilities
+            .Where(a => a.EventId == eventId && a.ParticipantId == participantId
+                        && a.Level == VolunteerAvailabilityLevel.Unavailable)
+            .Select(a => a.Day)
+            .ToListAsync(ct);
+        model.EarlySetupDayUnavailable = unavailableDays.Contains(earlySetupDay);
+        model.SetupDayUnavailable      = unavailableDays.Contains(setupDay);
+        model.PreDayUnavailable        = unavailableDays.Contains(preDay);
     }
 }

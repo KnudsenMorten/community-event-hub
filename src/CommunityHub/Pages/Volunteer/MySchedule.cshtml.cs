@@ -31,7 +31,7 @@ public class MyScheduleModel : PageModel
     private readonly VolunteerStructureService _svc;
     private readonly VolunteerShiftService _shifts;
     private readonly VolunteerHelpNotificationService _helpNotify;
-    private readonly ParticipantCalendarBuilder _calendarBuilder;
+    private readonly CalendarInviteEmailService _calendarInvite;
     private readonly ILogger<MyScheduleModel> _logger;
 
     public MyScheduleModel(
@@ -41,7 +41,7 @@ public class MyScheduleModel : PageModel
         VolunteerStructureService svc,
         VolunteerShiftService shifts,
         VolunteerHelpNotificationService helpNotify,
-        ParticipantCalendarBuilder calendarBuilder,
+        CalendarInviteEmailService calendarInvite,
         ILogger<MyScheduleModel> logger)
     {
         _db = db;
@@ -50,7 +50,7 @@ public class MyScheduleModel : PageModel
         _svc = svc;
         _shifts = shifts;
         _helpNotify = helpNotify;
-        _calendarBuilder = calendarBuilder;
+        _calendarInvite = calendarInvite;
         _logger = logger;
     }
 
@@ -164,21 +164,71 @@ public class MyScheduleModel : PageModel
     }
 
     /// <summary>
-    /// Download a single assigned volunteer task as an .ics (same stable UID
-    /// voltask:{id} as the personal feed, so a later subscribe never duplicates).
-    /// Scoped to the signed-in volunteer's own assigned task.
+    /// §193 "Add Reminder": e-mail the signed-in volunteer a calendar INVITATION
+    /// for one assigned task's due date (replacing the old "Download .ics"). Scoped
+    /// to the volunteer's own assigned, non-cancelled, dated task; the invite goes
+    /// to their chosen calendar / override e-mail. Stable UID so a re-send updates.
     /// </summary>
-    public async Task<IActionResult> OnGetCalendarItemAsync(int taskId, CancellationToken ct)
+    public async Task<IActionResult> OnPostAddReminderAsync(int taskId, CancellationToken ct)
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
 
         var host = Request.Host.Value ?? "communityhub";
-        var ics = await _calendarBuilder.BuildSingleVolunteerTaskAsync(me.ParticipantId, taskId, host, ct);
-        if (ics is null) return NotFound();
+        var assigned = await _db.VolunteerTaskAssignments
+            .AsNoTracking()
+            .AnyAsync(a => a.EventId == me.EventId
+                           && a.ParticipantId == me.ParticipantId
+                           && a.TaskId == taskId, ct);
+        var task = assigned
+            ? await _db.VolunteerTasks
+                .AsNoTracking()
+                .Where(t => t.Id == taskId
+                            && t.EventId == me.EventId
+                            && t.DueDate != null
+                            && t.Status != VolunteerTaskStatus.Cancelled)
+                .Select(t => new { t.Id, t.Title, t.Shift, t.TimeEnd, t.DueDate })
+                .FirstOrDefaultAsync(ct)
+            : null;
 
-        // Inline (no filename) so it opens in the calendar app rather than downloading.
-        return File(System.Text.Encoding.UTF8.GetBytes(ics), "text/calendar; charset=utf-8");
+        if (task is null || task.DueDate is null)
+        {
+            Notice = "That shift could not be found.";
+            return RedirectToPage();
+        }
+
+        var start = new DateTimeOffset(task.DueDate.Value.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
+        var when = string.IsNullOrWhiteSpace(task.Shift)
+            ? "Volunteer task."
+            : string.IsNullOrWhiteSpace(task.TimeEnd)
+                ? $"Volunteer task. When: {task.Shift}"
+                : $"Volunteer task. When: {task.Shift}-{task.TimeEnd}";
+
+        try
+        {
+            var sent = await _calendarInvite.SendItemInviteAsync(
+                me.ParticipantId,
+                uid: $"voltask-{task.Id}@{host}",
+                summary: $"Volunteer: {task.Title}",
+                description: when,
+                location: null,
+                start: start,
+                end: start.AddDays(1),
+                allDay: true,
+                fileName: "reminder.ics",
+                introHtml: $"Here is a reminder for your volunteer task <strong>{System.Net.WebUtility.HtmlEncode(task.Title)}</strong>.",
+                ct: ct);
+            Notice = sent
+                ? sent.Confirmation("Reminder")
+                : "Calendar invitations are turned off for this event.";
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Add Reminder failed for volunteer task {TaskId}", taskId);
+            Notice = "We couldn't send that reminder just now — please try again.";
+        }
+
+        return RedirectToPage();
     }
 
     private async Task LoadAsync(CurrentParticipant me, CancellationToken ct)

@@ -41,48 +41,56 @@
             <tr>
                 <td>@m.Title</td>
                 <td>
-                    <form method="post" asp-page-handler="Capacity" style="display:flex;gap:6px;align-items:center;">
+                    @* §326ba: min="1" — 0 is a typo, not "unlimited". Clearing the field IS
+                       how you say unlimited, and that now asks for confirmation, because an
+                       uncapped class lets every claim through and drains the whole waitlist
+                       into the room (mailing all of them) on the very next save. *@
+                    <form method="post" asp-page-handler="Capacity" style="display:flex;gap:6px;align-items:center;"
+                          onsubmit="var v=this.capacity.value.trim();
+                                    if (v === '') { return confirm('Leaving capacity EMPTY makes @m.Title UNLIMITED — every waitlisted attendee is promoted into it immediately and e-mailed. Continue?'); }
+                                    return true;">
                         <input type="hidden" name="session" value="@m.SessionId" />
-                        <input type="number" name="capacity" min="0" value="@(m.Capacity?.ToString() ?? "")" placeholder="none" />
+                        <input type="number" name="capacity" min="1" value="@(m.Capacity?.ToString() ?? "")"
+                               placeholder="none" title="Number of seats. Leave empty for no limit (needs a typed confirmation); 0 is rejected." />
+                        @* §339: the confirm() above is a convenience, not the gate — with JS off it
+                           does nothing at all. The SERVER now requires this typed word before it
+                           will accept an EMPTY capacity, which is the change that promotes and
+                           mass-mails the whole waitlist. Setting a number saves exactly as before. *@
+                        <input type="text" name="confirmPhrase" placeholder="type CONFIRM to unlimit"
+                               autocomplete="off" style="width:190px;"
+                               title="Only required when you leave capacity EMPTY (unlimited)." />
                         <button type="submit">Save</button>
                     </form>
                 </td>
                 <td>@m.Confirmed@(m.Capacity is int c ? $"/{c}" : "")</td>
                 <td>@m.Waitlisted</td>
-                <td><a asp-page="/Organizer/MasterClasses" asp-route-session="@m.SessionId">View roster &rarr;</a></td>
+                <td><a asp-page="/Organizer/MasterClasses" asp-route-session="@m.SessionId">View registrations &rarr;</a></td>
             </tr>
         }
         @if (Model.MasterClasses.Count == 0)
         {
-            <tr><td colspan="5" style="color:#6b7280;">No Master Class sessions yet — create the standard set below, or import them.</td></tr>
+            <tr><td colspan="5" style="color:#6b7280;">No Master Class sessions yet — import them from Sessionize or add them on the Sessions page.</td></tr>
         }
         </tbody>
     </table>
-    <form method="post" asp-page-handler="Seed" style="margin-top:10px;">
-        <button type="submit">Create the 8 standard ELDK27 master classes</button>
-    </form>
+    @* §274: the "Create the 8 standard ELDK27 master classes" seeding button was removed
+       (operator 2026-07-10) — it created hard-coded test master classes, wrong alongside the
+       real Sessionize-imported sessions. Master classes come from Sessionize or the Sessions page. *@
 </div>
 
-<div class="card">
-    <h2 style="margin-top:0;">Master Class selection invites</h2>
-    <p style="color:#6b7280;">Email 2-day-ticket attendees the "Action required: choose your Master Class" invite
-       (secure self-service link, tracked per person). Waitlist rule: when a seat frees, the next person's
-       current Master Class is automatically cancelled and replaced by the waitlisted one (they accept this when
-       they join the waitlist).</p>
-    <p>
-        <strong>@Model.InviteEligible</strong> eligible (2-day) ·
-        <strong>@Model.InviteSent</strong> invited ·
-        <strong>@Model.InviteNotSent</strong> not yet invited
-    </p>
-    <form method="post" asp-page-handler="SendInvites" onsubmit="return confirm('Send the selection invite to all not-yet-invited 2-day attendees?');">
-        <button type="submit" @(Model.InviteNotSent == 0 ? "disabled" : "")>Send invites to @Model.InviteNotSent attendee(s)</button>
-    </form>
-</div>
+@* §326bl (operator 2026-07-25): the "Master Class selection invites" card was REMOVED.
+   Sending the invite is not a manual step — AttendeeBackstageSyncJob sends it automatically
+   to each eligible 2-day attendee as they are mirrored, stamping
+   Attendee.MasterClassInviteSentAt so nobody is invited twice. The bulk button only
+   duplicated the job and put a mass-send one click away. The send path itself
+   (MasterClassEmailService.SendSelectionInviteAsync) is untouched and still used by the job. *@
 
 @if (Model.SelectedSession is not null)
 {
     <div class="card">
-        <h2 style="margin-top:0;">Roster — @Model.SelectedTitle</h2>
+        @* §388 (operator 2026-07-26: "look for any references to 'Roster' on the organizer pages
+           and change to Registrations - we dont understand that word"). *@
+        <h2 style="margin-top:0;">Registrations — @Model.SelectedTitle</h2>
 
         @if (Model.Offered.Count > 0)
         {

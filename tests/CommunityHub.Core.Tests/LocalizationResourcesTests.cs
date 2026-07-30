@@ -110,7 +110,7 @@ public sealed class LocalizationResourcesTests
             "Lead.Title", "SponsorTasks.Title", "TaskRow.MarkComplete", "Attendee.Title",
             "Nav.OrgArea", "Nav.OrgAttendees", "Nav.OrgLunch",
             "Sessions.Delete", "Sessions.BulkDelete", "Speakers.Remove",
-            "SponsorFacts.Delete", "Find.Title", "Exports.Title",
+            "SponsorFacts.Delete", "Exports.Title",
             "Comms.CockpitIntro", "Settings.Title", "OrgSurveys.Title",
             // Public site
             "Agenda.Title", "SessOv.Title", "MC.BeforeYouArrive",
@@ -141,7 +141,7 @@ public sealed class LocalizationResourcesTests
             "VolWiz.StepOf", "Attendee.Reserved", "Results.NResponses",
             "Survey.JsPickMore", "Welcome.Heading", "Welcome.RoleIntro",
             "Welcome.Countdown", "Welcome.WhatBody", "Onboard.StepBio", "Onboard.StepSwag",
-            "Find.Found", "Sessions.BulkDeleteConfirmBody", "Speakers.BulkRemoveConfirmBody",
+            "Sessions.BulkDeleteConfirmBody", "Speakers.BulkRemoveConfirmBody",
             "OnbExport.PendingCount", "OnbReopen.Intro", "OnbReopen.Confirm",
             "ReqChange.Intro", "ReqChange.MessageLabel", "Agenda.UnscheduledNote",
             "SpeakerQ.OpenCount", "Plan.SavedCount", "Plan.RoomTag",
@@ -206,6 +206,22 @@ public sealed class LocalizationResourcesTests
             Assert.Contains("{1}", WithCulture(culture, () => loc["Action.Sent"].Value));
             Assert.Contains("{1}", WithCulture(culture, () => loc["Action.Provisioned"].Value));
         }
+    }
+
+    [Fact]
+    public void Survey_results_section_labels_have_no_step_numbers()
+    {
+        // §184a: the survey-results section headers must NOT carry "(step N)" suffixes
+        // ("Track popularity (step 1)" / "Self-assessed level (step 3)") — plain labels only.
+        var loc = MakeLocalizer();
+
+        var trackPop = WithCulture("en", () => loc["Results.TrackPopularity"].Value);
+        var selfLevel = WithCulture("en", () => loc["Results.SelfLevel"].Value);
+
+        Assert.Equal("Track popularity", trackPop);
+        Assert.Equal("Self-assessed level", selfLevel);
+        Assert.DoesNotContain("step", trackPop, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("step", selfLevel, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

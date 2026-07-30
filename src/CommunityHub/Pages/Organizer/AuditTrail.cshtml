@@ -91,7 +91,20 @@
                                     <span style="color:#92400e;font-size:11px;"> (as @r.OnBehalfOf)</span>
                                 }
                             </td>
-                            <td style="padding:6px 8px;">@r.Summary</td>
+                            <td style="padding:6px 8px;">
+                                @r.Summary
+                                @* §331: Detail carries what a destructive action DESTROYED (e.g. which
+                                   volunteer shifts a deactivation vacated — those rows are hard-deleted
+                                   and never restored, so this is the only surviving record). Collapsed
+                                   so the grid stays scannable; opened on demand. *@
+                                @if (!string.IsNullOrWhiteSpace(r.Detail))
+                                {
+                                    <details style="margin-top:4px;">
+                                        <summary style="cursor:pointer;color:#1d4ed8;font-size:11.5px;">Details</summary>
+                                        <div style="margin-top:4px;font-size:11.5px;color:#334155;white-space:pre-wrap;word-break:break-word;">@r.Detail</div>
+                                    </details>
+                                }
+                            </td>
                             <td style="padding:6px 8px;">
                                 @{
                                     var (bg, fg) = r.Outcome switch

@@ -44,6 +44,19 @@ public sealed class SponsorTaskDefinition
     /// </summary>
     [JsonPropertyName("upload")]
     public SponsorTaskUploadDefinition? Upload { get; set; }
+
+    /// <summary>
+    /// §648 — the wizard step key that COMPLETES this task, e.g. <c>"session"</c>. When set, the
+    /// task shows a button straight into <c>/Forms/Wizard?step=…</c> instead of asking the sponsor
+    /// to e-mail something in.
+    /// </summary>
+    /// <remarks>
+    /// The form is the SAME one the Get Started wizard uses — not a copy. That is the point: a
+    /// second form would drift from the first, and §537's complaint was that the e-mail route
+    /// validates nothing, lands nowhere, and makes somebody retype it all.
+    /// </remarks>
+    [JsonPropertyName("form")]
+    public string? Form { get; set; }
 }
 
 /// <summary>
@@ -145,6 +158,25 @@ public sealed class BoothWallSpecTier
     /// </summary>
     [JsonPropertyName("furnitureSpec")]
     public string FurnitureSpec { get; set; } = string.Empty;
+
+    /// <summary>
+    /// §690 — how many booth members this tier's contract INCLUDES.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-07-29: <i>"this is optional outside of the agreed booth members count per
+    /// contract. feature/gold = 2, diamond = 4, platinum = 6"</i>. Extra staff tickets are the
+    /// EXCEPTION, bought only beyond this allowance — the task used to show the extra-purchase block
+    /// with no allowance beside it, so buying extras read as something every sponsor had to do.</para>
+    ///
+    /// <para>🔒 <b>Config, not code.</b> It is a COMMERCIAL TERM that changes per edition, so it sits
+    /// with the other per-tier commercial values (coupon, wall size, furniture spec).</para>
+    ///
+    /// <para>🔒 <b>0 means NOT STATED, and the UI omits the line rather than claiming "0
+    /// included".</b> Absent is not zero — the same distinction §555 turns on everywhere else in
+    /// this codebase.</para>
+    /// </remarks>
+    [JsonPropertyName("boothMembersIncluded")]
+    public int BoothMembersIncluded { get; set; }
 }
 
 /// <summary>Parsed <c>boothWallSpecs</c> section.</summary>

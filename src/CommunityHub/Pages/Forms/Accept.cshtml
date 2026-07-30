@@ -16,7 +16,8 @@
     {
         @* The shared partial renders the policy links + read-only acceptance confirmation. *@
         <partial name="_AcceptFields" model="Model.Form" />
-        <p><a asp-page="/Index">Back to hub</a></p>
+        @* §260: return to Get-Started when the person came from the wizard. *@
+        <partial name="_WizardBackLink" />
     }
     else
     {
@@ -25,6 +26,7 @@
             <partial name="_AcceptFields" model="Model.Form" />
             <button type="submit" style="margin-top:14px;">Confirm</button>
         </form>
-        <p style="margin-top:14px;"><a asp-page="/Index">Back to hub</a></p>
+        @* §260: return to Get-Started when the person came from the wizard. *@
+        <partial name="_WizardBackLink" />
     }
 </div>

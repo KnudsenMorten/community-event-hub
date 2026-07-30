@@ -19,7 +19,9 @@ test.describe('@gui §2 Sign-in (anonymous contract — no auth)', () => {
         await expect(page.locator('input[name="Email"]')).toBeVisible();
         const remember = page.locator('input[name="RememberMe"]');
         await expect(remember).toBeVisible();
-        await expect(remember).not.toBeChecked();   // unticked by default (normal session)
+        // §170: "Remember me" is CHECKED by default — a 365-day persistent
+        // session is the intended out-of-the-box behaviour.
+        await expect(remember).toBeChecked();
         await expect(page.getByRole('button', { name: /Send my sign-in code/i })).toBeVisible();
         await assertNoHorizontalScroll(page);
     });
@@ -35,8 +37,10 @@ test.describe('@gui §2 Sign-in (anonymous contract — no auth)', () => {
         await expect(page.locator('input[name="Pin"]')).toBeVisible();
         // The choice the user made on step 1 is carried into the verify form so it
         // is honoured when the cookie is issued. The old 4-option dropdown is gone.
+        // (The "Send a new code" form carries its own copy too, so scope to the
+        // verify form rather than counting page-wide.)
         await expect(page.locator('select[name="RememberFor"]')).toHaveCount(0);
-        await expect(page.locator('input[name="RememberMe"][value="true"]')).toHaveCount(1);
+        await expect(page.locator('form:has(input[name="Pin"]) input[name="RememberMe"][value="true"]')).toHaveCount(1);
         // Non-enumerable: no message should say "unknown"/"not found"/"no account".
         const body = (await page.locator('body').innerText()).toLowerCase();
         expect(body).not.toMatch(/no account|not found|unknown email|isn't registered|not registered/);
@@ -55,9 +59,11 @@ test.describe('@gui §2 Sign-in (anonymous contract — no auth)', () => {
 
     test('magic-link with a bad token errors gracefully and offers PIN fallback', async ({ page }) => {
         await page.goto(`${BASE}/Login/Magic?token=not-a-real-token`, { waitUntil: 'domcontentloaded' });
-        // Stays anonymous (no signout marker) and surfaces a PIN fallback link.
+        // Stays anonymous (no signout marker), explains what happened, and offers
+        // the PIN fallback (now a button that restarts the code flow, not a link).
         await expect(signedInMarker(page)).toHaveCount(0);
-        await expect(page.getByRole('link', { name: /email.*PIN|PIN sign-in/i })).toBeVisible();
+        await expect(page.getByRole('alert')).toContainText(/invalid or has expired/i);
+        await expect(page.getByRole('button', { name: /Request a new sign-in code/i })).toBeVisible();
     });
 });
 

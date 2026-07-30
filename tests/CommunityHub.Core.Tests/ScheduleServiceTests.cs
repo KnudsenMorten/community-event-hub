@@ -63,8 +63,11 @@ public class ScheduleServiceTests
         var dinner = Assert.Single(d, e => e.Title == "Appreciation Dinner");
         Assert.Equal(18, dinner.StartsAt.Hour);           // +30 min -> 18:30
         Assert.Equal(30, dinner.StartsAt.Minute);
-        Assert.DoesNotContain("attendee", dinner.Roles);  // all roles EXCEPT attendees
-        Assert.Contains("sponsor", dinner.Roles);
+        // §298: Appreciation Dinner is for speakers/organizers/volunteers/media/event-partners —
+        // NOT attendees or sponsors.
+        Assert.DoesNotContain("attendee", dinner.Roles);
+        Assert.DoesNotContain("sponsor", dinner.Roles);
+        Assert.Contains("eventpartner", dinner.Roles);
     }
 
     [Fact]
@@ -80,8 +83,8 @@ public class ScheduleServiceTests
         Assert.Contains(speaker, e => e.Title == "Party");                // 'all'
 
         var sponsor = await svc.GetForRoleAsync(ev, ParticipantRole.Sponsor);
-        Assert.DoesNotContain(sponsor, e => e.Title == "Group photo");    // all except sponsors
-        Assert.Contains(sponsor, e => e.Title == "Appreciation Dinner");  // 'all'
+        Assert.DoesNotContain(sponsor, e => e.Title == "Group photo");         // all except sponsors
+        Assert.DoesNotContain(sponsor, e => e.Title == "Appreciation Dinner"); // §298: NOT sponsors
         Assert.Contains(sponsor, e => e.Title.Contains("booth photos"));  // §122 sponsor-only
         Assert.DoesNotContain(speaker, e => e.Title.Contains("booth photos")); // not for speakers
 

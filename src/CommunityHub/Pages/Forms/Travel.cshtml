@@ -9,9 +9,21 @@
 
     @if (Model.AccessDenied)
     {
-        <p class="error">
-            @Localizer["Travel.AccessDenied", CommunityHub.Branding.RoleDisplay.Name(Model.Form.Role)]
-        </p>
+        @* §399: a Danish speaker is not "denied" — the benefit simply does not apply to them, and
+           "access denied" reads as a fault to someone who did nothing wrong. Give the real reason,
+           in the neutral info style. *@
+        @if (Model.NotEligibleByCountry)
+        {
+            <p class="info" style="background:#eef6ff;border:1px solid #b6d4fe;border-radius:8px;padding:12px 14px;">
+                @CommunityHub.Core.Entitlements.TravelReimbursementPolicy.NotEligibleMessage
+            </p>
+        }
+        else
+        {
+            <p class="error">
+                @Localizer["Travel.AccessDenied", CommunityHub.Branding.RoleDisplay.Name(Model.Form.Role)]
+            </p>
+        }
         <p><a asp-page="/Index">@Localizer["Common.BackToHub"]</a></p>
     }
     else
@@ -32,6 +44,7 @@
             <partial name="_LastSaved" model="Model.Form.LastSavedAt" />
         </form>
 
-        <p><a asp-page="/Index">@Localizer["Common.BackToHub"]</a></p>
+        @* §260: return to Get-Started when the person came from the wizard. *@
+        <partial name="_WizardBackLink" />
     }
 </div>

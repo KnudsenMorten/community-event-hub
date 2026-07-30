@@ -100,7 +100,8 @@ public sealed class FeatureCatalogClassificationTests
         // The §23 seed set: the operator's real advanced integrations/automation.
         var required = new[]
         {
-            "sessionize-import", "backstage-sync", "economic-erp-sync",
+            // §252 F7: economic-erp-sync was removed (inert duplicate of erp-webshop-reconcile).
+            "sessionize-import", "backstage-sync", "erp-webshop-reconcile",
             "some-scheduling", "linkedin-queue", "reminder-jobs", "digest-emails",
             "welcome-email", "magic-link", "surveys",
             // §23 residual: the remaining advanced sync jobs + their web triggers.
@@ -156,8 +157,9 @@ public sealed class FeatureCatalogClassificationTests
         // (1) ENGINE — core plumbing (pulls/syncs/transport): GA/Broad, NOT ring-scoped.
         foreach (var key in new[]
                  {
+                     // §252 F7: economic-erp-sync removed (inert duplicate toggle).
                      "sessionize-import", "sponsor-order-pull", "attendee-reconcile",
-                     "backstage-sync", "economic-erp-sync", "sponsor-upload-watch",
+                     "backstage-sync", "sponsor-upload-watch",
                  })
         {
             var d = FeatureCatalog.Find(key)!;
@@ -187,16 +189,23 @@ public sealed class FeatureCatalogClassificationTests
 
         // (4) USER-IMPACT — a human experiences it (email/task/GUI): ring-scoped,
         // staged-rolled on the target user.
-        foreach (var key in new[]
-                 {
-                     "welcome-email", "magic-link", "reminder-jobs", "digest-emails",
-                     "surveys",
-                 })
+        foreach (var key in new[] { "welcome-email", "reminder-jobs", "digest-emails" })
         {
             var d = FeatureCatalog.Find(key)!;
             Assert.Equal(FeatureSurface.UserImpact, d.Surface);
             Assert.True(d.IsUserImpact);
             Assert.True(d.IsRingScoped);
+        }
+
+        // 🔒 §566 step 3 / §589 — UserImpact but TILE-ONLY ⇒ no longer ring-scoped. Their ring only
+        // ever hid an organizer tile. "magic-link" is here too now: the operator confirmed it "goes
+        // out to anyone", and no send site ever passed it as a FeatureKey anyway.
+        foreach (var key in new[] { "surveys", "magic-link", "participant-activation" })
+        {
+            var d = FeatureCatalog.Find(key)!;
+            Assert.Equal(FeatureSurface.UserImpact, d.Surface);
+            Assert.True(d.GatesTileVisibilityOnly);
+            Assert.False(d.IsRingScoped);
         }
 
         // outbound-email is the ENGINE transport (+ global kill switch); held at
@@ -216,12 +225,16 @@ public sealed class FeatureCatalogClassificationTests
     [Fact]
     public void Queue_surfaces_are_classified_and_ring_scoped()
     {
+        // 🔒 §589 (operator 2026-07-28): *"queues are all managed by an organizer who
+        // accept/approve, etc. so no need for ring-gate here"*. The organizer's APPROVAL is the
+        // gate; a participant rollout ring on top of it is the same category error §569 removed
+        // from the Zoho speaker/session push. Queue access is by ROLE.
         foreach (var key in new[] { "volunteer-tasks", "volunteer-allocation", "hotel-assignment" })
         {
             var d = FeatureCatalog.Find(key)!;
             Assert.Equal(FeatureSurface.Queue, d.Surface);
             Assert.True(d.IsQueue);
-            Assert.True(d.IsRingScoped);   // ring-scopable — dial down to Ring1 to test
+            Assert.False(d.IsRingScoped);   // §589 — the approval is the gate, not a ring
             Assert.False(d.IsEngine);
             Assert.Equal(Ring.Broad, d.DefaultReleasedToRing);   // shipped ⇒ GA default
         }
@@ -241,20 +254,36 @@ public sealed class FeatureCatalogClassificationTests
         // surfaces (see Queue_surfaces_are_classified_and_ring_scoped), not here.
         var incubationUserImpact = new[]
         {
-            "broadcast-email", "invitation-email", "email-resend", "onboarding-step-reset",
-            "participant-activation", "masterclass-invites", "session-eval-email",
-            "sponsor-welcome", "sponsor-tasks", "sponsor-reminders",
-            "group-photo-invites", "travel-reimbursement-email", "graphics-release",
-            "test-data-cleanup", "hotel-invite", "dinner-invite",
+            // §252 F5: masterclass-invites removed — the MC funnel rides welcome-email.
+            // §705.12: broadcast-email + invitation-email DELETED (verified unused in PROD).
+            "email-resend", "onboarding-step-reset",
+            "participant-activation", "session-eval-email",
+            // §699 — "sponsor-welcome" removed from the catalog: it was a Settings switch no send
+            // site ever consulted (§619 found this and removed it from one list, leaving the entry).
+            "sponsor-tasks", "sponsor-reminders",
+            // §705.14a — "graphics-release" DELETED: it sent no mail and only hid one organizer tile,
+            // while its NAME implied it governed the speaker mail (that is speaker-graphics-promote).
+            "group-photo-invites", "travel-reimbursement-email",
+            "test-data-cleanup", "hotel-invite",
         };
 
         foreach (var key in incubationUserImpact)
         {
             var d = FeatureCatalog.Find(key);
-            Assert.True(d is not null, $"Incubation feature '{key}' missing from catalog.");
+            Assert.True(d is not null, $"Feature '{key}' missing from catalog.");
             Assert.Equal(FeatureSurface.UserImpact, d!.Surface);
             Assert.True(d.IsUserImpact, $"'{key}' must be USER-IMPACT (a person notices it).");
-            Assert.Equal(FeatureGroup.Incubation, d.Group);
+
+            // §695 — the GROUP assertion was removed on purpose. It pinned
+            // `FeatureGroup.Incubation`, i.e. the PARKING SPOT, when what this test exists to
+            // protect is the three properties below: a person notices it, it is released no wider
+            // than ring 1 by default, and it is opt-in. Asserting the group made re-homing a shipped
+            // feature into its real home (§694.4: session evals → Speakers, sponsor reminders →
+            // Sponsors) fail a test about RINGS, which is why 18 live features were still parked in
+            // a group labelled "Incubation (test)".
+            //
+            // 🔒 The ring assertions stay, and they are the point: moving a feature between groups
+            // must never widen its audience.
             Assert.Equal(Ring.Ring1, d.DefaultReleasedToRing);
             Assert.False(d.DefaultEnabled, $"'{key}' must default OFF (opt-in).");
         }
@@ -295,8 +324,16 @@ public sealed class FeatureCatalogClassificationTests
             Assert.Equal(Ring.Ring1, d!.DefaultReleasedToRing);
         }
 
-        // And every feature in the Email GROUP is at ring 1 (none widened to Broad).
-        foreach (var f in FeatureCatalog.All.Where(f => f.Group == FeatureGroup.Email))
+        // §695 — this used to iterate the Email GROUP, which is now EMPTY (its members were re-homed
+        // per role / to Event settings), leaving the loop vacuous: it would have passed forever while
+        // asserting nothing. Asserting over what a feature GOVERNS survives any re-filing, and is the
+        // property that actually matters — the same "assert the property, not the parking spot" fix
+        // §700 Batch A applied to the Incubation tests.
+        var emailGoverning = FeatureCatalog.All
+            .Where(f => f.Governs == FeatureGoverns.Email)
+            .ToList();
+        Assert.NotEmpty(emailGoverning);                   // the loop must never go vacuous again
+        foreach (var f in emailGoverning)
         {
             Assert.Equal(Ring.Ring1, f.DefaultReleasedToRing);
         }
@@ -326,5 +363,146 @@ public sealed class FeatureCatalogClassificationTests
         // Groups are ordered by the enum value (the GUI render order).
         var order = grouped.Select(g => (int)g.Key).ToList();
         Assert.Equal(order.OrderBy(x => x).ToList(), order);
+    }
+
+    // ---- 326bz: the three governance classes the Settings page is built from ----
+
+    [Fact]
+    public void Governs_splits_the_catalog_into_backend_emails_and_features()
+    {
+        // BACKEND = anything not ring-scoped. The ring is meaningless for these, which is
+        // why the page shows them last and offers no ring control (326by).
+        foreach (var d in FeatureCatalog.All.Where(x => !x.IsRingScoped))
+        {
+            Assert.Equal(FeatureGoverns.Backend, d.Governs);
+        }
+
+        // EMAIL = ring-scoped AND the key governs an outbound mail. Lowering the ring stops
+        // the message reaching someone.
+        Assert.Equal(FeatureGoverns.Email, FeatureCatalog.Find("welcome-email")!.Governs);
+        // §705.12: the "broadcast-email" exemplar went with the feature; email-resend stands in.
+        Assert.Equal(FeatureGoverns.Email, FeatureCatalog.Find("email-resend")!.Governs);
+        Assert.Equal(FeatureGoverns.Email, FeatureCatalog.Find("hotel-invite")!.Governs);
+
+        // FEATURE = ring-scoped but not a mail: the ring decides who SEES it.
+        // Derived, not hardcoded — a named exemplar silently rots when a key is reclassified,
+        // which is exactly what §566 step 3 just did to the three keys listed here before.
+        foreach (var d in FeatureCatalog.All
+                     .Where(x => x.IsRingScoped && !FeatureCatalog.EmailFeatureKeys.Contains(x.Key)))
+        {
+            Assert.Equal(FeatureGoverns.Feature, d.Governs);
+        }
+
+        // 🔒 §566 step 3 — the TILE-ONLY keys are now BACKEND (on/off, no ring). Their ring never
+        // gated the survey, the activation or the cleanup — only whether an organizer TILE was
+        // visible — while reading as a real audience control. That misreading is the §326bx
+        // incident and why he dropped the category outright.
+        Assert.Equal(FeatureGoverns.Backend, FeatureCatalog.Find("surveys")!.Governs);
+        Assert.Equal(FeatureGoverns.Backend, FeatureCatalog.Find("test-data-cleanup")!.Governs);
+        Assert.Equal(FeatureGoverns.Backend, FeatureCatalog.Find("participant-activation")!.Governs);
+
+        // 🔒 §589 — "magic-link" is NOT ring-gated (operator 2026-07-28: "it goes out to anyone").
+        // Verified before removing: no send site passes it as a FeatureKey and no template declares
+        // it, so its ring gated nothing. Sign-in mail is exempted by a different, correct
+        // mechanism — PinLoginService sends RingExempt, because someone who asks for a sign-in link
+        // and hears nothing back cannot diagnose it.
+        Assert.Equal(FeatureGoverns.Backend, FeatureCatalog.Find("magic-link")!.Governs);
+        Assert.False(FeatureCatalog.Find("magic-link")!.IsRingScoped);
+    }
+
+    [Fact]
+    public void Every_email_template_feature_key_is_a_real_catalog_key()
+    {
+        // A template filed under a key that is not in the catalog would silently lose its
+        // per-feature ring at the transport (BrevoEmailSender only tightens when
+        // FeatureCatalog.Find(key)?.IsRingScoped == true).
+        foreach (var key in CommunityHub.Core.Email.EmailTemplateCatalog.Map.Values.Select(v => v.FeatureKey).Distinct())
+        {
+            Assert.True(FeatureCatalog.Find(key) is not null,
+                $"Email template feature key '{key}' is not in the feature catalog.");
+        }
+    }
+
+    /// <summary>
+    /// §336 — the TILE-ONLY set is pinned by name.
+    ///
+    /// A ring on one of these hides an organizer TILE and gates nothing the switch's name
+    /// describes ("Magic link … Released to Ring 1" reads as if auto-login links were limited
+    /// to Ring 1; they are not). The §326bx / §327e / §336 audits turned up seven of these, one
+    /// at a time, each found by hand. Pinning the set means a NEW dead gate — a key whose only
+    /// consumer is a `.cshtml` tile — cannot appear without someone consciously editing this
+    /// list, and equally that a key cannot silently STOP gating something while keeping an
+    /// honest-looking ring. If this fails, do not just update the list: work out what the key
+    /// actually gates now.
+    /// </summary>
+    [Fact]
+    public void The_tile_only_set_is_exactly_the_seven_audited_keys()
+    {
+        var tileOnly = FeatureCatalog.All
+            .Where(d => d.GatesTileVisibilityOnly)
+            .Select(d => d.Key)
+            .OrderBy(k => k, StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.Equal(
+            new[]
+            {
+                // §705.14a — "graphics-release" DELETED (no send site; one tile; misleading name).
+                "magic-link",              // §336 — the seventh
+                "participant-activation",
+                "sponsor-tasks",
+                // §699 — "sponsor-welcome" DELETED from the catalog. This test's own sibling below
+                // already recorded WHY it was safe: "no send site passes ... 'sponsor-welcome' as an
+                // EmailContext.FeatureKey, and no template declares either — the only references are
+                // the catalog itself. So these rings gated NOTHING." It has now been removed rather
+                // than left as a switch that governs nothing.
+                "surveys",
+                "test-data-cleanup",
+            },
+            tileOnly);
+    }
+
+    /// <summary>
+    /// 🔒 §566 step 3 — INVERTED ON PURPOSE. A tile-only key must NOT be ring-scoped.
+    ///
+    /// <para>Its ring never gated the function or the e-mail whose name it carried — only whether
+    /// an organizer TILE was visible — while reading exactly like a real audience control. That is
+    /// the §326bx incident ("Sponsor welcome … Released to Ring 1" implying the MAILS were limited)
+    /// and a direct cause of the operator losing confidence in the Settings page. He dropped the
+    /// category outright: *"Category 4 (tile-only) - drop-it"*.</para>
+    ///
+    /// <para>THE EXCEPTION IS A SAFETY PROPERTY: a key that is ALSO a known e-mail FeatureKey keeps
+    /// its ring regardless, because removing a ring from an e-mail WIDENS its audience.
+    /// <c>magic-link</c> is both, and without that clause this page cleanup would have silently
+    /// un-gated sign-in link mails.</para>
+    /// </summary>
+    [Fact]
+    public void Tile_only_keys_are_never_ring_scoped()
+    {
+        // VERIFIED KEY BY KEY BEFORE ACCEPTING THIS: no send site passes "magic-link" or
+        // "sponsor-welcome" as an EmailContext.FeatureKey, and no template declares either — the
+        // only references are the catalog itself. So these rings gated NOTHING, which is precisely
+        // what §326bx reported ("Sponsor welcome … Released to Ring 1" read as if the MAILS were
+        // limited to Ring 1; they never were). Sign-in mail is exempted by a different and correct
+        // mechanism: PinLoginService sends RingExempt.
+        foreach (var d in FeatureCatalog.All.Where(d => d.GatesTileVisibilityOnly))
+        {
+            Assert.False(d.IsRingScoped,
+                $"'{d.Key}' is tile-only, so its ring only ever hid a tile. It must NOT show a "
+                + "ring — that is the §326bx misreading the operator asked to remove.");
+        }
+    }
+
+    [Fact]
+    public void Email_class_never_contains_a_backend_key()
+    {
+        // EmailFeatureKeys is a superset (it includes the transport itself); the Governs
+        // split must never promote a non-ring-scoped key into the e-mail section.
+        foreach (var key in FeatureCatalog.EmailFeatureKeys)
+        {
+            var d = FeatureCatalog.Find(key);
+            if (d is null || d.IsRingScoped) continue;
+            Assert.Equal(FeatureGoverns.Backend, d.Governs);
+        }
     }
 }

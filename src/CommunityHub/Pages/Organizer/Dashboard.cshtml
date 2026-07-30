@@ -43,7 +43,12 @@
     }
     else if (Model.Report is null)
     {
-        <p>No data.</p>
+        <p style="background:#eef6ff;padding:12px 14px;border-radius:8px;">
+            Nothing to show yet — this dashboard fills in once the active edition has
+            participants and survey data. Check <a asp-page="/Organizer/Settings">Setup</a>
+            (active edition) or import people via
+            <a asp-page="/Organizer/Participants">Participants</a>.
+        </p>
     }
     else
     {
@@ -69,8 +74,9 @@
                 <div class="lbl">Overdue tasks</div>
             </div>
             <div class="stat">
-                <div class="num @(r.AttendeeMismatches > 0 ? "warn" : "")">@r.AttendeeMismatches</div>
-                <div class="lbl">Attendee mismatches</div>
+                @* §326bp: a chase list, not a fault — see the note on /Organizer/Attendees. *@
+                <div class="num">@r.AttendeeMismatches</div>
+                <div class="lbl">Master Class not chosen</div>
             </div>
         </div>
     }
@@ -135,8 +141,11 @@
                                 <form method="post" asp-page-handler="ApproveVolunteer" asp-route-id="@v.Id">
                                     <button type="submit" class="approve" title="Set IsActive=true">Approve</button>
                                 </form>
+                                @* Escape ' in the applicant-supplied name — an unescaped
+                                   O'Brien breaks the inline JS and the confirm is SKIPPED
+                                   (the row would hard-delete without asking). *@
                                 <form method="post" asp-page-handler="RejectVolunteer" asp-route-id="@v.Id"
-                                      onsubmit="return confirm('Decline @v.Name and delete the application?');">
+                                      onsubmit="return confirm('Decline @Html.Raw(Html.Encode(v.Name).Replace("&#x27;", "\\&#x27;")) and delete the application?');">
                                     <button type="submit" class="reject" title="Delete the inactive Participant row">Decline</button>
                                 </form>
                             </td>
@@ -345,13 +354,15 @@
                 <div class="lbl">Total attendees</div>
             </div>
             <div class="stat">
-                <div class="num @(r.AttendeeMismatches > 0 ? "warn" : "")">@r.AttendeeMismatches</div>
-                <div class="lbl">Reconciliation mismatches</div>
+                <div class="num">@r.AttendeeMismatches</div>
+                <div class="lbl">Master Class not chosen</div>
             </div>
         </div>
         @if (r.AttendeeMismatches > 0)
         {
-            <p><a asp-page="/Organizer/Index">Review mismatches</a></p>
+            @* §326bp: the last surface still calling the chase list a "mismatch". The word said the
+               two systems disagree; it only ever meant someone has not picked a class yet. *@
+            <p><a asp-page="/Organizer/Index">See who still needs to choose</a></p>
         }
     </div>
 

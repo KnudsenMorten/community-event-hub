@@ -54,13 +54,16 @@ public sealed class LiveBackstageSpeakerBioApi : IBackstageSpeakerBioApi
             return new BackstageSpeakerUpsertResult(BackstageSpeakerAction.ExistsBlocked, existingId);
 
         // New speaker → create. featured = the publish gate (only true when approved).
-        var id = await _zoho.CreateSpeakerAsync(
+        var create = await _zoho.CreateSpeakerAsync(
             token!, email, record.FirstName, record.LastName, record.Country,
             record.Tagline, record.Biography, record.LinkedIn, record.Twitter,
-            record.Skills, featured: record.PublishState == SpeakerPublishState.Public, ct);
+            record.Skills, featured: record.PublishState == SpeakerPublishState.Public, ct,
+            company: record.Company);
 
-        return id is null
-            ? new BackstageSpeakerUpsertResult(BackstageSpeakerAction.Failed, null, "Backstage create-speaker POST failed.")
-            : new BackstageSpeakerUpsertResult(BackstageSpeakerAction.Created, string.IsNullOrEmpty(id) ? null : id);
+        return create.Error is not null
+            ? new BackstageSpeakerUpsertResult(BackstageSpeakerAction.Failed, null,
+                $"Backstage create-speaker POST failed: {create.Error}")
+            : new BackstageSpeakerUpsertResult(BackstageSpeakerAction.Created,
+                string.IsNullOrEmpty(create.Id) ? null : create.Id);
     }
 }

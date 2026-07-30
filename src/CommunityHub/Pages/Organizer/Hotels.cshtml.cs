@@ -165,11 +165,20 @@ public class HotelsModel : PageModel
         return Page();
     }
 
-    public async Task<IActionResult> OnPostDeleteAsync(int id, CancellationToken ct)
+    public async Task<IActionResult> OnPostDeleteAsync(int id, string? confirmPhrase, CancellationToken ct)
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
         if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
+
+        // §334: deleting a hotel UN-ASSIGNS everyone placed in it — a room block plus every
+        // placement decision, gone in one click. Server-verified phrase, not a JS confirm().
+        if (!TypedConfirmation.Matches(confirmPhrase, TypedConfirmation.DeletePhrase))
+        {
+            Error = TypedConfirmation.Rejection(TypedConfirmation.DeletePhrase, "delete this hotel");
+            await LoadAsync(me.EventId, ct);
+            return Page();
+        }
 
         var ok = await _hotels.DeleteHotelAsync(me.EventId, id, ct);
         Message = ok ? "Hotel deleted (assigned people were un-assigned)." : "Hotel not found.";
@@ -186,11 +195,21 @@ public class HotelsModel : PageModel
     /// Organizer-only, edition-scoped; the page's confirm modal (live count) gates
     /// the click.
     /// </summary>
-    public async Task<IActionResult> OnPostBulkDeleteAsync(CancellationToken ct)
+    public async Task<IActionResult> OnPostBulkDeleteAsync(string? confirmPhrase, CancellationToken ct)
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
         if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
+
+        // §334: many hotels + everyone placed in them, in one submit. The count in the modal was
+        // client-side; this check is not.
+        if (!TypedConfirmation.Matches(confirmPhrase, TypedConfirmation.ConfirmPhrase))
+        {
+            Error = TypedConfirmation.Rejection(
+                TypedConfirmation.ConfirmPhrase, "delete the selected hotels");
+            await LoadAsync(me.EventId, ct);
+            return Page();
+        }
 
         var requested = SelectedIds.Where(id => id > 0).Distinct().Count();
         if (requested == 0)
@@ -240,10 +259,12 @@ public class HotelsModel : PageModel
         var reservers = await _hotels.ListReserversForInviteAsync(eventId, hotelId, ct);
         if (reservers.Count == 0) return (0, 0);
 
-        var eventCode = await _db.Events
+        var ev = await _db.Events
             .Where(e => e.Id == eventId)
-            .Select(e => e.Code)
-            .FirstOrDefaultAsync(ct) ?? "Event Hub";
+            .Select(e => new { e.Code, e.AutoCalendarInvitesEnabled })
+            .FirstOrDefaultAsync(ct);
+        var eventCode = ev?.Code ?? "Event Hub";
+        var autoInvite = ev?.AutoCalendarInvitesEnabled ?? false;
 
         var sent = 0;
         var skipped = 0;
@@ -276,7 +297,8 @@ public class HotelsModel : PageModel
                     ct: ct,
                     hotelName: string.IsNullOrWhiteSpace(hotelName) ? null : hotelName,
                     hotelAddress: hotelAddress,
-                    hotelConfirmationNumber: confirmationNumber);
+                    hotelConfirmationNumber: confirmationNumber,
+                    attachCalendarInvite: autoInvite);
 
                 // Stamp the booking so the participant-side form knows the invite
                 // was re-issued (best-effort; never blocks the rest).

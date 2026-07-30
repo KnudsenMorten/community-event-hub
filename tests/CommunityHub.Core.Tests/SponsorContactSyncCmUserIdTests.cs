@@ -200,4 +200,54 @@ public sealed class SponsorContactSyncCmUserIdTests
         var coord = await db.Participants.SingleAsync(p => p.Email == "coord@2linkit.net");
         Assert.Equal(68, coord.CmUserId);
     }
+
+    /// <summary>
+    /// §253 G8 — the tombstone sticks: the 15-min sync pull used to re-activate
+    /// ANY inactive sponsor contact ("treat inactive as a defect to repair"),
+    /// silently undoing an organizer's deactivation and restoring the contact's
+    /// login. A contact stamped <see cref="Participant.DeactivatedByOrganizerAt"/>
+    /// (set by the ParticipantDeactivationService cascade) must stay inactive
+    /// across sync runs — while a contact that went inactive for SYNC-side
+    /// reasons (no tombstone) is still repaired as before.
+    /// </summary>
+    [Fact]
+    public async Task Sync_never_reactivates_an_organizer_deactivated_contact()
+    {
+        using var db = NewDb();
+        var ev = await SeedEventAsync(db);
+
+        // Coord: ORGANIZER-deactivated (cascade tombstone). Signer: inactive for
+        // sync-side reasons (no tombstone). Names/ids already match CM so the
+        // active-flag is the only thing the sync could touch.
+        db.Participants.Add(new Participant
+        {
+            EventId = ev.Id, Email = "coord@2linkit.net", FullName = "Coord Person",
+            Role = ParticipantRole.Sponsor, SponsorCompanyId = CompanyId.ToString(),
+            CmUserId = 68, IsActive = false,
+            LifecycleState = ParticipantLifecycleState.Inactive,
+            DeactivatedByOrganizerAt = new DateTimeOffset(2026, 7, 1, 8, 0, 0, TimeSpan.Zero),
+        });
+        db.Participants.Add(new Participant
+        {
+            EventId = ev.Id, Email = "signer@2linkit.net", FullName = "Signer Person",
+            Role = ParticipantRole.Sponsor, SponsorCompanyId = CompanyId.ToString(),
+            CmUserId = 77, IsActive = false,
+        });
+        await db.SaveChangesAsync();
+
+        var (svc, _) = NewSync(db, Respond());
+        await svc.SyncCompanyAsync(ev.Id, CompanyId);
+        // Twice — one run must not "wear the tombstone down" for the next.
+        await svc.SyncCompanyAsync(ev.Id, CompanyId);
+
+        // The organizer decision STUCK (tombstone intact, still inactive)...
+        var coord = await db.Participants.SingleAsync(p => p.Email == "coord@2linkit.net");
+        Assert.False(coord.IsActive);
+        Assert.NotNull(coord.DeactivatedByOrganizerAt);
+
+        // ...while the untombstoned contact was repaired exactly as before.
+        var signer = await db.Participants.SingleAsync(p => p.Email == "signer@2linkit.net");
+        Assert.True(signer.IsActive);
+        Assert.Null(signer.DeactivatedByOrganizerAt);
+    }
 }

@@ -43,7 +43,7 @@ public class GoModel : PageModel
     {
         // Intended destination: an explicit ?r= wins; otherwise the trailing
         // catch-all path. Local-only, never an external/protocol-relative URL.
-        var dest = SafeLocal(r) ?? SafeLocal(NormalizeTarget(target)) ?? "/";
+        var dest = SafeLocal(r) ?? SafeLocal(WithQuery(NormalizeTarget(target))) ?? "/";
 
         EmailMagicLinkResolution resolution;
         try
@@ -71,6 +71,14 @@ public class GoModel : PageModel
             return Redirect(BuildLoginRecovery(null, dest));
         }
 
+        // §299 7.1: refuse a blocked 1-day ticket holder BEFORE issuing the cookie.
+        var oneDayGate = HttpContext.RequestServices
+            .GetService<CommunityHub.Core.Auth.OneDayAccessGate>();
+        if (oneDayGate is not null && await oneDayGate.IsBlockedAsync(p.Id, ct))
+        {
+            return Redirect("/Login?blocked=1day");
+        }
+
         // Personal magic-link = a deliberate sign-in → persistent session (§170),
         // via the one shared sign-in path.
         await Auth.ParticipantSessionSignIn.SignInAsync(
@@ -79,15 +87,47 @@ public class GoModel : PageModel
         return Redirect(dest);
     }
 
-    /// <summary>Honour only local ("/"-prefixed, non-protocol-relative) URLs.</summary>
+    /// <summary>Honour only local ("/"-prefixed, non-protocol-relative) URLs.
+    /// Any '\' is rejected: browsers treat "/\evil.com" as protocol-relative (§234).</summary>
     private static string? SafeLocal(string? url) =>
         !string.IsNullOrWhiteSpace(url) && url.StartsWith('/') && !url.StartsWith("//")
+            && !url.Contains('\\')
             ? url
             : null;
 
     /// <summary>Turn the catch-all route segment ("Speaker/Graphics") into a local path ("/Speaker/Graphics").</summary>
     private static string? NormalizeTarget(string? target) =>
         string.IsNullOrWhiteSpace(target) ? null : "/" + target.TrimStart('/');
+
+    /// <summary>
+    /// §365 — carry the QUERY STRING through to the destination.
+    ///
+    /// <para>A route catch-all captures the PATH only, so <c>/go/{tok}/Forms/Wizard?step=masterclass</c>
+    /// gave <c>target = "Forms/Wizard"</c> and the <c>?step=</c> was silently dropped — every one of
+    /// the nine <c>{{hubUrl}}/Forms/Wizard?step=masterclass</c> CTAs (and the party equivalent) landed
+    /// the attendee on the wizard's FIRST step instead of the step the mail promised. Since §351-7
+    /// re-pointed those CTAs at the wizard precisely to stop them going to a shadow page, losing the
+    /// step made the mail button feel broken in a different way.</para>
+    ///
+    /// <para><c>r</c> is EXCLUDED: it is this page's own routing parameter, not the destination's, and
+    /// re-appending it would make <c>?r=</c> reappear on the target URL. Everything else is passed
+    /// verbatim. The result still goes through <see cref="SafeLocal"/>, so the local-only guarantee is
+    /// unchanged — a query string cannot make a "/"-prefixed path external.</para>
+    /// </summary>
+    private string? WithQuery(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return path;
+
+        var carried = Request.Query
+            .Where(kv => !string.Equals(kv.Key, "r", StringComparison.OrdinalIgnoreCase))
+            .SelectMany(kv => kv.Value.Select(v => (kv.Key, Value: v)))
+            .ToList();
+        if (carried.Count == 0) return path;
+
+        var qs = string.Join("&", carried.Select(kv =>
+            Uri.EscapeDataString(kv.Key) + "=" + Uri.EscapeDataString(kv.Value ?? string.Empty)));
+        return path + (path.Contains('?') ? "&" : "?") + qs;
+    }
 
     /// <summary>
     /// The fail-safe recovery URL: the email + PIN Login page, pre-staged with the

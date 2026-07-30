@@ -1,0 +1,27 @@
+@*
+    §260: the "Back" link for a Get-Started STEP form. When the person arrived from the
+    Get-Started wizard, the stepper appends ?returnTo=<wizard page> (see _WizardStepper),
+    and that query survives the form POST (the form action is omitted, so it posts to the
+    current URL with its query). So: if a SAFE local returnTo is present, link back to the
+    Get-Started wizard; otherwise fall back to the hub home. A directly-opened form (no
+    returnTo) still gets a sensible "Back to hub".
+*@
+@{
+    var rt = Context.Request.Query["returnTo"].ToString();
+    // Only honour a local, in-app Get-Started path — never an absolute/off-site URL or a
+    // protocol-relative "//host" (open-redirect safety, matching the app's other guards).
+    var safeReturn = !string.IsNullOrEmpty(rt)
+        && rt.StartsWith("/", StringComparison.Ordinal)
+        && !rt.StartsWith("//", StringComparison.Ordinal)
+        && !rt.Contains("..", StringComparison.Ordinal)
+        && (rt.StartsWith("/Forms/", StringComparison.Ordinal)
+            || rt.StartsWith("/Sponsor/GetStarted", StringComparison.Ordinal));
+}
+@if (safeReturn)
+{
+    <p style="margin-top:14px;"><a href="@rt">← Back to Get started</a></p>
+}
+else
+{
+    <p style="margin-top:14px;"><a asp-page="/Index">Back to hub</a></p>
+}

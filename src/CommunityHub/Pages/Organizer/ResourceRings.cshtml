@@ -37,7 +37,25 @@
     <h1 style="margin-top:0;">@Localizer["Rings.Title"]</h1>
     <p>@Localizer["Rings.Intro"]</p>
     <p><a asp-page="/Organizer/Settings">&larr; @Localizer["Rings.BackToSettings"]</a></p>
+    @* Name filter across all four lists — the primary workflow ("move person X to
+       Ring 1") otherwise means scanning long unsearchable lists at ELDK scale. *@
+    <input type="search" id="ringFilter" placeholder="Filter by name…" aria-label="Filter by name"
+           style="width:100%;max-width:640px;box-sizing:border-box;padding:8px 10px;border:1px solid #d1d5db;border-radius:8px;font-size:14px;" />
 </div>
+
+<script>
+    (function () {
+        var box = document.getElementById('ringFilter');
+        if (!box) return;
+        box.addEventListener('input', function () {
+            var q = box.value.trim().toLowerCase();
+            document.querySelectorAll('.ring-row').forEach(function (row) {
+                var name = row.querySelector('.ring-name');
+                row.style.display = (!q || (name && name.textContent.toLowerCase().indexOf(q) >= 0)) ? '' : 'none';
+            });
+        });
+    })();
+</script>
 
 @functions {
     // Build a ring <select> options list with the resource's own ring selected.
@@ -129,6 +147,71 @@
             <span class="ring-name">@p.DisplayName</span>
             <form method="post" asp-page-handler="ParticipantRing" class="ring-form">
                 <input type="hidden" name="participantId" value="@p.Id" />
+                <select name="ring" aria-label="@Localizer["Rings.SelectAria", p.DisplayName]">@RingOptions(p.Ring)</select>
+                <button type="submit" class="ring-btn">@Localizer["Rings.Set"]</button>
+            </form>
+        </div>
+    }
+</div>
+
+@* --- §706 Attendees — SEARCH-FIRST, because this list heads for ~1500 rows -----------------------
+   His 2026-08-11 plan: synced attendees sit at Broad; he assigns a FEW to Ring 2 when ticket sales
+   open, tests attendee mail on those, then raises the mails to Broad once proven. So the job this
+   section must do well is "find one person fast", not "show me everyone" — which is why it behaves
+   differently from every other section on this page. *@
+<div class="card">
+    <h2>Attendees</h2>
+    <p class="ring-eff">
+        An attendee is a participant like any other role &mdash; the ring sits on the person.
+        New attendees arrive at <strong>Broad</strong>, so a mail released to Ring&nbsp;2 skips them:
+        set a few people to Ring&nbsp;2 here to test attendee mail before releasing it to everyone.
+    </p>
+
+    <form method="get" class="ring-form" style="margin:0 0 12px;">
+        <label for="attendeeSearch" style="font-size:13px;color:#4b5563;">Find an attendee</label>
+        <input id="attendeeSearch" type="search" name="attendeeSearch" value="@Model.AttendeeSearch"
+               placeholder="name or email"
+               style="font-size:13px;padding:5px 8px;border:1px solid #d1d5db;border-radius:6px;min-width:220px;" />
+        <button type="submit" class="ring-btn">Search</button>
+        @if (!string.IsNullOrWhiteSpace(Model.AttendeeSearch))
+        {
+            <a asp-page="/Organizer/ResourceRings" class="ring-eff" style="margin-left:8px;">clear</a>
+        }
+    </form>
+
+    @* 🔒 Say what is being shown. A truncated list that does not admit it is how someone concludes
+       "that attendee isn't in the system" and goes hunting in Zoho instead. *@
+    @if (Model.AttendeeTotalCount == 0)
+    {
+        <p class="ring-eff">No attendees yet &mdash; they arrive when ticket sales open.</p>
+    }
+    else if (Model.AttendeeMatchCount == 0)
+    {
+        <p class="ring-eff">
+            No attendee matches &ldquo;@Model.AttendeeSearch&rdquo;.
+            <strong>@Model.AttendeeTotalCount</strong> attendee(s) exist in this edition.
+        </p>
+    }
+    else
+    {
+        <p class="ring-eff">
+            Showing <strong>@Model.Attendees.Count</strong> of <strong>@Model.AttendeeMatchCount</strong> match(es)@if (Model.AttendeeMatchCount != Model.AttendeeTotalCount)
+            {<text> &middot; @Model.AttendeeTotalCount attendee(s) in total</text>}.
+            @if (Model.AttendeesTruncated)
+            {
+                <text><strong>Narrow the search</strong> to reach the rest.</text>
+            }
+        </p>
+    }
+
+    @foreach (var p in Model.Attendees)
+    {
+        <div class="ring-row">
+            <span class="ring-name">@p.DisplayName</span>
+            <form method="post" asp-page-handler="ParticipantRing" class="ring-form">
+                <input type="hidden" name="participantId" value="@p.Id" />
+                @* Keep his search across the POST so he does not lose his place after every set. *@
+                <input type="hidden" name="attendeeSearch" value="@Model.AttendeeSearch" />
                 <select name="ring" aria-label="@Localizer["Rings.SelectAria", p.DisplayName]">@RingOptions(p.Ring)</select>
                 <button type="submit" class="ring-btn">@Localizer["Rings.Set"]</button>
             </form>

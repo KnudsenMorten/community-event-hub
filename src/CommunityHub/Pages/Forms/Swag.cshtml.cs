@@ -7,8 +7,9 @@ using Microsoft.AspNetCore.Mvc.RazorPages;
 namespace CommunityHub.Pages.Forms;
 
 /// <summary>
-/// Swag-preferences form (polo / jacket / appreciation award / Credly badge). The participant
-/// submits or updates one SwagPreference per edition.
+/// Swag-preferences form (polo / appreciation award / Credly badge). The participant
+/// submits or updates one SwagPreference per edition. (No jacket — §326bt removed it from the
+/// portal; the columns survive so captured values are not lost, but nothing offers one.)
 ///
 /// <para>REQUIREMENTS §148: this standalone page is now a thin SHELL — it renders the shared
 /// <c>_SwagFields</c> partial and delegates load + validate + persist + ALL side-effects to

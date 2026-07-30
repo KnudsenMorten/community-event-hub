@@ -14,17 +14,20 @@ namespace CommunityHub.Pages.Speaker;
 /// owns: name, bio + socials, photo, MS accreditation / skills, country, and contact
 /// preferences. Replaces the split between the old /Forms/Speaker (bio) and the speaker
 /// fields on /Profile. Bio fields seeded from Sessionize are marked speaker-edited on
-/// change so the delta re-import never overwrites them. "Save &amp; Sync to Zoho" pushes
-/// the speaker to Backstage (gated by the publish + ring rules; a no-op until a live
-/// Zoho speaker writer is configured).
+/// change so the delta re-import never overwrites them.
 ///
 /// <para>REQUIREMENTS §148: this standalone page is now a thin SHELL — it renders the shared
 /// <c>_DetailsFields</c> partial and delegates load + validate + persist + the speaker-edit
 /// side-effects to <see cref="SpeakerDetailsFormService"/>. The SAME service backs the inline
 /// wizard step (<c>SpeakerDetailsStepHandler</c>), so the standalone page and the wizard behave
-/// identically on the plain Save path. The "Save &amp; sync to Zoho" action stays on THIS page
-/// only (the wizard never syncs); it runs the service's plain Save then pushes to Backstage,
-/// gated on whether a sync-relevant field actually changed.</para>
+/// identically on the persist path.</para>
+///
+/// <para>REQUIREMENTS §195: the page has a SINGLE <em>Save</em> button. That one Save BOTH
+/// persists to SQL AND pushes the speaker to Backstage/Zoho (gated by the publish + ring rules;
+/// a no-op until a live Zoho speaker writer is configured). The sync is fail-safe — if it errors
+/// the SQL save is kept and only a non-fatal warning is surfaced — and the organizer manual-update
+/// alert is deduped to runs where a sync-relevant field actually changed. The inline wizard step
+/// never syncs (it persists only).</para>
 /// </summary>
 [Authorize]
 public class DetailsModel : PageModel
@@ -65,8 +68,12 @@ public class DetailsModel : PageModel
         return Page();
     }
 
-    public Task<IActionResult> OnPostSaveAsync(CancellationToken ct) => SaveAsync(sync: false, ct);
-    public Task<IActionResult> OnPostSaveAndSyncAsync(CancellationToken ct) => SaveAsync(sync: true, ct);
+    // §195: ONE Save button. The single Save BOTH persists to SQL AND syncs to Zoho
+    // (operator: "save must save to sql + sync to zoho"). The sync is fail-safe — a Zoho
+    // error never loses the SQL save (see the try/catch below), it only adds a non-fatal
+    // warning. The organizer manual-update alert is still deduped to real changes
+    // (alertOnExisting: result.SyncRelevantChanged), so a no-change save stays silent.
+    public Task<IActionResult> OnPostSaveAsync(CancellationToken ct) => SaveAsync(sync: true, ct);
 
     private async Task<IActionResult> SaveAsync(bool sync, CancellationToken ct)
     {
@@ -89,10 +96,13 @@ public class DetailsModel : PageModel
             try
             {
                 // DEDUPE: only let the sync re-email the organizers' manual-update alert
-                // when something the speaker owns actually changed. A no-change re-sync of
-                // an already-in-Backstage speaker stays silent.
+                // when something the speaker owns actually changed AND the shared save
+                // service didn't already mail the field-level changes (operator 2026-07-24
+                // — the detailed changes mail supersedes this generic alert). A no-change
+                // re-sync of an already-in-Backstage speaker stays silent.
                 var r = await _sync.SyncOneAsync(
-                    me.EventId, me.ParticipantId, alertOnExisting: result.SyncRelevantChanged, ct: ct);
+                    me.EventId, me.ParticipantId,
+                    alertOnExisting: result.SyncRelevantChanged && !result.ManualUpdateMailSent, ct: ct);
                 // Speaker-facing copy: never names the backend (Zoho/Backstage) or leaks an
                 // exception — a speaker only needs to know whether their details reached the
                 // public event site.

@@ -114,8 +114,13 @@ public class TravelReimbursementsModel : PageModel
 
                     var rendered = _templates.Render("travel-reimbursement-paid", tokens);
                     // Ring-governed by the travel-reimbursement-email feature (operator 2026-06-22).
+                    // 🔒 §707.2b — the key was ALREADY here, but as the FIRST argument, which is
+                    // `Category`, not `TemplateName`. That reads as wired and is not: the gate never saw
+                    // a mail identity and fell back to the feature ring. Exactly the trap §707.2 flagged
+                    // (check the argument POSITION, not the name). Now passed as TemplateName too.
                     using (_context?.Set(new EmailContext(
                         "travel-reimbursement-paid", p.EventId, row.ParticipantId, p.FullName,
+                        TemplateName: "travel-reimbursement-paid",
                         FeatureKey: "travel-reimbursement-email")))
                     {
                         await _emailSender.SendAsync(p.Email, rendered.Subject, rendered.HtmlBody, ct);

@@ -78,7 +78,7 @@ public class WaitlistModel : PageModel
         var promo = await _svc.RemoveAsync(a.EventId, a.Id, sessionId, ct);
         if (promo?.PromotedSignupId is int id)
         {
-            try { await _promo.SendPromotionAsync(id, BaseUrl, ct); }
+            try { await _promo.SendPromotionAsync(id, BaseUrl, ct, promo.ReleasedTitle); }
             catch { /* removal stands even if the notify mail fails */ }
         }
         try { await _email.SendCancelledAsync(a.EventId, a.Email, a.FirstName, a.LastName, title, BaseUrl, a.Id, ct); }

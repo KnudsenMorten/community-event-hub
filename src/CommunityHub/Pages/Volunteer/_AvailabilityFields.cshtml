@@ -55,7 +55,11 @@ else
     {
         var d = Model.Days[i];
         var opts = VolunteerDayOptions.For(d.Day);
-        var selected = VolunteerDayOptions.Resolve(d.Day, d.Level, d.RawNote);
+        @* §234 UX: a day the volunteer has never saved renders with NO option checked —
+           the old pre-selected "Full day" default was silently saved as the volunteer's
+           answer. `required` (one per radio group) + the server-side check force an
+           explicit choice; a previously saved day still re-selects its stored option. *@
+        var selected = d.HasSaved ? VolunteerDayOptions.Resolve(d.Day, d.Level, d.RawNote) : null;
         <div class="av-day" data-av-day>
             <h3>@d.Label</h3>
             <input type="hidden" name="Inputs[@i].Day" value="@d.Day.ToString("yyyy-MM-dd")" />
@@ -66,7 +70,7 @@ else
                     <div class="av-opt">
                         <input type="radio" id="d@(i)_@j" name="Inputs[@i].Slot"
                                value="@o.Slot" data-exclusive="@(o.IsExclusive ? "1" : "0")"
-                               checked="@(o.Slot == selected.Slot)" />
+                               required checked="@(o.Slot == selected?.Slot)" />
                         <label for="d@(i)_@j"><span class="av-pct">@o.Title</span>@if (o.Sub is not null) {<span class="av-sub">@o.Sub</span>}</label>
                     </div>
                 }
@@ -76,11 +80,25 @@ else
                       maxlength="500" placeholder="e.g. blocked 13:00–15:00 for a session I want to attend">@d.UserNote</textarea>
         </div>
     }
-    <p style="font-size:13px;color:#6e7681;margin:18px 0 8px;">
-        📧 When you click <strong>Save</strong>, your availability is emailed to
-        Morten Leth (<a href="mailto:mlh@expertslive.dk">mlh@expertslive.dk</a>)
-        so we can plan the schedule.
-    </p>
+    @* §234 UX: the footer states what ACTUALLY happens per path — only the FIRST save is
+       applied + emailed to the volunteer lead; a later change is queued for organizer
+       approval and does not take effect (or email anyone) until it is approved. *@
+    @if (Model.LastSavedAt is null)
+    {
+        <p style="font-size:13px;color:#6e7681;margin:18px 0 8px;">
+            📧 When you click <strong>Save</strong>, your availability is sent to
+            Morten Leth Hedegaard (<a href="mailto:mlh@expertslive.dk">mlh@expertslive.dk</a>)
+            so we can plan the schedule.
+        </p>
+    }
+    else
+    {
+        <p style="font-size:13px;color:#6e7681;margin:18px 0 8px;">
+            📋 When you click <strong>Save</strong>, your change is queued for the
+            organizers to approve. Until it is approved, your previously saved
+            availability still applies.
+        </p>
+    }
 }
 
 @* Per-day availability exclusivity (REQUIREMENTS §45): every option for a day is a

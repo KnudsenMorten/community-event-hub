@@ -18,8 +18,24 @@ namespace CommunityHub.Core.Auth;
 /// </summary>
 public sealed class PinIdentityProvider : IIdentityProvider
 {
-    /// <summary>A PIN is locked after this many wrong guesses.</summary>
-    private const int MaxFailedAttempts = 5;
+    /// <summary>
+    /// A PIN is locked after this many wrong guesses.
+    ///
+    /// <para><b>Operator decision 2026-07-27: 5 → 10.</b> Asked for as <i>"pin failed guess increase
+    /// to 10 per hour (not 1000)"</i> — deliberately a RAISE, not a removal, unlike the other limits
+    /// changed the same day.</para>
+    ///
+    /// <para><b>One clarification, because it is not per hour:</b> this counter lives on the
+    /// individual PIN, and a PIN expires 15 minutes after it is issued. So it is 10 wrong guesses
+    /// per LOGIN ATTEMPT, and requesting a fresh PIN starts a fresh 10. That delivers what was
+    /// asked — somebody fat-fingering a code now has real room — while keeping the property that
+    /// matters: one PIN cannot be ground down indefinitely.</para>
+    ///
+    /// <para>This is the ONLY brute-force control on sign-in, which is why it stays small. The
+    /// request-rate cap in <c>PinLoginService</c> was effectively removed the same day; that one
+    /// governed how many PINs could be MAILED, not how many could be GUESSED.</para>
+    /// </summary>
+    private const int MaxFailedAttempts = 10;
 
     private readonly CommunityHubDbContext _db;
     private readonly PinService _pinService;

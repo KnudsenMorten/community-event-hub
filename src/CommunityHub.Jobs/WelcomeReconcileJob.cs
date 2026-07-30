@@ -1,5 +1,6 @@
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
+using CommunityHub.Core.Email;
 using CommunityHub.Core.Reminders;
 using CommunityHub.Core.Settings;
 using Microsoft.Azure.Functions.Worker;
@@ -41,16 +42,26 @@ public sealed class WelcomeReconcileJob
     private readonly FeatureGateService _gate;
     private readonly ILogger<WelcomeReconcileJob> _log;
 
+    // §340-B: this is a BULK send loop and was the only one without the §219 pacer.
+    // Optional so existing constructions/tests are unchanged (null ⇒ no delay).
+    private readonly IBulkSendPacer? _pacer;
+    // §545(b) — optional, so an un-instrumented job simply says nothing (silence = UNKNOWN).
+    private readonly CommunityHub.Core.Diagnostics.JobActivityReporter? _activity;
+
     public WelcomeReconcileJob(
         WelcomeEmailService welcome,
         CommunityHubDbContext db,
         FeatureGateService gate,
-        ILogger<WelcomeReconcileJob> log)
+        ILogger<WelcomeReconcileJob> log,
+        IBulkSendPacer? pacer = null,
+        CommunityHub.Core.Diagnostics.JobActivityReporter? activity = null)
     {
         _welcome = welcome;
         _db = db;
         _gate = gate;
         _log = log;
+        _pacer = pacer;
+        _activity = activity;
     }
 
     [Function("WelcomeReconcileJob")]
@@ -61,6 +72,8 @@ public sealed class WelcomeReconcileJob
         if (eventId is null)
         {
             _log.LogInformation("WelcomeReconcileJob: no active edition; skipped.");
+            _activity?.ReportInactive(
+                "There is no ACTIVE edition, so nobody is being welcomed.");
             return;
         }
 
@@ -69,8 +82,15 @@ public sealed class WelcomeReconcileJob
         if (!await _gate.IsFeatureEnabledAsync("welcome-email", eventId.Value, ct))
         {
             _log.LogInformation("WelcomeReconcileJob: welcome-email disabled; skipped.");
+            // This is the reconcile that catches up when a ring WIDENS, so while it is off, new
+            // participants accumulate unwelcomed and nothing says so.
+            _activity?.ReportInactive(
+                "The 'welcome-email' feature is switched off, so no participant is being welcomed "
+                + "— new sign-ups are accumulating unwelcomed.");
             return;
         }
+
+        _activity?.ReportWork();
 
         var ids = await _db.Participants
             .Where(p => p.EventId == eventId.Value && p.IsActive && Roles.Contains(p.Role))
@@ -85,6 +105,14 @@ public sealed class WelcomeReconcileJob
                 if (await _welcome.SendWelcomeAsync(id, ct))
                 {
                     sent++;
+                    // §340-B PACING: space the bulk loop under Brevo's rate limit. Paced
+                    // AFTER an actual send, not before every iteration (the sibling loops in
+                    // AttendeeBackstageSyncJob pace up-front because every iteration there IS
+                    // a send). Here the overwhelming majority of iterations are idempotent
+                    // skips of already-welcomed people, so an up-front delay would add
+                    // ~150 ms × every participant on a job that runs every 10 minutes, for
+                    // nothing. This shape delays only between real outbound mail.
+                    if (_pacer is not null) await _pacer.PaceAsync(ct);
                 }
             }
             catch (Exception ex)

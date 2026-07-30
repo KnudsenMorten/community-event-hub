@@ -26,7 +26,7 @@ namespace CommunityHub.Jobs;
 ///
 /// All functions are tracked uniformly by function name (a manual/HTTP trigger that fails
 /// twice in a row alerting is acceptable). Note: a job that handles its OWN consecutive-
-/// failure gate and does NOT re-throw (e.g. <see cref="ErpWebshopReconcileJob"/>) is seen
+/// failure gate and does NOT re-throw (e.g. <see cref="ErpSyncCustomerContactJob"/>) is seen
 /// here as a SUCCESS, under its own distinct function-name key — no double counting.
 ///
 /// Registered OUTERMOST (before <see cref="JobsPauseMiddleware"/>) so it also catches a
@@ -83,6 +83,14 @@ public sealed class EngineErrorAlertMiddleware : IFunctionsWorkerMiddleware
             var gate = context.InstanceServices.GetService<EngineFailureAlertGate>();
             if (gate is not null)
                 await gate.OnSuccessAsync(fn, ct);
+
+            // §545(b) INACTIVE — a clean run is not the same as a run that DID something. The §544
+            // session push succeeded every time for weeks while switched off. If the job said which
+            // it was, record it; 🔒 if it said NOTHING, do nothing at all — silence is UNKNOWN, and
+            // treating it as "did work" would quietly reset a streak the job is genuinely still in.
+            var activity = context.InstanceServices.GetService<JobActivityReporter>();
+            if (gate is not null && activity is { Reported: true })
+                await gate.OnActivityAsync(fn, activity.InactiveReason, ct);
         }
         catch { /* success bookkeeping must never fail a successful job */ }
     }

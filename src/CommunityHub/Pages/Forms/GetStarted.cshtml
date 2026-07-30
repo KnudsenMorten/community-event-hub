@@ -31,7 +31,10 @@ else
     if (!v.AllDone && v.NextStep is not null)
     {
         continueUrl = Url.Page(v.NextStep.Route);
-        continueLabel = $"{Localizer["RoleWiz.Continue", v.NextStepNumber, v.EntitledCount].Value}: {StepTitle(v.NextStep.Key)}";
+        // §259: @Localizer is an IHtmlLocalizer — LocalizedHtmlString.Value returns the RAW
+        // format string ("… step {0} of {1}") because the args are only substituted when the
+        // HTML is written, not in .Value. Format explicitly so the numbers render.
+        continueLabel = $"{string.Format(Localizer["RoleWiz.Continue"].Value, v.NextStepNumber, v.EntitledCount)}: {StepTitle(v.NextStep.Key)}";
     }
     var vm = new WizardStepperVm(
         Heading: Localizer["RoleWiz.Title"].Value,

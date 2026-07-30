@@ -1,5 +1,6 @@
 using CommunityHub.Jobs;
 using CommunityHub.Core.Config;
+using CommunityHub.Core.Diagnostics;
 using CommunityHub.Core.Data;
 using Microsoft.ApplicationInsights.Extensibility;
 using Microsoft.AspNetCore.DataProtection;
@@ -96,30 +97,60 @@ var host = new HostBuilder()
         // LoggingEmailSender decorator as the web app so EmailLog captures
         // scheduled reminders + step-reset reminders too.
         services.AddSingleton<IEmailContextAccessor, EmailContextAccessor>();
+        // §219 (Risk-4): paces bulk email loops (reminder batch, attendee welcome loops)
+        // under Brevo's per-second rate limit. Reads Email:BulkSendDelayMs (default 150ms).
+        services.AddSingleton<IBulkSendPacer>(sp => new BulkSendPacer(
+            sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<EmailOptions>>(),
+            sp.GetService<TimeProvider>()));
+        // §234: delivered-vs-dropped seam. The SCOPED instance (injected into the
+        // ledger callers: welcome services, ReminderEngine) installs a per-job-run
+        // outcome holder; the SINGLETON senders write into it via Detached()
+        // instances, so a ring-dropped send is never stamped/ledgered as sent and
+        // is retried on a later run once rings widen.
+        services.AddScoped<IEmailDeliveryOutcome, EmailDeliveryOutcome>();
         // Ring-gate every send at the sender (REQUIREMENTS §23): opens a scope per
         // send for RingResolver + FeatureGateService and reads the active edition
         // from the ambient EmailContext. Covers the reminder/digest job paths too.
-        // The ring gate sits in front of the existing allowlist/redirect (intact).
+        // Audience control is rings-only (no allowlist): ring gate + DEV
+        // RedirectAllTo + global KillSwitch.
         services.AddSingleton<BrevoEmailSender>(sp => new BrevoEmailSender(
             sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<EmailOptions>>(),
             sp.GetRequiredService<IServiceScopeFactory>(),
             sp.GetRequiredService<IEmailContextAccessor>(),
-            sp.GetService<Microsoft.Extensions.Logging.ILogger<BrevoEmailSender>>()));
+            sp.GetService<Microsoft.Extensions.Logging.ILogger<BrevoEmailSender>>(),
+            EmailDeliveryOutcome.Detached()));
         services.AddSingleton<IEmailSender>(sp => new LoggingEmailSender(
             sp.GetRequiredService<BrevoEmailSender>(),
             sp.GetRequiredService<IServiceScopeFactory>(),
             sp.GetRequiredService<IEmailContextAccessor>(),
             sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<EmailOptions>>(),
             sp.GetRequiredService<TimeProvider>(),
-            sp.GetService<Microsoft.Extensions.Logging.ILogger<LoggingEmailSender>>()));
+            sp.GetService<Microsoft.Extensions.Logging.ILogger<LoggingEmailSender>>(),
+            EmailDeliveryOutcome.Detached()));
         // Ops/engine ALERT mail (ring-exempt so it reaches the developer mailbox, which is
         // not a ring-gated participant). Used by EngineErrorAlertMiddleware + the engines.
+        // §702 — the [DEV]/[PROD] tag on every alert subject. 🔒 NOT IHostEnvironment: the Functions
+        // apps set no environment variable at all, so it defaults to "Production" in BOTH editions
+        // (verified 2026-07-29). WEBSITE_SITE_NAME is the safety net that makes the tag correct even
+        // before Hub__EnvironmentLabel is deployed.
+        services.AddSingleton(sp => new CommunityHub.Core.Diagnostics.HubEnvironment(
+            sp.GetRequiredService<IConfiguration>()["Hub:EnvironmentLabel"],
+            Environment.GetEnvironmentVariable("WEBSITE_SITE_NAME")));
         services.AddSingleton<EngineAlertSender>();
+        // RULE (operator 2026-07-23): every CEH-made Zoho Backstage write notifies
+        // info@expertslive.dk (publish/delete is manual in Backstage). Rides the
+        // ring-exempt EngineAlertSender above; batched per run, unthrottled.
+        services.AddSingleton<ZohoChangeNotifier>();
 
         // --- Email system services (10a) -----------------------------------
         services.AddScoped<ParticipantEmailService>();
+        // §655 — retries mail that failed for a SELF-CORRECTING reason (throttle, timeout), three
+        // attempts across an hour, never a bad address (FailedMailRetryJob).
+        services.AddScoped<FailedMailRetryService>();
         services.AddScoped<OnboardingStepResetEmailService>();
         services.AddScoped<SpeakerQuestionDigestService>();
+        // §203: pending-organizer-action digest (ops mail to info@expertslive.dk).
+        services.AddScoped<CommunityHub.Core.Email.PendingApprovalsDigestService>();
         services.AddScoped<OrganizerActionItemService>();
         // Welcome-grant housekeeping (WelcomeGrantPruneJob).
         services.AddScoped<CommunityHub.Core.Auth.WelcomeGrantAdminService>();
@@ -149,6 +180,8 @@ var host = new HostBuilder()
             CommunityHub.Core.Auth.EmailMagicLinkService>();
         services.AddScoped<CommunityHub.Core.Reminders.WelcomeWithLoginEmailService>();
         services.AddScoped<CommunityHub.Core.Reminders.AttendeeWelcomeProvisioningService>();
+        // §208: the NEW 1-day attendee welcome (one task: Party signup; carries the magic link).
+        services.AddScoped<CommunityHub.Core.Reminders.AttendeeOneDayWelcomeEmailService>();
 
         // Welcome-email options: auto-login link DISABLED by default (operator
         // "disable welcome mail with login"); bound from the WelcomeEmail config
@@ -164,6 +197,10 @@ var host = new HostBuilder()
         services.AddSingleton<EmailTemplateProvider>();
 
         services.AddScoped<ReminderEngine>();
+        // §436: the shared "your session graphics are ready — Open Help Promote" mail.
+        // Registered in BOTH hosts: the sync job + daily sweep call it here, the
+        // organizer's Release click calls it in the web host.
+        services.AddScoped<CommunityHub.Core.Integrations.Graphics.SpeakerGraphicsReadyNotifier>();
         // Universal sponsor-email audience rule (REQUIREMENTS §7c): the shared
         // coordinator-only recipient resolver, consumed by TaskReminderBuilder so
         // sponsor task reminders go to coordinators (not signer-only assignees).
@@ -175,6 +212,25 @@ var host = new HostBuilder()
             sp.GetRequiredService<CommunityHub.Core.Data.CommunityHubDbContext>(),
             sp.GetService<CommunityHub.Core.Email.ISponsorErpCoordinatorSource>()));
         services.AddScoped<TaskReminderBuilder>();
+        // §177/§206: the crew + attendee party-RSVP cadence — every 2 weeks from welcome.
+        services.AddScoped<CommunityHub.Core.Reminders.AttendeePartyReminderBuilder>();
+        // §207: the 2-day attendee Master Class selection cadence — every 2 weeks from welcome.
+        services.AddScoped<CommunityHub.Core.Reminders.AttendeeMasterClassReminderBuilder>();
+
+        // §250: the biweekly Get-Started-incomplete digest. It enumerates open steps via
+        // the WIZARD SERVICES (the same source the wizard pages render — never the task
+        // table), so those services + the SignalGroupsProvider they consult are registered
+        // for the Jobs host too (mirroring the web app's registrations).
+        var signalGroupsOptions = new CommunityHub.Core.Config.SignalGroupsOptions();
+        config.GetSection(CommunityHub.Core.Config.SignalGroupsOptions.SectionName)
+            .Bind(signalGroupsOptions);
+        services.AddSingleton(signalGroupsOptions);
+        services.AddSingleton<CommunityHub.Core.Config.SignalGroupsProvider>();
+        services.AddScoped<CommunityHub.Forms.SpeakerWizardService>();
+        services.AddScoped<CommunityHub.Forms.RoleWizardService>();
+        services.AddScoped<CommunityHub.Forms.AttendeeWizardService>();
+        services.AddScoped<CommunityHub.Forms.SponsorWizardService>();
+        services.AddScoped<CommunityHub.Core.Reminders.GetStartedDigestBuilder>();
 
         // --- Speaker deadline seeding ---------------------------------------
         var speakerDeadlineOptions = new SpeakerDeadlineOptions();
@@ -182,16 +238,30 @@ var host = new HostBuilder()
             .Bind(speakerDeadlineOptions);
         services.AddSingleton(speakerDeadlineOptions);
         services.AddScoped<SpeakerDeadlineSeeder>();
+        // §326b: the one-shot speaker Get-Started deadline reminder — reads the
+        // getStartedDeadline block of the SAME speaker-deadlines config file.
+        services.AddScoped<CommunityHub.Core.Reminders.GetStartedDeadlineReminderBuilder>();
+        // §326bs: hotel release-deadline warning (needs the allotment board for its numbers).
+        services.AddScoped<CommunityHub.Core.Organizer.HotelAllotmentService>();
+        services.AddScoped<CommunityHub.Core.Reminders.HotelCutoffReminderBuilder>();
 
         // §164: party sign-up task seeding — ensures the staff-role "party sign-up"
         // tasks exist so the reminder run below nags anyone who hasn't answered Yes/No.
         services.AddScoped<PartyTaskSeeder>();
+        // §207: the 2-day attendee "Select your Master Class" task seeding.
+        services.AddScoped<CommunityHub.Core.Config.AttendeeMasterClassTaskSeeder>();
 
         // --- WooCommerce (sponsor pipeline) ---------------------------------
         var wooOptions = new WooCommerceOptions();
         config.GetSection(WooCommerceOptions.SectionName).Bind(wooOptions);
         services.AddSingleton(wooOptions);
-        services.AddHttpClient<WooCommerceClient>();
+        services.AddHttpClient<WooCommerceClient>()
+            // §649 — a WooCommerce 429 used to crash the WHOLE pull (observed 2026-07-29 08:30).
+            // That job now carries sponsor contacts into CEH, the Zoho provisioning AND the task
+            // form-links, so one rate-limit reply cost far more than it should. The handler already
+            // treats 429 as transient; WooCommerce simply never had it.
+            .AddHttpMessageHandler(() => new CommunityHub.Core.Integrations.TransientFaultRetryHandler())
+            .AddCredentialFailureAlert("WooCommerce");
 
         // --- Sponsor task config (JSON-driven task expansion) ---------------
         var sponsorConfigOptions = new SponsorConfigOptions();
@@ -205,6 +275,11 @@ var host = new HostBuilder()
         config.GetSection(EventConfigOptions.SectionName).Bind(eventConfigOptions);
         services.AddSingleton(eventConfigOptions);
         services.AddSingleton<EventEditionConfigLoader>();
+        // §299.8/b7 + §299.6/b5: session length/level options + the room registry
+        // (pure config) — the import stamps LevelCode and raises warn-only
+        // unknown-room warnings; the push log-warns on unknown rooms.
+        services.AddScoped<CommunityHub.Core.Config.SessionOptionsService>();
+        services.AddScoped<CommunityHub.Core.Config.RoomRegistryService>();
 
         // --- Admin-editable config overrides (HYBRID config model, Phase 1) -
         // The jobs share the same effective-config path as the web app: shipped
@@ -218,17 +293,28 @@ var host = new HostBuilder()
         services.AddScoped<ConfigOverrideStore>();
         // Per-edition editable email templates (§25h): job sends honor overrides too.
         services.AddScoped<CommunityHub.Core.Email.EmailTemplateOverrideStore>();
+        // §515 — per-template release rings. The jobs host sends most participant mail, so a ring
+        // registered only in the web app would be ignored by every scheduled send.
+        services.AddScoped<CommunityHub.Core.Email.EmailTemplateRingService>();
+
+        // §707.11 — the per-mail repeat interval. THIS host is where the reminder builders run, so
+        // without it every cadence would silently fall back to the shipped default.
+        services.AddScoped<CommunityHub.Core.Email.EmailReminderCadenceService>();
 
         // --- Sessionize (speaker import via v2 view API) -------------------
         var sessionizeOptions = new SessionizeApiOptions();
         config.GetSection(SessionizeApiOptions.SectionName).Bind(sessionizeOptions);
         services.AddSingleton(sessionizeOptions);
-        services.AddHttpClient<SessionizeApiClient>();
+        services.AddHttpClient<SessionizeApiClient>()
+            // §649 — same treatment, same reason. Read-only pull, so a retry cannot double-write.
+            .AddHttpMessageHandler(() => new CommunityHub.Core.Integrations.TransientFaultRetryHandler())
+            .AddCredentialFailureAlert("Sessionize");
         // Welcome path is shared with the API import route.
         services.AddScoped<WelcomeEmailService>();
         // Desired-state sponsor welcome reconcile (SponsorWelcomeReconcileJob).
         services.AddScoped<CommunityHub.Core.Reminders.SponsorWelcomeEmailService>();
-        // One-shot email-feature enable (EnableEmailFeaturesJob, admin-triggered).
+        // §335: surfaces a company stuck without its upload folder (SponsorProvisioningStallJob).
+        services.AddScoped<CommunityHub.Core.Reminders.SponsorProvisioningStallDetector>();
         services.AddScoped<CommunityHub.Core.Settings.FeatureSettingsService>();
         services.AddScoped<SessionizeImportService>();
         // Sessions are pulled from the same v2 view API and linked to speakers.
@@ -253,13 +339,19 @@ var host = new HostBuilder()
         // Bounded, jittered transient-fault retry (5xx/408/429/timeout) so a momentary
         // upstream blip from Company Manager doesn't crash a reconcile (2026-06-27 incident).
         services.AddHttpClient<CompanyManagerClient>()
-            .AddHttpMessageHandler(() => new CommunityHub.Core.Integrations.TransientFaultRetryHandler());
+            .AddHttpMessageHandler(() => new CommunityHub.Core.Integrations.TransientFaultRetryHandler())
+            .AddCredentialFailureAlert("Company Manager");
         services.AddScoped<SponsorContactSyncService>();
         // "Alert only on 2 consecutive failures" gate for background jobs.
         services.AddScoped<CommunityHub.Core.Diagnostics.JobFailureTracker>();
         // Central wrapper used by EngineErrorAlertMiddleware so the same consecutive-failure
         // gate covers EVERY function uniformly (not just the one job that self-gates).
         services.AddScoped<CommunityHub.Core.Diagnostics.EngineFailureAlertGate>();
+        // §545(b) — the per-run scratchpad where a job says "I ran and deliberately did nothing,
+        // and here is why". SCOPED is load-bearing: one instance per function invocation, so two
+        // concurrent jobs cannot read each other's outcome. EngineErrorAlertMiddleware reads it
+        // after a clean run; a job that reports nothing is left entirely alone.
+        services.AddScoped<CommunityHub.Core.Diagnostics.JobActivityReporter>();
 
         // --- SharePoint (per-sponsor upload folders + change watcher) ------
         var sharePointOptions = new SharePointUploadOptions();
@@ -269,8 +361,17 @@ var host = new HostBuilder()
         // walk + createLink). Raise the default 100s HttpClient timeout so a
         // single slow Graph call doesn't TaskCanceled-fail the WooCommerce pull.
         services.AddHttpClient<SharePointUploadClient>(c =>
-            c.Timeout = TimeSpan.FromMinutes(5));
+            c.Timeout = TimeSpan.FromMinutes(5))
+            // §598 is why this one matters most: the client secret was DEAD in BOTH environments
+            // and nothing said so — uploads simply stopped landing.
+            .AddCredentialFailureAlert("SharePoint");
         services.AddScoped<SponsorUploadWatchService>();
+        // §598 — verifies stored artefacts still exist in SharePoint (SponsorArtefactVerifyJob).
+        services.AddScoped<CommunityHub.Uploads.SponsorArtefactVerifier>();
+        // §623 — the CEH↔Zoho speaker gap report (SpeakerGapReportJob).
+        services.AddScoped<CommunityHub.Core.Integrations.SpeakerZohoGapReporter>();
+        // §545 — detects jobs that run green while doing nothing (JobSilenceAlertJob).
+        services.AddScoped<CommunityHub.Core.Diagnostics.JobSilenceDetector>();
 
         // --- SoMe graphics store (§18/§158): the SharePoint PULL + auto-release sync job
         // needs GraphicsService + the LIVE Graph file store, same gating as the web app
@@ -304,6 +405,10 @@ var host = new HostBuilder()
         var zohoOptions = new ZohoOptions();
         config.GetSection(ZohoOptions.SectionName).Bind(zohoOptions);
         services.AddSingleton(zohoOptions);
+        // §525 — SINGLETON: this host is where the burst came from. ~21 timer jobs each minted
+        // their own access token instead of sharing one, tripping Zoho's refresh-grant rate limit
+        // so every sync failed with "token refresh failed" against a perfectly valid credential.
+        services.AddSingleton<ZohoAccessTokenCache>();
         services.AddHttpClient<ZohoClient>();
 
         // §59: delta-approval queue — sync engines ENQUEUE detected changes here for the
@@ -347,13 +452,26 @@ var host = new HostBuilder()
             sp.GetRequiredService<ZohoClient>(),
             sp.GetRequiredService<ZohoOptions>(),
             tokenOverride: null,
-            queueFactory: () => sp.GetRequiredService<CommunityHub.Core.Integrations.Sessions.SyncDeltaQueueService>()));
+            queueFactory: () => sp.GetRequiredService<CommunityHub.Core.Integrations.Sessions.SyncDeltaQueueService>(),
+            // §299.6/b5: warn-only unknown-room logging against the config room registry.
+            logger: sp.GetService<Microsoft.Extensions.Logging.ILogger<CommunityHub.Core.Integrations.Sessions.SessionBackstagePushService>>(),
+            rooms: sp.GetService<CommunityHub.Core.Config.RoomRegistryService>(),
+            // Operator 2026-07-23: every successful Zoho write notifies info@expertslive.dk.
+            zohoChanges: sp.GetService<CommunityHub.Core.Email.ZohoChangeNotifier>(),
+            // INCIDENT FIX 2026-07-24: session creates attach ONLY approved + ring-eligible
+            // speaker e-mails (an attached e-mail makes Zoho create + INVITE the speaker).
+            gate: sp.GetRequiredService<CommunityHub.Core.Settings.FeatureGateService>()));
         services.AddScoped(sp => new CommunityHub.Core.Integrations.Sessions.SpeakerBackstagePushService(
             sp.GetRequiredService<CommunityHub.Core.Data.CommunityHubDbContext>(),
             sp.GetRequiredService<ZohoClient>(),
             sp.GetRequiredService<ZohoOptions>(),
             tokenOverride: null,
-            queueFactory: () => sp.GetRequiredService<CommunityHub.Core.Integrations.Sessions.SyncDeltaQueueService>()));
+            queueFactory: () => sp.GetRequiredService<CommunityHub.Core.Integrations.Sessions.SyncDeltaQueueService>(),
+            // Operator 2026-07-23: every successful Zoho write notifies info@expertslive.dk.
+            zohoChanges: sp.GetService<CommunityHub.Core.Email.ZohoChangeNotifier>(),
+            // Stage-2 go-live: only APPROVED speakers inside the backstage-speaker-sync
+            // released ring (Ring1 today) are pushed; everyone else is held.
+            gate: sp.GetRequiredService<CommunityHub.Core.Settings.FeatureGateService>()));
 
         // STAGE 4b: create/link Zoho sponsor + exhibitor records from webshop data
         // after the order pull (replaces the legacy PowerShell sync). Run by
@@ -372,6 +490,19 @@ var host = new HostBuilder()
         var testModeOptions = new TestModeOptions();
         config.GetSection(TestModeOptions.SectionName).Bind(testModeOptions);
         services.AddSingleton(testModeOptions);
+
+        // --- §340-H EXTERNAL WRITES (env default + per-edition organizer override) ---
+        // The JOBS host is where most third-party writes actually happen, so this
+        // registration matters more here than in the web app. SCOPED, because the guard
+        // reads the organizer's override from the DB and caches it for the scope.
+        var externalWriteOptions = new CommunityHub.Core.Integrations.ExternalWriteOptions();
+        config.GetSection(CommunityHub.Core.Integrations.ExternalWriteOptions.SectionName)
+            .Bind(externalWriteOptions);
+        services.AddSingleton(externalWriteOptions);
+        services.AddScoped<CommunityHub.Core.Integrations.IExternalWriteGuard,
+            CommunityHub.Core.Integrations.ExternalWriteGuard>();
+        Console.WriteLine(CommunityHub.Core.Integrations.ExternalWriteGuard.StartupBanner(
+            externalWriteOptions.AllowExternalWrites));
 
         // --- Backstage exhibitor sync --------------------------------------
         var backstageSyncOptions = new BackstageSyncOptions();
@@ -410,11 +541,12 @@ var host = new HostBuilder()
             .Bind(economicErpOptions);
         services.AddSingleton(economicErpOptions);
 
-        // ERP→webshop reconcile (the scheduled ErpWebshopReconcileJob, 30-min timer):
+        // ERP→webshop reconcile (the scheduled ErpSyncCustomerContactJob, 30-min timer):
         // mirror the web app's registration so the job can resolve the sync service.
         // All other deps (CompanyManagerClient/Options, EmailSender) are already above.
         services.AddHttpClient<CommunityHub.Core.Integrations.Erp.IEconomicContactAdminClient,
-            CommunityHub.Core.Integrations.Erp.LiveEconomicContactAdminClient>();
+            CommunityHub.Core.Integrations.Erp.LiveEconomicContactAdminClient>()
+            .AddCredentialFailureAlert("e-conomic");
         services.AddScoped<CommunityHub.Core.Integrations.Erp.EconomicContactAdminService>();
         services.AddScoped<CommunityHub.Core.Integrations.Erp.ErpWebshopContactSyncService>();
 
@@ -490,10 +622,14 @@ var host = new HostBuilder()
         var liOptions = new CommunityHub.Core.Integrations.LinkedInOptions();
         config.GetSection(CommunityHub.Core.Integrations.LinkedInOptions.SectionName).Bind(liOptions);
         services.AddSingleton(liOptions);
-        if (liOptions.Enabled && liOptions.HasCredentials)
+        // §324: live publisher whenever Enabled — the org token comes from the DB
+        // (minted via /Organizer/LinkedInConnect), else the options credentials.
+        services.AddHttpClient<CommunityHub.Core.Integrations.LinkedInTokenStore>();
+        if (liOptions.Enabled)
         {
             services.AddHttpClient<CommunityHub.Core.Integrations.ILinkedInPostPublisher,
-                CommunityHub.Core.Integrations.LiveLinkedInPostPublisher>();
+                CommunityHub.Core.Integrations.LiveLinkedInPostPublisher>()
+                .AddCredentialFailureAlert("LinkedIn");
         }
         else
         {
@@ -502,7 +638,58 @@ var host = new HostBuilder()
         }
         services.AddScoped<CommunityHub.Core.Integrations.SoMeSettingsService>();
         services.AddScoped<CommunityHub.Core.Integrations.SoMeDispatchService>();
+        // §304: pending-speaker approval — the import job mails info@ immediately
+        // when new speakers arrive held from the Zoho flow.
+        services.AddScoped<CommunityHub.Core.Organizer.SpeakerApprovalService>();
+    })
+    // 🔒 §570 — WHY THE WORKER'S OWN LOGS WERE INVISIBLE IN APP INSIGHTS.
+    //
+    // `AddApplicationInsightsTelemetryWorkerService()` installs a DEFAULT LoggerFilterRule for
+    // ApplicationInsightsLoggerProvider at **Warning**, so everything the isolated worker writes
+    // below Warning is dropped BEFORE reaching the telemetry pipeline — every `LogInformation` in
+    // every job, including the push job's "created X, updated Y, failed Z, skipped W" outcome line.
+    // The web app has no such rule, which is exactly why ITS "triggered manually." line appeared
+    // while nothing from inside the worker ever did.
+    //
+    // The filter lives in WORKER DI, so neither `host.json` nor the `AzureFunctionsJobHost__logging__*`
+    // app settings can reach it — both were tried and correctly changed nothing (they configure the
+    // HOST, not the worker).
+    //
+    // ⚠️ ORDER IS THE WHOLE FIX, AND GETTING IT WRONG LOOKS EXACTLY LIKE GETTING IT RIGHT.
+    // `IServiceCollection.Configure<T>` actions run in REGISTRATION order. The first attempt at this
+    // put `.ConfigureLogging(...)` BEFORE `.ConfigureServices(...)` in the builder chain, so the
+    // removal ran FIRST and `AddApplicationInsightsTelemetryWorkerService()` then re-added its rule
+    // afterwards — the code read correctly, compiled, deployed, and changed nothing. It MUST stay
+    // after the ConfigureServices block that registers the AI worker service.
+    .ConfigureLogging(logging =>
+    {
+        logging.Services.Configure<Microsoft.Extensions.Logging.LoggerFilterOptions>(options =>
+        {
+            var aiRule = options.Rules.FirstOrDefault(r => r.ProviderName
+                == "Microsoft.Extensions.Logging.ApplicationInsights.ApplicationInsightsLoggerProvider");
+            if (aiRule is not null) options.Rules.Remove(aiRule);
+        });
     })
     .Build();
+
+// --- §303 per-integration field maps (layer 2) ------------------------------
+// Same fail-soft load as the web host: zoho-backstage.fieldmap.json overrides
+// the ZohoFieldMap code defaults; a missing/invalid file logs and falls back.
+{
+    var mapLog = host.Services.GetRequiredService<Microsoft.Extensions.Logging.ILoggerFactory>()
+        .CreateLogger("IntegrationFieldMap");
+    CommunityHub.Core.Integrations.ZohoFieldMap.ApplyMapFile(
+        CommunityHub.Core.Integrations.IntegrationFieldMap.LoadMapFile(
+            CommunityHub.Core.Integrations.ZohoFieldMap.MapFilePath,
+            err => Microsoft.Extensions.Logging.LoggerExtensions.LogWarning(
+                mapLog, "IntegrationFieldMap: {Error}", err)));
+    // §323: the INBOUND Sessionize map — the importer (which runs IN THIS HOST) routes
+    // category groups by the file's keywords; code defaults are the fallback.
+    CommunityHub.Core.Integrations.SessionizeFieldMap.ApplyMapFile(
+        CommunityHub.Core.Integrations.IntegrationFieldMap.LoadMapFile(
+            CommunityHub.Core.Integrations.SessionizeFieldMap.MapFilePath,
+            err => Microsoft.Extensions.Logging.LoggerExtensions.LogWarning(
+                mapLog, "IntegrationFieldMap: {Error}", err)));
+}
 
 host.Run();

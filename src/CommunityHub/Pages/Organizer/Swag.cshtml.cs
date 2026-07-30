@@ -2,6 +2,7 @@ using ClosedXML.Excel;
 using CommunityHub.Auth;
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
+using CommunityHub.Core.Entitlements;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
@@ -25,17 +26,13 @@ public class SwagModel : PageModel
 
     public int TotalSubmissions { get; private set; }
     public int PoloYesCount { get; private set; }
-    public int JacketYesCount { get; private set; }
     public int GiftYesCount { get; private set; }
     public int CredlyYesCount { get; private set; }
 
     /// <summary>(Role, Size) → count, polo only, "yes" rows only. Sorted by role then size.</summary>
     public IReadOnlyList<PoloLine> PoloLines { get; private set; } = Array.Empty<PoloLine>();
-    /// <summary>Size → count, jacket only, "yes" rows only.</summary>
-    public IReadOnlyList<JacketLine> JacketLines { get; private set; } = Array.Empty<JacketLine>();
 
     public record PoloLine(string Role, string Size, int Count);
-    public record JacketLine(string Size, int Count);
 
     public async Task<IActionResult> OnGetAsync(CancellationToken ct)
     {
@@ -47,212 +44,245 @@ public class SwagModel : PageModel
         return Page();
     }
 
-    public async Task<IActionResult> OnGetDownloadAsync(CancellationToken ct)
+    // §326bu (operator 2026-07-25: "download excel must be 1 file per polo, award,
+    // credly. it must also contain the name of the person (critical to handout, send
+    // to people)"). Three separate downloads, each PER PERSON and named.
+    //
+    // The old single workbook aggregated polos to (Role × Size) counts with no names at
+    // all — fine for placing a vendor order, useless on the day, when someone has to
+    // hand a specific shirt to a specific person. Each file now leads with the person
+    // list; the polo file keeps the size totals as a SECOND sheet so the vendor order
+    // is not lost. Jackets are gone entirely (§326bt).
+
+    public Task<IActionResult> OnGetPoloXlsxAsync(CancellationToken ct) =>
+        BuildAsync("polo", ct);
+
+    public Task<IActionResult> OnGetAwardXlsxAsync(CancellationToken ct) =>
+        BuildAsync("award", ct);
+
+    public Task<IActionResult> OnGetCredlyXlsxAsync(CancellationToken ct) =>
+        BuildAsync("credly", ct);
+
+    private async Task<IActionResult> BuildAsync(string kind, CancellationToken ct)
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
         if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
 
+        // ACTIVE people only (§253 G5): these sheets drive what is ORDERED and what is
+        // physically handed over — a drop-out's row would be paid for and printed.
         var rows = await _db.SwagPreferences
             .Where(s => s.EventId == me.EventId)
             .Join(_db.Participants, s => s.ParticipantId, p => p.Id, (s, p) => new
             {
-                p.FullName, p.Email, p.Role,
-                s.WantsPolo, s.PoloSize,
-                s.WantsJacket, s.JacketSize,
-                s.WantsGift, s.WantsCredlyBadge, s.Notes,
-                s.UpdatedAt, s.CreatedAt
+                p.Id, p.FullName, p.Email, p.Role, p.IsActive,
+                s.WantsPolo, s.PoloSize, s.WantsGift, s.WantsCredlyBadge, s.Notes,
             })
+            .Where(x => x.IsActive)
             .ToListAsync(ct);
 
+        var (categoryByPid, daysBySpeaker) = await LoadSpeakerPoloInputsAsync(me.EventId, ct);
+
         using var wb = new XLWorkbook();
+        string fileStem;
 
-        // --- Sheet 1: Polo Order (Role → Size → Count) -----------------------
-        var poloSheet = wb.Worksheets.Add("Polo Order");
-        poloSheet.Cell(1, 1).Value = "Role";
-        poloSheet.Cell(1, 2).Value = "Size";
-        poloSheet.Cell(1, 3).Value = "Polo_Total";
-        poloSheet.Range(1, 1, 1, 3).Style.Font.Bold = true;
-
-        var poloAgg = rows
-            .Where(r => r.WantsPolo && !string.IsNullOrWhiteSpace(r.PoloSize))
-            .GroupBy(r => new { Role = r.Role.ToString(), Size = r.PoloSize! })
-            .Select(g => new { g.Key.Role, g.Key.Size, Count = g.Count() })
-            .OrderBy(x => x.Role).ThenBy(x => x.Size)
-            .ToList();
-
-        int prow = 2;
-        foreach (var p in poloAgg)
+        if (kind == "polo")
         {
-            poloSheet.Cell(prow, 1).Value = p.Role;
-            poloSheet.Cell(prow, 2).Value = p.Size;
-            poloSheet.Cell(prow, 3).Value = p.Count;
-            prow++;
+            fileStem = "polo-order";
+            var people = rows
+                .Where(r => r.WantsPolo && !string.IsNullOrWhiteSpace(r.PoloSize))
+                .OrderBy(r => r.Role.ToString()).ThenBy(r => r.FullName)
+                .ToList();
+
+            // Sheet 1: WHO gets what — the hand-out list.
+            var ws = wb.Worksheets.Add("Polo per person");
+            WriteHeader(ws, "Name", "Email", "Role", "Size", "Polos");
+            var row = 2;
+            foreach (var r in people)
+            {
+                ws.Cell(row, 1).Value = r.FullName;
+                ws.Cell(row, 2).Value = r.Email;
+                ws.Cell(row, 3).Value = r.Role.ToString();
+                ws.Cell(row, 4).Value = r.PoloSize;
+                // §299 6.3: a master-class speaker is funded for 2 (pre-day + main day).
+                ws.Cell(row, 5).Value = PoloCount(r.Role, r.Id, categoryByPid, daysBySpeaker);
+                row++;
+            }
+            Total(ws, people.Count, row, labelCol: 1, sumCol: 5);
+            ws.Columns().AdjustToContents();
+            ws.SheetView.FreezeRows(1);
+
+            // Sheet 2: the vendor order — same numbers, rolled up by role + size.
+            var agg = wb.Worksheets.Add("Size totals");
+            WriteHeader(agg, "Role", "Size", "Polo_Total");
+            var lines = people
+                .GroupBy(r => new { Role = r.Role.ToString(), Size = r.PoloSize! })
+                .Select(g => new { g.Key.Role, g.Key.Size, Count = g.Sum(r => PoloCount(r.Role, r.Id, categoryByPid, daysBySpeaker)) })
+                .OrderBy(x => x.Role).ThenBy(x => x.Size)
+                .ToList();
+            var arow = 2;
+            foreach (var l in lines)
+            {
+                agg.Cell(arow, 1).Value = l.Role;
+                agg.Cell(arow, 2).Value = l.Size;
+                agg.Cell(arow, 3).Value = l.Count;
+                arow++;
+            }
+            Total(agg, lines.Count, arow, labelCol: 1, sumCol: 3);
+            agg.Columns().AdjustToContents();
         }
-        if (poloAgg.Count > 0)
+        else if (kind == "award")
         {
-            poloSheet.Cell(prow, 1).Value = "Grand Total";
-            poloSheet.Cell(prow, 3).FormulaA1 = $"SUM(C2:C{prow - 1})";
-            poloSheet.Range(prow, 1, prow, 3).Style.Font.Bold = true;
+            fileStem = "award-order";
+            var people = rows
+                .Where(r => r.WantsGift)
+                .OrderBy(r => r.Role.ToString()).ThenBy(r => r.FullName)
+                .ToList();
+
+            var ws = wb.Worksheets.Add("Award per person");
+            WriteHeader(ws, "Name", "Email", "Role", "Awards");
+            var row = 2;
+            foreach (var r in people)
+            {
+                ws.Cell(row, 1).Value = r.FullName;
+                ws.Cell(row, 2).Value = r.Email;
+                ws.Cell(row, 3).Value = r.Role.ToString();
+                ws.Cell(row, 4).Value = 1;
+                row++;
+            }
+            Total(ws, people.Count, row, labelCol: 1, sumCol: 4);
+            ws.Columns().AdjustToContents();
+            ws.SheetView.FreezeRows(1);
         }
-        poloSheet.Columns().AdjustToContents();
-
-        // --- Sheet 2: Jacket Order (Size → Count) ---------------------------
-        var jacketSheet = wb.Worksheets.Add("Jacket Order");
-        jacketSheet.Cell(1, 1).Value = "Size";
-        jacketSheet.Cell(1, 2).Value = "Jacket_Total";
-        jacketSheet.Range(1, 1, 1, 2).Style.Font.Bold = true;
-
-        var jacketAgg = rows
-            .Where(r => r.WantsJacket && !string.IsNullOrWhiteSpace(r.JacketSize))
-            .GroupBy(r => r.JacketSize!)
-            .Select(g => new { Size = g.Key, Count = g.Count() })
-            .OrderBy(x => x.Size)
-            .ToList();
-
-        int jrow = 2;
-        foreach (var j in jacketAgg)
+        else
         {
-            jacketSheet.Cell(jrow, 1).Value = j.Size;
-            jacketSheet.Cell(jrow, 2).Value = j.Count;
-            jrow++;
-        }
-        if (jacketAgg.Count > 0)
-        {
-            jacketSheet.Cell(jrow, 1).Value = "Grand Total";
-            jacketSheet.Cell(jrow, 2).FormulaA1 = $"SUM(B2:B{jrow - 1})";
-            jacketSheet.Range(jrow, 1, jrow, 2).Style.Font.Bold = true;
-        }
-        jacketSheet.Columns().AdjustToContents();
+            fileStem = "credly-badges";
+            var people = rows
+                .Where(r => r.WantsCredlyBadge)
+                .OrderBy(r => r.Role.ToString()).ThenBy(r => r.FullName)
+                .ToList();
 
-        // --- Sheet 3: Award Order (one row per gift recipient, name + role) -
-        //  Engraver needs name + role per award. Grouped by Role for vendor
-        //  pivot-style readability; per-row count is 1 so SUM = headcount.
-        var awardSheet = wb.Worksheets.Add("Award Order");
-        awardSheet.Cell(1, 1).Value = "Role";
-        awardSheet.Cell(1, 2).Value = "Name";
-        awardSheet.Cell(1, 3).Value = "Count";
-        awardSheet.Range(1, 1, 1, 3).Style.Font.Bold = true;
-
-        var awardRows = rows
-            .Where(r => r.WantsGift)
-            .OrderBy(r => r.Role.ToString())
-            .ThenBy(r => r.FullName)
-            .ToList();
-
-        int arow = 2;
-        foreach (var r in awardRows)
-        {
-            awardSheet.Cell(arow, 1).Value = r.Role.ToString();
-            awardSheet.Cell(arow, 2).Value = r.FullName;
-            awardSheet.Cell(arow, 3).Value = 1;
-            arow++;
+            // Credly badges are ISSUED to an address, so email is the operative column.
+            var ws = wb.Worksheets.Add("Credly per person");
+            WriteHeader(ws, "Name", "Email", "Role", "Badges");
+            var row = 2;
+            foreach (var r in people)
+            {
+                ws.Cell(row, 1).Value = r.FullName;
+                ws.Cell(row, 2).Value = r.Email;
+                ws.Cell(row, 3).Value = r.Role.ToString();
+                ws.Cell(row, 4).Value = 1;
+                row++;
+            }
+            Total(ws, people.Count, row, labelCol: 1, sumCol: 4);
+            ws.Columns().AdjustToContents();
+            ws.SheetView.FreezeRows(1);
         }
-        if (awardRows.Count > 0)
-        {
-            awardSheet.Cell(arow, 1).Value = "Grand Total";
-            awardSheet.Cell(arow, 3).FormulaA1 = $"SUM(C2:C{arow - 1})";
-            awardSheet.Range(arow, 1, arow, 3).Style.Font.Bold = true;
-        }
-        awardSheet.Columns().AdjustToContents();
-
-        // --- Sheet 4: Credly Badge List -------------------------------------
-        var credlySheet = wb.Worksheets.Add("Credly Badge List");
-        credlySheet.Cell(1, 1).Value = "Role";
-        credlySheet.Cell(1, 2).Value = "Name";
-        credlySheet.Cell(1, 3).Value = "Email";
-        credlySheet.Cell(1, 4).Value = "Count";
-        credlySheet.Range(1, 1, 1, 4).Style.Font.Bold = true;
-        var credlyRows = rows
-            .Where(r => r.WantsCredlyBadge)
-            .OrderBy(r => r.Role.ToString()).ThenBy(r => r.FullName)
-            .ToList();
-        int crow = 2;
-        foreach (var r in credlyRows)
-        {
-            credlySheet.Cell(crow, 1).Value = r.Role.ToString();
-            credlySheet.Cell(crow, 2).Value = r.FullName;
-            credlySheet.Cell(crow, 3).Value = r.Email;
-            credlySheet.Cell(crow, 4).Value = 1;
-            crow++;
-        }
-        if (credlyRows.Count > 0)
-        {
-            credlySheet.Cell(crow, 1).Value = "Grand Total";
-            credlySheet.Cell(crow, 4).FormulaA1 = $"SUM(D2:D{crow - 1})";
-            credlySheet.Range(crow, 1, crow, 4).Style.Font.Bold = true;
-        }
-        credlySheet.Columns().AdjustToContents();
-
-        // --- Sheet 5: Raw (all rows, all detail) ----------------------------
-        var raw = wb.Worksheets.Add("Raw");
-        var headers = new[] { "Name", "Email", "Role",
-            "Wants polo", "Polo size",
-            "Wants jacket", "Jacket size",
-            "Wants award", "Wants Credly", "Notes", "Last updated (UTC)" };
-        for (int i = 0; i < headers.Length; i++) raw.Cell(1, i + 1).Value = headers[i];
-        raw.Range(1, 1, 1, headers.Length).Style.Font.Bold = true;
-
-        int rrow = 2;
-        foreach (var r in rows.OrderBy(x => x.Role.ToString()).ThenBy(x => x.FullName))
-        {
-            raw.Cell(rrow, 1).Value = r.FullName;
-            raw.Cell(rrow, 2).Value = r.Email;
-            raw.Cell(rrow, 3).Value = r.Role.ToString();
-            raw.Cell(rrow, 4).Value = r.WantsPolo ? "Yes" : "No";
-            raw.Cell(rrow, 5).Value = r.PoloSize ?? "";
-            raw.Cell(rrow, 6).Value = r.WantsJacket ? "Yes" : "No";
-            raw.Cell(rrow, 7).Value = r.JacketSize ?? "";
-            raw.Cell(rrow, 8).Value = r.WantsGift ? "Yes" : "No";
-            raw.Cell(rrow, 9).Value = r.WantsCredlyBadge ? "Yes" : "No";
-            raw.Cell(rrow, 10).Value = r.Notes ?? "";
-            raw.Cell(rrow, 11).Value = (r.UpdatedAt ?? r.CreatedAt).UtcDateTime;
-            rrow++;
-        }
-        raw.Columns().AdjustToContents();
 
         using var ms = new MemoryStream();
         wb.SaveAs(ms);
-        ms.Position = 0;
-
-        var fileName = $"swag-order-{DateTime.UtcNow:yyyyMMdd-HHmm}.xlsx";
         return File(
             ms.ToArray(),
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            fileName);
+            $"{fileStem}-{DateTime.UtcNow:yyyyMMdd-HHmm}.xlsx");
+    }
+
+    private static void WriteHeader(IXLWorksheet ws, params string[] headers)
+    {
+        for (var i = 0; i < headers.Length; i++) ws.Cell(1, i + 1).Value = headers[i];
+        ws.Range(1, 1, 1, headers.Length).Style.Font.Bold = true;
+    }
+
+    /// <summary>Bold grand-total row, written only when there is something to total.</summary>
+    private static void Total(IXLWorksheet ws, int dataCount, int row, int labelCol, int sumCol)
+    {
+        if (dataCount == 0) return;
+        ws.Cell(row, labelCol).Value = "Grand Total";
+        ws.Cell(row, sumCol).FormulaA1 =
+            $"SUM({ws.Cell(2, sumCol).Address.ColumnLetter}2:{ws.Cell(row - 1, sumCol).Address.ColumnLetter}{row - 1})";
+        ws.Range(row, labelCol, row, sumCol).Style.Font.Bold = true;
     }
 
     private async Task LoadAggregatesAsync(int eventId, CancellationToken ct)
     {
+        // ACTIVE people only (§253 G5) — the on-screen aggregates must equal the
+        // vendor sheets built in OnGetDownloadAsync.
         var rows = await _db.SwagPreferences
             .Where(s => s.EventId == eventId)
             .Join(_db.Participants, s => s.ParticipantId, p => p.Id, (s, p) => new
             {
-                p.Role,
+                p.Id, p.Role, p.IsActive,
                 s.WantsPolo, s.PoloSize,
-                s.WantsJacket, s.JacketSize,
+
                 s.WantsGift, s.WantsCredlyBadge,
             })
+            .Where(x => x.IsActive)
             .ToListAsync(ct);
+
+        // §299 6.3 — same category + derived-days polo rule the vendor sheet uses, so
+        // the on-screen preview totals equal the downloaded Polo_Total.
+        var (categoryByPid, daysBySpeaker) = await LoadSpeakerPoloInputsAsync(eventId, ct);
 
         TotalSubmissions = rows.Count;
         PoloYesCount   = rows.Count(r => r.WantsPolo);
-        JacketYesCount = rows.Count(r => r.WantsJacket);
         GiftYesCount   = rows.Count(r => r.WantsGift);
         CredlyYesCount = rows.Count(r => r.WantsCredlyBadge);
 
         PoloLines = rows
             .Where(r => r.WantsPolo && !string.IsNullOrWhiteSpace(r.PoloSize))
             .GroupBy(r => new { Role = r.Role.ToString(), Size = r.PoloSize! })
-            .Select(g => new PoloLine(g.Key.Role, g.Key.Size, g.Count()))
+            .Select(g => new PoloLine(g.Key.Role, g.Key.Size, g.Sum(r => PoloCount(r.Role, r.Id, categoryByPid, daysBySpeaker))))
             .OrderBy(x => x.Role).ThenBy(x => x.Size)
             .ToList();
 
-        JacketLines = rows
-            .Where(r => r.WantsJacket && !string.IsNullOrWhiteSpace(r.JacketSize))
-            .GroupBy(r => r.JacketSize!)
-            .Select(g => new JacketLine(g.Key, g.Count()))
-            .OrderBy(x => x.Size)
-            .ToList();
+        // §326bt: jackets are no longer offered in the portal, so there is no jacket
+        // preview. The stored columns are untouched — whatever was collected before the
+        // change is still in the database.
+    }
+
+    /// <summary>
+    /// §299 6.3 polo inputs: each speaker profile's organizer-set category
+    /// (participant id → category, null = uncategorized) and the DERIVED
+    /// presenting days from linked sessions (<see cref="SpeakerDayScope"/>).
+    /// </summary>
+    private async Task<(IReadOnlyDictionary<int, SpeakerCategory?> CategoryByPid,
+        IReadOnlyDictionary<int, SpeakerDays> DaysBySpeaker)> LoadSpeakerPoloInputsAsync(
+        int eventId, CancellationToken ct)
+    {
+        var categoryByPid = await _db.SpeakerProfiles
+            .Where(s => s.EventId == eventId)
+            .ToDictionaryAsync(s => s.ParticipantId, s => s.Category, ct);
+        var daysBySpeaker = await SpeakerDayScope.DaysBySpeakerAsync(_db, eventId, ct);
+        return (categoryByPid, daysBySpeaker);
+    }
+
+    /// <summary>
+    /// §299 6.3 — polo count for one "wants polo" row. A person WITHOUT a speaker
+    /// hat keeps their single role-hat polo (organizer / volunteer / booth member /
+    /// media / partner). A person WITH a speaker hat gets the funded speaker count:
+    /// Community/Guest = one per DISTINCT presenting day (0 with no linked
+    /// sessions); Sponsor-category or uncategorized = 0 from the speaker hat — a
+    /// pure Speaker row is therefore EXCLUDED from the tally, while a non-Speaker
+    /// role who also speaks never drops below their single role-hat polo.
+    /// </summary>
+    /// <summary>§299 OPEN-14 (operator 2026-07-23): every ORGANIZER gets 5 polos —
+    /// a flat per-organizer quantity that supersedes any speaker-hat day count.
+    /// Candidate for the per-edition config block arriving with batch 3.</summary>
+    internal const int OrganizerPoloCount = 5;
+
+    private static int PoloCount(
+        ParticipantRole role, int participantId,
+        IReadOnlyDictionary<int, SpeakerCategory?> categoryByPid,
+        IReadOnlyDictionary<int, SpeakerDays> daysBySpeaker)
+    {
+        // OPEN-14: organizers are a flat ×5, whether or not they also speak.
+        if (role == ParticipantRole.Organizer) return OrganizerPoloCount;
+
+        if (!categoryByPid.TryGetValue(participantId, out var category))
+            return 1; // no speaker hat — one role-hat polo
+
+        var days = daysBySpeaker.TryGetValue(participantId, out var d) ? d : SpeakerDays.None;
+        var funded = SpeakerDayScope.FundedPolos(category, days);
+        return role == ParticipantRole.Speaker ? funded : Math.Max(1, funded);
     }
 }

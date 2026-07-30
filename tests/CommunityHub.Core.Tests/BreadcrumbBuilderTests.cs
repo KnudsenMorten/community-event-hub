@@ -102,7 +102,8 @@ public sealed class BreadcrumbBuilderTests
     // the matching hub, proving the breadcrumb agrees with the nav grouping.
     [InlineData("/Organizer/Onboarding",            "/Organizer/People")]
     [InlineData("/Organizer/SessionEvaluations",    "/Organizer/Content")]
-    [InlineData("/Organizer/Broadcast",             "/Organizer/Comms")]
+    // §705.12: Broadcast deleted; EmailLog is the Comms exemplar now.
+    [InlineData("/Organizer/EmailLog",              "/Organizer/Comms")]
     [InlineData("/Organizer/Graphics",              "/Organizer/SoMe")]
     [InlineData("/Organizer/BucketAllocation",      "/Organizer/Volunteers")]
     [InlineData("/Organizer/Hotels",                "/Organizer/Logistics")]

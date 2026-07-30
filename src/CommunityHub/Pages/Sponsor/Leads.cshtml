@@ -80,7 +80,7 @@
         <p style="display:flex;gap:10px;flex-wrap:wrap;">
             <a class="task-link-btn" asp-page="/Sponsor/CaptureLead">Capture a booth lead &rarr;</a>
         </p>
-        <p><a asp-page="/Sponsor/Index">&larr; Back to Sponsor Engagement</a></p>
+        <p><a asp-page="/Sponsor/Index">&larr; Back to Webshop orders</a></p>
     }
 </div>
 
@@ -101,7 +101,7 @@
                organizers to <strong>bump the version</strong> &mdash; the
                old token immediately stops working and the new one shows
                up here.</p>
-            <p style="margin-top:8px;">Current version: <strong>v@Model.TokenVersion</strong></p>
+            <p style="margin-top:8px;">Current version: <strong>v@(Model.TokenVersion)</strong></p>
             <pre style="background:#fff;border:1px solid #c4c8d4;border-radius:6px;padding:10px 12px;overflow-x:auto;user-select:all;">@Model.DeterministicToken</pre>
             <p style="font-size:12.5px;color:#5a6170;margin:6px 0 0 0;">
                 Use this as the <code>Authorization: Bearer ...</code> header in your scripts (samples further down).
@@ -146,10 +146,16 @@
         <p>The hub's API serves the leads the organizer team has pulled in
            and screened (junk filtered out). You can always cross-check the
            raw capture directly in the Event System (Zoho):</p>
+        @* §667 — these three were WRONGER than the menu items the operator reported. They used
+           route names that do not exist in the Backstage SPA ("leads", "inquiries", "meetings"
+           instead of "lead-list", "inquiry-list") AND were missing the event-slug path segment,
+           so all three landed on the dashboard root. They disagreed with NavBuilder's own links
+           to the same two lists, which is how one page can look right and another wrong.
+           "Meetings" is dropped: there is no such route, so the button could only ever be a
+           promise the SPA does not keep. *@
         <p style="display:flex;gap:10px;flex-wrap:wrap;">
-            <a class="task-link-btn" href="https://eldk27.expertslive.dk/#/exhibitor-dashboard/leads?lang=en" target="_blank" rel="noopener noreferrer">Open Event System (Zoho) &mdash; Leads</a>
-            <a class="task-link-btn" href="https://eldk27.expertslive.dk/#/exhibitor-dashboard/inquiries?lang=en" target="_blank" rel="noopener noreferrer">Open Event System (Zoho) &mdash; Inquiries</a>
-            <a class="task-link-btn" href="https://eldk27.expertslive.dk/#/exhibitor-dashboard/meetings?lang=en" target="_blank" rel="noopener noreferrer">Open Event System (Zoho) &mdash; Meetings</a>
+            <a class="task-link-btn" href="https://eldk27.expertslive.dk/ELDK27-ExpertsLiveDenmark2027#/exhibitor-dashboard/lead-list?lang=en" target="_blank" rel="noopener noreferrer">Open Event System (Zoho) &mdash; Leads</a>
+            <a class="task-link-btn" href="https://eldk27.expertslive.dk/ELDK27-ExpertsLiveDenmark2027#/exhibitor-dashboard/inquiry-list?lang=en" target="_blank" rel="noopener noreferrer">Open Event System (Zoho) &mdash; Inquiries</a>
         </p>
     </div>
 

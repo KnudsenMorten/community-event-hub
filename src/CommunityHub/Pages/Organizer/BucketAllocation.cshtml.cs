@@ -70,8 +70,11 @@ public class BucketAllocationModel : PageModel
         VolunteerTaskStatus Status, string? EldkLeadName);
     public record BucketGroup(int Id, string Name, string? EldkLeadName, List<TaskCard> Tasks);
 
+    // §337: carry the acting-as marker into the service. Role cannot express it (an
+    // acting-as session holds the TARGET's Organizer role), so without this the service
+    // layer cannot fail closed and the page guards are the only defence.
     private VolunteerStructureService.ActorContext Actor(CurrentParticipant me)
-        => new(me.ParticipantId, me.Email, me.Role, me.EventId);
+        => new(me.ParticipantId, me.Email, me.Role, me.EventId, me.IsActingAs);
 
     public async Task<IActionResult> OnGetAsync(CancellationToken ct)
     {
@@ -142,6 +145,7 @@ public class BucketAllocationModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
+        if (!OrganizerAuth.IsRealOrganizer(me)) return Forbid();
         try { await _alloc.AddDraftAsync(Actor(me), taskId, volunteerId, ct); return RedirectToPage(new { Msg = "Added to draft." }); }
         catch (VolunteerValidationException ex) { return RedirectToPage(new { Msg = ex.Message }); }
         catch (VolunteerAccessDeniedException) { return Forbid(); }
@@ -151,6 +155,7 @@ public class BucketAllocationModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
+        if (!OrganizerAuth.IsRealOrganizer(me)) return Forbid();
         try { await _alloc.RemoveDraftAsync(Actor(me), taskId, volunteerId, ct); return RedirectToPage(new { Msg = "Removed from draft." }); }
         catch (VolunteerAccessDeniedException) { return Forbid(); }
     }
@@ -160,6 +165,7 @@ public class BucketAllocationModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
+        if (!OrganizerAuth.IsRealOrganizer(me)) return Forbid();
         try
         {
             var r = await _alloc.CommitAsync(Actor(me), ct);
@@ -172,6 +178,8 @@ public class BucketAllocationModel : PageModel
 
             var msg = $"Committed {r.Committed} allocation(s).";
             if (r.SkippedDuplicate > 0) msg += $" {r.SkippedDuplicate} already assigned (skipped).";
+            if (r.SkippedInactive > 0)
+                msg += $" {r.SkippedInactive} skipped — those volunteers were deactivated after being queued (re-activate them and re-draft to allocate them).";
             if (r.SkippedOutOfRing > 0)
                 msg += $" {r.SkippedOutOfRing} left in the queue — those volunteers are above the feature's released ring (out of scope). Promote the ring in Settings, then commit again to include them.";
             return RedirectToPage(new { Msg = msg });
@@ -183,6 +191,7 @@ public class BucketAllocationModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
+        if (!OrganizerAuth.IsRealOrganizer(me)) return Forbid();
         try { var n = await _alloc.DiscardAsync(Actor(me), ct); return RedirectToPage(new { Msg = $"Discarded {n} draft allocation(s)." }); }
         catch (VolunteerAccessDeniedException) { return Forbid(); }
     }
@@ -191,6 +200,7 @@ public class BucketAllocationModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
+        if (!OrganizerAuth.IsRealOrganizer(me)) return Forbid();
         try
         {
             var r = await _alloc.SeedDropoutBackfillAsync(Actor(me), volunteerId, ct);
@@ -207,6 +217,9 @@ public class BucketAllocationModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
+        // Organizer-only page (OnGet gates on the role); a supervisor completes their own
+        // tasks on /Volunteer/Supervisor, so this guard removes no legitimate capability.
+        if (!OrganizerAuth.IsRealOrganizer(me)) return Forbid();
         try { await svc.MarkTaskCompletedByLeadAsync(Actor(me), taskId, ct); return RedirectToPage(new { Msg = "Task marked completed." }); }
         catch (VolunteerAccessDeniedException) { return Forbid(); }
     }

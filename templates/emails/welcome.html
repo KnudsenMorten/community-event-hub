@@ -3,11 +3,20 @@ Subject: Welcome to {{communityName}} - {{eventDisplayName}}
 <p style="margin:0 0 16px;">Welcome to <strong>{{communityName}}</strong>. You have been added to the hub for <strong>{{eventDisplayName}}{{eventCodeParens}}</strong> as a <strong>{{roleName}}</strong>.</p>
 <p style="margin:0 0 16px;">The hub is where you will find everything relevant to your role:</p>
 <p style="margin:0 0 24px;">{{roleGuidance}}</p>
+<p style="margin:0 0 16px;">Your first step: open the hub and <strong>complete the tasks in the Get Started flow</strong> — it walks you through everything we need from you.</p>
 <p style="margin:0 0 16px;">To sign in, go to the hub and enter your email - you will receive a one-time code. No password to remember.</p>
-<table role="presentation" cellpadding="0" cellspacing="0"><tr>
-  <td style="background-color:{{brandColor}};border-radius:6px;">
-    <a href="{{hubUrl}}" style="display:inline-block;padding:12px 28px;color:#ffffff;font-size:15px;font-weight:bold;text-decoration:none;">Open the hub</a>
-  </td>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
+  <td align="center">
+        <!--[if mso]>
+        <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="{{hubUrl}}/Forms/Wizard" style="height:52px;v-text-anchor:middle;width:362px;" arcsize="50%" stroke="f" fillcolor="#1565c0">
+          <w:anchorlock/>
+          <center style="color:#ffffff;font-family:Aptos,'Segoe UI',Arial,sans-serif;font-size:16px;font-weight:bold;">Open the hub — Get Started</center>
+        </v:roundrect>
+        <![endif]-->
+        <!--[if !mso]><!-- -->
+        <a href="{{hubUrl}}/Forms/Wizard" style="background-color:#1565c0;border-radius:999px;color:#ffffff;display:inline-block;font-family:Aptos,'Segoe UI',Arial,sans-serif;font-size:16px;font-weight:700;line-height:52px;text-align:center;text-decoration:none;width:362px;-webkit-text-size-adjust:none;">Open the hub — Get Started</a>
+        <!--<![endif]-->
+      </td>
 </tr></table>
-<p style="margin:6px 0 16px;color:#6b7280;font-size:13px;text-align:center;">(Log in with your email, if prompted)</p>
+<p style="margin:0 0 16px;color:#6b7280;font-size:13px;text-align:center;">The button signs you in automatically — no password needed.</p>
 <p style="margin:24px 0 0;color:#6b7280;">See you at <strong>{{eventDisplayName}}{{eventCodeParens}}</strong>.</p>

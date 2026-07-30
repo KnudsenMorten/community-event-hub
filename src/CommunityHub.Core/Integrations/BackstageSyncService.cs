@@ -47,6 +47,7 @@ public sealed class BackstageSyncService
     private readonly BackstageSyncOptions _options;
     private readonly TestModeOptions _testMode;
     private readonly ILogger<BackstageSyncService> _log;
+    private readonly Email.IEmailContextAccessor? _emailContext;
 
     public BackstageSyncService(
         IBackstageExhibitorApi backstage,
@@ -54,7 +55,9 @@ public sealed class BackstageSyncService
         EmailTemplateProvider templates,
         BackstageSyncOptions options,
         TestModeOptions testMode,
-        ILogger<BackstageSyncService> log)
+        ILogger<BackstageSyncService> log,
+        // §707.7 — optional so existing constructions keep compiling; both hosts register it.
+        Email.IEmailContextAccessor? emailContext = null)
     {
         _backstage = backstage;
         _emailSender = emailSender;
@@ -62,6 +65,7 @@ public sealed class BackstageSyncService
         _options = options;
         _testMode = testMode;
         _log = log;
+        _emailContext = emailContext;
     }
 
     /// <summary>
@@ -170,7 +174,15 @@ public sealed class BackstageSyncService
                   + "and this message was routed to the test coordinator.</em></p>"
                 : string.Empty);
 
-        await _emailSender.SendAsync(recipient, subject, body, ct);
+        // 🔒 §707.7 — RING-EXEMPT, stated explicitly. This is an OPS note to the designated sync
+        // coordinator about an exhibitor mismatch; it reaches no participant and has no rollout
+        // audience, so a ring must never silence it. Until now it set no EmailContext at all, which
+        // produced the same outcome by ACCIDENT (falling through to the transport ceiling) — and
+        // would have started failing closed the moment anyone gave it a FeatureKey. Say what is true.
+        using (_emailContext?.Set(new Email.EmailContext("backstage-sync-alert", RingExempt: true)))
+        {
+            await _emailSender.SendAsync(recipient, subject, body, ct);
+        }
         _log.LogInformation(
             "Backstage sync: coordinator notified ({Recipient}) about '{Company}'.",
             recipient, exhibitor.CompanyName);

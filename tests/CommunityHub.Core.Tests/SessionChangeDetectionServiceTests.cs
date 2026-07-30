@@ -191,20 +191,22 @@ public sealed class SessionChangeDetectionServiceTests
 
         var r = await svc.RunAsync(EventId);
 
-        // §59: detected, ENQUEUED, NOT auto-applied and NOT emailed inline.
+        // §299 OPEN-28: detected, ENQUEUED (audit trail) and AUTO-APPLIED — never inline.
         Assert.Equal(1, r.Changed);
         Assert.Equal(1, r.Enqueued);
         Assert.Equal(0, r.Emailed);
-        Assert.Empty(sender.Messages);
+        Assert.Empty(sender.Messages);   // inline sender unused; the apply-time speaker
+                                         // email rides the queue's own sender (not wired here)
 
-        // The stored snapshot is UNTOUCHED until an operator approves (the old→new diff
-        // must survive for the approval).
+        // Stage-3 "Zoho wins": the snapshot AND the display fields carry the new time.
         var s = db.Sessions.First();
-        Assert.Equal(oldStart, s.BackstageStartsAt);
+        Assert.Equal(oldStart.AddHours(2), s.BackstageStartsAt);
+        Assert.Equal(oldStart.AddHours(2), s.StartsAt);
 
-        // A Pending Session Update delta now exists carrying the StartsAt/EndsAt diff.
+        // The delta is kept as the audit record: Applied, decided by the auto marker.
         var delta = Assert.Single(db.SyncDeltas);
-        Assert.Equal(SyncDeltaStatus.Pending, delta.Status);
+        Assert.Equal(SyncDeltaStatus.Applied, delta.Status);
+        Assert.Equal("auto-apply (stage 3)", delta.DecidedByEmail);
         Assert.Equal(SyncDeltaEntityType.Session, delta.EntityType);
         Assert.Equal(SyncDeltaChangeKind.Update, delta.ChangeKind);
         Assert.Equal(sid.ToString(), delta.EntityId);
@@ -229,9 +231,12 @@ public sealed class SessionChangeDetectionServiceTests
         Assert.Equal(1, r.Changed);
         Assert.Equal(1, r.Enqueued);
         Assert.Empty(sender.Messages);
-        // Snapshot untouched (kept for the approval); the delta carries the Room diff.
-        Assert.Equal("Room A", db.Sessions.First().BackstageRoom);
+        // §299 OPEN-28: auto-applied — snapshot + display room carry the Zoho value; the
+        // delta stays as the Applied audit record with the Room diff.
+        Assert.Equal("Room B", db.Sessions.First().BackstageRoom);
+        Assert.Equal("Room B", db.Sessions.First().Room);
         var delta = Assert.Single(db.SyncDeltas);
+        Assert.Equal(SyncDeltaStatus.Applied, delta.Status);
         Assert.Contains(delta.Changes, c => c.Field == SyncDeltaQueueService.FieldRoom && c.NewValue == "Room B");
     }
 
@@ -277,8 +282,10 @@ public sealed class SessionChangeDetectionServiceTests
         Assert.Equal(1, r.Changed);
         Assert.Equal(1, r.Enqueued);
         Assert.Empty(sender.Messages);          // never emails inline
-        Assert.Single(db.SyncDeltas);
-        Assert.Equal(start, db.Sessions.First().BackstageStartsAt); // snapshot untouched
+        // §299 OPEN-28: auto-applied regardless of the speaker's ring (the ring gates the
+        // apply-time speaker EMAIL, not the schedule write).
+        Assert.Equal(SyncDeltaStatus.Applied, Assert.Single(db.SyncDeltas).Status);
+        Assert.Equal(start.AddHours(2), db.Sessions.First().BackstageStartsAt);
     }
 
     [Fact]
@@ -382,7 +389,8 @@ public sealed class SessionChangeDetectionServiceTests
         Assert.Empty(db.SyncDeltas);
         Assert.Equal("bs-77", db.Sessions.Single().BackstageSessionId);
 
-        // PASS 2: same id now linked; the time moves → a real CHANGE → ENQUEUED (not emailed).
+        // PASS 2: same id now linked; the time moves → a real CHANGE → enqueued + AUTO-APPLIED
+        // (§299 OPEN-28), never emailed inline.
         var sender2 = new CapturingEmailSender();
         var svc2 = NewService(db, sender2, BeforeGoLive,
             Pull(Bs("bs-77", "Intune Master Class", start.AddHours(2), start.AddHours(9), "Room A")));
@@ -392,9 +400,9 @@ public sealed class SessionChangeDetectionServiceTests
         Assert.Equal(1, r2.Changed);
         Assert.Equal(1, r2.Enqueued);
         Assert.Empty(sender2.Messages);
-        // Snapshot kept at the seeded baseline until approval.
-        Assert.Equal(start, db.Sessions.Single().BackstageStartsAt);
-        Assert.Single(db.SyncDeltas);
+        // Auto-applied: the snapshot now carries the moved time; the delta is the audit row.
+        Assert.Equal(start.AddHours(2), db.Sessions.Single().BackstageStartsAt);
+        Assert.Equal(SyncDeltaStatus.Applied, Assert.Single(db.SyncDeltas).Status);
     }
 
     [Fact]
@@ -459,55 +467,32 @@ public sealed class SessionChangeDetectionServiceTests
         Assert.Equal("bs-linked", db.Sessions.Single().BackstageSessionId);
     }
 
-    // ---- pure date-gate logic -------------------------------------------------
-
-    [Theory]
-    [InlineData(Ring.Ring0)]
-    [InlineData(Ring.Ring1)]
-    public void Date_gate_never_limits_ring0_or_ring1(Ring ring)
-    {
-        Assert.True(SessionChangeDetectionService.IsWithinDateGate(ring, GoLive, BeforeGoLive));
-        Assert.True(SessionChangeDetectionService.IsWithinDateGate(ring, GoLive, AfterGoLive));
-    }
-
-    [Fact]
-    public void Date_gate_holds_broad_rings_until_the_date()
-    {
-        Assert.False(SessionChangeDetectionService.IsWithinDateGate(Ring.Ring2, GoLive, BeforeGoLive));
-        Assert.False(SessionChangeDetectionService.IsWithinDateGate(Ring.Broad, GoLive, BeforeGoLive));
-        Assert.True(SessionChangeDetectionService.IsWithinDateGate(Ring.Ring2, GoLive, AfterGoLive));
-        Assert.True(SessionChangeDetectionService.IsWithinDateGate(Ring.Broad, GoLive, AfterGoLive));
-    }
-
-    [Fact]
-    public void Date_gate_with_no_date_falls_back_to_the_seeded_default()
-    {
-        // §38e/§52: a null ActiveFromForBroadRings no longer lets broad rings through —
-        // it falls back to the 1 Dec 2026 default, so broad rings stay date-held by default.
-        Assert.False(SessionChangeDetectionService.IsWithinDateGate(Ring.Broad, null, BeforeGoLive));
-        Assert.False(SessionChangeDetectionService.IsWithinDateGate(Ring.Ring2, null, BeforeGoLive));
-        // …and are allowed once now passes the default date.
-        Assert.True(SessionChangeDetectionService.IsWithinDateGate(Ring.Broad, null, AfterGoLive));
-        Assert.True(SessionChangeDetectionService.IsWithinDateGate(Ring.Ring2, null, AfterGoLive));
-        // The default constant is exactly 1 Dec 2026 UTC.
-        Assert.Equal(GoLive, SessionChangeDetectionService.DefaultBroadRingsActiveFrom);
-    }
-
     // (The ring-3 date-gate-via-email tests were removed with §59: detection no longer
     // emails inline, so the released-ring + date gate no longer apply at detection time.
-    // The date-gate LOGIC remains covered by the pure IsWithinDateGate unit tests below,
-    // and the enqueue-regardless-of-ring behaviour by
+    // §234, 2026-07-07: the pure IsWithinDateGate unit tests went with the gate itself —
+    // the broad-rings date gate was dead code once §59 moved the speaker email to the
+    // operator-approved queue apply step, and it has been deleted from the service. The
+    // enqueue-regardless-of-ring behaviour stays covered by
     // Change_is_enqueued_regardless_of_speaker_ring above.)
 
-    // ---- §57 SESSION SYNC DIRECTION gate --------------------------------------
+    // ---- §576: the §57 stage-3 direction gate is REMOVED ----------------------
 
     [Theory]
     [InlineData(SessionSyncDirection.SessionizeToCeh)] // stage 1 = default
-    [InlineData(SessionSyncDirection.CehToZoho)]        // stage 2
-    public async Task Engine_is_inert_unless_direction_is_stage3_ZohoToCeh(SessionSyncDirection dir)
+    [InlineData(SessionSyncDirection.CehToZoho)]        // stage 2 = the permanent mode
+    [InlineData(SessionSyncDirection.ZohoToCeh)]        // stage 3 = deleted long ago
+    public async Task Engine_runs_whatever_the_stored_direction_says(SessionSyncDirection dir)
     {
+        // 🔒 §576 — THE GATE THAT USED TO BE HERE COULD NEVER BE SATISFIED.
+        //
+        // It demanded stage 3 (ZohoToCeh). The operator deleted stage 3 long ago and stage 2 is
+        // permanent, so this engine no-opped on EVERY 5-minute run for months while the Jobs page
+        // showed a healthy green run — which is exactly why he asked "dont we have a comparison job
+        // based on the field mapper" and got nothing from it.
+        //
+        // This test replaces `Engine_is_inert_unless_direction_is_stage3_ZohoToCeh`, which pinned
+        // the dead behaviour in place.
         using var db = ScenarioFixture.NewDb();
-        // Feature fully enabled, a real time change pulled — only the DIRECTION holds it back.
         await EnableFeatureAsync(db, enabled: true, activeFromBroad: GoLive, direction: dir);
         var start = new DateTimeOffset(2027, 2, 9, 10, 0, 0, TimeSpan.Zero);
         var sid = await SeedSessionAsync(db, "bs-1", start, start.AddHours(1), "Room A");
@@ -519,25 +504,17 @@ public sealed class SessionChangeDetectionServiceTests
 
         var r = await svc.RunAsync(EventId);
 
-        // Inert: nothing pulled/matched/seeded/changed/written, and it is flagged as a
-        // direction no-op (not a source-unavailable error).
-        Assert.True(r.DirectionInactive);
-        Assert.False(r.SourceAvailable);
-        Assert.Contains($"stage {(int)dir}", r.UnavailableReason);
-        Assert.Equal(0, r.Matched);
-        Assert.Equal(0, r.Seeded);
-        Assert.Equal(0, r.Changed);
-        Assert.Empty(sender.Messages);
-        // Nothing written back — the stored snapshot is untouched (no first-populate either).
-        var s = db.Sessions.Single();
-        Assert.Equal(start, s.BackstageStartsAt);
-        Assert.Equal("Room A", s.BackstageRoom);
+        Assert.False(r.DirectionInactive);
+        Assert.True(r.SourceAvailable);
+        Assert.Equal(1, r.Matched);   // it actually looked at the session, in every direction
     }
 
     [Fact]
-    public async Task Default_edition_with_no_setting_row_is_inert()
+    public async Task Default_edition_with_no_setting_row_still_runs()
     {
-        // No SessionSourceSetting row at all ⇒ defaults to stage 1 ⇒ §38e inert.
+        // §576 — no SessionSourceSetting row at all used to mean "stage 1 ⇒ inert". A MISSING row
+        // must not silently disable a comparison engine: absence of configuration is not a
+        // decision to stop checking.
         using var db = ScenarioFixture.NewDb();
         db.Events.Add(new Event
         {
@@ -561,10 +538,9 @@ public sealed class SessionChangeDetectionServiceTests
 
         var r = await svc.RunAsync(EventId);
 
-        Assert.True(r.DirectionInactive);
-        Assert.Contains("stage 1", r.UnavailableReason);
-        Assert.Empty(sender.Messages);
-        Assert.Equal("Room A", db.Sessions.Single().BackstageRoom); // untouched
+        Assert.False(r.DirectionInactive);
+        Assert.True(r.SourceAvailable);
+        Assert.Equal(1, r.Matched);
     }
 
     [Fact]

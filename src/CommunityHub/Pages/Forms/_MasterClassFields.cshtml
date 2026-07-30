@@ -1,0 +1,203 @@
+@model CommunityHub.Forms.Steps.MasterClassFormModel
+@*
+    §352 — fields-ONLY partial for the INLINE Master Class selection step.
+    Contains NO <form>, no Prev/Next, no page chrome — the HOST (/Forms/Wizard) owns those and
+    places this inside its single <form>. REFERENCE: _PartyFields.
+
+    Why this exists: the step used to be a LINK-OUT ("Open: Select your Master Class") which
+    navigated away from Get Started, so the attendee never reached step 2 (operator 2026-07-26).
+    All state + rules come from MasterClassFormService → MasterClassSignupService — the SAME
+    service /Attendee uses, so this step and that page cannot drift.
+*@
+
+@if (Model.NotEligible)
+{
+    <p class="info">Master Class selection applies to 2-day tickets only.</p>
+}
+else
+{
+    @* NO intro sentence here. The wizard HOST already renders the step description
+       (RoleWiz.Step.masterclass.Desc). This partial used to repeat it in slightly different words
+       — "on the pre-day" vs the host's "on the master-class day" — so the step showed two nearly
+       identical lines that CONTRADICTED each other on which day it is (operator screenshot
+       2026-07-26). One sentence, one source. *@
+
+    @if (Model.Confirmed is not null)
+    {
+        <p class="success" role="status">
+            &#10003; You're confirmed for <strong>@Model.Confirmed.Title</strong>.
+        </p>
+
+        @* §352 + §341-1: the operator asked for the calendar button on BOTH the Master Class and
+           the party step ("so people can choose to send invite to their calendar"). Same §193
+           invite path and the same green #15803d as the hotel/dinner/party buttons (§326j).
+           Posts to the HOST page's MasterClassInvite handler via formaction — never a nested form. *@
+        @if (TempData["MasterClassInviteMessage"] is string mim)
+        {
+            <p role="status" style="margin:6px 0;padding:8px 12px;border-radius:8px;background:#ecfdf5;color:#065f46;border:1px solid #a7f3d0;">@mim</p>
+        }
+        @* §370 (operator 2026-07-26): the retired /Attendee page owned three controls; the wizard
+           step only had the calendar button, which would have left an attendee unable to reach the
+           info page or cancel a seat at all. The two SAFE actions sit together here… *@
+        <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:12px 0 4px;">
+            <a class="task-link-btn" href="/MasterClassPage/@Model.Confirmed.SessionId">
+                &#128203; Master Class info, what to bring &amp; Q&amp;A
+            </a>
+            <button type="submit" asp-page-handler="MasterClassInvite"
+                    style="padding:9px 16px;border-radius:6px;background:#15803d;color:#fff;border:none;font-size:13.5px;font-weight:600;cursor:pointer;">
+                &#128197; Send Calendar invite for Master Class
+            </button>
+        </div>
+
+        @* …and the DESTRUCTIVE one is deliberately separated: its own block, a rule above it, extra
+           space and quiet styling. Operator: "i am worried people cancel by mistake" — on the old
+           page it sat flush beneath the two safe buttons with nothing between them. *@
+        <div style="margin:22px 0 4px;padding-top:14px;border-top:1px solid #e5e7eb;">
+            @* Operator 2026-07-26, exact values he specified: fill #F7C1C1, text #501313. (First
+               attempt was near-white on white — "impossible to see"; the second was an outlined red
+               button.) Solid fill carries the shape, so no border is needed: readable, obviously a
+               button, still clearly secondary to the two safe actions above — he was worried people
+               would cancel by mistake. *@
+            <button type="submit" asp-page-handler="MasterClassGiveUp"
+                    data-ceh-confirm="mc-giveup-step"
+                    style="padding:10px 18px;border-radius:6px;background:#F7C1C1;color:#501313;border:none;font-size:13.5px;font-weight:700;cursor:pointer;">
+                @* Icon to match the two buttons above (📋 / 📅). Deliberately the MONOCHROME ✖
+                   rather than a red ❌: it inherits the button's #501313 text colour, so it reads as
+                   part of the label instead of adding a second, louder red to a destructive action. *@
+                &#10006; Give up my Master Class seat (cancel)
+            </button>
+            <p style="margin:6px 0 0;color:#6b7280;font-size:12.5px;">
+                This frees your seat for the next person on the waitlist. You can pick another
+                Master Class afterwards if seats remain.
+            </p>
+        </div>
+
+        @* The confirm step, WITHOUT which the button above cancels on the first click: the layout
+           JS treats a data-ceh-confirm whose modal id is absent as "no modal ⇒ let the native
+           action proceed". The id must match the trigger EXACTLY. Same wording as the retired
+           /Attendee dialog so the safeguard the operator knows is the safeguard he gets.
+           Only type="button" inside — no nested form (§304b). *@
+        <partial name="_ConfirmModal" model='new CommunityHub.Pages.Shared.ConfirmModalModel(
+            "mc-giveup-step", "Give up your seat?",
+            "This frees your seat for the next person on the waitlist. You can pick another Master Class afterwards if seats remain.",
+            "Give up seat (cancel)", "Keep my seat", true)' />
+    }
+
+    @if (Model.Pending is not null)
+    {
+        <p class="info" style="margin:8px 0;">
+            You're on the waitlist for <strong>@Model.Pending.Title</strong>@if (Model.Pending.WaitlistPosition is int pos)
+            { <text> (position @pos)</text> }.
+        </p>
+    }
+
+    <div asp-validation-summary="ModelOnly" class="error"></div>
+    <span asp-validation-for="SessionId" class="error"></span>
+
+    @if (Model.Options.Count == 0)
+    {
+        <p class="info">The Master Classes aren't published yet — please check back soon.</p>
+    }
+    else
+    {
+        @* §377 CONTAINED REDESIGN (operator 2026-07-26: "we separate waitlist and sign-up - i am
+           worried it is confusing" → "lets try the contained method").
+
+           One radio list was doing TWO jobs: picking a class with seats BOOKS a seat, picking a full
+           one JOINS A QUEUE — the same gesture, different outcome, distinguished only by a line of
+           red text. The list is now split under two headings, so the difference is visible before a
+           word is read, and the primary button below renames itself to "Join waitlist" when the
+           chosen class is full. Deliberately NOT the per-row-button version: that needs the wizard
+           HOST to allow per-step actions, which would touch every role's Get Started. *@
+        var available = Model.Options.Where(x => !x.IsFull).ToList();
+        var fullOnes  = Model.Options.Where(x => x.IsFull).ToList();
+
+        @if (available.Count > 0)
+        {
+            <h4 style="margin:16px 0 6px;font-size:15px;color:#15803d;">Available &mdash; pick one to book your seat</h4>
+        }
+        <div style="display:flex;flex-direction:column;gap:10px;margin:6px 0;">
+            @foreach (var o in available)
+            {
+                var isMine = Model.Confirmed?.SessionId == o.SessionId;
+                var seatsLeft = o.Capacity is int cap ? Math.Max(0, cap - o.Taken) : (int?)null;
+                <label style="display:flex;gap:10px;align-items:flex-start;background:@(isMine ? "#ecfdf5" : "#f3f6fb");border:1px solid @(isMine ? "#a7f3d0" : "#dde4ee");border-radius:10px;padding:12px;cursor:pointer;">
+                    <input type="radio" name="SessionId" value="@o.SessionId" checked="@isMine"
+                           style="margin-top:3px;width:18px;height:18px;" />
+                    <span>
+                        <strong>@o.Title</strong>
+                        @if (o.SpeakerNames.Count > 0)
+                        {
+                            <span style="color:#5b636e;"> — @string.Join(", ", o.SpeakerNames)</span>
+                        }
+                        <br />
+                        <span style="font-size:13.5px;color:#15803d;">
+                            @if (seatsLeft is int left)
+                            {
+                                <text>@left of @o.Capacity seats available</text>
+                            }
+                            else
+                            {
+                                <text>Seats available</text>
+                            }
+                        </span>
+                        @if (!string.IsNullOrWhiteSpace(o.Abstract))
+                        {
+                            <details style="margin-top:6px;">
+                                <summary style="cursor:pointer;font-size:13.5px;">Session details</summary>
+                                <p style="margin:6px 0 0;font-size:13.5px;color:#3a4250;">@o.Abstract</p>
+                            </details>
+                        }
+                    </span>
+                </label>
+            }
+        </div>
+
+        @* §384 (operator 2026-07-26): FULL classes are INFO ONLY here — no radio, no button — with
+           a pointer to the waitlist step. The single radio group was not merely confusing, it
+           MISREPRESENTED the rules: holding a seat in one class while waitlisted for another is
+           legitimate and the services support it, but one radio can express only one choice. Taking
+           the control away from full classes is what makes step 1 honestly mean "book a seat". *@
+        @if (fullOnes.Count > 0)
+        {
+            <h4 style="margin:20px 0 2px;font-size:15px;color:#b91c1c;">Full &mdash; no seats left</h4>
+            <p style="margin:0 0 8px;font-size:13px;color:#6b7280;">
+                You can't book these, but you can join their waitlist on the
+                <strong>next step</strong> &mdash; and you can do that while still holding a seat above.
+            </p>
+            <div style="display:flex;flex-direction:column;gap:10px;margin:6px 0;">
+                @foreach (var o in fullOnes)
+                {
+                    <div style="background:#fafbfc;border:1px dashed #d7dee8;border-radius:10px;padding:12px;color:#5b636e;">
+                        <strong style="color:#3a4250;">@o.Title</strong>
+                        @if (o.SpeakerNames.Count > 0)
+                        {
+                            <span> &mdash; @string.Join(", ", o.SpeakerNames)</span>
+                        }
+                        <br />
+                        <span style="font-size:13.5px;color:#b91c1c;">Full &mdash; waitlist available on the next step</span>
+                        @if (!string.IsNullOrWhiteSpace(o.Abstract))
+                        {
+                            <details style="margin-top:6px;">
+                                <summary style="cursor:pointer;font-size:13.5px;">Session details</summary>
+                                <p style="margin:6px 0 0;font-size:13.5px;color:#3a4250;">@o.Abstract</p>
+                            </details>
+                        }
+                    </div>
+                }
+            </div>
+        }
+
+        @* §384b (operator 2026-07-26: "this shows at the bottom on the step 1 master class selection
+           it should only show on the waitlist step 2"). The seat-SWAP consent is GONE from this step.
+
+           It governs one thing: if a WAITLIST place later turns into a real seat, do we move you and
+           release the seat you hold? Step 1 can no longer select a full class, so there is no
+           waitlist place to consent about — the box was asking about something this step cannot do.
+           It now lives only on the waitlist step, where the trade is actually offered.
+
+           Also gone with it (§384): the §377 button-renaming script, which existed to warn that the
+           primary button was about to join a waitlist instead of booking a seat. That warning was
+           only needed while one control did both jobs. *@
+    }
+}

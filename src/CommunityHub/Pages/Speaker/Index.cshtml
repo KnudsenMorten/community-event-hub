@@ -77,18 +77,70 @@
    the speaker deadline tasks shown on the "My tasks" page. This page is now just the
    speaker's sessions. *@
 
+@if (!string.IsNullOrEmpty(Model.CalendarInviteMessage))
+{
+    <div class="card" style="border-left:4px solid #0a6;background:#f0fdf4;">
+        <p style="margin:0;color:#0a6;font-weight:600;">&#10003; @Model.CalendarInviteMessage</p>
+    </div>
+}
+
+@* §322i: flash from the on-card slide upload. *@
+@if (!string.IsNullOrEmpty(Model.SlideUploadMessage))
+{
+    <div class="card" style="border-left:4px solid @(Model.SlideUploadIsError ? "#c0392b" : "#0a6");background:@(Model.SlideUploadIsError ? "#fef2f2" : "#f0fdf4");">
+        <p style="margin:0;color:@(Model.SlideUploadIsError ? "#991b1b" : "#0a6");font-weight:600;">@Model.SlideUploadMessage</p>
+    </div>
+}
+
+@if (Model.MySessions.Count == 0 && Model.MasterClasses.Count == 0)
+{
+    @* §234 UX: with zero linked sessions the hub used to render nearly blank (just the
+       back-link card). Friendly empty state: explain why it's empty + the useful next steps. *@
+    <div class="card">
+        <h1>@Localizer["Speaker.MySessions"]</h1>
+        <p style="color:#4b5563;margin:0 0 8px;">
+            No sessions are linked to you yet. Your sessions appear here automatically once
+            the session catalogue is synced and you're attached as a speaker — no action
+            needed from you.
+        </p>
+        <p style="color:#4b5563;margin:0 0 12px;">
+            In the meantime you can complete your speaker details and check your tasks —
+            and if you think a session of yours is missing, just contact the organizers.
+        </p>
+        <p style="display:flex;gap:10px;flex-wrap:wrap;margin:0;">
+            <a class="task-link-btn" asp-page="/Speaker/Details">@Localizer["Nav.SpeakerDetails"]</a>
+            <a class="task-link-btn" asp-page="/Speaker/Tasks">@Localizer["Speaker.AllMyTasks"]</a>
+            <a class="task-link-btn" asp-page="/Contact">@Localizer["Nav.ContactOrganizers"]</a>
+        </p>
+    </div>
+}
+
 @if (Model.MySessions.Count > 0)
 {
     <div class="card">
         <h1>@Localizer["Speaker.MySessions"]</h1>
         <p style="font-size:13.5px;color:#555;margin-top:0;">@Localizer["Speaker.MySessionsIntro"]</p>
-        <p style="margin:0 0 12px;">
-            @* §153: DIRECT download of the .potx (streamed from SharePoint via /speaker-template/download),
-               not a link to the SharePoint site. Includes the load-bearing reminder that sponsor slides
-               are mandatory (a speaker hitting the bare button would otherwise miss it). *@
-            <a class="task-link-btn" href="/speaker-template/download">&#128196; @Localizer["Speaker.SessionTemplate"]</a>
-            <span style="display:block;font-size:12px;color:#6b7280;margin-top:4px;">The template includes white &amp; dark layouts — and the sponsor slides, which are mandatory in every presentation.</span>
-        </p>
+        @* §322h: the edition-wide "motion number" — attendees opening slides across ALL
+           sessions on the public Session slides page. *@
+        @if (Model.SlideStatsTotal > 0)
+        {
+            <p style="background:#eef6ff;border:1px solid #bfdbfe;color:#1e40af;border-radius:8px;padding:8px 12px;font-size:13.5px;">
+                📊 Attendees have opened session slides <strong>@Model.SlideStatsTotal</strong> times so far
+                across all sessions — your per-session numbers are on the cards below.
+            </p>
+        }
+        @* §461: the ELDK speaker template is part of the speaker programme a SPONSOR-category
+           speaker does not run — hidden for them, matching the menu (§457). *@
+        @if (!Model.IsSponsorCategorySpeaker)
+        {
+            <p style="margin:0 0 12px;">
+                @* §153: DIRECT download of the .potx (streamed from SharePoint via /speaker-template/download),
+                   not a link to the SharePoint site. Includes the load-bearing reminder that sponsor slides
+                   are mandatory (a speaker hitting the bare button would otherwise miss it). *@
+                <a class="task-link-btn" href="/speaker-template/download">&#128196; @Localizer["Speaker.SessionTemplate"]</a>
+                <span style="display:block;font-size:12px;color:#6b7280;margin-top:4px;">The template includes white &amp; dark layouts — and the sponsor slides, which are mandatory in every presentation.</span>
+            </p>
+        }
         <ul style="list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:12px;">
             @foreach (var s in Model.MySessions)
             {
@@ -106,6 +158,14 @@
                         </span>
                         <span class="ms-badge" style="background:#f3f4f6;color:#4b5563;border:1px solid #e5e7eb;">
                             @lengthLabel(s.Length)
+                        </span>
+                        @* §322h: how often this session's slides were viewed/downloaded on the
+                           public /Sessions/Slides page (one combined number). *@
+                        @* §466 (operator 2026-07-27): "Slides opened: 0" did not say WHOSE slides,
+                           WHICH deck, or who opened them. The badge now names all three. *@
+                        <span class="ms-badge" style="background:#eef6ff;color:#1e40af;border:1px solid #bfdbfe;"
+                              title="Views + downloads of your slides on the public Session slides page">
+                            📊 Preview/Final presentations opened @(Model.SlideStats.TryGetValue(s.SessionId, out var hits) ? hits : 0) times by attendees
                         </span>
                     </div>
 
@@ -179,11 +239,37 @@
                         {
                             <a class="task-link-btn" asp-page="/Speaker/Questions">&#128172; @Localizer["Speaker.AttendeeQuestions"]</a>
                         }
-                        <a class="task-link-btn" asp-page="/Speaker/Graphics">&#128241; @Localizer["Speaker.SoMePromote"]</a>
-                        <a class="task-link-btn" href="/sessions/@(s.SessionId)/calendar.ics">&#128197; @Localizer["Speaker.CalendarSync"]</a>
-                        @if (!string.IsNullOrWhiteSpace(s.EvaluationUrl))
+                        @* §461: SoMe promote belongs to the speaker programme — hidden for a
+                           SPONSOR-category speaker (their promotion is the sponsor's own). *@
+                        @if (!Model.IsSponsorCategorySpeaker)
                         {
-                            <a class="task-link-btn" href="@s.EvaluationUrl" target="_blank" rel="noopener">&#128202; @Localizer["Speaker.EvaluationsDownload"]<span class="visually-hidden">@Localizer["Common.OpensNewTab"]</span></a>
+                            <a class="task-link-btn" asp-page="/Speaker/Graphics">&#128241; @Localizer["Speaker.SoMePromote"]</a>
+                        }
+                        <form method="post" asp-page-handler="SendSessionInvite" style="display:inline;margin:0;">
+                            <input type="hidden" name="sessionId" value="@s.SessionId" />
+                            <button type="submit" class="task-link-btn" style="border:none;cursor:pointer;">&#128197; @Localizer["Speaker.CalendarSync"]</button>
+                        </form>
+                        @* §192d/§234: TWO per-session evaluation downloads — the Score PDF and
+                           the Open-feedback PDF, EACH rendered only when its file actually
+                           exists for this session (an always-on Score button 404'd until the
+                           post-event PDF was uploaded). Both stream through the hub proxy,
+                           never a SharePoint URL. *@
+                        @{
+                            var kinds = Model.EvalKinds.TryGetValue(s.SessionId, out var k) ? k : null;
+                            var hasScore = kinds is not null && kinds.Contains(EvaluationPdfKind.Score);
+                            var hasOpenFeedback = kinds is not null && kinds.Contains(EvaluationPdfKind.Open);
+                        }
+                        @if (hasScore)
+                        {
+                            <a class="task-link-btn"
+                               href="@CommunityHub.Core.Integrations.Graphics.SessionEvalPdfService.ProxyUrlFor(s.SessionId, EvaluationPdfKind.Score)"
+                               target="_blank" rel="noopener">&#128202; @Localizer["Speaker.EvaluationsScore"]<span class="visually-hidden">@Localizer["Common.OpensNewTab"]</span></a>
+                        }
+                        @if (hasOpenFeedback)
+                        {
+                            <a class="task-link-btn"
+                               href="@CommunityHub.Core.Integrations.Graphics.SessionEvalPdfService.ProxyUrlFor(s.SessionId, EvaluationPdfKind.Open)"
+                               target="_blank" rel="noopener">&#128221; @Localizer["Speaker.EvaluationsOpenFeedback"]<span class="visually-hidden">@Localizer["Common.OpensNewTab"]</span></a>
                         }
                         @* §124: download this session's ROOM session-evaluation QR (served by the Evaluations page handler). *@
                         @if (Model.RoomQr.TryGetValue(s.SessionId, out var roomQr))
@@ -192,28 +278,87 @@
                                asp-route-sessionId="@s.SessionId" download="@roomQr.FileName">&#128241; Evaluation QR</a>
                         }
                     </div>
+
+                    @* §322i (operator 2026-07-24): the PREVIEW/FINAL slide upload lives ON the
+                       session card — per session, with the latest file name/link. Versioned
+                       automatically (§68-style); the newest version is what attendees see on
+                       the public Session slides page. *@
+                    @if (Model.SlideUploadsConfigured)
+                    {
+                        var slot = Model.SlideFiles.TryGetValue(s.SessionId, out var sf) ? sf : null;
+                        @* §322o (operator): the fold-out toggle reads as a BUTTON like the
+                           card's other actions — plain text was too easy to miss. *@
+                        <details style="margin-top:10px;">
+                            <summary style="display:inline-block;background:var(--el-blue);color:#fff;padding:8px 18px;border-radius:6px;font-size:14px;font-weight:600;cursor:pointer;list-style:none;">
+                                ⬆️ Upload slides (preview / final)
+                                @if (slot?.FinalFileName is not null) { <span style="font-weight:700;"> · final uploaded ✓</span> }
+                                else if (slot?.PreviewFileName is not null) { <span style="font-weight:700;"> · preview uploaded ✓</span> }
+                            </summary>
+                            <div style="margin-top:8px;background:#f8fafc;border:1px solid #e5e7eb;border-radius:8px;padding:8px 12px;">
+                            <p style="font-size:12.5px;color:#4b5563;margin:8px 0 4px;">
+                                @* §465 (operator 2026-07-27) — his exact wording. *@
+                                PDF, PPTX or ZIP (max 1 GB). 💡 Upload a newer version at any time —
+                                Versions are assigned automatically; the system always uses the latest one.
+                            </p>
+                            @* §461/§456: a SPONSOR-category speaker owns the FINAL deck only, so the
+                               preview row is dropped for them (the handler refuses it too). *@
+                            @{
+                                var uploadKinds = Model.IsSponsorCategorySpeaker
+                                    ? new[] { ("final", "Final", slot?.FinalFileName) }
+                                    : new[]
+                                    {
+                                        ("preview", "Preview", slot?.PreviewFileName),
+                                        ("final", "Final", slot?.FinalFileName),
+                                    };
+                            }
+                            @foreach (var (slug, label, existing) in uploadKinds)
+                            {
+                                <div style="border-top:1px solid #eef1f5;padding:8px 0 2px;">
+                                    <span style="font-weight:600;font-size:13px;">@label:</span>
+                                    @if (existing is not null)
+                                    {
+                                        <a href="/session-slides/@s.SessionId/@slug/download" style="font-size:13px;">📄 @CommunityHub.Core.Integrations.Graphics.SpeakerPresentationService.DisplayName(existing)</a>
+                                    }
+                                    else
+                                    {
+                                        <span style="color:#9ca3af;font-size:13px;">not uploaded yet</span>
+                                    }
+                                    @* §421 (operator 2026-07-27: "as some files are big, is it possible
+                                       to show a turning something showing that things are happening
+                                       or write upload in progress"). A 1 GB PPTX can take minutes and
+                                       the page gave NO feedback at all — the button just sat there,
+                                       so the natural reaction is to press it again and start a
+                                       second upload of the same file.
+
+                                       PROGRESSIVE ENHANCEMENT (§21): the form posts normally with
+                                       JavaScript off; the script only relabels and disables the
+                                       button. Deliberately a spinner and not a percentage — a real
+                                       progress bar needs an XHR rewrite of a working upload path
+                                       for what is a reassurance problem, not a measurement one. *@
+                                    <form method="post" asp-page-handler="UploadSlides" enctype="multipart/form-data"
+                                          onsubmit="var b=this.querySelector('button[type=submit]');
+                                                    if(b){b.disabled=true;b.style.opacity='0.75';
+                                                          b.innerHTML='<span class=&quot;ceh-spin&quot;></span> Uploading… please keep this page open';}
+                                                    return true;"
+                                          style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:4px;">
+                                        <input type="hidden" name="kind" value="@slug" />
+                                        <input type="hidden" name="sessionId" value="@s.SessionId" />
+                                        <input type="file" name="file" accept=".pdf,.pptx,.zip" required style="max-width:340px;font-size:13px;" />
+                                        <button type="submit" class="task-link-btn" style="border:none;cursor:pointer;">⬆️ Upload @label.ToLowerInvariant()</button>
+                                    </form>
+                                </div>
+                            }
+                            </div>
+                        </details>
+                    }
                 </li>
             }
         </ul>
     </div>
 }
 
-<div class="card">
-    <h2>&#11088; @Localizer["Speaker.RatingsHeading"]</h2>
-    @if (Model.HasRatings)
-    {
-        <p style="font-size:13.5px;color:#374151;margin-top:0;">@Localizer["Speaker.RatingsIntro"]</p>
-        <p>
-            <a class="task-link-btn" asp-page="/Speaker/Evaluations">@Localizer["Speaker.RatingsCta"]</a>
-        </p>
-    }
-    else
-    {
-        <p style="background:#fef9c3;border-left:4px solid #ca8a04;padding:10px 14px;border-radius:6px;font-size:13.5px;color:#713f12;margin:0;">
-            Your session ratings aren't available yet. They'll appear here once attendees rate your sessions (after the event).
-        </p>
-    }
-</div>
+@* §192d: the "My session ratings" card was removed — per-session evaluations (the Score +
+   Open-feedback PDFs on each session row above) supersede it. *@
 
 @* Removed (operator 2026-06-25, redundant): "Your public profile", "Add my deadlines
    to my calendar", and "Speaker details" cards — Speaker Details is its own page, and
@@ -248,5 +393,7 @@
 }
 
 <div class="card">
-    <p><a asp-page="/Index">&larr; @Localizer["Common.BackToHub"]</a> &middot; <a asp-page="/Tasks/Index">@Localizer["Speaker.AllMyTasks"]</a></p>
+    @* §234 UX: speaker task links point at /Speaker/Tasks everywhere (the nav's "My tasks"
+       target) — the generic /Tasks entry point diverged from it. *@
+    <p><a asp-page="/Index">&larr; @Localizer["Common.BackToHub"]</a> &middot; <a asp-page="/Speaker/Tasks">@Localizer["Speaker.AllMyTasks"]</a></p>
 </div>

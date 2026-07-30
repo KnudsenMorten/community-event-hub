@@ -24,22 +24,29 @@ public class InfoPageModel : PageModel
     private readonly ContentMarkdownRenderer _renderer;
     private readonly ICurrentParticipantAccessor _participant;
     private readonly VenueImageProvider _venue;
+    private readonly CommunityHub.Core.Settings.FeatureGateService _gate;
     private readonly ILogger<InfoPageModel> _logger;
 
     public InfoPageModel(
         ContentMarkdownRenderer renderer,
         ICurrentParticipantAccessor participant,
         VenueImageProvider venue,
+        CommunityHub.Core.Settings.FeatureGateService gate,
         ILogger<InfoPageModel> logger)
     {
         _renderer = renderer;
         _participant = participant;
         _venue = venue;
+        _gate = gate;
         _logger = logger;
     }
 
     /// <summary>The registry metadata for the requested slug (title, etc.).</summary>
     public ContentPage Content { get; private set; } = default!;
+
+    /// <summary>§326br — the ROLE-AWARE heading for this page, so a speaker's menu entry
+    /// ("… &amp; Speaker Hotel") and the page they land on agree (§318d align rule).</summary>
+    public string PageTitle { get; private set; } = string.Empty;
 
     /// <summary>Rendered markdown body (raw HTML; trusted, in-repo content).</summary>
     public HtmlString BodyHtml { get; private set; } = HtmlString.Empty;
@@ -82,8 +89,14 @@ public class InfoPageModel : PageModel
         }
 
         Content = page;
+        PageTitle = page.TitleFor(me.Role);
 
-        if (_renderer.TryRender(slug, out var html))
+        // §351-5 (operator 2026-07-26: "dont include features which are turned off") — resolve the
+        // page's [feature:key] directives against THIS edition's switches, so a row describing a
+        // disabled capability is dropped from the markdown before it is rendered.
+        var features = await _renderer.BuildFeatureLookupAsync(slug, _gate, me.EventId, ct);
+
+        if (_renderer.TryRender(slug, out var html, publicView: false, features))
         {
             BodyHtml = new HtmlString(html);
         }
@@ -100,10 +113,17 @@ public class InfoPageModel : PageModel
         // Organizer, who sees everything). Keeps speaker-only blocks (e.g. the speaker hotel on
         // the all-roles Addresses page) hidden from attendees/volunteers/sponsors.
         if (me.Role is CommunityHub.Core.Domain.ParticipantRole.Speaker
-                     or CommunityHub.Core.Domain.ParticipantRole.Organizer
-            && _renderer.TryRender($"{slug}-speaker", out var speakerHtml))
+                     or CommunityHub.Core.Domain.ParticipantRole.Organizer)
         {
-            SpeakerSupplementHtml = new HtmlString(speakerHtml);
+            // The supplement is a separate file, so it gets its own §351-5 lookup.
+            var supplementSlug = $"{slug}-speaker";
+            var supplementFeatures =
+                await _renderer.BuildFeatureLookupAsync(supplementSlug, _gate, me.EventId, ct);
+
+            if (_renderer.TryRender(supplementSlug, out var speakerHtml, publicView: false, supplementFeatures))
+            {
+                SpeakerSupplementHtml = new HtmlString(speakerHtml);
+            }
         }
 
         // §146: append the LIVE SharePoint venue gallery for slugs with a mapped folder

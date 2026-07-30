@@ -154,14 +154,20 @@ public sealed class PublicSponsorsServiceTests
         db.Events.Add(evt);
         await db.SaveChangesAsync();
 
-        // No SponsorUploadLocation row → no captured name → "Company {id}" fallback.
+        // No SponsorUploadLocation row → no captured name → the unresolved-name fallback.
         Sponsor(db, evt.Id, "9001", BoothTier.Platinum, companyName: null);
         await db.SaveChangesAsync();
 
         var svc = new PublicSponsorsService(db);
         var view = await svc.BuildAsync();
 
-        Assert.Equal("Company 9001", view!.Groups.Single().Sponsors.Single().Name);
+        // §528b: the fallback used to read "Company 9001", which is indistinguishable from a company
+        // genuinely called that — the operator read it as corrupt data on a real sponsor. It now
+        // names itself as a missing sync, which is also the signal that the company's SharePoint
+        // upload folders were never provisioned.
+        Assert.Equal(
+            CommunityHub.Core.Integrations.SponsorCompanyName.UnresolvedName("9001"),
+            view!.Groups.Single().Sponsors.Single().Name);
     }
 
     [Fact]

@@ -19,8 +19,9 @@ namespace CommunityHub.Pages.Volunteer;
 /// attend part), Blocked (attending only) or Unavailable (not present). Plus any
 /// extra lead-up days configured for volunteers (e.g. the packing day).
 /// Coordinators read this when assigning shifts so a volunteer is never scheduled
-/// outside their windows. On Save the volunteer's availability is emailed to the
-/// volunteer lead (operator 2026-06-23). Self-service only — a volunteer edits
+/// outside their windows. On the FIRST save the availability is applied directly and
+/// emailed to the volunteer lead (operator 2026-06-23); a later EDIT is queued for
+/// organizer approval instead (§59). Self-service only — a volunteer edits
 /// their own row via <see cref="ICurrentParticipantAccessor"/>; the client never
 /// supplies the id.
 ///
@@ -79,8 +80,12 @@ public class AvailabilityModel : PageModel
     /// One editable row per event day, pre-filled with any saved value. RawNote is
     /// the full stored Note (incl. any "[slot]" tag — used to re-select the right
     /// option); UserNote is the volunteer's free text only (shown in the textarea).
+    /// HasSaved marks a day the volunteer has actually saved before — §234 UX: only
+    /// then is an option pre-selected; an unsaved day renders with NO radio checked
+    /// (client `required` + server validation force an explicit choice, so "Full day"
+    /// is never silently recorded as a default).
     /// </summary>
-    public record DayRow(DateOnly Day, string Label, VolunteerAvailabilityLevel Level, string? RawNote)
+    public record DayRow(DateOnly Day, string Label, VolunteerAvailabilityLevel Level, string? RawNote, bool HasSaved = false)
     {
         public string? UserNote => VolunteerDayOptions.StripSlot(RawNote);
     }
@@ -103,6 +108,10 @@ public class AvailabilityModel : PageModel
 
     [TempData] public string? Notice { get; set; }
 
+    /// <summary>"error" when the last save was REJECTED (e.g. a day left without a choice,
+    /// §234 UX) so the flash renders red, not as a green saved-note; null/other = success.</summary>
+    [TempData] public string? NoticeKind { get; set; }
+
     public async Task<IActionResult> OnGetAsync(CancellationToken ct)
     {
         var me = _participant.Current;
@@ -121,10 +130,12 @@ public class AvailabilityModel : PageModel
         // wizard step): first submission applies + emails the lead, a later edit enqueues a
         // delta for organizer approval. The service ignores client-injected out-of-edition days.
         Form = new VolunteerAvailabilityFormModel { Inputs = Inputs };
-        await Service.SaveAsync(Form, me.EventId, me.ParticipantId, me.FullName, me.Email, ct);
+        await Service.SaveAsync(Form, me.EventId, me.ParticipantId, me.FullName, me.Email, ModelState, ct);
 
-        // PRG: surface the service's flash and reload via OnGet.
+        // PRG: surface the service's flash and reload via OnGet. §234 UX: a REJECTED save
+        // (day without a choice) must render as an error, never a green saved-note.
         Notice = Form.Notice;
+        NoticeKind = Form.NoticeIsError ? "error" : null;
         return RedirectToPage();
     }
 }

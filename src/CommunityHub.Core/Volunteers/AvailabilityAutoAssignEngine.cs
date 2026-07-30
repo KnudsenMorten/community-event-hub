@@ -164,9 +164,19 @@ public sealed class AvailabilityAutoAssignEngine
 
         // Real assignments (any participant) and THIS owner's existing drafts both
         // count toward the budget and block re-proposing the same person on a task.
+        // Only EFFECTIVE assignments (§253 G7) count toward the budget — a ghost
+        // (deactivated) or declined holder used to shrink the gap so the engine
+        // under-proposed replacements for exactly the shifts a drop-out vacated.
+        // Ineffective rows still OCCUPY the (task, person) pair for dedup safety.
         var assignments = await _db.VolunteerTaskAssignments
             .Where(a => a.EventId == eventId)
-            .Select(a => new { a.TaskId, a.ParticipantId })
+            .Select(a => new
+            {
+                a.TaskId,
+                a.ParticipantId,
+                Effective = a.Participant.IsActive
+                            && a.DecisionStatus != ShiftDecisionStatus.Declined,
+            })
             .ToListAsync(ct);
 
         var drafts = await _db.TaskAllocationDrafts
@@ -178,7 +188,8 @@ public sealed class AvailabilityAutoAssignEngine
         var occupied = new HashSet<(int TaskId, int ParticipantId)>();
         foreach (var a in assignments)
         {
-            existingCountByTask[a.TaskId] = existingCountByTask.GetValueOrDefault(a.TaskId) + 1;
+            if (a.Effective)
+                existingCountByTask[a.TaskId] = existingCountByTask.GetValueOrDefault(a.TaskId) + 1;
             occupied.Add((a.TaskId, a.ParticipantId));
         }
         foreach (var d in drafts)

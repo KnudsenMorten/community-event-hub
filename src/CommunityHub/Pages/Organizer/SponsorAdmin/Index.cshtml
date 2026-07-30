@@ -31,8 +31,10 @@
         new("/Organizer/Sponsors", "Sponsor directory", "The full list of sponsor companies for this edition: contacts, tiers and onboarding status."),
         new("/Organizer/SponsorAdmin/Welcome", "Sponsor welcome", "Resend the sponsor welcome / intro email per company or to all sponsors, and reset the welcome flag.", "sponsor-welcome"),
         new("/Organizer/AppGame", "App game", "Track which sponsors take part in the attendee app game, the gift they committed, and send reminders.", "sponsor-reminders"),
-        new("/Organizer/EconomicContacts", "backend sponsor contacts", "Manage the contacts (Signer / Event Coordinator) on any sponsor's backend customer (group 1) straight from the hub."),
-        new("/Organizer/SponsorWebshopCompany", "Sponsor webshop company management", "Edit a sponsor's Company Manager record — default signer, default event coordinator, internal notes. A coordinator change cascades to CEH + Zoho."),
+        // §501 — "Sponsor contacts (finance system)" and "Sponsor webshop company & defaults" MOVED
+        // to the People hub at the operator's request: they manage people and their roles, and he
+        // could not find them here because they were filed by which company they belong to rather
+        // than by what they are. Both pages stay routable, so bookmarks and deep links still work.
     };
     <partial name="_HubGrid" model="@tiles" />
 }

@@ -13,13 +13,37 @@
     }
     else
     {
+        @* §326cb: the sponsor welcome is AUTOMATIC — say so first. The page used to read like
+           the send mechanism, so an organizer could not tell whether a company was blocked,
+           waiting for a ring, or simply not due yet. *@
         <p>
-            Resend the sponsor <strong>welcome / intro</strong> email, or reset the welcome
-            flag so a resend actually fires (the welcome is otherwise sent once per contact).
+            The sponsor welcome <strong>sends itself</strong> &mdash; a background job checks every
+            15 minutes and welcomes any event-coordinator who has not had it yet, exactly like the
+            speaker welcome. <strong>You do not need to click anything here.</strong> This page is
+            the monitor: it shows who has been welcomed and, when someone has not, why.
+        </p>
+        <p>
             Every send goes <strong>only to a company's event-coordinator contacts</strong> &mdash;
             signer-only contacts never receive sponsor mail; a contact who is both signer and
-            coordinator still receives it.
+            coordinator still receives it. Use <em>Resend</em> / <em>Reset flag</em> only to force
+            a repeat for someone who has already been welcomed.
         </p>
+        @if (Model.WelcomeEmailDisabled)
+        {
+            <p class="error" role="alert">
+                <strong>Nothing is being sent.</strong> The <code>welcome-email</code> feature is
+                switched OFF for this edition, so the job skips entirely. Turn it on in
+                <a asp-page="/Organizer/Settings">Settings</a>.
+            </p>
+        }
+        else
+        {
+            <p style="color:#6b7280;font-size:13px;">
+                Currently released to <strong>@CommunityHub.Core.Settings.Rings.Label(Model.ReleasedRing)</strong>
+                &mdash; a coordinator outside that ring is skipped on purpose and is welcomed
+                automatically as soon as the ring widens. Nothing is lost by waiting.
+            </p>
+        }
         <p><a asp-page="/Organizer/SponsorAdmin/Index">&larr; Back to Sponsor Admin</a></p>
 
         @if (!string.IsNullOrEmpty(Model.Message))
@@ -44,12 +68,20 @@
                 <form method="post" asp-page-handler="ResendAll" style="margin:0;">
                     <button type="submit">Resend welcome to all sponsors</button>
                 </form>
-                <form method="post" asp-page-handler="ResetAll" style="margin:0;">
-                    <button type="submit" style="background:#6c757d;"
-                            onclick="return confirm('Clear the welcome flag for every sponsor company\'s coordinators? The next resend will go out to all of them.');">
-                        Reset all welcome flags
-                    </button>
-                </form>
+                @* §334: clearing every company's flag makes the 15-minute reconcile job mail
+                   ALL of them. Two-step, and the phrase is verified SERVER-side. *@
+                <details style="margin:0;">
+                    <summary style="cursor:pointer;color:#7f1d1d;padding:6px 0;">Reset all welcome flags</summary>
+                    <form method="post" asp-page-handler="ResetAll" style="margin-top:8px;max-width:340px;">
+                        <partial name="_TypedConfirm" model="@(new CommunityHub.Pages.Shared.TypedConfirmField(
+                            CommunityHub.Core.Organizer.TypedConfirmation.ConfirmPhrase,
+                            "Clears the welcome flag for every sponsor company's coordinators — the reconcile job then e-mails all of them.",
+                            InputId: "resetAllPhrase"))" />
+                        <button type="submit" style="margin-top:8px;background:#6c757d;">
+                            Reset all welcome flags
+                        </button>
+                    </form>
+                </details>
             </div>
 
             <div style="overflow-x:auto;">
@@ -59,6 +91,7 @@
                     <th style="text-align:right;">Coordinators</th>
                     <th style="text-align:right;">Signer-only</th>
                     <th style="text-align:right;">Welcome sent</th>
+                    <th>Status</th>
                     <th>Actions</th>
                 </tr>
                 @foreach (var r in Model.Rows)
@@ -68,6 +101,21 @@
                         <td style="text-align:right;">@r.Coordinators</td>
                         <td style="text-align:right;color:#888;">@r.SignerOnly</td>
                         <td style="text-align:right;">@r.WelcomeSent / @r.Coordinators</td>
+                        @* §326cb: WHY a company is not welcomed — the two real gates, named. *@
+                        <td>
+                            @r.Status
+                            @if (r.BlockedReason is not null)
+                            {
+                                <br /><span style="color:#b42318;font-size:11.5px;">@r.BlockedReason</span>
+                            }
+                            else if (r.OutOfRing > 0)
+                            {
+                                <br /><span style="color:#92400e;font-size:11.5px;">
+                                    @r.OutOfRing coordinator(s) outside the released ring — they are welcomed
+                                    automatically when it widens.
+                                </span>
+                            }
+                        </td>
                         <td>
                             <div style="display:flex;flex-wrap:wrap;gap:6px;">
                                 <form method="post" asp-page-handler="Resend" style="margin:0;">

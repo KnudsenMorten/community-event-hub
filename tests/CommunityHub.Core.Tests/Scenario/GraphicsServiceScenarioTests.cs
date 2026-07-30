@@ -367,7 +367,7 @@ public sealed class GraphicsServiceScenarioTests
     {
         public List<SocialShareDraft> Posts { get; } = new();
         public bool CanPost => false;
-        public SocialShareDraft BuildDraft(SocialNetwork network, string text, string? graphicUrl) =>
-            new DraftOnlySocialShareGateway().BuildDraft(network, text, graphicUrl);
+        public SocialShareDraft BuildDraft(SocialNetwork network, string text, string? graphicUrl, string? cardUrl = null, string? intentText = null) =>
+            new DraftOnlySocialShareGateway().BuildDraft(network, text, graphicUrl, cardUrl, intentText);
     }
 }

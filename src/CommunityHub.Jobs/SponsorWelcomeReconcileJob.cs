@@ -25,17 +25,21 @@ public sealed class SponsorWelcomeReconcileJob
     private readonly CommunityHubDbContext _db;
     private readonly FeatureGateService _gate;
     private readonly ILogger<SponsorWelcomeReconcileJob> _log;
+    // §545(b) — optional, so an un-instrumented job simply says nothing (silence = UNKNOWN).
+    private readonly CommunityHub.Core.Diagnostics.JobActivityReporter? _activity;
 
     public SponsorWelcomeReconcileJob(
         SponsorWelcomeEmailService welcome,
         CommunityHubDbContext db,
         FeatureGateService gate,
-        ILogger<SponsorWelcomeReconcileJob> log)
+        ILogger<SponsorWelcomeReconcileJob> log,
+        CommunityHub.Core.Diagnostics.JobActivityReporter? activity = null)
     {
         _welcome = welcome;
         _db = db;
         _gate = gate;
         _log = log;
+        _activity = activity;
     }
 
     [Function("SponsorWelcomeReconcileJob")]
@@ -46,6 +50,8 @@ public sealed class SponsorWelcomeReconcileJob
         if (eventId is null)
         {
             _log.LogInformation("SponsorWelcomeReconcileJob: no active edition; skipped.");
+            _activity?.ReportInactive(
+                "There is no ACTIVE edition, so no sponsor welcome can be reconciled.");
             return;
         }
 
@@ -54,8 +60,13 @@ public sealed class SponsorWelcomeReconcileJob
         if (!await _gate.IsFeatureEnabledAsync("welcome-email", eventId.Value, ct))
         {
             _log.LogInformation("SponsorWelcomeReconcileJob: welcome-email disabled; skipped.");
+            _activity?.ReportInactive(
+                "The 'welcome-email' feature is switched off, so no sponsor contact is being "
+                + "welcomed — including anyone added since it was turned off.");
             return;
         }
+
+        _activity?.ReportWork();
 
         var results = await _welcome.SendForAllSponsorsAsync(eventId.Value, ct);
         var sent = results.Sum(r => r.Sent);

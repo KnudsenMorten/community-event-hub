@@ -39,7 +39,7 @@ public sealed class FeatureGroupRingTests
     {
         using var db = NewDb();
         var settings = NewSettings(db);
-        await settings.SetGroupRingAsync(EventId, FeatureGroup.Surveys, Ring.Ring1, "o@x.test");
+        await settings.SetGroupRingAsync(EventId, FeatureGroup.EventSettings, Ring.Ring1, "o@x.test");
 
         Assert.Equal(Ring.Ring1, await NewGate(db).GetReleasedRingAsync("surveys", EventId));
     }
@@ -49,7 +49,7 @@ public sealed class FeatureGroupRingTests
     {
         using var db = NewDb();
         var settings = NewSettings(db);
-        await settings.SetGroupRingAsync(EventId, FeatureGroup.Surveys, Ring.Ring1, null);
+        await settings.SetGroupRingAsync(EventId, FeatureGroup.EventSettings, Ring.Ring1, null);
         await settings.SetReleasedRingAsync(EventId, "surveys", Ring.Ring0, null); // override
 
         Assert.Equal(Ring.Ring0, await NewGate(db).GetReleasedRingAsync("surveys", EventId));
@@ -60,7 +60,11 @@ public sealed class FeatureGroupRingTests
     {
         using var db = NewDb();
         var settings = NewSettings(db);
-        await settings.SetGroupRingAsync(EventId, FeatureGroup.Surveys, Ring.Ring2, null);
+        // §695 — "surveys" now lives in EventSettings; the four MECHANISM groups (Email, Reminders,
+        // Social media, Surveys) were emptied so every switch is filed per ROLE or under Event
+        // settings. The MECHANISM under test is unchanged: clearing a per-feature override re-adopts
+        // whatever ring its HOME group carries.
+        await settings.SetGroupRingAsync(EventId, FeatureGroup.EventSettings, Ring.Ring2, null);
         await settings.SetReleasedRingAsync(EventId, "surveys", Ring.Ring0, null);
         Assert.Equal(Ring.Ring0, await NewGate(db).GetReleasedRingAsync("surveys", EventId));
 
@@ -74,17 +78,20 @@ public sealed class FeatureGroupRingTests
     {
         using var db = NewDb();
         var settings = NewSettings(db);
-        // Incubation group set to Ring0; move surveys into it ⇒ surveys becomes Ring0.
-        await settings.SetGroupRingAsync(EventId, FeatureGroup.Incubation, Ring.Ring0, null);
-        await settings.SetFeatureGroupAsync(EventId, "surveys", FeatureGroup.Incubation, null);
+        // EventSettings group set to Ring0; move surveys into it ⇒ surveys becomes Ring0.
+        // (§700 — was Incubation, which no longer exists. The MECHANISM under test is
+        // unchanged, and it is the exact hazard §694.4 warns about: a feature with no
+        // per-feature override adopts its destination group's ring when re-homed.)
+        await settings.SetGroupRingAsync(EventId, FeatureGroup.EventSettings, Ring.Ring0, null);
+        await settings.SetFeatureGroupAsync(EventId, "surveys", FeatureGroup.EventSettings, null);
 
         Assert.Equal(Ring.Ring0, await NewGate(db).GetReleasedRingAsync("surveys", EventId));
 
-        // And it now lists under the Incubation group in the GUI grouping.
+        // And it now lists under the Event settings group in the GUI grouping.
         var grouped = await settings.GetByGroupAsync(EventId);
-        var incubation = grouped.FirstOrDefault(g => g.Key == FeatureGroup.Incubation);
-        Assert.NotNull(incubation);
-        Assert.Contains(incubation!, s => s.Key == "surveys");
+        var destination = grouped.FirstOrDefault(g => g.Key == FeatureGroup.EventSettings);
+        Assert.NotNull(destination);
+        Assert.Contains(destination!, s => s.Key == "surveys");
     }
 
     [Fact]
@@ -92,12 +99,14 @@ public sealed class FeatureGroupRingTests
     {
         using var db = NewDb();
         var settings = NewSettings(db);
-        await settings.SetFeatureGroupAsync(EventId, "surveys", FeatureGroup.Incubation, null);
-        await settings.SetFeatureGroupAsync(EventId, "surveys", FeatureGroup.Surveys, null); // home
+        // §695 — "surveys" was re-homed OUT of the emptied Surveys mechanism group; EventSettings is
+        // its catalog home now. Moving it away and back must still clear the override.
+        await settings.SetFeatureGroupAsync(EventId, "surveys", FeatureGroup.Sponsors, null);
+        await settings.SetFeatureGroupAsync(EventId, "surveys", FeatureGroup.EventSettings, null); // home
 
         var all = await settings.GetAllAsync(EventId);
         var surveys = all.Single(s => s.Key == "surveys");
-        Assert.Equal(FeatureGroup.Surveys, surveys.EffectiveGroup);
+        Assert.Equal(FeatureGroup.EventSettings, surveys.EffectiveGroup);
         Assert.False(surveys.IsReHomed);
     }
 
@@ -124,11 +133,15 @@ public sealed class FeatureGroupRingTests
         var groups = await settings.GetGroupRingsAsync(EventId);
         Assert.Equal(Enum.GetValues<FeatureGroup>().Length, groups.Count);
 
-        // Defaults from FeatureCatalog.GroupDefaultRing where unset: EVERY group
-        // (incl. Incubation) is Ring1 — operator 2026-06-21 "default is ring 1".
-        Assert.Equal(Ring.Ring1, groups.Single(g => g.Group == FeatureGroup.Email).Ring);       // default
-        Assert.Equal(Ring.Ring1, groups.Single(g => g.Group == FeatureGroup.Incubation).Ring);  // default
-        Assert.Equal(Ring.Ring1, groups.Single(g => g.Group == FeatureGroup.Surveys).Ring);     // default
+        // Defaults from FeatureCatalog.GroupDefaultRing where unset: EVERY group is
+        // Ring1 — operator 2026-06-21 "default is ring 1".
+        // 🔒 §700 — assert this for EVERY group, not a hand-picked three. Uniformity is
+        // what makes re-homing audience-neutral, so it is the property worth pinning; a
+        // future group added with a different default must fail here, loudly.
+        foreach (var g in Enum.GetValues<FeatureGroup>().Where(x => x != FeatureGroup.Sponsors))
+        {
+            Assert.Equal(Ring.Ring1, groups.Single(x => x.Group == g).Ring);
+        }
         // The one we set is persisted.
         var sponsors = groups.Single(g => g.Group == FeatureGroup.Sponsors);
         Assert.Equal(Ring.Ring1, sponsors.Ring);

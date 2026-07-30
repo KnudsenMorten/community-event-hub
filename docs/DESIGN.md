@@ -30,12 +30,13 @@ rules about which doc owns what, see [`../CLAUDE.md`](../CLAUDE.md).
 16. [Testing strategy](#16-testing-strategy)
 17. [Configuration & Key Vault reference](#17-configuration--key-vault-reference)
 18. [Legacy automation: webhooks & deployment topology](#18-legacy-automation-webhooks--deployment-topology)
+19. [Attendee onboarding, party, seat allocation & test policy](#19-attendee-onboarding-party-seat-allocation--test-policy-206223)
 
 ---
 
 ## 1. System overview
 
-CEH is an evergreen, multi-community **ASP.NET Core 8 (Razor Pages)** participant portal plus an
+CEH is an evergreen, multi-community **ASP.NET Core (Razor Pages, .NET 10)** participant portal plus an
 **Azure Functions** job host, sharing one domain library and one Azure SQL database. Every
 participant logs in with an emailed PIN, lands on a role-personalized hub, self-services their
 pre-event obligations; organizers run the event from an admin hub; sponsors get a company-scoped
@@ -217,8 +218,8 @@ historical staging plan lives in the source CONTEXT material and is not repeated
     owning category's **supervisor** when a help request is raised, with the
     organizer **lead** copied (a separate per-person send so each gets correct
     effective-address/secondary-CC routing). It sends through the shared
-    `ParticipantEmailService` → `IEmailSender`, so the **DEV redirect-all-to and
-    the PROD allowlist gating apply automatically** — it never bypasses them, and
+    `ParticipantEmailService` → `IEmailSender`, so the **DEV redirect-all-to, the
+    kill switch and the per-recipient ring gate apply automatically** — it never bypasses them, and
     uses the shipped `volunteer-help-raised` template. The volunteer's "Ask for
     help" page (`/volunteer/mytasks`) invokes it **best-effort** after the request
     is saved: a mail failure is logged and swallowed (the request already persists
@@ -419,11 +420,13 @@ historical staging plan lives in the source CONTEXT material and is not repeated
   **one row per job key** holding `ConsecutiveFailures` + `LastSuccess` / `LastFailure` / `LastError`:
   the durable counter behind the §5 "page only at 2 consecutive failures" job-health gate
   (`Diagnostics/JobFailureTracker`). Additive, one table.
-- **Master-class atomic switch (§139).** `MasterClassSignupService.SwitchAsync` moves a seat between
-  master classes as a single **serializable read-decide-write**: the target's `SeatsTakenAsync` is
-  **range-locked** inside the transaction, a `NowFullError` **commit guard** rejects an overbooking
-  that raced in, and the **new seat is secured before the old one is released** — so a failed switch
-  never loses the original seat and two concurrent switches can never push a class past capacity.
+- **Master-class atomic switch (§139, §218).** `MasterClassSignupService.SwitchAsync` moves a seat
+  between master classes by **optimistically claiming the target seat FIRST** (`TryClaimSeatAsync` —
+  the §218 guarded conditional `UPDATE`, see §19), so the **new seat is secured before the old one is
+  released**: a failed claim returns "now full" / "now has a waitlist" and **leaves the original seat
+  untouched** (the switch is all-or-nothing), and two concurrent switches can never push a class past
+  capacity. No serializable range-lock — the same RCSI-correct `UPDLOCK/HOLDLOCK` claim every seat
+  path uses.
 
 ### Other stores
 - **Survey definitions** as JSON (`src/CommunityHub/App_Data/Surveys/*.json`, loaded + cached by
@@ -472,7 +475,7 @@ participants**.
   through to the legacy validation path. The grant is **scoped** to one participant + role in one
   edition (a re-roled person's stale link is refused) and **revocable** (`RevokedAt`); the row is the
   audit trail (who/when minted, consumed, revoked). The welcome send itself still goes through the
-  fail-closed allowlist + DEV redirect + kill-switch `IEmailSender` path — the token model adds
+  fail-closed ring-gated + DEV redirect + kill-switch `IEmailSender` path — the token model adds
   link-level security on top, it does **not** alter recipient gating.
 - **Magic-link recovery state** (`/Login/Magic`): when a link fails to authenticate the page is
   **never a dead end**. `MagicModel` distinguishes an **expired/invalid link** (`Login.MagicInvalid`)
@@ -618,6 +621,51 @@ blip is swallowed), through the ring-exempt `EngineAlertSender` under the thrott
 `engine-fail:erp-webshop-reconcile`; a success resets the counter. The job **deliberately does not
 re-throw** — a crash is recorded and alerted, not bubbled up to fail the Functions invocation.
 
+### Operator-editable job frequency (§509/§510)
+
+The organizer sets a job's cadence on `/Organizer/Jobs` with no deploy. The cron cannot carry this
+— Azure Functions binds a `[TimerTrigger]` at **startup** — so the schedule is split in two:
+
+- **Base tick (code).** An interval-driven job is bound to a fast, uniform cron,
+  `0 */5 * * * *` (`JobDescriptor.BaseTickMinutes`). It is an *offer* to run, not a cadence.
+- **Cadence (database).** `JobRunState.MinIntervalMinutes` — editable on the page, applied by
+  `JobsPauseMiddleware`, the one chokepoint every timer job already passes through. A tick whose
+  elapsed time since `LastRunAt` is short is skipped.
+
+`JobDescriptor.DefaultIntervalMinutes` marks a job as converted and supplies the cadence until the
+operator sets one. **The fallback is load-bearing:** treating an unset row (`0`) as "no limit" would
+run a converted job on every base tick — 6× more often than before.
+
+The rule lives in `JobThrottle` as pure arithmetic, apart from the middleware's `FunctionContext`
+and database, so `JobFrequencyTests` can exercise it directly.
+
+**Three constraints, each learned from a defect:**
+
+1. **A 30-second grace (`JobThrottle.TickGrace`), or every job runs one tick slow.** `LastRunAt` is
+   stamped *after* the middleware's DB round-trips, while the next tick lands on the cron's exact
+   clock boundary — so an exact comparison measures 29:59.x against a 30-minute interval, skips, and
+   turns "every 30" into every 35. The grace exceeds stamp jitter and stays far below the base tick,
+   so two consecutive ticks can never both run.
+2. **Clock-anchored jobs are NEVER converted.** "Daily 07:20 UTC" and "hourly at :15" are anchored to
+   a wall-clock time; tick+interval would drift the send off the hour. `DefaultIntervalMinutes` stays
+   null, and the page shows *"fixed time — set in code"* instead of an input that cannot work.
+3. **The page states the EFFECTIVE cadence.** Describing the raw cron would print "Every 5 minutes"
+   beside a "Runs every 30" box — two adjacent columns disagreeing about frequency, which was the
+   §509 complaint. For the same reason the "LIMITED" badge is suppressed on interval-driven jobs,
+   where a value is the cadence rather than a restraint on it.
+
+The floor is enforced **server-side** as well as via `min`/`step`: a value under the base tick is
+rejected with a message, never stored to silently do nothing. Catalog invariants in
+`JobFrequencyTests` fail the build if a converted job carries a cron other than the base tick, a
+default that is not a whole multiple of it, or an hour-pinned (clock-anchored) cron.
+
+**Status:** piloted on `ErpWebshopReconcileJob` at its existing 30 minutes, so the conversion is
+behaviour-neutral. The remaining interval jobs are not yet converted.
+
+**Do NOT implement this via `%AppSetting%` cron substitution.** Functions supports it, but app
+settings **swap with the slot**, so every change would have to be applied to both web slots or a
+deploy silently reverts it (§462). The database is the correct home for an operator-editable value.
+
 ### Real-time mirror: the Zoho Backstage order-change webhook (§128)
 
 The hourly `AttendeeBackstageSyncJob` is the authoritative FULL reconcile of the one-way Zoho→CEH
@@ -755,7 +803,7 @@ scheduled job call, so manual and timed runs are byte-identical. It: **creates a
 webshop (Company Manager) contact** from an ERP contact (respecting the one-user-per-company
 limit so a FASTTRACK override is left alone — `skip-existing-user`, never a duplicate); sets
 the company's **default signer / default event coordinator only when empty** (never
-overwrites an existing default); and **alerts the organizer** (`mok@expertslive.dk`) when a
+overwrites an existing default); and **alerts the organizer** (the configured organizer inbox) when a
 company is missing a Role:1 / Role:2 contact. The timer is `ErpWebshopReconcileJob`
 (`CommunityHub.Jobs`, **every 30 min**), gated by the **`erp-webshop-reconcile`** feature
 flag (off by default, checked across active editions) AND the service's own
@@ -1153,8 +1201,8 @@ view filters and per-room lookup. Enums are stored as int (`HasConversion<int>()
 - **Evaluation mail hook.** HappyOrNot is a physical box with **no API**, so per-session results arrive
   **manually**; `SessionEvaluationMailService.EmailResultsToSpeakersAsync(sessionId, resultsText)` emails
   the pasted results to every linked speaker (at their preferred address — `ContactEmailOverride ??
-  Email`, same routing as the welcome mail), through the `IEmailSender` seam (so the DEV redirect / PROD
-  allowlist apply and test sends never reach real people), and stamps `EvaluationEmailedAt`. The
+  Email`, same routing as the welcome mail), through the `IEmailSender` seam (so the DEV redirect / ring
+  gate apply and test sends never reach real people), and stamps `EvaluationEmailedAt`. The
   **results-text argument is the seam** for a future own-devices-via-API ingester (◻) — it would
   populate that text and reuse the same send. A **QR-code evaluation** form URL is stored per session
   (`EvaluationFormUrl`).
@@ -1409,7 +1457,7 @@ change** — all read-only projections over existing `Event` / `Session` / `Spea
   `CommunityHub.Core.Config.EventLocalTime` is the single authority for showing a moment in the EVENT's
   local time instead of raw UTC. It resolves the per-edition timezone from `event.<edition>.json →
   dates.timezone` (surfaced on `EditionDates.Timezone`), accepting an **IANA id** (`Europe/Copenhagen`,
-  works on .NET 8 Windows via ICU and on Linux) **or** a Windows id, trying an IANA↔Windows swap before
+  works on .NET 10 Windows via ICU and on Linux) **or** a Windows id, trying an IANA↔Windows swap before
   giving up and **falling back to UTC** (never throwing) for a blank/unknown zone. `Format` returns
   `local-time + zone-label` (e.g. `2027-02-03 14:00 UTC+01:00`); `ZoneLabel` shows the GMT offset or the
   plain `UTC` label at offset zero. Wired into the **MasterClass logistics** page (`UpdatedLocal` — the
@@ -1616,6 +1664,39 @@ speaking at ELDK27" announcement draft), `/Organizer/Graphics` (review/release q
 internal sponsor graphics), `/Organizer/AssetLocations` (per-persona SharePoint links). All mobile-first
 (~360px) + a11y (labels, `role="status"/"alert"`, new-tab hints).
 
+**Release → notification (REQUIREMENTS §436).** The "your graphics are ready — Open Help Promote" mail
+(`speaker-graphics-ready`) hangs off the RELEASE, not a clock. One Core service,
+**`SpeakerGraphicsReadyNotifier`**, owns the mail (render, ring gate, ledger, audit) and is called from
+**three** places, registered in BOTH hosts:
+
+| Trigger | Where | Scope |
+|---|---|---|
+| Organizer clicks **Release** | `/Organizer/Graphics` (web host) | the released asset's speaker |
+| SharePoint pull auto-releases | `SpeakerGraphicsSyncJob`, quarter-hourly (Functions host) | `ReleaseAllGeneratedAsync`'s reported speaker ids |
+| Daily catch-up sweep | `SpeakerGraphicsReadyJob` 08:30 UTC (Functions host) | every speaker with a released graphic |
+
+`ReleaseAllGeneratedAsync` returns **`ReleasedGraphics(Count, SpeakerIds)`** rather than a bare count,
+because after the flip every row reads `Released` and "who did this run release?" is no longer derivable.
+Idempotency is the *unchanged* ledger key `graphics-ready:{participantId}` — that, not the narrowing, is
+what stops the three triggers mailing a speaker twice, and what stops the trigger change re-announcing to
+everyone already notified. A narrowing list is an optimisation only; an EMPTY (non-null) list means "this
+release affected nobody" and does nothing, while `null` means the full sweep. The catch-up job's
+`JobCatalog` entry is named **"Speaker graphics ready (catch-up)"** so the organizer Jobs page does not
+claim to be when speakers hear about it.
+
+**Sharing a graphic as a NATIVE image (REQUIREMENTS §437).** The two publish paths differ by what token
+signs the post, and the difference is not fixable in the UI:
+- **Event company page** — `SoMeDispatchService` → `LiveLinkedInPostPublisher` runs LinkedIn's
+  `/rest/images?action=initializeUpload` → binary PUT → `content.media.id`, so the post carries a true
+  native image (since §324). An upload failure fails the publish rather than silently posting text-only.
+- **Speaker's own profile** — a share LINK carries plain text only (§326ac), so any URL in it is unfurled
+  into a preview CARD; a native image would need the Images API with the MEMBER's token, i.e. the app
+  consent ruled out in §326w. `/Speaker/Graphics` therefore leads with **"Post with the picture"**, whose
+  single click downloads the PNG (via the `/speaker-graphic/{id}` proxy), copies the full post text
+  (`execCommand`, synchronous — the async clipboard API loses the race against `target=_blank`) and opens
+  `GraphicsModel.EmptyComposerUrl` — deliberately parameterless, since a `url=`/`text=` param is exactly
+  what re-creates the card. The old share-intent route stays as the secondary "Share as a link card".
+
 **Operator config (flagged ◻/🟡 — never committed).** `Graphics:SharePoint` (site/drive/root) +
 `SharePoint` SPN creds (Key Vault) for the live store; the persona-group SharePoint links (operator-entered
 in the admin page); per-user LinkedIn/X OAuth for posting. Until set, the null store / draft-only gateway
@@ -1690,7 +1771,7 @@ manually insert the speaker's real LinkedIn handle. A **sponsor post** tags the 
 **Surfaces.** `/Organizer/SoMeQueue` (list + Preview + Active/Inactive + reschedule + fine-tune + ad-hoc
 compose), `/Organizer/SoMeSettings` (enable/disable, company page, pre-alert organizer, notification array
 + toggle). Both organizer-gated, mobile-first (~360px) + a11y. All outbound (pre-alert + publish
-notifications) goes through `IEmailSender`, so the DEV redirect / PROD allowlist apply.
+notifications) goes through `IEmailSender`, so the DEV redirect / ring gate / kill switch apply.
 
 **Operator config (flagged 🟡 — never committed).** The LinkedIn company-page URL / organization id
 (operator config, placeholder only) and the LinkedIn OAuth access token (Key Vault secret
@@ -1757,6 +1838,55 @@ so a host missing one still builds safely):
 
 ## 7. Email system
 
+### 7.0 WHEN each mail goes out — the complete cadence map (§707.8, 2026-07-30)
+
+Every outbound mail is either **event-driven** (sent inside the request that caused it — seconds) or
+**job-driven** (a timer decides who is due). This table is read from the code, and the job column is
+pinned against each job's real `[TimerTrigger]` by `JobCadenceWordsMatchCronTests`.
+
+**A. EVENT-DRIVEN — sent immediately, in the same request (seconds, not minutes)**
+
+| Mail | Trigger |
+|---|---|
+| `masterclass-confirmed` / `masterclass-waitlisted` | the attendee picks or joins a waitlist (`/Attendee`, `/MyMasterClass`, Get-Started wizard) |
+| `masterclass-cancelled` | the attendee gives up a seat — the receipt for their own click |
+| `masterclass-question-posted` / `-instructions-updated` | a question is posted / a speaker edits instructions |
+| `task-allocation-committed` | an organizer commits an allocation batch |
+| `travel-reimbursement-paid` · `group-photo-invite` · `app-game-gift-reminder` · `session-evaluation-results` · `hotel-confirmation-guest` | an organizer presses the button on the relevant page |
+| `pin-signin` · `calendar-*` · `hotel-calendar-selfsend` | the person asked for it (all ring-EXEMPT) |
+| `sponsor-lead-reply` | an organizer replies to a lead (ring-exempt) |
+
+**B. JOB-DRIVEN — a timer decides who is due**
+
+| Mail | Job | Job runs | Who is due |
+|---|---|---|---|
+| `task-deadline-reminder` | `ReminderJob` | **daily 08:00 UTC** | ONLY on the due day, and once more if overdue (§81) |
+| `getstarted-digest` | `ReminderJob` | daily 08:00 UTC | not finished Get Started — **one per 14-day window** |
+| `getstarted-deadline-reminder` | `ReminderJob` | daily 08:00 UTC | **one-shot**, before the configured speaker deadline |
+| attendee **party** + attendee **Master Class** task chasers | `ReminderJob` | daily 08:00 UTC | **every 14 days** from the task's creation |
+| `hotel-cutoff-reminder` | `ReminderJob` | daily 08:00 UTC | **3 days before** a hotel release deadline (organizers) |
+| `masterclass-selection-invite` | `AttendeeBackstageSyncJob` | every 10 min | a new 2-day ticket holder, once |
+| `pending-master-class-selection` | `AttendeeBackstageSyncJob` | every 10 min | invited **≥14 days** ago and still not selected |
+| `masterclass-offer` / `masterclass-promoted` | `AttendeeBackstageSyncJob` · `WaitlistOfferExpiryJob` · `ZohoWebhookDrainJob` | 10 min / expiry / **1 min** | a seat freed and a waitlisted attendee is next |
+| `welcome*` (all personas) | `WelcomeReconcileJob` | every 10 min | newly provisioned and in ring |
+| `sponsor-leads-digest` | `SponsorLeadsJob` | hourly at :15 | RealTime prefs hourly; Daily prefs on the 06:15 run |
+| `speaker-graphics-ready` | `SpeakerGraphicsReadyJob` | daily 08:30 UTC | graphics just released |
+| `session-time-location-changed` | `SessionChangeDetectionJob` | every 5 min | a detected change, **after** an organizer approves it |
+| any failed send | `FailedMailRetryJob` | every 20 min | retries transient failures |
+
+🔑 **The 08:00 UTC job is the day's big send** — historically ~70 of ~96 daily mails. A task reminder
+therefore arrives **the morning of the due date**, never earlier.
+
+### 7.0a Can an organizer change these?
+- **Cadence: NO, not for the reminder mails.** Every cron is a literal compiled into the job's
+  `[TimerTrigger]`, and the 14-day windows are `const IntervalDays = 14`. Changing either is a
+  **deploy**, not a setting. `/Organizer/Jobs` **lists** every job with its cadence in words and lets
+  an organizer **trigger a job now**; the "set interval" control applies only to jobs flagged
+  `IsIntervalDriven`, and **none of the mail-driving jobs is**.
+- **Audience: YES.** `/Organizer/Settings` sets the ring per **mail × role** — that is the control
+  that decides who receives it (§707.6).
+- **On/off: YES.** Each email feature switch, plus the global *Outbound email* master.
+
 All email renders through a small **template engine** (`EmailTemplateRenderer` +
 `EmailTemplateProvider` + `BrevoEmailSender` behind the `IEmailSender` seam). An email = a branded
 `_layout.html` table-based shell + a per-type content template dropped into it. The renderer splits
@@ -1816,6 +1946,40 @@ branding is consistent and multi-tenant-clean (no hard-coded team sign-off or br
 Template files present but not yet wired to every sender: `incomplete-form-chaser.html`,
 `speaker-deadline-reminder.html`, `speaker-pending-tasks.html`, `sponsor-overdue.html` (these route
 through the same engine + `SentReminder` dedup once wired).
+
+### E-mail CTA buttons — the VML bulletproof pattern (§375, operator-verified 2026-07-26)
+
+**Every CTA button in every template uses a two-half pattern, and both halves always ship together.**
+
+- **Why.** Outlook on Windows renders HTML with the **Word engine**, not a browser engine. Word
+  **ignores `border-radius`** (square corners) and **repaints link text with the Office theme colour**
+  (red instead of white). Phones and webmail use WebKit/Blink and honour both — so a broken button
+  looks *perfect* on the phone you happen to check. Three separate fixes were each believed to have
+  worked before someone opened one on a desktop: `border-radius:999px` on the `<td>`,
+  `color:#ffffff !important` on the `<a>`, and a nested `<font color="#ffffff">`. **Word obeys none
+  of them.**
+- **The pattern:** `<!--[if mso]><v:roundrect … arcsize="50%" stroke="f" fillcolor="…"><w:anchorlock/>
+  <center style="color:#ffffff;…">Label</center></v:roundrect><![endif]-->` for Outlook, and the
+  ordinary filled-pill `<a>` behind `<!--[if !mso]><!-- -->` for everyone else.
+- **Load-bearing details** (each is easy to "tidy away" and each breaks it): `arcsize` makes the
+  pill; the explicit `color:#ffffff` on the `<center>` is what stops Word repainting the text; and
+  VML **cannot auto-size**, so a FIXED `width` is required — derived from the label length (min
+  200px), or long labels clip.
+- **A token inside these MSO conditionals is correct** — they are markup Outlook parses, not
+  documentation. Contrast with the rule in the next paragraph.
+- **Guarded by tests:** `EmailButtonBulletproofTests` (a template with a pill anchor must carry a
+  matching `v:roundrect`, and each `roundrect` must keep arcsize + white colour + fixed width) and
+  `EmailTemplateCommentTokenTests` (no `{{token}}` in an ordinary HTML comment — see below).
+
+**Never put a `{{token}}` in an HTML comment (§374).** The renderer substitutes across the whole
+file, comments included. `_layout.html` once documented its own tokens in a comment — including the
+BODY token — so the entire rendered e-mail was injected *inside that comment*, and a live attendee
+received the mail rendered twice with developer prose in the middle. A second instance put a
+magic-link URL into the message source. Name tokens in prose, without braces.
+
+**PROD has zero `EmailTemplateOverrides` rows** (verified 2026-07-26), so the template FILES are what
+production sends — a file edit really does reach the inbox. A saved DB override would beat both file
+layers and silently make template edits invisible.
 
 ### Welcome email for all roles with one-click auto-login (DEV-only)
 
@@ -1916,7 +2080,7 @@ several signers.
   `Role == Sponsor` rows plus the e-conomic Role-2 set. A contact is included when it is active, has an
   email, and **either** carries the manual `IsEventCoordinator` flag (organizer override) **or** its
   email is in the e-conomic Role-2 set. It **only picks the audience** — `BrevoEmailSender`'s
-  redirect/allowlist still gates every actual delivery.
+  redirect/ring/kill-switch gating still gates every actual delivery.
 - **Every sponsor email path routes through it.** Sponsor **task-deadline reminders**
   (`TaskReminderBuilder`) fan a sponsor task's reminder out to the company's coordinators instead of to
   whoever the task is assigned to (which could be a signer-only contact), with each coordinator deduped
@@ -1965,15 +2129,15 @@ lists each sponsor company with its coordinator count, signer-only count (inform
 coordinators have already been welcomed, and offers: **Resend** (per company) / **Resend to all
 sponsors**, and **Reset flag** (per company) / **Reset all** — Reset deletes the matching `welcome`
 `SentReminder` rows for the company's coordinators so the next Resend actually fires (no other reminder
-type is touched). Sends go only to coordinators via the resolver; delivery is still allowlist-gated.
+type is touched). Sends go only to coordinators via the resolver; delivery is still ring-gated at the sender.
 
 ### `send-sample-emails` review command (OneShot, CLI-only)
 
 `tools/CommunityHub.OneShot` gained a `send-sample-emails --to <address> [--sponsor <name>]` command.
 It renders **every** shipped template under `templates/emails/*.html` (skipping the `_layout` partial)
-through the **real** `EmailTemplateProvider`/`EmailTemplateRenderer` with realistic 2LINKIT sample data
-(coordinator `mok@2linkit.net`), prefixes each subject with `[SAMPLE]`, and sends each via the
-configured `IEmailSender` (so the DEV redirect + allowlist apply). It runs **only** when invoked from
+through the **real** `EmailTemplateProvider`/`EmailTemplateRenderer` with realistic sample data
+(a sample coordinator address), prefixes each subject with `[SAMPLE]`, and sends each via the
+configured `IEmailSender` (so the DEV redirect + the sender's gating apply). It runs **only** when invoked from
 the CLI — never during build or test. The template directory is resolved to an absolute path (walking
 up to `<root>/templates/emails`) so the command works regardless of launch directory.
 
@@ -1983,8 +2147,8 @@ up to `<root>/templates/emails`) so the command works regardless of launch direc
 and the selected template's rendered content is sent there as a **real** send to validate copy
 end-to-end (e.g. previewing the new `pending-master-class-selection` mail to a ring-1 test attendee).
 It is deliberately **exempt from the rollout-ring gate** — a content review must reach the typed
-address regardless of that address's effective ring — while the DEV redirect / PROD `Email:OnlySendTo`
-allowlist still apply underneath (it goes through the same `IEmailSender`). Organizer-gated,
+address regardless of that address's effective ring — while the DEV redirect and the global kill
+switch still apply underneath (it goes through the same `IEmailSender`). Organizer-gated,
 edition-scoped.
 
 ### Organizer email center — broadcast (audience filters + reusable templates)
@@ -2026,8 +2190,8 @@ self, and the delivery ledger. Both are organizer-gated and event-scoped.
   subject only mails recipients not yet in the ledger, and per-recipient failures are counted without
   aborting the batch.
 - **Test-send path intact.** The DEV redirect of all mail to a single test inbox
-  (`Email:RedirectAllTo`) and the PROD `Email:OnlySendTo` allowlist apply unchanged — the broadcast
-  goes through the same `IEmailSender`.
+  (`Email:RedirectAllTo`), the global kill switch and the per-recipient ring gate apply unchanged —
+  the broadcast goes through the same `IEmailSender`.
 - **Mobile-first + a11y.** The audience controls are a `<fieldset>`/`<legend>`; the role checkboxes a
   labelled `role="group"`; the recipient list a captioned `<table>` inside a `<details>`; status
   messages carry `role="status"`; the preview `<iframe>` is sandboxed + titled. A reusable `.sr-only`
@@ -2039,14 +2203,14 @@ the organizers flagged `[LATE CHANGE]`; edits before the lock date send nothing.
 ### 7a. Email system build-out (REQUIREMENTS §10a)
 
 Built on the existing center: the shared `IEmailSender` + `EmailTemplateProvider` + the resume-safe
-`SentReminder` ledger + the DEV redirect / PROD allowlist are reused, not duplicated.
+`SentReminder` ledger + the DEV redirect / ring gate / kill switch are reused, not duplicated.
 
 - **Central audit log via a decorator.** `LoggingEmailSender` (in `CommunityHub.Core/Email/`)
   **decorates** `BrevoEmailSender` and is registered as the `IEmailSender` everything resolves, so no
   call site can bypass it. It writes one **`EmailLog`** row per send (category, the original To, the
   post-redirect *actual* To, CC, participant, name, subject, success/error) then delegates. It reuses
   the sender's own `BrevoEmailSender.ResolveDelivery` so the logged outcome matches the real
-  redirect/allowlist gate. A send failure is logged **then re-thrown** (preserving the throw-on-failure
+  redirect/kill-switch gate. A send failure is logged **then re-thrown** (preserving the throw-on-failure
   contract); a log-write failure is swallowed (an audit miss must never drop mail). The decorator is a
   singleton and opens a fresh scoped `CommunityHubDbContext` per write via `IServiceScopeFactory`. Rich
   fields come from an ambient **`EmailContext`** (`IEmailContextAccessor`, `AsyncLocal`-backed) a caller
@@ -2084,8 +2248,8 @@ Built on the existing center: the shared `IEmailSender` + `EmailTemplateProvider
   per speaker (open-question count, distinct-session count, and a **fingerprint** = the highest
   open-question id). The send routes through `ParticipantEmailService.SendTemplateToParticipantAsync`
   (`speaker-question-digest.html`) so it reuses the established effective-To + secondary-CC routing AND
-  the allowlist-gated `LoggingEmailSender` — there is **no new mail path**, and nothing reaches a real
-  speaker until their address passes the allowlist. Idempotency keys on the `SentReminder` ledger
+  the ring-gated `LoggingEmailSender` — there is **no new mail path**, and nothing reaches a real
+  speaker until their address passes the ring gate. Idempotency keys on the `SentReminder` ledger
   (`speaker-question-digest` / `upto:{fingerprint}` on the **identity** address, mirroring
   `CalendarInviteEmailService`): a run with the same open set is a no-op; a brand-new question raises
   the fingerprint → a fresh occasion → one updated digest; answering/closing a question shrinks the open
@@ -2096,25 +2260,25 @@ Built on the existing center: the shared `IEmailSender` + `EmailTemplateProvider
 - **Test-send to an arbitrary address (REQUIREMENTS §21).** Alongside the existing "send a test copy
   to me" handler, `/Organizer/EmailCenter` has a `TestSendToAddress` handler that test-sends the
   selected (rendered, sample-token) template to **any** address the organizer types. Because the
-  outbound path is allowlist-gated (and DEV-redirected), a naive send could silently go nowhere — so
+  outbound path is kill-switch-gated (and DEV-redirected), a naive send could silently go nowhere — so
   the decision is made up front by the pure `EmailTestSendPlanner` (Core, `CommunityHub.Core/Email/`,
   constructor-injected `IOptions<EmailOptions>`, no DB/clock/I/O). It validates the address (a single
   .NET-parseable bare address — a display form like `Foo <a@b>` is rejected) and then reuses the
   sender's own `BrevoEmailSender.ResolveDelivery` so the preview can never disagree with the send,
   returning an `EmailTestSendPlan` with one of four honest outcomes: `InvalidAddress` (nothing sent),
-  `DroppedByAllowlist` (a **no-op** reported as such — never a green success — naming the dropped
-  target and pointing at `Email__OnlySendTo`), `WouldRedirect` (sent, but the message names the real
+  `DroppedByKillSwitch` (a **no-op** reported as such — never a green success — naming the dropped
+  target), `WouldRedirect` (sent, but the message names the real
   redirect mailbox so the organizer knows where to look), or `WouldDeliver` (lands as typed). The
-  handler only calls `_emailSender.SendAsync` when the plan `WillSend`; the allowlist is applied to the
-  **post-redirect** address exactly as the sender does (a redirect target outside the allowlist is
-  dropped). Organizer-gated + event-scoped like the rest of the center. **No schema change.** New UI
+  handler only calls `_emailSender.SendAsync` when the plan `WillSend`; the kill switch is applied to
+  the **post-redirect** address exactly as the sender does (the per-recipient RING gate is applied by
+  the sender itself at send time). Organizer-gated + event-scoped like the rest of the center. **No schema change.** New UI
   strings (`EmailCenter.TestToAddress*`) are en + da-DK.
 - **Resend-on-failure from the Email Log (REQUIREMENTS §20 Participant).** A FAILED `EmailLog` row that
   captured a participant + a template gets a one-click **Re-send** on `/Organizer/EmailLog`.
   `EmailResendService` (Core, `CommunityHub.Core/Email/`) loads the row edition-scoped, asserts it is a
   failure with a `ParticipantId` AND a `TemplateName` (`IsResendable`), and re-sends through the existing
   `ParticipantEmailService.SendTemplateToParticipantAsync` (category `manual-resend`) — so the retry
-  reuses the effective-To + secondary-CC routing AND the allowlist-gated `LoggingEmailSender`, writing
+  reuses the effective-To + secondary-CC routing AND the ring-gated `LoggingEmailSender`, writing
   its **own fresh log row** (the retry is itself audited). It is **NOT** idempotency-gated (the organizer
   explicitly chose to retry; the `SentReminder` ledger is untouched). The outcome is an honest enum
   (`Sent` / `NotFailed` / `NotResendable` / `ParticipantGone` / `NotFound` / `Failed`) the page maps to
@@ -2140,7 +2304,7 @@ address is "unknown" to the ring resolver, so engine alerts were being dropped a
 recipient" (the reason earlier alerts never arrived).
 
 - **`EmailContext.RingExempt`.** A new flag on the ambient `EmailContext`; when set, the sender's
-  ring gate is bypassed for that send. The allowlist + `RedirectAllTo` + global kill-switch still
+  ring gate is bypassed for that send. `RedirectAllTo` + the global kill-switch still
   apply on top — ring-exempt only skips the *ring* decision, never the safety floor.
 - **Engine-alert sender.** Engine alerts are emitted through the dedicated alert path with
   `RingExempt` set, so an ops failure/drift/new-record/error alert reaches the configured operator
@@ -2198,7 +2362,7 @@ The mechanism is a per-user, token-secured, read-only iCal feed — add it once 
   calendar-invite email when a person is activated — an RFC 5545 `VEVENT` (`METHOD:REQUEST`) for the
   edition itself (all-day, pre-day→end-date, stable UID `event-{eventId}-{email}`), routed to the
   speaker **effective address** (override ?? identity) and sent via the existing
-  `IEmailSender.SendWithIcsAsync` so the **DEV redirect / PROD allowlist apply unchanged**. It is
+  `IEmailSender.SendWithIcsAsync` so the **DEV redirect / ring gate / kill switch apply unchanged**. It is
   **idempotent** via the `SentReminder` ledger (type `calendar-invite`, occasion `activation`, keyed
   on identity), and wired into `ParticipantActivationService.ActivateAndOnboardAsync` so it fires
   alongside the persona onboarding set for each newly-activated id.
@@ -2209,6 +2373,20 @@ The mechanism is a per-user, token-secured, read-only iCal feed — add it once 
   "Add to my calendar" card is hidden (`IndexModel` skips token minting); and the activation invite
   is skipped. Toggled on the organizer-gated page **`/Organizer/CalendarSettings`** (mobile-first,
   a11y; no new table — the flag lives on the edition row).
+- **AUTO-invite switch, decoupled from the manual option (§257, 2026-07-10):** `Event.AutoCalendarInvitesEnabled`
+  (bool, **defaults FALSE**, EF migration `AutoCalendarInvitesFlag`, additive `bit` default `0`) gates the
+  four AUTOMATIC calendar-invite pushes — the Dinner RSVP (`DinnerFormService`), the Hotel booking +
+  organizer placement (`HotelCalendarInviter` from `HotelFormService` / `Organizer/Hotels`), and the
+  Master-Class confirmed seat (`MasterClassEmailService.SendConfirmedAsync`). When **OFF (the default)** none
+  of these attaches a `METHOD:REQUEST` invite; each confirmation e-mail instead carries a manual
+  **"Add to calendar"** Google/Outlook link block (`CalendarLinkBuilder.AddToCalendarHtml`, which opens a
+  pre-filled event and pushes nothing). When an organizer turns it **ON**, those flows attach the `.ics`
+  invite exactly as before. This is DELIBERATELY separate from `CalendarSyncEnabled` (which governs the
+  user-initiated "Email me a calendar invite" actions and the add-to-calendar links): the operator wanted the
+  manual option to stay available while the automatic push is off, so the two switches are independent. Both
+  live on `/Organizer/CalendarSettings`. The `.ics`-attach paths retain full coverage via tests that set the
+  flag on; the default OFF behaviour is covered by `HotelCalendarInviterAutoInviteTests` +
+  `HotelEmailContentTests` + `CalendarLinkBuilderTests`.
 - **Feed preview on the settings page (2026-06-18):** `ParticipantCalendarBuilder.BuildPreviewAsync`
   returns the same dated items `BuildFeedAsync` emits (it reuses the identical `BuildItemsAsync` query),
   flattened to a read-only `CalendarPreviewRow` (Summary / Date / AllDay / Location) ordered by date.
@@ -2428,9 +2606,16 @@ exactly (no link dropped or duplicated).
   self-service blocks, all read-only and own-row scoped:
   - **"My sessions"** — a new Core `SpeakerSessionsService.GetMySessionsAsync(eventId, participantId, role)`
     returns the signed-in speaker's OWN (non-service) sessions in this edition. **Own-row scope is
-    server-enforced**: the query filters to `EventId == eventId` AND `SessionSpeakers.Any(ss =>
-    ss.ParticipantId == participantId)`, so a speaker can never see another speaker's other sessions; a
-    non-speaker role returns an empty list. Each row carries room, start/end, a master-class flag
+    server-enforced** by the SHARED predicate `SpeakerSessionScope.MineAsSpeaker(eventId, participantId)`
+    (`Core/Data`): same edition AND `!IsServiceSession` AND `SessionSpeakers.Any(ss => ss.ParticipantId
+    == participantId)`, so a speaker can never see another speaker's other sessions; a non-speaker role
+    returns an empty list. **REQUIREMENTS §428 — one predicate, deliberately:** the deck-upload gate
+    (`SpeakerPresentationService.UploadAsync`), the upload page's slot list, this list and
+    `/Speaker/Evaluations` all call it. The upload gate previously spelled the check out WITHOUT the
+    service-session clause, which made a service-flagged session **uploadable but invisible** — a deck
+    could be filed against something the page said did not exist. Adding the clause back in one more
+    place would have left the same class of drift available; sharing the predicate removes it. Each row
+    carries room, start/end, a master-class flag
     (`Type == CommunityMasterClass`), the open-question count
     (`Questions.Count(q => q.Status == Open)`), and the co-speaker names (the viewer excluded). The card
     shows time/room (with clear "to be scheduled" / "room to be assigned" placeholders), the master-class
@@ -2760,8 +2945,8 @@ landing surfaces. Two parts:
   `CommsCockpitSnapshot` (REQUIREMENTS §20 Organizer "Comms cockpit"): the single place that schedules /
   sends / tracks all outreach, consolidating the previously-fragmented comms tools. It is a **read-mostly,
   edition-scoped aggregation** over data that already exists, reusing three sources: the **`EmailLog`**
-  audit (every outbound email after the redirect/allowlist gate — its `Success`/`Error` are read straight
-  through, so a row the allowlist dropped is reported `Dropped`, a hard failure `Failed`, never `Sent`),
+  audit (every outbound email after the redirect/ring/kill-switch gate — its `Success`/`Error` are read straight
+  through, so a ring- or kill-switch-dropped row is reported `Dropped`, a hard failure `Failed`, never `Sent`),
   the **`SoMePost`** LinkedIn scheduled-post queue (§19) and the **`SentReminder`** ledger. The snapshot
   carries: a unified **`Timeline`** of `CommsTimelineItem`s over both channels (email + SoMe), ordered
   future-scheduled-first then newest-first, windowed to the last 30 days + capped; per-recipient
@@ -2791,7 +2976,17 @@ landing surfaces. Two parts:
   **volunteer rota** (`VolunteerRotaRow` ← `VolunteerTaskAssignment`, cancelled tasks excluded, carrying
   bucket/subcategory/task + due/shift/time-end), and **badge data** (`BadgeRow` ← active, non-test
   `Participant`: name/role/sponsor-company id — the minimal badge-printer/mail-merge field set, no contact
-  details). The screen page renders each as a captioned table; the page model serves the **same** projection
+  details). **§326bh added two catering artifacts:** the **dinner run-sheet**
+  (`DinnerHeadcountRow` seats = confirmed people + plus-ones, and `DinnerPersonRow` ← `DinnerSignup` joined to
+  its `DietaryRequirement` row for `DietarySurface.Dinner`, merging the structured `OtherAllergens` with the
+  legacy `DinnerSignup.AllergyNotes`), and the **catering dietary roll-up** (`DietaryCountRow`), which is the
+  first and only production consumer of `Domain.DietaryAggregator` — before it, structured allergy/diet
+  capture was a **write-only** table and no allergen count ever reached a caterer. Both filter
+  `Participant.IsActive` like their lunch/swag siblings; the roll-up additionally restricts the Dinner
+  occasion to `Rsvp == Yes`, so its allergen and diet counts always reconcile with the run-sheet's seats
+  (a diet filled in by someone who then declined must not reach the kitchen order). An occasion with no rows
+  is omitted rather than printed as zeros — which is why `SpeakerCatering` does not appear while nothing
+  writes it. The screen page renders each as a captioned table; the page model serves the **same** projection
   as CSV via the shared `Export.CsvWriter` (UTF-8 BOM so Excel reads Danish names) through one GET handler
   per artifact. The view is **print-optimized** — an `@media print` block hides the app chrome + the
   download/print buttons (`.ex-no-print`) and drops colour so a browser **Print → PDF** produces a clean
@@ -2921,18 +3116,18 @@ nothing non-core "just happens" and each integration can be turned on and tested
 - **Email kill switch = first-class.** `EmailOptions.KillSwitch` (config / `Email__KillSwitch`) is
   the process-wide hard stop, enforced in `BrevoEmailSender` — the single chokepoint every send
   path (web + jobs) passes through, including the outcome `LoggingEmailSender` records. When on,
-  `ResolveDelivery` returns `allowed=false` for **every** recipient (even an allowlisted one), so
+  `ResolveDelivery` returns `allowed=false` for **every** recipient (whatever their ring), so
   SMTP is never touched and the audit log records a kill-switch drop. The per-edition
-  `outbound-email` feature gate sits on top for edition-scoped control. The allowlist-only +
-  redirect safety rules (§9, fail-closed on empty allowlist) still hold underneath.
+  `outbound-email` feature gate sits on top for edition-scoped control. The redirect +
+  rings-only audience rules (§9) still hold underneath.
 - **Operator BCC on actually-sent mail (2026-06-20).** `EmailOptions.BccAllTo` (config /
   `Email__BccAllTo`, default empty) adds one operator address as a **BCC on every mail that truly goes
   out** — and only those. In `BrevoEmailSender` the bcc is added at the **dispatch tail** of each send
-  overload (plain / cc / multipart / ics), i.e. AFTER the ring gate AND the allowlist/redirect/kill-switch
-  decision have already let the mail through; a ring-dropped, allowlist-dropped, redirected-away or
+  overload (plain / cc / multipart / ics), i.e. AFTER the ring gate AND the redirect/kill-switch
+  decision have already let the mail through; a ring-dropped, redirected-away or
   kill-switched mail produces no send at all, so the operator never gets a copy of something that did not
-  send. The bcc recipient is the operator (organizer, ring0, allowlisted) and is added directly (not
-  re-ring/allowlist-filtered), but it never bypasses the gating of the **primary** recipient; it is
+  send. The bcc recipient is the operator (organizer, ring0) and is added directly (not
+  re-ring-filtered), but it never bypasses the gating of the **primary** recipient; it is
   de-duplicated against addresses already on the message. Empty in DEV/tests ⇒ behaviour unchanged. All
   send paths now funnel through one `protected virtual DispatchAsync(MailMessage, …)` seam (the single
   point after gating) so a test double can capture the exact on-the-wire message without a relay.
@@ -2940,7 +3135,7 @@ nothing non-core "just happens" and each integration can be turned on and tested
   keep the nav short — `NavBuilder` `FeaturePageToHub`). Renders the catalog grouped into chapters;
   each advanced feature has an Enable/Disable toggle; a disabled feature is shown **dimmed with a
   small "Disabled" label** (never hidden). The email chapter also surfaces the (read-only,
-  infra-managed) allowlist + redirect and a config-kill-switch banner. Mobile-first (~360px), a11y,
+  infra-managed) redirect and a config-kill-switch banner. Mobile-first (~360px), a11y,
   en + da-DK.
 
 #### Release rings (controlled progressive rollout) — §23, 2026-06-19
@@ -2972,9 +3167,10 @@ dev/test/prod stage + `#Test=On` idea.
   a NEW feature never auto-exposes in prod; every EXISTING feature is explicitly pinned to **Broad**
   (guardrail — the live site stays visible) and resource/person default is Broad. RULE 2: every
   **outbound-email** feature (`outbound-email`, `welcome-email`, `magic-link`, `reminder-jobs`,
-  `digest-emails`) is pinned to **Ring1** (mail reaches only ring 0 + 1). RULE 3: the
-  `Email:OnlySendTo` allowlist + `RedirectAllTo` are UNCHANGED — ring-gating sits ON TOP of them; they
-  come off only after a live ring-gating proof.
+  `digest-emails`) is pinned to **Ring1** (mail reaches only ring 0 + 1). RULE 3 (updated per §234,
+  operator 2026-07-07): audience control is **RINGS-ONLY** — no `Email:OnlySendTo` allowlist exists
+  (WON'T-FIX by operator decision); the DEV `RedirectAllTo` + the global kill switch are the only
+  gates alongside the ring model.
 - **RINGS GATE ALL EMAIL AT THE SENDER (2026-06-19).** The ring check is enforced INSIDE
   `BrevoEmailSender` — the single `SendAsync`/`SendWithIcsAsync` chokepoint EVERY send path funnels
   through (Broadcast, `WelcomeWithLoginEmailService`, reminder/digest jobs, PIN, onboarding, re-send).
@@ -2990,14 +3186,14 @@ dev/test/prod stage + `#Test=On` idea.
   (a singleton) opens a fresh DI scope per send for the scoped `RingResolver` + `FeatureGateService`
   (exactly as `LoggingEmailSender` does for its audit write); both `Program.cs` (web + Jobs) wire the
   `IServiceScopeFactory` + `IEmailContextAccessor` ctor.
-- **FAIL-CLOSED, ring gate IN FRONT of the (intact) allowlist.** An **unknown** address (no
-  participant in the edition) is NOT ring-gated — it is not a participant, so it falls through to the
-  existing fail-closed `Email:OnlySendTo` allowlist floor (`@expertslive.dk` + configured `OnlySendTo`),
-  which drops strangers and still covers organizer/non-participant addresses. A **resolve error**
+- **FAIL-CLOSED, rings-only (§234, operator 2026-07-07).** An **unknown** address (no
+  participant/sponsor contact in the edition) is **dropped by the ring gate** — there is NO
+  `Email:OnlySendTo` allowlist (never implemented; WON'T-FIX by operator decision). Ops/engine mail
+  to non-participant addresses (the operator, info@) rides the explicitly ring-exempt path
+  (`EmailContext.RingExempt` / `EngineAlertSender`) instead. A **resolve error**
   (or a missing/zero active edition→exception) FAILS CLOSED: the send is dropped (never leaks to an
-  unverified recipient) and the exception is swallowed so the send loop never crashes. The allowlist +
-  `RedirectAllTo` + kill switch are left fully intact (ring gate sits in front); the allowlist is
-  slated for removal only **after** a live ring-gating proof.
+  unverified recipient) and the exception is swallowed so the send loop never crashes.
+  `RedirectAllTo` (DEV) + the kill switch are left fully intact (the ring gate sits in front of them).
 - **Schedulers gate per resource.** A per-resource send loop resolves the resource's effective ring
   and consults the gate, skipping out-of-ring recipients (e.g. `SpeakerQuestionDigestService` takes
   optional `FeatureGateService` + `RingResolver`; when wired in production DI a speaker only receives
@@ -3041,30 +3237,40 @@ ring its features inherit; a feature may override with its own special ring:
 ```
    GROUP                         group ring     feature                         effective ring
    ────────────────────────────  ──────────     ────────────────────────────    ──────────────
-   Incubation (test)             Ring0          new-shiny-thing                  Ring0   (inherits)
-   Email                         Ring1          outbound-email                   Ring1   (inherits)
+   Email                         (unset)        outbound-email     [Ring1]       Ring1   (catalog)
                                                 welcome-email   [override Ring2]  Ring2   (override)
-   Sponsors                      Broad          sponsor-leads                    Broad   (inherits)
-   Reminders                     Ring1          digest-emails                    Ring1   (inherits)
+   Sponsors                      (unset)        sponsor-leads      [Broad]       Broad   (catalog)
+   Reminders                     (unset)        digest-emails   [override Ring2]  Ring2   (override)
+   Event settings                (unset)        group-photo-invites [Ring1]      Ring1   (catalog)
 
-   effective ring(feature) = perFeatureRingOverride ?? groupRing(effectiveGroup)
-   effective group(feature) = perEventGroupOverride ?? catalogHomeGroup
+   effective ring(feature)  = perFeatureRingOverride ?? groupRing(effectiveGroup) ?? catalogDefault
+   effective group(feature) = perEventGroupOverride  ?? catalogHomeGroup
 ```
+
+🔒 **The middle term is currently INERT, and that is a load-bearing fact (§700, verified
+2026-07-29 against BOTH editions).** `FeatureGroupSettings` holds **zero rows** in dev and prod, and
+`GroupDefaultRing` returns `Ring1` for **every** group with no variation. So in practice every
+feature resolves by its own override or by its catalog default, and **re-homing a feature between
+groups cannot change who receives its mail**. That is what made the §700 Batch A re-homing safe; it
+is a property to re-verify, not to assume, because one organizer setting a group ring arms it again.
 
 **Lifecycle = promote one number, or re-home one feature.**
 
 ```
-   create ──▶ born in "Incubation (test)" @ Ring0  (inner / organizers only)
+   create ──▶ declared DIRECTLY in its role group (or "Event settings") @ its own ring
                          │  test with Ring0/Ring1 participants
                          ▼
-   GRADUATE: re-home the feature into its target group  ──▶  it ADOPTS that group's ring
-                         │   (e.g. move new-shiny-thing → Sponsors ⇒ now Broad)
-                         ▼
-   PROMOTE the whole group through the cycle:  Ring0 ─▶ Ring1 ─▶ Ring2 ─▶ Broad
+   PROMOTE the feature (or its group) through the cycle:  Ring0 ─▶ Ring1 ─▶ Ring2 ─▶ Broad
                          │
                          ▼
    Broad = GA  ⇒  the YELLOW "not-yet-Broad" badge disappears (quiet/normal state)
 ```
+
+> **§700 — the "born in Incubation, graduate later" model is RETIRED.** `FeatureGroup.Incubation`
+> was a birthplace whose exit nobody ever took, so it became a parking space: 14 shipped, daily-use
+> features sat under a heading reading *"Incubation (test)"* and so read as provisional. Re-homing
+> as a GRADUATION MECHANISM is gone; re-homing as an organizer action still exists (the "Move to
+> group" control), and it still carries the §694.4 hazard above.
 
 **The gate (engine seam, unchanged caller API).** `FeatureGateService.GetReleasedRingAsync(key,
 eventId)` now resolves `perFeatureOverride ?? groupRing(effGroup) ?? catalogGroupDefault`; every
@@ -3084,8 +3290,33 @@ units `ParticipantTask.SourceKey` / `VolunteerCategory`).
 a ring override (with an "inherit group" option), a group reassignment (graduate), and a **yellow
 "not-yet-Broad" badge** that shows the ring cap whenever the effective ring ≠ Broad and disappears at
 Broad/GA. A **build stamp** (`v<ver> (<sha>) · <Env>`) shows which code is deployed. Organizer-only,
-mobile-first, en. **NEW-FEATURE RULE:** a new feature must either join an existing group (adopt its
-lifecycle ring) or be its own feature with a special ring; born at Ring0 in Incubation, never Broad.
+mobile-first, en. **NEW-FEATURE RULE (§700):** a new feature is declared directly in the group it
+belongs to — its ROLE (`Speakers` · `Sponsors` · `Volunteers` · `Attendees` · `Organizers`) or the
+generic `EventSettings` for anything not tied to a role — and carries its own ring, born at Ring1,
+never Broad.
+
+**Content pages follow the switches — the `[feature:key]` directive (§351-5, 2026-07-26).** The
+operator-authored content-hub markdown could describe capabilities the edition had turned off, because
+the features-per-role tables were a static list with nothing tying them to the flags. A content line
+prefixed `[feature:some-key]` is now resolved against the edition before rendering:
+**ON ⇒ the prefix is stripped and the line stays; OFF ⇒ the line is dropped.** The directive is removed
+from the markdown in *both* branches, so it can never reach Markdig as literal text.
+
+- **A line PREFIX, not an HTML-comment fence** (as `internal-only` uses). The unit that must disappear
+  is a TABLE ROW, and an HTML comment inside a markdown table terminates it — the §348 defect, where
+  every row after the comment rendered as literal `| cell | cell |`. A prefix lives inside the line it
+  governs and cannot break the construct around it.
+- **`ContentMarkdownRenderer.BuildFeatureLookupAsync`** resolves each distinct key ONCE per page (a key
+  repeats across rows) into a synchronous lookup passed to `TryRender`. Callers: `/Info/{slug}` (the
+  viewer's edition, plus a separate lookup for the `-speaker` supplement file) and the anonymous public
+  `/About` (the active edition, resolved per request).
+- **Fail-open, deliberately.** An unknown key, a null gate, or no active event ⇒ the line SHOWS.
+  Falling back to catalog defaults would blank most of the tables (advanced features default OFF) on a
+  page whose job is to describe the product. The safety net for the resulting typo risk is a test:
+  every key used in a shipped content file must exist in `FeatureCatalog`.
+- **Scope rule:** tag only keys that govern a **user-visible surface** (e.g. `sponsor-leads`, which
+  gates three nav items and the organizer page). `TileOnly` and Engine keys gate a tile or a job, not
+  the capability, so tagging a row with one would hide content that is really there.
 
 ### 8b. Allocation pipeline — availability → role-routed queues → silent draft → batched commit (BUILT, §150/§151, 2026-06-27)
 
@@ -3142,7 +3373,8 @@ organizer-only, server-enforced, edition-scoped.
 ## 9. Cross-cutting decisions
 
 - **Email gated everywhere** — DEV `RedirectAllTo` redirects ALL outbound mail to the DEV test
-  address; PROD uses an `OnlySendTo` allowlist. This gating is CEH-only — do not generalize.
+  address; PROD audience control is **rings-only** (per-recipient ring gate + `Email:KillSwitch` in
+  `BrevoEmailSender`; no static allowlist — §234). This gating is CEH-only — do not generalize.
 - **Embedding** — CSP `frame-ancestors` + `SameSite=None; Secure` to run inside the Backstage iframe.
 - **Resilience** — EF retry for Azure SQL serverless cold-start; cheapest tier + auto-pause.
 - **Zero-downtime prod** — S1 plan + staging slot, deploy → warm-up → swap; DEV is B1.
@@ -3251,6 +3483,14 @@ mobile-first (work at ~360px), en/da localized, and degrade gracefully with JS o
      the partial gets `new FlashModel(Model.Message, "success")` (the volunteer wizard flips to
      `"error"` when editing is locked). The bespoke `<p class="info">` confirmations they used before
      are gone.
+   - *Scope (REQUIREMENTS §428):* `TempData` is a **browser-scoped cookie**, not a session-scoped one,
+     so a queued flash outlives an identity change unless something drops it. It is dropped:
+     `ParticipantSessionSignIn.DropPendingFlash(http)` runs on the single shared sign-in path (PIN
+     login, welcome magic-link, `/go`) and on both acting-as transitions. Without it a message written
+     as one participant renders on the next participant's page — the concrete case was
+     *"✅ Uploaded 47 - Test Session_v1.pdf"* sitting above *"No sessions are linked to you yet"*, two
+     true statements that together read as a platform bug. Clearing is wrapped in a `try/catch`: a
+     stale flash is cosmetic, a failed sign-in is not.
 
 2. **Inline form validation** — a *pattern*, not a new type. Pages use the built-in
    `asp-validation-summary="All"` (styled `.ceh-validation-summary`) plus per-field
@@ -3285,6 +3525,17 @@ mobile-first (work at ~360px), en/da localized, and degrade gracefully with JS o
    - *Adoption:* wired to the **Broadcast Send** action (`Organizer/Broadcast`), replacing the bare native
      `confirm()` so an organizer sees the recipient COUNT and a clear summary before a bulk send. With JS
      off the Send button submits directly (the modal markup is inert).
+   - ⚠ **TWO WIRING TRAPS, both found live (§370, 2026-07-26) — `ConfirmModalWiringTests` now pins both.**
+     1. **A trigger whose modal id does not exist is SILENT.** The open path is deliberately
+        progressive-enhancement (`if (!modal) return;` ⇒ let the native action proceed), so a missing or
+        mistyped id does not throw — the destructive action just runs on the first click with no dialog.
+        Rule: the modal must be declared on the same page as its trigger, and the test asserts it.
+     2. **`asp-page-handler` on a `<button>` renders as `formaction`, not `name`/`value`.** The replay
+        must therefore pass the **submitter** (`form.requestSubmit(trigger)`); a bare `requestSubmit()`
+        drops it and posts to the form's DEFAULT handler. This had broken Broadcast → Send,
+        TestDataCleanup → Cleanup (no default `OnPost` ⇒ 400) and PreselectionQueue → row Delete (which
+        also lost its `participantId` route value). Triggers that declare the handler on the `<form>`
+        were never affected. Passing the submitter does **not** re-fire its click, so it cannot loop.
 
 **The Travel `OtherAmountEur` fix.** Previously `OnPostAsync` composed the claim via `ComposeAmount`,
 where `ChoiceOther` with a null/zero `OtherAmountEur` returned `null` — so selecting *Other* and leaving
@@ -3302,7 +3553,7 @@ when nothing actually happened. The shaping is a **pure, side-effect-free** help
 
    - `ForSend(anySent, recipientCount, at, reason, failed, formats)` → a `Succeeded` summary carrying the
      **timestamp + recipient count** ("Sent at &lt;time&gt; — N recipient(s).") only when something
-     really went out; a send that reached **nobody** (allowlist-dropped / zero eligible / all
+     really went out; a send that reached **nobody** (ring-dropped / zero eligible / all
      already-sent) is a `NoOp` carrying the reason, and a run where **every attempt failed** is `Failed` —
      never a green success. A partial run (some sent, some failed) is a success that **names the failures**.
    - `ForProvision(provisioned, at, url, reason, formats)` → a `Succeeded` summary carrying the
@@ -3424,7 +3675,7 @@ progressive enhancement**, in the same `data-ceh-*` opt-in spirit as the §9b mi
 
 ## 10. Build & local dev
 
-**Prerequisites:** .NET 8 SDK; EF Core tools (`dotnet tool install --global dotnet-ef`); Azure CLI
+**Prerequisites:** .NET 10 SDK (`global.json` pins 10.0.x); EF Core tools (`dotnet tool install --global dotnet-ef`); Azure CLI
 + Bicep (`az bicep install`); a SQL target (Azure SQL or LocalDB); Azure Functions Core Tools.
 
 **Build:**
@@ -3702,7 +3953,8 @@ drifting back.
 prod environments hold the **same data** so dev is a faithful rehearsal of prod. The single
 deliberate divergence is outbound email: in dev/local **all** outbound mail is redirected to the DEV
 test address (`Email:RedirectAllTo`, subject-prefixed `[TEST -> original]`), while prod sends to the
-real recipients (constrained by the `Email:OnlySendTo` allowlist until go-live). Everything else —
+real recipients (constrained by the per-recipient **ring gate** until go-live — every email feature
+sits at Ring 1, so only ring-0/1 test accounts receive mail). Everything else —
 schema, config, imported speakers/sponsors/attendees — is intended to match. (Seed test rows are the
 exception during early dev; prod is seeded from the real import paths, not the hand-seeded test
 emails.)
@@ -3738,7 +3990,7 @@ present **and** removable — go-live cleanup is `… WHERE [IsTestUser] = 1`.
 
 The tool is **data-only** — it never touches the email flow, which is the one intended dev/prod
 difference and is environment **configuration** (dev/local redirects all mail to one inbox; prod
-uses the send allowlist), not data. It hard-codes **no** prod secret or identifier: target
+is ring-gated at the sender), not data. It hard-codes **no** prod secret or identifier: target
 server/database/user are parameters, and the SQL password comes from `-KeyVault <name>` (the env's
 `sql-admin-password` secret), the `CEH_SQL_ADMIN_PASSWORD` env var, or `-SqlPassword`. `-WhatIf`
 previews without connecting; `-ApplyMigrations` runs `dotnet ef database update` against the target
@@ -3939,3 +4191,171 @@ VisualCron job — that is an operator cutover step (REQUIREMENTS §7b). The wat
 The surviving (active) scripts now live under **`tools/legacy-automation/`** — see that folder's `README.md`
 for the full active-vs-retired inventory. The dead/superseded scripts (`__`-prefixed monoliths,
 `__Sync-Economic-Webshop - Copy.ps1`, `__get info.ps1`, `Test_Webhook.ps1`) were **not** imported.
+
+---
+
+## 19. Attendee onboarding, party, seat allocation & test policy (§206–§223)
+
+This section consolidates the attendee-experience, master-class concurrency, and test-policy
+decisions made for the ~1500-attendee live event window.
+
+### 19.1 Attendee onboarding flow
+Ticket-holders are onboarded from their **welcome email** straight into a role-shaped **Get-Started**
+wizard (the shared `_WizardStepper` / My-Tasks layout, same as every other role), carried through the
+1-year magic-login link so they land **signed-in** on Get-Started rather than the generic hub home.
+
+- **2-day / master-class attendee:** the first email leads with a **welcome intro + party info block**
+  (time / date / venue) and a primary CTA to the Get-Started wizard, keeping the master-class chooser as
+  a secondary deep-link. Their wizard covers **two tasks — Master Class selection + Party Signup** —
+  both editable after the first answer.
+- **1-day attendee:** a dedicated welcome (new 1-day holders going forward) with **one task — Party
+  Signup** — and a Get-Started wizard covering it. (1-day vs 2-day is derived from `Attendee.TicketStatus`;
+  1-day = non-`TwoDay`.)
+- **Reminders:** an **every-2-weeks** reminder runs from the welcome (not date-gated) until the
+  outstanding signup(s) are **responded** — master class selected AND party answered for the 2-day
+  attendee, party answered for the 1-day attendee — and **stops** once complete. The same 2-week party
+  cadence applies to all crew roles.
+
+### 19.2 Party Signup
+The party RSVP is an **active Yes/No** decision — the attendee/crew must explicitly choose; there is **no
+default and no auto-activation**, and an unanswered form leaves the task open. The form states the party
+**time, date and location**, and on **Yes** offers a **calendar-invite** button (the shared invite
+mechanism, honoring the override email). Party Signup is **authenticated-only** (no anonymous name/email
+path), surfaced under **Event logistics** as "Party Signup", and is a completable **Get-Started step for
+all six crew roles** (organizer, speaker, volunteer, media, event partner — attendee via §19.1).
+
+### 19.3 Ticket lifecycle — reassignment, cancellation & login lockout
+Driven by `AttendeeTicketSyncService` (both the full and incremental reconcile paths), reusing the same
+mirror row so identities never duplicate:
+
+- **2-day reassignment:** the confirmed master-class **seat transfers to the new assignee** and is held
+  automatically; the new holder is flagged to **validate the inherited class** (it may be full → a change
+  can waitlist). The **previous holder's party RSVP is cancelled** (flipped to not-attending, row kept)
+  and the new holder starts with **no party answer** (must RSVP themselves).
+- **2-day cancellation:** **releases the master-class seat** (freeing it + promoting the waitlist) and
+  **resets the party RSVP**.
+- **1-day cancellation / reassignment:** same party reset, no master-class seat involved.
+- **Login lockout (§216):** after each reconcile, `ReconcileParticipantLoginsAsync` reconciles the
+  Attendee-role login's `IsActive` to "the email still holds ≥1 **active** ticket". A cancellation with no
+  remaining active ticket **locks the login out**; a **re-purchase restores** it onto the same row; an
+  email holding a second active ticket stays signed in. Keyed by email, idempotent, no hard delete, and a
+  different-role login sharing the email is never affected.
+
+### 19.4 Master-class seat allocation — optimistic + RCSI-correct (§218 / §219 / §222)
+Seats are allocated **optimistically** (no global serializable lock). `MasterClassSignupService.
+TryClaimSeatAsync` claims a seat with a single **guarded conditional `UPDATE`** on the capacity-bearing
+`Session` row inside a Read-Committed transaction; **1 row affected ⇒ seat granted, 0 rows ⇒ full ⇒
+waitlist**. Seat count stays **derived** — no counter column, no migration, no drift. Signup, promotion
+(claim-then-pick-head so concurrent promotes never double-fill), and the §139 switch all claim the same way.
+
+On **SQL Server / Azure SQL** the capacity `COUNT(*)` is read under the table hint **`WITH (UPDLOCK,
+HOLDLOCK)`** (raw SQL — EF can't emit table hints). This is the **§222 fix**: prod Azure SQL runs
+`READ_COMMITTED_SNAPSHOT` (RCSI) ON, under which a plain `COUNT(*)` reads a pre-statement snapshot and
+**missed just-committed seats → oversell**. `UPDLOCK` forces a locking read of the latest **committed**
+rows (RCSI-immune); `HOLDLOCK` makes it a **key-range lock** on `(EventId, SessionId, Status)` held to
+commit, so two claims **for the same class** serialize while different classes lock **disjoint** ranges
+(no global serialization — the operator-rejected approach). The SQLite test path keeps the plain guarded
+`ExecuteUpdate` (no RCSI; single write connection serializes). **No new column, zero drift, public API
+unchanged.** Validated at **400 and 1000 concurrent** on prod Azure SQL with **OVERSELL = 0**
+(see `docs/TEST-RESULTS-masterclass-concurrency.md`).
+
+### 19.5 Email release rings + attendee-welcome Ring-1 cap + pacing/retry (§217 / §219)
+Email release is governed by the **ring model**: each send is gated by the general email/feature ring and,
+for attendee **welcome** emails, an additional **`Email:AttendeeWelcomeMaxReleaseRing`** cap (default
+**Ring 1** = test/internal only, fail-safe to Ring 1 when blank) applied in `BrevoEmailSender.
+ShouldRingDropAsync` on top of the general gate — it only ever **tightens**, never loosens, keyed on the
+`EmailContext.AttendeeWelcome` marker. Attendee **participants stay Broad** for sign-in; only the welcome
+**email** release is held until the operator raises the cap to Ring 2 (then Broad for the full ~1500).
+Bulk sends are **paced** (`IBulkSendPacer`, `Email:BulkSendDelayMs` default 150 ms — a delay *between*
+sends, never before the first, so single interactive sends stay fast) and **retried** with backoff
+(`Email:SendMaxAttempts` / `Email:SendRetryBaseDelayMs`) on transient/throttle 4xx (the SMTP 429 analogue:
+421/450/451), 5xx and socket/IO/timeout; permanent rejections are not retried, and every recipient is
+attempted (one hard failure logs + continues).
+
+### 19.4c Cross-listing a shared mail on the Settings page (§707.27 B, 2026-07-30)
+Two catalog functions answer two different questions, and the page needs both:
+`EmailTemplateCatalog.AudienceFor(key)` gives a mail its ONE filing home; `RecipientRolesFor(key)`
+gives the roles it actually reaches (read from the SENDERS in the §705.9 audit). The page used to
+group by the first alone, so a role's section omitted every shared mail filed elsewhere.
+
+**`ListingAudiencesFor(key)`** now returns the sections a mail appears in: the filing home **first**,
+then one entry per role in `RecipientRolesFor` (`AudienceForRole` maps role → audience). A mail
+reaching ≤1 role returns its home alone, so cross-listing adds no rows for the ~28 single-role mails.
+A ring-exempt mail reaches no role and therefore never cross-lists.
+
+🔒 **Exactly one appearance is PRIMARY — the first.** `SettingsModel.BuildSections` marks it, and only
+that row renders the **all-roles** ring control (`OnPostTemplateRing`) plus the full per-role block. A
+cross-listed row renders a single `OnPostTemplateRoleRing` control for that section's role. Rendering
+the all-roles control twice would put one stored value behind two dropdowns in two sections — the same
+shape as the §515 invisible-shared-level defect this work exists to remove. The home is guaranteed
+present and first by `ListingAudiencesFor`, pinned by `The_filing_home_is_always_the_first_listing`;
+without that guarantee a mail whose home is the cross-role bucket (`task-deadline-reminder`) would
+lose its all-roles control from the page entirely.
+
+**`OnPostSetRoleRingAsync` ("Apply to all in this role") follows the same rule.** For a mail reaching
+>1 role it writes **that role's** ring; otherwise the all-roles ring, as before. Writing the all-roles
+row from a role section would silently move every other role the template reaches — the §515 trap,
+fired by a bulk action rather than a typo. Operator's rule: *"1 mail type to a role = 1 ring gate."*
+
+### 19.5a The master ring is a CEILING, and the page must say so (§514)
+`BrevoEmailSender` resolves a ring-gated send's audience as
+**`MIN(ring(outbound-email), ring(triggering feature))`** — per its own comment, this *"never
+LOOSENS"*. Three separate clamps stack the same way and only ever tighten: the transport ring, the
+per-feature ring (§23a), and the `Email:MaxReleaseRing` environment ceiling that keeps DEV below
+Ring 2.
+
+**The consequence that bit us:** releasing a feature **broader** than the master does nothing at all.
+With the master at Ring 2, a feature set to Ring 3 (Broad) still reaches only Ring 2 — while the
+Settings page happily displayed "Released to Ring 3 (broad)". Two screens, each truthful in
+isolation, together stating something false. The operator found it by example (*Speaker profile
+change alerts* at Ring 3, whose mail "will not arrive").
+
+`FeatureState.IsCappedByTransport` detects this and the page prints the ring that **actually**
+applies. Its condition deliberately mirrors the transport's own (`IsRingScoped`) rather than the
+narrower e-mail grouping, so it can neither warn where no clamp happens nor stay silent where one
+does — a whole-catalog test asserts the two agree. A non-ring-scoped (engine) feature is never
+reported as capped: claiming a cap where rings do not gate would repeat the §326by mistake of
+printing a scoping that does not exist.
+
+**Untagged sends ride the transport ring alone.** A send whose site passes no `FeatureKey` has no
+second clamp (§326bx), so the master's ring is its entire audience control — which is the one real
+consideration when raising the master toward Broad.
+
+### 19.5b The welcome release cap — every persona, not just attendees (§516)
+§217 gave the ATTENDEE welcome its own ceiling (`Email:AttendeeWelcomeMaxReleaseRing`, default
+Ring 1). **Every other persona's welcome — speaker, sponsor, volunteer, media, event partner — had
+no equivalent**: the only thing holding it back was the `welcome-email` feature ring, an ordinary
+picker on the Settings page. One mis-click there widened the lot, with nothing beneath to catch it.
+The operator asked for the gap to be closed while going live with **speakers**.
+
+`Email:WelcomeMaxReleaseRing` (**default Ring 1, set in `EmailOptions` — in CODE**) is applied by
+`BrevoEmailSender` to any send tagged `EmailContext.Welcome`, on top of the feature ring. The
+default lives in code rather than an app setting deliberately: **app settings swap with the
+deployment slot (§462)**, so a cap configured on one slot vanishes on a swap — and a cap that can
+disappear is not a cap. Unparseable or blank values fail safe to Ring 1; the cap only ever tightens.
+
+Tagged by `WelcomeEmailService` and `WelcomeWithLoginEmailService`. The two attendee-welcome sites
+are deliberately **NOT** tagged: they already carry the §217 cap, and double-tagging would let the
+welcome cap override the operator's phased attendee release. The two caps govern disjoint audiences.
+
+**Defence in depth, verified end to end (the §516 audit).** A welcome passes: outbound-email kill
+switch → per-hour ceiling → recipient ring (**fail-closed** on an unknown address) → transport ring
+→ feature ring → `MaxReleaseRing` → the welcome cap → the attendee cap. An organizer RESEND
+(`force: true`) bypasses only the once-ever `SentReminder` ledger — the desired-state gate
+(`IsFeatureActiveForParticipantAsync`, feature ring **and** participant ring) and the transport are
+both still evaluated. Neither welcome service records a gated send: one skips without writing a
+ledger row, the other leaves `WelcomeWithLoginSentAt` null (§234), so both re-send when rings widen.
+
+> ⚠ The template editor's **"Send test to address"** is `RingExempt` by design and will render any
+> template — including a welcome — to a typed address. It is the one route that bypasses the rings.
+
+### 19.6 Prod-only test policy (§223)
+**Load/concurrency tests run only against dev/prod Azure SQL.** The load-sim harness
+(`tools/CommunityHub.MasterClassLoadSim`) connects to an **existing** dev/prod Azure SQL database with an
+AAD token, runs in an **isolated synthetic test event** (never the live event), and does a **FK-safe
+cleanup that verifies 0 rows remain**. The former local **SQL Express** throwaway-DB path was **removed**:
+SQL Express has **RCSI OFF**, which **masked the §222 oversell bug** — only the real Azure SQL engine
+exercises the seat guard faithfully. If no dev/prod target is configured the harness prints a clear
+message and exits cleanly (it never falls back to a local or SQLite engine). The harness is a standalone
+console tool, **not** part of `dotnet test`. Full prod stress results (SQL 400/1000-concurrent, 500-email
+Brevo, 400 concurrent web logins) are in `docs/TEST-RESULTS-masterclass-concurrency.md`.

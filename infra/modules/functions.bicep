@@ -44,6 +44,12 @@ param sqlConnectionStringTemplate string
 @description('Application Insights connection string.')
 param appInsightsConnectionString string
 
+@description('TEST MODE master switch for the JOBS host -- when true, integrations perform NO real outbound writes (Zoho Backstage exhibitor sync and e-conomic ERP are swapped for stubs, coordinator notifications routed to TestCoordinatorEmail). §340-D: this module previously did NOT emit the setting at all, while the TestMode swaps live in THIS host (Jobs/Program.cs) -- so the Functions app bound the .NET default and silently stubbed those integrations in production. Now emitted explicitly, exactly like appservice.bicep does for the web app. dev true / prod false, set in main.bicep from environmentName.')
+param testModeEnabled bool
+
+@description('§340-H MASTER SWITCH for outbound writes to third-party systems (Zoho Backstage, e-conomic, LinkedIn, SharePoint). Surfaced as Integrations__AllowExternalWrites. prod true / dev false, set in main.bicep from environmentName. The .NET default is FALSE so an unconfigured host never reaches a third party; an organizer can override per edition on the Settings page.')
+param allowExternalWrites bool
+
 @description('Max scale-out instance count. FlexConsumption default ceiling is 100; lower for cost-bounded envs.')
 param maximumInstanceCount int = 40
 
@@ -158,6 +164,21 @@ resource functionsApp 'Microsoft.Web/sites@2023-12-01' = {
         {
           name: 'Sql__ConnectionStringTemplate'
           value: sqlConnectionStringTemplate
+        }
+        // §340-D: the TestMode swaps (IBackstageExhibitorApi, IEconomicErpClient)
+        // are registered in THIS host, so the setting must be emitted HERE -- it
+        // was previously only on the web app, which does not use it. dev true /
+        // prod false; never assumed, always passed from main.bicep.
+        {
+          name: 'TestMode__Enabled'
+          value: string(testModeEnabled)
+        }
+        // §340-H: the environment half of the external-write switch. dev false /
+        // prod true. Without this the .NET default (false) applies and the host
+        // writes nothing -- safe, but it must be STATED, not inferred.
+        {
+          name: 'Integrations__AllowExternalWrites'
+          value: string(allowExternalWrites)
         }
         // NOTE: no Sql__AdminPassword / Sql__AdminUser is emitted. The Functions
         // app authenticates to Azure SQL passwordlessly via its system-assigned

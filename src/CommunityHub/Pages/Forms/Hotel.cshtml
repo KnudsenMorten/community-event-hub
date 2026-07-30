@@ -42,5 +42,6 @@
             <partial name="_LastSaved" model="Model.Form.LastSavedAt" />
         </form>
     }
-    <p><a asp-page="/Index">@Localizer["Common.BackToHub"]</a></p>
+    @* §260: return to Get-Started when the person came from the wizard. *@
+    <partial name="_WizardBackLink" />
 </div>

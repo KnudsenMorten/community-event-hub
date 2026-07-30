@@ -41,6 +41,34 @@ public class ResourceRingsModel : PageModel
     public IReadOnlyList<RingResourceRow> Volunteers { get; private set; }
         = Array.Empty<RingResourceRow>();
 
+    // ---- §706 ATTENDEES -------------------------------------------------------------------------
+    // His 2026-08-11 plan: synced attendees default Broad, he assigns a FEW to Ring 2 when ticket
+    // sales open, tests attendee mail on them, then raises the mails to Broad once proven.
+    //
+    // 🔒 SEARCH-FIRST, not a full list. Attendees head for ~1500 rows, and rendering them all would
+    // make the page unusable exactly when he needs it. Every other section on this page is small
+    // enough to list whole; this one is not, so it behaves differently on purpose.
+
+    /// <summary>§706 — attendees matching <see cref="AttendeeSearch"/> (capped at <see cref="AttendeePageSize"/>).</summary>
+    public IReadOnlyList<RingResourceRow> Attendees { get; private set; }
+        = Array.Empty<RingResourceRow>();
+
+    /// <summary>§706 — how many attendees MATCH in total, so a capped list can admit it.</summary>
+    public int AttendeeMatchCount { get; private set; }
+
+    /// <summary>§706 — total attendees in the edition, shown so an empty search still says how many exist.</summary>
+    public int AttendeeTotalCount { get; private set; }
+
+    /// <summary>§706 — the name/email filter. Survives a ring POST so his place in the list is kept.</summary>
+    [BindProperty(SupportsGet = true)]
+    public string? AttendeeSearch { get; set; }
+
+    /// <summary>Most rows he can usefully scan at once; the count line says when there are more.</summary>
+    public const int AttendeePageSize = 50;
+
+    /// <summary>True when the list is truncated — the view says so rather than looking complete.</summary>
+    public bool AttendeesTruncated => AttendeeMatchCount > Attendees.Count;
+
     public async Task<IActionResult> OnGetAsync(CancellationToken ct)
     {
         var me = _participant.Current;
@@ -93,5 +121,16 @@ public class ResourceRingsModel : PageModel
         SponsorContacts = await _rings.GetParticipantsAsync(eventId, RingResourceKind.SponsorContact, ct);
         Speakers = await _rings.GetParticipantsAsync(eventId, RingResourceKind.Speaker, ct);
         Volunteers = await _rings.GetParticipantsAsync(eventId, RingResourceKind.Volunteer, ct);
+
+        // §706 — attendees are SEARCH-first and capped (see AttendeePageSize). Both counts are read so
+        // the view can distinguish "no attendees yet" from "none match that search", which are very
+        // different answers on 2026-08-11 when he is hunting for a specific test recipient.
+        Attendees = await _rings.GetParticipantsAsync(
+            eventId, RingResourceKind.Attendee, ct, AttendeeSearch, AttendeePageSize);
+        AttendeeMatchCount = await _rings.CountParticipantsAsync(
+            eventId, RingResourceKind.Attendee, AttendeeSearch, ct);
+        AttendeeTotalCount = string.IsNullOrWhiteSpace(AttendeeSearch)
+            ? AttendeeMatchCount
+            : await _rings.CountParticipantsAsync(eventId, RingResourceKind.Attendee, null, ct);
     }
 }

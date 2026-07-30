@@ -16,10 +16,12 @@
     }
     else
     {
-        <p>After a Sessionize import, classify each speaker (who funds them, which
-           days they speak, and whether a community-email row is really the same
-           person as a sponsor/organizer row) and verify the deduped
-           <strong>what to order</strong> counts below.</p>
+        <p>After a Sessionize import, classify each speaker (their category —
+           Community / Sponsor / Guest — and whether a community-email row is
+           really the same person as a sponsor/organizer row) and verify the
+           per-speaker entitlements below. Presenting days
+           derive from their linked sessions. An <strong>uncategorized</strong>
+           speaker counts for nothing and cannot be activated.</p>
 
         @if (!string.IsNullOrEmpty(Model.Error))
         {
@@ -30,22 +32,37 @@
             <p class="info">@Model.Notice</p>
         }
 
-        @* ---------- Section 1: order counts summary ---------- *@
-        <h3>What to order</h3>
-        <p>Deduped count of distinct people entitled to each item in this edition
-           (after same-person dedup and per-item overrides).</p>
-        <div style="display:flex;flex-wrap:wrap;gap:8px;margin:8px 0 16px;">
-            @foreach (var item in SpeakerReviewModel.AllItems)
-            {
-                var n = Model.Counts.TryGetValue(item, out var c) ? c : 0;
-                <div style="border:1px solid #d0d7de;border-radius:6px;padding:8px 12px;min-width:120px;">
-                    <div style="font-size:13px;color:#6b7280;">@item</div>
-                    <div style="font-size:22px;font-weight:600;">@n</div>
-                </div>
-            }
-        </div>
+        @* §299 OPEN-22 completeness check — never order while duplicates are unlinked. *@
+        @if (Model.UnlinkedDuplicateWarnings.Count > 0)
+        {
+            <div style="background:#fef3c7;border:1px solid #f59e0b;border-radius:10px;padding:12px 14px;margin:0 0 16px;">
+                <strong>⚠ Unlinked duplicate people — the counts below double-count them.</strong>
+                <ul style="margin:6px 0 0;padding-left:18px;">
+                    @foreach (var w in Model.UnlinkedDuplicateWarnings)
+                    {
+                        <li style="font-size:13px;">@w</li>
+                    }
+                </ul>
+            </div>
+        }
 
-        @* ---------- Section 2: speaker review list ---------- *@
+        @* §327j (operator 2026-07-25: "we mix 2 major things into one page") — the
+           "What to order" count strip was REMOVED. It duplicated numbers that now have
+           canonical, ACTIVE-gated homes reconciling with their own run-sheets, and two
+           places showing the same count is how they end up disagreeing. This page is now
+           ONE thing: classifying speakers. Classification still DRIVES those counts — the
+           per-speaker entitlements below are what the logistics pages add up. *@
+        <p style="color:#6b7280;font-size:13px;margin:6px 0 16px;">
+            Ordering numbers live with the thing being ordered, where they reconcile against
+            a named run-sheet:
+            <a asp-page="/Organizer/Swag">swag</a> ·
+            <a asp-page="/Organizer/Lunch">lunch</a> ·
+            <a asp-page="/Organizer/Exports">dinner run-sheet</a> ·
+            <a asp-page="/Organizer/HotelAllotments">hotel</a>.
+            What you set on this page decides who is counted there.
+        </p>
+
+        @* ---------- The speaker review list ---------- *@
         <h3>Speakers (@Model.Speakers.Count)</h3>
         @if (Model.Speakers.Count == 0)
         {
@@ -59,12 +76,19 @@
                     <summary>
                         <strong>@s.FullName</strong>
                         <span style="color:#6b7280;font-size:13px;">&mdash; @s.Email &middot; @s.Role</span>
-                        <span style="font-size:13px;">&middot; @s.Funding</span>
-                        @if (s.SpeakingPreDay)
+                        @if (s.Category is null)
+                        {
+                            <span style="background:#fef3c7;color:#92400e;font-size:12px;padding:1px 8px;border-radius:10px;">uncategorized</span>
+                        }
+                        else
+                        {
+                            <span style="font-size:13px;">&middot; @s.Category</span>
+                        }
+                        @if (s.PresentsPreDay)
                         {
                             <span class="info" style="font-size:12px;">pre-day</span>
                         }
-                        @if (s.SpeakingMainDay)
+                        @if (s.PresentsMainDay)
                         {
                             <span class="info" style="font-size:12px;">main-day</span>
                         }
@@ -90,42 +114,47 @@
                         }
                     </div>
 
-                    @* 1) Funding *@
-                    <form method="post" asp-page-handler="Funding" style="margin:8px 0;display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
+                    @* 1) Category (§299 6.1) + Guest nights (§299 6.3) *@
+                    <form method="post" asp-page-handler="Category" style="margin:8px 0;display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
                         <input type="hidden" name="participantId" value="@s.ParticipantId" />
-                        <label for="fund-@s.ParticipantId">Funding</label>
-                        <select id="fund-@s.ParticipantId" name="funding">
-                            @foreach (var f in Enum.GetValues<SpeakerFunding>())
+                        <label for="cat-@s.ParticipantId">Category</label>
+                        <select id="cat-@s.ParticipantId" name="category">
+                            <option value="" selected="@(s.Category is null)">(not set)</option>
+                            @foreach (var c in Enum.GetValues<SpeakerCategory>())
                             {
-                                if (f == s.Funding)
-                                {
-                                    <option value="@f" selected>@f</option>
-                                }
-                                else
-                                {
-                                    <option value="@f">@f</option>
-                                }
+                                <option value="@c" selected="@(c == s.Category)">@c</option>
                             }
                         </select>
-                        <button type="submit">Save funding</button>
+                        <label for="nights-@s.ParticipantId" style="font-size:13px;">Guest hotel nights</label>
+                        <input id="nights-@s.ParticipantId" name="guestFundedNights" type="number"
+                               inputmode="numeric" min="0" max="14" style="width:70px;"
+                               value="@(s.GuestFundedNights?.ToString() ?? "")"
+                               placeholder="—" title="ELDK-funded hotel nights — Guest category only (individual agreement)" />
+                        <button type="submit">Save category</button>
+                        @if (s.Category is null)
+                        {
+                            <span style="color:#92400e;font-size:12px;">Uncategorized — excluded from all counts and cannot be activated.</span>
+                        }
+                        else if (s.Category != SpeakerCategory.Guest)
+                        {
+                            <span style="color:#6b7280;font-size:12px;">Nights apply to Guest only.</span>
+                        }
                     </form>
 
-                    @* 2) Days *@
-                    <form method="post" asp-page-handler="Days" style="margin:8px 0;">
-                        <input type="hidden" name="participantId" value="@s.ParticipantId" />
-                        <input type="hidden" name="preDay" value="false" />
-                        <input type="hidden" name="mainDay" value="false" />
-                        <fieldset style="border:1px solid #e5e7eb;border-radius:6px;padding:8px 12px;">
-                            <legend style="font-size:13px;">Speaking days</legend>
-                            <label style="margin-right:12px;">
-                                <input type="checkbox" name="preDay" value="true" @(s.SpeakingPreDay ? "checked" : "") /> Pre-day
-                            </label>
-                            <label style="margin-right:12px;">
-                                <input type="checkbox" name="mainDay" value="true" @(s.SpeakingMainDay ? "checked" : "") /> Main-day
-                            </label>
-                            <button type="submit">Save days</button>
-                        </fieldset>
-                    </form>
+                    @* 2) Presenting days — DERIVED from linked sessions (§299 C5, read-only) *@
+                    <p style="margin:8px 0;font-size:13px;color:#6b7280;">
+                        Presents:
+                        @if (!s.PresentsPreDay && !s.PresentsMainDay)
+                        {
+                            <span>no linked sessions yet</span>
+                        }
+                        else
+                        {
+                            <span>@(s.PresentsPreDay ? "pre-day " : "")@(s.PresentsPreDay && s.PresentsMainDay ? "+ " : "")@(s.PresentsMainDay ? "main day" : "")</span>
+                        }
+                        (derived from linked sessions)
+                        &middot; legacy funding: @s.LegacyFunding
+                    </p>
 
                     @* 3) Same person as *@
                     <form method="post" asp-page-handler="SamePerson" style="margin:8px 0;display:flex;flex-wrap:wrap;gap:8px;align-items:center;">

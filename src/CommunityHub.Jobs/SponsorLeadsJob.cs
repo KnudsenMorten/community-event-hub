@@ -38,6 +38,7 @@ public sealed class SponsorLeadsJob
     private readonly FeatureGateService _gate;
     private readonly IAuditTrail _audit;
     private readonly ILogger<SponsorLeadsJob> _log;
+    private readonly IEmailContextAccessor? _emailContext;
 
     public SponsorLeadsJob(
         CommunityHubDbContext db,
@@ -48,8 +49,14 @@ public sealed class SponsorLeadsJob
         TimeProvider clock,
         FeatureGateService gate,
         IAuditTrail audit,
-        ILogger<SponsorLeadsJob> log)
+        ILogger<SponsorLeadsJob> log,
+        // §707.7 — OPTIONAL so the three existing test constructions keep compiling; the Functions
+        // host always injects it (registered singleton). Without it this job sent with NO
+        // EmailContext at all, so `sponsor-leads-digest` had a ring on the Settings page that the
+        // gate never saw — the §326bx defect, in a mail that IS registered.
+        IEmailContextAccessor? emailContext = null)
     {
+        _emailContext = emailContext;
         _db = db;
         _sync = sync;
         _zohoOptions = zohoOptions;
@@ -183,7 +190,18 @@ public sealed class SponsorLeadsJob
 
                 try
                 {
-                    await _emailSender.SendAsync(to, rendered.Subject, rendered.HtmlBody, ct);
+                    // §707.7 — the MAIL IDENTITY. This send previously created no EmailContext at
+                    // all, so the gate saw no template and no feature: the digest resolved to the
+                    // outbound-email ceiling while the Settings page displayed a ring for
+                    // `sponsor-leads-digest` that nothing consulted. Its own ring now governs it,
+                    // per role, like every other mail. The recipient's Participant id is passed too,
+                    // so the gate can key on the PERSON rather than only the address.
+                    using (_emailContext?.Set(new EmailContext(
+                        "sponsor-leads-digest", activeEvent.Id, pid, to,
+                        TemplateName: "sponsor-leads-digest", FeatureKey: "sponsor-leads")))
+                    {
+                        await _emailSender.SendAsync(to, rendered.Subject, rendered.HtmlBody, ct);
+                    }
                     ok = true;
                 }
                 catch (Exception ex)

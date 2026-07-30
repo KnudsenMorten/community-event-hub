@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using System.Text;
 using CommunityHub.Auth;
+using CommunityHub.Core.Auth;
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
 using CommunityHub.Core.Email;
@@ -8,6 +9,7 @@ using CommunityHub.Core.Integrations.Graphics;
 using CommunityHub.Core.Reminders;
 using CommunityHub.Pages.Organizer;
 using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc.RazorPages;
 using Microsoft.EntityFrameworkCore;
@@ -18,12 +20,13 @@ using Xunit;
 namespace CommunityHub.Web.Tests;
 
 /// <summary>
-/// §166 page-handler path: the organizer "Final evaluation PDFs" upload on
+/// §192 (reworking §166) page-handler path: the organizer per-session upload on
 /// <see cref="SessionEvaluationsModel"/>. Drives the real POST over a fake organizer session
-/// with a FAKE SharePoint store (no network) and proves: a successful upload sets
-/// <see cref="Session.EvaluationFormUrl"/> to the HUB PROXY url (NEVER a SharePoint URL) and
-/// emails the session's speaker(s); and that an unconfigured store reports a clear note and
-/// changes nothing. FAKE names only.
+/// with a FAKE SharePoint store (no network) and proves: a SCORE and an OPEN-feedback upload
+/// land in the folder under their kind-tagged deterministic names, record PROVENANCE
+/// (who/when), surface per-session in the organizer list, email the session's speaker(s); a
+/// missing kind / unconfigured store / non-PDF is rejected with a clear note and changes
+/// nothing. FAKE names only.
 /// </summary>
 public sealed class SessionEvalPdfUploadPageTests
 {
@@ -48,13 +51,13 @@ public sealed class SessionEvalPdfUploadPageTests
     /// <summary>Captures sends instead of hitting SMTP.</summary>
     private sealed class CapturingSender : IEmailSender
     {
-        public List<(string To, string Subject)> Sent { get; } = new();
+        public List<(string To, string Subject, string Html)> Sent { get; } = new();
         public Task SendAsync(string toEmail, string subject, string htmlBody, CancellationToken ct = default)
-        { Sent.Add((toEmail, subject)); return Task.CompletedTask; }
+        { Sent.Add((toEmail, subject, htmlBody)); return Task.CompletedTask; }
         public Task SendAsync(string toEmail, string subject, string htmlBody, IReadOnlyCollection<string>? cc, CancellationToken ct = default)
-        { Sent.Add((toEmail, subject)); return Task.CompletedTask; }
+        { Sent.Add((toEmail, subject, htmlBody)); return Task.CompletedTask; }
         public Task SendAsync(string toEmail, string subject, string htmlBody, string textBody, CancellationToken ct = default)
-        { Sent.Add((toEmail, subject)); return Task.CompletedTask; }
+        { Sent.Add((toEmail, subject, htmlBody)); return Task.CompletedTask; }
         public Task SendWithIcsAsync(string toEmail, string subject, string htmlBody, string ics, string icsName, CancellationToken ct = default)
             => Task.CompletedTask;
         public Task SendWithAttachmentsAsync(string toEmail, string subject, string htmlBody, IReadOnlyCollection<EmailAttachment> a, CancellationToken ct = default)
@@ -85,7 +88,12 @@ public sealed class SessionEvalPdfUploadPageTests
             SiteUrl = "https://contoso.sharepoint.example.test/sites/eldk",
             SessionEvalPdfFolderPath = folder,
         }), db);
-        return new SessionEvaluationsModel(accessor, eval, pdf, db, sender, NullLogger<SessionEvaluationsModel>.Instance)
+        var magic = new EmailMagicLinkService(
+            db,
+            DataProtectionProvider.Create(
+                new DirectoryInfo(Path.Combine(Path.GetTempPath(), "ceh-dp-evalpdf-tests"))),
+            new FixedClock());
+        return new SessionEvaluationsModel(accessor, eval, pdf, db, sender, magic, NullLogger<SessionEvaluationsModel>.Instance)
         {
             PageContext = new PageContext { HttpContext = http },
         };
@@ -117,7 +125,7 @@ public sealed class SessionEvalPdfUploadPageTests
     }
 
     [Fact]
-    public async Task Upload_sets_the_proxy_url_and_emails_the_speaker()
+    public async Task Score_upload_stores_the_kind_file_records_provenance_and_emails_the_speaker()
     {
         using var db = NewDb();
         var (org, session) = await SeedAsync(db);
@@ -127,21 +135,111 @@ public sealed class SessionEvalPdfUploadPageTests
         var http = new DefaultHttpContext { User = OrganizerSession(org) };
         var model = NewModel(db, http, store, sender);
         model.UploadSessionId = session.Id;
+        model.UploadKind = "score";
         model.Pdf = PdfUpload();
 
         await model.OnPostUploadPdfAsync(default);
 
-        var reloaded = await db.Sessions.FindAsync(session.Id);
-        Assert.Equal($"/session-eval/{session.Id}/download", reloaded!.EvaluationFormUrl); // HUB proxy, not SharePoint
-        Assert.DoesNotContain("sharepoint", reloaded.EvaluationFormUrl!, StringComparison.OrdinalIgnoreCase);
-        Assert.NotNull(reloaded.EvaluationEmailedAt);
+        // The kind-tagged deterministic file landed (§299 OPEN-30 CehId-prefixed name);
+        // nothing leaks a SharePoint URL.
+        Assert.Equal($"{session.Id}-scores.pdf", Assert.Single(store[Folder]).Name);
 
-        // The deterministic file landed in the folder, and the speaker was emailed.
-        Assert.Equal($"session-{session.Id}.pdf", Assert.Single(store[Folder]).Name);
+        // Provenance recorded (who/when) — §192c.
+        var prov = Assert.Single(db.SessionEvaluationFiles.Where(f => f.SessionId == session.Id));
+        Assert.Equal(EvaluationPdfKind.Score, prov.Kind);
+        Assert.Equal("Org Person", prov.UploadedByName);
+        Assert.Equal(org.Id, prov.UploadedByParticipantId);
+
+        // Speaker emailed + the "results emailed" marker stamped.
+        Assert.NotNull((await db.Sessions.FindAsync(session.Id))!.EvaluationEmailedAt);
         var sent = Assert.Single(sender.Sent);
         Assert.Equal("speaker@example.test", sent.To);
         Assert.Contains("evaluation is ready", sent.Subject, StringComparison.OrdinalIgnoreCase);
         Assert.NotNull(model.PdfMessage);
+
+        // The organizer list surfaces the score file (per-session) with its provenance.
+        var row = Assert.Single(model.PdfSessions);
+        Assert.NotNull(row.Score);
+        Assert.Equal("Org Person", row.Score!.UploadedByName);
+        Assert.Null(row.Open);
+    }
+
+    [Fact]
+    public async Task Score_and_open_feedback_upload_independently_into_two_files()
+    {
+        using var db = NewDb();
+        var (org, session) = await SeedAsync(db);
+        var store = new FakePdfStore(canRead: true, canStore: true);
+        var sender = new CapturingSender();
+        var http = new DefaultHttpContext { User = OrganizerSession(org) };
+
+        var m1 = NewModel(db, http, store, sender);
+        m1.UploadSessionId = session.Id; m1.UploadKind = "score"; m1.Pdf = PdfUpload();
+        await m1.OnPostUploadPdfAsync(default);
+
+        var m2 = NewModel(db, http, store, sender);
+        m2.UploadSessionId = session.Id; m2.UploadKind = "feedback"; m2.Pdf = PdfUpload();
+        await m2.OnPostUploadPdfAsync(default);
+
+        var names = store[Folder].Select(f => f.Name).OrderBy(n => n).ToArray();
+        // §299 OPEN-30: {CehId}-scores.pdf (mandatory) + {CehId}-openfeedback.pdf (optional).
+        Assert.Equal(new[] { $"{session.Id}-openfeedback.pdf", $"{session.Id}-scores.pdf" }, names);
+
+        var row = Assert.Single(m2.PdfSessions);
+        Assert.NotNull(row.Score);
+        Assert.NotNull(row.Open);
+    }
+
+    [Fact]
+    public async Task Speaker_email_uses_a_go_magic_link_not_a_bare_speaker_url()
+    {
+        // §190: the "Open My Sessions" CTA must auto-sign-in — it must route through the
+        // speaker's personal /go/{token} magic-link (deep-linking to /Speaker), NOT a
+        // bare {host}/Speaker URL that dumps a signed-out speaker on /Login.
+        using var db = NewDb();
+        var (org, session) = await SeedAsync(db);
+        var store = new FakePdfStore(canRead: true, canStore: true);
+        var sender = new CapturingSender();
+
+        var http = new DefaultHttpContext { User = OrganizerSession(org) };
+        http.Request.Scheme = "https";
+        http.Request.Host = new HostString("hub.example.test");
+        var model = NewModel(db, http, store, sender);
+        model.UploadSessionId = session.Id;
+        model.UploadKind = "score";
+        model.Pdf = PdfUpload();
+
+        await model.OnPostUploadPdfAsync(default);
+
+        var sent = Assert.Single(sender.Sent);
+        // The CTA is the speaker's auto-login magic-link deep-linking to /Speaker…
+        Assert.Contains("href=\"https://hub.example.test/go/", sent.Html);
+        Assert.Contains("r=%2FSpeaker", sent.Html);              // deep-link target = /Speaker
+        // …and never a bare /Speaker hub link that would land on /Login.
+        Assert.DoesNotContain("href=\"https://hub.example.test/Speaker\"", sent.Html);
+        // §191: white button text is forced so dark-mode clients cannot darken it.
+        Assert.Contains("color:#ffffff !important", sent.Html);
+    }
+
+    [Fact]
+    public async Task Upload_without_a_kind_is_rejected()
+    {
+        using var db = NewDb();
+        var (org, session) = await SeedAsync(db);
+        var store = new FakePdfStore(canRead: true, canStore: true);
+        var sender = new CapturingSender();
+
+        var http = new DefaultHttpContext { User = OrganizerSession(org) };
+        var model = NewModel(db, http, store, sender);
+        model.UploadSessionId = session.Id;
+        model.UploadKind = null;
+        model.Pdf = PdfUpload();
+
+        await model.OnPostUploadPdfAsync(default);
+
+        Assert.Empty(store[Folder]);
+        Assert.Empty(db.SessionEvaluationFiles);
+        Assert.NotNull(model.PdfError);
     }
 
     [Fact]
@@ -156,12 +254,12 @@ public sealed class SessionEvalPdfUploadPageTests
         var http = new DefaultHttpContext { User = OrganizerSession(org) };
         var model = NewModel(db, http, store, sender);
         model.UploadSessionId = session.Id;
+        model.UploadKind = "score";
         model.Pdf = PdfUpload();
 
         await model.OnPostUploadPdfAsync(default);
 
-        var reloaded = await db.Sessions.FindAsync(session.Id);
-        Assert.Null(reloaded!.EvaluationFormUrl);     // nothing set
+        Assert.Empty(db.SessionEvaluationFiles);      // nothing recorded
         Assert.Empty(sender.Sent);                    // nothing emailed
         Assert.NotNull(model.PdfError);               // a clear "not configured" note
     }
@@ -177,6 +275,7 @@ public sealed class SessionEvalPdfUploadPageTests
         var http = new DefaultHttpContext { User = OrganizerSession(org) };
         var model = NewModel(db, http, store, sender);
         model.UploadSessionId = session.Id;
+        model.UploadKind = "score";
 
         var bytes = Encoding.ASCII.GetBytes("not a pdf");
         model.Pdf = new FormFile(new MemoryStream(bytes), 0, bytes.Length, "Pdf", "notes.txt")
@@ -187,8 +286,8 @@ public sealed class SessionEvalPdfUploadPageTests
 
         await model.OnPostUploadPdfAsync(default);
 
-        Assert.Null((await db.Sessions.FindAsync(session.Id))!.EvaluationFormUrl);
         Assert.Empty(store[Folder]);
+        Assert.Empty(db.SessionEvaluationFiles);
         Assert.NotNull(model.PdfError);
     }
 
@@ -234,7 +333,7 @@ public sealed class SessionEvalPdfUploadPageTests
         }
 
         public Task<StoredFile> StoreAsync(string relativePath, byte[] content, string contentType, CancellationToken ct = default) =>
-            throw new InvalidOperationException("root store not used by §166");
+            throw new InvalidOperationException("root store not used by §192");
         public Task DeleteAsync(string relativePath, CancellationToken ct = default) => Task.CompletedTask;
     }
 }

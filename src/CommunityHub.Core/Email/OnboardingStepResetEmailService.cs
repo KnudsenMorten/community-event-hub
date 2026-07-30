@@ -50,9 +50,22 @@ public sealed class OnboardingStepResetEmailService
                         && a.ParticipantId != null)
             .ToListAsync(ct);
 
+        // §253 G9: never mail a DEACTIVATED participant. An item whose participant is
+        // currently inactive is left OPEN (not consumed): if the person is reactivated
+        // the reminder still goes out on a later run; if they stay gone, the organizer
+        // resolves/deletes the item. The transport also refuses inactive recipients
+        // (ParticipantEmailService backstop), so this skip keeps the ledger honest.
+        var inactiveIds = (await _db.Participants
+                .Where(p => p.EventId == eventId && !p.IsActive)
+                .Select(p => p.Id)
+                .ToListAsync(ct))
+            .ToHashSet();
+
         var consumed = 0;
         foreach (var item in open)
         {
+            if (inactiveIds.Contains(item.ParticipantId!.Value)) continue;
+
             var stepLabel = ExtractStepLabel(item.Summary);
             await _participantEmail.SendTemplateToParticipantAsync(
                 eventId, item.ParticipantId!.Value, TemplateName,

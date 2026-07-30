@@ -212,7 +212,9 @@ public sealed class SessionTypeMappingTests
         Assert.False(s.TypeIsManualOverride);
 
         // Organizer manually corrects it to a Panel Discussion (sets the override flag).
-        await mgmt.UpdateSessionAsync(eventId, s.Id, SessionType.PanelDiscussion, s.Length, s.Room, null);
+        // §299.8/b7: the length argument is integer MINUTES now (source of truth).
+        await mgmt.UpdateSessionAsync(
+            eventId, s.Id, SessionType.PanelDiscussion, s.LengthMinutes ?? 60, s.Room, null);
         s = await db.Sessions.SingleAsync(x => x.SessionizeId == "s-1");
         Assert.True(s.TypeIsManualOverride);
         Assert.Equal(SessionType.PanelDiscussion, s.Type);

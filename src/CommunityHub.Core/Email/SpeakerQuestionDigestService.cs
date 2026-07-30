@@ -21,9 +21,11 @@ namespace CommunityHub.Core.Email;
 ///  - <b>idempotent</b> via the <see cref="SentReminder"/> ledger. The occasion
 ///    key carries a CONTENT FINGERPRINT (the highest open-question id the speaker
 ///    can currently see). A run with the same open set is a no-op; a brand-new
-///    question raises the fingerprint, which is a fresh occasion, so the next run
+///    question raises the fingerprint, which is a fresh occasion, so a later run
 ///    sends an updated digest exactly once. Answering/closing questions never
-///    raises the fingerprint, so it never re-sends.
+///    raises the fingerprint, so it never re-sends. §246: cadence is WEEKLY per
+///    speaker (<see cref="MinIntervalDays"/>) — new questions inside the quiet
+///    window coalesce into one consolidated digest after it.
 ///
 /// Pure + constructor-injected (db + participant-email seam + clock), so it is
 /// unit-testable on the EF Core InMemory provider with a fixed clock.
@@ -52,6 +54,14 @@ public sealed class SpeakerQuestionDigestService
 
     /// <summary>The feature key whose released-to ring gates this per-speaker send (§23).</summary>
     public const string FeatureKey = "digest-emails";
+
+    /// <summary>§246 (operator 2026-07-07: "we dont want to nag them daily, change to
+    /// weekly") — the minimum days between two digests to the SAME speaker. The daily
+    /// job still runs, but a speaker is mailed at most WEEKLY: a new question inside
+    /// the quiet window raises the fingerprint without sending; the first run after
+    /// the window sends ONE consolidated update (the fingerprint occasion is only
+    /// ledgered when actually sent).</summary>
+    public const int MinIntervalDays = 7;
 
     public SpeakerQuestionDigestService(
         CommunityHubDbContext db,
@@ -163,6 +173,19 @@ public sealed class SpeakerQuestionDigestService
                 return false;
             }
         }
+
+        // §246 WEEKLY cadence: skip any speaker whose LAST digest (any fingerprint)
+        // is younger than the 7-day window. The pending occasion stays un-ledgered,
+        // so the first run AFTER the window sends one consolidated digest covering
+        // everything that arrived meanwhile.
+        var windowStart = _clock.GetUtcNow().AddDays(-MinIntervalDays);
+        var mailedRecently = await _db.SentReminders.AnyAsync(
+            s => s.EventId == eventId
+                 && s.RecipientEmail == p.Email
+                 && s.ReminderType == ReminderType
+                 && s.SentAt > windowStart,
+            ct);
+        if (mailedRecently) return false;
 
         var occasion = OccasionKey(digest.Fingerprint);
 

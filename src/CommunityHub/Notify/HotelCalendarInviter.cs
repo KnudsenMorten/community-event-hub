@@ -39,11 +39,25 @@ public sealed class HotelCalendarInviter
         CancellationToken ct = default,
         string? hotelName = null,
         string? hotelAddress = null,
-        string? hotelConfirmationNumber = null)
+        string? hotelConfirmationNumber = null,
+        bool attachCalendarInvite = false)
     {
         // All-day events: DTSTART = check-in date (midnight UTC), DTEND = day after check-out.
         var startUtc = new DateTimeOffset(checkInDate.Year, checkInDate.Month, checkInDate.Day, 0, 0, 0, TimeSpan.Zero);
         var endUtc   = new DateTimeOffset(checkOutDate.Year, checkOutDate.Month, checkOutDate.Day, 0, 0, 0, TimeSpan.Zero).AddDays(1);
+
+        // §257: when the automatic invite is off (the default), the hotel confirmation
+        // carries a manual "Add to calendar" link instead of an attached METHOD:REQUEST
+        // invite. Build the link block up front so the (unit-tested) Core builder can fold
+        // it into the body.
+        var addToCalendarHtml = attachCalendarInvite
+            ? null
+            : CalendarLinkBuilder.AddToCalendarHtml(
+                title: $"{eventCode} Hotel",
+                startUtc: startUtc,
+                endUtc: endUtc,
+                details: $"Your hotel reservation for {eventCode}.",
+                location: hotelName);
 
         // Build the email + calendar text via the pure Core builder (unit-tested):
         // it folds the organizer-assigned hotel name + address + the per-person
@@ -58,23 +72,44 @@ public sealed class HotelCalendarInviter
             roomType: roomType,
             hotelName: hotelName,
             hotelAddress: hotelAddress,
-            hotelConfirmationNumber: hotelConfirmationNumber);
+            hotelConfirmationNumber: hotelConfirmationNumber,
+            inviteAttached: attachCalendarInvite,
+            addToCalendarHtml: addToCalendarHtml);
 
-        var uid = $"hotel-{eventId}-{participantId}@eventhub.expertslive.dk";
-        var ics = IcsCalendarBuilder.BuildVEvent(
-            uid: uid,
-            summary: content.Subject,
-            description: content.IcsDescription,
-            location: content.Location,
-            startUtc: startUtc,
-            endUtc: endUtc,
-            organizerEmail: _emailOptions.FromAddress,
-            organizerName: _emailOptions.FromDisplayName);
-
-        // Ring-governed by the hotel-invite feature (operator 2026-06-22).
+        // §705.15 — this is the ORGANIZER-TRIGGERED guest mail: he enters a hotel confirmation number
+        // and EVERY guest placed in that hotel is written to. It keeps a ring precisely because the
+        // guest did not ask for it (§705.14c), unlike the "Add to calendar" self-send which is
+        // user-initiated and exempt.
+        //
+        // 🔒 TemplateName is what carries the mail identity, so this mail now has its own row + ring
+        // under a name that says what it is. The old generic "hotel-invite" stood for THREE different
+        // behaviours, which is why it read as "the hotel mail" to everyone.
         using (_context?.Set(new EmailContext(
-            "hotel-invite", eventId, participantId, fullName, FeatureKey: "hotel-invite")))
+            "hotel-invite", eventId, participantId, fullName,
+            TemplateName: "hotel-confirmation-guest", FeatureKey: "hotel-invite")))
         {
+            if (!attachCalendarInvite)
+            {
+                await _emailSender.SendAsync(toEmail, content.Subject, content.HtmlBody, ct);
+                return;
+            }
+
+            var uid = $"hotel-{eventId}-{participantId}@eventhub.expertslive.dk";
+            // §234 6: name the RECIPIENT as ATTENDEE so mail clients process the
+            // METHOD:REQUEST as a real invitation (auto-add / Accept), not a dead attachment.
+            var ics = IcsCalendarBuilder.BuildVEvent(
+                uid: uid,
+                summary: content.Subject,
+                description: content.IcsDescription,
+                location: content.Location,
+                startUtc: startUtc,
+                endUtc: endUtc,
+                organizerEmail: _emailOptions.FromAddress,
+                organizerName: _emailOptions.FromDisplayName,
+                allDay: false,
+                attendeeEmail: toEmail,
+                attendeeName: fullName);
+
             await _emailSender.SendWithIcsAsync(
                 toEmail, content.Subject, content.HtmlBody, ics, "hotel.ics", ct);
         }

@@ -296,10 +296,17 @@ Describe "3. Crew profiles & roles" {
         $p | Should -Match 'IsActive' -Because "people can be activated/deactivated"
     }
 
-    # FEATURE: A friendly one-time welcome page (once per edition).
-    # ACCEPTANCE: a /Welcome page exists.
-    It "A friendly one-time welcome — the /Welcome page exists" {
+    # FEATURE: The /Welcome page stays routable, but the first-sign-in
+    # INTERSTITIAL is retired (§248/§249 fewest clicks): the hub home must land
+    # people directly on the page they asked for — no redirect to /Welcome.
+    # ACCEPTANCE: the /Welcome page exists AND Index no longer redirects to it.
+    It "A friendly welcome — the /Welcome page exists (routable, not an interstitial)" {
         (Test-Path (Join-Path $script:SrcRoot 'Pages/Welcome.cshtml')) | Should -BeTrue
+    }
+    It "§248: the hub home never redirects to /Welcome (interstitial retired)" {
+        $index = Get-SrcText 'src/CommunityHub/Pages/Index.cshtml.cs'
+        $index | Should -Not -BeNullOrEmpty
+        $index | Should -Not -Match 'RedirectToPage\("/Welcome"\)' -Because "magic-link arrivals + hub home land directly on the target page (§248)"
     }
 
     # FEATURE: Activate or deactivate people in a click; deactivated cannot sign in.
@@ -348,14 +355,16 @@ Describe "4. Self-service forms" {
 
     # FEATURE: the in-hub volunteer-shift form is the wizard only — the legacy
     # single-page duplicate (no auto-task wiring) was removed.
-    # ACCEPTANCE: Forms/Volunteer.cshtml is gone; the nav points at the wizard.
+    # ACCEPTANCE: Forms/Volunteer.cshtml is gone; the nav (now built centrally by
+    # NavBuilder, not hand-rolled in _Layout) points at the wizard.
     It "Legacy single-page Forms/Volunteer is removed (wizard is the only in-hub shift form)" {
         (Test-Path (Join-Path $script:SrcRoot 'Pages/Forms/Volunteer.cshtml'))    | Should -BeFalse -Because "the legacy single-page volunteer form was removed"
         (Test-Path (Join-Path $script:SrcRoot 'Pages/Forms/Volunteer.cshtml.cs')) | Should -BeFalse -Because "the legacy single-page volunteer model was removed"
         (Test-Path (Join-Path $script:SrcRoot 'Pages/Forms/VolunteerWizard.cshtml')) | Should -BeTrue -Because "the wizard is the surviving in-hub shift form"
-        $layout = Get-SrcText 'src/CommunityHub/Pages/Shared/_Layout.cshtml'
-        $layout | Should -Match '/Forms/VolunteerWizard' -Because "the nav must link the wizard"
-        $layout | Should -Not -Match 'href="/Forms/Volunteer"' -Because "the nav must not link the removed legacy page"
+        $nav = Get-SrcText 'src/CommunityHub.Core/Navigation/NavBuilder.cs'
+        $nav | Should -Not -BeNullOrEmpty -Because "navigation is built centrally by NavBuilder"
+        $nav | Should -Match '"/Forms/VolunteerWizard"' -Because "the nav must link the wizard"
+        $nav | Should -Not -Match '"/Forms/Volunteer"' -Because "the nav must not link the removed legacy page"
     }
 
     # FEATURE: Travel — submitting a reimbursement claim automatically creates
@@ -415,16 +424,28 @@ Describe "5. Tasks & reminders" {
     }
 
     # FEATURE: Speaker deadlines, scheduled for you — each speaker gets a dated
-    # task for every key milestone.
-    # ACCEPTANCE: a speaker-deadline reminder type / template exists.
-    It "Speaker deadlines scheduled — a speaker-deadline reminder template exists" {
-        (Test-Path (Join-Path $script:TplDir 'speaker-deadline-reminder.html')) | Should -BeTrue
+    # task for every key milestone (SpeakerDeadlineSeeder stamps speakerdl: tasks),
+    # and reminders render through the SHARED task-deadline-reminder template
+    # (the dedicated speaker-deadline-reminder.html was retired with the move to
+    # the unified task-reminder pipeline).
+    # ACCEPTANCE: the shared reminder template exists; TaskReminderBuilder renders
+    # it; the seeder stamps the speakerdl: SourceKey.
+    It "Speaker deadlines scheduled — seeded speakerdl: tasks + the shared deadline-reminder template" {
+        (Test-Path (Join-Path $script:TplDir 'task-deadline-reminder.html')) | Should -BeTrue -Because "task deadline reminders (incl. speaker deadlines) render from the shared template"
+        $builder = Get-SrcText 'src/CommunityHub.Core/Reminders/TaskReminderBuilder.cs'
+        $builder | Should -Not -BeNullOrEmpty
+        $builder | Should -Match 'TemplateName = "task-deadline-reminder"' -Because "the reminder builder renders the shared template"
+        $seeder = Get-SrcText 'src/CommunityHub.Core/Config/SpeakerDeadlineSeeder.cs'
+        $seeder | Should -Not -BeNullOrEmpty
+        $seeder | Should -Match 'speakerdl:\{speaker\.Id\}:\{slug\}' -Because "every speaker milestone becomes a dated speakerdl: task"
     }
 
     # FEATURE: Speaker deadlines carry ABSOLUTE due dates (not an event-relative
-    # offset). REQUIREMENTS §5: the 4 milestone dates are confirmed real values.
-    # ACCEPTANCE: the config + seeder use an absolute dueDate / masterclassOnly
-    # model and the daysBeforeEvent offset is gone.
+    # offset). The milestone SET evolved with the ELDK27 speaker journey: the
+    # logistics forms (Hotel/Dinner/Swag/Lunch), travel reimbursement (non-DK
+    # speakers only) and the preview/final presentation uploads.
+    # ACCEPTANCE: the config + seeder use an absolute dueDate model with the
+    # masterclassOnly / nonDenmarkOnly audience flags; daysBeforeEvent is gone.
     It "Speaker deadlines use absolute dueDate (no daysBeforeEvent offset)" {
         $cfgPath = Join-Path $script:RepoRoot 'config/speaker-deadlines.eldk27.json'
         (Test-Path $cfgPath) | Should -BeTrue
@@ -433,24 +454,24 @@ Describe "5. Tasks & reminders" {
         $cfg = $cfgRaw | ConvertFrom-Json
         $cfg._needsUpdate | Should -BeFalse -Because "the milestone dates are confirmed (REQUIREMENTS §5)"
         $titles = $cfg.deadlines.title
-        $titles | Should -Contain 'Submit title and abstract'
-        $titles | Should -Contain 'Verify Bio + Photo in hub'
-        $titles | Should -Contain 'Upload draft preview deck'
-        $titles | Should -Contain 'Upload final slide deck'
-        $titles | Should -Not -Contain 'Confirm A/V and room requirements' -Because "that deadline was deleted"
+        foreach ($t in 'Hotel','Appreciation Dinner','Swag / Speaker gift','Pre-day Lunch',
+                       'Submit travel reimbursement','Upload preview presentation','Upload final presentation') {
+            $titles | Should -Contain $t -Because "'$t' is a delivered speaker milestone"
+        }
         foreach ($dl in $cfg.deadlines) {
             $dl.dueDate | Should -Match '^\d{4}-\d{2}-\d{2}$' -Because "every deadline carries an absolute date"
         }
-        # The title/abstract deadline is masterclass-only.
-        $mc = $cfg.deadlines | Where-Object { $_.title -eq 'Submit title and abstract' }
-        $mc.masterclassOnly | Should -BeTrue
-        $mc.dueDate | Should -Be '2026-06-20'
+        # The travel-reimbursement deadline targets non-Denmark speakers only.
+        $travel = $cfg.deadlines | Where-Object { $_.title -eq 'Submit travel reimbursement' }
+        $travel.nonDenmarkOnly | Should -BeTrue
+        $travel.dueDate | Should -Be '2027-01-10'
 
         $seeder = Get-SrcText 'src/CommunityHub.Core/Config/SpeakerDeadlineSeeder.cs'
         $seeder | Should -Not -BeNullOrEmpty
         $seeder | Should -Not -Match 'DaysBeforeEvent' -Because "the offset property is removed from the seeder"
         $seeder | Should -Match 'DueDate\s*=\s*dl\.DueDate' -Because "tasks are dated from the absolute dueDate"
-        $seeder | Should -Match 'MasterclassOnly' -Because "the masterclass-only audience flag is honoured"
+        $seeder | Should -Match 'MasterclassOnly'  -Because "the masterclass-only audience flag is honoured"
+        $seeder | Should -Match 'NonDenmarkOnly'   -Because "the non-Denmark audience flag is honoured"
     }
 
     # FEATURE: Tuned entirely through settings — reminder cadence/text/recipients
@@ -655,12 +676,21 @@ Describe "8. Sponsor leads" {
 # ===========================================================================
 Describe "9. Attendees & masterclass reconciliation" {
 
-    # FEATURE: Tickets vs masterclass seats reconciled automatically — surfaces
-    # no-booking / no-ticket / duplicate, with branded chaser emails.
-    # ACCEPTANCE: the three attendee chaser templates exist.
-    It "Tickets and masterclass seats reconciled — the three chaser templates exist" {
+    # FEATURE: Tickets vs masterclass seats reconciled automatically. §26c
+    # (operator 2026-06-24) reduced the chasers to ONE: master classes are in-hub
+    # one-seat and the ticket pull is filtered to 2-day buyers, so the only chaser
+    # left is "you hold a 2-day ticket but haven't selected a master class yet".
+    # The old missing-booking / missing-ticket / duplicate-booking chasers were
+    # deliberately removed.
+    # ACCEPTANCE: the pending-selection chaser template exists and is sent by the
+    # attendee sync job; the three retired chaser templates are gone.
+    It "Tickets and masterclass seats reconciled — the pending-selection chaser is the one delivered chaser" {
+        (Test-Path (Join-Path $script:TplDir 'pending-master-class-selection.html')) | Should -BeTrue -Because "the pending-selection chaser is the delivered reconciliation email"
+        $job = Get-SrcText 'src/CommunityHub.Jobs/AttendeeBackstageSyncJob.cs'
+        $job | Should -Not -BeNullOrEmpty
+        $job | Should -Match 'pending-master-class-selection' -Because "the attendee sync job sends the chaser"
         foreach ($t in 'attendee-missing-booking.html','attendee-missing-ticket.html','attendee-duplicate-booking.html') {
-            (Test-Path (Join-Path $script:TplDir $t)) | Should -BeTrue -Because "the '$t' chaser is a delivered reconciliation email"
+            (Test-Path (Join-Path $script:TplDir $t)) | Should -BeFalse -Because "the '$t' chaser was retired by §26c (in-hub one-seat selection)"
         }
     }
 
@@ -703,24 +733,43 @@ Describe "10. Email & notifications" {
         (Get-SrcText 'src/CommunityHub.Core/Email/EmailTemplateProvider.cs') | Should -Not -BeNullOrEmpty
     }
 
-    # FEATURE: A library of ready templates (welcome/reminders/chasers/app-game/
-    # broadcast) — all branded.
-    # ACCEPTANCE: every delivered template file exists AND starts with "Subject:".
+    # FEATURE: A library of ready templates (welcome per role/reminders/chaser/
+    # masterclass lifecycle/app-game/broadcast) — all branded. The library
+    # evolved: per-role welcomes + masterclass lifecycle + onboarding arrived;
+    # the retired chasers (speaker-deadline-reminder, speaker-pending-tasks,
+    # incomplete-form-chaser, sponsor-overdue, attendee-*) are gone.
+    # ACCEPTANCE: every delivered template file exists AND starts with "Subject:",
+    # and EVERY on-disk template (incl. the private config/email-templates
+    # overlay) honours the Subject-first-line contract.
     It "A library of ready templates — all present and each opens with a Subject line" {
         $expected = @(
-            '_layout.html','welcome.html','speaker-deadline-reminder.html',
-            'speaker-pending-tasks.html','task-deadline-reminder.html',
-            'incomplete-form-chaser.html','sponsor-overdue.html',
-            'sponsor-leads-digest.html','broadcast.html',
-            'attendee-duplicate-booking.html','attendee-missing-booking.html',
-            'attendee-missing-ticket.html','app-game-gift-reminder.html',
-            'group-photo-invite.html',
-            'invitation.html','task-manual-reminder.html','travel-reimbursement-paid.html'
+            '_layout.html','welcome.html','welcome-speaker.html','welcome-volunteer.html',
+            'welcome-sponsor.html','welcome-media.html','welcome-eventpartner.html',
+            'welcome-attendee-1day.html',
+            'task-deadline-reminder.html','task-manual-reminder.html',
+            'pending-master-class-selection.html',
+            'masterclass-selection-invite.html','masterclass-confirmed.html',
+            'masterclass-waitlisted.html','masterclass-cancelled.html',
+            'masterclass-offer.html','masterclass-promoted.html',
+            'masterclass-reassignment.html','masterclass-month-reminder.html',
+            'onboarding-getting-started.html','onboarding-step-reset.html',
+            'pin-signin.html','session-evaluation-results.html',
+            'session-time-location-changed.html','speaker-graphics-ready.html',
+            'speaker-question-digest.html','sponsor-leads-digest.html',
+            'broadcast.html','app-game-gift-reminder.html','group-photo-invite.html',
+            'invitation.html','travel-reimbursement-paid.html','volunteer-help-raised.html'
         )
         foreach ($t in $expected) {
             $path = Join-Path $script:TplDir $t
             (Test-Path $path) | Should -BeTrue -Because "template '$t' is in the delivered library"
-            (Get-Content -LiteralPath $path -TotalCount 1) | Should -Match '^Subject:' -Because "'$t' must declare its Subject on line 1"
+        }
+        # The Subject-first-line contract holds for the whole shipped library and
+        # the private per-edition overlay (config/email-templates).
+        $all = @(Get-ChildItem -Path $script:TplDir -Filter '*.html' -ErrorAction SilentlyContinue)
+        $overlay = Join-Path $script:RepoRoot 'config/email-templates'
+        if (Test-Path $overlay) { $all += Get-ChildItem -Path $overlay -Filter '*.html' -ErrorAction SilentlyContinue }
+        foreach ($f in $all) {
+            (Get-Content -LiteralPath $f.FullName -TotalCount 1) | Should -Match '^Subject:' -Because "'$($f.Name)' must declare its Subject on line 1"
         }
     }
 
@@ -832,16 +881,20 @@ Describe "12. Hosting & reliability" {
     }
 
     # FEATURE: Scheduled jobs that just work — reminders, order pulls, attendee
-    # reconciliation, portal sync, sponsor-lead delivery, upload-change watching,
+    # reconciliation (folded into the Backstage attendee sync), portal sync,
+    # sponsor-lead delivery, upload-change watching, and the Zoho webhook drain,
     # each individually switchable.
-    # ACCEPTANCE: a timer-triggered job class exists per pipeline.
+    # ACCEPTANCE: a timer-triggered job class exists per pipeline; the old
+    # standalone AttendeeReconcileJob stays retired.
     It "Scheduled jobs — timer-triggered job classes exist for each pipeline" {
-        $jobs = @('ReminderJob','WooCommercePullJob','AttendeeReconcileJob','BackstageSyncJob','SponsorLeadsJob','SponsorUploadWatchJob')
+        $jobs = @('ReminderJob','WooCommercePullJob','AttendeeBackstageSyncJob','BackstageSyncJob','SponsorLeadsJob','SponsorUploadWatchJob','ZohoWebhookDrainJob')
         foreach ($j in $jobs) {
-            (Test-Path (Join-Path $script:RepoRoot "src/CommunityHub.Jobs/$j.cs")) | Should -BeTrue -Because "scheduled pipeline '$j' is delivered"
+            $path = Join-Path $script:RepoRoot "src/CommunityHub.Jobs/$j.cs"
+            (Test-Path $path) | Should -BeTrue -Because "scheduled pipeline '$j' is delivered"
+            (Get-Content -LiteralPath $path -Raw) | Should -Match '(?i)TimerTrigger' -Because "'$j' is timer-scheduled"
         }
-        $rem = Get-SrcText 'src/CommunityHub.Jobs/ReminderJob.cs'
-        $rem | Should -Match '(?i)TimerTrigger' -Because "jobs are timer-scheduled"
+        (Test-Path (Join-Path $script:RepoRoot 'src/CommunityHub.Jobs/AttendeeReconcileJob.cs')) |
+            Should -BeFalse -Because "attendee reconciliation was folded into AttendeeBackstageSyncJob"
     }
 
     # FEATURE: SharePoint folder listing follows @odata.nextLink so the upload
@@ -883,20 +936,31 @@ Describe "13. Bug-fix regressions (REQUIREMENTS §13)" {
 
     # DEFECT: magic-link omitted the EventId claim, so CurrentParticipant.
     # FromPrincipal failed and magic-link-only sessions bounced to /Login.
-    # FIX: add the EventId claim to match the PIN flow.
+    # FIX (since centralized): every sign-in path — PIN and magic-link — goes
+    # through the shared ParticipantSessionSignIn helper, which always adds the
+    # EventId claim, so the flows can never drift apart again.
     It "Magic-link adds the EventId claim (so [Authorize] pages don't bounce)" {
         $magic = Get-SrcText 'src/CommunityHub/Pages/Login/Magic.cshtml.cs'
         $magic | Should -Not -BeNullOrEmpty
-        $magic | Should -Match 'new\("EventId",\s*participant\.EventId\.ToString\(\)\)' -Because "the magic-link session must carry EventId like the PIN flow"
+        $magic | Should -Match 'ParticipantSessionSignIn\.SignInAsync' -Because "magic-link must use the shared sign-in helper"
+        $magic | Should -Match 'participant\.EventId' -Because "the participant's EventId is passed into the session"
+        $helper = Get-SrcText 'src/CommunityHub/Auth/ParticipantSessionSignIn.cs'
+        $helper | Should -Not -BeNullOrEmpty
+        $helper | Should -Match 'new\("EventId",\s*eventId\.ToString\(\)\)' -Because "the shared helper must stamp the EventId claim on every session"
     }
 
     # DEFECT: ResolveCompanyDisplayNameAsync fetched the name but the ternary
     # returned "Company {id}" in both branches, so emails always read "Company {id}".
-    # FIX: return the fetched name; fall back to "Company {id}" only when blank.
+    # FIX (since centralized): the fallback chain lives in the single
+    # SponsorCompanyName.Resolve helper (public → legal → billing → "Company {id}")
+    # so the fetched name always wins and the chain can't drift per call site.
     It "Company-name resolution returns the fetched name, not 'Company {id}'" {
-        $tasks = Get-SrcText 'src/CommunityHub/Pages/Sponsor/Tasks.cshtml.cs'
-        $tasks | Should -Not -BeNullOrEmpty
-        $tasks | Should -Match 'IsNullOrWhiteSpace\(resolved\)\s*\?\s*\$"Company \{companyId\}"\s*:\s*resolved' -Because "the fetched company name must win; the id is only the empty fallback"
+        $resolver = Get-SrcText 'src/CommunityHub.Core/Integrations/SponsorCompanyName.cs'
+        $resolver | Should -Not -BeNullOrEmpty -Because "the fallback chain is centralized in SponsorCompanyName"
+        $resolver | Should -Match '!string\.IsNullOrWhiteSpace\(publicName\)\s*\?\s*publicName!\.Trim\(\)' -Because "the fetched public name must win"
+        $resolver | Should -Match '\$"Company \{companyId\}"' -Because "'Company {id}' is only the final all-blank fallback"
+        # The regressed shape (id returned in both ternary branches) must not exist anywhere.
+        $resolver | Should -Not -Match '\?\s*\$"Company \{companyId\}"\s*:\s*\$"Company \{companyId\}"' -Because "the both-branches-id bug was the defect"
     }
 
     # DEFECT: ZohoPipelinePending was hard-coded true, so the "Zoho pipeline not
@@ -989,12 +1053,16 @@ Describe "Dev -> Prod data parity + IsTestUser tagging" {
         }
     }
 
-    # FEATURE: the seed keeps the sponsor + speaker sample tasks so a sponsor /
-    # speaker area can be exercised in any env (data parity for tasks).
-    It "Canonical seed keeps the sponsor + speaker sample tasks (idempotent SourceKeys)" {
+    # FEATURE: the seed keeps the sponsor sample task so the sponsor area can be
+    # exercised in any env (data parity for tasks). The synthetic speaker sample
+    # task was deliberately REMOVED: the real speaker task/deadline set is seeded
+    # at runtime from config/speaker-deadlines.eldk27.json (SpeakerDeadlineSeeder),
+    # and a synthetic one would be pruned as an orphan / confuse parity.
+    It "Canonical seed keeps the sponsor sample task; speaker tasks come from the deadline config" {
         $seed = Get-SrcText 'scripts/seed-eldk27.sql'
         $seed | Should -Match 'woo:seed:2linkit:logo' -Because "the sponsor sample task must exist"
-        $seed | Should -Match 'seed:speaker:abstract' -Because "the speaker sample task must exist"
+        $seed | Should -Not -Match 'seed:speaker:abstract' -Because "the synthetic speaker sample task was removed (config-seeded speakerdl: tasks replace it)"
+        $seed | Should -Match 'speaker-deadlines\.eldk27\.json' -Because "the seed documents where the real speaker task set comes from"
     }
 
     # FEATURE: the parity tool is re-runnable, env-targeted, and hard-codes NO
@@ -1027,11 +1095,12 @@ Describe "Dev -> Prod data parity + IsTestUser tagging" {
 
 # ===========================================================================
 # CHAPTER 14 — Speaker hub (self-service milestone tracker)
-# A first-class /Speaker page that turns scattered speaker-deadline tasks +
-# the static "important dates" card into one cohesive, mobile-first speaker
-# journey: a progress bar, per-milestone countdown cards, and one-tap
-# mark-done / reopen. Reads the existing speakerdl: deadline tasks (orthogonal
-# to whatever deadline model seeds them). These assertions are offline/static.
+# A first-class speaker area: /Speaker is the sessions hub, and the milestone
+# journey (progress bar + one-tap mark-done / reopen) lives on /Speaker/Tasks
+# via the shared _TaskListPanel (the duplicate journey/milestone cards were
+# removed from /Speaker, operator 2026-06-24). Reads the existing speakerdl:
+# deadline tasks (orthogonal to whatever deadline model seeds them). These
+# assertions are offline/static.
 # ===========================================================================
 Describe "14. Speaker hub — self-service milestone tracker" {
 
@@ -1064,38 +1133,54 @@ Describe "14. Speaker hub — self-service milestone tracker" {
         $svc | Should -Match 'PercentComplete' -Because "the hub shows overall progress"
     }
 
-    # FEATURE: a speaker can mark their OWN milestone done / reopen — never
-    # another speaker's, never a non-milestone task.
-    # ACCEPTANCE: ToggleAsync re-asserts the (event, participant, speakerdl:)
-    # scope on the lookup, and the page exposes a Toggle handler.
+    # FEATURE: a speaker can mark their OWN task done / reopen — never another
+    # speaker's. The toggle moved to /Speaker/Tasks (the journey/milestone cards
+    # left /Speaker, operator 2026-06-24) and was deliberately widened beyond
+    # speakerdl: milestones to the §173e Get-Started step tasks — but stays
+    # hard-scoped to (event, participant).
+    # ACCEPTANCE: ToggleAsync re-asserts the (event, participant) scope on the
+    # lookup, and the Speaker Tasks page exposes a Toggle handler that calls it.
     It "Speaker can toggle only their own milestone (scoped flip)" {
         $svc = Get-SrcText 'src/CommunityHub.Core/Reminders/SpeakerMilestoneService.cs'
-        $svc | Should -Match 'public async Task<bool> ToggleAsync' -Because "the hub flips milestone state"
-        $svc | Should -Match 't\.AssignedParticipantId == participantId' -Because "a speaker can only flip their own milestone"
-        $svc | Should -Match 'StartsWith\(SourceKeyPrefix\)' -Because "only deadline milestones are toggleable here, not arbitrary tasks"
-        $page = Get-SrcText 'src/CommunityHub/Pages/Speaker/Index.cshtml.cs'
-        $page | Should -Match 'OnPostToggleAsync' -Because "the view posts to a Toggle handler"
+        $svc | Should -Match 'public async Task<bool> ToggleAsync' -Because "the speaker flips task state through the milestone service"
+        $svc | Should -Match 't\.AssignedParticipantId == participantId' -Because "a speaker can only flip their own task"
+        $svc | Should -Match 't\.EventId == eventId' -Because "the flip is scoped to the edition too"
+        $page = Get-SrcText 'src/CommunityHub/Pages/Speaker/Tasks.cshtml.cs'
+        $page | Should -Not -BeNullOrEmpty
+        $page | Should -Match 'OnPostToggleAsync' -Because "the Speaker Tasks view posts to a Toggle handler"
+        $page | Should -Match '_milestones\.ToggleAsync' -Because "the handler delegates to the scoped service flip"
     }
 
     # FEATURE: the hub is wired into navigation + the front-page speaker card,
-    # so speakers reach it without hunting.
-    # ACCEPTANCE: the nav links /Speaker for speaker roles; the Index card links it.
+    # so speakers reach it without hunting. Navigation is built centrally by
+    # NavBuilder (not hand-rolled in _Layout); /Speaker is the "My sessions"
+    # entry and /Speaker/Tasks is "My tasks".
+    # ACCEPTANCE: NavBuilder links /Speaker + /Speaker/Tasks for speaker roles;
+    # the front-page speaker card links the hub.
     It "Speaker hub is wired into nav and the front-page speaker card" {
-        $layout = Get-SrcText 'src/CommunityHub/Pages/Shared/_Layout.cshtml'
-        $layout | Should -Match 'href="/Speaker"' -Because "speakers need a nav entry to the hub"
+        $nav = Get-SrcText 'src/CommunityHub.Core/Navigation/NavBuilder.cs'
+        $nav | Should -Not -BeNullOrEmpty -Because "navigation is built centrally by NavBuilder"
+        $nav | Should -Match '"/Speaker"' -Because "speakers need a nav entry to the hub"
+        $nav | Should -Match '"/Speaker/Tasks"' -Because "the milestone/task journey is one tap from the nav"
         $index = Get-SrcText 'src/CommunityHub/Pages/Index.cshtml'
-        $index | Should -Match '/Speaker/Index' -Because "the front-page speaker card links the new hub"
+        $index | Should -Match '/Speaker/Index' -Because "the front-page speaker card links the hub"
     }
 
     # FEATURE: mobile-first — the hub renders at ~360px (single-column cards,
-    # full-width action buttons on narrow screens).
-    # ACCEPTANCE: the view ships a responsive @@media rule (per the mobile-first
-    # constraint, REQUIREMENTS §15).
+    # full-width action buttons on narrow screens). The progress bar moved with
+    # the journey to /Speaker/Tasks, which renders the shared _TaskListPanel
+    # (completion % header + accessible progress bar).
+    # ACCEPTANCE: the hub view ships a responsive @@media rule (per the
+    # mobile-first constraint, REQUIREMENTS §15) and the shared task panel used
+    # by /Speaker/Tasks renders an ARIA progressbar.
     It "Speaker hub is mobile-first — ships a responsive media query" {
         $view = Get-SrcText 'src/CommunityHub/Pages/Speaker/Index.cshtml'
         $view | Should -Not -BeNullOrEmpty
         $view | Should -Match '@media' -Because "mobile-first means a responsive breakpoint shipped with the desktop CSS"
-        $view | Should -Match 'progressbar' -Because "the progress bar is the centrepiece of the journey view"
+        $tasksView = Get-SrcText 'src/CommunityHub/Pages/Speaker/Tasks.cshtml'
+        $tasksView | Should -Match '_TaskListPanel' -Because "the journey renders through the shared task panel"
+        $panel = Get-SrcText 'src/CommunityHub/Pages/Shared/_TaskListPanel.cshtml'
+        $panel | Should -Match 'role="progressbar"' -Because "the progress bar is the centrepiece of the journey view (and accessible)"
     }
 
     # FEATURE: the service is registered for DI so the page resolves it.

@@ -26,4 +26,9 @@ public static class RepoPaths
     /// <summary>The shipped email-template directory (welcome.html etc.).</summary>
     public static string EmailTemplates() =>
         Path.Combine(RepoRoot(), "templates", "emails");
+
+    /// <summary>The PRIVATE per-edition email-template directory (config/email-templates) that
+    /// shadows the shipped defaults via <c>EmailTemplateProvider</c> resolution.</summary>
+    public static string PrivateEmailTemplates() =>
+        Path.Combine(RepoRoot(), "config", "email-templates");
 }

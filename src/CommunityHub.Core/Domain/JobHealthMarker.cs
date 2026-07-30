@@ -34,5 +34,24 @@ public class JobHealthMarker
     /// <summary>A short message from the last failure (truncated), for observability.</summary>
     public string? LastError { get; set; }
 
+    /// <summary>
+    /// §545(b) INACTIVE — how many times IN A ROW this job has run cleanly while deliberately
+    /// doing nothing. Reset to 0 the moment it does real work.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="ConsecutiveFailures"/> could never see the §544 incident: the session push was
+    /// switched off by a setting, said so every run for weeks at Information level, and SUCCEEDED
+    /// every time — until 1,500 attendees had no agenda. This counter is what makes "green and
+    /// doing nothing" a countable, alertable state instead of a log line nobody reads.
+    /// </remarks>
+    public int ConsecutiveNoOps { get; set; }
+
+    /// <summary>
+    /// The reason the job gave for doing nothing on its last run ("feature off", "Zoho disabled",
+    /// "no active edition"), or null when it last did work. Written for the operator to read in the
+    /// alert, not for a log grep.
+    /// </summary>
+    public string? LastNoOpReason { get; set; }
+
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
 }

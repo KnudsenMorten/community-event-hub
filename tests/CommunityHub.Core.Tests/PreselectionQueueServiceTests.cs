@@ -102,6 +102,98 @@ public sealed class PreselectionQueueServiceTests
     }
 
     [Fact]
+    public async Task Preselect_skips_speakers_but_activate_moves_them_inactive_to_active_in_one_step()
+    {
+        // §245 (operator 2026-07-07): speaker pre-selection happens in Sessionize, so the
+        // queue lifecycle for SPEAKERS is Inactive → Active in ONE step: a Preselect batch
+        // leaves speaker rows untouched (and does not count them as changed), while
+        // volunteers keep the 3-state flow. §299 6.1: the one-step activation requires the
+        // speaker's Category to be set (the CATEGORIZED case here; the gate is below).
+        using var db = NewDb();
+        var speaker = P(EventId, "spk@example.test");
+        speaker.Role = ParticipantRole.Speaker;
+        var volunteer = P(EventId, "vol@example.test");
+        db.Participants.AddRange(speaker, volunteer);
+        await db.SaveChangesAsync();
+        db.SpeakerProfiles.Add(new SpeakerProfile
+        {
+            EventId = EventId, ParticipantId = speaker.Id,
+            Category = SpeakerCategory.Community,
+        });
+        await db.SaveChangesAsync();
+
+        var svc = new PreselectionQueueService(db);
+
+        // A bulk Preselect over BOTH rows advances only the volunteer.
+        var pre = await svc.PreselectAsync(EventId, new[] { speaker.Id, volunteer.Id });
+        Assert.Equal(2, pre.Matched);
+        Assert.Equal(1, pre.Changed);
+        Assert.Equal(ParticipantLifecycleState.Inactive,
+            (await db.Participants.FindAsync(speaker.Id))!.LifecycleState);
+        Assert.Equal(ParticipantLifecycleState.Preselected,
+            (await db.Participants.FindAsync(volunteer.Id))!.LifecycleState);
+
+        // Activate takes the speaker straight Inactive → Active (one step, login-capable).
+        var act = await svc.ActivateAsync(EventId, new[] { speaker.Id });
+        Assert.Equal(1, act.Changed);
+        var reloaded = (await db.Participants.FindAsync(speaker.Id))!;
+        Assert.Equal(ParticipantLifecycleState.Active, reloaded.LifecycleState);
+        Assert.True(reloaded.IsActive);
+        Assert.Equal(speaker.Id, Assert.Single(act.ActivatedIds));   // onboarding hook fires
+        Assert.Empty(act.RefusedUncategorizedSpeakerIds);
+    }
+
+    [Fact]
+    public async Task Activate_refuses_an_uncategorized_speaker_until_the_category_is_set()
+    {
+        // §299 6.1 HARD GATE: a speaker whose SpeakerProfile.Category is null (or who
+        // has no profile at all) cannot be activated — an uncategorized speaker is
+        // excluded from every count, so activating one would corrupt the tallies. The
+        // refusal is reported (RefusedUncategorizedSpeakerIds), not silently dropped;
+        // non-speaker rows in the same batch still advance.
+        using var db = NewDb();
+        var uncategorized = P(EventId, "uncat@example.test");
+        uncategorized.Role = ParticipantRole.Speaker;
+        var noProfile = P(EventId, "noprof@example.test");
+        noProfile.Role = ParticipantRole.Speaker;
+        var volunteer = P(EventId, "vol@example.test");
+        db.Participants.AddRange(uncategorized, noProfile, volunteer);
+        await db.SaveChangesAsync();
+        db.SpeakerProfiles.Add(new SpeakerProfile
+        {
+            EventId = EventId, ParticipantId = uncategorized.Id, Category = null,
+        });
+        await db.SaveChangesAsync();
+
+        var svc = new PreselectionQueueService(db);
+        var act = await svc.ActivateAsync(
+            EventId, new[] { uncategorized.Id, noProfile.Id, volunteer.Id });
+
+        // Only the volunteer advanced; both speaker rows were refused.
+        Assert.Equal(3, act.Matched);
+        Assert.Equal(1, act.Changed);
+        Assert.Equal(volunteer.Id, Assert.Single(act.ActivatedIds));
+        Assert.Equal(
+            new[] { uncategorized.Id, noProfile.Id }.ToHashSet(),
+            act.RefusedUncategorizedSpeakerIds.ToHashSet());
+        foreach (var id in new[] { uncategorized.Id, noProfile.Id })
+        {
+            var row = (await db.Participants.FindAsync(id))!;
+            Assert.Equal(ParticipantLifecycleState.Inactive, row.LifecycleState);
+            Assert.False(row.IsActive);
+        }
+
+        // Setting the category unblocks the activation (gate applies at activation only).
+        (await db.SpeakerProfiles.FirstAsync(s => s.ParticipantId == uncategorized.Id))
+            .Category = SpeakerCategory.Guest;
+        await db.SaveChangesAsync();
+        var second = await svc.ActivateAsync(EventId, new[] { uncategorized.Id });
+        Assert.Equal(1, second.Changed);
+        Assert.Empty(second.RefusedUncategorizedSpeakerIds);
+        Assert.True((await db.Participants.FindAsync(uncategorized.Id))!.IsActive);
+    }
+
+    [Fact]
     public async Task Activate_single_sets_active_and_flips_IsActive()
     {
         using var db = NewDb();

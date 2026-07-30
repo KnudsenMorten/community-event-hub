@@ -34,7 +34,7 @@ public sealed class SpeakerReadinessServiceTests
 
     private static async Task<int> NewSpeakerAsync(
         CommunityHubDbContext db, int eventId, string name, string email,
-        SpeakerFunding funding = SpeakerFunding.Supported,
+        SpeakerCategory? category = SpeakerCategory.Community,
         DateTimeOffset? bioEdited = null, string? photoUrl = null)
     {
         var p = new Participant
@@ -48,7 +48,7 @@ public sealed class SpeakerReadinessServiceTests
         db.SpeakerProfiles.Add(new SpeakerProfile
         {
             EventId = eventId, ParticipantId = p.Id,
-            SpeakerFunding = funding,
+            Category = category,
             BioLastEditedBySpeakerAt = bioEdited,
             PhotoUrl = photoUrl,
         });
@@ -76,7 +76,7 @@ public sealed class SpeakerReadinessServiceTests
     }
 
     [Fact]
-    public async Task Fresh_supported_speaker_has_the_full_applicable_set_mostly_missing()
+    public async Task Fresh_community_speaker_has_the_full_applicable_set_mostly_missing()
     {
         using var db = NewDb();
         var eventId = await NewEventAsync(db);
@@ -101,13 +101,13 @@ public sealed class SpeakerReadinessServiceTests
     }
 
     [Fact]
-    public async Task Sponsor_self_funded_speaker_is_not_gated_into_hotel()
+    public async Task Sponsor_category_speaker_is_not_gated_into_hotel()
     {
         using var db = NewDb();
         var eventId = await NewEventAsync(db);
-        // SponsorSelfFunded entitles AppreciationDinner + LunchMainDay, NOT Hotel.
+        // §299 6.2: the Sponsor category entitles Dinner + lunches, NOT Hotel.
         var pid = await NewSpeakerAsync(db, eventId, "Spon Sor", "spon@x.test",
-            funding: SpeakerFunding.SponsorSelfFunded);
+            category: SpeakerCategory.Sponsor);
 
         var r = await NewService(db).BuildForSpeakerAsync(eventId, pid);
 

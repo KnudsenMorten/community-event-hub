@@ -50,12 +50,12 @@
                 <p>
                     <label for="Tagline">@Localizer["Onboard.Tagline"]</label><br />
                     <input type="text" id="Tagline" name="Tagline" value="@Model.Tagline"
-                           maxlength="500" style="width:100%;max-width:520px;" />
+                           maxlength="500" style="width:100%;max-width:960px;" />
                 </p>
                 <p>
                     <label for="Biography">@Localizer["Onboard.Biography"]</label><br />
                     <textarea id="Biography" name="Biography" rows="6" maxlength="4000"
-                              style="width:100%;max-width:520px;">@Model.Biography</textarea>
+                              style="width:100%;max-width:960px;">@Model.Biography</textarea>
                 </p>
             }
             else if (step == OnboardingStep.Picture)
@@ -64,7 +64,7 @@
                 <p>
                     <label for="PhotoUrl">@Localizer["Onboard.PictureUrl"]</label><br />
                     <input type="url" id="PhotoUrl" name="PhotoUrl" value="@Model.PhotoUrl"
-                           maxlength="1000" style="width:100%;max-width:520px;"
+                           maxlength="1000" style="width:100%;max-width:960px;"
                            placeholder="https://…" />
                 </p>
                 @if (!string.IsNullOrWhiteSpace(Model.PhotoUrl))
@@ -85,7 +85,7 @@
                 <p>
                     <label for="HotelNotes">@Localizer["Common.NotesOptional"]</label><br />
                     <textarea id="HotelNotes" name="HotelNotes" rows="3" maxlength="1000"
-                              style="width:100%;max-width:520px;">@Model.HotelNotes</textarea>
+                              style="width:100%;max-width:960px;">@Model.HotelNotes</textarea>
                 </p>
             }
             else if (step == OnboardingStep.Appreciation)
@@ -117,14 +117,12 @@
                     <label for="PoloSize">@Localizer["Swag.PoloSize"]</label>
                     <input type="text" id="PoloSize" name="PoloSize" value="@Model.PoloSize" maxlength="60" />
                 </p>
-                <p>
-                    <label>
-                        <input type="checkbox" name="WantsJacket" value="true" @(Model.WantsJacket ? "checked" : "") />
-                        @Localizer["Onboard.WantsJacket"]
-                    </label><br />
-                    <label for="JacketSize">@Localizer["Onboard.JacketSize"]</label>
-                    <input type="text" id="JacketSize" name="JacketSize" value="@Model.JacketSize" maxlength="60" />
-                </p>
+                @* §326bt (operator 2026-07-25: "remove jackets from portal") — the jacket
+                   checkbox + size were removed. This was the LAST participant-facing surface
+                   still offering one: the main swag form (_SwagFields) had already dropped it.
+                   The SwagPreference.WantsJacket / JacketSize COLUMNS and any values already
+                   captured are left untouched — the organizer vendor sheet still reports what
+                   was collected historically; the portal simply stops asking. *@
             }
 
             <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:14px;">

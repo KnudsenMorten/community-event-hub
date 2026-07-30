@@ -92,12 +92,11 @@ public sealed class SpeakerSessionsService
         DateOnly? mainDay = dates?.StartDate;
         DateOnly? preDay = dates?.PreDayDate ?? dates?.StartDate;
 
-        // Own-row scope: only sessions this participant is a SessionSpeaker on,
-        // in this edition, excluding service sessions.
+        // Own-row scope: only sessions this participant is a SessionSpeaker on, in this
+        // edition, excluding service sessions. §428: the predicate is SHARED with the slide
+        // upload (which used to omit the service-session clause) — see SpeakerSessionScope.
         var rows = await _db.Sessions
-            .Where(s => s.EventId == eventId
-                        && !s.IsServiceSession
-                        && s.SessionSpeakers.Any(ss => ss.ParticipantId == participantId))
+            .MineAsSpeaker(eventId, participantId)
             .Select(s => new
             {
                 s.Id,

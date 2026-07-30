@@ -66,8 +66,7 @@ public sealed class NavBuilderTests
         // Comms hub.
         ["/Organizer/EmailCenter"]                = "/Organizer/Comms",
         ["/Organizer/EmailLog"]                   = "/Organizer/Comms",
-        ["/Organizer/Broadcast"]                  = "/Organizer/Comms",
-        ["/Organizer/SendInvitations"]            = "/Organizer/Comms",
+        // §705.12: Broadcast + SendInvitations deleted (verified unused in PROD).
         ["/Organizer/SendWelcomeLogin"]           = "/Organizer/Comms",
         ["/Organizer/SpeakerReminders"]           = "/Organizer/Comms",
         // Sessions & speakers hub.
@@ -119,7 +118,7 @@ public sealed class NavBuilderTests
     private static readonly string[] ActionOnlyRoutes =
     {
         "/Organizer/EditParticipant",
-        "/Organizer/EditOnBehalf",
+        // §303b: /Organizer/EditOnBehalf DELETED — "Switch to user" is the one act-as feature.
         "/Organizer/SecureLink",
         "/Organizer/ReturnToOrganizer",
         "/Organizer/DataGrid",
@@ -189,8 +188,16 @@ public sealed class NavBuilderTests
         // entries + the 8 hub landings + the audit log. Feature pages are NOT in the
         // menu; they live on the hub button-grids (see _HubGrid). So the menu is
         // small and carries no per-feature rows or collapsible sub-folds.
-        Assert.True(mgmt.Items.Count <= 14,
-            $"Lean organizer menu should be ~13 hub-level entries; got {mgmt.Items.Count}.");
+        //
+        // §646 — raised 14 → 16 for Platform Health + Background Jobs, on his explicit request
+        // ("organizer menus - add Platform Health + Jobs to main menu for quick access"). The
+        // 2026-06-21 principle is NOT weakened: it bars per-FEATURE pages, and these two are OPS
+        // pages — the ones he opens to ask "is anything broken?", which §637 showed the hub answered
+        // worst of all.
+        // 🔒 The limit still exists and is still tight. If it needs raising again, that is a
+        // conversation about what the menu is FOR, not a number to nudge.
+        Assert.True(mgmt.Items.Count <= 16,
+            $"Lean organizer menu should stay ~13-16 hub-level entries; got {mgmt.Items.Count}.");
         Assert.All(mgmt.Items, i => Assert.Null(i.SectionKey));   // flat — no sub-folds
 
         foreach (var hub in new[]
@@ -279,9 +286,12 @@ public sealed class NavBuilderTests
         var hrefs = participant.Items.Select(i => i.Href).ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         Assert.Contains("/", hrefs);
-        Assert.Contains("/Profile", hrefs);
+        Assert.Contains("/Tasks", hrefs);
         Assert.Contains("/Resources", hrefs);
         Assert.Contains("/Sessions", hrefs);
+        // §283 (operator 2026-07-10): "My Hub Profile" is NO LONGER a main-menu item —
+        // it moved into the dropdown under the signed-in person's name in the header.
+        Assert.DoesNotContain("/Profile", hrefs);
     }
 
     [Fact]
@@ -292,46 +302,107 @@ public sealed class NavBuilderTests
         var g = NavBuilder.Build(ParticipantRole.Speaker, speakerHasMasterClass: true).Groups[0];
         var hrefs = g.Items.Select(i => i.Href).ToList();
 
-        // operator 2026-06-24 (§26c): Home, My Hub Profile, Speaker Details, My sessions,
-        // My tasks, Help Promote, Event-logistics fold-out, Contact.
-        // (Calendar entries removed: the user-facing calendar UI is retired.)
-        Assert.Equal("Nav.MyProfile", g.Items.Single(i => i.Href == "/Profile").LabelKey);
+        // Current speaker IA (§267/§267b/§285/§290/§294): Home, Get Started (inline wizard),
+        // Speaker Details top-level; a "My Tasks" fold-out with the register forms; a
+        // "Speaker Info" fold-out with the speaker-specific items + speaker content pages;
+        // Event Info with Lunch + the shared leaves; Party under "Register"; Contact last.
+        // §283 (operator 2026-07-10): "My Hub Profile" is no longer a main-menu item — it moved
+        // into the dropdown under the signed-in person's name in the header.
+        Assert.DoesNotContain("/Profile", hrefs);
+        // §285: "Get Started" opens the INLINE wizard at /Forms/Wizard (speaker onboarding §28).
+        var getStarted = g.Items.Single(i => i.Href == "/Forms/Wizard");
+        Assert.Equal("Nav.SpeakerOnboarding", getStarted.LabelKey);
+        Assert.Null(getStarted.SectionKey);
         Assert.Equal("Nav.SpeakerDetails", g.Items.Single(i => i.Href == "/Speaker/Details").LabelKey);
-        Assert.Equal("Nav.MySessions", g.Items.Single(i => i.Href == "/Speaker").LabelKey);
-        // §86/§138: the speaker Master Class Q&A area is a top-level entry (master-class speaker only).
-        Assert.Equal("Nav.MasterClassQa", g.Items.Single(i => i.Href == "/Speaker/Questions").LabelKey);
-        Assert.Equal("Nav.HelpPromote", g.Items.Single(i => i.Href == "/Speaker/Graphics").LabelKey);
+        Assert.Null(g.Items.Single(i => i.Href == "/Speaker/Details").SectionKey);
         Assert.DoesNotContain("/Forms/Speaker", hrefs);   // Bio replaced by Speaker Details
         Assert.Contains("/Contact", hrefs);
 
         // The calendar UI is retired: /Calendar no longer appears in the speaker menu.
         Assert.DoesNotContain("/Calendar", hrefs);
-        // §138: the standalone "Am I ready?" item is removed from the speaker menu (the
-        // readiness rollup moved to the top of My Tasks).
+        // §247 (operator 2026-07-07: "DROP THIS speaker readiness!"): the §234 "Am I
+        // ready?" entry is removed again — the readiness rollup on Speaker My Tasks
+        // covers it. The page stays routable; it just has no menu entry.
         Assert.DoesNotContain("/Speaker/Readiness", hrefs);
-
-        var logistics = g.Sections().SingleOrDefault(s => s.HeadingKey == "Nav.SectionEventLogistics");
-        Assert.NotNull(logistics);
-        var lh = logistics!.Items.Select(i => i.Href).ToList();
-        // The entitlement forms lead the Event-logistics fold-out, in order...
-        Assert.Equal(new[] { "/Forms/Hotel", "/Forms/Dinner", "/Forms/Lunch", "/Forms/Swag", "/Forms/Travel" }, lh.Take(5).ToList());
-        Assert.Equal("Nav.SpeakerGift", logistics.Items.Single(i => i.Href == "/Forms/Swag").LabelKey);
-        // ...then the §104–§123 content pages share the SAME fold-out: speakers see
-        // both the all-roles pages and the speaker-only pages (§123).
-        Assert.Contains("/Info/wayfinding", lh);        // all-roles
-        Assert.Contains("/Info/session-guidelines", lh); // speaker-only
-        Assert.Contains("/Info/help-promote", lh);       // speaker-only
-
-        // Removed for speakers (operator 2026-06-23): My tasks, Resources.
+        // Removed for speakers (operator 2026-06-23): the generic /Tasks list (speakers use
+        // /Speaker/Tasks) and Resources.
         Assert.DoesNotContain("/Tasks", hrefs);
         Assert.DoesNotContain("/Resources", hrefs);
-        // §153 (operator 2026-06-28): the public Sessions catalogue now lives in the SHARED
-        // Event-logistics fold-out for every role (no longer removed for speakers).
-        Assert.Contains("/Sessions", lh);
-        // §86/§138: the Master Class Q&A area IS a speaker nav entry (for a master-class speaker).
-        Assert.Contains("/Speaker/Questions", hrefs);
-        Assert.DoesNotContain("/Speaker/Evaluations", hrefs); // reached from My Sessions hub
-        // /Speaker/Graphics is now surfaced as "Help Promote" (§26c) — asserted above.
+
+        // §301c (operator 2026-07-24 "i want it to be consistent"): "My Tasks" is a PLAIN
+        // link again — every register/claim form moved to the "Register" fold-out.
+        var myTasks = g.Items.Single(i => i.Href == "/Speaker/Tasks");
+        Assert.Equal("Nav.MyTasks", myTasks.LabelKey);
+        Assert.Null(myTasks.SectionKey);
+
+        // §317 (operator 2026-07-24): the "Speaker Info" fold-out in the operator's EXACT
+        // order — two direct leaves (My Sessions, Master Class Q&A), then the three nested
+        // sub-fold-outs: Preparing My Session for ELDK27 (guidelines, deadlines, telemetry,
+        // survey results, Help Promote, template), Session Room Info (A/V), Session
+        // Evaluation (ratings, how-we-evaluate).
+        var speakerInfo = g.Sections().Single(s => s.HeadingKey == "Nav.SectionSpeakerInfo");
+        Assert.Equal(new[]
+        {
+            // §326e: "Key Dates & Times" is a DIRECT leaf right after the Q&A entry.
+            "/Speaker", "/Speaker/Questions", "/Info/key-dates-times",
+            "/Info/session-guidelines", "/Info/session-preview-final", "/Sponsor/Telemetry",
+            "https://eldk27.eventhub.expertslive.dk/survey/eldk27-topics/results",
+            "/Speaker/Graphics", "/Info/speaker-template", "/Speaker/Evaluations#eval-qr",
+            "/Sessions/Slides",
+            "/Info/av-stage-timer",
+            "/Speaker/Evaluations", "/Info/session-feedback",
+        }, speakerInfo.Items.Select(i => i.Href).ToList());
+        // Leaves carry no SubSectionKey; every other item sits in its named sub-fold-out.
+        string? Sub(string href) => speakerInfo.Items.Single(i => i.Href == href).SubSectionKey;
+        Assert.Null(Sub("/Speaker"));
+        Assert.Null(Sub("/Speaker/Questions"));
+        Assert.Null(Sub("/Info/key-dates-times"));   // §326e direct leaf
+        Assert.Equal("Nav.SubPrepareSession", Sub("/Info/session-guidelines"));
+        Assert.Equal("Nav.SubPrepareSession", Sub("/Info/session-preview-final"));
+        Assert.Equal("Nav.SubPrepareSession", Sub("/Sponsor/Telemetry"));
+        Assert.Equal("Nav.SubPrepareSession", Sub("/Speaker/Graphics"));
+        Assert.Equal("Nav.SubPrepareSession", Sub("/Info/speaker-template"));
+        Assert.Equal("Nav.SubPrepareSession", Sub("/Speaker/Evaluations#eval-qr"));   // §320
+        Assert.Equal("Nav.SubPrepareSession", Sub("/Sessions/Slides"));               // §322k
+        Assert.Equal("Nav.SubSessionRoom", Sub("/Info/av-stage-timer"));
+        Assert.Equal("Nav.SubSessionEvaluation", Sub("/Speaker/Evaluations"));
+        Assert.Equal("Nav.SubSessionEvaluation", Sub("/Info/session-feedback"));
+        // Speaker-specific labels (§317): the fuller Q&A + telemetry wordings.
+        Assert.Equal("Nav.MySessions", speakerInfo.Items.Single(i => i.Href == "/Speaker").LabelKey);
+        Assert.Equal("Nav.MasterClassQaSpeaker", speakerInfo.Items.Single(i => i.Href == "/Speaker/Questions").LabelKey);
+        Assert.Equal("Nav.HelpPromote", speakerInfo.Items.Single(i => i.Href == "/Speaker/Graphics").LabelKey);
+        Assert.Equal("Nav.AttendeeTelemetrySpeaker", speakerInfo.Items.Single(i => i.Href == "/Sponsor/Telemetry").LabelKey);
+        Assert.Equal("Nav.SpeakerEvaluations", speakerInfo.Items.Single(i => i.Href == "/Speaker/Evaluations").LabelKey);
+        // §289: the "Social Media Guidelines" (help-promote) content page is REMOVED — its
+        // copy lives on /Speaker/Graphics now.
+        Assert.DoesNotContain("/Info/help-promote", hrefs);
+
+        // §317: the Event Info fold-out in the operator's order — Check Out Last Event →
+        // Good To Know → Address → Wayfinding, then the Sessions catalogue, then the nested
+        // Policies sub-fold-out (Code of Conduct before Privacy Policy). No survey-results
+        // leaf here for speakers (it lives under Speaker Info), no Lunch (§301c: Register).
+        var logistics = g.Sections().Single(s => s.HeadingKey == "Nav.SectionEventLogistics");
+        var lh = logistics.Items.Select(i => i.Href).ToList();
+        Assert.DoesNotContain("/Forms/Lunch", lh);
+        Assert.Equal(new[]
+        {
+            "/Info/last-event-videos", "/Info/good-to-know", "/Info/addresses", "/Info/wayfinding",
+            "/Info/ceh-introduction",   // §326ag
+            "/Sessions", "/Sessions/Slides",
+            // §326f: the logo-pack zip download (speakers + sponsors only).
+            "/logo-pack/download",
+            "https://expertslive.dk/code-of-conduct/", "https://expertslive.dk/privacy-policy/",
+        }, lh);
+        Assert.DoesNotContain("/Info/session-guidelines", lh);  // speaker-only pages moved to Speaker Info
+
+        // §288/§297/§301c: the "Register" menu holds EVERY register/claim form — Hotel,
+        // Dinner, Lunch, Swag, Travel — plus Party (register). Not My Tasks, not Event Info.
+        var register = g.Sections().Single(s => s.HeadingKey == "Nav.SectionRegister");
+        Assert.Equal(
+            new[] { "/Forms/Hotel", "/Forms/Dinner", "/Forms/Lunch", "/Forms/Swag", "/Forms/Travel", "/Forms/Wizard?step=party" },
+            register.Items.Select(i => i.Href).ToList());
+        Assert.Equal("Nav.SpeakerGift", register.Items.Single(i => i.Href == "/Forms/Swag").LabelKey);
+        Assert.Equal("Nav.PartySignup", register.Items.Single(i => i.Href == "/Forms/Wizard?step=party").LabelKey);
     }
 
     [Fact]
@@ -350,46 +421,74 @@ public sealed class NavBuilderTests
     }
 
     [Fact]
-    public void Speaker_readiness_item_is_removed_from_the_menu()
+    public void Speaker_evaluations_is_in_the_menu_but_readiness_is_dropped()
     {
-        // §138: the standalone "Am I ready?" speaker nav item is gone (the rollup now
-        // lives at the top of My Tasks). This holds regardless of the master-class gate.
+        // §234 UX surfaced both orphaned pages; §247 (operator 2026-07-07) then DROPPED
+        // the "Am I ready?" (/Speaker/Readiness) entry again — the readiness rollup at
+        // the top of Speaker My Tasks covers it (the page stays routable, no menu
+        // entry). /Speaker/Evaluations stays in the menu regardless of the MC gate.
         foreach (var hasMc in new[] { false, true })
         {
             var hrefs = NavBuilder.Build(ParticipantRole.Speaker, speakerHasMasterClass: hasMc)
                 .AllItems.Select(i => i.Href).ToList();
             Assert.DoesNotContain("/Speaker/Readiness", hrefs);
+            Assert.Contains("/Speaker/Evaluations", hrefs);
         }
     }
 
     [Fact]
     public void Attendee_menu_is_minimal_home_masterclass_waitlist()
     {
-        var attendee = NavBuilder.Build(ParticipantRole.Attendee).Groups[0];
+        // §234 UX: the three Master-Class entries are gated on the 2-day ticket, so this
+        // FULL menu is the 2-day holder's; the 1-day menu is asserted in the next test.
+        var attendee = NavBuilder.Build(ParticipantRole.Attendee, attendeeIsTwoDay: true).Groups[0];
         var hrefs = attendee.Items.Select(i => i.Href).ToList();
 
-        // Home + Master Class + My plan + Waitlist + Contact Organizers (the latter
-        // appended last for every role, operator 2026-06-21). My plan was surfaced —
-        // a complete page that previously had no menu/link path.
-        // My plan removed (operator 2026-06-23 — Zoho Backstage); Master Class Q&A
-        // shortcut added (operator 2026-06-24).
+        // Home + Master Class + Waitlist + Q&A + Contact Organizers (the latter appended
+        // last for every role, operator 2026-06-21). My plan removed (operator 2026-06-23 —
+        // Zoho Backstage); Master Class Q&A shortcut added (operator 2026-06-24).
         // §104–§123: the all-roles content pages (Event-logistics fold-out) appear for
         // attendees too, between the attendee leaves and the Policies/Contact tail.
-        // Policies (Privacy Policy + Code of Conduct) precede Contact for every role (operator 2026-06-25).
+        // §297: Policies (Privacy Policy + Code of Conduct) is a nested sub-fold-out inside
+        // Event Info, still just before Contact in the flat list.
         // §153 (operator 2026-06-28): the public Sessions catalogue leads the shared
         // Event-logistics fold-out for every role (attendees included).
+        // §270 (operator 2026-07-10): the "fun IT games" entry is DEFAULT OFF — no /Games
+        // here (see Games_entry_is_flag_gated_for_attendees_and_authoring_for_organizers).
         Assert.Equal(new[]
         {
-            "/", "/Party", "/Attendee", "/Attendee/Waitlist", "/Attendee/MasterClassQa",
-            // §171: the attendee "fun IT games" entry sits in the attendee block.
-            "/Games",
-            "/Sessions",
-            "/Info/wayfinding", "/Info/good-to-know", "/Info/addresses", "/Info/last-event-videos",
-            "https://expertslive.dk/privacy-policy/", "https://expertslive.dk/code-of-conduct/", "/Contact",
+            // §285: the attendee Get-Started stepper (now the inline /Forms/Wizard) leads.
+            "/", "/Forms/Wizard", "/Forms/Wizard?step=masterclass", "/Attendee/Waitlist", "/Attendee/MasterClassQa",
+            // §326al (operator 2026-07-25): the three Master-Class entries repeat under the
+            // "Register/Update" fold-out — deliberate duplicates of the main-nav leaves above.
+            "/Forms/Wizard?step=masterclass", "/Attendee/Waitlist", "/Attendee/MasterClassQa",
+            // §353 (operator 2026-07-26) REVERSES §297: the prominent main-nav entry
+            // ("Party Preday") PLUS a deliberate duplicate under Register/Update. §326am: both
+            // open the wizard's INLINE party step instead of the standalone /Party page.
+            "/Forms/Wizard?step=party", "/Forms/Wizard?step=party",
+            // §317: Event Info in the operator's order — the four content leaves, then the
+            // Sessions catalogue + the survey-results leaf, then the nested Policies
+            // sub-fold-out (Code of Conduct before Privacy Policy).
+            "/Info/last-event-videos", "/Info/good-to-know", "/Info/addresses", "/Info/wayfinding",
+            "/Info/ceh-introduction",   // §326ag
+            "/Sessions", "/Sessions/Slides",
+            "https://expertslive.dk/code-of-conduct/", "https://expertslive.dk/privacy-policy/", "/Contact",
         }, hrefs);
-        Assert.Equal("Nav.MasterClass", attendee.Items.Single(i => i.Href == "/Attendee").LabelKey);
-        Assert.Equal("Nav.Waitlist", attendee.Items.Single(i => i.Href == "/Attendee/Waitlist").LabelKey);
-        Assert.Equal("Nav.MasterClassQa", attendee.Items.Single(i => i.Href == "/Attendee/MasterClassQa").LabelKey);
+        // §326al: each Master-Class href now resolves twice (main nav + Register fold-out) —
+        // assert the main-nav leaf, then that the Register duplicate carries the same label.
+        Assert.Equal("Nav.MasterClass", attendee.Items.Single(i => i.Href == "/Forms/Wizard?step=masterclass" && i.SectionKey is null).LabelKey);
+        Assert.Equal("Nav.Waitlist", attendee.Items.Single(i => i.Href == "/Attendee/Waitlist" && i.SectionKey is null).LabelKey);
+        Assert.Equal("Nav.MasterClassQa", attendee.Items.Single(i => i.Href == "/Attendee/MasterClassQa" && i.SectionKey is null).LabelKey);
+        foreach (var (href, label) in new[]
+                 {
+                     ("/Forms/Wizard?step=masterclass", "Nav.MasterClass"),
+                     ("/Attendee/Waitlist", "Nav.Waitlist"),
+                     ("/Attendee/MasterClassQa", "Nav.MasterClassQa"),
+                 })
+        {
+            var dup = attendee.Items.Single(i => i.Href == href && i.SectionKey == "Nav.SectionRegister");
+            Assert.Equal(label, dup.LabelKey);
+        }
         Assert.DoesNotContain("/Attendee/MyPlan", hrefs);
 
         // Removed for attendees.
@@ -400,6 +499,29 @@ public sealed class NavBuilderTests
         // §153 (operator 2026-06-28): Sessions is now in the shared Event-logistics fold-out for
         // EVERY role, attendees included.
         Assert.Contains("/Sessions", hrefs);
+    }
+
+    [Fact]
+    public void One_day_attendee_menu_hides_the_three_master_class_entries()
+    {
+        // §234 UX: a 1-DAY ticket excludes Master Classes — the chooser, waitlist and Q&A
+        // entries would all be dead ends, so they are hidden (attendeeIsTwoDay defaults to
+        // false). The pages stay reachable by direct URL (friendly not-eligible states);
+        // everything else in the attendee menu is unchanged.
+        var oneDay = NavBuilder.Build(ParticipantRole.Attendee).AllItems.Select(i => i.Href).ToList();
+        Assert.DoesNotContain("/Forms/Wizard?step=masterclass", oneDay);
+        Assert.DoesNotContain("/Attendee/Waitlist", oneDay);
+        Assert.DoesNotContain("/Attendee/MasterClassQa", oneDay);
+        Assert.Contains("/Forms/Wizard", oneDay);   // §285: the inline Get-Started wizard
+        // §270: games are DEFAULT OFF — absent unless the edition opts in.
+        Assert.DoesNotContain("/Games", oneDay);
+        Assert.Contains("/Forms/Wizard?step=party", oneDay);   // §326am: inline party step
+
+        var twoDay = NavBuilder.Build(ParticipantRole.Attendee, attendeeIsTwoDay: true)
+            .AllItems.Select(i => i.Href).ToList();
+        Assert.Contains("/Forms/Wizard?step=masterclass", twoDay);
+        Assert.Contains("/Attendee/Waitlist", twoDay);
+        Assert.Contains("/Attendee/MasterClassQa", twoDay);
     }
 
     [Fact]
@@ -424,7 +546,9 @@ public sealed class NavBuilderTests
         Assert.Contains("/Sponsor/Tasks", sponsor);
         Assert.Contains("/Sponsor/Logistics", sponsor);   // Key Dates & times, in the Event-logistics fold-out
         Assert.Contains("/Contact", sponsor);             // "Contact Organizers" — unified shared page (2026-06-28)
-        Assert.Contains("/Sponsor/CaptureLead", sponsor); // failover in the Leads fold-out (exhibitor-only)
+        // §483: "Capture Leads (Failover)" is no longer in the MENU (operator request). The page
+        // itself stays routable, so this asserts the nav entry is gone, not that the page is.
+        Assert.DoesNotContain("/Sponsor/CaptureLead", sponsor);
         // A sponsor uses the company-shared tasks entry, not the generic /Tasks.
         Assert.DoesNotContain("/Tasks", sponsor);
 
@@ -433,8 +557,9 @@ public sealed class NavBuilderTests
         Assert.DoesNotContain("/Sponsor/CaptureLead", digitalSponsor);
         Assert.Contains("/Sponsor/Tasks", digitalSponsor); // non-gated entries still present
 
-        var attendee = NavBuilder.Build(ParticipantRole.Attendee).AllItems.Select(i => i.Href).ToList();
-        Assert.Contains("/Attendee", attendee);          // in-hub Master Class chooser
+        // §234 UX: the Master-Class routes are 2-day-gated, so build a 2-day holder here.
+        var attendee = NavBuilder.Build(ParticipantRole.Attendee, attendeeIsTwoDay: true).AllItems.Select(i => i.Href).ToList();
+        Assert.Contains("/Forms/Wizard?step=masterclass", attendee);          // in-hub Master Class chooser
         Assert.Contains("/Attendee/Waitlist", attendee); // waitlist view
 
         var vol = NavBuilder.Build(ParticipantRole.Volunteer, isVolunteerSupervisor: true).AllItems.Select(i => i.Href).ToList();
@@ -472,29 +597,50 @@ public sealed class NavBuilderTests
         Assert.Contains("Nav.SectionExhibitorBooth", sections);
         Assert.DoesNotContain("Nav.SectionLeads", sections);
 
-        // The single "Exhibitor & Booth Details" fold-out now carries: the 4 external Zoho booth
-        // links, "Your Booth" (internal), and the Leads group (2 external Zoho + the internal
-        // Capture-lead failover) = 8 items.
+        // §483/§488/§489: the fold-out carries FOUR in-hub leaves (Key Dates & Times, Your Booth,
+        // Party Preday, Attendee Telemetry) plus the nested "Zoho Event System" group — just Leads
+        // + Inquiries after §488 removed the four Zoho setup links ⇒ 6 items.
         var booth = g.Sections().Single(s => s.HeadingKey == "Nav.SectionExhibitorBooth");
         var boothHrefs = booth.Items.Select(i => i.Href).ToList();
-        Assert.Equal(8, booth.Items.Count);
+        Assert.Equal(6, booth.Items.Count);
         Assert.Contains("/Sponsor/Booth", boothHrefs);          // Your Booth moved here
-        Assert.Contains("/Sponsor/CaptureLead", boothHrefs);    // Leads failover moved here
-        // The Zoho links open in a new tab; the two in-hub pages are same-tab.
+        Assert.DoesNotContain("/Sponsor/CaptureLead", boothHrefs);
+
+        // §483 ORDER — the operator's exact sequence. The layout renders direct leaves before any
+        // sub-fold-out, so asserting the leaf order here is what pins what he actually sees.
+        var boothLeaves = booth.Items.Where(i => i.SubSectionKey is null).Select(i => i.Href).ToList();
+        Assert.Equal(
+            new[] { "/Sponsor/Logistics", "/Sponsor/Booth", "/Forms/Wizard?step=party", "/Sponsor/Telemetry" },
+            boothLeaves);
+        // §489: telemetry left the sponsor's TOP-LEVEL menu — for an exhibitor it exists only here.
+        Assert.DoesNotContain(g.Items, i => i.Href == "/Sponsor/Telemetry" && i.SectionKey is null);
+
+        // §483 — every remaining Zoho link sits in the nested group, Leads FIRST, Inquiries SECOND.
+        // §488 — and ONLY those two: the four Zoho setup links are gone, because the hub now owns
+        // that data and a second editable copy in Zoho would diverge from it.
+        var zoho = booth.Items.Where(i => i.SubSectionKey == "Nav.SectionZohoEventSystem").ToList();
+        Assert.Equal(2, zoho.Count);
+        Assert.All(zoho, i => Assert.True(i.External));         // the whole group leaves the hub
+        Assert.EndsWith("lead-list", zoho[0].Href);
+        Assert.EndsWith("inquiry-list", zoho[1].Href);
+        // Nothing Zoho may remain a direct leaf — that was the point of grouping them.
+        Assert.DoesNotContain(boothLeaves, h => h.StartsWith("https://eldk27.expertslive.dk/"));
+
+        // §297: an EXHIBITOR sponsor gets Party (register) INSIDE this fold-out (not Register).
+        Assert.Contains("/Forms/Wizard?step=party", boothHrefs);
+        Assert.Equal("Nav.PartySignup", booth.Items.Single(i => i.Href == "/Forms/Wizard?step=party").LabelKey);
+        // The Zoho links open in a new tab; the in-hub pages are same-tab.
         Assert.All(booth.Items.Where(i => i.Href.StartsWith("https://eldk27.expertslive.dk/")), i => Assert.True(i.External));
-        Assert.False(booth.Items.Single(i => i.Href == "/Sponsor/CaptureLead").External);
         Assert.False(booth.Items.Single(i => i.Href == "/Sponsor/Booth").External);
 
-        // Operator 2026-06-27 (BUG): there is exactly ONE "Event logistics" entry. The booth
-        // run-of-show (/Sponsor/Logistics) is now a LEAF inside the SHARED
-        // Nav.SectionEventLogistics fold-out (not a second standalone "Event logistics" leaf),
-        // and it LEADS that fold-out, ahead of the §104–§123 content-hub pages.
+        // Operator 2026-06-27 (BUG): there is exactly ONE "Event logistics" entry.
         Assert.Single(g.Sections(), s => s.HeadingKey == "Nav.SectionEventLogistics");
         Assert.DoesNotContain(g.Items, i => i.LabelKey == "Nav.SponsorEventLogistics");
         var eventLogistics = g.Sections().Single(s => s.HeadingKey == "Nav.SectionEventLogistics");
-        var boothLeaf = eventLogistics.Items.Single(i => i.Href == "/Sponsor/Logistics");
-        Assert.Equal("Nav.SponsorBoothRunOfShow", boothLeaf.LabelKey);
-        Assert.Equal("/Sponsor/Logistics", eventLogistics.Items[0].Href); // booth run-of-show leads
+        // §483: for an EXHIBITOR, "Key Dates & Times" has MOVED to the top of Exhibitor & Booth
+        // Details, so it must NOT also appear here — the same page listed twice in one menu was
+        // the exact failure mode the 2026-06-27 bug above was about.
+        Assert.DoesNotContain(eventLogistics.Items, i => i.Href == "/Sponsor/Logistics");
         var elHrefs = eventLogistics.Items.Select(i => i.Href).ToList();
         Assert.Contains("/Info/wayfinding", elHrefs);  // content-hub pages share the SAME fold-out
 
@@ -502,9 +648,17 @@ public sealed class NavBuilderTests
         // Exhibitor & Booth Details fold-out (asserted above), so it must NOT appear here.
         Assert.DoesNotContain("/Sponsor/Booth", elHrefs);
 
-        // Operator 2026-06-27: the standalone "Deliverables" nav entry is removed (the rollup
-        // moved to the top of Sponsor My Tasks). The page route stays reachable by direct URL.
+        // Operator 2026-06-27: the standalone "Deliverables" nav entry is removed. §234 UX:
+        // after the rollup card was ALSO dropped from Sponsor My Tasks (2026-06-28) the page
+        // was orphaned — it is now linked from the Sponsor home card + a callout on Sponsor
+        // Tasks (in-page links, still NOT a nav entry).
         Assert.DoesNotContain("/Sponsor/Deliverables", hrefs);
+
+        // §290/§297: "Attendee telemetry" — the authenticated in-hub "who's coming" view.
+        // §489: for an EXHIBITOR it is no longer top-level; it lives inside the booth fold-out.
+        var telemetry = g.Items.Single(i => i.Href == "/Sponsor/Telemetry");
+        Assert.Equal("Nav.AttendeeTelemetry", telemetry.LabelKey);
+        Assert.Equal("Nav.SectionExhibitorBooth", telemetry.SectionKey);
 
         // P7: a digital-only (non-exhibitor) sponsor gets NEITHER the Exhibitor/Booth
         // nor the Leads fold-out (the booth/lead Zoho items would be dead links).
@@ -512,10 +666,63 @@ public sealed class NavBuilderTests
         var digitalSections = digital.Sections().Where(s => s.HeadingKey is not null).Select(s => s.HeadingKey).ToList();
         Assert.DoesNotContain("Nav.SectionExhibitorBooth", digitalSections);
         Assert.DoesNotContain("Nav.SectionLeads", digitalSections);
+        // §297: with no booth fold-out, a digital sponsor's Party leaf falls under "Register".
+        Assert.Equal("Nav.SectionRegister", digital.Items.Single(i => i.Href == "/Forms/Wizard?step=party").SectionKey);
         // The non-gated Sponsor Webshop fold-out still shows for a digital sponsor.
         Assert.Contains("Nav.SectionSponsorWebshop", digitalSections);
         // §146: "Our Booth" is exhibitor-only — a digital sponsor (no booth) doesn't get it.
         Assert.DoesNotContain("/Sponsor/Booth", digital.Items.Select(i => i.Href));
+
+        // §489 (operator: "we also need the 'Attendee Telemetry' as main menu also so it shows for
+        // a silver sponsor also (who are not an exhibitor)"): telemetry moved INTO the booth
+        // fold-out for exhibitors, and a non-exhibitor has no such fold-out — so for them it must
+        // stay a TOP-LEVEL item (SectionKey null). Without this, a silver sponsor would lose the
+        // page entirely rather than merely have it moved.
+        var digitalTelemetry = digital.Items.Single(i => i.Href == "/Sponsor/Telemetry");
+        Assert.Null(digitalTelemetry.SectionKey);
+        Assert.Equal("Nav.AttendeeTelemetry", digitalTelemetry.LabelKey);
+    }
+
+    [Fact]
+    public void Sponsor_zoho_and_webshop_items_carry_the_right_redirect_confirm_kind()
+    {
+        // §175/§176: the links that leave the hub for a third-party login carry a Redirect
+        // kind so the view shows a confirm() before navigating. Build an EXHIBITOR sponsor so
+        // the Zoho booth fold-out appears.
+        var items = NavBuilder.Build(ParticipantRole.Sponsor, isExhibitor: true).AllItems.ToList();
+        NavItem Item(string labelKey) => items.Single(i => i.LabelKey == labelKey);
+
+        // §175 — the remaining Zoho items confirm with the Zoho message.
+        // §488: the four Zoho SETUP links were removed (the hub owns that data now), so Leads and
+        // Inquiries are the only ones left — they have no API, which is what §484 explains.
+        var zohoLabels = new[] { "Nav.LeadsZoho", "Nav.InquiriesZoho" };
+        Assert.DoesNotContain(items, i =>
+            i.LabelKey is "Nav.ExhibitorProfile" or "Nav.BoothMembers"
+                       or "Nav.ExhibitorMaterials" or "Nav.PromotionalBanner");
+        foreach (var label in zohoLabels)
+        {
+            var it = Item(label);
+            Assert.Equal(ExternalRedirectKind.Zoho, it.Redirect);
+            Assert.True(it.External, $"{label} stays an external new-tab link.");
+        }
+
+        // Every Zoho-targeted href is tagged, and ONLY Zoho hrefs are (the in-hub leaves under the
+        // same fold-out are NOT redirects).
+        Assert.All(items.Where(i => i.Href.StartsWith("https://eldk27.expertslive.dk/", StringComparison.Ordinal)),
+            i => Assert.Equal(ExternalRedirectKind.Zoho, i.Redirect));
+        // §483: the Capture-lead failover left the menu, so the in-hub counterpart asserted here is
+        // "Your Booth" — still proving a same-fold-out internal leaf carries no redirect kind.
+        Assert.Equal(ExternalRedirectKind.None, items.Single(i => i.Href == "/Sponsor/Booth").Redirect);
+
+        // §176 — the EXTERNAL webshop buy-flow confirms with the Webshop message. The
+        // in-hub orders page does NOT (fixed 2026-07-07: it warned about an external
+        // login that never happens, on every click).
+        Assert.Equal(ExternalRedirectKind.Webshop, Item("Nav.SponsorBuyServices").Redirect);
+        Assert.Equal(ExternalRedirectKind.None, Item("Nav.SponsorOrders").Redirect);
+
+        // Non-redirect leaves (e.g. the booth run-of-show, Our Booth, Tasks) carry no kind.
+        Assert.Equal(ExternalRedirectKind.None, Item("Nav.SponsorBoothRunOfShow").Redirect);
+        Assert.Equal(ExternalRedirectKind.None, Item("Nav.OurBooth").Redirect);
     }
 
     [Fact]
@@ -541,18 +748,44 @@ public sealed class NavBuilderTests
         Assert.True(hrefs.IndexOf("/volunteer/availability") < hrefs.IndexOf("/volunteer/myschedule"),
             "My availability comes before My schedule (operator 2026-06-23).");
 
-        // Event-logistics fold-out with Volunteer Gift (the Important dates / Calendar
-        // entry was removed: the user-facing calendar UI is retired).
+        // §285: the guided Get-Started wizard is the inline /Forms/Wizard, top-level.
+        var getStarted = g.Items.Single(i => i.Href == "/Forms/Wizard");
+        Assert.Equal("Nav.GetStarted", getStarted.LabelKey);
+        Assert.Null(getStarted.SectionKey);
+        // §290: "Attendee telemetry" is a MAIN-menu item for volunteer crew (the shared
+        // limited /Sponsor/Telemetry "who's coming" view).
+        var telemetry = g.Items.Single(i => i.Href == "/Sponsor/Telemetry");
+        Assert.Equal("Nav.AttendeeTelemetry", telemetry.LabelKey);
+        Assert.Null(telemetry.SectionKey);
+
+        // §301c (operator 2026-07-24): "My Tasks" is a PLAIN link again — the register
+        // forms moved to the "Register" fold-out.
+        var myTasks = g.Items.Single(i => i.Href == "/Tasks");
+        Assert.Equal("Nav.MyTasks", myTasks.LabelKey);
+        Assert.Null(myTasks.SectionKey);
+
+        // §317: the Event Info fold-out in the operator's order — the four content leaves,
+        // then the Sessions catalogue + the survey-results leaf, then the nested Policies
+        // sub-fold-out. A volunteer (non-speaker) must NOT get the speaker-only content
+        // pages (§123). Lunch moved to Register (§301c).
         var logistics = g.Sections().Single(s => s.HeadingKey == "Nav.SectionEventLogistics");
         var lh = logistics.Items.Select(i => i.Href).ToList();
-        // The entitlement forms lead the fold-out, in order...
-        Assert.Equal(new[] { "/Forms/Hotel", "/Forms/Dinner", "/Forms/Lunch", "/Forms/Swag" }, lh.Take(4).ToList());
-        Assert.Equal("Nav.VolunteerGift", logistics.Items.Single(i => i.Href == "/Forms/Swag").LabelKey);
-        // ...then the all-roles content pages join the same fold-out, but a volunteer
-        // (non-speaker) must NOT get the speaker-only content pages (§123).
-        Assert.Contains("/Info/wayfinding", lh);
+        Assert.DoesNotContain("/Forms/Lunch", lh);
+        Assert.Equal(new[]
+        {
+            "/Info/last-event-videos", "/Info/good-to-know", "/Info/addresses", "/Info/wayfinding",
+            "/Info/ceh-introduction",   // §326ag
+            "/Sessions", "/Sessions/Slides",
+            "https://expertslive.dk/code-of-conduct/", "https://expertslive.dk/privacy-policy/",
+        }, lh);
         Assert.DoesNotContain("/Info/session-guidelines", lh);
         Assert.DoesNotContain("/Calendar", hrefs);
+
+        // §288/§297/§301c: the "Register" menu = every register form + Party (register).
+        var register = g.Sections().Single(s => s.HeadingKey == "Nav.SectionRegister");
+        Assert.Equal(new[] { "/Forms/Hotel", "/Forms/Dinner", "/Forms/Lunch", "/Forms/Swag", "/Forms/Wizard?step=party" },
+            register.Items.Select(i => i.Href).ToList());
+        Assert.Equal("Nav.VolunteerGift", register.Items.Single(i => i.Href == "/Forms/Swag").LabelKey);
     }
 
     [Fact]
@@ -589,33 +822,129 @@ public sealed class NavBuilderTests
     }
 
     [Fact]
-    public void Games_entry_is_present_for_attendees_and_authoring_for_organizers()
+    public void Games_entry_is_flag_gated_for_attendees_and_authoring_for_organizers()
     {
-        // §171: the player-facing "fun IT games" entry is in the attendee menu (default ON
-        // for attendees, ungated); the organizer authoring entry is in the management group.
-        var attendee = NavBuilder.Build(ParticipantRole.Attendee).AllItems.Select(i => i.Href).ToList();
-        Assert.Contains("/Games", attendee);
-        Assert.Equal("Nav.Games", NavBuilder.Build(ParticipantRole.Attendee)
-            .AllItems.Single(i => i.Href == "/Games").LabelKey);
+        // §171/§270: the player-facing "fun IT games" entry is an ON/OFF feature, DEFAULT
+        // OFF (operator 2026-07-10) — attendees see /Games ONLY when the edition opts in
+        // (attendeeGamesEnabled); the organizer authoring entry is in the management group.
+        var attendeeDefault = NavBuilder.Build(ParticipantRole.Attendee).AllItems.Select(i => i.Href).ToList();
+        Assert.DoesNotContain("/Games", attendeeDefault);
+
+        var attendeeGamesOn = NavBuilder.Build(ParticipantRole.Attendee, attendeeGamesEnabled: true).AllItems.ToList();
+        Assert.Contains("/Games", attendeeGamesOn.Select(i => i.Href));
+        Assert.Equal("Nav.Games", attendeeGamesOn.Single(i => i.Href == "/Games").LabelKey);
 
         var organizer = NavBuilder.Build(ParticipantRole.Organizer);
-        Assert.Contains("/Organizer/Quizzes", organizer.ManagementGroup!.Items.Select(i => i.Href));
-        // The authoring entry is flat (no sub-fold) like every other management item.
-        Assert.Null(organizer.ManagementGroup!.Items.Single(i => i.Href == "/Organizer/Quizzes").SectionKey);
+        // §652 (operator 2026-07-29: "remove the fun it games from organizer menu - we have
+        // disabled this functionality for now"). The authoring entry is GONE from the menu while
+        // the feature is off. The page itself stays routable — same treatment as §167's "Find a
+        // person" — so re-enabling it is one uncommented line, not a rebuild.
+        Assert.DoesNotContain("/Organizer/Quizzes", organizer.ManagementGroup!.Items.Select(i => i.Href));
+
+        // §182 (operator 2026-06-29): the /Games PLAYER surface belongs in the participant
+        // menu (attendees), NOT the organizer admin nav. It must not appear anywhere in the
+        // organizer's nav — only the authoring page (/Organizer/Quizzes) is admin-side.
+        Assert.DoesNotContain("/Games", organizer.AllItems.Select(i => i.Href));
+        Assert.DoesNotContain("/Games", organizer.ManagementGroup!.Items.Select(i => i.Href));
+    }
+
+    [Fact]
+    public void Attendee_survey_results_leaf_is_under_event_logistics_except_speaker_info_for_speakers()
+    {
+        // §183 (operator 2026-06-29): a single external "Attendee Survey Result: Topics and
+        // Level" leaf, opening in a new tab, for EVERY role. §290 (operator 2026-07-10): for
+        // SPEAKERS it lives under the "Speaker Info" fold-out; every other role keeps it in
+        // the shared Event-logistics ("Event Info") fold-out.
+        const string surveyUrl = "https://eldk27.eventhub.expertslive.dk/survey/eldk27-topics/results";
+        // §351-1 (operator 2026-07-26): "change for all roles under Event Info - remove the
+        // menu-item 'Attendee Survey Results: Topics and Level'". The leaf is now SPEAKER-ONLY
+        // (Speaker Info → Preparing My Session, where it is session-prep material) and is GONE
+        // from Event Info for every other role. Asserting the ABSENCE rather than deleting the
+        // test, so a future edit cannot silently restore it for everyone.
+        foreach (var role in Enum.GetValues<ParticipantRole>())
+        {
+            var group = NavBuilder.Build(role).Groups[0];
+
+            if (role == ParticipantRole.Speaker)
+            {
+                var section = group.Sections()
+                    .SingleOrDefault(s => s.HeadingKey == "Nav.SectionSpeakerInfo");
+                Assert.NotNull(section);
+                var leaf = section!.Items.SingleOrDefault(i => i.Href == surveyUrl);
+                Assert.NotNull(leaf);
+                Assert.Equal("Nav.AttendeeSurveyResults", leaf!.LabelKey);
+                Assert.True(leaf.External, "survey-results leaf must open in a new tab.");
+                Assert.Single(group.Items, i => i.Href == surveyUrl);
+            }
+            else
+            {
+                Assert.DoesNotContain(group.Items, i => i.Href == surveyUrl);
+            }
+        }
+    }
+
+    [Fact]
+    public void Attendee_telemetry_is_a_main_menu_item_for_crew_roles()
+    {
+        // §290: "Attendee Details" = the attendee telemetry — a MAIN-menu (top-level) item
+        // for the crew roles: Volunteer/Media/EventPartner get the shared limited
+        // /Sponsor/Telemetry "who's coming" view; the Organizer links to the fuller
+        // /Organizer/Telemetry. Speakers get it under "Speaker Info" instead (§294 —
+        // asserted in Speaker_menu_matches_redesign); attendees never see it.
+        foreach (var role in new[] { ParticipantRole.Volunteer, ParticipantRole.Media, ParticipantRole.EventPartner })
+        {
+            var item = NavBuilder.Build(role).Groups[0].Items.Single(i => i.Href == "/Sponsor/Telemetry");
+            Assert.Equal("Nav.AttendeeTelemetry", item.LabelKey);
+            Assert.Null(item.SectionKey);
+        }
+
+        var organizer = NavBuilder.Build(ParticipantRole.Organizer).Groups[0]
+            .Items.Single(i => i.Href == "/Organizer/Telemetry");
+        Assert.Equal("Nav.AttendeeTelemetry", organizer.LabelKey);
+        Assert.Null(organizer.SectionKey);
+
+        Assert.DoesNotContain("/Sponsor/Telemetry",
+            NavBuilder.Build(ParticipantRole.Attendee).AllItems.Select(i => i.Href));
+    }
+
+    [Fact]
+    public void Policies_is_a_nested_sub_foldout_inside_event_info_for_every_role()
+    {
+        // §297 (supersedes §290's own-submenu form): Event Info → Policies → (Privacy Policy
+        // + Code of Conduct) — a two-level nested sub-fold-out via SubSectionKey, NOT its own
+        // top-level fold-out and NOT flattened into Event Info. Both are external links.
+        foreach (var role in Enum.GetValues<ParticipantRole>())
+        {
+            var items = NavBuilder.Build(role).Groups[0].Items;
+            foreach (var href in new[]
+                     {
+                         "https://expertslive.dk/privacy-policy/",
+                         "https://expertslive.dk/code-of-conduct/",
+                     })
+            {
+                var link = items.Single(i => i.Href == href);
+                Assert.Equal("Nav.SectionEventLogistics", link.SectionKey);
+                Assert.Equal("Nav.SectionPolicies", link.SubSectionKey);
+                Assert.True(link.External, $"{role}: {href} must open in a new tab.");
+            }
+        }
     }
 
     [Fact]
     public void Attendee_primary_entry_is_the_master_class_chooser()
     {
-        var attendee = NavBuilder.Build(ParticipantRole.Attendee).Groups[0];
+        // §234 UX: the Master-Class entries are 2-day-gated — build a 2-day holder.
+        var attendee = NavBuilder.Build(ParticipantRole.Attendee, attendeeIsTwoDay: true).Groups[0];
         var hrefs = attendee.Items.Select(i => i.Href).ToList();
 
         // Operator 2026-06-21: the attendee menu is just Home + Master Class +
         // Waitlist. /Attendee is the in-hub Master Class chooser (replaced the old
         // Zoho-Bookings page) labelled "Master Class"; /Attendee/Waitlist is next.
-        var mc = attendee.Items.Single(i => i.Href == "/Attendee");
+        // §326al: /Attendee appears twice (main nav + Register fold-out) — the PRIMARY
+        // entry is the un-sectioned main-nav leaf.
+        var mc = attendee.Items.Single(i => i.Href == "/Forms/Wizard?step=masterclass" && i.SectionKey is null);
         Assert.Equal("Nav.MasterClass", mc.LabelKey);
-        Assert.True(hrefs.IndexOf("/Attendee") < hrefs.IndexOf("/Attendee/Waitlist"),
+        Assert.True(hrefs.IndexOf("/Forms/Wizard?step=masterclass") < hrefs.IndexOf("/Attendee/Waitlist"),
             "Master Class must come before Waitlist.");
     }
 
@@ -656,13 +985,15 @@ public sealed class NavBuilderTests
     private static readonly string[] AllRoleContentHrefs =
     {
         "/Info/wayfinding", "/Info/good-to-know", "/Info/addresses", "/Info/last-event-videos",
+        "/Info/ceh-introduction",
     };
 
+    // §289: /Info/help-promote ("Social Media Guidelines") was REMOVED from the registry —
+    // its copy lives on the Help Promote page (/Speaker/Graphics) now.
     private static readonly string[] SpeakerOnlyContentHrefs =
     {
         "/Info/speaker-template", "/Info/session-guidelines", "/Info/av-stage-timer",
         "/Info/session-preview-final", "/Info/session-feedback",
-        "/Info/help-promote",
     };
 
     [Fact]
@@ -705,12 +1036,197 @@ public sealed class NavBuilderTests
     [InlineData(ParticipantRole.Organizer)] // organizers see every page (§123)
     public void Speaker_only_content_pages_are_visible_to_speakers_and_organizers(ParticipantRole role)
     {
-        var hrefs = NavBuilder.Build(role).AllItems.Select(i => i.Href).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var group = NavBuilder.Build(role).Groups[0];
+        var hrefs = group.Items.Select(i => i.Href).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        // §267: for SPEAKERS the speaker-only pages group under "Speaker Info"; organizers
+        // (who see every page, §123) keep them under the Event Info fold-out.
+        var expectedSection = role == ParticipantRole.Speaker
+            ? "Nav.SectionSpeakerInfo"
+            : "Nav.SectionEventLogistics";
         foreach (var h in SpeakerOnlyContentHrefs)
+        {
             Assert.True(hrefs.Contains(h), $"{role} should see speaker content page {h}.");
-        // ...and the all-roles pages too.
+            Assert.Equal(expectedSection, group.Items.Single(i => i.Href == h).SectionKey);
+        }
+        // ...and the all-roles pages too (always under Event Info).
         foreach (var h in AllRoleContentHrefs)
             Assert.True(hrefs.Contains(h), $"{role} should see all-roles content page {h}.");
+        // §289: the removed Social-Media-Guidelines page never reappears.
+        Assert.DoesNotContain("/Info/help-promote", hrefs);
+    }
+
+    // ---- §288/§297: Party is a leaf under the "Register" menu (attendees excepted) ----
+
+    [Fact]
+    public void Party_is_a_leaf_under_register_for_every_non_attendee_role_not_top_level()
+    {
+        // §288b/§297: Party (register) moved OUT of "My tasks"/Event-logistics — for every
+        // non-attendee role it is a leaf under the "Register" menu (Nav.SectionRegister),
+        // never a top-level (null-section) item. §177 amends this for ATTENDEES (next test);
+        // an EXHIBITOR sponsor gets it inside "Exhibitor & Booth Details" instead (§297,
+        // asserted at the end + in Sponsor_menu_matches_redesign).
+        foreach (var role in Enum.GetValues<ParticipantRole>())
+        {
+            if (role == ParticipantRole.Attendee) continue;   // §177 — attendees get it in the MAIN nav
+
+            var group = NavBuilder.Build(role, speakerHasMasterClass: true).Groups[0];
+
+            var party = group.Items.SingleOrDefault(i => i.Href == "/Forms/Wizard?step=party");
+            Assert.NotNull(party);                                    // still present for every role
+            Assert.Equal("Nav.SectionRegister", party!.SectionKey);   // the "Register" fold-out leaf
+            Assert.Equal("Nav.PartySignup", party.LabelKey);          // §206: "Party Signup"
+
+            var sections = group.Sections();
+            var register = sections.Single(s => s.HeadingKey == "Nav.SectionRegister");
+            Assert.Contains("/Forms/Wizard?step=party", register.Items.Select(i => i.Href));
+            // Not a top-level (null-heading) leaf, and no longer under Event logistics.
+            var topLevel = sections.Single(s => s.HeadingKey is null);
+            Assert.DoesNotContain("/Forms/Wizard?step=party", topLevel.Items.Select(i => i.Href));
+            var logistics = sections.Single(s => s.HeadingKey == "Nav.SectionEventLogistics");
+            Assert.DoesNotContain("/Forms/Wizard?step=party", logistics.Items.Select(i => i.Href));
+        }
+
+        // §297: the EXHIBITOR sponsor exception — Party joins the booth fold-out.
+        var exhibitor = NavBuilder.Build(ParticipantRole.Sponsor, isExhibitor: true).Groups[0];
+        Assert.Equal("Nav.SectionExhibitorBooth",
+            exhibitor.Items.Single(i => i.Href == "/Forms/Wizard?step=party").SectionKey);
+    }
+
+    [Fact]
+    public void Attendee_party_is_a_single_prominent_main_nav_item()
+    {
+        // §353 (operator 2026-07-26) REVERSES §297: attendees now get the prominent MAIN-nav
+        // entry labelled "Party Preday" AND a duplicate under Register/Update. The duplicate is
+        // INTENTIONAL — the operator asked for both — so this test now pins TWO entries.
+        var group = NavBuilder.Build(ParticipantRole.Attendee).Groups[0];
+
+        // §326am: both deep-link into the wizard's INLINE party step (hub chrome, same tab)
+        // rather than the standalone /Party page.
+        const string PartyHref = "/Forms/Wizard?step=party";
+        var partyItems = group.Items.Where(i => i.Href == PartyHref).ToList();
+        Assert.Equal(2, partyItems.Count);
+
+        // The MAIN-nav one carries the new label and no section.
+        var main = Assert.Single(partyItems, i => i.SectionKey is null);
+        Assert.Equal("Nav.PartyPreday", main.LabelKey);
+        Assert.False(main.External);
+
+        // The Register/Update one keeps the shared label.
+        var register = Assert.Single(partyItems, i => i.SectionKey == "Nav.SectionRegister");
+        Assert.Equal("Nav.PartySignup", register.LabelKey);
+        Assert.False(register.External);
+
+        // §351-6: the standalone /Party page is no longer linked from the nav for ANY role —
+        // the wizard step is the single canonical party surface.
+        Assert.DoesNotContain(group.Items, i => i.Href == "/Party");
+
+        var sections = group.Sections();
+        var topLevel = sections.Single(s => s.HeadingKey is null);
+        Assert.Contains(PartyHref, topLevel.Items.Select(i => i.Href));
+        // Still NOT in the Event-Info fold-out — the §297 de-duplication holds there.
+        var logistics = sections.Single(s => s.HeadingKey == "Nav.SectionEventLogistics");
+        Assert.DoesNotContain(PartyHref, logistics.Items.Select(i => i.Href));
+    }
+
+    [Fact]
+    public void Event_info_foldout_renders_in_the_operator_order_not_alphabetized()
+    {
+        // §317 (operator 2026-07-24): the layout renders fold-outs in NavBuilder INSERTION
+        // order — the §173d "alphabetize Event logistics" projection is retired (the
+        // operator specifies the exact menu order). The Sections(resolver, keys) overload
+        // itself still works (Label_sort_leaves_non_targeted_sections_in_insertion_order).
+        var group = NavBuilder.Build(ParticipantRole.Speaker, speakerHasMasterClass: true).Groups[0];
+
+        var insertion = group.Sections().Single(s => s.HeadingKey == "Nav.SectionEventLogistics");
+        Assert.Equal(new[]
+        {
+            "/Info/last-event-videos", "/Info/good-to-know", "/Info/addresses", "/Info/wayfinding",
+            "/Info/ceh-introduction",   // §326ag
+            "/Sessions", "/Sessions/Slides",
+            // §326f: the logo-pack zip (speakers + sponsors only) — an EXTERNAL leaf.
+            "/logo-pack/download",
+            "https://expertslive.dk/code-of-conduct/", "https://expertslive.dk/privacy-policy/",
+        }, insertion.Items.Select(i => i.Href).ToList());
+        // §288/§297: Party is NOT in this fold-out anymore — it lives under "Register".
+        Assert.DoesNotContain("/Forms/Wizard?step=party", insertion.Items.Select(i => i.Href));
+        // The Policies pair stays a NESTED sub-fold-out (rendered auto-open by the layout).
+        // §326f/§326n: the OTHER Event-Info externals (logo pack; the chrome-less Sessions +
+        // Slides pages, which now open in a new tab) are plain LEAVES with no sub-fold-out.
+        foreach (var href in new[]
+                 { "https://expertslive.dk/code-of-conduct/", "https://expertslive.dk/privacy-policy/" })
+        {
+            Assert.Equal("Nav.SectionPolicies", insertion.Items.Single(i => i.Href == href).SubSectionKey);
+        }
+        Assert.Null(insertion.Items.Single(i => i.LabelKey == "Nav.DownloadLogos").SubSectionKey);
+        // §326n: menu items leading OUT of the hub chrome open in a new tab.
+        Assert.True(insertion.Items.Single(i => i.Href == "/Sessions").External);
+        Assert.True(insertion.Items.Single(i => i.Href == "/Sessions/Slides").External);
+    }
+
+    [Fact]
+    public void Label_sort_leaves_non_targeted_sections_in_insertion_order()
+    {
+        // §173d: only the named section(s) are alphabetized; every other section keeps its
+        // insertion order. A sponsor's Webshop fold-out (not targeted) must be untouched.
+        string Label(NavItem i) => i.FallbackLabel ?? i.LabelKey ?? i.Href;
+        var group = NavBuilder.Build(ParticipantRole.Sponsor, isExhibitor: true).Groups[0];
+
+        var viaPlain = group.Sections()
+            .Single(s => s.HeadingKey == "Nav.SectionSponsorWebshop").Items.Select(i => i.Href).ToList();
+        var viaSorted = group.Sections(Label, "Nav.SectionEventLogistics")
+            .Single(s => s.HeadingKey == "Nav.SectionSponsorWebshop").Items.Select(i => i.Href).ToList();
+
+        Assert.Equal(viaPlain, viaSorted);
+    }
+
+    // ---- §213/§285: every role has a "Get Started" entry in its MAIN (primary) nav -----
+    // §285: every role's Get-Started entry now opens the INLINE wizard at /Forms/Wizard —
+    // one route drives the generic wizard (Organizer/Media/EventPartner/Volunteer/Attendee),
+    // the speaker onboarding chain (§28) and the sponsor plan (§32, via SponsorWizardService).
+    // The item must live in the PRIMARY group (Groups[0]) — not a fold-out — so it is always
+    // one tap away. The per-role map stays so a future bespoke route is a one-line change.
+    private static readonly Dictionary<ParticipantRole, string> GetStartedRouteByRole = new()
+    {
+        [ParticipantRole.Organizer]    = "/Forms/Wizard",
+        [ParticipantRole.Speaker]      = "/Forms/Wizard",
+        [ParticipantRole.Volunteer]    = "/Forms/Wizard",
+        [ParticipantRole.Sponsor]      = "/Forms/Wizard",
+        [ParticipantRole.Attendee]     = "/Forms/Wizard",
+        [ParticipantRole.Media]        = "/Forms/Wizard",
+        [ParticipantRole.EventPartner] = "/Forms/Wizard",
+    };
+
+    [Fact]
+    public void Get_started_route_map_covers_every_role()
+    {
+        // Guard: if a new ParticipantRole is added, this map (and the per-role assertion
+        // below) must be extended — §213 requires EVERY role to have a get-started entry.
+        foreach (var role in Enum.GetValues<ParticipantRole>())
+            Assert.True(GetStartedRouteByRole.ContainsKey(role),
+                $"§213: role {role} has no expected Get-Started route — add it.");
+    }
+
+    [Theory]
+    [MemberData(nameof(AllRoleData))]
+    public void Every_role_has_a_get_started_entry_in_the_main_nav(ParticipantRole role)
+    {
+        // §213: the Get-Started item is in the PRIMARY/main group (Groups[0]) as a
+        // top-level (null-section) leaf, pointing at the role's own get-started wizard.
+        var primary = NavBuilder.Build(role, speakerHasMasterClass: true).Groups[0];
+        var expected = GetStartedRouteByRole[role];
+
+        var getStarted = primary.Items.FirstOrDefault(i =>
+            i.Href == expected && i.SectionKey is null);
+
+        Assert.True(getStarted is not null,
+            $"§213: role {role} must have a top-level main-nav Get-Started entry routed to {expected}.");
+    }
+
+    public static TheoryData<ParticipantRole> AllRoleData()
+    {
+        var data = new TheoryData<ParticipantRole>();
+        foreach (var r in Enum.GetValues<ParticipantRole>()) data.Add(r);
+        return data;
     }
 
     public static TheoryData<ParticipantRole> NonOrganizerNonSpeakerRoleData()

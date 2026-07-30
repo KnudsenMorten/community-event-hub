@@ -78,6 +78,9 @@
         <h3 style="margin-top:18px;">Freight + shipping</h3>
         <p style="margin:6px 0;">Ship to:</p>
         <pre style="background:#f8fafc;border:1px solid #e5e7eb;padding:10px;border-radius:6px;font-family:inherit;white-space:pre-wrap;">@Model.ShippingAddressDsv</pre>
+        @* §174b: mirror the attendee-bag marking so booth freight is identifiable on arrival.
+           Booth number + company resolve per sponsor (degrades to "Booth (TBA)" when unassigned). *@
+        <p style="margin:6px 0;">Mark every box with: <strong>@Model.DsvBoxMarking</strong></p>
         @if (!string.IsNullOrEmpty(Model.FreightContactPhone) || !string.IsNullOrEmpty(Model.FreightContactEmail))
         {
             <p>DSV Fairs &amp; Events:
@@ -92,6 +95,6 @@
         <h3 style="margin-top:18px;">Attendee-bag content shipping</h3>
         <p style="margin:6px 0;">If you ship brochures / swag for the attendee bags, send them to:</p>
         <pre style="background:#f8fafc;border:1px solid #e5e7eb;padding:10px;border-radius:6px;font-family:inherit;white-space:pre-wrap;">@Model.ShippingAddressBags</pre>
-        <p style="margin:6px 0;">Mark every box with: <strong>&lt;your company&gt; &mdash; Attendee Bag Content for @Model.EditionCode</strong></p>
+        <p style="margin:6px 0;">Mark every box with: <strong>@Model.BoxMarkingCompany &mdash; Attendee Bag Content for @Model.EditionCode</strong></p>
     }
 </div>

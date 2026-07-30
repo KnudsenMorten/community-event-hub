@@ -49,8 +49,17 @@ public interface ISocialShareGateway
     /// <summary>
     /// Build a share DRAFT (text + graphic + composer intent URL). Pure — no
     /// network call, no posting. Always available regardless of <see cref="CanPost"/>.
+    /// <paramref name="cardUrl"/> (§318c): a PUBLIC page whose OpenGraph card should carry
+    /// the post's image (e.g. the session page serving the graphic as og:image) — the X
+    /// intent adds it as the carded url= param.
+    /// <paramref name="intentText"/> (§322p): a COMPACT prefill for the LinkedIn composer
+    /// that SURVIVES LinkedIn's ~300-char prefill trim and CONTAINS the card URL — LinkedIn
+    /// renders the URL's OpenGraph card (the graphic) AND keeps the text, the §196-proven
+    /// combination. <paramref name="text"/> stays the FULL post body (clipboard/paste).
     /// </summary>
-    SocialShareDraft BuildDraft(SocialNetwork network, string text, string? graphicUrl);
+    SocialShareDraft BuildDraft(
+        SocialNetwork network, string text, string? graphicUrl,
+        string? cardUrl = null, string? intentText = null);
 }
 
 /// <summary>
@@ -63,18 +72,31 @@ public sealed class DraftOnlySocialShareGateway : ISocialShareGateway
 {
     public bool CanPost => false;
 
-    public SocialShareDraft BuildDraft(SocialNetwork network, string text, string? graphicUrl)
+    public SocialShareDraft BuildDraft(
+        SocialNetwork network, string text, string? graphicUrl,
+        string? cardUrl = null, string? intentText = null)
     {
         var intentUrl = network switch
         {
-            // LinkedIn feed share composer — opens prefilled, user posts. (LinkedIn's
-            // share-offsite URL only takes a url param; the article/compose composer
-            // is the closest prefilled-text surface, so we point at the feed share.)
+            // §322p (operator: "graphics came as a url … and the text is gone — do
+            // better"): the ONE web-intent combination that yields BOTH a picture and
+            // text on LinkedIn is the feed text-prefill whose text CONTAINS the session
+            // URL — LinkedIn renders that URL's OpenGraph card (the graphic) and keeps
+            // the text (§196-proven, the pre-§281 working state). The prefill must stay
+            // under LinkedIn's ~300-char trim ⇒ use the COMPACT intentText; the FULL body
+            // rides the clipboard (§318c auto-copy). share-offsite (card, no text) is the
+            // fallback when no compact text was provided.
+            SocialNetwork.LinkedIn when intentText is not null =>
+                "https://www.linkedin.com/feed/?shareActive=true&text=" + Uri.EscapeDataString(intentText),
+            SocialNetwork.LinkedIn when cardUrl is not null =>
+                "https://www.linkedin.com/sharing/share-offsite/?url=" + Uri.EscapeDataString(cardUrl),
+            // LinkedIn feed share composer — opens prefilled, user posts (no card).
             SocialNetwork.LinkedIn =>
                 "https://www.linkedin.com/feed/?shareActive=true&text=" + Uri.EscapeDataString(text),
-            // X web-intent — opens the composer prefilled with text, user posts.
+            // X web-intent — prefilled text (280-char cap is X's), plus the carded url when given.
             SocialNetwork.X =>
-                "https://twitter.com/intent/tweet?text=" + Uri.EscapeDataString(text),
+                "https://twitter.com/intent/tweet?text=" + Uri.EscapeDataString(intentText ?? text)
+                + (cardUrl is not null ? "&url=" + Uri.EscapeDataString(cardUrl) : string.Empty),
             _ => throw new ArgumentOutOfRangeException(nameof(network), network, "Unknown network."),
         };
 

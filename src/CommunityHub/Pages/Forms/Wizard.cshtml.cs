@@ -4,6 +4,7 @@ using CommunityHub.Forms;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
+using Microsoft.EntityFrameworkCore;
 
 namespace CommunityHub.Pages.Forms;
 
@@ -33,17 +34,38 @@ public class WizardModel : PageModel
     private readonly ICurrentParticipantAccessor _participant;
     private readonly SpeakerWizardService _speaker;
     private readonly RoleWizardService _role;
+    private readonly SponsorWizardService? _sponsor;
+    private readonly AttendeeWizardService? _attendee;   // §326ak
+    private readonly Core.Reminders.PartyRsvpService? _partyRsvp;
+    private readonly Core.Email.CalendarInviteEmailService? _calendarInvite;
+    private readonly ILogger<WizardModel>? _log;
     private readonly Dictionary<string, IWizardStepHandler> _handlers;
 
     public WizardModel(
         ICurrentParticipantAccessor participant,
         SpeakerWizardService speaker,
         RoleWizardService role,
-        IEnumerable<IWizardStepHandler> handlers)
+        IEnumerable<IWizardStepHandler> handlers,
+        // Optional + last so non-sponsor unit tests need not construct its heavy deps; the DI
+        // container always injects the registered service in production (§285).
+        SponsorWizardService? sponsor = null,
+        // §316: the party step's "e-mail me a calendar invite" (same optional-DI pattern).
+        Core.Reminders.PartyRsvpService? partyRsvp = null,
+        Core.Email.CalendarInviteEmailService? calendarInvite = null,
+        ILogger<WizardModel>? log = null,
+        // §326ak (operator 2026-07-25 BUG: "get started is empty" as a 2-day attendee):
+        // attendees DO have a wizard (§207: Master Class + Party) — this host just never
+        // asked for it. Optional + last so existing unit tests keep compiling.
+        AttendeeWizardService? attendee = null)
     {
         _participant = participant;
         _speaker = speaker;
         _role = role;
+        _sponsor = sponsor;
+        _attendee = attendee;
+        _partyRsvp = partyRsvp;
+        _calendarInvite = calendarInvite;
+        _log = log;
 
         // Key every discovered handler by its stable Key. In DEBUG a duplicate key is a
         // wiring bug (two handlers claim the same step) — fail loudly; in release last wins.
@@ -84,6 +106,9 @@ public class WizardModel : PageModel
     public bool AccessDenied { get; private set; }
     public bool NothingToDo { get; private set; }
     public bool ShowAllDone { get; private set; }
+    /// <summary>§297: every step is already done, but we still render the editable wizard (landed on
+    /// the first step) so the person can review/change any answer — never a dead-end at 100%.</summary>
+    public bool AllComplete { get; private set; }
     public WizardPlan? Plan { get; private set; }
     public int CurrentIndex { get; private set; }
     public string FullName { get; private set; } = string.Empty;
@@ -105,9 +130,9 @@ public class WizardModel : PageModel
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
 
-        // Sponsors keep their bespoke wizard (shared Company Details page).
-        if (me.Role == ParticipantRole.Sponsor) return RedirectToPage("/Sponsor/GetStarted");
-
+        // §285: sponsors now run through the SAME inline wizard as every other role (their
+        // plan comes from SponsorWizardService in BuildPlanAsync). No more redirect to the
+        // card-stepper / Company Details deep-links.
         FullName = me.FullName;
         Plan = await BuildPlanAsync(me, ct);
         // A null plan means the role simply has no generic wizard (e.g. Attendee) — that is NOT a
@@ -120,7 +145,14 @@ public class WizardModel : PageModel
         // otherwise the first incomplete step; otherwise everything is done.
         var idx = !string.IsNullOrEmpty(step) ? Plan.IndexOf(step) : -1;
         if (idx < 0) idx = Plan.NextStep is { } n ? Plan.IndexOf(n.Key) : -1;
-        if (idx < 0) { ShowAllDone = true; return Page(); }
+        if (idx < 0)
+        {
+            // §297: all steps complete. DON'T dead-end on a "go to hub" card — it was very confusing
+            // how to edit once you hit 100%. Land on the FIRST step (fully editable) with the step
+            // rail + Prev/Next so ANY answer can be reviewed/changed, plus an "all done" banner.
+            AllComplete = true;
+            idx = 0;
+        }
 
         CurrentIndex = idx;
         CurrentHandler = ResolveHandler(Plan.Steps[idx].Key);
@@ -134,8 +166,6 @@ public class WizardModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role == ParticipantRole.Sponsor) return RedirectToPage("/Sponsor/GetStarted");
-
         FullName = me.FullName;
 
         // Stateless: rebuild the plan from current data so re-entry / refresh is always correct.
@@ -162,6 +192,25 @@ public class WizardModel : PageModel
             return AdvanceFrom(idx);
 
         var outcome = await handler.SaveAsync(BuildContext(me, ct));
+
+        // §393 — SAVE & EXIT (operator 2026-07-26: "when i hit for example master class selection in
+        // the main menu, it take me to step 1, then step 2 then step 3 (party). it seems not
+        // relevant to go through all steps … otherwise we should have a save button next to the
+        // Save & Next").
+        //
+        // Deliberately NOT solved by trimming steps from the plan: the wizard is also the genuine
+        // first-run onboarding, where Party DOES belong. The problem is only that arriving from a
+        // MENU ITEM means you wanted one step, not the tour. So the step list is untouched and the
+        // person gets a way out that still SAVES.
+        //
+        // Placed after SaveAsync and gated on a successful outcome, so "exit" can never be a way to
+        // skip validation: an Invalid step falls through and re-renders with its errors exactly as
+        // "next" does.
+        if (dir == "exit" && outcome is WizardStepOutcome.Advance or WizardStepOutcome.NotRelevant)
+        {
+            return RedirectToPage("/Index");
+        }
+
         switch (outcome)
         {
             case WizardStepOutcome.Advance:
@@ -182,6 +231,340 @@ public class WizardModel : PageModel
                 CurrentIndex = idx;
                 CurrentHandler = handler;   // Model already holds the posted values from SaveAsync
                 return Page();
+        }
+    }
+
+    /// <summary>
+    /// §316: the party step's "e-mail me a calendar invite" — the SAME §193/§206 invite the
+    /// standalone /Party page sends (stable UID ⇒ re-send updates the same entry; honors the
+    /// calendar/override e-mail), but returned to the wizard's party step so the flow is not
+    /// interrupted. Fail-soft with a flash message.
+    /// </summary>
+    public async Task<IActionResult> OnPostPartyInviteAsync(CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+        if (_partyRsvp is null || _calendarInvite is null) return RedirectToPage(new { step = "party" });
+
+        var party = await _partyRsvp.GetActivePartyAsync(ct);
+        if (party is null) return RedirectToPage(new { step = "party" });
+
+        var (startUtc, endUtc) = Core.Reminders.PartyRsvpService.WindowUtc(party);
+        try
+        {
+            // §252: alongside the attached .ics, the mail offers open-in-browser links
+            // (Google + Outlook compose) — same content as the /Party page's invite.
+            var summary = $"{party.EventName} — Party";
+            var details = $"Join us for the {party.EventName} party — {party.Location}.";
+            var googleUrl = System.Net.WebUtility.HtmlEncode(Core.Email.CalendarLinkBuilder.GoogleUrl(
+                summary, startUtc, endUtc, details, party.Location));
+            var outlookUrl = System.Net.WebUtility.HtmlEncode(Core.Email.CalendarLinkBuilder.OutlookUrl(
+                summary, startUtc, endUtc, details, party.Location));
+            var sent = await _calendarInvite.SendItemInviteAsync(
+                me.ParticipantId,
+                uid: $"party-{party.EventId}@eventhub",
+                summary: summary,
+                description: details,
+                location: party.Location,
+                start: startUtc,
+                end: endUtc,
+                allDay: false,
+                fileName: "party.ics",
+                introHtml: "Here is your calendar invitation for the party. Prefer to add it online? "
+                    + $"Open it in <a href=\"{googleUrl}\">Google Calendar</a> or "
+                    + $"<a href=\"{outlookUrl}\">Outlook</a>.",
+                ct: ct);
+            TempData["PartyInviteMessage"] = sent
+                ? sent.Confirmation()
+                : "Calendar invitations are turned off for this event.";
+        }
+        catch (Exception ex)
+        {
+            _log?.LogWarning(ex, "Wizard party calendar invite failed for participant {Pid}.", me.ParticipantId);
+            TempData["PartyInviteMessage"] = "We couldn't send the invite just now — please try again later.";
+        }
+        return RedirectToPage(new { step = "party" });
+    }
+
+    /// <summary>
+    /// §370 — give up the confirmed Master Class seat from the inline wizard step.
+    ///
+    /// <para>The control used to live only on <c>/Attendee</c>, which §365 removed from the nav —
+    /// leaving an attendee no reachable way to cancel. Delegates to the SAME
+    /// <c>MasterClassSignupService.RemoveAsync</c> the old page used, so the freed seat still
+    /// promotes the next person on the waitlist exactly as before.</para>
+    /// </summary>
+    public async Task<IActionResult> OnPostMasterClassGiveUpAsync(
+        [FromServices] Core.Reminders.MasterClassSignupService signups,
+        [FromServices] Core.Email.MasterClassEmailService mcEmail,
+        [FromServices] Core.Email.MasterClassPromotionEmailService promo,
+        CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+
+        var attendee = await signups.ResolveByEmailAsync(me.EventId, me.Email, ct);
+        if (attendee is null) return RedirectToPage(new { step = "masterclass" });
+
+        var mine = await signups.GetForAttendeeAsync(me.EventId, attendee.Id, ct);
+        var confirmed = mine.FirstOrDefault(
+            s => s.Status == Core.Domain.MasterClassSignupStatus.Confirmed);
+        if (confirmed is null) return RedirectToPage(new { step = "masterclass" });
+
+        // §387 (operator 2026-07-26: "i still did NOT get any email when i was moved up and got a
+        // seat from the waitlist"). RemoveAsync RETURNS the promotion it caused — and this handler
+        // used to THROW THAT RETURN VALUE AWAY. The seat moved in the database, which is why the
+        // promotion looked like it worked, but the person who got it was never told.
+        //
+        // Every other give-up surface (/Attendee, /Attendee/Waitlist, /MyMasterClass) sends this
+        // mail; the wizard step did not — and §370 had just made the wizard THE place attendees
+        // cancel from, so the one surface that was missing it became the only one being used.
+        var promotion = await signups.RemoveAsync(me.EventId, attendee.Id, confirmed.SessionId, ct);
+
+        if (promotion?.PromotedSignupId is int promotedId)
+        {
+            // ONE mail, not two (operator: "I dont need to have 2 emails"): the promotion mail
+            // itself names the released seat via §386's ReleasedTitle, so the promoted attendee gets
+            // "you moved up AND your old seat was released" in a single message.
+            try { await promo.SendPromotionAsync(promotedId, BaseUrlFor(), ct, promotion.ReleasedTitle); }
+            catch { /* the promotion stands even if the mail fails; the job retries */ }
+        }
+
+        try
+        {
+            // …and the person who GAVE UP the seat gets their own cancellation confirmation.
+            await mcEmail.SendCancelledAsync(
+                me.EventId, attendee.Email, attendee.FirstName, attendee.LastName,
+                confirmed.Title, BaseUrlFor(), attendee.Id, ct);
+        }
+        catch { /* the cancellation stands even if the mail fails */ }
+
+        TempData["MasterClassInviteMessage"] =
+            "Your Master Class seat was given up. You can choose another one below while seats last.";
+        return RedirectToPage(new { step = "masterclass" });
+    }
+
+    /// <summary>
+    /// §400 — e-mail a calendar invitation for ONE dated task from the deadlines step.
+    ///
+    /// <para>Reuses the SAME <c>task-{id}@{host}</c> UID the hub's "Send Reminder to My Calendar"
+    /// button uses, so pressing either one updates the same calendar entry instead of creating a
+    /// second copy of the same deadline.</para>
+    /// </summary>
+    public async Task<IActionResult> OnPostTaskReminderAsync(
+        int taskId,
+        [FromServices] Core.Email.CalendarInviteEmailService calendar,
+        [FromServices] CommunityHub.Forms.Steps.DeadlinesFormService deadlines,
+        CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+
+        var sent = await SendTaskInviteAsync(calendar, deadlines, me, taskId, ct);
+        TempData["CalendarInviteMessage"] = sent
+            ? sent.Confirmation("Reminder")
+            : "We couldn't send that reminder just now — please try again.";
+
+        return RedirectToPage(new { step = "deadlines" });
+    }
+
+    /// <summary>
+    /// §400 — one button for every dated, still-open task (operator: <i>"Send Calendar invites for
+    /// all tasks (one button)"</i>). Each is a separate invitation with its own stable UID, so a
+    /// re-press updates rather than duplicates.
+    /// </summary>
+    public async Task<IActionResult> OnPostAllTaskRemindersAsync(
+        [FromServices] Core.Email.CalendarInviteEmailService calendar,
+        [FromServices] CommunityHub.Forms.Steps.DeadlinesFormService deadlines,
+        CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+
+        var ids = await deadlines.DatedPendingTaskIdsAsync(me.EventId, me.ParticipantId, ct);
+        var sent = 0;
+        foreach (var id in ids)
+        {
+            // One failure must not abandon the rest of the list.
+            if (await SendTaskInviteAsync(calendar, deadlines, me, id, ct)) sent++;
+        }
+
+        TempData["CalendarInviteMessage"] = ids.Count == 0
+            ? "You have no dated deadlines to add yet."
+            : sent == ids.Count
+                ? $"Sent {sent} calendar invitation(s) — check your inbox."
+                : $"Sent {sent} of {ids.Count} invitations; please try the rest again shortly.";
+
+        return RedirectToPage(new { step = "deadlines" });
+    }
+
+    /// <summary>Shared by both handlers so the single and the bulk path cannot diverge.</summary>
+    private async Task<Core.Email.CalendarInviteResult> SendTaskInviteAsync(
+        Core.Email.CalendarInviteEmailService calendar,
+        CommunityHub.Forms.Steps.DeadlinesFormService deadlines,
+        CurrentParticipant me, int taskId, CancellationToken ct)
+    {
+        // Resolved through the step's own service, which applies the checklist's visibility rule —
+        // so this can never invite someone to a task that is not theirs, and never refuse one the
+        // step just listed.
+        var task = await deadlines.DatedTaskAsync(me.EventId, me.ParticipantId, taskId, ct);
+        if (task is null) return Core.Email.CalendarInviteResult.NotSent;
+
+        var start = new DateTimeOffset(task.DueDate.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
+        var description = string.IsNullOrWhiteSpace(task.Description)
+            ? "Deadline from your Event Hub. Open the hub to update this item."
+            : Core.Email.TaskMarkup.ToPlainText(task.Description);
+
+        try
+        {
+            return await calendar.SendItemInviteAsync(
+                me.ParticipantId,
+                uid: $"task-{task.Id}@{Request.Host.Host}",
+                summary: task.Title,
+                description: description,
+                location: null,
+                start: start,
+                end: start.AddDays(1),
+                allDay: true,
+                fileName: "reminder.ics",
+                introHtml: $"Here is a reminder for <strong>{System.Net.WebUtility.HtmlEncode(task.Title)}</strong>, due {task.DueDate:d MMM yyyy}.",
+                ct: ct);
+        }
+        catch (Exception ex)
+        {
+            _log?.LogWarning(ex, "Wizard task reminder failed for task {TaskId}.", taskId);
+            return Core.Email.CalendarInviteResult.NotSent;
+        }
+    }
+
+    private string BaseUrlFor() => $"{Request.Scheme}://{Request.Host}";
+
+    /// <summary>
+    /// §352 — e-mail the attendee a calendar invitation for their CONFIRMED Master Class from the
+    /// inline wizard step (operator 2026-07-26 asked for the button on BOTH steps).
+    ///
+    /// <para>Reuses <c>MasterClassDayWindowUtc()</c> and <c>MasterClassInviteUid()</c> — the SAME
+    /// window and UID the confirmation mail's invite uses — so the two can never disagree and a
+    /// re-send UPDATES the existing calendar entry instead of duplicating it (§341-1).</para>
+    /// </summary>
+    public async Task<IActionResult> OnPostMasterClassInviteAsync(
+        [FromServices] Core.Reminders.MasterClassSignupService signups,
+        [FromServices] Core.Email.MasterClassEmailService mcEmail,
+        CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+        if (_calendarInvite is null) return RedirectToPage(new { step = "masterclass" });
+
+        var attendee = await signups.ResolveByEmailAsync(me.EventId, me.Email, ct);
+        if (attendee is null) return RedirectToPage(new { step = "masterclass" });
+
+        var mine = await signups.GetForAttendeeAsync(me.EventId, attendee.Id, ct);
+        var confirmed = mine.FirstOrDefault(
+            s => s.Status == Core.Domain.MasterClassSignupStatus.Confirmed);
+        if (confirmed is null)
+        {
+            TempData["MasterClassInviteMessage"] =
+                "You need a confirmed Master Class seat before we can send the invite.";
+            return RedirectToPage(new { step = "masterclass" });
+        }
+
+        try
+        {
+            var (startUtc, endUtc) = mcEmail.MasterClassDayWindowUtc();
+            var sent = await _calendarInvite.SendItemInviteAsync(
+                me.ParticipantId,
+                uid: Core.Email.MasterClassEmailService.MasterClassInviteUid(
+                    confirmed.SessionId, Request.Host.Host),
+                summary: confirmed.Title,
+                description: "Your Master Class. Registration & breakfast open at 07:00 — come "
+                    + "early so we can check everyone in; the class itself runs 09:00–16:00.",
+                location: string.Empty,
+                start: startUtc,
+                end: endUtc,
+                allDay: false,
+                fileName: "master-class.ics",
+                introHtml: "Here is your calendar invitation for your Master Class.",
+                ct: ct);
+
+            TempData["MasterClassInviteMessage"] = sent
+                ? sent.Confirmation()
+                : "Calendar invitations are turned off for this event.";
+        }
+        catch (Exception ex)
+        {
+            _log?.LogWarning(ex,
+                "Wizard Master Class calendar invite failed for participant {Pid}.", me.ParticipantId);
+            TempData["MasterClassInviteMessage"] =
+                "We couldn't send the invite just now — please try again later.";
+        }
+        return RedirectToPage(new { step = "masterclass" });
+    }
+
+    /// <summary>§322n: the hotel step's "Email me a calendar invite" — the standard §193
+    /// invitation for the saved hotel dates; back to the hotel step with a flash.
+    /// §424: saves the step first (see <see cref="SaveStepBeforeInviteAsync"/>).</summary>
+    public async Task<IActionResult> OnPostHotelInviteAsync(
+        [FromServices] CommunityHub.Forms.Steps.HotelFormService hotelForm, CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+        await SaveStepBeforeInviteAsync(me, "hotel", ct);
+        var (_, message) = await hotelForm.SendInviteEmailAsync(me.EventId, me.ParticipantId, ct);
+        TempData["HotelInviteMessage"] = message;
+        return RedirectToPage(new { step = "hotel" });
+    }
+
+    /// <summary>§322n: the dinner step's "Email me a calendar invite" — the standard §193
+    /// invitation for the saved RSVP=Yes; back to the dinner step with a flash.
+    /// §424: saves the step first (see <see cref="SaveStepBeforeInviteAsync"/>).</summary>
+    public async Task<IActionResult> OnPostDinnerInviteAsync(
+        [FromServices] CommunityHub.Forms.Steps.DinnerFormService dinnerForm, CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+        await SaveStepBeforeInviteAsync(me, "dinner", ct);
+        var (_, message) = await dinnerForm.SendInviteEmailAsync(me.EventId, me.ParticipantId, ct);
+        TempData["DinnerInviteMessage"] = message;
+        return RedirectToPage(new { step = "dinner" });
+    }
+
+    /// <summary>
+    /// §424 — persist the step the invite button lives on, BEFORE sending the invite.
+    ///
+    /// <para><b>Why.</b> The operator reported the buttons missing entirely (2026-07-27: <i>"i am
+    /// missing the button to send calendar invite for Appreciation Dinner + Hotel in the get
+    /// started wizard for all roles if they choose yes"</i>). They existed, but rendered only when
+    /// the LOADED model already said Yes — and a submit button with <c>asp-page-handler</c>
+    /// bypasses <see cref="OnPostAsync"/> entirely, so the Yes you just clicked was never saved.
+    /// Between those two facts the button was invisible until you had saved, navigated away, and
+    /// come back; and had it been visible, pressing it would have sent nothing, because
+    /// <c>SendInviteEmailAsync</c> re-derives from the database and would have found no RSVP.</para>
+    ///
+    /// <para>Saving first makes the button mean what it says the moment you press it. Failures are
+    /// deliberately swallowed: the send that follows re-reads the database and reports honestly
+    /// ("RSVP Yes and save first — then the invite has something to contain"), so a rejected save
+    /// surfaces as an accurate message rather than a lost keystroke.</para>
+    /// </summary>
+    private async Task SaveStepBeforeInviteAsync(CurrentParticipant me, string stepKey, CancellationToken ct)
+    {
+        try
+        {
+            Plan = await BuildPlanAsync(me, ct);
+            if (Plan is null || Plan.IndexOf(stepKey) < 0) return;
+
+            var handler = ResolveHandler(stepKey);
+            if (handler is not null) await handler.SaveAsync(BuildContext(me, ct));
+        }
+        catch
+        {
+            // Never let a save problem swallow the invite request itself — the send below
+            // reads the persisted state and says what it actually found.
+        }
+        finally
+        {
+            // The invite handlers redirect, so nothing here should leak into a rendered page.
+            ModelState.Clear();
         }
     }
 
@@ -206,11 +589,36 @@ public class WizardModel : PageModel
 
     private IActionResult RedirectToStep(string key) => RedirectToPage(new { step = key });
 
+    // §285: a sponsor step's section link (used by the handler-less fallback in the view) — the
+    // party step opens /Party (group reservation); every other step opens its section on the
+    // shared Company Details page with the fragment so it lands at the right place.
+    private static string SponsorStepRoute(string anchor) => anchor switch
+    {
+        "party" => "/Party",
+        "deadlines" => "/Tasks",   // §400 — not a Company Details section; it IS the task list
+        _ => "/Sponsor/CompanyDetails#" + anchor,
+    };
+
     private IActionResult RedirectToStepOrHub(PlanStep? step) =>
         step is null ? RedirectToPage("/Index") : RedirectToStep(step.Key);
 
     private async Task<WizardPlan?> BuildPlanAsync(CurrentParticipant me, CancellationToken ct)
     {
+        if (me.Role == ParticipantRole.Sponsor)
+        {
+            // §285: sponsors run through the shared inline wizard. Steps with an inline handler
+            // render their fields in-place; steps without one fall back to their Company-Details
+            // section link (the party step → /Party). Onboarding-only steps per §286.
+            if (_sponsor is null) return null;   // heavy service unavailable (unit-test path)
+            var sv = await _sponsor.BuildAsync(me.EventId, me.ParticipantId, ct);
+            if (sv is null) return null;
+            return new WizardPlan
+            {
+                ResxPrefix = "SponsorWiz",
+                Steps = sv.Steps.Select(s => new PlanStep(s.Key, SponsorStepRoute(s.Anchor), s.Done ?? false)).ToList(),
+            };
+        }
+
         if (me.Role == ParticipantRole.Speaker)
         {
             var v = await _speaker.BuildAsync(me.EventId, me.ParticipantId, ct);
@@ -231,6 +639,21 @@ public class WizardModel : PageModel
             };
         }
 
-        return null;   // role has no generic/inline wizard (e.g. Attendee)
+        // §326ak (operator 2026-07-25 BUG — "get started is empty" as a 2-day attendee):
+        // attendees DO have a wizard (§207/§208: Master Class + Party for a 2-day holder,
+        // Party alone for 1-day). The nav sends EVERY role to /Forms/Wizard (§285), so
+        // returning null here rendered "There are no get-started steps for you right now."
+        // AttendeeWizardService returns a RoleWizardView, so it uses the RoleWiz labels.
+        if (me.Role == ParticipantRole.Attendee && _attendee is not null)
+        {
+            var av = await _attendee.BuildAsync(me.EventId, me.ParticipantId, ct);
+            return new WizardPlan
+            {
+                ResxPrefix = "RoleWiz",
+                Steps = av.Steps.Select(s => new PlanStep(s.Key, s.Route, s.Done)).ToList(),
+            };
+        }
+
+        return null;   // role genuinely has no inline wizard
     }
 }

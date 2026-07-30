@@ -18,11 +18,52 @@
 }
 
 <style>
+    /* §662 — THE HOVER BUG, and it was never in this file's colours.
+       `_LayoutStyles` carries a global `a:hover { color: var(--el-darkblue); }`. That selector
+       is an element + a pseudo-class (specificity 0,1,1) and beats a plain class like
+       `.btn-linkcard` (0,1,0) — so hovering ANY <a class="btn"> swapped the white label for
+       dark blue. On the dark-navy alternative button that is dark-on-dark: "when I move move
+       over it blanks the color so i cannot read text". Pinning color on :hover/:focus fixes
+       every button in the row, which is what §662 asked for — not just the one he arrowed. */
     .btn { background:#008BD2; color:#fff; border:0; border-radius:6px;
            padding:8px 14px; font-size:14px; cursor:pointer; text-decoration:none; }
-    .btn:hover { background:#0079b8; }
+    .btn:hover, .btn:focus { background:#0079b8; color:#fff; }
     .btn-publish { background:#0a66c2; }
-    .btn-publish:hover { background:#084d92; }
+    .btn-publish:hover, .btn-publish:focus { background:#084d92; color:#fff; }
+    /* §663 supersedes §441's colour-coding: the two LinkedIn routes are now told apart by the
+       CARD they sit in and its badge (Recommended / Fastest), so the buttons no longer have to
+       carry that job in colour. Both are LinkedIn blue — which is also §662's "change color of
+       this to same as the others". */
+    .btn-linkcard { background:#0a66c2; color:#fff; border:0; }
+    .btn-linkcard:hover, .btn-linkcard:focus { background:#084d92; color:#fff; }
+
+    /* §663 — the operator's two-card mock-up. Two real choices presented side by side, each
+       stating its own trade-off, instead of one long paragraph above a row of buttons
+       explaining which button to press. */
+    /* flex-basis:100% because .li-choices is itself a child of the .gfx-actions flex row —
+       same trick .gfx-steps uses, so the pair claims its own line and the remaining buttons
+       (Share on X, Download graphic, Publish to LinkedIn page) wrap underneath it. */
+    .li-choices { flex-basis:100%; display:flex; flex-wrap:wrap; gap:12px; margin:10px 0 4px; }
+    .li-choice { flex:1 1 260px; min-width:0; display:flex; flex-direction:column; gap:8px;
+                 border:1px solid #d7e3f4; border-radius:10px; padding:14px;
+                 background:#f8fbff; }
+    .li-choice__badge { align-self:flex-start; font-size:11.5px; font-weight:700;
+                        letter-spacing:.04em; text-transform:uppercase;
+                        padding:3px 9px; border-radius:999px; }
+    .li-choice__badge--rec  { background:#dcfce7; color:#166534; border:1px solid #86efac; }
+    .li-choice__badge--fast { background:#fef3c7; color:#92400e; border:1px solid #fcd34d; }
+    .li-choice__h { font-weight:700; font-size:15px; color:var(--el-darkblue); line-height:1.35; }
+    .li-choice__b { margin:0; font-size:13.5px; line-height:1.5; color:#4b5563; flex:1 1 auto; }
+    .li-choice .btn { text-align:center; }
+    /* Mobile-first: the two cards stack, and each button spans its card. */
+    @@media (max-width: 560px) {
+        .li-choice { flex:1 1 100%; }
+        .li-choice .btn { width:100%; }
+    }
+    .gfx-steps { flex-basis:100%; margin:6px 0 0; padding:10px 12px; font-size:13px;
+                 line-height:1.55; background:#f0f9ff; border:1px solid #bae6fd;
+                 border-radius:8px; color:#0c4a6e; }
+    .gfx-steps ol { margin:6px 0 0; padding-left:20px; }
     @@media (max-width: 460px) {
         .gfx-actions form { flex:1 1 100%; }
         .gfx-actions form .btn { width:100%; }
@@ -44,30 +85,6 @@
     }
 </style>
 
-<div class="card">
-    <h1>Help Promote</h1>
-    @if (Model.AnnouncementDraft is not null)
-    {
-        <p style="margin-top:0;">Here's a ready-made post — review it and share when you're ready.</p>
-        <label for="announce-text"><strong>Your post</strong></label>
-        <textarea id="announce-text" rows="7" readonly aria-label="Draft post text"
-                  style="width:100%; box-sizing:border-box;">@Model.AnnouncementDraft.Text</textarea>
-        @* §160: the two share buttons live UNDER the post text and carry the SAME (correct) post text. *@
-        <p style="margin-top:8px;display:flex;flex-wrap:wrap;gap:8px;">
-            <a class="btn" href="@Model.AnnouncementDraft.IntentUrl" target="_blank" rel="noopener noreferrer">
-                Share on LinkedIn (draft)
-            </a>
-            @if (Model.AnnouncementDraftX is not null)
-            {
-                <a class="btn" href="@Model.AnnouncementDraftX.IntentUrl" target="_blank" rel="noopener noreferrer">
-                    Share on X (draft)
-                </a>
-            }
-        </p>
-        <p style="font-size:12.5px;color:#6b7280;margin:4px 0 0;">Tip: download a graphic below and attach it to your post.</p>
-    }
-</div>
-
 @if (!string.IsNullOrEmpty(Model.PublishMessage))
 {
     <div class="card">
@@ -81,19 +98,62 @@
     </div>
 }
 
+@* §326s (operator 2026-07-25 "merge into one paragraph"): the separate H1 card + the
+   "Help promote your speaking engagement" card are ONE card now; the step-by-step
+   intro and the per-card ordering hint were removed on request. *@
 <div class="card">
-    <h3>Graphics to go with your post</h3>
+    <h1>Help Promote</h1>
+    @* §289: the "Social Media Guidelines" nav page was removed — its copy lives here now. *@
+    <p style="background:#eef6ff;padding:10px 14px;border-radius:6px;font-size:14px;">
+        Please create awareness around your session on social media. Use tags
+        <strong>#ELDK27 #ExpertsLiveDK</strong>.
+    </p>
+    @* §326ad (operator 2026-07-25): the post itself is complete when the composer opens —
+       but a real page TAG is a LinkedIn annotation that only the author can insert from the
+       composer's drop-down (a share link cannot carry it, §326ac). So we ASK for it here,
+       in the header, instead of adding steps to every card. ("@@" renders one "@".) *@
+    <p style="background:#fffbeb;border:1px solid #fde68a;padding:10px 14px;border-radius:6px;font-size:14px;color:#78350f;">
+        💡 <strong>Please tag us in your post</strong> — in the LinkedIn composer, type
+        <strong>@@Experts Live Denmark</strong> and pick the page from the drop-down.
+        It only takes a second, and it puts your session in front of the whole community.
+        (LinkedIn only allows tagging from inside the composer, so we can't add it for you.)
+        <br />
+        @* §430 (operator 2026-07-27: "can you make picture smaller"). At max-width:100% this
+           screenshot rendered ~630px wide and dominated the page — it is an ILLUSTRATION of one
+           drop-down, not the content, and at full width it read as the main event above the
+           actual graphics below it. Capped at 380px; still legible, and it stays subordinate to
+           the instruction it is illustrating. `width:100%` keeps it shrinking on a phone. *@
+        <img src="/content/eldk27/help-promote/tag-sample.png"
+             alt="LinkedIn composer showing the Experts Live Denmark page in the tag drop-down"
+             style="width:100%;max-width:380px;height:auto;display:block;border:1px solid #fde68a;border-radius:6px;margin-top:10px;" />
+    </p>
+    @* §663 (operator 2026-07-29, supplied as a mock-up): this explanatory paragraph is GONE.
+       It described the two routes in prose above a row of buttons, so the reader had to hold
+       "preferred means the one that attaches the file" in their head while scanning for the
+       right button. Each route now states its own trade-off inside its own card, next to its
+       own button — see the .li-choices block on each graphic below. *@
     @if (Model.CanPublishToLinkedIn)
     {
         <p style="margin-top:0;font-size:13.5px;color:#4b5563;">You can also <strong>publish to the event's
-           LinkedIn page</strong> — pick a released graphic and use "Publish to LinkedIn page".</p>
+           LinkedIn page</strong> — pick a released graphic and use "Publish to LinkedIn page"
+           (that route uploads the picture natively, no attaching needed).</p>
     }
     @if (Model.Cards.Count == 0)
     {
-        <p class="gfx-empty">
-            No graphics have been released to you yet. Once the organizers review and
-            release your graphics, they'll appear here.
-        </p>
+        @* §326ah (operator 2026-07-25): the empty state was a small grey line that got
+           overlooked — make it a proper, readable message. *@
+        <div style="background:#eef6ff;border:1px solid #cfe0f5;border-left:5px solid #1565c0;
+                    padding:16px 18px;border-radius:8px;font-size:15px;line-height:1.6;color:#1f2937;">
+            <strong style="display:block;font-size:17px;color:#1D3380;margin-bottom:6px;">
+                🎨 Your session graphics are not ready yet
+            </strong>
+            The organizers prepare a personal promotion graphic for each of your sessions.
+            As soon as one is released it shows up here — together with a ready-made post
+            text you can share on LinkedIn or X in a couple of clicks.
+            <span style="display:block;margin-top:8px;color:#4b5563;font-size:14px;">
+                Nothing for you to do right now — just come back to this page later.
+            </span>
+        </div>
     }
     else
     {
@@ -102,15 +162,100 @@
             {
                 <li class="gfx-item">
                     <div class="gfx-main">
-                        <div class="gfx-kind">@c.Kind</div>
-                        @if (!string.IsNullOrWhiteSpace(c.Title))
+                        @* §311 (operator 2026-07-24): the SESSION TITLE is the heading —
+                           a "Session graphic" label line made no sense. *@
+                        <div class="gfx-kind">@(string.IsNullOrWhiteSpace(c.Title) ? c.Kind : c.Title)</div>
+                        @* §311: the FULL post text, visible + copyable. LinkedIn/X cap the
+                           text a share link can PREFILL (X: 280 chars) and an intent can
+                           never attach an image — so the reliable path is copy + paste,
+                           and attach the downloaded graphic in the composer. *@
+                        @if (c.LinkedInShare is not null)
                         {
-                            <div class="gfx-title">@c.Title</div>
+                            <details style="margin-top:6px;">
+                                <summary style="cursor:pointer;font-size:13.5px;color:#1f6feb;">Show the full post text</summary>
+                                <textarea readonly rows="12" data-post-text
+                                          style="margin-top:6px;font-size:13px;max-width:720px;">@c.LinkedInShare.Text</textarea>
+                                <button type="button" class="btn js-copy-post" style="margin-top:2px;">Copy text</button>
+                                @* §326s: the "Order matters …" hint was removed on operator request. *@
+                            </details>
                         }
                         <div class="gfx-actions">
-                            @* §160: per-graphic action is ONLY the direct download (proxied through the
-                               hub). The per-graphic "Share on LinkedIn/X" buttons were removed — sharing
-                               is done from the post text above; download the image and attach it. *@
+                            @* §172: each session/master-class (and track) card carries its OWN per-session
+                               Share buttons, whose post text links to that session's public page — the
+                               page's OpenGraph card pulls THIS graphic into the shared post. Only rendered
+                               when a tailored draft exists (a released graphic for that session). The plain
+                               speaker-headshot card has no session to anchor a share to, so it stays
+                               download-only. *@
+                            @* §318c: clicking a share button COPIES the full post text (the
+                               composer opens with the graphic card but no prefilled text —
+                               the speaker pastes). *@
+                            @* §326p: the §324c one-click own-profile button is REMOVED —
+                               the share intent + clipboard paste is the flow. *@
+                            @* §326x: the click ALSO downloads the PNG (data-graphic-url) and
+                               copies the full text, so the speaker attaches a real image and
+                               pastes — the composer opens empty (no link card). *@
+                            @* §437 (operator 2026-07-27: "i want the post to be an image …
+                               instead it becomes a url-based image and not a picture … Or do we
+                               need to download image to disk + manually attach as image to the
+                               post"). His second guess is the right one, and it cannot be
+                               automated away: a LinkedIn share LINK carries plain text only, so
+                               the picture can only reach the post as the URL's preview CARD —
+                               a native image needs an API upload with the AUTHOR's token, which
+                               for a speaker's OWN profile would mean an app consent we ruled out
+                               in §326w. (The EVENT PAGE post does upload natively — see
+                               "Publish to LinkedIn page" below.)
+                               So the manual route stops being a footnote and becomes the FIRST,
+                               primary button: download the PNG, copy the text, open an EMPTY
+                               composer, attach. The link-card route stays for one-click speed. *@
+                            @* §464 (operator 2026-07-27): this used to open LinkedIn IMMEDIATELY in a
+                               new tab, which took focus — so the instructions rendered back in THIS
+                               tab, where nobody was looking. Now the click only prepares (download +
+                               copy) and REVEALS the steps; a second "Continue to LinkedIn" button
+                               opens the composer once they have been read. Both actions are real
+                               user gestures, so the download and the popup are never blocked.
+                               NOT an <a href> any more — it must not navigate on the first click. *@
+                            @* §663 — the two LinkedIn routes as two CARDS, per the operator's
+                               mock-up. The wording is his: badge, heading, the one-line
+                               trade-off, then the button. Rendered as a flex-basis pair so
+                               they sit side by side on desktop and stack at ~360px.
+                               The behaviour of both buttons is UNCHANGED — same handlers, same
+                               data-attributes, same §464 reveal-then-continue flow. This is a
+                               presentation change; rewiring the share logic at the same time is
+                               how a layout fix turns into a broken share. *@
+                            @if (c.LinkedInShare is not null)
+                            {
+                                <div class="li-choices">
+                                    @if (c.HasStoredFile)
+                                    {
+                                        <div class="li-choice">
+                                            <span class="li-choice__badge li-choice__badge--rec">Recommended</span>
+                                            <div class="li-choice__h">LinkedIn: Post with graphic</div>
+                                            <p class="li-choice__b">Full-width image. Requires two manual steps in LinkedIn.</p>
+                                            <button type="button" class="btn btn-publish js-share-image"
+                                                    data-share-text="@c.LinkedInShare.Text"
+                                                    data-graphic-url="@c.DownloadUrl"
+                                                    data-composer-url="@CommunityHub.Pages.Speaker.GraphicsModel.EmptyComposerUrl">
+                                                LinkedIn: Post with graphic
+                                            </button>
+                                        </div>
+                                    }
+                                    <div class="li-choice">
+                                        <span class="li-choice__badge li-choice__badge--fast">Fastest</span>
+                                        <div class="li-choice__h">LinkedIn: Post with link preview</div>
+                                        <p class="li-choice__b">Fully automatic. Thumbnail image is small.</p>
+                                        <a class="btn btn-linkcard js-share-intent" href="@c.LinkedInShare.IntentUrl"
+                                           data-share-text="@c.LinkedInShare.Text"
+                                           data-graphic-url="@(c.HasStoredFile ? c.DownloadUrl : null)"
+                                           target="_blank" rel="noopener noreferrer">LinkedIn: Post with link</a>
+                                    </div>
+                                </div>
+                            }
+                            @if (c.XShare is not null)
+                            {
+                                <a class="btn js-share-intent" href="@c.XShare.IntentUrl"
+                                   data-share-text="@c.XShare.Text"
+                                   target="_blank" rel="noopener noreferrer">Share on X</a>
+                            }
                             @if (c.HasStoredFile)
                             {
                                 <a class="btn" href="@c.DownloadUrl">Download graphic</a>
@@ -137,3 +282,137 @@
 </div>
 
 <p><a asp-page="/Index">Back to hub</a></p>
+
+<script>
+    // §311: copy the FULL post text (the share intents may trim it platform-side).
+    document.querySelectorAll('.js-copy-post').forEach(function (b) {
+        b.addEventListener('click', function () {
+            var ta = b.parentElement.querySelector('[data-post-text]');
+            if (!ta) return;
+            navigator.clipboard.writeText(ta.value).then(function () {
+                var old = b.textContent;
+                b.textContent = 'Copied ✓';
+                setTimeout(function () { b.textContent = old; }, 1500);
+            });
+        });
+    });
+    // §326x (operator 2026-07-25: "it should UPLOAD the graphics as a image; not a url" +
+    // the full text must come over). One click now does THREE things, all inside the same
+    // user gesture so the browser allows them:
+    //   1. copies the FULL post text SYNCHRONOUSLY (execCommand — navigator.clipboard is
+    //      REJECTED here because target=_blank moves focus off this document before the
+    //      promise runs, which is why the old "copied ✓" was a lie and paste gave nothing),
+    //   2. downloads the session PNG so it is ready to attach as a REAL image,
+    //   3. lets the link open LinkedIn's EMPTY composer (a link card would block the
+    //      image upload; a text prefill is trimmed at ~300 chars — §326w: no app consent).
+    function copyNow(text) {
+        try {
+            var ta = document.createElement('textarea');
+            ta.value = text;
+            ta.setAttribute('readonly', '');
+            ta.style.cssText = 'position:fixed;top:-1000px;opacity:0;';
+            document.body.appendChild(ta);
+            ta.select();
+            ta.setSelectionRange(0, ta.value.length);   // iOS/Safari
+            var ok = document.execCommand('copy');
+            document.body.removeChild(ta);
+            return ok;
+        } catch (e) { return false; }
+    }
+    document.querySelectorAll('.js-share-intent').forEach(function (a) {
+        a.addEventListener('click', function () {
+            var text = a.getAttribute('data-share-text') || '';
+            var graphic = a.getAttribute('data-graphic-url');
+            var copied = text ? copyNow(text) : false;
+            // Belt-and-braces: also try the async API (works when the doc keeps focus).
+            if (text && navigator.clipboard) {
+                navigator.clipboard.writeText(text).then(function () { }, function () { });
+            }
+            // §326y: no auto-download — the composer already carries the picture (the
+            // session URL's OG card) + the text; "Download graphic" stays a manual button
+            // for anyone who prefers attaching the PNG themselves.
+            var note = a.parentElement.querySelector('.js-share-copied');
+            if (!note) {
+                note = document.createElement('span');
+                note.className = 'js-share-copied';
+                note.style.cssText = 'flex-basis:100%;font-size:12.5px;';
+                a.parentElement.appendChild(note);
+            }
+            // HONEST status: only claim the copy when it actually happened (§326x).
+            // §326ac (operator: "i dont want a speaker to manually have to do something"):
+            // NO instructions here — the post is complete when the composer opens. A real
+            // page tag is a structured API annotation that a plain-text share link cannot
+            // carry, so it is simply not part of the post.
+            note.style.color = '#065f46';
+            note.textContent = copied
+                ? '✓ LinkedIn opens with your post text + the session picture — review and press Post. '
+                    + '(Your exact text is also on the clipboard: Ctrl+A, Ctrl+V to replace it.)'
+                : '✓ LinkedIn opens with your post text + the session picture — review and press Post.';
+            void graphic;
+        });
+    });
+
+    // §437 (operator 2026-07-27: "i want the post to be an image … instead it becomes a
+    // url-based image and not a picture"). The picture route. One click, inside the one
+    // user gesture the browser allows, does three things:
+    //   1. downloads the PNG (an <a download> click — same-origin proxy, so it saves),
+    //   2. copies the FULL post text synchronously (execCommand — see copyNow above; the
+    //      async clipboard API loses the race against target=_blank),
+    //   3. opens an EMPTY LinkedIn composer (no url= param ⇒ nothing to unfurl ⇒ no link
+    //      card, which is precisely what was turning his picture into a thumbnail).
+    // Then it SPELLS OUT the two things only the speaker can do — attach the file and
+    // paste — because this is the one flow where saying nothing leaves them stuck.
+    document.querySelectorAll('.js-share-image').forEach(function (a) {
+        a.addEventListener('click', function () {
+            var text = a.getAttribute('data-share-text') || '';
+            var graphic = a.getAttribute('data-graphic-url');
+            var composer = a.getAttribute('data-composer-url');
+            if (graphic) {
+                var dl = document.createElement('a');
+                dl.href = graphic;
+                dl.setAttribute('download', '');
+                dl.style.display = 'none';
+                document.body.appendChild(dl);
+                dl.click();
+                document.body.removeChild(dl);
+            }
+            var copied = text ? copyNow(text) : false;
+            if (text && navigator.clipboard) {
+                navigator.clipboard.writeText(text).then(function () { }, function () { });
+            }
+            var steps = a.parentElement.querySelector('.gfx-steps');
+            if (!steps) {
+                steps = document.createElement('div');
+                steps.className = 'gfx-steps';
+                a.parentElement.appendChild(steps);
+            }
+            // §464: read FIRST, open second. The instructions are useless once LinkedIn has taken
+            // focus in another tab, so nothing opens until "Continue" is pressed.
+            steps.innerHTML =
+                '<strong>The picture is saved to your Downloads' +
+                (copied ? ' and your post text is on the clipboard' : '') + '. ' +
+                'Read these three steps, then press Continue.</strong>' +
+                '<ol>' +
+                '<li>In the LinkedIn composer, click the <strong>photo</strong> icon and pick the ' +
+                'image you just downloaded.</li>' +
+                '<li>Paste your post text' + (copied ? ' (Ctrl+V / ⌘V)' : ' — use “Show the full post text” → Copy text') + '.</li>' +
+                '<li>Type <strong>@@Experts Live Denmark</strong> and pick us from the drop-down, then post.</li>' +
+                '</ol>' +
+                'Attaching the file is what makes it a real, full-width picture instead of a small link preview.';
+
+            if (composer) {
+                var go = document.createElement('button');
+                go.type = 'button';
+                go.className = 'btn btn-publish';
+                go.style.marginTop = '10px';
+                go.textContent = 'Continue to LinkedIn →';
+                go.addEventListener('click', function () {
+                    window.open(composer, '_blank', 'noopener');
+                });
+                steps.appendChild(go);
+            }
+            a.disabled = true;
+            a.style.opacity = '0.6';
+        });
+    });
+</script>

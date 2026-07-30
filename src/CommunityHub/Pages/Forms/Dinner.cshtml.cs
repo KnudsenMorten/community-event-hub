@@ -80,4 +80,16 @@ public class DinnerModel : PageModel
         // The standalone page always re-renders (success shows the saved message, invalid the errors).
         return Page();
     }
+
+    /// <summary>§322n: the partial's "Email me a calendar invite" button — the standard
+    /// §193 invitation for the saved RSVP=Yes. Flash + PRG back to the form.</summary>
+    public async Task<IActionResult> OnPostDinnerInviteAsync(CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+
+        var (_, message) = await _dinner.SendInviteEmailAsync(me.EventId, me.ParticipantId, ct);
+        TempData["DinnerInviteMessage"] = message;
+        return RedirectToPage();
+    }
 }

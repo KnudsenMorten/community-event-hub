@@ -38,14 +38,17 @@ public sealed class ParticipantEmailService
         _context = context;
     }
 
-    /// <summary>Resolve the effective To + secondary-email CC for a participant.</summary>
+    /// <summary>Resolve the effective To + alternate-address CC for a participant.
+    /// §422: the CC is the RESOLVED alternate — organizer-set <c>SecondaryEmail</c> first, then
+    /// the participant's own <c>AlternateEmail</c>. Before this, someone could add their
+    /// alternate address on their own profile and no mail code read it, so nothing was ever
+    /// copied there while the tasks banner promised it would be.</summary>
     public static (string toEmail, IReadOnlyCollection<string> cc) ResolveRouting(
-        string identityEmail, string? speakerOverride, string? secondaryEmail)
+        string identityEmail, string? speakerOverride, string? secondaryEmail,
+        string? alternateEmail = null)
     {
         var to = SpeakerProfile.EffectiveEmailFor(identityEmail, speakerOverride);
-        var cc = string.IsNullOrWhiteSpace(secondaryEmail)
-            ? Array.Empty<string>()
-            : new[] { secondaryEmail.Trim() };
+        var cc = Participants.AlternateEmailPolicy.CcListFor(secondaryEmail, alternateEmail);
         return (to, cc);
     }
 
@@ -70,11 +73,16 @@ public sealed class ParticipantEmailService
             .FirstOrDefaultAsync(x => x.Id == participantId && x.EventId == eventId, ct);
         if (p is null) return null;
 
+        // §253 G9 BACKSTOP: never mail a DEACTIVATED participant through this shared
+        // seam (onboarding set, step-reset, digests, manual re-send). Deactivation
+        // means "no more prompts"; callers already treat null as skipped/not-found.
+        if (!p.IsActive) return null;
+
         var speakerOverride = await _db.SpeakerProfiles
             .Where(sp => sp.ParticipantId == p.Id)
             .Select(sp => sp.ContactEmailOverride)
             .FirstOrDefaultAsync(ct);
-        var (toEmail, cc) = ResolveRouting(p.Email, speakerOverride, p.SecondaryEmail);
+        var (toEmail, cc) = ResolveRouting(p.Email, speakerOverride, p.SecondaryEmail, p.AlternateEmail);
 
         var firstName = string.IsNullOrWhiteSpace(p.FullName)
             ? "there"
@@ -96,7 +104,18 @@ public sealed class ParticipantEmailService
 
         var rendered = _templates.Render(templateName, tokens);
 
-        using (_context.Set(new EmailContext(category, eventId, p.Id, p.FullName, templateName)))
+        // §326ca (operator 2026-07-25: "each of the emails should have a ring-gate attached to
+        // any emails being sent"). This shared seam sends MANY different templates — the
+        // onboarding set, step-reset, digests, manual re-sends — and passed no FeatureKey, so
+        // every one of them was governed only by the global kill switch, never by its own
+        // feature's ring. The template already names the owning feature, so derive the key
+        // instead of asking each caller to remember it. FeatureKeyFor falls back to
+        // "outbound-email" (the transport) for an unmapped template — never LOOSER than the
+        // old behaviour, and correctly ring-gated the moment the template is in the catalog.
+        var featureKey = EmailTemplateCatalog.FeatureKeyFor(templateName);
+
+        using (_context.Set(new EmailContext(
+            category, eventId, p.Id, p.FullName, templateName, FeatureKey: featureKey)))
         {
             await _emailSender.SendAsync(toEmail, rendered.Subject, rendered.HtmlBody, cc, ct);
         }

@@ -149,7 +149,7 @@ public sealed class MasterClassMagicLinkTests
         Assert.Contains("Choose your Master Class", m.Subject);
 
         // The Master-Class self-service deep-link (selectionUrl) STILL renders…
-        Assert.Contains("MyMasterClass?t=", m.Html);
+        Assert.Contains("/Forms/Wizard?step=masterclass", m.Html); // 351-7: magic-link CTA into the hub
         // …and the participant's standing §169 magic-link grant was minted for the hub CTA.
         var grant = await GrantForAsync(db, p.Id);
         Assert.NotNull(grant);
@@ -183,9 +183,19 @@ public sealed class MasterClassMagicLinkTests
         Assert.True(await svc.SendSelectionInviteAsync(att.Id, Origin));
 
         var m = Assert.Single(sender.Messages);
-        Assert.Contains("MyMasterClass?t=", m.Html);     // self-service deep-link still renders
-        Assert.DoesNotContain($"{Origin}/go/", m.Html);  // no magic hub link surfaced
-        Assert.Empty(db.MagicLinkGrants);                // and no grant minted (fail-safe)
+        // §351-7 (operator 2026-07-26): "all buttons in all emails MUST use magic link (no manual
+        // logins)". The CTA is now {{hubUrl}}/Attendee in EVERY mail — the /MyMasterClass?t=
+        // self-service deep-link is gone, because it was a SHADOW page (§351-6).
+        Assert.DoesNotContain("MyMasterClass?t=", m.Html);
+        Assert.Contains("/Forms/Wizard?step=masterclass", m.Html);
+        // With NO participant the magic link cannot be minted, so the CTA degrades to the plain
+        // hub — still the right PAGE, just without auto-login. This is the fail-safe path, NOT the
+        // production path: AttendeeBackstageSyncJob calls ProvisionAsync (:141) BEFORE
+        // SendSelectionInviteAsync (:271) in the same pass, and the operator confirms the Zoho sync
+        // makes the attendee active in CEH before this mail goes out — so in practice a participant
+        // always exists and the magic link always mints (proved by the next test).
+        Assert.DoesNotContain($"{Origin}/go/", m.Html);
+        Assert.Empty(db.MagicLinkGrants);
     }
 
     // ----------------------------------------------------------------------
@@ -231,7 +241,7 @@ public sealed class MasterClassMagicLinkTests
         Assert.True(await svc.SendSelectionInviteAsync(att.Id, Origin));
 
         var m = Assert.Single(sender.Messages);
-        Assert.Contains("MyMasterClass?t=", m.Html);     // self-service deep-link still renders
+        Assert.Contains("/Forms/Wizard?step=masterclass", m.Html);     // 351-7: magic-link CTA into the hub (was MyMasterClass?t=)
         // The §169 seam minted the now-provisioned attendee's standing magic-link grant
         // (the same grant the hub CTA resolves to) — the gap that the plain fail-safe hit
         // before provisioning is now closed.
@@ -256,6 +266,7 @@ public sealed class MasterClassMagicLinkTests
         var db = scope.ServiceProvider.GetRequiredService<CommunityHubDbContext>();
 
         var ev = NewEvent();
+        ev.AutoCalendarInvitesEnabled = true; // §257: verify the attached-invite path (gated)
         db.Events.Add(ev);
         await db.SaveChangesAsync();
         var session = new Session { EventId = ev.Id, Title = "Deep Dive MC", Type = SessionType.MasterClass, MasterClassCapacity = 5 };
@@ -278,8 +289,10 @@ public sealed class MasterClassMagicLinkTests
         var svc = new MasterClassEmailService(db, sender, new NoOpContext(), signups, RealTemplatesWithMagic(sp));
         await svc.SendConfirmedAsync(signupId, Origin);
 
-        var m = Assert.Single(sender.Messages);
-        Assert.Contains("MyMasterClass.ics", m.Html);    // .ics download still renders
+        // §193: the confirmation ATTACHES the calendar invite (no .ics download link).
+        var m = Assert.Single(sender.IcsMessages);
+        Assert.DoesNotContain("MyMasterClass.ics", m.Html);
+        Assert.NotNull(sender.LastIcs);
         var grant = await GrantForAsync(db, p.Id);        // hub CTA = personal magic-link
         Assert.NotNull(grant);
         Assert.True(grant!.MultiUse);

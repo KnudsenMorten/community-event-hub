@@ -48,6 +48,7 @@
                             <tr style="border-bottom:2px solid #ddd;text-align:left;">
                                 <th style="padding:6px;">@Localizer["OrgHotelAssign.Person"]</th>
                                 <th style="padding:6px;">@Localizer["OrgHotelAssign.Role"]</th>
+                                <th style="padding:6px;text-align:center;" title="ELDK-funded nights (§296): master-class speaker = 2, main-day-only speaker = 1">ELDK nights</th>
                                 <th style="padding:6px;text-align:center;">@Localizer["OrgHotelAssign.NeedsRoom"]</th>
                                 <th style="padding:6px;">@Localizer["OrgHotelAssign.Hotel"]</th>
                                 <th style="padding:6px;">@Localizer["OrgHotelAssign.ConfirmationNumber"]</th>
@@ -59,6 +60,7 @@
                                 <tr style="border-bottom:1px solid #eee;">
                                     <td style="padding:6px;">@o.FullName<br/><span style="color:#8a8f9c;font-size:11px;">@o.Email</span></td>
                                     <td style="padding:6px;">@o.Role</td>
+                                    <td style="padding:6px;text-align:center;">@(Model.FundedNights(o)?.ToString() ?? "—")</td>
                                     <td style="padding:6px;text-align:center;">@(o.NeedsRoom ? "✓" : "")</td>
                                     <td style="padding:6px;">
                                         <form method="post" asp-page-handler="Assign" style="display:flex;gap:4px;align-items:center;">

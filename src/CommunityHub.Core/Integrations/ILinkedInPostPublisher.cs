@@ -13,11 +13,21 @@ namespace CommunityHub.Core.Integrations;
 /// <param name="Text">The post body that actually publishes (override ?? auto).</param>
 /// <param name="ImageRef">Optional branding image reference (URL / SharePoint path); null = text-only.</param>
 /// <param name="Tags">The compliance-aware tag set (member/org handles or URNs).</param>
+/// <param name="ImageBytes">§324: the graphic's RAW BYTES for a NATIVE image upload
+/// (initializeUpload → binary PUT → content.media). Null = text-only post (the
+/// <paramref name="ImageRef"/> string alone cannot attach an image).</param>
+/// <param name="ImageAltText">Alt text for the uploaded image (a11y; e.g. the session title).</param>
+/// <param name="AccessTokenOverride">§324b: a MEMBER token to post in the speaker's OWN
+/// context (author = their <c>urn:li:person:{id}</c> in <paramref name="OrganizationUrnOrId"/>).
+/// Null = the publisher's own org/page token.</param>
 public sealed record LinkedInPost(
     string OrganizationUrnOrId,
     string Text,
     string? ImageRef,
-    IReadOnlyList<string> Tags);
+    IReadOnlyList<string> Tags,
+    byte[]? ImageBytes = null,
+    string? ImageAltText = null,
+    string? AccessTokenOverride = null);
 
 /// <summary>The outcome of one publish attempt.</summary>
 /// <param name="Published">True only when the post was actually posted to LinkedIn.</param>

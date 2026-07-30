@@ -87,9 +87,13 @@ public class AuditTrailModel : PageModel
         if (!string.IsNullOrWhiteSpace(Filter))
         {
             var f = Filter.Trim();
+            // §331: Detail is searched too — it is where a destructive action records WHAT it
+            // destroyed (e.g. the vacated volunteer shifts), so "which shifts did we lose?"
+            // must be answerable by typing the shift name here.
             q = q.Where(e => e.ActorEmail.Contains(f)
                 || e.Summary.Contains(f)
                 || e.Action.Contains(f)
+                || (e.Detail != null && e.Detail.Contains(f))
                 || (e.OnBehalfOf != null && e.OnBehalfOf.Contains(f)));
         }
         return q;
@@ -117,7 +121,7 @@ public class AuditTrailModel : PageModel
     private static string BuildCsv(IReadOnlyList<AuditEntry> rows)
     {
         var sb = new StringBuilder();
-        sb.AppendLine("OccurredUtc,Category,Action,Actor,OnBehalfOf,Role,Outcome,Source,TargetType,TargetId,Summary,Path");
+        sb.AppendLine("OccurredUtc,Category,Action,Actor,OnBehalfOf,Role,Outcome,Source,TargetType,TargetId,Summary,Detail,Path");
         foreach (var r in rows)
         {
             sb.Append(C(r.OccurredUtc.UtcDateTime.ToString("yyyy-MM-dd HH:mm:ss"))).Append(',')
@@ -131,6 +135,7 @@ public class AuditTrailModel : PageModel
               .Append(C(r.TargetType)).Append(',')
               .Append(C(r.TargetId)).Append(',')
               .Append(C(r.Summary)).Append(',')
+              .Append(C(r.Detail)).Append(',')
               .Append(C(r.Path)).Append('\n');
         }
         return sb.ToString();

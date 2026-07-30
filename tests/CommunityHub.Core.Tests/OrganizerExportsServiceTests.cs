@@ -63,7 +63,7 @@ public sealed class OrganizerExportsServiceTests
         var sp2 = P("Speaker Bravo", "bravo@expertslive.dk", ParticipantRole.Speaker);
         var vol1 = P("Volunteer Charlie", "charlie@expertslive.dk", ParticipantRole.Volunteer);
         var spon = P("Sponsor Delta", "delta@expertslive.dk", ParticipantRole.Sponsor, company: "77");
-        P("Inactive Echo", "echo@expertslive.dk", ParticipantRole.Speaker, active: false); // excluded from badges
+        var inactive = P("Inactive Echo", "echo@expertslive.dk", ParticipantRole.Speaker, active: false); // excluded from badges
         P("Test Foxtrot", "foxtrot@expertslive.dk", ParticipantRole.Volunteer, test: true); // excluded from badges
         P("Ghost Golf", "golf@expertslive.dk", ParticipantRole.Speaker, ev: OtherEventId); // scope guard
         await db.SaveChangesAsync();
@@ -140,6 +140,39 @@ public sealed class OrganizerExportsServiceTests
             EventId = EventId, TaskId = vtCancelled.Id, ParticipantId = vol1.Id,
         });
 
+        // --- Dinner sign-ups + structured dietary rows (§326bh) --------------
+        // The catering surfaces must count ONLY active people who said Yes, so the
+        // seed plants each way that could leak: an inactive Yes, a No who filled in
+        // a diet, and another edition's Yes.
+        void Dinner(int pid, DinnerRsvp rsvp, int plusOnes = 0,
+                    string? comments = null, string? legacyNotes = null, int ev = EventId)
+            => db.DinnerSignups.Add(new DinnerSignup
+            {
+                EventId = ev, ParticipantId = pid, Rsvp = rsvp,
+                Attending = rsvp == DinnerRsvp.Yes, PlusOneCount = plusOnes,
+                Comments = comments, AllergyNotes = legacyNotes,
+            });
+
+        Dinner(sp1.Id, DinnerRsvp.Yes, plusOnes: 2, comments: "Arrives late");
+        Dinner(vol1.Id, DinnerRsvp.Yes, legacyNotes: "No shellfish please");
+        Dinner(sp2.Id, DinnerRsvp.No);                        // declined -> no seat, no diet count
+        Dinner(inactive.Id, DinnerRsvp.Yes, plusOnes: 3);     // drop-out -> must never reach the caterer
+        Dinner(sp1.Id, DinnerRsvp.Yes, ev: OtherEventId);     // scope guard
+
+        void Diet(int pid, DietarySurface surface, string? diet = null,
+                  bool gluten = false, bool peanuts = false, string? other = null, int ev = EventId)
+            => db.DietaryRequirements.Add(new DietaryRequirement
+            {
+                EventId = ev, ParticipantId = pid, Surface = surface,
+                DietChoice = diet, Gluten = gluten, Peanuts = peanuts, OtherAllergens = other,
+            });
+
+        Diet(sp1.Id, DietarySurface.Dinner, diet: "Vegan", gluten: true);
+        Diet(vol1.Id, DietarySurface.Dinner, diet: "Vegan", peanuts: true, other: "Severe — no cross-contact");
+        Diet(sp2.Id, DietarySurface.Dinner, diet: "Halal");        // declined dinner -> excluded
+        Diet(inactive.Id, DietarySurface.Dinner, diet: "Kosher", gluten: true); // drop-out -> excluded
+        Diet(sp1.Id, DietarySurface.Dinner, diet: "Vegan", ev: OtherEventId);   // scope guard
+
         // --- Attendees ------------------------------------------------------
         void Att(string first, string last, string email, TicketStatus ticket,
                  string? masterClass = null, int ev = EventId)
@@ -168,6 +201,132 @@ public sealed class OrganizerExportsServiceTests
         Assert.True(rows[0].TwoDay);
         Assert.Equal("Kubernetes 101", rows[0].MasterClass);
         Assert.False(rows[1].TwoDay);
+    }
+
+    // --- Appreciation Dinner + catering dietary roll-up (§326bh) ------------
+
+    [Fact]
+    public async Task Dinner_headcount_counts_seats_and_excludes_inactive_and_declined()
+    {
+        using var db = NewDb();
+        await SeedAsync(db);
+
+        var head = await NewSvc(db).BuildDinnerHeadcountAsync(EventId);
+
+        // sp1 (+2) and vol1 (+0) — sp2 declined, Inactive Echo (+3) is a drop-out,
+        // and the other edition's row is out of scope.
+        Assert.Equal(2, head.Attending);
+        Assert.Equal(2, head.PlusOnes);
+        Assert.Equal(4, head.Total);
+    }
+
+    [Fact]
+    public async Task Dinner_run_sheet_lists_confirmed_people_with_their_dietary_detail()
+    {
+        using var db = NewDb();
+        await SeedAsync(db);
+
+        var people = await NewSvc(db).BuildDinnerRunSheetAsync(EventId);
+
+        Assert.Equal(2, people.Count);
+        Assert.DoesNotContain(people, p => p.Name == "Inactive Echo");
+        Assert.DoesNotContain(people, p => p.Name == "Speaker Bravo"); // declined
+
+        var alpha = people.Single(p => p.Name == "Speaker Alpha");
+        Assert.Equal(2, alpha.PlusOnes);
+        Assert.Equal("Vegan", alpha.Diet);
+        Assert.Equal("Gluten", alpha.Allergens);
+        Assert.Equal("Arrives late", alpha.Comments);
+
+        // The structured free-text and the legacy AllergyNotes are BOTH surfaced.
+        var charlie = people.Single(p => p.Name == "Volunteer Charlie");
+        Assert.Equal("Peanuts", charlie.Allergens);
+        Assert.Contains("Severe", charlie.OtherRequirements);
+        Assert.Contains("No shellfish please", charlie.OtherRequirements);
+    }
+
+    [Fact]
+    public async Task Dietary_rollup_counts_only_active_attending_people()
+    {
+        using var db = NewDb();
+        await SeedAsync(db);
+
+        var rows = await NewSvc(db).BuildDietaryHeadcountAsync(EventId);
+
+        // Both confirmed guests are Vegan; the Halal (declined) and Kosher
+        // (deactivated) rows must not reach the kitchen sheet.
+        var vegan = rows.Single(r => r.Kind == "Diet" && r.Item == "Vegan");
+        Assert.Equal("Appreciation Dinner", vegan.Occasion);
+        Assert.Equal(2, vegan.Count);
+        Assert.DoesNotContain(rows, r => r.Item == "Halal");
+        Assert.DoesNotContain(rows, r => r.Item == "Kosher");
+
+        // Allergens are counted per token — the drop-out's Gluten must not inflate it.
+        Assert.Equal(1, rows.Single(r => r.Kind == "Allergen" && r.Item == "Gluten").Count);
+        Assert.Equal(1, rows.Single(r => r.Kind == "Allergen" && r.Item == "Peanuts").Count);
+
+        Assert.Equal(2, rows.Single(r => r.Item == "People with any requirement").Count);
+        Assert.Equal(1, rows.Single(r => r.Item == "Free-text notes to read").Count);
+
+        // No day-catering rows are ever written today, so that occasion is absent
+        // rather than printed as zeros (§326bh Defect 2).
+        Assert.DoesNotContain(rows, r => r.Occasion.StartsWith("Speaker"));
+    }
+
+    [Fact]
+    public async Task Dietary_rollup_reconciles_with_the_dinner_run_sheet()
+    {
+        using var db = NewDb();
+        await SeedAsync(db);
+        var svc = NewSvc(db);
+
+        var people = await svc.BuildDinnerRunSheetAsync(EventId);
+        var rows = await svc.BuildDietaryHeadcountAsync(EventId);
+
+        // The kitchen sheet must never claim more meals of a kind than there are
+        // seats on the run-sheet — the two are built from the same population.
+        var withRequirement = rows.Single(r => r.Item == "People with any requirement").Count;
+        Assert.True(withRequirement <= people.Count);
+        Assert.Equal(
+            people.Count(p => p.Diet == "Vegan"),
+            rows.Single(r => r.Kind == "Diet" && r.Item == "Vegan").Count);
+    }
+
+    [Fact]
+    public async Task Dinner_and_dietary_csv_carry_the_headers_and_rows()
+    {
+        using var db = NewDb();
+        await SeedAsync(db);
+        var svc = NewSvc(db);
+
+        var dinnerCsv = await svc.BuildDinnerCsvAsync(EventId);
+        Assert.StartsWith("Name,Role,PlusOnes,Diet,Allergens,OtherRequirements,Comments", dinnerCsv);
+        Assert.Contains("Speaker Alpha", dinnerCsv);
+        Assert.DoesNotContain("Inactive Echo", dinnerCsv);
+
+        var dietCsv = await svc.BuildDietaryCsvAsync(EventId);
+        Assert.StartsWith("Occasion,Kind,Item,Count", dietCsv);
+        Assert.Contains("Appreciation Dinner,Diet,Vegan,2", dietCsv);
+    }
+
+    [Fact]
+    public async Task Dinner_surfaces_are_empty_when_nobody_has_confirmed()
+    {
+        using var db = NewDb();
+        db.Events.Add(new Event
+        {
+            Id = EventId, Code = "EX27", CommunityName = "Empty",
+            DisplayName = "Empty 2027",
+            StartDate = new DateOnly(2027, 2, 9), EndDate = new DateOnly(2027, 2, 10),
+            IsActive = true,
+        });
+        await db.SaveChangesAsync();
+        var svc = NewSvc(db);
+
+        Assert.Empty(await svc.BuildDinnerRunSheetAsync(EventId));
+        Assert.Empty(await svc.BuildDietaryHeadcountAsync(EventId));
+        var head = await svc.BuildDinnerHeadcountAsync(EventId);
+        Assert.Equal(0, head.Total);
     }
 
     [Fact]
@@ -267,6 +426,54 @@ public sealed class OrganizerExportsServiceTests
         // Every CSV builder returns a non-empty header row even for an empty event.
         var badgeCsv = await svc.BuildBadgeDataCsvAsync(EventId);
         Assert.StartsWith("Name,Role,Company", badgeCsv);
+    }
+
+    /// <summary>
+    /// §253 G4/G7 vendor-export truth: the caterer headcount/run-sheet and the
+    /// day-of rota must exclude a deactivated person's surviving rows — and the
+    /// rota must also exclude a shift its volunteer DECLINED. Before the fix all
+    /// three counted ghosts (money ordered against people who left).
+    /// </summary>
+    [Fact]
+    public async Task Caterer_and_rota_exports_exclude_inactive_people_and_declined_shifts()
+    {
+        using var db = NewDb();
+        await SeedAsync(db);
+
+        // The deactivated "Inactive Echo" keeps a lunch sign-up + a shift
+        // (legacy flag-only drop-out whose cascade never ran), and the active
+        // "Speaker Bravo" DECLINED a shift on the same task.
+        var echo = await db.Participants.SingleAsync(p => p.Email == "echo@expertslive.dk");
+        var bravo = await db.Participants.SingleAsync(p => p.Email == "bravo@expertslive.dk");
+        db.LunchSignups.Add(new LunchSignup
+        {
+            EventId = EventId, ParticipantId = echo.Id,
+            LunchSetupDay = true, LunchPreDay = true,
+        });
+        db.VolunteerTaskAssignments.Add(new VolunteerTaskAssignment
+        {
+            EventId = EventId, TaskId = 30, ParticipantId = echo.Id,
+        });
+        db.VolunteerTaskAssignments.Add(new VolunteerTaskAssignment
+        {
+            EventId = EventId, TaskId = 30, ParticipantId = bravo.Id,
+            DecisionStatus = ShiftDecisionStatus.Declined,
+        });
+        await db.SaveChangesAsync();
+        var svc = NewSvc(db);
+
+        // Caterer numbers + run-sheet: unchanged (echo's sign-up excluded).
+        var head = await svc.BuildLunchHeadcountAsync(EventId);
+        Assert.Equal(1, head.Single(h => h.Day.StartsWith("Setup")).Count); // sp1 only
+        Assert.Equal(2, head.Single(h => h.Day.StartsWith("Pre")).Count);   // sp1 + vol1
+        var people = await svc.BuildLunchPeopleAsync(EventId);
+        Assert.Equal(2, people.Count);
+        Assert.DoesNotContain(people, p => p.Name == "Inactive Echo");
+
+        // Day-of rota: neither the ghost nor the declined shift prints.
+        var rota = await svc.BuildVolunteerRotaAsync(EventId);
+        var row = Assert.Single(rota);
+        Assert.Equal("Volunteer Charlie", row.Volunteer);
     }
 
     [Fact]

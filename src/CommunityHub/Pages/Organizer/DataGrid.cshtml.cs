@@ -3,6 +3,7 @@ using CommunityHub.Auth;
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
 using CommunityHub.Core.Export;
+using CommunityHub.Core.Organizer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
@@ -43,15 +44,18 @@ public class DataGridModel : PageModel
     private readonly CommunityHubDbContext _db;
     private readonly ICurrentParticipantAccessor _participant;
     private readonly TimeProvider _clock;
+    private readonly ParticipantDeactivationService _cascade;
 
     public DataGridModel(
         CommunityHubDbContext db,
         ICurrentParticipantAccessor participant,
-        TimeProvider clock)
+        TimeProvider clock,
+        ParticipantDeactivationService cascade)
     {
         _db = db;
         _participant = participant;
         _clock = clock;
+        _cascade = cascade;
     }
 
     public bool AccessDenied { get; private set; }
@@ -97,8 +101,6 @@ public class DataGridModel : PageModel
             p => p.Id == participantId && p.EventId == me.EventId, ct);
         if (participant is not null)
         {
-            participant.IsActive = isActive;
-
             // Upsert the hotel booking for this person.
             var hotel = await _db.HotelBookings.FirstOrDefaultAsync(
                 h => h.EventId == me.EventId
@@ -122,6 +124,23 @@ public class DataGridModel : PageModel
             hotel.CheckOutDate = checkOutDate;
 
             await _db.SaveChangesAsync(ct);
+
+            // Active flag via the ONE cascade service (§253 G1) — this inline save
+            // used to be a bare flag write that skipped LifecycleState (D4) and
+            // left every logistics row live. Runs AFTER the hotel upsert so a
+            // deactivation's NeedsRoom=false wins over the posted row values.
+            if (participant.IsActive != isActive)
+            {
+                if (isActive)
+                {
+                    await _cascade.ReactivateAsync(me.EventId, participantId, me.Email, ct);
+                }
+                else
+                {
+                    await _cascade.DeactivateAsync(
+                        me.EventId, participantId, "data-grid row save", me.Email, ct);
+                }
+            }
             Message = $"Saved {participant.FullName}.";
         }
 

@@ -98,7 +98,11 @@ public sealed class SponsorDeliverablesService
             .Select(t => new TaskRow(Slug(t.SourceKey), t.State, t.DueDate))
             .ToList();
 
-        var signals = BuildSignals(info, members, materials, wallFile, logoAudit, wallAudit, tasks);
+        var sessionRelevant = info?.HasSponsorSession == true;
+        var sessionDone = sessionRelevant && await _db.SponsorSessions.AnyAsync(
+            s => s.EventId == eventId && s.SponsorCompanyId == companyId
+                 && s.Title != null && s.Title != "" && s.Abstract != null && s.Abstract != "" && s.Speakers.Any(), ct);
+        var signals = BuildSignals(info, members, materials, wallFile, logoAudit, wallAudit, tasks, sessionRelevant, sessionDone);
 
         return SponsorDeliverablesCalculator.Compute(
             companyId, companyName ?? companyId, IsExhibitor(info, members, materials, wallFile, wallAudit, tasks),
@@ -179,6 +183,13 @@ public sealed class SponsorDeliverablesService
         companyIds.UnionWith(tasksByCompany.Keys);
         companyIds.UnionWith(participantCompanies);
 
+        // §292: companies with a COMPLETE speaking session (title + abstract + >=1 speaker).
+        var sessionDoneCompanies = (await _db.SponsorSessions
+                .Where(s => s.EventId == eventId && s.Title != null && s.Title != ""
+                            && s.Abstract != null && s.Abstract != "" && s.Speakers.Any())
+                .Select(s => s.SponsorCompanyId).Distinct().ToListAsync(ct))
+            .ToHashSet(StringComparer.Ordinal);
+
         var result = new List<SponsorDeliverables>(companyIds.Count);
         foreach (var cid in companyIds)
         {
@@ -190,7 +201,8 @@ public sealed class SponsorDeliverablesService
             var logoAudit = logoCompanies.Contains(cid);
             var wallAudit = wallAuditCompanies.Contains(cid);
 
-            var signals = BuildSignals(info, members, materials, wallFile, logoAudit, wallAudit, tasks);
+            var signals = BuildSignals(info, members, materials, wallFile, logoAudit, wallAudit, tasks,
+                info?.HasSponsorSession == true, sessionDoneCompanies.Contains(cid));
             var name = companyNames is not null && companyNames.TryGetValue(cid, out var nm) ? nm : cid;
 
             result.Add(SponsorDeliverablesCalculator.Compute(
@@ -225,7 +237,7 @@ public sealed class SponsorDeliverablesService
     /// </summary>
     private static List<SponsorDeliverableSignal> BuildSignals(
         SponsorInfo? info, bool members, bool materials, bool wallFile, bool logoAudit, bool wallAudit,
-        IReadOnlyList<TaskRow> tasks)
+        IReadOnlyList<TaskRow> tasks, bool sessionRelevant = false, bool sessionDone = false)
     {
         var isExhibitor = IsExhibitor(info, members, materials, wallFile, wallAudit, tasks);
 
@@ -257,10 +269,14 @@ public sealed class SponsorDeliverablesService
 
         return new List<SponsorDeliverableSignal>
         {
-            new("onboarding",      "Contract & onboarding",  true,        onboardingDone, onboardingDeadline, CompanyDetailsLink),
-            new("logo",            "Logo uploaded",          true,        logoDone,       null,               CompanyDetailsLink),
-            new("booth-materials", "Booth materials",        isExhibitor, materialsDone,  materialsDeadline,  CompanyDetailsLink),
-            new("booth-members",   "Booth members present",  isExhibitor, membersDone,    membersDeadline,    CompanyDetailsLink),
+            // §297: deep-link to the RIGHT section of Company Details (the #anchor) so "Fix this"
+            // lands on the section, not the top of the page.
+            new("onboarding",      "Contract & onboarding",  true,        onboardingDone, onboardingDeadline, CompanyDetailsLink + "#company"),
+            new("logo",            "Logo uploaded",          true,        logoDone,       null,               CompanyDetailsLink + "#logos"),
+            // §292: shown only for sponsors who bought a speaking slot (Sponsor Sessions product).
+            new("session",         "Speaking session registered", sessionRelevant, sessionDone, null,          "/Forms/Wizard"),
+            new("booth-materials", "Booth materials",        isExhibitor, materialsDone,  materialsDeadline,  CompanyDetailsLink + "#booth-materials"),
+            new("booth-members",   "Booth members present",  isExhibitor, membersDone,    membersDeadline,    CompanyDetailsLink + "#booth-members"),
             new("tasks",           "Assigned tasks done",    true,        tasksDone,      tasksDeadline,      TasksLink),
         };
     }

@@ -195,4 +195,35 @@ public static class SessionDefaultsMapper
     /// A full-day length implies a master class; everything else is a technical session.
     /// </summary>
     public static SessionType MapType(SessionLength length) => MapType(null, length);
+
+    /// <summary>
+    /// §299.8/b7 — derive the LEGACY display bucket from the source-of-truth integer
+    /// minutes: ≥ 4 h ⇒ <see cref="SessionLength.FullDay"/>, else the nearest of
+    /// 20/50/60. Null/non-positive minutes keep the historic
+    /// <see cref="SessionLength.SixtyMin"/> default. The bucket exists ONLY for
+    /// legacy display sites — no logic branches on it any more.
+    /// </summary>
+    public static SessionLength ToLengthBucket(int? minutes)
+    {
+        if (minutes is not int m || m <= 0) return SessionLength.SixtyMin;
+        if (m >= FullDayThresholdMinutes) return SessionLength.FullDay;
+
+        var candidates = new[] { SessionLength.TwentyMin, SessionLength.FiftyMin, SessionLength.SixtyMin };
+        var best = candidates[0];
+        var bestDelta = double.MaxValue;
+        foreach (var c in candidates)
+        {
+            var delta = Math.Abs(m - (int)c);
+            if (delta < bestDelta) { bestDelta = delta; best = c; }
+        }
+        return best;
+    }
+
+    /// <summary>
+    /// §299.8/b7 — representative integer minutes for a legacy bucket (the back-compat
+    /// bridge for callers still holding only a bucket): FullDay → 420 (the configured
+    /// full-day quick-pick), else the bucket's own value (20/50/60).
+    /// </summary>
+    public static int MinutesFromBucket(SessionLength length) =>
+        length == SessionLength.FullDay ? 420 : (int)length;
 }

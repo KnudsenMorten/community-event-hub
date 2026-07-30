@@ -1,0 +1,80 @@
+@page
+@model CommunityHub.Pages.Organizer.PendingSpeakersModel
+@{
+    ViewData["Title"] = "Pending speakers";
+}
+<div class="card">
+    <h1>Pending speakers</h1>
+
+    @if (Model.AccessDenied)
+    {
+        <p class="error" role="alert">This area is for organizers only.</p>
+    }
+    else
+    {
+        <p>Speakers held from the Zoho Backstage flow — set the <strong>category</strong> and
+           <strong>ring</strong>; <strong>Save activates automatically</strong> (they were
+           already approved in Sessionize) so they flow to Zoho fast. Released Zoho ring today:
+           <strong>Ring @((int)Model.Pending.ReleasedRing)</strong>@(Model.Pending.FeatureEnabled ? "" : " (feature disabled — everyone is held)").</p>
+
+        @if (!string.IsNullOrEmpty(Model.Message))
+        {
+            <p class="@(Model.IsError ? "error" : "info")" role="status">@Model.Message</p>
+        }
+
+        @if (Model.Pending.Speakers.Count == 0)
+        {
+            <p class="info">Nothing pending — every speaker is categorized, activated and in ring. 🎉</p>
+        }
+        else
+        {
+            <table style="width:100%;border-collapse:collapse;">
+                <thead>
+                    <tr style="text-align:left;border-bottom:2px solid #e6e8ee;">
+                        <th style="padding:8px 6px;">Speaker</th>
+                        <th style="padding:8px 6px;">Blockers</th>
+                        <th style="padding:8px 6px;">Approve</th>
+                    </tr>
+                </thead>
+                <tbody>
+                @foreach (var s in Model.Pending.Speakers)
+                {
+                    <tr style="border-bottom:1px solid #eef0f5;vertical-align:top;">
+                        <td style="padding:8px 6px;">
+                            <strong>@s.FullName</strong><br />
+                            <span style="color:#6b7280;font-size:13px;">@s.Email</span><br />
+                            <span style="color:#6b7280;font-size:12px;">ring @((int)s.Ring) ·
+                                @(s.Category?.ToString() ?? "no category") ·
+                                @(s.IsActive ? "active" : "inactive") · @s.Lifecycle</span>
+                        </td>
+                        <td style="padding:8px 6px;font-size:13px;color:#92400e;">
+                            <ul style="margin:0;padding-left:18px;">
+                                @foreach (var b in s.Blockers) { <li>@b</li> }
+                            </ul>
+                        </td>
+                        <td style="padding:8px 6px;">
+                            <form method="post" asp-page-handler="Approve"
+                                  style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+                                <input type="hidden" name="participantId" value="@s.ParticipantId" />
+                                <select name="category" style="max-width:150px;margin:0;">
+                                    <option value="Community">Community</option>
+                                    <option value="Sponsor">Sponsor</option>
+                                    <option value="Guest">Guest</option>
+                                </select>
+                                <select name="ring" style="max-width:110px;margin:0;">
+                                    <option value="Ring1">Ring 1</option>
+                                    <option value="Ring2" selected>Ring 2</option>
+                                    <option value="Broad">Ring 3</option>
+                                </select>
+                                @* Saving ACTIVATES automatically — the speaker was already
+                                   approved in Sessionize (operator 2026-07-24). *@
+                                <button type="submit">Save</button>
+                            </form>
+                        </td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+        }
+    }
+</div>

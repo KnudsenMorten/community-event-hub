@@ -32,6 +32,9 @@ public sealed class SessionizeImportJob
     private readonly CommunityHubDbContext _db;
     private readonly FeatureGateService _gate;
     private readonly IAuditTrail _audit;
+    private readonly CommunityHub.Core.Organizer.SpeakerApprovalService _approval;
+    private readonly CommunityHub.Core.Email.EngineAlertSender _alerts;
+    private readonly Microsoft.Extensions.Configuration.IConfiguration _config;
     private readonly ILogger<SessionizeImportJob> _log;
 
     public SessionizeImportJob(
@@ -40,6 +43,9 @@ public sealed class SessionizeImportJob
         CommunityHubDbContext db,
         FeatureGateService gate,
         IAuditTrail audit,
+        CommunityHub.Core.Organizer.SpeakerApprovalService approval,
+        CommunityHub.Core.Email.EngineAlertSender alerts,
+        Microsoft.Extensions.Configuration.IConfiguration config,
         ILogger<SessionizeImportJob> log)
     {
         _service = service;
@@ -47,13 +53,16 @@ public sealed class SessionizeImportJob
         _db = db;
         _gate = gate;
         _audit = audit;
+        _approval = approval;
+        _alerts = alerts;
+        _config = config;
         _log = log;
     }
 
     /// <summary>Hourly, at the top of every hour UTC (matches scheduledJobs.sessionizeImport cron).</summary>
     [Function("SessionizeImportJob")]
     public async Task Run(
-        [TimerTrigger("0 0 * * * *")] TimerInfo timer,
+        [TimerTrigger("0 */5 * * * *")] TimerInfo timer,
         CancellationToken ct)
     {
         if (!_options.Enabled)
@@ -110,6 +119,35 @@ public sealed class SessionizeImportJob
             await RecordRunAsync(activeEventId.Value, AuditOutcome.Success,
                 $"Sessionize import: {result.Fetched} fetched, {result.Created} created, "
                 + $"{result.Updated} updated, {result.Skipped} skipped", ct);
+
+        // §304 (operator 2026-07-24): NEW speakers arrive Ring 3 / inactive /
+        // uncategorized (fail-closed) and are HELD from the Zoho flow — mail info@
+        // IMMEDIATELY with the pending list + the admin link so the organizer can set
+        // category + ring (Save activates) and the speaker "flows to zoho fast".
+        // Fires only when this pass CREATED someone (never on idle hourly pulls).
+        if (result.Created > 0)
+        {
+            try
+            {
+                var pending = await _approval.PendingAsync(activeEventId.Value, ct);
+                var domain = _config["Hub:CustomDomain"];
+                var baseUrl = string.IsNullOrWhiteSpace(domain)
+                    ? "https://eldk27.eventhub.expertslive.dk" : $"https://{domain}";
+                var html = CommunityHub.Core.Organizer.SpeakerApprovalService
+                    .BuildPendingMailHtml(pending, baseUrl);
+                if (html is not null)
+                {
+                    await _alerts.AlertAsync(
+                        $"ACTION: {pending.Speakers.Count} pending speaker(s) need approval for the Zoho flow [ELDK27]",
+                        html, ct, throttleKey: null,
+                        recipient: CommunityHub.Core.Email.ZohoChangeNotifier.Recipient);
+                }
+            }
+            catch (Exception ex)
+            {
+                _log.LogWarning(ex, "SessionizeImportJob: pending-speaker mail failed.");
+            }
+        }
 
         if (result.Sessions is { } sx)
         {

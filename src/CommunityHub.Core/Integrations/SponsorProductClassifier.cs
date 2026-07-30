@@ -24,12 +24,15 @@ public enum BoothTier
     Feature = 4,
 }
 
-/// <summary>The classification of one ordered product.</summary>
+/// <summary>The classification of one ordered product. <paramref name="Unmatched"/> is true
+/// only for the no-rule-matched fallback (§299 b10) — a legit config-declared addon keeps it
+/// false, so the pull can surface genuinely unknown categories to organizers.</summary>
 public sealed record SponsorProductClass(
     SponsorProductKind Kind,
     BoothTier Tier,
     bool GeneratesTasks,
-    string? BoothNumber = null);
+    string? BoothNumber = null,
+    bool Unmatched = false);
 
 /// <summary>
 /// Classifies a WooCommerce product into a sponsor product kind + booth tier
@@ -108,10 +111,12 @@ public sealed class SponsorProductClassifier
             return new SponsorProductClass(rule.Kind, tier, rule.GeneratesTasks, boothNumber);
         }
 
-        // Nothing matched: treat as a non-task addon so it never silently
-        // creates work for an unknown SKU.
+        // Nothing matched: treat as a non-task addon so it never silently creates
+        // work for an unknown SKU — but FLAG it (§299 b10) so the pull surfaces it
+        // to organizers instead of dropping it silently (an unhandled category can
+        // mean a sponsor who never receives their tasks).
         return new SponsorProductClass(
-            SponsorProductKind.Addon, BoothTier.None, GeneratesTasks: false);
+            SponsorProductKind.Addon, BoothTier.None, GeneratesTasks: false, Unmatched: true);
     }
 
     /// <summary>

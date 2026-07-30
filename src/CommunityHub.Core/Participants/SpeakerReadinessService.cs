@@ -85,7 +85,9 @@ public sealed class SpeakerReadinessService
         var overrides = await _db.ParticipantOrderOverrides
             .Where(o => o.EventId == eventId && o.ParticipantId == participantId)
             .ToListAsync(ct);
-        var entitled = OrderEntitlements.Effective(participant, profile, overrides);
+        // §299 C5: entitlement days derive from the speaker's linked sessions.
+        var days = await SpeakerDayScope.DaysForSpeakerAsync(_db, eventId, participantId, ct);
+        var entitled = OrderEntitlements.Effective(participant, profile, days, overrides);
 
         var hotelDone = entitled.Contains(OrderItem.Hotel)
             && await _db.HotelBookings.AnyAsync(
@@ -166,6 +168,10 @@ public sealed class SpeakerReadinessService
                 g => g.Key,
                 g => (IReadOnlyList<TaskRow>)g.Select(t => new TaskRow(t.SourceKey, t.State)).ToList());
 
+        // §299 C5: derived presenting days per speaker (drives main-day lunch
+        // entitlement), loaded once for the roster.
+        var daysBySpeaker = await SpeakerDayScope.DaysBySpeakerAsync(_db, eventId, ct);
+
         // Master-class link + published-prep per speaker, in two set-building queries.
         var mcLinkedPids = (await _db.SessionSpeakers
                 .Where(ss => ss.Session.EventId == eventId
@@ -189,7 +195,8 @@ public sealed class SpeakerReadinessService
 
             var overrides = overridesByPid.TryGetValue(pid, out var ov)
                 ? ov : Array.Empty<ParticipantOrderOverride>();
-            var entitled = OrderEntitlements.Effective(participant, profile, overrides);
+            var days = daysBySpeaker.TryGetValue(pid, out var dd) ? dd : SpeakerDays.None;
+            var entitled = OrderEntitlements.Effective(participant, profile, days, overrides);
 
             var hotelDone = entitled.Contains(OrderItem.Hotel) && hotelPids.Contains(pid);
             var dinnerDone = entitled.Contains(OrderItem.AppreciationDinner) && dinnerPids.Contains(pid);

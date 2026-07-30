@@ -23,7 +23,18 @@
     }
     else
     {
-        <p>@Localizer["Lunch.Intro"]</p>
+        @* §326h follow-up (operator 2026-07-25: "this is not what i wrote" on THIS page):
+           speakers get the operator's pre-day lunch text on the STANDALONE page too —
+           the wizard step already carries it; other roles keep the generic headcount
+           intro (they have no pre-day-Master-Class context). *@
+        @if (Model.Form.Role == ParticipantRole.Speaker)
+        {
+            <p>@Localizer["Lunch.IntroSpeaker"]</p>
+        }
+        else
+        {
+            <p>@Localizer["Lunch.Intro"]</p>
+        }
 
         @* Shared success toast (REQUIREMENTS §21): role=status, auto-dismiss, dismissable. *@
         <partial name="_Flash" model='new CommunityHub.Pages.Shared.FlashModel(Model.Form.Message, "success")' />
@@ -41,6 +52,7 @@
             @Localizer["Lunch.MainNote", Model.Form.MainDayLabel]
         </p>
 
-        <p><a asp-page="/Index">@Localizer["Common.BackToHub"]</a></p>
+        @* §260: return to Get-Started when the person came from the wizard. *@
+        <partial name="_WizardBackLink" />
     }
 </div>

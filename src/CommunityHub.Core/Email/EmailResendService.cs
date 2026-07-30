@@ -1,4 +1,5 @@
 using CommunityHub.Core.Data;
+using CommunityHub.Core.Settings;
 using Microsoft.EntityFrameworkCore;
 
 namespace CommunityHub.Core.Email;
@@ -28,6 +29,9 @@ public enum EmailResendOutcome
 
     /// <summary>The re-send itself threw (the new attempt failed too); see <see cref="EmailResendResult.Error"/>.</summary>
     Failed = 5,
+
+    /// <summary>§252 F8: the <c>email-resend</c> feature is disabled for this edition — the re-send was refused (nothing sent). Enable it in Settings → Features.</summary>
+    FeatureDisabled = 6,
 }
 
 /// <summary>Result of <see cref="EmailResendService.ResendAsync"/>.</summary>
@@ -61,13 +65,24 @@ public sealed record EmailResendResult(
 /// </summary>
 public sealed class EmailResendService
 {
+    /// <summary>§252 F8: the FeatureCatalog key that gates the organizer re-send.</summary>
+    public const string FeatureKey = "email-resend";
+
     private readonly CommunityHubDbContext _db;
     private readonly ParticipantEmailService _participantEmail;
 
-    public EmailResendService(CommunityHubDbContext db, ParticipantEmailService participantEmail)
+    // §252 F8: the email-resend catalog toggle used to be INERT (GUI ≠ behavior) —
+    // the resend path now consults the gate. Optional so legacy/test constructions
+    // without a gate keep the old always-allowed behaviour.
+    private readonly FeatureGateService? _gate;
+
+    public EmailResendService(
+        CommunityHubDbContext db, ParticipantEmailService participantEmail,
+        FeatureGateService? gate = null)
     {
         _db = db;
         _participantEmail = participantEmail;
+        _gate = gate;
     }
 
     /// <summary>
@@ -88,6 +103,12 @@ public sealed class EmailResendService
     public async Task<EmailResendResult> ResendAsync(
         int eventId, int emailLogId, CancellationToken ct = default)
     {
+        // §252 F8: honour the email-resend feature toggle BEFORE any work — a
+        // disabled feature is inert, and the caller gets an honest refusal (never
+        // a faked success or a silent send). No gate wired (legacy/test) ⇒ allowed.
+        if (_gate is not null && !await _gate.IsFeatureEnabledAsync(FeatureKey, eventId, ct))
+            return new EmailResendResult(EmailResendOutcome.FeatureDisabled);
+
         var row = await _db.EmailLogs
             .FirstOrDefaultAsync(e => e.Id == emailLogId && e.EventId == eventId, ct);
 

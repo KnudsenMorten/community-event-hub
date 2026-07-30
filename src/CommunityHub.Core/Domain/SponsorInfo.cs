@@ -26,6 +26,21 @@ public enum SponsorPackage
 }
 
 /// <summary>
+/// A sponsor company's LIFECYCLE status (REQUIREMENTS §253, G8b). Before this the
+/// sponsor lifecycle had no exit path at all — a company that withdrew kept its
+/// public logo, group party HeadCount and contact logins forever. Withdrawn
+/// companies are excluded from the public sponsors page + organizer sponsor
+/// counts, and the withdrawal action cascades a deactivation over every contact
+/// (via <see cref="Organizer.ParticipantDeactivationService"/>). Zoho/ERP records
+/// are never touched (§56 — no deletes).
+/// </summary>
+public enum SponsorStatus
+{
+    Active = 0,
+    Withdrawn = 1,
+}
+
+/// <summary>
 /// One sponsor company's self-service info: logos + descriptive text.
 /// Scoped to (EventId, SponsorCompanyId) so all contacts of a company edit
 /// the same row -- first one to save sets values; subsequent contacts edit
@@ -42,6 +57,34 @@ public class SponsorInfo
 
     /// <summary>WooCommerce / Company Manager company id.</summary>
     public string SponsorCompanyId { get; set; } = string.Empty;
+
+    /// <summary>
+    /// §593 — the company's DISPLAY NAME, synced from Company Manager's <b>Public Company Name</b>
+    /// (falling back to Legal Company Name, then the webshop billing company). This is the single
+    /// per-company home for the name in CEH.
+    /// </summary>
+    /// <remarks>
+    /// 🔒 WHY THIS COLUMN EXISTS. Operator 2026-07-28: *"you need to use a field inside CM which is
+    /// this field and it must be carried over to CEH as the company name"* — after
+    /// `/Organizer/Participants` rendered **"(name not synced — CM id 30)"** for a company whose CM
+    /// record clearly reads "System Center Dudes".
+    ///
+    /// <para>The name WAS being resolved correctly during the order pull — and then thrown away.
+    /// Its only persistent home was <c>SponsorUploadLocation.CompanyName</c>, which is written
+    /// INSIDE the SharePoint folder-provisioning loop. If SharePoint did not run (unconfigured, a
+    /// throw, or no upload-folder task definitions), no row was written and the resolved name was
+    /// discarded — while the order still created its tasks, so nothing looked broken. A company's
+    /// identity was, in effect, a by-product of folder provisioning.</para>
+    ///
+    /// <para>Persisted here at the MOMENT OF RESOLUTION instead, so it cannot depend on an
+    /// unrelated subsystem. The SharePoint folder name is derived from the SAME resolved value, so
+    /// the folder and the display name can never disagree (his instruction: *"that is also the name
+    /// that the sharepoint integration must create"*).</para>
+    ///
+    /// <para>⚠️ §443 still holds: this is SYNCED. Never fetch a company name from Company Manager
+    /// while rendering a page — that pattern made five organizer pages take 6–8 s warm.</para>
+    /// </remarks>
+    public string? CompanyName { get; set; }
 
     /// <summary>
     /// Zoho Backstage SPONSOR id for this company (every paying company is a Zoho
@@ -127,6 +170,31 @@ public class SponsorInfo
     public string? EventCoordinatorPhone { get; set; }
 
     /// <summary>
+    /// §597.4 — the Company Manager user id that was the company's <b>Default Event Coordinator</b>
+    /// the last time CEH read it. Null = never read.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-07-28: *"maybe add the ability to select DEFAULT event coordinator here"* →
+    /// *"then you know which will be synced to zoho"* → *"default comes from CM (default event
+    /// coordinator)"*. So the POINTER is CM's to own, even though the VALUES above are CEH's once a
+    /// human edits them on Company Details.</para>
+    ///
+    /// <para><b>This column is what makes both halves true at once.</b> Without it the fill was
+    /// blank-only — CEH took the coordinator once and could never notice him changing it in CM
+    /// afterwards. With it, a CHANGED pointer is unambiguous evidence of a deliberate decision in CM
+    /// and the coordinator is re-read; an UNCHANGED pointer leaves whatever the hub holds alone, so
+    /// a hub edit is never silently reverted by the next sync.</para>
+    ///
+    /// <para>🔒 <b>Why the pointer and not the e-mail.</b> Zoho hard-caps contact-e-mail updates at
+    /// 3 attempts and a burnt cap means an exhibitor's LEADS ARE LOST (§596.1) — his words: *"which
+    /// is a disaster as leads will be lost"*. Deriving the contact from "first coordinator in the
+    /// list" would churn the e-mail every time a booth member was added or removed and spend the cap
+    /// on nothing. A single pointer changes only when he changes it. The
+    /// <see cref="ZohoContactEmail"/> guard still stands in front of every send regardless.</para>
+    /// </remarks>
+    public int? CmDefaultCoordinatorUserId { get; set; }
+
+    /// <summary>
     /// The contact email LAST pushed to Zoho Backstage for this company (the
     /// sponsor/exhibitor record's contact email). Zoho hard-caps email updates at
     /// 3 attempts — even a no-op resend burns one — so the sync sends the contact
@@ -137,7 +205,51 @@ public class SponsorInfo
     /// </summary>
     public string? ZohoContactEmail { get; set; }
 
-    // --- Logos (relative paths under wwwroot, e.g. uploads/sponsors/<co>/logo.eps) -
+    /// <summary>
+    /// §302d (operator 2026-07-24, the perpetual "Social Pages" mails): the hash of the
+    /// social/overview values LAST PUSHED to the Zoho exhibitor. LIVE FACT: the
+    /// exhibitor PUT ACCEPTS company_social_pages / company_overview but the GET NEVER
+    /// echoes them back, so a blank-in-Zoho check could never see them and the engine
+    /// re-pushed + re-mailed every pass. CEH therefore remembers what it sent: re-push
+    /// (and mail) ONLY when the CEH values differ from this stamp. Null = never pushed.
+    /// </summary>
+    public string? ZohoSocialPushedHash { get; set; }
+
+    /// <summary>
+    /// §596 — the hash of the SPONSOR-record profile values last pushed to Zoho (description +
+    /// website). The sponsor twin of <see cref="ZohoSocialPushedHash"/>. Null = never pushed.
+    /// </summary>
+    /// <remarks>
+    /// 🔒 WHY THIS EXISTS. Operator 2026-07-28: *"the sponsor for an exhibitor in zoho is not
+    /// updated, when i change something in ceh … i have changed the company description but the
+    /// description in the sponsor area doesn't reflect that"* — while the EXHIBITOR record showed
+    /// his edit correctly.
+    ///
+    /// <para>Cause: the sponsor push was FILL-BLANK ONLY —
+    /// <c>BlankInZoho(z?.Description) &amp;&amp; …</c>. Once Zoho held any description, that
+    /// condition was false forever, so a CHANGED CEH description could never reach the sponsor
+    /// record. The exhibitor side was already CHANGE-driven (via the social hash), which is exactly
+    /// why one updated and the other did not.</para>
+    ///
+    /// <para>A hash stamp is used rather than a live diff even though the sponsor GET *does* echo
+    /// the description: Zoho reformats rich text, so a char-compare would differ on every pass and
+    /// re-push + re-mail forever — the §302 "70-mail night". Stamping what we sent means at most
+    /// ONE push per real CEH change.</para>
+    ///
+    /// <para>⚠️ This push carries NO contact block. Zoho hard-caps sponsor e-mail updates at 3 and
+    /// even a no-op resend burns one; exceeding it renders the sponsor AND exhibitor objects
+    /// unupdatable, recoverable only by deletion — which loses leads (§596.1). The contact e-mail
+    /// is still sent ONLY when it genuinely changed, on its own existing condition.</para>
+    /// </remarks>
+    public string? ZohoSponsorProfilePushedHash { get; set; }
+
+    // --- Logos -------------------------------------------------------------
+    // §468: these hold the SHAREPOINT webUrl returned by the upload (SponsorLogosFormService /
+    // CompanyDetails), NOT a local path. The previous comment claimed "relative paths under
+    // wwwroot, e.g. uploads/sponsors/<co>/logo.eps" — a leftover convention: nothing has written
+    // to wwwroot at runtime for a long time, and since §462b (WEBSITE_RUN_FROM_PACKAGE=1) wwwroot
+    // is READ-ONLY, so anything that tried would now fail outright. Corrected because that stale
+    // comment is precisely what made a local-disk logo bug look plausible when it was not one.
     public string? LogoVectorPath { get; set; }
     public string? LogoVectorFileName { get; set; }
     public string? LogoRasterPath { get; set; }
@@ -168,7 +280,69 @@ public class SponsorInfo
     /// </summary>
     public Ring Ring { get; set; } = Rings.Default;
 
+    // --- Booth check-in (pre-day expected arrival, REQUIREMENTS §229) ---------
+    /// <summary>
+    /// §229: when the sponsor expects to arrive at their booth on the pre-day
+    /// (9 Feb 2027). One of <see cref="BoothCheckInSlots.All"/> (canonical slot keys,
+    /// incl. the "we don't expect to participate on pre-day" opt-out); null = not
+    /// answered yet (the sponsor Get-Started step stays open).
+    /// </summary>
+    public string? BoothCheckInSlot { get; set; }
+    public DateTimeOffset? BoothCheckInSetAt { get; set; }
+    public string? BoothCheckInSetByEmail { get; set; }
+
+    /// <summary>§298: how many booth members will check in on the pre-day. Feeds the organizer
+    /// pre-day LUNCH headcount (each checked-in booth member eats the pre-day lunch). Null / 0 =
+    /// not stated; ignored when the slot is the not-participating opt-out.</summary>
+    public int? BoothCheckInMemberCount { get; set; }
+
+    /// <summary>§292 — true when this sponsor bought a "Sponsor Sessions" speaking slot (webshop
+    /// product category). Gates the extra Get-Started step where they register the session
+    /// title/abstract + speakers. Set from the order pull (or manually) — see SponsorSession.</summary>
+    public bool HasSponsorSession { get; set; }
+
+    // --- Lifecycle (REQUIREMENTS §253, G8b) ----------------------------------
+    /// <summary>
+    /// Whether the company is still sponsoring. <see cref="SponsorStatus.Withdrawn"/>
+    /// hides the company from the public sponsors page + the organizer sponsor
+    /// counts; set via the organizer "withdraw company" action, whose cascade also
+    /// deactivates the company's contacts and cancels its group party reservation.
+    /// </summary>
+    public SponsorStatus Status { get; set; } = SponsorStatus.Active;
+
+    /// <summary>When the company was withdrawn (null while active).</summary>
+    public DateTimeOffset? WithdrawnAt { get; set; }
+
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? UpdatedAt { get; set; }
     public string? LastUpdatedByEmail { get; set; }
+}
+
+/// <summary>
+/// §229 — the canonical booth check-in slot keys + display labels for the pre-day
+/// (9 Feb 2027) expected-arrival question in the sponsor Get-Started wizard.
+/// </summary>
+public static class BoothCheckInSlots
+{
+    public const string S0730 = "0730-0900";
+    public const string S0900 = "0900-1030";
+    public const string S1030 = "1030-1200";
+    public const string S1200 = "1200-1500";
+    /// <summary>"We don't expect to participate on pre-day."</summary>
+    public const string NotParticipating = "not-participating";
+
+    public static readonly IReadOnlyList<string> All =
+        new[] { S0730, S0900, S1030, S1200, NotParticipating };
+
+    public static bool IsValid(string? slot) => slot is not null && All.Contains(slot);
+
+    public static string Label(string? slot) => slot switch
+    {
+        S0730 => "7:30–9:00",
+        S0900 => "9:00–10:30",
+        S1030 => "10:30–12:00",
+        S1200 => "12:00–15:00",
+        NotParticipating => "We don't expect to participate on pre-day",
+        _ => "Not answered yet",
+    };
 }

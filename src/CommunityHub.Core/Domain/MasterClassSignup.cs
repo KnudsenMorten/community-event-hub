@@ -8,10 +8,16 @@ public enum MasterClassSignupStatus
     /// <summary>On the waitlist (FIFO by <see cref="MasterClassSignup.CreatedAt"/>).</summary>
     Waitlisted = 1,
     /// <summary>
-    /// A seat has opened and is being HELD for this person, who already holds a
-    /// confirmed seat in another MC — they must decide to keep their current seat
-    /// or switch (give it up to take this one). Counts against capacity while held;
-    /// expires (passes to the next waitlisted) at <see cref="MasterClassSignup.OfferExpiresAt"/>.
+    /// <b>RESERVED / UNUSED (§234 4)</b> — no live code path CREATES this state: every
+    /// promotion is an immediate confirm/auto-switch (§93, see
+    /// <c>MasterClassSignupService.PromoteNextAsync</c>), so no attendee ever sits in
+    /// "Offered". The value is KEPT because (a) it is persisted (renumbering would corrupt
+    /// stored rows), and (b) the accept/decline/expiry handling still consumes it
+    /// defensively should a row ever hold it. Original meaning: a freed seat HELD for a
+    /// person who already holds a confirmed seat elsewhere — they decide keep-or-switch;
+    /// counts against capacity while held; expires at
+    /// <see cref="MasterClassSignup.OfferExpiresAt"/>. Do not build new flows on this
+    /// state without an operator decision reviving the offer/decide model.
     /// </summary>
     Offered = 2,
 }

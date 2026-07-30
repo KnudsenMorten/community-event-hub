@@ -119,8 +119,44 @@ public sealed class TravelFormService : IWizardFormService
     /// (and any role granted the item via override) is entitled — a self-funded /
     /// organizer-funded speaker is NOT, so the step is NotRelevant for them.
     /// </summary>
-    public Task<bool> IsRelevantAsync(int eventId, int participantId, ParticipantRole role, CancellationToken ct) =>
-        FormEntitlementGate.IsEntitledAsync(_db, eventId, participantId, OrderItem.TravelReimbursement, ct);
+    public async Task<bool> IsRelevantAsync(
+        int eventId, int participantId, ParticipantRole role, CancellationToken ct)
+    {
+        if (!await FormEntitlementGate.IsEntitledAsync(
+                _db, eventId, participantId, OrderItem.TravelReimbursement, ct))
+        {
+            return false;
+        }
+
+        // §399 (operator 2026-07-26: "when a speaker is from Denmark, then the 'travel imbursement'
+        // should be disabled as the terms is that no people from denmark get travel reimbursed").
+        //
+        // The rule already existed — but ONLY inside SpeakerDeadlineSeeder as a private helper, so
+        // the deadline TASK was correctly withheld from Danish speakers while the nav entry and this
+        // form still offered the claim to them. Enforced HERE because both the GET and the POST
+        // already pass through this gate: hiding the menu item alone would leave the form reachable
+        // by URL, bookmark or an old e-mail, and a hidden link is not a rule.
+        var country = await _db.SpeakerProfiles
+            .Where(p => p.EventId == eventId && p.ParticipantId == participantId)
+            .Select(p => p.Country)
+            .FirstOrDefaultAsync(ct);
+
+        return CommunityHub.Core.Entitlements.TravelReimbursementPolicy.IsEligible(country);
+    }
+
+    /// <summary>
+    /// §399 — is the block specifically the Denmark rule (rather than a missing entitlement)? Lets
+    /// the page explain instead of saying "access denied" to someone who did nothing wrong.
+    /// </summary>
+    public async Task<bool> IsBlockedByCountryAsync(int eventId, int participantId, CancellationToken ct)
+    {
+        var country = await _db.SpeakerProfiles
+            .Where(p => p.EventId == eventId && p.ParticipantId == participantId)
+            .Select(p => p.Country)
+            .FirstOrDefaultAsync(ct);
+
+        return CommunityHub.Core.Entitlements.TravelReimbursementPolicy.IsDenmark(country);
+    }
 
     /// <summary>Completion detection (REQUIREMENTS §148) — a <see cref="TravelReimbursement"/> row
     /// exists for (eventId, participantId). Mirrors RoleWizardService.</summary>
@@ -473,7 +509,7 @@ public sealed class TravelFormService : IWizardFormService
                     AssignedParticipantId = participantId,
                     Title = "Submit flight ticket + invoice for reimbursement",
                     Description =
-                        $"Send your economy flight ticket + invoice to ELDK by {due:dd/MM/yyyy} " +
+                        $"Send your economy flight ticket + invoice to ELDK by {due:d MMM yyyy} " +
                         "(30 days before the event).",
                     DueDate = due,
                     State = TaskState.Open,

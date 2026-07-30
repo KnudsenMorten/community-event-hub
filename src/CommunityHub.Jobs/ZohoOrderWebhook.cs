@@ -1,15 +1,11 @@
 using System.Net;
-using CommunityHub.Core.Audit;
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
-using CommunityHub.Core.Email;
 using CommunityHub.Core.Integrations;
-using CommunityHub.Core.Reminders;
 using CommunityHub.Core.Settings;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
 namespace CommunityHub.Jobs;
@@ -18,19 +14,23 @@ namespace CommunityHub.Jobs;
 /// REAL-TIME leg of the authoritative one-way Zoho→CEH mirror (REQUIREMENTS §128): the
 /// FIRST HTTP-triggered Function in this worker (every other job is a TimerTrigger). Zoho
 /// Backstage POSTs here on Event Order / Attendee changes (Create / Update / Cancel /
-/// Delete / Reassign); the handler validates a shared secret, parses the changed ORDER id,
-/// and runs an INCREMENTAL single-order reconcile via
-/// <see cref="AttendeeTicketSyncService.SyncOrderAsync"/> — the same upsert + soft-cancel +
-/// reassignment path the hourly full sync uses, scoped to that one order so it never
-/// touches the rest of the mirror. The hourly <see cref="AttendeeBackstageSyncJob"/> stays
-/// on as the drift safety-net for missed/duplicate webhooks.
+/// Delete / Reassign); the handler validates a shared secret and parses the changed ORDER id.
+///
+/// <para><b>§233 BURST PROTECTION (operator 2026-07-07):</b> the webhook does NOT call the
+/// Zoho API anymore. It only ENQUEUES a <see cref="ZohoOrderSyncRequest"/> (deduped per
+/// still-pending order) and acks with 200 — the once-per-minute
+/// <see cref="ZohoWebhookDrainJob"/> coalesces everything queued in the window into ONE
+/// Zoho pull + per-order incremental reconciles. A burst (e.g. 5 orders in 2 minutes, or
+/// one order every 2 seconds) therefore costs at most one Zoho pull per minute instead of
+/// one full pull per webhook. The 10-minute <see cref="AttendeeBackstageSyncJob"/> stays on
+/// as the drift safety-net for missed/duplicate webhooks.</para>
 ///
 /// <para>CEH NEVER writes/deletes anything in Zoho — strictly read-then-mirror.</para>
 ///
 /// <para>Always returns a definite HTTP status so Zoho's retry behaviour is predictable:
-/// <c>401</c> bad/absent secret; <c>200</c> processed OR a deliberate no-op (disabled /
+/// <c>401</c> bad/absent secret; <c>200</c> queued OR a deliberate no-op (disabled /
 /// paused / feature off / no order id — the periodic reconcile will catch drift);
-/// <c>503</c> transient (no active event yet / token refresh failed) so Zoho retries.</para>
+/// <c>503</c> transient (no active event yet) so Zoho retries.</para>
 ///
 /// EXEMPT from <see cref="JobsPauseMiddleware"/> (which short-circuits with no HTTP
 /// response) — the pause is enforced INSIDE the handler so a paused edition still returns a
@@ -39,25 +39,16 @@ namespace CommunityHub.Jobs;
 public sealed class ZohoOrderWebhook
 {
     private readonly CommunityHubDbContext _db;
-    private readonly ZohoClient _zoho;
     private readonly ZohoOptions _options;
-    private readonly AttendeeTicketSyncService _sync;
-    private readonly MasterClassEmailService _mcEmail;
-    private readonly MasterClassPromotionEmailService _promo;
-    private readonly IAuditTrail _audit;
     private readonly FeatureGateService _gate;
-    private readonly IConfiguration _config;
     private readonly ILogger<ZohoOrderWebhook> _log;
 
     public ZohoOrderWebhook(
-        CommunityHubDbContext db, ZohoClient zoho, ZohoOptions options,
-        AttendeeTicketSyncService sync, MasterClassEmailService mcEmail,
-        MasterClassPromotionEmailService promo, IAuditTrail audit,
-        FeatureGateService gate, IConfiguration config, ILogger<ZohoOrderWebhook> log)
+        CommunityHubDbContext db, ZohoOptions options,
+        FeatureGateService gate, ILogger<ZohoOrderWebhook> log)
     {
-        _db = db; _zoho = zoho; _options = options; _sync = sync;
-        _mcEmail = mcEmail; _promo = promo; _audit = audit;
-        _gate = gate; _config = config; _log = log;
+        _db = db; _options = options;
+        _gate = gate; _log = log;
     }
 
     [Function("ZohoOrderWebhook")]
@@ -98,6 +89,17 @@ public sealed class ZohoOrderWebhook
         if (!await _gate.IsFeatureEnabledAsync("attendee-reconcile", ev, ct))
             return await Text(req, HttpStatusCode.OK, "attendee-reconcile feature off — no-op");
 
+        // 🔒 §707.13 — THE RECEIVER'S OWN SWITCH, visible in /Organizer/Settings. Operator
+        // 2026-07-30: *"ok, then we need the receiver in the portal as well (settings)"*.
+        //
+        // Until now the only control was the `Zoho__WebhookEnabled` app setting checked above —
+        // invisible on every page and changeable only by a deploy — so the Settings/Jobs pages
+        // showed the DRAIN switch and said nothing about whether anything was still being
+        // accepted and queued. Turning this off stops queueing at the door; leaving it on keeps
+        // events for replay when real-time sync is switched back on.
+        if (!await _gate.IsFeatureEnabledAsync(FeatureCatalog.WebhookReceiverKey, ev, ct))
+            return await Text(req, HttpStatusCode.OK, "webhook receiver switched off — no-op (periodic reconcile active)");
+
         if (string.IsNullOrWhiteSpace(parsed.OrderId))
         {
             _log.LogInformation("ZohoOrderWebhook: no order id in payload (action={Action}); "
@@ -106,88 +108,43 @@ public sealed class ZohoOrderWebhook
         }
         var orderId = parsed.OrderId!;
 
-        // ---- 4. Fetch the CURRENT Zoho state, scoped to this one order ----------
-        var token = await _zoho.GetAccessTokenAsync(ct);
-        if (token is null)
+        // ---- 4. §233: ENQUEUE + ACK — never call the Zoho API from the webhook ----
+        // Dedupe: one PENDING request per (edition, order). A repeat webhook for an order
+        // already queued only refreshes the cancel hint / timestamp — the drain job's next
+        // run covers both. Bursts therefore coalesce to one queue row per order and at
+        // most ONE Zoho pull per minute, however fast the webhooks arrive.
+        var pending = await _db.ZohoOrderSyncRequests.FirstOrDefaultAsync(
+            r => r.EventId == ev && r.OrderId == orderId && r.ProcessedAt == null, ct);
+        var now = DateTimeOffset.UtcNow;
+        if (pending is null)
         {
-            _log.LogError("ZohoOrderWebhook: no Zoho token; asking Zoho to retry.");
-            return await Text(req, HttpStatusCode.ServiceUnavailable, "zoho token unavailable");
+            _db.ZohoOrderSyncRequests.Add(new ZohoOrderSyncRequest
+            {
+                EventId = ev,
+                OrderId = orderId,
+                CancelHint = parsed.IsCancellation,
+                RequestedAt = now,
+            });
         }
-
-        // Reuse the SAME verified v3 parse the timer job uses, then filter to this order.
-        // (A single-order fetch endpoint isn't confirmed; the full pull keeps parsing
-        //  identical to the periodic sync. Webhooks are infrequent vs. the data size.)
-        var allOrders = await _zoho.GetBackstageOrdersAsync(token, ct);
-        var order = allOrders.FirstOrDefault(o => string.Equals(o.OrderId, orderId, StringComparison.Ordinal));
-
-        var allAttendees = await _zoho.GetBackstageAttendeesAsync(token, ct);
-        var ticketsForOrder = allAttendees
-            .Where(a => string.Equals(a.OrderId, orderId, StringComparison.Ordinal))
-            .Select(AttendeeTicketSyncService.FromBackstage)
-            .ToList();
-
-        // SAFETY: a transient/empty pull must NOT be mistaken for a real cancellation.
-        // The v3 pull swallows API errors and yields an empty list, so if the order is
-        // absent AND the whole pull came back empty AND the payload didn't signal a
-        // cancel/delete, treat it as ambiguous and let Zoho retry (the periodic reconcile,
-        // which sees the full set, is the backstop) rather than soft-cancelling wrongly.
-        var pullLooksEmpty = allOrders.Count == 0 && allAttendees.Count == 0;
-        if (order is null && !parsed.IsCancellation && pullLooksEmpty)
+        else
         {
-            _log.LogWarning("ZohoOrderWebhook: order {Order} absent from an EMPTY pull and no cancel "
-                + "hint — treating as transient, asking Zoho to retry.", orderId);
-            return await Text(req, HttpStatusCode.ServiceUnavailable, "ambiguous empty pull — retry");
+            pending.CancelHint = pending.CancelHint || parsed.IsCancellation;
+            pending.RequestedAt = now;
         }
-
-        var orderRow = order is null ? null : AttendeeTicketSyncService.FromBackstageOrder(order);
-        // The order is gone from Zoho's active set ⇒ whole-order cancellation (corroborated by
-        // a cancel/delete hint or a clearly-non-empty pull that simply doesn't contain it).
-        var orderRemoved = order is null;
-
-        // ---- 5. INCREMENTAL reconcile of just this order (§128) -----------------
-        var result = await _sync.SyncOrderAsync(ev, orderId, orderRow, ticketsForOrder, orderRemoved, ct);
-
-        // ---- 6. Side-effect emails (same as the full sync) ----------------------
-        var domain = _config["Hub:CustomDomain"];
-        var baseUrl = string.IsNullOrWhiteSpace(domain) ? "https://eldk27.eventhub.expertslive.dk" : $"https://{domain}";
-        var reEmails = 0;
-        foreach (var r in result.Reassignments)
-            try { if (await _mcEmail.SendReassignmentValidationAsync(r.AttendeeId, r.InheritedMcTitle, baseUrl, ct)) reEmails++; } catch { }
-        var promoEmails = 0;
-        foreach (var p in result.FreedPromotions)
-            if (p.PromotedSignupId is int id)
-                try { if (await _promo.SendPromotionAsync(id, baseUrl, ct)) promoEmails++; } catch { }
-
-        _log.LogInformation(
-            "ZohoOrderWebhook: order {Order} (action={Action}) — created {C}, updated {U}, "
-            + "reassigned {R} ({RE} validated), cancelled {X} ({PE} promoted), reactivated {RA}; "
-            + "order [created={OC} updated={OU} cancelled={OX} reactivated={ORr}].",
-            orderId, parsed.Action, result.Created, result.Updated, result.Reassigned, reEmails,
-            result.Cancelled, promoEmails, result.Reactivated,
-            result.OrderCreated, result.OrderUpdated, result.OrderCancelled, result.OrderReactivated);
+        await _db.SaveChangesAsync(ct);
 
         // --- Record the last-webhook-received stamp on the edition's sync marker (§132).
         //     Lets the Sync-Health dashboard show that the real-time push leg is alive,
-        //     distinct from the hourly full-sync's LastSuccessAt. ---
+        //     distinct from the full-sync's LastSuccessAt. ---
         await RecordWebhookStampAsync(ev, ct);
 
-        await _audit.RecordAsync(new AuditEntry
-        {
-            EventId = ev,
-            Category = AuditCategory.Engine,
-            Action = "attendee-backstage-webhook",
-            ActorEmail = "system",
-            Source = AuditSource.Job,
-            Outcome = AuditOutcome.Success,
-            Summary = $"Webhook incremental reconcile of order {orderId} (action {parsed.Action ?? "n/a"}): "
-                + $"created {result.Created}, updated {result.Updated}, reassigned {result.Reassigned}, "
-                + $"cancelled {result.Cancelled}, reactivated {result.Reactivated}"
-                + (orderRemoved ? "; order soft-cancelled" : ""),
-        }, ct);
+        _log.LogInformation(
+            "ZohoOrderWebhook: order {Order} (action={Action}) queued for the coalesced "
+            + "drain (§233) — {Mode}.",
+            orderId, parsed.Action, pending is null ? "new request" : "merged into pending request");
 
         return await Text(req, HttpStatusCode.OK,
-            $"ok: order {orderId} reconciled (created {result.Created}, updated {result.Updated}, "
-            + $"reassigned {result.Reassigned}, cancelled {result.Cancelled}, reactivated {result.Reactivated})");
+            $"ok: order {orderId} queued for coalesced reconcile (drain runs every minute)");
     }
 
     /// <summary>Upsert the edition's attendee-backstage <see cref="SyncRun"/> marker with the

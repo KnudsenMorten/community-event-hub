@@ -123,7 +123,23 @@ public sealed class SessionDeletionService
         }
 
         _db.Sessions.Remove(session);
-        await _db.SaveChangesAsync(ct);
+        try
+        {
+            await _db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException)
+        {
+            // §327d FAIL-SAFE — the same guard ParticipantDeletionService already had (§307,
+            // added after a delete returned HTTP 500). A dependency the probe above does not
+            // know about — schema drift, a new table hung off Session — refused the delete.
+            // NEVER surface a 500: drop the tracked removal and report BLOCKED, so the caller
+            // shows "can't delete, here's why" instead of an error page, and nothing is
+            // half-deleted.
+            _db.ChangeTracker.Clear();
+            return new DeletionResult(
+                DeletionStatus.Blocked, session.Id, session.Title,
+                !session.IsHubAdded, new[] { "other linked data" });
+        }
 
         return new DeletionResult(
             DeletionStatus.Deleted, session.Id, session.Title,
@@ -152,6 +168,34 @@ public sealed class SessionDeletionService
         var signups = await _db.MasterClassSignups.CountAsync(m => m.SessionId == sessionId, ct);
         if (signups > 0)
             blockers.Add($"{signups} master-class signup(s)");
+
+        // §327d (operator 2026-07-25, from the §326cc destructive-op review — "I don't want
+        // to end in a disaster losing data"). These four hang off a Session and were NOT
+        // probed, so a delete either destroyed them silently or failed with an FK 500
+        // depending on the FK's delete behaviour. Each is real work somebody did:
+
+        // Attendee comments on a master class — attendee-supplied, same class of data as
+        // the questions above.
+        var comments = await _db.MasterClassComments.CountAsync(c => c.SessionId == sessionId, ct);
+        if (comments > 0)
+            blockers.Add($"{comments} master-class comment(s)");
+
+        // The uploaded evaluation artefacts (QR sheets, result files) that back the
+        // evaluations — deleting the session would orphan the stored files.
+        var evalFiles = await _db.SessionEvaluationFiles.CountAsync(f => f.SessionId == sessionId, ct);
+        if (evalFiles > 0)
+            blockers.Add($"{evalFiles} evaluation file(s)");
+
+        // Promo graphics generated for this session and possibly already shared publicly.
+        var graphics = await _db.GraphicAssets.CountAsync(g => g.SessionId == sessionId, ct);
+        if (graphics > 0)
+            blockers.Add($"{graphics} promo graphic(s)");
+
+        // Social posts referencing the session. A PUBLISHED one is already live on
+        // LinkedIn, so losing the row loses the only record that we posted it.
+        var posts = await _db.SoMePosts.CountAsync(p => p.SessionId == sessionId, ct);
+        if (posts > 0)
+            blockers.Add($"{posts} social post(s)");
 
         return blockers;
     }

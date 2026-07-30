@@ -19,8 +19,11 @@
          config/content/<edition>/{slug}.md and the Info page renders it inside
          the normal hub layout. Markdig is the standard, dependency-free .NET
          Markdown processor. -->
+    <PackageReference Include="Azure.Identity" Version="1.21.0" />
+    <PackageReference Include="Azure.Monitor.Query" Version="1.7.1" />
     <PackageReference Include="Markdig" Version="0.41.*" />
     <PackageReference Include="ClosedXML" Version="0.104.*" />
+    <PackageReference Include="Microsoft.ApplicationInsights.AspNetCore" Version="3.1.2" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.9">
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
@@ -41,10 +44,10 @@
     <!-- Ship the per-edition config JSON into the publish output so
          SpeakerDeadlineSeeder + other config-driven services can read it
          at runtime in App Service. -->
-    <Content Include="..\..\config\*.json"
-             Link="config\%(Filename)%(Extension)"
-             CopyToOutputDirectory="PreserveNewest"
-             CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="..\..\config\*.json" Link="config\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <!-- §303 per-integration field maps (layer 2 of the IntegrationFieldMap design):
+         loaded fail-soft at startup over the code-default rows. -->
+    <Content Include="..\..\config\integrations\*.json" Link="config\integrations\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <!-- Operator-authored CONTENT-HUB markdown (REQUIREMENTS §104-§123). The
          /Info/{slug} page reads config/content/<edition>/{slug}.md at runtime
          via ConfigPaths.Resolve (AppContext.BaseDirectory), so ship the .md
@@ -55,14 +58,24 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>Always</CopyToPublishDirectory>
     </None>
+    <!-- REQUIREMENTS §684.8/§684.14 - the authored TASK BODIES (Markdown + directives), read at
+         runtime by TaskBodyStore through ConfigPaths.Resolve. Same shape as the content pages
+         above and shipped for the same reason: without this Include the .md files are simply
+         ABSENT from the published bundle and every migrated task renders as an empty body in
+         Azure. That is exactly the failure that hit templates/emails (found 2026-06-12), and it
+         presents as a content bug rather than a packaging one. Recursive, to keep the per-role
+         sub-folder. -->
+    <None Include="..\..\config\tasks\**\*.md">
+      <Link>config\tasks\%(RecursiveDir)%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>Always</CopyToPublishDirectory>
+    </None>
     <!-- Survey definitions read at runtime by SurveyDefinitionProvider via
          {ContentRoot}\App_Data\Surveys\<slug>.json. Editing the JSON
          changes survey copy without a code change or DB migration.
          SDK already auto-includes the JSON as Content; we only need to
          flip the copy-to-output flags via Update. -->
-    <Content Update="App_Data\Surveys\*.json"
-             CopyToOutputDirectory="PreserveNewest"
-             CopyToPublishDirectory="PreserveNewest" />
+    <Content Update="App_Data\Surveys\*.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <!-- Branded email templates (shared repo-root folder). The web app
          renders them too (welcome mail on invitations / Sessionize import,
          Email Center preview + test-send); without this block the publish

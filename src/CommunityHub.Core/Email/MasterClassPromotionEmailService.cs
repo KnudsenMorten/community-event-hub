@@ -65,7 +65,13 @@ public sealed class MasterClassPromotionEmailService
     /// is the scheme+host for the self-service link (e.g. "https://host"). Returns
     /// false when the signup is unknown, not a confirmed seat, or already notified.
     /// </summary>
-    public async Task<bool> SendPromotionAsync(int signupId, string baseUrl, CancellationToken ct = default)
+    /// <param name="releasedTitle">
+    /// §386 — the class whose seat was auto-released to take this one, when the attendee held a seat
+    /// elsewhere and consented to the swap. Null when nothing was given up. Without it the mail said
+    /// only "you're in X" while a seat quietly vanished, so the attendee found out by noticing.
+    /// </param>
+    public async Task<bool> SendPromotionAsync(
+        int signupId, string baseUrl, CancellationToken ct = default, string? releasedTitle = null)
     {
         var s = await _db.MasterClassSignups
             .Include(x => x.Attendee)
@@ -84,26 +90,49 @@ public sealed class MasterClassPromotionEmailService
 
         var firstName = string.IsNullOrWhiteSpace(s.Attendee.FirstName) ? "there" : s.Attendee.FirstName;
         var isOffer = s.Status == MasterClassSignupStatus.Offered;
+        // §707.2b — the MAIL IDENTITY. This service sends TWO different mails from one method, so the
+        // key is derived from the same branch the renderer uses (below) rather than restated, and it is
+        // passed as EmailContext.TemplateName by both the templated and the legacy-fallback send.
+        // Without it both resolved by the welcome-email FEATURE ring and neither could be tuned per role.
+        var mailKey = isOffer ? "masterclass-offer" : "masterclass-promoted";
         var when = s.OfferExpiresAt is { } exp ? $" by {exp:dddd HH:mm} UTC" : "";
         var name = $"{s.Attendee.FirstName} {s.Attendee.LastName}".Trim();
+
+        // §169 + §252 F6: the recipient's provisioned login Participant id — magic-link
+        // CTA + participant-keyed ring gate (never fail-closed dropped as "unknown").
+        // §252 F5: the promotion rides the SAME welcome-email ring as the rest of the
+        // Master Class funnel (one ring, one raise at go-live).
+        var pid = await MasterClassEmailService.ResolveAttendeeParticipantIdAsync(
+            _db, s.Attendee.Email, s.EventId, ct);
 
         string subject, htmlBody;
         if (_templates is not null)
         {
             // The service already branches on status: render the matching key.
-            // §169: the participant id makes the generic {{hubUrl}} CTA the recipient's
-            // personal auto-login magic-link (the selfServiceUrl deep-link is unchanged).
-            var pid = await MasterClassEmailService.ResolveAttendeeParticipantIdAsync(
-                _db, s.Attendee.Email, s.EventId, ct);
             var tokens = _templates.NewTokenSet(pid);
             tokens["firstName"] = firstName;
             tokens["masterClassTitle"] = s.Session.Title;
             tokens["selfServiceUrl"] = url;
             tokens["offerDeadline"] = when;   // offer variant only; empty otherwise
-            using (_context.Set(new EmailContext(Category, s.EventId, null, name, FeatureKey: "masterclass-invites")))
+            // §386: a whole SENTENCE, not just the title, so the template needs no conditional —
+            // empty when nothing was released, which renders as nothing.
+            //
+            // §386b: the token MUST end in "Block" (or "Html"). The renderer HTML-ENCODES token
+            // values at the seam, so a token named `releasedNote` had its <p> and <strong> printed
+            // as literal tags in the operator's inbox. That suffix IS the documented opt-out for
+            // sender-built fragments — the same convention `waitlistTerms`/`heldMasterClass` use.
+            // The TITLE is still encoded by hand, because it is user/event free text.
+            tokens["releasedNoteBlock"] = string.IsNullOrWhiteSpace(releasedTitle)
+                ? string.Empty
+                : "<p style=\"margin:0 0 16px;\">Your previous seat in <strong>"
+                  + System.Net.WebUtility.HtmlEncode(releasedTitle)
+                  + "</strong> has been released &mdash; that is what you agreed to when you joined "
+                  + "the wait list.</p>";
+            using (_context.Set(new EmailContext(
+                Category, s.EventId, pid, name,
+                TemplateName: mailKey, FeatureKey: "welcome-email")))
             {
-                var rendered = _templates.Render(
-                    isOffer ? "masterclass-offer" : "masterclass-promoted", tokens);
+                var rendered = _templates.Render(mailKey, tokens);
                 await _sender.SendAsync(s.Attendee.Email, rendered.Subject, rendered.HtmlBody, ct);
             }
             await _signups.MarkPromotionNotifiedAsync(s.Id, ct);
@@ -136,7 +165,9 @@ public sealed class MasterClassPromotionEmailService
                 ContactLine();
         }
 
-        using (_context.Set(new EmailContext(Category, s.EventId, null, name, FeatureKey: "masterclass-invites")))
+        using (_context.Set(new EmailContext(
+            Category, s.EventId, pid, name,
+            TemplateName: mailKey, FeatureKey: "welcome-email")))
         {
             await _sender.SendAsync(s.Attendee.Email, subject, htmlBody, ct);
         }

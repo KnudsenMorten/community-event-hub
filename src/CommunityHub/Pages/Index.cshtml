@@ -63,12 +63,13 @@
 </div>
 
 @* Unified "what's still needed" checklist — shared component (Top-8 #7).
-   The Hub passes the CalendarItem page-handler so dated pending rows offer .ics.
+   The Hub passes the AddReminder POST handler so dated pending rows offer an
+   "Add Reminder" button that e-mails a calendar invite (§193/§193b — no .ics download).
    Rendered ONLY when the role has tracked tasks, so a task-less role (attendee)
    doesn't get an empty "All tasks complete!" card (operator 2026-06-23). *@
 @if (Model.Checklist.Pending.Count + Model.Checklist.Completed.Count > 0)
 {
-    ViewData["ChecklistIcsHandler"] = "CalendarItem";
+    ViewData["ChecklistReminderHandler"] = "AddReminder";
     @await Html.PartialAsync("Shared/_ChecklistCard", Model.Checklist)
 }
 
@@ -76,6 +77,23 @@
    from the hub — they duplicated the same entitlements already shown in the task list (each is a
    "Complete the … form" task that links to the form). One source of truth: the tasks. The forms
    stay reachable from the tasks + the Event-logistics nav. *@
+
+@if (Model.ShowCrewIntro)
+{
+    @* Media / event-partner orientation: what the hub is for + the first action. *@
+    <div class="card">
+        <h2>Welcome to the crew 👋</h2>
+        <p style="margin:6px 0 10px;">
+            This hub is where your part of the event lives — your hotel, appreciation-dinner,
+            lunch and swag sign-ups, plus your tasks and practical info.
+        </p>
+        <p style="margin:0 0 4px;">
+            <strong>Start here:</strong> the Get started flow walks you through everything we
+            need from you, one short step at a time.
+        </p>
+        <a href="/Forms/Wizard" class="task-link-btn">Open Get started &rarr;</a>
+    </div>
+}
 
 @if (Model.ShowVolunteerShifts)
 {
@@ -147,7 +165,9 @@
 
         <p style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;">
             <a class="task-link-btn" asp-page="/Speaker/Index">@Localizer["Speaker.MySessions"]</a>
-            <a class="task-link-btn" asp-page="/Tasks/Index">@Localizer["Speaker.AllMyTasks"]</a>
+            @* §234 UX: speaker task links point at /Speaker/Tasks everywhere (the nav's
+               "My tasks" target) — the generic /Tasks entry point diverged from it. *@
+            <a class="task-link-btn" asp-page="/Speaker/Tasks">@Localizer["Speaker.AllMyTasks"]</a>
         </p>
     </div>
 }
@@ -156,7 +176,28 @@
    2026-06-23): the top nav already exposes these pages, and Key Dates lives on
    its own page. The Pending/Completed task lists above remain the sponsor home. *@
 
-@if (Model.ShowAttendeeArea)
+@if (Model.ShowAttendeeArea && !Model.AttendeeMasterClassEligible)
+{
+    @* §234 UX: a 1-DAY ticket holder's ticket excludes Master Classes, so the red
+       "no seat reserved" warning + Master-Class CTA made no sense for them. They get
+       the party-focused card instead — the Party RSVP is their one tracked action. *@
+    <div class="card">
+        <h2>See you at the party &#127881;</h2>
+        <p style="color:#4b5563;margin:0 0 8px;">
+            Master Classes are part of the <strong>2-day ticket</strong>, so there's nothing
+            you need to book here — just come and enjoy the conference day.
+        </p>
+        <p style="color:#4b5563;margin:0 0 8px;">
+            The <strong>Party</strong> is open to everyone. Let us know if you're coming so we
+            can plan food and drinks.
+        </p>
+        <p style="display:flex;gap:10px;flex-wrap:wrap;margin-top:8px;">
+            @* §351-6: the wizard step is the single canonical party surface (was /Party). *@
+            <a class="task-link-btn" href="/Forms/Wizard?step=party">Party Signup</a>
+        </p>
+    </div>
+}
+else if (Model.ShowAttendeeArea)
 {
     <div class="card">
         <h2>@Localizer["MyEvent.YourMasterClass"]</h2>
@@ -185,7 +226,14 @@
         @* "My Event" button removed (operator 2026-06-21): it only redirected to the
            Master Class chooser — a duplicate destination. The chooser link remains. *@
         <p style="display:flex;gap:10px;flex-wrap:wrap;margin-top:8px;">
-            <a class="task-link-btn" asp-page="/Attendee/Index">@Localizer["Hub.AttendeeMcDetails"]</a>
+            @* §382 (operator 2026-07-26: "when i click this master class details i ended with the
+               old /attendee that we killed. why is it still active"). This home-card button was the
+               LAST in-hub route into the retired page — the nav, the task deep-links and the mail
+               CTAs had all been moved (§351-6/§365/§372) and this one was missed, which is precisely
+               the "a retire is a sweep of every inbound link" lesson §365 recorded. Now the wizard
+               step, which is the live surface and itself links on to /MasterClassPage for the
+               what-to-bring & Q&A detail. *@
+            <a class="task-link-btn" href="/Forms/Wizard?step=masterclass">@Localizer["Hub.AttendeeMcDetails"]</a>
         </p>
     </div>
 }

@@ -29,6 +29,10 @@ namespace CommunityHub.Pages.Speaker;
 [Authorize]
 public class GraphicsModel : PageModel
 {
+    // §326p (operator 2026-07-25): the §324c "Post on my LinkedIn profile" self-post
+    // path is REMOVED — it never got past LinkedIn's redirect-URI gate live, and the
+    // share-intent + clipboard flow is the one that works. The company-page publish
+    // (§52/§324 "Publish to LinkedIn page") is untouched.
     private readonly CommunityHubDbContext _db;
     private readonly ICurrentParticipantAccessor _participant;
     private readonly GraphicsService _graphics;
@@ -48,6 +52,15 @@ public class GraphicsModel : PageModel
 
     public static readonly ParticipantRole[] EligibleRoles =
         { ParticipantRole.Speaker };
+
+    /// <summary>
+    /// §437: LinkedIn's composer with NOTHING prefilled — deliberately no <c>url=</c> and no
+    /// <c>text=</c>. A share link that carries a URL is unfurled into a small preview CARD,
+    /// which is exactly the "url-based image" the operator rejected; an empty composer has
+    /// nothing to unfurl, so the PNG the speaker attaches is the post's only media and
+    /// renders full-width. Public + const so the Help-Promote test can pin it.
+    /// </summary>
+    public const string EmptyComposerUrl = "https://www.linkedin.com/feed/?shareActive=true";
 
     public bool AccessDenied { get; private set; }
     public ParticipantRole Role { get; private set; }
@@ -72,18 +85,21 @@ public class GraphicsModel : PageModel
 
     public IReadOnlyList<GraphicCard> Cards { get; private set; } = Array.Empty<GraphicCard>();
 
-    /// <summary>The "I'm speaking at ELDK27" announcement draft (LinkedIn).</summary>
-    public SocialShareDraft? AnnouncementDraft { get; private set; }
-
-    /// <summary>The same announcement as an X (Twitter) draft (§160 — share buttons live under the post text).</summary>
-    public SocialShareDraft? AnnouncementDraftX { get; private set; }
-
+    /// <summary>
+    /// §172: a Help-Promote graphic card. Beyond the download, a session/master-class (or
+    /// track) card carries its OWN LinkedIn + X share DRAFTS, tailored to THAT session and
+    /// linking to the public session page (whose OpenGraph card pulls the graphic into the
+    /// post). The two share drafts are null for a plain speaker-headshot card (no session to
+    /// point a share at — download-only).
+    /// </summary>
     public sealed record GraphicCard(
         int Id,
         string Kind,
         string? Title,
         string? DownloadUrl,
-        bool HasStoredFile);
+        bool HasStoredFile,
+        SocialShareDraft? LinkedInShare = null,
+        SocialShareDraft? XShare = null);
 
     public Task<IActionResult> OnGetAsync(CancellationToken ct) => LoadAsync(ct);
 
@@ -110,6 +126,9 @@ public class GraphicsModel : PageModel
         return await LoadAsync(ct);
     }
 
+    // §326p: OnPostSelfPostAsync + the LinkedIn OAuth callback were removed with the
+    // self-post feature (see the class-level note above).
+
     private async Task<IActionResult> LoadAsync(CancellationToken ct)
     {
         var me = _participant.Current;
@@ -130,22 +149,67 @@ public class GraphicsModel : PageModel
             .Where(s => sessionIds.Contains(s.Id))
             .ToDictionaryAsync(s => s.Id, s => new { s.Title, s.Track }, ct);
 
+        // §172: build PER-CARD share drafts whose link is the PUBLIC page that carries the
+        // matching OpenGraph image — absolute URL from the current request (the repo's
+        // {scheme}://{host} convention).
+        var baseUrl = $"{Request.Scheme}://{Request.Host}";
+
         var cards = new List<GraphicCard>();
         foreach (var g in visible)
         {
-            var (kind, title) = g.Type switch
+            string kind;
+            string? title;
+            SocialShareDraft? liShare = null, xShare = null;
+
+            switch (g.Type)
             {
-                GraphicAssetType.Session =>
-                    ("Session graphic",
-                     g.SessionId is not null && sessionInfo.TryGetValue(g.SessionId.Value, out var s) ? s.Title : "Session"),
-                // §158: the per-track promo graphic, labelled with the track name so the speaker
-                // can tell it apart from their session graphic.
-                GraphicAssetType.Track =>
-                    ("Track graphic",
-                     g.SessionId is not null && sessionInfo.TryGetValue(g.SessionId.Value, out var ts)
-                        && !string.IsNullOrWhiteSpace(ts.Track) ? ts.Track : "Track"),
-                _ => ("Speaker graphic", (string?)null),
-            };
+                case GraphicAssetType.Session:
+                    // The graphic for one of the speaker's sessions/master-classes.
+                    title = g.SessionId is not null && sessionInfo.TryGetValue(g.SessionId.Value, out var s)
+                        ? s.Title : "Session";
+                    kind = "Session graphic";
+                    // §172: per-session share — text tailored to THIS session, linking to the public
+                    // session page (/Sessions/{id}) whose og:image is this very graphic.
+                    if (g.SessionId is not null)
+                    {
+                        var sessionUrl = $"{baseUrl}/Sessions/{g.SessionId.Value}";
+                        // §196: per-session promote text carries the /Sessions/{id} URL as its ONLY
+                        // link, so LinkedIn/X cards the session page and shows ITS og:image graphic.
+                        liShare = _graphics.BuildSessionPromoteDraft(
+                            EventDisplayName, EventDates, title ?? "Session", sessionUrl, SocialNetwork.LinkedIn, TicketUrl);
+                        xShare = _graphics.BuildSessionPromoteDraft(
+                            EventDisplayName, EventDates, title ?? "Session", sessionUrl, SocialNetwork.X, TicketUrl);
+                    }
+                    break;
+
+                case GraphicAssetType.Track:
+                    // §158: the per-track promo graphic, labelled with the track name so the speaker
+                    // can tell it apart from their session graphic.
+                    var track = g.SessionId is not null && sessionInfo.TryGetValue(g.SessionId.Value, out var ts)
+                        && !string.IsNullOrWhiteSpace(ts.Track) ? ts.Track! : "Track";
+                    title = track;
+                    kind = "Track graphic";
+                    // §172: a track graphic isn't one session, so its share links to the public sessions
+                    // list filtered to that track (the cleaner option vs. download-only — still a real,
+                    // shareable destination).
+                    if (!string.IsNullOrWhiteSpace(track) && track != "Track")
+                    {
+                        var trackUrl = $"{baseUrl}/Sessions?FilterTrack={Uri.EscapeDataString(track)}";
+                        liShare = _graphics.BuildTrackPromoteDraft(
+                            EventDisplayName, EventDates, TicketUrl, track, trackUrl, SocialNetwork.LinkedIn);
+                        xShare = _graphics.BuildTrackPromoteDraft(
+                            EventDisplayName, EventDates, TicketUrl, track, trackUrl, SocialNetwork.X);
+                    }
+                    break;
+
+                default:
+                    // The speaker headshot graphic — not tied to a session, so download-only (§172
+                    // removed the single generic top-of-page share; there is no per-session URL to
+                    // anchor a headshot share to).
+                    kind = "Speaker graphic";
+                    title = null;
+                    break;
+            }
 
             // §160: the PNG is served through the hub proxy (/speaker-graphic/{id}) — NEVER the raw
             // SharePoint URL (the speaker has no SharePoint permission). HasStoredFile keys off the
@@ -153,19 +217,11 @@ public class GraphicsModel : PageModel
             cards.Add(new GraphicCard(
                 g.Id, kind, title,
                 DownloadUrl: $"/speaker-graphic/{g.Id}",
-                HasStoredFile: !string.IsNullOrEmpty(g.StorageItemId)));
+                HasStoredFile: !string.IsNullOrEmpty(g.StorageItemId),
+                LinkedInShare: liShare,
+                XShare: xShare));
         }
         Cards = cards;
-
-        // The announcement (the speaker's "Your post") share drafts — LinkedIn + X — shown UNDER the
-        // post text. No graphicUrl is attached (share-intent can't carry an arbitrary image; the
-        // speaker downloads the PNG and attaches it themselves).
-        AnnouncementDraft = _graphics.BuildSpeakingAnnouncementDraft(
-            EventDisplayName, EventDates, TicketUrl, me.FullName, sessionTitle: null,
-            graphicUrl: null, SocialNetwork.LinkedIn);
-        AnnouncementDraftX = _graphics.BuildSpeakingAnnouncementDraft(
-            EventDisplayName, EventDates, TicketUrl, me.FullName, sessionTitle: null,
-            graphicUrl: null, SocialNetwork.X);
 
         return Page();
     }

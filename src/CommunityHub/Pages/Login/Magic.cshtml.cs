@@ -21,15 +21,18 @@ public class MagicModel : PageModel
     private readonly MagicLinkService _magic;
     private readonly CommunityHub.Core.Auth.IWelcomeAutoLoginTokenService _welcomeAutoLogin;
     private readonly CommunityHubDbContext _db;
+    private readonly CommunityHub.Core.Auth.OneDayAccessGate? _oneDayGate;
 
     public MagicModel(
         MagicLinkService magic,
         CommunityHub.Core.Auth.IWelcomeAutoLoginTokenService welcomeAutoLogin,
-        CommunityHubDbContext db)
+        CommunityHubDbContext db,
+        CommunityHub.Core.Auth.OneDayAccessGate? oneDayGate = null)
     {
         _magic = magic;
         _welcomeAutoLogin = welcomeAutoLogin;
         _db = db;
+        _oneDayGate = oneDayGate;
     }
 
     /// <summary>
@@ -59,7 +62,9 @@ public class MagicModel : PageModel
         string? token, string? r, CancellationToken ct)
     {
         // Carry the intended destination through the recovery flow (local only).
+        // Any '\' is rejected: browsers treat "/\evil.com" as protocol-relative (§234).
         ReturnUrl = !string.IsNullOrWhiteSpace(r) && r.StartsWith('/') && !r.StartsWith("//")
+            && !r.Contains('\\')
             ? r
             : null;
 
@@ -99,6 +104,13 @@ public class MagicModel : PageModel
             // inactive account, so we DON'T pre-fill here to avoid implying it'll work.
             ErrorKey = "Login.MagicInactive";
             return Page();
+        }
+
+        // §299 7.1: refuse a blocked 1-day ticket holder BEFORE issuing the cookie —
+        // the Login page shows the operator's exact block message via ?blocked=1day.
+        if (_oneDayGate is not null && await _oneDayGate.IsBlockedAsync(participant.Id, ct))
+        {
+            return Redirect("/Login?blocked=1day");
         }
 
         // A magic-link is a deliberate personal sign-in -> give it a FOREVER session

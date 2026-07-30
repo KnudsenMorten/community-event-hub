@@ -28,15 +28,20 @@ public class LoginModel : PageModel
     private readonly PinLoginService _pinLogin;
     private readonly IIdentityProvider _identityProvider;
     private readonly CommunityHubDbContext _db;
+    // §299 7.1: 1-day ticket-holder sign-in gate (RingCap=1 exception for testers).
+    // Optional so older test wiring without the gate keeps constructing the page.
+    private readonly OneDayAccessGate? _oneDayGate;
 
     public LoginModel(
         PinLoginService pinLogin,
         IIdentityProvider identityProvider,
-        CommunityHubDbContext db)
+        CommunityHubDbContext db,
+        OneDayAccessGate? oneDayGate = null)
     {
         _pinLogin = pinLogin;
         _identityProvider = identityProvider;
         _db = db;
+        _oneDayGate = oneDayGate;
     }
 
     [BindProperty]
@@ -78,8 +83,16 @@ public class LoginModel : PageModel
     /// and only has to request + enter the PIN. The link is built per-env from
     /// each environment's own base URL, so this works in dev and prod alike.
     /// </summary>
-    public IActionResult OnGet(string? email, string? returnUrl)
+    public IActionResult OnGet(string? email, string? returnUrl, string? blocked = null)
     {
+        // §299 7.1: a magic-link/go entry point bounced a 1-day ticket holder here —
+        // show the operator's exact block message on the sign-in form.
+        if (string.Equals(blocked, "1day", StringComparison.OrdinalIgnoreCase))
+        {
+            IsError = true;
+            Message = CommunityHub.Core.Auth.OneDayAccessGate.BlockedMessage;
+        }
+
         // "Remember me" defaults to CHECKED on the initial sign-in form (operator
         // 2026-06-28 §170): most people sign in on their own phone/laptop and want
         // to stay signed in. Only the first GET renders the step-1 form; the later
@@ -112,9 +125,12 @@ public class LoginModel : PageModel
         return Page();
     }
 
-    /// <summary>Honour only local ("/"-prefixed, non-protocol-relative) URLs.</summary>
+    /// <summary>Honour only local ("/"-prefixed, non-protocol-relative) URLs.
+    /// Backslashes are rejected outright: browsers treat "/\evil.com" (and "\/",
+    /// "\\") as protocol-relative, so any '\' makes the URL a redirect vector (§234).</summary>
     private static string? SafeLocalReturnUrl(string? url) =>
         !string.IsNullOrWhiteSpace(url) && url.StartsWith('/') && !url.StartsWith("//")
+            && !url.Contains('\\')
             ? url
             : null;
 
@@ -129,11 +145,32 @@ public class LoginModel : PageModel
             return Page();
         }
 
+        // §326ap (operator 2026-07-25: "a 1-day ticket holder should be blocked already when
+        // they try to sign-in … it doesn't make sense they try to login and wait for pin to
+        // get message"). The §299 7.1 gate in OnPostVerifyPin stays as the security backstop
+        // (and covers magic-link/go); this moves the ANSWER to the first step and — just as
+        // importantly — stops mailing a PIN to someone who can never use it. Unknown and
+        // non-1-day addresses fall through to the unchanged neutral response, so the endpoint
+        // still does not enumerate who is registered.
+        if (_oneDayGate is not null
+            && await _oneDayGate.IsBlockedByEmailAsync(activeEventId.Value, Email, ct))
+        {
+            Step = "email";
+            IsError = true;
+            Message = OneDayAccessGate.BlockedMessage;
+            return Page();
+        }
+
         var result = await _pinLogin.RequestPinAsync(activeEventId.Value, Email, ct);
 
         // Whether or not the email was known, advance to the PIN step with the
         // same neutral message - the endpoint must not reveal who is registered.
-        Step = "pin";
+        //
+        // §361 EXCEPTION: when the service reports the request was NOT accepted (a non-2-day
+        // attendee, who can never be sent a code), STAY on the email step. Advancing would show a
+        // PIN box that can never be filled — precisely the dead end the operator reported:
+        // "of course i never get the pin as we dont allow 1-day ticket holder to login".
+        Step = result.Accepted ? "pin" : "email";
         IsError = !result.Accepted;
         Message = result.Message;
         return Page();
@@ -159,6 +196,18 @@ public class LoginModel : PageModel
             Step = "pin";
             IsError = true;
             Message = result.FailureReason ?? "Invalid email or code.";
+            return Page();
+        }
+
+        // §299 7.1: a 1-day ticket holder is refused BEFORE any cookie is issued —
+        // with the exact operator message — unless inside the one-day-hub-access
+        // released ring (ring 0/1 test users validating the 1-day experience).
+        if (_oneDayGate is not null
+            && await _oneDayGate.IsBlockedAsync(result.Profile.Id, ct))
+        {
+            Step = "email";
+            IsError = true;
+            Message = OneDayAccessGate.BlockedMessage;
             return Page();
         }
 

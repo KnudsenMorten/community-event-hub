@@ -26,6 +26,11 @@ public sealed class WelcomeEmailService
     private readonly IEmailContextAccessor? _context;
     private readonly CommunityHub.Core.Settings.FeatureGateService? _gate;
     private readonly CommunityHub.Core.Settings.RingResolver? _rings;
+    // §234: delivered-vs-dropped seam — the SentReminder "welcome" ledger row is
+    // written only when the transport actually delivered, so a ring-dropped welcome
+    // (e.g. via a speaker override address) is retried once rings widen. Null
+    // (legacy/test wiring) ⇒ old always-record behaviour.
+    private readonly IEmailDeliveryOutcome? _outcome;
 
     public WelcomeEmailService(
         CommunityHubDbContext db,
@@ -34,7 +39,8 @@ public sealed class WelcomeEmailService
         TimeProvider clock,
         IEmailContextAccessor? context = null,
         CommunityHub.Core.Settings.FeatureGateService? gate = null,
-        CommunityHub.Core.Settings.RingResolver? rings = null)
+        CommunityHub.Core.Settings.RingResolver? rings = null,
+        IEmailDeliveryOutcome? outcome = null)
     {
         _db = db;
         _templates = templates;
@@ -43,6 +49,7 @@ public sealed class WelcomeEmailService
         _context = context;
         _gate = gate;
         _rings = rings;
+        _outcome = outcome;
     }
 
     /// <summary>
@@ -50,7 +57,7 @@ public sealed class WelcomeEmailService
     /// before (idempotent via the SentReminder ledger). Returns true if an
     /// email was actually sent. Pass <paramref name="force"/> = true for an
     /// organizer-initiated RESEND: the once-ever idempotency check is bypassed
-    /// (the ring gate + email allowlist still apply), and no duplicate ledger
+    /// (the ring gate + redirect/kill-switch still apply), and no duplicate ledger
     /// row is written.
     /// </summary>
     public async Task<bool> SendWelcomeAsync(
@@ -81,12 +88,18 @@ public sealed class WelcomeEmailService
         var toEmail = Domain.SpeakerProfile.EffectiveEmailFor(
             participant.Email, overrideEmail);
 
-        // Idempotency: one welcome per participant, ever. Keyed on the IDENTITY
-        // address so changing the override later never re-welcomes the speaker.
+        // Idempotency: one welcome per participant, ever.
+        //
+        // §326bf: this used to AND on `RecipientEmail == participant.Email` as well as the
+        // occasion key. `welcome:{participantId}` is ALREADY unique per person, so the
+        // address added nothing to the identity — but it could take the match AWAY:
+        // correcting a typo'd address, a re-import that changes the case, or a Sessionize
+        // update made the stored ledger row unmatchable, and the 10-minute
+        // WelcomeReconcileJob then welcomed that person all over again. The occasion key IS
+        // the identity; the address is merely where the mail happened to go that day.
         var occasionKey = $"welcome:{participant.Id}";
         var already = await _db.SentReminders.AnyAsync(
             s => s.EventId == participant.EventId
-                 && s.RecipientEmail == participant.Email
                  && s.ReminderType == ReminderType
                  && s.OccasionKey == occasionKey,
             ct);
@@ -132,12 +145,25 @@ public sealed class WelcomeEmailService
             CommunityHub.Core.Email.WelcomeVariants.TemplateKeyFor(participant.Role) ?? TemplateName;
         var rendered = _templates.Render(templateKey, tokens);
         // Ring-governed by the welcome-email feature (operator 2026-06-22).
+        // §516: Welcome:true adds the Email:WelcomeMaxReleaseRing cap (default Ring1) BENEATH the
+        // feature ring, so widening the Settings picker alone cannot release a persona welcome.
+        // TemplateName carries the per-role variant so the transport can see WHICH welcome this is.
         using (_context?.Set(new EmailContext(
             ReminderType, participant.EventId, participant.Id, participant.FullName,
-            FeatureKey: "welcome-email")))
+            TemplateName: templateKey,
+            FeatureKey: "welcome-email", Welcome: true)))
         {
             await _emailSender.SendAsync(
                 toEmail, rendered.Subject, rendered.HtmlBody, ct);
+        }
+
+        // §234: a gated (ring-dropped / kill-switched) send is NOT a welcome — do
+        // not write the once-ever ledger row, so a later reconcile re-sends
+        // automatically once rings widen. (Catches what the desired-state pre-gate
+        // above cannot: e.g. a speaker override address dropped at the transport.)
+        if (_outcome is not null && !_outcome.LastSendDelivered)
+        {
+            return false;
         }
 
         // Record it (first time) so a re-import does not re-send. A forced resend
@@ -176,11 +202,11 @@ public sealed class WelcomeEmailService
         ParticipantRole.Speaker =>
             "Start with the \"Get Started\" flow in the hub — it walks you "
             + "through everything you need to set up. Afterwards you can change "
-            + "anything under Event Logistics if needed.",
+            + "any of your preferences from the hub. You can access the hub using https://hub.expertslive.dk - save the link to your favourites.",
         ParticipantRole.Volunteer =>
             "Start with the \"Get Started\" flow in the hub — it walks you "
             + "through everything you need to set up. Afterwards you can change "
-            + "anything under Event Logistics if needed.",
+            + "any of your preferences from the hub. You can access the hub using https://hub.expertslive.dk - save the link to your favourites.",
         ParticipantRole.Sponsor =>
             "Your sponsor onboarding tasks and deadlines are in the hub. New "
             + "tasks appear as your order is processed.",

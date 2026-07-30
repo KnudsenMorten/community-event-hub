@@ -56,6 +56,13 @@ public sealed class OrganizerAllocationService
     {
         if (actor.Role != ParticipantRole.Organizer)
             throw new VolunteerAccessDeniedException("Organizer role required for allocation.");
+
+        // §337 DEFENCE IN DEPTH — see the twin guard in VolunteerAllocationService. Role
+        // cannot exclude an acting-as session (§234 gives it the target's claims); every
+        // caller here is a write, so failing closed removes no VIEW access.
+        if (actor.IsActingAs)
+            throw new VolunteerAccessDeniedException(
+                "Allocation writes are not permitted while acting as another user.");
     }
 
     // =====================================================================
@@ -75,8 +82,11 @@ public sealed class OrganizerAllocationService
             .Select(t => new { t.Id, t.Title, t.ResourcesNeeded })
             .ToListAsync(ct);
 
+        // EFFECTIVE assignments only (§253 G7) — same rule as the volunteer queue.
         var assignedCounts = await _db.VolunteerTaskAssignments
-            .Where(a => a.EventId == actor.EventId)
+            .Where(a => a.EventId == actor.EventId
+                        && a.Participant.IsActive
+                        && a.DecisionStatus != ShiftDecisionStatus.Declined)
             .GroupBy(a => a.TaskId)
             .Select(g => new { TaskId = g.Key, Count = g.Count() })
             .ToDictionaryAsync(x => x.TaskId, x => x.Count, ct);
@@ -105,8 +115,11 @@ public sealed class OrganizerAllocationService
             t => t.Id == taskId && t.EventId == actor.EventId, ct);
         if (task is null) return null;
 
+        // Same EFFECTIVE-assignment rule as LoadCoverageAsync (§253 G7).
         var assigned = await _db.VolunteerTaskAssignments
-            .CountAsync(a => a.TaskId == taskId && a.EventId == actor.EventId, ct);
+            .CountAsync(a => a.TaskId == taskId && a.EventId == actor.EventId
+                             && a.Participant.IsActive
+                             && a.DecisionStatus != ShiftDecisionStatus.Declined, ct);
         var draft = await _db.TaskAllocationDrafts
             .CountAsync(d => d.TaskId == taskId && d.EventId == actor.EventId
                              && d.OwnerParticipantId == actor.ParticipantId
@@ -215,7 +228,17 @@ public sealed class OrganizerAllocationService
         // every target is in scope.
         var releasedRing = await _gate.GetReleasedRingAsync(FeatureKey, actor.EventId, ct);
 
-        int committed = 0, skipped = 0, outOfRing = 0;
+        // §253 (matrix V6, mirrored from VolunteerAllocationService): targets who
+        // were DEACTIVATED since being queued are consumed-and-skipped — committing
+        // them would create ghost assignments the coverage filters immediately hide.
+        var draftTargetIds = drafts.Select(d => d.ParticipantId).Distinct().ToList();
+        var activeTargets = (await _db.Participants
+                .Where(p => draftTargetIds.Contains(p.Id) && p.IsActive)
+                .Select(p => p.Id)
+                .ToListAsync(ct))
+            .ToHashSet();
+
+        int committed = 0, skipped = 0, outOfRing = 0, inactive = 0;
         var now = _clock.GetUtcNow();
         var consumed = new List<TaskAllocationDraft>();
         var affected = new HashSet<int>();   // distinct targets whose committed set changed
@@ -229,6 +252,8 @@ public sealed class OrganizerAllocationService
             }
 
             consumed.Add(d);   // this draft is resolved this commit -> removable
+
+            if (!activeTargets.Contains(d.ParticipantId)) { inactive++; continue; }
 
             var exists = await _db.VolunteerTaskAssignments.AnyAsync(
                 a => a.TaskId == d.TaskId && a.ParticipantId == d.ParticipantId, ct);
@@ -249,7 +274,8 @@ public sealed class OrganizerAllocationService
         // Consume only the in-ring drafts; out-of-ring drafts stay queued.
         _db.TaskAllocationDrafts.RemoveRange(consumed);
         await _db.SaveChangesAsync(ct);
-        return new CommitResult(committed, skipped, outOfRing) { AffectedParticipantIds = affected.ToList() };
+        return new CommitResult(committed, skipped, outOfRing, inactive)
+        { AffectedParticipantIds = affected.ToList() };
     }
 
     /// <summary>DISCARD the organizer's whole ORGANIZER draft queue — nothing is assigned,

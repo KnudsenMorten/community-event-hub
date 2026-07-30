@@ -59,7 +59,12 @@ public sealed record SharePointFileSnapshot(
     string Name,
     string? ETag,
     DateTimeOffset? LastModifiedUtc,
-    string? WebUrl = null);
+    string? WebUrl = null,
+    // §467 — file size in BYTES from the Graph driveItem. Part of the DEFAULT driveItem
+    // response (no $select is set), so carrying it costs no extra call. Null when Graph
+    // omitted it. Used to decide whether a deck is too large for the embedded Office
+    // viewer BEFORE the attendee clicks "View" and lands on an error page.
+    long? SizeBytes = null);
 
 /// <summary>
 /// Microsoft Graph client for SharePoint Online. Pre-creates per-sponsor
@@ -202,7 +207,16 @@ public sealed class SharePointUploadClient
                         webUrl = wu.GetString();
                     }
 
-                    results.Add(new SharePointFileSnapshot(id!, name!, etag, lastMod, webUrl));
+                    // §467 — size comes back on the default driveItem; no extra request.
+                    long? sizeBytes = null;
+                    if (item.TryGetProperty("size", out var szEl)
+                        && szEl.ValueKind == JsonValueKind.Number
+                        && szEl.TryGetInt64(out var sz))
+                    {
+                        sizeBytes = sz;
+                    }
+
+                    results.Add(new SharePointFileSnapshot(id!, name!, etag, lastMod, webUrl, sizeBytes));
                 }
             }
 
@@ -249,21 +263,34 @@ public sealed class SharePointUploadClient
         }
 
         var encoded = EncodePath(fullPath);
-        var url = GraphRoot + $"/drives/{driveId}/root:/{encoded}:/content";
 
-        using var req = new HttpRequestMessage(HttpMethod.Put, url)
+        // §322b: files beyond the Graph SIMPLE-upload comfort zone go through an UPLOAD
+        // SESSION (chunked) — SharePoint itself has no 250 MB limit, only the single PUT
+        // does. Small files keep the one-call PUT.
+        const int SimpleUploadLimit = 4 * 1024 * 1024;
+        string raw;
+        if (content.Length > SimpleUploadLimit)
         {
-            Content = new ByteArrayContent(content),
-        };
-        req.Content.Headers.ContentType = new MediaTypeHeaderValue(contentType);
-        req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", await GetAccessTokenAsync(ct));
+            raw = await UploadViaSessionAsync(driveId, encoded, fullPath, content, ct);
+        }
+        else
+        {
+            var url = GraphRoot + $"/drives/{driveId}/root:/{encoded}:/content";
 
-        using var resp = await _http.SendAsync(req, ct);
-        var raw = await resp.Content.ReadAsStringAsync(ct);
-        if (!resp.IsSuccessStatusCode)
-        {
-            throw new SharePointUploadException(
-                $"Graph PUT content {fullPath} failed (HTTP {(int)resp.StatusCode}): {Truncate(raw, 400)}");
+            using var req = new HttpRequestMessage(HttpMethod.Put, url)
+            {
+                Content = new ByteArrayContent(content),
+            };
+            req.Content.Headers.ContentType = new MediaTypeHeaderValue(contentType);
+            req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", await GetAccessTokenAsync(ct));
+
+            using var resp = await _http.SendAsync(req, ct);
+            raw = await resp.Content.ReadAsStringAsync(ct);
+            if (!resp.IsSuccessStatusCode)
+            {
+                throw new SharePointUploadException(
+                    $"Graph PUT content {fullPath} failed (HTTP {(int)resp.StatusCode}): {Truncate(raw, 400)}");
+            }
         }
 
         using var doc = JsonDocument.Parse(raw);
@@ -275,6 +302,290 @@ public sealed class SharePointUploadClient
             : string.Empty;
 
         return (fullPath, webUrl, itemId);
+    }
+
+    /// <summary>
+    /// §455 — STREAMING upload: the same chunked upload session, but the source is a
+    /// <see cref="Stream"/> read one chunk at a time, so a large file is never held in
+    /// memory in full.
+    ///
+    /// <para>Why this exists (operator 2026-07-27, after a speaker's slide upload failed):
+    /// the web layer used to copy the whole request body into a <c>MemoryStream</c> and then
+    /// call <c>ToArray()</c> — holding a multi-hundred-MB deck in RAM <b>twice</b>, on a shared
+    /// App Service instance, before a single byte reached SharePoint. That is memory pressure
+    /// and a long pre-upload stall on the request thread. Now the bytes flow
+    /// browser → Graph a chunk at a time and peak memory is one chunk.</para>
+    ///
+    /// <para><paramref name="totalLength"/> must be the real length — Graph requires an exact
+    /// <c>Content-Range</c> per chunk and a final chunk that completes the declared total.</para>
+    /// </summary>
+    public async Task<(string Path, string WebUrl, string ItemId)> UploadFileStreamAsync(
+        string siteUrl,
+        string driveName,
+        string rootFolderPath,
+        string relativePath,
+        Stream content,
+        long totalLength,
+        string contentType,
+        CancellationToken ct = default)
+    {
+        if (!IsConfigured)
+        {
+            throw new SharePointUploadException("SharePoint integration is not fully configured.");
+        }
+
+        var driveId = await GetDriveIdAsync(siteUrl, driveName, ct);
+        var fullPath = JoinPath(rootFolderPath, relativePath);
+
+        var lastSlash = fullPath.LastIndexOf('/');
+        if (lastSlash > 0)
+        {
+            await EnsureFolderAsync(driveId, fullPath[..lastSlash], ct);
+        }
+
+        var encoded = EncodePath(fullPath);
+        var raw = await UploadStreamViaSessionAsync(driveId, encoded, fullPath, content, totalLength, ct);
+
+        using var doc = JsonDocument.Parse(raw);
+        var item = doc.RootElement;
+        var itemId = item.GetProperty("id").GetString()
+            ?? throw new SharePointUploadException("Upload response missing id.");
+        var webUrl = item.TryGetProperty("webUrl", out var w) && w.ValueKind == JsonValueKind.String
+            ? w.GetString() ?? string.Empty
+            : string.Empty;
+
+        return (fullPath, webUrl, itemId);
+    }
+
+    /// <summary>
+    /// §455 — the chunk loop for <see cref="UploadFileStreamAsync"/>. Identical session
+    /// protocol to <see cref="UploadViaSessionAsync"/>; the only difference is that each
+    /// chunk is READ FROM THE STREAM into one reusable buffer instead of being sliced out of
+    /// a fully-materialised array.
+    /// </summary>
+    private async Task<string> UploadStreamViaSessionAsync(
+        string driveId, string encodedPath, string fullPath, Stream content, long total,
+        CancellationToken ct)
+    {
+        var uploadUrl = await CreateUploadSessionAsync(driveId, encodedPath, fullPath, ct);
+
+        const int ChunkSize = 32 * 327_680;   // 10 MiB — a multiple of Graph's 320 KiB granularity
+        var buffer = new byte[ChunkSize];
+        long offset = 0;
+
+        while (offset < total)
+        {
+            // Fill the buffer up to ChunkSize (a single ReadAsync may return fewer bytes).
+            var want = (int)Math.Min(ChunkSize, total - offset);
+            var filled = 0;
+            while (filled < want)
+            {
+                var read = await content.ReadAsync(buffer.AsMemory(filled, want - filled), ct);
+                if (read == 0) break;
+                filled += read;
+            }
+            if (filled == 0)
+            {
+                throw new SharePointUploadException(
+                    $"Upload stream for {fullPath} ended early at {offset}/{total} bytes.");
+            }
+
+            using var chunkReq = new HttpRequestMessage(HttpMethod.Put, uploadUrl)
+            {
+                Content = new ByteArrayContent(buffer, 0, filled),
+            };
+            chunkReq.Content.Headers.ContentLength = filled;
+            chunkReq.Content.Headers.ContentRange =
+                new ContentRangeHeaderValue(offset, offset + filled - 1, total);
+
+            using var chunkResp = await _http.SendAsync(chunkReq, ct);
+            var chunkRaw = await chunkResp.Content.ReadAsStringAsync(ct);
+            if (!chunkResp.IsSuccessStatusCode)
+            {
+                throw new SharePointUploadException(
+                    $"Graph upload-session chunk {offset}-{offset + filled - 1}/{total} for {fullPath} "
+                    + $"failed (HTTP {(int)chunkResp.StatusCode}): {Truncate(chunkRaw, 400)}");
+            }
+            if (chunkResp.StatusCode is HttpStatusCode.OK or HttpStatusCode.Created)
+            {
+                return chunkRaw;
+            }
+            offset += filled;
+        }
+
+        throw new SharePointUploadException(
+            $"Graph upload session for {fullPath} finished without returning the driveItem.");
+    }
+
+    /// <summary>
+    /// §494 — DIRECT-TO-STORAGE: hand the BROWSER a pre-authenticated upload URL so the file goes
+    /// straight to SharePoint and never passes through the web app at all.
+    ///
+    /// <para><b>Why this is the end state.</b> §455 stopped us holding whole files in memory, but
+    /// every byte still travelled browser → App Service → Graph: the request thread was occupied
+    /// for the whole upload, a 25 MB brochure on a slow phone tied up a worker for minutes, and the
+    /// upload competed with page traffic on a shared instance. Now the bytes bypass us entirely and
+    /// the only thing crossing our servers is a short JSON exchange.</para>
+    ///
+    /// <para><b>Security: the CALLER decides the destination, never the browser.</b> This method
+    /// takes a folder and file name resolved SERVER-side from the signed-in user's own company, and
+    /// the URL Graph returns is scoped to that ONE item path. A caller must never pass a
+    /// client-supplied path in here.</para>
+    ///
+    /// <para>The session expires on its own (~15 minutes) and replaces the item on conflict, which
+    /// matches the versioned-name convention the callers already use.</para>
+    /// </summary>
+    /// <returns>The pre-authenticated upload URL, plus the drive-relative path it will write to.</returns>
+    public async Task<(string UploadUrl, string Path)> BeginDirectUploadAsync(
+        string siteUrl, string driveName, string folderPath, string fileName,
+        CancellationToken ct = default)
+    {
+        if (!IsConfigured)
+        {
+            throw new SharePointUploadException("SharePoint integration is not fully configured.");
+        }
+
+        var driveId = await GetDriveIdAsync(siteUrl, driveName, ct);
+        var fullPath = JoinPath(folderPath, fileName);
+
+        var lastSlash = fullPath.LastIndexOf('/');
+        if (lastSlash > 0)
+        {
+            await EnsureFolderAsync(driveId, fullPath[..lastSlash], ct);
+        }
+
+        var uploadUrl = await CreateUploadSessionAsync(driveId, EncodePath(fullPath), fullPath, ct);
+        return (uploadUrl, fullPath);
+    }
+
+    /// <summary>
+    /// §494 — read back ONE item by its drive-relative path, so a "the browser says it finished"
+    /// callback can be VERIFIED against storage instead of believed. Returns null when absent.
+    /// </summary>
+    public async Task<SharePointFileSnapshot?> GetItemByPathAsync(
+        string siteUrl, string driveName, string path, CancellationToken ct = default)
+    {
+        if (!IsConfigured) return null;
+
+        var driveId = await GetDriveIdAsync(siteUrl, driveName, ct);
+        var resp = await GraphGetAbsoluteOrNullAsync(
+            GraphRoot + $"/drives/{driveId}/root:/{EncodePath(path)}", ct);
+        if (resp is null) return null;
+
+        var item = resp.Value;
+        var id = item.TryGetProperty("id", out var idEl) ? idEl.GetString() : null;
+        var name = item.TryGetProperty("name", out var nEl) ? nEl.GetString() : null;
+        if (string.IsNullOrEmpty(id) || string.IsNullOrEmpty(name)) return null;
+
+        string? webUrl = item.TryGetProperty("webUrl", out var wu) && wu.ValueKind == JsonValueKind.String
+            ? wu.GetString() : null;
+        long? size = item.TryGetProperty("size", out var szEl) && szEl.ValueKind == JsonValueKind.Number
+                     && szEl.TryGetInt64(out var sz) ? sz : null;
+
+        return new SharePointFileSnapshot(id!, name!, null, null, webUrl, size);
+    }
+
+    /// <summary>
+    /// createUploadSession + extract the pre-authenticated uploadUrl. Shared by the byte[] and
+    /// stream chunk loops so the session protocol exists once.
+    /// </summary>
+    private async Task<string> CreateUploadSessionAsync(
+        string driveId, string encodedPath, string fullPath, CancellationToken ct)
+    {
+        using var createReq = new HttpRequestMessage(
+            HttpMethod.Post, GraphRoot + $"/drives/{driveId}/root:/{encodedPath}:/createUploadSession")
+        {
+            Content = JsonContent.Create(new
+            {
+                item = new Dictionary<string, object> { ["@microsoft.graph.conflictBehavior"] = "replace" },
+            }),
+        };
+        createReq.Headers.Authorization = new AuthenticationHeaderValue("Bearer", await GetAccessTokenAsync(ct));
+        using var createResp = await _http.SendAsync(createReq, ct);
+        var createRaw = await createResp.Content.ReadAsStringAsync(ct);
+        if (!createResp.IsSuccessStatusCode)
+        {
+            throw new SharePointUploadException(
+                $"Graph createUploadSession {fullPath} failed (HTTP {(int)createResp.StatusCode}): {Truncate(createRaw, 400)}");
+        }
+        using var sessionDoc = JsonDocument.Parse(createRaw);
+        var uploadUrl = sessionDoc.RootElement.TryGetProperty("uploadUrl", out var u) ? u.GetString() ?? "" : "";
+        if (string.IsNullOrEmpty(uploadUrl))
+        {
+            throw new SharePointUploadException($"Graph createUploadSession {fullPath}: no uploadUrl in response.");
+        }
+        return uploadUrl;
+    }
+
+    /// <summary>
+    /// §322b: upload a LARGE file through a Graph UPLOAD SESSION — createUploadSession,
+    /// then sequential Content-Range chunk PUTs against the pre-authenticated session URL.
+    /// This is the mechanism behind SharePoint's 250 GB per-file support (the ~250 MB cap
+    /// applies only to the single-PUT simple upload / list-item attachments). Chunks are
+    /// 10 MiB (a multiple of the required 320 KiB granularity); conflictBehavior=replace
+    /// keeps the same-path-overwrite contract. Returns the final driveItem JSON.
+    /// </summary>
+    private async Task<string> UploadViaSessionAsync(
+        string driveId, string encodedPath, string fullPath, byte[] content, CancellationToken ct)
+    {
+        // 1. Create the session (authenticated; the returned uploadUrl is pre-authorized).
+        using var createReq = new HttpRequestMessage(
+            HttpMethod.Post, GraphRoot + $"/drives/{driveId}/root:/{encodedPath}:/createUploadSession")
+        {
+            Content = JsonContent.Create(new
+            {
+                item = new Dictionary<string, object> { ["@microsoft.graph.conflictBehavior"] = "replace" },
+            }),
+        };
+        createReq.Headers.Authorization = new AuthenticationHeaderValue("Bearer", await GetAccessTokenAsync(ct));
+        using var createResp = await _http.SendAsync(createReq, ct);
+        var createRaw = await createResp.Content.ReadAsStringAsync(ct);
+        if (!createResp.IsSuccessStatusCode)
+        {
+            throw new SharePointUploadException(
+                $"Graph createUploadSession {fullPath} failed (HTTP {(int)createResp.StatusCode}): {Truncate(createRaw, 400)}");
+        }
+        string uploadUrl;
+        using (var sessionDoc = JsonDocument.Parse(createRaw))
+        {
+            uploadUrl = sessionDoc.RootElement.TryGetProperty("uploadUrl", out var u) ? u.GetString() ?? "" : "";
+        }
+        if (string.IsNullOrEmpty(uploadUrl))
+        {
+            throw new SharePointUploadException($"Graph createUploadSession {fullPath}: no uploadUrl in response.");
+        }
+
+        // 2. Sequential chunk PUTs. 10 MiB = 32 × the 320 KiB granularity Graph requires.
+        const int ChunkSize = 32 * 327_680;
+        var total = content.Length;
+        for (var offset = 0; offset < total; offset += ChunkSize)
+        {
+            var length = Math.Min(ChunkSize, total - offset);
+            using var chunkReq = new HttpRequestMessage(HttpMethod.Put, uploadUrl)
+            {
+                Content = new ByteArrayContent(content, offset, length),
+            };
+            chunkReq.Content.Headers.ContentLength = length;
+            chunkReq.Content.Headers.ContentRange =
+                new ContentRangeHeaderValue(offset, offset + length - 1, total);
+
+            using var chunkResp = await _http.SendAsync(chunkReq, ct);
+            var chunkRaw = await chunkResp.Content.ReadAsStringAsync(ct);
+            if (!chunkResp.IsSuccessStatusCode)
+            {
+                throw new SharePointUploadException(
+                    $"Graph upload-session chunk {offset}-{offset + length - 1}/{total} for {fullPath} "
+                    + $"failed (HTTP {(int)chunkResp.StatusCode}): {Truncate(chunkRaw, 400)}");
+            }
+            // Intermediate chunks answer 202 (nextExpectedRanges); the LAST answers 200/201
+            // with the created/updated driveItem.
+            if (chunkResp.StatusCode is HttpStatusCode.OK or HttpStatusCode.Created)
+            {
+                return chunkRaw;
+            }
+        }
+        throw new SharePointUploadException(
+            $"Graph upload session for {fullPath} finished without returning the driveItem.");
     }
 
     /// <summary>
@@ -326,6 +637,20 @@ public sealed class SharePointUploadClient
         if (!IsConfigured)
         {
             throw new SharePointUploadException("SharePoint integration is not fully configured.");
+        }
+
+        // §330 (was §326bg item 4) — REFUSE AN EMPTY RELATIVE PATH.
+        //
+        // JoinPath(root, "") IS the root folder, so an empty relativePath silently turns
+        // "delete one file" into "delete the folder and everything in it". That is reachable
+        // today: SessionEvalsQr null-checks the raw FileName but passes
+        // Path.GetFileName(...), which returns "" for any value ending in '/'. The guard
+        // belongs HERE, not only at that caller — every present and future caller gets it,
+        // and no argument to a file delete should ever be able to mean "the container".
+        if (string.IsNullOrWhiteSpace(relativePath))
+        {
+            throw new SharePointUploadException(
+                "Refusing to delete: an empty relative path would target the root folder, not a file.");
         }
 
         var driveId = await GetDriveIdAsync(siteUrl, driveName, ct);

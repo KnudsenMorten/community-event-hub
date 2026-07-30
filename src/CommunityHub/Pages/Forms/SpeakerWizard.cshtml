@@ -31,7 +31,9 @@ else
     if (!v.AllDone && v.NextStep is not null)
     {
         continueUrl = Url.Page(v.NextStep.Route);
-        continueLabel = $"{Localizer["SpeakerWiz.Continue", v.NextStepNumber, v.EntitledCount].Value}: {StepTitle(v.NextStep.Key)}";
+        // §259: @Localizer is an IHtmlLocalizer — .Value returns the RAW format string (args are
+        // only applied on HTML write, not in .Value). Format explicitly so the numbers render.
+        continueLabel = $"{string.Format(Localizer["SpeakerWiz.Continue"].Value, v.NextStepNumber, v.EntitledCount)}: {StepTitle(v.NextStep.Key)}";
     }
     var vm = new WizardStepperVm(
         Heading: Localizer["SpeakerWiz.Title"].Value,

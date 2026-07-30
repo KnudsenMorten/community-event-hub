@@ -33,10 +33,12 @@ public enum SessionType
 }
 
 /// <summary>
-/// The scheduled length of a <see cref="Session"/>. Imported sessions are mapped from
-/// the Sessionize start/end duration to the nearest bucket (see
-/// <c>SessionLengthMapper</c>); hub-added sessions set it explicitly. A filter on the
-/// session views narrows by this.
+/// LEGACY coarse length bucket of a <see cref="Session"/>. §299.8/b7: the SOURCE OF
+/// TRUTH for a session's length is the integer <see cref="Session.LengthMinutes"/>
+/// (any positive minutes up to the configured max; quick-picks are per-edition
+/// config) — this enum survives ONLY as a DERIVED display bucket for legacy display
+/// sites (map minutes → nearest bucket via <c>SessionDefaultsMapper.ToLengthBucket</c>).
+/// No filter, validation or push logic may branch on it any more.
 /// </summary>
 public enum SessionLength
 {
@@ -110,13 +112,34 @@ public class Session
     public string? Level { get; set; }
 
     /// <summary>
-    /// The session's length in NUMERIC minutes (§154), parsed from the Sessionize
-    /// Format label (e.g. "Technical Session (60 min)" → 60) or, once the grid is
-    /// published, derived from the scheduled start/end. Distinct from the coarse
-    /// <see cref="Length"/> bucket: this carries the exact figure for display
-    /// ("60 min"). Null when no minutes can be determined (e.g. a Master Class with
-    /// no "(NN min)" hint and no times → handled as full-day via <see cref="Length"/>).
-    /// Import-owned (refreshed each pull).
+    /// §299.8/b7 — the NUMERIC level code derived from <see cref="Level"/> against
+    /// the per-edition <c>sessionLevels</c> config (label match, else the "(NNN)"
+    /// digits in the label): Advanced 300 / Expert 400 / Black Belt 500 for this
+    /// edition. All level SORTING/COMPARISON uses this code, never the label
+    /// alphabetically (alphabetical puts Black Belt before Expert). Null for an
+    /// unknown/unmatched label — such labels keep their string-only behaviour.
+    /// Import-owned (re-derived each pull).
+    /// </summary>
+    public int? LevelCode { get; set; }
+
+    /// <summary>
+    /// §299.8/b7 — comma-separated tag labels from the source's "Tags" category
+    /// group (synced through from the call-for-speakers system when its v2 payload
+    /// provides them; stays null when the API omits tags). Import-owned (refreshed
+    /// each pull). Displayed as small chips on the public session detail page.
+    /// </summary>
+    public string? Tags { get; set; }
+
+    /// <summary>
+    /// §299.8/b7 — the session's length in NUMERIC minutes: the SOURCE OF TRUTH for
+    /// length. Imported: parsed from the Sessionize Format label (e.g. "Technical
+    /// Session (60 min)" → 60) or, once the grid is published, derived from the
+    /// scheduled start/end. Hub-added / organizer-edited: any positive integer up
+    /// to the configured max (quick-picks 15/20/30/40/45/50/60/420 are per-edition
+    /// config). The coarse <see cref="Length"/> bucket is DERIVED from this for
+    /// legacy display sites only. Null only for imports where no minutes can be
+    /// determined (e.g. a Master Class with no "(NN min)" hint and no times →
+    /// full-day via <see cref="Length"/>).
     /// </summary>
     public int? LengthMinutes { get; set; }
 
@@ -136,9 +159,10 @@ public class Session
     public bool TypeIsManualOverride { get; set; }
 
     /// <summary>
-    /// The scheduled length bucket. Imported sessions get a default mapping from the
-    /// Sessionize duration; hub-added sessions set it. Defaults to
-    /// <see cref="SessionLength.SixtyMin"/>.
+    /// LEGACY derived length bucket — kept ONLY for legacy display sites (§299.8/b7).
+    /// Always derived from <see cref="LengthMinutes"/> (nearest bucket) when minutes
+    /// are known; never the source of truth and never used for filtering/validation
+    /// logic any more. Defaults to <see cref="SessionLength.SixtyMin"/>.
     /// </summary>
     public SessionLength Length { get; set; } = SessionLength.SixtyMin;
 
@@ -147,6 +171,18 @@ public class Session
 
     /// <summary>Scheduled end, when the Sessionize grid is published.</summary>
     public DateTimeOffset? EndsAt { get; set; }
+
+    /// <summary>
+    /// §299.8 ❓OPEN-20 (answered 2026-07-23) — TRUE when an organizer has MANUALLY
+    /// set this session's schedule: an explicit StartsAt/EndsAt edit via
+    /// <c>SessionManagementService.UpdateSessionAsync</c> / the organizer Sessions
+    /// edit form, or the hub-add day choice (Pre-day / Main day) stamping the date.
+    /// A Sessionize re-import RESPECTS this flag for the SCHEDULE fields — it skips
+    /// the StartsAt/EndsAt refresh so the manual date survives (mirroring
+    /// <see cref="TypeIsManualOverride"/>); every other import-owned field keeps
+    /// refreshing. False for a purely import-scheduled session.
+    /// </summary>
+    public bool IsDateOverridden { get; set; }
 
     /// <summary>True for a Sessionize "service session" (break/lunch/etc.) - kept for fidelity.</summary>
     public bool IsServiceSession { get; set; }
@@ -158,6 +194,16 @@ public class Session
     /// never matches, touches or deletes them.
     /// </summary>
     public bool IsHubAdded { get; set; }
+
+    /// <summary>
+    /// §299 4.5/b8 — CEH-only TEST session flag. When set the session (a) is NEVER
+    /// pushed/synced into the external event system's public agenda, (b) never
+    /// appears on any PUBLIC page (catalog, detail, ask, evaluate), and (c) inside
+    /// the hub is visible only to ring 0 / ring 1 users (the standard
+    /// <c>RingCap = 1</c> rule) — usable for testing in dev AND prod without ever
+    /// being publicly visible. Organizer-set from the session admin.
+    /// </summary>
+    public bool UsedForTesting { get; set; }
 
     /// <summary>
     /// Unguessable per-session public token that addresses the session's PUBLIC
@@ -270,6 +316,17 @@ public class Session
     /// match key for the §38e change-detection engine. Filtered-unique within an edition.
     /// </summary>
     public string? BackstageSessionId { get; set; }
+
+    /// <summary>
+    /// §302 (operator 2026-07-24, ONE-WAY sync decision): the hash of the last CEH↔Zoho
+    /// field DIFF the ops mailbox was notified about for this linked session. Zoho's
+    /// sessions API is create-only, so a CEH change (room, time, title …) on an
+    /// already-pushed session can only be applied manually in the Backstage UI — the
+    /// engine mails info@ ONCE per distinct diff (this hash dedupes the hourly passes;
+    /// operator: "I don't want an email at every sync"). Cleared when the diff
+    /// disappears, so a LATER change mails again. Null = up to date / never notified.
+    /// </summary>
+    public string? ZohoChangeNotifiedHash { get; set; }
 
     /// <summary>
     /// The LAST-KNOWN Backstage start time for this session (the value CEH stored on

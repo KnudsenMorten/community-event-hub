@@ -106,10 +106,10 @@ public class PartyTaskFlowTests
         Assert.Null(row.ParticipantId);
     }
 
-    // ----- party task seeding (staff roles only) --------------------------
+    // ----- party task seeding (all crew roles incl. media + attendees) ----
 
     [Fact]
-    public async Task Seeder_creates_one_party_task_per_staff_role_but_not_attendees()
+    public async Task Seeder_creates_one_party_task_per_crew_role_including_media_and_attendees()
     {
         using var db = ScenarioFixture.NewDb();
         var ev = await SeedEventAsync(db);
@@ -121,11 +121,18 @@ public class PartyTaskFlowTests
         var seeder = new PartyTaskSeeder(db, ScenarioFixture.Clock);
         var created = await seeder.SeedAsync(ev);
 
-        Assert.Equal(2, created);   // sponsor + speaker; NOT media, NOT attendee
+        Assert.Equal(4, created);   // sponsor + speaker + media (§206) + attendee (§177)
         Assert.True(await HasPartyTask(db, ev, sponsor));
         Assert.True(await HasPartyTask(db, ev, speaker));
-        Assert.False(await HasPartyTask(db, ev, media));
-        Assert.False(await HasPartyTask(db, ev, attendee));
+        Assert.True(await HasPartyTask(db, ev, attendee));   // §177: attendees now get a party task
+        Assert.True(await HasPartyTask(db, ev, media));      // §206: media now gets one too
+
+        // §177: the attendee task carries NO due date (week-cadence reminder instead) while
+        // the staff task keeps its three-weeks-before due date.
+        var attendeeTask = await db.Tasks.FirstAsync(t => t.SourceKey == PartyTaskSeeder.SourceKeyFor(attendee));
+        Assert.Null(attendeeTask.DueDate);
+        var speakerTask = await db.Tasks.FirstAsync(t => t.SourceKey == PartyTaskSeeder.SourceKeyFor(speaker));
+        Assert.NotNull(speakerTask.DueDate);
 
         // Idempotent — a second run creates nothing.
         Assert.Equal(0, await seeder.SeedAsync(ev));

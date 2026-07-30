@@ -27,6 +27,19 @@ public sealed class GraphicsSharePointOptions
     public string RootFolderPath { get; set; } = "Graphics";
 
     /// <summary>
+    /// §467 — the largest deck (BYTES) the embedded Office viewer will render. Above this the
+    /// listing greys out "View" with a reason and leaves "Download" working, instead of sending
+    /// the attendee to Microsoft's "File too large — the file specified is larger than what the
+    /// Office Viewers are configured to support" page.
+    ///
+    /// <para>CONFIG, not a constant, on purpose: Microsoft has changed this ceiling before and it
+    /// differs per viewer/tenant. Default 10 MB — deliberately CONSERVATIVE, since wrongly
+    /// greying out a viewable deck merely costs a download, while wrongly offering an unviewable
+    /// one reproduces the exact error this exists to prevent. Set 0 to disable the check.</para>
+    /// </summary>
+    public long OfficeViewerMaxBytes { get; set; } = 10L * 1024 * 1024;
+
+    /// <summary>
     /// Drive-relative folder the operator uploads MASTER CLASS session graphics into
     /// (the PULL source for <see cref="CommunityHub.Core.Domain.SessionType.MasterClass"/>
     /// sessions — REQUIREMENTS §18). EMPTY by default so the pull is INERT (no folder ⇒ nothing
@@ -113,13 +126,23 @@ public sealed class GraphicsSharePointOptions
 
     /// <summary>
     /// Drive-relative folder holding the speaker PRESENTATION TEMPLATE (§153) — e.g.
-    /// <c>General/Events/ELDK 2027/Speaker Info/Speaker Templates</c>. The server-proxied
+    /// <c>General/Events/ELDK 2027/EventHub/Speakers/SpeakerTemplate</c> (§326ae — moved
+    /// under /EventHub so every hub-served document sits in one tree). The server-proxied
     /// <see cref="SpeakerTemplateService"/> streams the single template file (e.g.
     /// <c>ELDK27_PPT_Template.potx</c>) through CEH with the app's own credentials, so the
     /// speaker gets a DIRECT download instead of a link to the SharePoint site. EMPTY by
     /// default ⇒ the proxy is INERT and the page falls back to the configured template URL.
     /// </summary>
     public string SpeakerTemplateFolderPath { get; set; } = string.Empty;
+
+    /// <summary>
+    /// §326f-c: drive-relative folder holding the operator's LOGO-PACK zip (e.g.
+    /// <c>General/Events/ELDK 2027/EventHub/ELDK</c>). The server-proxied
+    /// <see cref="LogoPackService"/> streams the first zip there through CEH with the app
+    /// registration's credentials (consistent with every other SharePoint read — no share
+    /// link, no sharing-scope surprises). EMPTY by default ⇒ /logo-pack/download 404s.
+    /// </summary>
+    public string LogoPackFolderPath { get; set; } = string.Empty;
 
     /// <summary>
     /// Drive-relative folder the operator drops the FINAL per-session EVALUATION PDFs into
@@ -133,6 +156,21 @@ public sealed class GraphicsSharePointOptions
     /// until an operator configures it.
     /// </summary>
     public string SessionEvalPdfFolderPath { get; set; } = string.Empty;
+
+    /// <summary>
+    /// §322: drive-relative folder the speaker PREVIEW presentations land in — e.g.
+    /// <c>General/Events/ELDK 2027/EventHub/Speakers/Presentations/Preview</c>. Speakers
+    /// upload IN THE HUB (/Speaker/Presentations) and <see cref="SpeakerPresentationService"/>
+    /// writes the file here under the APP REGISTRATION's credentials — speakers have no
+    /// SharePoint access and must never get a SharePoint link (the §160 rule). EMPTY by
+    /// default ⇒ the upload is INERT (the page shows a "not configured" note).
+    /// </summary>
+    public string PresentationPreviewFolderPath { get; set; } = string.Empty;
+
+    /// <summary>§322: drive-relative folder for the speaker FINAL presentations — e.g.
+    /// <c>…/Speakers/Presentations/Final</c>. Same contract as
+    /// <see cref="PresentationPreviewFolderPath"/>.</summary>
+    public string PresentationFinalFolderPath { get; set; } = string.Empty;
 
     /// <summary>True when enabled AND a site URL is present (the live store can run).</summary>
     public bool IsConfigured => Enabled && !string.IsNullOrWhiteSpace(SiteUrl);
@@ -150,11 +188,39 @@ public sealed class GraphSharePointFileStore : ISharePointFileStore
     private readonly SharePointUploadClient _client;
     private readonly GraphicsSharePointOptions _options;
 
+    // §340-H: the environment-level external-write switch. Optional so existing
+    // constructions/tests are unchanged (null ⇒ allow); DI supplies the real guard.
+    private readonly IExternalWriteGuard _writes;
+
     public GraphSharePointFileStore(
-        SharePointUploadClient client, IOptions<GraphicsSharePointOptions> options)
+        SharePointUploadClient client, IOptions<GraphicsSharePointOptions> options,
+        IExternalWriteGuard? writes = null)
     {
         _client = client;
         _options = options.Value;
+        _writes = writes ?? new AllowAllExternalWrites();
+    }
+
+    /// <summary>
+    /// §340-H — refuse an upload/delete when this host may not write to third-party systems.
+    ///
+    /// <para>THROWS rather than no-opping: <see cref="StoreAsync"/> and
+    /// <see cref="UploadToFolderAsync"/> must return a <see cref="StoredFile"/> carrying a
+    /// real path and itemId, and inventing one would make callers persist a
+    /// <c>StorageItemId</c> pointing at a file that was never written — the §326k
+    /// "missing picture" failure, but silent. Deletes throw for symmetry: a delete that
+    /// quietly did nothing leaves a file the caller believes is gone.</para>
+    ///
+    /// <para>READS (<c>ListAsync</c> / <c>DownloadAsync</c>) are deliberately NOT gated.</para>
+    /// </summary>
+    private async Task EnsureMayWriteAsync(string operation, CancellationToken ct)
+    {
+        if (!await _writes.AllowAsync("SharePoint", operation, ct))
+        {
+            throw new InvalidOperationException(
+                $"SharePoint {operation} refused: external writes are disabled for this host "
+                + "(Integrations:AllowExternalWrites — §340-H).");
+        }
     }
 
     public bool CanStore => _options.IsConfigured && _client.IsConfigured;
@@ -162,15 +228,19 @@ public sealed class GraphSharePointFileStore : ISharePointFileStore
     public async Task<StoredFile> StoreAsync(
         string relativePath, byte[] content, string contentType, CancellationToken ct = default)
     {
+        await EnsureMayWriteAsync(nameof(StoreAsync), ct);
         var (path, webUrl, itemId) = await _client.UploadFileAsync(
             _options.SiteUrl, _options.DriveName, _options.RootFolderPath,
             relativePath, content, contentType, ct);
         return new StoredFile(path, webUrl, itemId);
     }
 
-    public Task DeleteAsync(string relativePath, CancellationToken ct = default) =>
-        _client.DeleteFileAsync(
+    public async Task DeleteAsync(string relativePath, CancellationToken ct = default)
+    {
+        await EnsureMayWriteAsync(nameof(DeleteAsync), ct);
+        await _client.DeleteFileAsync(
             _options.SiteUrl, _options.DriveName, _options.RootFolderPath, relativePath, ct);
+    }
 
     public bool CanRead => _options.IsConfigured && _client.IsConfigured;
 
@@ -189,7 +259,7 @@ public sealed class GraphSharePointFileStore : ISharePointFileStore
             _options.SiteUrl, _options.DriveName, relativeFolder, ct);
 
         return files
-            .Select(f => new SharePointFileRef(f.ItemId, f.Name, f.WebUrl ?? string.Empty))
+            .Select(f => new SharePointFileRef(f.ItemId, f.Name, f.WebUrl ?? string.Empty, f.SizeBytes))
             .ToList();
     }
 
@@ -202,6 +272,7 @@ public sealed class GraphSharePointFileStore : ISharePointFileStore
         string relativeFolder, string fileName, byte[] content, string contentType,
         CancellationToken ct = default)
     {
+        await EnsureMayWriteAsync(nameof(UploadToFolderAsync), ct);
         // The folder is DRIVE-RELATIVE (like ListAsync), so pass an empty root and let
         // the relative path carry "<folder>/<file>" — the bytes land in the folder the
         // operator configured, not under the graphics RootFolderPath.
@@ -212,9 +283,30 @@ public sealed class GraphSharePointFileStore : ISharePointFileStore
         return new StoredFile(path, webUrl, itemId);
     }
 
-    public Task DeleteFromFolderAsync(
-        string relativeFolder, string fileName, CancellationToken ct = default) =>
-        _client.DeleteFileAsync(
+    /// <summary>
+    /// §455 — the REAL streamed upload: the file flows browser → Graph a chunk at a time, so peak
+    /// memory is ONE chunk instead of the whole deck held twice. Same drive-relative folder
+    /// contract as <see cref="UploadToFolderAsync"/>; this override is what makes the interface's
+    /// buffering default irrelevant wherever a live store is wired.
+    /// </summary>
+    public async Task<StoredFile> UploadStreamToFolderAsync(
+        string relativeFolder, string fileName, System.IO.Stream content, long contentLength,
+        string contentType, CancellationToken ct = default)
+    {
+        await EnsureMayWriteAsync(nameof(UploadStreamToFolderAsync), ct);
+        var relative = $"{relativeFolder.Trim('/')}/{fileName}";
+        var (path, webUrl, itemId) = await _client.UploadFileStreamAsync(
+            _options.SiteUrl, _options.DriveName, rootFolderPath: string.Empty,
+            relative, content, contentLength, contentType, ct);
+        return new StoredFile(path, webUrl, itemId);
+    }
+
+    public async Task DeleteFromFolderAsync(
+        string relativeFolder, string fileName, CancellationToken ct = default)
+    {
+        await EnsureMayWriteAsync(nameof(DeleteFromFolderAsync), ct);
+        await _client.DeleteFileAsync(
             _options.SiteUrl, _options.DriveName, rootFolderPath: string.Empty,
             $"{relativeFolder.Trim('/')}/{fileName}", ct);
+    }
 }

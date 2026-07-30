@@ -15,16 +15,33 @@ public class EditParticipantModel : PageModel
     private readonly CommunityHubDbContext _db;
     private readonly ICurrentParticipantAccessor _participant;
     private readonly WelcomeEmailService _welcome;
+    private readonly AttendeeOneDayWelcomeEmailService _attendeeWelcome;
     private readonly TimeProvider _clock;
+
+    // §253 G11: reconciles the auto-seeded task set when the ROLE changes (prune the
+    // old role's wizard/speakerdl tasks, seed the new role's). Optional so older test
+    // constructions are unchanged; wired by DI at runtime.
+    private readonly CommunityHub.Forms.RoleChangeTaskReconciler? _roleChange;
+
+    // §707.15 — the ONE implementation of "make this person active again" (clears the organizer
+    // tombstone, re-opens abandoned tasks, re-arms the welcome). Optional so existing test
+    // constructions are unchanged; wired by DI at runtime.
+    private readonly Core.Organizer.ParticipantDeactivationService? _reactivate;
 
     public EditParticipantModel(
         CommunityHubDbContext db, ICurrentParticipantAccessor participant,
-        WelcomeEmailService welcome, TimeProvider clock)
+        WelcomeEmailService welcome, AttendeeOneDayWelcomeEmailService attendeeWelcome,
+        TimeProvider clock,
+        CommunityHub.Forms.RoleChangeTaskReconciler? roleChange = null,
+        Core.Organizer.ParticipantDeactivationService? reactivate = null)
     {
         _db = db;
         _participant = participant;
         _welcome = welcome;
+        _attendeeWelcome = attendeeWelcome;
         _clock = clock;
+        _roleChange = roleChange;
+        _reactivate = reactivate;
     }
 
     public bool AccessDenied { get; private set; }
@@ -78,11 +95,7 @@ public class EditParticipantModel : PageModel
         IsActive = p.IsActive;
         SponsorCompanyId = p.SponsorCompanyId;
 
-        WelcomeAlreadySent = await _db.SentReminders.AnyAsync(
-            s => s.EventId == p.EventId
-                 && s.RecipientEmail == p.Email
-                 && s.ReminderType == "welcome",
-            ct);
+        WelcomeAlreadySent = await WelcomeSentAsync(p, ct);
         return Page();
     }
 
@@ -170,6 +183,9 @@ public class EditParticipantModel : PageModel
             p.Email = emailNorm;
         }
 
+        var oldRole = p.Role;
+        // 🔒 §707.15 — remember the BEFORE state: an inactive → active flip has to re-onboard.
+        var wasActive = p.IsActive;
         p.FullName = FullName.Trim();
         p.Phone = string.IsNullOrWhiteSpace(Phone) ? null : Phone.Trim();
         p.Role = Role;
@@ -178,9 +194,128 @@ public class EditParticipantModel : PageModel
         await _db.SaveChangesAsync(ct);
 
         Message = "Saved.";
+
+        // 🔒 §707.15 — INACTIVE → ACTIVE RE-ONBOARDS, FROM THIS FORM TOO. Operator 2026-07-30:
+        // *"inactive to active must send email again"*, for ANY role.
+        //
+        // ⚠️ This checkbox wrote `p.IsActive` DIRECTLY and never went near
+        // ParticipantDeactivationService — so the re-arm added there would have missed the page he
+        // actually uses ("i primarily use the participant page"), and the person would have come
+        // back silently with no welcome. Routing the transition through ReactivateAsync keeps ONE
+        // implementation of "make this person active again": it clears the organizer tombstone,
+        // re-opens the tasks abandoned at deactivation, and re-arms the welcome (plus the Master
+        // Class selection invite for a 2-day attendee) so the reconcile jobs send it on their next
+        // pass through the normal ring-gated path.
+        if (!wasActive && IsActive && _reactivate is not null)
+        {
+            try
+            {
+                await _reactivate.ReactivateAsync(me.EventId, p.Id, me.Email, ct);
+                Message = "Saved. Re-activated — their welcome will be sent again.";
+            }
+            catch (Exception ex)
+            {
+                // Never let the re-onboarding step lose the save the organizer just made.
+                Message = $"Saved, but the welcome could not be re-armed: {ex.Message}";
+            }
+        }
+
+        // §253 G11: a ROLE change is no longer a bare field write — prune the old
+        // role's auto-seeded tasks (wizard-step mirrors + dated speakerdl: deadlines,
+        // which otherwise keep firing due-day reminders) and seed + reconcile the new
+        // role's steps. Runs AFTER the save so the wizards read the persisted role.
+        if (oldRole != Role && _roleChange is not null)
+        {
+            try
+            {
+                var (removed, createdTasks) = await _roleChange.ReconcileAsync(
+                    me.EventId, p.Id, oldRole, Role, ct);
+                if (removed > 0 || createdTasks > 0)
+                {
+                    Message = $"Saved. Role changed {oldRole} → {Role}: "
+                        + $"{removed} old-role task(s) removed, {createdTasks} new-role task(s) added.";
+                }
+            }
+            catch
+            {
+                // The save itself succeeded; the nightly SpeakerDeadlineSeeder sweep +
+                // page-load seeding self-heal the task set if this reconcile hiccups.
+            }
+        }
         IsNew = false;
-        WelcomeAlreadySent = await _db.SentReminders.AnyAsync(
-            s => s.EventId == p.EventId && s.RecipientEmail == p.Email && s.ReminderType == "welcome", ct);
+        WelcomeAlreadySent = await WelcomeSentAsync(p, ct);
+        return Page();
+    }
+
+    /// <summary>
+    /// 🔒 §707.14 — RE-SEND A 2-DAY ATTENDEE'S REAL WELCOME (the Master Class selection invite).
+    /// </summary>
+    /// <remarks>
+    /// Operator 2026-07-30: *"i primarily use the participant page, so it could be cool to have it
+    /// there as well"* — so the same action the Attendees grid grew also lives here, beside the
+    /// welcome button that does NOT do this.
+    ///
+    /// <para>🔑 Why a separate button: *Send/Resend welcome email* sends the GENERIC welcome and is
+    /// idempotent (once sent it no-ops), and the reset-welcome path calls
+    /// <c>AttendeeOneDayWelcomeEmailService</c>, retired by §299 OPEN-26 and hard-wired to return
+    /// false. Neither reaches <c>masterclass-selection-invite</c>, which IS the 2-day welcome
+    /// (§241).</para>
+    ///
+    /// <para>This page keys on a PARTICIPANT; the invite keys on the ATTENDEE (ticket) row, so the
+    /// live 2-day ticket is resolved by email. The §707.14 deactivated-login guard still applies
+    /// underneath — a re-send to a switched-off login is refused rather than delivering a
+    /// magic-link button that cannot resolve.</para>
+    /// </remarks>
+    [CommunityHub.Audit.Audit("Re-send Master Class selection invite",
+        Category = AuditCategory.Admin, TargetType = "Participant")]
+    public async Task<IActionResult> OnPostResendSelectionInviteAsync(
+        [FromServices] Core.Email.MasterClassEmailService mcEmail, CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+        if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
+
+        var p = Id is null ? null
+            : await _db.Participants.FirstOrDefaultAsync(x => x.Id == Id && x.EventId == me.EventId, ct);
+        if (p is null) { Error = "Participant not found."; IsNew = true; return Page(); }
+
+        // The LIVE 2-day ticket for this address (never a cancelled one).
+        var email = (p.Email ?? string.Empty).Trim().ToLowerInvariant();
+        var attendeeId = await _db.Attendees
+            .Where(a => a.EventId == me.EventId
+                        && a.Email.ToLower() == email
+                        && a.TicketStatus == TicketStatus.TwoDay
+                        && a.MirrorState == MirrorState.Active)
+            .Select(a => (int?)a.Id)
+            .FirstOrDefaultAsync(ct);
+
+        if (attendeeId is null)
+        {
+            Error = "No active 2-day ticket for this address — the selection invite only applies to "
+                  + "a live 2-day holder.";
+        }
+        else
+        {
+            try
+            {
+                var baseUrl = $"{Request.Scheme}://{Request.Host}";
+                var sent = await mcEmail.SendSelectionInviteAsync(attendeeId.Value, baseUrl, force: true, ct);
+                if (sent) { Message = "Selection invite re-sent."; }
+                else
+                {
+                    Error = "Not sent — most likely this login is deactivated, which would make the "
+                          + "magic link in the mail fail. Re-activate it and try again.";
+                }
+            }
+            catch (Exception ex)
+            {
+                Error = $"Could not re-send the selection invite: {ex.Message}";
+            }
+        }
+
+        IsNew = false;
+        Email = p.Email; FullName = p.FullName; Phone = p.Phone;
+        Role = p.Role; IsActive = p.IsActive; SponsorCompanyId = p.SponsorCompanyId;
         return Page();
     }
 
@@ -221,8 +356,142 @@ public class EditParticipantModel : PageModel
         IsNew = false;
         Email = p.Email; FullName = p.FullName; Phone = p.Phone;
         Role = p.Role; IsActive = p.IsActive; SponsorCompanyId = p.SponsorCompanyId;
-        WelcomeAlreadySent = await _db.SentReminders.AnyAsync(
-            s => s.EventId == p.EventId && s.RecipientEmail == p.Email && s.ReminderType == "welcome", ct);
+        WelcomeAlreadySent = await WelcomeSentAsync(p, ct);
         return Page();
     }
+
+    /// <summary>
+    /// §236 (operator 2026-07-07): RESET the welcome so it sends AGAIN — clears the
+    /// once-ever SentReminder ledger row(s) and the provisioning stamp
+    /// (<see cref="Participant.WelcomeWithLoginSentAt"/>), then immediately re-sends the
+    /// role-appropriate welcome. Built for the operator's role-simulation testing on his
+    /// Ring-1 accounts: reset → the fresh welcome (with its Get-Started magic link)
+    /// arrives again, repeatably. Normal ring/kill-switch gating still applies to the send.
+    /// </summary>
+    public async Task<IActionResult> OnPostResetWelcomeAsync(CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+        if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
+
+        var p = Id is null ? null
+            : await _db.Participants.FirstOrDefaultAsync(x => x.Id == Id && x.EventId == me.EventId, ct);
+        if (p is null) { Error = "Participant not found."; IsNew = true; return Page(); }
+
+        if (!p.IsActive)
+        {
+            Error = "Cannot reset/send a welcome for a deactivated participant.";
+        }
+        else
+        {
+            // 1. RESET — make the welcome sendable again.
+            var ledger = await WelcomeLedgerRows(p).ToListAsync(ct);
+            _db.SentReminders.RemoveRange(ledger);
+            p.WelcomeWithLoginSentAt = null;
+            await _db.SaveChangesAsync(ct);
+
+            // 2. RE-SEND immediately (role-appropriate path).
+            try
+            {
+                bool sent;
+                if (p.Role == ParticipantRole.Attendee)
+                {
+                    sent = await _attendeeWelcome.SendForProvisioningAsync(p.Id, ct);
+                }
+                else
+                {
+                    sent = await _welcome.SendWelcomeAsync(p.Id, ct);
+                }
+                Message = sent
+                    ? "Welcome reset — a fresh welcome email is on its way."
+                    : "Welcome reset — the immediate re-send was refused (no welcome for this role, or "
+                      + "gated by ring/kill-switch); the reconcile job will also retry on its next run.";
+            }
+            catch (Exception ex)
+            {
+                Error = $"Welcome was reset, but the re-send failed: {ex.Message}";
+            }
+        }
+
+        // Re-hydrate the form.
+        IsNew = false;
+        Email = p.Email; FullName = p.FullName; Phone = p.Phone;
+        Role = p.Role; IsActive = p.IsActive; SponsorCompanyId = p.SponsorCompanyId;
+        WelcomeAlreadySent = await WelcomeSentAsync(p, ct);
+        return Page();
+    }
+
+    /// <summary>The §355 step checkboxes the organizer ticked.</summary>
+    [BindProperty] public List<string> ResetSteps { get; set; } = new();
+
+    /// <summary>
+    /// §355 — reset this participant's GET STARTED, per step or in full (operator 2026-07-26:
+    /// <i>"should we have a similar organizer interface for this reset functionality, so i can
+    /// reset both per step + full reset"</i>). The attendee equivalent lives on
+    /// <c>/Organizer/Attendees</c>; this is the speaker/volunteer/media side.
+    ///
+    /// <para>Guarded on <see cref="OrganizerAuth.IsRealOrganizer"/> (§337) — it deletes another
+    /// person's answers and re-opens their tasks, so an ACTING-AS session must not be able to run
+    /// it — and audited, because "who reset this and what did it clear" is exactly the question
+    /// asked afterwards.</para>
+    /// </summary>
+    [CommunityHub.Audit.Audit("Reset participant Get Started",
+        Category = AuditCategory.Admin, TargetType = nameof(Participant))]
+    public async Task<IActionResult> OnPostResetOnboardingAsync(
+        [FromServices] CommunityHub.Core.Organizer.ParticipantOnboardingResetService reset,
+        CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+        if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
+
+        var p = Id is null ? null
+            : await _db.Participants.FirstOrDefaultAsync(x => x.Id == Id && x.EventId == me.EventId, ct);
+        if (p is null) { Error = "Participant not found."; IsNew = true; return Page(); }
+
+        var result = await reset.ResetAsync(me.EventId, p.Id, ResetSteps, ct);
+        if (!result.Ok)
+        {
+            Error = result.Detail;
+        }
+        else
+        {
+            Message = $"Get Started reset ({string.Join(", ", result.StepsReset)}) — "
+                      + $"{result.RowsRemoved} answer row(s) removed, {result.TasksReopened} task(s) re-opened.";
+        }
+
+        // Re-hydrate the form.
+        IsNew = false;
+        Email = p.Email; FullName = p.FullName; Phone = p.Phone;
+        Role = p.Role; IsActive = p.IsActive; SponsorCompanyId = p.SponsorCompanyId;
+        WelcomeAlreadySent = await WelcomeSentAsync(p, ct);
+        return Page();
+    }
+
+    /// <summary>
+    /// §340-G-1 — this participant's <c>welcome</c> ledger rows, found by ADDRESS **or** by the
+    /// occasion key the send actually writes.
+    ///
+    /// <para>§326bf moved <c>WelcomeEmailService</c>'s idempotency to <c>welcome:{participantId}</c>
+    /// because an address is not an identity: correcting a typo, a re-import that changes the case,
+    /// or a Sessionize update leaves the stored row under the OLD address. Six sites on this page
+    /// still looked that row up by address alone, and they failed in BOTH directions — the reset
+    /// deleted nothing while reporting success, and the "welcome already sent" badge told the
+    /// organizer it had never gone out, which is precisely the prompt to send it a second time.</para>
+    ///
+    /// <para>Written once and used by every site, so the badge and the reset can no longer disagree
+    /// about whether a welcome exists.</para>
+    /// </summary>
+    private IQueryable<Core.Domain.SentReminder> WelcomeLedgerRows(Core.Domain.Participant p)
+    {
+        var occasionKey = $"welcome:{p.Id}";
+        return _db.SentReminders
+            .Where(s => s.EventId == p.EventId
+                        && s.ReminderType == "welcome"
+                        && (s.RecipientEmail == p.Email || s.OccasionKey == occasionKey));
+    }
+
+    /// <inheritdoc cref="WelcomeLedgerRows"/>
+    private Task<bool> WelcomeSentAsync(Core.Domain.Participant p, CancellationToken ct) =>
+        WelcomeLedgerRows(p).AnyAsync(ct);
 }

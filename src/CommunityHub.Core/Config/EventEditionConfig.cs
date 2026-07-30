@@ -28,6 +28,14 @@ public sealed class EventEditionConfig
     public Dictionary<string, string> Placeholders { get; set; } = new();
 
     /// <summary>
+    /// §270 — on/off switch for the attendee "fun IT games" quizzes (operator 2026-07-10).
+    /// Default <b>false</b>: the <c>/Games</c> nav entry and surface are HIDDEN for attendees
+    /// unless an edition explicitly opts in via <c>event.&lt;edition&gt;.json -&gt; attendeeGamesEnabled: true</c>.
+    /// </summary>
+    [JsonPropertyName("attendeeGamesEnabled")]
+    public bool AttendeeGamesEnabled { get; set; }
+
+    /// <summary>
     /// Zoho Backstage sponsor-category NAME → sponsorship_type id (pinned). Zoho's
     /// live /sponsorship_types endpoint returns 400 "No Sponsorship Categories
     /// Available" on this account, so the provision/create flow resolves the id
@@ -93,6 +101,118 @@ public sealed class EventEditionConfig
     /// </summary>
     [JsonIgnore]
     public TicketSaleConfig? TicketSale { get; set; }
+
+    /// <summary>
+    /// §299.8/b7 — the session-length QUICK-PICK list from the SIBLING
+    /// <c>sessionLengths</c> array (label + integer minutes, e.g. 15/20/30/40/45/
+    /// 50/60/420). Per-edition CONFIG (a closed length enum has already failed
+    /// twice); the GUI offers these picks but accepts any positive integer up to
+    /// <see cref="SessionLengthMaxMinutes"/>. Empty when the section is absent.
+    /// </summary>
+    [JsonIgnore]
+    public List<SessionLengthOption> SessionLengths { get; set; } = new();
+
+    /// <summary>
+    /// §299.8/b7 — inclusive upper bound for a CUSTOM session length in minutes
+    /// (sibling scalar <c>sessionLengthMaxMinutes</c>). Missing/invalid config
+    /// falls back to the shipped default 600 (so the 420 full-day always passes).
+    /// </summary>
+    [JsonIgnore]
+    public int SessionLengthMaxMinutes { get; set; } = DefaultSessionLengthMaxMinutes;
+
+    /// <summary>The shipped default for <see cref="SessionLengthMaxMinutes"/>.</summary>
+    public const int DefaultSessionLengthMaxMinutes = 600;
+
+    /// <summary>
+    /// §447 — Zoho <c>ticket_class_id</c>(s) that grant Master Class (pre-day) access, from the
+    /// SIBLING <c>masterClassTickets.twoDayClassIds</c> array. AUTHORITATIVE and rename-proof: the
+    /// class NAME is a label the operator can edit, the id is not. Empty ⇒ the name markers decide
+    /// (unchanged pre-§447 behaviour).
+    /// </summary>
+    [JsonIgnore]
+    public List<string> MasterClassTwoDayClassIds { get; set; } = new();
+
+    /// <summary>
+    /// §447 — per-edition override of the ticket-class NAME markers
+    /// (<c>masterClassTickets.nameMarkers</c>). Used for historic orders and any ticket without a
+    /// class id. Empty ⇒ <see cref="Domain.MasterClassTicketPolicy.DefaultMarkers"/>.
+    /// </summary>
+    [JsonIgnore]
+    public List<string> MasterClassNameMarkers { get; set; } = new();
+
+    /// <summary>
+    /// §299.8/b7 — the configured audience-level list from the SIBLING
+    /// <c>sessionLevels</c> array (label + NUMERIC code, e.g. Advanced/300,
+    /// Expert/400, Black Belt/500). Sorting/comparison is ALWAYS by the numeric
+    /// code, never alphabetically. Empty when the section is absent.
+    /// </summary>
+    [JsonIgnore]
+    public List<SessionLevelOption> SessionLevels { get; set; } = new();
+
+    /// <summary>
+    /// §299.6/b5 — the per-edition room REGISTRY from the SIBLING
+    /// <c>sessionRooms</c> array: venue rooms (name + floor + capacity, per-day
+    /// records via <c>preDay</c>) and expo locations (free-form name, capacity
+    /// NULL, <c>expo: true</c>). Config only — no DB, no FK;
+    /// <c>Session.Room</c> stays a free-form string validated warn-only against
+    /// this list. Empty when the section is absent (validation then stays quiet).
+    /// </summary>
+    [JsonIgnore]
+    public List<SessionRoomOption> SessionRooms { get; set; } = new();
+}
+
+/// <summary>One session-length quick-pick (§299.8/b7): display label + integer minutes.</summary>
+public sealed class SessionLengthOption
+{
+    [JsonPropertyName("label")]
+    public string Label { get; set; } = string.Empty;
+
+    [JsonPropertyName("minutes")]
+    public int Minutes { get; set; }
+}
+
+/// <summary>
+/// One configured audience level (§299.8/b7): display label + NUMERIC code
+/// (Advanced 300 / Expert 400 / Black Belt 500 for this edition). All level
+/// sorting/comparison uses <see cref="Code"/>, never the label alphabetically.
+/// </summary>
+public sealed class SessionLevelOption
+{
+    [JsonPropertyName("label")]
+    public string Label { get; set; } = string.Empty;
+
+    [JsonPropertyName("code")]
+    public int Code { get; set; }
+}
+
+/// <summary>
+/// One registry entry from <c>sessionRooms</c> (§299.6/b5). A VENUE room carries
+/// a parsed-out floor + capacity (and <see cref="PreDay"/> marks the "-MC"
+/// pre-day set — the same physical room may appear per-day with a different
+/// capacity as two distinct entries). An EXPO location (<see cref="Expo"/>) is a
+/// free-form name whose <see cref="Capacity"/> is NULL by design — all
+/// capacity-based logic must tolerate that null (never default it to 0).
+/// </summary>
+public sealed class SessionRoomOption
+{
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>Floor label for a venue room (e.g. "0", "1", "0-1"); null for expo.</summary>
+    [JsonPropertyName("floor")]
+    public string? Floor { get; set; }
+
+    /// <summary>Seat capacity; NULL for expo locations (tolerated everywhere, never 0).</summary>
+    [JsonPropertyName("capacity")]
+    public int? Capacity { get; set; }
+
+    /// <summary>True for the "-MC" pre-day (master-class) room records.</summary>
+    [JsonPropertyName("preDay")]
+    public bool PreDay { get; set; }
+
+    /// <summary>True for an expo location (free-form name, no floor, null capacity).</summary>
+    [JsonPropertyName("expo")]
+    public bool Expo { get; set; }
 }
 
 /// <summary>
@@ -234,6 +354,16 @@ public sealed class SharePointEditionConfig
     public string VolunteerPhotoFolderPath { get; set; } = string.Empty;
 
     /// <summary>
+    /// §356 — optional drive-relative folder where a SPONSOR-SESSION speaker's photo lands, uploaded
+    /// by the sponsor on that speaker's behalf (operator 2026-07-26: <i>"let sponsor upload picture
+    /// per speaker and then we expose the picture as url"</i>). Same site + drive as the rest.
+    /// Empty DISABLES the upload — the form then saves every other field and says plainly that the
+    /// photo could not be stored, rather than dropping the file silently.
+    /// </summary>
+    [JsonPropertyName("speakerPhotoFolderPath")]
+    public string SpeakerPhotoFolderPath { get; set; } = string.Empty;
+
+    /// <summary>
     /// Optional drive-relative folder where every sponsor's uploaded LOGO file is
     /// ALSO copied (collected) so the organizers have all logos in one place
     /// (operator 2026-06-23). On the same site + drive as the per-company upload
@@ -354,6 +484,27 @@ public sealed class EventEditionConfigLoader
     /// an <see cref="EventEditionConfig"/>. The parsing/sanitization logic is the
     /// single source shared by both <see cref="Load(string)"/> overloads.
     /// </summary>
+    /// <summary>
+    /// §447 — read a string array from a config object, dropping blanks and trimming. Missing or
+    /// wrong-typed ⇒ empty list, so a malformed block degrades to "not configured" rather than
+    /// throwing during startup config load.
+    /// </summary>
+    private static List<string> StringArray(JsonElement obj, string propertyName)
+    {
+        var result = new List<string>();
+        if (!obj.TryGetProperty(propertyName, out var arr) || arr.ValueKind != JsonValueKind.Array)
+        {
+            return result;
+        }
+        foreach (var item in arr.EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.String) continue;
+            var v = item.GetString();
+            if (!string.IsNullOrWhiteSpace(v)) result.Add(v.Trim());
+        }
+        return result;
+    }
+
     private static EventEditionConfig Parse(string json)
     {
         using var doc = JsonDocument.Parse(json);
@@ -389,6 +540,16 @@ public sealed class EventEditionConfigLoader
             && sp.ValueKind == JsonValueKind.Object)
         {
             cfg.SharePoint = sp.Deserialize<SharePointEditionConfig>(Options);
+        }
+
+        // §447 — the SIBLING "masterClassTickets" object: which Zoho ticket class grants Master
+        // Class (pre-day) access. Absent ⇒ empty lists ⇒ MasterClassTicketPolicy falls back to its
+        // built-in name markers, i.e. behaviour before §447 is unchanged.
+        if (doc.RootElement.TryGetProperty("masterClassTickets", out var mct)
+            && mct.ValueKind == JsonValueKind.Object)
+        {
+            cfg.MasterClassTwoDayClassIds = StringArray(mct, "twoDayClassIds");
+            cfg.MasterClassNameMarkers = StringArray(mct, "nameMarkers");
         }
 
         // Pull the SIBLING "dates" object so the front-end can show a
@@ -460,6 +621,55 @@ public sealed class EventEditionConfigLoader
             && ts.ValueKind == JsonValueKind.Object)
         {
             cfg.TicketSale = ts.Deserialize<TicketSaleConfig>(Options);
+        }
+
+        // §299.8/b7: the SIBLING "sessionLengths" quick-pick array. Defensively
+        // drop garbage rows (blank label or non-positive minutes) so the forms
+        // never render an empty pick.
+        if (doc.RootElement.TryGetProperty("sessionLengths", out var sl)
+            && sl.ValueKind == JsonValueKind.Array)
+        {
+            cfg.SessionLengths = (sl.Deserialize<List<SessionLengthOption>>(Options)
+                                  ?? new List<SessionLengthOption>())
+                .Where(x => x is not null
+                            && !string.IsNullOrWhiteSpace(x.Label)
+                            && x.Minutes > 0)
+                .ToList();
+        }
+
+        // §299.8/b7: the SIBLING "sessionLengthMaxMinutes" scalar; invalid or
+        // missing keeps the shipped default (600) so 420 always validates.
+        if (doc.RootElement.TryGetProperty("sessionLengthMaxMinutes", out var maxMin)
+            && maxMin.ValueKind == JsonValueKind.Number
+            && maxMin.TryGetInt32(out var maxMinutes)
+            && maxMinutes > 0)
+        {
+            cfg.SessionLengthMaxMinutes = maxMinutes;
+        }
+
+        // §299.8/b7: the SIBLING "sessionLevels" array (label + numeric code).
+        // Rows without a label or a positive code are dropped.
+        if (doc.RootElement.TryGetProperty("sessionLevels", out var lv)
+            && lv.ValueKind == JsonValueKind.Array)
+        {
+            cfg.SessionLevels = (lv.Deserialize<List<SessionLevelOption>>(Options)
+                                 ?? new List<SessionLevelOption>())
+                .Where(x => x is not null
+                            && !string.IsNullOrWhiteSpace(x.Label)
+                            && x.Code > 0)
+                .ToList();
+        }
+
+        // §299.6/b5: the SIBLING "sessionRooms" registry. Only the NAME is
+        // mandatory (expo entries have no floor and a null capacity BY DESIGN —
+        // never coerce that null to 0).
+        if (doc.RootElement.TryGetProperty("sessionRooms", out var rooms)
+            && rooms.ValueKind == JsonValueKind.Array)
+        {
+            cfg.SessionRooms = (rooms.Deserialize<List<SessionRoomOption>>(Options)
+                                ?? new List<SessionRoomOption>())
+                .Where(x => x is not null && !string.IsNullOrWhiteSpace(x.Name))
+                .ToList();
         }
 
         return cfg;

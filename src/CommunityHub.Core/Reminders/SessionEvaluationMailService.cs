@@ -141,9 +141,13 @@ public sealed class SessionEvaluationMailService
             .FirstOrDefaultAsync(ct) ?? string.Empty;
         var subject = $"Your session evaluation — {session.Title}";
 
-        // Ring-governed by the session-eval-email feature (operator 2026-06-22).
+        // §707.2b — carries its MAIL IDENTITY, so it resolves its own (mail × role) ring instead of the
+        // session-eval-email feature ring. One context wraps the whole recipient loop: every send here
+        // is the same mail, so the identity is loop-invariant. ("session-eval" stays the CATEGORY — the
+        // ledger key — which is exactly the conflation §707 was about.)
         using (_context?.Set(new EmailContext(
-            "session-eval", FeatureKey: "session-eval-email")))
+            "session-eval",
+            TemplateName: "session-evaluation-results", FeatureKey: "session-eval-email")))
         {
             foreach (var (addr, firstName, participantId) in recipients)
             {

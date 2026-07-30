@@ -37,6 +37,10 @@ public sealed class VolunteerAvailabilityFormModel
 
     /// <summary>The post-save flash the standalone page surfaces via TempData; null until a save runs.</summary>
     [BindNever] public string? Notice { get; set; }
+
+    /// <summary>§234 UX: true when <see cref="Notice"/> is a REJECTION (e.g. a day left
+    /// without a choice) so the host renders it error-styled, never as a green saved-note.</summary>
+    [BindNever] public bool NoticeIsError { get; set; }
 }
 
 /// <summary>
@@ -108,12 +112,14 @@ public sealed class VolunteerAvailabilityFormService : IWizardFormService
     /// lead (fail-soft); a later EDIT is NOT applied — it is enqueued as a Volunteer Update
     /// delta for organizer approval, leaving the current (approved) availability in place.
     /// The post-save flash is written to <see cref="VolunteerAvailabilityFormModel.Notice"/>;
-    /// the model's display state is reloaded for re-render. Always advances (this form has no
-    /// field-level validation that blocks a save).
+    /// the model's display state is reloaded for re-render. §234 UX: a save where any event
+    /// day was left WITHOUT a choice is rejected (<see cref="WizardStepOutcome.Invalid"/> +
+    /// a <paramref name="modelState"/> error) — the radios no longer pre-select a default,
+    /// so the server must enforce the explicit choice the client `required` asks for.
     /// </summary>
     public async Task<WizardStepOutcome> SaveAsync(
         VolunteerAvailabilityFormModel model, int eventId, int participantId,
-        string fullName, string email, CancellationToken ct)
+        string fullName, string email, ModelStateDictionary modelState, CancellationToken ct)
     {
         // Only accept days that genuinely belong to this edition — ignore anything the
         // client may have injected.
@@ -148,6 +154,23 @@ public sealed class VolunteerAvailabilityFormService : IWizardFormService
             if (note is { Length: > 500 }) note = note[..500];
 
             desired.Add((input.Day, chosen.Level, note));
+        }
+
+        // §234 UX: the radios render with NO default selection, so an event day the
+        // volunteer never answered simply has no resolvable slot. Reject the save —
+        // silently recording nothing (or the old "Full day" default) misrepresents
+        // what the volunteer actually said.
+        var answered = desired.Select(d => d.Day).ToHashSet();
+        var missing = allDays.Where(d => !answered.Contains(d.Day)).Select(d => d.Label).ToList();
+        if (missing.Count > 0)
+        {
+            var msg = "Please choose your availability for every day — nothing was saved. "
+                + $"Missing: {string.Join(", ", missing)}.";
+            modelState.AddModelError(string.Empty, msg);
+            model.Notice = msg;
+            model.NoticeIsError = true;
+            await ReloadAsync(model, eventId, participantId, ct);
+            return WizardStepOutcome.Invalid;
         }
 
         if (alreadySubmitted)
@@ -202,7 +225,8 @@ public sealed class VolunteerAvailabilityFormService : IWizardFormService
         // shifts (operator 2026-06-23). Fail-soft: a mail problem must not lose the save.
         await NotifyLeadAsync(eventId, participantId, fullName, email, validDays, labelByDay, ct);
 
-        model.Notice = "Your availability has been saved and emailed to Morten Leth. "
+        model.Notice = "Your availability has been saved and sent to Morten Leth Hedegaard "
+            + "(mlh@expertslive.dk) so the schedule can be planned. "
             + "Thank you — this helps us schedule you fairly.";
         await ReloadAsync(model, eventId, participantId, ct);
         return WizardStepOutcome.Advance;
@@ -224,11 +248,14 @@ public sealed class VolunteerAvailabilityFormService : IWizardFormService
         model.Days = days.Select(d =>
         {
             saved.TryGetValue(d.Day, out var row);
+            // §234 UX: HasSaved gates the pre-selected radio — an unsaved day renders
+            // with NO option checked (the Level value is only meaningful when saved).
             return new AvailabilityModel.DayRow(
                 d.Day,
                 d.Label,
                 row?.Level ?? VolunteerAvailabilityLevel.Full,
-                row?.Note);
+                row?.Note,
+                HasSaved: row is not null);
         }).ToList();
     }
 

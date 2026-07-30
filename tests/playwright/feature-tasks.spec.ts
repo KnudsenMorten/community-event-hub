@@ -22,26 +22,50 @@ test.describe('@gui §5 Tasks & reminders (speaker)', () => {
         await page.goto(`${BASE}/Tasks`, { waitUntil: 'domcontentloaded' });
         await expect(page.locator('h2', { hasText: 'My tasks' })).toBeVisible();
         await assertNoHorizontalScroll(page);
-        // Either there are task rows (each with a toggle form) or the empty state.
-        const toggles = page.locator('form[asp-page-handler], form:has(button:has-text("Mark done"))');
-        const hasTasks = await page.locator('button:has-text("Mark done"), button:has-text("Mark not done")').count();
+        // §147: the page renders the shared _TaskListPanel (completion % header,
+        // "Still to do (N)" pending section, collapsed Completed section) — its
+        // rows toggle with "Mark complete" / "Reopen task". Either rows or the
+        // honest empty state must show.
+        const hasTasks = await page.locator('button:has-text("Mark complete"), button:has-text("Reopen task")').count();
         const empty = await page.locator('text=You have no tasks.').count();
         expect(hasTasks + empty, 'either tasks or the empty state must show').toBeGreaterThan(0);
+        if (hasTasks > 0) {
+            await expect(page.locator('h3.tl-section', { hasText: /Still to do/i })).toBeVisible();
+        }
     });
 
     test('ticking a task done and reopening it round-trips (self-cleaning)', async ({ page }) => {
         await page.goto(`${BASE}/Tasks`, { waitUntil: 'domcontentloaded' });
-        const markDone = page.getByRole('button', { name: 'Mark done', exact: true }).first();
-        const count = await markDone.count();
-        test.skip(count === 0, 'no open task to toggle for this speaker — nothing to round-trip');
+        // §147 rows are collapsed <details>; only manually-togglable rows carry a
+        // "Mark complete" button (data-signal tasks auto-complete and have none).
+        const pendingRow = page.locator('details').filter({
+            has: page.getByRole('button', { name: 'Mark complete', exact: true }),
+        }).first();
+        test.skip(await pendingRow.count() === 0,
+            'no manually-togglable open task for this speaker — nothing to round-trip');
 
-        // Complete the first open task -> a "Mark not done" control appears.
-        await markDone.click();
-        const reopen = page.getByRole('button', { name: 'Mark not done', exact: true }).first();
-        await expect(reopen).toBeVisible({ timeout: 10_000 });
-        // Reopen it again so we leave the list exactly as we found it.
-        await reopen.click();
-        await expect(page.getByRole('button', { name: 'Mark done', exact: true }).first()).toBeVisible({ timeout: 10_000 });
+        // Remember WHICH task we complete so we reopen exactly that one (the
+        // Completed section may already hold other, pre-existing tasks).
+        const title = (await pendingRow.locator('summary').first()
+            .evaluate((el) => (el.childNodes[0]?.textContent ?? '').trim()));
+        await pendingRow.locator('summary').click();   // expand the row
+        await pendingRow.getByRole('button', { name: 'Mark complete', exact: true }).click();
+
+        // The task moved into the COLLAPSED "Completed (N)" section — expand it,
+        // expand our row inside it, and reopen.
+        const completedSection = page.locator('details').filter({
+            has: page.locator('summary', { hasText: /Completed \(\d+\)/ }),
+        }).first();
+        await expect(completedSection).toBeVisible({ timeout: 10_000 });
+        await completedSection.locator('> summary').click();
+        const doneRow = completedSection.locator('details').filter({ hasText: title }).first();
+        await doneRow.locator('summary').click();
+        await doneRow.getByRole('button', { name: 'Reopen task', exact: true }).click();
+
+        // Back where we started: the same task is pending again.
+        await expect(page.locator('details').filter({
+            has: page.getByRole('button', { name: 'Mark complete', exact: true }),
+        }).filter({ hasText: title }).first()).toBeVisible({ timeout: 10_000 });
     });
 
     test('the hub front page surfaces pending speaker-deadline tasks', async ({ page }) => {
@@ -50,10 +74,20 @@ test.describe('@gui §5 Tasks & reminders (speaker)', () => {
         if (new URL(page.url()).pathname.toLowerCase().startsWith('/welcome')) {
             await page.getByRole('button', { name: /take me to my hub/i }).click();
         }
-        // Speaker-deadline area is present for a speaker.
-        await expect(
-            page.locator('h2', { hasText: /Speaker deadlines|Pending tasks/i }).first()
-        ).toBeVisible();
+        // The speaker landing renders its "Speaker hub" card; pending tasks
+        // surface via the shared checklist card (Shared/_ChecklistCard.cshtml):
+        // an "⚠ Pending tasks (N)" card with a due-date table + per-row
+        // "Add reminder to calendar" buttons. (The ".tl-label Task checklist"
+        // panel lives on /Speaker/Tasks, not the hub front page.)
+        await expect(page.locator('h2', { hasText: 'Speaker hub' }).first()).toBeVisible();
+        const pendingCard = page.locator('.ceh-checklist')
+            .filter({ has: page.locator('h2', { hasText: 'Pending tasks' }) }).first();
+        await expect(pendingCard).toBeVisible();
+        // The auto-seeded speaker deadlines are DATED milestones: at least one
+        // pending row must carry a due date, i.e. offer the calendar reminder.
+        await expect(pendingCard.locator('table.task-table tbody tr').first()).toBeVisible();
+        await expect(pendingCard.getByRole('button', { name: /Add reminder to calendar/i }).first())
+            .toBeVisible();
         await assertNoHorizontalScroll(page);
     });
 });

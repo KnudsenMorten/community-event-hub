@@ -74,5 +74,18 @@ public class EmailLog
     /// </summary>
     public string? TemplateName { get; set; }
 
+    /// <summary>
+    /// §655 — how many times the retry job has re-attempted this failed send. Capped at 3.
+    /// </summary>
+    /// <remarks>
+    /// Lives on the log row rather than in a side table because the row IS the unit of work: one
+    /// failed send, one retry budget. A side table would have to be kept in step with a row it
+    /// cannot outlive.
+    /// </remarks>
+    public int RetryCount { get; set; }
+
+    /// <summary>§655 — when the last retry ran, so attempts can be spaced out over the hour.</summary>
+    public DateTimeOffset? LastRetryAt { get; set; }
+
     public DateTimeOffset SentAt { get; set; } = DateTimeOffset.UtcNow;
 }

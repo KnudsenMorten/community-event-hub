@@ -1,0 +1,89 @@
+@*
+    THE styling for operator-authored content-hub markdown (`.content-page`).
+
+    ONE source, rendered by BOTH surfaces that show that markdown: the in-hub
+    `/Info/{slug}` page and the anonymous public `/About`. It exists as a partial
+    because the alternative had already failed — each page carried its own copy,
+    the copies drifted, and §348's fixes (ruled tables, header background, zebra
+    striping, heading spacing) landed on the in-hub page only. The PUBLIC page —
+    the one the operator shares with people outside the event — kept the old
+    thin-underline tables while its own comment claimed the two were identical.
+
+    A page keeps only its own page-specific CSS (the photo/venue galleries, the
+    About scroll wrapper); anything that styles the RENDERED MARKDOWN belongs here.
+*@
+<style>
+    /* Mobile-first: keep floor-plan / feedback images inside the card on phones. */
+    .content-page img { max-width: 100%; height: auto; border-radius: 8px; margin: 8px 0; }
+
+    /* §327a (operator 2026-07-25: "ceh intro - font is hard to read - maybe chg to same
+       font but use italic or bold"). Inline `code` had NO styling at all, so it fell back to
+       the browser's default monospace — noticeably smaller than the surrounding text and hard
+       to read mid-sentence, which is exactly where the CEH intro uses it (HttpOnly, Secure,
+       SameSite=None, frame-ancestors …). Keep the page's own font and mark the token with
+       weight + a light tint instead. Real code BLOCKS stay monospace, below. */
+    .content-page code {
+        font-family: inherit;
+        font-size: inherit;
+        font-weight: 700;
+        color: #1e293b;
+        background: #eef2f7;
+        padding: 1px 5px;
+        border-radius: 4px;
+        white-space: nowrap;
+    }
+    /* A fenced block IS genuine code — alignment matters there, so it keeps monospace. */
+    .content-page pre code {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-weight: 400;
+        background: none;
+        padding: 0;
+        white-space: pre;
+    }
+
+    /* §348 (operator 2026-07-26: "it looks awful with the layout and it is very hard to read. if
+       you want to use tables, then should the lines in the table"). Markdown tables had NO styling
+       at all, so they rendered as unruled columns — no borders, no header separation, widths set by
+       content alone, so rows ran together and the second column drifted far from the first. */
+    .content-page table {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 16px 0 28px;
+        font-size: 14.5px;
+        line-height: 1.55;
+    }
+    .content-page th,
+    .content-page td {
+        border: 1px solid #d7dee8;
+        padding: 9px 12px;
+        text-align: left;
+        vertical-align: top;
+    }
+    .content-page th {
+        background: #eef2f7;
+        color: var(--el-darkblue);
+        font-weight: 700;
+    }
+    /* Zebra striping: with long "what you get" cells, ruling alone is not enough to hold the eye
+       on one row across the full width. */
+    .content-page tbody tr:nth-child(even) { background: #fafbfd; }
+    .content-page td:first-child { min-width: 9.5em; }
+    /* Wide tables scroll INSIDE the card on phones — never widen the page (mobile-first). */
+    @@media (max-width: 700px) {
+        .content-page table { display: block; overflow-x: auto; }
+    }
+
+    /* §348: headings butted straight against the preceding table ("8. Who built it" was crammed
+       onto the row above). Space ABOVE a heading is what separates it from the previous section. */
+    .content-page h2 { color: var(--el-darkblue); margin: 34px 0 10px; }
+    .content-page h3 { color: var(--el-darkblue); margin: 26px 0 6px; }
+    .content-page h2:first-child, .content-page h1 + h2 { margin-top: 12px; }
+    .content-page p { margin: 0 0 12px; }
+    .content-page ul, .content-page ol { margin: 0 0 14px; padding-left: 22px; }
+    .content-page li { margin: 3px 0; }
+    .content-page hr { border: 0; border-top: 1px solid #e5e7eb; margin: 28px 0; }
+    .content-page blockquote {
+        border-left: 4px solid var(--el-darkblue);
+        margin: 12px 0; padding: 4px 14px; background: #f7f9fc; color: #374151;
+    }
+</style>

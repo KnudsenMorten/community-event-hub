@@ -1,0 +1,29 @@
+@model CommunityHub.Forms.Steps.SponsorCoordinatorModel
+@*
+    Fields-ONLY partial for the sponsor Event-Coordinator wizard step (§32 / §285 Phase 2).
+    NO <form>/buttons/chrome — the shared wizard host owns those. Field names match
+    SponsorCoordinatorModel (and the standalone Company Details section) so the host's
+    empty-prefix binding fills them. Same fields + labels as the standalone page, so the
+    inline step and the page stay identical.
+*@
+<p style="font-size:12px;color:#6b7280;margin:0 0 10px;">
+    Your primary contact for the event. Synced to the Event System (Zoho) as the
+    @(Model.IsExhibitor ? "sponsor + exhibitor" : "sponsor") contact.
+</p>
+
+<label for="EventCoordinatorFirstName">First name</label>
+<input type="text" id="EventCoordinatorFirstName" asp-for="EventCoordinatorFirstName" maxlength="120" />
+
+<label for="EventCoordinatorLastName">Last name</label>
+<input type="text" id="EventCoordinatorLastName" asp-for="EventCoordinatorLastName" maxlength="120" />
+
+<label for="EventCoordinatorCompanyName">Company name</label>
+<input type="text" id="EventCoordinatorCompanyName" asp-for="EventCoordinatorCompanyName" maxlength="200" />
+
+<label for="EventCoordinatorEmail">Email</label>
+<input type="email" id="EventCoordinatorEmail" asp-for="EventCoordinatorEmail" maxlength="320" />
+<span asp-validation-for="EventCoordinatorEmail" class="error"></span>
+
+<label for="EventCoordinatorPhone">Phone</label>
+<input type="tel" id="EventCoordinatorPhone" asp-for="EventCoordinatorPhone" maxlength="60" />
+<p style="font-size:12px;color:#6b7280;margin:2px 0 14px;">Phone is sent to the exhibitor contact only (the Event System (Zoho) doesn't accept a phone on the sponsor record).</p>

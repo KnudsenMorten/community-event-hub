@@ -74,10 +74,10 @@ public sealed class StartupWarmupService : BackgroundService
                 .Select(p => new { p.Id, p.Role, p.Email })
                 .FirstOrDefaultAsync(ct);
 
-            // --- Hub path (mirror Index.OnGetAsync's queries) ---
+            // --- Hub path (mirror Index.OnGetAsync's queries; the §248-retired
+            // /Welcome-redirect WelcomeShownAt probe is gone from Index, so it is
+            // no longer warmed here either) ---
             int pid = rep?.Id ?? 0;
-            _ = await db.Participants
-                .Where(p => p.Id == pid).Select(p => p.WelcomeShownAt).FirstOrDefaultAsync(ct);
             _ = await db.Events
                 .Where(e => e.Id == ev)
                 .Select(e => new { e.CommunityName, e.DisplayName, e.CalendarSyncEnabled })

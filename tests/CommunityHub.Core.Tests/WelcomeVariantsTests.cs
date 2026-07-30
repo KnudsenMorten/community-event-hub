@@ -51,8 +51,23 @@ public class WelcomeVariantsTests
             Assert.True(EmailTemplateCatalog.Map.ContainsKey(key), $"catalog missing {key}");
             Assert.Equal("welcome-email", EmailTemplateCatalog.FeatureKeyFor(key));
         }
-        // The MC selection invite is also catalogued under masterclass-invites.
-        Assert.Equal("masterclass-invites",
+        // §241: the MC selection invite IS the 2-day attendee welcome — its ring is
+        // governed by welcome-email (the send path tags that FeatureKey + AttendeeWelcome).
+        Assert.Equal("welcome-email",
             EmailTemplateCatalog.FeatureKeyFor("masterclass-selection-invite"));
+
+        // §252 F5: the ENTIRE Master Class funnel rides the ONE welcome-email ring
+        // (masterclass-invites was removed) — raising a single ring at go-live can
+        // never split the funnel (invited but never confirmed, or vice versa).
+        foreach (var mc in new[]
+                 {
+                     "masterclass-confirmed", "masterclass-waitlisted",
+                     "masterclass-cancelled", "masterclass-cancelled-ticket",
+                     "masterclass-reassignment", "masterclass-offer",
+                     "masterclass-promoted",
+                 })
+        {
+            Assert.Equal("welcome-email", EmailTemplateCatalog.FeatureKeyFor(mc));
+        }
     }
 }

@@ -10,6 +10,8 @@
     .pflag { display:inline-block; margin:1px 2px; padding:1px 7px; font-size:11px; font-weight:600;
         border-radius:9px; background:#eef2f7; color:#334155; border:1px solid #d3dbe6; white-space:nowrap; }
     .pflag-test { background:#fef3c7; color:#92560a; border-color:#f0d27a; }
+    /* §185: Ring 2 "Design" chip — same shape as the amber Test chip, in green. */
+    .pflag-design { background:#dcfce7; color:#166534; border-color:#86efac; }
     details.row-actions > summary { cursor:pointer; list-style:none; display:inline-block;
         padding:6px 12px; border:1px solid #c4c8d4; border-radius:6px; font-weight:600;
         color:var(--el-darkblue,#1D3380); white-space:nowrap; }
@@ -23,6 +25,38 @@
    REQUIREMENTS §21). Pure progressive enhancement. *@
 <div class="card ceh-grid" data-ceh-grid data-ceh-grid-loading="@Localizer["OrgGrid.Loading"]">
     <h1>Participants</h1>
+    @* 🔒 §707.37 (operator 2026-07-30: "Participants (Active People who can login to hub - 1-day
+       attendees are excluded)") — this page lists LOGINS, not ticket holders, and the difference
+       was invisible: he bought a 1-day ticket, saw it on /Organizer/Attendees, and reasonably
+       expected the person here too.
+
+       The 1-day clause is rendered from the LIVE feature state, not hard-coded. `attendee-1day-access`
+       is SUSPENDED by default (§242) — while it is off, 1-day holders get no login at all; the moment
+       it is switched on they are provisioned and DO appear here. A fixed sentence would then be a page
+       telling the reader something untrue, which is the §326bx defect in words. *@
+    <p class="set-deps" style="margin:-6px 0 14px;color:#334155;">
+        <strong>Active people who can sign in to the hub.</strong>
+        @if (Model.OneDayAccessEnabled)
+        {
+            <text>1-day attendees are <strong>included</strong> — 1-day hub access is currently
+            switched <strong>ON</strong>, so they have logins too.</text>
+        }
+        else
+        {
+            <text><strong>1-day attendees are excluded.</strong>
+            @* 🔒 §707.38 — operator 2026-07-30: "make a note that it is by design that 1-day ticket
+               holders have their state as inactive as they dont require access to hub". Said HERE,
+               where the number is read, so an inactive 1-day holder is never mistaken for a defect
+               and "repaired" by switching them on. *@
+            This is <strong>by design, not a fault</strong>: a 1-day holder attends the main event
+            only and does not need the hub, so they are provisioned no login and show as
+            <em>inactive</em>. The hub exists for Master&nbsp;Class selection, tasks and onboarding —
+            none of which apply to them. They are all listed under
+            <a asp-page="/Organizer/Attendees">Attendees</a>, and the
+            <strong>&ldquo;Active + 1-day attendees&rdquo;</strong> status filter below shows everyone
+            who is really coming.</text>
+        }
+    </p>
 
     @if (Model.AccessDenied)
     {
@@ -45,6 +79,10 @@
             <span style="display:flex;flex-direction:column;gap:2px;">
                 <label for="ActiveFilter">Status</label>
                 <select id="ActiveFilter" name="ActiveFilter">
+                    @* §707.38 — the DEFAULT (operator 2026-07-30: "set the new dropdown as default").
+                       "Active only" hid every 1-day holder, and "Inactive only" mixed them in with
+                       genuinely withdrawn people, so neither answered "who is actually coming". *@
+                    <option value="active+1day" selected="@(Model.ActiveFilter == "active+1day")">Active + 1-day attendees</option>
                     <option value="active" selected="@(Model.ActiveFilter == "active")">Active only</option>
                     <option value="inactive" selected="@(Model.ActiveFilter == "inactive")">Inactive only</option>
                     <option value="all" selected="@(Model.ActiveFilter == "all")">Show inactive too (all)</option>
@@ -102,6 +140,7 @@
                  bulk action; per-row buttons target their own handler via
                  asp-page-handler, so there are no (invalid) nested forms. -->
             <form method="post" id="bulkForm">
+                @Html.AntiForgeryToken()
                 <input type="hidden" name="ActiveFilter" value="@Model.ActiveFilter" />
                 <input type="hidden" name="RoleFilter" value="@Model.RoleFilter" />
                 <input type="hidden" name="SponsorCompanyFilter" value="@Model.SponsorCompanyFilter" />
@@ -155,12 +194,9 @@
                                asp-route-SponsorCompanyFilter="@Model.SponsorCompanyFilter" asp-route-Search="@Model.Search"
                                asp-route-Sort="name" asp-route-Desc="@Model.NextDescFor("name")" asp-route-PageNo="1">@Localizer["OrgGrid.Col.Name"]@Model.SortIndicator("name")</a>
                         </th>
-                        <th scope="col" aria-sort="@Model.AriaSort("email")">
-                            <a asp-page="/Organizer/Participants"
-                               asp-route-ActiveFilter="@Model.ActiveFilter" asp-route-RoleFilter="@Model.RoleFilter"
-                               asp-route-SponsorCompanyFilter="@Model.SponsorCompanyFilter" asp-route-Search="@Model.Search"
-                               asp-route-Sort="email" asp-route-Desc="@Model.NextDescFor("email")" asp-route-PageNo="1">@Localizer["OrgGrid.Col.Email"]@Model.SortIndicator("email")</a>
-                        </th>
+                        @* §186: Email column removed (not relevant on-screen + the long
+                           addresses overflowed the row and hid the Actions dropdown). Email is
+                           still searchable and stays in the Excel/CSV export. *@
                         <th scope="col" aria-sort="@Model.AriaSort("persona")">
                             <a asp-page="/Organizer/Participants"
                                asp-route-ActiveFilter="@Model.ActiveFilter" asp-route-RoleFilter="@Model.RoleFilter"
@@ -186,12 +222,34 @@
                                        aria-label="Select @p.FullName" />
                             </td>
                             <td>@p.FullName</td>
-                            <td>@p.Email</td>
+                            @* §186: Email cell removed — email stays searchable + in the export. *@
                             <td>@p.Role</td>
                             <td>
+                                @* §591 (operator 2026-07-28, flagged low prio): "if a speaker fills
+                                   out the company field, it could be nice to show it here under
+                                   partcipants". The column resolved only the SPONSOR company, so a
+                                   speaker's row was blank even when CEH held their employer — e.g.
+                                   Per Larsen is "Microsoft" on SpeakerProfile.CompanyName (§578).
+                                   The sponsor chain is UNCHANGED (a locked rule — always the Company
+                                   Manager public name); the speaker value is only a FALLBACK for
+                                   rows the sponsor chain does not cover. *@
                                 @if (p.Role == ParticipantRole.Sponsor && !string.IsNullOrWhiteSpace(p.SponsorCompanyId))
                                 {
                                     @Model.CompanyDisplayName(p.SponsorCompanyId)
+                                }
+                                else if (Model.SpeakerCompanyFor(p.Id) is { Length: > 0 } speakerCompany)
+                                {
+                                    @speakerCompany
+                                }
+                                @* §707.27 D (operator 2026-07-30) — an ATTENDEE's company comes from
+                                   their WINNING active mirror row (§707.22a: newest LastSyncedAt,
+                                   then Id). Zoho keeps that value current, so it is read, never
+                                   copied onto the Participant. LAST in the chain: the sponsor rule is
+                                   locked (always the Company Manager public name) and a speaker's own
+                                   profile beats a ticket's billing company. *@
+                                else if (Model.AttendeeCompanyFor(p.Email) is { Length: > 0 } attendeeCompany)
+                                {
+                                    @attendeeCompany
                                 }
                             </td>
                             <td>
@@ -204,9 +262,17 @@
                                     <span class="error">Inactive</span>
                                 }
                             </td>
-                            <td>@CommunityHub.Core.Settings.Rings.Label(p.Ring)</td>
+                            @* §185: show ONLY the ring number ("0".."3"), not the parenthetical label. *@
+                            <td>@CommunityHub.Core.Settings.Rings.Number(p.Ring)</td>
                             <td>
+                                @* §185: ring-derived flags — Ring 1 → amber "Test", Ring 2 → green
+                                   "Design". The explicit IsTestUser flag already renders an amber
+                                   "Test" chip, so suppress the ring-derived one for those rows to
+                                   avoid a duplicate; every other Ring 1 row still gets it. *@
+                                @{ var ringFlag = CommunityHub.Core.Settings.Rings.RingFlagLabel(p.Ring); }
                                 @if (p.IsTestUser) { <span class="pflag pflag-test">Test</span> }
+                                else if (ringFlag == "Test") { <span class="pflag pflag-test">Test</span> }
+                                @if (ringFlag == "Design") { <span class="pflag pflag-design">Design</span> }
                                 @if (p.IsBoothMember) { <span class="pflag">Booth member</span> }
                                 @if (p.IsSigner) { <span class="pflag">Signer</span> }
                                 @if (p.IsEventCoordinator) { <span class="pflag">Coordinator</span> }
@@ -216,8 +282,7 @@
                                     <summary>Actions ▾</summary>
                                 <div style="display:flex;flex-wrap:wrap;gap:6px;">
                                     <!-- REAL edit: open the full participant editor (name, email,
-                                         persona, active state, sponsor company). Distinct from the
-                                         "Modify on behalf" logistics quick-edit below. -->
+                                         persona, active state, sponsor company). -->
                                     <a class="secondary" style="text-decoration:none;padding:6px 10px;border:1px solid #c4c8d4;border-radius:6px;"
                                        asp-page="/Organizer/EditParticipant" asp-route-id="@p.Id"
                                        title="Edit this person's name, email, persona and status">
@@ -233,25 +298,17 @@
                                     </button>
                                     <!-- PRIMARY action: full impersonation. Re-issues the
                                          session AS this person and lands on their own hub, so
-                                         the organizer sees the WHOLE app from their seat — not
-                                         a 2-field form. Styled primary so it is unmistakably
-                                         the "switch into the user" action (the lesser
-                                         "Modify on behalf" quick-edit is a plain link below). -->
+                                         the organizer sees the WHOLE app from their seat.
+                                         §303b (operator 2026-07-24): this is THE one act-as
+                                         feature — "Modify on behalf" was DELETED ("modify on
+                                         behalf is equal to switch user - it is just bad
+                                         wording. i prefer to have switch user only"). -->
                                     <button type="submit"
                                             asp-page-handler="SwitchToUser"
                                             asp-route-participantId="@p.Id"
                                             title="Switch into this person — see and do everything as them, then Return to organizer">
                                         Switch to user
                                     </button>
-                                    <!-- Lesser, explicit quick-edit: change only hotel/swag FOR
-                                         the person without leaving the organizer seat. Kept as a
-                                         clearly secondary link so it is never mistaken for the
-                                         full user switch above. -->
-                                    <a class="secondary" style="text-decoration:none;padding:6px 10px;border:1px solid #c4c8d4;border-radius:6px;"
-                                       asp-page="/Organizer/EditOnBehalf" asp-route-participantId="@p.Id"
-                                       title="Quick-edit this person's hotel / swag without switching into their view">
-                                        Modify on behalf
-                                    </a>
                                     <a class="secondary" style="text-decoration:none;padding:6px 10px;border:1px solid #c4c8d4;border-radius:6px;"
                                        asp-page="/Organizer/SecureLink" asp-route-participantId="@p.Id">
                                         Secure link
@@ -263,18 +320,33 @@
                                         Email log
                                     </a>
                                     <!-- Resend the welcome email to THIS participant (per-row, production-safe).
-                                         Forces past the once-ever ledger; ring gate + allowlist still apply. -->
-                                    <form method="post" asp-page-handler="ResendWelcome" style="display:inline;margin:0;"
-                                          asp-route-participantId="@p.Id"
-                                          asp-route-ActiveFilter="@Model.ActiveFilter" asp-route-RoleFilter="@Model.RoleFilter"
-                                          asp-route-SponsorCompanyFilter="@Model.SponsorCompanyFilter" asp-route-Search="@Model.Search"
-                                          asp-route-Sort="@Model.Sort" asp-route-Desc="@Model.Desc" asp-route-PageNo="@Model.PageNo">
-                                        <button type="submit" class="secondary"
-                                                style="text-decoration:none;padding:6px 10px;border:1px solid #c4c8d4;border-radius:6px;background:#fff;cursor:pointer;"
-                                                title="Resend the welcome email to @p.FullName">
-                                            Resend welcome
-                                        </button>
-                                    </form>
+                                         Forces past the once-ever ledger; ring gate + allowlist still apply.
+                                         §304b BUGFIX (operator 2026-07-24, the bulk-ring HTTP 400): this was a
+                                         NESTED <form> inside #bulkForm — the HTML parser closed the outer form
+                                         at the FIRST row's </form>, detaching every later row's checkbox and
+                                         breaking the bulk POST (missing fields/token ⇒ 400). Now a formaction
+                                         submit button like its ToggleActive/SwitchToUser siblings. -->
+                                    <button type="submit" class="secondary"
+                                            asp-page-handler="ResendWelcome"
+                                            asp-route-participantId="@p.Id"
+                                            asp-route-ActiveFilter="@Model.ActiveFilter" asp-route-RoleFilter="@Model.RoleFilter"
+                                            asp-route-SponsorCompanyFilter="@Model.SponsorCompanyFilter" asp-route-Search="@Model.Search"
+                                            asp-route-Sort="@Model.Sort" asp-route-Desc="@Model.Desc" asp-route-PageNo="@Model.PageNo"
+                                            style="text-decoration:none;padding:6px 10px;border:1px solid #c4c8d4;border-radius:6px;background:#fff;cursor:pointer;"
+                                            title="Resend the welcome email to @p.FullName">
+                                        Resend welcome
+                                    </button>
+                                    @* §355/§379 (operator 2026-07-26: "where is the reset feature as
+                                       organizer … i dont see ability to reset all steps/tasks also").
+                                       The reset itself lives on Edit / Modify — but this grid is where
+                                       he went looking for it, and a feature nobody can find is a
+                                       feature that is not there. A LINK (not a second copy of the
+                                       control): one implementation, discoverable from both places. *@
+                                    <a class="secondary" style="text-decoration:none;padding:6px 10px;border:1px solid #c4c8d4;border-radius:6px;"
+                                       asp-page="/Organizer/EditParticipant" asp-route-Id="@p.Id"
+                                       title="Reset @p.FullName's Get Started — per step, or all of them">
+                                        Reset Get Started
+                                    </a>
                                     <!-- Per-row Delete. Opens an accessible confirmation modal
                                          first (no destructive action on a single click). The modal
                                          hosts the real submit button, which posts the Delete handler:
@@ -355,6 +427,12 @@
                 <input type="hidden" name="RoleFilter" value="@Model.RoleFilter" />
                 <input type="hidden" name="SponsorCompanyFilter" value="@Model.SponsorCompanyFilter" />
                 <input type="hidden" name="participantId" id="deleteModalPid" value="" />
+                @* §334: the real guard is the SERVER check in OnPostDeleteAsync — this box is
+                   only how a human supplies the phrase. *@
+                <partial name="_TypedConfirm" model="@(new CommunityHub.Pages.Shared.TypedConfirmField(
+                    CommunityHub.Core.Organizer.TypedConfirmation.DeletePhrase,
+                    "Permanently removes the person when they have no linked data; otherwise they are deactivated instead.",
+                    InputId: "deleteModalPhrase"))" />
                 <div style="display:flex;flex-wrap:wrap;gap:10px;justify-content:flex-end;margin-top:16px;">
                     <button type="button" id="deleteModalCancel" class="secondary"
                             style="padding:8px 14px;border:1px solid #c4c8d4;border-radius:6px;background:#fff;cursor:pointer;">

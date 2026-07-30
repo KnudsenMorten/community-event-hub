@@ -69,9 +69,9 @@ public sealed class WizardStepperVmTests
     // §161 step↔task consistency: the manual mark-done Get-Started steps deep-link to the
     // SAME page the matching My-Tasks row links to (ParticipantChecklistBuilder), so the two
     // surfaces never disagree on where to act.
-    [InlineData("/Forms/Signal", "signal:42")]
-    [InlineData("/Speaker/Promote", "promote:42")]
-    [InlineData("/Party", "party-form:42")]
+    // §352: both now point at the INLINE wizard step — one canonical surface per step.
+    [InlineData("/Forms/Wizard?step=signal", "signal:42")]
+    [InlineData("/Forms/Wizard?step=party", "party-form:42")]
     public void Manual_step_route_matches_my_tasks_link(string stepRoute, string sourceKey)
     {
         Assert.Equal(stepRoute, ParticipantChecklistBuilder.LinkForSourceKey(sourceKey));

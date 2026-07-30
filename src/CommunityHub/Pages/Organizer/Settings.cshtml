@@ -7,14 +7,13 @@
     // Map the FeatureGroup enum to its localized heading key.
     string GroupHeading(FeatureGroup g) => g switch
     {
-        FeatureGroup.Email => "Settings.Group.Email",
+        @* §695 — the four MECHANISM group cases went with their enum members. *@
         FeatureGroup.SpeakersSessions => "Settings.Group.SpeakersSessions",
         FeatureGroup.Sponsors => "Settings.Group.Sponsors",
-        FeatureGroup.SocialMedia => "Settings.Group.SocialMedia",
-        FeatureGroup.Surveys => "Settings.Group.Surveys",
-        FeatureGroup.Reminders => "Settings.Group.Reminders",
         FeatureGroup.Attendees => "Settings.Group.Attendees",
-        FeatureGroup.Incubation => "Settings.Group.Incubation",
+        FeatureGroup.Organizers => "Settings.Group.Organizers",
+        FeatureGroup.Volunteers => "Settings.Group.Volunteers",
+        FeatureGroup.EventSettings => "Settings.Group.EventSettings",
         _ => "Settings.Title",
     };
 }
@@ -30,6 +29,15 @@
 }
 
 <style>
+    /* §326bz — the three governance classes are the page's primary structure, so their
+       headings sit OUTSIDE the cards and read louder than a chapter heading. */
+    .set-class { margin:26px 0 2px; font-size:19px; color:var(--el-darkblue);
+                 border-bottom:2px solid var(--el-darkblue); padding-bottom:4px; }
+    .set-class-blurb { margin:0 0 12px; color:#4b5563; font-size:13px; max-width:70ch; }
+    /* Rare structural controls: present, but never competing with the on/off button. */
+    .set-adv { margin-top:8px; }
+    .set-adv > summary { cursor:pointer; color:#6b7280; font-size:12.5px; }
+    .set-adv[open] > summary { margin-bottom:6px; }
     .set-btn { background:#008BD2; color:#fff; border:0; border-radius:6px;
                padding:7px 13px; font-size:14px; cursor:pointer; }
     .set-btn:hover { background:#0079b8; }
@@ -41,7 +49,14 @@
     .set-feat .set-body { flex:1 1 220px; min-width:0; }
     .set-feat h3 { margin:0 0 2px; font-size:15px; }
     .set-feat p { margin:0; color:#4b5563; font-size:13px; }
-    .set-feat .set-action { flex:0 0 auto; }
+    /* §511 — stacked action buttons need AIR between them. Each button posts a different handler
+       so each sits in its own form element, and with no gap the three sat flush against one
+       another (operator 2026-07-28: "add more spacing", arrow at the Writes-to-external-systems
+       stack). Stretching them to a common width also stops the stack reading as ragged;
+       single-button rows are unaffected. */
+    .set-feat .set-action { flex:0 0 auto; display:flex; flex-direction:column;
+                            align-items:stretch; gap:8px; }
+    .set-feat .set-action .set-btn { width:100%; }
     .set-tag { display:inline-block; font-size:11px; line-height:1; padding:3px 7px;
                border-radius:999px; margin-left:6px; vertical-align:middle; }
     .set-tag.on { background:#dcfce7; color:#166534; }
@@ -206,6 +221,79 @@
             </form>
         </div>
     </div>
+
+    @* --- §340-H: outbound WRITES to third-party systems -------------------- *@
+    <div class="set-feat @(Model.ExternalWritesEffective ? "" : "is-disabled")">
+        <div class="set-body">
+            @* 🔒 §611 — NAME THE ENVIRONMENT ON THE CARD. The operator sent this card reading
+               ALLOWED believing it was DEV; it was a PROD tab. The card said "this environment"
+               and never said WHICH, and with a DEV and a PROD tab open there was nothing to tell
+               them apart. Misreading it means believing DEV can write, or that PROD is safe. *@
+            <h3>
+                Writes to external systems
+                @if (Model.ExternalWritesEffective)
+                {
+                    <span class="set-tag on">ALLOWED</span>
+                }
+                else
+                {
+                    <span class="set-tag off">BLOCKED</span>
+                }
+                <span class="set-tag" style="background:#e8eefc;color:#1a3a7a;border:1px solid #b7c8ea;">@Model.EnvName</span>
+            </h3>
+            <p>
+                Controls whether <strong>@Model.EnvName</strong> may <strong>write</strong> to Zoho
+                Backstage, e-conomic, LinkedIn and SharePoint. Reading is never affected.
+            </p>
+            @if (!Model.ExternalWritesEnvDefault)
+            {
+                @* §612 — a blocked host is blocked FULL STOP; no override can widen it. Saying so
+                   here matters: the buttons below still offer "Allow writes", and without this line
+                   an organizer would reasonably expect that button to work. *@
+                <p style="margin:6px 0 0;padding:8px 10px;background:#fdf3f2;border:1px solid #e9a8a3;border-radius:6px;font-size:14px;">
+                    <strong>Enforced:</strong> this environment blocks external writes, and
+                    <strong>no override on this page can enable them</strong>. That is deliberate &mdash;
+                    writes from here would create a second set of records in Zoho alongside the live ones.
+                </p>
+            }
+            <p>
+                This environment's default is
+                <strong>@(Model.ExternalWritesEnvDefault ? "ALLOWED" : "BLOCKED")</strong>@if (Model.ExternalWritesOverride is null)
+                { <text>, and this edition follows it.</text> }
+                else
+                { <text>, but this edition overrides it to <strong>@(Model.ExternalWritesOverride.Value ? "ALLOWED" : "BLOCKED")</strong>.</text> }
+            </p>
+            @if (Model.ExternalWritesEffective && !Model.ExternalWritesEnvDefault)
+            {
+                <p class="set-warn" role="alert">
+                    Writes are switched ON in an environment whose default is BLOCKED.
+                    DEV and PROD share the SAME Zoho Backstage and webshop, so anything pushed
+                    from here lands in the real systems. Set this back to
+                    &ldquo;Follow environment default&rdquo; when you are done.
+                </p>
+            }
+        </div>
+        <div class="set-action">
+            <form method="post" asp-page-handler="SetExternalWrites">
+                <input type="hidden" name="allow" value="true" />
+                <button type="submit" class="set-btn" disabled="@(Model.ExternalWritesOverride == true)">
+                    Allow writes
+                </button>
+            </form>
+            <form method="post" asp-page-handler="SetExternalWrites">
+                <input type="hidden" name="allow" value="false" />
+                <button type="submit" class="set-btn off" disabled="@(Model.ExternalWritesOverride == false)">
+                    Block writes
+                </button>
+            </form>
+            <form method="post" asp-page-handler="SetExternalWrites">
+                @* No 'allow' field ⇒ binds as null ⇒ deletes the override row. *@
+                <button type="submit" class="set-btn" disabled="@(Model.ExternalWritesOverride is null)">
+                    Follow environment default
+                </button>
+            </form>
+        </div>
+    </div>
 </div>
 
 @* --- Dependency warnings (enabled-but-prerequisite-off) --- *@
@@ -222,33 +310,54 @@
     </div>
 }
 
-@* --- The catalog, grouped into chapters; email group rendered above is skipped here --- *@
-@foreach (var group in Model.Groups)
+@* --- §700 Batch B — ONE CARD PER GROUP, EACH APPEARING EXACTLY ONCE -----------------------------
+   Operator 2026-07-29: *"it seems as many things are mentioned 2-3 times on that page = redundant"*
+   … *"things must only exist 1 time - no overlap. structured per role or a generic Event settings"*.
+
+   🔑 WHAT HE WAS ACTUALLY SEEING. The page looped `governs × chapter`: three top-level classes
+   (Features / E-mails / Backend), each re-listing every chapter that had a member in it. So
+   "Sponsors and exhibitors" printed its heading under Features AND under E-mails AND under Backend —
+   up to three times. No SWITCH was ever duplicated, which is why this was easy to argue away; the
+   HEADINGS were, and a heading repeating three times reads as the content repeating.
+
+   Now the GROUP is the outer loop and appears once, in role-first order (FeatureCatalog.DisplayOrder),
+   with what a switch governs demoted to a sub-heading inside its one card.
+
+   🔒 THE GROUP RING CONTROL IS GONE. §705: rings exist only on EMAILS; everything else is on/off.
+   It was also inert — `FeatureGroupSettings` holds zero rows in BOTH editions (verified for §700
+   Batch A), so it never governed anything. Deleting it removes a control that looked like it set an
+   audience and did not — the §326bx shape. *@
+@foreach (var group in Model.GroupsInDisplayOrder)
 {
-    if (group.Key == FeatureGroup.Email) { continue; }
-    var groupRing = Model.GroupRingFor(group.Key);
+    @* §438 (operator 2026-07-27: "what else is turned off?") — only the outbound-email MASTER switch
+       is skipped, and BY KEY, because it has its own card above. Never skip by chapter: doing that
+       once made every other switch in the Email chapter invisible and therefore untoggleable. *@
+    var groupItems = group
+        .Where(s => s.Key != FeatureCatalog.OutboundEmailKey)
+        .ToList();
+    if (groupItems.Count == 0) { continue; }
 
     <div class="card">
-        <h2 style="display:flex;align-items:center;flex-wrap:wrap;gap:8px;">
-            @Localizer[GroupHeading(group.Key)]
-            @if (groupRing.Ring != Ring.Broad)
+        <h3 style="margin-top:0;">@Localizer[GroupHeading(group.Key)]</h3>
+
+        @foreach (var governs in new[] { FeatureGoverns.Feature, FeatureGoverns.Email, FeatureGoverns.Backend })
+        {
+            var items = groupItems.Where(s => s.Descriptor.Governs == governs).ToList();
+            if (items.Count == 0) { continue; }
+
+            var (className, classBlurb) = governs switch
             {
-                <span class="set-tag ring" title="@Localizer["Settings.GroupRingBadgeTitle"]">@Localizer["Settings.GroupRingBadge", Rings.Label(groupRing.Ring)]</span>
-            }
-        </h2>
-        @* GROUP lifecycle ring — the PRIMARY control; features without an override inherit it. *@
-        <form method="post" asp-page-handler="GroupRing" class="set-ring" style="margin:0 0 10px;">
-            <input type="hidden" name="group" value="@group.Key" />
-            <label for="gring-@group.Key">@Localizer["Settings.GroupRingLabel"]</label>
-            <select id="gring-@group.Key" name="ring" aria-label="@Localizer["Settings.GroupRingAria", Localizer[GroupHeading(group.Key)].Value]">
-                @foreach (var r in Rings.All)
-                {
-                    <option value="@r" selected="@(r == groupRing.Ring)">@Rings.Label(r)</option>
-                }
-            </select>
-            <button type="submit" class="set-btn">@Localizer["Settings.SetGroupRing"]</button>
-        </form>
-        @foreach (var s in group)
+                FeatureGoverns.Feature => (Localizer["Settings.ClassFeatures"].Value, Localizer["Settings.ClassFeaturesBlurb"].Value),
+                FeatureGoverns.Email   => (Localizer["Settings.ClassEmails"].Value,   Localizer["Settings.ClassEmailsBlurb"].Value),
+                _                      => (Localizer["Settings.ClassBackend"].Value,  Localizer["Settings.ClassBackendBlurb"].Value),
+            };
+
+            @* A quiet sub-heading, not a page-level one: what a switch governs still matters, but it
+               is no longer the axis the page is built around. *@
+            <h4 style="margin:14px 0 2px;font-size:14px;color:#4b5563;text-transform:uppercase;letter-spacing:.04em;">@className</h4>
+            <p class="set-class-blurb" style="margin:0 0 8px;">@classBlurb</p>
+
+        @foreach (var s in items)
         {
             <div class="set-feat @(s.Enabled ? "" : "is-disabled")">
                 <div class="set-body">
@@ -284,15 +393,65 @@
                             };
                         }
                         <span class="set-tag kind" title="@kindTitle">@kindLabel</span>
-                        @* Ring badge only for RING-SCOPED kinds (Queue + User-impact) — an Engine feature's ring is moot. *@
-                        @if (s.Descriptor.IsRingScoped && s.ReleasedToRing != Ring.Broad)
+                        @* Ring badge only for RING-SCOPED kinds (Queue + User-impact) — an Engine feature's ring is moot.
+                           🔒 §707.6 — and NEVER for an EMAIL feature: the 17 email feature rings were
+                           removed from the transport, so such a badge would state an audience nothing
+                           consults. The ring lives on each MAIL below. *@
+                        @if (s.Descriptor.IsRingScoped
+                             && s.Descriptor.Governs != FeatureGoverns.Email
+                             && s.ReleasedToRing != Ring.Broad)
                         {
                             <span class="set-tag ring" title="@Localizer["Settings.RingBadgeTitle"]">@Localizer["Settings.RingBadge", Rings.Label(s.ReleasedToRing)]</span>
                         }
                     </h3>
                     <p>@Localizer[s.Descriptor.DescriptionKey]</p>
+                    @* §700 Batch B item 9 — SAY WHICH MAILS THIS SWITCH GOVERNS.
+                       🔑 The single change most likely to prevent a repeat of §694, §694.2 and §698:
+                       he read three feature rows correctly and drew the wrong conclusion from each,
+                       because a row named a capability but never said what rode on it. "Welcome
+                       emails" gating THIRTEEN mails is not guessable from the row.
+                       Derived from EmailTemplateCatalog, so it cannot drift from what actually sends. *@
+                    @if (Model.MailsGatedBy(s.Key).Count > 0)
+                    {
+                        var gated = Model.MailsGatedBy(s.Key);
+                        <p class="set-deps">
+                            <strong>Controls @gated.Count mail@(gated.Count == 1 ? "" : "s"):</strong>
+                            @string.Join(" · ", gated)
+                        </p>
+                    }
+                    @* §326by (operator 2026-07-25: "explain how it is ring gated … otherwise
+                       remove if that feature is not ring-gated"). An ENGINE / ENGINE-QUEUED
+                       feature is NEVER ring-scoped — FeatureSurface says exactly that in its
+                       own doc comment, and nothing calls GetReleasedRingAsync for these keys.
+                       Printing "Released to Ring 3" beside a backend sync claimed a scoping
+                       that does not exist: with the switch ON the sync runs for EVERYONE.
+                       Only Queue / User-impact surfaces show a ring now. *@
                     <p class="set-deps">
-                        @if (s.IsRingOverridden)
+                        @if (!s.Descriptor.IsRingScoped)
+                        {
+                            <span>@Localizer["Settings.NotRingScoped"]</span>
+                        }
+                        else if (s.Descriptor.Governs == FeatureGoverns.Email)
+                        {
+                            @* 🔒 §707.6 — this switch has NO ring any more. Stating one here is exactly
+                               the §326bx defect: a number that reads as the audience while the
+                               transport ignores it. Say what is true instead. *@
+                            <span>
+                                <strong>On/off only — this switch has no ring.</strong>
+                                Each mail below carries its own ring, per role, and that is what decides
+                                who receives it. Turning this off stops the mails entirely.
+                            </span>
+                        }
+                        else if (s.Descriptor.GatesTileVisibilityOnly)
+                        {
+                            @* §327e / §336: say what the ring ACTUALLY governs. These SEVEN gate
+                               the organizer TILE only — "Sponsor welcome … Released to Ring 1"
+                               otherwise reads as if the sponsor welcome MAILS were limited to
+                               Ring 1, which they are not (§326bx). §336 added magic-link: its
+                               ring hides two organizer tiles and stops no sign-in link at all. *@
+                            <span>@Localizer["Settings.TileOnly", Rings.Label(s.ReleasedToRing)]</span>
+                        }
+                        else if (s.IsRingOverridden)
                         {
                             <span>@Localizer["Settings.RingOverridden", Rings.Label(s.ReleasedToRing)]</span>
                         }
@@ -301,6 +460,21 @@
                             <span>@Localizer["Settings.RingInherited", Rings.Label(s.ReleasedToRing)]</span>
                         }
                     </p>
+                    @* §514 — the line above states this feature's ring. The TRANSPORT can overrule
+                       it: BrevoEmailSender sends to MIN(outbound-email ring, feature ring) and
+                       never loosens. Released broader than the master, the ring above is simply
+                       not the audience — the operator's example was a Ring 3 (broad) alert whose
+                       mail "will not arrive". Say so where the claim is made. *@
+                    @* 🔒 §707.6 — suppressed for EMAIL switches. This warning compares the FEATURE's
+                       ring to the transport ceiling, and an email feature no longer HAS a ring the
+                       transport consults, so the comparison describes a conflict that cannot occur. *@
+                    @if (s.IsCappedByTransport && s.Descriptor.Governs != FeatureGoverns.Email)
+                    {
+                        <p class="set-warn" role="alert">
+                            @Localizer["Settings.RingCappedByTransport",
+                                Rings.Label(s.ReleasedToRing), Rings.Label(s.EffectiveMailRing)]
+                        </p>
+                    }
                     @if (s.Descriptor.DependsOn.Count > 0)
                     {
                         var depNames = string.Join(", ",
@@ -320,40 +494,499 @@
                             @(s.Enabled ? Localizer["Settings.Disable"] : Localizer["Settings.Enable"])
                         </button>
                     </form>
-                    @* Per-feature ring OVERRIDE (the "special ring" exception). *@
-                    <form method="post" asp-page-handler="ReleaseRing" class="set-ring">
-                        <input type="hidden" name="key" value="@s.Key" />
-                        <label for="ring-@s.Key">@Localizer["Settings.OverrideRing"]</label>
-                        <select id="ring-@s.Key" name="ring"
-                                aria-label="@Localizer["Settings.ReleasedToRingAria", Localizer[s.Descriptor.DisplayNameKey].Value]">
-                            @foreach (var r in Rings.All)
-                            {
-                                <option value="@r" selected="@(r == s.ReleasedToRing)">@Rings.Label(r)</option>
-                            }
-                        </select>
-                        <button type="submit" class="set-btn">@Localizer["Settings.SetRing"]</button>
-                    </form>
-                    @if (s.IsRingOverridden)
+                    @* §326by: the ring CONTROLS follow the same rule as the ring text — an
+                       Engine feature has no ring to set, so offering the dropdown invited an
+                       organizer to "restrict" a sync that would keep running for everyone. *@
+                    @* 🔒 §707.6 — an EMAIL feature no longer HAS a ring: the transport stopped
+                       consulting feature rings entirely, so this dropdown would write a value that
+                       decides nothing. That is the §326bx defect the whole §705 arc removed, and
+                       re-offering it here would reintroduce it at the last step. Each MAIL carries
+                       its own (mail × role) ring in the section below. The on/off stays — it still
+                       stops whole jobs. *@
+                    @if (s.Descriptor.IsRingScoped && s.Descriptor.Governs != FeatureGoverns.Email)
                     {
-                        <form method="post" asp-page-handler="InheritGroupRing" class="set-ring">
+                        @* Per-feature ring OVERRIDE (the "special ring" exception). *@
+                        <form method="post" asp-page-handler="ReleaseRing" class="set-ring">
                             <input type="hidden" name="key" value="@s.Key" />
-                            <button type="submit" class="set-btn off">@Localizer["Settings.AdoptGroupRing", Rings.Label(s.GroupRing)]</button>
+                            <label for="ring-@s.Key">@Localizer["Settings.OverrideRing"]</label>
+                            <select id="ring-@s.Key" name="ring"
+                                    aria-label="@Localizer["Settings.ReleasedToRingAria", Localizer[s.Descriptor.DisplayNameKey].Value]">
+                                @foreach (var r in Rings.All)
+                                {
+                                    <option value="@r" selected="@(r == s.ReleasedToRing)">@Rings.Label(r)</option>
+                                }
+                            </select>
+                            <button type="submit" class="set-btn">@Localizer["Settings.SetRing"]</button>
                         </form>
+                        @if (s.IsRingOverridden)
+                        {
+                            <form method="post" asp-page-handler="InheritGroupRing" class="set-ring">
+                                <input type="hidden" name="key" value="@s.Key" />
+                                <button type="submit" class="set-btn off">@Localizer["Settings.AdoptGroupRing", Rings.Label(s.GroupRing)]</button>
+                            </form>
+                        }
                     }
-                    @* GRADUATE / re-home into another group (adopts that group's ring). *@
-                    <form method="post" asp-page-handler="FeatureGroup" class="set-ring">
-                        <input type="hidden" name="key" value="@s.Key" />
-                        <label for="grp-@s.Key">@Localizer["Settings.MoveToGroup"]</label>
-                        <select id="grp-@s.Key" name="group" aria-label="@Localizer["Settings.MoveToGroupAria", Localizer[s.Descriptor.DisplayNameKey].Value]">
-                            @foreach (var g in Enum.GetValues<FeatureGroup>())
-                            {
-                                <option value="@g" selected="@(g == s.EffectiveGroup)">@Localizer[GroupHeading(g)]</option>
-                            }
-                        </select>
-                        <button type="submit" class="set-btn">@Localizer["Settings.Move"]</button>
-                    </form>
+                    @* §326bz: re-homing a feature into another chapter is a RARE, structural
+                       act — it was sitting next to the everyday on/off control and made every
+                       row look complicated. Folded away; the common controls stay in front. *@
+                    <details class="set-adv">
+                        <summary>@Localizer["Settings.Advanced"]</summary>
+                        <form method="post" asp-page-handler="FeatureGroup" class="set-ring">
+                            <input type="hidden" name="key" value="@s.Key" />
+                            <label for="grp-@s.Key">@Localizer["Settings.MoveToGroup"]</label>
+                            <select id="grp-@s.Key" name="group" aria-label="@Localizer["Settings.MoveToGroupAria", Localizer[s.Descriptor.DisplayNameKey].Value]">
+                                @foreach (var g in Enum.GetValues<FeatureGroup>())
+                                {
+                                    <option value="@g" selected="@(g == s.EffectiveGroup)">@Localizer[GroupHeading(g)]</option>
+                                }
+                            </select>
+                            <button type="submit" class="set-btn">@Localizer["Settings.Move"]</button>
+                        </form>
+                        @* §513 (operator 2026-07-28: "i dont understand the advanced 'Move to'
+                           feature, what is this for ?"). Its POINT — inheriting the destination
+                           group's ring, i.e. graduation — is invisible, and on a feature that is
+                           not ring-scoped it genuinely does nothing but re-file the row. Say
+                           which of the two you are looking at. *@
+                        <p class="set-deps">
+                            @Localizer[s.Descriptor.IsRingScoped
+                                ? "Settings.MoveToGroupHelp"
+                                : "Settings.MoveToGroupHelpNoRing"]
+                        </p>
+                    </details>
                 </div>
             </div>
         }
+        }
     </div>
+}
+
+@* §515 — EVERY e-mail template, filed under the ROLE that receives it, each with its own ring.
+   Operator 2026-07-28: "i would like to configure indiidual ring per mail, like ring 2 for
+   speakers welome and ring 1 for sponsors. and then have fx welcome mail for speakers under
+   speakers section", and then "i still dont see the complete list of welcome emails and others
+   on the feature settings page, so i cannot control it".
+
+   Before this, a ring lived only on the FEATURE key and template→feature is many-to-one: all five
+   persona welcomes plus the whole Master Class funnel share welcome-email, so one ring moved the
+   lot. Setting a ring here overrides that for THIS mail only. *@
+@if (!Model.AccessDenied && Model.Templates.Count > 0)
+{
+    <h2 class="set-class">Individual e-mails &mdash; who receives each one</h2>
+    <p class="set-class-blurb">
+        Every e-mail the hub can send, filed under the role that RECEIVES it. Each one follows its
+        feature's ring until you give it a ring of its own here &mdash; so you can release the
+        speaker welcome while the sponsor welcome stays internal. The
+        <strong>Outbound e-mail</strong> master switch still caps everything above.
+    </p>
+
+    @* 🔒 §707.25 — hide mails RETIRED IN CODE by default (operator 2026-07-30: "as this is retired
+       in code, it should not be shown here — maybe add so i can tick on to show retired features in
+       code"). They stay REGISTERED so their ring is already correct on the day the code path
+       returns, but a row nobody can act on is noise. The COUNT is always stated — a filter that
+       silently removed rows would make this page lie by omission, which is the one thing it must
+       never do. *@
+    <form method="get" class="set-ring" style="margin:0 0 10px;">
+        <input type="checkbox" id="showRetired" name="showRetired" value="true"
+               onchange="this.form.submit()" checked="@Model.ShowRetired" />
+        <label for="showRetired">Show mails that are retired in code</label>
+    </form>
+    @if (!Model.ShowRetired && Model.RetiredHidden > 0)
+    {
+        <p class="set-deps" style="margin:0 0 12px;">
+            @Model.RetiredHidden mail(s) hidden because nothing in the shipped code sends them today
+            &mdash; re-enabling one is a deploy, not a switch. Tick the box above to see them.
+        </p>
+    }
+
+    @foreach (var group in Model.EmailsByRole)
+    {
+        var sharedIn = group.Mails.Count(m => !m.IsPrimary);
+        <div class="card">
+            <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:0 0 12px;">
+                <h3 style="margin:0;font-size:16px;flex:1 1 auto;">
+                    @CommunityHub.Core.Email.EmailTemplateCatalog.AudienceLabel(group.Audience)
+                    <span style="font-weight:400;color:#555;">
+                        (@group.Mails.Count mails@(sharedIn > 0 ? $", {sharedIn} shared with other roles" : ""))
+                    </span>
+                </h3>
+                @* §566 — "SET ALL IN THIS ROLE" as a BUTTON, his explicit choice ("use the button").
+                   It writes each mail's OWN ring, so the truth stays in one place and no new
+                   inheritance level appears. He tests a role at a time and sets every mail in that
+                   role to the same ring, so this is the action the page exists to make cheap. *@
+                <form method="post" asp-page-handler="SetRoleRing" class="set-ring" style="margin:0;">
+                    <input type="hidden" name="audience" value="@group.Audience" />
+                    <label style="font-size:13px;color:#444;">Set ALL in this role to</label>
+                    <select name="ring" aria-label="Set every @CommunityHub.Core.Email.EmailTemplateCatalog.AudienceLabel(group.Audience) mail to one ring">
+                        @foreach (var r in new[] { Ring.Ring0, Ring.Ring1, Ring.Ring2, Ring.Broad })
+                        {
+                            <option value="@r">@Rings.Label(r)</option>
+                        }
+                    </select>
+                    <button type="submit" class="set-btn">Apply to all</button>
+                </form>
+            </div>
+            @* 🔒 §707.27 B — say what "Apply to all" does to a SHARED mail before he presses it.
+               On a shared row it writes THIS role's own ring, so the other roles the template
+               reaches are left exactly as they are. *@
+            @if (sharedIn > 0)
+            {
+                <p class="set-deps" style="margin:0 0 12px;">
+                    @sharedIn of these are <strong>shared templates</strong> that also reach other roles.
+                    &ldquo;Apply to all&rdquo; sets <strong>this role&rsquo;s own ring</strong> on those &mdash;
+                    the other roles keep whatever they have.
+                </p>
+            }
+            @foreach (var listing in group.Mails)
+            {
+                var t = listing.Template;
+                @* §707.27 B — a CROSS-LISTED appearance: the mail is filed elsewhere, so this row
+                   carries ONLY this role's ring. The all-roles control lives on the filing home and
+                   must exist in exactly one place. *@
+                if (!listing.IsPrimary && listing.SectionRole is ParticipantRole rowRole)
+                {
+                    var xReach = CommunityHub.Core.Email.EmailTemplateCatalog.RecipientRolesFor(t.TemplateKey);
+                    var xOwn = t.RoleRings.TryGetValue(rowRole, out var xv) ? (Ring?)xv : null;
+                    var xEffective = xOwn ?? t.OverrideRing ?? Ring.Ring0;
+                    <div class="set-feat">
+                        <div class="set-body">
+                            <h3 style="font-size:15px;">
+                                @if (!string.IsNullOrWhiteSpace(t.Subject))
+                                {
+                                    <text>Subject: &ldquo;@t.Subject&rdquo;</text>
+                                }
+                                else
+                                {
+                                    <text>@t.Title</text>
+                                }
+                                <span class="set-tag kind"
+                                      title="One template serving several roles. It is filed under its main audience, and shown here because it also reaches this role.">shared &middot; @xReach.Count roles</span>
+                                @if (xOwn is not null)
+                                {
+                                    <span class="set-tag opt" title="This role has its own ring for this mail.">own ring</span>
+                                }
+                            </h3>
+                            <p class="set-deps" style="color:#334155;">
+                                <strong>Shown here because it reaches
+                                    @CommunityHub.Branding.RoleDisplay.Name(rowRole)</strong> &mdash; it is filed
+                                under @CommunityHub.Core.Email.EmailTemplateCatalog.AudienceLabel(t.Audience),
+                                where its all-roles ring and the full per-role list live.
+                            </p>
+                            <p class="set-deps" style="color:#334155;">
+                                @CommunityHub.Core.Email.EmailTemplateCatalog.RecipientHint(t.TemplateKey)
+                            </p>
+                            <p class="set-deps">
+                                <code>@t.TemplateKey</code> &middot;
+                                @if (xOwn is not null)
+                                {
+                                    <text><strong>Ring @((int)xEffective)</strong> for
+                                        @CommunityHub.Branding.RoleDisplay.Name(rowRole) (set for this role only)</text>
+                                }
+                                else if (t.OverrideRing is not null)
+                                {
+                                    <text>follows the all-roles ring &mdash; <strong>@Rings.Label(xEffective)</strong></text>
+                                }
+                                else
+                                {
+                                    <text><strong style="color:#b45309;">no ring set &mdash;
+                                        @CommunityHub.Branding.RoleDisplay.Name(rowRole) receive nothing</strong>
+                                        until a ring is chosen here or on the filing home.</text>
+                                }
+                            </p>
+                        </div>
+                        <div class="set-action">
+                            <form method="post" asp-page-handler="TemplateRoleRing" class="set-ring">
+                                <input type="hidden" name="templateKey" value="@t.TemplateKey" />
+                                <input type="hidden" name="role" value="@rowRole" />
+                                <select name="ring" aria-label="Ring for @CommunityHub.Branding.RoleDisplay.Name(rowRole) receiving @t.TemplateKey">
+                                    <option value="inherit" selected="@(xOwn is null)">— follow the all-roles ring —</option>
+                                    @foreach (var r in new[] { Ring.Ring0, Ring.Ring1, Ring.Ring2, Ring.Broad })
+                                    {
+                                        <option value="@r" selected="@(xOwn == r)">@Rings.Label(r)</option>
+                                    }
+                                </select>
+                                <button type="submit" class="set-btn">Set</button>
+                            </form>
+                        </div>
+                    </div>
+                }
+                else
+                {
+                <div class="set-feat">
+                    <div class="set-body">
+                        @* 🔒 §566 ROW FORMAT — BOTH LINES, ALWAYS. Operator: "include both the
+                           internal jargon + subject so it is 100% clear to everyone !".
+                           Line 1 = the REAL subject, READ from the template so it cannot drift from
+                           the mail that actually goes out. Line 2 = the internal key + the EFFECTIVE
+                           ring. Subjects collide (three welcomes all read "Welcome to …"), so the key
+                           disambiguates; the key alone is what made this page read as machine output. *@
+                        <h3 style="font-size:15px;">
+                            @if (!string.IsNullOrWhiteSpace(t.Subject))
+                            {
+                                <text>Subject: &ldquo;@t.Subject&rdquo;</text>
+                            }
+                            else
+                            {
+                                <text>@t.Title</text>
+                            }
+                            @* §704.1c — a RING-EXEMPT mail gets NO ring badge. Showing one is the
+                               §326bx defect: a badge that governs nothing. *@
+                            @if (CommunityHub.Core.Email.EmailTemplateCatalog.IsRingExempt(t.TemplateKey))
+                            {
+                                <span class="set-tag on" title="No ring applies to this mail — it is always sent.">always sent</span>
+                            }
+                            else
+                            {
+                                @if (t.IsOverridden)
+                                {
+                                    <span class="set-tag opt" title="This mail has its own ring — it no longer follows its feature.">own ring</span>
+                                }
+                                @if (t.EffectiveRing != Ring.Broad)
+                                {
+                                    <span class="set-tag ring">@Rings.Label(t.EffectiveRing)</span>
+                                }
+                            }
+                            @* 🔒 §707.18 — CARVED-OUT vs SHARED, said on the row. Operator 2026-07-30:
+                               *"under speaker (example) there is an email - but then you list any roles
+                               under … i cannot see somewhere the state of an email is carved-out or
+                               shared"*.
+                               The section heading comes from AudienceFor() — ONE filing home, the
+                               mail's main audience — while the per-role rings come from
+                               RecipientRolesFor(), the roles it ACTUALLY reaches. For a multi-role
+                               mail those two disagree on purpose, and nothing said so: a mail filed
+                               under "Speakers" quietly listed six roles underneath. *@
+                            @{ var reach = CommunityHub.Core.Email.EmailTemplateCatalog.RecipientRolesFor(t.TemplateKey); }
+                            @if (reach.Count > 1)
+                            {
+                                <span class="set-tag kind"
+                                      title="One template serving several roles. It is filed under its MAIN audience above, but reaches every role listed here — and each can carry its own ring.">shared &middot; @reach.Count roles</span>
+                            }
+                            else if (reach.Count == 1)
+                            {
+                                @* Name the ROLE, not the section heading — "Organizers (internal)"
+                                   is a heading, not a role, and reads wrong inside a badge. *@
+                                <span class="set-tag opt"
+                                      title="This mail reaches exactly one role, so its ring is the whole story.">only @CommunityHub.Branding.RoleDisplay.Name(reach[0])</span>
+                            }
+                        </h3>
+                        @* §707.18 — and NAME the roles when it is shared, so the per-role list below is
+                           expected rather than a surprise. *@
+                        @if (reach.Count > 1)
+                        {
+                            <p class="set-deps" style="color:#334155;">
+                                <strong>Shared template</strong> &mdash; filed under
+                                @CommunityHub.Core.Email.EmailTemplateCatalog.AudienceLabel(t.Audience)
+                                because that is its main audience, but it reaches
+                                <strong>@string.Join(", ", reach.Select(r => CommunityHub.Branding.RoleDisplay.Name(r)))</strong>.
+                                Each of those can carry its own ring below.
+                            </p>
+                        }
+                        @* §563 — WHO GETS THIS, in one line, on every row. Operator: "this is very
+                           confusing - who is this". Renaming the section heading fixes the heading;
+                           the question is actually asked at the ROW, where a key and a ring number
+                           never said who the mail reaches. This is also §561's answer: the app-game
+                           gift reminder read as weighty as a persona welcome because nothing said it
+                           goes to a handful of sponsors. *@
+                        <p class="set-deps" style="color:#334155;">
+                            @CommunityHub.Core.Email.EmailTemplateCatalog.RecipientHint(t.TemplateKey)
+                        </p>
+                        @* §704.1c — the exempt rows state WHY no ring applies, in place of a ring.
+                           The internal name is still shown: his rule is subject + internal name on
+                           every row, ring or no ring. *@
+                        @if (CommunityHub.Core.Email.EmailTemplateCatalog.IsRingExempt(t.TemplateKey))
+                        {
+                            <p class="set-deps">
+                                <code>@t.TemplateKey</code> &middot;
+                                <strong style="color:#166534;">no ring &mdash; always sent</strong>
+                            </p>
+                            <p class="set-deps">
+                                @CommunityHub.Core.Email.EmailTemplateCatalog.RingExemptReason(t.TemplateKey)
+                            </p>
+                        }
+                        else
+                        {
+                            @* 🔒 §707.3 — the all-roles ring is NOT the whole story. A mail can be governed
+                               entirely by PER-ROLE rings (§705.3b) with no all-roles row at all, and
+                               `EffectiveRing` is `OverrideRing ?? Ring0` — so such a mail rendered as
+                               "Ring 0 — nobody receives this", while it was in fact fully configured and
+                               sending. `task-allocation-committed` did exactly that on PROD and DEV:
+                               Organizers Ring 3, Volunteers Ring 1, headline "nobody receives this".
+                               That is the §326bx defect pointing the other way — the page understating an
+                               audience it really does deliver to — and it is just as corrosive. *@
+                            var rrHead = Model.RoleRingsFor(t);
+                            var rrSet = rrHead.Count(r => r.OwnRing is not null);
+                            var fullyPerRole = !t.IsOverridden && rrHead.Count > 0 && rrSet == rrHead.Count;
+
+                        <p class="set-deps">
+                            <code>@t.TemplateKey</code> &middot;
+                            @if (fullyPerRole)
+                            {
+                                <strong>set per role</strong>
+                            }
+                            else
+                            {
+                                <strong>Ring @((int)t.EffectiveRing)</strong>
+                            }
+                            @if (t.IsOverridden)
+                            {
+                                <text> &middot; released to <strong>@Rings.Label(t.EffectiveRing)</strong> (set for this mail only)</text>
+                            }
+                            else if (fullyPerRole)
+                            {
+                                <text> &middot; <strong>no all-roles ring &mdash; but each of the @rrHead.Count
+                                    role(s) this mail reaches has its own</strong>, so it IS being delivered.
+                                    See &ldquo;Per-role rings&rdquo; below.</text>
+                            }
+                            else if (rrSet > 0)
+                            {
+                                <text> &middot; <strong style="color:#b45309;">@rrSet of @rrHead.Count roles have their own ring</strong>;
+                                    the other @(rrHead.Count - rrSet) receive nothing until you set a ring here.</text>
+                            }
+                            else
+                            {
+                                @* 🔒 §705.2 — the "falling back to the X switch" story is GONE, because
+                                   the fallback is. A mail with no ring of its own now FAILS CLOSED, so
+                                   the honest line is that nobody receives it until a ring is chosen.
+                                   Saying "falling back to <feature>" here would describe an inheritance
+                                   the gate no longer performs — the §326bx defect in words. *@
+                                <text> &middot; <strong style="color:#b45309;">no ring set &mdash; nobody receives this</strong>
+                                    until you choose one. It no longer inherits a feature's ring:
+                                    every mail carries its own.</text>
+                            }
+                        </p>
+                        }
+
+                        @* 🔒 §707.11 — HOW OFTEN THIS MAIL REPEATS. Operator 2026-07-30: *"i can
+                           define the cadence for the emails that are recurring until fixed"*.
+                           Shown ONLY for mails in EmailTemplateCatalog.RecurringMails — a
+                           confirmation or a receipt fires once because the thing it reports already
+                           happened, so a repeat box there would govern nothing (§326bx).
+                           The completion condition is stated beside it, otherwise "every 14 days"
+                           reads as an unbounded nag rather than a chase with a defined end. *@
+                        @if (CommunityHub.Core.Email.EmailTemplateCatalog.IsRecurring(t.TemplateKey))
+                        {
+                            var cadence = Model.CadenceByTemplate.TryGetValue(t.TemplateKey, out var cv)
+                                ? cv
+                                : CommunityHub.Core.Email.EmailTemplateCatalog.DefaultIntervalDaysFor(t.TemplateKey);
+                            <form method="post" asp-page-handler="MailCadence" class="set-ring"
+                                  style="margin:6px 0 0 12px;">
+                                <input type="hidden" name="templateKey" value="@t.TemplateKey" />
+                                <label for="cad-@t.TemplateKey">Repeat every</label>
+                                <input id="cad-@t.TemplateKey" type="number" name="intervalDays"
+                                       min="0" max="365" step="1" value="@(cadence ?? 0)"
+                                       style="width:72px;padding:4px;font-size:13px;text-align:right;"
+                                       aria-label="Repeat interval in days for @t.TemplateKey" />
+                                <span>days</span>
+                                <button type="submit" class="set-btn">Set</button>
+                                <span class="set-deps" style="display:block;margin-top:4px;">
+                                    @if (cadence is int every && every > 0)
+                                    {
+                                        <text><strong>Repeats every @every day(s)</strong> until it is done, counted from the
+                                        LAST send to that person &mdash; not from a fixed calendar date.</text>
+                                    }
+                                    else
+                                    {
+                                        <text><strong>Sends once and never repeats.</strong> Set a number of days to chase until it is done.</text>
+                                    }
+                                    <br />
+                                    @CommunityHub.Core.Email.EmailTemplateCatalog.StopsWhenFor(t.TemplateKey)
+                                    <br />0 = send once, never repeat.
+                                </span>
+                            </form>
+                        }
+                    </div>
+                    <div class="set-action">
+                        @* §704.1c — NO ring control for a ring-exempt mail. Offering one would invite
+                           him to "restrict" a mail the ring cannot touch, and then to trust it. *@
+                        @if (!CommunityHub.Core.Email.EmailTemplateCatalog.IsRingExempt(t.TemplateKey))
+                        {
+                        <form method="post" asp-page-handler="TemplateRing" class="set-ring">
+                            <input type="hidden" name="templateKey" value="@t.TemplateKey" />
+                            <select name="ring" aria-label="Release ring for @t.Title">
+                                @* §560 — "Follow feature" is NO LONGER OFFERED. It named nothing
+                                   ("it is impossible for me to know what feature you are talking
+                                   about") and the operator decided against it outright: "i have
+                                   decided to newer use follow feature … as i dont trust it".
+                                   Every mail therefore gets an EXPLICIT ring, chosen here.
+
+                                   The inherit PATH still exists underneath — a template with no row
+                                   has to resolve to something — but it is a fallback, not a choice,
+                                   and the row below says plainly when a mail is still on it. *@
+                                @if (!t.IsOverridden)
+                                {
+                                    <option value="inherit" selected="selected">— not set yet —</option>
+                                }
+                                @foreach (var r in new[] { Ring.Ring0, Ring.Ring1, Ring.Ring2, Ring.Broad })
+                                {
+                                    <option value="@r" selected="@(t.OverrideRing == r)">@Rings.Label(r)</option>
+                                }
+                            </select>
+                            <button type="submit" class="set-btn">Set</button>
+                        </form>
+                        }
+                    </div>
+                </div>
+
+                @* --- §705.3b PER-ROLE RINGS ------------------------------------------------------
+                   Operator: "1 mail type to a role = 1 ring gate. that is it. so reminder to speaker
+                   is NOT the same as reminder to organizer or reminder to sponsor."
+
+                   Shown ONLY for mails that genuinely reach several roles (RecipientRolesFor, read
+                   from the senders in the §705.9 audit). Offering seven dropdowns on a single-role
+                   mail would be six controls that govern nothing — the §326bx defect that cost him
+                   confidence in this page. *@
+                @if (Model.RoleRingsFor(t).Count > 0)
+                {
+                    var roleRings = Model.RoleRingsFor(t);
+                    <details class="set-adv" style="margin:0 0 12px 12px;">
+                        <summary>
+                            Per-role rings &mdash; this mail reaches @roleRings.Count roles
+                            @if (roleRings.Any(r => r.OwnRing is not null))
+                            {
+                                <span class="set-tag opt">@roleRings.Count(r => r.OwnRing is not null) set</span>
+                            }
+                        </summary>
+                        <p class="set-deps" style="margin:6px 0 8px;">
+                            A role with its own ring uses it; the rest follow the ring above.
+                            Setting one role never changes the others.
+                        </p>
+                        @foreach (var (role, label, own, effective) in roleRings)
+                        {
+                            <div class="set-ring" style="margin:0 0 6px;">
+                                <label style="min-width:110px;">@label</label>
+                                <form method="post" asp-page-handler="TemplateRoleRing" class="set-ring" style="margin:0;">
+                                    <input type="hidden" name="templateKey" value="@t.TemplateKey" />
+                                    <input type="hidden" name="role" value="@role" />
+                                    <select name="ring" aria-label="Ring for @label receiving @t.TemplateKey">
+                                        @* "follow the ring above" is the DEFAULT, and it is the honest
+                                           label: it means the all-roles row, not a feature ring. *@
+                                        <option value="inherit" selected="@(own is null)">— follow the ring above —</option>
+                                        @foreach (var r in new[] { Ring.Ring0, Ring.Ring1, Ring.Ring2, Ring.Broad })
+                                        {
+                                            <option value="@r" selected="@(own == r)">@Rings.Label(r)</option>
+                                        }
+                                    </select>
+                                    <button type="submit" class="set-btn">Set</button>
+                                </form>
+                                <span class="set-deps">
+                                    @if (own is not null)
+                                    {
+                                        <strong>own ring: @Rings.Label(own.Value)</strong>
+                                    }
+                                    else if (effective == Ring.Ring0 && t.OverrideRing is null)
+                                    {
+                                        <strong style="color:#b45309;">nobody receives this yet</strong>
+                                    }
+                                    else
+                                    {
+                                        <text>follows @Rings.Label(effective)</text>
+                                    }
+                                </span>
+                            </div>
+                        }
+                    </details>
+                }
+                } @* §707.27 B — end of the PRIMARY (filing-home) row *@
+            }
+        </div>
+    }
 }

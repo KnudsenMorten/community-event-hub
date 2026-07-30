@@ -13,10 +13,10 @@ namespace CommunityHub.Core.Tests.Scenario;
 ///
 ///  - The seeder creates one task per shipped milestone, at the ABSOLUTE dates
 ///    documented in REQUIREMENTS §5 / speaker-deadlines.eldk27.json:
-///       title+abstract  20 Jun 2026  (Master Class speakers ONLY)
-///       verify bio+photo  1 Oct 2026  (all speakers)
-///       draft deck       20 Jan 2027  (all speakers)
-///       final deck        3 Feb 2027  (all speakers)
+///       Hotel / Dinner / Swag  1 Oct 2026  (entitlement-gated)
+///       Pre-day Lunch + Travel 10 Jan 2027 (gated / non-DK)
+///       Upload preview deck    20 Jan 2027  (all speakers)
+///       Upload final deck        3 Feb 2027  (all speakers)
 ///  - The masterclass-only milestone is seeded for the Master Class speaker but
 ///    NOT for plain session speakers.
 ///  - Completing a task (the /Tasks "Mark done" postback) flips the row to Done
@@ -31,18 +31,20 @@ public sealed class SpeakerMilestoneScenarioTests
     // uploads (preview + final). Logistics deadlines are P12 entitlement-gated; the
     // uploads are NEVER gated; the travel task is country-gated. The seeded cast has
     // no country set, so they count as non-Denmark and DO get the travel task.
-    // A Master Class (pre-day) speaker is entitled to the Pre-day Lunch, so gets all
-    // 7; a plain speaker not on the pre-/main-day has no lunch entitlement, so the
-    // Lunch deadline is gated out and they get 6.
+    // §295 (operator 2026-07-11): EVERY speaker is now entitled to the Pre-day Lunch (opt-in), so
+    // both the master-class speaker AND a plain speaker get the full set of 7 (incl. the Pre-day
+    // Lunch deadline). The test name holds literally: all speakers get the SAME task set.
     private static readonly DateOnly Oct1Due = new(2026, 10, 1);    // Hotel, Dinner, Swag
     private static readonly DateOnly LunchDue = new(2027, 1, 10);   // Pre-day Lunch (pre-day speakers only)
     private static readonly DateOnly TravelDue = new(2027, 1, 10);  // Submit travel reimbursement (non-DK)
+    private static readonly DateOnly PromoteDue = new(2027, 1, 15); // §314: Help to promote your session(s)
     private static readonly DateOnly PreviewDue = new(2027, 1, 20); // Upload preview presentation
     private static readonly DateOnly FinalDue = new(2027, 2, 3);    // Upload final presentation
     private const string LunchTitle = "Pre-day Lunch";
     private const string TravelTitle = "Submit travel reimbursement";
-    private const int MasterclassTaskCount = 7;   // + Pre-day Lunch (pre-day entitlement) + travel
-    private const int SpeakerTaskCount = 6;        // no Pre-day Lunch (not entitled), + travel
+    private const string PromoteTitle = "Help to promote your session(s)";
+    private const int MasterclassTaskCount = 8;   // + Pre-day Lunch (pre-day entitlement) + travel + §314 promote
+    private const int SpeakerTaskCount = 8;        // §295: every speaker now gets the Pre-day Lunch too; §314 promote
 
     private static SpeakerDeadlineSeeder NewSeeder(Data.CommunityHubDbContext db) =>
         new(db,
@@ -62,15 +64,17 @@ public sealed class SpeakerMilestoneScenarioTests
             .Where(t => t.AssignedParticipantId == seed.MasterclassSpeakerId)
             .ToListAsync();
 
-        // A Master Class (pre-day) speaker gets the full set of 7: Hotel/Dinner/Swag
+        // A Master Class (pre-day) speaker gets the full set of 8: Hotel/Dinner/Swag
         // (1 Oct), Pre-day Lunch (10 Jan), Submit travel reimbursement (10 Jan, non-DK),
-        // upload preview (20 Jan), upload final (3 Feb). Lunch + travel share 10 Jan, so
-        // those two are asserted by title rather than by due date.
+        // Help to promote (15 Jan, §314), upload preview (20 Jan), upload final (3 Feb).
+        // Lunch + travel share 10 Jan, so those two are asserted by title rather than by
+        // due date.
         Assert.Equal(MasterclassTaskCount, mcTasks.Count);
         Assert.Equal(3, mcTasks.Count(t => t.DueDate == Oct1Due));
         Assert.Single(mcTasks, t => t.Title == LunchTitle && t.DueDate == LunchDue);
         Assert.Single(mcTasks, t => t.Title == TravelTitle && t.DueDate == TravelDue);
         Assert.Equal(2, mcTasks.Count(t => t.DueDate == LunchDue)); // lunch + travel
+        Assert.Single(mcTasks, t => t.Title == PromoteTitle && t.DueDate == PromoteDue);
         Assert.Single(mcTasks, t => t.DueDate == PreviewDue);
         Assert.Single(mcTasks, t => t.DueDate == FinalDue);
         Assert.All(mcTasks, t => Assert.Equal(TaskState.Open, t.State));
@@ -83,18 +87,18 @@ public sealed class SpeakerMilestoneScenarioTests
         var seed = await ScenarioSeed.SeedAsync(db);
         await NewSeeder(db).SeedAsync(seed.EventId);
 
-        // A plain session speaker (not pre-/main-day) is NOT entitled to lunch, so the
-        // Pre-day Lunch deadline is P12-gated out: they get 6 tasks — Hotel/Dinner/Swag
-        // (1 Oct) + the §143 travel task (non-DK) + the two presentation uploads — but
-        // NOT the Pre-day Lunch the Master Class speaker gets.
+        // §295: a plain session speaker IS now entitled to the Pre-day Lunch (opt-in), so they get
+        // the same 7 tasks as the Master Class speaker — Hotel/Dinner/Swag (1 Oct) + Pre-day Lunch
+        // (10 Jan) + the §143 travel task (non-DK) + the two presentation uploads.
         var s1Tasks = await db.Tasks
             .Where(t => t.AssignedParticipantId == seed.SpeakerOneId)
             .ToListAsync();
 
         Assert.Equal(SpeakerTaskCount, s1Tasks.Count);
         Assert.Equal(3, s1Tasks.Count(t => t.DueDate == Oct1Due));
-        Assert.DoesNotContain(s1Tasks, t => t.Title == LunchTitle); // P12: lunch gated out
+        Assert.Single(s1Tasks, t => t.Title == LunchTitle);         // §295: every speaker gets lunch
         Assert.Single(s1Tasks, t => t.Title == TravelTitle);        // §143: non-DK gets travel
+        Assert.Single(s1Tasks, t => t.Title == PromoteTitle);       // §314: every speaker promotes
         Assert.Single(s1Tasks, t => t.DueDate == PreviewDue);
         Assert.Single(s1Tasks, t => t.DueDate == FinalDue);
     }

@@ -33,16 +33,28 @@ public class MasterClassPageModel : PageModel
     private readonly MasterClassPrepService _prep;
     private readonly MasterClassSignupService _signups;
     private readonly ICurrentParticipantAccessor _participant;
+    // §383. OPTIONAL so older test constructions keep compiling (the same pattern
+    // EditParticipant uses for RoleChangeTaskReconciler); DI always supplies it at runtime.
+    // Every use is null-conditional, so a test that omits it simply sends no notifications.
+    private readonly MasterClassNotificationService? _notify;
 
     public MasterClassPageModel(
         MasterClassPrepService prep,
         MasterClassSignupService signups,
-        ICurrentParticipantAccessor participant)
+        ICurrentParticipantAccessor participant,
+        MasterClassNotificationService? notify = null)
     {
         _prep = prep;
         _signups = signups;
         _participant = participant;
+        _notify = notify;
     }
+
+    /// <summary>§383 — is the viewer subscribed to "the speakers updated the instructions" (box 2)?</summary>
+    public bool SubscribedInstructions { get; private set; } = true;
+
+    /// <summary>§383 — is the viewer subscribed to "someone posted in the Q&amp;A" (box 3)?</summary>
+    public bool SubscribedQandA { get; private set; } = true;
 
     public int SessionId { get; private set; }
     public string Token { get; private set; } = string.Empty;
@@ -90,14 +102,28 @@ public class MasterClassPageModel : PageModel
 
         try
         {
+            MasterClassComment posted;
             if (IsAttendeeViewer && _attendee is not null)
-                await _prep.AddAttendeeCommentAsync(
+                posted = await _prep.AddAttendeeCommentAsync(
                     _eventId, sessionId, _attendee.Id, CommentBody ?? string.Empty, ParentCommentId, ct);
             else if (IsParticipantViewer && _me is not null)
-                await _prep.AddParticipantCommentAsync(
+                posted = await _prep.AddParticipantCommentAsync(
                     _eventId, sessionId, _me.ParticipantId, _me.Role, CommentBody ?? string.Empty, ParentCommentId, ct);
             else
                 throw new MasterClassPrepAccessDeniedException("You may not comment on this master class.");
+
+            // §383 — tell the rest of the class. AFTER the comment is safely stored, and swallowing
+            // any failure: a mail problem must never lose a question that was already posted.
+            try
+            {
+                if (_notify is not null)
+                    await _notify.NotifyQandAAsync(
+                        _eventId, sessionId, posted.AuthorDisplayName, posted.Body,
+                    $"{Request.Scheme}://{Request.Host}",
+                    actingParticipantId: posted.AuthorParticipantId,
+                    actingAttendeeId: posted.AuthorAttendeeId, ct);
+            }
+            catch { /* the comment stands even if the notification fails */ }
 
             return Redirect(SelfUrl("Comment posted."));
         }
@@ -169,6 +195,37 @@ public class MasterClassPageModel : PageModel
     {
         if (View is null) return;
         Comments = await _prep.LoadCommentsAsync(_eventId, SessionId, ct);
+
+        // §383 — the toggles. Default is SUBSCRIBED, and the service expresses that as "no opt-out
+        // row", so a viewer who has never touched these reads as ON without anything being written.
+        SubscribedInstructions = _notify is null || await _notify.IsSubscribedAsync(
+            _eventId, SessionId, MasterClassNotificationKind.SpeakerInstructions,
+            _me?.ParticipantId, _attendee?.Id, ct);
+        SubscribedQandA = _notify is null || await _notify.IsSubscribedAsync(
+            _eventId, SessionId, MasterClassNotificationKind.QandA,
+            _me?.ParticipantId, _attendee?.Id, ct);
+    }
+
+    /// <summary>
+    /// §383 — flip one of the two notification toggles for THIS viewer on THIS master class.
+    ///
+    /// <para>Scoped to whoever the gate already resolved: the handler never takes an identity from
+    /// the POST, so nobody can mute somebody else. Attendees are keyed by their attendee row and
+    /// speakers by their participant row, matching how the audience is built.</para>
+    /// </summary>
+    public async Task<IActionResult> OnPostSubscriptionAsync(
+        int sessionId, string? t, MasterClassNotificationKind kind, bool subscribed, CancellationToken ct)
+    {
+        SessionId = sessionId;
+        Token = t ?? string.Empty;
+        if (!await ResolveAsync(ct)) return Page();
+
+        if (_notify is not null) await _notify.SetSubscribedAsync(
+            _eventId, sessionId, kind, _me?.ParticipantId, _attendee?.Id, subscribed, ct);
+
+        return Redirect(SelfUrl(subscribed
+            ? "You'll get e-mails about this."
+            : "You won't get e-mails about this any more."));
     }
 
     /// <summary>The page's own URL with the bearer token preserved + a status message.</summary>

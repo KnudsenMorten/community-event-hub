@@ -93,8 +93,10 @@ public sealed class PublicSponsorsService
 
         var eventId = active.Id;
 
+        // Withdrawn companies (§253 G8b) drop off the public page immediately.
         var sponsors = await _db.SponsorInfos
-            .Where(s => s.EventId == eventId)
+            .Where(s => s.EventId == eventId
+                        && s.Status == Domain.SponsorStatus.Active)
             .Select(s => new
             {
                 s.SponsorCompanyId,

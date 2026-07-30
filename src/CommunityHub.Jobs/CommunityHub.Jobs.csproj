@@ -53,6 +53,23 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>Always</CopyToPublishDirectory>
     </None>
+    <!-- REQUIREMENTS §684.8/§684.14 - the authored TASK BODIES. The Functions host needs these as
+         much as the web app does: TaskReminderBuilder renders a task's body into the chase mail
+         (§684.12), so a bundle without them would send reminders with an EMPTY body while the hub
+         page looked perfectly fine. 🔒 CLAUDE.md's standing warning applies here - a Core change
+         that is only web-deployed is only half live. -->
+    <None Include="..\..\config\tasks\**\*.md">
+      <Link>config\tasks\%(RecursiveDir)%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>Always</CopyToPublishDirectory>
+    </None>
+    <!-- §303 per-integration field maps (layer 2 of the IntegrationFieldMap design):
+         loaded fail-soft at startup over the code-default rows. -->
+    <None Include="..\..\config\integrations\*.json">
+      <Link>config\integrations\%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>Always</CopyToPublishDirectory>
+    </None>
   </ItemGroup>
 
   <!-- Ship the branded email templates (templates/emails/_layout.html +

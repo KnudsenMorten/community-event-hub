@@ -28,6 +28,15 @@
             </p>
         }
 
+        @if (Model.Error is not null)
+        {
+            @* §334: the typed phrase was missing or wrong — say so; nothing ran. *@
+            <p class="error" role="alert"
+               style="background:#fef2f2;border:1px solid #b91c1c;padding:8px 12px;border-radius:6px;">
+                @Model.Error
+            </p>
+        }
+
         @if (p is null || !p.Any)
         {
             <div role="status"
@@ -77,8 +86,14 @@
             </div>
 
             <form method="post" style="margin-top:16px;">
-                @* Confirm-gated destructive action (REQUIREMENTS §21). With JS off
-                   the button submits directly; the service is idempotent + safe. *@
+                @* §334: the modal is a courtesy — the guard is the SERVER check in
+                   OnPostCleanupAsync. The comment that used to sit here said "with JS off the
+                   button submits directly", which was exactly the hole: no confirmation at all
+                   for a bulk delete/deactivate. The phrase is now required either way. *@
+                <partial name="_TypedConfirm" model="@(new CommunityHub.Pages.Shared.TypedConfirmField(
+                    CommunityHub.Core.Organizer.TypedConfirmation.ConfirmPhrase,
+                    $"Hard-deletes {p.WouldHardDelete} test row(s) and deactivates {p.WouldDeactivate}. Real participants are never touched.",
+                    InputId: "cleanupPhrase"))" />
                 <button type="submit" asp-page-handler="Cleanup"
                         data-ceh-confirm="confirmTestCleanup"
                         data-ceh-count="@p.Total">

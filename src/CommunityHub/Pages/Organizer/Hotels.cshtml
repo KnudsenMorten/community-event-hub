@@ -55,6 +55,9 @@
                (live count). One destructive op never fires on a single click. *@
             <form method="post" id="hotelBulkForm" asp-page-handler="BulkDelete" hidden>
                 <div id="hotelBulkIds"></div>
+                @* §334: the typed phrase travels with the bulk POST and is verified SERVER-side,
+                   so the modal's live count is a courtesy rather than the guard. *@
+                <input type="hidden" name="confirmPhrase" id="hotelBulkPhrase" value="" />
             </form>
             <div class="bulk-bar"
                  style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;
@@ -64,6 +67,13 @@
                         aria-haspopup="dialog">@Localizer["OrgHotels.BulkDelete"]</button>
                 <span style="font-size:12.5px;color:#6b7280;">@Localizer["OrgHotels.BulkDeleteHint"]</span>
             </div>
+            <details style="margin-bottom:12px;">
+                <summary style="cursor:pointer;font-size:13px;color:#7f1d1d;">Arm bulk delete (required)</summary>
+                <partial name="_TypedConfirm" model="@(new CommunityHub.Pages.Shared.TypedConfirmField(
+                    CommunityHub.Core.Organizer.TypedConfirmation.ConfirmPhrase,
+                    "Deletes every ticked hotel and un-assigns everyone placed in them.",
+                    FieldName: "hotelBulkPhraseInput", InputId: "hotelBulkPhraseInput"))" />
+            </details>
             <div style="overflow-x:auto;">
             <table style="border-collapse:collapse;width:100%;font-size:13px;min-width:640px;">
                 <thead>
@@ -107,10 +117,19 @@
                             <td style="padding:6px;max-width:240px;">@h.Notes</td>
                             <td style="padding:6px;white-space:nowrap;">
                                 <a asp-page="/Organizer/Hotels" asp-route-EditId="@h.Id">@Localizer["Common.Edit"]</a>
-                                <form method="post" asp-page-handler="Delete" asp-route-id="@h.Id" style="display:inline;margin-left:8px;"
-                                      onsubmit="return confirm('@Localizer["OrgHotels.ConfirmDelete"]');">
-                                    <button type="submit" style="background:none;border:none;color:#b91c1c;cursor:pointer;text-decoration:underline;padding:0;">@Localizer["Common.Delete"]</button>
-                                </form>
+                                @* §334: a two-step inline delete instead of a JS confirm(). The
+                                   <details> needs no JavaScript, and the phrase is verified on the
+                                   SERVER — so the guard survives with scripting off. *@
+                                <details style="display:inline-block;margin-left:8px;vertical-align:top;">
+                                    <summary style="cursor:pointer;color:#b91c1c;text-decoration:underline;list-style:none;">@Localizer["Common.Delete"]</summary>
+                                    <form method="post" asp-page-handler="Delete" asp-route-id="@h.Id" style="margin-top:6px;min-width:240px;">
+                                        <partial name="_TypedConfirm" model="@(new CommunityHub.Pages.Shared.TypedConfirmField(
+                                            CommunityHub.Core.Organizer.TypedConfirmation.DeletePhrase,
+                                            @Localizer["OrgHotels.ConfirmDelete"].Value,
+                                            InputId: $"hotelDelete{h.Id}"))" />
+                                        <button type="submit" style="margin-top:8px;padding:6px 12px;border:none;border-radius:6px;background:#b91c1c;color:#fff;cursor:pointer;">@Localizer["Common.Delete"]</button>
+                                    </form>
+                                </details>
                             </td>
                         </tr>
                     }
@@ -199,6 +218,10 @@
                     h.type = 'hidden'; h.name = 'SelectedIds'; h.value = c.value;
                     idsHost.appendChild(h);
                 });
+                // §334: carry the typed phrase into the hidden bulk form. If it is blank or
+                // wrong the SERVER refuses — this copy is convenience, not the guard.
+                var typed = document.getElementById('hotelBulkPhraseInput');
+                document.getElementById('hotelBulkPhrase').value = typed ? typed.value : '';
                 form.submit();
             });
             cancelBtn.addEventListener('click', close);

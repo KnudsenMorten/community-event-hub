@@ -128,9 +128,9 @@ public sealed class ParticipantChecklistBuilderTests
 
         var row = Assert.Single(cl.Pending);
         Assert.Equal("Upload booth logo", row.Title);
-        // P6: the sponsor: checklist deep-link now points at the Company Details
-        // form page (was /Sponsor/Tasks).
-        Assert.Equal("/Sponsor/CompanyDetails", row.Link);   // SourceKey deep-link mapping
+        // P6/§297: the sponsor: checklist deep-link points at the RIGHT Company Details section
+        // (#anchor) — "sponsor:logo" → the logos section.
+        Assert.Equal("/Sponsor/CompanyDetails#logos", row.Link);   // SourceKey deep-link mapping
     }
 
     [Fact]
@@ -142,16 +142,25 @@ public sealed class ParticipantChecklistBuilderTests
         Assert.True(cl.AllComplete);
     }
 
+    // §352 (operator 2026-07-26: "i bet we have other similar overlaps") — every task whose form
+    // has an INLINE wizard step now deep-links to that step, the way §351-6/§365 already did for
+    // party and master class. One canonical surface, with hub chrome and a way back.
     [Theory]
-    [InlineData("hotel-form:7", "/Forms/Hotel")]
-    [InlineData("dinner-form:7", "/Forms/Dinner")]
-    [InlineData("volunteer-form:7", "/volunteer/availability")] // B8: retired /Forms/VolunteerWizard
-    [InlineData("swag-form:7", "/Forms/Swag")]
-    [InlineData("lunch-form:7", "/Forms/Lunch")]
+    [InlineData("hotel-form:7", "/Forms/Wizard?step=hotel")]
+    [InlineData("dinner-form:7", "/Forms/Wizard?step=dinner")]
+    [InlineData("volunteer-form:7", "/Forms/VolunteerWizard")] // §234 (7a): the SHIFTS wizard's own form (availability is a different live form)
+    [InlineData("swag-form:7", "/Forms/Wizard?step=swag")]
+    [InlineData("lunch-form:7", "/Forms/Wizard?step=lunch")]
     // §161: manual mark-done steps now deep-link to the same page their Get-Started card opens.
-    [InlineData("signal:7", "/Forms/Signal")]
-    [InlineData("promote:7", "/Speaker/Promote")]
-    [InlineData("party-form:7", "/Party")]
+    [InlineData("signal:7", "/Forms/Wizard?step=signal")]
+    // §314: the Promote step page is retired — promote rows (legacy) and the new
+    // speakerdl Help-Promote deadline both land on the Help Promote page.
+    [InlineData("promote:7", "/Speaker/Graphics")]
+    [InlineData("speakerdl:7:help-to-promote-your-sessions", "/Speaker/Graphics")]
+    // §322i: the upload deadlines deep-link to My Sessions (the on-card upload; never SharePoint).
+    [InlineData("speakerdl:7:upload-preview-presentation", "/Speaker")]
+    [InlineData("speakerdl:7:upload-final-presentation", "/Speaker")]
+    [InlineData("party-form:7", "/Forms/Wizard?step=party")]
     [InlineData(null, null)]
     [InlineData("unknown:7", null)]
     public void SourceKey_maps_to_form_page(string? key, string? expected)

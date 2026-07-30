@@ -32,6 +32,17 @@ public sealed class CommitNotificationService : ICommitNotificationService
     /// <summary>EmailLog category recorded for these per-person commit summaries.</summary>
     private const string Category = "task-allocation";
 
+    /// <summary>
+    /// §705.14 — the MAIL IDENTITY for the commit notification, so it appears on /Organizer/Settings
+    /// with a subject and an internal name and can hold a ring per receiving role.
+    /// </summary>
+    /// <remarks>
+    /// 🔒 Must match an <c>EmailTemplateCatalog.Map</c> key. Since §705.2, a registered mail with no ring
+    /// FAILS CLOSED — so a typo here silences the mail rather than falling back to a feature ring.
+    /// `EmailRegistryCompletenessTests` pins the pairing.
+    /// </remarks>
+    public const string MailKey = "task-allocation-committed";
+
     private readonly CommunityHubDbContext _db;
     private readonly IEmailSender _sender;
     private readonly IEmailContextAccessor _context;
@@ -142,8 +153,18 @@ public sealed class CommitNotificationService : ICommitNotificationService
             // Set the per-person email context so the sender's ring gate scopes the
             // send to THIS commit's queue feature (volunteer-/organizer-allocation)
             // and the kill switch applies — then issue the single batched send.
+            //
+            // §705.14 — TemplateName carries the MAIL IDENTITY. This mail reaches a ROLE (volunteers on a
+            // volunteer commit, organizers on an organizer commit) but had no identity, so it never
+            // appeared on the Settings page — a breach of *"no exception"*. §566 had noticed the send
+            // site and ACCEPTED that dropping the queue ring would widen it; under his later rule (if it
+            // sends a mail, it is an email) the ring belongs ON THE MAIL instead, per role.
+            //
+            // 🔑 ONE mail key, TWO roles: the ring is resolved per (mail × recipient role), so the
+            // volunteer and organizer audiences stay independently controllable without two templates.
             using (_context.Set(new EmailContext(
-                Category, eventId, p.Id, p.FullName, FeatureKey: queueFeatureKey)))
+                Category, eventId, p.Id, p.FullName,
+                TemplateName: MailKey, FeatureKey: queueFeatureKey)))
             {
                 await _sender.SendAsync(p.Email, subject, html, ct);
             }

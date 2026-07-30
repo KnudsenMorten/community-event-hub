@@ -16,7 +16,16 @@
     }
     else
     {
-        <p>Reconciled nightly from Zoho Backstage (tickets) and Zoho Bookings
+        @* §355: outcome of the last onboarding reset. *@
+        @if (!string.IsNullOrWhiteSpace(Model.ResetMessage))
+        {
+            <p role="status" class="@(Model.ResetIsError ? "error" : "success")"
+               style="padding:10px 12px;border-radius:8px;background:@(Model.ResetIsError ? "#fef2f2" : "#ecfdf5");border:1px solid @(Model.ResetIsError ? "#fecaca" : "#a7f3d0");">
+                @Model.ResetMessage
+            </p>
+        }
+
+        <p>Reconciled hourly from Zoho Backstage (tickets) and Zoho Bookings
            (Master Class seats). Read-only here &mdash; fix issues at the
            source; the next sync picks them up.
            @if (Model.LastSyncedAt is not null)
@@ -36,13 +45,27 @@
                 <div style="font-size:26px;font-weight:700;">@Model.TwoDayCount</div>
                 <div style="font-size:13px;color:#6b7280;">2-day tickets</div>
             </div>
+            @* §707.36 (operator 2026-07-30: "i need a field so i can see 1-day tickets also as
+               counter") — without it the tiles did not add up: "2 attendees / 1 2-day ticket" left
+               the second attendee unaccounted for, so the reader had to subtract and assume. *@
+            <div style="flex:1 1 140px;background:#f8f9fb;border-radius:8px;padding:12px;text-align:center;">
+                <div style="font-size:26px;font-weight:700;">@Model.OneDayCount</div>
+                <div style="font-size:13px;color:#6b7280;">1-day tickets</div>
+            </div>
             <div style="flex:1 1 140px;background:#f8f9fb;border-radius:8px;padding:12px;text-align:center;">
                 <div style="font-size:26px;font-weight:700;">@Model.BookedCount</div>
                 <div style="font-size:13px;color:#6b7280;">Master Class booked</div>
             </div>
-            <div style="flex:1 1 140px;background:@(Model.MismatchCount > 0 ? "#fdecea" : "#f8f9fb");border-radius:8px;padding:12px;text-align:center;">
-                <div style="font-size:26px;font-weight:700;color:@(Model.MismatchCount > 0 ? "#c0392b" : "inherit");">@Model.MismatchCount</div>
-                <div style="font-size:13px;color:#6b7280;">mismatches</div>
+            @* §326bp (operator 2026-07-25: "what does mismatch mean?") — it never meant the two
+               systems disagree. The flag is literally `!hasSelection`: a live 2-day ticket whose
+               holder has not picked a Master Class yet. That is a normal CHASE LIST — and the job
+               already e-mails those people — so it is named for what it is and loses the
+               alert-red treatment, which made routine work look like a data fault. The
+               HasReconciliationMismatch COLUMN and the MismatchOnly route key are unchanged
+               (a rename there is a migration and would break saved links for no gain). *@
+            <div style="flex:1 1 140px;background:@(Model.MismatchCount > 0 ? "#fff8e1" : "#f8f9fb");border-radius:8px;padding:12px;text-align:center;">
+                <div style="font-size:26px;font-weight:700;color:@(Model.MismatchCount > 0 ? "#7a5b00" : "inherit");">@Model.MismatchCount</div>
+                <div style="font-size:13px;color:#6b7280;">Master Class not chosen</div>
             </div>
         </div>
 
@@ -71,7 +94,7 @@
             <label style="display:flex;align-items:center;gap:8px;margin:10px 0 14px;">
                 <input type="checkbox" name="MismatchOnly" value="true"
                        checked="@Model.MismatchOnly" style="width:auto;margin:0;" />
-                Mismatches only
+                Only those who have not chosen a Master Class
             </label>
 
             <button type="submit">Apply</button>
@@ -134,17 +157,83 @@
                     </tr>
                     @foreach (var a in Model.Attendees)
                     {
-                        <tr style="border-bottom:1px solid #eee;@(a.HasReconciliationMismatch ? "background:#fdf3f2;" : "")">
+                        <tr style="border-bottom:1px solid #eee;@(a.HasReconciliationMismatch ? "background:#fffdf3;" : "")">
                             <td>@a.FirstName @a.LastName</td>
                             <td style="word-break:break-all;">@a.Email</td>
-                            <td>@a.TicketStatus@(a.TicketClassName is null ? "" : $" ({a.TicketClassName})")</td>
+                            @* §380 (operator 2026-07-26: "remove the word TwoDay - just show the
+                               ticket in no parantes"). The cell read "TwoDay (2-day ticket incl.
+                               Master Class)" — the raw enum name followed by the real ticket name in
+                               brackets, i.e. the same fact twice, once in developer spelling. Show
+                               the ticket's OWN name; fall back to the enum only when Zoho sent no
+                               class name, so the column is never blank. *@
+                            <td>@(string.IsNullOrWhiteSpace(a.TicketClassName) ? a.TicketStatus.ToString() : a.TicketClassName)</td>
                             <td>@a.BookingStatus</td>
                             <td>@a.MasterClassName</td>
                             <td>
                                 @if (a.HasReconciliationMismatch)
                                 {
-                                    <span class="error" style="font-size:13px;font-weight:600;">mismatch</span>
+                                    <span style="font-size:13px;font-weight:600;color:#7a5b00;">Master Class not chosen</span>
                                 }
+
+                                @* §355 (operator 2026-07-26): "an organizer can do this reset, which
+                                   resets the welcome, master class + party sign-up — he selects the
+                                   attendee and have option to flip the 3 values so it forces attendee
+                                   to setup again". A two-step <details> disclosure (the §334 shape):
+                                   needs NO JavaScript, so it behaves identically with scripting off,
+                                   and the three checkboxes ARE the deliberate act. *@
+                                @* 🔒 §707.40 (operator 2026-07-30: "this reset onboarding + resend
+                                   invite is not relevant for 1-day ticket holders (by design)") —
+                                   BOTH actions are Master-Class/onboarding actions, and a 1-day
+                                   holder has no Master Class, no selection invite and no hub login
+                                   (§707.38). Offering them was the §326bx defect: controls that
+                                   govern nothing, on the row where they look most authoritative.
+                                   The row SAYS SO rather than falling silently blank, so an empty
+                                   actions cell never reads as a rendering fault. *@
+                                @if (a.TicketStatus != TicketStatus.TwoDay)
+                                {
+                                    <p class="set-deps" style="margin:6px 0 0;font-size:12.5px;color:#6b7280;">
+                                        <em>No onboarding actions</em> &mdash; a 1-day ticket has no
+                                        Master&nbsp;Class and no hub login, by design.
+                                    </p>
+                                }
+                                else
+                                {
+                                <details style="margin-top:6px;">
+                                    <summary style="cursor:pointer;font-size:12.5px;color:#1565c0;">Reset onboarding&hellip;</summary>
+                                    <form method="post" asp-page-handler="ResetOnboarding" style="margin:8px 0 2px;padding:10px;background:#fff8e1;border:1px solid #f5d98a;border-radius:8px;">
+                                        <input type="hidden" name="attendeeId" value="@a.Id" />
+                                        <p style="margin:0 0 6px;font-size:12.5px;color:#7c4a03;">
+                                            Forces this attendee to onboard again. Tick what to reset:
+                                        </p>
+                                        <label style="display:block;font-size:12.5px;margin:3px 0;">
+                                            <input type="checkbox" name="resetWelcome" value="true" /> Welcome / selection invite (will be re-sent)
+                                        </label>
+                                        <label style="display:block;font-size:12.5px;margin:3px 0;">
+                                            <input type="checkbox" name="resetMasterClass" value="true" /> Master Class seat &amp; waitlist place
+                                        </label>
+                                        <label style="display:block;font-size:12.5px;margin:3px 0;">
+                                            <input type="checkbox" name="resetParty" value="true" /> Party sign-up (RSVP)
+                                        </label>
+                                        <button type="submit" style="margin-top:8px;padding:6px 12px;border-radius:6px;background:#b45309;color:#fff;border:none;font-size:12.5px;font-weight:600;cursor:pointer;">
+                                            Reset selected
+                                        </button>
+                                    </form>
+                                </details>
+                                @* 🔒 §707.14 — RE-SEND THE SELECTION INVITE. Operator 2026-07-30: the
+                                   "welcome mail" button is NOT the equivalent for attendees — it sends
+                                   the GENERIC welcome and is idempotent, and the reset-welcome path
+                                   calls the RETIRED 1-day service. A 2-day attendee's real welcome is
+                                   masterclass-selection-invite, and until now the only way to re-send
+                                   it was a database edit. Deliberately SEPARATE from "Reset
+                                   onboarding": this re-sends the mail without destroying their Master
+                                   Class seat or party RSVP. *@
+                                <form method="post" asp-page-handler="ResendSelectionInvite" style="margin-top:6px;">
+                                    <input type="hidden" name="attendeeId" value="@a.Id" />
+                                    <button type="submit" style="padding:5px 11px;border-radius:6px;background:#0f766e;color:#fff;border:none;font-size:12.5px;font-weight:600;cursor:pointer;">
+                                        Re-send selection invite
+                                    </button>
+                                </form>
+                                } @* §707.40 — end of the 2-day-only actions *@
                             </td>
                         </tr>
                     }

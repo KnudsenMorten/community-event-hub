@@ -33,27 +33,46 @@ public class ParticipantsModel : PageModel
     private readonly ICurrentParticipantAccessor _participant;
     private readonly ParticipantBulkOperationService _bulk;
     private readonly ParticipantDeletionService _deletion;
+    private readonly ParticipantDeactivationService _cascade;
     private readonly ParticipantSearchService _search;
     private readonly ImpersonationAuditService _audit;
     private readonly CommunityHub.Core.Integrations.CompanyManagerClient _companyManager;
     private readonly ILogger<ParticipantsModel> _logger;
     private readonly TimeProvider _clock;
+    private readonly CommunityHub.Core.Settings.FeatureGateService? _gate;
+
+    /// <summary>
+    /// §707.37 — is <c>attendee-1day-access</c> ON for this edition? Decides whether the page says
+    /// 1-day attendees are excluded (they have no login) or included.
+    /// </summary>
+    /// <remarks>
+    /// 🔒 Read LIVE rather than hard-coded into the copy. The feature is SUSPENDED by default (§242),
+    /// but the moment it is switched on 1-day holders are provisioned and DO appear here — at which
+    /// point a fixed "1-day attendees are excluded" sentence would be the page stating something
+    /// untrue (§326bx, in words instead of a control).
+    /// </remarks>
+    public bool OneDayAccessEnabled { get; private set; }
 
     public ParticipantsModel(
         CommunityHubDbContext db,
         ICurrentParticipantAccessor participant,
         ParticipantBulkOperationService bulk,
         ParticipantDeletionService deletion,
+        ParticipantDeactivationService cascade,
         ParticipantSearchService search,
         ImpersonationAuditService audit,
         CommunityHub.Core.Integrations.CompanyManagerClient companyManager,
         ILogger<ParticipantsModel> logger,
-        TimeProvider clock)
+        TimeProvider clock,
+        // §707.37 — optional so existing constructions and tests are unchanged; wired by DI.
+        CommunityHub.Core.Settings.FeatureGateService? gate = null)
     {
+        _gate = gate;
         _db = db;
         _participant = participant;
         _bulk = bulk;
         _deletion = deletion;
+        _cascade = cascade;
         _search = search;
         _audit = audit;
         _companyManager = companyManager;
@@ -69,6 +88,38 @@ public class ParticipantsModel : PageModel
     /// </summary>
     public Dictionary<string, string> CompanyNames { get; private set; } = new();
 
+    /// <summary>
+    /// §591 — each SPEAKER's own company (<c>SpeakerProfile.CompanyName</c>), keyed by participant id,
+    /// so the grid's Company column is not blank for speakers.
+    /// </summary>
+    /// <remarks>
+    /// Operator 2026-07-28 (flagged low prio): *"if a speaker fills out the company field, it could
+    /// be nice to show it here under partcipants"*. The column only ever resolved the SPONSOR
+    /// company, so a speaker row stayed blank even when CEH held their employer — Per Larsen reads
+    /// "Microsoft" on his speaker profile (§578).
+    ///
+    /// <para>Loaded in ONE query with the page, never per row: §443 — a per-row lookup is exactly
+    /// what made five organizer pages take 6–8 s warm.</para>
+    /// </remarks>
+    public Dictionary<int, string> SpeakerCompanies { get; private set; } = new();
+
+    /// <summary>The speaker's own company for this participant, or empty when there is none.</summary>
+    public string SpeakerCompanyFor(int participantId) =>
+        SpeakerCompanies.TryGetValue(participantId, out var n) ? n : string.Empty;
+
+    /// <summary>
+    /// §707.27 D — each attendee's company from their WINNING active mirror row, keyed by lowercase
+    /// e-mail (the mirror keys on address, not participant id).
+    /// </summary>
+    public Dictionary<string, string> AttendeeCompanies { get; private set; } =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>The attendee's company for this address, or empty when the mirror holds none.</summary>
+    public string AttendeeCompanyFor(string? email) =>
+        !string.IsNullOrWhiteSpace(email) && AttendeeCompanies.TryGetValue(email, out var n)
+            ? n
+            : string.Empty;
+
     public List<Participant> Participants { get; private set; } = new();
     public bool AccessDenied { get; private set; }
     public string? ActionMessage { get; private set; }
@@ -77,9 +128,17 @@ public class ParticipantsModel : PageModel
     /// <summary>Distinct sponsor-company ids present in this edition (for the filter dropdown).</summary>
     public List<string> SponsorCompanyIds { get; private set; } = new();
 
-    /// <summary>Filter: "all", "active", "inactive". Active is lifecycle-correct.</summary>
+    /// <summary>
+    /// Filter: "active+1day" (default), "active", "inactive", "all". Active is lifecycle-correct.
+    /// </summary>
+    /// <remarks>
+    /// §707.38 — the default is <c>active+1day</c> (operator 2026-07-30: *"set the new dropdown as
+    /// default"*). "Active only" hid every 1-day ticket holder — inactive BY DESIGN, since they need
+    /// no hub access — while "Inactive only" mixed them in with genuinely withdrawn people. Neither
+    /// answered the question the page is opened to answer: *who is actually coming?*
+    /// </remarks>
     [BindProperty(SupportsGet = true)]
-    public string ActiveFilter { get; set; } = "active";
+    public string ActiveFilter { get; set; } = "active+1day";
 
     /// <summary>Filter by persona/role, or null for all personas.</summary>
     [BindProperty(SupportsGet = true)]
@@ -167,19 +226,39 @@ public class ParticipantsModel : PageModel
             p => p.Id == participantId && p.EventId == me.EventId, ct);
         if (target is not null)
         {
-            // Lifecycle-correct toggle (operator 2026-06-23): activating clears BOTH
-            // the withdrawal switch and the onboarding gate so a synced participant
-            // (IsActive=true but LifecycleState != Active) actually becomes active.
+            // Lifecycle-correct toggle via the ONE cascade service (§253 G1):
+            // deactivating cancels the party RSVP, releases the room block, closes
+            // open tasks and vacates shift assignments (audited); activating clears
+            // BOTH the withdrawal switch and the onboarding gate + the G8 tombstone,
+            // and deliberately restores nothing (re-RSVP / re-book).
             if (ParticipantActivation.IsActive(target))
             {
-                target.IsActive = false;
+                await _cascade.DeactivateAsync(
+                    me.EventId, target.Id, "grid toggle", me.Email, ct);
             }
             else
             {
-                target.IsActive = true;
-                target.LifecycleState = ParticipantLifecycleState.Active;
+                // §253: reactivation restores nothing, but dormant dinner/lunch/
+                // swag rows (and a still-held MC seat) rejoin the live counts the
+                // moment the flag flips — tell the organizer instead of leaving
+                // the vendor numbers to change silently.
+                var r = await _cascade.ReactivateAsync(me.EventId, target.Id, me.Email, ct);
+                if (r.Found && r.AnythingResurrected)
+                {
+                    var msg = $"{target.FullName} re-activated. Back in the live counts: "
+                              + $"{r.DinnerSignupsBackInCounts} dinner, {r.LunchSignupsBackInCounts} lunch, "
+                              + $"{r.SwagPreferencesBackInCounts} swag signup(s)"
+                              + (r.MasterClassSeatsStillHeld > 0
+                                  ? $"; {r.MasterClassSeatsStillHeld} Master-Class seat(s) still held."
+                                  : ".")
+                              + " Party, room claim, tasks and shifts stay cancelled (re-RSVP / re-book).";
+                    return RedirectToPage(new
+                    {
+                        ActiveFilter, RoleFilter, SponsorCompanyFilter, Search, Sort, Desc, PageNo,
+                        Msg = msg,
+                    });
+                }
             }
-            await _db.SaveChangesAsync(ct);
         }
 
         return RedirectToPage(new { ActiveFilter, RoleFilter, SponsorCompanyFilter, Search, Sort, Desc, PageNo });
@@ -270,11 +349,23 @@ public class ParticipantsModel : PageModel
     /// removal is never silent.
     /// </summary>
     public async Task<IActionResult> OnPostDeleteAsync(
-        int participantId, CancellationToken ct)
+        int participantId, string? confirmPhrase, CancellationToken ct)
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
         if (!IsRealOrganizer(me)) return Forbid();
+
+        // §334: SERVER-verified typed confirmation. The modal's confirm() only ever ran in the
+        // browser — a POST with JavaScript off, or a replayed form, executed the delete outright.
+        if (!TypedConfirmation.Matches(confirmPhrase, TypedConfirmation.DeletePhrase))
+        {
+            return RedirectToPage(new
+            {
+                ActiveFilter, RoleFilter, SponsorCompanyFilter, Search, Sort, Desc, PageNo,
+                Msg = TypedConfirmation.Rejection(
+                    TypedConfirmation.DeletePhrase, "delete this participant"),
+            });
+        }
 
         var actorLabel = $"{me.FullName} ({me.Email})";
         var hard = await _deletion.HardDeleteAsync(me.EventId, participantId, ct);
@@ -475,7 +566,17 @@ public class ParticipantsModel : PageModel
             .Skip(Paging.Skip).Take(Paging.PageSize)
             .ToListAsync(ct);
 
-        await ResolveCompanyNamesAsync(ct);
+        // §707.37 — live feature state for the "who is on this page" line. Fail-safe: if the gate is
+        // not wired or throws, fall back to the shipped default (suspended), which is the state the
+        // page is describing today.
+        try
+        {
+            OneDayAccessEnabled = _gate is not null
+                && await _gate.IsFeatureEnabledAsync("attendee-1day-access", eventId, ct);
+        }
+        catch { OneDayAccessEnabled = false; }
+
+        await ResolveCompanyNamesAsync(eventId, ct);
     }
 
     /// <summary>
@@ -484,7 +585,7 @@ public class ParticipantsModel : PageModel
     /// Fail-soft per company so a Company-Manager outage just leaves the "Company
     /// {id}" fallback rather than breaking the grid.
     /// </summary>
-    private async Task ResolveCompanyNamesAsync(CancellationToken ct)
+    private async Task ResolveCompanyNamesAsync(int eventId, CancellationToken ct)
     {
         var ids = SponsorCompanyIds
             .Concat(Participants
@@ -493,25 +594,86 @@ public class ParticipantsModel : PageModel
             .Where(id => !string.IsNullOrWhiteSpace(id))
             .Distinct(StringComparer.Ordinal)
             .ToList();
-        if (ids.Count == 0) return;
 
-        foreach (var cid in ids)
+        // 🔒 §707.27 D — this early return USED to sit here as `if (ids.Count == 0) return;`, which
+        // skipped the speaker lookup below as well. An edition with no sponsor company ids on the
+        // page would silently lose every OTHER company value too — a column blank for a reason that
+        // has nothing to do with the row. It now guards only the sponsor resolution it belongs to.
+        if (ids.Count > 0)
         {
-            if (!int.TryParse(cid, out var idInt)) continue;
-            try
-            {
-                var c = await _companyManager.GetCompanyAsync(idInt, ct);
-                if (c is not null)
-                {
-                    CompanyNames[cid] = SponsorCompanyName.Resolve(
-                        c.PublicName, c.Name, billingName: null, companyId: cid);
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex,
-                    "Participants: company-name lookup failed for {CompanyId}; using fallback.", cid);
-            }
+        // §443: ONE query against CEH SQL. This loop used to await a Company Manager HTTP call per
+        // company — on PROD that was ~12 sequential round trips to the WordPress plugin and made
+        // this page 7.4 s warm, on EVERY paging click (the ids come from the edition-wide company
+        // list, so paging never reduced them). The names are synced into CEH by
+        // SponsorOrderPullService through this same chain, so the local copy is the same value.
+        CompanyNames = await SponsorCompanyNameService.ResolveFromLocalAsync(_db, eventId, ids, ct);
         }
+
+        // §591 — the SPEAKERS' own companies, in the same single-query spirit: one read for the
+        // whole page keyed by participant id, so the Company column can fall back to it.
+        SpeakerCompanies = await _db.SpeakerProfiles.AsNoTracking()
+            .Where(sp => sp.EventId == eventId
+                         && sp.CompanyName != null
+                         && sp.CompanyName != "")
+            .Select(sp => new { sp.ParticipantId, sp.CompanyName })
+            .ToDictionaryAsync(x => x.ParticipantId, x => x.CompanyName!, ct);
+
+        await ResolveAttendeeCompaniesAsync(eventId, ct);
+    }
+
+    /// <summary>
+    /// §707.27 D — each ATTENDEE's company, read from their WINNING active mirror row, so the grid's
+    /// Company column is not blank for attendees (operator 2026-07-30).
+    /// </summary>
+    /// <remarks>
+    /// 🔒 <b>The §707.22a winning-row rule, not "any row".</b> Several mirror rows per address is
+    /// NORMAL — one per ticket — so "the company" is ambiguous unless the tie is broken the same way
+    /// everywhere: newest <c>LastSyncedAt</c>, then highest <c>Id</c>. Picking arbitrarily would make
+    /// the column flicker between two employers as rows re-sync, which reads as data loss.
+    ///
+    /// <para>Zoho keeps <c>Attendee.CompanyName</c> current, so this is DISPLAY-ONLY — no schema
+    /// change, nothing copied onto <c>Participant</c>. A copy would be a second source of truth that
+    /// goes stale the moment the buyer edits the order.</para>
+    ///
+    /// <para>Scoped to the addresses ON THIS PAGE (§443): the edition holds ~1500 attendee rows and
+    /// the grid shows a page at a time.</para>
+    /// </remarks>
+    private async Task ResolveAttendeeCompaniesAsync(int eventId, CancellationToken ct)
+    {
+        var emails = Participants
+            .Where(p => !string.IsNullOrWhiteSpace(p.Email))
+            .Select(p => p.Email.ToLowerInvariant())
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        if (emails.Count == 0) return;
+
+        // 🔒 §707.41 — CANCELLED rows are included, and ACTIVE ones simply WIN.
+        //
+        // The first cut filtered to `MirrorState == Active`, which blanked the column for someone
+        // whose ticket had just been cancelled even though the mirror still held their company
+        // (operator 2026-07-30, spotting exactly that row). Discarding a value we hold, because of a
+        // state change that says nothing about where the person works, is a loss for no gain — and
+        // it contradicts the §707.23 rule that CEH KEEPS old references through cancellations and
+        // reassignments.
+        //
+        // Ordering does the work: active-first, then the §707.22a winning-row rule (newest
+        // LastSyncedAt, then Id). So a live ticket always beats a cancelled one and a cancelled one
+        // is used only when there is nothing live — never a mix, never a flicker.
+        var rows = await _db.Attendees.AsNoTracking()
+            .Where(a => a.EventId == eventId
+                        && a.CompanyName != null
+                        && a.CompanyName != ""
+                        && emails.Contains(a.Email.ToLower()))
+            .Select(a => new { a.Email, a.CompanyName, a.LastSyncedAt, a.Id, a.MirrorState })
+            .ToListAsync(ct);
+
+        AttendeeCompanies = rows
+            .GroupBy(a => a.Email.ToLowerInvariant(), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(
+                g => g.Key,
+                g => g.OrderByDescending(a => a.MirrorState == CommunityHub.Core.Domain.MirrorState.Active)
+                      .ThenByDescending(a => a.LastSyncedAt).ThenByDescending(a => a.Id)
+                      .First().CompanyName!,
+                StringComparer.OrdinalIgnoreCase);
     }
 }

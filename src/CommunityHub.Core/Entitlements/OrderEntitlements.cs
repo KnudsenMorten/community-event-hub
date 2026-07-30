@@ -25,16 +25,23 @@ public static class OrderEntitlements
     /// <see cref="ParticipantOrderOverride"/> is applied.
     ///
     /// <para>Default rules (overridable):</para>
-    /// <para>Speaker hat (the person HAS a <paramref name="speaker"/> profile):</para>
+    /// <para>Speaker hat (the person HAS a <paramref name="speaker"/> profile),
+    /// by <see cref="SpeakerProfile.Category"/> (§299 6.2) with the DERIVED
+    /// presenting days (<paramref name="days"/>, from
+    /// <see cref="SpeakerDayScope"/> — the stored flags are retired, C5):</para>
     /// <list type="bullet">
-    ///   <item><see cref="SpeakerFunding.Supported"/>: Polo, Swag, Award, Hotel,
-    ///   TravelReimbursement, AppreciationDinner; + LunchPreDay if
-    ///   <see cref="SpeakerProfile.SpeakingPreDay"/>; + LunchMainDay if
-    ///   <see cref="SpeakerProfile.SpeakingMainDay"/>.</item>
-    ///   <item><see cref="SpeakerFunding.SponsorSelfFunded"/>: AppreciationDinner,
-    ///   LunchMainDay only.</item>
-    ///   <item><see cref="SpeakerFunding.Organizer"/>: NOTHING from the speaker hat
-    ///   (their Organizer role entitlements still apply).</item>
+    ///   <item><see cref="SpeakerCategory.Community"/>: Polo, Swag, Award, Hotel,
+    ///   TravelReimbursement, AppreciationDinner, LunchPreDay (§294 — every
+    ///   speaker may join the pre-day); + LunchMainDay when they present on the
+    ///   main day (<see cref="SpeakerDays.PresentsMainDay"/>).</item>
+    ///   <item><see cref="SpeakerCategory.Guest"/>: IDENTICAL to Community except
+    ///   NO TravelReimbursement (§299 6.2 — the travel option/tasks are never
+    ///   presented to a Guest; their travel runs on individual terms).</item>
+    ///   <item><see cref="SpeakerCategory.Sponsor"/>: AppreciationDinner,
+    ///   LunchPreDay, LunchMainDay only (sponsor-paid otherwise).</item>
+    ///   <item>null (NOT YET CATEGORIZED): NOTHING from the speaker hat — an
+    ///   uncategorized speaker is excluded from every count (§299 6.1; they also
+    ///   cannot be activated until categorized).</item>
     /// </list>
     /// <para>Primary role hat:</para>
     /// <list type="bullet">
@@ -49,7 +56,14 @@ public static class OrderEntitlements
     ///   <item>Attendee: nothing (their ticket covers food).</item>
     /// </list>
     /// </summary>
-    public static IReadOnlySet<OrderItem> Base(Participant p, SpeakerProfile? speaker)
+    /// <param name="p">The participant (role hat).</param>
+    /// <param name="speaker">Their speaker profile, or null when they have no speaker hat.</param>
+    /// <param name="days">
+    /// The speaker's DERIVED presenting days (<see cref="SpeakerDayScope.DaysBySpeakerAsync"/> /
+    /// <see cref="SpeakerDayScope.DaysForSpeakerAsync"/>); null when there is no speaker hat (or
+    /// sessions are irrelevant to the caller — treated as <see cref="SpeakerDays.None"/>).
+    /// </param>
+    public static IReadOnlySet<OrderItem> Base(Participant p, SpeakerProfile? speaker, SpeakerDays? days)
     {
         ArgumentNullException.ThrowIfNull(p);
 
@@ -58,27 +72,37 @@ public static class OrderEntitlements
         // --- Speaker hat (only when a speaker profile is in hand) ------------
         if (speaker is not null)
         {
-            switch (speaker.SpeakerFunding)
+            switch (speaker.Category)
             {
-                case SpeakerFunding.Supported:
+                case SpeakerCategory.Community:
+                case SpeakerCategory.Guest:
                     set.Add(OrderItem.Polo);
                     set.Add(OrderItem.Swag);
                     set.Add(OrderItem.Award);
                     set.Add(OrderItem.Hotel);
-                    set.Add(OrderItem.TravelReimbursement);
+                    // §299 6.2: a Guest is Community MINUS the travel-reimbursement
+                    // option — ELDK hires them on individual terms, so the travel
+                    // form/task must never be presented to them.
+                    if (speaker.Category == SpeakerCategory.Community)
+                        set.Add(OrderItem.TravelReimbursement);
                     set.Add(OrderItem.AppreciationDinner);
-                    if (speaker.SpeakingPreDay) set.Add(OrderItem.LunchPreDay);
-                    if (speaker.SpeakingMainDay) set.Add(OrderItem.LunchMainDay);
+                    // §294 (operator 2026-07-11: "any speaker can participate in preday"):
+                    // pre-day lunch is open to EVERY speaker, regardless of which days
+                    // they present. Main-day lunch follows the DERIVED schedule (C5).
+                    set.Add(OrderItem.LunchPreDay);
+                    if (days?.PresentsMainDay == true) set.Add(OrderItem.LunchMainDay);
                     break;
 
-                case SpeakerFunding.SponsorSelfFunded:
+                case SpeakerCategory.Sponsor:
                     set.Add(OrderItem.AppreciationDinner);
                     set.Add(OrderItem.LunchMainDay);
+                    set.Add(OrderItem.LunchPreDay);   // §294: any speaker can participate pre-day
                     break;
 
-                case SpeakerFunding.Organizer:
-                    // Contributes nothing from the speaker hat; the Organizer
-                    // role hat below supplies their entitlements.
+                case null:
+                    // §299 6.1: an UNCATEGORIZED speaker contributes NOTHING from
+                    // the speaker hat — they are excluded from every count until an
+                    // organizer sets the category (which also gates activation).
                     break;
             }
         }
@@ -116,9 +140,22 @@ public static class OrderEntitlements
                 set.Add(OrderItem.LunchMainDay);
                 break;
 
+            // §299 7.2/7.3: Media and EventPartner are DELIBERATELY two separate blocks even
+            // though the sets are identical today — they are different populations whose
+            // entitlements may diverge independently. A change to one must NEVER be
+            // auto-applied to the other; tests assert each role on its own.
             case ParticipantRole.Media:
+                set.Add(OrderItem.Polo);
+                set.Add(OrderItem.Swag);   // §299 OPEN-27 (operator 2026-07-23): polo + swag, same as volunteers
+                set.Add(OrderItem.Hotel);
+                set.Add(OrderItem.AppreciationDinner);
+                set.Add(OrderItem.LunchPreDay);
+                set.Add(OrderItem.LunchMainDay);
+                break;
+
             case ParticipantRole.EventPartner:
                 set.Add(OrderItem.Polo);
+                set.Add(OrderItem.Swag);   // §299 OPEN-27: polo + swag, same as volunteers
                 set.Add(OrderItem.Hotel);
                 set.Add(OrderItem.AppreciationDinner);
                 set.Add(OrderItem.LunchPreDay);
@@ -145,14 +182,19 @@ public static class OrderEntitlements
     /// an Include=false override REMOVES it. Overrides for other participants are
     /// ignored, so a caller may pass the whole edition's override list.
     /// </summary>
+    /// <param name="p">The participant (role hat).</param>
+    /// <param name="speaker">Their speaker profile, or null when they have no speaker hat.</param>
+    /// <param name="days">The speaker's derived presenting days — see <see cref="Base"/>.</param>
+    /// <param name="overrides">The per-person per-item overrides (other people's rows are ignored).</param>
     public static IReadOnlySet<OrderItem> Effective(
         Participant p,
         SpeakerProfile? speaker,
+        SpeakerDays? days,
         IEnumerable<ParticipantOrderOverride> overrides)
     {
         ArgumentNullException.ThrowIfNull(p);
 
-        var set = new HashSet<OrderItem>(Base(p, speaker));
+        var set = new HashSet<OrderItem>(Base(p, speaker, days));
 
         if (overrides is not null)
         {

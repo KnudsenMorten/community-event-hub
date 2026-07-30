@@ -91,6 +91,13 @@ public class TravelModel : PageModel
     /// <summary>True when the participant is NOT entitled to travel reimbursement (gate).</summary>
     public bool AccessDenied { get; private set; }
 
+    /// <summary>
+    /// §399 — the block is because the speaker is based in Denmark, not because they lack
+    /// permission. Kept separate so the page can say WHY: "access denied" to someone who simply
+    /// isn't eligible reads as a fault they need to fix.
+    /// </summary>
+    public bool NotEligibleByCountry { get; private set; }
+
     public string? Message { get; private set; }
     public string? Error { get; private set; }
 
@@ -105,6 +112,9 @@ public class TravelModel : PageModel
         if (!await _travel.IsRelevantAsync(me.EventId, me.ParticipantId, me.Role, ct))
         {
             AccessDenied = true;
+            // §399: distinguish "not eligible because you are based in Denmark" from "you lack the
+            // entitlement", so the page can explain rather than accuse.
+            NotEligibleByCountry = await _travel.IsBlockedByCountryAsync(me.EventId, me.ParticipantId, ct);
             Form = new TravelFormModel { Role = me.Role };
             return Page();
         }
@@ -122,6 +132,9 @@ public class TravelModel : PageModel
         if (!await _travel.IsRelevantAsync(me.EventId, me.ParticipantId, me.Role, ct))
         {
             AccessDenied = true;
+            // §399: distinguish "not eligible because you are based in Denmark" from "you lack the
+            // entitlement", so the page can explain rather than accuse.
+            NotEligibleByCountry = await _travel.IsBlockedByCountryAsync(me.EventId, me.ParticipantId, ct);
             Form = new TravelFormModel { Role = me.Role };
             return Page();
         }

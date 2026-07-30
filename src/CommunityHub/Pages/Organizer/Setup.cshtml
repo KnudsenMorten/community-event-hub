@@ -27,6 +27,12 @@
         new("/Organizer/SoMeSettings", Localizer["Nav.OrgSoMeSettings"].Value, Localizer["OrgSetup.SoMe"].Value),
         new("/Organizer/Settings", Localizer["Nav.OrgSettings"].Value, Localizer["OrgSetup.Settings"].Value),
         new("/Organizer/AuditTrail", "Audit trail", "Every user action + backend event (emails, calendar syncs) for troubleshooting and usage — filter, count, export."),
+        // §327: the verified inventory of every background job + the per-job run limit.
+        new("/Organizer/Jobs", "Background jobs", "Every job the hub runs: what it does, its schedule, when it last ran, its health — and a run limit you can change without a deploy."),
+        // §392: the diagnostics view. Named PlatformHealth, NOT Telemetry — /Organizer/Telemetry is
+        // ATTENDEE telemetry (who is coming), a different question entirely, and two pages called
+        // "Telemetry" would cost a support round-trip every time someone is asked to open one.
+        new("/Organizer/PlatformHealth", "Platform health", "Traffic, response times, outbound calls and failures from Application Insights — the page to open when someone says it hangs."),
         new("/Organizer/TestDataCleanup", Localizer["Nav.OrgTestDataCleanup"].Value, Localizer["OrgSetup.TestData"].Value, "test-data-cleanup"),
     };
     <partial name="_HubGrid" model="@tiles" />

@@ -25,6 +25,12 @@
         new("/Organizer/VolunteerStructure", Localizer["Nav.OrgVolunteerStructure"].Value, Localizer["OrgVolunteers.Structure"].Value, "volunteer-tasks"),
         new("/Organizer/BucketAllocation", Localizer["Nav.OrgBucketAllocation"].Value, Localizer["OrgVolunteers.Buckets"].Value, "volunteer-allocation"),
         new("/Organizer/AllocationScenarios", "Allocation scenarios", "Stage a bulk reshuffle, simulate the coverage impact, then commit it — or auto-seed a drop-out backfill.", "volunteer-allocation"),
+        // §150 allocation queue — previously unreachable (no nav entry, no hub tile).
+        new("/Organizer/OrganizerAllocation", "Allocation queue", "Review the availability-routed queue: silently draft assignments per person, then commit them as one batch.", "organizer-allocation"),
+        // §234 (2026-07-07): the §23/§151 Excel round-trip page + the shared task editor
+        // were built but unreachable (no nav entry, no hub tile) — surfaced here.
+        new("/Organizer/VolunteerTasksExcel", "Tasks — Excel", "Export every volunteer task to .xlsx for bulk editing, then import the edited sheet back (rows upsert by task id).", "volunteer-tasks"),
+        new("/Organizer/EditVolunteerTask", "Edit task definitions", "Open any task and edit its shared definition — title, description, criticality, team, resources, instructions, lead, time window, due date.", "volunteer-tasks"),
     };
     <partial name="_HubGrid" model="@tiles" />
 }

@@ -20,12 +20,16 @@ public class MasterClassPrepModel : PageModel
 {
     private readonly MasterClassPrepService _prep;
     private readonly ICurrentParticipantAccessor _participant;
+    private readonly MasterClassNotificationService _notify;
 
     public MasterClassPrepModel(
-        MasterClassPrepService prep, ICurrentParticipantAccessor participant)
+        MasterClassPrepService prep,
+        ICurrentParticipantAccessor participant,
+        MasterClassNotificationService notify)
     {
         _prep = prep;
         _participant = participant;
+        _notify = notify;
     }
 
     public int SessionId { get; private set; }
@@ -69,11 +73,31 @@ public class MasterClassPrepModel : PageModel
         View = await _prep.GetLandingAsync(me.EventId, sessionId, ct);
         if (View is null) { NotFoundState = true; return Page(); }
 
+        // §383: only notify when the text ACTUALLY CHANGED. A speaker who opens the editor and
+        // saves without editing — or saves twice — must not mail the whole class again. Compared
+        // before the write, because afterwards there is nothing left to compare against.
+        var before = View.PrepContent ?? string.Empty;
+        var changed = !string.Equals(before, PrepContent ?? string.Empty, StringComparison.Ordinal);
+
         try
         {
             await _prep.UpdatePrepAsync(
                 me.EventId, sessionId, me.ParticipantId, me.Role, PrepContent, ct);
             Message = "Preparation notes saved.";
+
+            if (changed)
+            {
+                // After the save, and swallowed: a mail failure must never make it look as though
+                // the notes were not saved. They were.
+                try
+                {
+                    await _notify.NotifyInstructionsUpdatedAsync(
+                        me.EventId, sessionId, me.FullName ?? "A speaker",
+                        $"{Request.Scheme}://{Request.Host}",
+                        actingParticipantId: me.ParticipantId, ct);
+                }
+                catch { /* the edit stands even if the notification fails */ }
+            }
         }
         catch (MasterClassPrepAccessDeniedException ex) { AccessDenied = true; Error = ex.Message; }
         catch (MasterClassPrepValidationException ex) { Error = ex.Message; }

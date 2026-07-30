@@ -47,10 +47,11 @@ public class MasterClassQaModel : PageModel
             }
         }
 
-        // No confirmed seat — flash an INFO notice (a no-op redirect, not a green
-        // "done") via the shared TempData flash so /Attendee/Index actually shows it.
+        // No confirmed seat — flash an INFO notice (a no-op redirect, not a green "done").
+        // §390: lands on the WIZARD STEP, not the retired /Attendee chooser. This was the last
+        // server-side redirect into that page.
         TempData["Flash"] = "Reserve a Master Class seat first — its Q&A opens once you're confirmed.";
         TempData["FlashKind"] = "info";
-        return RedirectToPage("/Attendee/Index");
+        return Redirect("/Forms/Wizard?step=masterclass");
     }
 }

@@ -14,7 +14,7 @@ namespace CommunityHub.Pages.Organizer;
 /// <summary>
 /// Full attendee browser for organizers. The organizer Index card only shows
 /// reconciliation MISMATCHES; this page shows the whole reconciled attendee
-/// set (synced nightly from Zoho Backstage + Bookings) with filters, search
+/// set (synced hourly from Zoho Backstage + Bookings) with filters, search
 /// and a CSV export for on-site lists / BI. Read-only by design: attendees
 /// are owned by the reconcile job, never edited in the hub (CONTEXT.md 9z).
 /// </summary>
@@ -38,6 +38,8 @@ public class AttendeesModel : PageModel
     // --- Summary tiles --------------------------------------------------
     public int TotalCount { get; private set; }
     public int TwoDayCount { get; private set; }
+    /// <summary>§707.36 — active 1-day (non-2-day) ticket holders, so the tiles ADD UP.</summary>
+    public int OneDayCount { get; private set; }
     public int BookedCount { get; private set; }
     public int MismatchCount { get; private set; }
     public DateTimeOffset? LastSyncedAt { get; private set; }
@@ -147,7 +149,10 @@ public class AttendeesModel : PageModel
         var sb = new StringBuilder();
         sb.AppendLine(string.Join(delimiter,
             "FirstName", "LastName", "Email", "TicketStatus", "TicketClass",
-            "BookingStatus", "MasterClass", "Mismatch", "LastSyncedUtc"));
+            // §326bp: the column said "Mismatch" and meant "has not chosen a Master Class yet".
+            // Renamed in the EXPORT too — the operator reads this file, and a header he has to
+            // decode is the same defect as a label he has to decode.
+            "BookingStatus", "MasterClass", "MasterClassNotChosen", "LastSyncedUtc"));
         foreach (var a in rows)
         {
             sb.AppendLine(string.Join(delimiter,
@@ -188,11 +193,135 @@ public class AttendeesModel : PageModel
         var all = _db.Attendees.Where(a => a.EventId == eventId && a.MirrorState == MirrorState.Active);
         TotalCount    = await all.CountAsync(ct);
         TwoDayCount   = await all.CountAsync(a => a.TicketStatus == TicketStatus.TwoDay, ct);
+        // §707.36 (operator 2026-07-30: *"i need a field so i can see 1-day tickets also as
+        // counter"*). The page counted 2-day only, so "2 attendees / 1 2-day ticket" left the
+        // other one unexplained — the reader has to do the subtraction and hope it is a 1-day.
+        // `Other` is precisely "an active ticket that is not 2-day" (AttendeeTicketSyncService
+        // maps the class that way), which for this edition is the 1-day class.
+        OneDayCount   = await all.CountAsync(a => a.TicketStatus == TicketStatus.Other, ct);
         BookedCount   = await all.CountAsync(a => a.BookingStatus != MasterClassBookingStatus.NotBooked, ct);
         MismatchCount = await all.CountAsync(a => a.HasReconciliationMismatch, ct);
         LastSyncedAt  = TotalCount == 0
             ? null
             : await all.MaxAsync(a => (DateTimeOffset?)a.LastSyncedAt, ct);
+    }
+
+    /// <summary>Outcome of the last §355 reset, shown as a flash on the page.</summary>
+    public string? ResetMessage { get; private set; }
+    public bool ResetIsError { get; private set; }
+
+    /// <summary>
+    /// §355 — put ONE attendee back to "freshly synced" so onboarding can be re-tested
+    /// (operator 2026-07-26). The three switches are INDEPENDENT: re-testing the party flow must
+    /// not have to destroy a Master Class seat.
+    ///
+    /// <para>Guarded on <see cref="OrganizerAuth.IsRealOrganizer"/> (§337): it re-sends mail and
+    /// re-opens another person's tasks, so an acting-as session must not be able to run it.</para>
+    /// </summary>
+    [CommunityHub.Audit.Audit("Reset attendee onboarding",
+        Category = CommunityHub.Core.Domain.AuditCategory.Admin, TargetType = "Attendee")]
+    public async Task<IActionResult> OnPostResetOnboardingAsync(
+        int attendeeId, bool resetWelcome, bool resetMasterClass, bool resetParty,
+        [FromServices] Core.Organizer.AttendeeOnboardingResetService reset,
+        CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+        if (!OrganizerAuth.IsRealOrganizer(me)) return Forbid();
+
+        // 🔒 §707.40 — REFUSE for a non-2-day holder, server-side. The button is hidden for them,
+        // but hiding a control is not enforcing it: a stale tab or a hand-made POST still reaches
+        // this handler, and it would then reset a "Master Class seat" and a "selection invite" that
+        // a 1-day holder never had. The §700 lesson — a reachable POST endpoint the UI no longer
+        // offers is still an endpoint.
+        // `ResendSelectionInvite` already refuses the same case inside SendSelectionInviteAsync.
+        var isTwoDay = await _db.Attendees
+            .Where(a => a.EventId == me.EventId && a.Id == attendeeId)
+            .Select(a => a.TicketStatus == TicketStatus.TwoDay)
+            .FirstOrDefaultAsync(ct);
+        if (!isTwoDay)
+        {
+            ResetMessage = "Not reset — onboarding, the Master Class seat and the selection invite "
+                + "do not apply to a 1-day ticket holder (by design: no Master Class, no hub login).";
+            ResetIsError = true;
+            await LoadSummaryAsync(me.EventId, ct);
+            var q = BuildQuery(me.EventId);
+            var n = await q.CountAsync(ct);
+            Paging = GridPaging.Resolve(PageNo, GridPaging.DefaultPageSize, n);
+            Attendees = await ApplySort(q).Skip(Paging.Skip).Take(Paging.PageSize).ToListAsync(ct);
+            return Page();
+        }
+
+        var r = await reset.ResetAsync(
+            me.EventId, attendeeId, resetWelcome, resetMasterClass, resetParty, ct);
+
+        ResetMessage = r.Detail;
+        ResetIsError = !r.Ok;
+
+        await LoadSummaryAsync(me.EventId, ct);
+        var filtered = BuildQuery(me.EventId);
+        var matched = await filtered.CountAsync(ct);
+        Paging = GridPaging.Resolve(PageNo, GridPaging.DefaultPageSize, matched);
+        Attendees = await ApplySort(filtered).Skip(Paging.Skip).Take(Paging.PageSize).ToListAsync(ct);
+        return Page();
+    }
+
+    /// <summary>
+    /// 🔒 §707.14 — RE-SEND THE MASTER CLASS SELECTION INVITE for one attendee.
+    /// </summary>
+    /// <remarks>
+    /// Operator 2026-07-30: *"how do i resend the welcome mail for an attendee — i have a welcome
+    /// mail button — is that equivalent for attendees"*. It was not, and there was no lever at all:
+    /// <list type="bullet">
+    /// <item>*Send/Resend welcome email* sends the GENERIC welcome and is idempotent — once sent it
+    /// no-ops.</item>
+    /// <item>The reset-welcome path branches on role and, for an Attendee, calls
+    /// <c>AttendeeOneDayWelcomeEmailService</c>, retired by §299 OPEN-26 and hard-wired to return
+    /// false.</item>
+    /// </list>
+    /// A 2-day attendee's REAL welcome is <c>masterclass-selection-invite</c> (§241), and until now
+    /// the only way to re-send it was editing <c>MasterClassInviteSentAt</c> in the database.
+    ///
+    /// <para>Uses <c>force: true</c> so an already-invited attendee is re-sent deliberately. The
+    /// §707.14 deactivated-login guard still applies underneath — a re-send to a switched-off login
+    /// is refused rather than delivering a magic-link button that cannot resolve.</para>
+    ///
+    /// <para>Guarded on <see cref="OrganizerAuth.IsRealOrganizer"/> (§337): it sends real mail, so
+    /// an acting-as session must not be able to run it.</para>
+    /// </remarks>
+    [CommunityHub.Audit.Audit("Re-send Master Class selection invite",
+        Category = CommunityHub.Core.Domain.AuditCategory.Admin, TargetType = "Attendee")]
+    public async Task<IActionResult> OnPostResendSelectionInviteAsync(
+        int attendeeId,
+        [FromServices] Core.Email.MasterClassEmailService mcEmail,
+        CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+        if (!OrganizerAuth.IsRealOrganizer(me)) return Forbid();
+
+        try
+        {
+            var baseUrl = $"{Request.Scheme}://{Request.Host}";
+            var sent = await mcEmail.SendSelectionInviteAsync(attendeeId, baseUrl, force: true, ct);
+            ResetMessage = sent
+                ? "Selection invite re-sent."
+                : "Not sent — the attendee is not an active 2-day holder, has no email, or their "
+                  + "login is deactivated (a magic link would not work). Re-activate the login first.";
+            ResetIsError = !sent;
+        }
+        catch (Exception ex)
+        {
+            ResetMessage = $"Could not re-send the selection invite: {ex.Message}";
+            ResetIsError = true;
+        }
+
+        await LoadSummaryAsync(me.EventId, ct);
+        var filtered = BuildQuery(me.EventId);
+        var matched = await filtered.CountAsync(ct);
+        Paging = GridPaging.Resolve(PageNo, GridPaging.DefaultPageSize, matched);
+        Attendees = await ApplySort(filtered).Skip(Paging.Skip).Take(Paging.PageSize).ToListAsync(ct);
+        return Page();
     }
 
     /// <summary>CSV field for the given <paramref name="delimiter"/>: quote when the

@@ -47,16 +47,25 @@
                 <option value="title" selected="@(Model.Sort == "title")">Title</option>
                 <option value="state" selected="@(Model.Sort == "state")">State</option>
             </select>
+            @* §253 G12: default-on filter — tasks of DEACTIVATED assignees are hidden
+               from the grid + exports unless the organizer asks for them. *@
+            <label style="margin-left:8px;">
+                <input type="checkbox" name="ShowInactiveAssignees" value="true"
+                       checked="@Model.ShowInactiveAssignees" />
+                Include deactivated assignees
+            </label>
             <button type="submit">Apply</button>
         </form>
         <p>
             <a asp-page-handler="Export"
                asp-route-Sort="@Model.Sort"
-               asp-route-StateFilter="@Model.StateFilter">Export to CSV</a>
+               asp-route-StateFilter="@Model.StateFilter"
+               asp-route-ShowInactiveAssignees="@Model.ShowInactiveAssignees">Export to CSV</a>
             &nbsp;|&nbsp;
             <a asp-page-handler="ExportXlsx"
                asp-route-Sort="@Model.Sort"
-               asp-route-StateFilter="@Model.StateFilter">Excel (.xlsx)</a>
+               asp-route-StateFilter="@Model.StateFilter"
+               asp-route-ShowInactiveAssignees="@Model.ShowInactiveAssignees">Excel (.xlsx)</a>
         </p>
 
         @if (Model.Tasks.Count == 0)
@@ -76,7 +85,8 @@
                     {
                         <form method="post" asp-page-handler="SaveRow" class="row"
                               asp-route-Sort="@Model.Sort"
-                              asp-route-StateFilter="@Model.StateFilter">
+                              asp-route-StateFilter="@Model.StateFilter"
+                              asp-route-ShowInactiveAssignees="@Model.ShowInactiveAssignees">
                             <input type="hidden" name="taskId" value="@t.Id" />
                             <span>
                                 <input type="text" name="title" value="@t.Title"

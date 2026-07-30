@@ -25,7 +25,7 @@ test.describe('@gui §4 Self-service forms (speaker)', () => {
 
     test('hotel form renders and the room-detail block toggles with NeedsRoom', async ({ page }) => {
         await gotoForm(page, '/Forms/Hotel');
-        await expect(page.locator('h2', { hasText: 'Hotel preference' })).toBeVisible();
+        await expect(page.locator('h1', { hasText: 'Hotel preference' })).toBeVisible();
         // Choosing "needs a room" reveals the date/notes block (JS-driven).
         await page.locator('input[name="NeedsRoom"][value="true"]').check();
         await expect(page.locator('#CheckInDate')).toBeVisible();
@@ -37,70 +37,95 @@ test.describe('@gui §4 Self-service forms (speaker)', () => {
 
     test('appreciation dinner form renders with RSVP + allergy capture', async ({ page }) => {
         await gotoForm(page, '/Forms/Dinner');
-        await expect(page.locator('h2', { hasText: 'Appreciation Dinner' })).toBeVisible();
+        await expect(page.locator('h1', { hasText: 'Appreciation Dinner' })).toBeVisible();
         await expect(page.locator('input[name="Rsvp"]').first()).toBeVisible();
         await page.locator('input[name="Rsvp"][value="Yes"]').check();
-        await expect(page.locator('#AllergyNotes')).toBeVisible();
+        // §21: the free-text allergy box became the structured dietary fieldset
+        // (shared with the Speaker form) — always rendered, not RSVP-toggled.
+        await expect(page.locator('h3', { hasText: 'Dietary needs & allergies' })).toBeVisible();
+        await expect(page.locator('#Dietary_DietChoice')).toBeVisible();
         await expect(page.getByRole('button', { name: /Save my RSVP/i })).toBeVisible();
     });
 
     test('lunch form renders the pre-day / main-day choices', async ({ page }) => {
         await gotoForm(page, '/Forms/Lunch');
-        await expect(page.locator('h2', { hasText: 'Lunch logistics' })).toBeVisible();
-        // PRE-DAY lunch is a required Yes/No radio group (operator §62), not a checkbox.
-        await expect(page.locator('input[name="LunchPreDay"][value="true"]')).toBeVisible();
-        await expect(page.locator('input[name="LunchPreDay"][value="false"]')).toBeVisible();
-        await expect(page.getByRole('button', { name: /Save my lunch preferences/i })).toBeVisible();
+        await expect(page.locator('h1', { hasText: 'Lunch logistics' })).toBeVisible();
+        // A speaker who speaks on the pre-day (Master Class) has the pre-day lunch
+        // AUTO-COUNTED (LunchFormService.PreDayAutoCounted): the page then renders
+        // an info notice INSTEAD of the form — an equally valid render.
+        const preDay = page.locator('input[type="checkbox"][name="LunchPreDay"]');
+        if (await preDay.count() === 0) {
+            await expect(page.locator('p.info', { hasText: /automatically counted/i }))
+                .toBeVisible();
+            await expect(page.getByRole('link', { name: /Back to hub/i })).toBeVisible();
+        } else {
+            // §178c: the pre-day lunch is a CHECKBOX, matching the setup-day lunches
+            // (operator wants ONE select/unselect style) — checked = yes, unchecked = no.
+            await expect(preDay).toBeVisible();
+            await expect(page.getByRole('button', { name: /Save my lunch preferences/i })).toBeVisible();
+        }
     });
 
-    test('speaker bio renders as editable tabs (Bio / Tagline / Links / Photo / Sessions)', async ({ page }) => {
+    test('speaker bio: /Forms/Speaker funnels to the consolidated Speaker Details editor', async ({ page }) => {
+        // §26c: the old tabbed bio form is superseded — speakers are redirected
+        // from /Forms/Speaker to the consolidated /Speaker/Details page (name +
+        // bio + links + photo + accreditation + details in ONE flat form with a
+        // single Save; see Pages/Speaker/_DetailsFields.cshtml).
         await gotoForm(page, '/Forms/Speaker');
-        await expect(page.locator('h2', { hasText: 'Speaker details' })).toBeVisible();
-        // Email is the identity, shown read-only (not editable).
-        await expect(page.locator('input[name="Email"]')).toHaveAttribute('readonly', /.*/);
+        await expect(page).toHaveURL(/\/Speaker\/Details/i);
+        await expect(page.locator('h1', { hasText: 'Speaker Details' })).toBeVisible();
 
-        // The bio is now a speaker-editable tab strip, not a read-only panel.
-        await expect(page.locator('h3', { hasText: /Your public bio/i })).toBeVisible();
-        const tablist = page.locator('.bio-tablist[role="tablist"]');
-        await expect(tablist).toBeVisible();
-        for (const name of ['Bio', 'Tagline', 'Links & Social', 'Photo', 'Sessions']) {
-            await expect(tablist.getByRole('tab', { name })).toBeVisible();
+        // The sign-in email is the identity + Sessionize match key — rendered as
+        // the FIRST read-only input (display-only, never posted; it has no id/name).
+        await expect(page.locator('input[readonly]').first()).toBeVisible();
+
+        // The flat sections replace the former tab strip.
+        for (const heading of ['Name', 'Bio & links', 'Photo', 'Microsoft accreditation', 'Details']) {
+            await expect(page.locator('h3', { hasText: heading })).toBeVisible();
         }
 
-        // Default tab (Bio) shows the editable Biography textarea; the Tagline
-        // field is on a different (hidden) tab until selected.
-        await expect(page.locator('#Biography')).toBeVisible();
-        await expect(page.locator('#Tagline')).toBeHidden();
+        // All bio fields are editable and visible at once (no hidden tab panels).
+        for (const id of ['#FirstName', '#LastName', '#Tagline', '#Biography',
+                          '#LinkedIn', '#Twitter', '#Blog', '#PhotoUrl', '#Country']) {
+            await expect(page.locator(id)).toBeVisible();
+        }
+        await expect(page.locator('input[name="SelectedAccreditations"]').first()).toBeVisible();
 
-        // Selecting the Tagline tab (CSS-only) reveals its input; clicking the
-        // Links tab reveals the social fields. Pure-CSS tabs need no JS.
-        await page.locator('label[for="biotab-tagline"]').click();
-        await expect(page.locator('#Tagline')).toBeVisible();
-        await page.locator('label[for="biotab-links"]').click();
-        await expect(page.locator('#LinkedIn')).toBeVisible();
-        await expect(page.locator('#Twitter')).toBeVisible();
-
-        // One Save submits the whole form (hub-collected + bio).
-        await expect(page.getByRole('button', { name: /Save speaker details/i })).toBeVisible();
+        // ONE Save button saves the hub edits AND syncs to the public event system (§195).
+        await expect(page.getByRole('button', { name: 'Save', exact: true })).toBeVisible();
         await assertNoHorizontalScroll(page);
     });
 
     test('swag form renders polo/gift/badge preferences', async ({ page }) => {
         await gotoForm(page, '/Forms/Swag');
-        await expect(page.locator('h2', { hasText: 'Swag preferences' })).toBeVisible();
+        await expect(page.locator('h1', { hasText: 'Swag preferences' })).toBeVisible();
         await expect(page.locator('#PoloChoice')).toBeVisible();
         await expect(page.getByRole('button', { name: /Save preferences/i })).toBeVisible();
     });
 
     test('travel form reveals the claim block only when reimbursement is requested', async ({ page }) => {
         await gotoForm(page, '/Forms/Travel');
-        await expect(page.locator('h2', { hasText: 'Travel reimbursement' })).toBeVisible();
-        // Default: claim block hidden. Requesting reimbursement reveals it.
-        await page.locator('#ReqYes').check();
-        await expect(page.locator('#ClaimBlock')).toBeVisible();
-        await expect(page.locator('#AmountChoice')).toBeVisible();
-        await page.locator('#ReqNo').check();
-        await expect(page.locator('#ClaimBlock')).toBeHidden();
+        await expect(page.locator('h1', { hasText: 'Travel reimbursement' })).toBeVisible();
+        // §48: Step 2 (the claim) lives in #Step2Fieldset which renders DISABLED
+        // ("locked — complete Step 1 first") until ≥1 receipt is uploaded. We never
+        // upload files (keeps the run re-runnable), so when this account has no
+        // receipts on file we assert the locked contract instead of toggling.
+        await expect(page.locator('#Step2Fieldset')).toBeVisible();
+        if (await page.locator('#ReqNo').isDisabled()) {
+            // Locked: the lock notice renders, and BOTH the claim radios and the
+            // Step-2 save are unusable until Step 1 is completed.
+            await expect(page.getByText(/complete Step 1 first/i)).toBeVisible();
+            await expect(page.locator('#ReqYes')).toBeDisabled();
+            await expect(page.getByRole('button', { name: /Request Travel Reimbursement/ }))
+                .toBeDisabled();
+        } else {
+            // Unlocked: the claim block toggles with the reimbursement choice.
+            await page.locator('#ReqYes').check();
+            await expect(page.locator('#ClaimBlock')).toBeVisible();
+            await expect(page.locator('#AmountChoice')).toBeVisible();
+            await page.locator('#ReqNo').check();
+            await expect(page.locator('#ClaimBlock')).toBeHidden();
+        }
     });
 });
 
@@ -111,7 +136,7 @@ test.describe('@gui §4 Volunteer wizard (multi-step)', () => {
     test('the wizard walks step 1 -> 2 -> 3 via real postbacks and shows a review', async ({ page }) => {
         await login(page, USERS.volunteer, PINS.volunteer);
         await gotoForm(page, '/Forms/VolunteerWizard');
-        await expect(page.locator('h2', { hasText: 'Volunteer sign-up' })).toBeVisible();
+        await expect(page.locator('h1', { hasText: 'Volunteer sign-up' })).toBeVisible();
 
         const step = page.locator('text=/Step \\d of 3/');
         await expect(step).toContainText('Step 1 of 3');
@@ -148,7 +173,12 @@ test.describe('@gui §4 Public volunteer signup (no login)', () => {
         await expect(page.locator('h1', { hasText: /Volunteer at/i })).toBeVisible();
         await expect(page.locator('#FullName')).toBeVisible();
         await expect(page.locator('#Email')).toBeVisible();
-        await expect(page.getByRole('button', { name: /Send my application/i })).toBeVisible();
+        // The page is now a 4-step client-side wizard: step 1 shows "Next →"
+        // (disabled until name/email/mobile validate) and the final submit
+        // ("Submit application") stays hidden until the last step.
+        await expect(page.locator('#vol-next')).toBeVisible();
+        await expect(page.locator('#vol-submit')).toBeHidden();
+        await expect(page.locator('#vol-submit')).toHaveText(/Submit application/i);
         // The honeypot field exists as a spam trap: kept out of the tab order
         // (tabindex=-1, autocomplete=off) and wrapped in an aria-hidden container
         // so real users never see or fill it.

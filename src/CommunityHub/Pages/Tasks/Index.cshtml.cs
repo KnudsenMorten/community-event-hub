@@ -20,17 +20,23 @@ public class IndexModel : PageModel
     private readonly ICurrentParticipantAccessor _participant;
     private readonly TimeProvider _clock;
     private readonly CommunityHub.Core.Participants.FormTaskReconciler _reconciler;
+    private readonly CommunityHub.Forms.WizardStepTaskSeeder _wizardStepTasks;
+    private readonly CommunityHub.Core.Config.PartyTaskSeeder _partyTasks;
 
     public IndexModel(
         CommunityHubDbContext db,
         ICurrentParticipantAccessor participant,
         TimeProvider clock,
-        CommunityHub.Core.Participants.FormTaskReconciler reconciler)
+        CommunityHub.Core.Participants.FormTaskReconciler reconciler,
+        CommunityHub.Forms.WizardStepTaskSeeder wizardStepTasks,
+        CommunityHub.Core.Config.PartyTaskSeeder partyTasks)
     {
         _db = db;
         _participant = participant;
         _clock = clock;
         _reconciler = reconciler;
+        _wizardStepTasks = wizardStepTasks;
+        _partyTasks = partyTasks;
     }
 
     public List<ParticipantTask> Tasks { get; private set; } = new();
@@ -39,6 +45,12 @@ public class IndexModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
+
+        // §173e: seed any missing Get-Started step-tasks (+ the party task) so this list
+        // MIRRORS the role's Get-Started journey, then reconcile. Both idempotent; tolerate
+        // a seed hiccup so the list still renders.
+        try { await _partyTasks.EnsureForParticipantAsync(me.EventId, me.ParticipantId, me.Role, ct); } catch { }
+        try { await _wizardStepTasks.EnsureForParticipantAsync(me.EventId, me.ParticipantId, me.Role, ct); } catch { }
 
         // §147: the page renders ONE unified task list (shared _TaskListPanel) — no
         // longer the shared _ChecklistCard too — so tasks appear once. We still run the

@@ -77,7 +77,7 @@ public sealed class EmailTemplateConversionTests
         Assert.Equal("p@x.dk", m.To);
         Assert.Contains("waitlist", m.Subject, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("MC2", m.Subject);                          // {{masterClassTitle}}
-        Assert.Contains("MyMasterClass?t=", m.Html);                // {{selfServiceUrl}}
+        Assert.Contains("/Forms/Wizard?step=masterclass", m.Html);                      // 351-6: the hub Master Class surface (was MyMasterClass?t=)
         Assert.Contains("cancelled", m.Html, StringComparison.OrdinalIgnoreCase); // {{waitlistTerms}}
         Assert.DoesNotContain("The team", m.Html);                  // §89: sign-off removed
     }
@@ -98,7 +98,7 @@ public sealed class EmailTemplateConversionTests
         Assert.Contains("Master Class cancelled", m.Subject);       // §99: explicit subject
         Assert.Contains("Deep Dive MC", m.Subject);                 // {{masterClassTitle}}
         Assert.Contains("C 2027", m.Html);                          // {{eventDisplayName}}
-        Assert.Contains("MyMasterClass?t=", m.Html);                // {{signupUrl}}
+        Assert.Contains("/Forms/Wizard?step=masterclass", m.Html);                      // 351-3: the hub Master Class surface (was MyMasterClass?t=)
         // Operator 2026-06-24: dropped the "Questions? Email" + "The team" lines, and
         // the title already reads "… Master Class", so the body no longer says
         // "the Master Class" before it.
@@ -121,7 +121,7 @@ public sealed class EmailTemplateConversionTests
         Assert.Contains("Validate your Master Class", m.Subject);
         Assert.Contains("C 2027", m.Subject);                       // {{eventDisplayName}}
         Assert.Contains("Deep Dive MC", m.Html);                    // {{heldMasterClass}} raw block
-        Assert.Contains("MyMasterClass?t=", m.Html);                // {{selfServiceUrl}}
+        Assert.Contains("/Forms/Wizard?step=masterclass", m.Html);                      // 351-6: the hub Master Class surface (was MyMasterClass?t=)
         Assert.DoesNotContain("The team", m.Html);                  // §89: sign-off removed
     }
 
@@ -154,7 +154,7 @@ public sealed class EmailTemplateConversionTests
         var m = Assert.Single(sender.Messages);
         Assert.Contains("moved into", m.Subject);                   // §93: notification, not a chooser
         Assert.Contains("Deep Dive MC", m.Subject);                 // {{masterClassTitle}}
-        Assert.Contains("MyMasterClass?t=", m.Html);                // {{selfServiceUrl}}
+        Assert.Contains("/Forms/Wizard?step=masterclass", m.Html);                      // 351-6: the hub Master Class surface (was MyMasterClass?t=)
         Assert.Contains("previous Master Class seat has been released", m.Html); // §93: previous seat released
         Assert.DoesNotContain("choose to switch", m.Html);          // §93: no choose-to-switch offer
         Assert.DoesNotContain("The team", m.Html);                  // §89: sign-off removed
@@ -185,11 +185,51 @@ public sealed class EmailTemplateConversionTests
         Assert.True(await email.SendPromotionAsync(signup.Id, "https://hub.test"));
         var m = Assert.Single(sender.Messages);
         Assert.Equal("a2@x.dk", m.To);
-        Assert.Contains("moved into", m.Subject, StringComparison.OrdinalIgnoreCase); // §93: notification
+        // §386b: the subject now leads with the wait list, at the operator's request ("maybe also
+        // use the word wait list somewhere") — it was "You've been moved into …".
+        Assert.Contains("wait list", m.Subject, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Deep Dive MC", m.Subject);                 // {{masterClassTitle}}
-        Assert.Contains("MyMasterClass?t=", m.Html);                // {{selfServiceUrl}}
-        Assert.Contains("previous Master Class seat has been released", m.Html); // §93: previous seat released
+        Assert.Contains("/Forms/Wizard?step=masterclass", m.Html);                      // 351-6: the hub Master Class surface (was MyMasterClass?t=)
         Assert.DoesNotContain("The team", m.Html);                  // §89: sign-off removed
+
+        // §386 — REVERSED (was: asserts "previous Master Class seat has been released").
+        // a2 held NO other seat, so nothing was released — and the template used to claim it had
+        // been, unconditionally. Saying "your previous seat is gone" to someone who never had one
+        // is the same defect as saying nothing to someone who did. Now the sentence only appears
+        // when a seat was really given up.
+        Assert.DoesNotContain("has been released", m.Html);
+    }
+
+    [Fact]
+    public async Task Promoted_mail_NAMES_the_seat_that_was_released_for_it()
+    {
+        // §386 (operator 2026-07-26: "if i move up and get a requested/waitlist i should be informed
+        // that i received it and the old was cancelled"). The auto-switch silently deleted the old
+        // signup, so the attendee learned about it only by noticing the seat was gone.
+        using var db = ScenarioFixture.NewDb();
+        var (ev, mc, _) = await SeedMcAsync(db, capacity: 1);
+        var a1 = await AttendeeAsync(db, ev, "a1@x.dk");
+        var a2 = await AttendeeAsync(db, ev, "a2@x.dk");
+        var svc = new MasterClassSignupService(db);
+        await svc.SignUpAsync(ev, a1, mc);
+        await svc.SignUpAsync(ev, a2, mc);
+        var promo = await svc.RemoveAsync(ev, a1, mc);
+        var signup = db.MasterClassSignups.First(x => x.Id == promo!.PromotedSignupId!.Value);
+        signup.Status = MasterClassSignupStatus.Confirmed;
+        signup.PromotionNotifiedAt = null;
+        await db.SaveChangesAsync();
+
+        var sender = new CapturingEmailSender();
+        var email = new MasterClassPromotionEmailService(
+            db, sender, new NoOpContext(), svc, Templates("mc-promoted"));
+
+        // Drive the REAL send path with a released title, as the promotion sites now do.
+        Assert.True(await email.SendPromotionAsync(
+            signup.Id, "https://hub.test", default, "Azure Master Class"));
+
+        var m = Assert.Single(sender.Messages);
+        Assert.Contains("has been released", m.Html, StringComparison.Ordinal);
+        Assert.Contains("Azure Master Class", m.Html, StringComparison.Ordinal);
     }
 
     // 5 ------------------------------------------------------------ month-reminder ----
@@ -252,7 +292,7 @@ public sealed class EmailTemplateConversionTests
 
     // 7 -------------------------------------------------------- calendar invite ----
     [Fact]
-    public async Task CalendarInvite_renders_from_template_and_keeps_ics()
+    public async Task CalendarInvite_sends_an_item_invitation_with_an_ics_attachment()
     {
         using var db = ScenarioFixture.NewDb();
         var e = new Event
@@ -271,18 +311,30 @@ public sealed class EmailTemplateConversionTests
         db.Participants.Add(p); await db.SaveChangesAsync();
 
         var sender = new CapturingEmailSender();
+        // §193: the invite service no longer uses a template — it sends a single
+        // calendar INVITATION (inline body + .ics attachment) for one item.
         var svc = new CalendarInviteEmailService(
-            db, sender, new NoOpContext(), ScenarioFixture.Clock, Templates("cal"));
+            db, sender, new NoOpContext(), ScenarioFixture.Clock);
 
-        Assert.True(await svc.SendActivationInviteAsync(p.Id));
+        var sent = await svc.SendItemInviteAsync(
+            p.Id,
+            uid: "session-1@x.dk",
+            summary: "My session: Securing Entra ID",
+            description: "Your session at the event.",
+            location: "Room A",
+            start: new DateTimeOffset(2027, 2, 9, 9, 0, 0, TimeSpan.Zero),
+            end: new DateTimeOffset(2027, 2, 9, 10, 0, 0, TimeSpan.Zero),
+            allDay: false,
+            fileName: "session.ics");
+
+        Assert.True(sent);
         var m = Assert.Single(sender.IcsMessages);
         Assert.Equal("v@x.dk", m.To);
-        Assert.Contains("C 2027", m.Subject);                       // {{eventDisplayName}}
-        Assert.Contains("Val", m.Html);                             // {{firstName}}
-        Assert.DoesNotContain("The team", m.Html);                  // §89: sign-off removed
-        Assert.NotNull(sender.LastIcs);                             // .ics attachment preserved
+        Assert.Contains("My session: Securing Entra ID", m.Subject);   // subject = summary
+        Assert.Contains("Val", m.Html);                                 // greeting first name
+        Assert.NotNull(sender.LastIcs);                                 // .ics attachment present
         Assert.Contains("BEGIN:VCALENDAR", sender.LastIcs!);
-        Assert.False(await svc.SendActivationInviteAsync(p.Id));    // idempotent
+        Assert.Contains("METHOD:REQUEST", sender.LastIcs!);
     }
 
     // 8 ------------------------------------------------- session-evaluation results ----

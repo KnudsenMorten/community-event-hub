@@ -37,6 +37,7 @@ var knownCommands = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     "pull-sponsors",
     "watch-uploads",
     "import-speakers",
+    "import-plan",
     "send-sample-emails",
 };
 
@@ -51,6 +52,9 @@ if (args.Length == 0 || args[0] is "-h" or "--help" || !knownCommands.Contains(a
     Console.Error.WriteLine("  pull-sponsors    Run the WooCommerce sponsor-order pull once.");
     Console.Error.WriteLine("  watch-uploads    Poll provisioned SharePoint upload folders + email recipients on file changes.");
     Console.Error.WriteLine("  import-speakers  Pull speakers from the Sessionize v2 view API into the active edition.");
+    Console.Error.WriteLine("  import-plan --file <path.csv> [--dry-run]");
+    Console.Error.WriteLine("                   Import a semicolon volunteer-plan CSV into the active edition");
+    Console.Error.WriteLine("                   (buckets from Responsible Team; upserts by name, so re-running is safe).");
     Console.Error.WriteLine("  send-sample-emails --to <addr> [--sponsor <name>]");
     Console.Error.WriteLine("                   Render EVERY shipped email template with sample 2LINKIT data and send each (subjects prefixed [SAMPLE]).");
     return 1;
@@ -75,17 +79,44 @@ var services = builder.Services;
 // ---------------------------------------------------------------------------
 var sqlTemplate = config["Sql:ConnectionStringTemplate"]
     ?? throw new InvalidOperationException("Sql:ConnectionStringTemplate is not configured.");
-var sqlPassword = config["Sql:AdminPassword"]
-    ?? throw new InvalidOperationException("Sql:AdminPassword is not configured.");
-var sqlUser = config["Sql:AdminUser"] ?? "communityhubadmin";
-var connectionString = $"{sqlTemplate}User ID={sqlUser};Password={sqlPassword};";
+// §327k — ENTRA TOKEN path. PROD SQL is Entra-only (no SQL logins exist), so the
+// user/password wiring below can only ever reach a server that still has one. When
+// CEH_SQL_ACCESS_TOKEN is set (from `az account get-access-token --resource
+// https://database.windows.net/`), authenticate with that instead. Passed by ENVIRONMENT,
+// never config and never a file, so no credential is left on disk.
+var sqlAccessToken = Environment.GetEnvironmentVariable("CEH_SQL_ACCESS_TOKEN");
 
-services.AddDbContext<CommunityHubDbContext>(options =>
-    options.UseSqlServer(connectionString, sql =>
-        sql.EnableRetryOnFailure(
-            maxRetryCount: 6,
-            maxRetryDelay: TimeSpan.FromSeconds(30),
-            errorNumbersToAdd: null)));
+if (!string.IsNullOrWhiteSpace(sqlAccessToken))
+{
+    services.AddDbContext<CommunityHubDbContext>(options =>
+    {
+        var conn = new Microsoft.Data.SqlClient.SqlConnection(sqlTemplate)
+        {
+            AccessToken = sqlAccessToken,
+        };
+        options.UseSqlServer(conn, sql =>
+            sql.EnableRetryOnFailure(
+                maxRetryCount: 6,
+                maxRetryDelay: TimeSpan.FromSeconds(30),
+                errorNumbersToAdd: null));
+    });
+}
+else
+{
+    var sqlPassword = config["Sql:AdminPassword"]
+        ?? throw new InvalidOperationException(
+            "Sql:AdminPassword is not configured and no CEH_SQL_ACCESS_TOKEN was supplied. "
+            + "PROD SQL is Entra-only — supply a database.windows.net access token.");
+    var sqlUser = config["Sql:AdminUser"] ?? "communityhubadmin";
+    var connectionString = $"{sqlTemplate}User ID={sqlUser};Password={sqlPassword};";
+
+    services.AddDbContext<CommunityHubDbContext>(options =>
+        options.UseSqlServer(connectionString, sql =>
+            sql.EnableRetryOnFailure(
+                maxRetryCount: 6,
+                maxRetryDelay: TimeSpan.FromSeconds(30),
+                errorNumbersToAdd: null)));
+}
 
 services.AddSingleton(TimeProvider.System);
 
@@ -161,6 +192,17 @@ services.AddHttpClient<SharePointUploadClient>();
 services.AddScoped<SponsorUploadWatchService>();
 
 services.AddScoped<SponsorOrderPullService>();
+
+// ---------------------------------------------------------------------------
+// §327k — volunteer plan import (import-plan). The HEURISTIC guidance generator is
+// used deliberately rather than the LLM one: an import must be deterministic and must
+// not depend on an AI endpoint being reachable or on what it happens to return.
+// ---------------------------------------------------------------------------
+services.AddSingleton(new CommunityHub.Core.Volunteers.TaskGuidanceOptions());
+services.AddSingleton<CommunityHub.Core.Volunteers.HeuristicTaskGuidanceGenerator>();
+services.AddScoped<CommunityHub.Core.Volunteers.ITaskGuidanceGenerator>(sp =>
+    sp.GetRequiredService<CommunityHub.Core.Volunteers.HeuristicTaskGuidanceGenerator>());
+services.AddScoped<CommunityHub.Core.Volunteers.VolunteerPlanImportService>();
 
 // ---------------------------------------------------------------------------
 // Sessionize speaker import via the v2 view API - same wiring as the Jobs app.
@@ -264,6 +306,62 @@ switch (command)
                 foreach (var w in sx.Warnings) logger.LogWarning("  {Warning}", w);
             }
             return result.Error is null ? 0 : 2;
+        }
+
+    // §327k — import a volunteer plan CSV without the browser upload on
+    // /Organizer/BucketAllocation. Deliberately reuses the SHIPPED parser + import service
+    // rather than writing SQL: the upsert-by-name semantics, the ExternalKey identity and
+    // the name-matching (which never invents people) are the behaviour that makes a
+    // re-import safe, and a hand-rolled INSERT would have none of it.
+    case "import-plan":
+        {
+            var fileArg = GetArg(args, "--file");
+            if (string.IsNullOrWhiteSpace(fileArg) || !File.Exists(fileArg))
+            {
+                Console.Error.WriteLine("import-plan: --file <path.csv> is required and must exist.");
+                return 1;
+            }
+            var dryRun = args.Contains("--dry-run", StringComparer.OrdinalIgnoreCase);
+
+            using var scope = host.Services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<CommunityHubDbContext>();
+            var activeEventId = await db.Events
+                .Where(e => e.IsActive)
+                .Select(e => (int?)e.Id)
+                .FirstOrDefaultAsync(CancellationToken.None);
+            if (activeEventId is null)
+            {
+                logger.LogWarning("import-plan: no active event in DB.");
+                return 2;
+            }
+
+            var csv = await File.ReadAllTextAsync(fileArg, CancellationToken.None);
+            var plan = new CommunityHub.Core.Volunteers.VolunteerPlanParser().Parse(csv);
+
+            logger.LogInformation(
+                "import-plan: parsed {Tasks} task(s) into {Buckets} bucket(s) from {File}; teams: {Teams}",
+                plan.Tasks.Count, plan.Buckets.Count, Path.GetFileName(fileArg),
+                string.Join(", ", plan.Tasks.Select(t => t.ResponsibleTeam ?? "(none)")
+                                            .Distinct().OrderBy(t => t)));
+
+            if (dryRun)
+            {
+                logger.LogInformation("import-plan: --dry-run, nothing was written.");
+                return 0;
+            }
+
+            var import = scope.ServiceProvider
+                .GetRequiredService<CommunityHub.Core.Volunteers.VolunteerPlanImportService>();
+            var res = await import.ImportAsync(
+                activeEventId.Value, plan, fillGuidance: true, CancellationToken.None);
+
+            logger.LogInformation(
+                "import-plan result: buckets={Buckets}, tasks={Tasks}, assignmentsLinked={Links}, "
+                + "guidanceFilled={Guidance}, namesUnmatched={Unmatched}",
+                res.BucketsCreated, res.TasksCreated, res.AssignmentsLinked,
+                res.GuidanceFilled, res.NamesUnmatched);
+            foreach (var n in res.UnmatchedNames) logger.LogWarning("  unmatched name: {Name}", n);
+            return 0;
         }
 
     default:

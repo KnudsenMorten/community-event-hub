@@ -1,0 +1,56 @@
+@page
+@model CommunityHub.Pages.Sponsor.SessionFormModel
+@{
+    ViewData["Title"] = "Submit session description";
+}
+
+@*
+    §651 — the standalone home for the sponsor session form, reached from the "Submit session
+    description" task. It renders the SAME _SponsorSessionFields partial the old Get Started step
+    used (§292/§356), so there is exactly one version of this form in the product.
+*@
+
+<div class="card">
+    <h1>Submit session description</h1>
+
+    @if (Model.AccessDenied)
+    {
+        <p class="error">
+            This form is for sponsor contacts whose package includes a speaking session.
+        </p>
+        <p><a asp-page="/Sponsor/Tasks">&larr; Back to your tasks</a></p>
+    }
+    else
+    {
+        <p style="color:#374151;">
+            Everything we need to publish your session in the programme. You can
+            <strong>save and come back</strong> &mdash; we remember what you entered, and you can
+            change anything up to the deadline.
+        </p>
+
+        @if (Model.Saved)
+        {
+            <p class="info" role="status"
+               style="background:#ecfdf5;border:1px solid #a7f3d0;border-radius:8px;padding:12px 14px;">
+                <strong>Saved.</strong> Your session details are with us, and the
+                <em>Submit session description</em> task has completed itself &mdash; there is
+                nothing to tick off.
+            </p>
+        }
+
+        <form method="post" enctype="multipart/form-data">
+            <div asp-validation-summary="All" class="ceh-validation-summary"></div>
+
+            @* The SAME partial the wizard step rendered — one form, one behaviour. *@
+            <partial name="/Pages/Forms/_SponsorSessionFields.cshtml" model="Model.Form" />
+
+            <div style="margin-top:18px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
+                <button type="submit"
+                        style="background:#1565c0;color:#fff;border:1px solid #1565c0;padding:10px 22px;border-radius:6px;font-weight:600;cursor:pointer;">
+                    Save session details
+                </button>
+                <a asp-page="/Sponsor/Tasks" style="color:#1565c0;">&larr; Back to your tasks</a>
+            </div>
+        </form>
+    }
+</div>

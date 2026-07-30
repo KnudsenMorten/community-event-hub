@@ -17,6 +17,12 @@ public static class AuditActions
     public const string SignIn = "auth.sign-in";
     public const string SignOut = "auth.sign-out";
     public const string MagicLink = "auth.magic-link";
+
+    /// <summary>REQUIREMENTS §551 — the edition's SESSION sync stage was changed (from → to).</summary>
+    public const string SessionSyncDirectionChanged = "sync.direction.session";
+
+    /// <summary>REQUIREMENTS §551 — the edition's SPEAKER sync stage was changed (from → to).</summary>
+    public const string SpeakerSyncDirectionChanged = "sync.direction.speaker";
 }
 
 /// <summary>

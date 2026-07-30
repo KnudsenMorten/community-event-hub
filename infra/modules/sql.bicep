@@ -84,6 +84,23 @@ resource sqlAadOnly 'Microsoft.Sql/servers/azureADOnlyAuthentications@2023-08-01
   }
 }
 
+// READ_COMMITTED_SNAPSHOT (RCSI) — IMPORTANT for master-class seat allocation (§222).
+//   Azure SQL Database creates every new database with READ_COMMITTED_SNAPSHOT = ON by
+//   default (unlike SQL Server / SQL Express, which default it OFF). There is no RCSI
+//   property on the `databases` ARM resource, so it cannot be set declaratively here — the
+//   Azure default already gives us RCSI ON for any NEW environment (ELDK28+), which is what
+//   we want. The master-class oversell bug (§222) surfaced ONLY on prod precisely because
+//   prod had RCSI ON: a plain READ COMMITTED count-subquery reads a pre-statement row-version
+//   snapshot under RCSI and missed just-committed seats. The fix is in the APPLICATION code,
+//   not the infra: MasterClassSignupService.TryClaimSeatAsync reads the capacity COUNT under
+//   WITH (UPDLOCK, HOLDLOCK), so correctness does NOT depend on RCSI being on or off — it is
+//   locking-correct under either setting. We therefore (a) document that new Azure SQL DBs
+//   keep RCSI ON by default and (b) rely on the locking-correct code rather than toggling
+//   RCSI. If a future deploymentScript/post-deploy SQL step is ever added, an idempotent
+//   `ALTER DATABASE [<db>] SET READ_COMMITTED_SNAPSHOT ON` could assert it explicitly, but
+//   it is not required for correctness today. The load-sim harness
+//   (tools/CommunityHub.MasterClassLoadSim) turns RCSI ON on its local SQL Express throwaway
+//   DB so local runs reproduce this prod isolation behaviour.
 resource sqlDatabase 'Microsoft.Sql/servers/databases@2023-08-01-preview' = {
   parent: sqlServer
   name: sqlDatabaseName

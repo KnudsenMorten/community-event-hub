@@ -48,6 +48,9 @@ public sealed class SyncDeltaQueueService
     public const string FieldLinkedIn = "LinkedIn";
     public const string FieldTwitter = "Twitter";
 
+    /// <summary>§559 — the dead external id carried by a <see cref="SyncDeltaChangeKind.StaleLink"/>.</summary>
+    public const string FieldBackstageId = "BackstageId";
+
     private readonly CommunityHubDbContext _db;
     private readonly TimeProvider _clock;
     private readonly IAuditTrail? _audit;
@@ -182,6 +185,34 @@ public sealed class SyncDeltaQueueService
             Changes = Array.Empty<SyncFieldChange>(),
         }, ct);
 
+    /// <summary>
+    /// §559 — enqueue a confirmed-STALE external link for approval: CEH holds an id that a COMPLETE
+    /// live read says is gone. Approving CLEARS the id so the next pass re-creates the record.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator: *"you can use this queue for this purpose"*, after *"no clue where to find
+    /// the place to approve"*. Until now the §555 detection could only write a mail that admitted
+    /// **an approve button is not built yet** — so 9 sessions sat neither updatable nor
+    /// re-creatable.</para>
+    ///
+    /// <para>🔒 The dead id is carried in the change list as <c>BackstageId</c> old → (blank), so
+    /// the queue row SHOWS exactly what approving will erase, and the apply can verify it is
+    /// clearing the id it was enqueued against rather than whatever the row holds by then.</para>
+    /// </remarks>
+    public Task<SyncDelta> EnqueueStaleLinkAsync(
+        int eventId, SyncDeltaEntityType entityType, string entityId, string label,
+        string deadExternalId, SessionSyncDirection source, CancellationToken ct = default) =>
+        EnqueueAsync(new SyncDelta
+        {
+            EventId = eventId,
+            EntityType = entityType,
+            EntityId = entityId,
+            EntityLabel = string.IsNullOrWhiteSpace(label) ? "(unnamed)" : label,
+            Source = source,
+            ChangeKind = SyncDeltaChangeKind.StaleLink,
+            Changes = new[] { new SyncFieldChange(FieldBackstageId, deadExternalId, "") },
+        }, ct);
+
     // -------------------------------------------------------------------------
     // READ
     // -------------------------------------------------------------------------
@@ -239,7 +270,9 @@ public sealed class SyncDeltaQueueService
 
         var (applied, emailed, message) = await ApplyAsync(delta, ct);
 
-        if (delta.ChangeKind == SyncDeltaChangeKind.Update && applied)
+        // §559: a StaleLink that actually cleared its id is APPLIED, not merely approved — the write
+        // happened, and the audit section must not show it as a bare acknowledgement.
+        if (applied && delta.ChangeKind is SyncDeltaChangeKind.Update or SyncDeltaChangeKind.StaleLink)
         {
             delta.Status = SyncDeltaStatus.Applied;
             delta.AppliedAt = now;
@@ -335,7 +368,8 @@ public sealed class SyncDeltaQueueService
         sb.Append("</ul>");
         if (pending.Count > 20) sb.Append($"<p>…and {pending.Count - 20} more.</p>");
         sb.Append("<p><a href=\"/Organizer/SyncQueue\">Open the sync approval queue</a></p>");
-        sb.Append("<p>(CEH never auto-applies a sync change or auto-deletes — REQUIREMENTS §59.)</p>");
+        sb.Append("<p>(Stage-3 Zoho session changes auto-apply — §299 OPEN-28; everything else"
+            + " waits for approval here, and CEH never auto-deletes.)</p>");
         return sb.ToString();
     }
 
@@ -379,8 +413,73 @@ public sealed class SyncDeltaQueueService
                 => await ApplySessionUpdateAsync(delta, ct),
             SyncDeltaEntityType.Volunteer when delta.ChangeKind == SyncDeltaChangeKind.Update
                 => await ApplyVolunteerAvailabilityUpdateAsync(delta, ct),
+            // §559 — clearing a dead link. The ONE irreversible act this queue performs.
+            SyncDeltaEntityType.Session when delta.ChangeKind == SyncDeltaChangeKind.StaleLink
+                => await ApplySessionStaleLinkAsync(delta, ct),
             _ => (false, false, $"No apply handler for {delta.EntityType}/{delta.ChangeKind} yet."),
         };
+    }
+
+    /// <summary>
+    /// §559 — APPROVE a stale session link: clear the dead <c>BackstageSessionId</c> so the next
+    /// push pass CREATES the session again.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator: *"i can delete a session and we can resync after you fix it"* and *"reset
+    /// zoho field for the deleted sessions so it recreates again, as the sync approver is still not
+    /// build"* — he was doing this by hand because the button did not exist.</para>
+    ///
+    /// <para>🔒 <b>Approving is a CREATE, and it cannot be undone.</b> The Backstage sessions API
+    /// has no delete, so a wrong clear duplicates the live agenda permanently. Two guards, both
+    /// pinned by test:</para>
+    /// <list type="number">
+    /// <item><b>Clear ONLY the id this row was raised against.</b> If the session has since been
+    /// re-linked to a DIFFERENT id, that id is live — erasing it would duplicate a session that is
+    /// perfectly fine. Time passes between detection and approval, and §553's whole lesson is that
+    /// a stale read must never drive a write.</item>
+    /// <item><b>Already cleared ⇒ report success, change nothing.</b> He may well have done it by
+    /// hand (he has, repeatedly). That is the desired end state, so the row closes cleanly instead
+    /// of failing and leaving him to wonder which of the two acted.</item>
+    /// </list>
+    /// </remarks>
+    private async Task<(bool Applied, bool Emailed, string Message)> ApplySessionStaleLinkAsync(
+        SyncDelta delta, CancellationToken ct)
+    {
+        if (!int.TryParse(delta.EntityId, out var sessionId))
+            return (false, false, $"'{delta.EntityId}' is not a session id.");
+
+        var session = await _db.Sessions.FirstOrDefaultAsync(
+            s => s.Id == sessionId && s.EventId == delta.EventId, ct);
+        if (session is null)
+            return (false, false, "That session no longer exists in CEH.");
+
+        var deadId = delta.Changes.FirstOrDefault(c => c.Field == FieldBackstageId)?.OldValue;
+        if (string.IsNullOrWhiteSpace(deadId))
+            return (false, false, "This item does not record which Backstage id was dead, so nothing was cleared.");
+
+        if (string.IsNullOrWhiteSpace(session.BackstageSessionId))
+        {
+            return (true, false,
+                "The link was already cleared, so nothing needed changing — the session will be "
+                + "re-created on the next push.");
+        }
+
+        // 🔒 Guard 1: a DIFFERENT id means it has been re-linked since this row was raised. That id
+        // is live; clearing it would duplicate a healthy session in the agenda, permanently.
+        if (!string.Equals(session.BackstageSessionId, deadId, StringComparison.OrdinalIgnoreCase))
+        {
+            return (false, false,
+                $"This session now points at a DIFFERENT Backstage id ({session.BackstageSessionId}) "
+                + $"than the dead one this item was raised for ({deadId}). Nothing was cleared — "
+                + "re-creating it could duplicate a session that is currently fine.");
+        }
+
+        session.BackstageSessionId = null;
+        await _db.SaveChangesAsync(ct);
+
+        return (true, false,
+            $"Cleared the dead Backstage link ({deadId}). The session will be CREATED in Backstage "
+            + "on the next push pass.");
     }
 
     /// <summary>
@@ -779,8 +878,12 @@ public sealed class SyncDeltaQueueService
 
         // This IS a participant email — keep it ring-gated (NOT RingExempt). Tag it with the
         // §38e feature key so the sender re-checks the recipient ring as a backstop.
+        // §707.2b — the mail identity (the same const the renderer uses below), so this resolves its own
+        // (mail × role) ring rather than the session-change-alerts FEATURE ring. `EmailCategory` stays
+        // the ledger category; the two are different things.
         var scope = _context?.Set(new EmailContext(
             EmailCategory, eventId, null, fullName,
+            TemplateName: TemplateName,
             FeatureKey: SessionChangeDetectionService.FeatureKey));
         try
         {

@@ -7,6 +7,29 @@
     the cards STILL list with Edit links — there is no "all done, go to hub" dead-end.
     Mobile-first (single column, wraps at ~360px).
 *@
+@*
+    §260: every step link carries ?returnTo=<this Get-Started page> so the step form's
+    "Back" / post-save link returns HERE (via _WizardBackLink) instead of dumping the
+    person on the hub home. The returnTo query survives the form POST because the form
+    action is omitted (posts to the current URL, query included).
+*@
+@{
+    var stepperReturnTo = Context.Request.Path.ToString();
+    // §285: a step URL may carry a #fragment (e.g. /Sponsor/CompanyDetails#logos) so the edit link
+    // jumps to the RIGHT section. The returnTo query MUST go BEFORE the fragment — a "?query" placed
+    // after "#" becomes part of the fragment ("#logos?returnTo=…"), which is not a valid anchor id, so
+    // the browser can't find the section and lands at the top. Split off the fragment, insert the query,
+    // then re-append the fragment.
+    string WithReturn(string url)
+    {
+        if (string.IsNullOrEmpty(url)) return url;
+        var hashIdx = url.IndexOf('#');
+        var basePart = hashIdx >= 0 ? url.Substring(0, hashIdx) : url;
+        var fragment = hashIdx >= 0 ? url.Substring(hashIdx) : string.Empty;
+        var sep = basePart.Contains('?') ? "&" : "?";
+        return basePart + sep + "returnTo=" + Uri.EscapeDataString(stepperReturnTo) + fragment;
+    }
+}
 <div class="card">
     <h1>@Model.Heading</h1>
     <p>@Model.Intro</p>
@@ -29,7 +52,7 @@
     }
     else if (Model.ContinueUrl is not null)
     {
-        <p><a href="@Model.ContinueUrl" class="btn-primary">@Model.ContinueLabel</a></p>
+        <p><a href="@WithReturn(Model.ContinueUrl)" class="btn-primary">@Model.ContinueLabel</a></p>
     }
 </div>
 
@@ -47,7 +70,7 @@
                     <strong>@step.Number. @step.Title</strong>
                     <span class="muted" style="display:block;font-size:13px;">@step.Description</span>
                 </span>
-                <a href="@step.Url"
+                <a href="@WithReturn(step.Url)"
                    class="@(step.Done == true ? "" : "btn-primary")" style="flex:0 0 auto;align-self:center;">
                     @label
                 </a>

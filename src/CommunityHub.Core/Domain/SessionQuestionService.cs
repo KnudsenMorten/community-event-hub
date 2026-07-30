@@ -80,7 +80,7 @@ public sealed class SessionQuestionService
             .AsNoTracking()
             .Include(s => s.Event)
             .Include(s => s.SessionSpeakers).ThenInclude(ss => ss.Participant)
-            .FirstOrDefaultAsync(s => s.PublicToken == trimmed, ct);
+            .FirstOrDefaultAsync(s => s.PublicToken == trimmed && !s.UsedForTesting, ct);
     }
 
     // =====================================================================
@@ -99,7 +99,7 @@ public sealed class SessionQuestionService
         string questionText, string? ipHash, CancellationToken ct = default)
     {
         var session = await _db.Sessions
-            .FirstOrDefaultAsync(s => s.PublicToken == (publicToken ?? string.Empty).Trim(), ct);
+            .FirstOrDefaultAsync(s => s.PublicToken == (publicToken ?? string.Empty).Trim() && !s.UsedForTesting, ct);
         if (session is null) return null;
 
         questionText = (questionText ?? string.Empty).Trim();

@@ -160,6 +160,99 @@
         }
     </div>
 
+    <!-- Appreciation Dinner run-sheet (§326bh) -->
+    <div class="card">
+        <h2>@Localizer["Exports.Dinner"]</h2>
+        <div class="ex-actions ex-no-print">
+            <a class="ex-btn" asp-page="/Organizer/Exports" asp-page-handler="DinnerCsv"
+               aria-label="@Localizer["Exports.DownloadDinner"]">@Localizer["Exports.DownloadCsv"]</a>
+            <a class="ex-btn" asp-page="/Organizer/Exports" asp-page-handler="DinnerXlsx"
+               aria-label="Download the dinner run-sheet as Excel (.xlsx)">Excel (.xlsx)</a>
+        </div>
+        <p class="ex-intro">
+            @string.Format(Localizer["Exports.DinnerSeats"].Value,
+                Model.DinnerHeadcount.Attending, Model.DinnerHeadcount.PlusOnes, Model.DinnerHeadcount.Total)
+        </p>
+        @if (Model.DinnerPeople.Count == 0)
+        {
+            <p class="ex-empty">@Localizer["Exports.NoDinner"]</p>
+        }
+        else
+        {
+            <div class="ex-scroll">
+                <table class="ex-tbl">
+                    <caption>@Localizer["Exports.DinnerWho"]</caption>
+                    <thead>
+                        <tr>
+                            <th scope="col">@Localizer["Exports.Col.Name"]</th>
+                            <th scope="col">@Localizer["Exports.Col.Role"]</th>
+                            <th scope="col">@Localizer["Exports.Col.PlusOnes"]</th>
+                            <th scope="col">@Localizer["Exports.Col.Diet"]</th>
+                            <th scope="col">@Localizer["Exports.Col.Allergens"]</th>
+                            <th scope="col">@Localizer["Exports.Col.OtherRequirements"]</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    @foreach (var d in Model.DinnerPeople)
+                    {
+                        <tr>
+                            <td>@d.Name</td>
+                            <td>@d.Role</td>
+                            <td>@(d.PlusOnes > 0 ? d.PlusOnes.ToString() : null)</td>
+                            <td>@d.Diet</td>
+                            <td>@d.Allergens</td>
+                            <td>@d.OtherRequirements</td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div>
+
+    <!-- Catering dietary roll-up (§326bh) -->
+    <div class="card">
+        <h2>@Localizer["Exports.Dietary"]</h2>
+        <div class="ex-actions ex-no-print">
+            <a class="ex-btn" asp-page="/Organizer/Exports" asp-page-handler="DietaryCsv"
+               aria-label="@Localizer["Exports.DownloadDietary"]">@Localizer["Exports.DownloadCsv"]</a>
+            <a class="ex-btn" asp-page="/Organizer/Exports" asp-page-handler="DietaryXlsx"
+               aria-label="Download the catering dietary roll-up as Excel (.xlsx)">Excel (.xlsx)</a>
+        </div>
+        <p class="ex-note">@Localizer["Exports.DietaryHint"]</p>
+        @if (Model.DietaryHeadcount.Count == 0)
+        {
+            <p class="ex-empty">@Localizer["Exports.NoDietary"]</p>
+        }
+        else
+        {
+            <div class="ex-scroll">
+                <table class="ex-tbl">
+                    <caption>@Localizer["Exports.DietaryCounts"]</caption>
+                    <thead>
+                        <tr>
+                            <th scope="col">@Localizer["Exports.Col.Occasion"]</th>
+                            <th scope="col">@Localizer["Exports.Col.Kind"]</th>
+                            <th scope="col">@Localizer["Exports.Col.Item"]</th>
+                            <th scope="col">@Localizer["Exports.Col.Count"]</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    @foreach (var r in Model.DietaryHeadcount)
+                    {
+                        <tr>
+                            <td>@r.Occasion</td>
+                            <td>@r.Kind</td>
+                            <td>@r.Item</td>
+                            <td>@r.Count</td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div>
+
     <!-- Room / session sheets -->
     <div class="card">
         <h2>@Localizer["Exports.Rooms"]</h2>

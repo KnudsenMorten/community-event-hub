@@ -18,7 +18,9 @@ namespace CommunityHub.Core.Tests.Scenario;
 ///    re-classified a speaker),
 ///  - skip + report a speaker with no email (can't log in without one),
 ///  - never delete anyone,
-///  - send the welcome mail only to genuinely NEW speakers.
+///  - land genuinely NEW speakers as PRESELECTED + uncategorized (§299 6.1: the
+///    activation hard gate — no welcome mail until an organizer categorizes and
+///    activates them).
 ///
 /// The JSON fixture mirrors a real Sessionize "Speakers" view response with the
 /// "speaker emails" advanced field enabled. NO real Sessionize id, customer or
@@ -77,15 +79,21 @@ public sealed class SessionizeImportScenarioTests
         Assert.Contains(result.Warnings, w => w.Contains("No Email"));
         Assert.Contains(result.Warnings, w => w.Contains("speaker emails"));
 
-        // The new speaker is now a Participant with Speaker role.
+        // The new speaker is now a Participant with Speaker role — landed as
+        // PRESELECTED, not active (§299 6.1): the activation hard gate holds them
+        // in the pre-selection queue until an organizer sets their SpeakerCategory.
         var created = await db.Participants.SingleAsync(
             p => p.Email == "newly.accepted@example.test");
         Assert.Equal(ParticipantRole.Speaker, created.Role);
-        Assert.True(created.IsActive);
+        Assert.False(created.IsActive);
+        Assert.Equal(ParticipantLifecycleState.Preselected, created.LifecycleState);
+        // A profile exists but is UNCATEGORIZED — the organizer classifies it on review.
+        var profile = await db.SpeakerProfiles.SingleAsync(s => s.ParticipantId == created.Id);
+        Assert.Null(profile.Category);
 
-        // Welcome mail went ONLY to the new speaker (idempotent, never re-welcomes).
-        Assert.Single(sender.Sent);
-        Assert.Equal("newly.accepted@example.test", sender.Sent[0].To);
+        // §299 6.1: no welcome mail at import time — the new speaker is not active
+        // yet, so the welcome/onboarding flows fire at ACTIVATION instead.
+        Assert.Empty(sender.Sent);
     }
 
     [Fact]
@@ -127,6 +135,8 @@ public sealed class SessionizeImportScenarioTests
         Assert.Equal(countBefore + 1, await db.Participants.CountAsync(p => p.EventId == seed.EventId));
         Assert.Equal(1, first.Created);
         Assert.Equal(0, second.Created);
-        Assert.Single(sender.Sent); // welcome sent once, never again
+        // §299 6.1: the new speaker lands Preselected (not active), so no welcome is
+        // sent at import time on EITHER run — welcomes/onboarding fire at activation.
+        Assert.Empty(sender.Sent);
     }
 }

@@ -100,17 +100,17 @@ public sealed class FormsUxBatchTests
         db.Participants.Add(p);
         await db.SaveChangesAsync();
 
-        // FEATURE B: the self-service forms are entitlement-gated. A SUPPORTED speaker
-        // is entitled to the full appreciation set (hotel/swag/lunch/dinner/travel), so
-        // these UX/validation tests exercise the forms as an eligible participant. The
-        // entitlement DENY paths are covered separately in FormEntitlementGateTests.
+        // FEATURE B: the self-service forms are entitlement-gated. A COMMUNITY-category
+        // speaker is entitled to the full appreciation set (hotel/swag/lunch/dinner/
+        // travel), so these UX/validation tests exercise the forms as an eligible
+        // participant. The entitlement DENY paths are covered separately in
+        // FormEntitlementGateTests.
         if (role == ParticipantRole.Speaker)
         {
             db.SpeakerProfiles.Add(new SpeakerProfile
             {
                 EventId = EventId, ParticipantId = p.Id,
-                SpeakerFunding = SpeakerFunding.Supported,
-                SpeakingPreDay = true, SpeakingMainDay = true,
+                Category = SpeakerCategory.Community,
             });
             await db.SaveChangesAsync();
         }
@@ -131,7 +131,6 @@ public sealed class FormsUxBatchTests
     private static HotelModel NewHotel(CommunityHubDbContext db, HttpContext http) =>
         new HotelModel(
             new HotelFormService(db, new FixedClock(),
-                new HotelCalendarInviter(new NoOpEmailSender(), Options.Create(new EmailOptions())),
                 new OrganizerActionItemService(db, new FixedClock()),
                 Loc(), NullLogger<HotelFormService>.Instance),
             Accessor(http))

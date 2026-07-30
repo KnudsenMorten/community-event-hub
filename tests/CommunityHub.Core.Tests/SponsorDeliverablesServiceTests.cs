@@ -83,7 +83,8 @@ public sealed class SponsorDeliverablesServiceTests
         Assert.Contains(d.DoneStages, s => s.Key == "tasks");
         Assert.Contains(d.MissingStages, s => s.Key == "onboarding");
         Assert.Contains(d.MissingStages, s => s.Key == "logo");
-        Assert.Equal(SponsorDeliverablesService.CompanyDetailsLink,
+        // §297: onboarding deep-links to the #company section of Company Details (not the page top).
+        Assert.Equal(SponsorDeliverablesService.CompanyDetailsLink + "#company",
             d.Stages.Single(s => s.Key == "onboarding").FixLink);
     }
 

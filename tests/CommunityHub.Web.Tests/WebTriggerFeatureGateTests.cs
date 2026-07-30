@@ -88,7 +88,9 @@ public sealed class WebTriggerFeatureGateTests
 
     // ---- Sessionize import page ('sessionize-import') ----------------------
 
-    private static SessionizeImportModel NewSessionizeImport(CommunityHubDbContext db, HttpContext http)
+    private static SessionizeImportModel NewSessionizeImport(
+        CommunityHubDbContext db, HttpContext http,
+        CommunityHub.Core.Reminders.ISessionizeApiImportService? apiImport = null)
     {
         // API options enabled so the gate (not the config) is what stops the run.
         var apiOptions = new CommunityHub.Core.Integrations.SessionizeApiOptions
@@ -96,11 +98,39 @@ public sealed class WebTriggerFeatureGateTests
             Enabled = true, EndpointId = "endpoint-x",
         };
         return new SessionizeImportModel(
-            Accessor(http), apiImport: null!, preview: null!,
+            Accessor(http), apiImport: apiImport!, preview: null!,
             apiOptions, new FeatureGateService(db), new RingResolver(db))
         {
             PageContext = new PageContext { HttpContext = (DefaultHttpContext)http },
         };
+    }
+
+    /// <summary>
+    /// §198 fake: records the on-demand delta import call and returns canned counts +
+    /// a skipped reason, so the page test can prove the handler ran the SAME service the
+    /// timer job runs (delta, never emails) and rendered the result.
+    /// </summary>
+    private sealed class RecordingApiImport : CommunityHub.Core.Reminders.ISessionizeApiImportService
+    {
+        public int Calls { get; private set; }
+        public bool? LastSendWelcome { get; private set; }
+        public CommunityHub.Core.Reminders.SessionizeImportMode? LastMode { get; private set; }
+
+        public Task<CommunityHub.Core.Reminders.SessionizeImportResult> ImportAsync(
+            int eventId,
+            CancellationToken ct = default,
+            bool sendWelcome = false,
+            CommunityHub.Core.Reminders.SessionizeImportMode mode =
+                CommunityHub.Core.Reminders.SessionizeImportMode.Delta)
+        {
+            Calls++;
+            LastSendWelcome = sendWelcome;
+            LastMode = mode;
+            return Task.FromResult(new CommunityHub.Core.Reminders.SessionizeImportResult(
+                Fetched: 5, Created: 2, Updated: 1, Skipped: 2,
+                Warnings: new[] { "Skipped \"No Email Speaker\" — no email on the Sessionize view." },
+                Error: null));
+        }
     }
 
     [Fact]
@@ -132,27 +162,66 @@ public sealed class WebTriggerFeatureGateTests
             () => model.OnPostApiAsync(CancellationToken.None));
     }
 
-    // ---- Speakers page Excel import ('sessionize-import') ------------------
-
+    // §198: the on-demand "Sync new speakers (delta)" button runs the SAME import the
+    // timer job runs, in-request, never emails, and renders read/created/updated/skipped
+    // counts + skipped reasons.
     [Fact]
-    public async Task Speakers_excel_import_noops_when_feature_disabled()
+    public async Task Sessionize_force_sync_runs_import_in_request_and_renders_counts()
     {
         using var db = NewDb();
+        await EnableAsync(db, "sessionize-import");
         var http = OrganizerContext();
-        var model = new SpeakersModel(
-            db, Accessor(http), new FixedClock(),
-            new CommunityHub.Core.Organizer.SpeakerDeletionService(db),
-            new FeatureGateService(db))
+        var fake = new RecordingApiImport();
+        var model = NewSessionizeImport(db, http, fake);
+
+        var result = await model.OnPostApiAsync(CancellationToken.None);
+
+        Assert.IsType<PageResult>(result);
+        // Ran the import service exactly once, synchronously in-request, as a DELTA that
+        // never sends welcome emails (the §198 safety).
+        Assert.Equal(1, fake.Calls);
+        Assert.Equal(false, fake.LastSendWelcome);
+        Assert.Equal(CommunityHub.Core.Reminders.SessionizeImportMode.Delta, fake.LastMode);
+        // Result is surfaced for rendering: read/created/updated/skipped + skipped reasons.
+        Assert.NotNull(model.Result);
+        Assert.Null(model.Result!.Error);
+        Assert.Equal(5, model.Result.Fetched);
+        Assert.Equal(2, model.Result.Created);
+        Assert.Equal(1, model.Result.Updated);
+        Assert.Equal(2, model.Result.Skipped);
+        Assert.Contains(model.Result.Warnings, w => w.Contains("no email"));
+        Assert.False(model.ResultWasFullImport);   // delta, not full
+        Assert.Null(model.ValidationError);
+    }
+
+    [Fact]
+    public async Task Sessionize_force_sync_shows_not_configured_when_api_disabled()
+    {
+        using var db = NewDb();
+        await EnableAsync(db, "sessionize-import");
+        var http = OrganizerContext();
+        var fake = new RecordingApiImport();
+        // API options disabled ⇒ ApiEnabled is false ⇒ existing not-configured message.
+        var model = new SessionizeImportModel(
+            Accessor(http), apiImport: fake, preview: null!,
+            new CommunityHub.Core.Integrations.SessionizeApiOptions { Enabled = false },
+            new FeatureGateService(db), new RingResolver(db))
         {
             PageContext = new PageContext { HttpContext = http },
         };
 
-        var result = await model.OnPostImportXlsxAsync(CancellationToken.None);
+        var result = await model.OnPostApiAsync(CancellationToken.None);
 
         Assert.IsType<PageResult>(result);
-        Assert.NotNull(model.Error);
-        Assert.Contains("turned off", model.Error!);
+        Assert.Equal(0, fake.Calls);             // never reached the import service
+        Assert.Null(model.Result);
+        Assert.NotNull(model.ValidationError);
+        Assert.Contains("not configured", model.ValidationError!);
     }
+
+    // §197: the legacy Speakers-page Excel/xlsx import (and its feature gate) was
+    // removed — speakers come from the Sessionize API import only — so the former
+    // "Speakers_excel_import_noops_when_feature_disabled" test was dropped with it.
 
     // ---- Sponsor leads "sync now" ('sponsor-leads') -----------------------
 
@@ -166,7 +235,12 @@ public sealed class WebTriggerFeatureGateTests
     private static CommunityHub.Pages.Organizer.SponsorAdmin.LeadsModel NewLeads(
         CommunityHubDbContext db, HttpContext http) =>
         new(db, Accessor(http), keys: null!, detTokens: null!, sync: null!,
-            emailSender: null!, new FixedClock(), new FeatureGateService(db))
+            emailSender: null!, new FixedClock(), new FeatureGateService(db),
+            // Company Manager lookups are disabled (Enabled=false default) — the
+            // handlers under test never call the client, so a null client is safe.
+            cm: null!, cmOptions: new CommunityHub.Core.Integrations.CompanyManagerOptions(),
+            logger: Microsoft.Extensions.Logging.Abstractions.NullLogger<
+                CommunityHub.Pages.Organizer.SponsorAdmin.LeadsModel>.Instance)
         {
             PageContext = new PageContext { HttpContext = http },
             TempData = new Microsoft.AspNetCore.Mvc.ViewFeatures.TempDataDictionary(

@@ -78,9 +78,18 @@ public class PreselectionQueueModel : PageModel
 
         var result = await _activation.ActivateAndOnboardAsync(
             me.EventId, new[] { participantId }, ct);
-        var msg = result.Queue.Changed == 1
-            ? $"Participant activated, {result.OnboardingEmailsSent} onboarding email(s) sent."
-            : "No change (already at or beyond that state).";
+        string msg;
+        if (result.Queue.RefusedUncategorizedSpeakerIds.Contains(participantId))
+        {
+            // §299 6.1 hard gate: an uncategorized speaker cannot be activated.
+            msg = PreselectionQueueService.UncategorizedSpeakerMessage;
+        }
+        else
+        {
+            msg = result.Queue.Changed == 1
+                ? $"Participant activated, {result.OnboardingEmailsSent} onboarding email(s) sent."
+                : "No change (already at or beyond that state).";
+        }
         return RedirectToPage(new { SourceFilter, Msg = msg });
     }
 
@@ -104,10 +113,17 @@ public class PreselectionQueueModel : PageModel
         var result = await _activation.ActivateAndOnboardAsync(me.EventId, SelectedIds, ct);
         var q = result.Queue;
         var skipped = q.Skipped(requested);
+        var refused = q.RefusedUncategorizedSpeakerIds.Count;
+        var alreadyThere = q.Matched - q.Changed - refused;
         var msg = $"{q.Changed} row(s) activated"
-            + (q.Matched - q.Changed > 0 ? $", {q.Matched - q.Changed} already there" : string.Empty)
+            + (alreadyThere > 0 ? $", {alreadyThere} already there" : string.Empty)
             + (skipped > 0 ? $", {skipped} not found" : string.Empty)
-            + $", {result.OnboardingEmailsSent} onboarding email(s) sent.";
+            + $", {result.OnboardingEmailsSent} onboarding email(s) sent."
+            // §299 6.1 hard gate: uncategorized speakers in the batch are refused.
+            + (refused > 0
+                ? $" {refused} speaker(s) NOT activated: "
+                  + PreselectionQueueService.UncategorizedSpeakerMessage
+                : string.Empty);
         return RedirectToPage(new { SourceFilter, Msg = msg });
     }
 
@@ -125,15 +141,28 @@ public class PreselectionQueueModel : PageModel
         if (me is null) return RedirectToPage("/Login");
         if (!OrganizerAuth.IsRealOrganizer(me)) return Forbid();
 
-        var hard = await _deletion.HardDeleteAsync(me.EventId, participantId, ct);
-        string msg = hard.Status switch
+        // §253 G15: the dependents cleanup at the DbContext seam removes the old FK
+        // holes (PartyRsvp / volunteer availability), but any FUTURE Restrict FK not
+        // yet probed must degrade to the safe fallback (deactivate), never a 500.
+        string msg;
+        try
         {
-            ParticipantDeletionService.DeletionStatus.HardDeleted =>
-                $"{hard.FullName} was removed from the queue.",
-            ParticipantDeletionService.DeletionStatus.NotFound =>
-                "That row could not be found in this edition.",
-            _ => await DeactivateFallbackAsync(me.EventId, participantId, hard, ct),
-        };
+            var hard = await _deletion.HardDeleteAsync(me.EventId, participantId, ct);
+            msg = hard.Status switch
+            {
+                ParticipantDeletionService.DeletionStatus.HardDeleted =>
+                    $"{hard.FullName} was removed from the queue.",
+                ParticipantDeletionService.DeletionStatus.NotFound =>
+                    "That row could not be found in this edition.",
+                _ => await DeactivateFallbackAsync(me.EventId, participantId, hard, ct),
+            };
+        }
+        catch (Microsoft.EntityFrameworkCore.DbUpdateException)
+        {
+            var soft = await _deletion.DeactivateAsync(me.EventId, participantId, ct);
+            msg = $"{soft.FullName} has linked data, so they were deactivated "
+                  + "instead of permanently removed.";
+        }
         return RedirectToPage(new { SourceFilter, Msg = msg });
     }
 

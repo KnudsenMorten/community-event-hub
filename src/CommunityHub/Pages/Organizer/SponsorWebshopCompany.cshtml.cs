@@ -99,6 +99,9 @@ public class SponsorWebshopCompanyModel : PageModel
         var me = Guard();
         if (_participant.Current is null) return RedirectToPage("/Login");
         if (me is null) return Page();
+        // Writes require a REAL organizer — acting-as / secretary sessions carry
+        // Role==Organizer but must never mutate (§234 / OrganizerAuth).
+        if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
         if (!_cmOptions.Enabled) { NotConfigured = true; return Page(); }
 
         // What's the coordinator BEFORE the save? (to detect a change for the cascade)
@@ -187,6 +190,16 @@ public class SponsorWebshopCompanyModel : PageModel
         }
     }
 
+    /// <summary>
+    /// The company PICKER. §443: this is a display list, so its labels come from CEH SQL in ONE
+    /// query. It used to call Company Manager once per company purely to label a drop-down, which
+    /// is what made this page ~7 s.
+    ///
+    /// <para>The per-company EDIT load (<see cref="LoadCompanyAsync"/>) stays live on purpose —
+    /// it reads the editable CM fields (website, LinkedIn, notes, signer/coordinator ids) that
+    /// CEH does not hold, for the ONE company being edited, on a page whose whole job is writing
+    /// them back. That is a genuine CM surface, not a lookup.</para>
+    /// </summary>
     private async Task LoadCompanyListAsync(int eventId, CancellationToken ct)
     {
         var ids = await _db.SponsorInfos
@@ -195,21 +208,12 @@ public class SponsorWebshopCompanyModel : PageModel
             .Distinct()
             .ToListAsync(ct);
 
-        foreach (var id in ids.OrderBy(x => x))
-        {
-            var name = id;
-            if (int.TryParse(id, out var cid))
-            {
-                try
-                {
-                    var c = await _cm.GetCompanyAsync(cid, ct);
-                    if (c is not null) name = !string.IsNullOrWhiteSpace(c.PublicName) ? c.PublicName : c.Name;
-                }
-                catch (Exception ex) { _log.LogWarning(ex, "Webshop mgmt: name lookup failed for {Co}.", id); }
-            }
-            Companies.Add(new CompanyPick(id, name));
-        }
-        Companies = Companies.OrderBy(c => c.Name).ToList();
+        var names = await SponsorCompanyNameService.ResolveFromLocalAsync(_db, eventId, ids, ct);
+        Companies = ids
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Select(id => new CompanyPick(id, names.TryGetValue(id, out var n) ? n : id))
+            .OrderBy(c => c.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
     }
 
     private async Task LoadCompanyAsync(int companyId, CancellationToken ct)

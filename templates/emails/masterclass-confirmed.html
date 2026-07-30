@@ -1,27 +1,26 @@
-Subject: You're confirmed: {{masterClassTitle}}
+Subject: You're confirmed: {{masterClassTitle}} — important details inside
 <p style="margin:0 0 16px;">Hi {{firstName}},</p>
 <p style="margin:0 0 16px;">Your Master Class place is <strong>confirmed</strong>: <strong>{{masterClassTitle}}</strong> at <strong>{{eventDisplayName}}{{eventCodeParens}}</strong>.</p>
-<p style="margin:0 0 16px;">Your Master Class page has everything you need to get ready — what to expect, what to bring, things to set up in advance, the group Q&amp;A, and a way to ask the speakers a private question.</p>
-<table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:8px 0 20px;"><tr>
+<p style="margin:0 0 16px;">Your Master Class page has everything you need to get ready — what to expect, what to bring, things to set up in advance, and a shared Q&amp;A where you can ask the speaker a question and see what other attendees have asked.</p>
+<!-- 369: the two CTAs pointed at the SAME page, so they are merged into one button and one
+     paragraph (operator 2026-07-26). -->
+<p style="margin:0 0 16px;">It is also where you can give up your seat (so a waitlisted attendee can take it) or join the waitlist for another Master Class, any time.</p>
+<table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:8px 0 6px;"><tr>
   <td align="center">
-    <table role="presentation" cellpadding="0" cellspacing="0"><tr>
-      <td style="background-color:{{brandColor}};border-radius:6px;">
-        <a href="{{landingPageUrl}}" style="display:inline-block;padding:14px 30px;color:#ffffff;font-size:16px;font-weight:bold;text-decoration:none;">Open my Master Class page</a>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
+      <td align="center">
+        <!--[if mso]>
+        <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="{{hubUrl}}/MasterClassPage/{{masterClassSessionId}}" style="height:52px;v-text-anchor:middle;width:351px;" arcsize="50%" stroke="f" fillcolor="#1565c0">
+          <w:anchorlock/>
+          <center style="color:#ffffff;font-family:Aptos,'Segoe UI',Arial,sans-serif;font-size:16px;font-weight:bold;">Open my Master Class page</center>
+        </v:roundrect>
+        <![endif]-->
+        <!--[if !mso]><!-- -->
+        <a href="{{hubUrl}}/MasterClassPage/{{masterClassSessionId}}" style="background-color:#1565c0;border-radius:999px;color:#ffffff;display:inline-block;font-family:Aptos,'Segoe UI',Arial,sans-serif;font-size:16px;font-weight:700;line-height:52px;text-align:center;text-decoration:none;width:351px;-webkit-text-size-adjust:none;">Open my Master Class page</a>
+        <!--<![endif]-->
       </td>
     </tr></table>
   </td>
 </tr></table>
-<p style="margin:6px 0 16px;color:#6b7280;font-size:13px;text-align:center;">(Log in with your email, if prompted)</p>
-<p style="margin:0 0 16px;"><a href="{{icsUrl}}">Add it to your calendar (.ics)</a>.</p>
-<p style="margin:0 0 16px;">Plans changed? On your self-service page you can give up your seat (so a waitlisted attendee can take it) or join a waitlist for another Master Class — and choose a calendar reminder about a month before the event:</p>
-<table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:8px 0 20px;"><tr>
-  <td align="center">
-    <table role="presentation" cellpadding="0" cellspacing="0"><tr>
-      <td style="background-color:{{brandColor}};border-radius:6px;">
-        <a href="{{selfServiceUrl}}" style="display:inline-block;padding:14px 30px;color:#ffffff;font-size:16px;font-weight:bold;text-decoration:none;">Manage my seat &amp; waitlist</a>
-      </td>
-    </tr></table>
-  </td>
-</tr></table>
-<p style="margin:6px 0 16px;color:#6b7280;font-size:13px;text-align:center;">(Log in with your email, if prompted)</p>
+<p style="margin:0 0 16px;color:#6b7280;font-size:13px;text-align:center;">(the button signs you in automatically — no password needed)</p>
 <p style="margin:16px 0 0;color:#6b7280;font-size:14px;">Questions? Email <a href="mailto:{{supportEmail}}">{{supportEmail}}</a>.</p>

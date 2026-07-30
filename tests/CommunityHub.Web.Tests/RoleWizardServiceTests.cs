@@ -102,8 +102,9 @@ public sealed class RoleWizardServiceTests
         var (db, ev, pid) = await SeedAsync(ParticipantRole.Volunteer);
         var view = await Wizard(db).BuildAsync(ev, pid);
 
-        // §109 signal (volunteers are in scope) + §164 party (staff role) + §119 accept
-        // (always last) close the list.
+        // §109 signal (volunteers are in scope) + §164 party (staff role) + §119 accept close the
+        // ANSWERABLE steps; §400 "deadlines" — the read-only summary of what lives OUTSIDE the
+        // wizard — is genuinely last.
         Assert.Equal(
             new[] { "profile", "availability", "hotel", "dinner", "lunch", "swag", "signal", "party", "accept" },
             view.Steps.Select(s => s.Key).ToArray());
@@ -127,9 +128,11 @@ public sealed class RoleWizardServiceTests
         var (db, ev, pid) = await SeedAsync(ParticipantRole.Media);
         var view = await Wizard(db).BuildAsync(ev, pid);
 
-        // Media is broadcast-only in scope for §109 signal; §119 accept always closes.
+        // Media is broadcast-only in scope for §109 signal; §206 added the party step for
+        // Media; §119 accept closes the ANSWERABLE steps, then §400 "deadlines" summarises what
+        // lives outside the wizard.
         Assert.Equal(
-            new[] { "profile", "hotel", "dinner", "lunch", "swag", "signal", "accept" },
+            new[] { "profile", "hotel", "dinner", "lunch", "swag", "signal", "party", "accept" },
             view.Steps.Select(s => s.Key).ToArray());
         Assert.DoesNotContain(view.Steps, s => s.Key == "travel");
     }
@@ -157,14 +160,14 @@ public sealed class RoleWizardServiceTests
     }
 
     [Fact]
-    public async Task Multi_hat_volunteer_plus_supported_speaker_gets_hotel_swag_travel()
+    public async Task Multi_hat_volunteer_plus_community_speaker_gets_hotel_swag_travel()
     {
-        // A supported-speaker hat grants Hotel, TravelReimbursement, Swag, etc. — so a
-        // volunteer who also speaks (supported) MUST get hotel/travel steps via the
-        // speaker hat (§44a — entitlement is the union across hats).
+        // A Community-category speaker hat grants Hotel, TravelReimbursement, Swag,
+        // etc. — so a volunteer who also speaks (Community) MUST get hotel/travel
+        // steps via the speaker hat (§44a — entitlement is the union across hats).
         var (db, ev, pid) = await SeedAsync(
             ParticipantRole.Volunteer,
-            new SpeakerProfile { SpeakerFunding = SpeakerFunding.Supported, SpeakingMainDay = true });
+            new SpeakerProfile { Category = SpeakerCategory.Community });
 
         var view = await Wizard(db).BuildAsync(ev, pid);
 
@@ -177,37 +180,40 @@ public sealed class RoleWizardServiceTests
     }
 
     [Fact]
-    public async Task Self_funded_speaker_hat_grants_dinner_and_lunch_but_not_hotel_or_travel()
+    public async Task Sponsor_category_speaker_hat_grants_dinner_and_lunch_but_not_hotel_or_travel()
     {
-        // §44a: a SELF-FUNDED speaker hat grants the appreciation dinner + main-day
-        // lunch only — NOT hotel or travel. Proven here on the shared entitlement
+        // §44a: a SPONSOR-category speaker hat grants the appreciation dinner +
+        // lunches only — NOT hotel or travel. Proven here on the shared entitlement
         // gating the generic wizard uses (the role-44 example a sponsor+speaker must
         // get the dinner step but no hotel; the sponsor wizard is bespoke, but this
-        // pins the same self-funded-speaker rule the gating relies on).
+        // pins the same sponsor-category rule the gating relies on).
         var (db, ev, pid) = await SeedAsync(
             ParticipantRole.Volunteer,
-            new SpeakerProfile { SpeakerFunding = SpeakerFunding.SponsorSelfFunded, SpeakingMainDay = true });
+            new SpeakerProfile { Category = SpeakerCategory.Sponsor });
 
         var view = await Wizard(db).BuildAsync(ev, pid);
 
-        Assert.Contains(view.Steps, s => s.Key == "dinner");   // self-funded speaker hat + volunteer hat
+        Assert.Contains(view.Steps, s => s.Key == "dinner");   // sponsor-category speaker hat + volunteer hat
         Assert.Contains(view.Steps, s => s.Key == "lunch");    // main-day lunch
         Assert.DoesNotContain(view.Steps, s => s.Key == "travel");  // neither hat grants travel
         // Hotel is NOW present via the VOLUNTEER hat (operator 2026-06-26: volunteers
-        // are hotel-entitled). The self-funded SPEAKER hat itself grants no hotel —
+        // are hotel-entitled). The sponsor-category SPEAKER hat itself grants no hotel —
         // that rule is pinned separately by
-        // OrderEntitlementsTests.SponsorSelfFunded_speaker_gets_dinner_and_main_lunch_only.
+        // OrderEntitlementsTests.Sponsor_category_speaker_gets_dinner_and_both_lunches.
         Assert.Contains(view.Steps, s => s.Key == "hotel");
     }
 
     [Fact]
     public async Task Accept_step_is_always_present_and_last_for_every_role()
     {
-        // §119: the Code of Conduct + Privacy "I accept" step applies across roles and
-        // is always the final step.
+        // §119: the Code of Conduct + Privacy "I accept" step applies across roles and is the last
+        // step that ASKS anything. §400 appended a read-only "deadlines" summary after it — which
+        // is why this pins the last-answerable step rather than the last element.
         var (db, ev, pid) = await SeedAsync(ParticipantRole.Organizer);
         var view = await Wizard(db).BuildAsync(ev, pid);
 
+        // §410: with no task outside the wizard, the deadlines step is not offered, so accept is
+        // once again genuinely last.
         Assert.Equal("accept", view.Steps[^1].Key);
         Assert.Equal("/Forms/Accept", view.Steps[^1].Route);
     }
@@ -251,10 +257,10 @@ public sealed class RoleWizardServiceTests
     }
 
     [Fact]
-    public async Task Party_step_is_present_for_staff_roles_but_not_media()
+    public async Task Party_step_is_present_for_all_crew_roles_including_media()
     {
-        // §164: Volunteer / Organizer / EventPartner get the party step; Media does NOT
-        // (the operator's party-task role list excludes Media).
+        // §164/§206: Volunteer / Organizer / EventPartner AND (new in §206) Media all get
+        // the party Get-Started step.
         var (dbV, evV, pidV) = await SeedAsync(ParticipantRole.Volunteer);
         Assert.Contains((await Wizard(dbV).BuildAsync(evV, pidV)).Steps, s => s.Key == "party");
 
@@ -265,7 +271,7 @@ public sealed class RoleWizardServiceTests
         Assert.Contains((await Wizard(dbE).BuildAsync(evE, pidE)).Steps, s => s.Key == "party");
 
         var (dbM, evM, pidM) = await SeedAsync(ParticipantRole.Media);
-        Assert.DoesNotContain((await Wizard(dbM).BuildAsync(evM, pidM)).Steps, s => s.Key == "party");
+        Assert.Contains((await Wizard(dbM).BuildAsync(evM, pidM)).Steps, s => s.Key == "party");
     }
 
     [Fact]

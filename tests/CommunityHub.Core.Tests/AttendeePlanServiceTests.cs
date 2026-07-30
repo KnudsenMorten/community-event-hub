@@ -220,90 +220,9 @@ public sealed class AttendeePlanServiceTests
         Assert.Equal(0, plan.ScheduledCount);
     }
 
-    // --- Calendar export (.ics) --------------------------------------------
-
-    [Fact]
-    public async Task Plan_ics_emits_one_vevent_per_scheduled_saved_talk_with_stable_uid()
-    {
-        using var db = TestDb.New();
-        var s = await SeedAsync(db);
-        var svc = Svc(db);
-
-        // Save two scheduled talks + the unscheduled one (which must be excluded).
-        await svc.ToggleAsync(s.EventId, s.AliceId, s.TalkA);
-        await svc.ToggleAsync(s.EventId, s.AliceId, s.TalkB);
-        await svc.ToggleAsync(s.EventId, s.AliceId, s.Unscheduled);
-
-        var ics = await svc.BuildPlanIcsAsync(
-            s.EventId, s.AliceId, "Alice Adams", "alice@example.test", "hub.test");
-
-        Assert.NotNull(ics);
-        Assert.StartsWith("BEGIN:VCALENDAR", ics);
-        Assert.Contains("METHOD:PUBLISH", ics);
-        // Exactly two events (the unscheduled talk has no time → not on the calendar).
-        Assert.Equal(2, CountOccurrences(ics!, "BEGIN:VEVENT"));
-        // Stable, plan-scoped UIDs so a re-download updates rather than duplicates.
-        Assert.Contains($"UID:plan-session:{s.TalkA}@hub.test", ics);
-        Assert.Contains($"UID:plan-session:{s.TalkB}@hub.test", ics);
-        Assert.DoesNotContain($"plan-session:{s.Unscheduled}@", ics);
-        // Title (summary), room (location), and a same-day pop-up alarm.
-        Assert.Contains("SUMMARY:Alpha Talk", ics);
-        Assert.Contains("LOCATION:Room A", ics);
-        Assert.Contains("BEGIN:VALARM", ics);
-        Assert.Contains("TRIGGER:-P0D", ics);
-        // The owner resolves to the signed-in participant (their own plan).
-        Assert.Contains("alice@example.test", ics);
-    }
-
-    [Fact]
-    public async Task Plan_ics_is_null_when_no_scheduled_talks()
-    {
-        using var db = TestDb.New();
-        var s = await SeedAsync(db);
-        var svc = Svc(db);
-
-        // Empty plan → nothing to export.
-        Assert.Null(await svc.BuildPlanIcsAsync(
-            s.EventId, s.AliceId, "Alice", "alice@example.test", "hub.test"));
-
-        // A plan with ONLY an unscheduled talk → still nothing to put on a calendar.
-        await svc.ToggleAsync(s.EventId, s.AliceId, s.Unscheduled);
-        Assert.Null(await svc.BuildPlanIcsAsync(
-            s.EventId, s.AliceId, "Alice", "alice@example.test", "hub.test"));
-    }
-
-    [Fact]
-    public async Task Plan_ics_is_own_row_scoped()
-    {
-        using var db = TestDb.New();
-        var s = await SeedAsync(db);
-        var svc = Svc(db);
-
-        // Alice saves a scheduled talk; Bob saved nothing.
-        await svc.ToggleAsync(s.EventId, s.AliceId, s.TalkA);
-
-        var alice = await svc.BuildPlanIcsAsync(
-            s.EventId, s.AliceId, "Alice", "alice@example.test", "hub.test");
-        var bob = await svc.BuildPlanIcsAsync(
-            s.EventId, s.BobId, "Bob", "bob@example.test", "hub.test");
-
-        Assert.NotNull(alice);
-        Assert.Contains("Alpha Talk", alice!);
-        // Bob's export never carries Alice's saved talk (and is null — he saved nothing).
-        Assert.Null(bob);
-    }
-
-    private static int CountOccurrences(string haystack, string needle)
-    {
-        var count = 0;
-        var i = 0;
-        while ((i = haystack.IndexOf(needle, i, StringComparison.Ordinal)) >= 0)
-        {
-            count++;
-            i += needle.Length;
-        }
-        return count;
-    }
+    // §193: the "download my plan as .ics" export (BuildPlanIcsAsync) was removed,
+    // so its tests are gone too — attendees receive e-mailed calendar invitations
+    // (CalendarInviteEmailService) rather than downloading a calendar file.
 
     // --- Pure builder (no DbContext) ---------------------------------------
 

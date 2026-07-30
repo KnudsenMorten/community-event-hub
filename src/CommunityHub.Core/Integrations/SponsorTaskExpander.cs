@@ -10,7 +10,9 @@ public sealed record SponsorTask(
     string Description,
     BoothTier Tier,
     bool Mandatory,
-    SponsorTaskUploadDefinition? Upload);
+    SponsorTaskUploadDefinition? Upload,
+    /// <summary>§648 — the wizard step that completes this task, or null.</summary>
+    string? Form = null);
 
 /// <summary>
 /// Expands a classified sponsor product into the concrete task list, using the
@@ -95,12 +97,29 @@ public sealed class SponsorTaskExpander
 
                 var due = ResolveDeadline(
                     def.Deadline, rules, eventDate, firstOrderDate, today);
-                tasks.Add(new SponsorTask(def.Title, due, def.Deadline, def.Description, cls.Tier, def.Mandatory, def.Upload));
+                tasks.Add(new SponsorTask(def.Title, due, def.Deadline, def.Description, cls.Tier, def.Mandatory, def.Upload, def.Form));
             }
         }
 
         return tasks;
     }
+
+    /// <summary>
+    /// Resolve one named deadline rule to a concrete date — the SAME rules the JSON task sets use.
+    /// </summary>
+    /// <remarks>
+    /// 🔒 §684.11 — a migrated definition's <c>TaskDue.FromConfig</c> resolves through THIS method,
+    /// not a reimplementation. The deadline SOURCE is being unified; the deadline RULES are not
+    /// changing, and the dates stay per-edition config. A second copy of <c>eventMinus</c> /
+    /// <c>contractPlus</c> arithmetic is how a migrated task would quietly acquire a due date one
+    /// day off the one its reminders were already built around.
+    /// </remarks>
+    public DateOnly? ResolveDeadlineRule(
+        string ruleName,
+        DateOnly eventDate,
+        DateOnly? firstOrderDate,
+        DateOnly today) =>
+        ResolveDeadline(ruleName, _config.DeadlineRules(), eventDate, firstOrderDate, today);
 
     /// <summary>Resolve a named deadline rule to a concrete date.</summary>
     private static DateOnly? ResolveDeadline(

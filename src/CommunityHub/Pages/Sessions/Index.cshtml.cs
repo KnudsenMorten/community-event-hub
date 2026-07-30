@@ -22,17 +22,31 @@ namespace CommunityHub.Pages.Sessions;
 public class IndexModel : PageModel
 {
     private readonly PublicSessionsService _svc;
+    // §299.8/b7: the per-edition length quick-picks (label + minutes) for the
+    // config-driven length filter. Pure config, no DB — the page stays fast.
+    private readonly CommunityHub.Core.Config.SessionOptionsService _options;
 
-    public IndexModel(PublicSessionsService svc) => _svc = svc;
+    public IndexModel(
+        PublicSessionsService svc, CommunityHub.Core.Config.SessionOptionsService options)
+    {
+        _svc = svc;
+        _options = options;
+    }
 
     // --- Filters (querystring, GET-bound) ----------------------------------
     [BindProperty(SupportsGet = true)] public SessionType? FilterType { get; set; }
-    [BindProperty(SupportsGet = true)] public SessionLength? FilterLength { get; set; }
+    /// <summary>§299.8/b7 — the length filter is MINUTES now (the config quick-pick
+    /// values), replacing the retired enum-bucket filter.</summary>
+    [BindProperty(SupportsGet = true)] public int? FilterLength { get; set; }
     [BindProperty(SupportsGet = true)] public string? FilterRoom { get; set; }
     [BindProperty(SupportsGet = true)] public string? FilterTimeslot { get; set; }
     [BindProperty(SupportsGet = true)] public string? FilterTrack { get; set; }
     [BindProperty(SupportsGet = true)] public string? FilterLevel { get; set; }
     [BindProperty(SupportsGet = true)] public string? Search { get; set; }
+
+    /// <summary>§299.8/b7 — the config length quick-picks driving the filter options.</summary>
+    public IReadOnlyList<CommunityHub.Core.Config.SessionLengthOption> LengthQuickPicks =>
+        _options.LengthQuickPicks;
 
     // --- View state --------------------------------------------------------
     public PublicSessionsView? View { get; private set; }

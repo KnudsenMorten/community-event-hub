@@ -10,16 +10,34 @@ using Microsoft.Extensions.Logging;
 namespace CommunityHub.Jobs;
 
 /// <summary>
-/// The Backstage exhibitor sync job (CONTEXT.md - Backstage exhibitor sync).
-/// Daily, it derives the sponsor/exhibitor list from the completed WooCommerce
-/// orders, then runs <see cref="BackstageSyncService"/>: each exhibitor is
-/// checked against Backstage and, if missing, created (when the API allows)
-/// with the event coordinator emailed.
-///
-/// In TESTMODE the only exhibitor examined is the configured test sponsor and
-/// no real Backstage calls or live coordinator emails happen - the run
-/// exercises the whole flow safely.
+/// 🔒 <b>RETIRED (§641, operator 2026-07-29: *"retire BackstageSyncJob and delete its health
+/// marker"*).</b> It has NO <c>[Function]</c>/<c>[TimerTrigger]</c> attribute and must never be
+/// scheduled again. (Was: <c>"0 */5 * * * *"</c> base tick, §510 interval 10 minutes.)
 /// </summary>
+/// <remarks>
+/// <para><b>Why it was retired rather than fixed.</b> §637 found it had been a **no-op for its
+/// entire deployed life**: it requires <c>BackstageSync:Enabled</c> in config, which was never set
+/// in PROD — while the <c>backstage-sync</c> FEATURE was ON, so the Settings page said it was
+/// running and the Jobs page rendered it as an ordinary healthy job. §640 then built
+/// <see cref="SponsorZohoReconcileJob"/> over the path that actually works, at the §542 cadence he
+/// asked for. Keeping a second, dormant sponsor sync listed would leave the §637 trap armed for
+/// whoever next set that config key.</para>
+///
+/// <para>🔒 <b>Two sponsor syncs writing the same records is DATA LOSS, not inefficiency</b> — Zoho
+/// hard-caps contact-e-mail updates at 3, and a burnt cap means *"a disaster as leads will be
+/// lost"* (§596.1). Retiring this job removes that possibility at the root rather than relying on
+/// a switch staying off. <see cref="SponsorZohoReconcileJob"/>'s interlock is kept as a tripwire in
+/// case anyone ever re-adds the attribute below.</para>
+///
+/// <para><b>The class is kept, not deleted</b> — same treatment as §244/§252 F2. The code documents
+/// what the legacy sync did, and <see cref="BackstageSyncService"/> remains reachable for a manual
+/// investigation; nothing schedules it.</para>
+///
+/// <para>Historic behaviour, for reference: derived the sponsor/exhibitor list from completed
+/// WooCommerce orders, then ran <see cref="BackstageSyncService"/> — each exhibitor checked against
+/// Backstage and created if missing, with the event coordinator e-mailed. In TESTMODE only the
+/// configured test sponsor was examined.</para>
+/// </remarks>
 public sealed class BackstageSyncJob
 {
     private readonly WooCommerceClient _woo;
@@ -39,7 +57,8 @@ public sealed class BackstageSyncJob
         CommunityHubDbContext db,
         FeatureGateService gate,
         IAuditTrail audit,
-        ILogger<BackstageSyncJob> log)
+        ILogger<BackstageSyncJob> log,
+        CommunityHub.Core.Diagnostics.JobActivityReporter? activity = null)
     {
         _woo = woo;
         _sync = sync;
@@ -49,17 +68,26 @@ public sealed class BackstageSyncJob
         _gate = gate;
         _audit = audit;
         _log = log;
+        _activity = activity;
     }
 
+    // §545(b) — optional, so an un-instrumented job simply says nothing (silence = UNKNOWN).
+    private readonly CommunityHub.Core.Diagnostics.JobActivityReporter? _activity;
+
     /// <summary>Daily at 06:30 UTC - after the WooCommerce pull (06:00).</summary>
-    [Function("BackstageSyncJob")]
+    // 🔒 §641: NO [Function]/[TimerTrigger] attribute — the job is RETIRED and must never be
+    // scheduled. (Was: base tick "0 */5 * * * *", §510 interval 10 minutes.) Re-adding the
+    // attribute would put a SECOND sponsor sync alongside SponsorZohoReconcileJob and put Zoho's
+    // 3-attempt contact-e-mail cap back at risk — read §640.1 before you do.
     public async Task Run(
-        [TimerTrigger("0 30 6 * * *")] TimerInfo timer,
+        TimerInfo timer,
         CancellationToken ct)
     {
         if (!_options.Enabled)
         {
             _log.LogInformation("BackstageSyncJob: disabled by config.");
+            _activity?.ReportInactive(
+                "Backstage sync is switched off in config, so no exhibitor reaches Zoho.");
             return;
         }
 
@@ -84,8 +112,13 @@ public sealed class BackstageSyncJob
         {
             _log.LogInformation(
                 "BackstageSyncJob: feature 'backstage-sync' disabled for all active editions, skipped.");
+            _activity?.ReportInactive(
+                "The 'backstage-sync' feature is off for EVERY active edition, so no exhibitor is "
+                + "being synced to Zoho.");
             return;
         }
+
+        _activity?.ReportWork();
 
         IReadOnlyList<ExhibitorRecord> exhibitors;
 

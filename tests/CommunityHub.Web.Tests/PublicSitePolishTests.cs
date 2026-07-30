@@ -127,13 +127,16 @@ public sealed class PublicSitePolishTests : IDisposable
     }
 
     [Fact]
-    public void Contributors_model_carries_a_role_for_every_person()
+    public void Contributors_model_has_no_titles_and_a_linkedin_for_every_person()
     {
+        // Operator 2026-07-24: "remove all titles as they are wrong" — every person is
+        // listed with name + LinkedIn only; the view hides the blank role line.
         var model = new ContributorsModel();
 
         Assert.NotEmpty(model.Organizers);
-        Assert.All(model.Organizers, c => Assert.False(string.IsNullOrWhiteSpace(c.Role)));
-        Assert.All(model.Contributors, c => Assert.False(string.IsNullOrWhiteSpace(c.Role)));
+        Assert.All(model.Organizers, c => Assert.True(string.IsNullOrWhiteSpace(c.Role)));
+        Assert.All(model.Contributors, c => Assert.True(string.IsNullOrWhiteSpace(c.Role)));
+        Assert.All(model.Organizers, c => Assert.False(string.IsNullOrWhiteSpace(c.LinkedIn)));
         // Photo is optional (null today) so the avatar falls back to initials.
         Assert.All(model.Organizers, c => Assert.Null(c.PhotoUrl));
     }

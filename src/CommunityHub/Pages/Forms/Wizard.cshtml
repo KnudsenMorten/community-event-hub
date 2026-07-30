@@ -3,117 +3,237 @@
 @{
     ViewData["Title"] = Localizer["Wizard.Title"].Value;
 
-    // Step label/description per key (prefix differs per wizard service: SpeakerWiz / RoleWiz).
+    // Step label/description per key (prefix differs per wizard service: SpeakerWiz / RoleWiz / SponsorWiz).
     string StepTitle(string key) => Model.Plan is null ? key : Localizer[Model.Plan.ResxPrefix + ".Step." + key].Value;
     string StepDesc(string key) => Model.Plan is null ? "" : Localizer[Model.Plan.ResxPrefix + ".Step." + key + ".Desc"].Value;
 }
 
-<div class="card" style="max-width:640px;margin:0 auto;">
-    <h1>@Localizer["Wizard.Title"]</h1>
+@* ============================================================================
+   §285/§293: the shared Get-Started wizard SHELL. One smooth, mobile-first
+   stepper for EVERY role (speaker / sponsor / role) — the forms are replicated
+   INLINE (each step's handler renders its fields partial), with a progress bar,
+   a tappable step rail, and a sticky Previous / Save & continue bar. Onboarding
+   steps only. Styles are SCOPED to .ceh-wiz so the shared field partials keep
+   the global form styling and nothing leaks out to the rest of the app.
+   ========================================================================== *@
+<style>
+    .ceh-wiz { max-width: 600px; margin: 0 auto; }
+    /* §301d/§309 (operator 2026-07-24): let the wizard breathe on desktop — the 600px
+       column forced needless scrolling on big screens. Phones untouched. Breakpoint at
+       1000px so Windows display scaling still qualifies. */
+    @@media (min-width: 1000px) { .ceh-wiz { max-width: 1000px; } }
+    .ceh-wiz__title-lead { font-size: 26px; font-weight: 700; color: var(--el-darkblue); margin: 0 0 14px; }
+
+    /* Progress */
+    .ceh-wiz__progress { margin: 0 0 12px; }
+    .ceh-wiz__progress-meta { display: flex; justify-content: space-between; font-size: 13px;
+        color: #4b5563; font-weight: 600; margin-bottom: 6px; }
+    .ceh-wiz__bar { height: 10px; background: #e6eaf2; border-radius: 999px; overflow: hidden; }
+    .ceh-wiz__bar-fill { height: 100%; border-radius: 999px;
+        background: linear-gradient(90deg, var(--el-blue, #008BD2), #00a7e6); transition: width .45s ease; }
+
+    /* Tappable step rail (revisit completed steps) */
+    .ceh-wiz__rail { display: flex; gap: 8px; overflow-x: auto; padding: 2px 2px 10px; margin: 0 -2px;
+        -webkit-overflow-scrolling: touch; scrollbar-width: thin; }
+    .ceh-wiz__chip { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 5px;
+        font-size: 12.5px; font-weight: 600; padding: 6px 12px; border-radius: 999px;
+        text-decoration: none; white-space: nowrap; border: 1px solid transparent;
+        transition: background .15s ease, color .15s ease, box-shadow .15s ease; }
+    .ceh-wiz__chip--todo { background: #eef2f7; color: #4b5563; }
+    .ceh-wiz__chip--todo:hover { background: #dbe3ee; color: var(--el-darkblue); }
+    .ceh-wiz__chip--done { background: #e7f6ec; color: #1b5e34; }
+    .ceh-wiz__chip--done:hover { background: #d3efdc; }
+    .ceh-wiz__chip--current { background: var(--el-blue, #008BD2); color: #fff;
+        box-shadow: 0 2px 7px rgba(0,139,210,.4); }
+    .ceh-wiz__chip--current:hover { color: #fff; }
+
+    /* The step card */
+    .ceh-wiz__card { background: #fff; border-radius: 14px; padding: 22px;
+        box-shadow: 0 2px 16px rgba(15,18,40,.09); animation: ceh-wiz-in .28s ease both; }
+    @@keyframes ceh-wiz-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+    .ceh-wiz__stepno { font-size: 12px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+        color: var(--el-blue, #008BD2); margin: 0 0 4px; }
+    .ceh-wiz__step-title { font-size: 22px; font-weight: 700; color: var(--el-darkblue); margin: 0 0 4px; }
+    /* §397 (operator 2026-07-26: "make this text easier to read - it is gray"). #6b7280 on white
+       is ~4.8:1 — it passes AA for body text but reads as disabled, and on the Lunch step this is a
+       long instruction people must actually follow, not a caption. #374151 is ~10:1 and still
+       clearly secondary to the heading. */
+    .ceh-wiz__step-desc { font-size: 14.5px; color: #374151; line-height: 1.55; margin: 0 0 18px; }
+
+    /* Handler-less fallback: a proper button-styled section link (.btn-primary is undefined app-wide). */
+    .ceh-wiz__open { display: inline-block; background: var(--el-blue, #008BD2); color: #fff !important;
+        padding: 10px 18px; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 15px; }
+    .ceh-wiz__open:hover { background: var(--el-darkblue); color: #fff !important; }
+    .ceh-wiz__open-wrap { background: #eef6ff; border: 1px solid #d3e6fb; padding: 14px;
+        border-radius: 10px; font-size: 14px; color: #1f3f6b; }
+
+    /* Sticky Previous / Save-continue bar */
+    .ceh-wiz__nav { position: sticky; bottom: 0; display: flex; gap: 12px; align-items: center;
+        justify-content: space-between; padding: 14px 0 max(6px, env(safe-area-inset-bottom));
+        margin-top: 20px; background: linear-gradient(180deg, rgba(255,255,255,0), #fff 26%); }
+    .ceh-wiz__nav .btn-prev { background: #eef2f7; color: var(--el-darkblue); }
+    .ceh-wiz__nav .btn-prev:hover { background: #dbe3ee; }
+    .ceh-wiz__nav .btn-next { min-width: 168px; display: inline-flex; align-items: center; gap: 8px;
+        justify-content: center; font-weight: 600; }
+    .ceh-wiz__nav-spacer { flex: 1; }
+
+    .ceh-wiz__alldone { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+        gap: 10px; background: #e7f6ec; border: 1px solid #b6e0c4; color: #1b5e34;
+        padding: 12px 14px; border-radius: 10px; margin: 0 0 16px; font-size: 14px; line-height: 1.45; }
+    .ceh-wiz__back { text-align: center; margin-top: 16px; font-size: 13.5px; }
+
+    /* Slightly roomier field rhythm INSIDE the wizard only (partials keep global styling elsewhere). */
+    .ceh-wiz__card label { margin-top: 14px; }
+
+    @@media (prefers-reduced-motion: reduce) {
+        .ceh-wiz__card { animation: none; }
+        .ceh-wiz__bar-fill { transition: none; }
+    }
+</style>
+
+<div class="ceh-wiz">
+    <h1 class="ceh-wiz__title-lead">@Localizer["Wizard.Title"]</h1>
 
     @if (Model.AccessDenied)
     {
-        <p class="error">@Localizer["SpeakerForm.AccessDenied", Model.FullName]</p>
-        <p><a asp-page="/Index">@Localizer["Common.BackToHub"]</a></p>
+        <div class="ceh-wiz__card">
+            <p class="error">@Localizer["SpeakerForm.AccessDenied", Model.FullName]</p>
+            <p><a asp-page="/Index">@Localizer["Common.BackToHub"]</a></p>
+        </div>
     }
     else if (Model.NothingToDo)
     {
-        <p class="info">@Localizer["Wizard.Nothing"]</p>
-        <p><a asp-page="/Index">@Localizer["Common.BackToHub"]</a></p>
+        <div class="ceh-wiz__card">
+            <p class="info">@Localizer["Wizard.Nothing"]</p>
+            <p><a asp-page="/Index">@Localizer["Common.BackToHub"]</a></p>
+        </div>
     }
     else if (Model.ShowAllDone || Model.Plan is null || Model.CurrentStep is null)
     {
-        <p class="success" style="font-size:16px;">🎉 @Localizer["Wizard.AllDone"]</p>
-        <p><a asp-page="/Index" class="btn-primary">@Localizer["Wizard.GoToHub"]</a></p>
+        var donePlan = Model.Plan;
+        <div class="ceh-wiz__card">
+            @if (donePlan is not null)
+            {
+                <div class="ceh-wiz__progress">
+                    <div class="ceh-wiz__progress-meta">
+                        <span>@Localizer["SpeakerWiz.Progress", donePlan.DoneCount, donePlan.EntitledCount]</span>
+                        <span>100%</span>
+                    </div>
+                    <div class="ceh-wiz__bar"><div class="ceh-wiz__bar-fill" style="width:100%;"></div></div>
+                </div>
+            }
+            <p class="success" style="font-size:17px;margin-top:14px;">🎉 @Localizer["Wizard.AllDone"]</p>
+            <p style="margin-top:12px;"><a asp-page="/Index" class="ceh-wiz__open">@Localizer["Wizard.GoToHub"]</a></p>
+        </div>
     }
     else
     {
         var plan = Model.Plan;
         var step = Model.CurrentStep!;
 
-        @* Progress: "{done} of {total} steps done" + percent + bar (reused chrome). *@
-        <div style="margin:14px 0;">
-            <div style="display:flex;justify-content:space-between;font-size:13px;color:#4b5563;margin-bottom:4px;">
+        <div class="ceh-wiz__progress">
+            <div class="ceh-wiz__progress-meta">
                 <span>@Localizer["SpeakerWiz.Progress", plan.DoneCount, plan.EntitledCount]</span>
                 <span>@plan.Percent%</span>
             </div>
-            <div style="height:10px;background:#eef2f7;border-radius:999px;overflow:hidden;" role="progressbar"
+            <div class="ceh-wiz__bar" role="progressbar"
                  aria-valuenow="@plan.Percent" aria-valuemin="0" aria-valuemax="100">
-                <div style="height:100%;width:@(plan.Percent)%;background:var(--el-blue,#008BD2);border-radius:999px;"></div>
+                <div class="ceh-wiz__bar-fill" style="width:@(plan.Percent)%;"></div>
             </div>
         </div>
 
-        @* Step breadcrumb chips (cheap, scrollable on phones). Completed steps are revisitable. *@
-        <div style="display:flex;gap:6px;overflow-x:auto;padding-bottom:6px;margin-bottom:6px;-webkit-overflow-scrolling:touch;">
+        @* Tappable step rail — completed steps are revisitable. *@
+        <nav class="ceh-wiz__rail" aria-label="@Localizer["Wizard.Title"]">
             @{ var i = 0; }
             @foreach (var s in plan.Steps)
             {
                 var isCurrent = i == Model.CurrentIndex;
-                var bg = isCurrent ? "var(--el-blue,#008BD2)" : (s.Done ? "#dcfce7" : "#eef2f7");
-                var fg = isCurrent ? "#fff" : (s.Done ? "#166534" : "#4b5563");
-                <a asp-page="/Forms/Wizard" asp-route-step="@s.Key"
-                   title="@StepTitle(s.Key)"
-                   style="flex:0 0 auto;font-size:12px;padding:4px 10px;border-radius:999px;text-decoration:none;background:@bg;color:@fg;white-space:nowrap;">
-                    @(s.Done ? "✓ " : "")@StepTitle(s.Key)
+                var cls = isCurrent ? "ceh-wiz__chip--current" : (s.Done ? "ceh-wiz__chip--done" : "ceh-wiz__chip--todo");
+                <a asp-page="/Forms/Wizard" asp-route-step="@s.Key" title="@StepTitle(s.Key)"
+                   class="ceh-wiz__chip @cls" aria-current="@(isCurrent ? "step" : null)">
+                    @(s.Done && !isCurrent ? "✓ " : "")@StepTitle(s.Key)
                 </a>
                 i++;
             }
+        </nav>
+
+        <div class="ceh-wiz__card">
+            @if (Model.AllComplete)
+            {
+                @* §297: at 100% we still show the editable wizard (not a dead-end) — this banner
+                   makes it obvious you can review/change any answer, then leave. *@
+                <div class="ceh-wiz__alldone">
+                    <div>🎉 <strong>@Localizer["Wizard.AllDone"]</strong> @Localizer["Wizard.AllDoneEdit"]</div>
+                    <a asp-page="/Index" class="ceh-wiz__open" style="flex:0 0 auto;">@Localizer["Wizard.GoToHub"]</a>
+                </div>
+            }
+            <p class="ceh-wiz__stepno">@Localizer["Wizard.StepXofN", Model.CurrentStepNumber, plan.EntitledCount]</p>
+            <h2 class="ceh-wiz__step-title">@StepTitle(step.Key)</h2>
+            <p class="ceh-wiz__step-desc">@StepDesc(step.Key)</p>
+
+            @* Multipart so file-upload steps (e.g. the sponsor Logos step) can post files;
+               harmless for the text/radio steps. *@
+            <form method="post" enctype="multipart/form-data">
+                <div asp-validation-summary="All" class="ceh-validation-summary"></div>
+
+                @if (Model.CurrentHandler is not null)
+                {
+                    <partial name="@Model.CurrentHandler.PartialName" model="@Model.CurrentHandler.Model" />
+                }
+                else
+                {
+                    @* No inline handler for this step yet → open its section. href (not asp-page)
+                       so a route with a #fragment (e.g. /Sponsor/CompanyDetails#logos) lands right. *@
+                    <div class="ceh-wiz__open-wrap">
+                        <p style="margin:0 0 10px;">@StepDesc(step.Key)</p>
+                        <a href="@step.Route" class="ceh-wiz__open">@Localizer["Wizard.OpenStep", StepTitle(step.Key)]</a>
+                    </div>
+                }
+
+                <input type="hidden" name="__step" value="@step.Key" />
+
+                <div class="ceh-wiz__nav">
+                    @if (!Model.IsFirstStep)
+                    {
+                        <button type="submit" name="__dir" value="prev" formnovalidate class="btn-prev">
+                            @Localizer["Wizard.Previous"]
+                        </button>
+                    }
+                    else
+                    {
+                        <span class="ceh-wiz__nav-spacer"></span>
+                    }
+
+                    @* §393 SAVE & EXIT — for the person who arrived from a MENU ITEM wanting ONE
+                       step, not the whole tour. Saves exactly like "next" and then returns to the
+                       hub. Secondary styling on purpose: first-run onboarding should still read
+                       left-to-right through the flow, so this must not compete with the primary.
+                       Hidden on the LAST step, where "Finish" already lands on the hub. *@
+                    @if (Model.CurrentHandler is not null && !Model.IsLastStep)
+                    {
+                        <button type="submit" name="__dir" value="exit" class="secondary"
+                                style="margin-right:8px;"
+                                title="Save this step and go back to the hub">
+                            Save &amp; exit
+                        </button>
+                    }
+
+                    @if (Model.CurrentHandler is null)
+                    {
+                        <button type="submit" name="__dir" value="next" class="btn-next">@Localizer["Wizard.Skip"]</button>
+                    }
+                    else if (Model.IsLastStep)
+                    {
+                        <button type="submit" name="__dir" value="next" class="btn-next">@Localizer["Wizard.Finish"] →</button>
+                    }
+                    else
+                    {
+                        <button type="submit" name="__dir" value="next" class="btn-next">@Localizer["Wizard.Next"] →</button>
+                    }
+                </div>
+            </form>
         </div>
 
-        <p style="font-size:13px;color:#6b7280;margin:0 0 4px;">
-            @Localizer["Wizard.StepXofN", Model.CurrentStepNumber, plan.EntitledCount]
-        </p>
-        <h2 style="margin:0 0 2px;font-size:20px;">@StepTitle(step.Key)</h2>
-        <p class="muted" style="font-size:13px;margin:0 0 12px;">@StepDesc(step.Key)</p>
-
-        <form method="post">
-            <div asp-validation-summary="All" class="ceh-validation-summary"></div>
-
-            @if (Model.CurrentHandler is not null)
-            {
-                <partial name="@Model.CurrentHandler.PartialName" model="@Model.CurrentHandler.Model" />
-            }
-            else
-            {
-                @* No inline handler registered for this step yet (rollout window) → open the
-                   standalone page; the buttons below still let the participant move on. *@
-                <p class="info" style="background:#eef6ff;padding:10px 14px;border-radius:6px;font-size:14px;">
-                    <a asp-page="@step.Route" class="btn-primary">@StepTitle(step.Key)</a>
-                </p>
-            }
-
-            <input type="hidden" name="__step" value="@step.Key" />
-
-            @* Sticky mobile-first button bar. *@
-            <div style="position:sticky;bottom:0;background:#fff;border-top:1px solid #e6eaf2;display:flex;gap:10px;justify-content:space-between;padding:12px 0;margin-top:16px;">
-                @if (!Model.IsFirstStep)
-                {
-                    <button type="submit" name="__dir" value="prev" formnovalidate
-                            style="flex:0 0 auto;">@Localizer["Wizard.Previous"]</button>
-                }
-                else
-                {
-                    <span></span>
-                }
-
-                @if (Model.CurrentHandler is null)
-                {
-                    <button type="submit" name="__dir" value="next" class="btn-primary"
-                            style="flex:0 0 auto;">@Localizer["Wizard.Skip"]</button>
-                }
-                else if (Model.IsLastStep)
-                {
-                    <button type="submit" name="__dir" value="next" class="btn-primary"
-                            style="flex:0 0 auto;">@Localizer["Wizard.Finish"]</button>
-                }
-                else
-                {
-                    <button type="submit" name="__dir" value="next" class="btn-primary"
-                            style="flex:0 0 auto;">@Localizer["Wizard.Next"]</button>
-                }
-            </div>
-        </form>
-
-        <p style="margin-top:10px;"><a asp-page="/Index">@Localizer["Common.BackToHub"]</a></p>
+        <p class="ceh-wiz__back"><a asp-page="/Index">@Localizer["Common.BackToHub"]</a></p>
     }
 </div>

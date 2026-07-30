@@ -1,5 +1,6 @@
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
+using CommunityHub.Core.Participants;
 using Microsoft.EntityFrameworkCore;
 
 namespace CommunityHub.Core.Reporting;
@@ -137,6 +138,7 @@ public sealed class ReportingService
         var today = DateOnly.FromDateTime(_clock.GetUtcNow().UtcDateTime);
         var tasks = await _db.Tasks
             .Where(t => t.EventId == eventId)
+            .ExcludingAbandoned()   // §332 — work a drop-out never did is not "Done"
             .Select(t => new { t.State, t.DueDate, t.SourceKey })
             .ToListAsync(ct);
 

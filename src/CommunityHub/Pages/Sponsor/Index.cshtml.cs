@@ -81,6 +81,15 @@ public class IndexModel : PageModel
     /// <summary>Resolved booth code (e.g. "E-29") for booth sponsors; null for non-exhibitor sponsors.</summary>
     public string? AssignedBoothNumber { get; private set; }
 
+    // --- §234 UX: read-only "event activities" status (previously email/ICS-only) -----
+    /// <summary>This company's attendee app-game participation (gift + confirmed flag);
+    /// null when the organizers haven't registered the company for the game.</summary>
+    public AppGameParticipation? AppGame { get; private set; }
+    /// <summary>This company's group-photo registration (slot + location); null when no
+    /// session is registered. Matched read-only by company name / contact email — the
+    /// organizer-side table has no company-id column.</summary>
+    public GroupPhotoRegistration? GroupPhoto { get; private set; }
+
     public async Task<IActionResult> OnGetAsync(CancellationToken ct)
     {
         var me = _participant.Current;
@@ -148,6 +157,41 @@ public class IndexModel : PageModel
             {
                 _log.LogWarning(ex, "Sponsor/Index: Company Manager lookup failed for company {Co}.", companyIdInt);
             }
+        }
+
+        // §234 UX: surface the company's app-game + group-photo state read-only on the
+        // portal (both were previously visible only via the emails / calendar invites the
+        // organizer engine sends). Best-effort — a lookup failure never breaks the page.
+        try
+        {
+            AppGame = await _db.AppGameParticipations
+                .AsNoTracking()
+                .FirstOrDefaultAsync(a => a.EventId == me.EventId
+                                          && a.SponsorCompanyId == companyId, ct);
+
+            // Group photos are registered by COMPANY NAME + lead-contact email (there is
+            // no company-id column on the registration), so match by the company's known
+            // names or any linked sponsor contact's email — in memory, the per-event
+            // table is small.
+            var contactEmails = LinkedContacts
+                .Select(c => (c.Email ?? string.Empty).Trim().ToLowerInvariant())
+                .Where(e => e.Length > 0)
+                .ToHashSet();
+            var companyNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (!string.IsNullOrWhiteSpace(CompanyDetails?.PublicName)) companyNames.Add(CompanyDetails!.PublicName.Trim());
+            if (!string.IsNullOrWhiteSpace(CompanyDetails?.Name)) companyNames.Add(CompanyDetails!.Name.Trim());
+
+            var photoRegs = await _db.GroupPhotoRegistrations
+                .AsNoTracking()
+                .Where(g => g.EventId == me.EventId)
+                .ToListAsync(ct);
+            GroupPhoto = photoRegs.FirstOrDefault(g =>
+                companyNames.Contains((g.CompanyName ?? string.Empty).Trim())
+                || contactEmails.Contains((g.ContactEmail ?? string.Empty).Trim().ToLowerInvariant()));
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex, "Sponsor/Index: app-game / group-photo status lookup failed for company {Co}.", companyId);
         }
 
         if (_wooOptions.Enabled)

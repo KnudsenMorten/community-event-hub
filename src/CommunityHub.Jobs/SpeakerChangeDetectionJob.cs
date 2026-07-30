@@ -28,24 +28,40 @@ public sealed class SpeakerChangeDetectionJob
     private readonly FeatureGateService _gate;
     private readonly SpeakerChangeDetectionService _service;
     private readonly ILogger<SpeakerChangeDetectionJob> _log;
+    // §545(b) — optional, so a job can be instrumented without touching its wiring and an
+    // un-instrumented job simply says nothing (silence = UNKNOWN, never flagged).
+    private readonly CommunityHub.Core.Diagnostics.JobActivityReporter? _activity;
 
     public SpeakerChangeDetectionJob(
         CommunityHubDbContext db, ZohoOptions options, FeatureGateService gate,
-        SpeakerChangeDetectionService service, ILogger<SpeakerChangeDetectionJob> log)
+        SpeakerChangeDetectionService service, ILogger<SpeakerChangeDetectionJob> log,
+        CommunityHub.Core.Diagnostics.JobActivityReporter? activity = null)
     {
         _db = db; _options = options; _gate = gate; _service = service; _log = log;
+        _activity = activity;
     }
 
     [Function("SpeakerChangeDetectionJob")]
-    public async Task Run([TimerTrigger("0 50 * * * *")] TimerInfo timer, CancellationToken ct)
+    public async Task Run([TimerTrigger("0 */5 * * * *")] TimerInfo timer, CancellationToken ct)
     {
-        if (!_options.Enabled) { _log.LogInformation("SpeakerChangeDetectionJob: Zoho disabled."); return; }
+        if (!_options.Enabled)
+        {
+            _log.LogInformation("SpeakerChangeDetectionJob: Zoho disabled.");
+            _activity?.ReportInactive("Zoho is switched off, so nothing is compared.");
+            return;
+        }
 
         var eventId = await _db.Events.Where(e => e.IsActive).Select(e => (int?)e.Id).FirstOrDefaultAsync(ct);
         if (eventId is null) { _log.LogWarning("SpeakerChangeDetectionJob: no active event."); return; }
 
         if (!await _gate.IsFeatureEnabledAsync(SpeakerChangeDetectionService.FeatureKey, eventId.Value, ct))
-        { _log.LogInformation("SpeakerChangeDetectionJob: feature off."); return; }
+        {
+            _log.LogInformation("SpeakerChangeDetectionJob: feature off.");
+            _activity?.ReportInactive(
+                $"The '{SpeakerChangeDetectionService.FeatureKey}' feature is switched off, so speaker "
+                + "changes made in Zoho are not being detected.");
+            return;
+        }
 
         var result = await _service.RunAsync(eventId.Value, ct);
 
@@ -54,6 +70,8 @@ public sealed class SpeakerChangeDetectionJob
         if (result.DirectionInactive)
         {
             _log.LogInformation("SpeakerChangeDetectionJob: {Reason}.", result.UnavailableReason);
+            _activity?.ReportInactive(
+                result.UnavailableReason ?? "The edition's speaker sync direction excludes this engine.");
             return;
         }
 
@@ -61,8 +79,15 @@ public sealed class SpeakerChangeDetectionJob
         {
             _log.LogWarning(
                 "SpeakerChangeDetectionJob: source unavailable — {Reason}", result.UnavailableReason);
+            // 🔒 §621 was EXACTLY this branch: Zoho:SpeakerReadEnabled was never set, so this
+            // returned "unavailable" without ever calling Zoho — for as long as the feature existed.
+            _activity?.ReportInactive(
+                "The Zoho speaker list could not be read, so nothing was compared: "
+                + (result.UnavailableReason ?? "reason not given") + ".");
             return;
         }
+
+        _activity?.ReportWork();
 
         // §59: a real change is ENQUEUED to the delta-approval queue (not auto-applied);
         // the operator approves/rejects it in /Organizer/SyncQueue.

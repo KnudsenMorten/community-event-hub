@@ -99,14 +99,14 @@ public sealed class TravelValidationTests
         };
         db.Participants.Add(speaker);
         await db.SaveChangesAsync();
-        // FEATURE B: travel is entitlement-gated; a SUPPORTED speaker is entitled to
-        // OrderItem.TravelReimbursement, so the form is accessible (a sponsor-self-funded
-        // speaker would be denied — covered by FormEntitlementGateTests).
+        // FEATURE B: travel is entitlement-gated; a COMMUNITY-category speaker is
+        // entitled to OrderItem.TravelReimbursement, so the form is accessible (a
+        // Sponsor-category or Guest speaker would be denied — covered by
+        // FormEntitlementGateTests).
         db.SpeakerProfiles.Add(new SpeakerProfile
         {
             EventId = EventId, ParticipantId = speaker.Id,
-            SpeakerFunding = SpeakerFunding.Supported,
-            SpeakingPreDay = true, SpeakingMainDay = true,
+            Category = SpeakerCategory.Community,
         });
         // Seed one uploaded receipt so the Step-2 reimbursement request is unlocked
         // (REQUIREMENTS §48 gate). These tests exercise Step-2 FIELD validation, which

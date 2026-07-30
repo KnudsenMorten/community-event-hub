@@ -242,6 +242,80 @@ public sealed class SessionizeApiClientTests
     }
 
     [Fact]
+    public void Unreadable_emails_view_warning_points_at_the_emailstoken_config()
+    {
+        // §189: no readable emails view (null/empty join map) → the cause is config,
+        // so the warning keeps the "enable speaker emails / configure EmailsToken" guidance.
+        var result = SessionizeApiClient.ParseSpeakers(MainViewNoEmailJson);
+
+        var warning = Assert.Single(result.Warnings);
+        Assert.Contains("Morten Knudsen", warning);
+        Assert.Contains("EmailsToken", warning);
+        Assert.Contains("speaker emails", warning);
+        // It must NOT misdiagnose this as an unaccepted invite.
+        Assert.DoesNotContain("invite", warning);
+    }
+
+    [Fact]
+    public void Readable_emails_view_blames_an_unaccepted_invite_not_the_config()
+    {
+        // §189: the SpeakersEmails view IS readable (a non-empty join map resolved at
+        // least one address this run), but THIS speaker isn't in it → the real cause is
+        // an unaccepted Sessionize speaker invite, NOT a missing/mis-set EmailsToken.
+        const string twoSpeakers = """
+        [
+          { "id": "has-email", "firstName": "Resolved", "lastName": "One", "fullName": "Resolved One", "links": [] },
+          { "id": "missing-from-view", "firstName": "Not", "lastName": "Invited", "fullName": "Not Invited", "links": [] }
+        ]
+        """;
+        var emailById = new Dictionary<string, string>
+        {
+            ["has-email"] = "resolved@example.test", // proves the view is readable this run
+        };
+
+        var result = SessionizeApiClient.ParseSpeakers(twoSpeakers, emailById);
+
+        // The resolved speaker imports; the one absent from the view is skipped with a warning.
+        var spk = Assert.Single(result.Speakers);
+        Assert.Equal("resolved@example.test", spk.Email);
+        var warning = Assert.Single(result.Warnings);
+        Assert.Contains("Not Invited", warning);
+        Assert.Contains("invite", warning);
+        Assert.Contains("SpeakersEmails view", warning);
+        // The config guidance must NOT appear when the view is genuinely readable.
+        Assert.DoesNotContain("EmailsToken", warning);
+    }
+
+    [Fact]
+    public void Email_less_speaker_with_a_sessionize_id_is_surfaced_for_preselection()
+    {
+        // §204: an email-less speaker that still has a Sessionize id is collected into
+        // EmailLessSpeakers (so the importer can queue them), separately from Speakers,
+        // and still produces the skip warning.
+        var result = SessionizeApiClient.ParseSpeakers(MainViewNoEmailJson);
+
+        Assert.Empty(result.Speakers);              // not importable as a login participant
+        Assert.Single(result.Warnings);             // still reported
+        var pending = Assert.Single(result.EmailLessSpeakers);
+        Assert.Equal("eee7c4bd-de60-428e-b5b9-6eef8aa5fd04", pending.SessionizeId);
+        Assert.Equal("Morten", pending.FirstName);
+    }
+
+    [Fact]
+    public void Email_less_speaker_without_an_id_stays_a_plain_skip()
+    {
+        // No id ⇒ no stable key to queue/reconcile on ⇒ not surfaced for pre-selection.
+        const string noIdNoEmail = """
+        [ { "firstName": "No", "lastName": "Key", "fullName": "No Key", "links": [] } ]
+        """;
+        var result = SessionizeApiClient.ParseSpeakers(noIdNoEmail);
+
+        Assert.Empty(result.Speakers);
+        Assert.Single(result.Warnings);
+        Assert.Empty(result.EmailLessSpeakers);
+    }
+
+    [Fact]
     public void Invalid_json_returns_error_not_throw()
     {
         var result = SessionizeApiClient.ParseSpeakers("{ not json");

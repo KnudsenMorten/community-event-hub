@@ -44,3 +44,8 @@ resource appInsights 'Microsoft.Insights/components@2020-02-02' = {
 output appInsightsConnectionString string = appInsights.properties.ConnectionString
 output appInsightsName string = appInsights.name
 output logAnalyticsId string = logAnalytics.id
+
+// §392: the ARM RESOURCE ID, not just the connection string. The connection string is
+// write-only plumbing (where telemetry GOES); READING it back for the organizer's
+// Platform-health page needs the resource id to address the component in a Logs query.
+output appInsightsId string = appInsights.id

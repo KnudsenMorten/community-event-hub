@@ -1,0 +1,275 @@
+@page
+@model CommunityHub.Pages.Organizer.PlatformHealthModel
+@{
+    ViewData["Title"] = "Platform health";
+}
+
+@*
+    §392 — the operator's diagnostics view. Server-rendered CSS bars, no chart library: the page
+    must work when the platform is unhealthy, and a CDN script is one more thing that can be the
+    reason it does not load. Every number here comes from Application Insights via
+    PlatformTelemetryService.
+*@
+
+@* §647 (operator 2026-07-29: "more column spacing") — these tables are dense NUMBERS, and the
+   right-aligned Calls / 95th % / Failed columns ran into each other, which is exactly where a
+   misread costs the most. Scoped to this page, so the shared .grid used everywhere else is
+   untouched. *@
+<style>
+    .ph table.grid th,
+    .ph table.grid td { padding-left: 16px; padding-right: 16px; }
+    .ph table.grid th:first-child,
+    .ph table.grid td:first-child { padding-left: 4px; }
+    .ph table.grid th:last-child,
+    .ph table.grid td:last-child { padding-right: 4px; }
+    /* Keep a value and its unit on one line — a wrapped "4.1 s" is what made these hard to scan. */
+    .ph table.grid td { white-space: nowrap; }
+    .ph table.grid td:first-child { white-space: normal; word-break: break-word; }
+</style>
+
+<div class="card ph">
+    <h1>Platform health</h1>
+
+    @if (Model.AccessDenied)
+    {
+        <p class="error">This area is for organizers only.</p>
+        <p><a asp-page="/Index">Back to the hub</a></p>
+        return;
+    }
+
+    <p>
+        What the hub is actually doing right now — traffic, how slow the slowest pages are, which
+        outbound calls are costing the time, and what is failing. This is the view to open when
+        someone says <em>&ldquo;it hangs&rdquo;</em>.
+    </p>
+    <p><a asp-page="/Organizer/Index">&larr; Back to the organizer area</a></p>
+
+    @if (!Model.IsConfigured)
+    {
+        <p class="info" style="background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:12px 14px;">
+            <strong>Telemetry is not wired up in this environment.</strong>
+            Set the <code>Telemetry:AppInsightsResourceId</code> app setting to the Application
+            Insights resource id and grant this app <strong>Monitoring Reader</strong> on it.
+            <br />
+            On production this must be set on <strong>BOTH web slots</strong> &mdash; app settings
+            swap with the slot, so setting it on one silently breaks this page after the next swap.
+        </p>
+        return;
+    }
+
+    @* ---- window picker ---- *@
+    <p style="margin:14px 0 6px;">
+        @foreach (var (h, label) in CommunityHub.Pages.Organizer.PlatformHealthModel.Windows)
+        {
+            var active = Model.Hours == h;
+            <a asp-page="/Organizer/PlatformHealth" asp-route-hours="@h"
+               style="display:inline-block;margin:0 6px 6px 0;padding:6px 12px;border-radius:999px;font-size:13px;text-decoration:none;border:1px solid @(active ? "#1565c0" : "#dde4ee");background:@(active ? "#1565c0" : "#fff");color:@(active ? "#fff" : "#374151");font-weight:@(active ? "700" : "500");">@label</a>
+        }
+    </p>
+</div>
+
+@if (Model.Data is { } d)
+{
+    @if (!d.Ok)
+    {
+        <div class="card ph">
+            <p class="error" style="margin:0;">@d.Message</p>
+            <p style="margin:8px 0 0;color:#374151;font-size:13.5px;">
+                Most likely, in order: the <strong>Monitoring Reader</strong> role assignment has not
+                propagated yet (it can take a few minutes), the resource id is wrong, or Azure Monitor
+                is throttling. Nothing is broken in the hub itself &mdash; this page could not read
+                the monitoring backend.
+            </p>
+        </div>
+        return;
+    }
+
+    @* ---- headline numbers ---- *@
+    <div class="card ph">
+        <h2 style="margin-top:0;">Last @Model.Hours hour(s)</h2>
+        <div style="display:flex;flex-wrap:wrap;gap:14px;">
+            <div style="flex:1 1 160px;background:#f6f8fb;border:1px solid #dde4ee;border-radius:10px;padding:12px 14px;">
+                <div style="font-size:12.5px;color:#5b636e;">Requests served</div>
+                <div style="font-size:26px;font-weight:700;">@d.TotalRequests.ToString("N0")</div>
+            </div>
+            <div style="flex:1 1 160px;background:#f6f8fb;border:1px solid #dde4ee;border-radius:10px;padding:12px 14px;">
+                <div style="font-size:12.5px;color:#5b636e;">Failed</div>
+                <div style="font-size:26px;font-weight:700;color:@(d.TotalFailed > 0 ? "#b91c1c" : "#15803d");">
+                    @d.TotalFailed.ToString("N0")
+                </div>
+                <div style="font-size:12px;color:#5b636e;">@Model.FailureRatePercent.ToString("0.#")% of requests</div>
+            </div>
+            <div style="flex:1 1 160px;background:#f6f8fb;border:1px solid #dde4ee;border-radius:10px;padding:12px 14px;">
+                <div style="font-size:12.5px;color:#5b636e;">Peak concurrent users</div>
+                <div style="font-size:26px;font-weight:700;">@d.PeakConcurrentUsers.ToString("N0")</div>
+                <div style="font-size:12px;color:#5b636e;">distinct users in the busiest bucket</div>
+            </div>
+            <div style="flex:1 1 160px;background:#f6f8fb;border:1px solid #dde4ee;border-radius:10px;padding:12px 14px;">
+                <div style="font-size:12.5px;color:#5b636e;">Worst 95th-percentile</div>
+                <div style="font-size:26px;font-weight:700;color:@CommunityHub.Pages.Organizer.PlatformHealthModel.LatencyColour(d.OverallP95Ms);">
+                    @CommunityHub.Pages.Organizer.PlatformHealthModel.Ms(d.OverallP95Ms)
+                </div>
+                <div style="font-size:12px;color:#5b636e;">95 in 100 pages were faster than this</div>
+            </div>
+        </div>
+    </div>
+
+    @* ---- traffic over time ---- *@
+    <div class="card ph">
+        <h2 style="margin-top:0;">Traffic &amp; response time</h2>
+        <p style="color:#374151;font-size:13.5px;margin:0 0 10px;">
+            Bar height is requests in the bucket; the darker segment is failures. The line under each
+            bar is that bucket's 95th-percentile response time &mdash; a tall bar with a green line is
+            a busy but healthy period, a short bar with a red line is the shape a
+            <em>&ldquo;it hangs&rdquo;</em> report has.
+        </p>
+
+        @if (d.Traffic.Count == 0)
+        {
+            <p class="info">No requests recorded in this window.</p>
+        }
+        else
+        {
+            <div style="overflow-x:auto;">
+                <div style="display:flex;align-items:flex-end;gap:3px;min-height:180px;padding:8px 0;min-width:@(d.Traffic.Count * 16)px;">
+                    @foreach (var t in d.Traffic)
+                    {
+                        var h = (int)Math.Round(150.0 * t.Requests / Model.PeakRequests);
+                        var fh = t.Requests == 0 ? 0 : (int)Math.Round(h * 1.0 * t.Failed / t.Requests);
+                        var lat = CommunityHub.Pages.Organizer.PlatformHealthModel.Ms(t.P95Ms);
+                        <div title="@Model.BucketLabel(t.Bucket) — @t.Requests request(s), @t.Failed failed, p95 @lat, @t.Users user(s)"
+                             style="flex:0 0 13px;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;">
+                            <div style="width:11px;height:@(Math.Max(h, 1))px;background:#93b4dd;border-radius:2px 2px 0 0;display:flex;flex-direction:column;justify-content:flex-end;">
+                                @if (fh > 0)
+                                {
+                                    <div style="width:11px;height:@(fh)px;background:#b91c1c;border-radius:2px 2px 0 0;"></div>
+                                }
+                            </div>
+                            <div style="width:11px;height:3px;margin-top:2px;background:@CommunityHub.Pages.Organizer.PlatformHealthModel.LatencyColour(t.P95Ms);"></div>
+                        </div>
+                    }
+                </div>
+            </div>
+            <p style="color:#5b636e;font-size:12.5px;margin:4px 0 0;">
+                @Model.BucketLabel(d.Traffic[0].Bucket) &rarr; @Model.BucketLabel(d.Traffic[^1].Bucket)
+                (local time) &mdash; hover a bar for its exact numbers.
+            </p>
+        }
+    </div>
+
+    @* ---- slowest operations ---- *@
+    <div class="card ph">
+        <h2 style="margin-top:0;">Slowest pages</h2>
+        <p style="color:#374151;font-size:13.5px;margin:0 0 10px;">
+            Ranked by 95th-percentile, not average: an average hides the one request in twenty that
+            takes ten seconds, and that request is the one someone reports.
+        </p>
+        @if (d.SlowestOperations.Count == 0)
+        {
+            <p class="info">Nothing recorded in this window.</p>
+        }
+        else
+        {
+            <div style="overflow-x:auto;">
+                <table class="grid">
+                    <thead>
+                        <tr><th>Page</th><th style="text-align:right;">Calls</th><th style="text-align:right;">Typical</th><th style="text-align:right;">95th %</th><th style="text-align:right;">Failed</th></tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var o in d.SlowestOperations)
+                        {
+                            <tr>
+                                <td>@o.Name</td>
+                                <td style="text-align:right;">@o.Count.ToString("N0")</td>
+                                <td style="text-align:right;">@CommunityHub.Pages.Organizer.PlatformHealthModel.Ms(o.P50Ms)</td>
+                                <td style="text-align:right;color:@CommunityHub.Pages.Organizer.PlatformHealthModel.LatencyColour(o.P95Ms);font-weight:700;">
+                                    @CommunityHub.Pages.Organizer.PlatformHealthModel.Ms(o.P95Ms)
+                                </td>
+                                <td style="text-align:right;color:@(o.Failed > 0 ? "#b91c1c" : "#5b636e");">@o.Failed.ToString("N0")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div>
+
+    @* ---- dependencies ---- *@
+    <div class="card ph">
+        <h2 style="margin-top:0;">Where the time goes (outbound calls)</h2>
+        <p style="color:#374151;font-size:13.5px;margin:0 0 10px;">
+            This is the panel that tells the three causes of a hang apart. A slow <strong>SQL</strong>
+            call means lock contention or a missing index &mdash; <em>our</em> problem. A slow
+            <strong>HTTP</strong> call to Zoho or Brevo means we are waiting on someone else. Neither
+            showing up, with slow requests anyway, points at a slot swap and a cold start.
+        </p>
+        @if (d.Dependencies.Count == 0)
+        {
+            <p class="info">No outbound calls recorded in this window.</p>
+        }
+        else
+        {
+            <div style="overflow-x:auto;">
+                <table class="grid">
+                    <thead>
+                        <tr><th>Kind</th><th>Target</th><th style="text-align:right;">Calls</th><th style="text-align:right;">95th %</th><th style="text-align:right;">Failed</th></tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var dep in d.Dependencies)
+                        {
+                            <tr>
+                                <td>@dep.Kind</td>
+                                <td style="word-break:break-all;">@dep.Target</td>
+                                <td style="text-align:right;">@dep.Count.ToString("N0")</td>
+                                <td style="text-align:right;color:@CommunityHub.Pages.Organizer.PlatformHealthModel.LatencyColour(dep.P95Ms);font-weight:700;">
+                                    @CommunityHub.Pages.Organizer.PlatformHealthModel.Ms(dep.P95Ms)
+                                </td>
+                                <td style="text-align:right;color:@(dep.Failed > 0 ? "#b91c1c" : "#5b636e");">@dep.Failed.ToString("N0")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div>
+
+    @* ---- problems ---- *@
+    <div class="card ph">
+        <h2 style="margin-top:0;">What is failing</h2>
+        @if (d.Problems.Count == 0)
+        {
+            <p class="info" style="background:#ecfdf5;border:1px solid #a7f3d0;color:#065f46;">
+                Nothing failed in this window.
+            </p>
+        }
+        else
+        {
+            <div style="overflow-x:auto;">
+                <table class="grid">
+                    <thead>
+                        <tr><th>Problem</th><th style="text-align:right;">Times</th><th style="text-align:right;">Last seen</th></tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var p in d.Problems)
+                        {
+                            <tr>
+                                <td style="word-break:break-word;">@p.Problem</td>
+                                <td style="text-align:right;font-weight:700;">@p.Count.ToString("N0")</td>
+                                <td style="text-align:right;color:#5b636e;">@p.LastSeen.ToLocalTime().ToString("d MMM HH:mm")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div>
+
+    <div class="card ph">
+        <p style="margin:0;color:#5b636e;font-size:12.5px;">
+            Times are shown in your local time zone. Data comes from Application Insights and is read
+            with the app's own managed identity &mdash; no key is stored anywhere. Application
+            Insights typically lags real time by a minute or two, so a problem you are watching right
+            now may take a moment to appear.
+        </p>
+    </div>
+}

@@ -332,16 +332,23 @@ public sealed class CommandCenterService
     private async Task PopulateHeadcountsAsync(
         CommandCenterSnapshot s, int eventId, CancellationToken ct)
     {
+        // Every headcount tile counts ACTIVE people only (§253 G2/G4/G5/G6): a
+        // deactivated participant's surviving preference rows must not inflate the
+        // rooms / vendor / caterer / venue numbers an organizer orders against.
         var hotelRooms = await _db.HotelBookings
-            .CountAsync(h => h.EventId == eventId && h.NeedsRoom, ct);
+            .CountAsync(h => h.EventId == eventId && h.NeedsRoom
+                             && _db.Participants.Any(p => p.Id == h.ParticipantId && p.IsActive), ct);
         var swag = await _db.SwagPreferences
             .CountAsync(w => w.EventId == eventId
-                             && (w.WantsPolo || w.WantsJacket || w.WantsGift), ct);
+                             && (w.WantsPolo || w.WantsJacket || w.WantsGift)
+                             && _db.Participants.Any(p => p.Id == w.ParticipantId && p.IsActive), ct);
         var lunch = await _db.LunchSignups
-            .CountAsync(l => l.EventId == eventId && (l.LunchSetupDay || l.LunchPreDay), ct);
+            .CountAsync(l => l.EventId == eventId && (l.LunchSetupDay || l.LunchPreDay)
+                             && _db.Participants.Any(p => p.Id == l.ParticipantId && p.IsActive), ct);
         // Dinner headcount = attendees (Attending) + their plus-ones.
         var dinnerRows = await _db.DinnerSignups
-            .Where(d => d.EventId == eventId && d.Attending)
+            .Where(d => d.EventId == eventId && d.Attending
+                        && _db.Participants.Any(p => p.Id == d.ParticipantId && p.IsActive))
             .Select(d => d.PlusOneCount)
             .ToListAsync(ct);
         var dinner = dinnerRows.Count + dinnerRows.Sum();
@@ -366,11 +373,14 @@ public sealed class CommandCenterService
         s.SessionsScheduled = sessions.Count(
             x => x.StartsAt != null && !string.IsNullOrWhiteSpace(x.Room));
 
-        s.SponsorsTotal = await _db.SponsorInfos.CountAsync(x => x.EventId == eventId, ct);
+        // Withdrawn companies (§253 G8b) no longer count as sponsors.
+        s.SponsorsTotal = await _db.SponsorInfos.CountAsync(
+            x => x.EventId == eventId && x.Status == SponsorStatus.Active, ct);
 
         var sponsorTasks = await _db.Tasks
             .Where(t => t.EventId == eventId
                         && t.SourceKey != null && t.SourceKey.StartsWith(SponsorTaskPrefix))
+            .ExcludingAbandoned()   // §332 — a departed contact's deliverables are not "done"
             .Select(t => t.State)
             .ToListAsync(ct);
         s.SponsorTasksTotal = sponsorTasks.Count;
@@ -403,10 +413,14 @@ public sealed class CommandCenterService
                 t.Id, t.Title, t.Assignee, t.DueDate, t.DueDate!.Value < today))
             .ToList();
 
-        // Unassigned volunteer tasks (open coverage).
+        // Unassigned volunteer tasks (open coverage). Only EFFECTIVE assignments
+        // count (§253 G7): an assignment held by a deactivated volunteer — or one
+        // the volunteer DECLINED — must not hide the task from the attention tile.
         var volTasks = await _db.VolunteerTasks
             .Where(t => t.EventId == eventId && t.Status != VolunteerTaskStatus.Cancelled)
-            .Select(t => t.Assignments.Count)
+            .Select(t => t.Assignments.Count(a =>
+                a.Participant.IsActive
+                && a.DecisionStatus != ShiftDecisionStatus.Declined))
             .ToListAsync(ct);
         var unassignedVol = volTasks.Count(c => c == 0);
 

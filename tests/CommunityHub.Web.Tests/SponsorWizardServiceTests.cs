@@ -86,15 +86,45 @@ public sealed class SponsorWizardServiceTests
 
         var v = (await OfflineSvc(db).BuildAsync(ev, pid))!;
 
-        Assert.Equal(new[] { "details", "coordinator", "contacts", "logos" }, v.Steps.Select(s => s.Key).ToArray());
-        Assert.True(v.Steps.Single(s => s.Key == "details").Done);
-        Assert.False(v.Steps.Single(s => s.Key == "coordinator").Done);
+        // §228: every sponsor also gets the company party group sign-up step.
+        Assert.Equal(new[] { "company", "contacts", "logos", "party" }, v.Steps.Select(s => s.Key).ToArray());
+        Assert.True(v.Steps.Single(s => s.Key == "company").Done);
+        // §597 — the coordinator step is gone; contacts is now the first post-company step.
         Assert.Null(v.Steps.Single(s => s.Key == "contacts").Done);   // e-conomic off → undeterminable
         Assert.False(v.Steps.Single(s => s.Key == "logos").Done);
+        Assert.False(v.Steps.Single(s => s.Key == "party").Done);     // nobody answered yet
+        // §410: this fixture has no tasks OUTSIDE the wizard, so the §400 deadlines step is
+        // correctly withheld — an empty "your deadlines" step is worse than no step at all.
+        Assert.DoesNotContain(v.Steps, s => s.Key == "deadlines");
         Assert.Equal(4, v.TotalSteps);                                // every step numbered/counted
         Assert.Equal(1, v.DoneCount);
-        Assert.Equal("coordinator", v.NextStep!.Key);
+        Assert.Equal("logos", v.NextStep!.Key);   // contacts is undeterminable, so it is skipped
         Assert.False(v.AllDone);
+    }
+
+    [Fact]
+    public async Task Speaking_session_is_NOT_a_wizard_step_even_when_the_sponsor_bought_one()
+    {
+        // §495 — the sponsor's speaking session left Get Started for the same reason as §474's
+        // booth members: a title, abstract and speaker line-up are rarely settled at onboarding,
+        // so keeping it in the completion flow invites a placeholder abstract or parks the sponsor
+        // short of 100% on something they cannot answer yet.
+        //
+        // The fixture DELIBERATELY sets HasSponsorSession = true — the flag that used to add the
+        // step — so this pins the step's absence as the RULE rather than an empty-data accident.
+        // The obligation survives as the "Submit session description" sponsor task, which §400/§410
+        // surface on the deadlines step.
+        var (db, ev, pid) = await SeedAsync(new SponsorInfo
+        {
+            SponsorPackage = SponsorPackage.Gold,
+            HasSponsorSession = true,
+            WebsiteUrl = "https://2linkit.net",
+            EventCoordinatorEmail = "coord@x.dk",
+        });
+
+        var v = (await OfflineSvc(db).BuildAsync(ev, pid))!;
+
+        Assert.DoesNotContain(v.Steps, s => s.Key == "session");
     }
 
     [Fact]
@@ -109,18 +139,77 @@ public sealed class SponsorWizardServiceTests
         });
         db.SponsorBoothMembers.Add(new SponsorBoothMember
         { EventId = ev, SponsorCompanyId = "c1", FirstName = "A", LastName = "B", Email = "a@b.dk" });
+        // §297: the logos step is done only when ALL THREE logos are in the upload audit.
+        foreach (var kind in new[] { "some", "print", "zoho" })
+            db.SponsorUploadAudits.Add(new SponsorUploadAudit
+            {
+                EventId = ev, SponsorCompanyId = "c1", Kind = kind, FileName = $"{kind}.png",
+                Version = 1, WebUrl = "/x", UploadedByEmail = "x@y.dk", UploadedAt = DateTimeOffset.UtcNow,
+            });
         await db.SaveChangesAsync();
 
         var v = (await OfflineSvc(db).BuildAsync(ev, pid))!;
 
-        Assert.Equal(new[] { "details", "coordinator", "contacts", "logos", "booth-members", "booth-materials" },
+        // §229 adds booth-checkin for exhibitors; §228 adds the party group step for all.
+        Assert.Equal(new[] { "company", "contacts", "logos", "booth-materials", "booth-checkin", "party" },
             v.Steps.Select(s => s.Key).ToArray());
-        Assert.True(v.Steps.Single(s => s.Key == "booth-members").Done);    // a member exists
+
+        // §474 — booth-members is NOT a wizard step: a sponsor onboarding ~6 months out cannot know
+        // who will staff the booth. Asserted explicitly, and the fixture DOES add a booth member
+        // above, so this pins the step's absence as the rule rather than an empty-data accident.
+        // The obligation itself survives as the `sponsor:…:register-booth-members` task on the
+        // deadlines step (see SponsorDeliverablesServiceTests for the stage).
+        Assert.DoesNotContain(v.Steps, s => s.Key == "booth-members");
+
         Assert.False(v.Steps.Single(s => s.Key == "booth-materials").Done); // none yet
-        // details + coordinator + logos + booth-members done; booth-materials not.
+        Assert.False(v.Steps.Single(s => s.Key == "booth-checkin").Done);   // §229: unanswered
+        Assert.False(v.Steps.Single(s => s.Key == "party").Done);           // §228: unanswered
+        // details + logos done; the rest not. §410: no tasks outside the wizard in this fixture,
+        // so no deadlines step. §597: the coordinator step is gone, so BOTH the total and the
+        // done-count drop by one — it used to be counted as done via EventCoordinatorEmail.
         Assert.Equal(6, v.TotalSteps);
-        Assert.Equal(4, v.DoneCount);
+        Assert.Equal(2, v.DoneCount);
         Assert.Equal("booth-materials", v.NextStep!.Key);
+    }
+
+    [Fact]
+    public async Task Booth_checkin_step_completes_on_any_answer_including_not_participating()
+    {
+        // §229: the step is Done once ANY slot is saved — incl. the pre-day opt-out.
+        var (db, ev, pid) = await SeedAsync(new SponsorInfo
+        {
+            SponsorPackage = SponsorPackage.Gold,
+            BoothCheckInSlot = BoothCheckInSlots.NotParticipating,
+        });
+
+        var v = (await OfflineSvc(db).BuildAsync(ev, pid))!;
+        Assert.True(v.Steps.Single(s => s.Key == "booth-checkin").Done);
+    }
+
+    [Fact]
+    public async Task Party_step_completes_for_every_contact_once_anyone_in_the_company_answered()
+    {
+        // §228: ONE group reservation covers the whole company — a second contact's wizard
+        // shows the party step Done even though THEY never submitted anything.
+        var (db, ev, pid) = await SeedAsync(new SponsorInfo { SponsorPackage = SponsorPackage.Silver });
+        var colleague = new Participant
+        {
+            EventId = ev, FullName = "Sponsor Two", Email = "s2@x.dk",
+            Role = ParticipantRole.Sponsor, IsActive = true,
+            LifecycleState = ParticipantLifecycleState.Active, SponsorCompanyId = "c1",
+        };
+        db.Participants.Add(colleague);
+        await db.SaveChangesAsync();
+        db.PartyRsvps.Add(new PartyRsvp
+        {
+            EventId = ev, Name = "Sponsor Two", Email = "s2@x.dk",
+            Attending = true, HeadCount = 4, ParticipantId = colleague.Id,
+        });
+        await db.SaveChangesAsync();
+
+        // Build for the FIRST contact (pid) — who did not answer themselves.
+        var v = (await OfflineSvc(db).BuildAsync(ev, pid))!;
+        Assert.True(v.Steps.Single(s => s.Key == "party").Done);
     }
 
     /// <summary>
@@ -143,12 +232,15 @@ public sealed class SponsorWizardServiceTests
 
         var v = (await OfflineSvc(db).BuildAsync(ev, pid))!;
 
-        // Steps: 1 details(✓) 2 coordinator(✓) 3 contacts(untracked) 4 logos(✗).
+        // §597 — the "coordinator" step is GONE (operator: "step event coordinator is not
+        // relevant"); the "contacts" step already lists coordinators as a add/delete list.
+        // Steps: 1 details(✓) 2 contacts(untracked) 3 logos(✗) 4 party(✗)
+        //        5 deadlines(✓ — §400 read-only summary, always done).
         Assert.Equal("logos", v.NextStep!.Key);
         var listPosition = v.Steps.Select((s, i) => (s, i)).First(x => x.s.Key == v.NextStep.Key).i + 1;
         Assert.Equal(listPosition, v.NextStepNumber);   // number shown == list item the user sees
-        Assert.Equal(4, v.NextStepNumber);
-        Assert.Equal(4, v.TotalSteps);                  // "step 4 of 4", not "4 of 3"
+        Assert.Equal(3, v.NextStepNumber);
+        Assert.Equal(4, v.TotalSteps);                  // "step 3 of 4", not "3 of 5"
         Assert.True(v.NextStepNumber <= v.TotalSteps);
     }
 }

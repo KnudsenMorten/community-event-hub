@@ -23,7 +23,20 @@ public sealed record ContentPage(
     string Slug,
     string Title,
     string MenuSection,
-    IReadOnlyList<ParticipantRole> Roles);
+    IReadOnlyList<ParticipantRole> Roles,
+    string? SpeakerTitle = null)
+{
+    /// <summary>
+    /// §326br — the menu label / page heading for one role. An all-roles page may carry a
+    /// SPEAKER-specific title when the page holds a section only speakers act on (the
+    /// addresses page also lists the speaker hotel). Every other role keeps
+    /// <see cref="Title"/>, so nobody is shown a heading about a benefit they do not get.
+    /// </summary>
+    public string TitleFor(ParticipantRole role) =>
+        role == ParticipantRole.Speaker && !string.IsNullOrWhiteSpace(SpeakerTitle)
+            ? SpeakerTitle!
+            : Title;
+}
 
 /// <summary>
 /// The single source of truth that maps a content-page <c>slug</c> to its
@@ -45,21 +58,38 @@ public static class ContentPageRegistry
     private static readonly IReadOnlyDictionary<string, ContentPage> Pages =
         new[]
         {
-            // ALL roles (§123).
-            new ContentPage("wayfinding", "Wayfinding – conference venue", EventLogistics, AllRoles),
-            new ContentPage("good-to-know", "Good to know before event", EventLogistics, AllRoles),
-            new ContentPage("addresses", "Addresses", EventLogistics, AllRoles),
-            new ContentPage("last-event-videos", "Check out our last event", EventLogistics, AllRoles),
+            // ALL roles (§123). §317 (operator 2026-07-24): titles + DECLARATION ORDER are
+            // the Event Info menu order (the nav renders in insertion order now — the §173d
+            // alphabetize is retired): Check Out Last Event → Good To Know → Address →
+            // Wayfinding.
+            new ContentPage("last-event-videos", "Check Out Last Event - ELDK26", EventLogistics, AllRoles),
+            new ContentPage("good-to-know", "Good To Know Before Event", EventLogistics, AllRoles),
+            // §326br (operator 2026-07-25): speakers see the speaker hotel on this page, so
+            // for them the label names it. Other roles keep the plain venue title.
+            new ContentPage("addresses", "Address To Conference Venue", EventLogistics, AllRoles,
+                SpeakerTitle: "Address To Conference Venue & Speaker Hotel"),
+            new ContentPage("wayfinding", "Wayfinding Inside Conference Venue", EventLogistics, AllRoles),
+            // §326ag (operator 2026-07-25): what CEH is, how it is built, and the feature
+            // list per role — all roles, last in the Event Info order.
+            new ContentPage("ceh-introduction", "Introduction to Community Event Hub solution", EventLogistics, AllRoles),
 
-            // SPEAKERS (+ organizers always) (§123).
-            new ContentPage("speaker-template", "Speaker template", EventLogistics, SpeakersOnly),
+            // SPEAKERS (+ organizers always) (§123). §317: speaker-only pages are placed
+            // EXPLICITLY into the Speaker Info sub-fold-outs by NavBuilder (not via the
+            // generic loop) — titles per the operator's menu wording.
+            // §326d (operator 2026-07-25): menu item renamed "Speaker template" →
+            // "Download Speaker Template" (heading follows per the §318d align rule).
+            new ContentPage("speaker-template", "Download Speaker Template", EventLogistics, SpeakersOnly),
+            // §326e (operator 2026-07-25): speaker key dates & times — a DIRECT Speaker
+            // Info leaf (NavBuilder places it explicitly, before the sub-fold-outs).
+            new ContentPage("key-dates-times", "Key Dates & Times", EventLogistics, SpeakersOnly),
             new ContentPage("session-guidelines", "Session Guidelines", EventLogistics, SpeakersOnly),
-            new ContentPage("av-stage-timer", "A/V, Comfort Screen, HDMI Switchers, Stage-timer", EventLogistics, SpeakersOnly),
-            new ContentPage("session-preview-final", "Session Preview / Final guidelines", EventLogistics, SpeakersOnly),
+            new ContentPage("av-stage-timer", "A/V, Comfort Screen, HDMI Switches, Stage-timer", EventLogistics, SpeakersOnly),
+            new ContentPage("session-preview-final", "Deadlines: Session Preview / Final guidelines", EventLogistics, SpeakersOnly),
             // §161 (operator 2026-06-28): one entry — "Session feedback" page kept but relabelled
             // "Session Evaluations"; the duplicate "session-evaluations" nav entry dropped.
-            new ContentPage("session-feedback", "Session Evaluations", EventLogistics, SpeakersOnly),
-            new ContentPage("help-promote", "Help Promote", EventLogistics, SpeakersOnly),
+            new ContentPage("session-feedback", "How We Do Session Evaluations?", EventLogistics, SpeakersOnly),
+            // §289 (operator 2026-07-10): the "Social Media Guidelines" nav page was REMOVED — its
+            // awareness/tags copy now lives directly on the Help Promote page (/Speaker/Graphics).
         }
         .ToDictionary(p => p.Slug, StringComparer.OrdinalIgnoreCase);
 

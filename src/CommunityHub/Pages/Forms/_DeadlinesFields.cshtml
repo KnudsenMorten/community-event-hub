@@ -1,0 +1,145 @@
+@model CommunityHub.Forms.Steps.DeadlinesFormModel
+@*
+    §400 — fields-ONLY partial for the "Your tasks & deadlines" step.
+    No <form>, no Prev/Next — the HOST (/Forms/Wizard) owns those, and the calendar buttons below
+    are formaction submits into the host's handlers (never a nested form, §304b).
+
+    Why this step exists (operator 2026-07-26): the wizard collects what we need FROM you, but the
+    dated obligations — slide uploads, travel invoice, promotion — live OUTSIDE it. So someone could
+    finish Get Started believing they were done while several deadlines were still ahead of them.
+*@
+
+<p>
+    @* §448 (operator 2026-07-27) — his exact rewording of this step's intro. *@
+    Get Started covers everything we need from you right now. The items below have their own
+    <strong>deadlines</strong> and sit outside this flow &mdash; you can return to them any time
+    from <strong>My Tasks</strong>.
+</p>
+
+<p style="background:#eef6ff;border:1px solid #b6d4fe;border-radius:8px;padding:12px 14px;">
+    <strong>You will be reminded.</strong> We e-mail a reminder as each deadline approaches, and we
+    keep reminding you until the item is <strong>completed and marked as done</strong> &mdash; so
+    nothing quietly slips. Finish an item and its reminders stop immediately.
+</p>
+
+@if (TempData["CalendarInviteMessage"] is string cim)
+{
+    <p role="status" style="margin:6px 0 12px;padding:8px 12px;border-radius:8px;background:#ecfdf5;color:#065f46;border:1px solid #a7f3d0;">@cim</p>
+}
+
+@if (Model.Pending.Count == 0 && Model.Completed.Count == 0)
+{
+    <p class="info">You have no dated tasks right now. If any appear, they will show up here and in My Tasks.</p>
+}
+else
+{
+    @if (Model.AnyDated)
+    {
+        @* ONE button for the whole list — the operator asked for both this and per-task. *@
+        <p style="margin:14px 0 6px;">
+            <button type="submit" asp-page-handler="AllTaskReminders"
+                    style="padding:10px 18px;border-radius:6px;background:#15803d;color:#fff;border:none;font-size:14px;font-weight:700;cursor:pointer;">
+                &#128197; Send calendar invites for all my deadlines
+            </button>
+        </p>
+        <p style="margin:0 0 16px;font-size:12.5px;color:#6b7280;">
+            One invitation per dated item. Re-sending updates the existing entries rather than
+            creating duplicates, so it is always safe to press again.
+        </p>
+    }
+
+    @if (Model.Pending.Count > 0)
+    {
+        <h4 style="margin:18px 0 6px;font-size:15px;color:#b45309;">Still to do (@Model.Pending.Count)</h4>
+        <div style="display:flex;flex-direction:column;gap:8px;">
+            @foreach (var r in Model.Pending)
+            {
+                <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;background:#fff;border:1px solid @(r.Overdue ? "#e9a8a3" : "#dde4ee");border-radius:10px;padding:10px 12px;">
+                    <span style="flex:1 1 260px;">
+                        @* §449 (operator 2026-07-27): the title used to be a LINK, which navigated
+                           away from the LAST wizard step — so people left to read what an item meant
+                           and never came back to press "Save & finish". His preferred fix, and the
+                           right one: EXPLAIN it in place. The title now opens a fold-out; the
+                           deep-link survives inside it and opens in a NEW TAB, so acting on an item
+                           also never costs you the step you were finishing. *@
+                        @if (!string.IsNullOrWhiteSpace(r.Description) || !string.IsNullOrWhiteSpace(r.Link))
+                        {
+                            <details class="dl-item">
+                                @* Keep the disclosure triangle: it is the only thing that says
+                                   "this expands" now that the text is no longer a link. *@
+                                <summary style="cursor:pointer;font-weight:600;color:#1f6feb;">
+                                    @r.Title
+                                </summary>
+                                <div style="margin:8px 0 2px;padding:10px 12px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;font-size:13.5px;line-height:1.6;color:#334155;">
+                                    @if (!string.IsNullOrWhiteSpace(r.Description))
+                                    {
+                                        @* §480 — render through the SHARED task renderer, like every
+                                           other task row (_SpeakerTaskRow / _SponsorTaskRow /
+                                           _ParticipantTaskRow). Printed raw, the descriptions' own
+                                           markup showed as literal text: "__DESIGN REQUIREMENTS:__",
+                                           "**BEFORE**" and whole "[label](url)" link syntax. The
+                                           renderer HTML-encodes BEFORE substituting, so this adds no
+                                           injection path. *@
+                                        <div style="white-space:pre-line;">@CommunityHub.Branding.TaskTextLinkifier.Render(r.Description)</div>
+                                    }
+                                    else
+                                    {
+                                        <div>Open this item to complete it — it stays on your list until it is done.</div>
+                                    }
+                                    @if (!string.IsNullOrWhiteSpace(r.Link))
+                                    {
+                                        <p style="margin:8px 0 0;">
+                                            <a href="@r.Link" target="_blank" rel="noopener noreferrer" style="font-weight:600;">
+                                                Open this item &#8599;<span class="visually-hidden"> (opens in a new tab)</span>
+                                            </a>
+                                        </p>
+                                    }
+                                </div>
+                            </details>
+                        }
+                        else
+                        {
+                            <strong>@r.Title</strong>
+                        }
+                        <br />
+                        @if (r.DueDate is { } due)
+                        {
+                            <span style="font-size:13px;color:@(r.Overdue ? "#b91c1c" : "#5b636e");">
+                                @(r.Overdue ? "Overdue — was due " : "Due ")@due.ToString("d MMM yyyy")
+                            </span>
+                        }
+                        else
+                        {
+                            <span style="font-size:13px;color:#5b636e;">No deadline &mdash; but still needed</span>
+                        }
+                    </span>
+
+                    @if (r.HasDueDate)
+                    {
+                        <button type="submit" asp-page-handler="TaskReminder" asp-route-taskId="@r.TaskId"
+                                style="flex:0 0 auto;padding:7px 12px;border-radius:6px;background:#fff;color:#15803d;border:1px solid #a7f3d0;font-size:12.5px;font-weight:700;cursor:pointer;">
+                            &#128197; Add to my calendar
+                        </button>
+                    }
+                </div>
+            }
+        </div>
+    }
+
+    @if (Model.Completed.Count > 0)
+    {
+        @* Completed items are collapsed: they are reassurance, not work. *@
+        <details style="margin-top:16px;">
+            <summary style="cursor:pointer;font-weight:600;">Already done (@Model.Completed.Count)</summary>
+            <ul style="margin:8px 0 0 18px;line-height:1.7;color:#5b636e;">
+                @foreach (var r in Model.Completed)
+                {
+                    <li>
+                        &#10003; @r.Title
+                        @if (r.DueDate is { } d) { <span style="font-size:12.5px;"> &mdash; was due @d.ToString("d MMM yyyy")</span> }
+                    </li>
+                }
+            </ul>
+        </details>
+    }
+}

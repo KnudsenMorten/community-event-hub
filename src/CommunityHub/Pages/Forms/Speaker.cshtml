@@ -64,9 +64,9 @@
             @* Shared inline-validation summary (REQUIREMENTS §21). *@
             <div asp-validation-summary="All" class="ceh-validation-summary"></div>
 
-            <label for="SpeakerName">@Localizer["Common.Name"]</label>
-            <input type="text" id="SpeakerName" value="@Model.FullName" readonly />
-
+            @* §326i: the read-only Name display is gone (authenticated session); the
+               sign-in email stays — it is the identity + Sessionize match key and
+               carries its explanatory note. *@
             <label for="SpeakerSignInEmail">@Localizer["SpeakerForm.SignInEmail"]</label>
             <input type="text" id="SpeakerSignInEmail" value="@Model.Email" readonly />
             <p style="color:#6b7280;font-size:12px;margin:-8px 0 14px;">
@@ -86,11 +86,11 @@
                 @Localizer["SpeakerForm.BioIntro"]
                 @if (Model.LastSessionizeImportAt is not null)
                 {
-                    <span>@Localizer["SpeakerForm.LastImported", Model.LastSessionizeImportAt?.ToString("dd/MM/yyyy HH:mm 'UTC'") ?? ""]</span>
+                    <span>@Localizer["SpeakerForm.LastImported", Model.LastSessionizeImportAt?.ToString("d MMM yyyy HH:mm 'UTC'") ?? ""]</span>
                 }
                 @if (Model.BioLastEditedBySpeakerAt is not null)
                 {
-                    <span>@Localizer["SpeakerForm.LastEdited", Model.BioLastEditedBySpeakerAt?.ToString("dd/MM/yyyy HH:mm 'UTC'") ?? ""]</span>
+                    <span>@Localizer["SpeakerForm.LastEdited", Model.BioLastEditedBySpeakerAt?.ToString("d MMM yyyy HH:mm 'UTC'") ?? ""]</span>
                 }
             </p>
 

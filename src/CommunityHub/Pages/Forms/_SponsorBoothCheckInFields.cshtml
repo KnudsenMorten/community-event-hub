@@ -1,0 +1,58 @@
+@model CommunityHub.Forms.Steps.SponsorBoothCheckInModel
+@*
+    Fields-ONLY partial for the sponsor Booth-check-in wizard step (§229 / §285 Phase 2).
+    Contains NO <form>, no buttons, no page chrome — the shared wizard host (/Forms/Wizard)
+    owns those and places this inside its single <form method="post">. The radio name is
+    "Slot" so the host's empty-prefix model binding fills SponsorBoothCheckInModel.Slot.
+    Same options + labels as the standalone Company Details "Booth check-in" section, so the
+    inline step and the page stay identical.
+*@
+<p style="color:#4b5563;margin-top:0;font-size:13.5px;">
+    Tell us when you expect to arrive at your booth on <strong>9 Feb 2027</strong> (pre-day),
+    so we can plan check-in and be ready to help you get set up.
+</p>
+@* §477 — say the answer is not binding. Without this, an exhibitor who does not yet know their
+   travel plans hesitates over a preliminary question, or picks nothing at all. *@
+<p style="color:#4b5563;margin:0 0 12px;font-size:13.5px;">
+    Your arrival time is <strong>preliminary</strong> — you can change it later at any time
+    from the Company Details page.
+</p>
+@foreach (var s in CommunityHub.Core.Domain.BoothCheckInSlots.All)
+{
+    <div style="display:flex;gap:10px;align-items:center;margin:8px 0;background:#f3f6fb;border:1px solid #dde4ee;border-radius:10px;padding:12px;">
+        <input type="radio" id="slot-@s" name="Slot" value="@s" required
+               checked="@(Model.CurrentSlot == s)" style="width:18px;height:18px;margin:0;" />
+        <label for="slot-@s" style="margin:0;font-weight:500;cursor:pointer;">@CommunityHub.Core.Domain.BoothCheckInSlots.Label(s)</label>
+    </div>
+}
+<span asp-validation-for="Slot" class="error"></span>
+
+@* §298: how many booth members will check in — feeds the organizer pre-day LUNCH order.
+   §477: MANDATORY when attending (the server enforces it; not marked `required` in HTML because
+   the not-participating option must still be able to post with this box empty). *@
+<label for="MemberCount" style="margin-top:16px;">
+    How many of your booth members will check in on the pre-day?
+    <span style="color:#b91c1c;" title="Required">*</span>
+</label>
+<input type="number" id="MemberCount" name="MemberCount" min="1" max="50" inputmode="numeric"
+       value="@(Model.MemberCount)" placeholder="e.g. 3" style="max-width:120px;" />
+<span asp-validation-for="MemberCount" class="error"></span>
+<p style="color:#6b7280;font-size:12px;margin:2px 0 14px;">
+    Used to plan the pre-day lunch — count everyone from your team who'll be on site.
+    An estimate is fine; you can update it later.
+</p>
+
+@* §298: exhibitor pre-day run-of-show (key dates & times) — so exhibitors know when the breaks are. *@
+<div style="background:#eef6ff;border:1px solid #d3e6fb;border-radius:10px;padding:14px;margin-top:6px;font-size:13.5px;line-height:1.6;color:#1f3f6b;">
+    <strong>Tue 9 Feb 2027 — Pre-day (Master Classes + Expo)</strong>
+    <ul style="margin:8px 0 0;padding-left:18px;">
+        <li>07:00 — Doors open · breakfast for attendees</li>
+        <li>07:30 — Exhibitor check-in to booth (set up swag, demos, etc.)</li>
+        <li>09:00 — Master Classes start</li>
+        <li>10:30 — Coffee break (15 min)</li>
+        <li>11:00–14:00 — Media team photographs the exhibitor booths (used in the welcome video)</li>
+        <li>12:00 — Exhibitor ready for the attendee lunch break (1 hr)</li>
+        <li>14:15 — Coffee &amp; cake break (30 min)</li>
+        <li>16:00–18:30 — Party in the Expo / food area</li>
+    </ul>
+</div>

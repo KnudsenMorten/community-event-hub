@@ -384,6 +384,49 @@ public class SponsorRecipientResolverTests
         Assert.Equal("coord@2linkit.net", sent.To);
     }
 
+    [Fact]
+    public async Task Reset_still_works_when_the_coordinators_ADDRESS_CHANGED_since_the_welcome()
+    {
+        // §340-G-1. §326bf moved the SEND's idempotency to `welcome:{participantId}`, because an
+        // address is not an identity — a typo correction, a case change on re-import or a
+        // Sessionize update all leave the ledger row under the OLD address. The RESET was left
+        // matching RecipientEmail, so the two halves drifted, and silently in the worse direction:
+        // it matched nothing, deleted nothing, reported "0", and the follow-up resend then found
+        // the row still present and skipped. "Reset, then resend" did nothing at all, forever,
+        // with no error anywhere to notice.
+        using var db = ScenarioFixture.NewDb();
+        var eventId = await SeedEventAsync(db);
+
+        var coord = Sponsor("new.address@2linkit.net", coordinator: true, signer: false);
+        coord.EventId = eventId;
+        db.Participants.Add(coord);
+        await db.SaveChangesAsync();
+
+        // The welcome went out back when this person used a different address.
+        db.SentReminders.Add(new SentReminder
+        {
+            EventId = eventId,
+            RecipientEmail = "old.address@2linkit.net",
+            ReminderType = "welcome",
+            OccasionKey = $"welcome:{coord.Id}",
+        });
+        await db.SaveChangesAsync();
+
+        var svc = NewWelcomeService(db, out var sender);
+
+        // Suppressed to begin with — the SEND keys on the participant, so it still matches.
+        var before = await svc.SendForCompanyAsync(eventId, "test-2linkit");
+        Assert.Equal(0, before.Sent);
+        Assert.Empty(sender.Sent);
+
+        var deleted = await svc.ResetForCompanyAsync(eventId, "test-2linkit");
+        Assert.Equal(1, deleted);   // 0 before the fix — the silent no-op
+
+        var after = await svc.SendForCompanyAsync(eventId, "test-2linkit");
+        Assert.Equal(1, after.Sent);
+        Assert.Equal("new.address@2linkit.net", Assert.Single(sender.Sent).To);
+    }
+
     // ----------------------------------------------------------------------
     // Sponsor task-deadline reminder fans out to coordinators (not the assignee)
     // ----------------------------------------------------------------------

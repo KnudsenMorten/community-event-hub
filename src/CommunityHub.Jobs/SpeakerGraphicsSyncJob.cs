@@ -26,25 +26,37 @@ public sealed class SpeakerGraphicsSyncJob
     private readonly GraphicsService _graphics;
     private readonly CommunityHubDbContext _db;
     private readonly IAuditTrail _audit;
+    private readonly SpeakerGraphicsReadyNotifier _ready;
     private readonly ILogger<SpeakerGraphicsSyncJob> _log;
 
     public SpeakerGraphicsSyncJob(
         GraphicsService graphics,
         CommunityHubDbContext db,
         IAuditTrail audit,
+        SpeakerGraphicsReadyNotifier ready,
         ILogger<SpeakerGraphicsSyncJob> log)
     {
         _graphics = graphics;
         _db = db;
         _audit = audit;
+        _ready = ready;
         _log = log;
     }
 
-    /// <summary>Hourly, at :40 past the hour UTC (offset from the Sessionize import at :00 so the
-    /// sessions exist before their graphics are matched by title).</summary>
+    /// <summary>
+    /// Every 15 minutes at :10/:25/:40/:55 UTC. The :40 slot is kept — it is offset from the
+    /// Sessionize import at :00 so the sessions exist before their graphics are matched by title,
+    /// and that reason still holds for the slot that matters most.
+    ///
+    /// <para>§435 (operator 2026-07-27): he dropped a file in the SharePoint MasterClass folder and
+    /// expected it within *"1-5 min"*, then asked <i>"is the folder or name or method wrong"</i>.
+    /// Neither the folder nor the name — this schedule. Hourly is right for a settled event and
+    /// wrong for someone testing, so it now matches the §433 speaker-push cadence. The manual
+    /// "Pull now" on /Organizer/Graphics remains the instant path.</para>
+    /// </summary>
     [Function("SpeakerGraphicsSyncJob")]
     public async Task Run(
-        [TimerTrigger("0 40 * * * *")] TimerInfo timer,
+        [TimerTrigger("0 10,25,40,55 * * * *")] TimerInfo timer,
         CancellationToken ct)
     {
         var activeEventId = await _db.Events
@@ -72,12 +84,21 @@ public sealed class SpeakerGraphicsSyncJob
         var released = await _graphics.ReleaseAllGeneratedAsync(
             activeEventId.Value, "system (SharePoint sync)", ct);
 
+        // §436 (operator 2026-07-27: "when it detects, i expect also an email to arrive").
+        // THIS is the detection path he meant: the file appears in SharePoint, this job pulls
+        // it and — because placing the file IS the curation — releases it in the same run. So
+        // the mail goes out here, quarter-hourly, instead of waiting for the next 08:30 sweep.
+        // Narrowed to the speakers this run actually released; the shared ledger key means an
+        // already-notified speaker is skipped either way.
+        var notified = await _ready.NotifyAsync(activeEventId.Value, released.SpeakerIds, ct);
+
         _log.LogInformation(
             "SpeakerGraphicsSyncJob: pulled {Matched} session-matched ({Unmatched} had no file), "
-            + "{TracksMatched} track(s) matched, released {Released}.",
-            pull.Matched, pull.Unmatched, pull.TracksMatched, released);
+            + "{TracksMatched} track(s) matched, released {Released} (notified {Notified} speaker(s)), "
+            + "retired {Retired} (§326af — file deleted in SharePoint).",
+            pull.Matched, pull.Unmatched, pull.TracksMatched, released.Count, notified, pull.Retired);
 
-        if (pull.Matched > 0 || pull.TracksMatched > 0 || released > 0)
+        if (pull.Matched > 0 || pull.TracksMatched > 0 || released.Count > 0 || pull.Retired > 0)
             await _audit.RecordAsync(new AuditEntry
             {
                 EventId = activeEventId.Value,
@@ -86,7 +107,7 @@ public sealed class SpeakerGraphicsSyncJob
                 ActorEmail = "system",
                 Source = AuditSource.Job,
                 Summary = $"SharePoint graphics sync: {pull.Matched} session graphic(s) pulled, "
-                          + $"{pull.TracksMatched} track(s) matched, {released} released to speakers"
+                          + $"{pull.TracksMatched} track(s) matched, {released.Count} released to speakers"
                           + (pull.Unmatched > 0 ? $", {pull.Unmatched} session(s) had no matching file" : ""),
                 Outcome = AuditOutcome.Success,
             }, ct);

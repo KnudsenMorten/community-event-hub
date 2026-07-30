@@ -1,11 +1,11 @@
 @page
 @model CommunityHub.Pages.Organizer.CalendarSettingsModel
 @{
-    ViewData["Title"] = "Calendar sync settings";
+    ViewData["Title"] = "Calendar invitation settings";
 }
 
 <div class="card">
-    <h1>&#128197; Calendar sync settings</h1>
+    <h1>&#128197; Calendar invitation settings</h1>
 
     @if (Model.AccessDenied)
     {
@@ -13,10 +13,10 @@
     }
     else
     {
-        <p>Calendar sync lets speakers, volunteers and organizers <strong>subscribe their
-           own deadlines, shifts and tasks</strong> to their personal calendar (a private
-           per-user feed), and attaches an <strong>.ics invite</strong> to activation emails
-           so the event lands in their calendar.</p>
+        <p>When calendar invitations are on, participants can e-mail themselves a
+           <strong>calendar invitation</strong> (an &ldquo;Add Reminder&rdquo; / &ldquo;Email me a
+           calendar invite&rdquo; action) for their task due dates, sessions and other items, so each
+           lands straight in their calendar.</p>
 
         @if (Model.SavedMessage is not null)
         {
@@ -28,15 +28,28 @@
 
         <form method="post">
             <fieldset style="border:1px solid #e5e7eb;border-radius:8px;padding:12px 14px;max-width:100%;">
-                <legend style="font-weight:600;">Calendar sync for this edition</legend>
+                <legend style="font-weight:600;">Calendar invitations for this edition</legend>
                 <label style="display:flex;gap:10px;align-items:flex-start;cursor:pointer;">
                     <input type="checkbox" asp-for="Enabled" style="margin-top:3px;" />
                     <span>
-                        <strong>Enable calendar sync</strong>
+                        <strong>Enable the manual calendar option</strong>
                         <span style="display:block;color:#6b7280;font-size:13px;margin-top:2px;">
-                            When off, the per-user calendar feed returns nothing, the hub's
-                            &ldquo;Add to my calendar&rdquo; card is hidden, and no .ics invite
-                            is sent on activation &mdash; for the whole edition.
+                            The &ldquo;Add Reminder&rdquo; / &ldquo;Email me a calendar invite&rdquo; actions
+                            and the &ldquo;Add to calendar&rdquo; links people click themselves. When off,
+                            those actions send nothing &mdash; for the whole edition.
+                        </span>
+                    </span>
+                </label>
+                <label style="display:flex;gap:10px;align-items:flex-start;cursor:pointer;margin-top:12px;">
+                    <input type="checkbox" asp-for="AutoInvitesEnabled" style="margin-top:3px;" />
+                    <span>
+                        <strong>Auto-send calendar invites on submit</strong>
+                        <span style="display:block;color:#6b7280;font-size:13px;margin-top:2px;">
+                            When ON, the hub automatically pushes a calendar invitation into the recipient's
+                            inbox for the four automatic flows (Appreciation Dinner RSVP, Hotel booking,
+                            organizer hotel placement, Master-Class seat). When <strong>OFF (default)</strong>,
+                            no invite is pushed &mdash; the confirmation e-mail instead carries an
+                            &ldquo;Add to calendar&rdquo; link the person can click to add it themselves.
                         </span>
                     </span>
                 </label>
@@ -45,48 +58,6 @@
                 </div>
             </fieldset>
         </form>
-
-        <section style="margin-top:20px;" aria-labelledby="cal-preview-h">
-            <h3 id="cal-preview-h" style="font-size:15px;margin-bottom:4px;">
-                @Localizer["CalPreview.Heading"]
-            </h3>
-            <p style="color:#6b7280;font-size:13px;margin-top:0;">@Localizer["CalPreview.Intro"]</p>
-
-            @if (Model.FeedPreview.Count == 0)
-            {
-                <p class="info" role="status" style="color:#6b7280;font-style:italic;font-size:13px;">
-                    @Localizer["CalPreview.Empty"]
-                </p>
-            }
-            else
-            {
-                <p role="status" style="font-size:13px;color:#374151;">
-                    @string.Format(Localizer["CalPreview.Count"].Value, Model.FeedPreview.Count)
-                </p>
-                <div style="overflow-x:auto;-webkit-overflow-scrolling:touch;">
-                    <table style="width:100%;border-collapse:collapse;font-size:13.5px;">
-                        <caption class="sr-only">@Localizer["CalPreview.Heading"]</caption>
-                        <thead>
-                            <tr>
-                                <th scope="col" style="text-align:left;padding:8px 10px;border-bottom:1px solid #e6e8ee;background:#f9fafb;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:#6b7280;">@Localizer["CalPreview.Col.Date"]</th>
-                                <th scope="col" style="text-align:left;padding:8px 10px;border-bottom:1px solid #e6e8ee;background:#f9fafb;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:#6b7280;">@Localizer["CalPreview.Col.Item"]</th>
-                                <th scope="col" style="text-align:left;padding:8px 10px;border-bottom:1px solid #e6e8ee;background:#f9fafb;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:#6b7280;">@Localizer["CalPreview.Col.Where"]</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                        @foreach (var row in Model.FeedPreview)
-                        {
-                            <tr>
-                                <td style="padding:8px 10px;border-bottom:1px solid #e6e8ee;white-space:nowrap;">@row.Date.ToString("yyyy-MM-dd")</td>
-                                <td style="padding:8px 10px;border-bottom:1px solid #e6e8ee;">@row.Summary</td>
-                                <td style="padding:8px 10px;border-bottom:1px solid #e6e8ee;color:#6b7280;">@(string.IsNullOrWhiteSpace(row.Location) ? "—" : row.Location)</td>
-                            </tr>
-                        }
-                        </tbody>
-                    </table>
-                </div>
-            }
-        </section>
     }
     <p style="margin-top:16px;"><a asp-page="/Organizer/Index">Back to organizer area</a></p>
 </div>

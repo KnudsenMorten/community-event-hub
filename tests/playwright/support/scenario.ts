@@ -68,8 +68,16 @@ export async function login(page: Page, email: string, pin: string) {
     await expect(signedInMarker(page)).toBeVisible({ timeout: 15_000 });
 }
 
+/** The element the shared layout renders only when a session is present.
+ *
+ *  🔒 §707.3 — this MUST match `support/hub.ts`. §283 moved Sign out INSIDE the name dropdown
+ *  (`<details class="user-menu">`, collapsed by default), so `button.signout` is still in the DOM but
+ *  HIDDEN until the summary is opened — `toBeVisible()` could never pass again. `hub.ts` was updated at
+ *  the time and this twin was not, so every `scenario.ts` login has been failing since. It went
+ *  unnoticed because the deep suite only runs against DEV, and DEV had drifted 4 migrations behind.
+ *  The always-visible indicator is the dropdown SUMMARY (the person's name + role). */
 export function signedInMarker(page: Page) {
-    return page.locator('header .user-tools button.signout, button.signout');
+    return page.locator('header .user-tools details.user-menu > summary').first();
 }
 
 export function onLoginPage(page: Page): boolean {

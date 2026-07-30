@@ -269,8 +269,10 @@ public class OnboardingWizardModel : PageModel
         var swag = await GetOrCreateSwagAsync(me, ct);
         swag.WantsPolo = WantsPolo;
         swag.PoloSize = WantsPolo && !string.IsNullOrWhiteSpace(PoloSize) ? PoloSize.Trim() : null;
-        swag.WantsJacket = WantsJacket;
-        swag.JacketSize = WantsJacket && !string.IsNullOrWhiteSpace(JacketSize) ? JacketSize.Trim() : null;
+        // §326bt: the portal no longer asks for a jacket, so this save no longer WRITES one.
+        // Deliberately does not clear an existing WantsJacket/JacketSize either: the field is
+        // gone from the form, so the posted value would always be false and would silently
+        // wipe what a participant chose before the change.
         await _db.SaveChangesAsync(ct);
     }
 

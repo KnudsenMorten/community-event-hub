@@ -38,11 +38,14 @@ public sealed class ParticipantDeletionService
 {
     private readonly CommunityHubDbContext _db;
     private readonly TimeProvider _clock;
+    private readonly ParticipantDeactivationService _cascade;
 
-    public ParticipantDeletionService(CommunityHubDbContext db, TimeProvider clock)
+    public ParticipantDeletionService(
+        CommunityHubDbContext db, TimeProvider clock, ParticipantDeactivationService cascade)
     {
         _db = db;
         _clock = clock;
+        _cascade = cascade;
     }
 
     /// <summary>The outcome of a delete/deactivate call.</summary>
@@ -85,9 +88,10 @@ public sealed class ParticipantDeletionService
 
     /// <summary>
     /// Soft-delete: deactivate the participant so they can no longer sign in.
-    /// Sets <see cref="Participant.IsActive"/> false and parks the lifecycle at
-    /// <see cref="ParticipantLifecycleState.Inactive"/>. Keeps every dependent
-    /// row intact. This is the safe default the grid offers for anyone.
+    /// Runs the FULL deactivation cascade (§253 G1 — party RSVP cancelled, room
+    /// block released, open tasks closed, shift assignments vacated, audited) via
+    /// <see cref="ParticipantDeactivationService"/>; the person's history rows are
+    /// kept. This is the safe default the grid offers for anyone.
     /// </summary>
     public async Task<DeletionResult> DeactivateAsync(
         int eventId, int participantId, CancellationToken ct = default)
@@ -95,17 +99,17 @@ public sealed class ParticipantDeletionService
         var p = await FindAsync(eventId, participantId, ct);
         if (p is null) return NotFoundResult(participantId);
 
-        if (!p.IsActive && p.LifecycleState == ParticipantLifecycleState.Inactive)
-        {
-            return new DeletionResult(
-                DeletionStatus.AlreadyInactive, p.Id, p.FullName, NoBlockers);
-        }
+        var alreadyInactive =
+            !p.IsActive && p.LifecycleState == ParticipantLifecycleState.Inactive;
 
-        p.IsActive = false;
-        p.LifecycleState = ParticipantLifecycleState.Inactive;
-        await _db.SaveChangesAsync(ct);
+        // Cascade even when already inactive: a row deactivated by the OLD
+        // flag-only paths may still hold live logistics rows — re-running the
+        // (idempotent) cascade converges it.
+        await _cascade.DeactivateAsync(eventId, participantId, "soft-delete", ct: ct);
+
         return new DeletionResult(
-            DeletionStatus.Deactivated, p.Id, p.FullName, NoBlockers);
+            alreadyInactive ? DeletionStatus.AlreadyInactive : DeletionStatus.Deactivated,
+            p.Id, p.FullName, NoBlockers);
     }
 
     /// <summary>
@@ -138,7 +142,21 @@ public sealed class ParticipantDeletionService
         p.HotelId = null;
 
         _db.Participants.Remove(p);
-        await _db.SaveChangesAsync(ct);
+        try
+        {
+            await _db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException)
+        {
+            // §307 FAIL-SAFE (operator 2026-07-24, the delete HTTP 500): a dependency
+            // the probe doesn't know about (schema drift) refused the delete. NEVER
+            // surface a 500 — drop the tracked removals and report BLOCKED so the
+            // caller falls back to the safe deactivate.
+            _db.ChangeTracker.Clear();
+            return new DeletionResult(
+                DeletionStatus.HardDeleteBlocked, p.Id, p.FullName,
+                new[] { "other linked data" });
+        }
         return new DeletionResult(
             DeletionStatus.HardDeleted, p.Id, p.FullName, NoBlockers);
     }
@@ -195,6 +213,29 @@ public sealed class ParticipantDeletionService
                          || a.ActorParticipantId == participantId), ct))
             blockers.Add("acting-as audit history");
 
+        // §307 (operator 2026-07-24, the delete HTTP 500): real engagement the old
+        // probe missed — each of these previously slipped past and made the hard
+        // delete hit a Restrict FK.
+        if (await _db.MasterClassSignups.AnyAsync(m => m.AttendeeId == participantId, ct))
+            blockers.Add("master-class signup(s)");
+        if (await _db.FeedbackItems.AnyAsync(f => f.ParticipantId == participantId, ct))
+            blockers.Add("submitted feedback");
+        if (await _db.MasterClassComments.AnyAsync(c => c.AuthorParticipantId == participantId, ct))
+            blockers.Add("master-class comment(s)");
+        if (await _db.SoMePosts.AnyAsync(s => s.ParticipantId == participantId, ct))
+            blockers.Add("social-media post(s)");
+        if (await _db.GraphicAssets.AnyAsync(g => g.ParticipantId == participantId, ct))
+            blockers.Add("speaker graphic(s)");
+        if (await _db.TaskAllocationDrafts.AnyAsync(
+                t => t.ParticipantId == participantId || t.OwnerParticipantId == participantId, ct))
+            blockers.Add("allocation planning row(s)");
+        if (await _db.VolunteerBucketSupervisors.AnyAsync(v => v.ParticipantId == participantId, ct))
+            blockers.Add("supervisor assignment(s)");
+        if (await _db.VolunteerHelpRequests.AnyAsync(v => v.RequestedByParticipantId == participantId, ct))
+            blockers.Add("volunteer help request(s)");
+        if (await _db.SponsorSessionSpeakers.AnyAsync(s => s.ParticipantId == participantId, ct))
+            blockers.Add("sponsor-session speaker link(s)");
+
         return blockers;
     }
 
@@ -235,5 +276,29 @@ public sealed class ParticipantDeletionService
             await _db.ParticipantSecretaryTokens
                 .Where(x => x.ParticipantId == participantId)
                 .ToListAsync(ct));
+
+        // §307: per-person rows the old clean-up missed — pure preference/plumbing
+        // with no history worth keeping once the person is gone. Each previously
+        // blocked the "no dependent data" hard delete with an FK 500.
+        _db.DietaryRequirements.RemoveRange(
+            await _db.DietaryRequirements.Where(x => x.ParticipantId == participantId).ToListAsync(ct));
+        _db.MagicLinkGrants.RemoveRange(
+            await _db.MagicLinkGrants.Where(x => x.ParticipantId == participantId).ToListAsync(ct));
+        _db.PartyRsvps.RemoveRange(
+            await _db.PartyRsvps.Where(x => x.ParticipantId == participantId).ToListAsync(ct));
+        _db.Tasks.RemoveRange(
+            await _db.Tasks.Where(x => x.AssignedParticipantId == participantId).ToListAsync(ct));
+        _db.SavedSessions.RemoveRange(
+            await _db.SavedSessions.Where(x => x.ParticipantId == participantId).ToListAsync(ct));
+        _db.QuizAttempts.RemoveRange(
+            await _db.QuizAttempts.Where(x => x.ParticipantId == participantId).ToListAsync(ct));
+        _db.ParticipantPolicyAcceptances.RemoveRange(
+            await _db.ParticipantPolicyAcceptances.Where(x => x.ParticipantId == participantId).ToListAsync(ct));
+        _db.OrganizerActionItems.RemoveRange(
+            await _db.OrganizerActionItems.Where(x => x.ParticipantId == participantId).ToListAsync(ct));
+        _db.VolunteerAvailabilities.RemoveRange(
+            await _db.VolunteerAvailabilities.Where(x => x.ParticipantId == participantId).ToListAsync(ct));
+        _db.VolunteerDayAvailabilities.RemoveRange(
+            await _db.VolunteerDayAvailabilities.Where(x => x.ParticipantId == participantId).ToListAsync(ct));
     }
 }

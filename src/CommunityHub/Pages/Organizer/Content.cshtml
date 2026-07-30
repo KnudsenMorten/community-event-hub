@@ -15,7 +15,8 @@
         new HubTile("/Organizer/SessionizeEndpointSettings", Localizer["Nav.OrgSessionizeEndpoint"].Value, "Configure the Sessionize API endpoint."),
         new HubTile("/Organizer/SessionSource", "Session source", "Choose the session source (Sessionize / Backstage)."),
         new HubTile("/Organizer/SyncQueue", Localizer["Nav.OrgSyncQueue"].Value, Localizer["OrgContent.SyncQueue"].Value),
-        new HubTile("/Organizer/MasterClasses", "Master Classes", "Seat capacity + waitlist rosters, set capacity, and attendee self-service links.", "masterclass-invites"),
+        // §252 F5: the MC funnel rides the welcome-email ring (masterclass-invites was removed).
+        new HubTile("/Organizer/MasterClasses", "Master Classes", "Seat capacity + waitlist registrations, set capacity, and attendee self-service links.", "welcome-email"),
         new HubTile("/Organizer/Surveys", Localizer["Nav.OrgSurveys"].Value, Localizer["OrgContent.Surveys"].Value, "surveys"),
     };
 }

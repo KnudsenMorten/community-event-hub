@@ -36,6 +36,9 @@
          invalidated on save so the deep-merge runs once per change, not per read. -->
     <PackageReference Include="Microsoft.Extensions.Caching.Memory" Version="10.0.9" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.9" />
+    <!-- §545(b): AddCredentialFailureAlert() extends IHttpClientBuilder so every integration
+         gets credential alerting from ONE registration line (CredentialFailureAlertExtensions). -->
+    <PackageReference Include="Microsoft.Extensions.Http" Version="10.0.9" />
     <PackageReference Include="Microsoft.Extensions.Options" Version="10.0.9" />
     <PackageReference Include="ClosedXML" Version="0.102.2" />
     <!-- ClosedXML pulls System.IO.Packaging 6.0.0 transitively, which carries a

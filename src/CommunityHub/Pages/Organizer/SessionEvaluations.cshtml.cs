@@ -1,4 +1,5 @@
 using CommunityHub.Auth;
+using CommunityHub.Core.Auth;
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
 using CommunityHub.Core.Email;
@@ -32,6 +33,8 @@ public class SessionEvaluationsModel : PageModel
     private readonly SessionEvalPdfService _pdf;
     private readonly CommunityHubDbContext _db;
     private readonly IEmailSender _email;
+    private readonly IEmailMagicLinkService _magic;
+    private readonly CommunityHub.Core.Email.IEmailContextAccessor? _emailContext;
     private readonly ILogger<SessionEvaluationsModel> _log;
 
     public SessionEvaluationsModel(
@@ -40,13 +43,17 @@ public class SessionEvaluationsModel : PageModel
         SessionEvalPdfService pdf,
         CommunityHubDbContext db,
         IEmailSender email,
-        ILogger<SessionEvaluationsModel> log)
+        IEmailMagicLinkService magic,
+        ILogger<SessionEvaluationsModel> log,
+        CommunityHub.Core.Email.IEmailContextAccessor? emailContext = null)
     {
         _participant = participant;
         _svc = svc;
         _pdf = pdf;
         _db = db;
         _email = email;
+        _magic = magic;
+        _emailContext = emailContext;
         _log = log;
     }
 
@@ -70,6 +77,8 @@ public class SessionEvaluationsModel : PageModel
 
     /// <summary>The session id of the per-row upload form being submitted.</summary>
     [BindProperty] public int UploadSessionId { get; set; }
+    /// <summary>Which file is being uploaded — the route slug (<c>score</c>/<c>feedback</c>, §192b).</summary>
+    [BindProperty] public string? UploadKind { get; set; }
     [BindProperty] public IFormFile? Pdf { get; set; }
 
     public SelectList TypeOptions => new(
@@ -114,9 +123,10 @@ public class SessionEvaluationsModel : PageModel
     }
 
     /// <summary>
-    /// §166 — store the uploaded final evaluation PDF for one session on SharePoint, point
-    /// <see cref="Session.EvaluationFormUrl"/> at the HUB PROXY url (never a SharePoint link),
-    /// and email the session's speaker(s). Organizer-only write (<see cref="OrganizerAuth.IsRealOrganizer"/>).
+    /// §192 (reworking §166) — store ONE uploaded evaluation PDF (Score or Open-feedback,
+    /// per <see cref="UploadKind"/>) for one session on SharePoint, record its provenance
+    /// (who/when), and email the session's speaker(s). Organizer-only write
+    /// (<see cref="OrganizerAuth.IsRealOrganizer"/>).
     /// </summary>
     public async Task<IActionResult> OnPostUploadPdfAsync(CancellationToken ct)
     {
@@ -131,6 +141,14 @@ public class SessionEvaluationsModel : PageModel
         if (!_pdf.CanManage)
         {
             PdfError = "The final-evaluation-PDF SharePoint folder is not configured yet — nothing was uploaded.";
+            await LoadPdfSectionAsync(me.EventId, ct);
+            return Page();
+        }
+
+        var kind = SessionEvalPdfService.ParseKind(UploadKind);
+        if (kind is null)
+        {
+            PdfError = "Choose which evaluation file (score or open feedback) is being uploaded.";
             await LoadPdfSectionAsync(me.EventId, ct);
             return Page();
         }
@@ -160,20 +178,22 @@ public class SessionEvaluationsModel : PageModel
 
         using var ms = new MemoryStream();
         await Pdf.CopyToAsync(ms, ct);
-        await _pdf.UploadAsync(session.Id, ms.ToArray(), ct);
+        // Provenance (§192c): who (this organizer) + when is recorded by the service.
+        await _pdf.UploadAsync(me.EventId, session.Id, kind.Value, ms.ToArray(),
+            me.ParticipantId, me.FullName, ct);
 
-        // The link handed to speakers is the HUB PROXY url — NEVER the SharePoint URL
-        // (speakers have no SharePoint access; this is the bug fixed for graphics §160).
-        session.EvaluationFormUrl = SessionEvalPdfService.ProxyUrlFor(session.Id);
+        // Stamp the "results emailed" marker the organizer UI reads (speakers get the file
+        // through the HUB PROXY — NEVER a SharePoint URL; the bug fixed for graphics §160).
         session.EvaluationEmailedAt = DateTimeOffset.UtcNow;
         await _db.SaveChangesAsync(ct);
 
         // Best-effort: notify the speaker(s). A send failure must NOT fail the upload.
         var notified = await NotifySpeakersAsync(me.EventId, session.Id, session.Title, ct);
 
+        var kindLabel = kind.Value == EvaluationPdfKind.Open ? "open-feedback" : "score";
         PdfMessage = notified > 0
-            ? $"Uploaded the evaluation PDF for \"{session.Title}\" and emailed {notified} speaker(s)."
-            : $"Uploaded the evaluation PDF for \"{session.Title}\".";
+            ? $"Uploaded the {kindLabel} PDF for \"{session.Title}\" and emailed {notified} speaker(s)."
+            : $"Uploaded the {kindLabel} PDF for \"{session.Title}\".";
         await LoadPdfSectionAsync(me.EventId, ct);
         return Page();
     }
@@ -190,25 +210,71 @@ public class SessionEvaluationsModel : PageModel
         var speakers = await _pdf.GetSpeakerContactsAsync(eventId, sessionId, ct);
         if (speakers.Count == 0) return 0;
 
-        var mySessionsUrl = $"{Request.Scheme}://{Request.Host}/Speaker";
-        string Enc(string? s) => System.Net.WebUtility.HtmlEncode(s ?? string.Empty);
+        var origin = $"{Request.Scheme}://{Request.Host}";
 
-        const string subject = "[ELDK27] Your session evaluation is ready";
+        const string subject = "Your session evaluation is ready";
         foreach (var sp in speakers)
         {
-            var html =
-                $"<p>Hi {Enc(sp.FullName.Split(' ').FirstOrDefault())},</p>"
-                + $"<p>The final evaluation for your session <b>{Enc(title)}</b> is now available.</p>"
-                + $"<p style=\"margin:18px 0 4px;\"><a href=\"{Enc(mySessionsUrl)}\" "
-                + "style=\"display:inline-block;padding:12px 22px;background:#008BD2;color:#ffffff;"
-                + "font-weight:700;font-size:15px;border-radius:6px;text-decoration:none;\">"
-                + "Open My Sessions</a></p>"
-                + "<p style=\"color:#6a7280;font-size:13px;\">Find the \"Evaluations\" download on your "
-                + "My Sessions page.</p>";
+            // §190: the "Open My Sessions" CTA must AUTO-SIGN-IN the speaker — route it
+            // through THIS speaker's §169 personal magic-link to /Speaker (resolves via
+            // /go/{token}?r=/Speaker). FAIL-SAFE: any error / no participant ⇒ fall back
+            // to the plain hub URL so the notification is never lost.
+            var mySessionsUrl = await BuildSpeakerSessionsUrlAsync(sp.ParticipantId, origin, ct);
+            var html = BuildSpeakerEvalEmailHtml(sp.FullName, title, mySessionsUrl);
+            // §234: carry the SPEAKER's identity so the ring gate resolves the PERSON —
+            // a ContactEmailOverride address isn't a participant email and would
+            // otherwise be fail-closed ring-dropped.
+            using var _ = _emailContext?.Set(new CommunityHub.Core.Email.EmailContext(
+                "session-eval", eventId, sp.ParticipantId, sp.FullName,
+                FeatureKey: "session-eval-email"));
             try { await _email.SendAsync(sp.Email, subject, html, ct); }
             catch (Exception ex) { _log.LogWarning(ex, "SessionEval PDF: notify {To} failed.", sp.Email); }
         }
         return speakers.Count;
+    }
+
+    /// <summary>
+    /// §190: the speaker's personal auto-login link to their "My Sessions" (/Speaker)
+    /// page. Best-effort + FAIL-SAFE: returns the plain <c>{origin}/Speaker</c> if the
+    /// magic-link can't be minted (unknown participant / any error), so the send never
+    /// breaks — it just degrades to an email+PIN sign-in.
+    /// </summary>
+    private async Task<string> BuildSpeakerSessionsUrlAsync(int participantId, string origin, CancellationToken ct)
+    {
+        if (participantId > 0)
+        {
+            try
+            {
+                return await _magic.BuildUrlForParticipantAsync(participantId, origin, "/Speaker", ct);
+            }
+            catch (Exception ex)
+            {
+                _log.LogWarning(ex,
+                    "SessionEval PDF: magic-link for participant {Pid} failed; using plain URL.", participantId);
+            }
+        }
+        return $"{origin.TrimEnd('/')}/Speaker";
+    }
+
+    /// <summary>
+    /// The "your evaluation is ready" speaker email body. The CTA is a §191 bulletproof
+    /// button (white text forced with <c>!important</c> so dark-mode clients can't darken
+    /// it, explicit background on the anchor itself). <paramref name="url"/> is the
+    /// speaker's §190 magic-link (or the plain fallback). Internal for test coverage.
+    /// </summary>
+    internal static string BuildSpeakerEvalEmailHtml(string fullName, string title, string url)
+    {
+        string Enc(string? s) => System.Net.WebUtility.HtmlEncode(s ?? string.Empty);
+        var firstName = fullName?.Split(' ').FirstOrDefault();
+        return
+            $"<p>Hi {Enc(firstName)},</p>"
+            + $"<p>The final evaluation for your session <b>{Enc(title)}</b> is now available.</p>"
+            + $"<p style=\"margin:18px 0 4px;\"><a href=\"{Enc(url)}\" "
+            + "style=\"display:inline-block;padding:14px 30px;background-color:#1565c0;"
+            + "color:#ffffff !important;font-weight:700;font-size:16px;border-radius:6px;"
+            + "text-decoration:none;\">Open My Sessions</a></p>"
+            + "<p style=\"color:#6a7280;font-size:13px;\">Find the \"Evaluations\" download on your "
+            + "My Sessions page.</p>";
     }
 
     private static bool IsPdf(IFormFile file)

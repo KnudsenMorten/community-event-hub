@@ -1,5 +1,6 @@
 using CommunityHub.Auth;
 using CommunityHub.Core.Domain;
+using CommunityHub.Core.Organizer;
 using CommunityHub.Core.Reminders;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -34,10 +35,6 @@ public class MasterClassesModel : PageModel
         _email = email;
     }
 
-    public int InviteEligible { get; private set; }
-    public int InviteSent { get; private set; }
-    public int InviteNotSent { get; private set; }
-
     public bool AccessDenied { get; private set; }
     public string? Message { get; private set; }
     public IReadOnlyList<MasterClassSignupService.McOption> MasterClasses { get; private set; }
@@ -67,7 +64,6 @@ public class MasterClassesModel : PageModel
 
         Message = msg;
         MasterClasses = await _svc.ListMasterClassesAsync(me.EventId, ct);
-        (InviteEligible, InviteSent, InviteNotSent) = await _svc.InviteStatsAsync(me.EventId, ct);
 
         if (session is int sid)
         {
@@ -92,33 +88,50 @@ public class MasterClassesModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+        if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
         var n = await _svc.SeedDefaultMasterClassesAsync(me.EventId, ct);
         return RedirectToPage(new { msg = $"Created {n} master class(es). Set capacity on each below." });
     }
 
-    /// <summary>Send the "choose your Master Class" invite to every 2-day attendee not yet invited.</summary>
-    public async Task<IActionResult> OnPostSendInvitesAsync(CancellationToken ct)
+    // §326bl (operator 2026-07-25): OnPostSendInvitesAsync + its card were REMOVED.
+    // AttendeeBackstageSyncJob already sends the selection invite automatically to every
+    // eligible 2-day attendee (stamping Attendee.MasterClassInviteSentAt so nobody gets two),
+    // so the manual bulk button duplicated the job and put a mass-send one click away.
+    // MasterClassEmailService.SendSelectionInviteAsync is untouched — the job still calls it.
+
+    public async Task<IActionResult> OnPostCapacityAsync(
+        int session, int? capacity, string? confirmPhrase, CancellationToken ct)
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+        if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
 
-        var ids = await _svc.EligibleNotInvitedIdsAsync(me.EventId, ct);
-        var baseUrl = $"{Request.Scheme}://{Request.Host}";
-        var sent = 0;
-        foreach (var id in ids)
+        // §326ba: refuse 0/negative outright, and SAY SO. The service ignores it too
+        // (defence in depth), but a silent no-op is how a typo becomes a mystery later.
+        if (capacity is <= 0)
         {
-            try { if (await _email.SendSelectionInviteAsync(id, baseUrl, ct: ct)) sent++; } catch { /* retry later */ }
+            return RedirectToPage(new { session, msg =
+                "Capacity must be 1 or more — nothing was changed. Leave the field EMPTY if "
+                + "the class genuinely has no limit; 0 is treated as a mistake, not as unlimited." });
         }
-        return RedirectToPage(new { msg = $"Sent {sent} Master Class selection invite(s)." });
-    }
 
-    public async Task<IActionResult> OnPostCapacityAsync(int session, int? capacity, CancellationToken ct)
-    {
-        var me = _participant.Current;
-        if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+        // §339 — CLEARING the capacity makes the class UNLIMITED, which promotes and E-MAILS every
+        // waitlisted attendee at once. Until now that sat behind a JavaScript confirm() ONLY: with
+        // JS off, or on a direct POST, there was no gate at all. It is also the mildest-LOOKING
+        // action on the page — emptying a text box — while being one of the largest in effect.
+        //
+        // Now the same TYPED confirmation §334 put on the other mass-send paths, enforced on the
+        // SERVER where it cannot be bypassed. Gated on null specifically: raising a NUMBER also
+        // promotes people, but it promotes at most as many as the number allows and is an obviously
+        // deliberate act; clearing the field is unbounded and looks like nothing.
+        if (capacity is null
+            && !TypedConfirmation.Matches(confirmPhrase, TypedConfirmation.ConfirmPhrase))
+        {
+            return RedirectToPage(new { session, msg =
+                "Nothing was changed. Leaving capacity EMPTY makes this class UNLIMITED and "
+                + "immediately promotes AND e-mails every waitlisted attendee. To confirm, type "
+                + $"{TypedConfirmation.ConfirmPhrase} in the confirm box next to the capacity field." });
+        }
 
         // Raising the cap opens seats that the waitlist takes first (§93/§94); notify
         // every attendee the engine promoted/moved as a result.
@@ -128,7 +141,7 @@ public class MasterClassesModel : PageModel
         {
             if (p.PromotedSignupId is int id)
             {
-                try { await _promo.SendPromotionAsync(id, baseUrl, ct); } catch { /* retryable */ }
+                try { await _promo.SendPromotionAsync(id, baseUrl, ct, p.ReleasedTitle); } catch { /* retryable */ }
             }
         }
         return RedirectToPage(new { session, msg = "Capacity updated." });
@@ -143,14 +156,31 @@ public class MasterClassesModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+        if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
 
         var promo = await _svc.RemoveAsync(me.EventId, attendeeId, session, ct);
-        if (promo?.PromotedSignupId is int promotedId)
+
+        // §389 (operator 2026-07-26: "i guess the remove from my organizer side didn't work").
+        // This used to report "Entry removed." UNCONDITIONALLY — including when RemoveAsync found
+        // no row and did nothing. A no-op that congratulates you is worse than an error: the
+        // organizer walks away believing the person is gone, and only finds out later when that
+        // person is still on the list (or, as here, gets promoted into a seat). Say what happened.
+        if (promo is null)
+        {
+            return RedirectToPage(new { session, msg = "Nothing to remove — that attendee had no entry for this Master Class." });
+        }
+
+        if (promo.PromotedSignupId is int promotedId)
         {
             var baseUrl = $"{Request.Scheme}://{Request.Host}";
-            try { await _promo.SendPromotionAsync(promotedId, baseUrl, ct); } catch { /* retryable */ }
+            // §386: pass the released title so the promoted attendee gets ONE mail covering both
+            // "you moved up" and "your old seat went" — this site was missed in the first sweep.
+            try { await _promo.SendPromotionAsync(promotedId, baseUrl, ct, promo.ReleasedTitle); }
+            catch { /* retryable */ }
+
+            return RedirectToPage(new { session, msg = "Entry removed — the next person on the wait list was promoted and e-mailed." });
         }
+
         return RedirectToPage(new { session, msg = "Entry removed." });
     }
 }

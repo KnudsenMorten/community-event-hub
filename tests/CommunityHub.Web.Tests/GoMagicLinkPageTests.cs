@@ -105,6 +105,28 @@ public sealed class GoMagicLinkPageTests
     }
 
     [Fact]
+    public async Task A_fresh_grant_authenticates_and_redirects_to_the_target_not_login()
+    {
+        // §190 end-to-end: a signed-OUT speaker clicks an email CTA that deep-links to
+        // /Speaker through their /go/{token} magic-link. The Go page must SIGN THEM IN
+        // and redirect to /Speaker — never bounce them to /Login.
+        using var db = NewDb();
+        var p = await SeedAsync(db);
+        var svc = NewService(db);
+        var token = await svc.GetOrCreateTokenAsync(p.Id);
+        var (http, auth) = NewHttpContext();
+
+        var result = await NewModel(svc, db, http).OnGetAsync(token, r: "/Speaker", target: null, default);
+
+        var redirect = Assert.IsType<RedirectResult>(result);
+        Assert.Equal("/Speaker", redirect.Url);                 // lands on the intended target…
+        Assert.NotEqual("/Login", redirect.Url);                // …NOT the login page
+        Assert.NotNull(auth.LastSignedIn);                      // AUTHENTICATED principal established
+        Assert.Equal(p.Id.ToString(),
+            auth.LastSignedIn!.FindFirst(ClaimTypes.NameIdentifier)?.Value);
+    }
+
+    [Fact]
     public async Task A_live_token_honours_an_explicit_r_return_url()
     {
         using var db = NewDb();
@@ -133,6 +155,68 @@ public sealed class GoMagicLinkPageTests
         Assert.Equal("/Speaker/Graphics", Assert.IsType<RedirectResult>(result).Url);
     }
 
+    /// <summary>
+    /// §365 — THE QUERY STRING MUST SURVIVE. A route catch-all captures the PATH only, so
+    /// <c>{{hubUrl}}/Forms/Wizard?step=masterclass</c> used to arrive as target="Forms/Wizard" with
+    /// the <c>?step=</c> silently dropped, landing the attendee on the wizard's FIRST step instead of
+    /// the one the mail button promised. Nine master-class CTAs (plus the party equivalent) were
+    /// affected — and §351-7 had re-pointed them at the wizard precisely to fix a bad landing.
+    /// </summary>
+    [Fact]
+    public async Task A_deep_link_keeps_its_query_string_so_the_wizard_opens_the_promised_step()
+    {
+        using var db = NewDb();
+        var p = await SeedAsync(db);
+        var svc = NewService(db);
+        var token = await svc.GetOrCreateTokenAsync(p.Id);
+        var (http, _) = NewHttpContext();
+        http.Request.QueryString = new QueryString("?step=masterclass");
+
+        var result = await NewModel(svc, db, http).OnGetAsync(token, r: null, target: "Forms/Wizard", default);
+
+        Assert.Equal("/Forms/Wizard?step=masterclass", Assert.IsType<RedirectResult>(result).Url);
+    }
+
+    /// <summary>
+    /// <c>r</c> is the /go page's OWN parameter, not the destination's — re-appending it would make
+    /// a stray <c>?r=</c> show up in the address bar of the page the recipient lands on.
+    /// </summary>
+    [Fact]
+    public async Task The_r_parameter_is_not_re_appended_to_the_destination()
+    {
+        using var db = NewDb();
+        var p = await SeedAsync(db);
+        var svc = NewService(db);
+        var token = await svc.GetOrCreateTokenAsync(p.Id);
+        var (http, _) = NewHttpContext();
+        http.Request.QueryString = new QueryString("?r=%2FTasks&step=party");
+
+        var result = await NewModel(svc, db, http).OnGetAsync(token, r: null, target: "Forms/Wizard", default);
+
+        Assert.Equal("/Forms/Wizard?step=party", Assert.IsType<RedirectResult>(result).Url);
+    }
+
+    /// <summary>
+    /// The §234 local-only guarantee is unchanged by the query carry: appending a query string must
+    /// not rescue a target <see cref="Pages.GoModel"/> would otherwise refuse. A backslash is the
+    /// live vector — browsers read "/\evil.example.com" as protocol-relative.
+    /// </summary>
+    [Fact]
+    public async Task A_query_string_cannot_rescue_a_target_the_local_guard_rejects()
+    {
+        using var db = NewDb();
+        var p = await SeedAsync(db);
+        var svc = NewService(db);
+        var token = await svc.GetOrCreateTokenAsync(p.Id);
+        var (http, _) = NewHttpContext();
+        http.Request.QueryString = new QueryString("?step=masterclass");
+
+        var result = await NewModel(svc, db, http).OnGetAsync(
+            token, r: null, target: "\\evil.example.com/phish", default);
+
+        Assert.Equal("/", Assert.IsType<RedirectResult>(result).Url);
+    }
+
     [Fact]
     public async Task A_protocol_relative_target_is_dropped_and_falls_back_to_root()
     {
@@ -143,6 +227,23 @@ public sealed class GoMagicLinkPageTests
         var (http, auth) = NewHttpContext();
 
         var result = await NewModel(svc, db, http).OnGetAsync(token, r: "//evil.example.com/phish", target: null, default);
+
+        Assert.Equal("/", Assert.IsType<RedirectResult>(result).Url);  // not honoured
+        Assert.NotNull(auth.LastSignedIn);                              // still a real sign-in
+    }
+
+    [Fact]
+    public async Task A_backslash_target_is_dropped_and_falls_back_to_root()
+    {
+        // §234 4a: browsers treat "/\evil.com" as protocol-relative — a plain
+        // "starts with / but not //" check is an open redirect. Any '\' is rejected.
+        using var db = NewDb();
+        var p = await SeedAsync(db);
+        var svc = NewService(db);
+        var token = await svc.GetOrCreateTokenAsync(p.Id);
+        var (http, auth) = NewHttpContext();
+
+        var result = await NewModel(svc, db, http).OnGetAsync(token, r: "/\\evil.example.com/phish", target: null, default);
 
         Assert.Equal("/", Assert.IsType<RedirectResult>(result).Url);  // not honoured
         Assert.NotNull(auth.LastSignedIn);                              // still a real sign-in

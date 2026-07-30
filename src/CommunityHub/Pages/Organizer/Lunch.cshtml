@@ -12,7 +12,9 @@
     }
     else
     {
-        <p>Use this to cater the lunches on the days BEFORE the main conference.</p>
+        <p>Use this to cater every lunch: the setup days, the pre-day / Master Class day, and
+           the main day. Only <strong>active</strong> people and <strong>non-cancelled</strong>
+           tickets are counted, so the numbers are what you order against.</p>
 
         <div class="stat-grid" style="display:flex;flex-wrap:wrap;gap:12px;margin:12px 0 16px;">
             <div class="stat" style="background:var(--el-grey);border-radius:8px;padding:12px 16px;min-width:160px;">
@@ -26,15 +28,42 @@
             <div class="stat" style="background:var(--el-grey);border-radius:8px;padding:12px 16px;min-width:160px;">
                 <div style="font-size:22px;font-weight:700;color:var(--el-darkblue);">@Model.PreDayCount</div>
                 <div style="font-size:12px;color:#6b7280;">@Model.PreDayLabel</div>
+                @* §326bv: every contribution is itemised so the tile can be reconciled
+                   against the table below — an unexplained number is one nobody trusts. *@
                 <div style="font-size:11px;color:#6b7280;margin-top:4px;">
-                    @Model.DeclaredPreDayCount declared + @Model.AutoCountedPreDayCount auto-counted (crew &amp; MC speakers)
+                    @Model.DeclaredPreDayCount declared
+                    + @Model.AutoCountedPreDayCount auto-counted crew
+                    @if (Model.BoothCheckInPreDayCount > 0)
+                    {
+                        <text>+ @Model.BoothCheckInPreDayCount booth members</text>
+                    }
+                    + @Model.AttendeePreDayCount attendees (2-day)
+                </div>
+            </div>
+            @* §326bv: the single number to order MAIN-DAY lunch against. Nobody signs up for
+               it — main-day lunch is ordered for everyone on site — so it is presence, not
+               a checkbox: every active participant plus every non-cancelled attendee. *@
+            <div class="stat" style="background:#e8f1fb;border-radius:8px;padding:12px 16px;min-width:160px;">
+                <div style="font-size:22px;font-weight:700;color:var(--el-darkblue);">@Model.MainDayCount</div>
+                <div style="font-size:12px;color:#6b7280;">@Model.MainDayLabel</div>
+                <div style="font-size:11px;color:#6b7280;margin-top:4px;">
+                    @Model.CrewMainDayCount crew &amp; speakers + @Model.AttendeeMainDayCount attendees
+                    &middot; no sign-up needed
                 </div>
             </div>
             <div class="stat" style="background:var(--el-grey);border-radius:8px;padding:12px 16px;min-width:160px;">
                 <div style="font-size:22px;font-weight:700;color:var(--el-darkblue);">@Model.TotalResponses</div>
-                <div style="font-size:12px;color:#6b7280;text-transform:uppercase;">Responses</div>
+                <div style="font-size:12px;color:#6b7280;text-transform:uppercase;">Form responses</div>
             </div>
         </div>
+
+        <p style="font-size:12.5px;color:#6b7280;">
+            The table lists every CREW head individually, including the
+            <strong>auto-counted</strong> ones who never filled the form (always-on-site roles:
+            Organizer, Media, Event partner) — so the pre-day tile can be checked line by line.
+            Attendees and booth members are counted from their tickets and booth check-in
+            rather than listed here; there are too many to be a useful table.
+        </p>
 
         <div style="overflow-x:auto;">
         <table style="border-collapse:collapse;width:100%;font-size:13px;min-width:760px;">
@@ -53,7 +82,14 @@
                 {
                     <tr style="border-bottom:1px solid #eee;">
                         <td style="padding:6px;">
-                            @r.Name<br/>
+                            @r.Name
+                            @if (r.AutoCounted)
+                            {
+                                <span title="Always on site — counted for the pre-day without a form response"
+                                      style="background:#e8f1fb;color:#1d4ed8;font-size:10px;font-weight:700;
+                                             padding:1px 6px;border-radius:9px;margin-left:6px;">AUTO</span>
+                            }
+                            <br/>
                             <span style="color:#8a8f9c;font-size:11px;">@r.Email</span>
                         </td>
                         <td style="padding:6px;">@r.Role</td>

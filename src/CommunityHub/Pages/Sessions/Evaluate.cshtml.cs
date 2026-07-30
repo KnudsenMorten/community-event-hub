@@ -24,8 +24,11 @@ namespace CommunityHub.Pages.Sessions;
 [AllowAnonymous]
 public class EvaluateModel : PageModel
 {
-    /// <summary>How many evaluations one IP hash may submit per edition within the window.</summary>
-    private const int RateLimitMax = 30;
+    /// <summary>
+    /// How many evaluations one IP hash may submit per edition within the window.
+    /// <b>0 = OFF</b> (operator 2026-07-27) — see the reasoning at the check site.
+    /// </summary>
+    private const int RateLimitMax = 0;
     private static readonly TimeSpan RateLimitWindow = TimeSpan.FromHours(1);
 
     /// <summary>Per-session cookie name prefix carrying the one-per-attendee voter token.</summary>
@@ -94,18 +97,36 @@ public class EvaluateModel : PageModel
 
         var ipHash = HashIp(HttpContext.Connection.RemoteIpAddress?.ToString());
 
-        // Soft rate-limit (never PII'd back to the IP). Pretend success so a flooder
-        // gets no signal, but write nothing.
-        var recent = await _svc.CountRecentByIpHashAsync(
-            Session.EventId, ipHash, _clock.GetUtcNow() - RateLimitWindow, ct);
-        if (recent >= RateLimitMax)
+        // §406 — the per-IP soft rate-limit is OFF (operator 2026-07-27: "session evaluation remove
+        // (we can have 10000 pr hour easily)"). Kept as a switchable block rather than deleted, so
+        // it can be re-armed by setting RateLimitMax without rewriting the handler.
+        //
+        // It was wrong for the venue, not merely tight: everyone in the hall shares the conference
+        // wifi, so the whole room hashes to ONE ip. 30/hour meant the 31st person to rate a popular
+        // session was dropped — and SILENTLY, which is the sharp edge. The handler returns
+        // SubmittedOk so a flooder learns nothing, which also meant a real attendee saw "thanks!"
+        // while their rating was discarded. Evaluation data nobody can trust is worse than none,
+        // because the speaker reads it and acts on it.
+        //
+        // What still protects the SCORES: the per-session voter cookie below gives one row per
+        // attendee-per-session — a re-rate UPDATES rather than inserts, so no amount of posting
+        // from one browser can inflate a result. That was always the real control; the IP counter
+        // only ever bounded the row COUNT.
+#pragma warning disable CS0162 // Unreachable while RateLimitMax is 0 — intentional; see above.
+        if (RateLimitMax > 0)
         {
-            _log.LogInformation(
-                "Session-evaluation soft rate-limit hit ({Count}) for event {EventId}",
-                recent, Session.EventId);
-            SubmittedOk = true;
-            return Page();
+            var recent = await _svc.CountRecentByIpHashAsync(
+                Session.EventId, ipHash, _clock.GetUtcNow() - RateLimitWindow, ct);
+            if (recent >= RateLimitMax)
+            {
+                _log.LogInformation(
+                    "Session-evaluation soft rate-limit hit ({Count}) for event {EventId}",
+                    recent, Session.EventId);
+                SubmittedOk = true;
+                return Page();
+            }
         }
+#pragma warning restore CS0162
 
         // One-per-attendee/session: reuse the per-session voter cookie if present,
         // otherwise mint one and set it so a re-rate updates the same row.

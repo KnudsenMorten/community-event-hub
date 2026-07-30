@@ -47,10 +47,25 @@ public sealed class SessionImportService
     private readonly CommunityHubDbContext _db;
     private readonly TimeProvider _clock;
 
-    public SessionImportService(CommunityHubDbContext db, TimeProvider clock)
+    // §299.6/b5: the config room registry (warn-only validation) — optional so
+    // legacy constructions/tests stay valid; null or an empty registry keeps the
+    // unknown-room warning quiet.
+    private readonly Config.RoomRegistryService? _rooms;
+
+    // §299.8/b7: the configured level list, for deriving Session.LevelCode from
+    // the source Level label. Optional; null falls back to the "(NNN)" parse only.
+    private readonly Config.SessionOptionsService? _options;
+
+    public SessionImportService(
+        CommunityHubDbContext db,
+        TimeProvider clock,
+        Config.RoomRegistryService? rooms = null,
+        Config.SessionOptionsService? options = null)
     {
         _db = db;
         _clock = clock;
+        _rooms = rooms;
+        _options = options;
     }
 
     /// <summary>
@@ -133,8 +148,24 @@ public sealed class SessionImportService
             // not the Format) + Level (from the "Level" group) are import-owned labels.
             session.Track = src.Track;
             session.Level = src.Level;
-            session.StartsAt = src.StartsAt;
-            session.EndsAt = src.EndsAt;
+            // §299.8/b7: derive the NUMERIC level code from the label against the
+            // configured sessionLevels (label match, else "(NNN)" digits). Unknown
+            // labels stay null (string-only behaviour). Re-derived each pull.
+            session.LevelCode = _options is not null
+                ? _options.DeriveLevelCode(src.Level)
+                : Config.SessionOptionsService.DeriveLevelCode(
+                    src.Level, Array.Empty<Config.SessionLevelOption>());
+            // §299.8/b7: comma-separated tags from the source "Tags" group; stays
+            // null when the API omits them. Import-owned.
+            session.Tags = src.Tags;
+            // ❓OPEN-20 (answered): an organizer's MANUAL schedule edit sets
+            // IsDateOverridden — the re-import then SKIPS the StartsAt/EndsAt
+            // refresh so the manual date survives (mirrors TypeIsManualOverride).
+            if (!session.IsDateOverridden)
+            {
+                session.StartsAt = src.StartsAt;
+                session.EndsAt = src.EndsAt;
+            }
             session.IsServiceSession = src.IsServiceSession;
             // Imported sessions are NEVER hub-added; derive Type + Length defaults
             // from the source category/format + duration (these are import-owned,
@@ -175,13 +206,24 @@ public sealed class SessionImportService
             // Reconcile links: add missing, remove stale. (Import state, not a
             // hub-editable field, so reconciling flushes nothing the organizer owns.)
             var currentLinks = session.SessionSpeakers.ToList();
-            foreach (var link in currentLinks)
+            // §326ax GUARD: the speaker→participant join is keyed on e-mail, and e-mail comes
+            // from Sessionize's token-protected "emails" SIDE-VIEW — whose failure is only a
+            // WARNING (SessionizeApiClient), unlike the main speakers view which fails closed.
+            // When that side-view is down, idToEmail is empty for EVERY speaker, so
+            // desiredParticipantIds is empty for EVERY session and this loop would delete
+            // every session→speaker link in the edition: the public agenda loses all its
+            // speakers and the speaker portal loses their sessions. An empty join is never
+            // evidence that speakers were unassigned — only prune when the roster resolved.
+            if (idToEmail.Count > 0)
             {
-                if (!desiredParticipantIds.Contains(link.ParticipantId))
+                foreach (var link in currentLinks)
                 {
-                    session.SessionSpeakers.Remove(link);
-                    _db.Set<SessionSpeaker>().Remove(link);
-                    linksRemoved++;
+                    if (!desiredParticipantIds.Contains(link.ParticipantId))
+                    {
+                        session.SessionSpeakers.Remove(link);
+                        _db.Set<SessionSpeaker>().Remove(link);
+                        linksRemoved++;
+                    }
                 }
             }
             var existingPids = currentLinks
@@ -197,6 +239,29 @@ public sealed class SessionImportService
                     ParticipantId = pid,
                 });
                 linksCreated++;
+            }
+        }
+
+        // §299.6/b5 — WARN-ONLY room validation (option A): after the upsert,
+        // surface every imported room name that is not in the configured registry
+        // (sessionRooms). Names must be byte-identical across systems, so this is
+        // an exact (ordinal) check; it NEVER blocks the import. Quiet when no
+        // registry is configured.
+        if (_rooms is { HasEntries: true })
+        {
+            var unknownRooms = sessions
+                .Select(s => s.Room)
+                .Where(r => !string.IsNullOrWhiteSpace(r) && !_rooms.IsKnown(r))
+                .Select(r => r!.Trim())
+                .Distinct(StringComparer.Ordinal)
+                .OrderBy(r => r, StringComparer.Ordinal)
+                .ToList();
+            foreach (var room in unknownRooms)
+            {
+                carriedWarnings.Add(
+                    $"Unknown room '{room}': not in the configured room registry "
+                    + "(sessionRooms). Room names must be byte-identical across "
+                    + "systems — check for a typo/rename. The import was NOT blocked.");
             }
         }
 

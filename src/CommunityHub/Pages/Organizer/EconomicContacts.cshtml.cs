@@ -1,6 +1,7 @@
 using CommunityHub.Auth;
 using CommunityHub.Core.Domain;
 using CommunityHub.Core.Integrations.Erp;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
@@ -25,6 +26,71 @@ public class EconomicContactsModel : PageModel
     {
         _participant = participant;
         _admin = admin;
+    }
+
+    /// <summary>
+    /// §501b (operator: <i>"verify also the functionality matches the new method where you sync as
+    /// well?"</i>) — it did NOT. §482b/§493b pushed an ERP contact change downstream when a SPONSOR
+    /// edited contacts on Company Details, but this ORGANIZER page wrote to the ERP and triggered
+    /// nothing. An organizer adding a contact here hit exactly the bug the sponsor page had already
+    /// been fixed for: correct in the ERP, invisible in the hub until a scheduled run.
+    ///
+    /// <para>Queued, never awaited (§493b): these are several sequential external calls and must not
+    /// sit in front of the page load. Its OWN DI scope, because the request scope and its DbContext
+    /// are disposed the moment the response is written.</para>
+    ///
+    /// <para>Fail-soft: the ERP write is the system of record and has already succeeded, so a sync
+    /// hiccup is logged and the scheduled reconcile catches up. It must never turn a saved change
+    /// into an error.</para>
+    /// </summary>
+    private void PushContactChangeDownstream(int erpCustomerNumber)
+    {
+        var scopeFactory = HttpContext.RequestServices.GetRequiredService<IServiceScopeFactory>();
+        var logger = HttpContext.RequestServices
+            .GetRequiredService<ILoggerFactory>().CreateLogger("EconomicContacts");
+
+        _ = Task.Run(async () =>
+        {
+            // NOT the request token — it is cancelled as the response completes, which would abort
+            // the work we just deliberately moved off the request.
+            var ct = CancellationToken.None;
+            try
+            {
+                using var scope = scopeFactory.CreateScope();
+                var sp = scope.ServiceProvider;
+
+                // Leg 1 — ERP → Company Manager, scoped to THIS customer (§482b).
+                var erpToCm = sp.GetService<CommunityHub.Core.Integrations.Erp.ErpWebshopContactSyncService>();
+                if (erpToCm is not null)
+                {
+                    await erpToCm.SyncAsync(onlyCustomerNumber: erpCustomerNumber, ct: ct);
+                }
+
+                // Leg 2 — Company Manager → hub, for the company carrying this ERP number.
+                var cm = sp.GetService<CommunityHub.Core.Integrations.CompanyManagerClient>();
+                var cmToHub = sp.GetService<CommunityHub.Core.Integrations.SponsorContactSyncService>();
+                var db = sp.GetService<CommunityHub.Core.Data.CommunityHubDbContext>();
+                if (cm is null || cmToHub is null || db is null) return;
+
+                var eventId = await db.Events.Where(e => e.IsActive)
+                    .Select(e => (int?)e.Id).FirstOrDefaultAsync(ct);
+                if (eventId is null) return;
+
+                var companies = await cm.ListCompaniesAsync(ct);
+                var match = companies.FirstOrDefault(c =>
+                    int.TryParse(c.ErpCustomerNumber, out var n) && n == erpCustomerNumber);
+                if (match is not null)
+                {
+                    await cmToHub.SyncCompanyAsync(eventId.Value, match.Id, ct);
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex,
+                    "Background contact sync failed for ERP customer {Erp}; the scheduled reconcile will catch up.",
+                    erpCustomerNumber);
+            }
+        });
     }
 
     public bool AccessDenied { get; private set; }
@@ -83,11 +149,17 @@ public class EconomicContactsModel : PageModel
         var me = Guard();
         if (_participant.Current is null) return RedirectToPage("/Login");
         if (me is null) return Page();
+        // Writes require a REAL organizer — acting-as / secretary sessions carry
+        // Role==Organizer but must never mutate (§234 / OrganizerAuth).
+        if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
         if (!_admin.CanWrite) { NotConfigured = true; return Page(); }
         if (string.IsNullOrWhiteSpace(name))
             return RedirectToPage(new { customer, msg = "Name is required." });
 
-        await _admin.CreateAsync(customer, name, email, phone, signer, coordinator, ct);
+        try { await _admin.CreateAsync(customer, name, email, phone, signer, coordinator, ct); }
+        catch (CommunityHub.Core.Integrations.Erp.EconomicApiException ex)
+        { return RedirectToPage(new { customer, msg = ex.Message }); }
+        PushContactChangeDownstream(customer);   // §501b — same downstream push as the sponsor page
         return RedirectToPage(new { customer, msg = "Contact added in backend." });
     }
 
@@ -98,10 +170,20 @@ public class EconomicContactsModel : PageModel
         var me = Guard();
         if (_participant.Current is null) return RedirectToPage("/Login");
         if (me is null) return Page();
+        if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
         if (!_admin.CanWrite) { NotConfigured = true; return Page(); }
 
-        await _admin.UpdateAsync(customer, contact, name ?? string.Empty, email, phone,
-            signer, coordinator, notes, ct);
+        // §643 — a REJECTED EDIT IS NOT A CRASHED SERVER. e-conomic answering 400 used to escape
+        // as an unhandled HttpRequestException and render HTTP 500, so a routine data problem
+        // looked like the hub was broken and said nothing about the cause.
+        try
+        {
+            await _admin.UpdateAsync(customer, contact, name ?? string.Empty, email, phone,
+                signer, coordinator, notes, ct);
+        }
+        catch (CommunityHub.Core.Integrations.Erp.EconomicApiException ex)
+        { return RedirectToPage(new { customer, msg = ex.Message }); }
+        PushContactChangeDownstream(customer);   // §501b
         return RedirectToPage(new { customer, msg = "Contact updated in backend." });
     }
 
@@ -110,9 +192,13 @@ public class EconomicContactsModel : PageModel
         var me = Guard();
         if (_participant.Current is null) return RedirectToPage("/Login");
         if (me is null) return Page();
+        if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
         if (!_admin.CanWrite) { NotConfigured = true; return Page(); }
 
-        await _admin.DeleteAsync(customer, contact, ct);
+        try { await _admin.DeleteAsync(customer, contact, ct); }
+        catch (CommunityHub.Core.Integrations.Erp.EconomicApiException ex)
+        { return RedirectToPage(new { customer, msg = ex.Message }); }
+        PushContactChangeDownstream(customer);   // §501b
         return RedirectToPage(new { customer, msg = "Contact deleted." });
     }
 }

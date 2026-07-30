@@ -5,7 +5,19 @@
 }
 
 <div class="card">
-    <h1>@(Model.IsNew ? "Add participant" : $"Edit participant #{Model.Id}")</h1>
+    @*
+        §592 — NAME THE PERSON, NOT THE ROW ID. This read "Edit participant #4", which is the raw
+        database key: it tells the organizer nothing about WHO is being edited and it is the same
+        machine-output-in-a-human-surface defect that cost trust in the Settings page (§563/§564).
+        Falls back name → e-mail → "#id", so the heading is never empty even for a half-filled row.
+    *@
+    <h1>
+        @(Model.IsNew
+            ? "Add participant"
+            : "Edit " + (!string.IsNullOrWhiteSpace(Model.FullName) ? Model.FullName
+                : !string.IsNullOrWhiteSpace(Model.Email) ? Model.Email
+                : $"participant #{Model.Id}"))
+    </h1>
 
     @if (Model.AccessDenied)
     {
@@ -89,10 +101,134 @@
                         : "No welcome has been sent to this person yet.")
                 </span>
             </form>
+
+            @* 🔒 §707.14 — a 2-day ATTENDEE's real welcome is the Master Class selection invite
+               (§241), NOT the generic welcome above. The button above is idempotent and sends the
+               wrong mail for this role, and the reset path calls the retired 1-day service — so
+               without this there was no way to re-send it except a database edit. Shown only for
+               attendees, because it means nothing for any other role. *@
+            @if (Model.Role == CommunityHub.Core.Domain.ParticipantRole.Attendee)
+            {
+                <form method="post" asp-page-handler="ResendSelectionInvite" style="margin-top:10px;">
+                    <input type="hidden" asp-for="Id" />
+                    <button type="submit"
+                            style="background:#0f766e;color:#fff;padding:9px 16px;border-radius:7px;border:none;font-size:15px;cursor:pointer;">
+                        Re-send Master Class selection invite
+                    </button>
+                    <span style="font-size:12px;color:#6b7280;display:block;margin-top:4px;">
+                        This IS the 2-day attendee's welcome mail — it carries the magic-link button.
+                        Re-sends even if it went out before. Their Master Class seat and party RSVP
+                        are left untouched.
+                    </span>
+                </form>
+            }
+
+            @* §236 — RESET so the welcome sends AGAIN (role-simulation testing): clears the
+               once-ever ledger + the sent-stamp, then re-sends the role's welcome now. *@
+            <form method="post" asp-page-handler="ResetWelcome" style="margin-top:10px;"
+                  onsubmit="return confirm('Reset the welcome for this person and send a fresh welcome email now?');">
+                <input type="hidden" asp-for="Id" />
+                <button type="submit"
+                        style="background:#fff;color:#b45309;border:1px solid #f0d878;padding:9px 16px;border-radius:7px;font-size:15px;cursor:pointer;">
+                    🔄 Reset welcome — send again
+                </button>
+                <span style="font-size:12px;color:#6b7280;display:block;margin-top:4px;">
+                    Clears the "already sent" state and immediately sends a fresh welcome (with a
+                    new Get-Started link). Ring gating still applies — handy for re-testing a role's
+                    first-contact flow on your own accounts.
+                </span>
+            </form>
         }
 
         @if (!Model.IsNew)
         {
+            @* §355 (operator 2026-07-26: "should we have a similar organizer interface for this
+               reset functionality, so i can reset both per step + full reset") — the speaker /
+               volunteer / media counterpart of the attendee reset on /Organizer/Attendees.
+
+               A <details> disclosure so it needs no JavaScript (the §334 shape) and cannot be hit
+               by accident: this deletes another person's answers.
+
+               The step list is rendered from ParticipantOnboardingResetService.Steps, so a step
+               added to the service appears here without touching this view. *@
+            <details style="margin-top:20px;border:1px solid #f0d878;border-radius:8px;background:#fffdf3;padding:10px 14px;">
+                <summary style="cursor:pointer;font-weight:600;color:#7a5b00;">
+                    🔄 Reset Get Started (per step, or all)
+                </summary>
+
+                <p style="font-size:13px;color:#4b5563;margin:10px 0 4px;">
+                    Puts the selected steps back to <em>not done</em> so this person is asked again.
+                    Their role, login, ring and sessions are untouched — and a speaker's biography
+                    text is never deleted, only the "the speaker edited it" marker.
+                </p>
+                <p style="font-size:12.5px;color:#7a5b00;margin:0 0 10px;">
+                    Get Started reads each step from the underlying DATA, not from the task — so
+                    this clears the answer as well as re-opening the task. Re-opening the task alone
+                    would leave the wizard still showing the step as complete.
+                </p>
+
+                <form method="post" asp-page-handler="ResetOnboarding"
+                      onsubmit="return confirm('Reset the ticked Get Started steps for this person? Their saved answers for those steps are deleted.');">
+                    <input type="hidden" asp-for="Id" />
+
+                    @* §395 (operator 2026-07-26: "where is the select all button"). The help text
+                       said "tick every box for a full reset" — with nine boxes, that instruction
+                       was the feature request. Progressive enhancement: with JS off the individual
+                       boxes still work exactly as before, so nothing depends on this. *@
+                    <label id="reset-all-wrap" style="display:none;gap:9px;align-items:center;margin:10px 0 2px;font-weight:700;">
+                        <input type="checkbox" id="reset-all" style="width:auto;margin:0;" />
+                        <span>Select all steps (full reset)</span>
+                    </label>
+
+                    <div id="reset-steps" style="display:flex;flex-direction:column;gap:8px;margin:8px 0 14px;">
+                        @foreach (var step in CommunityHub.Core.Organizer.ParticipantOnboardingResetService.Steps)
+                        {
+                            <label style="display:flex;gap:9px;align-items:flex-start;font-weight:500;">
+                                <input type="checkbox" name="ResetSteps" value="@step.Key"
+                                       style="width:auto;margin:3px 0 0;" />
+                                <span>
+                                    @step.Label
+                                    <span style="display:block;font-weight:400;font-size:12.5px;color:#6b7280;">
+                                        @step.What
+                                    </span>
+                                </span>
+                            </label>
+                        }
+                    </div>
+                    <button type="submit"
+                            style="background:#fff;color:#b45309;border:1px solid #f0d878;padding:9px 16px;border-radius:7px;font-size:15px;cursor:pointer;">
+                        Reset the ticked steps
+                    </button>
+                    <span style="font-size:12px;color:#6b7280;display:block;margin-top:6px;">
+                        Recorded in the audit trail with exactly what it cleared.
+                    </span>
+                </form>
+
+                <script>
+                    (function () {
+                        var wrap = document.getElementById('reset-all-wrap');
+                        var all = document.getElementById('reset-all');
+                        var list = document.getElementById('reset-steps');
+                        if (!wrap || !all || !list) return;
+                        var boxes = list.querySelectorAll('input[name="ResetSteps"]');
+                        if (!boxes.length) return;
+                        wrap.style.display = 'flex';   // only shown when JS can actually drive it
+                        all.addEventListener('change', function () {
+                            boxes.forEach(function (b) { b.checked = all.checked; });
+                        });
+                        // Keep the master box honest when the individual ones are edited.
+                        boxes.forEach(function (b) {
+                            b.addEventListener('change', function () {
+                                var checked = 0;
+                                boxes.forEach(function (x) { if (x.checked) checked++; });
+                                all.checked = checked === boxes.length;
+                                all.indeterminate = checked > 0 && checked < boxes.length;
+                            });
+                        });
+                    })();
+                </script>
+            </details>
+
             <p style="margin-top:18px;font-size:13px;color:#6b7280;">
                 Tip: to edit hotel dates / dinner / swag answers on behalf of this person,
                 use <a asp-page="/Organizer/DataGrid">the participant data grid</a>.

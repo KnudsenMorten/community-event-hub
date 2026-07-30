@@ -1,14 +1,25 @@
 Subject: Master Class cancelled: {{masterClassTitle}}
 <p style="margin:0 0 16px;">Hi {{firstName}},</p>
 <p style="margin:0 0 16px;">Your Master Class seat for <strong>{{masterClassTitle}}</strong> at <strong>{{eventDisplayName}}{{eventCodeParens}}</strong> has been <strong>cancelled</strong>.</p>
-<p style="margin:0 0 16px;">You can sign up for another Master Class on your self-service page (subject to availability):</p>
-<table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:8px 0 20px;"><tr>
+<p style="margin:0 0 16px;">You can choose another Master Class in the Event Hub, subject to availability:</p>
+<table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:8px 0 6px;"><tr>
   <td align="center">
-    <table role="presentation" cellpadding="0" cellspacing="0"><tr>
-      <td style="background-color:{{brandColor}};border-radius:6px;">
-        <a href="{{signupUrl}}" style="display:inline-block;padding:14px 30px;color:#ffffff;font-size:16px;font-weight:bold;text-decoration:none;">Choose another Master Class</a>
-      </td>
-    </tr></table>
+    <!-- §351 (operator 2026-07-26): was the signupUrl token (the per-seat self-service page, which
+         the operator did not want). Now the hub's Master Class Selection surface via the hubUrl
+         token, which renders as /go/{token} against the /go/{token}/{**target} route, so this still
+         signs the attendee in automatically AND lands them on the right step.
+         NOTE: token names are written WITHOUT double braces on purpose — the renderer substitutes
+         across the whole file, comments included, so a braced token here would render a live
+         magic-link URL into the message source (see _layout.html). -->
+    <!--[if mso]>
+    <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="{{hubUrl}}/Forms/Wizard?step=masterclass" style="height:52px;v-text-anchor:middle;width:360px;" arcsize="50%" stroke="f" fillcolor="#1565c0">
+      <w:anchorlock/>
+      <center style="color:#ffffff;font-family:Aptos,'Segoe UI',Arial,sans-serif;font-size:16px;font-weight:bold;">Choose another Master Class</center>
+    </v:roundrect>
+    <![endif]-->
+    <!--[if !mso]><!-- -->
+    <a href="{{hubUrl}}/Forms/Wizard?step=masterclass" style="background-color:#1565c0;border-radius:999px;color:#ffffff;display:inline-block;font-family:Aptos,'Segoe UI',Arial,sans-serif;font-size:16px;font-weight:700;line-height:52px;text-align:center;text-decoration:none;width:360px;-webkit-text-size-adjust:none;">Choose another Master Class</a>
+    <!--<![endif]-->
   </td>
 </tr></table>
-<p style="margin:6px 0 16px;color:#6b7280;font-size:13px;text-align:center;">(Log in with your email, if prompted)</p>
+<p style="margin:0 0 16px;color:#6b7280;font-size:13px;text-align:center;">(the button signs you in automatically — no password needed)</p>

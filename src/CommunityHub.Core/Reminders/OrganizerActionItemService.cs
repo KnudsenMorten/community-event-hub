@@ -25,6 +25,15 @@ public sealed class OrganizerActionItemService
     /// <summary>A volunteer declined, or asked to swap, a shift they were assigned —
     /// a coordinator must reassign it.</summary>
     public const string TypeVolunteerShiftReassign = "volunteer-shift-needs-reassignment";
+    /// <summary>§253 G8d: a WooCommerce sponsor order was REFUNDED or CANCELLED after
+    /// the pull mirrored it — the pull reads completed orders only, and tiers/tasks
+    /// are raise-only, so an organizer must decide the rollback (package, booth,
+    /// tasks; Zoho is never deleted per §56). One item per Woo order id.</summary>
+    public const string TypeSponsorOrderRefunded = "sponsor-order-refunded";
+    /// <summary>§299 b10: a webshop order line matched NO product-classification rule —
+    /// no tasks/tier/session were derived from it. An organizer must decide whether the
+    /// sponsor config needs a new rule (e.g. after a webshop category rename).</summary>
+    public const string TypeWebshopCategoryUnrecognized = "webshop-category-unrecognized";
     /// <summary>Type PREFIX for a participant change-request raised AFTER the edition
     /// lock date (the form is read-only). The concrete type carries the form topic
     /// (e.g. "change-requested:hotel") so each form keeps its own queue row, while
@@ -41,6 +50,12 @@ public sealed class OrganizerActionItemService
             return "Change requested (after lock)";
         }
 
+        // §335: one row per stuck sponsor company, so the type carries the company id.
+        if (type.StartsWith(SponsorProvisioningStallDetector.TypePrefix + ":", StringComparison.Ordinal))
+        {
+            return "Sponsor upload folder not provisioned";
+        }
+
         return type switch
         {
             TypeHotelChanged   => "Hotel changed",
@@ -51,6 +66,8 @@ public sealed class OrganizerActionItemService
             TypeSpeakerChanged => "Speaker info changed",
             TypeOnboardingStepReset => "Onboarding step re-opened",
             TypeVolunteerShiftReassign => "Volunteer shift needs reassignment",
+            TypeSponsorOrderRefunded => "Sponsor order refunded/cancelled",
+            TypeWebshopCategoryUnrecognized => "Webshop category not recognized",
             _                  => type,
         };
     }

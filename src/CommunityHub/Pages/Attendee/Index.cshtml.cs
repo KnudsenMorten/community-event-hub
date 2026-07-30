@@ -26,19 +26,41 @@ public class IndexModel : PageModel
     private readonly MasterClassEmailService _email;
     private readonly MasterClassLogisticsService _logistics;
 
+    // §341-1: the standard §193 invite sender behind the "Send Calendar invite for Master
+    // Class" button. Optional + last so existing unit tests keep compiling (the §316 pattern);
+    // DI always injects it in production. Null ⇒ the button is not offered at all.
+    private readonly Core.Email.CalendarInviteEmailService? _calendarInvite;
+    private readonly ILogger<IndexModel>? _log;
+
     public IndexModel(
         MasterClassSignupService svc,
         ICurrentParticipantAccessor participant,
         MasterClassPromotionEmailService promo,
         MasterClassEmailService email,
-        MasterClassLogisticsService logistics)
+        MasterClassLogisticsService logistics,
+        Core.Email.CalendarInviteEmailService? calendarInvite = null,
+        ILogger<IndexModel>? log = null)
     {
         _svc = svc;
         _participant = participant;
         _promo = promo;
         _email = email;
         _logistics = logistics;
+        _calendarInvite = calendarInvite;
+        _log = log;
     }
+
+    /// <summary>
+    /// §341-1 — whether to offer the manual "Send Calendar invite for Master Class" button.
+    ///
+    /// <para><b>Why this button exists.</b> The confirmation mail used to carry the Google /
+    /// Outlook "add it online" links, which were the deliberate fallback for
+    /// <c>AutoCalendarInvitesEnabled = false</c> (the migration default, and prod's state).
+    /// The operator had that paragraph removed (§341-4) because the mail must not talk about
+    /// calendar invites at all — so without this button an attendee would have NO way to get
+    /// the Master Class into their calendar.</para>
+    /// </summary>
+    public bool CanSendCalendarInvite => Confirmed is not null && _calendarInvite is not null;
 
     private string BaseUrl => $"{Request.Scheme}://{Request.Host}";
 
@@ -48,6 +70,9 @@ public class IndexModel : PageModel
     public bool Eligible { get; private set; }
     public string EventName { get; private set; } = string.Empty;
     public string? Message { get; private set; }
+    /// <summary>"success" (default) or "error" — drives the _Flash kind so a FAILED
+    /// signup renders as a red ⚠ error, not a green ✓ success toast (§234 UX).</summary>
+    public string MessageKind { get; private set; } = "success";
 
     /// <summary>The attendee's confirmed seat, if any.</summary>
     public MasterClassSignupService.MySignup? Confirmed { get; private set; }
@@ -89,15 +114,16 @@ public class IndexModel : PageModel
     {
         if (promo?.PromotedSignupId is int id)
         {
-            try { await _promo.SendPromotionAsync(id, BaseUrl, ct); }
+            try { await _promo.SendPromotionAsync(id, BaseUrl, ct, promo.ReleasedTitle); }
             catch { /* promotion stands even if the notify mail fails; retryable */ }
         }
     }
 
-    public async Task<IActionResult> OnGetAsync(string? msg, CancellationToken ct)
+    public async Task<IActionResult> OnGetAsync(string? msg, string? kind, CancellationToken ct)
     {
         if (_participant.Current is null) return RedirectToPage("/Login");
         Message = msg;
+        MessageKind = string.Equals(kind, "error", StringComparison.OrdinalIgnoreCase) ? "error" : "success";
         await LoadAsync(ct);
         return Page();
     }
@@ -108,7 +134,10 @@ public class IndexModel : PageModel
         if (a is null) return Page();
 
         var r = await _svc.SignUpAsync(a.EventId, a.Id, sessionId, autoSwitchConsent, ct);
-        if (!r.Ok) return RedirectToPage(new { msg = r.Error });
+        // §234 UX: a FAILED signup must render as an error toast with the engine's actual
+        // message — it previously redirected with only msg, which the page showed as a
+        // green ✓ success flash.
+        if (!r.Ok) return RedirectToPage(new { msg = r.Error, kind = "error" });
 
         var newSignupId = await _svc.SignupIdAsync(a.EventId, a.Id, sessionId, ct);
         if (newSignupId is int sid)
@@ -143,19 +172,6 @@ public class IndexModel : PageModel
         return RedirectToPage(new { msg = "Done — your Master Class place was updated." });
     }
 
-    /// <summary>"Add to my calendar" — the attendee's confirmed Master Class as an .ics.</summary>
-    public async Task<IActionResult> OnGetIcsAsync(CancellationToken ct)
-    {
-        var a = await LoadAsync(ct);
-        if (a is null || Confirmed is null) return NotFound();
-        var s = await _svc.GetSessionForIcsAsync(a.EventId, Confirmed.SessionId, ct);
-        if (s is null) return NotFound();
-        var ics = MasterClassEmailService.BuildIcs(
-            Request.Host.Host, Confirmed.SessionId, s.Title, s.StartsAt, s.EndsAt, s.EditionStart);
-        // Inline (no filename) so the .ics opens in the OS calendar app.
-        return File(System.Text.Encoding.UTF8.GetBytes(ics), "text/calendar; charset=utf-8");
-    }
-
     /// <summary>Toggle the "remind me ~1 month before" calendar opt-in on the confirmed seat.</summary>
     public async Task<IActionResult> OnPostToggleReminderAsync(bool wants, CancellationToken ct)
     {
@@ -163,5 +179,63 @@ public class IndexModel : PageModel
         if (a is null) return Page();
         await _svc.SetMonthReminderOptInAsync(a.EventId, a.Id, wants, ct);
         return RedirectToPage(new { msg = wants ? "We'll remind you about a month before." : "Reminder turned off." });
+    }
+
+    /// <summary>
+    /// §341-1 — e-mail the attendee a calendar invitation for their confirmed Master Class day.
+    ///
+    /// <para>Uses the standard §193 <see cref="Core.Email.CalendarInviteEmailService"/> path (the
+    /// same one the hotel/dinner buttons use, §322n), and deliberately reuses
+    /// <see cref="MasterClassEmailService.MasterClassDayWindow"/> and
+    /// <see cref="MasterClassEmailService.MasterClassInviteUid"/> rather than re-stating the day
+    /// or the UID: the SAME uid means a re-send UPDATES the attendee's existing calendar entry
+    /// instead of adding a duplicate, and the shared window means this invite can never disagree
+    /// with the one the confirmation mail attaches when auto-invites are on.</para>
+    /// </summary>
+    public async Task<IActionResult> OnPostCalendarInviteAsync(CancellationToken ct)
+    {
+        var a = await LoadAsync(ct);
+        if (a is null) return Page();
+
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+        if (Confirmed is null || _calendarInvite is null)
+            return RedirectToPage(new { msg = "You need a confirmed Master Class seat first." , kind = "error" });
+
+        // The window comes from the SAME service that builds the auto-attached invite, resolved
+        // through the edition timezone — so the two can never disagree.
+        var (startUtc, endUtc) = _email.MasterClassDayWindowUtc();
+
+        try
+        {
+            var host = Request.Host.Host;
+            var sent = await _calendarInvite.SendItemInviteAsync(
+                me.ParticipantId,
+                uid: MasterClassEmailService.MasterClassInviteUid(Confirmed.SessionId, host),
+                summary: $"{EventName} — {Confirmed.Title}",
+                description: "Your Master Class. Registration & breakfast open at 07:00 — "
+                    + "come early so we can check everyone in; the class itself runs 09:00–16:00.",
+                location: string.Empty,
+                start: startUtc,
+                end: endUtc,
+                allDay: false,
+                fileName: "master-class.ics",
+                introHtml: "Here is your calendar invitation for your Master Class.",
+                ct: ct);
+
+            return RedirectToPage(sent
+                ? new { msg = sent.Confirmation(), kind = "success" }
+                : new { msg = "Calendar invitations are turned off for this event.", kind = "error" });
+        }
+        catch (Exception ex)
+        {
+            _log?.LogWarning(ex,
+                "Attendee Master Class calendar invite failed for participant {Pid}.", me.ParticipantId);
+            return RedirectToPage(new
+            {
+                msg = "We couldn't send the invite just now — please try again later.",
+                kind = "error",
+            });
+        }
     }
 }

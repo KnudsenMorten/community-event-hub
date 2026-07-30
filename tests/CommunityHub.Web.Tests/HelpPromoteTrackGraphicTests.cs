@@ -109,6 +109,7 @@ public sealed class HelpPromoteTrackGraphicTests
         var store = new FakeReadStore();
         var graphics = Graphics(db, store);
         var http = new DefaultHttpContext { User = Session(speaker) };
+        // §326p: the self-post feature (and its ctor plumbing) is removed again.
         var model = new CommunityHub.Pages.Speaker.GraphicsModel(
             db, new HttpCurrentParticipantAccessor(new HttpContextAccessorOver(http)),
             graphics, Publish(db, graphics))

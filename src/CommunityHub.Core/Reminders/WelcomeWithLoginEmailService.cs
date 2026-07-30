@@ -59,6 +59,10 @@ public sealed class WelcomeWithLoginEmailService
     private readonly TimeProvider _clock;
     private readonly IEmailContextAccessor? _context;
     private readonly WelcomeEmailOptions _options;
+    // §234: delivered-vs-dropped seam — the WelcomeWithLoginSentAt stamp is written
+    // only when the transport actually delivered. Null (legacy/test wiring) ⇒ the
+    // old always-stamp behaviour.
+    private readonly IEmailDeliveryOutcome? _outcome;
 
     public WelcomeWithLoginEmailService(
         CommunityHubDbContext db,
@@ -68,7 +72,8 @@ public sealed class WelcomeWithLoginEmailService
         IEnvironmentInfo env,
         TimeProvider clock,
         IEmailContextAccessor? context = null,
-        WelcomeEmailOptions? options = null)
+        WelcomeEmailOptions? options = null,
+        IEmailDeliveryOutcome? outcome = null)
     {
         _db = db;
         _templates = templates;
@@ -79,6 +84,7 @@ public sealed class WelcomeWithLoginEmailService
         _context = context;
         // Default: auto-login DISABLED (operator "disable welcome mail with login").
         _options = options ?? new WelcomeEmailOptions();
+        _outcome = outcome;
     }
 
     /// <summary>Whether the auto-login magic-link is minted (else the plain hub URL is used).</summary>
@@ -100,7 +106,7 @@ public sealed class WelcomeWithLoginEmailService
             return WelcomeWithLoginResult.RefusedNotDev(_env.EnvironmentName);
         }
 
-        return await SendCoreAsync(participantId, baseUrl, onlyIfUnsent: false, ct);
+        return await SendCoreAsync(participantId, baseUrl, onlyIfUnsent: false, attendeeWelcome: false, ct);
     }
 
     /// <summary>
@@ -115,10 +121,10 @@ public sealed class WelcomeWithLoginEmailService
     /// </summary>
     public Task<WelcomeWithLoginResult> SendForAttendeeProvisioningAsync(
         int participantId, string baseUrl, CancellationToken ct = default)
-        => SendCoreAsync(participantId, baseUrl, onlyIfUnsent: true, ct);
+        => SendCoreAsync(participantId, baseUrl, onlyIfUnsent: true, attendeeWelcome: true, ct);
 
     private async Task<WelcomeWithLoginResult> SendCoreAsync(
-        int participantId, string baseUrl, bool onlyIfUnsent, CancellationToken ct)
+        int participantId, string baseUrl, bool onlyIfUnsent, bool attendeeWelcome, CancellationToken ct)
     {
         var participant = await _db.Participants
             .Include(p => p.Event)
@@ -160,14 +166,30 @@ public sealed class WelcomeWithLoginEmailService
         }
 
         var rendered = RenderForUrl(participant, loginUrl);
-        // Ring-governed by the welcome-email feature (operator 2026-06-22).
+        // Ring-governed by the welcome-email feature (operator 2026-06-22). §217 (F3):
+        // when this is the ATTENDEE provisioning welcome (2-day), tag AttendeeWelcome so
+        // the sender adds the Email:AttendeeWelcomeMaxReleaseRing ceiling (default Ring1)
+        // on top — the ~1500 attendee welcomes are released in operator-controlled phases.
+        // §516: Welcome:true adds the Email:WelcomeMaxReleaseRing cap (default Ring1) beneath the
+        // feature ring for EVERY persona — this is the path an organizer triggers by hand, so it
+        // must not depend on the Settings picker alone. The attendee blast keeps its §217 cap too.
         using (_context?.Set(new EmailContext(
             roleTemplateKey,
             participant.EventId, participant.Id, participant.FullName,
-            FeatureKey: "welcome-email")))
+            TemplateName: roleTemplateKey,
+            FeatureKey: "welcome-email", AttendeeWelcome: attendeeWelcome, Welcome: true)))
         {
             await _emailSender.SendAsync(
                 participant.Email, rendered.Subject, rendered.HtmlBody, rendered.TextBody, ct);
+        }
+
+        // §234: NEVER record a gated (ring-dropped / kill-switched) send as sent —
+        // leave WelcomeWithLoginSentAt null so the provisioning path retries
+        // automatically once rings widen.
+        if (_outcome is not null && !_outcome.LastSendDelivered)
+        {
+            return new WelcomeWithLoginResult(
+                false, "Gated by ring — not sent (will retry when rings widen).");
         }
 
         // Record the send. Each send mints a FRESH single-use grant, so an earlier
@@ -276,17 +298,17 @@ public sealed class WelcomeWithLoginEmailService
         ParticipantRole.Organizer =>
             "As an organizer you get the full picture: participants, sponsors, attendee reconciliation and the live dashboards that run the whole event from one place.",
         ParticipantRole.Speaker =>
-            "As a speaker, start with the \"Get Started\" flow in the hub — it walks you through everything you need to set up. Afterwards you can change anything under Event Logistics if needed.",
+            "As a speaker, start with the \"Get Started\" flow in the hub — it walks you through everything you need to set up. Afterwards you can change any of your preferences from the hub. You can access the hub using https://hub.expertslive.dk - save the link to your favourites.",
         ParticipantRole.Volunteer =>
-            "As a volunteer, start with the \"Get Started\" flow in the hub — it walks you through everything you need to set up. Afterwards you can change anything under Event Logistics if needed.",
+            "As a volunteer, start with the \"Get Started\" flow in the hub — it walks you through everything you need to set up. Afterwards you can change any of your preferences from the hub. You can access the hub using https://hub.expertslive.dk - save the link to your favourites.",
         ParticipantRole.Sponsor =>
-            "As a sponsor contact you get your company's onboarding tasks and deadlines, and you can capture the leads you meet at your booth — straight from your phone.",
+            "As a sponsor contact, start with the \"Get Started\" flow in the hub — complete its tasks to set up your company (details, contacts, logos, booth). You can also capture the leads you meet at your booth — straight from your phone.",
         ParticipantRole.Attendee =>
-            "As an attendee you get your own \"My Event\" page: a countdown, your Master Class status, the practical info, and a one-tap check-in on the day.",
+            "As an attendee, start with the \"Get Started\" flow in the hub — it walks you through your sign-ups (Master Class, party) — and your \"My Event\" page keeps the countdown, status and practical info in one place.",
         ParticipantRole.Media =>
-            "As part of the press / media crew, start with the \"Get Started\" flow in the hub — it walks you through everything you need to set up. Afterwards you can change anything under Event Logistics if needed.",
+            "As part of the press / media crew, start with the \"Get Started\" flow in the hub — it walks you through everything you need to set up. Afterwards you can change any of your preferences from the hub. You can access the hub using https://hub.expertslive.dk - save the link to your favourites.",
         ParticipantRole.EventPartner =>
-            "As an event partner, start with the \"Get Started\" flow in the hub — it walks you through everything you need to set up. Afterwards you can change anything under Event Logistics if needed.",
+            "As an event partner, start with the \"Get Started\" flow in the hub — it walks you through everything you need to set up. Afterwards you can change any of your preferences from the hub. You can access the hub using https://hub.expertslive.dk - save the link to your favourites.",
         _ =>
             "Sign in to see exactly the part of the event that is relevant to you.",
     };

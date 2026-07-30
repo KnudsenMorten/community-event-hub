@@ -154,7 +154,9 @@ public sealed class GraphicsService
     /// <param name="TracksMatched">DISTINCT tracks whose name matched a file in the track-graphics
     /// folder (REQUIREMENTS §158) — one shared graphic per track, regardless of how many sessions /
     /// speakers reference it. Zero when the track folder is unset (inert).</param>
-    public sealed record PullSessionGraphicsResult(int Matched, int Unmatched, int TracksMatched = 0);
+    /// <param name="Retired">§326af: assets removed because their SharePoint file is gone.</param>
+    public sealed record PullSessionGraphicsResult(
+        int Matched, int Unmatched, int TracksMatched = 0, int Retired = 0);
 
     /// <summary>
     /// PULL operator-uploaded session graphics from SharePoint and surface them
@@ -214,6 +216,10 @@ public sealed class GraphicsService
             })
             .ToListAsync(ct);
 
+        // §326af: every drive-item id seen LIVE in the folders listed below — the input to
+        // the stale-asset heal at the end. Declared before ListBySlugAsync, which fills it.
+        var liveItemIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
         // Cache each folder's listing (slug→file) so a folder is listed at most ONCE.
         var folderCache = new Dictionary<string, IReadOnlyDictionary<string, SharePointFileRef>>(
             StringComparer.OrdinalIgnoreCase);
@@ -227,6 +233,7 @@ public sealed class GraphicsService
             var bySlug = new Dictionary<string, SharePointFileRef>(StringComparer.OrdinalIgnoreCase);
             foreach (var f in files)
             {
+                liveItemIds.Add(f.ItemId);                                       // §326af
                 var nameSlug = Slug(StripExtension(f.Name));
                 if (!string.IsNullOrEmpty(nameSlug)) bySlug.TryAdd(nameSlug, f); // first wins
             }
@@ -285,7 +292,50 @@ public sealed class GraphicsService
             }
         }
 
-        return new PullSessionGraphicsResult(matched, unmatched, matchedTrackSlugs.Count);
+        // §326af (operator 2026-07-25: "we need it to automatically detect that when the
+        // SharePoint file is gone from the folder"): RETIRE assets whose backing file has
+        // been deleted. The pull used to be add-only, so a graphic deleted in SharePoint
+        // stayed "released" forever and speakers kept seeing a dead card.
+        //
+        // SCOPE GUARD: only assets that live in a folder we actually LISTED this pass are
+        // considered — a folder that isn't configured (or wasn't read) can never retire
+        // anything. An EMPTY listing is treated as a real emptiness here (unlike the §301b
+        // Zoho heal): emptying the folder is exactly how the operator un-publishes, and the
+        // damage from a transient empty read self-corrects — the next pull re-creates and
+        // re-releases the asset from the file that is still there.
+        var retired = 0;
+        var listedFolders = folderCache.Keys
+            .Where(k => !string.IsNullOrWhiteSpace(k))
+            .Select(k => k.Trim('/'))
+            .ToList();
+        if (listedFolders.Count > 0)
+        {
+            var candidates = await _db.GraphicAssets
+                .Where(g => g.EventId == eventId
+                            && (g.Type == GraphicAssetType.Session || g.Type == GraphicAssetType.Track)
+                            && g.StorageItemId != null && g.StorageItemId != ""
+                            && g.SharePointPath != null)
+                .ToListAsync(ct);
+
+            var gone = candidates
+                .Where(g => listedFolders.Any(f =>
+                    g.SharePointPath!.TrimStart('/').StartsWith(f + "/", StringComparison.OrdinalIgnoreCase)))
+                .Where(g => !liveItemIds.Contains(g.StorageItemId!))
+                .ToList();
+
+            if (gone.Count > 0)
+            {
+                // The file is gone ⇒ so is the graphic. Removing the row (rather than
+                // flipping a status) is what keeps the speaker page, the organizer board
+                // and the share buttons consistent — and the pull re-creates the asset if
+                // the operator puts a file back.
+                _db.GraphicAssets.RemoveRange(gone);
+                await _db.SaveChangesAsync(ct);
+                retired = gone.Count;   // reported by the caller (job log + audit)
+            }
+        }
+
+        return new PullSessionGraphicsResult(matched, unmatched, matchedTrackSlugs.Count, retired);
     }
 
     // ===================================================================
@@ -329,13 +379,27 @@ public sealed class GraphicsService
     }
 
     /// <summary>
+    /// What a bulk release actually did. §436: the CALLER has to be able to notify the
+    /// speakers whose graphics just became visible, and re-deriving "who was released"
+    /// afterwards is impossible — every row now reads Released, including the ones that
+    /// already did. So the release reports it, at the one place that knows.
+    /// </summary>
+    /// <param name="Count">How many assets flipped Generated → Released.</param>
+    /// <param name="SpeakerIds">The DISTINCT participants those assets belong to (a
+    /// sponsor/unassigned asset contributes nobody).</param>
+    public sealed record ReleasedGraphics(int Count, IReadOnlyList<int> SpeakerIds)
+    {
+        public static readonly ReleasedGraphics None = new(0, Array.Empty<int>());
+    }
+
+    /// <summary>
     /// BULK-release every generated, non-sponsor (speaker/session) graphic for an edition that is
     /// still <see cref="GraphicAssetStatus.Generated"/>. Used by the SharePoint sync (the operator
     /// already curated by placing the finished file in the folder, so a pulled graphic is released
     /// straight to the speaker) and by the organizer "Release all" action. Sponsor graphics stay
-    /// internal-only and are never touched. Returns the number released.
+    /// internal-only and are never touched.
     /// </summary>
-    public async Task<int> ReleaseAllGeneratedAsync(
+    public async Task<ReleasedGraphics> ReleaseAllGeneratedAsync(
         int eventId, string releasedByEmail, CancellationToken ct = default)
     {
         var pending = await _db.GraphicAssets
@@ -343,7 +407,7 @@ public sealed class GraphicsService
                         && g.Status == GraphicAssetStatus.Generated
                         && g.Type != GraphicAssetType.Sponsor)
             .ToListAsync(ct);
-        if (pending.Count == 0) return 0;
+        if (pending.Count == 0) return ReleasedGraphics.None;
 
         var now = DateTimeOffset.UtcNow;
         foreach (var asset in pending)
@@ -354,7 +418,12 @@ public sealed class GraphicsService
             asset.UpdatedAt = now;
         }
         await _db.SaveChangesAsync(ct);
-        return pending.Count;
+        return new ReleasedGraphics(
+            pending.Count,
+            pending.Where(a => a.ParticipantId is not null)
+                .Select(a => a.ParticipantId!.Value)
+                .Distinct()
+                .ToList());
     }
 
     // ===================================================================
@@ -498,6 +567,87 @@ public sealed class GraphicsService
         return new SpeakerGraphicFile(bytes, ctype, name);
     }
 
+    // ===================================================================
+    //  Public OG image for the public session-detail page (§172)
+    // ===================================================================
+
+    /// <summary>
+    /// Resolve the released, STORED SoMe session-graphic to use as the PUBLIC OpenGraph
+    /// image for a session's public detail page (§172), scoped to the ACTIVE edition (the
+    /// same gate the public <c>/Sessions/{id}</c> page uses). Picks ONE graphic
+    /// DETERMINISTICALLY (lowest <see cref="GraphicAsset.Id"/>) among the session's
+    /// RELEASED, <see cref="GraphicAssetType.Session"/> graphics that have stored bytes.
+    /// Returns null when there is no active event, the session isn't in it / is a service
+    /// session, or no released, stored session graphic exists. NEVER returns a draft /
+    /// unreleased or a sponsor graphic — released promo graphics are public by design, the
+    /// rest are not.
+    /// </summary>
+    private async Task<GraphicAsset?> FindPublicSessionOgGraphicAsync(int sessionId, CancellationToken ct)
+    {
+        var activeId = await _db.Events
+            .Where(e => e.IsActive)
+            .OrderByDescending(e => e.Id)
+            .Select(e => (int?)e.Id)
+            .FirstOrDefaultAsync(ct);
+        if (activeId is null) return null;
+
+        // Same public gate as the session-detail page: the id must be in the active
+        // edition and NOT a service session (breaks/lunch are never publicly addressable).
+        var inEdition = await _db.Sessions.AnyAsync(
+            s => s.Id == sessionId && s.EventId == activeId.Value && !s.IsServiceSession, ct);
+        if (!inEdition) return null;
+
+        return await _db.GraphicAssets
+            .Where(g => g.EventId == activeId.Value
+                        && g.SessionId == sessionId
+                        && g.Type == GraphicAssetType.Session     // never a sponsor / track graphic
+                        && g.Status == GraphicAssetStatus.Released // THE GATE — drafts ⇒ 404
+                        && g.StorageItemId != null)                // only what we can actually stream
+            .OrderBy(g => g.Id)                                    // deterministic pick (lowest id)
+            .FirstOrDefaultAsync(ct);
+    }
+
+    /// <summary>
+    /// True iff a PUBLIC OG session-graphic exists for the session (so the public detail
+    /// page emits its <c>og:image</c> only when the image can actually be served). §172.
+    /// </summary>
+    public async Task<bool> HasPublicSessionOgGraphicAsync(int sessionId, CancellationToken ct = default) =>
+        await FindPublicSessionOgGraphicAsync(sessionId, ct) is not null;
+
+    /// <summary>
+    /// Stream the PUBLIC OG session-graphic bytes for the no-auth social-card endpoint
+    /// (§172): the released, stored session graphic (lowest id) for a session in the active
+    /// edition, fetched from SharePoint with the app's creds so social crawlers (which have
+    /// no SharePoint permission and can't use the auth proxy) can render the shared link's
+    /// preview card. A draft/unreleased, sponsor, non-graphic or unknown session ⇒ null
+    /// (404). Returns null when none / not stored / the store can't read.
+    /// </summary>
+    public async Task<SpeakerGraphicFile?> GetPublicSessionOgGraphicAsync(int sessionId, CancellationToken ct = default)
+    {
+        var asset = await FindPublicSessionOgGraphicAsync(sessionId, ct);
+        if (asset?.StorageItemId is null || !_store.CanRead) return null;
+
+        byte[]? bytes;
+        try { bytes = await _store.DownloadAsync(asset.StorageItemId, ct); }
+        catch { return null; }
+        if (bytes is null || bytes.Length == 0) return null;
+
+        var name = string.IsNullOrWhiteSpace(asset.FileName) ? $"session-{sessionId}.png" : asset.FileName!;
+        var ext = System.IO.Path.GetExtension(name).ToLowerInvariant();
+        // ONLY serve a known image type — never a non-graphic file (defence in depth, even
+        // though a Session GraphicAsset is always an image).
+        var ctype = ext switch
+        {
+            ".png" => "image/png",
+            ".gif" => "image/gif",
+            ".jpg" or ".jpeg" => "image/jpeg",
+            ".webp" => "image/webp",
+            _ => null,
+        };
+        if (ctype is null) return null;
+        return new SpeakerGraphicFile(bytes, ctype, name);
+    }
+
     /// <summary>
     /// Build the "I'm speaking at ELDK27" LinkedIn DRAFT for a speaker. The text
     /// carries the event date(s), the ticket URL <c>eldk27.expertslive.dk</c> and
@@ -536,6 +686,134 @@ public sealed class GraphicsService
             $"Catch my session \"{sessionTitle.Trim()}\" at {eventDisplayName}. "
             + $"Tickets: {ticketUrl} #ELDK27 #ExpertsLive";
         return _share.BuildDraft(network, text, graphicUrl);
+    }
+
+    /// <summary>
+    /// Build a PER-SESSION promote DRAFT (§172) — the speaker shares THIS session/master-class
+    /// in the same voice as <see cref="BuildSpeakingAnnouncementDraft"/>, but the post text
+    /// carries the PUBLIC session URL (<paramref name="sessionUrl"/>, e.g.
+    /// <c>{baseUrl}/Sessions/{id}</c>). The URL is put IN THE TEXT (not BuildDraft's image
+    /// slot) on purpose: LinkedIn/X text-intents can't attach an image, so the graphic gets
+    /// INTO the post via the OpenGraph card LinkedIn/X render when they crawl that URL — the
+    /// session-detail page serves the matching <c>og:image</c>. Draft only — never an auto-post.
+    ///
+    /// §196: the session URL is the ONLY link in the post. The earlier "Get your ticket: …" line
+    /// was dropped because LinkedIn/X card just ONE URL — with two links the platform picked the
+    /// generic ticket URL (and its OG card), so the session graphic never showed. One link ⇒ the
+    /// platform cards the session page and renders ITS og:image (the session graphic).
+    /// </summary>
+    public SocialShareDraft BuildSessionPromoteDraft(
+        string eventDisplayName, string eventDates,
+        string sessionTitle, string sessionUrl, SocialNetwork network = SocialNetwork.LinkedIn,
+        // §326z: the ticket/agenda site the prefill's CTA points at (the session URL stays
+        // the card source). Defaulted so existing callers/tests keep compiling.
+        string ticketUrl = "eldk27.expertslive.dk")
+    {
+        // §281 (operator 2026-07-10): the promotion post uses this exact format/layout, and the
+        // link IN THE TEXT is the AGENDA & TICKETS site (https://eldk27.expertslive.dk).
+        // §318c (operator bug 2026-07-24): the SESSION URL rides as the intent's CARD URL —
+        // the composer opens with the session page's OpenGraph card (= the session graphic),
+        // which §281's agenda-link text had lost (§196 documented that trap).
+        var text =
+            $"I'm speaking at {eventDisplayName} with my session: \"{sessionTitle.Trim()}\"\n\n"
+            + $"📅 {eventDates}\n"
+            + "📍 Bella Center, Copenhagen\n\n"
+            + "Two days of deep technical sessions and real-life experience:\n"
+            + "• Ask your questions directly to the experts\n"
+            + "• Meet the Microsoft product teams\n"
+            + "• Network with peers & friends\n"
+            + "• Fun and lots of laughing\n\n"
+            + "👉 Agenda & tickets: https://eldk27.expertslive.dk\n\n"
+            + "Hope to see you there! :-)\n\n"
+            + "#ELDK27 #ExpertsLiveDK";
+        // §326y (operator's PLAN B, 2026-07-25: "share the image as url … but then we need
+        // to also upload the text"): the composer is prefilled with a COMPACT post that
+        // CONTAINS the public session URL — LinkedIn keeps the text AND renders that URL's
+        // OpenGraph card, which is this session's graphic. Both appear, so the speaker just
+        // reviews and clicks Post. The prefill MUST stay under LinkedIn's ~300-char trim
+        // (the §322q full-text prefill was cut mid-bullet and lost the URL, hence no card),
+        // so the FULL §281 text below rides the clipboard for anyone who wants it verbatim.
+        // A NATIVE image upload would need the member token (§326w — ruled out).
+        return _share.BuildDraft(
+            network, text, graphicUrl: null, cardUrl: sessionUrl,
+            intentText: PrefillText(eventDisplayName, eventDates, sessionTitle, sessionUrl, ticketUrl));
+    }
+
+    /// <summary>
+    /// Build a PER-TRACK promote DRAFT (§172) for a track graphic card. A track graphic isn't
+    /// one session, so the link points at the PUBLIC sessions list filtered to that track
+    /// (<paramref name="trackUrl"/>, e.g. <c>{baseUrl}/Sessions?FilterTrack={track}</c>).
+    /// Same voice / draft-only contract as <see cref="BuildSessionPromoteDraft"/>.
+    /// </summary>
+    public SocialShareDraft BuildTrackPromoteDraft(
+        string eventDisplayName, string eventDates, string ticketUrl,
+        string track, string trackUrl, SocialNetwork network = SocialNetwork.LinkedIn)
+    {
+        var text =
+            $"I'm speaking in the {track.Trim()} track at {eventDisplayName} on {eventDates}!\n\n"
+            + $"See the sessions: {trackUrl}\n\n"
+            + $"Get your ticket: {ticketUrl}\n\n"
+            + "#ELDK27 #ExpertsLiveDK";
+        // §326y: same as the session draft — ampersand-safe prefill carrying the URL early,
+        // so the composer shows the text AND the card; clipboard keeps the verbatim text.
+        return _share.BuildDraft(
+            network, text, graphicUrl: null, cardUrl: trackUrl,
+            intentText: PrefillText(eventDisplayName, eventDates, $"the {track.Trim()} track", trackUrl, ticketUrl));
+    }
+
+    /// <summary>
+    /// §326y (operator's PLAN B, 2026-07-25) — the text LinkedIn's composer is PREFILLED
+    /// with. Same voice + content as the verbatim §281 body (which stays on the clipboard),
+    /// with two deliberate differences, both forced by how LinkedIn handles a share link:
+    /// <list type="number">
+    /// <item><b>No literal <c>&amp;</c>.</b> The live composer cut the post at
+    /// "…Network with peers" — exactly at the <c>&amp;</c> of "peers &amp; friends" — and
+    /// lost everything after it INCLUDING the URL (hence no card). LinkedIn re-parses the
+    /// decoded text as a query string, so an ampersand terminates it. "and" is used
+    /// instead; the clipboard copy keeps the operator's exact "&amp;".</item>
+    /// <item><b>The link sits EARLY</b> (right after the date/venue block, ~140 chars in)
+    /// and is the ONLY URL: LinkedIn cards the first URL it finds, and this one's
+    /// OpenGraph image IS the session graphic — so the picture shows. Placing it early
+    /// also means it survives even if LinkedIn additionally trims long prefills.</item>
+    /// </list>
+    /// Result: the speaker clicks once and reviews a post that already carries the text
+    /// and the picture — no manual attach, no app consent (§326w).
+    /// </summary>
+    private static string PrefillText(
+        string eventDisplayName, string eventDates, string what, string url, string ticketUrl) =>
+        $"I'm speaking at {eventDisplayName} with my session: \"{what.Trim()}\"\n\n"
+        + $"📅 {eventDates}\n"
+        + "📍 Bella Center, Copenhagen\n\n"
+        + $"👉 Agenda and tickets: {AbsoluteTicketUrl(ticketUrl)}\n\n"
+        + "Two days of deep technical sessions and real-life experience:\n"
+        + "• Ask your questions directly to the experts\n"
+        + "• Meet the Microsoft product teams\n"
+        + "• Network with peers and friends\n"
+        + "• Fun and lots of laughing\n\n"
+        + "Hope to see you there! :-)\n\n"
+        // §326ac (operator 2026-07-25): the raw company-page URL is GONE. A share link can
+        // only carry PLAIN TEXT, and a LinkedIn @-mention is a structured annotation
+        // (urn:li:organization:…) that only the API — or the author picking the page from
+        // the composer's dropdown — can create; a prefilled "@ExpertsLiveDK" would be dead
+        // characters. So the page is not tagged automatically; the page-tag hint lives
+        // under the Share button, and the #ExpertsLiveDK hashtag still links its feed.
+        + "#ELDK27 #ExpertsLiveDK\n"
+        // §326ab: NO "My session" prefix — the session URL is the LAST line, bare. It must
+        // stay: LinkedIn reads the preview picture (the OG image) from THIS url.
+        + url;
+
+    /// <summary>§326z: the community's LinkedIn company page, tagged in the closing line
+    /// (operator 2026-07-25). A plain-text intent cannot carry a real @-mention (that needs
+    /// the API), so the page URL is appended — LinkedIn renders it as a link to the page.</summary>
+    private const string CompanyPageUrl = "https://www.linkedin.com/company/expertslivedk";
+
+    /// <summary>The ticket/agenda site as a clickable absolute URL (config often stores the
+    /// bare host, e.g. "eldk27.expertslive.dk").</summary>
+    private static string AbsoluteTicketUrl(string ticketUrl)
+    {
+        var t = (ticketUrl ?? string.Empty).Trim();
+        if (t.Length == 0) return "https://eldk27.expertslive.dk";
+        return t.StartsWith("http", StringComparison.OrdinalIgnoreCase) ? t : $"https://{t}";
     }
 
     // ----- internals -------------------------------------------------------

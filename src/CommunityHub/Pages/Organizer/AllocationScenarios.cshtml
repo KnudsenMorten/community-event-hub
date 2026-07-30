@@ -4,7 +4,7 @@
     ViewData["Title"] = "Allocation scenarios";
 }
 
-<div class="card" style="max-width:920px;margin:0 auto;">
+<div class="card" style="max-width:1100px;margin:0 auto;">
     <h1>Allocation scenarios</h1>
 
     @if (Model.AccessDenied)
@@ -37,7 +37,12 @@
         <form method="post" asp-page-handler="SeedBackfill" style="flex:1 1 320px;display:flex;flex-direction:column;gap:6px;">
             <strong style="font-size:13.5px;">Auto-seed a drop-out backfill</strong>
             <span class="muted" style="font-size:12px;">Pick the person who dropped — we stage an un-assign for every task they cover so you start from exactly what's now uncovered.</span>
-            <input name="DroppedPersonId" type="number" min="1" placeholder="Dropped person's id" required />
+            @* Name-labelled picker (same options as the Add-move form) — organizers
+               don't know internal ids, and a wrong-but-valid typed id would silently
+               seed the wrong person's backfill. *@
+            <select name="DroppedPersonId" asp-items="Model.PersonOptions" required>
+                <option value="">— pick the person who dropped —</option>
+            </select>
             <div><button type="submit">Seed backfill</button></div>
         </form>
     </div>

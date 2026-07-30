@@ -23,13 +23,21 @@
     else if (Model.Pending is null)
     {
         <p>You're not on any Master Class waitlist.</p>
-        <p class="info">You hold <strong>one</strong> Master Class at a time. If the one you want is full, join its
-           waitlist — when a seat opens, the <strong>first person in line is moved in automatically and emailed</strong>.
-           If you're <strong>already confirmed</strong> in another Master Class and you waitlist a different one, we'll
-           <strong>automatically switch you</strong> the moment a seat opens: your current seat is released and you're
-           moved into the one you waitlisted. You agree to that auto-switch when you join the waitlist, so you always
-           end up with exactly one Master Class.</p>
-        <p><a class="task-link-btn" asp-page="/Attendee/Index">Add myself to master class waitlist</a></p>
+        @* §275: rephrased into short, plain points (operator 2026-07-10). *@
+        <p class="info"><strong>You can hold one Master Class at a time.</strong> Here's how the waitlist works:</p>
+        <ul class="info" style="line-height:1.6;margin-top:0;">
+            <li>If the Master Class you want is <strong>full</strong>, join its waitlist.</li>
+            <li>When a seat opens, the <strong>first person in line gets it automatically</strong> — and we email them.</li>
+            <li>Already confirmed in another Master Class? If you waitlist a different one, we <strong>switch you
+                automatically</strong> when a seat opens: your old seat is released and you're moved into the new one.</li>
+            <li>Joining a waitlist means you <strong>agree to that switch</strong> — so you always end up with exactly
+                one Master Class.</li>
+        </ul>
+        @* §390 (operator 2026-07-26: "/attendee keeps coming again !!! i clicked this" →
+           "it should go to step 2 in the wizard"). This button was the remaining route into the
+           retired /Attendee chooser. The waitlist now has its OWN wizard step (§384), which is
+           where joining one actually happens. *@
+        <p><a class="task-link-btn" href="/Forms/Wizard?step=masterclass-waitlist">Add myself to master class waitlist</a></p>
     }
     else
     {

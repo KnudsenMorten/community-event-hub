@@ -62,6 +62,12 @@ public sealed class EditParticipantSaveTests
                new NoOpEmailSender(),
                clock);
 
+    private static AttendeeOneDayWelcomeEmailService NewAttendeeWelcome(CommunityHubDbContext db, TimeProvider clock)
+        => new(db,
+               new EmailTemplateProvider(Options.Create(new EmailTemplateOptions())),
+               new NoOpEmailSender(),
+               clock);
+
     private static ClaimsPrincipal OrganizerSession(Participant org)
     {
         var claims = new List<Claim>
@@ -79,7 +85,7 @@ public sealed class EditParticipantSaveTests
     {
         var clock = new FixedClock();
         var accessor = new HttpCurrentParticipantAccessor(new HttpContextAccessorOver(http));
-        return new EditParticipantModel(db, accessor, NewWelcome(db, clock), clock)
+        return new EditParticipantModel(db, accessor, NewWelcome(db, clock), NewAttendeeWelcome(db, clock), clock)
         {
             PageContext = new PageContext { HttpContext = http },
         };

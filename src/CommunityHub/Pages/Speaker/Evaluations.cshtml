@@ -47,7 +47,8 @@
 
 @if (Model.QrConfigured && Model.MySessions.Count > 0)
 {
-    <div class="card">
+    @* §320: id anchors the "Download Session-evaluation QR codes" menu item. *@
+    <div class="card" id="eval-qr">
         <h2>&#128241; Session-evaluation QR codes</h2>
         <p style="font-size:13.5px;color:#374151;margin-top:0;">
             Each room has a printed QR attendees scan to rate your session. Download the QR for your

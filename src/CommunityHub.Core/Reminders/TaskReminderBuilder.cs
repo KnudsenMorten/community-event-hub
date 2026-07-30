@@ -39,14 +39,22 @@ public sealed class TaskReminderBuilder
     private IReadOnlyDictionary<string, string>? _placeholders;
     private string? _supportEmail;
 
+    /// <summary>The reminder TYPE — the ledger key this mail's history is stored under.</summary>
+    public const string ReminderTypeName = "task-deadline";
+
+    private readonly EmailReminderCadenceService? _cadence;
+
     public TaskReminderBuilder(
         CommunityHubDbContext db,
         EmailTemplateProvider templates,
         TimeProvider clock,
         SponsorRecipientResolver sponsorRecipients,
         EventEditionConfigLoader? eventConfigLoader = null,
-        EventConfigOptions? eventConfigOptions = null)
+        EventConfigOptions? eventConfigOptions = null,
+        // §707.11 — optional so existing constructions keep compiling; null ⇒ the shipped default.
+        EmailReminderCadenceService? cadence = null)
     {
+        _cadence = cadence;
         _db = db;
         _templates = templates;
         _clock = clock;
@@ -110,12 +118,24 @@ public sealed class TaskReminderBuilder
         var communityName = ev?.CommunityName ?? string.Empty;
         var eventDisplayName = ev?.DisplayName ?? string.Empty;
 
-        // Open, assigned, dated tasks for this edition.
+        // 🔒 §707.11 — the task reminder now REPEATS (operator 2026-07-30: *"the 2 must follow same
+        // pattern"*). It used to be once-ever (OccasionKey `task:{id}:due`, §81), so a person who
+        // ignored it was never chased again. The interval is the operator's, per mail; `null` would
+        // restore the old once-only behaviour.
+        var intervalDays = _cadence is null
+            ? EmailTemplateCatalog.DefaultIntervalDaysFor(TemplateName)
+            : await _cadence.GetIntervalDaysAsync(eventId, TemplateName, ct);
+        IReadOnlyDictionary<string, DateOnly> lastSentByOccasion = await EmailReminderCadenceService.LastSentByOccasionAsync(_db, eventId, ReminderTypeName, ct);
+
+        // Open, assigned, dated tasks for this edition. §253 G9: only ACTIVE
+        // assignees — a deactivated participant must never receive a due-day
+        // reminder (the same gate the party builder has, AttendeePartyReminderBuilder).
         var tasks = await _db.Tasks
             .Where(t => t.EventId == eventId
                         && t.State != TaskState.Done
                         && t.DueDate != null
-                        && t.AssignedParticipantId != null)
+                        && t.AssignedParticipantId != null
+                        && t.AssignedParticipant!.IsActive)
             .Select(t => new
             {
                 t.Id,
@@ -145,11 +165,33 @@ public sealed class TaskReminderBuilder
                 continue; // due date not reached yet
             }
 
+            // 🔒 §707.11 — REPEAT until the task is done. The DUE DATE is the anchor and
+            // `firstSendAtAnchor: true` keeps §81 intact: the first mail still lands ON the due day,
+            // and only the REPEATS are spaced by the interval, measured per TASK from its last send
+            // (§707.10). `State != Done` above is the stop signal, so finishing the task ends it.
+            var taskOccasion = $"task:{t.Id}";
+            var lastSentForTask = lastSentByOccasion.TryGetValue(taskOccasion, out var tls)
+                ? tls : (DateOnly?)null;
+            if (!EmailReminderCadenceService.IsDue(
+                    today, t.DueDate, lastSentForTask, intervalDays, firstSendAtAnchor: true))
+            {
+                continue;
+            }
+
             var firstName = string.IsNullOrWhiteSpace(t.Participant.FullName)
                 ? "there"
                 : t.Participant.FullName.Split(' ')[0];
-            // Single wording now the reminder only goes out on the due day (§81).
-            var state = "due today";
+            // §340-A-1: the wording must match what actually happened. §81 made this a
+            // due-DAY reminder and the copy was collapsed to a single "due today" — but
+            // this builder deliberately fires for OVERDUE tasks too (the daysLeft > 0
+            // skip above, and the class doc: "an overdue task still fires once on the
+            // next run"). So a task due weeks ago was announcing itself as due today.
+            // That is not cosmetic: the reminder is a deadline instruction, and a wrong
+            // deadline is worse than none. It bites hardest exactly when a release ring
+            // is widened, because every newly-in-ring person receives their whole
+            // backlog at once — the moment the mail must be trustworthy.
+            // `dueDate` is already in the token set, so the real date is shown either way.
+            var state = daysLeft == 0 ? "due today" : "overdue";
 
             // Per-role organizer-lead contact footer (config → token bridge). The
             // names/emails live ONLY in the edition config; here we just resolve
@@ -170,7 +212,7 @@ public sealed class TaskReminderBuilder
                 tokens["communityName"] = communityName;
                 tokens["eventDisplayName"] = eventDisplayName;
                 tokens["taskTitle"] = t.Title;
-                tokens["dueDate"] = t.DueDate.ToString("dd/MM/yyyy");
+                tokens["dueDate"] = t.DueDate.ToString("d MMM yyyy");
                 tokens["state"] = state;
                 tokens["taskLink"] = "Open the hub to see and update this task.";
                 RoleContact.AddTo(tokens, t.Participant.Role, placeholders, supportEmail);
@@ -184,8 +226,10 @@ public sealed class TaskReminderBuilder
             var persona = Email.OnboardingEmailSets.PersonaFor(t.Participant.Role)
                 .ToString();
 
-            // One reminder per task, ever (no milestone suffix any more — §81).
-            var occasionKey = $"task:{t.Id}:due";
+            // §707.11 — the occasion is the DAY now; "due" is decided above by the due date plus
+            // lastSent + interval. Was `task:{id}:due`, which by having no varying segment is what
+            // made this mail once-ever.
+            var occasionKey = $"{taskOccasion}:{today:yyyyMMdd}";
 
             // SPONSOR audience rule (REQUIREMENTS §7c): a sponsor task reminder
             // does NOT go to whoever the task happens to be assigned to (which may
@@ -201,29 +245,45 @@ public sealed class TaskReminderBuilder
                     eventId, t.Participant.SponsorCompanyId!, ct);
                 foreach (var c in coordinators)
                 {
-                    var cCc = string.IsNullOrWhiteSpace(c.SecondaryEmail)
-                        ? null
-                        : new[] { c.SecondaryEmail!.Trim() };
+                    // 🔒 §707.11 — each coordinator is chased on their OWN clock, so the root embeds
+                    // the address and the DATE stays the final segment (the root is everything before
+                    // the last ':'). Putting the date before the address would make every day a new
+                    // root, and the cadence would never hold anyone back.
+                    var cOccasion = $"{taskOccasion}:{c.Email}";
+                    var cLastSent = lastSentByOccasion.TryGetValue(cOccasion, out var cls)
+                        ? cls : (DateOnly?)null;
+                    if (!EmailReminderCadenceService.IsDue(
+                            today, t.DueDate, cLastSent, intervalDays, firstSendAtAnchor: true))
+                    {
+                        continue;
+                    }
+
+                    // §422: CcEmail is already the resolved alternate (see SponsorRecipient).
+                    var cCc = c.CcEmail is null ? null : new[] { c.CcEmail };
                     // §169: render PER coordinator so each carries THEIR own magic-link.
                     var cRendered = RenderForRecipient(c.ParticipantId);
                     messages.Add(new ReminderMessage(
                         RecipientEmail: c.Email,
-                        ReminderType: "task-deadline",
-                        OccasionKey: $"{occasionKey}:{c.Email}",
+                        ReminderType: ReminderTypeName,
+                        OccasionKey: $"{cOccasion}:{today:yyyyMMdd}",
                         Subject: cRendered.Subject,
                         HtmlBody: cRendered.HtmlBody,
                         DeliverToEmail: c.Email,
                         Persona: persona,
                         ParticipantId: c.ParticipantId,
                         RecipientName: c.FullName,
-                        Cc: cCc));
+                        Cc: cCc, MailKey: TemplateName));
                 }
                 continue;
             }
 
-            var cc = string.IsNullOrWhiteSpace(t.Participant.SecondaryEmail)
-                ? null
-                : new[] { t.Participant.SecondaryEmail!.Trim() };
+            // §422: the alternate inbox the tasks banner advertises. It resolves the
+            // organizer-set SecondaryEmail first, then the participant's OWN AlternateEmail —
+            // which until now nothing in the mail path read, so "we'll copy every reminder
+            // there as well" was not true for anyone who set it themselves.
+            var ccAddress = Participants.AlternateEmailPolicy.CcFor(
+                t.Participant.SecondaryEmail, t.Participant.AlternateEmail);
+            var cc = ccAddress is null ? null : new[] { ccAddress };
 
             // §169: the assignee's own personal magic-link body.
             var rendered = RenderForRecipient(t.Participant.Id);
@@ -240,7 +300,7 @@ public sealed class TaskReminderBuilder
                 Persona: persona,
                 ParticipantId: t.Participant.Id,
                 RecipientName: t.Participant.FullName,
-                Cc: cc));
+                Cc: cc, MailKey: TemplateName));
         }
 
         return messages;

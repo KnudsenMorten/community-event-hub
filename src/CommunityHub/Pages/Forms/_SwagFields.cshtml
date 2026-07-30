@@ -8,12 +8,8 @@
     so model binding is unchanged between the standalone page and the inline wizard step.
 *@
 
-<label for="SwagName">@Localizer["Common.Name"]</label>
-<input type="text" id="SwagName" value="@Model.FullName" readonly />
-
-<label for="SwagEmail">@Localizer["Common.Email"]</label>
-<input type="text" id="SwagEmail" value="@Model.Email" readonly />
-
+@* §326i: read-only Name/Email removed — authenticated session, answers keyed to the
+   signed-in participant. *@
 <label for="PoloChoice">@Localizer["Swag.PoloSize"]</label>
 <select asp-for="PoloChoice" required>
     <option value="">@Localizer["Swag.PickSize"]</option>

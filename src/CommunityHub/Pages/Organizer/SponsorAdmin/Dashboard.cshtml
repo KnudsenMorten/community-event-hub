@@ -37,6 +37,12 @@
             <form method="post" asp-page-handler="ReconcileErp" style="display:inline;margin:0 0 0 8px;">
                 <button type="submit" data-ceh-confirm="confirmReconcileErp">Reconcile ERP → webshop (users + defaults)</button>
             </form>
+            @* §496c — the missing LAST leg. The buttons above push ERP → webshop; this PULLS
+               webshop → hub, so a contact added directly in Company Manager shows up in CEH without
+               waiting for the scheduled pull. Idempotent — pressing it twice changes nothing. *@
+            <form method="post" asp-page-handler="SyncContacts" style="display:inline;margin:0 0 0 8px;">
+                <button type="submit">Sync contacts webshop → hub (now)</button>
+            </form>
             <p style="font-size:12px;color:#6b7280;margin:8px 0 0;">
                 <strong>Create / link</strong> provisions sponsors/exhibitors that don't exist in Zoho yet (replaces the legacy sync script — also runs automatically after each order pull when enabled).
             </p>

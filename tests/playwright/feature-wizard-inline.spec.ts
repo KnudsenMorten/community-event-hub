@@ -33,8 +33,9 @@ test.describe('@gui §148 Inline wizard — Volunteer availability step (HTTP 50
         await expect(page.locator('input[name^="Days"], input[type="radio"]').first()).toBeVisible();
         await assertNoHorizontalScroll(page);
 
-        // A real postback from the step advances (the Next/Finish button submits the host form).
-        await page.getByRole('button', { name: /Next|Finish/, exact: false }).first().click();
+        // A real postback from the step advances (the wizard's forward button is
+        // now labelled "Save & next"; the last step says "Finish").
+        await page.getByRole('button', { name: /save & next|next|finish/i, exact: false }).first().click();
         // We either moved to another step or landed on the hub — never a server error.
         expect(new URL(page.url()).pathname.toLowerCase()).not.toContain('/error');
     });

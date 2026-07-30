@@ -66,15 +66,12 @@ public class FeatureSetting
     public FeatureGroup? GroupOverride { get; set; }
 
     /// <summary>
-    /// The DATE this feature auto-activates for the BROAD rings (ring 2 + ring 3) — the
-    /// §38e date gate (operator 2026-06-25: "auto-enabled by a DATE: 1 Dec 2026 for ring
-    /// 2+3; ring 0/1 is NOT date-limited so we can test now"). When set, a ring-2/ring-3
-    /// participant is only inside the feature BEFORE this date if... no — they are only
-    /// inside it ONCE <c>now &gt;= ActiveFromForBroadRings</c>. Ring 0 and ring 1 ignore
-    /// this entirely (always active once the kill switch + released-ring gate pass), so a
-    /// ring-1 tester exercises the feature immediately. <c>null</c> = no date gate (broad
-    /// rings follow only the normal kill-switch + released-ring rules). Only consulted by
-    /// features that opt into a date gate (today: <c>session-change-alerts</c>).
+    /// RETIRED (§234, 2026-07-07): the §38e broad-rings "1 Dec 2026 auto-enable" DATE
+    /// gate. It became dead code with §59 — session-change emails are no longer sent
+    /// inline at detection time; they send only when an operator APPROVES the queued
+    /// delta (and the sender still ring-gates each recipient), so nothing reads this
+    /// value anymore. The COLUMN is retained solely to avoid a schema migration; do
+    /// not wire new behavior to it.
     /// </summary>
     public DateTimeOffset? ActiveFromForBroadRings { get; set; }
 

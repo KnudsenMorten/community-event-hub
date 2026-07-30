@@ -77,47 +77,6 @@ public sealed class AuditTrailTests
         Assert.Equal(new[] { "recent" }, rows);
     }
 
-    [Fact]
-    public async Task Calendar_subscribe_is_audited_once_on_first_mint_only()
-    {
-        using var db = NewDb();
-        db.Events.Add(new Event { Id = EventId, CommunityName = "C", DisplayName = "C27", Code = "C27", IsActive = true });
-        var p = new Participant { EventId = EventId, Email = "spk@x", FullName = "Spk", Role = ParticipantRole.Speaker, IsActive = true };
-        db.Participants.Add(p);
-        await db.SaveChangesAsync();
-
-        var audit = new AuditTrailService(db, new FixedClock());
-        var svc = new CalendarFeedTokenService(db, audit);
-
-        var t1 = await svc.EnsureTokenAsync(p.Id);
-        var t2 = await svc.EnsureTokenAsync(p.Id);   // idempotent — no second audit row
-        Assert.Equal(t1, t2);
-
-        var subs = await db.AuditEntries
-            .Where(e => e.Category == AuditCategory.CalendarSync && e.Action == AuditActions.CalendarSubscribe)
-            .ToListAsync();
-        Assert.Single(subs);
-        Assert.Equal(p.Id, subs[0].ActorParticipantId);
-        Assert.Equal("spk@x", subs[0].ActorEmail);
-
-        // Regenerating (revoke + reissue) is audited as a token reset.
-        await svc.RegenerateTokenAsync(p.Id);
-        Assert.True(await db.AuditEntries.AnyAsync(e => e.Action == AuditActions.CalendarTokenReset));
-    }
-
-    [Fact]
-    public async Task Calendar_token_service_works_without_an_audit_sink()
-    {
-        // The audit dependency is optional (legacy/test wiring) — minting still works.
-        using var db = NewDb();
-        var p = new Participant { EventId = EventId, Email = "v@x", FullName = "V", Role = ParticipantRole.Volunteer, IsActive = true };
-        db.Participants.Add(p);
-        await db.SaveChangesAsync();
-
-        var svc = new CalendarFeedTokenService(db);   // no audit sink
-        var token = await svc.EnsureTokenAsync(p.Id);
-
-        Assert.False(string.IsNullOrWhiteSpace(token));
-        Assert.False(await db.AuditEntries.AnyAsync());
-    }
+    // §193: the per-user calendar FEED + its token service (CalendarFeedTokenService)
+    // were removed, so the calendar-subscribe audit tests are gone with them.
 }

@@ -1,9 +1,12 @@
 namespace CommunityHub.Core.Domain;
 
 /// <summary>
-/// How a freed Master Class seat is handed to a waitlisted attendee who ALREADY
-/// holds a confirmed seat in another MC (a person can never hold two confirmed).
-/// Organizer-selectable (REQUIREMENTS §6).
+/// <b>RESERVED / UNUSED (§234 4)</b> — the live promotion engine (§93,
+/// <c>MasterClassSignupService.PromoteNextAsync</c>) ALWAYS auto-switches and never
+/// reads this setting; there is no organizer UI offering it. Kept because the value is
+/// persisted in <see cref="MasterClassSettings"/> rows. Original meaning: how a freed
+/// Master Class seat is handed to a waitlisted attendee who ALREADY holds a confirmed
+/// seat in another MC (a person can never hold two confirmed).
 /// </summary>
 public enum MasterClassPromotionMode
 {
@@ -27,9 +30,10 @@ public enum MasterClassPromotionMode
 }
 
 /// <summary>
-/// Per-edition Master Class signup settings the organizer controls (REQUIREMENTS §6):
-/// how long a held offer waits for a decision, and which promotion mode applies when
-/// the next waitlisted attendee already holds a seat. No row ⇒ the shipped defaults.
+/// Per-edition Master Class signup settings (REQUIREMENTS §6). <b>RESERVED / UNUSED
+/// (§234 4):</b> both knobs belong to the retired offer/decide model — the live engine
+/// always auto-switches, no organizer UI exposes them, and no live path reads them.
+/// The table is kept because rows may exist; do not surface these in settings UI.
 /// </summary>
 public class MasterClassSettings
 {
@@ -39,7 +43,8 @@ public class MasterClassSettings
     public int EventId { get; set; }
     public Event Event { get; set; } = null!;
 
-    /// <summary>Hours a freed seat is held for an attendee to accept/decline (default 12).</summary>
+    /// <summary>RESERVED (§234 4): hours a freed seat WOULD be held under the retired
+    /// offer/decide model (default 12). Never read by the live engine.</summary>
     public int OfferHoldHours { get; set; } = 12;
 
     /// <summary>

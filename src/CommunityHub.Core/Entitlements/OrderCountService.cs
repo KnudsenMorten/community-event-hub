@@ -72,6 +72,10 @@ public sealed class OrderCountService
             .Where(s => s.EventId == eventId)
             .ToDictionaryAsync(s => s.ParticipantId, s => s, ct);
 
+        // §299 C5: presenting days derive from linked sessions (drives the
+        // speakers' main-day lunch entitlement). Loaded once for the edition.
+        var daysBySpeaker = await SpeakerDayScope.DaysBySpeakerAsync(_db, eventId, ct);
+
         var overridesByParticipant = (await _db.ParticipantOrderOverrides
                 .Where(o => o.EventId == eventId)
                 .ToListAsync(ct))
@@ -88,7 +92,10 @@ public sealed class OrderCountService
                 ? ov
                 : (IEnumerable<ParticipantOrderOverride>)Array.Empty<ParticipantOrderOverride>();
 
-            var items = OrderEntitlements.Effective(p, speaker, overrides);
+            var days = speaker is not null && daysBySpeaker.TryGetValue(p.Id, out var d)
+                ? d
+                : SpeakerDays.None;
+            var items = OrderEntitlements.Effective(p, speaker, days, overrides);
             if (items.Count == 0) continue;
 
             var entitled = new EntitledParticipant(p.Id, p.FullName, p.Email, p.Role);

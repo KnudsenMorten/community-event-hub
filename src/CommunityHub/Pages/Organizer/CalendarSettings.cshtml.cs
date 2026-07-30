@@ -1,7 +1,6 @@
 using CommunityHub.Auth;
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
-using CommunityHub.Core.Reminders;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
@@ -10,46 +9,43 @@ using Microsoft.EntityFrameworkCore;
 namespace CommunityHub.Pages.Organizer;
 
 /// <summary>
-/// Organizer-gated setting to enable/disable calendar sync for the edition
-/// (REQUIREMENTS §5). Calendar sync is the per-user subscribable iCal feed
-/// (<c>GET /cal/{token}.ics</c>) plus the .ics invite attached to activation
-/// emails. When the organizer turns it OFF for the edition:
-///  - the feed returns 404 for every participant of the edition;
-///  - the hub's "Add to my calendar" card is hidden;
-///  - no .ics invite is attached to activation emails.
-/// The switch lives on the edition's <see cref="Event.CalendarSyncEnabled"/> row
-/// (no new table) and defaults ON.
+/// Organizer-gated setting to enable/disable calendar invitations for the edition.
+/// When ON (the default), the hub's "Add Reminder" / "Email me a calendar invite"
+/// actions e-mail participants a calendar INVITATION (REQUIREMENTS §193) for their
+/// task due dates, sessions, etc. When the organizer turns it OFF for the edition,
+/// those actions send nothing. The switch lives on the edition's
+/// <see cref="Event.CalendarSyncEnabled"/> row (no new table) and defaults ON.
+///
+/// REQUIREMENTS §201: the per-user subscribable iCal feed and "Add to my calendar"
+/// subscription were removed — there is no feed to preview or subscribe to any more.
 /// </summary>
 [Authorize]
 public class CalendarSettingsModel : PageModel
 {
     private readonly ICurrentParticipantAccessor _participant;
     private readonly CommunityHubDbContext _db;
-    private readonly ParticipantCalendarBuilder _calendar;
 
     public CalendarSettingsModel(
         ICurrentParticipantAccessor participant,
-        CommunityHubDbContext db,
-        ParticipantCalendarBuilder calendar)
+        CommunityHubDbContext db)
     {
         _participant = participant;
         _db = db;
-        _calendar = calendar;
     }
 
     [BindProperty]
     public bool Enabled { get; set; }
 
+    /// <summary>
+    /// REQUIREMENTS §257 — the AUTOMATIC calendar-invite push (Dinner / Hotel /
+    /// Hotel-placement / Master-Class). Off by default: the confirmation e-mails carry a
+    /// manual "Add to calendar" link instead of pushing an invite into the inbox.
+    /// </summary>
+    [BindProperty]
+    public bool AutoInvitesEnabled { get; set; }
+
     public bool AccessDenied { get; private set; }
     public string? SavedMessage { get; private set; }
-
-    /// <summary>
-    /// Read-only preview of the organizer's OWN calendar feed — the same items a
-    /// calendar client would see when it subscribes to the per-user .ics. Lets the
-    /// organizer confirm what the feed contains before sharing the subscribe URL.
-    /// </summary>
-    public IReadOnlyList<ParticipantCalendarBuilder.CalendarPreviewRow> FeedPreview { get; private set; }
-        = System.Array.Empty<ParticipantCalendarBuilder.CalendarPreviewRow>();
 
     public async Task<IActionResult> OnGetAsync(CancellationToken ct)
     {
@@ -57,12 +53,13 @@ public class CalendarSettingsModel : PageModel
         if (me is null) return RedirectToPage("/Login");
         if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
 
-        Enabled = await _db.Events
+        var settings = await _db.Events
             .Where(e => e.Id == me.EventId)
-            .Select(e => e.CalendarSyncEnabled)
+            .Select(e => new { e.CalendarSyncEnabled, e.AutoCalendarInvitesEnabled })
             .FirstOrDefaultAsync(ct);
+        Enabled = settings?.CalendarSyncEnabled ?? false;
+        AutoInvitesEnabled = settings?.AutoCalendarInvitesEnabled ?? false;
 
-        FeedPreview = await _calendar.BuildPreviewAsync(me.ParticipantId, ct);
         return Page();
     }
 
@@ -76,11 +73,16 @@ public class CalendarSettingsModel : PageModel
         if (ev is null) return NotFound();
 
         ev.CalendarSyncEnabled = Enabled;
+        ev.AutoCalendarInvitesEnabled = AutoInvitesEnabled;
         await _db.SaveChangesAsync(ct);
 
-        SavedMessage = Enabled
-            ? "Calendar sync is ON — participants can subscribe to their calendar feed and get .ics invites."
-            : "Calendar sync is OFF — the calendar feed is disabled and no .ics invites are sent for this edition.";
+        var manualPart = Enabled
+            ? "the manual \"Email me a calendar invite\" / \"Add to calendar\" actions are ON"
+            : "the manual \"Email me a calendar invite\" / \"Add to calendar\" actions are OFF";
+        var autoPart = AutoInvitesEnabled
+            ? "automatic invites (dinner/hotel/master-class) are ON — a calendar invite is pushed on submit"
+            : "automatic invites are OFF — confirmations carry an \"Add to calendar\" link instead";
+        SavedMessage = $"Saved. {char.ToUpperInvariant(manualPart[0])}{manualPart[1..]}; {autoPart}.";
         return Page();
     }
 }

@@ -54,7 +54,8 @@ public sealed record SpeakerBioRecord(
     string? LastName = null,
     string? Country = null,
     string? Skills = null,
-    string? BackstageSpeakerId = null);
+    string? BackstageSpeakerId = null,
+    string? Company = null);   // §302b: Zoho "Company Name" (hub-collected, optional)
 
 /// <summary>What the Backstage write actually did (the v3 speakers API is create-only).</summary>
 public enum BackstageSpeakerAction

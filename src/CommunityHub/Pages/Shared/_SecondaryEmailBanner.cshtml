@@ -2,11 +2,29 @@
     Shared ALTERNATIVE-EMAIL banner — surfaced at the top of every role's task
     page so the secondary-email option isn't buried in My Hub Profile.
 
-    Task + calendar reminders are CC'd to Participant.SecondaryEmail
-    (ParticipantEmailService.ResolveRouting / TaskReminderBuilder). This banner
-    tells the person which inbox(es) those reminders reach and lets them add or
-    change the alternative inbox in one tap — useful when someone keeps their
-    calendar reminders on a different account than their primary login email.
+    TASK reminders are CC'd to the RESOLVED alternate address
+    (AlternateEmailPolicy.CcFor: organizer-set SecondaryEmail first, then the
+    participant's own AlternateEmail) — see ParticipantEmailService.ResolveRouting
+    and TaskReminderBuilder. This banner tells the person which inbox(es) those
+    reminders reach and lets them add or change the alternative inbox in one tap.
+
+    §660 — CALENDAR INVITES ARE NOT CC'd, and this comment used to say they were.
+    CalendarInviteEmailService resolves ONE address (SpeakerProfile.CalendarEmailFor)
+    and calls IEmailSender.SendWithIcsAsync, which has no cc parameter. Before
+    claiming a mail family is copied anywhere, check that its send site passes a cc —
+    only TaskReminderBuilder and the shared ParticipantEmailService seam do.
+
+    §422 fixed two faults here (operator 2026-07-27: "it appears as the alternative
+    email didn't pick up here as well, as it still shows primary email here"):
+
+      1. It read ONLY SecondaryEmail, which no participant-facing screen can set —
+         it is organizer-only. So someone who added their alternate address on their
+         own profile saw this banner keep insisting they had just one inbox.
+      2. The link pointed at /Profile#SecondaryEmail, an anchor that does not exist
+         on that page. The box they actually landed next to was AlternateEmail.
+
+    Together those made the banner advertise something it could not deliver: it
+    invited you to add an address, and then ignored the one you added.
 
     Self-contained: reads the CURRENT participant (honours organizer "act as")
     and looks up their secondary email, so it drops into any page with one line:
@@ -14,6 +32,7 @@
 *@
 @using CommunityHub.Auth
 @using CommunityHub.Core.Data
+@using CommunityHub.Core.Domain
 @using Microsoft.EntityFrameworkCore
 @inject ICurrentParticipantAccessor CurrentParticipant
 @inject CommunityHubDbContext Db
@@ -21,14 +40,28 @@
     var me = CurrentParticipant.Current;
     string primary = me?.Email ?? string.Empty;
     string? secondary = null;
+    // §660 — the CALENDAR address, resolved exactly as CalendarInviteEmailService resolves it.
+    string? calendarInbox = null;
     if (me is not null)
     {
-        secondary = await Db.Participants
+        var row = await Db.Participants
             .Where(p => p.Id == me.ParticipantId)
-            .Select(p => p.SecondaryEmail)
+            .Select(p => new { p.SecondaryEmail, p.AlternateEmail })
             .FirstOrDefaultAsync();
+        secondary = CommunityHub.Core.Participants.AlternateEmailPolicy.CcFor(
+            row?.SecondaryEmail, row?.AlternateEmail);
+
+        var sp = await Db.SpeakerProfiles
+            .Where(x => x.ParticipantId == me.ParticipantId)
+            .Select(x => new { x.CalendarEmail, x.ContactEmailOverride })
+            .FirstOrDefaultAsync();
+        calendarInbox = SpeakerProfile.CalendarEmailFor(
+            primary, sp?.CalendarEmail, sp?.ContactEmailOverride);
     }
     var hasSecondary = !string.IsNullOrWhiteSpace(secondary);
+    // Only worth calling out when the calendar invite lands somewhere OTHER than the primary.
+    var calendarDiffers = !string.IsNullOrWhiteSpace(calendarInbox)
+        && !string.Equals(calendarInbox, primary, StringComparison.OrdinalIgnoreCase);
 }
 @if (me is not null)
 {
@@ -37,23 +70,57 @@
                 background:@(hasSecondary ? "#f0fdf4" : "#eff6ff");
                 border:1px solid @(hasSecondary ? "#bbf7d0" : "#bfdbfe");
                 border-left:4px solid @(hasSecondary ? "#16a34a" : "#2563eb");color:#1f2937;">
+        @* §660 (operator 2026-07-29: "i dont believe it is true that mails go to both primary and
+           alternative mail, which mails this text wrong"). He was right, and the banner was wrong
+           in a specific way worth remembering: it said "task & calendar reminder emails", but the
+           CC is applied by TaskReminderBuilder and the shared participant-mail seam ONLY.
+           CalendarInviteEmailService resolves a SINGLE address (CalendarEmail ?? contact override
+           ?? primary) and calls SendWithIcsAsync with no CC — there is no cc parameter on that
+           method at all. So the calendar half of the promise was never kept, and the invite can
+           even land in a THIRD mailbox the banner never mentioned. Say what is true, per mail
+           family, and name the calendar inbox when it differs. *@
         @if (hasSecondary)
         {
             <p style="margin:0;"><span aria-hidden="true">&#128231;</span>
-                <strong>Reminders reach two inboxes.</strong>
-                Your task &amp; calendar reminder emails go to your primary
+                <strong>Your task reminders reach two inboxes.</strong>
+                Task reminders and the hub&rsquo;s other emails to you go to your primary
                 <strong>@primary</strong> and are also copied to <strong>@secondary</strong>.
-                <a asp-page="/Profile" asp-fragment="SecondaryEmail" style="white-space:nowrap;">Change &rarr;</a>
+                <a asp-page="/Profile" asp-fragment="AlternateEmail" style="white-space:nowrap;">Change &rarr;</a>
             </p>
+            @if (calendarDiffers)
+            {
+                <p style="margin:6px 0 0;">
+                    <strong>Calendar invitations are different:</strong> they go to
+                    <strong>@calendarInbox</strong> only &mdash; a calendar invite is sent to one
+                    mailbox, not copied.
+                </p>
+            }
+            else
+            {
+                <p style="margin:6px 0 0;">
+                    <strong>Calendar invitations are different:</strong> they go to
+                    <strong>@primary</strong> only &mdash; they are not copied to your alternative
+                    address.
+                </p>
+            }
         }
         else
         {
             <p style="margin:0;"><span aria-hidden="true">&#128231;</span>
-                <strong>Want reminders in another inbox too?</strong>
-                Right now task &amp; calendar reminders only go to <strong>@primary</strong>.
-                If you keep your calendar reminders on a different account,
-                <a asp-page="/Profile" asp-fragment="SecondaryEmail" style="white-space:nowrap;">add an alternative email &rarr;</a>
-                and we&rsquo;ll copy every reminder there as well.
+                <strong>Want your task reminders in another inbox too?</strong>
+                Right now they only go to <strong>@primary</strong>.
+                <a asp-page="/Profile" asp-fragment="AlternateEmail" style="white-space:nowrap;">Add an alternative email &rarr;</a>
+                and we&rsquo;ll copy your task reminders there as well.
+                @if (calendarDiffers)
+                {
+                    <text>Calendar invitations are sent to <strong>@calendarInbox</strong> and are
+                    not affected by this setting.</text>
+                }
+                else
+                {
+                    <text>Calendar invitations go to one mailbox only and are not affected by this
+                    setting.</text>
+                }
             </p>
         }
     </div>

@@ -37,10 +37,12 @@ test.describe('@gui §3 Organizer hub', () => {
         // The signed-in header shows the role; nav exposes the organizer area.
         await expect(page.locator('header .who')).toContainText(/Organizer/i);
         await expect(page.locator('nav.primary a[href="/Organizer"]')).toBeVisible();
-        // Organizer-only landing actually loads (a non-organizer would bounce).
+        // Organizer-only landing actually loads (a non-organizer gets the
+        // in-place "organizers only" denial instead).
         await page.goto(`${BASE}/Organizer`, { waitUntil: 'domcontentloaded' });
         expect(onLoginPage(page)).toBeFalsy();
-        await expect(page.locator('h2', { hasText: 'Dashboard' }).first()).toBeVisible();
+        await expect(page.locator('h1', { hasText: 'Organizer area' }).first()).toBeVisible();
+        await expect(page.locator('p.error', { hasText: /for organizers only/i })).toHaveCount(0);
         await assertNoHorizontalScroll(page);
     });
 });
@@ -55,10 +57,15 @@ test.describe('@gui §3 Speaker hub', () => {
         await expect(page.locator('header .who')).toContainText(/Speaker/i);
         // Speaker forms are reachable; the volunteer wizard + organizer area are not theirs.
         await sweep(page, ['/Tasks', '/Forms/Hotel', '/Forms/Dinner', '/Forms/Speaker', '/Forms/Travel']);
-        // Organizer area must NOT be accessible to a speaker.
+        // Organizer area must NOT be accessible to a speaker. The app now denies
+        // IN PLACE (HTTP 200 + "This area is for organizers only.") rather than
+        // redirecting — what must never happen is the organizer UI rendering.
         await page.goto(`${BASE}/Organizer`, { waitUntil: 'domcontentloaded' });
-        expect(onLoginPage(page) || !page.url().includes('/Organizer'),
-            'speaker should be bounced from /Organizer').toBeTruthy();
+        const deniedInPlace = await page.locator('p.error', { hasText: /for organizers only/i }).count() > 0;
+        expect(onLoginPage(page) || !page.url().includes('/Organizer') || deniedInPlace,
+            'speaker should be denied the organizer area').toBeTruthy();
+        // None of the organizer chrome leaks through to a denied speaker.
+        await expect(page.locator('a[href="/Organizer/CommandCenter"]')).toHaveCount(0);
     });
 });
 
@@ -96,8 +103,11 @@ test.describe('@gui §3 Attendee hub', () => {
         await expect(page.locator('header .who')).toContainText(/Attendee/i);
         await sweep(page, ['/Attendee']);
         // Cross-role isolation: the attendee must not reach the organizer area.
+        // Denial is rendered IN PLACE (200 + "organizers only" notice), not a bounce.
         await page.goto(`${BASE}/Organizer`, { waitUntil: 'domcontentloaded' });
-        expect(onLoginPage(page) || !page.url().includes('/Organizer'),
-            'attendee should be bounced from /Organizer').toBeTruthy();
+        const deniedInPlace = await page.locator('p.error', { hasText: /for organizers only/i }).count() > 0;
+        expect(onLoginPage(page) || !page.url().includes('/Organizer') || deniedInPlace,
+            'attendee should be denied the organizer area').toBeTruthy();
+        await expect(page.locator('a[href="/Organizer/CommandCenter"]')).toHaveCount(0);
     });
 });

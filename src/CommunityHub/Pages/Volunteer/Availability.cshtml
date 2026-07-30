@@ -9,7 +9,17 @@
 
     @if (!string.IsNullOrEmpty(Model.Notice))
     {
-        <div class="av-note-saved">@Model.Notice</div>
+        @* §234 UX: a rejected save (NoticeKind == "error") renders red with role=alert —
+           never as the green saved-note. *@
+        @if (string.Equals(Model.NoticeKind, "error", StringComparison.OrdinalIgnoreCase))
+        {
+            <div class="av-note-saved" role="alert"
+                 style="background:#fdecec;border-left-color:#b3261e;color:#b3261e;">@Model.Notice</div>
+        }
+        else
+        {
+            <div class="av-note-saved" role="status">@Model.Notice</div>
+        }
     }
 
     @if (Model.Form.Days.Count == 0)

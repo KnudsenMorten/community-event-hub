@@ -11,7 +11,12 @@ namespace CommunityHub.Core.Organizer;
 /// <see cref="ParticipantLifecycleState.Inactive"/> /
 /// <see cref="ParticipantLifecycleState.Preselected"/>. An organizer validates
 /// the data and advances rows along the lifecycle
-/// <c>Inactive → Preselected → Active</c>, single OR multi-select.
+/// <c>Inactive → Preselected → Active</c>, single OR multi-select. §245: SPEAKERS
+/// skip a manual Preselect step (their pre-selection happens in Sessionize) — the
+/// Sessionize import lands them directly as Preselected (§299 6.1) and a
+/// Preselect batch leaves speaker rows untouched; an organizer activates them in
+/// one step ONCE their <see cref="SpeakerProfile.Category"/> is set (the §299 6.1
+/// activation hard gate below).
 ///
 /// Invariants (enforced HERE, not in the page):
 ///   - EVERY operation is scoped to the caller's <c>eventId</c>; ids from
@@ -35,6 +40,14 @@ public sealed class PreselectionQueueService
         _db = db;
     }
 
+    /// <summary>
+    /// §299 6.1 activation hard gate — the refusal message for a speaker whose
+    /// <see cref="SpeakerProfile.Category"/> is not set yet.
+    /// </summary>
+    public const string UncategorizedSpeakerMessage =
+        "Set the speaker's category (Community / Sponsor / Guest) before activating "
+        + "— uncategorized speakers are excluded from all counts.";
+
     /// <summary>Outcome of a queue advance call.</summary>
     /// <param name="Matched">Distinct ids that resolved to a participant in this event.</param>
     /// <param name="Changed">Of the matched rows, how many actually advanced state.</param>
@@ -44,11 +57,21 @@ public sealed class PreselectionQueueService
     /// auto-send (10a-1) fires on — a row already Active is not re-listed, so
     /// onboarding is never double-triggered.
     /// </param>
+    /// <param name="RefusedUncategorizedSpeakerIds">
+    /// §299 6.1 HARD GATE: speaker rows that were REFUSED activation because their
+    /// <see cref="SpeakerProfile.Category"/> is not set (or they have no profile at
+    /// all). Empty unless the target was Active. The caller must surface
+    /// <see cref="UncategorizedSpeakerMessage"/> for these rows.
+    /// </param>
     public sealed record QueueResult(
-        int Matched, int Changed, IReadOnlyList<int> ActivatedIds)
+        int Matched, int Changed, IReadOnlyList<int> ActivatedIds,
+        IReadOnlyList<int> RefusedUncategorizedSpeakerIds)
     {
         public QueueResult(int matched, int changed)
-            : this(matched, changed, Array.Empty<int>()) { }
+            : this(matched, changed, Array.Empty<int>(), Array.Empty<int>()) { }
+
+        public QueueResult(int matched, int changed, IReadOnlyList<int> activatedIds)
+            : this(matched, changed, activatedIds, Array.Empty<int>()) { }
 
         /// <summary>How many requested ids did NOT resolve in this event (ignored).</summary>
         public int Skipped(int requested) => Math.Max(0, requested - Matched);
@@ -112,12 +135,56 @@ public sealed class PreselectionQueueService
             .Where(p => p.EventId == eventId && ids.Contains(p.Id))
             .ToListAsync(ct);
 
+        // §299 6.1 HARD GATE: a speaker cannot be ACTIVATED before an organizer
+        // sets their SpeakerCategory — an uncategorized speaker contributes
+        // nothing to any count, so silently activating one would corrupt every
+        // tally. Applies at activation time only (already-active speakers are
+        // untouched). A speaker with no profile row at all is equally
+        // uncategorized. Computed as the CATEGORIZED set so a missing profile
+        // refuses too.
+        var categorizedSpeakerIds = new HashSet<int>();
+        if (target == ParticipantLifecycleState.Active)
+        {
+            var speakerIds = targets
+                .Where(p => p.Role == ParticipantRole.Speaker)
+                .Select(p => p.Id)
+                .ToList();
+            if (speakerIds.Count > 0)
+            {
+                categorizedSpeakerIds = (await _db.SpeakerProfiles
+                        .Where(s => s.EventId == eventId
+                                    && speakerIds.Contains(s.ParticipantId)
+                                    && s.Category != null)
+                        .Select(s => s.ParticipantId)
+                        .ToListAsync(ct))
+                    .ToHashSet();
+            }
+        }
+
         int changed = 0;
         var activatedIds = new List<int>();
+        var refusedIds = new List<int>();
         foreach (var p in targets)
         {
             // Forward-only: never demote, never re-count a no-op.
             if ((int)p.LifecycleState >= (int)target) continue;
+
+            // §299 6.1: refuse to activate an uncategorized speaker (see above).
+            if (target == ParticipantLifecycleState.Active
+                && p.Role == ParticipantRole.Speaker
+                && !categorizedSpeakerIds.Contains(p.Id))
+            {
+                refusedIds.Add(p.Id);
+                continue;
+            }
+
+            // §245 (operator 2026-07-07): SPEAKERS skip the Preselected state — their
+            // pre-selection already happened in Sessionize, so the speaker queue
+            // lifecycle is Inactive → Active in ONE step. A speaker caught in a
+            // Preselect batch is left untouched (not counted as changed); volunteers /
+            // media keep the 3-state flow.
+            if (target == ParticipantLifecycleState.Preselected
+                && p.Role == ParticipantRole.Speaker) continue;
 
             p.LifecycleState = target;
             if (target == ParticipantLifecycleState.Active)
@@ -130,7 +197,7 @@ public sealed class PreselectionQueueService
         }
 
         if (changed > 0) await _db.SaveChangesAsync(ct);
-        return new QueueResult(targets.Count, changed, activatedIds);
+        return new QueueResult(targets.Count, changed, activatedIds, refusedIds);
     }
 
     // Distinct + drop non-positive ids so a stray "0"/duplicate from a posted

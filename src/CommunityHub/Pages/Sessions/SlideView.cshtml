@@ -1,0 +1,29 @@
+@page "/Sessions/Slides/{sessionId:int}/{kind}"
+@model CommunityHub.Pages.Sessions.SlideViewModel
+@{
+    ViewData["Title"] = Model.Title;
+    @* §322j: standalone like the catalogue — no site/hub menus on the embedded viewer. *@
+    ViewData["HidePublicNav"] = true;
+}
+
+<div class="card">
+    <p style="margin:0 0 8px;"><a href="/Sessions/Slides">← All session slides</a></p>
+    <h1 style="margin:0 0 2px;">@Model.Title</h1>
+    <p style="color:#6b7280;font-size:13.5px;margin:0 0 12px;">
+        @Model.KindLabel ·
+        <a href="@Model.DownloadUrl">⬇️ Download</a>
+    </p>
+
+    @if (Model.EmbedUrl is null)
+    {
+        <p class="info">This deck is a ZIP archive — it can't be shown in the browser.
+           <a href="@Model.DownloadUrl">Download it</a> instead.</p>
+    }
+    else
+    {
+        @* §322e: embedded viewer — the deck renders INSIDE the hub page. *@
+        <iframe src="@Model.EmbedUrl" title="@Model.Title — @Model.KindLabel"
+                style="width:100%;height:82vh;border:1px solid #e5e7eb;border-radius:10px;background:#f8fafc;"
+                allowfullscreen></iframe>
+    }
+</div>

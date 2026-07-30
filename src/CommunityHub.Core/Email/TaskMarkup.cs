@@ -18,6 +18,18 @@ public static class TaskMarkup
         @"\*\*(?=\S)([^*\n]+?)\*\*", RegexOptions.Compiled);
     private static readonly Regex Underline = new(
         @"__(?=\S)([^_\n]+?)__", RegexOptions.Compiled);
+    // §685 — HIGHLIGHT and ITALIC were missing here for two features running.
+    // §675 added `==highlight==` and §600.5 added `*italic*` to the WEB renderer
+    // (TaskTextLinkifier) and neither was mirrored into this one, so the raw markers
+    // leaked verbatim into every calendar entry built from a task body.
+    //
+    // ORDER MATTERS: highlight runs BEFORE bold/italic (its `==` cannot collide, which is
+    // exactly why §675 chose that delimiter), and Italic runs AFTER Bold so `**x**` is
+    // already consumed and its inner asterisks are never mistaken for an italic span.
+    private static readonly Regex Highlight = new(
+        @"==(?=\S)([^=\n]+?)==", RegexOptions.Compiled);
+    private static readonly Regex Italic = new(
+        @"(?<!\*)\*(?=\S)([^*\n]+?)\*(?!\*)", RegexOptions.Compiled);
     private static readonly Regex Bullet = new(
         @"(?m)^[ \t]*[*-][ \t]+", RegexOptions.Compiled);
 
@@ -26,8 +38,12 @@ public static class TaskMarkup
     {
         if (string.IsNullOrEmpty(s)) return string.Empty;
         var t = MdLink.Replace(s, "$1: $2"); // "label: https://…"
+        t = Highlight.Replace(t, "$1");
         t = Bold.Replace(t, "$1");
+        t = Italic.Replace(t, "$1");
         t = Underline.Replace(t, "$1");
+        // Bullets LAST: the italic pass must not see a leading "* " list marker as the
+        // opening of an italic span.
         t = Bullet.Replace(t, "• ");
         return t;
     }

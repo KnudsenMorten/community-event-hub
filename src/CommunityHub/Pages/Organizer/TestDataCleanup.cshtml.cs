@@ -32,6 +32,8 @@ public class TestDataCleanupModel : PageModel
     public bool AccessDenied { get; private set; }
     public TestDataCleanupService.CleanupPreview? Preview { get; private set; }
     public string? DoneMessage { get; private set; }
+    /// <summary>§334 — set when the typed confirmation was missing or wrong; nothing ran.</summary>
+    public string? Error { get; private set; }
 
     public async Task<IActionResult> OnGetAsync(CancellationToken ct)
     {
@@ -43,11 +45,22 @@ public class TestDataCleanupModel : PageModel
         return Page();
     }
 
-    public async Task<IActionResult> OnPostCleanupAsync(CancellationToken ct)
+    public async Task<IActionResult> OnPostCleanupAsync(string? confirmPhrase, CancellationToken ct)
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
         if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
+
+        // §334: a bulk delete/deactivate across every row flagged as test data. The preview
+        // makes it honest; the typed phrase makes it deliberate — and the check is here, on the
+        // server, so it cannot be skipped by posting the handler directly.
+        if (!TypedConfirmation.Matches(confirmPhrase, TypedConfirmation.ConfirmPhrase))
+        {
+            Error = TypedConfirmation.Rejection(
+                TypedConfirmation.ConfirmPhrase, "run the test-data cleanup");
+            Preview = await _cleanup.PreviewAsync(me.EventId, ct);
+            return Page();
+        }
 
         var result = await _cleanup.CleanupAsync(me.EventId, ct);
         DoneMessage = $"{result.HardDeleted}|{result.Deactivated}";

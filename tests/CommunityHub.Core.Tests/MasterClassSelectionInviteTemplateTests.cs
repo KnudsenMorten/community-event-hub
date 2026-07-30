@@ -70,7 +70,7 @@ public sealed class MasterClassSelectionInviteTemplateTests
         Assert.Contains("Choose your Master Class", m.Subject);
         Assert.Contains("C 2027", m.Subject);                          // {{eventDisplayName}} token
         Assert.Contains("Choose my Master Class", m.Html);             // the CTA from the template
-        Assert.Contains("MyMasterClass?t=", m.Html);                   // {{selectionUrl}} secure link
+        Assert.Contains("/Forms/Wizard?step=masterclass", m.Html);                   // 351-7: magic-link CTA into the hub
         Assert.Contains("not confirmed", m.Html);
 
         // Tracking + 2-day gate still apply.

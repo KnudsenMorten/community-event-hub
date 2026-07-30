@@ -26,24 +26,40 @@ public sealed class SessionChangeDetectionJob
     private readonly FeatureGateService _gate;
     private readonly SessionChangeDetectionService _service;
     private readonly ILogger<SessionChangeDetectionJob> _log;
+    // §545(b) — optional, so a job can be instrumented without touching its wiring and an
+    // un-instrumented job simply says nothing (silence = UNKNOWN, never flagged).
+    private readonly CommunityHub.Core.Diagnostics.JobActivityReporter? _activity;
 
     public SessionChangeDetectionJob(
         CommunityHubDbContext db, ZohoOptions options, FeatureGateService gate,
-        SessionChangeDetectionService service, ILogger<SessionChangeDetectionJob> log)
+        SessionChangeDetectionService service, ILogger<SessionChangeDetectionJob> log,
+        CommunityHub.Core.Diagnostics.JobActivityReporter? activity = null)
     {
         _db = db; _options = options; _gate = gate; _service = service; _log = log;
+        _activity = activity;
     }
 
     [Function("SessionChangeDetectionJob")]
-    public async Task Run([TimerTrigger("0 40 * * * *")] TimerInfo timer, CancellationToken ct)
+    public async Task Run([TimerTrigger("0 */5 * * * *")] TimerInfo timer, CancellationToken ct)
     {
-        if (!_options.Enabled) { _log.LogInformation("SessionChangeDetectionJob: Zoho disabled."); return; }
+        if (!_options.Enabled)
+        {
+            _log.LogInformation("SessionChangeDetectionJob: Zoho disabled.");
+            _activity?.ReportInactive("Zoho is switched off, so nothing is compared.");
+            return;
+        }
 
         var eventId = await _db.Events.Where(e => e.IsActive).Select(e => (int?)e.Id).FirstOrDefaultAsync(ct);
         if (eventId is null) { _log.LogWarning("SessionChangeDetectionJob: no active event."); return; }
 
         if (!await _gate.IsFeatureEnabledAsync(SessionChangeDetectionService.FeatureKey, eventId.Value, ct))
-        { _log.LogInformation("SessionChangeDetectionJob: feature off."); return; }
+        {
+            _log.LogInformation("SessionChangeDetectionJob: feature off.");
+            _activity?.ReportInactive(
+                $"The '{SessionChangeDetectionService.FeatureKey}' feature is switched off, so session "
+                + "changes made in Zoho are not being detected.");
+            return;
+        }
 
         var result = await _service.RunAsync(eventId.Value, ct);
 
@@ -53,6 +69,10 @@ public sealed class SessionChangeDetectionJob
         {
             _log.LogInformation(
                 "SessionChangeDetectionJob: {Reason}.", result.UnavailableReason);
+            // 🔒 §576 was EXACTLY this branch: both engines demanded a sync stage that had been
+            // DELETED, so they no-opped every 5 minutes for months behind a green Jobs page.
+            _activity?.ReportInactive(
+                result.UnavailableReason ?? "The edition's session sync direction excludes this engine.");
             return;
         }
 
@@ -60,8 +80,13 @@ public sealed class SessionChangeDetectionJob
         {
             _log.LogWarning(
                 "SessionChangeDetectionJob: source unavailable — {Reason}", result.UnavailableReason);
+            _activity?.ReportInactive(
+                "The Zoho agenda could not be read, so nothing was compared: "
+                + (result.UnavailableReason ?? "reason not given") + ".");
             return;
         }
+
+        _activity?.ReportWork();
 
         // §59: a real change is ENQUEUED to the delta-approval queue (not auto-applied/emailed
         // inline); the operator approves/rejects it in /Organizer/SyncQueue.

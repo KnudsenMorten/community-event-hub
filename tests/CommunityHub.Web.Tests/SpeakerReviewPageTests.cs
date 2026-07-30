@@ -3,6 +3,7 @@ using CommunityHub.Auth;
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
 using CommunityHub.Core.Entitlements;
+using CommunityHub.Core.Integrations;
 using CommunityHub.Pages.Organizer;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Http;
@@ -18,7 +19,8 @@ namespace CommunityHub.Web.Tests;
 /// (<see cref="SpeakerReviewModel"/>). Drives the real page model over a fake
 /// HttpContext + in-memory DbContext. Proves:
 ///   • an organizer sees the speaker list + booth list; a non-organizer is denied;
-///   • setting Funding / Days persists;
+///   • setting the §299 6.1 Category (+ Guest hotel nights) persists, clearing
+///     re-marks the speaker uncategorized, and nights are cleared for non-Guest;
 ///   • SamePersonAsId persists, self-reference is rejected, and a chain
 ///     (linking to a non-primary) is rejected;
 ///   • an override upsert then clear (default) works;
@@ -56,7 +58,7 @@ public sealed class SpeakerReviewPageTests
     private static SpeakerReviewModel NewModel(CommunityHubDbContext db, HttpContext http)
     {
         var accessor = new HttpCurrentParticipantAccessor(new HttpContextAccessorOver(http));
-        return new SpeakerReviewModel(db, accessor, new OrderCountService(db), TimeProvider.System)
+        return new SpeakerReviewModel(db, accessor, TimeProvider.System)
         {
             PageContext = new PageContext { HttpContext = http },
         };
@@ -87,8 +89,7 @@ public sealed class SpeakerReviewPageTests
 
     private static async Task<Participant> AddSpeakerAsync(
         CommunityHubDbContext db, int eventId, string name, string email,
-        SpeakerFunding funding = SpeakerFunding.Supported,
-        bool preDay = false, bool mainDay = true,
+        SpeakerCategory? category = SpeakerCategory.Community,
         ParticipantRole role = ParticipantRole.Speaker)
     {
         var p = new Participant
@@ -100,8 +101,7 @@ public sealed class SpeakerReviewPageTests
 
         db.SpeakerProfiles.Add(new SpeakerProfile
         {
-            EventId = eventId, ParticipantId = p.Id,
-            SpeakerFunding = funding, SpeakingPreDay = preDay, SpeakingMainDay = mainDay,
+            EventId = eventId, ParticipantId = p.Id, Category = category,
         });
         await db.SaveChangesAsync();
         return p;
@@ -145,40 +145,57 @@ public sealed class SpeakerReviewPageTests
     }
 
     [Fact]
-    public async Task Setting_funding_persists()
+    public async Task Setting_category_persists_and_uncategorized_rows_are_flagged()
     {
         using var db = NewDb();
         var seed = await SeedEventAsync(db);
         var sam = await AddSpeakerAsync(db, seed.Event.Id, "Sam", "sam@example.test",
-            funding: SpeakerFunding.Supported);
+            category: null);   // fresh import = uncategorized
 
         var http = new DefaultHttpContext { User = Session(seed.Organizer) };
-        var model = NewModel(db, http);
 
-        var result = await model.OnPostFundingAsync(sam.Id, SpeakerFunding.SponsorSelfFunded, default);
+        // The review row surfaces the uncategorized state (null Category).
+        var m0 = NewModel(db, http);
+        await m0.OnGetAsync(default);
+        Assert.Null(Assert.Single(m0.Speakers).Category);
+
+        var result = await NewModel(db, http)
+            .OnPostCategoryAsync(sam.Id, SpeakerCategory.Sponsor, guestFundedNights: null, default);
 
         Assert.IsType<RedirectToPageResult>(result);
         var profile = await db.SpeakerProfiles.FirstAsync(s => s.ParticipantId == sam.Id);
-        Assert.Equal(SpeakerFunding.SponsorSelfFunded, profile.SpeakerFunding);
+        Assert.Equal(SpeakerCategory.Sponsor, profile.Category);
     }
 
     [Fact]
-    public async Task Setting_days_persists()
+    public async Task Guest_category_stores_organizer_entered_nights_and_clearing_resets_them()
     {
         using var db = NewDb();
         var seed = await SeedEventAsync(db);
-        var sam = await AddSpeakerAsync(db, seed.Event.Id, "Sam", "sam@example.test",
-            preDay: false, mainDay: false);
+        var gwen = await AddSpeakerAsync(db, seed.Event.Id, "Gwen Guest", "gwen@example.test",
+            category: null);
 
         var http = new DefaultHttpContext { User = Session(seed.Organizer) };
-        var model = NewModel(db, http);
 
-        var result = await model.OnPostDaysAsync(sam.Id, preDay: true, mainDay: false, default);
+        // Guest + organizer-entered ELDK-funded nights save in one post (§299 6.3).
+        await NewModel(db, http)
+            .OnPostCategoryAsync(gwen.Id, SpeakerCategory.Guest, guestFundedNights: 3, default);
+        var profile = await db.SpeakerProfiles.FirstAsync(s => s.ParticipantId == gwen.Id);
+        Assert.Equal(SpeakerCategory.Guest, profile.Category);
+        Assert.Equal(3, profile.GuestFundedNights);
 
-        Assert.IsType<RedirectToPageResult>(result);
-        var profile = await db.SpeakerProfiles.FirstAsync(s => s.ParticipantId == sam.Id);
-        Assert.True(profile.SpeakingPreDay);
-        Assert.False(profile.SpeakingMainDay);
+        // Switching away from Guest clears the stale nights value.
+        await NewModel(db, http)
+            .OnPostCategoryAsync(gwen.Id, SpeakerCategory.Community, guestFundedNights: 3, default);
+        profile = await db.SpeakerProfiles.FirstAsync(s => s.ParticipantId == gwen.Id);
+        Assert.Equal(SpeakerCategory.Community, profile.Category);
+        Assert.Null(profile.GuestFundedNights);
+
+        // Clearing the category ("(not set)") marks the speaker uncategorized again.
+        await NewModel(db, http)
+            .OnPostCategoryAsync(gwen.Id, category: null, guestFundedNights: null, default);
+        profile = await db.SpeakerProfiles.FirstAsync(s => s.ParticipantId == gwen.Id);
+        Assert.Null(profile.Category);
     }
 
     [Fact]
@@ -288,16 +305,24 @@ public sealed class SpeakerReviewPageTests
     }
 
     [Fact]
-    public async Task BoothMember_toggle_persists()
+    public async Task BoothMember_toggle_persists_for_an_exhibitor_company()
     {
+        // §299 7.4: the toggle now requires the company to actually HAVE a booth
+        // (SponsorPackage >= Gold) — seeded here so the happy path still round-trips.
         using var db = NewDb();
         var seed = await SeedEventAsync(db);
         var sponsor = new Participant
         {
             EventId = seed.Event.Id, FullName = "Sandra Sponsor", Email = "sandra@example.test",
             Role = ParticipantRole.Sponsor, IsActive = true, IsBoothMember = false,
+            SponsorCompanyId = "co-booth",
         };
         db.Participants.Add(sponsor);
+        db.SponsorInfos.Add(new SponsorInfo
+        {
+            EventId = seed.Event.Id, SponsorCompanyId = "co-booth",
+            SponsorPackage = SponsorPackage.Gold, Tier = BoothTier.Gold,
+        });
         await db.SaveChangesAsync();
 
         var http = new DefaultHttpContext { User = Session(seed.Organizer) };
@@ -311,26 +336,67 @@ public sealed class SpeakerReviewPageTests
     }
 
     [Fact]
+    public async Task BoothMember_toggle_is_refused_for_a_digital_only_sponsor()
+    {
+        // §299 7.4 hard constraint: a non-exhibitor (no-booth) sponsor cannot have a booth
+        // member — the assignment is refused at POST time, not just hidden in the GUI.
+        using var db = NewDb();
+        var seed = await SeedEventAsync(db);
+        var sponsor = new Participant
+        {
+            EventId = seed.Event.Id, FullName = "Dana Digital", Email = "dana@example.test",
+            Role = ParticipantRole.Sponsor, IsActive = true, IsBoothMember = false,
+            SponsorCompanyId = "co-digital",
+        };
+        db.Participants.Add(sponsor);
+        db.SponsorInfos.Add(new SponsorInfo
+        {
+            EventId = seed.Event.Id, SponsorCompanyId = "co-digital",
+            SponsorPackage = SponsorPackage.Silver, Tier = BoothTier.None,
+        });
+        await db.SaveChangesAsync();
+
+        var http = new DefaultHttpContext { User = Session(seed.Organizer) };
+        var model = NewModel(db, http);
+
+        await model.OnPostBoothMemberAsync(sponsor.Id, isBoothMember: true, default);
+        Assert.False((await db.Participants.FirstAsync(p => p.Id == sponsor.Id)).IsBoothMember);
+
+        // A sponsor contact with NO company/SponsorInfo at all is refused too (no booth).
+        var orphan = new Participant
+        {
+            EventId = seed.Event.Id, FullName = "Nora NoCompany", Email = "nora@example.test",
+            Role = ParticipantRole.Sponsor, IsActive = true, IsBoothMember = false,
+        };
+        db.Participants.Add(orphan);
+        await db.SaveChangesAsync();
+        await model.OnPostBoothMemberAsync(orphan.Id, isBoothMember: true, default);
+        Assert.False((await db.Participants.FirstAsync(p => p.Id == orphan.Id)).IsBoothMember);
+    }
+
+    [Fact]
     public async Task Counts_reflect_a_force_exclude_override()
     {
         using var db = NewDb();
         var seed = await SeedEventAsync(db);
         var sam = await AddSpeakerAsync(db, seed.Event.Id, "Sam", "sam@example.test",
-            funding: SpeakerFunding.Supported); // Supported speaker is entitled to Polo
+            category: SpeakerCategory.Community); // Community speaker is entitled to Polo
 
         var http = new DefaultHttpContext { User = Session(seed.Organizer) };
 
+        // §327j: the page no longer SHOWS the counts — they moved to the logistics pages.
+        // What must still hold is that classifying HERE changes them, so the assertion now
+        // reads OrderCountService directly: the same authority those pages use, tested
+        // without going through a view that no longer displays it.
+        var counts = new OrderCountService(db);
+
         // Baseline: Sam counts toward Polo (organizer also has Polo).
-        var m1 = NewModel(db, http);
-        await m1.OnGetAsync(default);
-        var poloBefore = m1.Counts[OrderItem.Polo];
+        var poloBefore = (await counts.CountsAsync(seed.Event.Id, default))[OrderItem.Polo];
 
         // Force-exclude Polo for Sam.
         await NewModel(db, http).OnPostOverrideAsync(sam.Id, OrderItem.Polo, "exclude", default);
 
-        var m2 = NewModel(db, http);
-        await m2.OnGetAsync(default);
-        var poloAfter = m2.Counts[OrderItem.Polo];
+        var poloAfter = (await counts.CountsAsync(seed.Event.Id, default))[OrderItem.Polo];
 
         Assert.Equal(poloBefore - 1, poloAfter);
     }
@@ -341,22 +407,20 @@ public sealed class SpeakerReviewPageTests
         using var db = NewDb();
         var seed = await SeedEventAsync(db);
         var primary = await AddSpeakerAsync(db, seed.Event.Id, "Primary", "primary@example.test",
-            funding: SpeakerFunding.Supported);
+            category: SpeakerCategory.Community);
         var dup = await AddSpeakerAsync(db, seed.Event.Id, "Dup", "dup@example.test",
-            funding: SpeakerFunding.Supported);
+            category: SpeakerCategory.Community);
 
         var http = new DefaultHttpContext { User = Session(seed.Organizer) };
 
-        var m1 = NewModel(db, http);
-        await m1.OnGetAsync(default);
-        var poloTwoPeople = m1.Counts[OrderItem.Polo];
+        // §327j: counts read from OrderCountService — see the note above.
+        var counts = new OrderCountService(db);
+        var poloTwoPeople = (await counts.CountsAsync(seed.Event.Id, default))[OrderItem.Polo];
 
         // Mark dup as the same physical person as primary.
         await NewModel(db, http).OnPostSamePersonAsync(dup.Id, primary.Id, default);
 
-        var m2 = NewModel(db, http);
-        await m2.OnGetAsync(default);
-        var poloOnePerson = m2.Counts[OrderItem.Polo];
+        var poloOnePerson = (await counts.CountsAsync(seed.Event.Id, default))[OrderItem.Polo];
 
         Assert.Equal(poloTwoPeople - 1, poloOnePerson);
     }

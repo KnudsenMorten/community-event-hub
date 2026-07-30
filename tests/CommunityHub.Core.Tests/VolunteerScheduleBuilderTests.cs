@@ -171,75 +171,10 @@ public sealed class VolunteerScheduleBuilderTests
         Assert.Empty(schedule.Entries);
     }
 
-    // ---- Per-user .ics feed now carries assigned volunteer tasks --------------
-
-    [Fact]
-    public async Task Personal_feed_includes_assigned_volunteer_task_as_stable_vevent()
-    {
-        using var db = NewDb();
-        var seed = await SeedAsync(db, new[]
-        {
-            new VolunteerTask { Title = "Staff the desk", DueDate = new DateOnly(2026, 9, 1), Shift = "08:00", TimeEnd = "10:00" },
-        });
-
-        var feed = await new ParticipantCalendarBuilder(db).BuildFeedAsync(seed.VolunteerId, UidHost);
-
-        Assert.StartsWith("BEGIN:VCALENDAR", feed);
-        Assert.Contains("Volunteer: Staff the desk", feed);
-        Assert.Contains($"voltask:", feed);              // stable UID prefix
-        Assert.Contains("08:00-10:00", feed);            // shift window in description
-    }
-
-    [Fact]
-    public async Task Personal_feed_excludes_cancelled_volunteer_task()
-    {
-        using var db = NewDb();
-        var seed = await SeedAsync(db, new[]
-        {
-            new VolunteerTask { Title = "Cancelled work", DueDate = new DateOnly(2026, 9, 1), Status = VolunteerTaskStatus.Cancelled },
-        });
-
-        var feed = await new ParticipantCalendarBuilder(db).BuildFeedAsync(seed.VolunteerId, UidHost);
-
-        Assert.DoesNotContain("Cancelled work", feed);
-    }
-
-    [Fact]
-    public async Task Single_volunteer_task_ics_matches_feed_uid_and_is_scoped()
-    {
-        using var db = NewDb();
-        var seed = await SeedAsync(db, new[]
-        {
-            new VolunteerTask { Title = "Download me", DueDate = new DateOnly(2026, 9, 1) },
-        });
-        var task = await db.VolunteerTasks.FirstAsync();
-        var builder = new ParticipantCalendarBuilder(db);
-
-        var ics = await builder.BuildSingleVolunteerTaskAsync(seed.VolunteerId, task.Id, UidHost);
-
-        Assert.NotNull(ics);
-        Assert.Contains($"voltask:{task.Id}@{UidHost}", ics);
-
-        // A different participant (the supervisor isn't assigned to this task) gets null.
-        var other = await builder.BuildSingleVolunteerTaskAsync(seed.SupervisorId, task.Id, UidHost);
-        Assert.Null(other);
-    }
-
-    [Fact]
-    public async Task Single_volunteer_task_ics_null_when_no_due_date()
-    {
-        using var db = NewDb();
-        var seed = await SeedAsync(db, new[]
-        {
-            new VolunteerTask { Title = "Undated" },
-        });
-        var task = await db.VolunteerTasks.FirstAsync();
-
-        var ics = await new ParticipantCalendarBuilder(db)
-            .BuildSingleVolunteerTaskAsync(seed.VolunteerId, task.Id, UidHost);
-
-        Assert.Null(ics);
-    }
+    // §193: the per-user .ics feed + single-task .ics builders (ParticipantCalendarBuilder)
+    // were removed — assigned volunteer tasks are now e-mailed as calendar invitations via
+    // CalendarInviteEmailService (covered by VolunteerMyScheduleTests), so the feed tests
+    // are gone.
 
     private static int EventIdOf(CommunityHubDbContext db) =>
         db.Events.AsNoTracking().Select(e => e.Id).First();

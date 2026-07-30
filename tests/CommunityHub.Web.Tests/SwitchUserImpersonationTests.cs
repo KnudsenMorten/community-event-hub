@@ -101,9 +101,12 @@ public sealed class SwitchUserImpersonationTests
         CommunityHubDbContext db, DefaultHttpContext http, TimeProvider clock)
     {
         var accessor = new HttpCurrentParticipantAccessor(new HttpContextAccessorOver(http));
+        var cascade = new CommunityHub.Core.Organizer.ParticipantDeactivationService(
+            db, clock, new CommunityHub.Core.Audit.AuditTrailService(db, clock));
         var model = new ParticipantsModel(
-            db, accessor, new ParticipantBulkOperationService(db),
-            new ParticipantDeletionService(db, clock),
+            db, accessor, new ParticipantBulkOperationService(db, cascade),
+            new ParticipantDeletionService(db, clock, cascade),
+            cascade,
             new ParticipantSearchService(db),
             new ImpersonationAuditService(db, clock),
             new CommunityHub.Core.Integrations.CompanyManagerClient(new System.Net.Http.HttpClient(), new CommunityHub.Core.Integrations.CompanyManagerOptions()),

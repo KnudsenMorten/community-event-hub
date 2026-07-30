@@ -1,0 +1,74 @@
+@model CommunityHub.Forms.Steps.SponsorBoothMaterialsModel
+@*
+    §297 — fields-only partial for the inline sponsor Booth-materials step.
+    §476 — SIX video rows and collateral file upload INLINE. It previously sent the sponsor to the
+    Company Details page to finish a wizard step, which is the same complaint as §473.
+*@
+<p style="font-size:13.5px;color:#4b5563;margin-top:0;">
+    Add the videos that play at your booth (paste the URLs), and upload any collateral
+    (brochures, PDFs) here. Everything already on file is listed below.
+</p>
+
+@if (Model.CurrentMaterials.Count > 0)
+{
+    <h3 style="color:var(--el-darkblue);margin-top:14px;font-size:15px;">Current materials (@Model.CurrentMaterials.Count)</h3>
+    <ul style="list-style:none;padding:0;margin:0 0 10px;display:flex;flex-direction:column;gap:6px;">
+        @foreach (var m in Model.CurrentMaterials)
+        {
+            @* §476 — each saved item is now REMOVABLE. Previously the list was read-only, so a
+               wrong video URL could only be added past, never corrected. A tick box processed on
+               save (rather than a per-row delete button) is what fits: the wizard host owns the
+               only form on the page, and a nested form would not post. *@
+            <li style="border:1px solid #e6eaf2;border-radius:8px;padding:8px 12px;font-size:14px;word-break:break-all;">
+                <label style="display:flex;gap:8px;align-items:flex-start;margin:0;cursor:pointer;font-weight:400;">
+                    <input type="checkbox" name="RemoveIds" value="@m.Id" style="margin-top:3px;width:16px;height:16px;" />
+                    <span>
+                        <span style="color:#6b7280;">@m.Kind:</span> @m.Display
+                        <span style="display:block;font-size:12px;color:#b45309;">tick to remove on save</span>
+                    </span>
+                </label>
+            </li>
+        }
+    </ul>
+}
+else
+{
+    @* §475 — optional step: state what is missing WITHOUT implying it blocks progress. *@
+    <p style="color:#6b7280;font-size:13px;margin:4px 0 10px;">No booth materials yet — this is optional, and you can come back later.</p>
+}
+
+<h3 style="color:var(--el-darkblue);margin-top:14px;font-size:15px;">Add booth videos</h3>
+@* §476 — SIX rows. The service has always allowed MaxVideos = 6; only this loop capped it at 3,
+   so the UI contradicted its own backend. Already-saved videos are listed above (they are stored
+   rows, not form values) — these boxes ADD to that list. *@
+@for (var i = 1; i <= 6; i++)
+{
+    var field = $"Video{i}Url";
+    var val = i switch
+    {
+        1 => Model.Video1Url, 2 => Model.Video2Url, 3 => Model.Video3Url,
+        4 => Model.Video4Url, 5 => Model.Video5Url, _ => Model.Video6Url,
+    };
+    <input type="url" inputmode="url" name="@field" value="@val" placeholder="https://youtu.be/… (video @i)" style="margin:6px 0;" />
+}
+
+@* §476 — collateral upload, inline. Shown only when the destination folder is configured: offering
+   a file picker that cannot store anything would be worse than not offering one. §473: say what
+   actually performs the upload, since the wizard host owns the only submit button. *@
+<h3 style="color:var(--el-darkblue);margin-top:18px;font-size:15px;">Add booth collateral</h3>
+@if (Model.CanUploadCollateral)
+{
+    <input type="file" id="CollateralFile" name="CollateralFile" accept=".jpg,.jpeg,.png,.pdf" style="margin:6px 0;" />
+    <span asp-validation-for="CollateralFile" class="error"></span>
+    <p style="font-size:12px;color:#6b7280;margin:2px 0 10px;">
+        JPG, PNG or PDF, max 25 MB — one file per save, up to 6 in total. Choose the file, then press
+        <strong>Save &amp; next</strong> to upload it. Optional; you can come back later.
+    </p>
+}
+else
+{
+    <p style="font-size:12.5px;color:#6b7280;margin:2px 0 10px;">
+        File uploads aren't available right now — you can still add video URLs above, or send
+        collateral to the organizers.
+    </p>
+}

@@ -29,7 +29,18 @@ public sealed record PublicSessionRow(
     // §154: audience level ("Expert (400)") + the exact numeric length in minutes
     // (preferred over the coarse Length bucket for the "60 min" label when present).
     string? Level = null,
-    int? LengthMinutes = null);
+    int? LengthMinutes = null,
+    // §299.8/b7: the derived NUMERIC level code (level sorting is always by code).
+    int? LevelCode = null)
+{
+    /// <summary>
+    /// §299.8/b7 — the row's EFFECTIVE minutes for the length filter: the
+    /// source-of-truth <see cref="LengthMinutes"/> when known, else derived from the
+    /// legacy bucket (FullDay ⇒ 420, the configured full-day quick-pick's minutes).
+    /// </summary>
+    public int EffectiveLengthMinutes =>
+        LengthMinutes ?? Integrations.SessionDefaultsMapper.MinutesFromBucket(Length);
+}
 
 /// <summary>The whole public overview: the rows plus the filter facets to render.</summary>
 public sealed record PublicSessionsView(
@@ -82,7 +93,9 @@ public sealed record PublicSessionDetail(
     string? AskToken,
     // §154: audience level + exact numeric length in minutes (see PublicSessionRow).
     string? Level = null,
-    int? LengthMinutes = null);
+    int? LengthMinutes = null,
+    // §299.8/b7: comma-separated source tags, rendered as small chips. Null = none.
+    string? Tags = null);
 
 /// <summary>
 /// Builds the data for the PUBLIC, no-login sessions overview page
@@ -108,14 +121,17 @@ public sealed class PublicSessionsService
     /// renders a friendly "no event" empty state).
     /// </summary>
     /// <param name="type">Narrow to one session type, or null for all.</param>
-    /// <param name="length">Narrow to one session length, or null for all.</param>
+    /// <param name="lengthMinutes">§299.8/b7 — narrow to one length in MINUTES (the
+    /// config quick-pick values, e.g. 15/20/…/420), or null for all. Matches the
+    /// row's effective minutes (LengthMinutes, else derived from the legacy bucket) —
+    /// the old enum filter is retired.</param>
     /// <param name="room">Narrow to one room (exact, case-insensitive), or null for all.</param>
     /// <param name="search">Free-text search over title/abstract/speaker/room/track.</param>
     /// <param name="track">Narrow to one track (exact, case-insensitive), or null for all (§154).</param>
     /// <param name="level">Narrow to one level (exact, case-insensitive), or null for all (§154).</param>
     public async Task<PublicSessionsView?> BuildAsync(
         SessionType? type = null,
-        SessionLength? length = null,
+        int? lengthMinutes = null,
         string? room = null,
         string? search = null,
         string? timeslot = null,
@@ -164,7 +180,7 @@ public sealed class PublicSessionsService
         // this materialization boundary, so no un-translatable nested projection
         // reaches the relational provider.
         var raw = await _db.Sessions
-            .Where(s => s.EventId == eventId && !s.IsServiceSession)
+            .Where(s => s.EventId == eventId && !s.IsServiceSession && !s.UsedForTesting)
             .Select(s => new
             {
                 s.Id,
@@ -175,6 +191,7 @@ public sealed class PublicSessionsService
                 s.Room,
                 s.Track,
                 s.Level,
+                s.LevelCode,
                 s.LengthMinutes,
                 s.StartsAt,
                 s.EndsAt,
@@ -212,14 +229,18 @@ public sealed class PublicSessionsService
                 s.Type == SessionType.MasterClass ? s.PublicSlug : null,
                 s.PublicToken,
                 s.Level,
-                s.LengthMinutes))
+                s.LengthMinutes,
+                s.LevelCode))
             .ToList();
 
         var total = all.Count;
 
         IEnumerable<PublicSessionRow> q = all;
         if (type is not null) q = q.Where(r => r.Type == type);
-        if (length is not null) q = q.Where(r => r.Length == length);
+        // §299.8/b7: length filter by MINUTES (config quick-picks) — matches the
+        // effective minutes so legacy full-day rows without a numeric length still
+        // answer the 420 pick.
+        if (lengthMinutes is int lm) q = q.Where(r => r.EffectiveLengthMinutes == lm);
         if (!string.IsNullOrWhiteSpace(timeslot))
             q = q.Where(r => TimeslotKey(r.StartsAt) == timeslot.Trim());
         if (!string.IsNullOrWhiteSpace(room))
@@ -276,12 +297,24 @@ public sealed class PublicSessionsService
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .OrderBy(t => t, StringComparer.OrdinalIgnoreCase)
             .ToList();
+        // §299.8/b7: levels sort by the NUMERIC code, never alphabetically
+        // (alphabetical puts Black Belt before Expert). Coded levels first
+        // (ascending code), then unknown/uncoded labels alphabetically.
         var levels = all
-            .Select(r => r.Level)
-            .Where(l => !string.IsNullOrWhiteSpace(l))
-            .Select(l => l!.Trim())
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .OrderBy(l => l, StringComparer.OrdinalIgnoreCase)
+            .Where(r => !string.IsNullOrWhiteSpace(r.Level))
+            .GroupBy(r => r.Level!.Trim(), StringComparer.OrdinalIgnoreCase)
+            .Select(g => new
+            {
+                Label = g.Key,
+                // Stored code (import-derived) first; else the "(NNN)" parse so
+                // legacy rows without a stored code still sort numerically.
+                Code = g.Min(r => r.LevelCode)
+                       ?? Config.SessionOptionsService.DeriveLevelCode(
+                           g.Key, Array.Empty<Config.SessionLevelOption>()),
+            })
+            .OrderBy(x => x.Code ?? int.MaxValue)
+            .ThenBy(x => x.Label, StringComparer.OrdinalIgnoreCase)
+            .Select(x => x.Label)
             .ToList();
 
         // Date/timeslot facet (§154): every distinct scheduled start across the edition, ordered,
@@ -346,11 +379,11 @@ public sealed class PublicSessionsService
         var publishedSpeakers = new HashSet<int>(publishedSpeakerIds);
 
         var s = await _db.Sessions
-            .Where(x => x.Id == id && x.EventId == eventId && !x.IsServiceSession)
+            .Where(x => x.Id == id && x.EventId == eventId && !x.IsServiceSession && !x.UsedForTesting)
             .Select(x => new
             {
                 x.Id, x.Title, x.Abstract, x.Type, x.Length, x.Room, x.Track,
-                x.Level, x.LengthMinutes,
+                x.Level, x.LengthMinutes, x.Tags,
                 x.StartsAt, x.EndsAt, x.PublicSlug, x.PublicToken,
                 // Flat, translatable speaker rows; the publish gate is applied
                 // client-side below against the published-id set.
@@ -384,7 +417,8 @@ public sealed class PublicSessionsService
             s.Type == SessionType.MasterClass ? s.PublicSlug : null,
             s.PublicToken,
             s.Level,
-            s.LengthMinutes);
+            s.LengthMinutes,
+            s.Tags);
     }
 
     /// <summary>
@@ -412,10 +446,12 @@ public sealed class PublicSessionsService
             .FirstOrDefaultAsync(ct);
         if (activeId is null) return new HashSet<int>();
 
-        // Same gate as GetByIdAsync: in the active edition, not a service session.
+        // Same gate as GetByIdAsync: in the active edition, not a service session,
+        // never a §299 test session.
         var viewable = await _db.Sessions
             .Where(s => s.EventId == activeId.Value
                         && !s.IsServiceSession
+                        && !s.UsedForTesting
                         && ids.Contains(s.Id))
             .Select(s => s.Id)
             .ToListAsync(ct);
@@ -423,65 +459,10 @@ public sealed class PublicSessionsService
         return new HashSet<int>(viewable);
     }
 
-    /// <summary>
-    /// Build a single-event RFC 5545 VCALENDAR (one VEVENT, <c>METHOD:PUBLISH</c>) for
-    /// one PUBLIC session, so an anonymous visitor can drop the talk straight into a
-    /// personal calendar from the session-detail page. Reuses the same
-    /// <see cref="IcsCalendarBuilder"/> the per-user feed uses, so the file validates
-    /// identically (CRLF, stable UID, folded lines).
-    ///
-    /// Returns <c>null</c> when the session is not publicly resolvable (no active
-    /// event, wrong edition, service session, unknown id — same gate as
-    /// <see cref="GetByIdAsync"/>) OR when it has no scheduled start time (an
-    /// unscheduled talk has nothing to put on a calendar). The UID is stable
-    /// (<c>session:{id}@{host}</c>) so re-downloading UPDATES the entry, never
-    /// duplicates it. Location is "Room, Venue" (whichever parts exist); the
-    /// description carries the speaker name(s) and (truncated) abstract. No private
-    /// data — only the already-public session fields.
-    /// </summary>
-    public async Task<string?> BuildIcsAsync(int id, string host, CancellationToken ct = default)
-    {
-        var s = await GetByIdAsync(id, ct);
-        if (s is null || s.StartsAt is null) return null;
-
-        var start = s.StartsAt.Value;
-        // No explicit end → fall back to a sensible 1-hour block so the calendar
-        // entry has a duration rather than a zero-length point.
-        var end = s.EndsAt ?? start.AddHours(1);
-        if (end <= start) end = start.AddHours(1);
-
-        var location = string.Join(", ", new[] { s.Room, s.VenueName }
-            .Where(p => !string.IsNullOrWhiteSpace(p)));
-
-        var descParts = new List<string>();
-        var speakerNames = s.Speakers.Select(sp => sp.Name).Where(n => !string.IsNullOrWhiteSpace(n)).ToList();
-        if (speakerNames.Count > 0) descParts.Add(string.Join(", ", speakerNames));
-        if (!string.IsNullOrWhiteSpace(s.Abstract))
-        {
-            var a = s.Abstract.Trim();
-            descParts.Add(a.Length > 500 ? a.Substring(0, 500) + "…" : a);
-        }
-        var description = string.Join("\n\n", descParts);
-
-        var safeHost = string.IsNullOrWhiteSpace(host) ? "communityhub" : host;
-        var item = new CalendarItem(
-            Uid: $"session:{s.Id}@{safeHost}",
-            Summary: s.Title,
-            Description: description.Length == 0 ? null : description,
-            Location: location.Length == 0 ? null : location,
-            Start: start,
-            End: end,
-            AllDay: false,
-            AlarmsDaysBefore: Array.Empty<int>());
-
-        // METHOD:PUBLISH single-event calendar (no owner — this is a public talk, not
-        // a personal invite, so it carries no ORGANIZER/ATTENDEE addresses).
-        return IcsCalendarBuilder.BuildFeed(
-            calendarName: s.Title,
-            ownerEmail: string.Empty,
-            ownerName: string.Empty,
-            items: new[] { item });
-    }
+    // §193: the public per-session ".ics" download (BuildIcsAsync) was removed — a
+    // public talk is no longer offered as a downloadable calendar file. Signed-in
+    // participants (e.g. the session's speaker) instead e-mail themselves a calendar
+    // invitation via CalendarInviteEmailService.
 
     private static bool Contains(string? haystack, string needle) =>
         !string.IsNullOrEmpty(haystack)

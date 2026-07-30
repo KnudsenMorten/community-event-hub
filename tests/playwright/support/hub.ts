@@ -52,7 +52,7 @@ export function narrowOnly() {
 
 /**
  * Real PIN login. Mirrors the exact markup of Pages/Login.cshtml:
- *   step 1  form asp-page-handler="RequestPin"  -> input[name=Email] + input[name=RememberMe] (checkbox) + "Send my sign-in code"
+ *   step 1  form asp-page-handler="RequestPin"  -> input[name=Email] + input[name=RememberMe] (checkbox, CHECKED by default — §170 365-day persistent session) + "Send my sign-in code"
  *   step 2  form asp-page-handler="VerifyPin"   -> input[name=Pin] + hidden RememberMe + "Sign in"
  * Success is detected by the signed-in marker the shared layout renders only
  * when authenticated: header .user-tools button.signout.
@@ -63,21 +63,33 @@ export async function login(
 ) {
     await page.goto(`${BASE}/Login`, { waitUntil: 'domcontentloaded' });
     await page.locator('input[name="Email"]').fill(email);
-    if (opts.rememberMe) {
+    // §170: the box is ticked by default. Only touch it when the caller asks
+    // for an explicit state (true keeps it ticked; false unticks it).
+    if (opts.rememberMe === true) {
         await page.locator('input[name="RememberMe"]').check();
+    } else if (opts.rememberMe === false) {
+        await page.locator('input[name="RememberMe"]').uncheck();
     }
-    await page.getByRole('button', { name: /send.*code|email me|request/i }).click();
+    // DEV is a B1 App Service that can be slow right after a deploy / cold
+    // start, and both PIN-flow buttons trigger a real server postback — give
+    // those navigations a generous budget instead of the default 10s action
+    // timeout ("waiting for scheduled navigations" was timing out).
+    await page.getByRole('button', { name: /send.*code|email me|request/i })
+        .click({ timeout: 45_000 });
 
     const pinInput = page.locator('input[name="Pin"]');
-    await expect(pinInput).toBeVisible();
+    await expect(pinInput).toBeVisible({ timeout: 15_000 });
     await pinInput.fill(pin);
-    await page.getByRole('button', { name: 'Sign in', exact: true }).click();
-    await expect(signedInMarker(page)).toBeVisible({ timeout: 15_000 });
+    await page.getByRole('button', { name: 'Sign in', exact: true })
+        .click({ timeout: 45_000 });
+    await expect(signedInMarker(page)).toBeVisible({ timeout: 30_000 });
 }
 
-/** The element the shared layout renders only when a session is present. */
+/** The element the shared layout renders only when a session is present. §283: Sign out moved
+ *  INTO the name dropdown (collapsed by default), so the always-visible signed-in indicator is now
+ *  the name-dropdown summary in the header user-tools. */
 export function signedInMarker(page: Page) {
-    return page.locator('header .user-tools button.signout, button.signout');
+    return page.locator('header .user-tools details.user-menu > summary').first();
 }
 
 /** True when the browser is sitting on the login card (anonymous / bounced). */
@@ -111,6 +123,15 @@ export async function sweep(page: Page, paths: string[]) {
         }
         if (onLoginPage(page)) {
             failures.push(`${path}: redirected to login (role not allowed?)`);
+            continue;
+        }
+        // Gated areas now deny IN PLACE (HTTP 200 + an "…is for organizers/sponsors
+        // only" notice) instead of redirecting — a 200 alone no longer proves the
+        // role is allowed here.
+        const denied = await page.locator('p.error')
+            .filter({ hasText: /is for \w+ only/i }).count();
+        if (denied > 0) {
+            failures.push(`${path}: in-place access denial (role not allowed?)`);
             continue;
         }
         const o = await page.evaluate(() => ({

@@ -115,4 +115,47 @@ public sealed class LiveLinkedInPostPublisherTests
     {
         Assert.Equal(expected, LiveLinkedInPostPublisher.ToOrganizationUrn(input));
     }
+
+    // ---- §326k: little-text-format commentary escaping ------------------------
+    // LinkedIn's Posts API treats ( ) { } [ ] < > @ | * _ ~ \ as control characters
+    // and TRUNCATES/mangles the rendered post at the first unescaped one (the
+    // operator's live symptom: "only half the text comes over").
+
+    [Fact]
+    public void Commentary_escaping_covers_little_text_controls_but_keeps_hashtags()
+    {
+        var raw = "Zero Trust (300) — see [my] session {live} @ ELDK27 <today> *now* _really_ ~soon~ | \\ #ELDK27";
+        var escaped = LiveLinkedInPostPublisher.EscapeCommentary(raw);
+
+        Assert.Contains(@"\(300\)", escaped);
+        Assert.Contains(@"\[my\]", escaped);
+        Assert.Contains(@"\{live\}", escaped);
+        Assert.Contains(@"\@ ELDK27", escaped);
+        Assert.Contains(@"\<today\>", escaped);
+        Assert.Contains(@"\*now\*", escaped);
+        Assert.Contains(@"\_really\_", escaped);
+        Assert.Contains(@"\~soon\~", escaped);
+        Assert.Contains(@"\|", escaped);
+        // Hashtags must keep auto-linking — '#' is never escaped.
+        Assert.Contains("#ELDK27", escaped);
+        Assert.DoesNotContain(@"\#", escaped);
+        // Plain text passes through untouched.
+        Assert.Equal("Hope to see you there!", LiveLinkedInPostPublisher.EscapeCommentary("Hope to see you there!"));
+    }
+
+    [Fact]
+    public async Task Payload_commentary_is_escaped_at_the_chokepoint()
+    {
+        var resp = new HttpResponseMessage(HttpStatusCode.Created);
+        resp.Headers.TryAddWithoutValidation("x-restli-id", "urn:li:share:7001");
+        var h = new StubHandler(_ => resp);
+        var pub = Make(new LinkedInOptions { Enabled = true, AccessToken = "tok", DryRun = false }, h);
+
+        var r = await pub.PublishAsync(
+            new LinkedInPost("12345", "Deep dive (300) #ELDK27", null, Array.Empty<string>()));
+
+        Assert.True(r.Published);
+        // In the raw JSON body the backslash-escaped text \(300\) serializes as \\(300\\).
+        Assert.Contains(@"Deep dive \\(300\\) #ELDK27", h.LastBody);
+    }
 }

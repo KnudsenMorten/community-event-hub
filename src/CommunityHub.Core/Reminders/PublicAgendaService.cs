@@ -97,7 +97,12 @@ public sealed class PublicAgendaService
                 s.Track,
                 s.StartsAt,
                 s.EndsAt,
+                // §253 G14: a DEACTIVATED speaker never renders on the public agenda
+                // (the public speakers page already gates on IsActive — X5). The
+                // session keeps its speaker LINK (Sessionize disappearance stays
+                // alert-only, §56/§58); only the public display is gated.
                 s.SessionSpeakers
+                    .Where(ss => ss.Participant.IsActive)
                     .Select(ss => ss.Participant.FullName)
                     .ToList()))
             .ToListAsync(ct);

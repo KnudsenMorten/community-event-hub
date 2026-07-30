@@ -26,7 +26,9 @@ public sealed class ParticipantDeletionServiceTests
             .Options);
 
     private static ParticipantDeletionService Sut(CommunityHubDbContext db) =>
-        new(db, new FixedClock(T0));
+        new(db, new FixedClock(T0),
+            new ParticipantDeactivationService(db, new FixedClock(T0),
+                new CommunityHub.Core.Audit.AuditTrailService(db, new FixedClock(T0))));
 
     private static async Task<Participant> SeedPersonAsync(
         CommunityHubDbContext db, int eventId = EventId,
@@ -167,5 +169,56 @@ public sealed class ParticipantDeletionServiceTests
         var r = await Sut(db).HardDeleteAsync(EventId, 999);
 
         Assert.Equal(ParticipantDeletionService.DeletionStatus.NotFound, r.Status);
+    }
+
+    // ----- §307 (operator 2026-07-24: the delete HTTP 500) -------------------
+
+    [Fact]
+    public async Task HardDelete_cleans_tasks_party_magiclink_dietary_and_succeeds()
+    {
+        // §307: nearly every participant has onboarding tasks, a party RSVP, a magic
+        // link and dietary rows — the old clean-up missed them, so the "no dependent
+        // data" hard delete hit a Restrict FK and the grid button returned HTTP 500.
+        using var db = NewDb();
+        var p = await SeedPersonAsync(db);
+        db.Tasks.Add(new ParticipantTask { EventId = EventId, AssignedParticipantId = p.Id, Title = "Do a thing" });
+        db.PartyRsvps.Add(new PartyRsvp { EventId = EventId, ParticipantId = p.Id });
+        db.MagicLinkGrants.Add(new MagicLinkGrant
+        {
+            EventId = EventId, ParticipantId = p.Id, TokenIdHash = "h", Purpose = "welcome",
+        });
+        db.DietaryRequirements.Add(new DietaryRequirement { EventId = EventId, ParticipantId = p.Id });
+        await db.SaveChangesAsync();
+
+        var r = await Sut(db).HardDeleteAsync(EventId, p.Id);
+
+        Assert.Equal(ParticipantDeletionService.DeletionStatus.HardDeleted, r.Status);
+        Assert.Null(await db.Participants.FindAsync(p.Id));
+        Assert.Empty(db.Tasks.Where(t => t.AssignedParticipantId == p.Id));
+        Assert.Empty(db.PartyRsvps.Where(t => t.ParticipantId == p.Id));
+        Assert.Empty(db.MagicLinkGrants.Where(t => t.ParticipantId == p.Id));
+        Assert.Empty(db.DietaryRequirements.Where(t => t.ParticipantId == p.Id));
+    }
+
+    [Fact]
+    public async Task HardDelete_is_blocked_by_master_class_signup()
+    {
+        // §307: a master-class seat is real engagement — blocked, fall back to deactivate.
+        using var db = NewDb();
+        var p = await SeedPersonAsync(db);
+        var session = new Session { EventId = EventId, Title = "MC" };
+        db.Sessions.Add(session);
+        await db.SaveChangesAsync();
+        db.MasterClassSignups.Add(new MasterClassSignup
+        {
+            EventId = EventId, SessionId = session.Id, AttendeeId = p.Id,
+        });
+        await db.SaveChangesAsync();
+
+        var r = await Sut(db).HardDeleteAsync(EventId, p.Id);
+
+        Assert.Equal(ParticipantDeletionService.DeletionStatus.HardDeleteBlocked, r.Status);
+        Assert.Contains("master-class signup(s)", r.BlockingDependencies);
+        Assert.NotNull(await db.Participants.FindAsync(p.Id));
     }
 }

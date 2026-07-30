@@ -50,7 +50,7 @@ public class QuizzesModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+        if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
 
         await _authoring.UpdateQuizAsync(
             me.EventId, quizId, title, isActive, questionsPerAttempt, perQuestionSeconds, basePoints, ct);
@@ -63,7 +63,7 @@ public class QuizzesModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+        if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
 
         var id = await _authoring.AddQuestionAsync(
             me.EventId, quizId, prompt, Options(opt0, opt1, opt2, opt3), correctIndex, explanation ?? "", ct);
@@ -77,7 +77,7 @@ public class QuizzesModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+        if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
 
         var ok = await _authoring.UpdateQuestionAsync(
             me.EventId, questionId, prompt, Options(opt0, opt1, opt2, opt3), correctIndex, explanation ?? "", isActive, ct);
@@ -89,7 +89,7 @@ public class QuizzesModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+        if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
 
         await _authoring.SetQuestionActiveAsync(me.EventId, questionId, isActive, ct);
         return RedirectToPage(new { quizId });

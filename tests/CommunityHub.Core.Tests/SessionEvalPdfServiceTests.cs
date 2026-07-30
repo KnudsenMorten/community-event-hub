@@ -8,13 +8,16 @@ using Xunit;
 namespace CommunityHub.Core.Tests;
 
 /// <summary>
-/// FINAL per-session evaluation PDFs (REQUIREMENTS §166): the organizer uploads a PDF, it
-/// lands in a SharePoint folder under a DETERMINISTIC name (<c>session-{id}.pdf</c>) and is
-/// streamed back to the session's speaker(s) through a HUB PROXY — never a SharePoint URL.
-/// Uses a FAKE store (no external call). Proves: the proxy-url contract, the upload/list
-/// round-trip + status, the inert (not-configured) path, and — the security-critical part —
-/// the proxy ACCESS GATE (organizer + own-session speaker allowed; a foreign speaker / other
-/// role denied). NO real data.
+/// FINAL per-session evaluation PDFs (REQUIREMENTS §192, reworking §166): an organizer
+/// uploads up to TWO PDFs per session — a SCORE PDF and an OPEN-feedback PDF — each landing
+/// in a SharePoint folder under a DETERMINISTIC, kind-tagged name
+/// (<c>session-{id}-score.pdf</c> / <c>session-{id}-feedback.pdf</c>) and streamed back to
+/// the session's speaker(s) through a HUB PROXY — never a SharePoint URL. Uses a FAKE store
+/// (no external call). Proves: the per-kind proxy-url contract, the two-kind upload/list
+/// round-trip + PROVENANCE (who/when), the "which kinds exist" lookup, the inert
+/// (not-configured) path, and — the security-critical part — the proxy ACCESS GATE
+/// (organizer + own-session speaker allowed; a foreign speaker / other role denied) for BOTH
+/// kinds. NO real data.
 /// </summary>
 public sealed class SessionEvalPdfServiceTests
 {
@@ -55,64 +58,137 @@ public sealed class SessionEvalPdfServiceTests
         return (session.Id, org.Id, own.Id, other.Id);
     }
 
-    // ---- the proxy-url contract -------------------------------------------
+    // ---- the per-kind proxy-url / file-name contract ----------------------
 
     [Fact]
-    public void ProxyUrl_and_file_name_are_deterministic_and_never_a_sharepoint_url()
+    public void ProxyUrl_and_file_name_are_per_kind_deterministic_and_never_a_sharepoint_url()
     {
-        Assert.Equal("/session-eval/42/download", SessionEvalPdfService.ProxyUrlFor(42));
-        Assert.Equal("session-42.pdf", SessionEvalPdfService.FileNameFor(42));
-        Assert.DoesNotContain("sharepoint", SessionEvalPdfService.ProxyUrlFor(42), StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("/session-eval/42/score/download", SessionEvalPdfService.ProxyUrlFor(42, EvaluationPdfKind.Score));
+        Assert.Equal("/session-eval/42/feedback/download", SessionEvalPdfService.ProxyUrlFor(42, EvaluationPdfKind.Open));
+        // §299 OPEN-30: CehId-prefixed names (scores mandatory / openfeedback optional)...
+        Assert.Equal("42-scores.pdf", SessionEvalPdfService.FileNameFor(42, EvaluationPdfKind.Score));
+        Assert.Equal("42-openfeedback.pdf", SessionEvalPdfService.FileNameFor(42, EvaluationPdfKind.Open));
+        // ...with the pre-rename names still resolvable as a download fallback.
+        Assert.Equal("session-42-score.pdf", SessionEvalPdfService.LegacyFileNameFor(42, EvaluationPdfKind.Score));
+        Assert.Equal("session-42-feedback.pdf", SessionEvalPdfService.LegacyFileNameFor(42, EvaluationPdfKind.Open));
+        Assert.DoesNotContain("sharepoint", SessionEvalPdfService.ProxyUrlFor(42, EvaluationPdfKind.Open), StringComparison.OrdinalIgnoreCase);
     }
 
-    // ---- upload + list status round-trip ----------------------------------
+    [Theory]
+    [InlineData("score", EvaluationPdfKind.Score)]
+    [InlineData("SCORE", EvaluationPdfKind.Score)]
+    [InlineData("feedback", EvaluationPdfKind.Open)]
+    public void ParseKind_maps_the_route_slug(string slug, EvaluationPdfKind expected)
+        => Assert.Equal(expected, SessionEvalPdfService.ParseKind(slug));
+
+    [Theory]
+    [InlineData("open")]
+    [InlineData("")]
+    [InlineData(null)]
+    public void ParseKind_returns_null_for_an_unknown_slug(string? slug)
+        => Assert.Null(SessionEvalPdfService.ParseKind(slug));
+
+    // ---- two-kind upload + list + PROVENANCE round-trip -------------------
 
     [Fact]
-    public async Task Upload_then_list_marks_the_session_as_having_a_pdf()
+    public async Task The_two_kinds_upload_independently_and_record_provenance()
     {
         using var db = NewDb();
-        var (sessionId, _, _, _) = await SeedAsync(db);
+        var (sessionId, organizerId, _, _) = await SeedAsync(db);
         var store = new FakePdfStore(canRead: true, canStore: true);
         var svc = NewService(db, store);
 
-        // Before any upload: listed, but not uploaded.
-        var before = await svc.ListSessionsAsync(EventId);
-        var row = Assert.Single(before);
-        Assert.Equal(sessionId, row.SessionId);
-        Assert.False(row.HasPdf);
-        Assert.Equal(new[] { "Own Speaker" }, row.SpeakerNames);
+        // Before any upload: listed PER SESSION, but neither file present.
+        var before = Assert.Single(await svc.ListSessionsAsync(EventId));
+        Assert.Equal(sessionId, before.SessionId);
+        Assert.Null(before.Score);
+        Assert.Null(before.Open);
+        Assert.Equal(new[] { "Own Speaker" }, before.SpeakerNames);
 
-        await svc.UploadAsync(sessionId, new byte[] { 1, 2, 3 });
+        // Upload ONLY the score → score present + provenance, open still null.
+        await svc.UploadAsync(EventId, sessionId, EvaluationPdfKind.Score, new byte[] { 1, 2, 3 }, organizerId, "Org Person");
+        var afterScore = Assert.Single(await svc.ListSessionsAsync(EventId));
+        Assert.NotNull(afterScore.Score);
+        Assert.Equal("Org Person", afterScore.Score!.UploadedByName);
+        Assert.Equal(SessionEvalPdfService.FileNameFor(sessionId, EvaluationPdfKind.Score), afterScore.Score.FileName);
+        Assert.Null(afterScore.Open);
 
-        var after = await svc.ListSessionsAsync(EventId);
-        Assert.True(Assert.Single(after).HasPdf);
-        Assert.Equal(SessionEvalPdfService.FileNameFor(sessionId), Assert.Single(store[Folder]).Name);
+        // Upload the open-feedback INDEPENDENTLY → both present now.
+        await svc.UploadAsync(EventId, sessionId, EvaluationPdfKind.Open, new byte[] { 9 }, organizerId, "Org Person");
+        var afterBoth = Assert.Single(await svc.ListSessionsAsync(EventId));
+        Assert.NotNull(afterBoth.Score);
+        Assert.NotNull(afterBoth.Open);
+
+        // Both deterministic files landed in the folder.
+        var names = store[Folder].Select(f => f.Name).OrderBy(n => n).ToArray();
+        Assert.Equal(new[]
+        {
+            SessionEvalPdfService.FileNameFor(sessionId, EvaluationPdfKind.Open),
+            SessionEvalPdfService.FileNameFor(sessionId, EvaluationPdfKind.Score),
+        }.OrderBy(n => n).ToArray(), names);
     }
 
-    // ---- the ACCESS GATE (the security-critical part) ---------------------
+    [Fact]
+    public async Task Replace_upserts_the_same_provenance_row_in_place()
+    {
+        using var db = NewDb();
+        var (sessionId, organizerId, _, _) = await SeedAsync(db);
+        var svc = NewService(db, new FakePdfStore(canRead: true, canStore: true));
+
+        await svc.UploadAsync(EventId, sessionId, EvaluationPdfKind.Score, new byte[] { 1 }, organizerId, "First Org");
+        await svc.UploadAsync(EventId, sessionId, EvaluationPdfKind.Score, new byte[] { 2 }, organizerId, "Second Org");
+
+        // One row (upsert, not a duplicate); newest provenance wins.
+        var row = Assert.Single(db.SessionEvaluationFiles.Where(f => f.SessionId == sessionId && f.Kind == EvaluationPdfKind.Score));
+        Assert.Equal("Second Org", row.UploadedByName);
+    }
+
+    // ---- which kinds exist (speaker page driver, §192d) -------------------
 
     [Fact]
-    public async Task Proxy_allows_an_organizer_and_the_own_session_speaker_but_denies_a_foreign_speaker()
+    public async Task GetKinds_reports_score_then_both_as_files_are_added()
+    {
+        using var db = NewDb();
+        var (sessionId, organizerId, _, _) = await SeedAsync(db);
+        var svc = NewService(db, new FakePdfStore(canRead: true, canStore: true));
+
+        Assert.Empty(await svc.GetKindsForSessionsAsync(EventId, new[] { sessionId }));
+
+        await svc.UploadAsync(EventId, sessionId, EvaluationPdfKind.Score, new byte[] { 1 }, organizerId, "Org Person");
+        var scoreOnly = await svc.GetKindsForSessionsAsync(EventId, new[] { sessionId });
+        Assert.True(scoreOnly[sessionId].Contains(EvaluationPdfKind.Score));
+        Assert.False(scoreOnly[sessionId].Contains(EvaluationPdfKind.Open));
+
+        await svc.UploadAsync(EventId, sessionId, EvaluationPdfKind.Open, new byte[] { 2 }, organizerId, "Org Person");
+        var both = await svc.GetKindsForSessionsAsync(EventId, new[] { sessionId });
+        Assert.True(both[sessionId].Contains(EvaluationPdfKind.Score));
+        Assert.True(both[sessionId].Contains(EvaluationPdfKind.Open));
+    }
+
+    // ---- the ACCESS GATE for BOTH kinds (the security-critical part) ------
+
+    [Theory]
+    [InlineData(EvaluationPdfKind.Score)]
+    [InlineData(EvaluationPdfKind.Open)]
+    public async Task Proxy_allows_an_organizer_and_the_own_session_speaker_but_denies_a_foreign_speaker(EvaluationPdfKind kind)
     {
         using var db = NewDb();
         var (sessionId, organizerId, ownSpeakerId, otherSpeakerId) = await SeedAsync(db);
         var store = new FakePdfStore(canRead: true, canStore: true);
         var svc = NewService(db, store);
-        await svc.UploadAsync(sessionId, new byte[] { 9, 9, 9 });
+        await svc.UploadAsync(EventId, sessionId, kind, new byte[] { 9, 9, 9 }, organizerId, "Org Person");
 
         // Organizer in this edition → allowed.
-        var asOrg = await svc.GetPdfForParticipantAsync(EventId, organizerId, ParticipantRole.Organizer, sessionId);
+        var asOrg = await svc.GetPdfForParticipantAsync(EventId, organizerId, ParticipantRole.Organizer, sessionId, kind);
         Assert.NotNull(asOrg);
-        Assert.Equal(SessionEvalPdfService.FileNameFor(sessionId), asOrg!.FileName);
+        Assert.Equal(SessionEvalPdfService.FileNameFor(sessionId, kind), asOrg!.FileName);
         Assert.NotEmpty(asOrg.Content);
 
         // The speaker ON this session → allowed.
-        var asOwn = await svc.GetPdfForParticipantAsync(EventId, ownSpeakerId, ParticipantRole.Speaker, sessionId);
-        Assert.NotNull(asOwn);
+        Assert.NotNull(await svc.GetPdfForParticipantAsync(EventId, ownSpeakerId, ParticipantRole.Speaker, sessionId, kind));
 
         // A DIFFERENT speaker, not on this session → denied (→ 404).
-        var asOther = await svc.GetPdfForParticipantAsync(EventId, otherSpeakerId, ParticipantRole.Speaker, sessionId);
-        Assert.Null(asOther);
+        Assert.Null(await svc.GetPdfForParticipantAsync(EventId, otherSpeakerId, ParticipantRole.Speaker, sessionId, kind));
     }
 
     [Fact]
@@ -120,12 +196,24 @@ public sealed class SessionEvalPdfServiceTests
     {
         using var db = NewDb();
         var (sessionId, organizerId, _, _) = await SeedAsync(db);
-        var store = new FakePdfStore(canRead: true, canStore: true);
-        var svc = NewService(db, store);
-        await svc.UploadAsync(sessionId, new byte[] { 1 });
+        var svc = NewService(db, new FakePdfStore(canRead: true, canStore: true));
+        await svc.UploadAsync(EventId, sessionId, EvaluationPdfKind.Score, new byte[] { 1 }, organizerId, "Org Person");
 
         // Same organizer id, WRONG event id → denied.
-        Assert.Null(await svc.GetPdfForParticipantAsync(EventId + 1, organizerId, ParticipantRole.Organizer, sessionId));
+        Assert.Null(await svc.GetPdfForParticipantAsync(EventId + 1, organizerId, ParticipantRole.Organizer, sessionId, EvaluationPdfKind.Score));
+    }
+
+    [Fact]
+    public async Task Proxy_returns_null_for_a_kind_that_was_not_uploaded()
+    {
+        using var db = NewDb();
+        var (sessionId, organizerId, _, _) = await SeedAsync(db);
+        var svc = NewService(db, new FakePdfStore(canRead: true, canStore: true));
+
+        // Only the score is uploaded → the open-feedback download 404s.
+        await svc.UploadAsync(EventId, sessionId, EvaluationPdfKind.Score, new byte[] { 1 }, organizerId, "Org Person");
+        Assert.NotNull(await svc.GetPdfForParticipantAsync(EventId, organizerId, ParticipantRole.Organizer, sessionId, EvaluationPdfKind.Score));
+        Assert.Null(await svc.GetPdfForParticipantAsync(EventId, organizerId, ParticipantRole.Organizer, sessionId, EvaluationPdfKind.Open));
     }
 
     // ---- inert when not configured ----------------------------------------
@@ -136,12 +224,14 @@ public sealed class SessionEvalPdfServiceTests
         using var db = NewDb();
         var (sessionId, organizerId, _, _) = await SeedAsync(db);
 
-        // Store can't read/write → nothing uploaded-flagged, nothing streamed, nothing faked.
+        // Store can't read/write → still lists sessions (per-session), nothing streamed, nothing faked.
         var noStore = NewService(db, new FakePdfStore(canRead: false, canStore: false));
         Assert.False(noStore.CanRead);
         Assert.False(noStore.CanManage);
-        Assert.False(Assert.Single(await noStore.ListSessionsAsync(EventId)).HasPdf);
-        Assert.Null(await noStore.GetPdfForParticipantAsync(EventId, organizerId, ParticipantRole.Organizer, sessionId));
+        var row = Assert.Single(await noStore.ListSessionsAsync(EventId));
+        Assert.Null(row.Score);
+        Assert.Null(row.Open);
+        Assert.Null(await noStore.GetPdfForParticipantAsync(EventId, organizerId, ParticipantRole.Organizer, sessionId, EvaluationPdfKind.Score));
 
         // Folder blank → also inert even with a capable store.
         var blank = NewService(db, new FakePdfStore(canRead: true, canStore: true), folder: "");
@@ -162,6 +252,27 @@ public sealed class SessionEvalPdfServiceTests
         var only = Assert.Single(contacts);
         Assert.Equal("own@example.test", only.Email);
         Assert.Equal("Own Speaker", only.FullName);
+    }
+
+    [Fact]
+    public async Task Speaker_contacts_honor_the_contact_email_override()
+    {
+        // §234 5: the "your evaluation PDF is ready" notify must reach the speaker's
+        // PREFERRED inbox — the SpeakerProfile.ContactEmailOverride wins over the
+        // identity address, matching the welcome / evaluation-results routing.
+        using var db = NewDb();
+        var (sessionId, _, ownSpeakerId, _) = await SeedAsync(db);
+        db.SpeakerProfiles.Add(new SpeakerProfile
+        {
+            EventId = EventId, ParticipantId = ownSpeakerId,
+            ContactEmailOverride = "preferred@example.test",
+        });
+        await db.SaveChangesAsync();
+        var svc = NewService(db, new FakePdfStore(canRead: true, canStore: true));
+
+        var only = Assert.Single(await svc.GetSpeakerContactsAsync(EventId, sessionId));
+        Assert.Equal("preferred@example.test", only.Email);
+        Assert.Equal(ownSpeakerId, only.ParticipantId);   // §169 magic-link id unchanged
     }
 
     // ---- helpers -----------------------------------------------------------
@@ -210,9 +321,9 @@ public sealed class SessionEvalPdfServiceTests
             return Task.CompletedTask;
         }
 
-        // Write-to-root side unused by §166.
+        // Write-to-root side unused by §192.
         public Task<StoredFile> StoreAsync(string relativePath, byte[] content, string contentType, CancellationToken ct = default) =>
-            throw new InvalidOperationException("root store not used by §166");
+            throw new InvalidOperationException("root store not used by §192");
         public Task DeleteAsync(string relativePath, CancellationToken ct = default) => Task.CompletedTask;
     }
 }

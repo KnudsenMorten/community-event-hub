@@ -6,14 +6,30 @@
 
     var tiles = new List<HubTile>
     {
-        new HubTile("/Organizer/FindPerson", Localizer["Nav.OrgFindPerson"].Value, Localizer["OrgPeople.FindPerson"].Value),
+        // §187 (operator 2026-06-29): the "Find a person" card is removed — the nav item
+        // was already dropped (§167) and the Participants grid's own search covers it.
         new HubTile("/Organizer/Participants", Localizer["Nav.OrgParticipants"].Value, Localizer["OrgPeople.Participants"].Value),
+        // 🔒 §707.39 (operator 2026-07-30: "move the attendees next to the particpants") — these two
+        // are the pair that has to be read TOGETHER: Participants = people who can sign in;
+        // Attendees = everyone holding a ticket, including the 1-day holders who deliberately have
+        // no login (§707.38). With four unrelated cards between them, "why is my 1-day buyer not in
+        // Participants?" had no adjacent answer.
+        new HubTile("/Organizer/Attendees", Localizer["Nav.OrgAttendees"].Value, Localizer["OrgPeople.Attendees"].Value),
+        // §304: speakers held from the Zoho flow — set category + ring, Save activates.
+        new HubTile("/Organizer/PendingSpeakers", "Pending speakers", "Approve imported speakers for the Zoho flow: set category + ring; saving activates."),
         new HubTile("/Organizer/PreselectionQueue", Localizer["Nav.OrgPreselectionQueue"].Value, Localizer["OrgPeople.Preselection"].Value, "participant-activation"),
         new HubTile("/Organizer/Onboarding", Localizer["Nav.OrgOnboarding"].Value, Localizer["OrgPeople.Onboarding"].Value),
-        new HubTile("/Organizer/Attendees", Localizer["Nav.OrgAttendees"].Value, Localizer["OrgPeople.Attendees"].Value),
         new HubTile("/Organizer/ActionQueue", Localizer["Nav.OrgActionQueue"].Value, Localizer["OrgPeople.ActionQueue"].Value, "onboarding-step-reset"),
         new HubTile("/Organizer/WelcomeLinks", "Welcome sign-in links", "Review and revoke welcome auto-login links the hub has issued.", "magic-link"),
         new HubTile("/Organizer/AccessLinks", "Permanent sign-in links", "Standing one-click sign-in links.", "magic-link"),
+        // §501 (operator 2026-07-28: "i cannot find the 2 buttons… move them under People category,
+        // as it make sense to have them there"). Both manage PEOPLE — sponsor contacts and their
+        // roles — but sat on the Sponsor Admin hub, filed by which COMPANY they belong to rather
+        // than by what they are. Anyone asking "where do I add a contact?" looks under People.
+        new HubTile("/Organizer/EconomicContacts", "Sponsor contacts (finance system)",
+            "Create, edit and remove a sponsor's contacts and their Signer / Event Coordinator roles. The finance system is the master — changes flow from here to the webshop and the hub."),
+        new HubTile("/Organizer/SponsorWebshopCompany", "Sponsor webshop company & defaults",
+            "Edit a sponsor's Company Manager record — default signer, default event coordinator, internal notes. A coordinator change cascades to the hub and Zoho."),
     };
 }
 

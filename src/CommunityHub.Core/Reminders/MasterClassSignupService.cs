@@ -74,15 +74,31 @@ public sealed class MasterClassSignupService
             : AvailabilityLevel.Available;
     }
 
+    /// <param name="AutoSwitchConsentAt">
+    /// §384c — when the attendee consented to releasing a held seat if this waitlist place turns
+    /// into a real one. Surfaced so the wizard step can render the consent checkbox in the state
+    /// the attendee last left it: without it, walking the wizard a second time showed the box
+    /// unticked even though consent was on record, which reads as "my answer was lost".
+    /// Optional trailing parameter so existing constructions are unaffected.
+    /// </param>
     public sealed record MySignup(
         int SessionId, string Title, MasterClassSignupStatus Status,
-        int? WaitlistPosition, DateTimeOffset? OfferExpiresAt, bool WantsMonthReminder = false);
+        int? WaitlistPosition, DateTimeOffset? OfferExpiresAt, bool WantsMonthReminder = false,
+        DateTimeOffset? AutoSwitchConsentAt = null);
 
     public sealed record SignupResult(bool Ok, string? Error, MySignup? Signup);
 
     /// <summary>A promotion produced by a freed seat — who to notify + how.</summary>
+    /// <param name="ReleasedTitle">
+    /// §386 — the class whose seat was AUTO-RELEASED to take this promotion, when the attendee held
+    /// one elsewhere. Null when nothing was given up. Carried so the promotion mail can say what was
+    /// traded: the release happened silently, so the attendee learned they had lost a seat only by
+    /// noticing it gone (operator 2026-07-26: <i>"if i move up and get a requested/waitlist i should
+    /// be informed that i received it and the old was cancelled"</i>).
+    /// </param>
     public sealed record PromotionResult(
-        int SessionId, int? PromotedSignupId, int? PromotedAttendeeId, PromotionKind? Kind);
+        int SessionId, int? PromotedSignupId, int? PromotedAttendeeId, PromotionKind? Kind,
+        string? ReleasedTitle = null);
 
     // --- selection-invite tracking ------------------------------------------
 
@@ -117,7 +133,16 @@ public sealed class MasterClassSignupService
     {
         if (string.IsNullOrWhiteSpace(email)) return Task.FromResult<Attendee?>(null);
         var norm = email.Trim().ToLowerInvariant();
-        return _db.Attendees.FirstOrDefaultAsync(a => a.EventId == eventId && a.Email == norm, ct);
+        // §234 5: one email may legitimately hold SEVERAL tickets (the (EventId, Email)
+        // index is non-unique — Zoho allows it). Resolve deterministically to the row
+        // that actually carries the person's entitlement: an ACTIVE mirror row first,
+        // then a 2-day (Master-Class) ticket over other classes, then the oldest row.
+        return _db.Attendees
+            .Where(a => a.EventId == eventId && a.Email == norm)
+            .OrderByDescending(a => a.MirrorState == MirrorState.Active)
+            .ThenByDescending(a => a.TicketStatus == TicketStatus.TwoDay)
+            .ThenBy(a => a.Id)
+            .FirstOrDefaultAsync(ct);
     }
 
     public async Task<string?> EnsureSelfServiceTokenAsync(int attendeeId, CancellationToken ct = default)
@@ -254,19 +279,31 @@ public sealed class MasterClassSignupService
     /// Set (or clear) a master class's seat capacity. Per §93/§94, raising the cap (or
     /// making it unlimited) OPENS seats that belong to the waitlist FIRST — so every
     /// newly-opened seat is consumed by the waitlist (highest first, chaining the
-    /// auto-switch cascade) before the public can ever see it. Runs in a serializable
-    /// transaction so a concurrent public booker can't grab an opened seat. Returns the
-    /// promotions produced (so the caller can notify each moved attendee).
+    /// auto-switch cascade) before the public can ever see it. Runs in a transaction and
+    /// each promotion claims its seat atomically (§218 <see cref="TryClaimSeatAsync"/>) so
+    /// a concurrent public booker can't grab an opened seat. Returns the promotions
+    /// produced (so the caller can notify each moved attendee).
     /// </summary>
     public async Task<IReadOnlyList<PromotionResult>> SetCapacityAsync(
         int eventId, int sessionId, int? capacity, CancellationToken ct = default)
     {
-        return await InSerializableTxAsync<IReadOnlyList<PromotionResult>>(async () =>
+        return await InTxAsync<IReadOnlyList<PromotionResult>>(async () =>
         {
             var mc = await _db.Sessions.FirstOrDefaultAsync(
                 s => s.Id == sessionId && s.EventId == eventId && s.Type == SessionType.MasterClass, ct);
             if (mc is null) return Array.Empty<PromotionResult>();
-            mc.MasterClassCapacity = capacity is > 0 ? capacity : null;
+
+            // §326ba: 0 (or negative) is a MISTAKE, never a request for "unlimited".
+            // The old expression `capacity is > 0 ? capacity : null` collapsed 0 into NULL,
+            // and NULL is the one branch of the §218 seat claim that ALWAYS succeeds
+            // (`MasterClassCapacity IS NULL` ⇒ every claim wins). So a mistyped 0 silently
+            // UNCAPPED the room, and the promotion loop below then drained the entire
+            // waitlist into it and mailed every one of them — from one form post, with no
+            // confirmation. Unlimited is still expressible, but only by CLEARING the field
+            // (null), which the page now makes you confirm.
+            if (capacity is <= 0) return Array.Empty<PromotionResult>();
+
+            mc.MasterClassCapacity = capacity;
             mc.UpdatedAt = DateTimeOffset.UtcNow;
             await _db.SaveChangesAsync(ct);
 
@@ -336,7 +373,7 @@ public sealed class MasterClassSignupService
         await ExpireOffersAsync(DateTimeOffset.UtcNow, eventId, ct);
         var rows = await _db.MasterClassSignups.AsNoTracking()
             .Where(x => x.EventId == eventId && x.AttendeeId == attendeeId)
-            .Select(x => new { x.SessionId, x.Status, x.CreatedAt, x.OfferExpiresAt, x.WantsMonthBeforeReminder, Title = x.Session.Title })
+            .Select(x => new { x.SessionId, x.Status, x.CreatedAt, x.OfferExpiresAt, x.WantsMonthBeforeReminder, x.AutoSwitchConsentAt, Title = x.Session.Title })
             .ToListAsync(ct);
 
         var outList = new List<MySignup>();
@@ -344,11 +381,19 @@ public sealed class MasterClassSignupService
         {
             int? pos = null;
             if (r.Status == MasterClassSignupStatus.Waitlisted)
-                pos = await _db.MasterClassSignups.AsNoTracking().CountAsync(
-                    x => x.EventId == eventId && x.SessionId == r.SessionId
-                         && x.Status == MasterClassSignupStatus.Waitlisted
-                         && x.CreatedAt <= r.CreatedAt, ct);
-            outList.Add(new MySignup(r.SessionId, r.Title, r.Status, pos, r.OfferExpiresAt, r.WantsMonthBeforeReminder));
+            {
+                // 1-based FIFO position. The `CreatedAt <=` comparison is client-side (the
+                // EF SQLite provider can't compare a DateTimeOffset; SQL Server can) over
+                // the bounded per-class waitlist.
+                var times = await _db.MasterClassSignups.AsNoTracking()
+                    .Where(x => x.EventId == eventId && x.SessionId == r.SessionId
+                                && x.Status == MasterClassSignupStatus.Waitlisted)
+                    .Select(x => x.CreatedAt).ToListAsync(ct);
+                pos = times.Count(t => t <= r.CreatedAt);
+            }
+            outList.Add(new MySignup(
+                r.SessionId, r.Title, r.Status, pos, r.OfferExpiresAt, r.WantsMonthBeforeReminder,
+                r.AutoSwitchConsentAt));
         }
         return outList;
     }
@@ -362,13 +407,16 @@ public sealed class MasterClassSignupService
         GetRosterAsync(int eventId, int sessionId, CancellationToken ct = default)
     {
         await ExpireOffersAsync(DateTimeOffset.UtcNow, eventId, ct);
-        var rows = await _db.MasterClassSignups.AsNoTracking()
+        // CreatedAt ordering is client-side (the EF SQLite provider can't ORDER BY a
+        // DateTimeOffset; SQL Server can) over one class's signups.
+        var rows = (await _db.MasterClassSignups.AsNoTracking()
             .Where(x => x.EventId == eventId && x.SessionId == sessionId)
-            .OrderBy(x => x.CreatedAt)
             .Select(x => new RosterEntry(x.Status, x.AttendeeId,
                 ((x.Attendee.FirstName ?? "") + " " + (x.Attendee.LastName ?? "")).Trim(),
                 x.Attendee.Email, x.CreatedAt))
-            .ToListAsync(ct);
+            .ToListAsync(ct))
+            .OrderBy(r => r.CreatedAt)
+            .ToList();
 
         IReadOnlyList<RosterRow> Pick(MasterClassSignupStatus st) =>
             rows.Where(r => r.Status == st)
@@ -394,9 +442,11 @@ public sealed class MasterClassSignupService
 
         await ExpireOffersAsync(DateTimeOffset.UtcNow, eventId, ct);
 
-        // The seat decision is a read-decide-write that must not race a concurrent
-        // booker or a promotion freeing/taking the same seat → serializable section.
-        var (ok, error) = await InSerializableTxAsync<(bool Ok, string? Error)>(async () =>
+        // §218 OPTIMISTIC seat decision: the seat grant is a single atomic conditional
+        // write (TryClaimSeatAsync) that detects "full" at commit under a brief one-row
+        // lock — no serializable range locks, no SELECT-then-INSERT window. The short
+        // transaction keeps the claim + the matching signup insert atomic.
+        var (ok, error) = await InTxAsync<(bool Ok, string? Error)>(async () =>
         {
             var mine = await _db.MasterClassSignups
                 .Where(x => x.EventId == eventId && x.AttendeeId == attendeeId).ToListAsync(ct);
@@ -405,46 +455,76 @@ public sealed class MasterClassSignupService
 
             var hasConfirmed = mine.Any(x => x.Status == MasterClassSignupStatus.Confirmed);
             var hasWaitOrOffer = mine.Any(x => x.Status is MasterClassSignupStatus.Waitlisted or MasterClassSignupStatus.Offered);
-
-            var taken = await SeatsTakenAsync(eventId, sessionId, ct);
-            var waiting = await WaitlistCountAsync(eventId, sessionId, ct);
-            var capHasRoom = mc.MasterClassCapacity is not int cap || taken < cap;
-            // §94: the waitlist has PRIORITY. A public/online booker may take a seat ONLY
-            // when there is a free seat AND nobody is on the waitlist; otherwise they join
-            // the waitlist (the freed/open seats flow to the waitlist via §93 promotion).
-            var hasRoom = capHasRoom && waiting == 0;
             var now = DateTimeOffset.UtcNow;
 
-            MasterClassSignupStatus status;
-            if (hasRoom)
+            if (hasConfirmed)
             {
-                if (hasConfirmed)
+                // Already hold a confirmed seat → may NEVER take a second confirmed seat.
+                // If the target currently has room (free seat + no waitlist, §94) the rule
+                // is "give up your current seat first"; otherwise they may join the
+                // waitlist (auto-switch). This room check is read-only (message-only) — no
+                // seat is ever granted to a confirmed holder, so it needs no atomicity.
+                if (await HasPublicRoomAsync(eventId, sessionId, ct))
                     return (false,
                         "You already have a confirmed Master Class. Give it up first to take another.");
-                status = MasterClassSignupStatus.Confirmed;
-            }
-            else
-            {
+
                 if (hasWaitOrOffer)
                     return (false,
                         "You can wait-list for one Master Class at a time. Leave your current waitlist first.");
-                status = MasterClassSignupStatus.Waitlisted;
+                // Consent gate (§63/§93): on promotion their current MC is AUTO-CANCELLED
+                // and they're moved here automatically — they must accept that.
+                if (!autoSwitchConsent)
+                    return (false,
+                        "Please accept that joining this waitlist will cancel your current Master Class and move you here automatically.");
+
+                _db.MasterClassSignups.Add(new MasterClassSignup
+                {
+                    EventId = eventId, SessionId = sessionId, AttendeeId = attendeeId,
+                    Status = MasterClassSignupStatus.Waitlisted, CreatedAt = now, UpdatedAt = now,
+                    AutoSwitchConsentAt = now,
+                });
+                await _db.SaveChangesAsync(ct);
+                return (true, null);
             }
 
-            // Consent gate (§63/§93): waitlisting while you already hold a seat means that,
-            // on promotion, your current Master Class is AUTO-CANCELLED and you're moved
-            // here automatically (no choose-to-switch step). The attendee must accept that.
-            var willAutoCancel = status == MasterClassSignupStatus.Waitlisted && hasConfirmed;
-            if (willAutoCancel && !autoSwitchConsent)
-                return (false,
-                    "Please accept that joining this waitlist will cancel your current Master Class and move you here automatically.");
+            // No confirmed seat yet → try to atomically grab one (§94: only when a seat is
+            // free AND nobody is waitlisted). 1 row ⇒ seat granted; 0 rows ⇒ full/waitlist.
+            if (await TryClaimSeatAsync(eventId, sessionId, blockWhenWaitlisted: true, ct))
+            {
+                // §234 RE-VALIDATE UNDER THE LOCK: `mine` was read BEFORE the claim, so a
+                // concurrent §93 promotion may have JUST confirmed this attendee elsewhere
+                // (their waitlisted row in another class flips to Confirmed in an
+                // independent transaction). Re-read the attendee's rows with a LOCKING read
+                // (UPDLOCK on SQL Server — sees latest COMMITTED rows, immune to the RCSI
+                // snapshot, and serializes against the promotion's row update) so signup +
+                // promotion can never leave one person with TWO confirmed seats. Bailing
+                // here is safe: the claim only touched Session.UpdatedAt — no signup row
+                // was written, so no seat is consumed (the live COUNT is the truth).
+                var fresh = await ReadAttendeeSignupsLockedAsync(eventId, attendeeId, ct);
+                if (fresh.Any(x => x.SessionId == sessionId))
+                    return (true, null);   // row appeared concurrently → idempotent OK
+                if (fresh.Any(x => x.Status == MasterClassSignupStatus.Confirmed))
+                    return (false,
+                        "You already have a confirmed Master Class. Give it up first to take another.");
 
+                _db.MasterClassSignups.Add(new MasterClassSignup
+                {
+                    EventId = eventId, SessionId = sessionId, AttendeeId = attendeeId,
+                    Status = MasterClassSignupStatus.Confirmed,
+                    CreatedAt = now, UpdatedAt = now, ConfirmedAt = now,
+                });
+                await _db.SaveChangesAsync(ct);
+                return (true, null);
+            }
+
+            // Full (or a waitlist already exists) → join the waitlist.
+            if (hasWaitOrOffer)
+                return (false,
+                    "You can wait-list for one Master Class at a time. Leave your current waitlist first.");
             _db.MasterClassSignups.Add(new MasterClassSignup
             {
                 EventId = eventId, SessionId = sessionId, AttendeeId = attendeeId,
-                Status = status, CreatedAt = now, UpdatedAt = now,
-                ConfirmedAt = status == MasterClassSignupStatus.Confirmed ? now : null,
-                AutoSwitchConsentAt = willAutoCancel ? now : null,
+                Status = MasterClassSignupStatus.Waitlisted, CreatedAt = now, UpdatedAt = now,
             });
             await _db.SaveChangesAsync(ct);
             return (true, null);
@@ -492,7 +572,7 @@ public sealed class MasterClassSignupService
 
         await ExpireOffersAsync(DateTimeOffset.UtcNow, eventId, ct);
 
-        return await InSerializableTxAsync<(bool, string?, PromotionResult?)>(async () =>
+        return await InTxAsync<(bool, string?, PromotionResult?)>(async () =>
         {
             var mine = await _db.MasterClassSignups
                 .Where(x => x.EventId == eventId && x.AttendeeId == attendeeId).ToListAsync(ct);
@@ -502,18 +582,20 @@ public sealed class MasterClassSignupService
                               && x.Status == MasterClassSignupStatus.Confirmed))
                 return (true, null, (PromotionResult?)null);
 
-            // GUARD (re-checked at commit, under serializable range locks): the seat must
-            // still be free AND the target must have no waitlist (§94 priority). Checked
-            // BEFORE we touch the old seat, so a failure leaves the attendee untouched.
-            var taken = await SeatsTakenAsync(eventId, targetSessionId, ct);
-            var waiting = await WaitlistCountAsync(eventId, targetSessionId, ct);
-            var capHasRoom = mc.MasterClassCapacity is not int cap || taken < cap;
-            if (!capHasRoom)
+            // §218 OPTIMISTIC GUARD: atomically claim a seat in the target FIRST (a free
+            // seat AND no waitlist, §94 priority) — a single conditional write that detects
+            // "full" at commit. Done BEFORE we touch the old seat, so any failure leaves
+            // the attendee's existing seat untouched (the switch is all-or-nothing).
+            if (!await TryClaimSeatAsync(eventId, targetSessionId, blockWhenWaitlisted: true, ct))
+            {
+                // Distinguish the message: a grown waitlist (§94) vs a genuinely full room.
+                // Read-only and best-effort — the claim above already failed safely.
+                if (await WaitlistCountAsync(eventId, targetSessionId, ct) > 0)
+                    return (false,
+                        "Sorry — this could not be completed: this Master Class now has a waitlist, so its seats go to waitlisted attendees first. Your current seat was kept — join the waitlist instead.",
+                        (PromotionResult?)null);
                 return (false, NowFullError, (PromotionResult?)null);
-            if (waiting > 0)
-                return (false,
-                    "Sorry — this could not be completed: this Master Class now has a waitlist, so its seats go to waitlisted attendees first. Your current seat was kept — join the waitlist instead.",
-                    (PromotionResult?)null);
+            }
 
             var now = DateTimeOffset.UtcNow;
             // The attendee's existing confirmed seat (in another class), if any.
@@ -560,7 +642,7 @@ public sealed class MasterClassSignupService
     {
         // Remove + (if a seat was freed) promote the waitlist atomically, so a public
         // booker can't slip into the seat between the give-up and the promotion (§93/§94).
-        return await InSerializableTxAsync<PromotionResult?>(async () =>
+        return await InTxAsync<PromotionResult?>(async () =>
         {
             var mine = await _db.MasterClassSignups.FirstOrDefaultAsync(
                 x => x.EventId == eventId && x.AttendeeId == attendeeId && x.SessionId == sessionId, ct);
@@ -590,48 +672,59 @@ public sealed class MasterClassSignupService
         int eventId, int attendeeId, CancellationToken ct = default)
     {
         await ExpireOffersAsync(DateTimeOffset.UtcNow, eventId, ct);
-        var offered = await _db.MasterClassSignups.FirstOrDefaultAsync(
-            x => x.EventId == eventId && x.AttendeeId == attendeeId
-                 && x.Status == MasterClassSignupStatus.Offered, ct);
-        if (offered is null) return (false, "You don't have a Master Class offer to accept.", null);
-
-        var confirmed = await _db.MasterClassSignups.FirstOrDefaultAsync(
-            x => x.EventId == eventId && x.AttendeeId == attendeeId
-                 && x.Status == MasterClassSignupStatus.Confirmed, ct);
-
-        PromotionResult? freed = null;
-        if (confirmed is not null)
+        // The accept (Offered→Confirmed) keeps the seat the offer already held — Offered
+        // and Confirmed both count against capacity — so NO new claim is needed; only the
+        // released OLD seat re-enters its waitlist, and that promotion claims atomically.
+        // The whole free+promote+flip runs in one transaction so it can't race a booker.
+        return await InTxAsync<(bool Ok, string? Error, PromotionResult? FreedPromotion)>(async () =>
         {
-            var freedSession = confirmed.SessionId;
-            _db.MasterClassSignups.Remove(confirmed);
-            await _db.SaveChangesAsync(ct);
-            var sink = new List<PromotionResult>();
-            await PromoteNextAsync(eventId, freedSession, sink, ct);
-            freed = sink.Count > 0 ? sink[0] : null;
-        }
+            var offered = await _db.MasterClassSignups.FirstOrDefaultAsync(
+                x => x.EventId == eventId && x.AttendeeId == attendeeId
+                     && x.Status == MasterClassSignupStatus.Offered, ct);
+            if (offered is null) return (false, "You don't have a Master Class offer to accept.", null);
 
-        offered.Status = MasterClassSignupStatus.Confirmed;
-        offered.ConfirmedAt = DateTimeOffset.UtcNow;
-        offered.OfferExpiresAt = null;
-        offered.UpdatedAt = DateTimeOffset.UtcNow;
-        await _db.SaveChangesAsync(ct);
-        return (true, null, freed);
+            var confirmed = await _db.MasterClassSignups.FirstOrDefaultAsync(
+                x => x.EventId == eventId && x.AttendeeId == attendeeId
+                     && x.Status == MasterClassSignupStatus.Confirmed, ct);
+
+            PromotionResult? freed = null;
+            if (confirmed is not null)
+            {
+                var freedSession = confirmed.SessionId;
+                _db.MasterClassSignups.Remove(confirmed);
+                await _db.SaveChangesAsync(ct);
+                var sink = new List<PromotionResult>();
+                await PromoteNextAsync(eventId, freedSession, sink, ct);
+                freed = sink.Count > 0 ? sink[0] : null;
+            }
+
+            offered.Status = MasterClassSignupStatus.Confirmed;
+            offered.ConfirmedAt = DateTimeOffset.UtcNow;
+            offered.OfferExpiresAt = null;
+            offered.UpdatedAt = DateTimeOffset.UtcNow;
+            await _db.SaveChangesAsync(ct);
+            return (true, null, freed);
+        }, ct);
     }
 
     /// <summary>Decline a held offer: drop it (frees the held seat → promote next).</summary>
     public async Task<PromotionResult?> DeclineOfferAsync(
         int eventId, int attendeeId, CancellationToken ct = default)
     {
-        var offered = await _db.MasterClassSignups.FirstOrDefaultAsync(
-            x => x.EventId == eventId && x.AttendeeId == attendeeId
-                 && x.Status == MasterClassSignupStatus.Offered, ct);
-        if (offered is null) return null;
-        var sessionId = offered.SessionId;
-        _db.MasterClassSignups.Remove(offered);
-        await _db.SaveChangesAsync(ct);
-        var sink = new List<PromotionResult>();
-        await PromoteNextAsync(eventId, sessionId, sink, ct);
-        return sink.Count > 0 ? sink[0] : new PromotionResult(sessionId, null, null, null);
+        // Drop + promote atomically so a public booker can't slip into the freed seat.
+        return await InTxAsync<PromotionResult?>(async () =>
+        {
+            var offered = await _db.MasterClassSignups.FirstOrDefaultAsync(
+                x => x.EventId == eventId && x.AttendeeId == attendeeId
+                     && x.Status == MasterClassSignupStatus.Offered, ct);
+            if (offered is null) return null;
+            var sessionId = offered.SessionId;
+            _db.MasterClassSignups.Remove(offered);
+            await _db.SaveChangesAsync(ct);
+            var sink = new List<PromotionResult>();
+            await PromoteNextAsync(eventId, sessionId, sink, ct);
+            return sink.Count > 0 ? sink[0] : new PromotionResult(sessionId, null, null, null);
+        }, ct);
     }
 
     /// <summary>
@@ -648,31 +741,41 @@ public sealed class MasterClassSignupService
         // `eventId == null || x.EventId == eventId` with a captured nullable does not
         // translate on relational providers — SQLite/SQL Server — only EF in-memory).
         var q = _db.MasterClassSignups
-            .Where(x => x.Status == MasterClassSignupStatus.Offered
-                        && x.OfferExpiresAt != null && x.OfferExpiresAt <= now);
+            .Where(x => x.Status == MasterClassSignupStatus.Offered && x.OfferExpiresAt != null);
         if (eventId is int evid) q = q.Where(x => x.EventId == evid);
-        var expired = await q.ToListAsync(ct);
+        // The `<= now` DateTimeOffset comparison is evaluated client-side: SQL Server
+        // translates it but the EF SQLite provider does not, and the candidate set (held
+        // offers with an expiry) is tiny, so we materialize then filter. Result is
+        // identical on every provider.
+        var expired = (await q.ToListAsync(ct)).Where(x => x.OfferExpiresAt <= now).ToList();
         if (expired.Count == 0) return Array.Empty<PromotionResult>();
 
-        var results = new List<PromotionResult>();
-        foreach (var o in expired)
+        // Flip each offer + release its old seat + promote the released class's waitlist
+        // atomically (§218 PromoteNextAsync claims each freed seat) so a concurrent booker
+        // can't take a seat freed here. Offered→Confirmed keeps the held seat (both count),
+        // so the flip itself needs no claim.
+        return await InTxAsync<IReadOnlyList<PromotionResult>>(async () =>
         {
-            // Auto-switch fallback: take the offered seat, release the old one.
-            var old = await _db.MasterClassSignups.FirstOrDefaultAsync(
-                x => x.EventId == o.EventId && x.AttendeeId == o.AttendeeId
-                     && x.Status == MasterClassSignupStatus.Confirmed, ct);
-            o.Status = MasterClassSignupStatus.Confirmed;
-            o.ConfirmedAt = now; o.OfferExpiresAt = null; o.UpdatedAt = now;
-            await _db.SaveChangesAsync(ct);
-            if (old is not null)
+            var results = new List<PromotionResult>();
+            foreach (var o in expired)
             {
-                var freedSession = old.SessionId;
-                _db.MasterClassSignups.Remove(old);
+                // Auto-switch fallback: take the offered seat, release the old one.
+                var old = await _db.MasterClassSignups.FirstOrDefaultAsync(
+                    x => x.EventId == o.EventId && x.AttendeeId == o.AttendeeId
+                         && x.Status == MasterClassSignupStatus.Confirmed, ct);
+                o.Status = MasterClassSignupStatus.Confirmed;
+                o.ConfirmedAt = now; o.OfferExpiresAt = null; o.UpdatedAt = now;
                 await _db.SaveChangesAsync(ct);
-                await PromoteNextAsync(o.EventId, freedSession, results, ct);
+                if (old is not null)
+                {
+                    var freedSession = old.SessionId;
+                    _db.MasterClassSignups.Remove(old);
+                    await _db.SaveChangesAsync(ct);
+                    await PromoteNextAsync(o.EventId, freedSession, results, ct);
+                }
             }
-        }
-        return results;
+            return results;
+        }, ct);
     }
 
     public async Task MarkPromotionNotifiedAsync(int signupId, CancellationToken ct = default)
@@ -697,14 +800,18 @@ public sealed class MasterClassSignupService
                  && x.Status == MasterClassSignupStatus.Waitlisted, ct);
 
     /// <summary>
-    /// Run <paramref name="action"/> inside a SERIALIZABLE database transaction so the
-    /// read-decide-write of a seat assignment cannot interleave with a concurrent booker
-    /// or promotion (the §93/§94 race). Honours the configured retrying execution
-    /// strategy (Azure SQL). On a NON-relational store (the EF in-memory test provider,
-    /// which has no transactions) it simply runs the action — the ordering/logic
-    /// invariants are still exercised, but real DB-level locking is a no-op there.
+    /// Run <paramref name="action"/> inside a database transaction (default READ
+    /// COMMITTED isolation — <b>no longer SERIALIZABLE</b>, REQUIREMENTS §218). The
+    /// optimistic <see cref="TryClaimSeatAsync"/> does the "is there room?" decision as a
+    /// single atomic guarded UPDATE on the capacity-bearing Session row, so we no longer
+    /// hold serializable range locks over the whole signup set. The transaction exists
+    /// only to keep a multi-statement unit (claim + insert, or free + promote) atomic and
+    /// to hold the brief single-row lock the claim takes until the matching signup write
+    /// commits. Honours the configured retrying execution strategy (Azure SQL). On a
+    /// NON-relational store (the EF in-memory test provider, which has no transactions) it
+    /// simply runs the action — the ordering/logic invariants are still exercised.
     /// </summary>
-    private async Task<T> InSerializableTxAsync<T>(Func<Task<T>> action, CancellationToken ct)
+    private async Task<T> InTxAsync<T>(Func<Task<T>> action, CancellationToken ct)
     {
         if (!_db.Database.IsRelational())
             return await action();
@@ -712,12 +819,168 @@ public sealed class MasterClassSignupService
         var strategy = _db.Database.CreateExecutionStrategy();
         return await strategy.ExecuteAsync(async () =>
         {
-            await using var tx = await _db.Database.BeginTransactionAsync(
-                System.Data.IsolationLevel.Serializable, ct);
+            await using var tx = await _db.Database.BeginTransactionAsync(ct);
             var result = await action();
             await tx.CommitAsync(ct);
             return result;
         });
+    }
+
+    /// <summary>
+    /// OPTIMISTIC atomic seat claim (REQUIREMENTS §218) — detects "class full" AT COMMIT
+    /// with NO global serializable lock. On a relational provider this is a single guarded
+    /// statement: <c>UPDATE Sessions SET UpdatedAt = now WHERE Id = … AND (Capacity IS
+    /// NULL OR (SELECT COUNT(*) of confirmed+offered signups) &lt; Capacity)</c> — the seat
+    /// count is read LIVE from the signup rows (zero counter-drift) and we "touch" the
+    /// capacity-bearing Session row so the DB evaluates the capacity test as one atomic
+    /// statement.
+    /// <para>
+    /// <b>§219 RCSI FIX.</b> On <b>SQL Server / Azure SQL (prod has
+    /// <c>READ_COMMITTED_SNAPSHOT ON</c>)</b> the capacity <c>COUNT(*)</c> is read with the
+    /// table hint <c>WITH (UPDLOCK, HOLDLOCK)</c> via raw SQL (EF cannot emit table hints).
+    /// Under RCSI a plain <c>READ COMMITTED</c> sub-select reads a <i>pre-statement
+    /// row-version snapshot</i> and misses seats other transactions just committed → the old
+    /// code OVERSOLD. <c>UPDLOCK</c> forces a <i>locking</i> read of the latest <b>committed</b>
+    /// rows (immune to the RCSI snapshot); <c>HOLDLOCK</c> makes it a key-range (serializable)
+    /// lock on the <c>(EventId, SessionId, Status)</c> index held to commit, so two concurrent
+    /// claims FOR THE SAME CLASS serialize and the blocked one re-reads the now-committed count
+    /// and correctly sees "full". No new column, no counter to drift, and only claims on the
+    /// <i>same</i> class contend (claims on different classes lock disjoint key ranges).
+    /// </para>
+    /// <list type="bullet">
+    /// <item><b>1 row affected ⇒ a seat is reserved.</b> The range/row locks are held until
+    /// the caller's transaction commits the matching signup write, so a concurrent claim on
+    /// the same class blocks, then re-evaluates the live committed count and correctly sees
+    /// "full" — never an oversell of the last seat.</item>
+    /// <item><b>0 rows affected ⇒ full ⇒ the caller waitlists.</b></item>
+    /// </list>
+    /// When <paramref name="blockWhenWaitlisted"/> is true the claim ALSO fails if anyone
+    /// is waitlisted (§94 waitlist-priority: a public booker / switch may take a seat only
+    /// when free AND nobody waits). Promotions pass it false — serving the waitlist is the
+    /// whole point. Other relational providers (the EF SQLite test provider) keep the plain
+    /// guarded <c>ExecuteUpdate</c>: SQLite has no RCSI and serializes its single write
+    /// connection, so the same logic is already correct there. On the non-relational
+    /// in-memory provider (no <c>ExecuteUpdate</c>; single-threaded tests) it falls back to
+    /// an in-process count check; the real concurrency path is the SQL Server one, validated
+    /// by the §221 prod Azure SQL load-sim.
+    /// </summary>
+    private async Task<bool> TryClaimSeatAsync(
+        int eventId, int sessionId, bool blockWhenWaitlisted, CancellationToken ct)
+    {
+        if (_db.Database.IsRelational())
+        {
+            // SQL SERVER / AZURE SQL: read the capacity COUNT under a key-range lock so it
+            // sees COMMITTED seats (RCSI-immune, §219). Status ints: Confirmed=0, Offered=2
+            // occupy a seat; Waitlisted=1. The hinted sub-select needs raw SQL — EF Core
+            // cannot attach WITH (UPDLOCK, HOLDLOCK). Runs inside the caller's transaction
+            // (InTxAsync), so the lock is held until the matching signup write commits.
+            if (_db.Database.IsSqlServer())
+            {
+                var now = DateTimeOffset.UtcNow;
+                // Call ExecuteSqlInterpolatedAsync directly per branch so each interpolated
+                // string target-types to FormattableString (a ternary would collapse them to
+                // a plain string and lose parameterization).
+                int affectedSql = blockWhenWaitlisted
+                    ? await _db.Database.ExecuteSqlInterpolatedAsync($@"
+UPDATE [Sessions] SET [UpdatedAt] = {now}
+WHERE [Id] = {sessionId} AND [EventId] = {eventId} AND [Type] = 2
+  AND ([MasterClassCapacity] IS NULL
+       OR (SELECT COUNT(*) FROM [MasterClassSignups] WITH (UPDLOCK, HOLDLOCK)
+           WHERE [SessionId] = {sessionId} AND [Status] IN (0, 2)) < [MasterClassCapacity])
+  AND NOT EXISTS (SELECT 1 FROM [MasterClassSignups] WITH (UPDLOCK, HOLDLOCK)
+                  WHERE [SessionId] = {sessionId} AND [Status] = 1)", ct)
+                    : await _db.Database.ExecuteSqlInterpolatedAsync($@"
+UPDATE [Sessions] SET [UpdatedAt] = {now}
+WHERE [Id] = {sessionId} AND [EventId] = {eventId} AND [Type] = 2
+  AND ([MasterClassCapacity] IS NULL
+       OR (SELECT COUNT(*) FROM [MasterClassSignups] WITH (UPDLOCK, HOLDLOCK)
+           WHERE [SessionId] = {sessionId} AND [Status] IN (0, 2)) < [MasterClassCapacity])", ct);
+                return affectedSql > 0;
+            }
+
+            // Other relational providers (EF SQLite tests): no table hints, no RCSI, single
+            // serialized write connection — the plain guarded conditional UPDATE is correct.
+            var q = _db.Sessions.Where(s =>
+                s.Id == sessionId && s.EventId == eventId
+                && s.Type == SessionType.MasterClass
+                && (s.MasterClassCapacity == null
+                    || _db.MasterClassSignups.Count(x =>
+                            x.SessionId == sessionId
+                            && (x.Status == MasterClassSignupStatus.Confirmed
+                                || x.Status == MasterClassSignupStatus.Offered))
+                        < s.MasterClassCapacity));
+            if (blockWhenWaitlisted)
+                q = q.Where(s => !_db.MasterClassSignups.Any(x =>
+                    x.SessionId == sessionId && x.Status == MasterClassSignupStatus.Waitlisted));
+
+            var affected = await q.ExecuteUpdateAsync(
+                set => set.SetProperty(s => s.UpdatedAt, DateTimeOffset.UtcNow), ct);
+            return affected > 0;
+        }
+
+        // In-memory fallback (no ExecuteUpdate; tests run single-threaded so a
+        // read-then-decide is sufficient — the relational path above is what real
+        // concurrency exercises, proven by the §220 relational tests).
+        var mc = await _db.Sessions.AsNoTracking().FirstOrDefaultAsync(
+            s => s.Id == sessionId && s.EventId == eventId
+                 && s.Type == SessionType.MasterClass, ct);
+        if (mc is null) return false;
+        if (mc.MasterClassCapacity is int cap && await SeatsTakenAsync(eventId, sessionId, ct) >= cap)
+            return false;
+        if (blockWhenWaitlisted && await WaitlistCountAsync(eventId, sessionId, ct) > 0)
+            return false;
+        return true;
+    }
+
+    /// <summary>
+    /// §234 — LOCKING re-read of one attendee's signup rows, used to RE-VALIDATE the
+    /// one-confirmed-seat invariant INSIDE the claim's locked region (after
+    /// <see cref="TryClaimSeatAsync"/> succeeded, before the signup row is written).
+    /// On <b>SQL Server / Azure SQL</b> the rows are read <c>WITH (UPDLOCK, HOLDLOCK)</c>:
+    /// UPDLOCK forces a locking read of the latest COMMITTED rows (immune to the RCSI
+    /// pre-statement snapshot a plain READ COMMITTED select would use) and serializes
+    /// against a concurrent §93 promotion updating the same attendee's rows; HOLDLOCK
+    /// key-range-locks the attendee's slice of the (EventId, AttendeeId) index until the
+    /// caller's transaction commits, so a promotion can't confirm this attendee elsewhere
+    /// between this check and our insert. Other providers (the EF SQLite / in-memory test
+    /// providers) have no RCSI — a plain fresh re-read is already the latest state there.
+    /// </summary>
+    private async Task<IReadOnlyList<MasterClassSignup>> ReadAttendeeSignupsLockedAsync(
+        int eventId, int attendeeId, CancellationToken ct)
+    {
+        if (_db.Database.IsRelational() && _db.Database.IsSqlServer())
+        {
+            return await _db.MasterClassSignups
+                .FromSqlInterpolated($@"
+SELECT * FROM [MasterClassSignups] WITH (UPDLOCK, HOLDLOCK)
+WHERE [EventId] = {eventId} AND [AttendeeId] = {attendeeId}")
+                .AsNoTracking()
+                .ToListAsync(ct);
+        }
+
+        // SQLite (serialized single write connection) / in-memory: a fresh re-read IS the
+        // latest committed state — same logic, no table hints available or needed.
+        return await _db.MasterClassSignups.AsNoTracking()
+            .Where(x => x.EventId == eventId && x.AttendeeId == attendeeId)
+            .ToListAsync(ct);
+    }
+
+    /// <summary>
+    /// Read-only "does a public booker have room here right now?" (free seat AND no
+    /// waitlist, §94). Used only to choose the right MESSAGE for an attendee who already
+    /// holds a confirmed seat (give-up-first vs join-the-waitlist) — never to grant a
+    /// seat, so it needs no atomicity (the actual grant always goes through
+    /// <see cref="TryClaimSeatAsync"/>).
+    /// </summary>
+    private async Task<bool> HasPublicRoomAsync(int eventId, int sessionId, CancellationToken ct)
+    {
+        var mc = await _db.Sessions.AsNoTracking().FirstOrDefaultAsync(
+            s => s.Id == sessionId && s.EventId == eventId
+                 && s.Type == SessionType.MasterClass, ct);
+        if (mc is null) return false;
+        if (mc.MasterClassCapacity is int cap && await SeatsTakenAsync(eventId, sessionId, ct) >= cap)
+            return false;
+        return await WaitlistCountAsync(eventId, sessionId, ct) == 0;
     }
 
     /// <summary>
@@ -729,24 +992,36 @@ public sealed class MasterClassSignupService
     /// THERE, so we cascade into that class's waitlist (chain promotions until no more
     /// waitlisted person can be promoted). Only promotes when there is a free seat. Every
     /// actual promotion in the chain is appended to <paramref name="sink"/> (so the caller
-    /// can notify each moved attendee). MUST run inside the caller's serializable
-    /// transaction (the entry points wrap it; this method never opens its own).
+    /// can notify each moved attendee). MUST run inside the caller's transaction (the entry
+    /// points wrap it via <see cref="InTxAsync"/>; this method never opens its own).
+    /// <para>
+    /// §218 race-safety: the free seat is reserved with the SAME optimistic atomic claim
+    /// (<see cref="TryClaimSeatAsync"/>, waitlist-priority OFF — serving the waitlist is the
+    /// point) the public path uses, so a concurrent give-up/promote can never double-fill a
+    /// single seat. We claim FIRST, then pick the current head of the waitlist — so two
+    /// concurrent promotions each grab a DISTINCT seat and promote DISTINCT attendees (no
+    /// double-promote), and the claim's row lock blocks a racing public booker.
+    /// </para>
     /// </summary>
     private async Task<PromotionResult?> PromoteNextAsync(
         int eventId, int sessionId, List<PromotionResult> sink, CancellationToken ct)
     {
-        var mc = await _db.Sessions.AsNoTracking()
-            .FirstOrDefaultAsync(s => s.Id == sessionId && s.EventId == eventId, ct);
-        if (mc is null) return null;
-        var taken = await SeatsTakenAsync(eventId, sessionId, ct);
-        if (mc.MasterClassCapacity is int cap && taken >= cap) return null; // no free seat
+        // Reserve a seat atomically BEFORE choosing who fills it (so concurrent promotions
+        // can't both pick the same head and consume two seats for one person). 0 rows ⇒ no
+        // free seat (full / no such class) ⇒ nothing to promote.
+        if (!await TryClaimSeatAsync(eventId, sessionId, blockWhenWaitlisted: false, ct))
+            return null;
 
-        // Highest up the waitlist (FIFO). They are taken regardless of whether they hold
-        // a seat elsewhere — that old seat is auto-cancelled below (§93, no choose step).
-        var first = await _db.MasterClassSignups
+        // Highest up the waitlist (FIFO by CreatedAt), read AFTER the claim so a racing
+        // promotion that already confirmed the previous head sees the next one. They are
+        // taken regardless of any seat held elsewhere — that old seat is auto-cancelled
+        // below (§93). The CreatedAt ordering is done client-side (the EF SQLite provider
+        // can't ORDER BY a DateTimeOffset; SQL Server can) over the bounded waitlist set.
+        var waiting = await _db.MasterClassSignups
             .Where(x => x.EventId == eventId && x.SessionId == sessionId
                         && x.Status == MasterClassSignupStatus.Waitlisted)
-            .OrderBy(x => x.CreatedAt).FirstOrDefaultAsync(ct);
+            .ToListAsync(ct);
+        var first = waiting.OrderBy(x => x.CreatedAt).FirstOrDefault();
         if (first is null) return new PromotionResult(sessionId, null, null, null); // nobody waiting
 
         var now = DateTimeOffset.UtcNow;
@@ -756,6 +1031,17 @@ public sealed class MasterClassSignupService
             x => x.EventId == eventId && x.AttendeeId == first.AttendeeId
                  && x.Status == MasterClassSignupStatus.Confirmed && x.SessionId != sessionId, ct);
 
+        // §386: read the released class's TITLE before the row goes, so the promotion mail can name
+        // what was traded. Afterwards there is nothing left to look it up from.
+        string? releasedTitle = null;
+        if (old is not null)
+        {
+            releasedTitle = await _db.Sessions.AsNoTracking()
+                .Where(s => s.Id == old.SessionId)
+                .Select(s => s.Title)
+                .FirstOrDefaultAsync(ct);
+        }
+
         first.Status = MasterClassSignupStatus.Confirmed;
         first.ConfirmedAt = now;
         first.OfferExpiresAt = null;
@@ -763,7 +1049,8 @@ public sealed class MasterClassSignupService
         first.UpdatedAt = now;
         await _db.SaveChangesAsync(ct);
 
-        var result = new PromotionResult(sessionId, first.Id, first.AttendeeId, PromotionKind.Confirmed);
+        var result = new PromotionResult(
+            sessionId, first.Id, first.AttendeeId, PromotionKind.Confirmed, releasedTitle);
         sink.Add(result);
 
         if (old is not null)

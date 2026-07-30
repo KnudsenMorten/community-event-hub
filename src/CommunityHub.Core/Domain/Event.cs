@@ -54,14 +54,31 @@ public class Event
     public DateOnly? LockDate { get; set; }
 
     /// <summary>
-    /// Organizer master switch for calendar sync (REQUIREMENTS §5). When false,
-    /// the per-user iCal feed (<c>GET /cal/{token}.ics</c> and
-    /// <c>/calendar/{token}.ics</c>) returns 404, the hub's "Add to my calendar"
-    /// card is hidden, and no .ics invite is attached to activation emails — for
-    /// the whole edition. Defaults <b>true</b> (sync on) so existing editions keep
-    /// working; an organizer can disable it on <c>/Organizer/CalendarSettings</c>.
+    /// Organizer master switch for calendar INVITATIONS (REQUIREMENTS §193). When
+    /// false, the hub's "Add Reminder" / "Email me a calendar invite" actions send
+    /// nothing for the whole edition (<see cref="CommunityHub.Core.Email.CalendarInviteEmailService"/>
+    /// short-circuits). Defaults <b>true</b> so existing editions keep working; an
+    /// organizer can disable it on <c>/Organizer/CalendarSettings</c>. (§201: the old
+    /// per-user iCal feed + "Add to my calendar" subscription this once gated were
+    /// removed.)
     /// </summary>
     public bool CalendarSyncEnabled { get; set; } = true;
+
+    /// <summary>
+    /// Organizer switch for the AUTOMATIC calendar invitations (REQUIREMENTS §257).
+    /// When <b>false</b> (the default), the hub NEVER auto-pushes a
+    /// <c>METHOD:REQUEST</c> calendar invite into an inbox on a form submit / hotel
+    /// placement / master-class selection — the four automatic invites (Dinner, Hotel,
+    /// Hotel-placement, Master-Class) are suppressed and the confirmation e-mail instead
+    /// carries a manual &ldquo;Add to calendar&rdquo; Google/Outlook link the recipient
+    /// can click. When an organizer turns it <b>on</b>, those four flows attach the
+    /// invite as before. This is DISTINCT from <see cref="CalendarSyncEnabled"/>, which
+    /// governs the user-initiated &ldquo;Email me a calendar invite&rdquo; actions and
+    /// the manual add-to-calendar links: the operator wanted the manual option to stay
+    /// available while the automatic push is off, so the two switches are decoupled.
+    /// Defaults <b>false</b> per the operator directive 2026-07-10.
+    /// </summary>
+    public bool AutoCalendarInvitesEnabled { get; set; }
 
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 

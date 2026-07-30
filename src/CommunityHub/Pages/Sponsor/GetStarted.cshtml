@@ -5,8 +5,11 @@
     ViewData["Title"] = Localizer["SponsorWiz.Title"].Value;
     string StepTitle(string key) => Localizer["SponsorWiz.Step." + key].Value;
     string StepDesc(string key) => Localizer["SponsorWiz.Step." + key + ".Desc"].Value;
-    // Each sponsor step deep-links into a SECTION of the single Company Details page.
-    string StepUrl(string anchor) => Url.Page("/Sponsor/CompanyDetails") + "#" + anchor;
+    // Each sponsor step deep-links into a SECTION of the single Company Details page —
+    // except the §228 party group sign-up, which lives on its own /Party page.
+    string StepUrl(string anchor) => anchor == "party"
+        ? Url.Page("/Party") ?? "/Party"
+        : Url.Page("/Sponsor/CompanyDetails") + "#" + anchor;
 }
 
 @if (Model.AccessDenied)

@@ -131,7 +131,7 @@ public sealed class LiveEconomicContactAdminClient : IEconomicContactAdminClient
         var req = Req(HttpMethod.Post, $"{Base}/customers/{customerNumber}/contacts");
         req.Content = JsonContent.Create(body);
         using var resp = await _http.SendAsync(req, ct);
-        resp.EnsureSuccessStatusCode();
+        await ThrowIfFailedAsync(resp, $"create a contact on customer {customerNumber}", ct);
         using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync(ct));
         return GetInt(doc.RootElement, "customerContactNumber");
     }
@@ -140,19 +140,50 @@ public sealed class LiveEconomicContactAdminClient : IEconomicContactAdminClient
         int customerNumber, int contactNumber, EconomicContactInput input, CancellationToken ct = default)
     {
         EnsureWritable();
-        var body = new
+
+        // 🔒 §643 — OMIT empty fields, NEVER send them as null. This built an anonymous object with
+        // `email = ... ? null : ...`, which puts `"email": null` on the wire — and e-conomic answers
+        // 400. CreateContactAsync above already knew this ("OMITTED rather than sent as null —
+        // matching the proven webhook integration"); the lesson never reached the UPDATE path, so
+        // editing a contact that had a blank phone or notes 500'd the Manage-contacts page.
+        var body = new Dictionary<string, object>
         {
-            customer = new { customerNumber },
-            customerContactNumber = contactNumber,
-            name = input.Name,
-            email = string.IsNullOrWhiteSpace(input.Email) ? null : input.Email,
-            phone = string.IsNullOrWhiteSpace(input.Phone) ? null : input.Phone,
-            notes = string.IsNullOrWhiteSpace(input.Notes) ? null : input.Notes,
+            ["customer"] = new { customerNumber },
+            ["customerContactNumber"] = contactNumber,
+            ["name"] = input.Name,
         };
+        if (!string.IsNullOrWhiteSpace(input.Email)) body["email"] = input.Email!;
+        if (!string.IsNullOrWhiteSpace(input.Phone)) body["phone"] = input.Phone!;
+        if (!string.IsNullOrWhiteSpace(input.Notes)) body["notes"] = input.Notes!;
+
         var req = Req(HttpMethod.Put, $"{Base}/customers/{customerNumber}/contacts/{contactNumber}");
         req.Content = JsonContent.Create(body);
         using var resp = await _http.SendAsync(req, ct);
-        resp.EnsureSuccessStatusCode();
+        await ThrowIfFailedAsync(resp, $"update contact {contactNumber} on customer {customerNumber}", ct);
+    }
+
+    /// <summary>
+    /// §643 — turn a failed e-conomic call into an error that CARRIES ITS REASON.
+    /// </summary>
+    /// <remarks>
+    /// <c>EnsureSuccessStatusCode()</c> throws the response body away, and e-conomic puts the actual
+    /// complaint there — "Bad Request" alone tells the operator nothing. This is §524's lesson
+    /// (<i>read the body</i>) applied to the ERP client: without it, all anyone could learn from a
+    /// 400 was that something, somewhere, had been rejected.
+    /// </remarks>
+    private static async Task ThrowIfFailedAsync(
+        HttpResponseMessage resp, string what, CancellationToken ct)
+    {
+        if (resp.IsSuccessStatusCode) return;
+
+        string detail;
+        try { detail = (await resp.Content.ReadAsStringAsync(ct)).Trim(); }
+        catch { detail = string.Empty; }
+        if (detail.Length > 600) detail = detail[..600] + "…";
+
+        throw new EconomicApiException(
+            $"e-conomic refused to {what}: HTTP {(int)resp.StatusCode} {resp.ReasonPhrase}."
+            + (detail.Length > 0 ? $" It said: {detail}" : string.Empty));
     }
 
     public async Task DeleteContactAsync(
@@ -161,7 +192,7 @@ public sealed class LiveEconomicContactAdminClient : IEconomicContactAdminClient
         EnsureWritable();
         using var resp = await _http.SendAsync(
             Req(HttpMethod.Delete, $"{Base}/customers/{customerNumber}/contacts/{contactNumber}"), ct);
-        resp.EnsureSuccessStatusCode();
+        await ThrowIfFailedAsync(resp, $"delete contact {contactNumber} on customer {customerNumber}", ct);
     }
 
     // --- helpers -------------------------------------------------------------

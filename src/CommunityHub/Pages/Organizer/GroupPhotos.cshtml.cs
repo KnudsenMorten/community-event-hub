@@ -192,7 +192,11 @@ public class GroupPhotosModel : PageModel
             startUtc: startUtc,
             endUtc: endUtc,
             organizerEmail: me.Email,
-            organizerName: me.FullName);
+            organizerName: me.FullName,
+            // §234: a real invite needs the recipient as ATTENDEE or clients won't
+            // offer accept/decline.
+            attendeeEmail: row.ContactEmail?.Trim(),
+            attendeeName: row.ContactName);
 
         // The calendar invite goes to the APPOINTED COMPANY LEAD ONLY (operator
         // 2026-06-22). InternalParticipants is reference-only and not invited.
@@ -204,8 +208,11 @@ public class GroupPhotosModel : PageModel
 
         bool sent;
         // Ring-governed by the group-photo-invites feature (operator 2026-06-22).
+        // 🔒 §707.2b — the key was already the FIRST argument (`Category`), not `TemplateName`, so the
+        // gate saw no mail identity and used the feature ring. Position, not name.
         using (_context?.Set(new EmailContext(
             "group-photo-invite", row.EventId, null, row.ContactName,
+            TemplateName: "group-photo-invite",
             FeatureKey: "group-photo-invites")))
         {
             try

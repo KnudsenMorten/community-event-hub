@@ -75,14 +75,24 @@ public static class QuizLeaderboard
     /// <summary>
     /// Privacy-safe player name (REQUIREMENTS §171): first name + last-name initial
     /// (e.g. "Alice B."). Never the email. Falls back to "Player" when no name.
+    ///
+    /// <para>§173g: the last-name initial is taken from the first LETTER/DIGIT of the
+    /// last token — a blank, whitespace, or punctuation-only last name (e.g. "MOK ."
+    /// or "MOK (") yields just the first name ("MOK"), never a stray "(" or a dangling
+    /// "." . The " (you)" suffix is added by the view, exactly once, so the result here
+    /// is always a clean, balanced base name.</para>
     /// </summary>
     public static string DisplayName(string? fullName)
     {
         if (string.IsNullOrWhiteSpace(fullName)) return "Player";
         var parts = fullName.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        if (parts.Length == 1) return parts[0];
+        var first = parts[0];
+        if (parts.Length == 1) return first;
+        // Use the first real letter/digit of the last token as the initial; ignore a
+        // punctuation-only / blank last name so we never emit "First (." or "First .".
         var last = parts[^1];
-        var initial = char.ToUpperInvariant(last[0]);
-        return $"{parts[0]} {initial}.";
+        var initialChar = last.FirstOrDefault(char.IsLetterOrDigit);
+        if (initialChar == '\0') return first;
+        return $"{first} {char.ToUpperInvariant(initialChar)}.";
     }
 }

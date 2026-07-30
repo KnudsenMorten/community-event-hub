@@ -25,11 +25,16 @@ public class GetStartedModel : PageModel
 {
     private readonly ICurrentParticipantAccessor _participant;
     private readonly RoleWizardService _wizard;
+    private readonly AttendeeWizardService _attendeeWizard;
 
-    public GetStartedModel(ICurrentParticipantAccessor participant, RoleWizardService wizard)
+    public GetStartedModel(
+        ICurrentParticipantAccessor participant,
+        RoleWizardService wizard,
+        AttendeeWizardService attendeeWizard)
     {
         _participant = participant;
         _wizard = wizard;
+        _attendeeWizard = attendeeWizard;
     }
 
     public bool AccessDenied { get; private set; }
@@ -44,7 +49,15 @@ public class GetStartedModel : PageModel
         if (me.Role == ParticipantRole.Speaker) return RedirectToPage("/Forms/SpeakerWizard");
         if (me.Role == ParticipantRole.Sponsor) return RedirectToPage("/Sponsor/GetStarted");
 
-        // A role this generic wizard does not serve (e.g. Attendee) sees the access note.
+        // §207/§208: attendees get their own ticket-driven stepper (Master Class + Party for
+        // 2-day; Party for 1-day), rendered through the SAME shared stepper.
+        if (me.Role == ParticipantRole.Attendee)
+        {
+            View = await _attendeeWizard.BuildAsync(me.EventId, me.ParticipantId, ct);
+            return Page();
+        }
+
+        // A role this generic wizard does not serve sees the access note.
         if (!RoleWizardService.Handles(me.Role)) { AccessDenied = true; return Page(); }
 
         View = await _wizard.BuildAsync(me.EventId, me.ParticipantId, ct);

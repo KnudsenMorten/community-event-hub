@@ -62,8 +62,11 @@ public class AllocationScenariosModel : PageModel
     public List<SelectListItem> PersonOptions { get; private set; } = new();
     public int MyParticipantId { get; private set; }
 
+    // §337: carry the acting-as marker into the service (see BucketAllocation). This page
+    // already guards every write, so the flag is always false here today — populated so the
+    // ActorContext never lies about the session it came from.
     private VolunteerStructureService.ActorContext Actor(CurrentParticipant me)
-        => new(me.ParticipantId, me.Email, me.Role, me.EventId);
+        => new(me.ParticipantId, me.Email, me.Role, me.EventId, me.IsActingAs);
 
     public async Task<IActionResult> OnGetAsync(CancellationToken ct)
     {
@@ -81,7 +84,7 @@ public class AllocationScenariosModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+        if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
         try
         {
             var id = await _scenarios.CreateAsync(Actor(me), NewKind, NewTitle ?? "Untitled scenario", ct: ct);
@@ -94,7 +97,7 @@ public class AllocationScenariosModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+        if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
         try
         {
             var id = await _scenarios.SeedDropOutBackfillAsync(Actor(me), DroppedPersonId, ct);
@@ -109,7 +112,7 @@ public class AllocationScenariosModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+        if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
         try
         {
             var role = await _db.Participants.Where(p => p.Id == MovePersonId)
@@ -126,7 +129,7 @@ public class AllocationScenariosModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+        if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
         try
         {
             await _scenarios.AddTaskMoveAsync(Actor(me), Id!.Value, me.ParticipantId, MoveTaskId,
@@ -140,7 +143,7 @@ public class AllocationScenariosModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+        if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
         try { await _scenarios.RemoveMoveAsync(Actor(me), Id!.Value, moveId, ct); }
         catch (Exception ex) when (ex is VolunteerValidationException or VolunteerAccessDeniedException) { return RedirectToPage(new { id = Id, Err = ex.Message }); }
         return RedirectToPage(new { id = Id, Msg = "Move removed." });
@@ -150,7 +153,7 @@ public class AllocationScenariosModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+        if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
         try
         {
             var r = await _scenarios.CommitAsync(Actor(me), Id!.Value, AckOverCapacity, ct);
@@ -164,7 +167,7 @@ public class AllocationScenariosModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+        if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
         try { await _scenarios.DiscardAsync(Actor(me), Id!.Value, ct); }
         catch (Exception ex) when (ex is VolunteerValidationException or VolunteerAccessDeniedException) { return RedirectToPage(new { id = Id, Err = ex.Message }); }
         return RedirectToPage(new { Msg = "Scenario discarded." });

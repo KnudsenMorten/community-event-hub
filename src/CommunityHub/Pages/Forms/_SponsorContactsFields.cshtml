@@ -1,0 +1,66 @@
+@model CommunityHub.Forms.Steps.SponsorContactsModel
+@*
+    §297 — fields-only partial for the inline sponsor Contacts step (Contract Signers & Event
+    Coordinators, mastered in e-conomic). Lists the current contacts + a fail-soft inline add.
+*@
+<p style="font-size:13.5px;color:#4b5563;margin-top:0;">
+    These are your company's contacts (contract signers &amp; event coordinators). You can add one
+    here; edit or remove them on the Company Details page.
+</p>
+
+@if (!Model.ErpAvailable)
+{
+    <p class="info" style="background:#eef6ff;padding:10px 14px;border-radius:8px;font-size:14px;">
+        The contacts backend isn't reachable for your company right now — you can continue and add your
+        contacts later from the Company Details page.
+    </p>
+}
+else
+{
+    @if (Model.CurrentContacts.Count > 0)
+    {
+        <h3 style="color:var(--el-darkblue);margin-top:14px;font-size:15px;">Current contacts (@Model.CurrentContacts.Count)</h3>
+        <ul style="list-style:none;padding:0;margin:0 0 10px;display:flex;flex-direction:column;gap:6px;">
+            @foreach (var c in Model.CurrentContacts)
+            {
+                @* §472 — show the two roles as labelled TICKS. "Role:1,2" is e-conomic's internal
+                   id list (§7c) and leaked straight onto a sponsor-facing page with nothing to
+                   explain it. DISPLAY-ONLY on purpose: the ERP owns these, mirrored read-only, so
+                   they must NOT look like checkboxes the sponsor can change here — editing happens
+                   on Company Details, which writes back to e-conomic. *@
+                <li style="border:1px solid #e6eaf2;border-radius:8px;padding:8px 12px;font-size:14px;">
+                    ✓ <strong>@c.Name</strong>
+                    <span style="color:#6b7280;">@(string.IsNullOrEmpty(c.Email) ? "" : $"<{c.Email}>")</span>
+                    <span style="display:inline-flex;gap:12px;margin-left:6px;font-size:13px;color:#334155;">
+                        <span>@(c.IsSigner ? "☑" : "☐") Signer</span>
+                        <span>@(c.IsEventCoordinator ? "☑" : "☐") Event coordinator</span>
+                    </span>
+                </li>
+            }
+        </ul>
+    }
+    else
+    {
+        <p style="color:#b45309;font-size:13px;margin:4px 0 10px;">No contacts yet — add one below.</p>
+    }
+
+    @* §535 — this is a SECTION HEADING for the fields below it, but sitting tight under the contact
+       list in link-blue it read as an action on that list: the operator tried to click it
+       ("button is dead - cannot click on it … i thought it was a button"). More air above, and a
+       hairline under it, so it visibly introduces the form rather than the list. *@
+    <h3 style="color:var(--el-darkblue);margin:30px 0 6px;font-size:15px;
+               border-bottom:1px solid #e5e7eb;padding-bottom:6px;">Add a contact</h3>
+    <label asp-for="NewName">Name</label>
+    <input type="text" asp-for="NewName" placeholder="Full name" />
+    <label asp-for="NewEmail">Email</label>
+    <input type="email" inputmode="email" asp-for="NewEmail" placeholder="name@@company.com" />
+    <label asp-for="NewPhone">Phone <span style="color:#6b7280;font-weight:400;">(optional)</span></label>
+    <input type="text" asp-for="NewPhone" />
+    <label style="display:flex;gap:8px;align-items:center;font-weight:400;margin-top:8px;">
+        <input type="checkbox" asp-for="NewSigner" style="width:auto;" /> Contract signer
+    </label>
+    <label style="display:flex;gap:8px;align-items:center;font-weight:400;">
+        <input type="checkbox" asp-for="NewCoordinator" style="width:auto;" /> Event coordinator
+    </label>
+    <p style="color:#6b7280;font-size:12px;margin:6px 0 0;">Leave the name blank to skip adding a contact.</p>
+}

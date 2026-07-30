@@ -7,10 +7,14 @@ using Microsoft.Extensions.Logging;
 namespace CommunityHub.Jobs;
 
 /// <summary>
-/// Sends the opt-in "~1 month before" Master Class calendar reminder (REQUIREMENTS §6):
-/// a confirmed attendee who chose it gets an email carrying the master-class .ics when
-/// the class is within the next ~month. Ring-gated + idempotent (MonthReminderSentAt).
-/// Runs daily at 08:00 UTC.
+/// RETIRED (§244, operator 2026-07-07: "drop this reminder 1 month before, it's too
+/// confusing"). This job used to send the opt-in "~1 month before" Master Class calendar
+/// reminder (REQUIREMENTS §6) daily at 08:00 UTC. The <c>[Function]</c> timer trigger has
+/// been REMOVED so the Functions host never discovers or schedules it — the class is kept
+/// compiling (and manually invokable) only so the send path and its tests remain intact.
+/// The <c>masterclass-month-reminder</c> catalog entry was removed too; the template file
+/// stays on disk for historic re-renders. The confirmed-seat email already carries the
+/// full-day calendar invite (§210), which is the one calendar touchpoint attendees keep.
 /// </summary>
 public sealed class MasterClassMonthReminderJob
 {
@@ -27,8 +31,9 @@ public sealed class MasterClassMonthReminderJob
         _svc = svc; _email = email; _config = config; _clock = clock; _log = log;
     }
 
-    [Function("MasterClassMonthReminderJob")]
-    public async Task Run([TimerTrigger("0 0 8 * * *")] TimerInfo timer, CancellationToken ct)
+    // §244: NO [Function]/[TimerTrigger] attribute — the job is retired and must never
+    // be scheduled. (Was: daily 08:00 UTC, "0 0 8 * * *".)
+    public async Task Run(TimerInfo timer, CancellationToken ct)
     {
         var due = await _svc.DueMonthReminderSignupIdsAsync(_clock.GetUtcNow(), windowDays: 31, ct: ct);
         if (due.Count == 0) return;

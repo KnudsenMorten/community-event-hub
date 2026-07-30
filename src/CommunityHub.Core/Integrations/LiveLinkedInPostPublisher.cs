@@ -25,16 +25,27 @@ public sealed class LiveLinkedInPostPublisher : ILinkedInPostPublisher
     private readonly HttpClient _http;
     private readonly LinkedInOptions _options;
     private readonly ILogger<LiveLinkedInPostPublisher> _log;
+    private readonly LinkedInTokenStore? _tokenStore;
 
     public LiveLinkedInPostPublisher(
-        HttpClient http, LinkedInOptions options, ILogger<LiveLinkedInPostPublisher> log)
+        HttpClient http, LinkedInOptions options, ILogger<LiveLinkedInPostPublisher> log,
+        // §324: optional DB token source — the /Organizer/LinkedInConnect-minted token
+        // wins over the static/refresh-triplet options.
+        LinkedInTokenStore? tokenStore = null,
+        // §340-H: the environment-level external-write switch. Optional so existing
+        // constructions/tests are unchanged (null ⇒ allow); DI supplies the real guard.
+        IExternalWriteGuard? writes = null)
     {
         _http = http;
         _options = options;
         _log = log;
+        _tokenStore = tokenStore;
+        _writes = writes ?? new AllowAllExternalWrites();
     }
 
-    public bool CanPublish => _options.Enabled && _options.HasCredentials;
+    private readonly IExternalWriteGuard _writes;
+
+    public bool CanPublish => _options.Enabled && (_options.HasCredentials || _tokenStore is not null);
 
     public async Task<LinkedInPublishResult> PublishAsync(
         LinkedInPost post, CancellationToken ct = default)
@@ -42,6 +53,16 @@ public sealed class LiveLinkedInPostPublisher : ILinkedInPostPublisher
         if (!CanPublish)
             return new LinkedInPublishResult(false, null,
                 "LinkedIn publisher is not configured (disabled or no token).");
+
+        // §340-H: publishing to LinkedIn is a PUBLIC, irreversible act (a post can be
+        // deleted afterwards but never unsent), so it belongs under the same environment
+        // switch as the other third-party writes. Returns a SOFT failure, matching the
+        // not-configured line above: SoMeDispatchService leaves such a post Queued rather
+        // than marking it Failed, so it publishes by itself once the switch is on.
+        if (!await _writes.AllowAsync("LinkedIn", nameof(PublishAsync), ct))
+            return new LinkedInPublishResult(false, null,
+                "External writes are disabled for this host (Integrations:AllowExternalWrites "
+                + "— §340-H); the post stays queued and nothing was published.");
 
         var orgUrn = ToOrganizationUrn(post.OrganizationUrnOrId);
         if (orgUrn is null)
@@ -59,18 +80,49 @@ public sealed class LiveLinkedInPostPublisher : ILinkedInPostPublisher
         }
 
         string token;
-        try { token = await GetAccessTokenAsync(ct); }
-        catch (Exception ex)
+        if (!string.IsNullOrWhiteSpace(post.AccessTokenOverride))
         {
-            _log.LogWarning(ex, "LinkedIn token acquisition failed.");
-            return new LinkedInPublishResult(false, null, $"LinkedIn token error: {ex.Message}");
+            // §324b: a MEMBER post — the speaker's own token, author = their person urn.
+            token = post.AccessTokenOverride!;
+        }
+        else
+        {
+            try { token = await GetAccessTokenAsync(ct); }
+            catch (Exception ex)
+            {
+                _log.LogWarning(ex, "LinkedIn token acquisition failed.");
+                return new LinkedInPublishResult(false, null, $"LinkedIn token error: {ex.Message}");
+            }
         }
 
-        // LinkedIn Posts API payload (text post to the org's main feed, published).
+        // §324: NATIVE IMAGE upload (the operator's requirement: "png file upload with
+        // text incl url") — initializeUpload → binary PUT → reference the image urn in
+        // content.media. An upload failure fails the publish honestly (never a
+        // text-only post when an image was requested).
+        string? imageUrn = null;
+        if (post.ImageBytes is { Length: > 0 })
+        {
+            try
+            {
+                imageUrn = await UploadImageAsync(token, orgUrn, post.ImageBytes, ct);
+            }
+            catch (Exception ex)
+            {
+                _log.LogWarning(ex, "LinkedIn image upload failed.");
+                return new LinkedInPublishResult(false, null, $"LinkedIn image upload failed: {ex.Message}");
+            }
+        }
+
+        _log.LogInformation(
+            "LinkedIn publish: author={Author}, chars={Chars}, image={HasImage}",
+            orgUrn, post.Text?.Length ?? 0, imageUrn is not null);
+
+        // LinkedIn Posts API payload (org main feed, published; native image when uploaded).
+        // §326k: commentary MUST be little-text-format escaped — see EscapeCommentary.
         var payload = new Dictionary<string, object?>
         {
             ["author"] = orgUrn,
-            ["commentary"] = post.Text,
+            ["commentary"] = EscapeCommentary(post.Text ?? string.Empty),
             ["visibility"] = "PUBLIC",
             ["distribution"] = new Dictionary<string, object?>
             {
@@ -81,6 +133,17 @@ public sealed class LiveLinkedInPostPublisher : ILinkedInPostPublisher
             ["lifecycleState"] = "PUBLISHED",
             ["isReshareDisabledByAuthor"] = false,
         };
+        if (imageUrn is not null)
+        {
+            payload["content"] = new Dictionary<string, object?>
+            {
+                ["media"] = new Dictionary<string, object?>
+                {
+                    ["id"] = imageUrn,
+                    ["altText"] = post.ImageAltText ?? "Session graphic",
+                },
+            };
+        }
 
         using var req = new HttpRequestMessage(HttpMethod.Post, $"{_options.ApiBaseUrl.TrimEnd('/')}/rest/posts");
         req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
@@ -114,8 +177,60 @@ public sealed class LiveLinkedInPostPublisher : ILinkedInPostPublisher
         }
     }
 
+    /// <summary>
+    /// §324: LinkedIn's two-step native image upload. POST /rest/images?action=
+    /// initializeUpload (owner = the posting author) returns an uploadUrl + image urn;
+    /// the raw bytes are PUT to the uploadUrl; the urn goes into content.media.id.
+    /// </summary>
+    private async Task<string> UploadImageAsync(
+        string token, string ownerUrn, byte[] bytes, CancellationToken ct)
+    {
+        using var initReq = new HttpRequestMessage(
+            HttpMethod.Post, $"{_options.ApiBaseUrl.TrimEnd('/')}/rest/images?action=initializeUpload");
+        initReq.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        initReq.Headers.TryAddWithoutValidation("LinkedIn-Version", _options.ApiVersion);
+        initReq.Headers.TryAddWithoutValidation("X-Restli-Protocol-Version", "2.0.0");
+        initReq.Content = new StringContent(
+            JsonSerializer.Serialize(new { initializeUploadRequest = new { owner = ownerUrn } }),
+            new UTF8Encoding(false), "application/json");
+        using var initResp = await _http.SendAsync(initReq, ct);
+        var initBody = await initResp.Content.ReadAsStringAsync(ct);
+        if (!initResp.IsSuccessStatusCode)
+            throw new InvalidOperationException(
+                $"initializeUpload returned {(int)initResp.StatusCode}: {Trim(initBody, 300)}");
+        using var doc = JsonDocument.Parse(initBody);
+        var value = doc.RootElement.GetProperty("value");
+        var uploadUrl = value.GetProperty("uploadUrl").GetString()
+            ?? throw new InvalidOperationException("initializeUpload returned no uploadUrl.");
+        var imageUrn = value.GetProperty("image").GetString()
+            ?? throw new InvalidOperationException("initializeUpload returned no image urn.");
+
+        using var putReq = new HttpRequestMessage(HttpMethod.Put, uploadUrl)
+        {
+            Content = new ByteArrayContent(bytes),
+        };
+        putReq.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        putReq.Content.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
+        using var putResp = await _http.SendAsync(putReq, ct);
+        if (!putResp.IsSuccessStatusCode)
+            throw new InvalidOperationException($"image binary PUT returned {(int)putResp.StatusCode}.");
+
+        return imageUrn;
+    }
+
     private async Task<string> GetAccessTokenAsync(CancellationToken ct)
     {
+        // §324: a connected (DB-minted) org token wins; then the static token; then
+        // the refresh triplet.
+        if (_tokenStore is not null)
+        {
+            var stored = await _tokenStore.GetOrgAccessTokenAsync(ct);
+            if (!string.IsNullOrWhiteSpace(stored)) return stored!;
+            if (!_options.HasCredentials)
+                throw new InvalidOperationException(
+                    "No LinkedIn token connected yet — an organizer must run Connect LinkedIn "
+                    + "(/Organizer/LinkedInConnect) once.");
+        }
         // Static token wins when present; else refresh via the OAuth triplet.
         if (!string.IsNullOrWhiteSpace(_options.AccessToken)) return _options.AccessToken!;
 
@@ -145,6 +260,8 @@ public sealed class LiveLinkedInPostPublisher : ILinkedInPostPublisher
         if (string.IsNullOrWhiteSpace(value)) return null;
         var s = value.Trim();
         if (s.StartsWith("urn:li:organization:", StringComparison.OrdinalIgnoreCase)) return s;
+        // §324b: a MEMBER post authors as the person urn directly.
+        if (s.StartsWith("urn:li:person:", StringComparison.OrdinalIgnoreCase)) return s;
         if (s.All(char.IsDigit)) return $"urn:li:organization:{s}";
 
         // A company URL like .../company/123456 — take the trailing numeric segment.
@@ -153,6 +270,30 @@ public sealed class LiveLinkedInPostPublisher : ILinkedInPostPublisher
             return $"urn:li:organization:{tail}";
 
         return null;
+    }
+
+    /// <summary>
+    /// §326k (operator live test 2026-07-25: "only half the text comes over"): the Posts
+    /// API's <c>commentary</c> is LinkedIn "little text format" — <c>( ) { } [ ] &lt; &gt;
+    /// @ | * _ ~ \</c> are CONTROL characters, and the first unescaped one makes LinkedIn
+    /// truncate/mangle the rendered post (the §281 text is full of parentheses). Escape
+    /// each with a backslash. <c>#</c> is deliberately NOT escaped so the #ELDK27 /
+    /// #ExpertsLiveDK hashtags keep auto-linking.
+    /// </summary>
+    public static string EscapeCommentary(string text)
+    {
+        if (string.IsNullOrEmpty(text)) return text;
+        var sb = new StringBuilder(text.Length + 16);
+        foreach (var c in text)
+        {
+            if (c is '\\' or '|' or '{' or '}' or '@' or '[' or ']'
+                  or '(' or ')' or '<' or '>' or '*' or '_' or '~')
+            {
+                sb.Append('\\');
+            }
+            sb.Append(c);
+        }
+        return sb.ToString();
     }
 
     private static string? HeaderValue(HttpResponseMessage resp, string name) =>

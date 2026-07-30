@@ -106,16 +106,31 @@ public sealed class SponsorContactSyncService
             var isSigner = signerUserId != 0 && u.UserId == signerUserId;
             var isCoordinator = coordinatorUserId != 0 && u.UserId == coordinatorUserId;
 
+            // NORMALIZE at write (§253 G17): CM returns whatever casing the shop
+            // user typed. Storing it raw fed the Sessionize import's in-memory
+            // email dedup a mixed-case key it could miss (near-duplicate row).
+            // The SQL CI collation already matches the lookup either way; the
+            // lowercased STORED value is what keeps every in-memory consumer safe.
+            var email = (u.Email ?? string.Empty).Trim().ToLowerInvariant();
+            if (email.Length == 0)
+            {
+                _log.LogWarning(
+                    "SponsorContactSync: company {Co} user {UserId} has no email — skipped.",
+                    companyId, u.UserId);
+                skipped++;
+                continue;
+            }
+
             var existing = await _db.Participants
                 .FirstOrDefaultAsync(
-                    p => p.EventId == eventId && p.Email == u.Email, ct);
+                    p => p.EventId == eventId && p.Email == email, ct);
 
             if (existing is null)
             {
                 _db.Participants.Add(new Participant
                 {
                     EventId = eventId,
-                    Email = u.Email,
+                    Email = email,
                     FullName = ChooseName(u),
                     Role = ParticipantRole.Sponsor,
                     SponsorCompanyId = companyIdStr,
@@ -150,6 +165,13 @@ public sealed class SponsorContactSyncService
             }
 
             var changed = false;
+            // Heal legacy rows stored with raw CM casing (§253 G17) — same
+            // identity under the CI collation, normalized for in-memory consumers.
+            if (!string.Equals(existing.Email, email, StringComparison.Ordinal))
+            {
+                existing.Email = email;
+                changed = true;
+            }
             if (existing.SponsorCompanyId != companyIdStr)
             {
                 existing.SponsorCompanyId = companyIdStr;
@@ -172,7 +194,13 @@ public sealed class SponsorContactSyncService
                 existing.FullName = preferredName;
                 changed = true;
             }
-            if (!existing.IsActive)
+            // Re-activate a contact that went inactive for sync-side reasons — but
+            // NEVER one an ORGANIZER deactivated (§253 G8): the tombstone
+            // DeactivatedByOrganizerAt marks an explicit organizer decision that
+            // this 15-min pull must not silently undo. A manual organizer
+            // re-activation clears the tombstone and hands the contact back to
+            // the sync.
+            if (!existing.IsActive && existing.DeactivatedByOrganizerAt is null)
             {
                 existing.IsActive = true;
                 changed = true;

@@ -10,10 +10,18 @@ Subject: {{eventDisplayName}}: {{leadCount}} new lead(s) for {{sponsorCompany}}
   {{leadListHtml}}
 </table>
 <p style="margin:0 0 24px;">The full list (including these) is always available through your leads feed &mdash; the CSV / JSON endpoints and PowerShell samples are on the <strong>Your Leads API</strong> page in the hub.</p>
-<table role="presentation" cellpadding="0" cellspacing="0"><tr>
-  <td style="background-color:{{brandColor}};border-radius:6px;">
-    <a href="{{hubUrl}}" style="display:inline-block;padding:12px 28px;color:#ffffff;font-size:15px;font-weight:bold;text-decoration:none;">Open the hub</a>
-  </td>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
+  <td align="center">
+        <!--[if mso]>
+        <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="{{hubUrl}}" style="height:52px;v-text-anchor:middle;width:208px;" arcsize="50%" stroke="f" fillcolor="#1565c0">
+          <w:anchorlock/>
+          <center style="color:#ffffff;font-family:Aptos,'Segoe UI',Arial,sans-serif;font-size:16px;font-weight:bold;">Open the hub</center>
+        </v:roundrect>
+        <![endif]-->
+        <!--[if !mso]><!-- -->
+        <a href="{{hubUrl}}" style="background-color:#1565c0;border-radius:999px;color:#ffffff;display:inline-block;font-family:Aptos,'Segoe UI',Arial,sans-serif;font-size:16px;font-weight:700;line-height:52px;text-align:center;text-decoration:none;width:208px;-webkit-text-size-adjust:none;">Open the hub</a>
+        <!--<![endif]-->
+      </td>
 </tr></table>
-<p style="margin:6px 0 16px;color:#6b7280;font-size:13px;text-align:center;">(Log in with your email, if prompted)</p>
+<p style="margin:0 0 16px;color:#6b7280;font-size:13px;text-align:center;">(the button signs you in automatically — no password needed)</p>
 <p style="margin:24px 0 0;color:#6b7280;font-size:13px;">You receive this because lead notifications are enabled for your company. Ask the organizer team ({{supportEmail}}) to change cadence or recipients.</p>

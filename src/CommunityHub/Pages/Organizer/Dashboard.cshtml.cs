@@ -1,6 +1,7 @@
 using CommunityHub.Auth;
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
+using CommunityHub.Core.Participants;
 using CommunityHub.Core.Reporting;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -257,8 +258,9 @@ public class DashboardModel : PageModel
             LunchSetupDayLabel      = $"Setup day ({evt.StartDate.AddDays(-1):dddd, MMM d})";
             LunchPreDayLabel        = $"Pre-day ({evt.StartDate:dddd, MMM d})";
         }
+        // ACTIVE people only (§253 G4): dashboard lunch tiles match /Organizer/Lunch.
         var lunch = await _db.LunchSignups
-            .Where(l => l.EventId == eventId)
+            .Where(l => l.EventId == eventId && l.Participant.IsActive)
             .Select(l => new { l.LunchEarlySetupDay, l.LunchSetupDay, l.LunchPreDay })
             .ToListAsync(ct);
         LunchEarlySetupDayCount = lunch.Count(l => l.LunchEarlySetupDay);
@@ -274,6 +276,7 @@ public class DashboardModel : PageModel
             .Where(t => t.EventId == eventId
                         && t.AssignedParticipantId != null
                         && t.AssignedParticipant!.Role == ParticipantRole.Speaker)
+            .ExcludingAbandoned()   // §332 — a withdrawn speaker never "cleared" their deadlines
             .Select(t => new
             {
                 t.Title,

@@ -84,4 +84,22 @@ public static class Rings
         Ring.Broad => "Ring 3 (broad)",
         _ => ring.ToString(),
     };
+
+    /// <summary>
+    /// Just the bare ring NUMBER ("0".."3") for compact grid columns (§185) — the
+    /// People grid shows this instead of the parenthetical <see cref="Label"/>.
+    /// </summary>
+    public static string Number(Ring ring) => ((int)ring).ToString();
+
+    /// <summary>
+    /// The ring-DERIVED flag chip label for the People grid (§185): Ring 1 → "Test"
+    /// (an amber chip), Ring 2 → "Design" (a green chip). Ring 0 (dev) and Ring 3
+    /// (broad) carry no ring-derived flag, so this returns <c>null</c> for them.
+    /// </summary>
+    public static string? RingFlagLabel(Ring ring) => ring switch
+    {
+        Ring.Ring1 => "Test",
+        Ring.Ring2 => "Design",
+        _ => null,
+    };
 }

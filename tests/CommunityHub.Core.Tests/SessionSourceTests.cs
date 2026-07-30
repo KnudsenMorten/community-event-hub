@@ -1,6 +1,10 @@
+using CommunityHub.Core.Audit;
+using CommunityHub.Core.Data;
+using CommunityHub.Core.Domain;
 using CommunityHub.Core.Integrations;
 using CommunityHub.Core.Integrations.Sessions;
 using CommunityHub.Core.Tests.Scenario;
+using Microsoft.EntityFrameworkCore;
 using Xunit;
 
 namespace CommunityHub.Core.Tests;
@@ -12,6 +16,14 @@ namespace CommunityHub.Core.Tests;
 /// </summary>
 public class SessionSourceTests
 {
+    /// <summary>
+    /// §551 — the service now writes an audit entry on every stage change, so the tests use the
+    /// REAL <see cref="AuditTrailService"/> against the same in-memory context. That lets a test
+    /// assert what actually landed on the trail rather than that a mock was called.
+    /// </summary>
+    private static SessionSourceSettingsService NewSettings(CommunityHubDbContext db) =>
+        new(db, new AuditTrailService(db, TimeProvider.System));
+
     private sealed class FakeSource : ISessionSource
     {
         public FakeSource(string key, bool available = true) { Key = key; IsAvailable = available; }
@@ -29,7 +41,7 @@ public class SessionSourceTests
     public async Task Settings_default_is_sessionize_and_set_is_persisted()
     {
         using var db = ScenarioFixture.NewDb();
-        var svc = new SessionSourceSettingsService(db);
+        var svc = NewSettings(db);
 
         Assert.Equal(SessionSourceKinds.Sessionize, await svc.GetActiveKeyAsync(1));
 
@@ -46,7 +58,7 @@ public class SessionSourceTests
     public async Task SyncDirection_default_is_stage1_and_set_is_persisted()
     {
         using var db = ScenarioFixture.NewDb();
-        var svc = new SessionSourceSettingsService(db);
+        var svc = NewSettings(db);
 
         // §57: no row ⇒ stage 1 (SessionizeToCeh).
         Assert.Equal(CommunityHub.Core.Domain.SessionSyncDirection.SessionizeToCeh,
@@ -70,7 +82,7 @@ public class SessionSourceTests
     public async Task SpeakerSyncDirection_default_is_stage1_and_is_independent_of_session_direction()
     {
         using var db = ScenarioFixture.NewDb();
-        var svc = new SessionSourceSettingsService(db);
+        var svc = NewSettings(db);
 
         // §58: no row ⇒ speaker stage 1 (SessionizeToCeh); the Zoho→CEH gate is INACTIVE.
         Assert.Equal(CommunityHub.Core.Domain.SessionSyncDirection.SessionizeToCeh,
@@ -109,7 +121,7 @@ public class SessionSourceTests
         // §58: setting the speaker direction with NO existing row must seed a valid Source
         // (NOT NULL) and leave the session direction at its stage-1 default.
         using var db = ScenarioFixture.NewDb();
-        var svc = new SessionSourceSettingsService(db);
+        var svc = NewSettings(db);
 
         await svc.SetSpeakerSyncDirectionAsync(
             1, CommunityHub.Core.Domain.SessionSyncDirection.CehToZoho, null);
@@ -120,11 +132,138 @@ public class SessionSourceTests
         Assert.Equal(CommunityHub.Core.Domain.SessionSyncDirection.SessionizeToCeh, row.SyncDirection);
     }
 
+    // ---- §551: "not configured" must be distinguishable from a deliberate stage 1 ----
+
+    [Fact]
+    public async Task Stage_state_reports_NOT_CONFIGURED_when_no_row_exists()
+    {
+        // The whole §551 defect: with no settings row the engines read stage 1 and the UI said
+        // "stage 1", so a push that had silently switched itself off looked like a choice.
+        using var db = ScenarioFixture.NewDb();
+        var svc = NewSettings(db);
+
+        var session = await svc.GetSyncDirectionStateAsync(1);
+        Assert.False(session.IsConfigured);
+        Assert.Equal(SessionSyncDirection.SessionizeToCeh, session.Effective);
+        // Never audited yet ⇒ reported as unknown, NOT guessed from the row's shared stamp.
+        Assert.Null(session.LastChangeBy);
+        Assert.Null(session.LastChangeAt);
+
+        var speaker = await svc.GetSpeakerSyncDirectionStateAsync(1);
+        Assert.False(speaker.IsConfigured);
+        Assert.Equal(SessionSyncDirection.SessionizeToCeh, speaker.Effective);
+    }
+
+    [Fact]
+    public async Task Stage_state_reports_CONFIGURED_for_a_deliberate_stage_1()
+    {
+        // The other half: choosing stage 1 on purpose must NOT look like "never configured".
+        using var db = ScenarioFixture.NewDb();
+        var svc = NewSettings(db);
+
+        await svc.SetSyncDirectionAsync(1, SessionSyncDirection.SessionizeToCeh, "mok@expertslive.dk");
+
+        var state = await svc.GetSyncDirectionStateAsync(1);
+        Assert.True(state.IsConfigured);
+        Assert.Equal(SessionSyncDirection.SessionizeToCeh, state.Effective);
+    }
+
+    [Fact]
+    public async Task Stage_state_is_per_edition_so_a_new_edition_reads_as_unconfigured()
+    {
+        // §551's leading hypothesis: the row does not match the CURRENT active EventId (a new
+        // edition, a restore, a re-seed) and the push goes dark with nobody having edited it.
+        using var db = ScenarioFixture.NewDb();
+        var svc = NewSettings(db);
+
+        await svc.SetSyncDirectionAsync(1, SessionSyncDirection.CehToZoho, "mok@expertslive.dk");
+
+        Assert.True((await svc.GetSyncDirectionStateAsync(1)).IsConfigured);
+
+        var other = await svc.GetSyncDirectionStateAsync(2);
+        Assert.False(other.IsConfigured);
+        Assert.Equal(SessionSyncDirection.SessionizeToCeh, other.Effective);
+    }
+
+    [Fact]
+    public async Task Stage_change_is_audited_with_who_and_from_to()
+    {
+        // "it is NOT audited ... there is no history of who moved the stage or when — the exact
+        // question he is now asking, and it cannot be answered." Now it can.
+        using var db = ScenarioFixture.NewDb();
+        var svc = NewSettings(db);
+
+        await svc.SetSyncDirectionAsync(1, SessionSyncDirection.CehToZoho, "mok@expertslive.dk");
+        await svc.SetSyncDirectionAsync(1, SessionSyncDirection.SessionizeToCeh, "someone@expertslive.dk");
+
+        var entries = await db.AuditEntries
+            .Where(e => e.Action == AuditActions.SessionSyncDirectionChanged)
+            .OrderBy(e => e.Id)
+            .ToListAsync();
+
+        Assert.Equal(2, entries.Count);
+
+        // First write: never configured before ⇒ says so, rather than claiming "was stage 1".
+        Assert.Contains("NOT CONFIGURED", entries[0].Summary);
+        Assert.Equal("mok@expertslive.dk", entries[0].ActorEmail);
+        Assert.Equal(AuditCategory.Admin, entries[0].Category);
+
+        // Second write: the from → to that answers "something took it back to stage 1".
+        Assert.Contains("from stage 2", entries[1].Summary);
+        Assert.Contains("to stage 1", entries[1].Summary);
+        Assert.Equal("someone@expertslive.dk", entries[1].ActorEmail);
+
+        // And the state read surfaces the most recent one.
+        var state = await svc.GetSyncDirectionStateAsync(1);
+        Assert.Equal("someone@expertslive.dk", state.LastChangeBy);
+        Assert.Contains("to stage 1", state.LastChangeSummary!);
+    }
+
+    [Fact]
+    public async Task Speaker_stage_change_is_audited_under_its_OWN_action_code()
+    {
+        // The speaker stage has its own identical setting and default, so it goes dark the same
+        // way. Separate codes keep "who moved the speaker stage" answerable on its own.
+        using var db = ScenarioFixture.NewDb();
+        var svc = NewSettings(db);
+
+        await svc.SetSyncDirectionAsync(1, SessionSyncDirection.CehToZoho, "mok@expertslive.dk");
+        await svc.SetSpeakerSyncDirectionAsync(1, SessionSyncDirection.CehToZoho, "mok@expertslive.dk");
+
+        Assert.Single(await db.AuditEntries
+            .Where(e => e.Action == AuditActions.SessionSyncDirectionChanged).ToListAsync());
+        Assert.Single(await db.AuditEntries
+            .Where(e => e.Action == AuditActions.SpeakerSyncDirectionChanged).ToListAsync());
+
+        // The session read must not pick up the SPEAKER change as its own last change.
+        var session = await svc.GetSyncDirectionStateAsync(1);
+        Assert.Contains("Session sync stage", session.LastChangeSummary!);
+
+        var speaker = await svc.GetSpeakerSyncDirectionStateAsync(1);
+        Assert.Contains("Speaker sync stage", speaker.LastChangeSummary!);
+    }
+
+    [Fact]
+    public async Task An_unchanged_re_save_is_audited_as_unchanged_not_as_a_move()
+    {
+        // A re-save must not read as "someone moved the stage" when chasing an incident.
+        using var db = ScenarioFixture.NewDb();
+        var svc = NewSettings(db);
+
+        await svc.SetSyncDirectionAsync(1, SessionSyncDirection.CehToZoho, "mok@expertslive.dk");
+        await svc.SetSyncDirectionAsync(1, SessionSyncDirection.CehToZoho, "mok@expertslive.dk");
+
+        var last = await db.AuditEntries
+            .Where(e => e.Action == AuditActions.SessionSyncDirectionChanged)
+            .OrderByDescending(e => e.Id).FirstAsync();
+        Assert.Contains("unchanged", last.Summary);
+    }
+
     [Fact]
     public async Task Settings_set_rejects_an_unknown_key()
     {
         using var db = ScenarioFixture.NewDb();
-        var svc = new SessionSourceSettingsService(db);
+        var svc = NewSettings(db);
         await Assert.ThrowsAsync<ArgumentException>(() => svc.SetAsync(1, "nope", null));
     }
 
@@ -132,7 +271,7 @@ public class SessionSourceTests
     public async Task Resolver_picks_active_source_then_falls_back_to_sessionize()
     {
         using var db = ScenarioFixture.NewDb();
-        var settings = new SessionSourceSettingsService(db);
+        var settings = NewSettings(db);
         var sessionize = new FakeSource(SessionSourceKinds.Sessionize);
         var backstage = new FakeSource(SessionSourceKinds.ZohoBackstage);
         var resolver = new SessionSourceResolver(new ISessionSource[] { sessionize, backstage }, settings);

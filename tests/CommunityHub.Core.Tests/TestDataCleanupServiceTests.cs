@@ -23,7 +23,9 @@ public sealed class TestDataCleanupServiceTests
     private static readonly DateTimeOffset Now = new(2026, 6, 1, 9, 0, 0, TimeSpan.Zero);
 
     private static TestDataCleanupService NewService(CommunityHub.Core.Data.CommunityHubDbContext db)
-        => new(db, new ParticipantDeletionService(db, new FixedClock(Now)));
+        => new(db, new ParticipantDeletionService(db, new FixedClock(Now),
+            new ParticipantDeactivationService(db, new FixedClock(Now),
+                new CommunityHub.Core.Audit.AuditTrailService(db, new FixedClock(Now)))));
 
     private static Event NewEvent(bool active, string code = "CLN27") => new()
     {

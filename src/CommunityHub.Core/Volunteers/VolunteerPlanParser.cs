@@ -11,6 +11,13 @@ namespace CommunityHub.Core.Volunteers;
 public sealed record ParsedPlanTask(
     string BucketName,
     string Title,
+    /// <summary>§327k — the calendar date the work happens (CSV "Date", dd-MM-yyyy). Was
+    /// DROPPED by the parser: a run plan whose tasks have no date cannot be worked from.</summary>
+    DateOnly? Date,
+    /// <summary>§327k — the start time (CSV "Time Start"), stored as VolunteerTask.Shift.
+    /// Also dropped previously. Together with <see cref="Date"/> this is what makes two rows
+    /// of the same task DIFFERENT shifts rather than a duplicate.</summary>
+    string? Shift,
     string? TimeEnd,
     VolunteerTaskStatus Status,
     VolunteerTaskCriticality Criticality,
@@ -51,6 +58,8 @@ public sealed class VolunteerPlanParser
     public const string UnassignedBucket = "Unassigned";
 
     // Column indices in the known header layout.
+    private const int ColDate = 1;
+    private const int ColTimeStart = 2;
     private const int ColTimeEnd = 3;
     private const int ColTaskName = 4;
     private const int ColStatus = 5;
@@ -62,28 +71,85 @@ public sealed class VolunteerPlanParser
     private const int ColPrereq = 11;
     private const int ColExpectations = 12;
 
+    /// <summary>
+    /// §327k — resolves each column by its HEADER NAME, falling back to the fixed layout above
+    /// when that name is absent.
+    ///
+    /// <para><b>Why this exists.</b> The parser was purely positional, written for the ELDK26
+    /// export which carried a <c>Status</c> column at index 5. The ELDK27 export has no such
+    /// column, so every field from index 5 on shifted by one and the parser read the
+    /// <i>ELDK Lead</i> column as the Responsible Team. It did not fail — it "succeeded",
+    /// reporting buckets named after PEOPLE ("Kent Agerlund", "Martin Byskov"), and would have
+    /// imported 127 tasks into them. A positional parser cannot tell a shifted file from a
+    /// valid one; a header-driven one can.</para>
+    /// </summary>
+    private sealed class ColumnMap
+    {
+        private readonly Dictionary<string, int> _byName = new(StringComparer.OrdinalIgnoreCase);
+
+        public ColumnMap(IReadOnlyList<string>? header)
+        {
+            if (header is null) return;
+            for (var i = 0; i < header.Count; i++)
+            {
+                var name = header[i].Trim();
+                if (name.Length > 0 && !_byName.ContainsKey(name)) _byName[name] = i;
+            }
+        }
+
+        /// <summary>Index of <paramref name="name"/>, or <paramref name="fallback"/> when the
+        /// file has no such header (a legacy headerless export).</summary>
+        public int Of(string name, int fallback) =>
+            _byName.TryGetValue(name, out var i) ? i : fallback;
+
+        public bool Has(string name) => _byName.ContainsKey(name);
+    }
+
     public ParsedPlan Parse(string csv)
     {
         var records = SplitRecords(csv ?? string.Empty);
         var tasks = new List<ParsedPlanTask>();
         var buckets = new List<string>();
 
-        bool headerSeen = false;
+        // A header is present when ANY cell of the first record is the task-name header —
+        // not just the cell at the ELDK26 position, which is the assumption that broke.
+        IReadOnlyList<string>? header = null;
+        var first = records.FirstOrDefault();
+        if (first is not null
+            && first.Any(f => f.Trim().Equals("Task Name", StringComparison.OrdinalIgnoreCase)))
+        {
+            header = first;
+        }
+
+        var map = new ColumnMap(header);
+        int cDate = map.Of("Date", ColDate);
+        int cTimeStart = map.Of("Time Start", ColTimeStart);
+        int cTimeEnd = map.Of("Time End", ColTimeEnd);
+        int cTaskName = map.Of("Task Name", ColTaskName);
+        int cStatus = map.Of("Status", ColStatus);
+        int cCriticality = map.Of("Criticality", ColCriticality);
+        int cTeam = map.Of("Responsible Team", ColTeam);
+        int cLead = map.Of("ELDK Lead Task", ColEldkLead);
+        int cResources = map.Of("Resources Needed", ColResourcesNeeded);
+        int cNames = map.Of("Resource Names", ColResourceNames);
+        int cPrereq = map.Of("Pre-req", ColPrereq);
+        int cExpect = map.Of("Expectations", ColExpectations);
+        // No Status column ⇒ nothing has been done yet, so every task is Open.
+        bool hasStatus = header is null || map.Has("Status");
+
+        bool skippedHeader = false;
         foreach (var fields in records)
         {
-            // Skip the header row (first record whose 5th column is the task-name header).
-            if (!headerSeen)
+            if (header is not null && !skippedHeader)
             {
-                headerSeen = true;
-                if (Get(fields, ColTaskName).Equals("Task Name", StringComparison.OrdinalIgnoreCase))
-                    continue;
-                // No header present — fall through and treat this record as data.
+                skippedHeader = true;
+                continue;   // the header row itself
             }
 
-            var title = Get(fields, ColTaskName).Trim();
+            var title = Get(fields, cTaskName).Trim();
             if (title.Length == 0) continue; // blank separator rows
 
-            var team = NullIfBlank(Get(fields, ColTeam));
+            var team = NullIfBlank(Get(fields, cTeam));
             var bucket = team ?? UnassignedBucket;
             if (!buckets.Contains(bucket, StringComparer.OrdinalIgnoreCase))
                 buckets.Add(bucket);
@@ -91,15 +157,17 @@ public sealed class VolunteerPlanParser
             tasks.Add(new ParsedPlanTask(
                 BucketName: bucket,
                 Title: title,
-                TimeEnd: NullIfBlank(Get(fields, ColTimeEnd)),
-                Status: ParseStatus(Get(fields, ColStatus)),
-                Criticality: ParseCriticality(Get(fields, ColCriticality)),
+                Date: ParseDate(Get(fields, cDate)),
+                Shift: NullIfBlank(Get(fields, cTimeStart)),
+                TimeEnd: NullIfBlank(Get(fields, cTimeEnd)),
+                Status: hasStatus ? ParseStatus(Get(fields, cStatus)) : VolunteerTaskStatus.Open,
+                Criticality: ParseCriticality(Get(fields, cCriticality)),
                 ResponsibleTeam: team,
-                EldkLeadName: NullIfBlank(Get(fields, ColEldkLead)),
-                ResourcesNeeded: ParseInt(Get(fields, ColResourcesNeeded)),
-                ResourceNames: SplitNames(Get(fields, ColResourceNames)),
-                Prerequisites: NullIfBlank(Get(fields, ColPrereq)),
-                Expectations: NullIfBlank(Get(fields, ColExpectations))));
+                EldkLeadName: NullIfBlank(Get(fields, cLead)),
+                ResourcesNeeded: ParseInt(Get(fields, cResources)),
+                ResourceNames: SplitNames(Get(fields, cNames)),
+                Prerequisites: NullIfBlank(Get(fields, cPrereq)),
+                Expectations: NullIfBlank(Get(fields, cExpect))));
         }
 
         return new ParsedPlan(tasks, buckets);
@@ -112,6 +180,24 @@ public sealed class VolunteerPlanParser
 
     private static string? NullIfBlank(string s)
         => string.IsNullOrWhiteSpace(s) ? null : s.Trim();
+
+    /// <summary>
+    /// §327k — parse the plan's date cell. The export is Danish <c>dd-MM-yyyy</c>; ISO is
+    /// accepted too so a re-saved file still imports. Unparseable ⇒ null rather than a guess:
+    /// a wrong date on a run-plan task is worse than a missing one, because nobody checks it.
+    /// </summary>
+    internal static DateOnly? ParseDate(string s)
+    {
+        if (string.IsNullOrWhiteSpace(s)) return null;
+        var v = s.Trim();
+        string[] formats = { "dd-MM-yyyy", "d-M-yyyy", "yyyy-MM-dd", "dd/MM/yyyy", "d/M/yyyy" };
+        return DateOnly.TryParseExact(
+                   v, formats,
+                   System.Globalization.CultureInfo.InvariantCulture,
+                   System.Globalization.DateTimeStyles.None, out var d)
+            ? d
+            : null;
+    }
 
     internal static int ParseInt(string s)
         => int.TryParse((s ?? string.Empty).Trim(), out var n) && n > 0 ? n : 0;

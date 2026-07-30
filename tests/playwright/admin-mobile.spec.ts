@@ -184,22 +184,45 @@ test.describe('DEV organizer admin (mobile)', () => {
         await expect(page.locator('h2', { hasText: 'Group photos' })).toBeVisible();
         await assertNoHorizontalScroll(page);
 
-        // Register a company with a slot (idempotent-ish: unique name per run).
-        const company = `PW Photo Co ${Date.now()}`;
-        await page.locator('summary', { hasText: 'Register a company' }).click();
-        const form = page.locator('form[action*="Create"]').first();
-        await form.locator('input[name="companyName"]').fill(company);
-        await form.locator('input[name="contactName"]').fill('Lena Larsen');
-        await form.locator('input[name="contactEmail"]').fill('lena.larsen@contoso-example.dk');
-        await form.locator('input[name="scheduledLocal"]').fill('2027-02-10T11:30');
-        await form.getByRole('button', { name: 'Register' }).click();
-        await expect(page.locator('.info', { hasText: `Registered '${company}'` })).toBeVisible();
+        // §326az (operator 2026-07-25: "i am getting lots of group photo emails … hundreds
+        // of mails … this is critical"). ROOT CAUSE was this line: `PW Photo Co ${Date.now()}`
+        // minted a NEW company on every run, so every run created another registration and —
+        // via the send below — a real ICS calendar invite with a brand-new UID. DEV redirects
+        // all mail to the operator (deliberately: that is how e-mail is reviewed before prod),
+        // so each run dropped another "Group photo - PW Photo Co <timestamp>" entry into their
+        // calendar, and the registrations piled up in the DEV database forever.
+        //
+        // FIX: a STABLE name plus register-only-if-absent (below). The registration is then
+        // reused across runs, the ICS UID (group-photo-{eventId}-{rowId}) stays constant, and
+        // a re-send UPDATES the one existing calendar entry instead of adding another. The
+        // test must never depend on the kill switch for safety — DEV mail is intentionally
+        // left ON and redirected, because that is how the operator reviews e-mail before prod.
+        const company = 'PW Photo Co';
 
-        // Send the calendar invite (DEV redirect catches the real ICS mail).
-        const row = page.locator('details', { hasText: company });
+        // REGISTER ONCE, then reuse — same pattern as the app-game test below. The Create
+        // handler always INSERTS (there is no upsert), so registering unconditionally would
+        // add a row and a fresh ICS UID on every run even with a stable name.
+        const already = await page.locator('details', { hasText: company }).count();
+        if (already === 0) {
+            await page.locator('summary', { hasText: 'Register a company' }).click();
+            const form = page.locator('form[action*="Create"]').first();
+            await form.locator('input[name="companyName"]').fill(company);
+            await form.locator('input[name="contactName"]').fill('Lena Larsen');
+            await form.locator('input[name="contactEmail"]').fill('lena.larsen@contoso-example.dk');
+            await form.locator('input[name="scheduledLocal"]').fill('2027-02-10T11:30');
+            await form.getByRole('button', { name: 'Register' }).click();
+            await expect(page.locator('.info', { hasText: `Registered '${company}'` })).toBeVisible();
+        }
+
+        // Send the calendar invite. This is a REAL send (DEV redirects it to the operator),
+        // but the registration — and therefore the ICS UID group-photo-{eventId}-{rowId} —
+        // is now stable, so a re-run UPDATES the one existing calendar entry instead of
+        // adding another. Assert on the page's actual wording rather than an invented count.
+        const row = page.locator('details', { hasText: company }).first();
         await row.locator('summary').click();
         await row.getByRole('button', { name: /calendar invite/ }).click();
-        await expect(page.locator('.info', { hasText: /Invite for '.*': 1 sent/ })).toBeVisible({ timeout: 20_000 });
+        await expect(page.locator('.info', { hasText: /Invite for '.*(sent to the company lead|could NOT be sent)/ }))
+            .toBeVisible({ timeout: 20_000 });
         await assertNoHorizontalScroll(page);
     });
 

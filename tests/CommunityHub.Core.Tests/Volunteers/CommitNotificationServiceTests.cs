@@ -182,17 +182,31 @@ public sealed class CommitNotificationServiceTests
         Assert.Empty(sender.Sent);
     }
 
-    // ---- the REAL ring-gated sender: FeatureKey drives the drop -------------------
+    // ---- §589: a QUEUE key no longer narrows the commit notification ---------------
 
+    /// <summary>
+    /// 🔒 §589 (operator 2026-07-28): *"queues are all managed by an organizer who accept/approve,
+    /// etc. so no need for ring-gate here"*.
+    ///
+    /// <para>THIS TEST WAS INVERTED DELIBERATELY, AND IT IS A REAL AUDIENCE CHANGE — it is the one
+    /// place in the §566 rebuild where removing a ring actually widens a live participant e-mail.
+    /// The volunteer COMMIT notification passes <c>volunteer-allocation</c> as its
+    /// <c>EmailContext.FeatureKey</c>, so that queue ring used to hold a Broad-ring volunteer back.
+    /// It no longer does: the mail is now bounded only by the <c>outbound-email</c> ceiling.</para>
+    ///
+    /// <para>That is the §566 model working exactly as signed off —
+    /// <c>audience = MIN(ceiling, that mail's own ring)</c>, and a send carrying no mail-level ring
+    /// rides the ceiling alone — and it is coherent: an organizer who COMMITS an allocation is
+    /// deciding those volunteers should be told. The consequence was stated to him before the
+    /// change, not discovered afterwards.</para>
+    /// </summary>
     [Fact]
-    public async Task Out_of_ring_person_is_dropped_by_the_feature_key_ring_gate()
+    public async Task Queue_feature_ring_no_longer_drops_a_broad_recipient()
     {
         using var provider = BuildRingProvider();
 
-        // Transport (outbound-email) wide open at Broad; the QUEUE feature released only
-        // to Ring1 — so ONLY the EmailContext.FeatureKey tightening can drop a Broad
-        // recipient. Seed everything THROUGH the provider so the sender's own scope sees
-        // the same in-memory store.
+        // Transport (outbound-email) wide open at Broad; the QUEUE feature dialled down to Ring1.
+        // Under the OLD rule that tightening dropped the Broad volunteer. Under §589 it does not.
         SetRing(provider, FeatureCatalog.OutboundEmailKey, Ring.Broad);
         SetRing(provider, QueueFeatureKey, Ring.Ring1);
 
@@ -219,9 +233,10 @@ public sealed class CommitNotificationServiceTests
 
         await svc.NotifyCommittedAsync(Organizer(), EventId, new[] { inRing, outRing }, QueueFeatureKey);
 
-        // The Broad recipient is ring-dropped inside the sender; only the Ring1 one sends.
-        var msg = Assert.Single(sender.Captured);
-        Assert.Equal("inring@x.test", msg.To[0].Address);
+        // §589 — BOTH volunteers are notified. The queue ring no longer narrows the audience;
+        // the organizer's commit is the decision, and the outbound-email ceiling is the only bound.
+        var addresses = sender.Captured.Select(m => m.To[0].Address).OrderBy(a => a).ToArray();
+        Assert.Equal(new[] { "inring@x.test", "outring@x.test" }, addresses);
     }
 
     [Fact]

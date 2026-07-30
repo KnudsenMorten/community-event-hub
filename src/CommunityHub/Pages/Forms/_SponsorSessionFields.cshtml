@@ -1,0 +1,110 @@
+@model CommunityHub.Forms.Steps.SponsorSessionModel
+@*
+    §292 — fields-only partial for the sponsor Speaking-session wizard step. Title + abstract + up to
+    three speakers (name + email). The shared wizard host owns the <form>. Each speaker becomes a real
+    Speaker participant (they get CEH access, welcome mail, dinner sign-up, speaker details/photo).
+*@
+<p style="font-size:13.5px;color:#4b5563;margin-top:0;">
+    You purchased a <strong>speaking session</strong>. Tell us the session title + abstract and who's
+    presenting. Each speaker you add becomes a full speaker in the hub (they'll get a welcome email and
+    can add their photo, company, title and bio, and sign up for the appreciation dinner).
+</p>
+
+<label asp-for="Title">Session title</label>
+<input type="text" asp-for="Title" maxlength="300" placeholder="e.g. Securing Azure at scale" />
+<span asp-validation-for="Title" class="error"></span>
+
+<label asp-for="Abstract">Session abstract</label>
+<textarea asp-for="Abstract" rows="6" maxlength="4000" placeholder="What is the session about?"></textarea>
+<span asp-validation-for="Abstract" class="error"></span>
+
+@* §356 (operator 2026-07-26: "a dropdown with all available tracks"). The options are the tracks
+   already in use on this edition's agenda — the exact vocabulary the Zoho push matches on, so a
+   choice made here will actually resolve on push. With no track list yet the field degrades to free
+   text rather than an empty dropdown: a missing list must never block the form. *@
+<label asp-for="Track">Track</label>
+@if (Model.HasTrackOptions)
+{
+    <select asp-for="Track">
+        <option value="">&mdash; not sure yet &mdash;</option>
+        @foreach (var t in Model.AvailableTracks)
+        {
+            <option value="@t" selected="@(string.Equals(t, Model.Track, StringComparison.OrdinalIgnoreCase))">@t</option>
+        }
+    </select>
+    <p style="font-size:12.5px;color:#6b7280;margin:4px 0 0;">
+        Optional &mdash; the organizers can place your session later if you're not sure.
+    </p>
+}
+else
+{
+    <input type="text" asp-for="Track" maxlength="200" placeholder="e.g. Security" />
+    <p style="font-size:12.5px;color:#6b7280;margin:4px 0 0;">
+        Optional. The agenda tracks aren't published yet, so type one if you already know it.
+    </p>
+}
+
+<h3 style="color:var(--el-darkblue);margin-top:20px;">Speakers</h3>
+<p style="font-size:12.5px;color:#6b7280;margin:0 0 8px;">
+    Add one or more speakers (name + email). Leave a row blank to skip it. LinkedIn and the photo are
+    optional and can be added later &mdash; by you here, or by the speaker on their own profile.
+</p>
+
+@for (var i = 1; i <= 3; i++)
+{
+    var nameField = $"Speaker{i}Name";
+    var emailField = $"Speaker{i}Email";
+    var linkedInField = $"Speaker{i}LinkedIn";
+    var photoField = $"Speaker{i}Photo";
+    var nameVal = i == 1 ? Model.Speaker1Name : i == 2 ? Model.Speaker2Name : Model.Speaker3Name;
+    var emailVal = i == 1 ? Model.Speaker1Email : i == 2 ? Model.Speaker2Email : Model.Speaker3Email;
+    var linkedInVal = i == 1 ? Model.Speaker1LinkedIn : i == 2 ? Model.Speaker2LinkedIn : Model.Speaker3LinkedIn;
+    Model.CurrentPhotoUrls.TryGetValue(i, out var photoUrl);
+
+    <div style="border:1px solid #dde4ee;border-radius:10px;padding:12px 14px;margin:10px 0;background:#fff;">
+        <div style="display:flex;gap:10px;flex-wrap:wrap;">
+            <div style="flex:1 1 200px;">
+                <input type="text" name="@nameField" value="@nameVal" placeholder="Speaker @i name" style="margin:0;" />
+            </div>
+            <div style="flex:1 1 200px;">
+                <input type="email" inputmode="email" name="@emailField" value="@emailVal" placeholder="speaker@@company.com" style="margin:0;" />
+            </div>
+        </div>
+
+        <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:8px;align-items:flex-start;">
+            <div style="flex:1 1 260px;">
+                <input type="url" inputmode="url" name="@linkedInField" value="@linkedInVal"
+                       placeholder="https://www.linkedin.com/in/…" style="margin:0;" />
+                <span style="font-size:12px;color:#6b7280;">LinkedIn profile (optional)</span>
+            </div>
+            <div style="flex:1 1 260px;">
+                <input type="file" name="@photoField" accept=".jpg,.jpeg,.png,.webp" style="margin:0;" />
+                @* §473b — same confusion as the logos step: there is no upload BUTTON, because the
+                   wizard host owns one form and the photo uploads when the step is saved. *@
+                <span style="font-size:12px;color:#6b7280;display:block;">
+                    Speaker photo &mdash; JPG, PNG or WebP, max 5&nbsp;MB.
+                    Choose the file, then press <strong>Save &amp; next</strong> to upload it.
+                </span>
+                @* A file input cannot be pre-filled, so without this the sponsor cannot tell a photo
+                   is already on file and re-uploads it on every visit. *@
+                @if (!string.IsNullOrWhiteSpace(photoUrl))
+                {
+                    @* §665 — the thumbnail used to render the raw SharePoint URL, which a browser
+                       cannot fetch: a broken glyph next to a confident "Photo on file". Two rules
+                       now: the src goes through the hub proxy (resolved in the form service), and
+                       if it STILL fails the image removes itself and the caption says so, so the
+                       picture and the words can never contradict each other again. *@
+                    <span style="display:inline-flex;align-items:center;gap:8px;margin-top:6px;">
+                        <img src="@photoUrl" alt=""
+                             style="width:44px;height:44px;object-fit:cover;border-radius:8px;
+                                    max-width:44px;overflow:hidden;background:#eef2f7;flex:0 0 auto;"
+                             onerror="this.style.display='none';
+                                      var n=this.nextElementSibling;
+                                      if(n){n.textContent='A photo is on file but could not be shown here — uploading a new one will replace it.';n.style.color='#8a5a00';}" />
+                        <span style="font-size:12px;color:#15803d;">Photo on file &mdash; upload a new one to replace it.</span>
+                    </span>
+                }
+            </div>
+        </div>
+    </div>
+}

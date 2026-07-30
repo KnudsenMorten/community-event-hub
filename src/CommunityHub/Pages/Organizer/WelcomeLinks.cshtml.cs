@@ -64,7 +64,7 @@ public class WelcomeLinksModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+        if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
 
         var ok = await _admin.RevokeAsync(me.EventId, id, DateTimeOffset.UtcNow, ct);
         return RedirectToPage(new { msg = ok ? "Link revoked." : "That link could not be revoked (already used, revoked, or unknown)." });
@@ -75,7 +75,7 @@ public class WelcomeLinksModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+        if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
 
         var ok = await _emailLinks.RevokeAsync(me.EventId, id, DateTimeOffset.UtcNow, ct);
         return RedirectToPage(new { msg = ok ? "Email sign-in link revoked." : "That link could not be revoked (already revoked, or unknown)." });
@@ -86,7 +86,7 @@ public class WelcomeLinksModel : PageModel
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+        if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
 
         var token = await _emailLinks.RotateAsync(me.EventId, id, DateTimeOffset.UtcNow, ct);
         return RedirectToPage(new { msg = token is not null

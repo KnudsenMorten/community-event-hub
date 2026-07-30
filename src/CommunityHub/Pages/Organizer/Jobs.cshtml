@@ -1,0 +1,316 @@
+@page
+@using CommunityHub.Core.Settings
+@model CommunityHub.Pages.Organizer.JobsModel
+@{
+    ViewData["Title"] = "Background jobs";
+}
+
+<style>
+    /* Mobile-first: the job table scrolls sideways on a ~360px phone. */
+    .jb-scroll { overflow-x:auto; -webkit-overflow-scrolling:touch; }
+    table.jb { border-collapse:collapse; width:100%; min-width:820px; }
+    .jb th, .jb td { border-bottom:1px solid #e6e8ee; padding:8px 10px; font-size:13px; vertical-align:top; }
+    .jb th { background:#f9fafb; font-size:11.5px; text-transform:uppercase; letter-spacing:.04em; color:#6b7280; text-align:left; }
+    .jb td.num { text-align:right; white-space:nowrap; }
+    .jb-what { color:#6b7280; font-size:12px; }
+    .jb-tag { display:inline-block; font-size:10.5px; font-weight:700; padding:1px 7px; border-radius:9px; margin-left:6px; }
+    .jb-off { background:#fee2e2; color:#b42318; }
+    .jb-thr { background:#fef3c7; color:#92400e; }
+    .jb-bad { background:#fee2e2; color:#b42318; }
+    /* §707.13 — was `max-width:78ch`, which pinned this text to ~650px and left most of a wide
+       window empty (operator: "why is this text limited in width so it takes up most window
+       room"). The card already provides the page gutter, so the prose can use it. */
+    .jb-note { color:#6b7280; font-size:12.5px; }
+    .jb input[type=number] { width:72px; padding:4px; font-size:13px; text-align:right; }
+    /* §707.13 — the show/hide switched-off filter. */
+    .jb-filter { display:flex; align-items:center; gap:8px; margin:10px 0 0;
+                 font-size:13px; color:#374151; }
+    .jb-hidden-note { color:#6b7280; font-size:12.5px; margin:6px 0 0; }
+</style>
+
+<div class="card">
+    <h1>Background jobs</h1>
+    @if (Model.AccessDenied)
+    {
+        <p class="error" role="alert">This area is for organizers only.</p>
+        <p><a asp-page="/Index">Back to hub</a></p>
+    }
+    else
+    {
+        <p class="jb-note">
+            Every background job the hub runs, with its schedule, when it last ran, and the
+            feature switch that turns it off. This list is <strong>checked against the deployed
+            code by a test</strong> &mdash; a job cannot run without appearing here.
+        </p>
+        <p class="jb-note">
+            @* §510 — this paragraph used to explain a throttle. It now explains a frequency,
+               because that is what the box actually is. *@
+            <strong>Runs every N minutes</strong> is the job's real frequency and you can change it
+            right now, with no deploy &mdash; set 10 and it runs every 10 minutes. The smallest
+            value is <strong>5 minutes</strong>, because that is how often the host offers the job
+            a chance to run; anything below the minimum is rejected rather than silently ignored.
+            <br />
+            Jobs that run at a <strong>fixed time</strong> ("every day at 07:20 UTC", "every hour
+            at :00") have no box &mdash; their schedule is anchored to the clock, so it is set in
+            code. Ask and it can be changed with a deploy.
+        </p>
+        <p class="jb-note">
+            @* §440 — answer the question this page provoked but never addressed. *@
+            <strong>To make a job run MORE often</strong> the <em>Schedule</em> itself has to
+            change, and that lives in code &mdash; deployed with the app, so it can be reviewed and
+            rolled back. Nothing on this page can speed a job up, so ask for a change rather than
+            hunting for a control that is not here.
+        </p>
+        @* 🔒 §707.13 — hide switched-off jobs by default (operator 2026-07-30: "it disturbs my eye
+           that the first one is off"). A switched-off job does nothing, so it is noise at the top
+           of a group. The COUNT is always stated: a filter that silently removed rows would make
+           this page lie by omission, which is exactly the defect this page exists to avoid. *@
+        <form method="get" class="jb-filter">
+            <input type="checkbox" id="showOff" name="showOff" value="true"
+                   onchange="this.form.submit()" checked="@Model.ShowSwitchedOff" />
+            <label for="showOff">Show jobs whose feature switch is OFF</label>
+        </form>
+        @if (!Model.ShowSwitchedOff && Model.HiddenByFilter > 0)
+        {
+            <p class="jb-hidden-note">
+                @Model.HiddenByFilter job(s) hidden because their feature switch is off &mdash; they
+                would do nothing if they ran. Tick the box above to see them.
+            </p>
+        }
+        @if (!string.IsNullOrEmpty(Model.Message))
+        {
+            <p class="info">@Model.Message</p>
+        }
+        @* §635 — THE ONE FAULT THAT CANNOT MAIL YOU ABOUT ITSELF. Every other alert in this system
+           arrives by e-mail; if the mail relay is the thing that is broken, the alert would have to
+           travel through the very channel that is failing. So it is stated HERE, on the page he
+           already opens to ask "is anything broken?". *@
+        @if (Model.MailStatus.IsDown)
+        {
+            <div class="card" style="border-left:6px solid #b91c1c;background:#fef2f2;">
+                <h3 style="margin:0 0 6px;color:#b91c1c;">Outbound e-mail is DOWN</h3>
+                <p style="margin:0 0 6px;">@Model.MailStatus.Detail</p>
+                <p style="margin:0;font-size:13px;color:#555;">
+                    The last <strong>@Model.MailStatus.ConsecutiveFailures</strong> sends all failed.
+                    Last error: <code>@Model.MailStatus.LastError</code>
+                </p>
+            </div>
+        }
+        @* §491b — the platform monitoring that sits AROUND these jobs, surfaced where an organizer
+           already comes to ask "is anything broken?". Deliberately a STATIC description of the
+           configured Azure Monitor rules rather than a live query: reading Azure from the app would
+           need its own credentials and a new integration, and this answers the real question —
+           what is watched, and would I be told. *@
+        <details style="margin:18px 0 8px;">
+            <summary style="cursor:pointer;font-weight:600;color:var(--el-darkblue);">
+                Platform monitoring &amp; alerting — what is watched
+            </summary>
+            <div style="border:1px solid #e2e8f0;border-radius:8px;padding:12px 14px;margin-top:8px;background:#f8fafc;font-size:13.5px;line-height:1.6;color:#334155;">
+                <p style="margin:0 0 8px;">
+                    These jobs are the hub's own work. The platform underneath is watched separately
+                    by Azure Monitor, which e-mails the organizers when a rule fires &mdash; you do
+                    not have to be looking at this page.
+                </p>
+                <ul style="margin:0 0 8px;padding-left:18px;">
+                    <li><strong>Health check failing</strong> (severity 1) &mdash; the
+                        <code>/health</code> endpoint stops answering on an instance. This is the
+                        same signal that gates a deployment swap.</li>
+                    <li><strong>Server errors</strong> (severity 2) &mdash; more than 10 HTTP 5xx
+                        responses in 5 minutes.</li>
+                    <li><strong>Slow responses</strong> (severity 3) &mdash; average response time
+                        over 5 seconds for 15 minutes: the site is up but painful to use.</li>
+                </ul>
+                <p style="margin:0 0 8px;">
+                    The web app runs on <strong>two instances</strong> behind the platform load
+                    balancer, so one container restarting does not take the hub down.
+                </p>
+                <p style="margin:0 0 8px;">
+                    <strong>Job failures are alerted too</strong>, by the hub itself rather than
+                    Azure (§138): any job that throws e-mails the developer, but only on its
+                    <strong>second consecutive</strong> failure &mdash; a single transient blip, such
+                    as a supplier returning a 503, does not wake anyone. A success resets the count,
+                    and a further 6-hour throttle stops a persistently broken job flooding the inbox.
+                </p>
+                <p style="margin:0;color:#475569;">
+                    A job's <em>Last run</em> stamp is set BEFORE its work starts &mdash; deliberately,
+                    so a crash cannot turn a throttle into a retry loop. It therefore never proves a
+                    job SUCCEEDED: for that, look at the health column below.
+                </p>
+            </div>
+        </details>
+        <p><a asp-page="/Organizer/Settings">Feature switches</a> &middot;
+           <a asp-page="/Organizer/Index">&larr; Organizer area</a></p>
+    }
+</div>
+
+@if (!Model.AccessDenied)
+{
+    @* §645 — GROUPED BY SOURCE SYSTEM. Operator: "can we reorder / restructure the list per system
+       (source) … it is in no order". One card per system, in JobSystem declaration order, so
+       finding "the Zoho one" is a glance rather than a scan of 25 rows. *@
+    @foreach (var group in Model.Rows
+        .GroupBy(r => r.Job.System)
+        .OrderBy(g => (int)g.Key))
+    {
+    <div class="card">
+        <h2 style="margin:0 0 2px;font-size:18px;">
+            @CommunityHub.Core.Settings.JobCatalog.SystemLabel(group.Key)
+            <span style="font-weight:400;color:#6b7280;font-size:14px;">(@group.Count())</span>
+        </h2>
+        <p style="margin:0 0 12px;color:#475569;font-size:13px;">
+            @CommunityHub.Core.Settings.JobCatalog.SystemBlurb(group.Key)
+        </p>
+        <div class="jb-scroll">
+            <table class="jb">
+                <thead>
+                    <tr>
+                        <th>Job</th>
+                        <th>Schedule</th>
+                        <th>Last run</th>
+                        <th>Health</th>
+                        <th>Run</th>
+                        <th>Runs every</th>
+                    </tr>
+                </thead>
+                <tbody>
+                @foreach (var r in group)
+                {
+                    <tr>
+                        <td>
+                            <strong>@r.Job.Title</strong>
+                            @if (r.BlockedByFeature)
+                            {
+                                <span class="jb-tag jb-off" title="Its feature switch is OFF, so this job does nothing.">FEATURE OFF</span>
+                            }
+                            @if (r.IsThrottled)
+                            {
+                                <span class="jb-tag jb-thr">LIMITED</span>
+                            }
+                            <div class="jb-what">@r.Job.What</div>
+                            @if (r.Job.FeatureKey is not null)
+                            {
+                                <div class="jb-what">Switch: <code>@r.Job.FeatureKey</code></div>
+                            }
+                        </td>
+                        <td>
+                            @* §440 — lead with plain English; keep the raw expression underneath
+                               for anyone who wants it, labelled so it does not read as something
+                               editable on this page.
+
+                               §510 — but for an interval-driven job the cron is only a base tick,
+                               so describing it would print "Every 5 minutes" beside a "Runs every
+                               30" box. Two adjacent columns disagreeing about frequency is the §509
+                               complaint itself, so state the EFFECTIVE cadence here and demote the
+                               tick to a footnote. *@
+                            @if (r.Job.IsIntervalDriven)
+                            {
+                                <text>Every @r.EffectiveIntervalMinutes minutes</text>
+                                <div class="jb-what" style="opacity:.75;">
+                                    set here &rarr; &middot; checked every
+                                    @CommunityHub.Core.Settings.JobDescriptor.BaseTickMinutes min
+                                </div>
+                            }
+                            else
+                            {
+                                @CommunityHub.Pages.Organizer.JobsModel.DescribeCron(r.Job.Cron)
+                                <div class="jb-what" style="opacity:.75;">
+                                    <code>@r.Job.Cron</code> &middot; set in code
+                                </div>
+                            }
+                        </td>
+                        <td>
+                            @CommunityHub.Pages.Organizer.JobsModel.Ago(r.LastRunAt)
+                            @if (r.ThrottledCount > 0)
+                            {
+                                <div class="jb-what">
+                                    skipped @r.ThrottledCount&times; by the limit
+                                    (last @CommunityHub.Pages.Organizer.JobsModel.Ago(r.LastThrottledAt))
+                                </div>
+                            }
+                        </td>
+                        <td>
+                            @if (r.Job.HealthKey is null)
+                            {
+                                <span class="jb-what">&mdash;</span>
+                            }
+                            else if (r.IsUnhealthy)
+                            {
+                                <span class="jb-tag jb-bad">@r.ConsecutiveFailures FAIL</span>
+                                <div class="jb-what">last OK @CommunityHub.Pages.Organizer.JobsModel.Ago(r.LastSuccessAt)</div>
+                            }
+                            else if (r.IsInactive)
+                            {
+                                @* §545(a)/§627 — THE STATE THIS PAGE COULD NOT SHOW. In §544 the
+                                   session push was switched off by a setting and this cell read
+                                   "OK, 4 minutes ago" every single time, for weeks, until 1,500
+                                   attendees had no agenda. A run that succeeds at doing nothing
+                                   looked exactly like a run that worked. Now it says which. *@
+                                <span class="jb-tag jb-off" title="This job runs and succeeds, but it is being turned away every time.">
+                                    DOING NOTHING
+                                </span>
+                                <div class="jb-what">
+                                    @r.ConsecutiveNoOps runs in a row &mdash; @r.LastNoOpReason
+                                </div>
+                            }
+                            else
+                            {
+                                <span class="jb-what">OK @CommunityHub.Pages.Organizer.JobsModel.Ago(r.LastSuccessAt)</span>
+                            }
+                        </td>
+                        <td>
+                            @* §543 — RUN IT NOW. Until this existed the only way to make a job run
+                               was to wait for its cron, so a stuck sync could be watched but not
+                               acted on (operator: "i cannot trigger now, i cannot change
+                               frequency"). This starts the REAL timer function via the Functions
+                               admin endpoint — the production routine, early — never a copy of it.
+                               It returns as soon as the run is ACCEPTED, so the wording promises
+                               "started", never "succeeded"; Last run + Health report the outcome. *@
+                            @if (Model.CanTrigger)
+                            {
+                                <form method="post" asp-page-handler="Trigger">
+                                    <input type="hidden" name="functionName" value="@r.Job.FunctionName" />
+                                    <button type="submit" class="set-btn" style="white-space:nowrap;">Run now</button>
+                                </form>
+                            }
+                            else
+                            {
+                                <span class="jb-what">&mdash;</span>
+                            }
+                        </td>
+                        <td class="num">
+                            @* §510 — the box only appears where it can actually do something. On a
+                               clock-anchored job ("every day at 07:20 UTC") there is nothing to set,
+                               and showing an input that silently does nothing WAS the §509 bug. *@
+                            @if (r.Job.IsIntervalDriven)
+                            {
+                                <form method="post" asp-page-handler="SetInterval" style="display:flex;gap:6px;justify-content:flex-end;align-items:center;">
+                                    <input type="hidden" name="functionName" value="@r.Job.FunctionName" />
+                                    <input type="number" name="minutes"
+                                           min="@CommunityHub.Core.Settings.JobDescriptor.BaseTickMinutes" max="10080"
+                                           step="@CommunityHub.Core.Settings.JobDescriptor.BaseTickMinutes"
+                                           value="@(r.MinIntervalMinutes > 0 ? r.MinIntervalMinutes : r.Job.DefaultIntervalMinutes)"
+                                           aria-label="How often @r.Job.Title runs, in minutes" />
+                                    <button type="submit" class="set-btn">Set</button>
+                                </form>
+                                <div class="jb-what" style="text-align:right;margin-top:2px;">
+                                    minutes &middot; min @CommunityHub.Core.Settings.JobDescriptor.BaseTickMinutes
+                                </div>
+                            }
+                            else
+                            {
+                                <span class="jb-what">fixed time &mdash; set in code</span>
+                            }
+                        </td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+        </div>
+    </div>
+    }
+    <p class="jb-note" style="margin-top:10px;">
+        Jobs marked <strong>Manual only</strong> have no real timer &mdash; they exist to be
+        triggered by hand. All jobs also stop entirely while
+        <a asp-page="/Organizer/Settings">Pause all background jobs</a> is on.
+    </p>
+}

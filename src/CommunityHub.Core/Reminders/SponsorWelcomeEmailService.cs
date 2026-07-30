@@ -39,14 +39,20 @@ public sealed class SponsorWelcomeEmailService
     private readonly SponsorRecipientResolver _recipients;
     private readonly WelcomeEmailService _welcome;
 
+    // §340-B: the shared §219 bulk-send pacer. Optional so existing constructions and every
+    // test are unchanged (null ⇒ no delay, exactly as before); DI supplies the real one.
+    private readonly Email.IBulkSendPacer? _pacer;
+
     public SponsorWelcomeEmailService(
         CommunityHubDbContext db,
         SponsorRecipientResolver recipients,
-        WelcomeEmailService welcome)
+        WelcomeEmailService welcome,
+        Email.IBulkSendPacer? pacer = null)
     {
         _db = db;
         _recipients = recipients;
         _welcome = welcome;
+        _pacer = pacer;
     }
 
     /// <summary>
@@ -79,7 +85,13 @@ public sealed class SponsorWelcomeEmailService
                 return new SponsorWelcomeResult(
                     sponsorCompanyId, 0, 0, 0,
                     Blocked: true,
-                    Reason: "SharePoint upload folders not provisioned yet — run the sponsor pull first, then resend.");
+                    // §326cd: NOT "run the sponsor pull" — the pull runs itself every 30 min and
+                    // PROVISIONS the folder (EnsureFolderWithEditLinkAsync), after which the
+                    // 15-min reconcile welcomes the company with no human involved. This block
+                    // is transient BY DESIGN; it only persists when provisioning cannot succeed.
+                    Reason: "Waiting for its SharePoint upload folder — the sponsor pull provisions "
+                            + "this automatically (~30 min) and the welcome then sends itself. If it "
+                            + "persists, SharePoint provisioning is failing or is not configured.");
             }
         }
 
@@ -88,7 +100,19 @@ public sealed class SponsorWelcomeEmailService
         foreach (var c in coordinators)
         {
             var didSend = await _welcome.SendWelcomeAsync(c.ParticipantId, ct);
-            if (didSend) sent++; else skipped++;
+            if (didSend)
+            {
+                sent++;
+                // §340-B PACING: this is a bulk loop — SendForAllSponsorsAsync calls it once per
+                // company, so a "resend to all sponsors" / the 15-min reconcile can walk every
+                // coordinator of every company back to back. Paced AFTER an actual send, never
+                // before the attempt: the overwhelming majority of iterations are idempotent
+                // skips of already-welcomed coordinators, so an up-front delay would add
+                // ~150 ms per coordinator every 15 minutes for nothing. Same shape as
+                // WelcomeReconcileJob; the pacer is the shared §219 IBulkSendPacer.
+                if (_pacer is not null) await _pacer.PaceAsync(ct);
+            }
+            else skipped++;
         }
         return new SponsorWelcomeResult(
             sponsorCompanyId, coordinators.Count, sent, skipped);
@@ -125,11 +149,25 @@ public sealed class SponsorWelcomeEmailService
         var coordinators = await _recipients.ResolveAsync(eventId, sponsorCompanyId, ct);
         if (coordinators.Count == 0) return 0;
 
-        var emails = coordinators.Select(c => c.Email).ToList();
+        // §340-G-1: keyed on the OCCASION KEY, exactly as the send is — not on the address.
+        //
+        // §326bf moved the SEND's idempotency to `welcome:{participantId}`, because an address is
+        // not an identity: correcting a typo, a re-import that changes the case, or a Sessionize
+        // update made a stored row unmatchable. This reset was left matching `RecipientEmail`, so
+        // the two halves drifted — and silently, in the worse direction. A coordinator whose
+        // address changed since their welcome has a ledger row under the OLD address, so the reset
+        // matched nothing, deleted nothing, and returned "0 rows" as if there had been nothing to
+        // do; the follow-up re-send then found the row still present and skipped. "Reset, then
+        // resend" would do nothing at all, forever, with no error anywhere — the same shape of
+        // failure as §401, and the reason a reset must be keyed identically to the thing it resets.
+        //
+        // The send resolves each participant from THIS list, so keying the reset the same way makes
+        // the pair correct by construction rather than by both happening to agree today.
+        var occasionKeys = coordinators.Select(c => $"welcome:{c.ParticipantId}").ToList();
         var rows = await _db.SentReminders
             .Where(s => s.EventId == eventId
                         && s.ReminderType == WelcomeReminderType
-                        && emails.Contains(s.RecipientEmail))
+                        && occasionKeys.Contains(s.OccasionKey))
             .ToListAsync(ct);
         if (rows.Count == 0) return 0;
 

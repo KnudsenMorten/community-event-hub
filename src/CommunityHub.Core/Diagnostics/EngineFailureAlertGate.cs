@@ -61,6 +61,62 @@ public sealed class EngineFailureAlertGate
     }
 
     /// <summary>
+    /// §545(b) INACTIVE — how many consecutive runs a job may do NOTHING before the operator is
+    /// told. Deliberately high.
+    /// </summary>
+    /// <remarks>
+    /// 🔒 A doing-nothing run is usually CORRECT — a feature is off because he switched it off, and
+    /// he does not need telling every 10 minutes. The alert exists for the case where a job has been
+    /// inert so long that the reason has been FORGOTTEN, which is exactly §544 (weeks). At the
+    /// 10-minute cadence of the sync jobs, 100 runs is about 17 hours — long enough that no
+    /// deliberate same-day toggle trips it, short enough that "weeks" is impossible.
+    /// </remarks>
+    public const int ConsecutiveNoOpAlertThreshold = 100;
+
+    /// <summary>
+    /// §545(b) — record what a clean run ACHIEVED, and alert once a job has been doing nothing for
+    /// so long that the reason has plainly been forgotten. Never throws.
+    /// </summary>
+    public async Task OnActivityAsync(
+        string functionName, string? inactiveReason, CancellationToken ct = default)
+    {
+        int streak;
+        try
+        {
+            streak = await _failures.RecordActivityAsync(functionName, inactiveReason, ct);
+        }
+        catch (Exception ex)
+        {
+            // 🔒 FAIL QUIET here, the opposite of OnFailureAsync. That one fails OPEN because a
+            // missed FAILURE is an outage; this one is a nice-to-know, and alerting on a bookkeeping
+            // error would be the §609 mistake — a red mail for a condition that is not a problem.
+            _log.LogWarning(ex,
+                "EngineFailureAlertGate[{Fn}]: could not record run activity; ignored.", functionName);
+            return;
+        }
+
+        if (streak == 0 || streak % ConsecutiveNoOpAlertThreshold != 0) return;
+
+        var fnEnc = System.Net.WebUtility.HtmlEncode(functionName);
+        var reasonEnc = System.Net.WebUtility.HtmlEncode(inactiveReason ?? "(no reason given)");
+
+        await _alerts.AlertAsync(
+            $"Engine INACTIVE: {functionName} [ELDK27]",
+            $"<p>The background engine <b>{fnEnc}</b> has now run <b>{streak}</b> times in a row "
+            + "WITHOUT DOING ANYTHING. It is not failing — it is being turned away every time, "
+            + "always for the same reason:</p>"
+            + $"<blockquote><b>{reasonEnc}</b></blockquote>"
+            + "<p>If that is deliberate, nothing needs doing and this will not be repeated until it "
+            + "has run another " + ConsecutiveNoOpAlertThreshold + " times. If it is not, this job "
+            + "has been silently switched off and whatever it feeds is not being updated.</p>",
+            ct, throttleKey: $"engine-inactive:{functionName}");
+
+        _log.LogWarning(
+            "EngineFailureAlertGate[{Fn}]: INACTIVE for {N} consecutive runs — {Reason}.",
+            functionName, streak, inactiveReason);
+    }
+
+    /// <summary>
     /// A function THREW: increment its durable consecutive-failure counter and send the ops
     /// alert ONLY once the count reaches <see cref="ConsecutiveFailureAlertThreshold"/>. The
     /// caller is still responsible for re-throwing the original exception (platform
@@ -102,19 +158,46 @@ public sealed class EngineFailureAlertGate
             return;
         }
 
-        var countText = consecutive >= 0
-            ? $"now FAILED <b>{consecutive}</b> time(s) in a row, so this is no longer a one-off "
-              + "platform/upstream glitch"
-            : "FAILED and the durable failure-state store could not be read (failing OPEN)";
+        // §701.1 — a store-unavailable fail-open is NOT a per-job event. The state store is the
+        // database, so when it is unreachable EVERY job fails open in the same minute and, under a
+        // per-function throttle key, each one sent its own mail. That is the operator's "3 erors
+        // per mail" (2026-07-29): a single ~5-minute Azure SQL blip produced one alert per engine,
+        // all with the same root cause, and the §138 consecutive-failure gate was bypassed for all
+        // of them precisely because the counter it reads was the thing that was down.
+        //
+        // ⇒ Coalesce onto ONE shared throttle key so the 6h window collapses the storm to a single
+        // mail. The FIRST engine to notice names itself in the subject; the body says plainly that
+        // the others are suppressed, so a coalesced alert can never read as "only this one broke".
+        var storeUnavailable = consecutive < 0;
+
+        var countText = storeUnavailable
+            ? "FAILED and the durable failure-state store could not be read (failing OPEN)"
+            : $"now FAILED <b>{consecutive}</b> time(s) in a row, so this is no longer a one-off "
+              + "platform/upstream glitch";
 
         var fnEnc = System.Net.WebUtility.HtmlEncode(functionName);
         var html =
             $"<p>The background engine <b>{fnEnc}</b> has {countText}.</p>"
             + $"<pre>{System.Net.WebUtility.HtmlEncode(failure.ToString())}</pre>";
 
-        // Subject unchanged (operator contract). Stable per-function throttle key so a job stuck
-        // failing every tick can't flood the inbox (EngineAlertSender suppresses within 6h).
+        if (storeUnavailable)
+        {
+            html +=
+                "<p><b>This alert is coalesced.</b> The failure-state store is the database, so if it "
+                + "is unreachable then every other engine is failing the same way at the same time — "
+                + "they are suppressed for 6 hours rather than sending you one mail each. "
+                + "<b>Read this as \"the database was unreachable\", not as \"this one engine broke\".</b></p>"
+                + "<p>The engines recover on their own once the database is reachable; a short blip "
+                + "needs no action. Check whether they are running again before investigating.</p>";
+        }
+
+        // Subject unchanged (operator contract). Per-function throttle key normally, so one stuck job
+        // can't flood; ONE SHARED key when the store is down, so N broken jobs can't flood either.
+        var throttleKey = storeUnavailable
+            ? "engine-fail:state-store-unavailable"
+            : $"engine-fail:{functionName}";
+
         await _alerts.AlertAsync(
-            $"Engine FAILED: {functionName} [ELDK27]", html, ct, throttleKey: $"engine-fail:{functionName}");
+            $"Engine FAILED: {functionName} [ELDK27]", html, ct, throttleKey: throttleKey);
     }
 }

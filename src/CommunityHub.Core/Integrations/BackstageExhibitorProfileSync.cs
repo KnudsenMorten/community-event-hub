@@ -21,12 +21,19 @@ public sealed class BackstageExhibitorProfileSync
     private readonly ZohoOptions _options;
     private readonly ILogger<BackstageExhibitorProfileSync> _log;
 
+    // RULE (operator 2026-07-23): every CEH-made Zoho write must notify info@expertslive.dk
+    // (the operator must publish/delete manually in Backstage). Optional so tests/legacy
+    // constructions keep compiling; null ⇒ no notification.
+    private readonly Email.ZohoChangeNotifier? _zohoChanges;
+
     public BackstageExhibitorProfileSync(
-        ZohoClient zoho, ZohoOptions options, ILogger<BackstageExhibitorProfileSync> log)
+        ZohoClient zoho, ZohoOptions options, ILogger<BackstageExhibitorProfileSync> log,
+        Email.ZohoChangeNotifier? zohoChanges = null)
     {
         _zoho = zoho;
         _options = options;
         _log = log;
+        _zohoChanges = zohoChanges;
     }
 
     /// <summary>
@@ -74,9 +81,18 @@ public sealed class BackstageExhibitorProfileSync
                 token!, match.Id, companyOverview, companyShortDescription, ct,
                 companyName: companyName, contactFirstName: contactFirstName, contactLastName: contactLastName);
             if (ok)
+            {
                 _log.LogInformation("Backstage exhibitor profile updated for '{Co}' (id {Id}).", companyName, match.Id);
+                // Operator 2026-07-23: a successful Zoho write must notify the ops mailbox
+                // (publish/delete is manual in Backstage). One save = one-item batch.
+                if (_zohoChanges is not null)
+                    await _zohoChanges.NotifyAsync("Exhibitor profiles",
+                        new[] { $"Updated exhibitor profile for '{companyName}' (Backstage id {match.Id})" }, ct);
+            }
             else
+            {
                 _log.LogWarning("Backstage exhibitor profile update FAILED for '{Co}' (id {Id}).", companyName, match.Id);
+            }
             return ok;
         }
         catch (Exception ex)

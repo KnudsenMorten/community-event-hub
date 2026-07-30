@@ -11,12 +11,21 @@ namespace CommunityHub.Pages.Organizer;
 /// Organizer page to import speakers from the Sessionize v2 view API. The pull
 /// upserts Participant rows (role Speaker), matched by email. Organizer-only.
 /// (The legacy Excel/.xlsx upload path was removed — §82, API-only now.)
+///
+/// <para>REQUIREMENTS §198: the "Sync new speakers (delta)" button is the on-demand
+/// "trigger import now / force sync" the organizer needs — <see cref="OnPostApiAsync"/>
+/// runs the SAME <see cref="ISessionizeApiImportService"/> delta import the timer job
+/// runs, synchronously in-request (no shelling out to the Functions admin API), for the
+/// active edition, with <c>sendWelcome:false</c> (never emails). It is ring-gated to
+/// organizers, shows read/created/updated/skipped counts, and surfaces skipped reasons
+/// (e.g. a speaker with no email) in the result Warnings list. When Sessionize is not
+/// configured for the edition the existing not-configured message is shown.</para>
 /// </summary>
 [Authorize]
 public class SessionizeImportModel : PageModel
 {
     private readonly ICurrentParticipantAccessor _participant;
-    private readonly SessionizeApiImportService _apiImport;
+    private readonly ISessionizeApiImportService _apiImport;
     private readonly SessionizeImportPreviewService _preview;
     private readonly CommunityHub.Core.Integrations.SessionizeApiOptions _apiOptions;
     private readonly CommunityHub.Core.Settings.FeatureGateService _gate;
@@ -24,7 +33,7 @@ public class SessionizeImportModel : PageModel
 
     public SessionizeImportModel(
         ICurrentParticipantAccessor participant,
-        SessionizeApiImportService apiImport,
+        ISessionizeApiImportService apiImport,
         SessionizeImportPreviewService preview,
         CommunityHub.Core.Integrations.SessionizeApiOptions apiOptions,
         CommunityHub.Core.Settings.FeatureGateService gate,

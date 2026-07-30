@@ -28,6 +28,8 @@
         <strong>Preselect</strong> = shortlist this person but keep them <em>inactive</em> — they
         <strong>cannot sign in yet</strong> (a "we intend to include them, not confirmed" state).
         <strong>Activate</strong> = make them <em>active</em> so they <strong>can sign in</strong> and get hub access.
+        <br /><strong>Speakers skip the Preselect step</strong> (their pre-selection already happened in
+        Sessionize) — a speaker row goes straight <em>Inactive → Active</em> in one step.
     </p>
 
     @if (Model.AccessDenied)
@@ -94,7 +96,19 @@
                                        aria-label="Select @p.FullName" />
                             </td>
                             <td>@p.FullName</td>
-                            <td>@p.Email</td>
+                            <td>
+                                @* §204: an email-less Sessionize speaker (invite not yet
+                                   accepted) is parked under a placeholder address — show a
+                                   clear flag instead of the synthetic email. *@
+                                @if (CommunityHub.Core.Reminders.SessionizeImportService.IsPlaceholderEmail(p.Email))
+                                {
+                                    <em style="color:#b45309;">no email yet — pending invite acceptance</em>
+                                }
+                                else
+                                {
+                                    @p.Email
+                                }
+                            </td>
                             <td>@p.Role</td>
                             <td>@p.QueueSource</td>
                             <td>
@@ -109,7 +123,11 @@
                             </td>
                             <td>
                                 <span class="psq-actions">
-                                @if (p.LifecycleState == ParticipantLifecycleState.Inactive)
+                                @* §245: speakers skip Preselected (pre-selection lives in
+                                   Sessionize) — no Preselect button for a speaker row; the
+                                   activate button says so. Volunteers/media keep 3 states. *@
+                                @if (p.LifecycleState == ParticipantLifecycleState.Inactive
+                                     && p.Role != ParticipantRole.Speaker)
                                 {
                                     <button type="submit" class="secondary"
                                             asp-page-handler="PreselectOne"
@@ -119,7 +137,9 @@
                                 <button type="submit"
                                         asp-page-handler="ActivateOne"
                                         asp-route-participantId="@p.Id"
-                                        asp-route-SourceFilter="@Model.SourceFilter">Activate</button>
+                                        asp-route-SourceFilter="@Model.SourceFilter">@(
+                                        p.Role == ParticipantRole.Speaker && p.LifecycleState == ParticipantLifecycleState.Inactive
+                                            ? "Activate (one step)" : "Activate")</button>
                                 <button type="submit"
                                         style="background:#b91c1c;"
                                         asp-page-handler="Delete"

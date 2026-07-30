@@ -21,10 +21,12 @@ namespace CommunityHub.Web.Tests;
 
 /// <summary>
 /// FEATURE B: the self-service forms are gated by ENTITLEMENT
-/// (<see cref="CommunityHub.Core.Entitlements.OrderEntitlements"/>), not role alone.
-/// A SPONSOR-SELF-FUNDED speaker must be DENIED Hotel / Travel / Swag (and the
-/// non-existent Award) but ALLOWED Lunch + the appreciation dinner; a SUPPORTED
-/// speaker is allowed all. Drives the real page-model OnGet handlers over an
+/// (<see cref="CommunityHub.Core.Entitlements.OrderEntitlements"/>), not role alone
+/// — by the §299 6.2 <see cref="SpeakerCategory"/> matrix. A SPONSOR-category
+/// speaker must be DENIED Hotel / Travel / Swag (and the non-existent Award) but
+/// ALLOWED Lunch + the appreciation dinner; a COMMUNITY speaker is allowed all;
+/// a GUEST is Community minus travel; an UNCATEGORIZED (null) speaker gets no
+/// speaker forms at all. Drives the real page-model OnGet handlers over an
 /// in-memory DB + a fake speaker session. FAKE names only.
 /// </summary>
 public sealed class FormEntitlementGateTests
@@ -79,7 +81,7 @@ public sealed class FormEntitlementGateTests
     }
 
     private static async Task<Participant> SeedSpeakerAsync(
-        CommunityHubDbContext db, SpeakerFunding funding)
+        CommunityHubDbContext db, SpeakerCategory? category)
     {
         if (!await db.Events.AnyAsync(e => e.Id == EventId))
         {
@@ -102,8 +104,7 @@ public sealed class FormEntitlementGateTests
         db.SpeakerProfiles.Add(new SpeakerProfile
         {
             EventId = EventId, ParticipantId = p.Id,
-            SpeakerFunding = funding,
-            SpeakingPreDay = true, SpeakingMainDay = true,
+            Category = category,   // §299 6.1: the canonical organizer-set category
         });
         await db.SaveChangesAsync();
         return p;
@@ -112,11 +113,11 @@ public sealed class FormEntitlementGateTests
     // ---- page-model factories -------------------------------------------------
 
     private static (T model, CommunityHubDbContext db) Build<T>(
-        SpeakerFunding funding, Func<CommunityHubDbContext, DefaultHttpContext, T> make)
+        SpeakerCategory? category, Func<CommunityHubDbContext, DefaultHttpContext, T> make)
         where T : PageModel
     {
         var db = NewDb();
-        var speaker = SeedSpeakerAsync(db, funding).GetAwaiter().GetResult();
+        var speaker = SeedSpeakerAsync(db, category).GetAwaiter().GetResult();
         var http = new DefaultHttpContext { User = Session(speaker) };
         var model = make(db, http);
         model.PageContext = new PageContext { HttpContext = http };
@@ -128,7 +129,6 @@ public sealed class FormEntitlementGateTests
     // same deps the page used to take, so the entitlement (relevance) gate under test is identical.
     private static HotelModel NewHotel(CommunityHubDbContext db, DefaultHttpContext http) =>
         new(new HotelFormService(db, new FixedClock(),
-                new HotelCalendarInviter(new NoOpEmailSender(), Options.Create(new EmailOptions())),
                 new OrganizerActionItemService(db, new FixedClock()),
                 Loc(), NullLogger<HotelFormService>.Instance),
             Accessor(http));
@@ -149,80 +149,115 @@ public sealed class FormEntitlementGateTests
                 new OrganizerActionItemService(db, new FixedClock()), Loc()),
             Accessor(http));
 
-    // ===== Sponsor-self-funded speaker: DENIED hotel/travel/swag ==============
+    // ===== Sponsor-category speaker: DENIED hotel/travel/swag =================
 
     [Fact]
-    public async Task Sponsor_self_funded_speaker_is_denied_hotel()
+    public async Task Sponsor_category_speaker_is_denied_hotel()
     {
-        var (m, db) = Build(SpeakerFunding.SponsorSelfFunded, NewHotel);
+        var (m, db) = Build(SpeakerCategory.Sponsor, NewHotel);
         using (db) { await m.OnGetAsync(default); Assert.False(m.HotelRelevant); }
     }
 
     [Fact]
-    public async Task Sponsor_self_funded_speaker_is_denied_travel()
+    public async Task Sponsor_category_speaker_is_denied_travel()
     {
-        var (m, db) = Build(SpeakerFunding.SponsorSelfFunded, NewTravel);
+        var (m, db) = Build(SpeakerCategory.Sponsor, NewTravel);
         using (db) { await m.OnGetAsync(default); Assert.True(m.AccessDenied); }
     }
 
     [Fact]
-    public async Task Sponsor_self_funded_speaker_is_denied_swag()
+    public async Task Sponsor_category_speaker_is_denied_swag()
     {
-        var (m, db) = Build(SpeakerFunding.SponsorSelfFunded, NewSwag);
+        var (m, db) = Build(SpeakerCategory.Sponsor, NewSwag);
         using (db) { await m.OnGetAsync(default); Assert.True(m.AccessDenied); }
     }
 
-    // ===== Sponsor-self-funded speaker: ALLOWED lunch + dinner ================
+    // ===== Sponsor-category speaker: ALLOWED lunch + dinner ===================
 
     [Fact]
-    public async Task Sponsor_self_funded_master_class_speaker_lunch_is_auto_counted()
+    public async Task Sponsor_category_speaker_sees_optin_preday_lunch()
     {
-        // Master-class speakers (SpeakingPreDay) are AUTO-COUNTED for the pre-day
-        // lunch now (operator 2026-06-24) — they don't fill the form.
-        var (m, db) = Build(SpeakerFunding.SponsorSelfFunded, NewLunch);
-        using (db) { await m.OnGetAsync(default); Assert.True(m.Form.AccessDenied); Assert.True(m.Form.PreDayAutoCounted); }
+        // §295 (operator 2026-07-11): speakers are NO LONGER auto-counted for the pre-day lunch —
+        // any speaker can join but some arrive after lunch, so they SEE the form with an opt-in
+        // pre-day checkbox (master-class speakers just default it to Yes).
+        var (m, db) = Build(SpeakerCategory.Sponsor, NewLunch);
+        using (db) { await m.OnGetAsync(default); Assert.False(m.Form.AccessDenied); Assert.False(m.Form.PreDayAutoCounted); Assert.True(m.Form.ShowPreDay); }
     }
 
     [Fact]
-    public async Task Sponsor_self_funded_speaker_is_allowed_dinner()
+    public async Task Sponsor_category_speaker_is_allowed_dinner()
     {
-        var (m, db) = Build(SpeakerFunding.SponsorSelfFunded, NewDinner);
+        var (m, db) = Build(SpeakerCategory.Sponsor, NewDinner);
         using (db) { await m.OnGetAsync(default); Assert.False(m.AccessDenied); }
     }
 
-    // ===== Supported speaker: ALLOWED everything =============================
+    // ===== Community speaker: ALLOWED everything =============================
 
     [Fact]
-    public async Task Supported_speaker_is_allowed_hotel()
+    public async Task Community_speaker_is_allowed_hotel()
     {
-        var (m, db) = Build(SpeakerFunding.Supported, NewHotel);
+        var (m, db) = Build(SpeakerCategory.Community, NewHotel);
         using (db) { await m.OnGetAsync(default); Assert.True(m.HotelRelevant); }
     }
 
     [Fact]
-    public async Task Supported_speaker_is_allowed_travel()
+    public async Task Community_speaker_is_allowed_travel()
     {
-        var (m, db) = Build(SpeakerFunding.Supported, NewTravel);
+        var (m, db) = Build(SpeakerCategory.Community, NewTravel);
         using (db) { await m.OnGetAsync(default); Assert.False(m.AccessDenied); }
     }
 
     [Fact]
-    public async Task Supported_speaker_is_allowed_swag()
+    public async Task Community_speaker_is_allowed_swag()
     {
-        var (m, db) = Build(SpeakerFunding.Supported, NewSwag);
+        var (m, db) = Build(SpeakerCategory.Community, NewSwag);
         using (db) { await m.OnGetAsync(default); Assert.False(m.AccessDenied); }
     }
 
     [Fact]
-    public async Task Supported_master_class_speaker_lunch_auto_counted_dinner_allowed()
+    public async Task Community_speaker_sees_optin_preday_lunch_dinner_allowed()
     {
-        // Pre-day lunch is auto-counted for the master-class speaker (operator
-        // 2026-06-24); dinner is unaffected and still shown.
-        var (lunch, db1) = Build(SpeakerFunding.Supported, NewLunch);
-        using (db1) { await lunch.OnGetAsync(default); Assert.True(lunch.Form.AccessDenied); Assert.True(lunch.Form.PreDayAutoCounted); }
+        // §295: pre-day lunch is an OPT-IN checkbox for the speaker (not auto-counted); dinner is
+        // unaffected and still shown.
+        var (lunch, db1) = Build(SpeakerCategory.Community, NewLunch);
+        using (db1) { await lunch.OnGetAsync(default); Assert.False(lunch.Form.AccessDenied); Assert.False(lunch.Form.PreDayAutoCounted); Assert.True(lunch.Form.ShowPreDay); }
 
-        var (dinner, db2) = Build(SpeakerFunding.Supported, NewDinner);
+        var (dinner, db2) = Build(SpeakerCategory.Community, NewDinner);
         using (db2) { await dinner.OnGetAsync(default); Assert.False(dinner.AccessDenied); }
+    }
+
+    // ===== Guest speaker (§299 6.2): Community minus travel ==================
+
+    [Fact]
+    public async Task Guest_speaker_is_allowed_hotel_and_swag_but_denied_travel()
+    {
+        // §299 6.2 summary rule: Guest is identical to Community EXCEPT the
+        // travel-reimbursement option must never be presented.
+        var (hotel, db1) = Build(SpeakerCategory.Guest, NewHotel);
+        using (db1) { await hotel.OnGetAsync(default); Assert.True(hotel.HotelRelevant); }
+
+        var (swag, db2) = Build(SpeakerCategory.Guest, NewSwag);
+        using (db2) { await swag.OnGetAsync(default); Assert.False(swag.AccessDenied); }
+
+        var (travel, db3) = Build(SpeakerCategory.Guest, NewTravel);
+        using (db3) { await travel.OnGetAsync(default); Assert.True(travel.AccessDenied); }
+    }
+
+    // ===== Uncategorized speaker (§299 6.1): the hat grants nothing ==========
+
+    [Fact]
+    public async Task Uncategorized_speaker_is_denied_the_speaker_forms()
+    {
+        // A null Category contributes NOTHING — the still-active legacy case (a
+        // migrated organizer-funded speaker) gets no hotel/travel/swag forms.
+        var (hotel, db1) = Build((SpeakerCategory?)null, NewHotel);
+        using (db1) { await hotel.OnGetAsync(default); Assert.False(hotel.HotelRelevant); }
+
+        var (travel, db2) = Build((SpeakerCategory?)null, NewTravel);
+        using (db2) { await travel.OnGetAsync(default); Assert.True(travel.AccessDenied); }
+
+        var (swag, db3) = Build((SpeakerCategory?)null, NewSwag);
+        using (db3) { await swag.OnGetAsync(default); Assert.True(swag.AccessDenied); }
     }
 
     // ===== Award form: confirmed NOT to exist (entitlement only) ============

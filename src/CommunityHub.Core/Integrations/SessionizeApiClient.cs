@@ -251,6 +251,19 @@ public sealed class SessionizeApiClient
         // Dedupe on email; keep the first non-empty value for each field.
         var seen = new Dictionary<string, SessionizeSpeaker>(
             StringComparer.OrdinalIgnoreCase);
+        // §204: email-less speakers that DO carry a Sessionize id — deduped by that
+        // id — so the importer can land them in the pre-selection queue instead of
+        // dropping them. (Still also reported as a warning, for §189 wording.)
+        var emailLess = new Dictionary<string, SessionizeSpeaker>(
+            StringComparer.OrdinalIgnoreCase);
+
+        // §189: distinguish the two causes of a missing email. The secured
+        // SpeakersEmails view is "readable" iff a non-empty join map was supplied
+        // (a token was configured AND at least one speaker email resolved this run).
+        // When it IS readable, a speaker with no address simply isn't in that view
+        // yet — almost always because they haven't accepted the Sessionize speaker
+        // invite — so the "enable / configure EmailsToken" guidance would be wrong.
+        var emailsViewReadable = emailById is { Count: > 0 };
 
         JsonDocument doc;
         try
@@ -310,12 +323,31 @@ public sealed class SessionizeApiClient
                 if (string.IsNullOrWhiteSpace(parsed.Email))
                 {
                     var name = $"{parsed.FirstName} {parsed.LastName}".Trim();
-                    var fix = "Enable the 'speaker emails' field on the Sessionize "
-                        + "endpoint, or configure Sessionize:EmailsToken so the hub "
-                        + "can read the secured SpeakersEmails view.";
+                    // §189: pick the message by CAUSE. If the SpeakersEmails view is
+                    // readable, THIS speaker just isn't in it yet (invite not accepted);
+                    // only point at the EmailsToken / "speaker emails" config when the
+                    // view is genuinely unreadable. Either way it stays a non-fatal skip.
+                    var detail = emailsViewReadable
+                        ? "no email - likely hasn't accepted the Sessionize speaker "
+                          + "invite yet (not in the SpeakersEmails view)."
+                        : "skipped - no email address. Enable the 'speaker emails' field "
+                          + "on the Sessionize endpoint, or configure Sessionize:EmailsToken "
+                          + "so the hub can read the secured SpeakersEmails view.";
                     warnings.Add(string.IsNullOrEmpty(name)
-                        ? $"Speaker #{index}: skipped - no email address. {fix}"
-                        : $"Speaker '{name}': skipped - no email address. {fix}");
+                        ? $"Speaker #{index}: {detail}"
+                        : $"Speaker '{name}': {detail}");
+
+                    // §204: if this email-less speaker has a stable Sessionize id we can
+                    // still bring them into the pre-selection queue (keyed by that id) so
+                    // the organizer sees them; without an id there is no key to reconcile
+                    // on later, so it stays a plain skip.
+                    if (!string.IsNullOrEmpty(parsed.SessionizeId))
+                    {
+                        emailLess[parsed.SessionizeId] =
+                            emailLess.TryGetValue(parsed.SessionizeId, out var prevNoEmail)
+                                ? Merge(prevNoEmail, parsed)
+                                : parsed;
+                    }
                     continue;
                 }
 
@@ -326,7 +358,10 @@ public sealed class SessionizeApiClient
         }
 
         speakers.AddRange(seen.Values);
-        return new SessionizeParseResult(speakers, warnings, null);
+        return new SessionizeParseResult(speakers, warnings, null)
+        {
+            EmailLessSpeakers = emailLess.Values.ToList(),
+        };
     }
 
     /// <summary>
@@ -521,8 +556,10 @@ public sealed class SessionizeApiClient
         //  - Format group  → the Category (drives Type + LengthMinutes via the mapper).
         //  - Track group    → Track (in CEH this is just "Track", §154).
         //  - Level group    → Level.
+        //  - Tags group     → Tags (§299.8/b7 — comma-joined; null when absent).
         //  - anything else  → an extra label kept ONLY as a Category fallback (below).
         string? track = null, level = null, formatLabel = null;
+        var tagLabels = new List<string>();
         var otherLabels = new List<string>();
         if (sess.TryGetProperty("categoryItems", out var ci)
             && ci.ValueKind == JsonValueKind.Array)
@@ -534,14 +571,21 @@ public sealed class SessionizeApiClient
                     : item.GetString() ?? string.Empty;
                 if (!categoryItemNames.TryGetValue(key, out var cat)) continue;
 
+                // §323: the routing keywords are MAP-DRIVEN (SessionizeFieldMap reads
+                // them from sessionize-to-ceh.fieldmap.json, code fallback here) — a
+                // renamed Sessionize category group is a config edit, not a deploy.
                 var group = cat.GroupTitle.ToLowerInvariant();
-                if (group.Contains("format"))
+                if (group.Contains(SessionizeFieldMap.FormatKeyword))
                     formatLabel ??= cat.Name;
                 // "Suggested Event Track" and a plainly-titled "Track" both map to Track.
-                else if (group.Contains("track"))
+                else if (group.Contains(SessionizeFieldMap.TrackKeyword))
                     track ??= cat.Name;
-                else if (group.Contains("level"))
+                else if (group.Contains(SessionizeFieldMap.LevelKeyword))
                     level ??= cat.Name;
+                // §299.8/b7: a "Tags" group (any title containing the tag keyword)
+                // carries the session's tag chips; ALL its items are kept (comma-joined).
+                else if (group.Contains(SessionizeFieldMap.TagKeyword))
+                    tagLabels.Add(cat.Name);
                 else
                     otherLabels.Add(cat.Name);
             }
@@ -587,7 +631,9 @@ public sealed class SessionizeApiClient
             Level:            NullIfEmpty(level ?? string.Empty),
             // §154: numeric minutes from the scheduled times when published, else the
             // Format label's "(NN min)" hint.
-            LengthMinutes:    SessionDefaultsMapper.MapLengthMinutes(startsAt, endsAt, formatLabel));
+            LengthMinutes:    SessionDefaultsMapper.MapLengthMinutes(startsAt, endsAt, formatLabel),
+            // §299.8/b7: comma-joined "Tags" group labels; null when the payload has none.
+            Tags:             tagLabels.Count > 0 ? string.Join(", ", tagLabels) : null);
     }
 
     /// <summary>
@@ -784,13 +830,12 @@ public sealed class SessionizeApiClient
         }
         var raw = v.GetString();
         if (string.IsNullOrWhiteSpace(raw)) return null;
-        // Sessionize emits local wall-clock ("2027-02-04T09:00:00") with no
-        // offset; treat it as unspecified rather than fabricating a zone.
-        return DateTimeOffset.TryParse(
-            raw, System.Globalization.CultureInfo.InvariantCulture,
-            System.Globalization.DateTimeStyles.AssumeUniversal, out var dto)
-            ? dto
-            : null;
+        // §305 CRITICAL FIX (operator 2026-07-24): Sessionize emits the EVENT's local
+        // wall-clock ("2027-02-04T09:00:00") with NO offset. The old AssumeUniversal
+        // read it as UTC, so every session landed +1h/+2h late in Zoho (9:00 Danish
+        // became "09:00Z" = 10:00 CET). EventTimezone attaches the REAL Danish offset
+        // for that date (CET/CEST, DST-correct); explicit offsets are honoured as-is.
+        return EventTimezone.ParseEventLocal(raw);
     }
 
     private static bool GetBool(JsonElement e, string prop) =>

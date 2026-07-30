@@ -32,6 +32,7 @@ public class EmailCenterModel : PageModel
     private readonly ParticipantEmailService _participantEmail;
     private readonly EmailTestSendPlanner _testSendPlanner;
     private readonly TimeProvider _clock;
+    private readonly IEmailContextAccessor? _emailContext;
 
     public EmailCenterModel(
         CommunityHubDbContext db,
@@ -41,8 +42,11 @@ public class EmailCenterModel : PageModel
         IEmailSender emailSender,
         ParticipantEmailService participantEmail,
         EmailTestSendPlanner testSendPlanner,
-        TimeProvider clock)
+        TimeProvider clock,
+        // §707.7 — optional so existing constructions keep compiling; the web host registers it.
+        IEmailContextAccessor? emailContext = null)
     {
+        _emailContext = emailContext;
         _db = db;
         _participant = participant;
         _templates = templates;
@@ -199,8 +203,16 @@ public class EmailCenterModel : PageModel
                 // Template name in the TEST-send subject so a batch test-send is
                 // identifiable in one inbox. Test-sends only — never real mail.
                 // (Kept as a permanent test aid, operator 2026-06-23.)
-                await _emailSender.SendAsync(
-                    me.Email, $"[TEST: {Template}] {rendered.Subject}", rendered.HtmlBody, ct);
+                // 🔒 §707.7 — RING-EXEMPT, and deliberately so. A test-send goes to the ORGANIZER
+                // who pressed the button; it is a diagnostic, not a participant mail, and a rollout
+                // ring silently swallowing it would make the tool lie about the mail it is testing.
+                // It previously set no EmailContext at all, which achieved this by accident.
+                using (_emailContext?.Set(new EmailContext(
+                    "email-test-send", me.EventId, me.ParticipantId, me.FullName, RingExempt: true)))
+                {
+                    await _emailSender.SendAsync(
+                        me.Email, $"[TEST: {Template}] {rendered.Subject}", rendered.HtmlBody, ct);
+                }
                 msg = $"Test mail '{Template}' sent to {me.Email}.";
             }
             catch (Exception ex)
@@ -255,8 +267,16 @@ public class EmailCenterModel : PageModel
                         // Template name in the TEST-send subject so a batch test-send is
                         // identifiable in one inbox. Test-sends only — never real mail.
                         // (Kept as a permanent test aid, operator 2026-06-23.)
-                        await _emailSender.SendAsync(
-                            plan.TargetAddress!, $"[TEST: {Template}] {rendered.Subject}", rendered.HtmlBody, ct);
+                        // 🔒 §707.7 — RING-EXEMPT, same reasoning as the self test-send above: the
+                        // organizer typed this address to verify delivery to a specific mailbox.
+                        // A ring-drop here would report "sent" for a mail that never left.
+                        using (_emailContext?.Set(new EmailContext(
+                            "email-test-send", me.EventId, me.ParticipantId, me.FullName,
+                            RingExempt: true)))
+                        {
+                            await _emailSender.SendAsync(
+                                plan.TargetAddress!, $"[TEST: {Template}] {rendered.Subject}", rendered.HtmlBody, ct);
+                        }
                         msg = plan.Outcome == EmailTestSendOutcome.WouldRedirect
                             ? $"Test mail '{Template}' sent for {plan.TargetAddress} "
                               + $"(redirected to {plan.ActualRecipient} in this environment)."
@@ -362,7 +382,6 @@ public class EmailCenterModel : PageModel
         tokens["selectionUrl"] = hub + "/MyMasterClass";
         tokens["selfServiceUrl"] = hub + "/MyMasterClass";
         tokens["landingPageUrl"] = hub + "/MasterClassPage/1";
-        tokens["icsUrl"] = hub + "/MyMasterClass.ics";
         tokens["masterClassTitle"] = "Securing Entra ID (sample)";
         return tokens;
     }

@@ -10,13 +10,22 @@
     ParticipantChecklistBuilder).
 
     Optional ViewData:
-      ChecklistIcsHandler — a page-handler name (e.g. "CalendarItem"). When set, each
-        DATED pending row gets a "Download .ics" link to that handler with route
-        taskId. Omitted when the host page has no such handler.
+      ChecklistReminderHandler — a POST page-handler name (e.g. "AddReminder").
+        When set, each DATED pending row gets an "Add Reminder" button that POSTs
+        the taskId to that handler; the handler e-mails the participant a calendar
+        INVITATION for the task's due date (REQUIREMENTS §193/§193b — no more .ics
+        download). Omitted when the host page has no such handler.
 *@
 @{
-    var icsHandler = ViewData["ChecklistIcsHandler"] as string;
+    var reminderHandler = ViewData["ChecklistReminderHandler"] as string;
     var today = DateOnly.FromDateTime(DateTime.UtcNow);
+}
+
+@if (TempData["CalendarInviteMessage"] is string calMsg && !string.IsNullOrEmpty(calMsg))
+{
+    <div class="card ceh-checklist" style="border-left:4px solid #0a6;background:#f0fdf4;">
+        <p style="margin:0;color:#0a6;font-weight:600;">&#10003; @calMsg</p>
+    </div>
 }
 
 @* Self-contained styles so the component looks identical wherever it is rendered
@@ -66,14 +75,17 @@
                             }
                         </td>
                         <td style="padding:10px 6px; white-space:nowrap;">
-                            @(t.DueDate?.ToString("dd/MM/yyyy") ?? "-")
-                            @if (t.DueDate is not null && !string.IsNullOrEmpty(icsHandler))
+                            @(t.DueDate?.ToString("d MMM yyyy") ?? "-")
+                            @if (t.DueDate is not null && !string.IsNullOrEmpty(reminderHandler))
                             {
                                 <br />
-                                <a class="cal-dl-link" asp-page-handler="@icsHandler"
-                                   asp-route-taskId="@t.Id" title="@L["Hub.DownloadIcs"]">
-                                    &#128197; @L["Hub.DownloadIcs"]
-                                </a>
+                                <form method="post" asp-page-handler="@reminderHandler" style="display:inline;margin:0;">
+                                    <input type="hidden" name="taskId" value="@t.Id" />
+                                    <button type="submit" class="cal-dl-link" title="@L["TaskRow.AddReminder"]"
+                                            style="background:none;border:none;padding:0;cursor:pointer;">
+                                        &#128197; @L["TaskRow.AddReminder"]
+                                    </button>
+                                </form>
                             }
                         </td>
                         <td style="padding:10px 6px; white-space:nowrap;
@@ -92,6 +104,20 @@
                 }
             </tbody>
         </table>
+        @* §321 (operator 2026-07-24): ONE button that e-mails a calendar invitation for
+           EVERY dated pending task (one invite per task). Rendered only when the host
+           wired a reminder handler and ≥1 dated pending row exists; posts to the
+           "<handler>All" page handler (e.g. AddReminderAll). *@
+        @if (!string.IsNullOrEmpty(reminderHandler) && Model.Pending.Any(t => t.DueDate is not null))
+        {
+            <form method="post" asp-page-handler="@(reminderHandler + "All")" style="margin:12px 0 0;">
+                @* §326j: calendar-button family recolored green (slate was hard to read). *@
+                <button type="submit"
+                        style="display:inline-block;background:#15803d;color:#fff;border:none;padding:8px 18px;border-radius:6px;font-size:14px;font-weight:600;cursor:pointer;line-height:1.2;">
+                    &#128197; @L["TaskRow.AddReminderAll"]
+                </button>
+            </form>
+        }
     </div>
 }
 

@@ -596,6 +596,109 @@ public sealed class SoMeQueueTests
         Assert.True(post.IsAwaitingApprovedGraphic);
     }
 
+    // ---- §329 re-validation at publish time -------------------------------------
+    // A post is composed once and published weeks later. A LinkedIn post can be deleted
+    // afterwards but never unsent, so announcing someone who has since withdrawn is not
+    // recoverable — these pin that the subject is re-checked at the last moment.
+
+    [Fact]
+    public async Task A_withdrawn_speaker_is_never_announced()
+    {
+        using var db = TestDb.New();
+        var (eventId, _, speakerId, sessionId) = await SeedAsync(db);
+        await NewSettings(db).SaveAsync(eventId, true, "urn:li:organization:1", null, null, false, null);
+
+        var post = await NewQueue(db).CreateSpeakerPostAsync(
+            eventId, speakerId, sessionId, Now.AddMinutes(-1), autoGenerate: false, "org@example.test");
+
+        // The speaker withdraws AFTER the post was queued.
+        var speaker = await db.Participants.FirstAsync(p => p.Id == speakerId);
+        speaker.IsActive = false;
+        await db.SaveChangesAsync();
+
+        var publisher = new RecordingPublisher();
+        var result = await NewDispatch(db, publisher).DispatchDueAsync(eventId);
+
+        Assert.Empty(publisher.Posted);          // nothing reached LinkedIn
+        Assert.Equal(0, result.Published);
+
+        // Deactivated (not Failed — nothing failed), with the reason recorded, so it is
+        // not re-tried on every later pass.
+        var after = await db.SoMePosts.AsNoTracking().FirstAsync(p => p.Id == post.Id);
+        Assert.False(after.IsActive);
+        Assert.Equal(SoMePostStatus.Queued, after.Status);
+        Assert.Contains("withdrawn", after.LastError, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task A_post_pointing_at_a_session_that_no_longer_exists_is_never_announced()
+    {
+        // DEFENSIVE case. §327d now BLOCKS deleting a session that has SoMePosts, and the FK
+        // is NoAction, so this should not arise going forward — but a legacy or hand-edited
+        // row can still point at a session id that is gone, and the dispatcher must not
+        // announce a talk that is not in the programme. Set the dangling id directly rather
+        // than deleting the session: EF's in-memory fixup would otherwise quietly null the
+        // pointer and the test would prove nothing.
+        using var db = TestDb.New();
+        var (eventId, _, speakerId, sessionId) = await SeedAsync(db);
+        await NewSettings(db).SaveAsync(eventId, true, "urn:li:organization:1", null, null, false, null);
+
+        var post = await NewQueue(db).CreateSpeakerPostAsync(
+            eventId, speakerId, sessionId, Now.AddMinutes(-1), autoGenerate: false, "org@example.test");
+
+        var tracked = await db.SoMePosts.FirstAsync(p => p.Id == post.Id);
+        tracked.SessionId = 999_999;          // a session id that does not exist
+        await db.SaveChangesAsync();
+
+        var publisher = new RecordingPublisher();
+        await NewDispatch(db, publisher).DispatchDueAsync(eventId);
+
+        Assert.Empty(publisher.Posted);
+        var after = await db.SoMePosts.AsNoTracking().FirstAsync(p => p.Id == post.Id);
+        Assert.False(after.IsActive);
+        Assert.Contains("session", after.LastError, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task An_active_speakers_post_still_publishes_normally()
+    {
+        // The guard must not suppress the NORMAL case — that would be a worse bug than the
+        // one it fixes, and a silent one.
+        using var db = TestDb.New();
+        var (eventId, _, speakerId, sessionId) = await SeedAsync(db);
+        await NewSettings(db).SaveAsync(eventId, true, "urn:li:organization:1", null, null, false, null);
+
+        var post = await NewQueue(db).CreateSpeakerPostAsync(
+            eventId, speakerId, sessionId, Now.AddMinutes(-1), autoGenerate: false, "org@example.test");
+
+        var publisher = new RecordingPublisher();
+        var result = await NewDispatch(db, publisher).DispatchDueAsync(eventId);
+
+        Assert.Single(publisher.Posted);
+        Assert.Equal(1, result.Published);
+        var after = await db.SoMePosts.AsNoTracking().FirstAsync(p => p.Id == post.Id);
+        Assert.Equal(SoMePostStatus.Published, after.Status);
+        Assert.True(after.IsActive);
+    }
+
+    [Fact]
+    public async Task An_ad_hoc_post_with_no_subject_always_publishes()
+    {
+        // A plain announcement links to nobody, so there is nothing to re-validate.
+        using var db = TestDb.New();
+        var (eventId, _, _, _) = await SeedAsync(db);
+        await NewSettings(db).SaveAsync(eventId, true, "urn:li:organization:1", null, null, false, null);
+
+        await NewQueue(db).CreateAdHocPostAsync(
+            eventId, "See you in February!", null, Now.AddMinutes(-1), null, "org@example.test");
+
+        var publisher = new RecordingPublisher();
+        var result = await NewDispatch(db, publisher).DispatchDueAsync(eventId);
+
+        Assert.Single(publisher.Posted);
+        Assert.Equal(1, result.Published);
+    }
+
     private static BrandingGraphicRef Ref(string key, string imageRef) =>
         new(key, GraphicAssetType.Speaker, imageRef, "x.png", "draft");
 

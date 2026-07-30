@@ -1,0 +1,41 @@
+@model CommunityHub.Pages.McSubscribeToggle
+@*
+    §383 — the per-box subscribe/unsubscribe control (operator 2026-07-26: "a subscribe/unsubscribe
+    ratio button next to #2 & #3 which is turned ON by default").
+
+    A SUBMIT BUTTON, not a checkbox: the state changes server-side the moment it is pressed, and a
+    checkbox would either need JS to post itself or a separate Save — both of which leave the screen
+    disagreeing with the database for a while. The button's label states the state it is IN and the
+    action moves to the other one, so there is never any doubt which way round it is.
+
+    §420 (operator 2026-07-27: "nothing happens when i click mail notifications on/off - how can a
+    person switch this themselves then and turn off ?"). This partial USED to assume it was
+    "rendered inside the page's ONE form" and emitted a bare <button type="submit">. It was not:
+    on /MasterClassPage both toggles sit ABOVE the page's only form (the Q&A comment box), and a
+    submit button outside a form does nothing at all — no request, no error, no clue.
+
+    It now carries its OWN <form>. That is safe here and does NOT violate §304b, which is about
+    NESTED forms: these two are siblings of the comment form, never inside it. Owning the form also
+    means the control cannot be broken again by moving it, which is exactly how it broke.
+*@
+<form method="post" style="margin:0;">
+<button type="submit"
+        asp-page-handler="Subscription"
+        asp-route-sessionId="@Model.SessionId"
+        asp-route-t="@(string.IsNullOrEmpty(Model.Token) ? null : Model.Token)"
+        asp-route-kind="@Model.Kind"
+        asp-route-subscribed="@(!Model.Subscribed)"
+        title="@(Model.Subscribed ? "Turn these e-mails off" : "Turn these e-mails on")"
+        style="flex:0 0 auto;display:inline-flex;align-items:center;gap:7px;cursor:pointer;
+               font-size:12.5px;font-weight:600;padding:6px 12px;border-radius:999px;
+               background:@(Model.Subscribed ? "#ecfdf5" : "#f3f4f6");
+               color:@(Model.Subscribed ? "#15803d" : "#6b7280");
+               border:1px solid @(Model.Subscribed ? "#a7f3d0" : "#d7dee8");">
+    <span aria-hidden="true">@(Model.Subscribed ? "🔔" : "🔕")</span>
+    @* §412 (operator 2026-07-27: "add the word Mail here in front"). "Notifications" alone reads as
+       in-app or push; this toggle only ever controls E-MAIL, and that word is what tells someone
+       whether switching it off stops something landing in their inbox. *@
+    <span>@(Model.Subscribed ? "Mail notifications on" : "Mail notifications off")</span>
+</button>
+</form>
+<span class="sr-only">@Model.Description</span>

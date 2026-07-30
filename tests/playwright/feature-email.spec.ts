@@ -21,7 +21,7 @@ test.describe('@gui §10 Email center template library', () => {
 
     test('multiple branded templates each preview with a Subject + rendered iframe', async ({ page }) => {
         await page.goto(`${BASE}/Organizer/EmailCenter`, { waitUntil: 'domcontentloaded' });
-        await expect(page.locator('h2', { hasText: 'Email center' })).toBeVisible();
+        await expect(page.locator('h1', { hasText: 'Email center' })).toBeVisible();
 
         const select = page.locator('select#Template');
         await expect(select).toBeVisible();
@@ -49,7 +49,7 @@ test.describe('@gui §10 Email center template library', () => {
 
     test('broadcast personalizes with {firstName} and previews a recipient count', async ({ page }) => {
         await page.goto(`${BASE}/Organizer/Broadcast`, { waitUntil: 'domcontentloaded' });
-        await expect(page.locator('h2', { hasText: 'Broadcast email' })).toBeVisible();
+        await expect(page.locator('h1', { hasText: 'Broadcast email' })).toBeVisible();
         await page.locator('input[name="Roles"][value="Organizer"]').check();
         await page.locator('input[name="Subject"]').fill(`PW preview only ${Date.now()}`);
         await page.locator('textarea[name="Message"]').fill('Hi {firstName}, this is a preview-only check.');

@@ -16,6 +16,18 @@
     {
         if (!string.IsNullOrEmpty(Model.Error))   { <p class="error" role="alert">@Model.Error</p> }
         if (!string.IsNullOrEmpty(Model.Message)) { <p class="info" role="status">@Model.Message</p> }
+        @* §366: what the reset could NOT undo. Shown as a distinct block, not folded into the
+           success line — these are the cases where a sync pass will legitimately re-close a task
+           the operator just re-opened, and not saying so is what makes a reset look broken. *@
+        if (Model.ResetWarnings.Count > 0)
+        {
+            <div role="status" style="margin:8px 0;padding:10px 12px;border-radius:8px;background:#fff8e1;border:1px solid #f5d98a;color:#92400e;">
+                <strong style="display:block;margin-bottom:4px;">The reset could not undo everything:</strong>
+                <ul style="margin:0;padding-left:18px;">
+                    @foreach (var w in Model.ResetWarnings) { <li style="margin:3px 0;">@w</li> }
+                </ul>
+            </div>
+        }
 
         <p style="font-size:13px;color:#6b7280;">
             Company name + contact details live in <strong>Company Manager (WordPress)</strong>.
@@ -87,27 +99,28 @@
                 <thead>
                     <tr style="border-bottom:2px solid #ddd;text-align:left;">
                         <th scope="col" style="padding:6px;" aria-sort="@Model.AriaSort("company")">
-                            <a asp-page="/Organizer/Sponsors" asp-route-Search="@Model.Search" asp-route-Sort="company" asp-route-Desc="@Model.NextDescFor("company")" asp-route-PageNo="1">Company@Model.SortIndicator("company")</a>
+                            <a asp-page="/Organizer/Sponsors" asp-route-Search="@Model.Search" asp-route-Sort="company" asp-route-Desc="@Model.NextDescFor("company")" asp-route-PageNo="1">Company@(Model.SortIndicator("company"))</a>
                         </th>
                         <th scope="col" style="padding:6px;" aria-sort="@Model.AriaSort("contacts")">
-                            <a asp-page="/Organizer/Sponsors" asp-route-Search="@Model.Search" asp-route-Sort="contacts" asp-route-Desc="@Model.NextDescFor("contacts")" asp-route-PageNo="1">Contacts@Model.SortIndicator("contacts")</a>
+                            <a asp-page="/Organizer/Sponsors" asp-route-Search="@Model.Search" asp-route-Sort="contacts" asp-route-Desc="@Model.NextDescFor("contacts")" asp-route-PageNo="1">Contacts@(Model.SortIndicator("contacts"))</a>
                         </th>
                         <th scope="col" style="padding:6px;text-align:right;" aria-sort="@Model.AriaSort("open")">
-                            <a asp-page="/Organizer/Sponsors" asp-route-Search="@Model.Search" asp-route-Sort="open" asp-route-Desc="@Model.NextDescFor("open")" asp-route-PageNo="1">Open@Model.SortIndicator("open")</a>
+                            <a asp-page="/Organizer/Sponsors" asp-route-Search="@Model.Search" asp-route-Sort="open" asp-route-Desc="@Model.NextDescFor("open")" asp-route-PageNo="1">Open@(Model.SortIndicator("open"))</a>
                         </th>
                         <th scope="col" style="padding:6px;text-align:right;">In progress</th>
                         <th scope="col" style="padding:6px;text-align:right;" aria-sort="@Model.AriaSort("done")">
-                            <a asp-page="/Organizer/Sponsors" asp-route-Search="@Model.Search" asp-route-Sort="done" asp-route-Desc="@Model.NextDescFor("done")" asp-route-PageNo="1">Done@Model.SortIndicator("done")</a>
+                            <a asp-page="/Organizer/Sponsors" asp-route-Search="@Model.Search" asp-route-Sort="done" asp-route-Desc="@Model.NextDescFor("done")" asp-route-PageNo="1">Done@(Model.SortIndicator("done"))</a>
                         </th>
                         <th scope="col" style="padding:6px;text-align:right;" aria-sort="@Model.AriaSort("overdue")">
-                            <a asp-page="/Organizer/Sponsors" asp-route-Search="@Model.Search" asp-route-Sort="overdue" asp-route-Desc="@Model.NextDescFor("overdue")" asp-route-PageNo="1">Overdue@Model.SortIndicator("overdue")</a>
+                            <a asp-page="/Organizer/Sponsors" asp-route-Search="@Model.Search" asp-route-Sort="overdue" asp-route-Desc="@Model.NextDescFor("overdue")" asp-route-PageNo="1">Overdue@(Model.SortIndicator("overdue"))</a>
                         </th>
                         <th scope="col" style="padding:6px;text-align:right;" aria-sort="@Model.AriaSort("total")">
-                            <a asp-page="/Organizer/Sponsors" asp-route-Search="@Model.Search" asp-route-Sort="total" asp-route-Desc="@Model.NextDescFor("total")" asp-route-PageNo="1">Total@Model.SortIndicator("total")</a>
+                            <a asp-page="/Organizer/Sponsors" asp-route-Search="@Model.Search" asp-route-Sort="total" asp-route-Desc="@Model.NextDescFor("total")" asp-route-PageNo="1">Total@(Model.SortIndicator("total"))</a>
                         </th>
                         <th scope="col" style="padding:6px;" aria-sort="@Model.AriaSort("nextdue")">
-                            <a asp-page="/Organizer/Sponsors" asp-route-Search="@Model.Search" asp-route-Sort="nextdue" asp-route-Desc="@Model.NextDescFor("nextdue")" asp-route-PageNo="1">Next due@Model.SortIndicator("nextdue")</a>
+                            <a asp-page="/Organizer/Sponsors" asp-route-Search="@Model.Search" asp-route-Sort="nextdue" asp-route-Desc="@Model.NextDescFor("nextdue")" asp-route-PageNo="1">Next due@(Model.SortIndicator("nextdue"))</a>
                         </th>
+                        <th scope="col" style="padding:6px;">Status</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -135,7 +148,26 @@
                                     @for (int i = 0; i < c.Contacts.Count; i++)
                                     {
                                         var cn = c.Contacts[i];
-                                        <span>@cn.Name <span style="color:#8a8f9c;font-size:11px;">&lt;@cn.Email&gt;</span></span>
+                                        @* §530 — a DEACTIVATED contact rendered identically to an
+                                           active one, so after the ERP reconcile deactivated the
+                                           orphans the operator still saw them unchanged and
+                                           reasonably concluded the job had not run (2026-07-28:
+                                           "the reconsile should run every 10 min and have set these
+                                           to inactive, but they still show"). They are shown, not
+                                           hidden — deactivation is reversible and the row is the
+                                           audit trail — but they must LOOK deactivated. *@
+                                        @if (cn.IsActive)
+                                        {
+                                            <span>@cn.Name <span style="color:#8a8f9c;font-size:11px;">&lt;@cn.Email&gt;</span></span>
+                                        }
+                                        else
+                                        {
+                                            <span style="opacity:.55;">
+                                                <s>@cn.Name</s>
+                                                <span style="color:#8a8f9c;font-size:11px;">&lt;@cn.Email&gt;</span>
+                                                <span style="font-size:10px;background:#f3f4f6;color:#6b7280;border-radius:999px;padding:1px 6px;">INACTIVE</span>
+                                            </span>
+                                        }
                                         @if (i < c.Contacts.Count - 1) { <br /> }
                                     }
                                 }
@@ -145,7 +177,83 @@
                             <td style="padding:6px;text-align:right;color:#0a6;">@c.Done</td>
                             <td style="padding:6px;text-align:right;@(c.Overdue > 0 ? "color:#c0392b;font-weight:600;" : "")">@c.Overdue</td>
                             <td style="padding:6px;text-align:right;">@c.Total</td>
-                            <td style="padding:6px;">@(c.NextDue?.ToString("dd/MM/yyyy") ?? "-")</td>
+                            <td style="padding:6px;">@(c.NextDue?.ToString("d MMM yyyy") ?? "-")</td>
+                            <td style="padding:6px;">
+                                @* §253 G8b — sponsor-company withdrawal: cascades a
+                                   deactivation over every contact (party group
+                                   reservation cancelled, logins locked, tasks closed)
+                                   and hides the company from the public page + counts.
+                                   Zoho/ERP records are never touched (§56). *@
+                                @if (c.IsWithdrawn)
+                                {
+                                    <span style="display:inline-block;background:#fee2e2;color:#b91c1c;border-radius:6px;padding:3px 8px;font-size:12px;font-weight:600;">Withdrawn</span>
+                                }
+                                else
+                                {
+                                    @* §334: two-step withdraw. The <details> needs no JavaScript
+                                       and the phrase is verified SERVER-side, so the guard
+                                       cannot be lost by turning scripting off. *@
+                                    <details style="display:inline-block;vertical-align:top;">
+                                        <summary style="cursor:pointer;color:#b91c1c;font-size:12px;list-style:none;
+                                                        border:1px solid #b91c1c;border-radius:6px;padding:4px 9px;">Mark as withdrawn</summary>
+                                        <form method="post" asp-page-handler="WithdrawCompany" style="margin-top:6px;min-width:260px;">
+                                            <input type="hidden" name="companyId" value="@c.CompanyId" />
+                                            <partial name="_TypedConfirm" model="@(new CommunityHub.Pages.Shared.TypedConfirmField(
+                                                CommunityHub.Core.Organizer.TypedConfirmation.ConfirmPhrase,
+                                                $"Deactivates every contact at {c.CompanyName}, cancels their group party reservation and removes the company from the public sponsors page. Zoho/ERP records are NOT touched.",
+                                                InputId: $"withdraw{c.CompanyId}"))" />
+                                            <button type="submit"
+                                                    style="margin-top:8px;background:#b91c1c;color:#fff;border:none;border-radius:6px;padding:6px 12px;cursor:pointer;font-size:12px;">
+                                                Withdraw @c.CompanyName
+                                            </button>
+                                        </form>
+                                    </details>
+                                }
+
+                                @* §366 (operator 2026-07-26): the sponsor half of the §355 reset.
+                                   Deliberately NOT styled as a danger action like Withdraw above —
+                                   it takes nothing away from the company, it just makes the hub ask
+                                   the onboarding questions again. Each switch clears the DATA that
+                                   backs its task, because SponsorOrderPullService auto-closes those
+                                   tasks from the data and would otherwise undo the reset. *@
+                                <details style="display:inline-block;vertical-align:top;margin-left:6px;">
+                                    <summary style="cursor:pointer;color:#92400e;font-size:12px;list-style:none;
+                                                    border:1px solid #f5d98a;background:#fff8e1;border-radius:6px;padding:4px 9px;">Reset onboarding</summary>
+                                    <form method="post" asp-page-handler="ResetSponsorOnboarding"
+                                          style="margin-top:6px;min-width:300px;padding:10px;background:#fff8e1;border:1px solid #f5d98a;border-radius:8px;text-align:left;">
+                                        <input type="hidden" name="companyId" value="@c.CompanyId" />
+                                        <p style="margin:0 0 8px;font-size:12px;color:#6b7280;">
+                                            Makes @c.CompanyName look freshly onboarded so the journey can be
+                                            re-tested. Package, tier, logo, contacts and logins are kept, and
+                                            nothing is changed in Zoho.
+                                        </p>
+                                        <label style="display:block;font-size:12.5px;margin:4px 0;">
+                                            <input type="checkbox" name="resetWelcome" value="true" />
+                                            Welcome mail (will be sent again)
+                                        </label>
+                                        <label style="display:block;font-size:12.5px;margin:4px 0;">
+                                            <input type="checkbox" name="resetOverview" value="true" />
+                                            Company overview — clears the saved description
+                                        </label>
+                                        <label style="display:block;font-size:12.5px;margin:4px 0;">
+                                            <input type="checkbox" name="resetBoothMembers" value="true" />
+                                            Booth members — removes them from the hub
+                                        </label>
+                                        <label style="display:block;font-size:12.5px;margin:4px 0;">
+                                            <input type="checkbox" name="resetAllTasks" value="true" checked />
+                                            Re-open <strong>all</strong> tasks for this company
+                                        </label>
+                                        <p style="margin:6px 0 0;font-size:11.5px;color:#92400e;">
+                                            The sponsor wall design can't be reset here — its "done" signal is
+                                            the uploaded file in SharePoint.
+                                        </p>
+                                        <button type="submit"
+                                                style="margin-top:8px;background:#92400e;color:#fff;border:none;border-radius:6px;padding:6px 12px;cursor:pointer;font-size:12px;">
+                                            Reset onboarding
+                                        </button>
+                                    </form>
+                                </details>
+                            </td>
                         </tr>
                     }
                 </tbody>

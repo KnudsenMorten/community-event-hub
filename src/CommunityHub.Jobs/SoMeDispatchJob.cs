@@ -45,10 +45,19 @@ public sealed class SoMeDispatchJob
         _log = log;
     }
 
-    /// <summary>Every 5 minutes. NCRONTAB: sec min hour day month weekday.</summary>
+    /// <summary>
+    /// §707.17 (operator 2026-07-30: *"change to every 15 min"*) — every 15 minutes; was every 5.
+    /// NCRONTAB: sec min hour day month weekday.
+    ///
+    /// <para>⚠️ ONE KNOCK-ON, stated so it is a decision and not a surprise: the §326ca speaker
+    /// PRE-ALERT is described as arriving *"~5 minutes before"* a post goes live, because that was
+    /// the tick. On a 15-minute tick the warning lands anywhere from 0 to 15 minutes ahead, so the
+    /// window to paste in a LinkedIn handle before publication is shorter and less predictable.
+    /// The publish itself is unaffected — only how much notice the organizer gets.</para>
+    /// </summary>
     [Function("SoMeDispatchJob")]
     public async Task Run(
-        [TimerTrigger("0 */5 * * * *")] TimerInfo timer,
+        [TimerTrigger("0 */15 * * * *")] TimerInfo timer,
         CancellationToken ct)
     {
         var activeEventIds = await _db.Events

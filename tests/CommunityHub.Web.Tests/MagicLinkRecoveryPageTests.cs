@@ -190,4 +190,30 @@ public sealed class MagicLinkRecoveryPageTests
         Assert.Null(model.ReturnUrl);                       // not honoured
         Assert.DoesNotContain("evil.example.com", model.RecoveryLink());
     }
+
+    [Fact]
+    public async Task A_backslash_return_url_is_dropped()
+    {
+        // §234 4a: browsers treat "/\evil.com" as protocol-relative — any '\' in
+        // the r= destination must be rejected, both for the post-sign-in redirect
+        // and for the recovery link built from it.
+        using var db = NewDb();
+        var p = await SeedAsync(db);
+        var magic = NewMagic();
+
+        // Live token: must still sign in but land on "/" — never the backslash target.
+        var live = magic.CreateToken(p.Id, TimeSpan.FromMinutes(10));
+        var (http, _) = NewHttpContext();
+        var liveModel = NewModel(magic, db, http);
+        var result = await liveModel.OnGetAsync(live, "/\\evil.example.com/phish", default);
+        Assert.Equal("/", Assert.IsType<RedirectResult>(result).Url);
+
+        // Expired token: the recovery link must not carry the backslash target either.
+        var expired = magic.CreateToken(p.Id, TimeSpan.FromMinutes(-1));
+        var (http2, _) = NewHttpContext();
+        var expiredModel = NewModel(magic, db, http2);
+        await expiredModel.OnGetAsync(expired, "/\\evil.example.com/phish", default);
+        Assert.Null(expiredModel.ReturnUrl);
+        Assert.DoesNotContain("evil.example.com", expiredModel.RecoveryLink());
+    }
 }

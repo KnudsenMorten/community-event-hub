@@ -174,8 +174,12 @@ public class SpeakerRemindersModel : PageModel
         try
         {
             // Ring-governed by the reminder-jobs feature (operator 2026-06-22).
+            // §707.2b — the manual chase renders `task-manual-reminder` (see BuildReminderEmail), so it
+            // carries that identity and resolves its own (mail × role) ring. `ReminderType` stays the
+            // ledger category — the SentReminders row keys on it, and it is not a mail identity.
             using (_context?.Set(new EmailContext(
                 ReminderType, me.EventId, p.Id, p.FullName,
+                TemplateName: "task-manual-reminder",
                 FeatureKey: "reminder-jobs")))
             {
                 await _emailSender.SendAsync(toEmail, rendered.Subject, rendered.HtmlBody, ct);
@@ -281,7 +285,7 @@ public class SpeakerRemindersModel : PageModel
         // renderer at the seam — pass raw text. REQUIREMENTS §10c-4.
         var dueText = due is null
             ? "no fixed due date"
-            : $"due <strong>{due:dd/MM/yyyy}</strong>";
+            : $"due <strong>{due:d MMM yyyy}</strong>";
         var descriptionBlock = string.IsNullOrWhiteSpace(description)
             ? string.Empty
             : $"<p style=\"margin:0 0 16px;\">{System.Net.WebUtility.HtmlEncode(description)}</p>";

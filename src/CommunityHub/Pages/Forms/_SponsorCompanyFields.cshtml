@@ -1,0 +1,40 @@
+@model CommunityHub.Forms.Steps.SponsorCompanyModel
+@*
+    Fields-ONLY partial for the sponsor Company-details wizard step (§32 / §285 Phase 2).
+    NO <form>/buttons/chrome — the shared wizard host owns those. Field names match
+    SponsorCompanyModel (and the standalone Company Details section) so the host's empty-prefix
+    binding fills them; same fields + limits + helper copy as the standalone page.
+*@
+<label for="WebsiteUrl">Website URL</label>
+<input type="url" id="WebsiteUrl" asp-for="WebsiteUrl" maxlength="400" placeholder="https://www.example.com" />
+<p style="font-size:12px;color:#6b7280;margin:2px 0 12px;">Must be a full URL including https://</p>
+
+<label for="LinkedInUrl">LinkedIn URL</label>
+<input type="url" id="LinkedInUrl" asp-for="LinkedInUrl" maxlength="400" placeholder="https://www.linkedin.com/company/yourcompany" />
+<p style="font-size:12px;color:#6b7280;margin:2px 0 12px;">Full URL, e.g. https://www.linkedin.com/company/yourcompany</p>
+
+<label for="TwitterUrl">Twitter / X URL</label>
+<input type="url" id="TwitterUrl" asp-for="TwitterUrl" maxlength="400" placeholder="https://www.twitter.com/yourcompany" />
+<p style="font-size:12px;color:#6b7280;margin:2px 0 14px;">Full URL, e.g. https://www.twitter.com/xyz</p>
+
+<label for="CompanyOverview">Company Overview</label>
+<textarea id="CompanyOverview" asp-for="CompanyOverview" rows="6" maxlength="1000"></textarea>
+<p style="font-size:12px;color:#6b7280;margin:2px 0 14px;">
+    Used for exposure on the Event System (Zoho) ticket/lead system. A detailed overview of the
+    @(Model.IsExhibitor ? "exhibitor's" : "company's") company — mission, services and background (max 1000 chars).
+</p>
+
+<label for="SocialMediaBrandingText">Company Social Media Branding Text</label>
+<textarea id="SocialMediaBrandingText" asp-for="SocialMediaBrandingText" rows="4" maxlength="600"></textarea>
+<p style="font-size:12px;color:#6b7280;margin:2px 0 14px;">
+    Used by ELDK in social-media promotion (max 600 chars). This is NOT sent to the Event System (Zoho).
+</p>
+
+@if (Model.IsExhibitor)
+{
+    <label for="CompanyShortDescription">Company Short Description</label>
+    <textarea id="CompanyShortDescription" asp-for="CompanyShortDescription" rows="2" maxlength="80"></textarea>
+    <p style="font-size:12px;color:#6b7280;margin:2px 0 14px;">
+        A concise version for space-limited sections (event listings, the mobile app). Max 80 chars.
+    </p>
+}

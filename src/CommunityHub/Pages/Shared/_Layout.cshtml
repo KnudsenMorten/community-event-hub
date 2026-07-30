@@ -61,7 +61,13 @@
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>@ViewData["Title"] - @communityName</title>
+    @* §263: a short, identifiable browser-tab / bookmark title. With a page Title:
+       "<Title> — ELDK27"; without one: just the edition CODE (never a dangling "- name"). *@
+    @{
+        var pageTitle = ViewData["Title"] as string;
+        var titleCode = ActiveEvent.GetEventCode();
+    }
+    <title>@(string.IsNullOrWhiteSpace(pageTitle) ? titleCode : $"{pageTitle} — {titleCode}")</title>
     <partial name="_LayoutStyles" />
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.css">
     <script defer src="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.js"></script>
@@ -106,6 +112,9 @@
             });
         })();
     </script>
+    @* §172: per-page <head> extras (e.g. the public session page's OpenGraph / Twitter-card
+       meta so a shared link renders a rich preview). Optional — most pages render nothing. *@
+    @await RenderSectionAsync("Head", required: false)
 </head>
 <body>
     <a class="skip-link" href="#main">@Localizer["Layout.SkipToContent"]</a>
@@ -143,11 +152,21 @@
            anonymous survey / signup must show no internal chrome (operator 2026-06-24). *@
         @if (isLoggedIn && (ViewData["HidePublicNav"] as bool? ?? false) == false)
         {
+            @* §283: the signed-in person's NAME is a dropdown holding "My Hub Profile" + Sign out,
+               so those free up room on the main menu (native <details>, no JS, keyboard-operable). *@
             <div class="user-tools">
-                <span class="who">@me!.FullName &middot; @CommunityHub.Branding.RoleDisplay.Name(role!.Value)</span>
-                <form method="post" asp-page="/Logout">
-                    <button type="submit" class="signout">@Localizer["Common.SignOut"]</button>
-                </form>
+                <details class="user-menu">
+                    <summary>
+                        <span class="who">@me!.FullName &middot; @CommunityHub.Branding.RoleDisplay.Name(role!.Value)</span>
+                        <span class="user-menu-caret" aria-hidden="true">▾</span>
+                    </summary>
+                    <div class="user-menu-items">
+                        <a href="/Profile">@Localizer["Nav.MyProfile"]</a>
+                        <form method="post" asp-page="/Logout">
+                            <button type="submit" class="signout">@Localizer["Common.SignOut"]</button>
+                        </form>
+                    </div>
+                </details>
             </div>
         }
     </header>
@@ -176,6 +195,9 @@
                 ? Localizer[item.LabelKey]
                 : new Microsoft.AspNetCore.Html.HtmlString(
                       System.Net.WebUtility.HtmlEncode(item.FallbackLabel ?? item.Href));
+        // §317 (operator 2026-07-24): fold-outs render in NavBuilder INSERTION order — the
+        // §173d "alphabetize Event logistics" projection is retired (the operator specifies
+        // the exact menu order; NavBuilder owns it).
         // Standalone pages (sign-in, magic-link, survey, etc.) opt OUT of the public
         // event nav bar via ViewData["HidePublicNav"]=true — that nav is for the public
         // SITE sections and does not belong on a bare auth/form page.
@@ -233,7 +255,40 @@
                     && ss.Session.EventId == me.EventId
                     && ss.Session.Type == CommunityHub.Core.Domain.SessionType.MasterClass);
         }
-        var nav = NavBuilder.Build(role!.Value, isVolunteerSupervisor, isExhibitor, speakerHasMasterClass);
+        // §457: a SPONSOR-category speaker does not run the ELDK speaker programme, so those
+        // menu items are hidden for them. Resolved for speakers only (one indexed lookup).
+        // Only an EXPLICIT Sponsor category hides anything — an uncategorised speaker keeps the
+        // full menu rather than being quietly stripped of it.
+        var speakerIsSponsorCategory = false;
+        if (role == CommunityHub.Core.Domain.ParticipantRole.Speaker && me is not null)
+        {
+            speakerIsSponsorCategory = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions
+                .AnyAsync(Db.SpeakerProfiles, sp => sp.ParticipantId == me.ParticipantId
+                    && sp.EventId == me.EventId
+                    && sp.Category == CommunityHub.Core.Domain.SpeakerCategory.Sponsor);
+        }
+        // §234 UX: the three attendee Master-Class nav entries (chooser / waitlist / Q&A)
+        // show ONLY for a 2-day ticket holder — a 1-day attendee's ticket excludes Master
+        // Classes, so all three would be dead ends. Resolved for attendees only (cheap
+        // indexed AnyAsync on the normalized email, the same key /Attendee resolves by).
+        var attendeeIsTwoDay = false;
+        if (role == CommunityHub.Core.Domain.ParticipantRole.Attendee && me is not null)
+        {
+            var normEmail = (me.Email ?? string.Empty).Trim().ToLowerInvariant();
+            // One email can hold several ticket rows (e.g. a soft-cancelled 2-day plus an
+            // active 1-day) — entitlement is ≥1 ACTIVE 2-day row, so cancelled mirrors
+            // never light the Master-Class menu up.
+            attendeeIsTwoDay = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions
+                .AnyAsync(Db.Attendees, a => a.EventId == me.EventId
+                    && a.Email == normEmail
+                    && a.TicketStatus == CommunityHub.Core.Domain.TicketStatus.TwoDay
+                    && a.MirrorState == CommunityHub.Core.Domain.MirrorState.Active);
+        }
+        // §270: the attendee "fun IT games" is an on/off feature (default OFF) — read the
+        // edition flag; a broken/missing config must never 500 the nav, so default false.
+        var attendeeGamesEnabled = false;
+        try { attendeeGamesEnabled = EventConfigLoader.Load(EventConfigOptions.EventConfigPath).AttendeeGamesEnabled; } catch { }
+        var nav = NavBuilder.Build(role!.Value, isVolunteerSupervisor, isExhibitor, speakerHasMasterClass, attendeeIsTwoDay, attendeeGamesEnabled, speakerIsSponsorCategory);
         var participant = nav.Groups[0];
         var management = nav.ManagementGroup;
 
@@ -310,6 +365,25 @@
             catch { /* entitlement gating is best-effort; never 500 the nav */ }
         }
         var isSpeakerRole = role == CommunityHub.Core.Domain.ParticipantRole.Speaker;
+        // §399 (operator 2026-07-26): a speaker based in DENMARK cannot claim travel reimbursement,
+        // so the menu entry must go too. Resolved here alongside the entitlements, best-effort and
+        // never able to 500 the nav. The PAGE enforces the same rule independently — this only
+        // stops us offering something we would then refuse.
+        var travelBlockedByCountry = false;
+        if (me is not null && isSpeakerRole)
+        {
+            try
+            {
+                var country = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions
+                    .FirstOrDefaultAsync(
+                        Db.SpeakerProfiles
+                          .Where(p => p.EventId == me.EventId && p.ParticipantId == me.ParticipantId)
+                          .Select(p => p.Country));
+                travelBlockedByCountry =
+                    CommunityHub.Core.Entitlements.TravelReimbursementPolicy.IsDenmark(country);
+            }
+            catch { /* same best-effort contract as the entitlement lookup above */ }
+        }
         // Map a form href → the OrderItem(s) that entitle it. A link is hidden only
         // for SPEAKERS who lack the entitlement; every other role keeps its link.
         Func<CommunityHub.Core.Navigation.NavItem, bool> formEntitlementHidden = it =>
@@ -320,7 +394,9 @@
             return href switch
             {
                 "/Forms/Hotel"  => !Has(CommunityHub.Core.Domain.OrderItem.Hotel),
-                "/Forms/Travel" => !Has(CommunityHub.Core.Domain.OrderItem.TravelReimbursement),
+                // §399: entitled AND not based in Denmark.
+                "/Forms/Travel" => !Has(CommunityHub.Core.Domain.OrderItem.TravelReimbursement)
+                                   || travelBlockedByCountry,
                 "/Forms/Swag"   => !Has(CommunityHub.Core.Domain.OrderItem.Swag, CommunityHub.Core.Domain.OrderItem.Polo),
                 "/Forms/Lunch"  => !Has(CommunityHub.Core.Domain.OrderItem.LunchPreDay, CommunityHub.Core.Domain.OrderItem.LunchMainDay),
                 "/Forms/Dinner" => !Has(CommunityHub.Core.Domain.OrderItem.AppreciationDinner),
@@ -330,6 +406,17 @@
         // Combined nav-item hide: ring scope OR (Feature B) form entitlement.
         Func<CommunityHub.Core.Navigation.NavItem, bool> navHidden = it =>
             ringHidden(it) || formEntitlementHidden(it);
+        // §175/§176: links that leave the hub for a third-party system needing its own
+        // login carry a localized "you'll be redirected, here's how to log in" message,
+        // emitted as data-confirm="…"; the shared nav-confirm.js handler shows a confirm()
+        // before navigating (OK proceeds as today, Cancel stays). Internal/plain links
+        // (Redirect=None) return null, so the attribute is simply omitted.
+        Func<CommunityHub.Core.Navigation.NavItem, string?> confirmMsg = it => it.Redirect switch
+        {
+            CommunityHub.Core.Navigation.ExternalRedirectKind.Zoho    => Localizer["Nav.RedirectConfirmZoho"].Value,
+            CommunityHub.Core.Navigation.ExternalRedirectKind.Webshop => Localizer["Nav.RedirectConfirmWebshop"].Value,
+            _ => null,
+        };
         <nav class="primary" aria-label="@Localizer[primaryAriaKey]">
             @* Render the participant group by SECTION (mirrors the management
                bar). Items with no SectionKey collapse into the leading
@@ -353,7 +440,12 @@
                         if (navHidden(item)) { continue; }
                         if (item.LabelKey == "Nav.ContactOrganizers") { continue; } // rendered last
                         var rb = ringBadgeOf(item);
-                        <a href="@item.Href" target="@(item.External ? "_blank" : null)" rel="@(item.External ? "noopener noreferrer" : null)" aria-current="@ariaCurrent(item.Href)">@navLabel(item)@if (rb is not null) {<span class="set-tag ring" title="@Localizer["Settings.RingBadgeTitle"]">@CommunityHub.Core.Settings.Rings.Label(rb.Value)</span>}@if (item.External) {<span class="visually-hidden">@Localizer["Common.OpensNewTab"]</span>}</a>
+                        @* §486: an IMPLICIT @@expr is what Razor omits when null — an explicit
+                           @@(cond ? "1" : null) writes an EMPTY attribute instead, which is how a
+                           presence selector ended up matching every nav link. *@
+                        var zohoAttr = item.Redirect == CommunityHub.Core.Navigation.ExternalRedirectKind.Zoho ? "1" : null;
+                        var shopAttr = item.Redirect == CommunityHub.Core.Navigation.ExternalRedirectKind.Webshop ? "1" : null;
+                        <a href="@item.Href" target="@(item.External ? "_blank" : null)" rel="@(item.External ? "noopener noreferrer" : null)" title="@confirmMsg(item)" data-zoho-interstitial="@zohoAttr" data-webshop-interstitial="@shopAttr" aria-current="@ariaCurrent(item.Href)">@navLabel(item)@if (rb is not null) {<span class="set-tag ring" title="@Localizer["Settings.RingBadgeTitle"]">@CommunityHub.Core.Settings.Rings.Label(rb.Value)</span>}@if (item.External) {<span class="ext-ico" aria-hidden="true">&#8599;</span><span class="visually-hidden">@Localizer["Common.OpensNewTab"]</span>}</a>
                     }
                 }
                 else
@@ -371,10 +463,42 @@
                             <span class="nav-section-caret" aria-hidden="true">&#9662;</span>
                         </summary>
                         <div class="nav-section-items">
-                            @foreach (var item in visible)
+                            @* §297: direct leaves first, then any NESTED sub-fold-outs (SubSectionKey),
+                               e.g. Event Info → Policies → (Code of Conduct + Privacy Policy). *@
+                            @foreach (var item in visible.Where(i => i.SubSectionKey is null))
                             {
                                 var rb = ringBadgeOf(item);
-                                <a href="@item.Href" target="@(item.External ? "_blank" : null)" rel="@(item.External ? "noopener noreferrer" : null)" aria-current="@ariaCurrent(item.Href)">@navLabel(item)@if (rb is not null) {<span class="set-tag ring" title="@Localizer["Settings.RingBadgeTitle"]">@CommunityHub.Core.Settings.Rings.Label(rb.Value)</span>}@if (item.External) {<span class="visually-hidden">@Localizer["Common.OpensNewTab"]</span>}</a>
+                        @* §486: an IMPLICIT @@expr is what Razor omits when null — an explicit
+                           @@(cond ? "1" : null) writes an EMPTY attribute instead, which is how a
+                           presence selector ended up matching every nav link. *@
+                        var zohoAttr = item.Redirect == CommunityHub.Core.Navigation.ExternalRedirectKind.Zoho ? "1" : null;
+                        var shopAttr = item.Redirect == CommunityHub.Core.Navigation.ExternalRedirectKind.Webshop ? "1" : null;
+                                <a href="@item.Href" target="@(item.External ? "_blank" : null)" rel="@(item.External ? "noopener noreferrer" : null)" title="@confirmMsg(item)" data-zoho-interstitial="@zohoAttr" data-webshop-interstitial="@shopAttr" aria-current="@ariaCurrent(item.Href)">@navLabel(item)@if (rb is not null) {<span class="set-tag ring" title="@Localizer["Settings.RingBadgeTitle"]">@CommunityHub.Core.Settings.Rings.Label(rb.Value)</span>}@if (item.External) {<span class="ext-ico" aria-hidden="true">&#8599;</span><span class="visually-hidden">@Localizer["Common.OpensNewTab"]</span>}</a>
+                            }
+                            @foreach (var sub in visible.Where(i => i.SubSectionKey is not null).GroupBy(i => i.SubSectionKey!))
+                            {
+                                var subActive = sub.Any(i => ariaCurrent(i.Href) == "page");
+                                @* §317 (operator 2026-07-24): nested sub-fold-outs render OPEN by
+                                   default — "let any submenu folder foldout automatically, so I
+                                   don't have to click". The caret still collapses them. *@
+                                <details class="nav-subsection@(subActive ? " is-active" : null)" open="open">
+                                    <summary>
+                                        <span class="nav-section-label">@Localizer[sub.Key]</span>
+                                        <span class="nav-section-caret" aria-hidden="true">&#9662;</span>
+                                    </summary>
+                                    <div class="nav-subsection-items">
+                                        @foreach (var item in sub)
+                                        {
+                                            var rb = ringBadgeOf(item);
+                        @* §486: an IMPLICIT @@expr is what Razor omits when null — an explicit
+                           @@(cond ? "1" : null) writes an EMPTY attribute instead, which is how a
+                           presence selector ended up matching every nav link. *@
+                        var zohoAttr = item.Redirect == CommunityHub.Core.Navigation.ExternalRedirectKind.Zoho ? "1" : null;
+                        var shopAttr = item.Redirect == CommunityHub.Core.Navigation.ExternalRedirectKind.Webshop ? "1" : null;
+                                            <a href="@item.Href" target="@(item.External ? "_blank" : null)" rel="@(item.External ? "noopener noreferrer" : null)" title="@confirmMsg(item)" data-zoho-interstitial="@zohoAttr" data-webshop-interstitial="@shopAttr" aria-current="@ariaCurrent(item.Href)">@navLabel(item)@if (rb is not null) {<span class="set-tag ring" title="@Localizer["Settings.RingBadgeTitle"]">@CommunityHub.Core.Settings.Rings.Label(rb.Value)</span>}@if (item.External) {<span class="ext-ico" aria-hidden="true">&#8599;</span><span class="visually-hidden">@Localizer["Common.OpensNewTab"]</span>}</a>
+                                        }
+                                    </div>
+                                </details>
                             }
                         </div>
                     </details>
@@ -382,7 +506,7 @@
             }
             @if (contactItem is not null && !navHidden(contactItem))
             {
-                <a href="@contactItem.Href" target="@(contactItem.External ? "_blank" : null)" rel="@(contactItem.External ? "noopener noreferrer" : null)" aria-current="@ariaCurrent(contactItem.Href)">@navLabel(contactItem)@if (contactItem.External) {<span class="visually-hidden">@Localizer["Common.OpensNewTab"]</span>}</a>
+                <a href="@contactItem.Href" target="@(contactItem.External ? "_blank" : null)" rel="@(contactItem.External ? "noopener noreferrer" : null)" aria-current="@ariaCurrent(contactItem.Href)">@navLabel(contactItem)@if (contactItem.External) {<span class="ext-ico" aria-hidden="true">&#8599;</span><span class="visually-hidden">@Localizer["Common.OpensNewTab"]</span>}</a>
             }
         </nav>
         @if (dropdownGroup is not null)
@@ -425,7 +549,7 @@
                                 @* Prominent, ungrouped entries — no disclosure. *@
                                 foreach (var item in dvisible)
                                 {
-                                    <a href="@item.Href" target="@(item.External ? "_blank" : null)" rel="@(item.External ? "noopener noreferrer" : null)" aria-current="@ariaCurrent(item.Href)">@navLabel(item)</a>
+                                    <a href="@item.Href" target="@(item.External ? "_blank" : null)" rel="@(item.External ? "noopener noreferrer" : null)" aria-current="@ariaCurrent(item.Href)">@navLabel(item)@if (item.External) {<span class="ext-ico" aria-hidden="true">&#8599;</span><span class="visually-hidden">@Localizer["Common.OpensNewTab"]</span>}</a>
                                 }
                             }
                             else
@@ -444,7 +568,7 @@
                                     <div class="org-section-items">
                                         @foreach (var item in dvisible)
                                         {
-                                            <a href="@item.Href" target="@(item.External ? "_blank" : null)" rel="@(item.External ? "noopener noreferrer" : null)" aria-current="@ariaCurrent(item.Href)">@navLabel(item)</a>
+                                            <a href="@item.Href" target="@(item.External ? "_blank" : null)" rel="@(item.External ? "noopener noreferrer" : null)" aria-current="@ariaCurrent(item.Href)">@navLabel(item)@if (item.External) {<span class="ext-ico" aria-hidden="true">&#8599;</span><span class="visually-hidden">@Localizer["Common.OpensNewTab"]</span>}</a>
                                         }
                                     </div>
                                 </details>
@@ -525,6 +649,53 @@
        enhancement only: with JS disabled the flash stays visible and the
        confirm modal falls back to a native confirm() (see _ConfirmModal).
        ---------------------------------------------------------------------- *@
+    @* §484 — interstitial shown before any (Zoho) nav link opens Zoho Backstage. Rendered
+       hidden and inert; the handler in _LayoutClientScripts reveals it, and "Continue" is what
+       opens the new tab (a real user gesture, so no popup blocker — the §464 lesson). With JS
+       off the links simply navigate straight through as before. *@
+    <div id="zoho-interstitial" class="zoho-interstitial" hidden role="dialog" aria-modal="true" aria-labelledby="zoho-interstitial-title">
+        <div class="zoho-interstitial-card">
+            <h2 id="zoho-interstitial-title">@Localizer["Nav.ZohoDialogTitle"]</h2>
+            @* §487 — the copy carries **bold** markers and renders through the SHARED task
+               renderer, which HTML-ENCODES first and only then substitutes <strong>. That keeps the
+               emphasis in the resx (translatable, no markup split across keys) without opening a
+               raw-HTML path into the layout. *@
+            <p>@CommunityHub.Branding.TaskTextLinkifier.Render(Localizer["Nav.ZohoDialogBody1"].Value)</p>
+            <p>@CommunityHub.Branding.TaskTextLinkifier.Render(Localizer["Nav.ZohoDialogBody2"].Value)</p>
+            <p>@CommunityHub.Branding.TaskTextLinkifier.Render(Localizer["Nav.ZohoDialogBody3"].Value)</p>
+            <label class="zoho-interstitial-hide">
+                <input type="checkbox" id="zoho-interstitial-hide" />
+                <span>@Localizer["Nav.ZohoDialogHide"]</span>
+            </label>
+            <div class="zoho-interstitial-actions">
+                <button type="button" id="zoho-interstitial-cancel" class="secondary">@Localizer["Nav.ZohoDialogCancel"]</button>
+                <button type="button" id="zoho-interstitial-continue">@Localizer["Nav.ZohoDialogContinue"]</button>
+            </div>
+        </div>
+    </div>
+
+    @* §653 — the SPONSOR WEBSHOP hand-off, same shape as the Zoho one above. Operator 2026-07-29:
+       tell the sponsor they are being sent to the external webshop, to sign in with their own e-mail
+       and password, to use "Lost your password?" if they cannot remember it, and that they may tick
+       "Remember Me". The real confusion is NOT the new tab — it is that this is a DIFFERENT system
+       with its own credentials, so a sponsor meeting a login screen assumes the hub signed them out.
+       Reuses the zoho-interstitial CSS classes deliberately: one dialog style in the product, not two. *@
+    <div id="webshop-interstitial" class="zoho-interstitial" hidden role="dialog" aria-modal="true" aria-labelledby="webshop-interstitial-title">
+        <div class="zoho-interstitial-card">
+            <h2 id="webshop-interstitial-title">@Localizer["Nav.WebshopDialogTitle"]</h2>
+            <p>@CommunityHub.Branding.TaskTextLinkifier.Render(Localizer["Nav.WebshopDialogBody1"].Value)</p>
+            <p>@CommunityHub.Branding.TaskTextLinkifier.Render(Localizer["Nav.WebshopDialogBody2"].Value)</p>
+            <p>@CommunityHub.Branding.TaskTextLinkifier.Render(Localizer["Nav.WebshopDialogBody3"].Value)</p>
+            <label class="zoho-interstitial-hide">
+                <input type="checkbox" id="webshop-interstitial-hide" />
+                <span>@Localizer["Nav.ZohoDialogHide"]</span>
+            </label>
+            <div class="zoho-interstitial-actions">
+                <button type="button" id="webshop-interstitial-cancel" class="secondary">@Localizer["Nav.ZohoDialogCancel"]</button>
+                <button type="button" id="webshop-interstitial-continue">@Localizer["Nav.ZohoDialogContinue"]</button>
+            </div>
+        </div>
+    </div>
     <partial name="_LayoutClientScripts" />
     @* AI Community Helper widget (code-named AiHelper, configurable display name; REQUIREMENTS
        §129). AUTHENTICATED, non-standalone pages only — same gate as the logged-in nav, so an

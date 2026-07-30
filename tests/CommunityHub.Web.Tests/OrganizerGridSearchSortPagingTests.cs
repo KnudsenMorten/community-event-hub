@@ -63,9 +63,12 @@ public sealed class OrganizerGridSearchSortPagingTests
     private static ParticipantsModel NewParticipants(CommunityHubDbContext db, DefaultHttpContext http, TimeProvider clock)
     {
         var accessor = new HttpCurrentParticipantAccessor(new HttpContextAccessorOver(http));
+        var cascade = new CommunityHub.Core.Organizer.ParticipantDeactivationService(
+            db, clock, new CommunityHub.Core.Audit.AuditTrailService(db, clock));
         return new ParticipantsModel(
-            db, accessor, new ParticipantBulkOperationService(db),
-            new ParticipantDeletionService(db, clock),
+            db, accessor, new ParticipantBulkOperationService(db, cascade),
+            new ParticipantDeletionService(db, clock, cascade),
+            cascade,
             new ParticipantSearchService(db),
             new ImpersonationAuditService(db, clock),
             new CommunityHub.Core.Integrations.CompanyManagerClient(new System.Net.Http.HttpClient(), new CommunityHub.Core.Integrations.CompanyManagerOptions()),
@@ -79,8 +82,7 @@ public sealed class OrganizerGridSearchSortPagingTests
     {
         var accessor = new HttpCurrentParticipantAccessor(new HttpContextAccessorOver(http));
         return new SpeakersModel(db, accessor, clock,
-            new CommunityHub.Core.Organizer.SpeakerDeletionService(db),
-            new CommunityHub.Core.Settings.FeatureGateService(db))
+            new CommunityHub.Core.Organizer.SpeakerDeletionService(db))
         {
             PageContext = new PageContext { HttpContext = http },
         };
@@ -268,26 +270,31 @@ public sealed class OrganizerGridSearchSortPagingTests
     }
 
     [Fact]
-    public async Task Speakers_bulk_selected_sets_flag_on_selection_only()
+    public async Task Speakers_grid_shows_derived_speaking_days_no_manual_flags()
     {
+        // §308 (operator 2026-07-24): the manual pre-/main-day bulk setter is GONE —
+        // "we have dates when speakers are speaking". The grid derives the speaking
+        // days from the linked sessions' dates (Danish time), read-only.
         using var db = NewDb();
-        var s1 = MakeSpeaker("Flag One", "f1@example.test");
-        var s2 = MakeSpeaker("Flag Two", "f2@example.test");
-        db.Participants.AddRange(s1, s2);
+        var s1 = MakeSpeaker("Days One", "d1@example.test");
+        db.Participants.Add(s1);
+        await db.SaveChangesAsync();
+        var session = new Session
+        {
+            EventId = EventId, Title = "MC",
+            StartsAt = new DateTimeOffset(2027, 2, 9, 9, 0, 0, TimeSpan.FromHours(1)),
+        };
+        db.Sessions.Add(session);
+        await db.SaveChangesAsync();
+        db.SessionSpeakers.Add(new SessionSpeaker { SessionId = session.Id, ParticipantId = s1.Id });
         await db.SaveChangesAsync();
 
         var http = OrganizerContext();
         var model = NewSpeakers(db, http, new FixedClock());
-        model.SelectedIds = new[] { s1.Id };
-        model.FieldToSet = "preday";
-        model.TargetValue = true;
+        await model.OnGetAsync(CancellationToken.None);
 
-        await model.OnPostBulkSelectedAsync(CancellationToken.None);
-
-        var p1 = await db.SpeakerProfiles.FirstOrDefaultAsync(p => p.ParticipantId == s1.Id);
-        var p2 = await db.SpeakerProfiles.FirstOrDefaultAsync(p => p.ParticipantId == s2.Id);
-        Assert.True(p1!.SpeakingPreDay);
-        Assert.True(p2 is null || !p2.SpeakingPreDay);   // untouched speaker
+        var row = Assert.Single(model.Rows, r => r.Id == s1.Id);
+        Assert.Equal(new[] { "Tue 9 Feb" }, row.SpeakingDays);
     }
 
     // ---- Attendees: search + sort + paging (read-only grid) ------------------
@@ -402,8 +409,13 @@ public sealed class OrganizerGridSearchSortPagingTests
     private static SessionsModel NewSessions(CommunityHubDbContext db, DefaultHttpContext http)
     {
         var accessor = new HttpCurrentParticipantAccessor(new HttpContextAccessorOver(http));
+        // §299.8/b7 + §299.6/b5: the session options + room registry are pure-config
+        // services; an EMPTY config keeps quick-picks empty and validation quiet.
+        var emptyConfig = new CommunityHub.Core.Config.EventEditionConfig();
         return new SessionsModel(db, accessor, null!, null!, null!, null!, null!, null!,
-            new FixedClock(), Loc(), new CommunityHub.Core.Settings.FeatureGateService(db))
+            new FixedClock(), Loc(), new CommunityHub.Core.Settings.FeatureGateService(db),
+            new CommunityHub.Core.Config.SessionOptionsService(emptyConfig),
+            new CommunityHub.Core.Config.RoomRegistryService(emptyConfig))
         {
             PageContext = new PageContext { HttpContext = http },
         };
@@ -416,6 +428,24 @@ public sealed class OrganizerGridSearchSortPagingTests
         EventId = EventId, Title = title, Room = room, Type = type, Length = length,
         SessionizeId = Guid.NewGuid().ToString("N"),
     };
+
+    // §299.8/b7: the MANUAL add path requires the Pre-day / Main day choice
+    // (imported sessions never prompt). Missing choice = honest error, no add.
+    [Fact]
+    public async Task Sessions_add_without_day_choice_is_refused_with_message()
+    {
+        using var db = NewDb();
+        var http = OrganizerContext();
+        var model = NewSessions(db, http);
+        model.NewTitle = "Dayless";
+        model.NewLengthMinutes = 60;
+        model.NewDay = null;   // organizer skipped the required day choice
+
+        await model.OnPostAddAsync(CancellationToken.None);
+
+        Assert.Contains("Pre-day or Main day", model.Error);
+        Assert.Equal(0, await db.Sessions.CountAsync());   // nothing added
+    }
 
     [Fact]
     public async Task Sessions_search_filters_by_title_or_room_server_side()
@@ -501,6 +531,22 @@ public sealed class OrganizerGridSearchSortPagingTests
 
     // ---- Leads: search + sort + paging ---------------------------------------
 
+    /// <summary>
+    /// §326bq: the leads page GET is gated on the <c>sponsor-leads</c> switch, whose shipped
+    /// default is OFF (leads live in Zoho Backstage today). These tests exercise the GRID,
+    /// which only exists when the pipeline is on — so the fixture turns the feature on
+    /// explicitly. Without it the page short-circuits to its "not handled in the hub" panel
+    /// and every grid assertion would see an empty model.
+    /// </summary>
+    private static async Task EnableSponsorLeadsAsync(CommunityHubDbContext db)
+    {
+        db.FeatureSettings.Add(new CommunityHub.Core.Domain.FeatureSetting
+        {
+            EventId = EventId, FeatureKey = "sponsor-leads", Enabled = true,
+        });
+        await db.SaveChangesAsync();
+    }
+
     private static CommunityHub.Pages.Organizer.SponsorAdmin.LeadsModel NewLeads(
         CommunityHubDbContext db, DefaultHttpContext http, TimeProvider clock)
     {
@@ -511,7 +557,12 @@ public sealed class OrganizerGridSearchSortPagingTests
         // never invokes them. Pass null for those.
         return new CommunityHub.Pages.Organizer.SponsorAdmin.LeadsModel(
             db, accessor, null!, null!, null!, null!, clock,
-            new CommunityHub.Core.Settings.FeatureGateService(db))
+            new CommunityHub.Core.Settings.FeatureGateService(db),
+            // Company Manager lookups disabled (Enabled=false default) — the GET
+            // grid path resolves names from the DB-local fallback only.
+            cm: null!, cmOptions: new CommunityHub.Core.Integrations.CompanyManagerOptions(),
+            logger: Microsoft.Extensions.Logging.Abstractions.NullLogger<
+                CommunityHub.Pages.Organizer.SponsorAdmin.LeadsModel>.Instance)
         {
             PageContext = new PageContext { HttpContext = http },
         };
@@ -536,6 +587,7 @@ public sealed class OrganizerGridSearchSortPagingTests
             MakeLead("Carol Lead", "carol@acme.test", "acme"));
         await db.SaveChangesAsync();
 
+        await EnableSponsorLeadsAsync(db);
         var http = OrganizerContext();
         var model = NewLeads(db, http, new FixedClock());
         model.Search = "acme";
@@ -555,6 +607,7 @@ public sealed class OrganizerGridSearchSortPagingTests
             MakeLead("Middle", "m@x.test", "acme", captured: DateTimeOffset.Parse("2026-06-05T10:00:00Z")));
         await db.SaveChangesAsync();
 
+        await EnableSponsorLeadsAsync(db);
         var http = OrganizerContext();
         var model = NewLeads(db, http, new FixedClock());
         await model.OnGetAsync(CancellationToken.None);   // default Sort=captured, Desc=true
@@ -573,6 +626,7 @@ public sealed class OrganizerGridSearchSortPagingTests
             MakeLead("Bravo", "b@x.test", "acme"));
         await db.SaveChangesAsync();
 
+        await EnableSponsorLeadsAsync(db);
         var http = OrganizerContext();
         var model = NewLeads(db, http, new FixedClock());
         model.Sort = "name"; model.Desc = false;
@@ -591,6 +645,7 @@ public sealed class OrganizerGridSearchSortPagingTests
                 captured: DateTimeOffset.Parse("2026-06-01T10:00:00Z").AddMinutes(i)));
         await db.SaveChangesAsync();
 
+        await EnableSponsorLeadsAsync(db);
         var http = OrganizerContext();
         var model = NewLeads(db, http, new FixedClock());
         model.PageNo = 1;
@@ -612,6 +667,7 @@ public sealed class OrganizerGridSearchSortPagingTests
             MakeLead("Ignored", "i@x.test", "acme", SponsorLeadStatus.Ignore));
         await db.SaveChangesAsync();
 
+        await EnableSponsorLeadsAsync(db);
         var http = OrganizerContext();
         var hidden = NewLeads(db, http, new FixedClock());
         await hidden.OnGetAsync(CancellationToken.None);
@@ -630,6 +686,8 @@ public sealed class OrganizerGridSearchSortPagingTests
         var accessor = new HttpCurrentParticipantAccessor(new HttpContextAccessorOver(http));
         return new SponsorsModel(db, accessor, clock,
             new CommunityHub.Core.Organizer.SponsorInfoDeletionService(db),
+            new CommunityHub.Core.Organizer.ParticipantDeactivationService(
+                db, clock, new CommunityHub.Core.Audit.AuditTrailService(db, clock)),
             new CommunityHub.Core.Integrations.CompanyManagerClient(
                 new System.Net.Http.HttpClient(), new CommunityHub.Core.Integrations.CompanyManagerOptions { Enabled = false }),
             new CommunityHub.Core.Integrations.CompanyManagerOptions { Enabled = false },

@@ -127,7 +127,6 @@ public sealed class WizardInlineStepperTests
 
     private static HotelFormService HotelSvc(CommunityHubDbContext db) =>
         new(db, new FixedClock(),
-            new HotelCalendarInviter(new NoOpEmailSender(), Options.Create(new EmailOptions())),
             new OrganizerActionItemService(db, new FixedClock()),
             Loc(), NullLogger<HotelFormService>.Instance);
 
@@ -142,7 +141,7 @@ public sealed class WizardInlineStepperTests
         .Bind(http);
 
     private static SpeakerProfile Supported() =>
-        new() { SpeakerFunding = SpeakerFunding.Supported, SpeakingMainDay = true };
+        new() { Category = SpeakerCategory.Community };   // §299 6.1: ELDK-funded community speaker
 
     // ===== 1. A step POST advances + persists via the shared service =========
 
@@ -288,24 +287,28 @@ public sealed class WizardInlineStepperTests
         Assert.Equal(viaWizard.CheckOutDate, viaPage.CheckOutDate);
     }
 
-    // ===== 5. Sponsor entry resolves to the bespoke host ====================
+    // ===== 5. Sponsor entry runs through the SHARED wizard (§285 Phase 1) ====
 
     [Fact]
-    public async Task Sponsor_entering_the_generic_host_is_routed_to_the_sponsor_wizard()
+    public async Task Sponsor_runs_through_the_shared_wizard_not_redirected_out()
     {
+        // §285 Phase 1: sponsors are NO LONGER bounced to /Sponsor/GetStarted — they run through THIS
+        // shared inline wizard (their plan comes from SponsorWizardService). This lightweight harness
+        // does not supply the heavy sponsor service (an optional ctor arg), so the sponsor falls
+        // through to the neutral "nothing to set up" page here rather than redirecting; the real
+        // sponsor plan + inline steps are covered by SponsorBoothCheckInStepTests. The regression
+        // guard that matters: NO redirect back out to /Sponsor/GetStarted.
         using var db = NewDb();
         var (_, me) = await SeedAsync(db, ParticipantRole.Sponsor);
 
         var getHttp = WizardBindingHarness.GetContext(Session(me));
         var getResult = await Host(db, getHttp).OnGetAsync(null, default);
-        var get = Assert.IsType<RedirectToPageResult>(getResult);
-        Assert.Equal("/Sponsor/GetStarted", get.PageName);
+        Assert.IsNotType<RedirectToPageResult>(getResult);
 
         var postHttp = WizardBindingHarness.PostContext(Session(me),
             new Dictionary<string, string?> { ["__step"] = "anything" });
         var postResult = await Host(db, postHttp).OnPostAsync(default);
-        var post = Assert.IsType<RedirectToPageResult>(postResult);
-        Assert.Equal("/Sponsor/GetStarted", post.PageName);
+        Assert.IsNotType<RedirectToPageResult>(postResult);
     }
 
     // ===== 6. No step links out: every emitted step key has an inline handler =
@@ -407,7 +410,9 @@ public sealed class WizardInlineStepperTests
 
         var result = await host.OnPostAsync(default);
 
-        // Advances (does NOT re-render on "please tick"); accept is last -> the hub.
+        // Advances (does NOT re-render on "please tick"); accept is last for this volunteer -> the
+        // hub. (§410: the deadlines step is withheld because the fixture has no task outside the
+        // wizard, so accept is the final step again.)
         var redirect = Assert.IsType<RedirectToPageResult>(result);
         Assert.Equal("/Index", redirect.PageName);
         Assert.Single(await db.ParticipantPolicyAcceptances.ToListAsync()); // idempotent

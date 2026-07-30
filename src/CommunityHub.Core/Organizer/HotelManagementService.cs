@@ -152,8 +152,12 @@ public sealed class HotelManagementService
     public async Task<IReadOnlyList<HotelReserver>> ListReserversForInviteAsync(
         int eventId, int hotelId, CancellationToken ct = default)
     {
+        // ACTIVE people only (§253 G2/H3): a deactivated participant must never
+        // receive the re-issued CONFIRMED calendar invite (worst of the hotel
+        // ghost surfaces — it emailed drop-outs a confirmed booking).
         var people = await _db.Participants
             .Where(p => p.EventId == eventId && p.HotelId == hotelId
+                        && p.IsActive
                         && p.Role != ParticipantRole.Sponsor)
             .Select(p => new { p.Id, p.FullName, p.Email })
             .ToListAsync(ct);
@@ -270,9 +274,13 @@ public sealed class HotelManagementService
 
         // Sponsors are not part of crew logistics (hotel, dinner, swag, …) — they
         // never get a hotel room block, so they must not appear in the hotel
-        // assignment lists in org admin (operator 2026-06-21).
+        // assignment lists in org admin (operator 2026-06-21). ACTIVE people only
+        // (§253 G2): drop-outs must leave the rosters + "(N people, M confirmed)"
+        // badges (the cascade also un-places them, this is the belt-and-braces).
         var people = await _db.Participants
-            .Where(p => p.EventId == eventId && p.Role != ParticipantRole.Sponsor)
+            .Where(p => p.EventId == eventId
+                        && p.IsActive
+                        && p.Role != ParticipantRole.Sponsor)
             .Select(p => new
             {
                 p.Id, p.FullName, p.Email, p.Role, p.HotelId, p.HotelConfirmationNumber,

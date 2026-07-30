@@ -117,18 +117,23 @@ public static class ScenarioSeed
         await db.SaveChangesAsync(ct);
 
         // --- Speaker profiles (hub-collected + Sessionize-imported fields) ----
+        // §299 6.1: both seeded speakers are organizer-categorized COMMUNITY
+        // (ELDK-funded) — an uncategorized (null) speaker would contribute
+        // nothing and could not be activated. Presenting days DERIVE from linked
+        // sessions (§299 C5); the legacy SpeakingPreDay flag below is kept as an
+        // audit value only (the Master Class character of the mc speaker).
         db.SpeakerProfiles.Add(new SpeakerProfile
         {
             EventId = evt.Id, ParticipantId = mc.Id, CreatedAt = now,
             Tagline = "Master Class lead", Biography = "Veteran practitioner.",
-            // Pre-day (Master Class) speaker — drives the masterclass-only
-            // milestone + pre-day lunch entitlement.
-            SpeakingPreDay = true,
+            Category = SpeakerCategory.Community,
+            SpeakingPreDay = true,   // LEGACY audit value (§299 C5 — not read by logic)
         });
         db.SpeakerProfiles.Add(new SpeakerProfile
         {
             EventId = evt.Id, ParticipantId = s1.Id, CreatedAt = now,
             Tagline = "Cloud engineer",
+            Category = SpeakerCategory.Community,
         });
 
         // --- Sponsor company facts + canonical public name --------------------

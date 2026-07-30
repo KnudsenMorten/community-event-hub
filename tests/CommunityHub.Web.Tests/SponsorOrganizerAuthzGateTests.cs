@@ -131,8 +131,12 @@ public sealed class SponsorOrganizerAuthzGateTests
     private static SessionsModel NewSessions(CommunityHubDbContext db, DefaultHttpContext http)
     {
         var accessor = new HttpCurrentParticipantAccessor(new HttpContextAccessorOver(http));
+        // §299.8/b7 + §299.6/b5: pure-config option/registry services (empty config).
+        var emptyConfig = new CommunityHub.Core.Config.EventEditionConfig();
         return new SessionsModel(db, accessor, null!, null!, null!, null!, null!, null!,
-            new FixedClock(), Loc(), new CommunityHub.Core.Settings.FeatureGateService(db))
+            new FixedClock(), Loc(), new CommunityHub.Core.Settings.FeatureGateService(db),
+            new CommunityHub.Core.Config.SessionOptionsService(emptyConfig),
+            new CommunityHub.Core.Config.RoomRegistryService(emptyConfig))
         {
             PageContext = new PageContext { HttpContext = http },
         };

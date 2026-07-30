@@ -82,6 +82,28 @@
                             {
                                 <span class="error">Gone upstream — review manually (no auto-delete).</span>
                             }
+                            else if (d.ChangeKind == SyncDeltaChangeKind.StaleLink)
+                            {
+                                @* §559 — the ONE irreversible act in this queue, so it says so at
+                                   the point of decision rather than in a mail he read hours ago.
+                                   The dead id is shown because approving is what erases it. *@
+                                <span class="error">
+                                    The stored Backstage id
+                                    <code>@Show(d.Changes.FirstOrDefault()?.OldValue)</code>
+                                    no longer exists, so this session is neither updated nor visible
+                                    in the agenda.
+                                </span>
+                                <p style="margin:6px 0 0;">
+                                    <strong>Approve</strong> clears the dead link and the next push
+                                    <strong>creates the session again</strong> in Backstage.
+                                    <strong>Reject</strong> leaves it untouched.
+                                </p>
+                                <p style="margin:4px 0 0;color:#b45309;">
+                                    ⚠️ This cannot be undone — the Backstage API has no delete, so a
+                                    re-create that turns out to be wrong duplicates your agenda
+                                    permanently.
+                                </p>
+                            }
                             else if (d.Changes.Count == 0)
                             {
                                 <span>—</span>

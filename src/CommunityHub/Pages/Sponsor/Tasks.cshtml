@@ -5,9 +5,9 @@
     ViewData["Title"] = Localizer["SponsorTasks.Title"].Value;
 }
 
-@* The "Your deliverables" rollup card was removed from the top of this page (operator
-   2026-06-28): Sponsor Tasks now starts directly with the tasks section below. The full
-   deliverables checklist remains at /Sponsor/Deliverables. *@
+@* §297 (operator 2026-07-11): the "See your deliverables checklist" link to /Sponsor/Deliverables
+   was removed — the deliverables page duplicated the tasks confusingly (and showed wrong
+   contract/assigned-tasks rows). Sponsor Tasks is the single source of what's outstanding. *@
 <div class="card">
     <h1>@Localizer["SponsorTasks.Title"]</h1>
 
@@ -19,6 +19,11 @@
     @if (!string.IsNullOrEmpty(Model.Message))
     {
         <p class="info">@Model.Message</p>
+    }
+
+    @if (!string.IsNullOrEmpty(Model.CalendarInviteMessage))
+    {
+        <p class="info">@Model.CalendarInviteMessage</p>
     }
 
     @if (Model.NoCompanyLink)
@@ -37,11 +42,18 @@
             <p style="margin:0 0 10px;">Delivering information by the deadlines gives us enough time to handle the necessary logistics and preparations, while also helping maximize your company's visibility and exposure to attendees before and during the event.</p>
             <p style="margin:0 0 10px;">Tasks that are not marked as <em>Optional</em> are mandatory and must be completed for your company to be fully represented at the event.</p>
             <p style="margin:0 0 10px;">A red badge indicates that a task is overdue, while a yellow badge indicates an upcoming deadline. Mark the task as completed once finished.</p>
-            <p style="margin:0;">If you are unable to meet a deadline, please contact the organizers as soon as possible so we can discuss possible solutions.</p>
+            @* §497 — the instruction said "contact the organizers" without giving any way to do
+               it. Now it is a real mailto, so acting on the sentence takes one tap. *@
+            <p style="margin:0;">If you are unable to meet a deadline, please
+                <a href="mailto:info@expertslive.dk">contact the organizers</a>
+                as soon as possible so we can discuss possible solutions.</p>
         </div>
         @if (Model.LinkedContacts.Count > 0)
         {
-            <p style="margin:14px 0 4px;color:#24292f;font-size:14px;font-weight:600;">Linked Event Coordinators who can manage tasks</p>
+            @* §496 — "Linked Event Coordinators" over-claimed: the list is the company's contacts
+               who can manage tasks, which is not the same as the ONE person Company Manager marks
+               as the default event coordinator. *@
+            <p style="margin:14px 0 4px;color:#24292f;font-size:14px;font-weight:600;">Your company's contacts who can manage tasks</p>
             <ul style="margin:0 0 8px;padding-left:20px;color:#555;font-size:14px;line-height:1.6;">
                 @foreach (var c in Model.LinkedContacts)
                 {
@@ -49,9 +61,33 @@
                 }
             </ul>
             @* §162: manage these contacts (Signers / Event Coordinators — NOT booth members)
-               from Company Details. *@
-            <p style="margin:0 0 14px;">
-                <a class="task-link-btn" href="/Sponsor/CompanyDetails#contacts">Manage contacts</a>
+               from Company Details.
+               §482 (operator: "erp owns contacts and roles. they sync to cm via sync service"):
+               there is ONE chain — ERP is the master, it syncs to Company Manager, and the hub
+               mirrors that. So this list and the editor are the same people seen at different
+               points in the chain, and the right thing is to say where an edit LANDS, not to hedge
+               about two systems. *@
+            <p style="margin:0 0 4px;">
+                @* §688.12 — was /Sponsor/CompanyDetails#contacts, the RAW editor. The operator hit
+                   this button and landed on it: "we have a new forms booth members which makes it
+                   more user friendly", then pointed at the form directly —
+                   /Forms/Wizard?step=contacts. It is the same people, presented as a guided step
+                   instead of a grid of inputs.
+                   🔒 Routed through TaskFormLinks, and "contacts" was CHECKED against the wizard
+                   plan (SponsorWizardService:145) before linking — §651/§474 is what happens when a
+                   form key is assumed to be a wizard route. *@
+                <a class="task-link-btn"
+                   href="@CommunityHub.Pages.Sponsor.TaskFormLinks.PageFor("contacts")">Manage contacts</a>
+            </p>
+            @* §496 — the previous wording promised "immediately", which is not true and left the
+               operator watching for a change that had not arrived yet. The sync runs behind the
+               save and takes a few minutes; say that, so a short wait reads as normal rather than
+               as a failure. *@
+            <p style="margin:0 0 14px;color:#6b7280;font-size:12.5px;">
+                Contacts and their roles are held in our finance system and flow from there into the
+                hub. Add, remove or change a role on the Company Details page and it is written
+                there straight away; this list catches up when the sync next runs &mdash; usually
+                within about five minutes.
             </p>
         }
         @* §147: the unified task list (completion % header → pending at the top →
@@ -60,6 +96,20 @@
            completion — deliberately distinct from the "Your deliverables" rollup card
            above (which aggregates richer per-stage booth/upload signals). The sponsor
            row keeps its Optional badge + .ics link. *@
+        @* §603 — the uploaded artefact kinds, loaded ONCE by the page model, handed to the row
+           partial so an artefact-backed task renders its DERIVED state instead of a self-declared
+           "Mark complete". ViewData flows through the shared panel down to the row. *@
+        ViewData["UploadedKinds"] = Model.UploadedKinds;
+        @* §684.8 — the pre-rendered bodies of MIGRATED tasks, keyed by task id. Same ViewData
+           channel as UploadedKinds above, and it flows through the shared panel down to the row.
+           A task absent from this map is not migrated and renders its stored Description as
+           before, so the two models coexist without the row having to know about either. *@
+        ViewData["RenderedBodies"] = Model.RenderedBodies;
+        @* §688.12 — the embedded booth-members editor reads the member list off the page model.
+           Same ViewData channel as the two above, flowing through the shared panel to the row. *@
+        ViewData["BoothMembersPage"] = Model;
+        @* §688.11 — "by whom" for completed tasks, resolved once per page. *@
+        ViewData["CompletedByNames"] = Model.CompletedByNames;
         @await Html.PartialAsync("Shared/_TaskListPanel",
             new CommunityHub.Pages.Shared.TaskListPanelView { Tasks = Model.SponsorTasks, RowPartialName = "_SponsorTaskRow" })
     }

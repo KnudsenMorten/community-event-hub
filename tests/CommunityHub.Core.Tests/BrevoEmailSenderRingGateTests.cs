@@ -48,6 +48,89 @@ public sealed class BrevoEmailSenderRingGateTests
         Assert.False(BrevoEmailSender.IsRingDropped(found: false, Ring.Broad, Ring.Ring1));
     }
 
+    // ---- §326au: the MASTER SWITCH actually stops mail ---------------------
+    // The 2026-07-25 audit found FeatureGateService.IsOutboundEmailEnabledAsync had ZERO
+    // production callers: the transport read only the released RING, so the "Outbound
+    // email" toggle in /Organizer/Settings was decorative. These pin it for good.
+
+    [Fact]
+    public async Task Outbound_email_switched_OFF_stops_an_otherwise_perfect_send()
+    {
+        await using var h = await Harness.CreateAsync(Ring.Broad, outboundEnabled: false);
+        await h.SeedSpeakerAsync("ring0@in.test", Ring.Ring0);   // in-ring, known, would send
+
+        await h.Sender.SendAsync("ring0@in.test", "Hi", "<p>hi</p>");
+
+        Assert.Empty(h.Sent);
+        Assert.Contains(h.Logs, l => l.Contains("switched OFF"));
+    }
+
+    [Fact]
+    public async Task Outbound_email_defaults_ON_so_the_switch_never_silences_a_fresh_edition()
+    {
+        await using var h = await Harness.CreateAsync(Ring.Broad);   // nothing persisted
+        await h.SeedSpeakerAsync("ring0@in.test", Ring.Ring0);
+
+        await h.Sender.SendAsync("ring0@in.test", "Hi", "<p>hi</p>");
+
+        Assert.Single(h.Sent);
+    }
+
+    // ---- §326av: the per-hour ceiling --------------------------------------
+
+    [Fact]
+    public async Task Sends_are_declined_once_the_hourly_ceiling_is_reached()
+    {
+        // 5 already sent this hour, ceiling 5 ⇒ the next one is refused.
+        await using var h = await Harness.CreateAsync(
+            Ring.Broad, maxSendsPerHour: 5, seedSentLastHour: 5);
+        await h.SeedSpeakerAsync("ring0@in.test", Ring.Ring0);
+
+        await h.Sender.SendAsync("ring0@in.test", "Hi", "<p>hi</p>");
+
+        Assert.Empty(h.Sent);
+        Assert.Contains(h.Logs, l => l.Contains("CEILING HIT"));
+    }
+
+    [Fact]
+    public async Task Under_the_ceiling_sends_normally()
+    {
+        await using var h = await Harness.CreateAsync(
+            Ring.Broad, maxSendsPerHour: 5, seedSentLastHour: 4);
+        await h.SeedSpeakerAsync("ring0@in.test", Ring.Ring0);
+
+        await h.Sender.SendAsync("ring0@in.test", "Hi", "<p>hi</p>");
+
+        Assert.Single(h.Sent);
+    }
+
+    [Fact]
+    public async Task Interactive_ring_exempt_mail_ignores_the_ceiling()
+    {
+        // Nobody may be locked out of the hub because a welcome run is in progress:
+        // PIN sign-in and engine alerts are RingExempt and must always get through.
+        await using var h = await Harness.CreateAsync(
+            Ring.Broad, ringExempt: true, maxSendsPerHour: 5, seedSentLastHour: 500);
+        await h.SeedSpeakerAsync("ring0@in.test", Ring.Ring0);
+
+        await h.Sender.SendAsync("ring0@in.test", "Your code", "<p>123456</p>");
+
+        Assert.Single(h.Sent);
+        Assert.DoesNotContain(h.Logs, l => l.Contains("CEILING HIT"));
+    }
+
+    [Fact]
+    public async Task A_ceiling_of_zero_disables_the_cap()
+    {
+        await using var h = await Harness.CreateAsync(
+            Ring.Broad, maxSendsPerHour: 0, seedSentLastHour: 5000);
+        await h.SeedSpeakerAsync("ring0@in.test", Ring.Ring0);
+
+        await h.Sender.SendAsync("ring0@in.test", "Hi", "<p>hi</p>");
+
+        Assert.Single(h.Sent);
+    }
+
     // ---- DB-backed sender gate (rings only) --------------------------------
 
     [Fact]
@@ -159,23 +242,39 @@ public sealed class BrevoEmailSenderRingGateTests
         Assert.Contains(h.Logs, l => l.Contains("RING-DROP") && l.Contains("ring2@in.test"));
     }
 
+    /// <summary>
+    /// 🔒 §707.6 — THE 17 EMAIL FEATURE RINGS ARE GONE, and this is the test that pins it.
+    /// </summary>
+    /// <remarks>
+    /// This REPLACES <c>Per_feature_ring_tightens_below_the_transport_ring</c>, which asserted the
+    /// exact opposite and was correct until the operator asked for the feature rings to go
+    /// (2026-07-29: *"i want INDIVIDUAL EMAIL RING GATES - one for each ! and remove features gates
+    /// relevant for emails"*). The coverage is INVERTED rather than deleted, so the removal cannot be
+    /// quietly undone by a future change.
+    ///
+    /// <para>A send naming a ring-scoped FEATURE but carrying no registered mail identity now FAILS
+    /// CLOSED instead of inheriting that feature's ring. Falling through to the outbound-email
+    /// ceiling would widen it to everyone — the §699.2 hazard.</para>
+    /// </remarks>
     [Fact]
-    public async Task Per_feature_ring_tightens_below_the_transport_ring()
+    public async Task A_feature_ring_no_longer_governs_a_send_and_an_unidentified_mail_fails_closed()
     {
-        // Transport (outbound-email) is Broad, but the TRIGGERING feature is released
-        // only to Ring1 -> a Broad recipient is dropped (the per-feature ring tightens),
-        // while a Ring1 recipient still sends.
+        // Transport is Broad and the feature is released to Ring1. Under the OLD model the feature
+        // ring tightened to Ring1 and the ring1 recipient WOULD have received this.
         await using var h = await Harness.CreateAsync(
-            Ring.Broad, featureKey: "masterclass-invites", featureRing: Ring.Ring1);
+            Ring.Broad, featureKey: "welcome-email", featureRing: Ring.Ring1);
         await h.SeedSpeakerAsync("broad@in.test", Ring.Broad);
         await h.SeedSpeakerAsync("ring1@in.test", Ring.Ring1);
 
-        await h.Sender.SendAsync("broad@in.test", "Hi", "<p>hi</p>");   // out of feature ring
-        await h.Sender.SendAsync("ring1@in.test", "Hi", "<p>hi</p>");   // in feature ring
+        await h.Sender.SendAsync("broad@in.test", "Hi", "<p>hi</p>");
+        await h.Sender.SendAsync("ring1@in.test", "Hi", "<p>hi</p>");
 
-        Assert.Single(h.Sent);
-        Assert.Equal("ring1@in.test", h.Sent[0].To[0].Address);
-        Assert.Contains(h.Logs, l => l.Contains("RING-DROP") && l.Contains("broad@in.test"));
+        // NEITHER sends: the feature ring supplies no audience any more, and with no registered
+        // TemplateName there is no mail ring either — so the send fails closed, audibly.
+        Assert.Empty(h.Sent);
+        Assert.Contains(
+            h.Logs,
+            l => l.Contains("no registered mail identity") && l.Contains("welcome-email"));
     }
 
     [Fact]
@@ -184,7 +283,7 @@ public sealed class BrevoEmailSenderRingGateTests
         // Transport Ring1, feature Broad -> still capped at Ring1 (a feature ring can
         // only TIGHTEN, never widen, the transport gate). A Broad recipient is dropped.
         await using var h = await Harness.CreateAsync(
-            Ring.Ring1, featureKey: "masterclass-invites", featureRing: Ring.Broad);
+            Ring.Ring1, featureKey: "welcome-email", featureRing: Ring.Broad);
         await h.SeedSpeakerAsync("broad@in.test", Ring.Broad);
 
         await h.Sender.SendAsync("broad@in.test", "Hi", "<p>hi</p>");
@@ -259,7 +358,9 @@ public sealed class BrevoEmailSenderRingGateTests
         public static async Task<Harness> CreateAsync(
             Ring emailReleaseRing, string? maxReleaseRing = null, bool killSwitch = false,
             int contextEventId = EventId, bool seedActiveEdition = false,
-            string? featureKey = null, Ring featureRing = Ring.Broad, bool ringExempt = false)
+            string? featureKey = null, Ring featureRing = Ring.Broad, bool ringExempt = false,
+            // §326au/§326av
+            bool outboundEnabled = true, int maxSendsPerHour = 600, int seedSentLastHour = 0)
         {
             var dbName = $"sender-rings-{Guid.NewGuid():N}";
             var services = new ServiceCollection();
@@ -279,6 +380,26 @@ public sealed class BrevoEmailSenderRingGateTests
                 // per-feature gate can be exercised independently of the transport ring.
                 if (featureKey is not null)
                     await settings.SetReleasedRingAsync(EventId, featureKey, featureRing, null);
+                // §326au: the persisted MASTER switch (catalog default is ON).
+                if (!outboundEnabled)
+                    await settings.SetEnabledAsync(
+                        EventId, FeatureCatalog.OutboundEmailKey, false, null);
+            }
+            // §326av: pretend this many sends already went out in the last hour.
+            if (seedSentLastHour > 0)
+            {
+                using var scope = provider.CreateScope();
+                var db = scope.ServiceProvider.GetRequiredService<CommunityHubDbContext>();
+                for (var i = 0; i < seedSentLastHour; i++)
+                {
+                    db.EmailLogs.Add(new EmailLog
+                    {
+                        EventId = EventId, ToEmail = $"prior{i}@in.test",
+                        ActualToEmail = $"prior{i}@in.test", Subject = "prior",
+                        Success = true, SentAt = DateTimeOffset.UtcNow.AddMinutes(-5),
+                    });
+                }
+                await db.SaveChangesAsync();
             }
             if (seedActiveEdition)
             {
@@ -297,6 +418,7 @@ public sealed class BrevoEmailSenderRingGateTests
                 MaxReleaseRing = maxReleaseRing ?? string.Empty,
                 KillSwitch = killSwitch,
                 SmtpHost = "smtp.invalid.localhost",
+                MaxSendsPerHour = maxSendsPerHour,
             });
             var sender = new CapturingSender(options, scopeFactory, ctx, logger);
             return new Harness { Sender = sender, LogQueue = logQueue, Provider = provider, ScopeFactory = scopeFactory };

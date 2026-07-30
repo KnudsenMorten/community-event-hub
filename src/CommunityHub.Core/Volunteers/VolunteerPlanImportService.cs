@@ -77,8 +77,18 @@ public sealed class VolunteerPlanImportService
             var bucket = bucketByName[pt.BucketName].Category;
             var sub = subByBucket[bucket.Id];
 
+            // §327k — the upsert key includes the DATE and START TIME, not the title alone.
+            //
+            // Keying on title only silently collapsed genuine repeat SHIFTS: "Speaker
+            // supporter - Room 20" runs five times across the day, and a title-only match
+            // turned 127 plan rows into 72 tasks, discarding 55 shifts along with their times
+            // and headcounts. Two rows are the same task only when they are the same task AT
+            // THE SAME TIME; otherwise they are separate shifts somebody has to staff.
             var task = await _db.VolunteerTasks.FirstOrDefaultAsync(
-                t => t.EventId == eventId && t.SubcategoryId == sub.Id && t.Title == pt.Title, ct);
+                t => t.EventId == eventId && t.SubcategoryId == sub.Id
+                     && t.Title == pt.Title
+                     && t.DueDate == pt.Date
+                     && t.Shift == pt.Shift, ct);
             bool isNew = task is null;
             if (task is null)
             {
@@ -93,6 +103,10 @@ public sealed class VolunteerPlanImportService
                 tasksCreated++;
             }
 
+            // §327k: the plan's WHEN — previously dropped entirely, leaving every imported
+            // task undated and unscheduled, which is unusable as a run plan.
+            task.DueDate = pt.Date;
+            task.Shift = pt.Shift;
             task.TimeEnd = pt.TimeEnd;
             task.Status = pt.Status;
             task.Criticality = pt.Criticality;

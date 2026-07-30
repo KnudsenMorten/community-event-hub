@@ -26,15 +26,18 @@ public class GraphicsModel : PageModel
     private readonly CommunityHubDbContext _db;
     private readonly ICurrentParticipantAccessor _participant;
     private readonly GraphicsService _graphics;
+    private readonly SpeakerGraphicsReadyNotifier _ready;
 
     public GraphicsModel(
         CommunityHubDbContext db,
         ICurrentParticipantAccessor participant,
-        GraphicsService graphics)
+        GraphicsService graphics,
+        SpeakerGraphicsReadyNotifier ready)
     {
         _db = db;
         _participant = participant;
         _graphics = graphics;
+        _ready = ready;
     }
 
     public bool AccessDenied { get; private set; }
@@ -66,8 +69,20 @@ public class GraphicsModel : PageModel
         if (me is null) return RedirectToPage("/Login");
         if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
 
-        await _graphics.ReleaseAsync(me.EventId, AssetId, me.Email, ct);
-        Message = "Graphic released to the speaker.";
+        var asset = await _graphics.ReleaseAsync(me.EventId, AssetId, me.Email, ct);
+
+        // §436: the release IS the moment the speaker can do something with the graphic, so
+        // the "your graphics are ready — Open Help Promote" mail goes out now rather than at
+        // the next 08:30 sweep. Idempotent through the shared ledger key: releasing a second
+        // graphic for the same speaker does not send a second mail.
+        var notified = await _ready.NotifyAsync(
+            me.EventId,
+            asset.ParticipantId is null ? Array.Empty<int>() : new[] { asset.ParticipantId.Value },
+            ct);
+        Message = notified > 0
+            ? "Graphic released to the speaker — and they have been emailed a Help Promote link."
+            : "Graphic released to the speaker.";
+
         await LoadAsync(me.EventId, ct);
         return Page();
     }

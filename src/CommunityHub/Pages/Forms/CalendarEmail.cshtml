@@ -1,11 +1,12 @@
 @page
 @model CommunityHub.Pages.Forms.CalendarEmailModel
 @{
-    ViewData["Title"] = "Calendar email";
+    @* §422: renamed from "Extra email" — this page and My Hub Profile set the same address. *@
+    ViewData["Title"] = "Alternate email";
 }
 
 <div class="card">
-    <h1>Calendar email (optional)</h1>
+    <h1>Alternate email (optional)</h1>
 
     @if (Model.AccessDenied)
     {
@@ -17,7 +18,7 @@
         <p>
             Some speakers prefer to receive calendar invites and notifications on a
             different email than the one they registered with. If that's you, enter an
-            alternate <strong>calendar email</strong> below. Leave it blank to keep using
+            <strong>extra email</strong> below. Leave it blank to keep using
             your primary email (@Model.Form.PrimaryEmail).
         </p>
 
@@ -34,5 +35,5 @@
         </form>
     }
 
-    <p style="margin-top:14px;"><a asp-page="/Forms/SpeakerWizard">Back to Get started</a></p>
+    <p style="margin-top:14px;"><a href="/Forms/Wizard">Back to Get started</a></p>
 </div>

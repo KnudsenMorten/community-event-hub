@@ -3,6 +3,7 @@ using System.Text;
 using CommunityHub.Auth;
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
+using CommunityHub.Core.Email;
 using CommunityHub.Core.Reminders;
 using CommunityHub.Core.Volunteers;
 using CommunityHub.Pages.Volunteer;
@@ -17,14 +18,36 @@ using Xunit;
 namespace CommunityHub.Web.Tests;
 
 /// <summary>
-/// Web tests for the volunteer unified "My schedule" page (REQUIREMENTS Top-8 #8):
-/// the per-task .ics download handler returns a calendar file for the signed-in
-/// volunteer's own assigned task and 404s for a task they aren't assigned to.
-/// Drives the real <see cref="MyScheduleModel"/> over a fake HttpContext.
-/// FAKE names only.
+/// Web tests for the volunteer unified "My schedule" page (REQUIREMENTS Top-8 #8 /
+/// §193): the per-task "Add Reminder" handler e-mails the signed-in volunteer a
+/// calendar INVITATION for their own assigned task, and sends nothing for a task
+/// they aren't assigned to. Drives the real <see cref="MyScheduleModel"/> over a
+/// fake HttpContext. FAKE names only.
 /// </summary>
 public sealed class VolunteerMyScheduleTests
 {
+    /// <summary>Captures the last calendar-invite send so a test can assert on it.</summary>
+    private sealed class CapturingEmailSender : IEmailSender
+    {
+        public string? LastTo { get; private set; }
+        public string? LastIcs { get; private set; }
+        public int IcsSends { get; private set; }
+
+        public Task SendAsync(string toEmail, string subject, string htmlBody, CancellationToken ct = default)
+            => Task.CompletedTask;
+        public Task SendAsync(string toEmail, string subject, string htmlBody, IReadOnlyCollection<string>? cc, CancellationToken ct = default)
+            => Task.CompletedTask;
+        public Task SendAsync(string toEmail, string subject, string htmlBody, string textBody, CancellationToken ct = default)
+            => Task.CompletedTask;
+        public Task SendWithIcsAsync(string toEmail, string subject, string htmlBody, string icsContent, string icsFileName, CancellationToken ct = default)
+        {
+            LastTo = toEmail; LastIcs = icsContent; IcsSends++;
+            return Task.CompletedTask;
+        }
+        public Task SendWithAttachmentsAsync(string toEmail, string subject, string htmlBody, IReadOnlyCollection<EmailAttachment> attachments, CancellationToken ct = default)
+            => Task.CompletedTask;
+    }
+
     private static CommunityHubDbContext NewDb() =>
         new(new DbContextOptionsBuilder<CommunityHubDbContext>()
             .UseInMemoryDatabase($"vol-mysched-{Guid.NewGuid():N}")
@@ -48,19 +71,23 @@ public sealed class VolunteerMyScheduleTests
         return new ClaimsPrincipal(new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme));
     }
 
-    private static MyScheduleModel NewModel(CommunityHubDbContext db, DefaultHttpContext http)
+    private static MyScheduleModel NewModel(
+        CommunityHubDbContext db, DefaultHttpContext http, IEmailSender? sender = null)
     {
         http.Request.Host = new HostString("ceh.example.test");
         var accessor = new HttpCurrentParticipantAccessor(new HttpContextAccessorOver(http));
         var structure = new VolunteerStructureService(db, TimeProvider.System);
+        var actions = new OrganizerActionItemService(db, TimeProvider.System);
+        var invite = new CalendarInviteEmailService(
+            db, sender ?? new CapturingEmailSender(), new EmailContextAccessor(), TimeProvider.System);
         return new MyScheduleModel(
             db,
             accessor,
             new VolunteerScheduleBuilder(db, structure),
             structure,
-            shifts: null!,                     // not reached by the .ics handler
-            helpNotify: null!,                 // not reached by the .ics handler
-            new ParticipantCalendarBuilder(db),
+            new VolunteerShiftService(db, TimeProvider.System, actions),
+            helpNotify: null!,                 // not reached by these handlers
+            invite,
             NullLogger<MyScheduleModel>.Instance)
         {
             PageContext = new PageContext { HttpContext = http },
@@ -103,7 +130,7 @@ public sealed class VolunteerMyScheduleTests
         var task = new VolunteerTask
         {
             EventId = eventId, SubcategoryId = sub.Id, Title = "Staff the desk",
-            DueDate = new DateOnly(2026, 9, 1),
+            DueDate = new DateOnly(2026, 9, 1), Instructions = "Hand out badges.",
         };
         db.VolunteerTasks.Add(task);
         await db.SaveChangesAsync();
@@ -118,36 +145,41 @@ public sealed class VolunteerMyScheduleTests
     }
 
     [Fact]
-    public async Task Own_assigned_task_returns_text_calendar_file()
+    public async Task Own_assigned_task_emails_a_calendar_invite_to_the_volunteer()
     {
         using var db = NewDb();
         var seed = await SeedAsync(db);
 
         var http = new DefaultHttpContext { User = Session(seed.Volunteer) };
-        var model = NewModel(db, http);
+        var sender = new CapturingEmailSender();
+        var model = NewModel(db, http, sender);
 
-        var result = await model.OnGetCalendarItemAsync(seed.TaskId, default);
+        var result = await model.OnPostAddReminderAsync(seed.TaskId, default);
 
-        var file = Assert.IsType<FileContentResult>(result);
-        Assert.StartsWith("text/calendar", file.ContentType);
-        var body = Encoding.UTF8.GetString(file.FileContents);
-        Assert.StartsWith("BEGIN:VCALENDAR", body);
-        Assert.Contains("Volunteer: Staff the desk", body);
+        Assert.IsType<RedirectToPageResult>(result);
+        Assert.Equal(1, sender.IcsSends);
+        // The invite goes to the volunteer's (primary, here) calendar address.
+        Assert.Equal("vol@example.test", sender.LastTo);
+        Assert.StartsWith("BEGIN:VCALENDAR", sender.LastIcs);
+        Assert.Contains("METHOD:REQUEST", sender.LastIcs);
+        Assert.Contains("Volunteer: Staff the desk", sender.LastIcs);
     }
 
     [Fact]
-    public async Task Task_not_assigned_to_me_returns_not_found()
+    public async Task Task_not_assigned_to_me_sends_nothing()
     {
         using var db = NewDb();
         var seed = await SeedAsync(db);
 
         // Sign in as the OTHER volunteer (no assignment to the task).
         var http = new DefaultHttpContext { User = Session(seed.Other) };
-        var model = NewModel(db, http);
+        var sender = new CapturingEmailSender();
+        var model = NewModel(db, http, sender);
 
-        var result = await model.OnGetCalendarItemAsync(seed.TaskId, default);
+        var result = await model.OnPostAddReminderAsync(seed.TaskId, default);
 
-        Assert.IsType<NotFoundResult>(result);
+        Assert.IsType<RedirectToPageResult>(result);
+        Assert.Equal(0, sender.IcsSends);
     }
 
     [Fact]
@@ -164,6 +196,49 @@ public sealed class VolunteerMyScheduleTests
         Assert.IsType<PageResult>(result);
         var entry = Assert.Single(model.Schedule.Entries);
         Assert.Equal("Staff the desk", entry.Title);
+        Assert.Equal("Hand out badges.", entry.Instructions);
+        Assert.Equal(ShiftDecisionStatus.None, entry.Decision);
+    }
+
+    // ---------------------------------------------------------------------
+    //  Shift confirm/decline handlers (merged here from the old MyShifts page,
+    //  §234 Wave 3a): declining my OWN shift persists the decision and raises
+    //  a coordinator reassign signal; a shift I'm not assigned to is forbidden.
+    // ---------------------------------------------------------------------
+
+    [Fact]
+    public async Task Decline_my_own_shift_persists_and_signals_coordinator()
+    {
+        using var db = NewDb();
+        var seed = await SeedAsync(db);
+        var model = NewModel(db, new DefaultHttpContext { User = Session(seed.Volunteer) });
+
+        var result = await model.OnPostDeclineAsync(seed.TaskId, "Cannot make it", default);
+
+        Assert.IsType<RedirectToPageResult>(result);
+        var a = await db.VolunteerTaskAssignments.SingleAsync(
+            x => x.TaskId == seed.TaskId && x.ParticipantId == seed.Volunteer.Id);
+        Assert.Equal(ShiftDecisionStatus.Declined, a.DecisionStatus);
+
+        var open = await db.OrganizerActionItems.CountAsync(
+            x => x.Type == OrganizerActionItemService.TypeVolunteerShiftReassign && x.ResolvedAt == null);
+        Assert.Equal(1, open);
+    }
+
+    [Fact]
+    public async Task Decline_a_shift_not_mine_is_forbidden()
+    {
+        using var db = NewDb();
+        var seed = await SeedAsync(db);
+        // Sign in as the OTHER volunteer (not assigned to the task).
+        var model = NewModel(db, new DefaultHttpContext { User = Session(seed.Other) });
+
+        var result = await model.OnPostDeclineAsync(seed.TaskId, "not mine", default);
+
+        Assert.IsType<ForbidResult>(result);
+        var a = await db.VolunteerTaskAssignments.SingleAsync(
+            x => x.TaskId == seed.TaskId && x.ParticipantId == seed.Volunteer.Id);
+        Assert.Equal(ShiftDecisionStatus.None, a.DecisionStatus);
     }
 
     // ---------------------------------------------------------------------
@@ -175,17 +250,15 @@ public sealed class VolunteerMyScheduleTests
     [Fact]
     public void Volunteer_selectable_statuses_exclude_Cancelled()
     {
-        // The dropdown in BOTH volunteer views (MySchedule + MyTasks) is built
-        // from these lists, so the rendered options can never offer Cancelled.
+        // MySchedule is the single volunteer surface (§234 Wave 3a — the old
+        // MyTasks/MyShifts pages are permanent redirects here), and its dropdown
+        // is built from this list, so the rendered options can never offer
+        // Cancelled.
         Assert.DoesNotContain(VolunteerTaskStatus.Cancelled, MyScheduleModel.VolunteerSelectableStatuses);
-        Assert.DoesNotContain(VolunteerTaskStatus.Cancelled, MyTasksModel.VolunteerSelectableStatuses);
 
         Assert.Equal(
             new[] { VolunteerTaskStatus.Open, VolunteerTaskStatus.InProgress, VolunteerTaskStatus.Done },
             MyScheduleModel.VolunteerSelectableStatuses);
-        Assert.Equal(
-            new[] { VolunteerTaskStatus.Open, VolunteerTaskStatus.InProgress, VolunteerTaskStatus.Done },
-            MyTasksModel.VolunteerSelectableStatuses);
     }
 
     [Fact]

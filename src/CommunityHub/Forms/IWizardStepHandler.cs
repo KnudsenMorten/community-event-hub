@@ -57,6 +57,13 @@ public sealed record WizardStepContext(
 
     /// <summary>The current request (posted form / query) for any manual reads.</summary>
     public HttpRequest Request => Page.Request;
+
+    /// <summary>
+    /// §352 — the absolute origin of this request (<c>scheme://host</c>), for handlers that
+    /// trigger e-mail carrying links back into the hub (the Master Class step sends the
+    /// confirmation / waitlist mail, which needs a base URL).
+    /// </summary>
+    public string BaseUrl => $"{Page.Request.Scheme}://{Page.Request.Host}";
 }
 
 /// <summary>

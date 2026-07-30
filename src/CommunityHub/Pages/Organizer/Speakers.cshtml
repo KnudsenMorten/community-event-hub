@@ -22,59 +22,9 @@
             <strong>@Model.SessionCount</strong> session(s) imported from Sessionize.
         </p>
 
-        <h3 style="color:var(--el-darkblue);margin-top:14px;">Bulk set: upload xlsx</h3>
-        <p style="font-size:13px;color:#6b7280;">
-            Columns: <strong>Email</strong> (required), <strong>SpeakingPreDay</strong>, <strong>SpeakingMainDay</strong>.
-            Yes/Y/1/true/x = tick &middot; No/N/0/false = untick &middot; empty = leave unchanged.
-        </p>
-        <p>
-            <a asp-page-handler="Template"
-               style="display:inline-block;background:var(--el-grey);color:var(--el-darkblue);
-                      padding:6px 12px;border-radius:6px;text-decoration:none;font-size:13px;">
-                Download xlsx template
-            </a>
-        </p>
-        <form method="post" asp-page-handler="ImportXlsx" enctype="multipart/form-data" style="margin-bottom:18px;">
-            <label for="UploadFile">Pick xlsx file</label>
-            <input type="file" name="UploadFile" id="UploadFile" accept=".xlsx,.xlsm" />
-            <button type="submit">Upload and import</button>
-        </form>
-
-        <h3 style="color:var(--el-darkblue);margin-top:14px;">Bulk set: paste a list of emails</h3>
-        <p style="font-size:13px;color:#6b7280;">
-            One email per line (commas / spaces also OK). Only matching active speakers are updated.
-        </p>
-        <form method="post" asp-page-handler="BulkPaste">
-            <label for="EmailList">Speaker emails</label>
-            <textarea asp-for="EmailList" rows="5" placeholder="alice@example.com&#10;bob@example.com"></textarea>
-
-            <label>Apply to which flag?</label>
-            <div style="display:flex; flex-direction:column; gap:6px; margin:6px 0 14px;">
-                <label style="font-weight:normal;">
-                    <input type="radio" asp-for="FieldToSet" value="preday" /> SpeakingPreDay
-                </label>
-                <label style="font-weight:normal;">
-                    <input type="radio" asp-for="FieldToSet" value="mainday" /> SpeakingMainDay
-                </label>
-            </div>
-
-            <label>Target value</label>
-            <div style="display:flex; gap:18px; margin:6px 0 14px;">
-                <label style="font-weight:normal;">
-                    <input type="radio" asp-for="TargetValue" value="true" /> Yes (tick)
-                </label>
-                <label style="font-weight:normal;">
-                    <input type="radio" asp-for="TargetValue" value="false" /> No (untick)
-                </label>
-            </div>
-
-            <button type="submit">Apply to pasted list</button>
-        </form>
-
-        <h3 style="color:var(--el-darkblue);margin-top:24px;">Multi-select grid</h3>
-        <p style="font-size:13px;color:#6b7280;">
-            Tick speakers below, set the field + target above, then click <em>Apply to selection</em>.
-        </p>
+        @* §197: speakers come from the Sessionize API import only. §308 (operator
+           2026-07-24): the manual pre-/main-day bulk setter is GONE — "we have dates
+           when speakers are speaking", so the grid shows the DERIVED speaking days. *@
 
         <!-- Server-side search over name + email. Submitting resets to page 1 and
              keeps the active sort (carried as hidden fields). -->
@@ -93,9 +43,9 @@
             @Localizer["OrgGrid.ShowingRange", Model.Paging.FirstRowNumber, Model.Paging.LastRowNumber, Model.Paging.TotalItems]
         </p>
 
-        <form method="post" asp-page-handler="BulkSelected" id="bulkForm">
-            <input type="hidden" asp-for="FieldToSet" />
-            <input type="hidden" asp-for="TargetValue" />
+        @* §308: the form is now just the checkbox host for the bulk REMOVE flow (its
+           own hidden form submits) — the flag-setter handler was deleted. *@
+        <form method="post" id="bulkForm">
             <input type="hidden" name="Search" value="@Model.Search" />
             <input type="hidden" name="Sort" value="@Model.Sort" />
             <input type="hidden" name="Desc" value="@Model.Desc" />
@@ -117,14 +67,8 @@
                                asp-route-Sort="email" asp-route-Desc="@Model.NextDescFor("email")" asp-route-PageNo="1">@Localizer["OrgGrid.Col.Email"]@Model.SortIndicator("email")</a>
                         </th>
                         <th scope="col" style="padding:6px;">Sessions</th>
-                        <th scope="col" style="padding:6px;text-align:center;" aria-sort="@Model.AriaSort("preday")">
-                            <a asp-page="/Organizer/Speakers" asp-route-Search="@Model.Search"
-                               asp-route-Sort="preday" asp-route-Desc="@Model.NextDescFor("preday")" asp-route-PageNo="1">@Localizer["OrgSpeakers.Col.PreDay"]@Model.SortIndicator("preday")</a>
-                        </th>
-                        <th scope="col" style="padding:6px;text-align:center;" aria-sort="@Model.AriaSort("mainday")">
-                            <a asp-page="/Organizer/Speakers" asp-route-Search="@Model.Search"
-                               asp-route-Sort="mainday" asp-route-Desc="@Model.NextDescFor("mainday")" asp-route-PageNo="1">@Localizer["OrgSpeakers.Col.MainDay"]@Model.SortIndicator("mainday")</a>
-                        </th>
+                        @* §308: derived from the linked sessions' dates — read-only. *@
+                        <th scope="col" style="padding:6px;">Speaking days</th>
                         <th style="padding:6px;">Accreditation</th>
                         <th style="padding:6px;">Country</th>
                         <th style="padding:6px;text-align:center;">1st-time</th>
@@ -135,7 +79,7 @@
                 <tbody>
                     @if (Model.Rows.Count == 0)
                     {
-                        <tr><td colspan="11" style="padding:10px;color:#6b7280;">@Localizer["OrgGrid.NoMatch"]</td></tr>
+                        <tr><td colspan="10" style="padding:10px;color:#6b7280;">@Localizer["OrgGrid.NoMatch"]</td></tr>
                     }
                     @foreach (var r in Model.Rows)
                     {
@@ -160,8 +104,9 @@
                                     </ul>
                                 }
                             </td>
-                            <td style="padding:6px;text-align:center;">@(r.SpeakingPreDay ? "✓" : "")</td>
-                            <td style="padding:6px;text-align:center;">@(r.SpeakingMainDay ? "✓" : "")</td>
+                            <td style="padding:6px;">
+                                @(r.SpeakingDays.Count == 0 ? "—" : string.Join(", ", r.SpeakingDays))
+                            </td>
                             <td style="padding:6px;">@r.Accreditation</td>
                             <td style="padding:6px;">@r.Country</td>
                             <td style="padding:6px;text-align:center;">

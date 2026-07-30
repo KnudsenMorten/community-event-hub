@@ -33,12 +33,15 @@ public sealed class EngineFailureAlertGateTests
         public int Sends { get; private set; }
         public string? LastSubject { get; private set; }
         public string? LastTo { get; private set; }
+        /// <summary>§701.1 — the coalesced-alert body has to SAY it is coalesced.</summary>
+        public string? LastHtml { get; private set; }
 
         public Task SendAsync(string toEmail, string subject, string htmlBody, CancellationToken cancellationToken = default)
         {
             Sends++;
             LastSubject = subject;
             LastTo = toEmail;
+            LastHtml = htmlBody;
             return Task.CompletedTask;
         }
 
@@ -64,8 +67,17 @@ public sealed class EngineFailureAlertGateTests
             .UseInMemoryDatabase($"enginegate-{Guid.NewGuid():N}")
             .Options);
 
+    /// <summary>
+    /// §702 — the sender stamps the environment on every alert subject, so these tests pin a
+    /// KNOWN environment (DEV) and assert the tag is present. Leaving it unset would assert
+    /// "[UNKNOWN]", which pins the fallback rather than the behaviour the operator asked for.
+    /// </summary>
     private static EngineAlertSender NewAlertSender(RecordingEmailSender mail) =>
-        new(mail, new EmailContextAccessor(), TimeProvider.System, NullLogger<EngineAlertSender>.Instance);
+        new(mail, new EmailContextAccessor(), TimeProvider.System, NullLogger<EngineAlertSender>.Instance,
+            new CommunityHub.Core.Diagnostics.HubEnvironment("DEV", null));
+
+    /// <summary>§702 — the expected alert subject, environment tag included.</summary>
+    private static string ExpectedSubject(string fn) => $"[DEV] Engine FAILED: {fn} [ELDK27]";
 
     private static EngineFailureAlertGate NewGate(CommunityHubDbContext db, RecordingEmailSender mail) =>
         new(
@@ -103,7 +115,8 @@ public sealed class EngineFailureAlertGateTests
         await gate.OnFailureAsync(fn, new InvalidOperationException("503 again")); // #2 alerts
 
         Assert.Equal(1, mail.Sends);
-        Assert.Equal($"Engine FAILED: {fn} [ELDK27]", mail.LastSubject); // subject contract unchanged
+        // §702 — the subject now leads with the ENVIRONMENT. The rest of the contract is unchanged.
+        Assert.Equal(ExpectedSubject(fn), mail.LastSubject);
         Assert.Equal(EngineAlertSender.Recipient, mail.LastTo);          // ring-exempt ops mailbox
         Assert.Equal(2, (await db.JobHealthMarkers.SingleAsync(m => m.JobKey == fn)).ConsecutiveFailures);
     }
@@ -151,7 +164,36 @@ public sealed class EngineFailureAlertGateTests
 
         Assert.Null(ex);          // never throws -> caller is free to re-throw the original
         Assert.Equal(1, mail.Sends); // failed OPEN: alerted despite the unreadable counter
-        Assert.Equal($"Engine FAILED: {fn} [ELDK27]", mail.LastSubject);
+        // 🔒 §701 — THIS is the alert the operator actually received: the state store was
+        // unreadable (SQL blip), so the gate failed OPEN and alerted on the FIRST failure of
+        // every job at once. The environment tag is what tells him which edition is shouting.
+        Assert.Equal(ExpectedSubject(fn), mail.LastSubject);
+    }
+
+    /// <summary>
+    /// §701.1 — the fix for *"3 erors per mail"*. When the state store is unreachable the cause is
+    /// the DATABASE, so every engine fails open in the same minute. Under the old per-function
+    /// throttle key each one sent its own mail; they must now coalesce onto one shared key.
+    /// </summary>
+    [Fact]
+    public async Task A_store_outage_sends_ONE_mail_not_one_per_engine()
+    {
+        var mail = new RecordingEmailSender();
+        // A disposed context makes every state-store read throw — i.e. "the database is down".
+        var db = NewDb();
+        db.Dispose();
+        var gate = NewGate(db, mail);
+
+        // Three different engines all fail in the same window, exactly as on 2026-07-29.
+        await gate.OnFailureAsync("ErpSyncCustomerContactJob", new Exception("login failed"));
+        await gate.OnFailureAsync("WooCommercePullJob", new Exception("login failed"));
+        await gate.OnFailureAsync("SessionChangeDetectionJob", new Exception("login failed"));
+
+        // ONE mail, not three. The first engine to notice names itself in the subject...
+        Assert.Equal(1, mail.Sends);
+        Assert.Equal(ExpectedSubject("ErpSyncCustomerContactJob"), mail.LastSubject);
+        // ...and the body must say the others are suppressed, so it cannot read as "only this broke".
+        Assert.Contains("coalesced", mail.LastHtml ?? string.Empty, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -186,6 +228,6 @@ public sealed class EngineFailureAlertGateTests
         // jobA fails a 2nd consecutive time -> only jobA alerts.
         await gate.OnFailureAsync(jobA, new Exception("a2"));
         Assert.Equal(1, mail.Sends);
-        Assert.Equal($"Engine FAILED: {jobA} [ELDK27]", mail.LastSubject);
+        Assert.Equal(ExpectedSubject(jobA), mail.LastSubject);
     }
 }

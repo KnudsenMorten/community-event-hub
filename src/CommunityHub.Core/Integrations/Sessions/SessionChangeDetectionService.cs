@@ -18,16 +18,15 @@ namespace CommunityHub.Core.Integrations.Sessions;
 /// <b>FIRST POPULATE is silent.</b> When the stored Backstage* values are all null the
 /// engine SEEDS them and NEVER emails (there is no "previous" to have changed from).
 ///
-/// <b>GATES per speaker (all must pass to email).</b>
-///   1. KILL SWITCH — the <c>session-change-alerts</c> feature is enabled for the edition.
-///   2. RELEASED RING — the speaker's effective ring ≤ the feature's released ring
-///      (<see cref="FeatureGateService.GetReleasedRingAsync"/>).
-///   3. DATE GATE — ring 0 / ring 1 are NEVER date-limited (so a ring-1 tester gets the
-///      alert immediately); ring 2 / ring 3 (Broad) are held until
-///      <c>now &gt;= FeatureSetting.ActiveFromForBroadRings</c> (1 Dec 2026 by config).
-/// The send itself goes through the normal RING-GATED participant email path
-/// (<see cref="IEmailSender"/> tagged with the feature key), so the sender re-checks the
-/// recipient ring as a backstop — this IS a participant email; it is NOT ring-exempt.
+/// <b>GATES.</b> Detection enqueues only while the <c>session-change-alerts</c> feature
+/// (kill switch) is enabled for the edition. Since §59 the speaker email is sent on
+/// operator APPROVE by <see cref="SyncDeltaQueueService"/> — NOT inline here — through
+/// the normal RING-GATED participant email path (<see cref="IEmailSender"/> tagged with
+/// the feature key), so the sender checks each recipient's ring; this IS a participant
+/// email; it is NOT ring-exempt. <i>(§234, 2026-07-07: the former per-speaker
+/// released-ring + broad-rings "1 Dec 2026" DATE gate that governed the inline send was
+/// dead code after §59 and has been deleted; <c>FeatureSetting.ActiveFromForBroadRings</c>
+/// is retired.)</i>
 ///
 /// <b>SOURCE AVAILABILITY.</b> The Backstage agenda API needs the
 /// <c>ZohoBackstage.agenda.READ</c> scope. Until granted (and
@@ -37,20 +36,8 @@ namespace CommunityHub.Core.Integrations.Sessions;
 /// </summary>
 public sealed class SessionChangeDetectionService
 {
-    /// <summary>The §38e feature key (kill switch + released-ring + date gate).</summary>
+    /// <summary>The §38e feature key (the kill switch; also ring-checked by the sender).</summary>
     public const string FeatureKey = "session-change-alerts";
-
-    /// <summary>
-    /// REQUIREMENTS §38e / §52 — the DEFAULT broad-rings auto-enable date for the
-    /// session-change-alerts feature. When an organizer has NOT persisted
-    /// <see cref="FeatureSetting.ActiveFromForBroadRings"/> (it is null), the date gate
-    /// falls back to this constant so ring 2 / ring 3 (Broad) speakers are still date-held
-    /// until <b>1 Dec 2026 (UTC)</b> by default — they are NOT silently let through. An
-    /// organizer who sets the field still overrides this default. Ring 0 / ring 1 remain
-    /// unrestricted regardless (testing rings get the alert immediately).
-    /// </summary>
-    public static readonly DateTimeOffset DefaultBroadRingsActiveFrom =
-        new(2026, 12, 1, 0, 0, 0, TimeSpan.Zero);
 
     private const string Category = "session-change";
     private const string TemplateName = "session-time-location-changed";
@@ -128,19 +115,15 @@ public sealed class SessionChangeDetectionService
     /// </summary>
     public async Task<Result> RunAsync(int eventId, CancellationToken ct = default)
     {
-        // §57 DIRECTION GATE. This Zoho→CEH engine is only active at stage 3
-        // (SessionSyncDirection.ZohoToCeh). At the default stage 1 (Sessionize→CEH) — and at
-        // stage 2 (CEH→Zoho) — it is INERT: it pulls nothing from Backstage and writes
-        // nothing back, so a first-populate can't silently happen before the operator opts in.
-        var direction = await _db.SessionSourceSettings.AsNoTracking()
-            .Where(s => s.EventId == eventId)
-            .Select(s => (SessionSyncDirection?)s.SyncDirection)
-            .FirstOrDefaultAsync(ct) ?? SessionSyncDirection.SessionizeToCeh;
-        if (direction != SessionSyncDirection.ZohoToCeh)
-        {
-            return Result.Inactive(
-                $"session sync direction is stage {(int)direction} ({direction}) — Zoho→CEH change detection inactive");
-        }
+        // 🔒 §576 — THE STAGE-3 DIRECTION GATE IS GONE. DO NOT REINTRODUCE IT.
+        // Identical shape and identical reasoning to the speaker detection engine: it demanded
+        // stage 3 (ZohoToCeh), stage 3 was deleted long ago, stage 2 is permanent ⇒ the condition
+        // was unsatisfiable and this engine no-opped on every 5-minute run.
+        //
+        // The original comment's worry — "a first-populate can't silently happen before the
+        // operator opts in" — is still honoured, just not by a dead selector: the first populate
+        // is SEEDED SILENTLY by design, and every real change is ENQUEUED for his approval rather
+        // than applied. Nothing here writes to Zoho or auto-changes CEH.
 
         // Pull the current agenda. Unavailable ⇒ no-op (never fake / never email).
         var pull = await PullAsync(ct);
@@ -261,21 +244,22 @@ public sealed class SessionChangeDetectionService
 
             if (!timeChanged && !roomChanged) continue;
 
-            // §59: a REAL change is NO LONGER auto-applied + emailed inline. We DO NOT
-            // overwrite the stored Backstage* snapshot here (so the old→new diff survives
-            // until a decision); instead we ENQUEUE a Pending Update delta for the operator
-            // to approve/reject. The speaker email is sent on APPROVE by the queue's apply
-            // step. Kept gated on stage 3 (the §57 direction gate above) + the feature kill
-            // switch below.
+            // §299 OPEN-28 (operator 2026-07-23): stage-3 "Zoho wins" — a REAL change is
+            // ENQUEUED (audit trail) and then AUTO-APPLIED immediately, no operator approval.
+            // The enqueue keeps the old→new diff on record; ApproveAsync runs the same apply
+            // step as a manual approval (CEH session updated, speaker email sent) and marks
+            // the delta Approved→Applied with the auto marker as the decider. Kept gated on
+            // stage 3 (the §57 direction gate above) + the feature kill switch below.
             changed++;
             if (_queue is null || !featureEnabled) continue;
 
             var fieldChanges = SyncDeltaQueueService.BuildSessionChanges(
                 oldStart, oldEnd, oldRoom, current.StartsAt, current.EndsAt, current.Room);
 
-            await _queue.EnqueueSessionUpdateAsync(
+            var delta = await _queue.EnqueueSessionUpdateAsync(
                 eventId, session.Id, session.Title, SessionSyncDirection.ZohoToCeh,
                 fieldChanges, ct);
+            await _queue.ApproveAsync(delta.Id, "auto-apply (stage 3)", ct);
             enqueued++;
         }
 
@@ -315,23 +299,9 @@ public sealed class SessionChangeDetectionService
         return await _zoho.GetBackstageSessionsAsync(token, ct);
     }
 
-    /// <summary>
-    /// The DATE gate (§38e, testable in isolation): ring 0 / ring 1 are never
-    /// date-limited; ring 2 / ring 3 (Broad) are gated until <paramref name="now"/> ≥ the
-    /// effective broad-rings date. When <paramref name="activeFromBroad"/> is null we fall
-    /// back to <see cref="DefaultBroadRingsActiveFrom"/> (1 Dec 2026 UTC) per REQUIREMENTS
-    /// §38e/§52 — so broad rings are date-held by default rather than let through.
-    /// </summary>
-    public static bool IsWithinDateGate(
-        Ring effectiveRing, DateTimeOffset? activeFromBroad, DateTimeOffset now)
-    {
-        // Ring 0 + ring 1 ignore the date gate entirely.
-        if ((int)effectiveRing <= (int)Ring.Ring1) return true;
-        // Ring 2 + ring 3: no configured date ⇒ use the seeded default (don't let through);
-        // an organizer-set date overrides it. Hold until the effective date.
-        var effectiveDate = activeFromBroad ?? DefaultBroadRingsActiveFrom;
-        return now >= effectiveDate;
-    }
+    // (§234, 2026-07-07: the IsWithinDateGate helper + DefaultBroadRingsActiveFrom
+    // constant were deleted — the §38e broad-rings date gate was dead code once §59
+    // moved the speaker email to the operator-approved queue apply step.)
 
     private static bool RoomEquals(string? a, string? b) =>
         string.Equals(

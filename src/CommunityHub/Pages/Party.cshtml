@@ -3,8 +3,7 @@
 @{
     Layout = null;
     var p = Model.Party;
-    // §164: data-driven window text (16:00–18:30) from PartyInfo — start + end minutes
-    // come from the one source, never hardcoded here.
+    // §164/§206: data-driven window text (16:00–18:30) from PartyInfo — the one source.
     string timeWindow = p is null ? "" : $"{p.StartHour:00}:{p.StartMinute:00}–{p.EndHour:00}:{p.EndMinute:00}";
     string dateLine = p is null ? "" :
         p.Date.ToDateTime(new TimeOnly(0,0)).ToString("dddd, d MMMM yyyy")
@@ -15,7 +14,7 @@
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Party sign-up</title>
+    <title>Party Signup</title>
     <style>
         :root { color-scheme: light; }
         body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin:0;
@@ -23,19 +22,26 @@
         .wrap { max-width:480px; margin:0 auto; padding:24px 18px 48px; }
         .card { background:#fff; border-radius:14px; padding:22px 20px; box-shadow:0 6px 24px rgba(0,0,0,.25); }
         h1 { font-size:22px; margin:0 0 4px; }
-        .when { color:#5b636e; font-size:14px; margin:0 0 18px; }
+        .when { color:#5b636e; font-size:14px; margin:0 0 6px; }
+        .where { color:#5b636e; font-size:14px; margin:0 0 18px; }
         label { display:block; font-weight:600; font-size:14px; margin:14px 0 5px; }
-        input[type=text], input[type=email] { width:100%; box-sizing:border-box; padding:11px 12px;
+        input[type=number] { width:100%; box-sizing:border-box; padding:11px 12px;
                border:1px solid #cbd2d9; border-radius:9px; font-size:16px; }
-        .optin { display:flex; gap:10px; align-items:flex-start; margin:18px 0 4px;
-                 background:#f3f6fb; border:1px solid #dde4ee; border-radius:10px; padding:12px; }
-        .optin input { margin-top:2px; width:18px; height:18px; }
-        .optin label { margin:0; font-weight:500; }
+        fieldset { border:0; padding:0; margin:18px 0 4px; }
+        legend { font-weight:600; font-size:14px; margin-bottom:8px; padding:0; }
+        .choice { display:flex; gap:10px; align-items:center; margin:8px 0;
+                  background:#f3f6fb; border:1px solid #dde4ee; border-radius:10px; padding:12px; cursor:pointer; }
+        .choice input { width:18px; height:18px; margin:0; }
+        .choice label { margin:0; font-weight:500; cursor:pointer; }
         button { width:100%; margin-top:20px; padding:13px; border:0; border-radius:10px;
                  background:#1c6b35; color:#fff; font-size:16px; font-weight:600; cursor:pointer; }
-        .hp { position:absolute; left:-9999px; top:-9999px; }
+        .invite { background:#0d5fa6; }
         .err { background:#fdecec; color:#b3261e; border-radius:9px; padding:10px 12px; font-size:14px; margin:12px 0; }
         .ok h1 { color:#1c6b35; }
+        .note { color:#5b636e; font-size:14px; }
+        .intro { color:#3a4250; font-size:14.5px; line-height:1.55; margin:0 0 16px; }
+        .group { background:#eaf6ee; border:1px solid #bfe3cb; color:#14532d; border-radius:10px;
+                 padding:12px 14px; font-size:14px; margin:0 0 14px; }
     </style>
 </head>
 <body>
@@ -43,63 +49,122 @@
     @if (Model.SubmittedOk)
     {
         <div class="card ok">
-            <h1>You're on the list 🎉</h1>
-            <p class="when">Thanks! We've recorded your Party RSVP@(p is null ? "" : $" for {dateLine}").</p>
-            <p style="color:#5b636e;font-size:14px;">Change of plans? Just submit the form again with the same email.</p>
+            @* The headline must match the ANSWER — a "No" answered with "You're on the
+               list 🎉" told people the opposite of what was saved. *@
+            <h1>@(Model.Attending == true ? "You're on the list 🎉" : "Thanks — answer saved")</h1>
+            <p class="when">
+                @(Model.Attending == true
+                    ? $"Thanks! We've recorded your Party RSVP{(p is null ? "" : $" for {dateLine}")}."
+                    : "We've noted that you can't make it to the party. You can change your answer any time.")
+            </p>
+            @if (p is not null)
+            {
+                <p class="where">📍 @p.Location</p>
+            }
+            @if (!string.IsNullOrEmpty(Model.InviteMessage))
+            {
+                <p class="note" role="status">@Model.InviteMessage</p>
+            }
+            @* §206: when attending, offer a one-tap calendar invitation for the window. *@
+            @if (Model.Attending == true)
+            {
+                <form method="post" asp-page-handler="Invite">
+                    <button type="submit" class="invite">📅 Send me a calendar invite</button>
+                </form>
+            }
+            <p class="note" style="margin-top:14px;">You can change your answer anytime — just <a href="/Party" style="color:#1c6b35;font-weight:600;">update your RSVP</a>.</p>
+            <a href="/" style="display:inline-block;margin-top:14px;padding:12px 16px;border-radius:10px;background:#1c6b35;color:#fff;text-decoration:none;font-weight:600;">← Back to the hub</a>
         </div>
     }
     else if (p is null)
     {
+        @* §234 UX: the "← Back to the hub" link renders in EVERY state (it was
+           confirmation-only, leaving the error/edge states as dead ends). *@
         <div class="card"><h1>No event right now</h1>
-            <p class="when">There's no active event taking sign-ups at the moment.</p></div>
+            <p class="when">There's no active event taking sign-ups at the moment.</p>
+            <a href="/" style="display:inline-block;margin-top:14px;padding:12px 16px;border-radius:10px;background:#1c6b35;color:#fff;text-decoration:none;font-weight:600;">← Back to the hub</a></div>
+    }
+    else if (!Model.IsSignedIn)
+    {
+        <div class="card"><h1>@p.EventName — Party</h1>
+            <p class="when">@dateLine</p>
+            <p class="where">📍 @p.Location</p>
+            <p class="note">Please <a href="/Login" style="color:#1c6b35;font-weight:600;">sign in</a> to RSVP for the party.</p>
+            <a href="/" style="display:inline-block;margin-top:14px;padding:12px 16px;border-radius:10px;background:#1c6b35;color:#fff;text-decoration:none;font-weight:600;">← Back to the hub</a></div>
     }
     else
     {
         <div class="card">
             <h1>@p.EventName — Party</h1>
             <p class="when">@dateLine</p>
+            <p class="where">📍 @p.Location</p>
+
+            @* §227: role-matched intro copy (operator 2026-07-07, verbatim). *@
+            <p class="intro">@CommunityHub.Pages.PartyModel.RoleIntro(Model.Role)</p>
 
             @if (!string.IsNullOrEmpty(Model.ErrorMessage))
             {
                 <div class="err" role="alert">@Model.ErrorMessage</div>
             }
 
-            <form method="post">
-                @* §164: signed-in participants get their name + email auto-filled (read-only) from
-                   their hub profile; anonymous visitors type them in. *@
-                <label for="Name">Your name</label>
-                <input type="text" id="Name" name="Name" value="@Model.Name" required autocomplete="name"
-                       readonly="@(Model.IsSignedIn ? "readonly" : null)" />
-
-                <label for="Email">Email</label>
-                <input type="email" id="Email" name="Email" value="@Model.Email" required autocomplete="email"
-                       readonly="@(Model.IsSignedIn ? "readonly" : null)" />
-                @if (Model.IsSignedIn)
-                {
-                    <p style="font-size:12.5px;color:#6b7280;margin:-4px 0 10px;">Filled in from your hub profile.</p>
-                }
-
-                <div class="optin">
-                    <input type="checkbox" id="Attending" name="Attending" value="true" checked="@Model.Attending" />
-                    <label for="Attending">Yes, I'll attend the Party (@timeWindow).</label>
+            @* §228: the sponsor company's single group reservation — visible to every
+               linked contact, whoever registered it. *@
+            @if (Model.IsSponsor && Model.GroupReservation is not null)
+            {
+                <div class="group" role="status">
+                    @if (Model.GroupReservation.Attending)
+                    {
+                        <strong>✅ Your company is registered.</strong>
+                        @($" {Model.GroupReservation.Name} signed up your group")
+                        @(Model.GroupReservation.HeadCount is int hc ? $" — {hc} attending" : "")
+                        @($" ({Model.GroupReservation.UpdatedAt:d MMM yyyy}).")
+                        @if (Model.GroupByOther)
+                        {
+                            <span> You don't need to sign up again — but you can update the group reservation below.</span>
+                        }
+                    }
+                    else
+                    {
+                        <strong>Your company has answered:</strong>
+                        @($" {Model.GroupReservation.Name} declined for your group ({Model.GroupReservation.UpdatedAt:d MMM yyyy}).")
+                        <span> You can change that below.</span>
+                    }
                 </div>
+            }
 
-                @* §164: sponsors bring a company group — ask how many will attend. Shown only
-                   to signed-in sponsors; anonymous + non-sponsor RSVPs are a single person. *@
+            <form method="post">
+                <p class="note" style="margin:0 0 4px;">Signing up as <strong>@Model.Name</strong>@(Model.IsSponsor ? " — one reservation covers your whole team" : "").</p>
+
+                @* §206: an EXPLICIT yes/no — neither is pre-selected. The form cannot be
+                   submitted until one is chosen (client `required` + server validation). *@
+                <fieldset>
+                    <legend>Will you attend the Party (@timeWindow)?</legend>
+                    <div class="choice">
+                        <input type="radio" id="AttendingYes" name="Attending" value="true" required
+                               checked="@(Model.Attending == true)" />
+                        @* §278: sponsors make a GROUP reservation for the company, so use "we". *@
+                        <label for="AttendingYes">@(Model.IsSponsor ? "Yes, We'll be there" : "Yes, I'll be there")</label>
+                    </div>
+                    <div class="choice">
+                        <input type="radio" id="AttendingNo" name="Attending" value="false" required
+                               checked="@(Model.Attending == false)" />
+                        <label for="AttendingNo">@(Model.IsSponsor ? "No, we can't make it" : "No, I can't make it")</label>
+                    </div>
+                </fieldset>
+
                 @if (Model.IsSponsor)
                 {
                     <label for="HeadCount">How many will attend from your company?</label>
                     <input type="number" id="HeadCount" name="HeadCount" min="1" step="1"
-                           value="@(Model.HeadCount?.ToString())" inputmode="numeric"
-                           style="width:100%;box-sizing:border-box;padding:11px 12px;border:1px solid #cbd2d9;border-radius:9px;font-size:16px;" />
-                    <p style="font-size:12.5px;color:#6b7280;margin:4px 0 0;">Include yourself in the count.</p>
+                           value="@(Model.HeadCount?.ToString())" inputmode="numeric" />
+                    <p class="note" style="font-size:12.5px;margin:4px 0 0;">Register your whole team in one go — include yourself in the count. Everyone linked to your company will see this reservation.</p>
                 }
 
-                <!-- honeypot: leave empty -->
-                <div class="hp" aria-hidden="true"><label>Website<input type="text" name="Website" tabindex="-1" autocomplete="off" /></label></div>
-
-                <button type="submit">Sign me up</button>
+                <button type="submit">@(Model.IsSponsor ? "Save our group reservation" : "Save")</button>
             </form>
+            @* §234 UX: the back-link renders in the FORM (and its inline-error) state too,
+               not only after a successful submit. *@
+            <a href="/" style="display:inline-block;margin-top:14px;padding:12px 16px;border-radius:10px;background:#1c6b35;color:#fff;text-decoration:none;font-weight:600;">← Back to the hub</a>
         </div>
     }
     </div>

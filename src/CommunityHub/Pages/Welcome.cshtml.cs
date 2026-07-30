@@ -9,8 +9,12 @@ using Microsoft.EntityFrameworkCore;
 namespace CommunityHub.Pages;
 
 /// <summary>
-/// The first-login PORTAL welcome (shown once, gated by
-/// <see cref="CommunityHub.Core.Domain.Participant.WelcomeShownAt"/>). Renders the
+/// The portal welcome page. §248 (operator 2026-07-07): RETIRED as a first-sign-in
+/// INTERSTITIAL — <c>/Index</c> no longer redirects here, so magic-link arrivals land
+/// directly on their target page. The page stays ROUTABLE (linkable curiosity) and
+/// keeps stamping <see cref="CommunityHub.Core.Domain.Participant.WelcomeShownAt"/>
+/// on Continue (the column is kept, no migration; it is simply no longer read as a
+/// redirect gate). Renders the
 /// per-role welcome CONTENT (the same variant the welcome email uses, via
 /// <see cref="WelcomeVariants"/>) as a body-only fragment — the email
 /// <c>_layout.html</c> shell and the <c>Subject:</c> line are stripped, so the

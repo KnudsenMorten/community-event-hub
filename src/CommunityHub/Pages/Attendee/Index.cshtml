@@ -45,9 +45,11 @@
         <partial name="_Flash" model='new CommunityHub.Pages.Shared.FlashModel(flashMsg, (TempData["FlashKind"] as string) ?? "success")' />
     }
 
+    @* §234 UX: MessageKind carries "error" for a failed signup (e.g. seat race / engine
+       rejection) so the failure renders as a red ⚠ alert, not a green ✓ success toast. *@
     @if (!string.IsNullOrEmpty(Model.Message))
     {
-        <partial name="_Flash" model='new CommunityHub.Pages.Shared.FlashModel(Model.Message!, "success")' />
+        <partial name="_Flash" model='new CommunityHub.Pages.Shared.FlashModel(Model.Message!, Model.MessageKind)' />
     }
 
     @if (!Model.HasAttendeeRecord)
@@ -76,22 +78,35 @@
                 <a class="task-link-btn" href="/MasterClassPage/@Model.Confirmed.SessionId">&#128203; Master Class info, what to bring &amp; Q&amp;A</a>
             </div>
 
-            <form method="post" asp-page-handler="ToggleReminder" style="margin-top:12px;">
-                <input type="hidden" name="wants" value="@((!Model.MonthReminderOptIn).ToString().ToLowerInvariant())" />
-                <button type="submit" class="secondary">
-                    @(Model.MonthReminderOptIn ? "Turn off the ~1-month-before reminder" : "Remind me ~1 month before")
-                </button>
-            </form>
+            @* §341-1 (operator 2026-07-26): "there must be button for attendees 'Send Calendar
+               invite for Master Class' to add manually if they want inside the hub. dont mention
+               in mail, as we dont send it out." This REPLACES the Google/Outlook links removed
+               from the confirmation mail (§341-4) — without it an attendee has no way to get the
+               class into their calendar. Same green #15803d as the other calendar buttons (§326j)
+               and the same §193 invite path as hotel/dinner (§322n). *@
+            @if (Model.CanSendCalendarInvite)
+            {
+                <form method="post" asp-page-handler="CalendarInvite" style="margin-top:10px;">
+                    <button type="submit"
+                            style="padding:8px 14px;border-radius:6px;background:#15803d;color:#fff;border:none;font-size:13.5px;font-weight:600;cursor:pointer;">
+                        &#128197; Send Calendar invite for Master Class
+                    </button>
+                </form>
+            }
+
+            @* §271 (operator 2026-07-10, repeated 2026-07-11): the "Remind me ~1 month before" opt-in
+               button was removed from the Master Class Selection page too (it was only removed from
+               MyMasterClass before). The ToggleReminder handler stays routable but is unlinked. *@
 
             <form method="post" asp-page-handler="GiveUp" style="margin-top:12px;"
                   data-ceh-confirm="mc-giveup-modal">
                 <input type="hidden" name="sessionId" value="@Model.Confirmed.SessionId" />
-                <button type="submit" class="secondary">Give up my Master Class seat</button>
+                <button type="submit" class="secondary">Give up my Master Class seat (cancel)</button>
             </form>
             <partial name="_ConfirmModal" model='new CommunityHub.Pages.Shared.ConfirmModalModel(
                 "mc-giveup-modal", "Give up your seat?",
                 "This frees your seat for the next person on the waitlist. You can pick another Master Class afterwards if seats remain.",
-                "Give up seat", "Keep my seat", true)' />
+                "Give up seat (cancel)", "Keep my seat", true)' />
         }
 
         @* Cards to act on: choose a seat (no confirmed seat yet) OR — while already holding
@@ -134,7 +149,9 @@
                             ? (o.Capacity is int fc ? $"Full ({fc} seats) — join the waitlist" : "Full — join the waitlist")
                         : (o.Free is int free && o.Capacity is int cap)
                             ? $"{free} of {cap} seats available"
-                            : "Seats available";
+                            // §273: still show the number when only the free-seat count is known
+                            // (operator wants "Seats available: 13", never a bare label if we have a count).
+                            : (o.Free is int freeOnly ? $"Seats available: {freeOnly}" : "Seats available");
                     <div class="mc-card">
                         <h3>@o.Title</h3>
                         <span class="mc-avail @cls">@availText</span>

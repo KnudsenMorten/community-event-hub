@@ -37,17 +37,23 @@ param blobEndpoint string
 @description('Application Insights connection string for telemetry.')
 param appInsightsConnectionString string
 
+@description('§392 — the Application Insights ARM RESOURCE ID (not the connection string). Surfaced as Telemetry__AppInsightsResourceId so the organizer Platform-health page can RUN Logs queries against the component; the connection string only says where telemetry goes. Empty disables the page with an explanation rather than failing.')
+param appInsightsResourceId string = ''
+
 @description('The Zoho Backstage origin allowed to embed the hub in an iframe (frame-ancestors CSP). Empty = embedding disabled until set.')
 param backstageEmbedOrigin string = ''
 
 @description('Custom hostname the operator will bind post-deploy (e.g. test.hub.eldk27.expertslive.dk). Surfaced as the Hub__CustomDomain app setting so the running app can emit it in absolute URLs / cookie domain hints. Binding itself is manual -- see docs/RUNBOOK.md §4.2.')
 param customDomain string = ''
 
-@description('SAFE outbound-email allowlist FLOOR persisted in infra so a redeploy can never re-open mail to real recipients (operator directive 2026-06-16: never mail anyone outside the allowlist, dev AND prod). Defaults to the @expertslive.dk organiser domain only; the operator''s personal test addresses are added on top as a LIVE app setting (never committed here, public mirror). The app fails closed if this is empty.')
+@description('RETIRED (§330) — the old outbound-email allowlist floor. SUPERSEDED by §234: audience control is RINGS ONLY and nothing in the app reads Email__OnlySendTo any more, so this module no longer emits it. The parameter is kept (unused) so existing parameter files and pipelines that still pass it do not fail; remove it once none do.')
 param emailOnlySendTo string = '@expertslive.dk'
 
 @description('TEST MODE master switch -- when true, integrations perform NO real outbound writes (no Zoho Backstage / Booking calls, no WooCommerce writes, coordinator notifications routed to TestCoordinatorEmail). Surfaced as the TestMode__Enabled app setting; the .NET app binds this via TestModeOptions. Defaults are set in main.bicep based on environmentName (true for dev, false for prod).')
 param testModeEnabled bool
+
+@description('§340-H MASTER SWITCH for outbound writes to third-party systems (Zoho Backstage, e-conomic, LinkedIn, SharePoint). Surfaced as Integrations__AllowExternalWrites. prod true / dev false, set in main.bicep from environmentName. The .NET default is FALSE so an unconfigured host never reaches a third party; an organizer can override per edition on the Settings page.')
+param allowExternalWrites bool
 
 resource appServicePlan 'Microsoft.Web/serverfarms@2023-12-01' = {
   name: appServicePlanName
@@ -84,15 +90,14 @@ resource webApp 'Microsoft.Web/sites@2023-12-01' = {
           name: 'ASPNETCORE_ENVIRONMENT'
           value: 'Production'
         }
-        // Outbound-email safety (operator directive 2026-06-16): allowlist is the
-        // SOLE gate, redirect is OFF, and the app fails closed on an empty list.
-        // Persisted here so a redeploy can't drop them and re-open mail to real
-        // speakers / sponsors / volunteers. Personal test addresses are layered
-        // on as a live app setting (not committed -- public mirror).
-        {
-          name: 'Email__OnlySendTo'
-          value: emailOnlySendTo
-        }
+        // Outbound-email safety. §330 NOTE: the 2026-06-16 allowlist directive was
+        // SUPERSEDED by §234 — audience control is RINGS ONLY, enforced per recipient in
+        // BrevoEmailSender, plus Email__KillSwitch and the per-hour ceiling (§326av). The
+        // Email__OnlySendTo setting this module used to emit is READ BY NOTHING, so
+        // emitting it made a redeploy look like it restored a protection that no longer
+        // exists — worse than emitting nothing. Removed.
+        // RedirectAllTo stays pinned EMPTY here: prod must never fan all mail into one
+        // mailbox. DEV sets it deliberately as a live app setting.
         {
           name: 'Email__RedirectAllTo'
           value: ''
@@ -112,6 +117,19 @@ resource webApp 'Microsoft.Web/sites@2023-12-01' = {
         {
           name: 'APPLICATIONINSIGHTS_CONNECTION_STRING'
           value: appInsightsConnectionString
+        }
+        // §392: the READ side of telemetry — the organizer's Platform-health page runs KQL
+        // against this component as the app's managed identity (see the Monitoring Reader
+        // assignment below). The connection string above is write-only plumbing and cannot
+        // be used to query, which is why this is a second, separate setting.
+        //
+        // SLOT WARNING (the §347 lesson, and the reason this belongs in Bicep at all): app
+        // settings SWAP WITH THE SLOT unless marked sticky. Set by hand on one slot only,
+        // this page works until the next swap and then silently stops — so it is emitted
+        // here, from the template, for whichever site this module deploys.
+        {
+          name: 'Telemetry__AppInsightsResourceId'
+          value: appInsightsResourceId
         }
         // NOTE: no Sql__AdminPassword is emitted. The app authenticates to
         // Azure SQL passwordlessly via its system-assigned managed identity
@@ -146,8 +164,38 @@ resource webApp 'Microsoft.Web/sites@2023-12-01' = {
           name: 'TestMode__Enabled'
           value: string(testModeEnabled)
         }
+        // §340-H: the environment half of the external-write switch. dev false /
+        // prod true. The web app reaches Zoho too (sponsor provisioning, the
+        // organizer push buttons), so it is gated identically to the Jobs host.
+        {
+          name: 'Integrations__AllowExternalWrites'
+          value: string(allowExternalWrites)
+        }
       ]
     }
+  }
+}
+
+// §392: the web app's MI must be able to READ the Application Insights component, or the
+// Platform-health page renders its "could not read telemetry" message forever. Built-in role
+// 'Monitoring Reader' id 43d0d8ad-25c7-4714-9337-8ba259a9fe05 — read-only by definition, so this
+// grants the ability to see telemetry and nothing else.
+//
+// Scoped to the RESOURCE GROUP rather than the component: this module does not own the AI resource
+// (monitoring.bicep does), and a cross-module resource scope would need it passed in as an existing
+// reference. Monitoring Reader at RG scope is still read-only, and the RG holds only this platform's
+// own resources.
+//
+// Deterministic GUID name so a redeploy is idempotent. Conditional on the resource id being set, so
+// an environment that deliberately runs without the page does not get a stray assignment.
+var monitoringReaderRoleId = '43d0d8ad-25c7-4714-9337-8ba259a9fe05'
+
+resource webAppMonitoringReader 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (!empty(appInsightsResourceId)) {
+  name: guid(resourceGroup().id, webApp.id, monitoringReaderRoleId)
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', monitoringReaderRoleId)
+    principalId: webApp.identity.principalId
+    principalType: 'ServicePrincipal'
   }
 }
 

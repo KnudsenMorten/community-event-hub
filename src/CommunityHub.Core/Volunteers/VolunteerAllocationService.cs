@@ -40,7 +40,8 @@ public sealed record TaskCoverage(
 /// created) — the ONLY input the §150 batched commit-notifier (unit D) needs to mail
 /// one summary per affected person. Empty when nothing changed; never the proposals or
 /// the lead's queue edits (those are mail-free).</summary>
-public sealed record CommitResult(int Committed, int SkippedDuplicate, int SkippedOutOfRing = 0)
+public sealed record CommitResult(
+    int Committed, int SkippedDuplicate, int SkippedOutOfRing = 0, int SkippedInactive = 0)
 {
     /// <summary>Distinct committed targets (never null — empty when none changed).</summary>
     public IReadOnlyList<int> AffectedParticipantIds { get; init; } = Array.Empty<int>();
@@ -89,6 +90,16 @@ public sealed class VolunteerAllocationService
     {
         if (actor.Role != ParticipantRole.Organizer)
             throw new VolunteerAccessDeniedException("Organizer role required for allocation.");
+
+        // §337 DEFENCE IN DEPTH. Role alone cannot exclude an acting-as session: §234 gives
+        // it the TARGET's claims, so Role == Organizer is true while impersonating another
+        // organizer. Every caller is a WRITE (AddDraft/RemoveDraft/Commit/Discard/
+        // SeedDropoutBackfill) — the reads never come through here — so failing closed costs
+        // a legitimate acting-as organizer no VIEW access, and a page that forgets the
+        // OrganizerAuth.IsRealOrganizer guard can no longer reopen the hole.
+        if (actor.IsActingAs)
+            throw new VolunteerAccessDeniedException(
+                "Allocation writes are not permitted while acting as another user.");
     }
 
     // =====================================================================
@@ -108,8 +119,13 @@ public sealed class VolunteerAllocationService
             .Select(t => new { t.Id, t.Title, t.ResourcesNeeded })
             .ToListAsync(ct);
 
+        // EFFECTIVE assignments only (§253 G7): a shift held by a deactivated
+        // volunteer — or one the volunteer declined — is NOT coverage; counting
+        // ghosts made exactly the vacated shifts look green.
         var assignedCounts = await _db.VolunteerTaskAssignments
-            .Where(a => a.EventId == actor.EventId)
+            .Where(a => a.EventId == actor.EventId
+                        && a.Participant.IsActive
+                        && a.DecisionStatus != ShiftDecisionStatus.Declined)
             .GroupBy(a => a.TaskId)
             .Select(g => new { TaskId = g.Key, Count = g.Count() })
             .ToDictionaryAsync(x => x.TaskId, x => x.Count, ct);
@@ -138,8 +154,11 @@ public sealed class VolunteerAllocationService
             t => t.Id == taskId && t.EventId == actor.EventId, ct);
         if (task is null) return null;
 
+        // Same EFFECTIVE-assignment rule as LoadCoverageAsync (§253 G7).
         var assigned = await _db.VolunteerTaskAssignments
-            .CountAsync(a => a.TaskId == taskId && a.EventId == actor.EventId, ct);
+            .CountAsync(a => a.TaskId == taskId && a.EventId == actor.EventId
+                             && a.Participant.IsActive
+                             && a.DecisionStatus != ShiftDecisionStatus.Declined, ct);
         var draft = await _db.TaskAllocationDrafts
             .CountAsync(d => d.TaskId == taskId && d.EventId == actor.EventId
                              && d.OwnerParticipantId == actor.ParticipantId
@@ -169,6 +188,11 @@ public sealed class VolunteerAllocationService
         if (vol is null) throw new VolunteerValidationException("Volunteer not found in this edition.");
         if (vol.Role != ParticipantRole.Volunteer)
             throw new VolunteerValidationException("Only volunteers can be allocated to tasks.");
+        // §253 (matrix V6): never queue a DEACTIVATED volunteer — a committed
+        // ghost assignment would be invisible coverage (the G7 filters skip it).
+        if (!vol.IsActive)
+            throw new VolunteerValidationException(
+                "That volunteer is deactivated — re-activate them before allocating shifts.");
 
         // Already a real assignment ⇒ nothing to draft.
         var alreadyAssigned = await _db.VolunteerTaskAssignments.AnyAsync(
@@ -245,7 +269,17 @@ public sealed class VolunteerAllocationService
         // ring is Broad (GA), so by default every target is in scope (no behaviour change).
         var releasedRing = await _gate.GetReleasedRingAsync(FeatureKey, actor.EventId, ct);
 
-        int committed = 0, skipped = 0, outOfRing = 0;
+        // §253 (matrix V6): targets who DROPPED OUT since being queued — committing
+        // them would create ghost assignments the G7 coverage filters immediately
+        // hide. One batched query, then consumed-and-skipped per draft below.
+        var draftTargetIds = drafts.Select(d => d.ParticipantId).Distinct().ToList();
+        var activeTargets = (await _db.Participants
+                .Where(p => draftTargetIds.Contains(p.Id) && p.IsActive)
+                .Select(p => p.Id)
+                .ToListAsync(ct))
+            .ToHashSet();
+
+        int committed = 0, skipped = 0, outOfRing = 0, inactive = 0;
         var now = _clock.GetUtcNow();
         var consumed = new List<TaskAllocationDraft>();
         var affected = new HashSet<int>();   // distinct targets whose committed set changed
@@ -259,6 +293,8 @@ public sealed class VolunteerAllocationService
             }
 
             consumed.Add(d);   // this draft is resolved this commit -> removable
+
+            if (!activeTargets.Contains(d.ParticipantId)) { inactive++; continue; }
 
             var exists = await _db.VolunteerTaskAssignments.AnyAsync(
                 a => a.TaskId == d.TaskId && a.ParticipantId == d.ParticipantId, ct);
@@ -279,7 +315,8 @@ public sealed class VolunteerAllocationService
         // Consume only the in-ring drafts; out-of-ring drafts stay queued.
         _db.TaskAllocationDrafts.RemoveRange(consumed);
         await _db.SaveChangesAsync(ct);
-        return new CommitResult(committed, skipped, outOfRing) { AffectedParticipantIds = affected.ToList() };
+        return new CommitResult(committed, skipped, outOfRing, inactive)
+        { AffectedParticipantIds = affected.ToList() };
     }
 
     /// <summary>
@@ -308,17 +345,39 @@ public sealed class VolunteerAllocationService
         _db.VolunteerTaskAssignments.RemoveRange(theirs);
         await _db.SaveChangesAsync(ct);
 
+        var seeded = await SeedBackfillForTasksAsync(
+            actor.EventId, actor.ParticipantId, taskIds, droppedParticipantId, ct);
+        return new DropoutReplanResult(theirs.Count, taskIds.Count, seeded);
+    }
+
+    /// <summary>
+    /// SEED backfill drafts for a set of now-short tasks into ONE organizer's draft
+    /// queue (the review-then-commit flow). The id-based seam shared by
+    /// <see cref="SeedDropoutBackfillAsync"/> (the manual re-plan button) and the
+    /// §253 G1/G7 deactivation cascade (<c>ParticipantDeactivationService</c>), which
+    /// has already vacated the leaver's assignments before calling. Candidates are
+    /// ACTIVE volunteers (availability submitters preferred), excluding
+    /// <paramref name="droppedParticipantId"/>; only genuine shortfall (effective
+    /// holders + this owner's existing drafts subtracted) is plugged. Returns the
+    /// number of drafts seeded.
+    /// </summary>
+    public async Task<int> SeedBackfillForTasksAsync(
+        int eventId, int ownerParticipantId, IReadOnlyCollection<int> taskIds,
+        int droppedParticipantId, CancellationToken ct = default)
+    {
+        if (taskIds.Count == 0) return 0;
+
         // Candidate pool: active volunteers in the edition (excluding the leaver),
         // those who submitted availability preferred so we propose people likely to
         // say yes first.
         var availableIds = new HashSet<int>(
             (await _db.VolunteerDayAvailabilities
-                .Where(v => v.EventId == actor.EventId).Select(v => v.ParticipantId).ToListAsync(ct))
+                .Where(v => v.EventId == eventId).Select(v => v.ParticipantId).ToListAsync(ct))
             .Concat(await _db.VolunteerAvailabilities
-                .Where(v => v.EventId == actor.EventId).Select(v => v.ParticipantId).ToListAsync(ct)));
+                .Where(v => v.EventId == eventId).Select(v => v.ParticipantId).ToListAsync(ct)));
 
         var pool = (await _db.Participants
-                .Where(p => p.EventId == actor.EventId
+                .Where(p => p.EventId == eventId
                             && p.Role == ParticipantRole.Volunteer
                             && p.IsActive
                             && p.Id != droppedParticipantId)
@@ -330,17 +389,21 @@ public sealed class VolunteerAllocationService
 
         var now = _clock.GetUtcNow();
         var seeded = 0;
-        foreach (var taskId in taskIds)
+        foreach (var taskId in taskIds.Distinct())
         {
             var task = await _db.VolunteerTasks.FirstOrDefaultAsync(
-                t => t.Id == taskId && t.EventId == actor.EventId, ct);
+                t => t.Id == taskId && t.EventId == eventId, ct);
             if (task is null) continue;
 
+            // EFFECTIVE holders only (§253 G7): another ghost (inactive/declined)
+            // on the task must not shrink the shortfall this backfill plugs.
             var assignedNow = await _db.VolunteerTaskAssignments
-                .CountAsync(a => a.TaskId == taskId && a.EventId == actor.EventId, ct);
+                .CountAsync(a => a.TaskId == taskId && a.EventId == eventId
+                                 && a.Participant.IsActive
+                                 && a.DecisionStatus != ShiftDecisionStatus.Declined, ct);
             var draftedNow = await _db.TaskAllocationDrafts
-                .CountAsync(d => d.TaskId == taskId && d.EventId == actor.EventId
-                                 && d.OwnerParticipantId == actor.ParticipantId
+                .CountAsync(d => d.TaskId == taskId && d.EventId == eventId
+                                 && d.OwnerParticipantId == ownerParticipantId
                                  && d.TargetRole == ParticipantRole.Volunteer, ct);
             var shortfall = Math.Max(0, task.ResourcesNeeded - assignedNow - draftedNow);
             if (shortfall == 0) continue;
@@ -348,11 +411,11 @@ public sealed class VolunteerAllocationService
             // On-task ids (real or already drafted) to avoid proposing duplicates.
             var onTask = new HashSet<int>(
                 (await _db.VolunteerTaskAssignments
-                    .Where(a => a.TaskId == taskId && a.EventId == actor.EventId)
+                    .Where(a => a.TaskId == taskId && a.EventId == eventId)
                     .Select(a => a.ParticipantId).ToListAsync(ct))
                 .Concat(await _db.TaskAllocationDrafts
-                    .Where(d => d.TaskId == taskId && d.EventId == actor.EventId
-                                && d.OwnerParticipantId == actor.ParticipantId
+                    .Where(d => d.TaskId == taskId && d.EventId == eventId
+                                && d.OwnerParticipantId == ownerParticipantId
                                 && d.TargetRole == ParticipantRole.Volunteer)
                     .Select(d => d.ParticipantId).ToListAsync(ct)));
 
@@ -362,8 +425,8 @@ public sealed class VolunteerAllocationService
                 if (onTask.Contains(candidateId)) continue;
                 _db.TaskAllocationDrafts.Add(new TaskAllocationDraft
                 {
-                    EventId = actor.EventId,
-                    OwnerParticipantId = actor.ParticipantId,
+                    EventId = eventId,
+                    OwnerParticipantId = ownerParticipantId,
                     TaskId = taskId,
                     ParticipantId = candidateId,
                     TargetRole = ParticipantRole.Volunteer,
@@ -376,7 +439,7 @@ public sealed class VolunteerAllocationService
         }
 
         if (seeded > 0) await _db.SaveChangesAsync(ct);
-        return new DropoutReplanResult(theirs.Count, taskIds.Count, seeded);
+        return seeded;
     }
 
     /// <summary>DISCARD the organizer's whole draft queue — nothing is assigned.</summary>

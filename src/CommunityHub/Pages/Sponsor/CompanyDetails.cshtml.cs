@@ -54,6 +54,10 @@ public class CompanyDetailsModel : PageModel
     private readonly CommunityHub.Core.Integrations.Erp.EconomicContactAdminService _erpContacts;
     private readonly ILogger<CompanyDetailsModel> _log;
 
+    /// <summary>§482b — pulls an ERP contact change back into the hub straight away. OPTIONAL so a
+    /// host without Company Manager keeps working; the edit still lands in the ERP either way.</summary>
+    private readonly CommunityHub.Core.Integrations.SponsorContactSyncService? _contactSync;
+
     public CompanyDetailsModel(
         CommunityHubDbContext db,
         ICurrentParticipantAccessor participant,
@@ -66,8 +70,10 @@ public class CompanyDetailsModel : PageModel
         IEmailSender email,
         SponsorZohoSyncService zohoSync,
         CommunityHub.Core.Integrations.Erp.EconomicContactAdminService erpContacts,
-        ILogger<CompanyDetailsModel> log)
+        ILogger<CompanyDetailsModel> log,
+        CommunityHub.Core.Integrations.SponsorContactSyncService? contactSync = null)
     {
+        _contactSync = contactSync;
         _db = db;
         _participant = participant;
         _clock = clock;
@@ -132,6 +138,13 @@ public class CompanyDetailsModel : PageModel
     public const int MaxVideos = 6;
     public const int MaxCollateral = 6;
     public bool CanUploadCollateral { get; private set; }
+
+    /// <summary>§229 — the saved booth check-in slot (pre-day expected arrival), null = unanswered.</summary>
+    public string? CurrentBoothCheckInSlot { get; private set; }
+    /// <summary>§298 — how many booth members will check in (feeds the pre-day lunch order).</summary>
+    public int? CurrentBoothCheckInMemberCount { get; private set; }
+    public DateTimeOffset? BoothCheckInSetAt { get; private set; }
+    public string? BoothCheckInSetByEmail { get; private set; }
 
     /// <summary>The sponsor's e-conomic customer number (from the webshop company), if any.</summary>
     public int? ErpCustomerNumber { get; private set; }
@@ -215,6 +228,44 @@ public class CompanyDetailsModel : PageModel
         var sync = await _zohoSync.SyncAsync(me.EventId, companyId!, sponsorName ?? string.Empty, ct);
         Message = BuildSyncMessage(sync);
 
+        await LoadAsync(me, prefill: true, ct);
+        return Page();
+    }
+
+    /// <summary>
+    /// §229 — save the booth check-in slot ("when do you expect to arrive at your booth
+    /// on 9 Feb 2027"): one of <see cref="BoothCheckInSlots.All"/>. Stored on the company's
+    /// <see cref="SponsorInfo"/> row (who + when audited); no Zoho sync — hub-only data.
+    /// </summary>
+    public async Task<IActionResult> OnPostBoothCheckInAsync(string? slot, int? memberCount, CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+        if (me.Role != ParticipantRole.Sponsor) { AccessDenied = true; return Page(); }
+
+        var companyId = await GetCompanyIdAsync(me.ParticipantId, ct);
+        if (companyId is null) { NoCompanyLink = true; await LoadAsync(me, prefill: true, ct); return Page(); }
+
+        if (!BoothCheckInSlots.IsValid(slot))
+        {
+            Error = "Please pick when you expect to arrive at your booth (or the not-participating option).";
+            await LoadAsync(me, prefill: true, ct);
+            return Page();
+        }
+
+        var info = await GetOrCreateInfoAsync(me.EventId, companyId!, ct);
+        info.BoothCheckInSlot = slot;
+        // §298: booth-member count feeds the pre-day lunch order; cleared on the opt-out, clamped 1..50.
+        info.BoothCheckInMemberCount = slot == BoothCheckInSlots.NotParticipating
+            ? null
+            : (memberCount is int n && n > 0 ? Math.Min(n, 50) : null);
+        info.BoothCheckInSetAt = _clock.GetUtcNow();
+        info.BoothCheckInSetByEmail = me.Email;
+        await _db.SaveChangesAsync(ct);
+
+        Message = slot == BoothCheckInSlots.NotParticipating
+            ? "Saved — we've noted that you don't expect to participate on pre-day."
+            : $"Saved — we'll expect you at your booth between {BoothCheckInSlots.Label(slot)} on 9 Feb 2027.";
         await LoadAsync(me, prefill: true, ct);
         return Page();
     }
@@ -342,13 +393,16 @@ public class CompanyDetailsModel : PageModel
         var sponsorName = await ResolveSponsorNameAsync(companyId!, ct);
         try
         {
-            using var ms = new MemoryStream();
-            await UploadFile.CopyToAsync(ms, ct);
-
+            // §455 (operator 2026-07-27: "those are also very large files - should we change those
+            // as well so we dont kill infra"). Exhibitor-wall artwork is capped at 1 GB, and this
+            // buffered the whole file into a MemoryStream then ToArray()'d it — the same double
+            // copy that made the speaker slide upload fragile. Now streamed straight into Graph's
+            // chunked session: peak memory is one chunk, whatever the artwork weighs.
             var fileName = await NextVersionedNameAsync(
                 sp!.SiteUrl, sp.DriveName, spec.Folder, spec.Prefix, SanitizeNameComponent(sponsorName), ext, ct);
-            var (_, webUrl, _) = await _sp.UploadFileAsync(
-                sp.SiteUrl, sp.DriveName, spec.Folder, fileName, ms.ToArray(),
+            await using var wallUpload = UploadFile.OpenReadStream();
+            var (_, webUrl, _) = await _sp.UploadFileStreamAsync(
+                sp.SiteUrl, sp.DriveName, spec.Folder, fileName, wallUpload, UploadFile.Length,
                 string.IsNullOrWhiteSpace(UploadFile.ContentType) ? "application/octet-stream" : UploadFile.ContentType,
                 ct);
 
@@ -478,10 +532,12 @@ public class CompanyDetailsModel : PageModel
         // BELOW the details (was an inline "open" link next to the filename).
         var button = string.IsNullOrWhiteSpace(webUrl)
             ? ""
+            // §191: bulletproof button — explicit white text with !important so dark-mode
+            // mail clients can't darken it, background on the anchor itself.
             : $"<p style=\"margin:18px 0 4px;\"><a href=\"{Enc(webUrl)}\" "
-              + "style=\"display:inline-block;padding:12px 22px;background:#008BD2;color:#ffffff;"
-              + "font-weight:700;font-size:15px;border-radius:6px;text-decoration:none;\">"
-              + "Open file</a></p>";
+              + "style=\"display:inline-block;padding:14px 30px;background-color:#1565c0;"
+              + "color:#ffffff !important;font-weight:700;font-size:16px;border-radius:6px;"
+              + "text-decoration:none;\">Open file</a></p>";
         var html =
             $"<p>Sponsor <b>{Enc(sponsorName)}</b> uploaded a new file via Company Details.</p>"
             + $"<ul><li><b>File:</b> {Enc(fileName)}</li>"
@@ -497,6 +553,69 @@ public class CompanyDetailsModel : PageModel
 
     // ---- Sponsor self-service e-conomic contacts (ERP master) ----------------
 
+    /// <summary>
+    /// §482b (operator: <i>"you need to trigger a sync if you make chg"</i> and <i>"maybe you can
+    /// extend so it syncs to both ceh and cm from erp"</i>) — push an ERP contact change through
+    /// BOTH downstream hops immediately, instead of leaving the sponsor to wonder why their edit
+    /// changed nothing visible until a scheduled job ran hours later.
+    ///
+    /// <para>ERP is the master. Hop 1 reconciles ERP → Company Manager (scoped to THIS customer, so
+    /// a page POST never triggers an estate-wide sweep). Hop 2 pulls Company Manager → the hub, so
+    /// the participant rows and the "Linked Event Coordinators" list agree with what was just
+    /// saved.</para>
+    ///
+    /// <para>FAIL-SOFT on purpose: the ERP write has already succeeded and is the system of record.
+    /// A sync hiccup must not turn a saved change into an error message — it only means the hub
+    /// catches up on the next scheduled run, so it is logged, not surfaced.</para>
+    /// </summary>
+    private void PushContactChangeDownstream(int eventId, string companyId, int erpCustomerNumber)
+    {
+        // §493b (operator: "make it into queue so it complete behind. no problem.") — QUEUED, not
+        // awaited. Run inline this was 2–4 sequential external calls (e-conomic, then Company
+        // Manager, then the hub pull) BEFORE the page responded: exactly the §443 shape that made
+        // the admin interface feel broken. The sponsor's save now returns immediately.
+        //
+        // Its OWN DI scope: the request scope — and its DbContext — is disposed the moment the
+        // response is written, so continuing to use it would throw ObjectDisposedException under
+        // load. This is the one detail that makes fire-and-forget safe here.
+        var scopeFactory = HttpContext.RequestServices.GetRequiredService<IServiceScopeFactory>();
+        var logger = _log;
+
+        _ = Task.Run(async () =>
+        {
+            // NOT the request's CancellationToken: that is cancelled as soon as the response
+            // completes, which would abort the work we just deliberately moved off the request.
+            var ct = CancellationToken.None;
+            try
+            {
+                using var scope = scopeFactory.CreateScope();
+                var sp = scope.ServiceProvider;
+
+                var erpToCm = sp.GetService<CommunityHub.Core.Integrations.Erp.ErpWebshopContactSyncService>();
+                if (erpToCm is not null)
+                {
+                    await erpToCm.SyncAsync(onlyCustomerNumber: erpCustomerNumber, ct: ct);
+                }
+
+                var cmToHub = sp.GetService<CommunityHub.Core.Integrations.SponsorContactSyncService>();
+                if (cmToHub is not null && int.TryParse(companyId, out var cmCompanyId))
+                {
+                    await cmToHub.SyncCompanyAsync(eventId, cmCompanyId, ct);
+                }
+            }
+            catch (Exception ex)
+            {
+                // Swallowed on purpose. The ERP write — the system of record — already succeeded,
+                // and an unobserved exception on a background task must never take the host down.
+                // The scheduled ErpSyncCustomerContactJob sweep is the backstop: worst case the hub
+                // catches up on its next run instead of within seconds.
+                logger.LogWarning(ex,
+                    "Background contact sync failed for company {Co} (ERP customer {Erp}); "
+                    + "the scheduled reconcile will catch it up.", companyId, erpCustomerNumber);
+            }
+        });
+    }
+
     public async Task<IActionResult> OnPostAddErpContactAsync(
         string name, string? email, string? phone, bool signer, bool coordinator, CancellationToken ct)
     {
@@ -509,7 +628,8 @@ public class CompanyDetailsModel : PageModel
         try
         {
             await _erpContacts.CreateAsync(erpNo.Value, name, email, phone, signer, coordinator, ct);
-            Message = "Contact added in backend.";
+            PushContactChangeDownstream(me!.EventId, companyId!, erpNo.Value);
+            Message = "Contact added.";
         }
         catch (Exception ex) { _log.LogWarning(ex, "AddErpContact failed."); Error = "Could not add the contact in backend. Please try again."; }
         await LoadAsync(me!, prefill: true, ct);
@@ -528,7 +648,8 @@ public class CompanyDetailsModel : PageModel
         try
         {
             await _erpContacts.UpdateAsync(erpNo.Value, contactNumber, name ?? string.Empty, email, phone, signer, coordinator, notes, ct);
-            Message = "Contact updated in backend.";
+            PushContactChangeDownstream(me!.EventId, companyId!, erpNo.Value);
+            Message = "Contact updated.";
         }
         catch (Exception ex) { _log.LogWarning(ex, "UpdateErpContact failed."); Error = "Could not update the contact in backend. Please try again."; }
         await LoadAsync(me!, prefill: true, ct);
@@ -545,7 +666,8 @@ public class CompanyDetailsModel : PageModel
         try
         {
             await _erpContacts.DeleteAsync(erpNo.Value, contactNumber, ct);
-            Message = "Contact removed from backend.";
+            PushContactChangeDownstream(me!.EventId, companyId!, erpNo.Value);
+            Message = "Contact removed.";
         }
         catch (Exception ex) { _log.LogWarning(ex, "DeleteErpContact failed."); Error = "Could not remove the contact in backend. Please try again."; }
         await LoadAsync(me!, prefill: true, ct);
@@ -563,6 +685,12 @@ public class CompanyDetailsModel : PageModel
         IsExhibitor = info?.HasBooth ?? false;
         // §51 — surface the row's last-saved instant for the "Last saved …" line.
         LastSavedAt = info?.UpdatedAt;
+
+        // §229 — booth check-in (pre-day expected arrival) state for the section + wizard.
+        CurrentBoothCheckInSlot = info?.BoothCheckInSlot;
+        CurrentBoothCheckInMemberCount = info?.BoothCheckInMemberCount;
+        BoothCheckInSetAt = info?.BoothCheckInSetAt;
+        BoothCheckInSetByEmail = info?.BoothCheckInSetByEmail;
 
         if (prefill && info is not null)
         {
@@ -730,12 +858,17 @@ public class CompanyDetailsModel : PageModel
         var sponsorName = await ResolveSponsorNameAsync(companyId!, ct);
         try
         {
-            using var ms = new MemoryStream();
-            await UploadFile.CopyToAsync(ms, ct);
+            // §455/§476 — STREAM it. This was still buffering the whole file into a MemoryStream
+            // and then calling ToArray(), holding a 25 MB brochure in RAM TWICE on a shared
+            // instance before a single byte reached SharePoint. Booth collateral is precisely the
+            // large-file case §455 was built for, and this was the last sponsor upload path still
+            // buffering — the same shape that produced the speaker upload failure.
             var baseName = Path.GetFileNameWithoutExtension(UploadFile.FileName);
             var fileName = $"{SanitizeNameComponent(sponsorName)}_{SanitizeNameComponent(baseName)}{ext}";
-            var (_, webUrl, _) = await _sp.UploadFileAsync(
-                sp.SiteUrl, sp.DriveName, sp.BoothCollateralFolderPath, fileName, ms.ToArray(),
+            await using var upload = UploadFile.OpenReadStream();
+            var (_, webUrl, _) = await _sp.UploadFileStreamAsync(
+                sp.SiteUrl, sp.DriveName, sp.BoothCollateralFolderPath, fileName,
+                upload, UploadFile.Length,
                 string.IsNullOrWhiteSpace(UploadFile.ContentType) ? "application/octet-stream" : UploadFile.ContentType, ct);
             _db.SponsorBoothMaterials.Add(new SponsorBoothMaterial
             {

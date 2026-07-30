@@ -4,18 +4,38 @@
 @page "/Info/{slug}"
 @model CommunityHub.Pages.Info.InfoPageModel
 @{
-    ViewData["Title"] = Model.Content.Title;
+    ViewData["Title"] = Model.PageTitle;
 }
 
+@* §348 — the markdown styling lives in ONE shared partial (`_ContentPageStyles`), rendered by this
+   page AND the public /About. It used to be duplicated per page and the copies drifted: the §348
+   table/heading fixes landed here only, leaving the public copy on the old unruled tables. Only
+   PAGE-SPECIFIC CSS belongs below. *@
+<partial name="_ContentPageStyles" />
 <style>
-    /* Mobile-first: keep floor-plan / feedback images inside the card on phones. */
-    .content-page img { max-width: 100%; height: auto; border-radius: 8px; margin: 8px 0; }
-    .content-page h2 { color: var(--el-darkblue); }
-    .content-page h3 { color: var(--el-darkblue); margin: 18px 0 4px; }
-    .content-page blockquote {
-        border-left: 4px solid var(--el-darkblue);
-        margin: 12px 0; padding: 4px 14px; background: #f7f9fc; color: #374151;
+    /* §351 (operator 2026-07-26): the ELDK26 photo gallery on /Info/last-event-videos —
+       a thumbnail grid whose tiles link to the full-size photo. Mobile-first: 2 across on a
+       phone, more as the viewport grows. Fixed tile height + object-fit:cover so a mixed set of
+       portrait/landscape photos still forms an even grid instead of a ragged one. */
+    .photo-gallery {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 10px;
+        margin: 14px 0 26px;
     }
+    .photo-gallery a { display: block; line-height: 0; }
+    .photo-gallery img {
+        width: 100%;
+        height: 130px;
+        object-fit: cover;
+        border-radius: 8px;
+        margin: 0;
+        transition: transform .15s ease, box-shadow .15s ease;
+    }
+    .photo-gallery a:hover img { transform: scale(1.03); box-shadow: 0 3px 12px rgba(0,0,0,.22); }
+    @@media (min-width: 560px) { .photo-gallery { grid-template-columns: repeat(3, 1fr); } .photo-gallery img { height: 150px; } }
+    @@media (min-width: 860px) { .photo-gallery { grid-template-columns: repeat(4, 1fr); } .photo-gallery img { height: 160px; } }
+
     /* §146 venue gallery: single column on phones, multi-column from ~560px up. */
     .venue-gallery { display: grid; grid-template-columns: 1fr; gap: 12px; margin: 10px 0; }
     .venue-gallery figure { margin: 0; }
@@ -26,7 +46,7 @@
 <div class="card content-page">
     @if (Model.ContentMissing)
     {
-        <h2>@Model.Content.Title</h2>
+        <h2>@Model.PageTitle</h2>
         <p class="info" style="background:#eef6ff;padding:10px 14px;border-radius:6px;">
             This content is not available yet &mdash; the organizers will add it
             closer to the event. Please check back soon.

@@ -293,6 +293,70 @@ public sealed class CommandCenterServiceTests
         Assert.Equal(3, Head("Dinner"));  // sp1 attending (1) + 2 plus-ones; sp2 not attending
     }
 
+    /// <summary>
+    /// §253 G2/G4/G5/G6/G7/G8b count truth: a deactivated person's surviving
+    /// hotel/swag/lunch/dinner rows must not inflate any headcount tile, a
+    /// WITHDRAWN sponsor company is no longer a sponsor, and a volunteer task
+    /// held ONLY by a deactivated volunteer reads as UNASSIGNED on the attention
+    /// tile (ghost-held tasks used to vanish from it).
+    /// </summary>
+    [Fact]
+    public async Task Headcounts_exclude_inactive_people_withdrawn_sponsors_and_ghost_held_shifts()
+    {
+        using var db = NewDb();
+        await SeedAsync(db);
+
+        // A deactivated drop-out with a FULL logistics footprint...
+        var drop = new Participant
+        {
+            EventId = EventId, Email = "drop@expertslive.dk", FullName = "drop",
+            Role = ParticipantRole.Volunteer, IsActive = false,
+            LifecycleState = ParticipantLifecycleState.Inactive,
+        };
+        db.Participants.Add(drop);
+        await db.SaveChangesAsync();
+        db.HotelBookings.Add(new HotelBooking { EventId = EventId, ParticipantId = drop.Id, NeedsRoom = true });
+        db.SwagPreferences.Add(new SwagPreference { EventId = EventId, ParticipantId = drop.Id, WantsPolo = true });
+        db.LunchSignups.Add(new LunchSignup { EventId = EventId, ParticipantId = drop.Id, LunchSetupDay = true });
+        db.DinnerSignups.Add(new DinnerSignup { EventId = EventId, ParticipantId = drop.Id, Attending = true, PlusOneCount = 4 });
+
+        // ...a WITHDRAWN sponsor company (§253 G8b)...
+        db.SponsorInfos.Add(new SponsorInfo
+        {
+            EventId = EventId, SponsorCompanyId = "43",
+            Status = SponsorStatus.Withdrawn, WithdrawnAt = Now,
+        });
+
+        // ...and a volunteer task held ONLY by the drop-out (ghost-held).
+        var ghostHeld = new VolunteerTask
+        {
+            Id = 34, EventId = EventId, SubcategoryId = 20, Title = "Ghost-held desk",
+        };
+        db.VolunteerTasks.Add(ghostHeld);
+        await db.SaveChangesAsync();
+        db.VolunteerTaskAssignments.Add(new VolunteerTaskAssignment
+        {
+            EventId = EventId, TaskId = ghostHeld.Id, ParticipantId = drop.Id,
+        });
+        await db.SaveChangesAsync();
+
+        var s = await NewSvc(db).BuildAsync(EventId);
+
+        // Every headcount unchanged — the ghost's rows count nowhere.
+        int Head(string key) => Assert.Single(s.Headcounts, h => h.Key == key).Count;
+        Assert.Equal(1, Head("Hotel"));
+        Assert.Equal(2, Head("Swag"));
+        Assert.Equal(2, Head("Lunch"));
+        Assert.Equal(3, Head("Dinner"));  // drop's 1 + 4 plus-ones ignored
+
+        // Withdrawn company is not a sponsor any more.
+        Assert.Equal(1, s.SponsorsTotal);
+
+        // The ghost-held task shows as unassigned: vtOpen + ghostHeld.
+        var tile = Assert.Single(s.AttentionTiles, t => t.Key == "UnassignedVolunteerTasks");
+        Assert.Equal(2, tile.Count);
+    }
+
     [Fact]
     public async Task Sessions_and_sponsor_status_scoped()
     {

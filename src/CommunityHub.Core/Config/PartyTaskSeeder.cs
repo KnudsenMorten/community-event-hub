@@ -36,13 +36,25 @@ public sealed class PartyTaskSeeder
     public static string SourceKeyFor(int participantId) => $"{PartyTaskKey}:{participantId}";
 
     /// <summary>
-    /// The STAFF roles that get a party sign-up TASK + reminder (§164). Plain
-    /// attendees are excluded (they use the menu, not a task); Media is not a tracked
-    /// party role per the operator's list.
+    /// The STAFF / crew roles that get a party sign-up TASK + Get-Started step (§164/§206).
+    /// §206 (operator 2026-06-30): MEDIA is now included, so ALL SIX crew roles —
+    /// Organizer, Speaker, Volunteer, Media, Event Partner, Sponsor — get the party
+    /// step+task. Drives the Get-Started "party" step gating (RoleWizardService) and the
+    /// crew due-date path. (Attendees ALSO get a party task — §177 — handled via
+    /// <see cref="RoleGetsAnyPartyTask"/>.)
     /// </summary>
     public static bool RoleGetsPartyTask(ParticipantRole role) => role is
         ParticipantRole.Sponsor or ParticipantRole.Speaker or ParticipantRole.Volunteer
-        or ParticipantRole.EventPartner or ParticipantRole.Organizer;
+        or ParticipantRole.EventPartner or ParticipantRole.Organizer or ParticipantRole.Media;
+
+    /// <summary>
+    /// Every role that gets a party sign-up TASK: the staff roles above PLUS attendees
+    /// (§177 — an attendee's party RSVP is now a tracked task with its own week-cadence
+    /// reminder). The attendee task carries NO due date, so the standard due-day reminder
+    /// (TaskReminderBuilder) skips it — the cadence lives in AttendeePartyReminderBuilder.
+    /// </summary>
+    public static bool RoleGetsAnyPartyTask(ParticipantRole role) =>
+        RoleGetsPartyTask(role) || role == ParticipantRole.Attendee;
 
     /// <summary>
     /// Ensure the party sign-up task exists for EVERY active staff-role participant in
@@ -53,14 +65,37 @@ public sealed class PartyTaskSeeder
         var party = await GetPartyAsync(eventId, ct);
         if (party is null) return 0; // no active party window for this edition
 
-        // Active participants in a party-task role who don't yet have the task.
+        // Active participants in a party-task role who don't yet have the task. §177:
+        // attendees are now included too (their task carries no due date — see BuildTask).
+        // §242: the IsActive filter below is ALSO the 1-day suspension gate — while
+        // attendee-1day-access is OFF, the sync deactivates every 1-day-only attendee
+        // login (ReconcileOneDayAccessAsync), so no party task is ever seeded for them
+        // here (and EnsureForParticipantAsync is unreachable for them: they can't sign
+        // in). Re-enabling the flag reactivates them and seeding resumes.
         var people = await _db.Participants
             .Where(p => p.EventId == eventId && p.IsActive)
             .Where(p => p.Role == ParticipantRole.Sponsor
                         || p.Role == ParticipantRole.Speaker
                         || p.Role == ParticipantRole.Volunteer
                         || p.Role == ParticipantRole.EventPartner
-                        || p.Role == ParticipantRole.Organizer)
+                        || p.Role == ParticipantRole.Organizer
+                        || p.Role == ParticipantRole.Media
+                        // §299 7.1 (operator 2026-07-23): ONLY 2-day-ticket attendees get
+                        // the party task — a 1-day holder gets NO tasks at all. Same rule
+                        // as the sign-in gate: an active mirrored 2-day ticket qualifies;
+                        // an attendee participant with NO mirrored 1-day ticket (seed/test
+                        // row) keeps the task; an active 1-day-only holder is excluded.
+                        || (p.Role == ParticipantRole.Attendee
+                            && (_db.Attendees.Any(a =>
+                                    a.EventId == eventId
+                                    && a.MirrorState == MirrorState.Active
+                                    && a.TicketStatus == TicketStatus.TwoDay
+                                    && a.Email.ToLower() == p.Email.ToLower())
+                                || !_db.Attendees.Any(a =>
+                                    a.EventId == eventId
+                                    && a.MirrorState == MirrorState.Active
+                                    && a.TicketStatus == TicketStatus.Other
+                                    && a.Email.ToLower() == p.Email.ToLower()))))
             .Select(p => new { p.Id, p.Role })
             .ToListAsync(ct);
         if (people.Count == 0) return 0;
@@ -78,7 +113,7 @@ public sealed class PartyTaskSeeder
         {
             var key = SourceKeyFor(p.Id);
             if (have.Contains(key)) continue; // idempotent
-            _db.Tasks.Add(BuildTask(eventId, p.Id, p.Role, party.DueDate, now));
+            _db.Tasks.Add(BuildTask(eventId, p.Id, p.Role, DueDateFor(p.Role, party.DueDate), now));
             created++;
         }
 
@@ -94,7 +129,7 @@ public sealed class PartyTaskSeeder
     public async Task EnsureForParticipantAsync(
         int eventId, int participantId, ParticipantRole role, CancellationToken ct = default)
     {
-        if (!RoleGetsPartyTask(role)) return;
+        if (!RoleGetsAnyPartyTask(role)) return;
 
         var party = await GetPartyAsync(eventId, ct);
         if (party is null) return;
@@ -105,21 +140,31 @@ public sealed class PartyTaskSeeder
                  && t.SourceKey == key, ct);
         if (exists) return;
 
-        _db.Tasks.Add(BuildTask(eventId, participantId, role, party.DueDate, _clock.GetUtcNow()));
+        _db.Tasks.Add(BuildTask(eventId, participantId, role, DueDateFor(role, party.DueDate), _clock.GetUtcNow()));
         await _db.SaveChangesAsync(ct);
     }
 
+    /// <summary>§177: attendees get NO due date (their reminder cadence is week-based,
+    /// driven by AttendeePartyReminderBuilder); staff roles keep the three-weeks-before
+    /// due date so the standard due-day reminder nags them.</summary>
+    private static DateOnly? DueDateFor(ParticipantRole role, DateOnly staffDueDate) =>
+        role == ParticipantRole.Attendee ? (DateOnly?)null : staffDueDate;
+
     private ParticipantTask BuildTask(
-        int eventId, int participantId, ParticipantRole role, DateOnly dueDate, DateTimeOffset now) =>
+        int eventId, int participantId, ParticipantRole role, DateOnly? dueDate, DateTimeOffset now) =>
         new()
         {
             EventId = eventId,
             AssignedParticipantId = participantId,
             Title = "Sign up for the Party",
+            // §669 — the emphasis rule applies to code-seeded bodies too, not only the config
+            // catalogue: bold the TIME (the detail people get wrong) and the count being asked
+            // for. "HOW MANY" was shouting in capitals; the rule replaces that with bold —
+            // capitals read as tone, bold reads as importance.
             Description = role == ParticipantRole.Sponsor
-                ? "RSVP yes/no for the party (16:00–18:30 on the pre-day) and tell us HOW MANY "
-                  + "people will attend from your company. Submitting the Party form marks this done."
-                : "RSVP yes/no for the party (16:00–18:30 on the pre-day). Submitting the Party "
+                ? "RSVP yes/no for the party (**16:00–18:30 on the pre-day**) and tell us **how many "
+                  + "people** will attend from your company. Submitting the Party form marks this done."
+                : "RSVP yes/no for the party (**16:00–18:30 on the pre-day**). Submitting the Party "
                   + "form marks this done.",
             DueDate = dueDate,
             State = TaskState.Open,

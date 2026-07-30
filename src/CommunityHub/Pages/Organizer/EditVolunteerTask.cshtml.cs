@@ -80,8 +80,9 @@ public class EditVolunteerTaskModel : PageModel
         public DateOnly? DueDate { get; set; }
     }
 
+    // §337: carry the acting-as marker into the service (see BucketAllocation).
     private VolunteerStructureService.ActorContext Actor(CurrentParticipant me)
-        => new(me.ParticipantId, me.Email, me.Role, me.EventId);
+        => new(me.ParticipantId, me.Email, me.Role, me.EventId, me.IsActingAs);
 
     public async Task<IActionResult> OnGetAsync(CancellationToken ct)
     {

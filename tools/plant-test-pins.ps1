@@ -31,12 +31,32 @@
 param(
     [string]$OrganizerEmail = 'mok@expertslive.dk',
     [int]$Count = 4,
+    # 2026-07-28 — how far in the FUTURE the planted rows are stamped, and how long they last.
+    #
+    # WHY THIS IS NOW A PARAMETER. PinIdentityProvider picks the newest still-redeemable row
+    # (ORDER BY CreatedAt DESC), and every GUI login begins by pressing "Send my sign-in code",
+    # which inserts a REAL row stamped at the true current time. A planted row only outranks
+    # that while it is still in the future — so with the old hard-coded +5 minutes, any test
+    # running more than five minutes after planting silently lost to its own freshly-requested
+    # PIN and the whole suite failed at login with "Invalid email or code".
+    #
+    # The tell was that the planted rows had FailedAttempts = 0: the app was never comparing
+    # against them at all. Defaults preserve the old behaviour; a long suite passes bigger values.
+    [int]$RankMinutes  = 5,
+    [int]$ValidMinutes = 14,
     # ParticipantRole filter: 0=Organizer (default), 4=Sponsor, 5=Attendee...
-    [int]$Role = 0
+    [int]$Role = 0,
+    # §235 (operator 2026-07-07): GUI validation targets PROD by preference —
+    # prod is Ring-1-gated and Ring 1 = the operator's own accounts, so any
+    # test-triggered mail can only reach him. 'dev' stays available for
+    # pre-merge work.
+    [ValidateSet('dev', 'prod')]
+    [string]$Env = 'dev'
 )
 $ErrorActionPreference = 'Stop'
 
-$server = 'eldk27hub-sql-devz237e.database.windows.net'
+$server = if ($Env -eq 'prod') { 'eldk27hub-sql-prodpdrq.database.windows.net' }
+          else                 { 'eldk27hub-sql-devz237e.database.windows.net' }
 $dbName = 'eldk27hub-db'
 
 # --- Generate the PIN + PBKDF2 hash (mirrors PinService.HashPin) ----------
@@ -78,8 +98,8 @@ WHILE @i < @count
 BEGIN
     INSERT INTO LoginPins (ParticipantId, PinHash, CreatedAt, ExpiresAt, FailedAttempts)
     VALUES (@pid, @hash,
-            DATEADD(MINUTE, 5, SYSDATETIMEOFFSET()),  -- future: outranks form-requested rows
-            DATEADD(MINUTE, 14, SYSDATETIMEOFFSET()),
+            DATEADD(MINUTE, @rank, SYSDATETIMEOFFSET()),  -- future: outranks form-requested rows
+            DATEADD(MINUTE, @valid, SYSDATETIMEOFFSET()),
             0);
     SET @i += 1;
 END
@@ -87,10 +107,12 @@ SELECT @pid;
 "@
     [void]$cmd.Parameters.AddWithValue('@email', $OrganizerEmail)
     [void]$cmd.Parameters.AddWithValue('@hash', $hash)
+    [void]$cmd.Parameters.AddWithValue('@rank', $RankMinutes)
+    [void]$cmd.Parameters.AddWithValue('@valid', $ValidMinutes)
     [void]$cmd.Parameters.AddWithValue('@count', $Count)
     [void]$cmd.Parameters.AddWithValue('@role', $Role)
     $participantId = $cmd.ExecuteScalar()
-    Write-Host "Planted $Count PIN row(s) for participant $participantId ($OrganizerEmail, role $Role) on DEV." -ForegroundColor Green
+    Write-Host "Planted $Count PIN row(s) for participant $participantId ($OrganizerEmail, role $Role) on $($Env.ToUpper())." -ForegroundColor Green
     Write-Host "PIN (valid ~14 min, single-use each):" -ForegroundColor Green
 }
 finally { $conn.Close() }

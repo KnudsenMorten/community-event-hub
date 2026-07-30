@@ -93,18 +93,11 @@ else
                     @if (!flashShown && Model.FlashAtConfirmed) { <div class="@flashClass">@Model.Message</div> flashShown = true; }
                     <p><span class="pill seat">✓ Confirmed seat</span></p>
                     <p><a href="/MasterClassPage/@seat.SessionId?t=@Model.Token">📋 How to prepare &amp; Group Q&amp;A</a></p>
-                    <form method="post" asp-page-handler="ToggleReminder">
-                        <input type="hidden" name="t" value="@Model.Token" />
-                        <input type="hidden" name="wants" value="@((!Model.MonthReminderOptIn).ToString().ToLower())" />
-                        <button type="submit" class="ghost">
-                            @(Model.MonthReminderOptIn ? "✓ Reminder ~1 month before (turn off)" : "Remind me ~1 month before")
-                        </button>
-                    </form>
-                    @if (!flashShown && Model.FlashAtReminder) { <div class="@flashClass">@Model.Message</div> flashShown = true; }
+                    @* §271: the "remind me ~1 month before" opt-in was removed (operator 2026-07-10). *@
                     <form method="post" asp-page-handler="GiveUp" onsubmit="return confirm('Give up your seat in @seat.Title? It goes to the next person on the waitlist and cannot be undone.');">
                         <input type="hidden" name="t" value="@Model.Token" />
                         <input type="hidden" name="sessionId" value="@seat.SessionId" />
-                        <button type="submit" class="give">Give up my seat</button>
+                        <button type="submit" class="give">Give up my seat (cancel)</button>
                     </form>
                 </div>
             }

@@ -61,6 +61,29 @@ public sealed class RingResolverTests
         Assert.Equal(Ring.Broad, RingResolver.EffectiveForContact(Ring.Broad, null));
     }
 
+    [Theory]
+    [InlineData(Ring.Ring0, "0")]
+    [InlineData(Ring.Ring1, "1")]
+    [InlineData(Ring.Ring2, "2")]
+    [InlineData(Ring.Broad, "3")]
+    public void Number_is_the_bare_ring_digit_for_the_people_grid(Ring ring, string expected)
+    {
+        // §185: the People grid shows only the number, not the parenthetical Label().
+        Assert.Equal(expected, Rings.Number(ring));
+    }
+
+    [Theory]
+    [InlineData(Ring.Ring0, null)]
+    [InlineData(Ring.Ring1, "Test")]
+    [InlineData(Ring.Ring2, "Design")]
+    [InlineData(Ring.Broad, null)]
+    public void RingFlagLabel_is_test_for_ring1_design_for_ring2_and_none_otherwise(Ring ring, string? expected)
+    {
+        // §185: ring-derived People-grid chip — Ring1→amber "Test", Ring2→green "Design";
+        // Ring0 (dev) and Ring3 (broad) carry no ring-derived flag.
+        Assert.Equal(expected, Rings.RingFlagLabel(ring));
+    }
+
     [Fact]
     public void IsActiveForRing_is_true_only_when_effective_ring_is_at_or_below_released()
     {
@@ -156,14 +179,17 @@ public sealed class RingResolverTests
         var settings = Settings(db);
         var gate = new FeatureGateService(db);
 
-        // Enable an advanced feature and release it only to ring 1.
-        await settings.SetEnabledAsync(EventId, "surveys", true, null);
-        await settings.SetReleasedRingAsync(EventId, "surveys", Ring.Ring1, null);
+        // Enable a RING-SCOPED feature and release it only to ring 1.
+        // §566 step 3: "surveys" used to be the exemplar here, but it is TILE-ONLY and therefore no
+        // longer ring-scoped — its ring only ever hid an organizer tile. "participant-activation"
+        // is a genuine UserImpact feature whose ring really does decide who can use it.
+        await settings.SetEnabledAsync(EventId, "digest-emails", true, null);
+        await settings.SetReleasedRingAsync(EventId, "digest-emails", Ring.Ring1, null);
 
-        Assert.True(await gate.IsFeatureActiveForRingAsync("surveys", EventId, Ring.Ring0));
-        Assert.True(await gate.IsFeatureActiveForRingAsync("surveys", EventId, Ring.Ring1));
-        Assert.False(await gate.IsFeatureActiveForRingAsync("surveys", EventId, Ring.Ring2));
-        Assert.False(await gate.IsFeatureActiveForRingAsync("surveys", EventId, Ring.Broad));
+        Assert.True(await gate.IsFeatureActiveForRingAsync("digest-emails", EventId, Ring.Ring0));
+        Assert.True(await gate.IsFeatureActiveForRingAsync("digest-emails", EventId, Ring.Ring1));
+        Assert.False(await gate.IsFeatureActiveForRingAsync("digest-emails", EventId, Ring.Ring2));
+        Assert.False(await gate.IsFeatureActiveForRingAsync("digest-emails", EventId, Ring.Broad));
     }
 
     [Fact]
@@ -191,11 +217,12 @@ public sealed class RingResolverTests
         // §23a (operator 2026-06-20): an EXISTING feature now starts at Ring1, so once
         // enabled a ring0/ring1 tester sees it but a Broad resource does NOT (until an
         // organizer promotes it to Broad). Controlled-rollout posture before go-live.
-        await settings.SetEnabledAsync(EventId, "surveys", true, null);
-        Assert.Equal(Ring.Ring1, await gate.GetReleasedRingAsync("surveys", EventId));
-        Assert.True(await gate.IsFeatureActiveForRingAsync("surveys", EventId, Ring.Ring1));
-        Assert.True(await gate.IsFeatureActiveForRingAsync("surveys", EventId, Ring.Ring0));
-        Assert.False(await gate.IsFeatureActiveForRingAsync("surveys", EventId, Ring.Broad));
+        // §566 step 3: exemplar moved off "surveys" (now tile-only ⇒ not ring-scoped).
+        await settings.SetEnabledAsync(EventId, "digest-emails", true, null);
+        Assert.Equal(Ring.Ring1, await gate.GetReleasedRingAsync("digest-emails", EventId));
+        Assert.True(await gate.IsFeatureActiveForRingAsync("digest-emails", EventId, Ring.Ring1));
+        Assert.True(await gate.IsFeatureActiveForRingAsync("digest-emails", EventId, Ring.Ring0));
+        Assert.False(await gate.IsFeatureActiveForRingAsync("digest-emails", EventId, Ring.Broad));
 
         // An advanced feature defaults OFF ⇒ inert for everyone until enabled.
         Assert.False(await gate.IsFeatureActiveForRingAsync("backstage-sync", EventId, Ring.Ring0));

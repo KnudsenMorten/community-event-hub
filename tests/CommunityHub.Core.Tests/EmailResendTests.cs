@@ -56,6 +56,11 @@ public sealed class EmailResendTests
     private static EmailResendService NewService(CommunityHubDbContext db, IEmailSender sender) =>
         new(db, new ParticipantEmailService(db, RealTemplates(), sender, new EmailContextAccessor()));
 
+    /// <summary>§252 F8: a service WITH the feature gate wired (like production DI).</summary>
+    private static EmailResendService NewGatedService(CommunityHubDbContext db, IEmailSender sender) =>
+        new(db, new ParticipantEmailService(db, RealTemplates(), sender, new EmailContextAccessor()),
+            new CommunityHub.Core.Settings.FeatureGateService(db));
+
     private static EmailLog FailedRow(int eventId, int? participantId, string? template) => new()
     {
         EventId = eventId, Category = "welcome", ToEmail = "p@example.test",
@@ -198,6 +203,46 @@ public sealed class EmailResendTests
 
         Assert.Equal(EmailResendOutcome.Failed, result.Outcome);
         Assert.Contains("kaboom", result.Error);
+    }
+
+    // ----- §252 F8: the email-resend feature toggle actually gates the resend --
+
+    [Fact]
+    public async Task Resend_is_refused_when_the_email_resend_feature_is_off()
+    {
+        using var db = NewDb();
+        var (eventId, p) = await SeedAsync(db);
+        var sender = new CapturingEmailSender();
+        var row = FailedRow(eventId, p.Id, "welcome");
+        db.EmailLogs.Add(row);
+        await db.SaveChangesAsync();
+
+        // Gate wired, no persisted setting ⇒ the catalog default (email-resend is
+        // an advanced feature ⇒ OFF) applies: honest refusal, NOTHING sent.
+        var result = await NewGatedService(db, sender).ResendAsync(eventId, row.Id);
+
+        Assert.Equal(EmailResendOutcome.FeatureDisabled, result.Outcome);
+        Assert.Empty(sender.Sent);
+    }
+
+    [Fact]
+    public async Task Resend_proceeds_when_the_email_resend_feature_is_enabled()
+    {
+        using var db = NewDb();
+        var (eventId, p) = await SeedAsync(db);
+        var sender = new CapturingEmailSender();
+        var row = FailedRow(eventId, p.Id, "welcome");
+        db.EmailLogs.Add(row);
+        db.FeatureSettings.Add(new FeatureSetting
+        {
+            EventId = eventId, FeatureKey = EmailResendService.FeatureKey, Enabled = true,
+        });
+        await db.SaveChangesAsync();
+
+        var result = await NewGatedService(db, sender).ResendAsync(eventId, row.Id);
+
+        Assert.Equal(EmailResendOutcome.Sent, result.Outcome);
+        Assert.Single(sender.Sent);
     }
 
     // ----- helpers ------------------------------------------------------------

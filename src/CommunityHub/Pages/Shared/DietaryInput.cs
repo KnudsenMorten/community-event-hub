@@ -17,7 +17,9 @@ namespace CommunityHub.Pages.Shared;
 /// </summary>
 public sealed class DietaryInput
 {
-    public string? DietChoice { get; set; }
+    // Default is "No special diet" ("None"), never blank/"not stated" (operator 2026-07-11):
+    // a fresh form shows it selected, and it's what persists if the person never changes it.
+    public string? DietChoice { get; set; } = "None";
 
     public bool Gluten { get; set; }
     public bool Crustaceans { get; set; }
@@ -59,7 +61,8 @@ public sealed class DietaryInput
     public void LoadFrom(DietaryRequirement? r)
     {
         if (r is null) return;
-        DietChoice = r.DietChoice;
+        // A stored row that never set a diet reads back as "No special diet", not blank.
+        DietChoice = string.IsNullOrWhiteSpace(r.DietChoice) ? "None" : r.DietChoice;
         Gluten = r.Gluten; Crustaceans = r.Crustaceans; Eggs = r.Eggs; Fish = r.Fish;
         Peanuts = r.Peanuts; Soybeans = r.Soybeans; Milk = r.Milk; TreeNuts = r.TreeNuts;
         Celery = r.Celery; Mustard = r.Mustard; Sesame = r.Sesame; Sulphites = r.Sulphites;
@@ -70,8 +73,9 @@ public sealed class DietaryInput
     /// <summary>Write this input onto a (new or existing) entity row before save.</summary>
     public void ApplyTo(DietaryRequirement r)
     {
-        // Only persist a known diet choice; ignore tampered values.
-        r.DietChoice = DietaryRequirement.DietChoices.Contains(DietChoice) ? DietChoice : null;
+        // Persist a known diet choice; anything else (blank / tampered) defaults to "No special
+        // diet" rather than null, so "None" is the concrete default that lands in storage.
+        r.DietChoice = DietaryRequirement.DietChoices.Contains(DietChoice) ? DietChoice : "None";
         r.Gluten = Gluten; r.Crustaceans = Crustaceans; r.Eggs = Eggs; r.Fish = Fish;
         r.Peanuts = Peanuts; r.Soybeans = Soybeans; r.Milk = Milk; r.TreeNuts = TreeNuts;
         r.Celery = Celery; r.Mustard = Mustard; r.Sesame = Sesame; r.Sulphites = Sulphites;

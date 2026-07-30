@@ -16,7 +16,11 @@ public sealed record StoredFile(string Path, string WebUrl, string? ItemId);
 /// <param name="ItemId">The Graph driveItem id.</param>
 /// <param name="Name">The file name including extension (e.g. <c>my-session.png</c>).</param>
 /// <param name="WebUrl">The hub→SharePoint link to download / preview the file.</param>
-public sealed record SharePointFileRef(string ItemId, string Name, string WebUrl);
+/// <param name="SizeBytes">§467 — size in bytes when SharePoint reported it, else null. Lets a
+/// caller refuse an online PREVIEW the Office viewer would reject, rather than offering a "View"
+/// button that is guaranteed to fail. Optional, so existing constructions stay valid.</param>
+public sealed record SharePointFileRef(
+    string ItemId, string Name, string WebUrl, long? SizeBytes = null);
 
 /// <summary>
 /// The SoMe-graphics SharePoint FILE-STORE seam (REQUIREMENTS §18): store bytes
@@ -89,6 +93,29 @@ public interface ISharePointFileStore
     Task<StoredFile> UploadToFolderAsync(
         string relativeFolder, string fileName, byte[] content, string contentType,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// §455 — STREAMING upload: store <paramref name="content"/> without ever holding the whole
+    /// file in memory. For the big-file surfaces (speaker slide decks, sponsor exhibitor-wall
+    /// artwork — both capped at 1 GB) where buffering the request body into a <c>MemoryStream</c>
+    /// and then calling <c>ToArray()</c> held the file in RAM TWICE on a shared App Service
+    /// instance before a byte reached SharePoint.
+    ///
+    /// <para><paramref name="contentLength"/> must be the true length: Graph's chunked upload
+    /// session requires an exact <c>Content-Range</c> per chunk against a declared total.</para>
+    ///
+    /// <para>The DEFAULT implementation falls back to the <c>byte[]</c> overload, so the null
+    /// store and every test fake keep working untouched — only the Graph store overrides it with
+    /// a genuine streamed upload.</para>
+    /// </summary>
+    async Task<StoredFile> UploadStreamToFolderAsync(
+        string relativeFolder, string fileName, System.IO.Stream content, long contentLength,
+        string contentType, CancellationToken ct = default)
+    {
+        using var ms = new System.IO.MemoryStream();
+        await content.CopyToAsync(ms, ct);
+        return await UploadToFolderAsync(relativeFolder, fileName, ms.ToArray(), contentType, ct);
+    }
 
     /// <summary>
     /// Delete <paramref name="fileName"/> from a DRIVE-RELATIVE

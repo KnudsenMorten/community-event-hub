@@ -54,13 +54,24 @@ public class CommsModel : PageModel
     [BindProperty(SupportsGet = true)] public string? Msg { get; set; }
     public bool MsgIsError { get; private set; }
 
+    /// <summary>
+    /// §650 — include RING-DROPPED mail in the resend list. OFF by default.
+    /// </summary>
+    /// <remarks>
+    /// Operator 2026-07-29: *"it is not relevant when you troubleshoot to see dropped mails due to
+    /// ring-gates. i should be able to enable it but by default it should not be shown in this
+    /// view"*. A ring drop is the system obeying him, not a fault — and 1,242 of them buried the 2
+    /// real failures completely.
+    /// </remarks>
+    [BindProperty(SupportsGet = true)] public bool ShowDropped { get; set; }
+
     public async Task<IActionResult> OnGetAsync(CancellationToken ct)
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
         if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
 
-        Snapshot = await _cockpit.BuildAsync(me.EventId, ct);
+        Snapshot = await _cockpit.BuildAsync(me.EventId, ct, includeDropped: ShowDropped);
         return Page();
     }
 

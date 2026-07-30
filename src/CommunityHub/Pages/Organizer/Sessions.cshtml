@@ -41,7 +41,9 @@
 
         <p style="font-size:13px;color:#6b7280;margin:0 0 10px;" role="status">
             <strong>@Model.TotalCount</strong> session(s) &middot;
-            <strong>@Model.HubAddedCount</strong> added in the hub.
+            <strong>@Model.HubAddedCount</strong> added in the hub &middot;
+            @* §322h: the edition-wide slides "motion number" (views + downloads combined). *@
+            <strong>@Model.SlideStatsTotal</strong> slide opens on the public Session slides page.
         </p>
 
         <!-- ---- Filters (Search + Type + Length) --------------------------- -->
@@ -60,9 +62,13 @@
             </div>
             <div style="flex:1 1 160px;min-width:140px;">
                 <label for="FilterLength">Length</label>
-                <select asp-for="FilterLength" id="FilterLength"
-                        asp-items="Model.LengthOptions">
+                @* §299.8/b7: the length filter is MINUTES (per-edition config quick-picks). *@
+                <select asp-for="FilterLength" id="FilterLength">
                     <option value="">All lengths</option>
+                    @foreach (var qp in Model.LengthQuickPicks)
+                    {
+                        <option value="@qp.Minutes">@qp.Label</option>
+                    }
                 </select>
             </div>
             <!-- Reset to page 1 + keep current sort whenever the filter changes. -->
@@ -80,6 +86,22 @@
             Add a session that is <strong>not</strong> from Sessionize (e.g. a sponsor
             session), alongside the imported ones. A re-import never touches or deletes it.
         </p>
+        @* §299.8/b7: shared datalists — the config length quick-picks (any positive
+           integer up to the max still validates) and the §299.6/b5 registry room
+           names (free text stays allowed; the registry is warn-only). *@
+        <datalist id="lengthQuickPicks">
+            @foreach (var qp in Model.LengthQuickPicks)
+            {
+                <option value="@qp.Minutes" label="@qp.Label"></option>
+            }
+        </datalist>
+        <datalist id="registryRoomNames">
+            @foreach (var name in Model.RegistryRoomNames)
+            {
+                <option value="@name"></option>
+            }
+        </datalist>
+
         <form method="post" asp-page-handler="Add" style="display:flex;flex-direction:column;gap:10px;margin-bottom:22px;">
             @* keep the grid's search/sort/page position after the post returns Page() *@
             @{ GridStateFields(); }
@@ -94,12 +116,26 @@
                     <select asp-for="NewType" id="NewType" asp-items="Model.TypeOptions"></select>
                 </div>
                 <div style="flex:1 1 160px;min-width:140px;">
-                    <label for="NewLength">Length</label>
-                    <select asp-for="NewLength" id="NewLength" asp-items="Model.LengthOptions"></select>
+                    <label for="NewLengthMinutes">Length</label>
+                    @* §326bk: a plain dropdown. Was a number input + datalist, which renders
+                       as a caret AND a spinner and reads as neither. *@
+                    <select asp-for="NewLengthMinutes" id="NewLengthMinutes" required
+                            asp-items="Model.LengthOptions()"></select>
+                </div>
+                <div style="flex:1 1 160px;min-width:140px;">
+                    <label for="NewDay">Day</label>
+                    @* §299.8/b7: REQUIRED day choice on the manual add path only —
+                       imported sessions never prompt (their day comes from the source). *@
+                    <select asp-for="NewDay" id="NewDay" required>
+                        <option value="">Pick a day…</option>
+                        <option value="@CommunityHub.Core.Reminders.HubSessionDay.PreDay">Pre-day (master classes)</option>
+                        <option value="@CommunityHub.Core.Reminders.HubSessionDay.MainDay">Main day</option>
+                    </select>
                 </div>
                 <div style="flex:1 1 160px;min-width:140px;">
                     <label for="NewRoom">Room</label>
-                    <input asp-for="NewRoom" id="NewRoom" maxlength="200" placeholder="e.g. Room A" />
+                    <input asp-for="NewRoom" id="NewRoom" maxlength="200" placeholder="e.g. Room A"
+                           list="registryRoomNames" />
                 </div>
             </div>
             <div>
@@ -152,6 +188,8 @@
             <form method="post" id="sessionBulkForm" asp-page-handler="BulkDelete" hidden>
                 @{ GridStateFields(); }
                 <div id="sessionBulkIds"></div>
+                @* §334: the typed phrase travels with the bulk POST and is verified SERVER-side. *@
+                <input type="hidden" name="confirmPhrase" id="sessionBulkPhrase" value="" />
             </form>
             <!-- Bulk action bar (stacks on a phone, inline on wider screens). The
                  button is type=button: it opens the confirm modal with the live
@@ -165,6 +203,13 @@
                         aria-haspopup="dialog">@Localizer["Sessions.BulkDelete"]</button>
                 <span style="font-size:12.5px;color:#6b7280;">@Localizer["Sessions.BulkDeleteHint"]</span>
             </div>
+            <details style="margin-bottom:12px;">
+                <summary style="cursor:pointer;font-size:13px;color:#7f1d1d;">Arm bulk delete (required)</summary>
+                <partial name="_TypedConfirm" model="@(new CommunityHub.Pages.Shared.TypedConfirmField(
+                    CommunityHub.Core.Organizer.TypedConfirmation.ConfirmPhrase,
+                    "Deletes every ticked session that has no attendee engagement. Sessions with questions, evaluations or bookings are refused and reported.",
+                    FieldName: "sessionBulkPhraseInput", InputId: "sessionBulkPhraseInput"))" />
+            </details>
             <div style="overflow-x:auto;">
             <table>
                 <caption style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);">Sessions for this edition</caption>
@@ -176,23 +221,25 @@
                         </th>
                         <th scope="col" aria-sort="@Model.AriaSort("title")">
                             <a asp-page="Sessions" asp-route-FilterType="@Model.FilterType" asp-route-FilterLength="@Model.FilterLength"
-                               asp-route-Search="@Model.Search" asp-route-Sort="title" asp-route-Desc="@Model.NextDescFor("title")" asp-route-PageNo="1">Title@Model.SortIndicator("title")</a>
+                               asp-route-Search="@Model.Search" asp-route-Sort="title" asp-route-Desc="@Model.NextDescFor("title")" asp-route-PageNo="1">Title@(Model.SortIndicator("title"))</a>
                         </th>
                         <th scope="col" aria-sort="@Model.AriaSort("type")">
                             <a asp-page="Sessions" asp-route-FilterType="@Model.FilterType" asp-route-FilterLength="@Model.FilterLength"
-                               asp-route-Search="@Model.Search" asp-route-Sort="type" asp-route-Desc="@Model.NextDescFor("type")" asp-route-PageNo="1">Type@Model.SortIndicator("type")</a>
+                               asp-route-Search="@Model.Search" asp-route-Sort="type" asp-route-Desc="@Model.NextDescFor("type")" asp-route-PageNo="1">Type@(Model.SortIndicator("type"))</a>
                         </th>
                         <th scope="col" aria-sort="@Model.AriaSort("length")">
                             <a asp-page="Sessions" asp-route-FilterType="@Model.FilterType" asp-route-FilterLength="@Model.FilterLength"
-                               asp-route-Search="@Model.Search" asp-route-Sort="length" asp-route-Desc="@Model.NextDescFor("length")" asp-route-PageNo="1">Length@Model.SortIndicator("length")</a>
+                               asp-route-Search="@Model.Search" asp-route-Sort="length" asp-route-Desc="@Model.NextDescFor("length")" asp-route-PageNo="1">Length@(Model.SortIndicator("length"))</a>
                         </th>
                         <th scope="col" aria-sort="@Model.AriaSort("room")">
                             <a asp-page="Sessions" asp-route-FilterType="@Model.FilterType" asp-route-FilterLength="@Model.FilterLength"
-                               asp-route-Search="@Model.Search" asp-route-Sort="room" asp-route-Desc="@Model.NextDescFor("room")" asp-route-PageNo="1">Room@Model.SortIndicator("room")</a>
+                               asp-route-Search="@Model.Search" asp-route-Sort="room" asp-route-Desc="@Model.NextDescFor("room")" asp-route-PageNo="1">Room@(Model.SortIndicator("room"))</a>
                         </th>
                         <th scope="col">Speakers</th>
                         <th scope="col">QR</th>
                         <th scope="col">Evaluation</th>
+                        @* §322h: public /Sessions/Slides views+downloads (one number). *@
+                        <th scope="col" title="Slides opened on the public Session slides page (views + downloads)">Slides</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -216,10 +263,25 @@
                                 <span title="Added in the hub"
                                       style="font-size:11px;background:#eef6ff;color:#1d4ed8;border-radius:4px;padding:1px 5px;margin-left:4px;">hub</span>
                             }
+                            @if (r.UsedForTesting)
+                            {
+                                <span title="Test session — hidden from public pages and never synced to the public agenda; hub-visible to ring 0/1 only"
+                                      style="font-size:11px;background:#fef3c7;color:#92400e;border-radius:4px;padding:1px 5px;margin-left:4px;">TEST</span>
+                            }
                         </td>
                         <td>@CommunityHub.Pages.Organizer.SessionsModel.Display(r.Type)</td>
-                        <td>@CommunityHub.Pages.Organizer.SessionsModel.Display(r.Length)</td>
-                        <td>@(r.Room ?? "—")</td>
+                        <td>@CommunityHub.Pages.Organizer.SessionsModel.DisplayLength(r.LengthMinutes, r.Length)</td>
+                        <td>
+                            @(r.Room ?? "—")
+                            @if (r.UnknownRoom)
+                            {
+                                @* §299.6/b5: warn-only — the room is not in the config
+                                   registry (sessionRooms); names must be byte-identical
+                                   across systems. Nothing is blocked. *@
+                                <span title="This room name is not in the configured room registry (sessionRooms). Room names must be byte-identical across systems — check for a typo/rename."
+                                      style="font-size:11px;background:#fef3c7;color:#92400e;border-radius:4px;padding:1px 5px;margin-left:4px;">unknown room</span>
+                            }
+                        </td>
                         <td>@(r.Speakers.Count == 0 ? "—" : string.Join(", ", r.Speakers))</td>
                         <td>
                             @if (!string.IsNullOrWhiteSpace(r.RoomQrUrl))
@@ -241,12 +303,23 @@
                                 <span style="color:#9ca3af;">—</span>
                             }
                         </td>
+                        <td>@(Model.SlideStats.TryGetValue(r.Id, out var slHits) ? slHits : 0)</td>
                     </tr>
                     <!-- Edit row (Type/Length/Room/eval form) -->
                     <tr>
-                        <td colspan="8" style="background:#fafafa;">
+                        <td colspan="9" style="background:#fafafa;">
                             <details>
                                 <summary style="cursor:pointer;font-size:13px;">Edit &amp; evaluation</summary>
+                                <div style="padding:8px 0 0;">
+                                    <form method="post" asp-page-handler="ToggleTest" style="display:inline;">
+                                        <input type="hidden" name="SessionId" value="@r.Id" />
+                                        @{ GridStateFields(); }
+                                        <button type="submit" class="btn-secondary" style="font-size:12px;"
+                                                title="A test session never reaches the public pages or the public agenda; inside the hub it is visible to ring 0/1 only.">
+                                            @(r.UsedForTesting ? "Remove TEST flag" : "Mark as TEST session")
+                                        </button>
+                                    </form>
+                                </div>
                                 <div style="display:flex;flex-wrap:wrap;gap:18px;padding:10px 0;">
                                     <form method="post" asp-page-handler="Edit"
                                           style="flex:1 1 280px;min-width:240px;display:flex;flex-direction:column;gap:8px;">
@@ -259,11 +332,42 @@
                                             </div>
                                             <div style="flex:1 1 120px;">
                                                 <label for="EditLength_@r.Id">Length</label>
-                                                <select id="EditLength_@r.Id" name="EditLength" asp-items="Model.LengthOptions"></select>
+                                                @* §326bk: same plain dropdown as the add form. The row's CURRENT
+                                                   length is always offered even when config does not list it, so
+                                                   re-saving an imported session never rounds its length. *@
+                                                @{
+                                                    var curLen = r.LengthMinutes
+                                                        ?? (r.Length == CommunityHub.Core.Domain.SessionLength.FullDay
+                                                            ? 420 : (int)r.Length);
+                                                }
+                                                <select id="EditLength_@r.Id" name="EditLengthMinutes" required
+                                                        asp-items="Model.LengthOptions(curLen)"></select>
                                             </div>
                                         </div>
+                                        <div style="display:flex;flex-wrap:wrap;gap:8px;">
+                                            <div style="flex:1 1 150px;">
+                                                <label for="EditStartsAt_@r.Id">Starts (UTC)</label>
+                                                @* ❓OPEN-20: a CHANGED value marks the schedule as manually owned
+                                                   (IsDateOverridden) so a re-import keeps the manual date. *@
+                                                <input id="EditStartsAt_@r.Id" name="EditStartsAt" type="datetime-local"
+                                                       value="@CommunityHub.Pages.Organizer.SessionsModel.FormatLocalUtc(r.StartsAt)" />
+                                            </div>
+                                            <div style="flex:1 1 150px;">
+                                                <label for="EditEndsAt_@r.Id">Ends (UTC)</label>
+                                                <input id="EditEndsAt_@r.Id" name="EditEndsAt" type="datetime-local"
+                                                       value="@CommunityHub.Pages.Organizer.SessionsModel.FormatLocalUtc(r.EndsAt)" />
+                                            </div>
+                                        </div>
+                                        @if (r.IsDateOverridden)
+                                        {
+                                            <span style="font-size:11.5px;color:#92400e;background:#fef3c7;border-radius:4px;padding:2px 6px;align-self:flex-start;"
+                                                  title="An organizer set this schedule manually; the Sessionize re-import keeps it (skips the StartsAt/EndsAt refresh).">
+                                                manual date — import won't overwrite
+                                            </span>
+                                        }
                                         <label for="EditRoom_@r.Id">Room</label>
-                                        <input id="EditRoom_@r.Id" name="EditRoom" maxlength="200" value="@r.Room" />
+                                        <input id="EditRoom_@r.Id" name="EditRoom" maxlength="200" value="@r.Room"
+                                               list="registryRoomNames" />
                                         <label for="EditEval_@r.Id">QR-code evaluation form URL</label>
                                         <input id="EditEval_@r.Id" name="EditEvaluationFormUrl" type="url"
                                                maxlength="2000" value="@r.EvaluationFormUrl" placeholder="https://…" />
@@ -469,6 +573,10 @@
                             h.type = 'hidden'; h.name = 'SelectedIds'; h.value = c.value;
                             idsHost.appendChild(h);
                         });
+                        // §334: carry the typed phrase into the hidden bulk form. The SERVER
+                        // refuses if it is blank or wrong — this copy is convenience only.
+                        var typed = document.getElementById('sessionBulkPhraseInput');
+                        document.getElementById('sessionBulkPhrase').value = typed ? typed.value : '';
                         form.submit();
                     });
                     cancelBtn.addEventListener('click', close);

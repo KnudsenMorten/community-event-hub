@@ -153,14 +153,17 @@ public sealed class PublicSessionsServiceTests
         Assert.Equal("Sponsor Showcase", view.Sessions[0].Title);
     }
 
+    // §299.8/b7: the public length filter takes MINUTES (the config quick-pick
+    // values) now — the enum-bucket filter is retired. A legacy full-day row
+    // without a numeric LengthMinutes still answers the 420 full-day pick.
     [Fact]
-    public async Task Filter_by_length_narrows_the_list()
+    public async Task Filter_by_length_minutes_narrows_the_list()
     {
         using var db = TestDb.New();
         await SeedAsync(db);
         var svc = new PublicSessionsService(db);
 
-        var view = await svc.BuildAsync(length: SessionLength.FullDay);
+        var view = await svc.BuildAsync(lengthMinutes: 420);
 
         Assert.NotNull(view);
         Assert.Single(view!.Sessions);
@@ -168,24 +171,46 @@ public sealed class PublicSessionsServiceTests
     }
 
     [Fact]
-    public async Task Filter_by_type_and_length_combine()
+    public async Task Filter_by_type_and_length_minutes_combine()
     {
         using var db = TestDb.New();
         await SeedAsync(db);
         var svc = new PublicSessionsService(db);
 
-        // Tech AND 50-min → exactly the Bicep session.
+        // Tech AND 50 min → exactly the Bicep session.
         var hit = await svc.BuildAsync(
-            type: SessionType.TechnicalSession, length: SessionLength.FiftyMin);
+            type: SessionType.TechnicalSession, lengthMinutes: 50);
         Assert.Single(hit!.Sessions);
         Assert.Equal("Intro to Bicep", hit.Sessions[0].Title);
 
-        // Tech AND full-day → none (the full-day one is a master class).
+        // Tech AND full-day (420) → none (the full-day one is a master class).
         var miss = await svc.BuildAsync(
-            type: SessionType.TechnicalSession, length: SessionLength.FullDay);
+            type: SessionType.TechnicalSession, lengthMinutes: 420);
         Assert.Empty(miss!.Sessions);
         Assert.Equal(0, miss.MatchCount);
         Assert.Equal(3, miss.TotalCount);   // total still reflects the edition
+    }
+
+    // §299.8/b7: a CUSTOM (non-quick-pick) minutes value filters exactly — the
+    // config list drives the UI options, never the validation of what can match.
+    [Fact]
+    public async Task Filter_by_custom_length_minutes_matches_exact_rows()
+    {
+        using var db = TestDb.New();
+        var eventId = await SeedAsync(db);
+        db.Sessions.Add(new Session
+        {
+            EventId = eventId, SessionizeId = "sess-37", Title = "Lightning 37",
+            Type = SessionType.TechnicalSession, Length = SessionLength.TwentyMin,
+            LengthMinutes = 37,
+        });
+        await db.SaveChangesAsync();
+
+        var svc = new PublicSessionsService(db);
+        var view = await svc.BuildAsync(lengthMinutes: 37);
+
+        Assert.Single(view!.Sessions);
+        Assert.Equal("Lightning 37", view.Sessions[0].Title);
     }
 
     [Fact]
@@ -339,62 +364,9 @@ public sealed class PublicSessionsServiceTests
         Assert.Null(await svc.GetByIdAsync(999999));
     }
 
-    [Fact]
-    public async Task BuildIcs_returns_valid_single_event_calendar_for_scheduled_session()
-    {
-        using var db = TestDb.New();
-        await SeedAsync(db);
-        var svc = new PublicSessionsService(db);
-
-        var tech = (await svc.BuildAsync())!.Sessions.Single(s => s.Title == "Intro to Bicep");
-        var ics = await svc.BuildIcsAsync(tech.Id, "ceh.example.test");
-
-        Assert.NotNull(ics);
-        // Valid RFC 5545 shell, exactly one VEVENT (a single talk), PUBLISH method.
-        Assert.StartsWith("BEGIN:VCALENDAR", ics);
-        Assert.Contains("METHOD:PUBLISH", ics);
-        Assert.Contains("VERSION:2.0", ics);
-        Assert.Single(System.Text.RegularExpressions.Regex.Matches(ics!, "BEGIN:VEVENT"));
-        Assert.EndsWith("END:VCALENDAR\r\n", ics);
-        Assert.Contains("\r\n", ics);                       // CRLF line endings
-        // The talk's public facts land in the event.
-        Assert.Contains("SUMMARY:Intro to Bicep", ics);
-        Assert.Contains("DTSTART:", ics);
-        Assert.Contains("DTEND:", ics);
-        Assert.Contains("LOCATION:Room B", ics);            // room (no venue seeded)
-        Assert.Contains("Alice Adams", ics);                // speaker(s) in the description
-        // Stable UID so a re-download UPDATES the entry, never duplicates it.
-        Assert.Contains($"UID:session:{tech.Id}@ceh.example.test", ics);
-        // Public talk → no personal ORGANIZER/ATTENDEE address leaks.
-        Assert.DoesNotContain("ATTENDEE", ics);
-        Assert.DoesNotContain("mailto:", ics);
-    }
-
-    [Fact]
-    public async Task BuildIcs_returns_null_for_unscheduled_service_or_unknown_session()
-    {
-        using var db = TestDb.New();
-        var eventId = await SeedAsync(db);
-        var svc = new PublicSessionsService(db);
-
-        // An UNSCHEDULED talk (no StartsAt) has nothing to put on a calendar → null.
-        var unscheduled = new Session
-        {
-            EventId = eventId, SessionizeId = "sess-tba", Title = "To Be Announced",
-            Type = SessionType.TechnicalSession, Length = SessionLength.FiftyMin,
-            StartsAt = null, EndsAt = null,
-        };
-        db.Sessions.Add(unscheduled);
-        await db.SaveChangesAsync();
-        Assert.Null(await svc.BuildIcsAsync(unscheduled.Id, "host"));
-
-        // A service session is never publicly addressable.
-        var breakId = (await db.Sessions.FirstAsync(s => s.Title == "Coffee Break")).Id;
-        Assert.Null(await svc.BuildIcsAsync(breakId, "host"));
-
-        // Unknown id.
-        Assert.Null(await svc.BuildIcsAsync(999999, "host"));
-    }
+    // §193: the public per-session ".ics" download (BuildIcsAsync) was removed — a
+    // public talk is no longer offered as a downloadable calendar file, so its tests
+    // are gone. Signed-in participants e-mail themselves a calendar invitation instead.
 
     [Fact]
     public async Task Empty_edition_returns_view_with_zero_sessions()
@@ -460,7 +432,44 @@ public sealed class PublicSessionsServiceTests
 
         Assert.NotNull(view);
         Assert.Equal(new[] { "Azure", "Security" }, view!.Tracks);
-        Assert.Equal(new[] { "Expert (400)", "Intermediate (200)" }, view.Levels);
+        // §299.8/b7: levels sort by NUMERIC code (200 before 400), never
+        // alphabetically (which would wrongly put "Expert (400)" first here —
+        // and Black Belt before Expert in the real level list).
+        Assert.Equal(new[] { "Intermediate (200)", "Expert (400)" }, view.Levels);
+    }
+
+    // §299.8/b7: the numeric-code sort proves the operator's example — Black Belt
+    // (500) must come AFTER Expert (400) even though it alphabetizes before it.
+    [Fact]
+    public async Task Level_facet_sorts_black_belt_after_expert_by_code()
+    {
+        using var db = TestDb.New();
+        var evt = new Event
+        {
+            Code = "LV27", CommunityName = "LV", DisplayName = "LV 2027",
+            StartDate = new DateOnly(2027, 2, 9), EndDate = new DateOnly(2027, 2, 10),
+            IsActive = true,
+        };
+        db.Events.Add(evt);
+        await db.SaveChangesAsync();
+
+        void Sess(string id, string level, int? code) => db.Sessions.Add(new Session
+        {
+            EventId = evt.Id, SessionizeId = id, Title = id,
+            Type = SessionType.TechnicalSession, Level = level, LevelCode = code,
+        });
+
+        // Stored codes (as the import derives them from the config level list).
+        Sess("s-bb", "Black Belt (500)", 500);
+        Sess("s-ex", "Expert (400)", 400);
+        Sess("s-ad", "Advanced (300)", 300);
+        await db.SaveChangesAsync();
+
+        var view = await new PublicSessionsService(db).BuildAsync();
+
+        Assert.Equal(
+            new[] { "Advanced (300)", "Expert (400)", "Black Belt (500)" },
+            view!.Levels);
     }
 
     [Fact]

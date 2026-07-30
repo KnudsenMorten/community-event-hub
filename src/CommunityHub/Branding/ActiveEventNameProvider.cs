@@ -10,6 +10,7 @@ public sealed class ActiveEventNameProvider
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly object _gate = new();
     private string? _communityName;
+    private string? _eventCode;
     private DateTimeOffset _expires = DateTimeOffset.MinValue;
 
     public ActiveEventNameProvider(IServiceScopeFactory scopeFactory)
@@ -19,32 +20,55 @@ public sealed class ActiveEventNameProvider
 
     public string GetCommunityName()
     {
+        Refresh();
+        return _communityName ?? "Community Hub";
+    }
+
+    /// <summary>
+    /// The active edition's short CODE (e.g. "ELDK27"), cached like the community name.
+    /// Used for the browser tab / bookmark title (REQUIREMENTS §263) so a favourite reads
+    /// short + identifiable instead of the long community name. Falls back to the community
+    /// name, then "Event Hub", if no code is set.
+    /// </summary>
+    public string GetEventCode()
+    {
+        Refresh();
+        return !string.IsNullOrWhiteSpace(_eventCode) ? _eventCode!
+             : (!string.IsNullOrWhiteSpace(_communityName) ? _communityName! : "Event Hub");
+    }
+
+    private void Refresh()
+    {
         lock (_gate)
         {
             if (_communityName is not null && DateTimeOffset.UtcNow < _expires)
-                return _communityName;
+                return;
         }
 
-        string resolved;
+        string communityName;
+        string? code;
         try
         {
             using var scope = _scopeFactory.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<CommunityHubDbContext>();
-            resolved = db.Events
+            var ev = db.Events
                 .Where(e => e.IsActive)
-                .Select(e => e.CommunityName)
-                .FirstOrDefault() ?? "Community Hub";
+                .Select(e => new { e.CommunityName, e.Code })
+                .FirstOrDefault();
+            communityName = ev?.CommunityName ?? "Community Hub";
+            code = ev?.Code;
         }
         catch
         {
-            resolved = "Community Hub";
+            communityName = "Community Hub";
+            code = null;
         }
 
         lock (_gate)
         {
-            _communityName = resolved;
+            _communityName = communityName;
+            _eventCode = code;
             _expires = DateTimeOffset.UtcNow.Add(CacheTtl);
         }
-        return resolved;
     }
 }

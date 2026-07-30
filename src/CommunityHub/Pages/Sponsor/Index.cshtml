@@ -50,7 +50,7 @@ else
                         <tr>
                             <td style="padding:6px 14px 6px 0;vertical-align:top;white-space:nowrap;">#@o.OrderId</td>
                             <td style="padding:6px 14px 6px 0;vertical-align:top;white-space:nowrap;">
-                                @(o.CreatedAt?.ToString("dd/MM/yyyy") ?? "—")
+                                @(o.CreatedAt?.ToString("d MMM yyyy") ?? "—")
                             </td>
                             <td style="padding:6px 0;vertical-align:top;">
                                 @if (o.LineItems.Count == 0)
@@ -76,10 +76,16 @@ else
         @* Company profile + facts now live on Company Details (no longer duplicated here).
            Booth info moved to the Event logistics nav section. Linked contacts removed
            (the contacts list lives on Company Details). (§35) *@
+        @* §485 — the three cross-links (Company details / Your deliverables / Sponsor Tasks) are
+           REMOVED at the operator's request. They duplicated the main menu, and "Your deliverables"
+           pointed at a page whose nav entry was already retired in §135 (the rollup now lives on
+           Sponsor Tasks), so this footer was quietly the last route to a superseded page.
+           "Back to hub" stays — it is the only one that is not reachable from the menu. *@
         <p style="margin-top:18px;">
-            <a asp-page="/Sponsor/CompanyDetails">Company details &rarr;</a> &middot;
-            <a asp-page="/Sponsor/Tasks">Sponsor Tasks &rarr;</a> &middot;
             <a asp-page="/Index">Back to hub</a>
         </p>
     </div>
+
+    @* §297 (operator 2026-07-11): the "Event activities" card (app-game + group-photo status) was
+       removed from the sponsor landing — it's organizer-arranged and was cluttering the hub. *@
 }

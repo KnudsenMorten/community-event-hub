@@ -25,7 +25,12 @@
         new("/Organizer/CommandCenter", Localizer["Nav.OrgCommandCenter"].Value, Localizer["OrgArea.CommandCenter"].Value),
         new("/Organizer/Dashboard", Localizer["Nav.OrgDashboard"].Value, Localizer["OrgArea.Dashboard"].Value),
         new("/Organizer/Overview", "Event overview", "A single at-a-glance read on the event — key counts and progress bars across people, sessions, sponsors and logistics."),
-        new("/Organizer/FindPerson", Localizer["Nav.OrgFindPerson"].Value, Localizer["OrgPeople.FindPerson"].Value),
+        @* §326bn (operator 2026-07-25: "this page is useless and you can delete") —
+           /Organizer/FindPerson removed. The Participants grid searches the same
+           ParticipantSearchService by name/email and adds filters, sorting and row
+           actions the standalone page never had. §167 had already dropped it from the
+           nav; this card was the last way in. ParticipantSearchService itself STAYS —
+           the Participants grid is its real caller. *@
         new("/Organizer/People", Localizer["Nav.OrgPeople"].Value, Localizer["OrgPeople.Intro"].Value),
         new("/Organizer/Content", Localizer["Nav.OrgSessionsHub"].Value, Localizer["OrgContent.Intro"].Value),
         new("/Organizer/Comms", Localizer["Nav.OrgComms"].Value, Localizer["OrgComms.Intro"].Value),

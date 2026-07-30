@@ -22,7 +22,11 @@
 {
     var tiles = new List<CommunityHub.Pages.Shared.HubTile>
     {
-        new("/Organizer/Graphics", Localizer["Nav.OrgGraphics"].Value, Localizer["OrgSoMe.Graphics"].Value, "graphics-release"),
+        @* §705.14a — the "graphics-release" gate key is GONE with the feature: it sent no mail and only
+           hid this tile, while its name implied it governed the speaker mail (that is
+           "speaker-graphics-promote", which keeps its own ring). Organizer tooling is gated by ROLE,
+           so no key here — same as its neighbours. *@
+        new("/Organizer/Graphics", Localizer["Nav.OrgGraphics"].Value, Localizer["OrgSoMe.Graphics"].Value),
         new("/Organizer/DesignerGraphics", "Designer graphics pipeline", "Pull speaker photos named by name (speaker upload wins), build per-session / master-class / track folders, and download an Excel brief for an external designer."),
         new("/Organizer/ContentStudio", Localizer["Nav.OrgContentStudio"].Value, Localizer["OrgSoMe.ContentStudio"].Value, "content-studio"),
         new("/Organizer/SoMeQueue", Localizer["Nav.OrgSoMeQueue"].Value, Localizer["OrgSoMe.Queue"].Value),

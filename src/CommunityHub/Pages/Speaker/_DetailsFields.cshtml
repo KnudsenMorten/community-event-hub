@@ -14,39 +14,45 @@
 <input type="text" value="@Model.Email" readonly />
 <p style="color:#6b7280;font-size:12px;margin:-8px 0 14px;">This is your identity + Sessionize match key — it can't be changed here.</p>
 
+@* §309 (operator 2026-07-24): stacked, not a flex row — on wide screens the flex
+   pushed Last name to the far right edge, miles from First name. *@
 <h3 style="color:var(--el-darkblue);margin-top:20px;">Name</h3>
-<div style="display:flex;gap:12px;flex-wrap:wrap;">
-    <div style="flex:1 1 200px;">
-        <label asp-for="FirstName">First name</label>
-        <input type="text" asp-for="FirstName" />
-        <span asp-validation-for="FirstName" class="error"></span>
-    </div>
-    <div style="flex:1 1 200px;">
-        <label asp-for="LastName">Last name</label>
-        <input type="text" asp-for="LastName" />
-        <span asp-validation-for="LastName" class="error"></span>
-    </div>
-</div>
+<label asp-for="FirstName">First name</label>
+<input type="text" asp-for="FirstName" style="max-width:420px;" />
+<span asp-validation-for="FirstName" class="error"></span>
+
+<label asp-for="LastName">Last name</label>
+<input type="text" asp-for="LastName" style="max-width:420px;" />
+<span asp-validation-for="LastName" class="error"></span>
+
+@* §302b (operator 2026-07-24): company is optional in Zoho and absent from Sessionize —
+   the hub collects it here; when filled it is pushed to the speaker's "Company Name". *@
+<label asp-for="CompanyName">Company (optional)</label>
+<input type="text" asp-for="CompanyName" placeholder="Your company / employer" />
+<span asp-validation-for="CompanyName" class="error"></span>
 
 <h3 style="color:var(--el-darkblue);margin-top:20px;">Bio &amp; links</h3>
+@* §309c: taglines are long one-liners — full bio width so they don't clip. *@
 <label asp-for="Tagline">Tagline</label>
-<input type="text" asp-for="Tagline" placeholder="One line that sums you up" />
+<input type="text" asp-for="Tagline" placeholder="One line that sums you up" style="max-width:960px;" />
 <span asp-validation-for="Tagline" class="error"></span>
 
+@* §309: the bio deserves ROOM — full card width (up to 960px) and 14 rows,
+   overriding the global mobile-first textarea cap. *@
 <label asp-for="Biography">Biography</label>
-<textarea asp-for="Biography" rows="7" maxlength="4000"></textarea>
+<textarea asp-for="Biography" rows="14" maxlength="4000" style="max-width:960px;"></textarea>
 <span asp-validation-for="Biography" class="error"></span>
 
 <label asp-for="LinkedIn">LinkedIn</label>
-<input type="url" inputmode="url" asp-for="LinkedIn" placeholder="https://www.linkedin.com/in/you" />
+<input type="url" inputmode="url" asp-for="LinkedIn" placeholder="https://www.linkedin.com/in/you" style="max-width:640px;" />
 <span asp-validation-for="LinkedIn" class="error"></span>
 
 <label asp-for="Twitter">X / Twitter</label>
-<input type="url" inputmode="url" asp-for="Twitter" placeholder="https://x.com/you" />
+<input type="url" inputmode="url" asp-for="Twitter" placeholder="https://x.com/you" style="max-width:640px;" />
 <span asp-validation-for="Twitter" class="error"></span>
 
 <label asp-for="Blog">Blog / website</label>
-<input type="url" inputmode="url" asp-for="Blog" placeholder="https://yourblog.example" />
+<input type="url" inputmode="url" asp-for="Blog" placeholder="https://yourblog.example" style="max-width:640px;" />
 <span asp-validation-for="Blog" class="error"></span>
 
 <h3 style="color:var(--el-darkblue);margin-top:20px;">Photo</h3>
@@ -62,8 +68,9 @@
     <p style="color:#6b7280;font-size:12px;margin-top:6px;">A copy of your photo has been saved for the event programme.</p>
 }
 
-<h3 style="color:var(--el-darkblue);margin-top:20px;">Microsoft accreditation</h3>
-<p style="color:#6b7280;font-size:12px;margin-top:0;">Tick all that apply.</p>
+<h3 style="color:var(--el-darkblue);margin-top:20px;">Microsoft accreditation <span style="color:#c0392b;">*</span></h3>
+<p style="color:#6b7280;font-size:12px;margin-top:0;">Tick all that apply (at least one is required).</p>
+<span asp-validation-for="SelectedAccreditations" class="error"></span>
 <div style="display:flex;flex-direction:column;gap:6px;margin:4px 0 6px;">
     @foreach (var opt in CommunityHub.Pages.Speaker.DetailsModel.AccreditationOptions)
     {
@@ -75,7 +82,7 @@
 </div>
 
 <h3 style="color:var(--el-darkblue);margin-top:20px;">Details</h3>
-<label asp-for="Country">Country</label>
+<label asp-for="Country">Country <span style="color:#c0392b;">*</span></label>
 <select asp-for="Country">
     <option value="">— select —</option>
     @foreach (var c in CommunityHub.Core.Domain.Countries.All)
@@ -85,9 +92,11 @@
 </select>
 <span asp-validation-for="Country" class="error"></span>
 
-<label asp-for="Gender">Gender</label>
+@* §306: Gender is required — "Prefer not to say" is the explicit opt-out choice,
+   so the placeholder is a plain "— select —" that fails validation. *@
+<label asp-for="Gender">Gender <span style="color:#c0392b;">*</span></label>
 <select asp-for="Gender">
-    <option value="">— prefer not to say —</option>
+    <option value="">— select —</option>
     @foreach (var opt in CommunityHub.Pages.Speaker.DetailsModel.GenderOptions)
     {
         <option value="@opt">@opt</option>
@@ -106,5 +115,5 @@
 
 @if (Model.LastSessionizeImportAt is not null)
 {
-    <p style="color:#6b7280;font-size:12px;margin-top:14px;">Last Sessionize import: @Model.LastSessionizeImportAt?.ToString("dd/MM/yyyy HH:mm 'UTC'")</p>
+    <p style="color:#6b7280;font-size:12px;margin-top:14px;">Last Sessionize import: @Model.LastSessionizeImportAt?.ToString("d MMM yyyy HH:mm 'UTC'")</p>
 }

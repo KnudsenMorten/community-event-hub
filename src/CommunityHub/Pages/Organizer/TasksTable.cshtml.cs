@@ -50,6 +50,15 @@ public class TasksTableModel : PageModel
     [BindProperty(SupportsGet = true)]
     public TaskState? StateFilter { get; set; }
 
+    /// <summary>
+    /// §253 G12: by DEFAULT the grid + exports hide tasks assigned to a DEACTIVATED
+    /// participant (drop-outs' open tasks used to pollute the grid and CSV/XLSX
+    /// forever). Tick to include them (e.g. to clean them up). Unassigned tasks are
+    /// always shown.
+    /// </summary>
+    [BindProperty(SupportsGet = true)]
+    public bool ShowInactiveAssignees { get; set; }
+
     public async Task<IActionResult> OnGetAsync(CancellationToken ct)
     {
         var me = _participant.Current;
@@ -172,6 +181,13 @@ public class TasksTableModel : PageModel
         var query = _db.Tasks
             .Include(t => t.AssignedParticipant)
             .Where(t => t.EventId == eventId);
+
+        // §253 G12: hide tasks held by deactivated participants unless asked for.
+        if (!ShowInactiveAssignees)
+        {
+            query = query.Where(t => t.AssignedParticipantId == null
+                                     || t.AssignedParticipant!.IsActive);
+        }
 
         if (StateFilter is not null)
         {

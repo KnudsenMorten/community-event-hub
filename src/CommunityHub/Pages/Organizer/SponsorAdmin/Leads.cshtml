@@ -1,4 +1,4 @@
-﻿@page
+@page
 @model CommunityHub.Pages.Organizer.SponsorAdmin.LeadsModel
 @{
     ViewData["Title"] = "Sponsor leads";
@@ -10,6 +10,20 @@
     {
         <p class="error">This area is for organizers only.</p>
         <p><a asp-page="/Index">Back to hub</a></p>
+    }
+    else if (Model.FeatureDisabled)
+    {
+        @* §326bq: the sponsor-leads pipeline is OFF. Say where leads actually live rather
+           than rendering an API-key / pipeline console for something that is not running. *@
+        <p><strong>Sponsor leads are not handled in the hub for this event.</strong></p>
+        <p>Leads, inquiries and booth-meeting requests currently live in
+           <strong>Zoho Backstage</strong> — collect and follow them up there. CEH may take
+           this over in a future edition: the pipeline here (per-sponsor API keys, the daily
+           CRM pull, lead triage and notification preferences) is built and simply switched
+           off, so nothing is lost by leaving it disabled.</p>
+        <p>To turn it on, enable <code>sponsor-leads</code> in
+           <a asp-page="/Organizer/Settings">Settings</a>.</p>
+        <p><a asp-page="/Organizer/SponsorAdmin/Index">&larr; Back to Sponsor Admin</a></p>
     }
     else
     {
@@ -26,14 +40,14 @@
     }
 </div>
 
-@if (!Model.AccessDenied)
+@if (!Model.AccessDenied && !Model.FeatureDisabled)
 {
     <div class="card">
         <h2>1. Pipeline status</h2>
         <table style="width:100%;border-collapse:collapse;max-width:560px;">
             <tr style="border-bottom:1px solid #eee;"><td>Total leads in DB</td><td><strong>@Model.TotalLeads</strong></td></tr>
             <tr style="border-bottom:1px solid #eee;"><td>New in last 7 days</td><td><strong>@Model.LeadsLast7d</strong></td></tr>
-            <tr><td>Last Zoho sync</td><td><strong>@(Model.LastZohoSyncAt?.ToString("u") ?? "(never &mdash;” pipeline not configured yet)")</strong></td></tr>
+            <tr><td>Last Zoho sync</td><td><strong>@(Model.LastZohoSyncAt?.ToString("u") ?? "(never — pipeline not configured yet)")</strong></td></tr>
         </table>
         <p style="margin-top:14px;">
             <form method="post" asp-page-handler="SyncNow" style="display:inline;">
@@ -46,7 +60,7 @@
         <h2>2. Per-sponsor API keys + download</h2>
         <p>Every sponsor company gets its own API key. The key authenticates
            two endpoints (JSON + CSV) that return that sponsor's leads
-           only. The key is shown ONCE at issue time &mdash;” copy it and hand
+           only. The key is shown ONCE at issue time — copy it and hand
            it to the sponsor immediately; the hub stores only its SHA256
            hash.</p>
 
@@ -56,7 +70,7 @@
                 <strong>New key issued for sponsor '@freshSponsor':</strong>
                 <pre style="background:#fff;border:1px solid #d0d7de;border-radius:4px;padding:8px 10px;margin:8px 0 0 0;overflow-x:auto;user-select:all;">@freshKey</pre>
                 <p style="margin:8px 0 0 0;font-size:12.5px;color:#5a6170;">
-                    Hand this to the sponsor NOW &mdash;” it's not retrievable after you leave the page.
+                    Hand this to the sponsor NOW — it's not retrievable after you leave the page.
                 </p>
             </div>
         }
@@ -66,7 +80,7 @@
         <div style="overflow-x:auto;">
         <table style="width:100%;border-collapse:collapse;min-width:760px;">
             <tr style="text-align:left;border-bottom:2px solid #ddd;">
-                <th>Sponsor company id</th>
+                <th>Sponsor company</th>
                 <th>Deterministic token (current)</th>
                 <th>Ver</th>
                 <th>Legacy key</th>
@@ -75,7 +89,9 @@
             @foreach (var s in Model.SponsorKeys)
             {
                 <tr style="border-bottom:1px solid #eee;">
-                    <td><code>@s.SponsorCompanyId</code></td>
+                    @* §234: display name first; the raw id stays visible (small) because the
+                       sponsor pastes it into the API samples below. *@
+                    <td>@Model.CompanyDisplayName(s.SponsorCompanyId) <code style="font-size:11.5px;color:#57606a;">@s.SponsorCompanyId</code></td>
                     <td>
                         @if (!string.IsNullOrEmpty(s.DeterministicToken))
                         {
@@ -86,7 +102,7 @@
                             <em style="color:#cf222e;">global secret missing</em>
                         }
                     </td>
-                    <td>v@s.TokenVersion</td>
+                    <td>v@(s.TokenVersion)</td>
                     <td>@(s.KeyPrefix is null ? "—" : s.KeyPrefix + "...")</td>
                     <td>
                         <form method="post" asp-page-handler="BumpTokenVersion" style="display:inline;" onsubmit="return confirm('Bump @s.SponsorCompanyId to v@(s.TokenVersion + 1)? Old token stops working immediately.');">
@@ -111,7 +127,7 @@
            <code>X-Sponsor-Api-Key</code> request header (preferred) or
            a <code>?key=</code> query parameter (browser-friendly).</p>
 
-        <h4>A. PowerShell &mdash;” download CSV to file</h4>
+        <h4>A. PowerShell — download CSV to file</h4>
 <pre style="background:#0d1117;color:#c9d1d9;padding:12px 14px;border-radius:6px;overflow-x:auto;">
 $key       = 'PASTE-YOUR-SPONSOR-API-KEY-HERE'
 $cid       = 'YOUR-SPONSOR-COMPANY-ID'
@@ -123,7 +139,7 @@ Invoke-WebRequest -Uri "@(Model.BaseUrl)/api/v1/sponsors/$cid/leads.csv" `
 Write-Host "Saved $outFile"
 </pre>
 
-        <h4>B. PowerShell &mdash;” fetch JSON, pipe into your own pipeline</h4>
+        <h4>B. PowerShell — fetch JSON, pipe into your own pipeline</h4>
 <pre style="background:#0d1117;color:#c9d1d9;padding:12px 14px;border-radius:6px;overflow-x:auto;">
 $key = 'PASTE-YOUR-SPONSOR-API-KEY-HERE'
 $cid = 'YOUR-SPONSOR-COMPANY-ID'
@@ -136,7 +152,7 @@ $resp.leads | Where-Object { $_.LeadKind -eq 'Meeting' } |
               Select-Object FullName, Company, Email, CapturedAt
 </pre>
 
-        <h4>C. PowerShell &mdash;” scheduled task (daily, 06:30 local)</h4>
+        <h4>C. PowerShell — scheduled task (daily, 06:30 local)</h4>
 <pre style="background:#0d1117;color:#c9d1d9;padding:12px 14px;border-radius:6px;overflow-x:auto;">
 # Save as Download-Leads.ps1, then register the task.
 $key     = $env:SPONSOR_API_KEY      # set once in scheduled-task env
@@ -154,7 +170,7 @@ Invoke-WebRequest -Uri "@(Model.BaseUrl)/api/v1/sponsors/$cid/leads.csv" `
 </pre>
 
         <h4>D. Browser direct download (no PowerShell)</h4>
-        <p>Paste this URL into the address bar &mdash;” the browser downloads
+        <p>Paste this URL into the address bar — the browser downloads
            <code>leads-&lt;sponsor&gt;-&lt;date&gt;.csv</code> into the
            Downloads folder. The query-string key form is only intended
            for this manual case (avoid embedding in bookmarks since URLs
@@ -174,7 +190,8 @@ Invoke-WebRequest -Uri "@(Model.BaseUrl)/api/v1/sponsors/$cid/leads.csv" `
         {
             var pref = Model.NotifyPrefs.TryGetValue(s.SponsorCompanyId, out var p0) ? p0 : null;
             <details style="margin:10px 0;padding:8px 12px;border:1px solid #d0d7de;border-radius:6px;">
-                <summary><strong>@s.SponsorCompanyId</strong>
+                <summary><strong>@Model.CompanyDisplayName(s.SponsorCompanyId)</strong>
+                    <code style="font-size:11.5px;color:#57606a;">@s.SponsorCompanyId</code>
                     @if (pref?.Enabled == true)
                     {
                         <span class="info" style="font-size:13px;">(@pref.Cadence digest on)</span>
@@ -231,7 +248,7 @@ Invoke-WebRequest -Uri "@(Model.BaseUrl)/api/v1/sponsors/$cid/leads.csv" `
                     <option value="">All sponsors</option>
                     @foreach (var s in Model.SponsorKeys)
                     {
-                        <option value="@s.SponsorCompanyId" selected="@(Model.SponsorFilter == s.SponsorCompanyId)">@s.SponsorCompanyId</option>
+                        <option value="@s.SponsorCompanyId" selected="@(Model.SponsorFilter == s.SponsorCompanyId)">@Model.CompanyDisplayName(s.SponsorCompanyId)</option>
                     }
                 </select>
             </div>
@@ -264,11 +281,11 @@ Invoke-WebRequest -Uri "@(Model.BaseUrl)/api/v1/sponsors/$cid/leads.csv" `
                 <tr style="text-align:left;border-bottom:2px solid #ddd;">
                     <th scope="col" aria-sort="@Model.AriaSort("captured")">
                         <a asp-page-handler="" asp-route-ShowHidden="@Model.ShowHidden" asp-route-SponsorFilter="@Model.SponsorFilter"
-                           asp-route-Search="@Model.Search" asp-route-Sort="captured" asp-route-Desc="@Model.NextDescFor("captured")" asp-route-PageNo="1">Captured@Model.SortIndicator("captured")</a>
+                           asp-route-Search="@Model.Search" asp-route-Sort="captured" asp-route-Desc="@Model.NextDescFor("captured")" asp-route-PageNo="1">Captured@(Model.SortIndicator("captured"))</a>
                     </th>
                     <th scope="col" aria-sort="@Model.AriaSort("company")">
                         <a asp-page-handler="" asp-route-ShowHidden="@Model.ShowHidden" asp-route-SponsorFilter="@Model.SponsorFilter"
-                           asp-route-Search="@Model.Search" asp-route-Sort="company" asp-route-Desc="@Model.NextDescFor("company")" asp-route-PageNo="1">Sponsor@Model.SortIndicator("company")</a>
+                           asp-route-Search="@Model.Search" asp-route-Sort="company" asp-route-Desc="@Model.NextDescFor("company")" asp-route-PageNo="1">Sponsor@(Model.SortIndicator("company"))</a>
                     </th>
                     <th scope="col">Type</th>
                     <th scope="col" aria-sort="@Model.AriaSort("name")">
@@ -288,7 +305,7 @@ Invoke-WebRequest -Uri "@(Model.BaseUrl)/api/v1/sponsors/$cid/leads.csv" `
                 {
                     <tr style="border-bottom:1px solid #eee;@(l.Status is SponsorLeadStatus.Ignore or SponsorLeadStatus.Junk ? "opacity:.55;" : "")">
                         <td style="white-space:nowrap;">@l.CapturedAt.UtcDateTime.ToString("dd MMM HH:mm")</td>
-                        <td>@l.SponsorCompanyId</td>
+                        <td title="@l.SponsorCompanyId">@Model.CompanyDisplayName(l.SponsorCompanyId)</td>
                         <td>@l.LeadKind</td>
                         <td>@l.FullName
                             @if (!string.IsNullOrWhiteSpace(l.JobTitle))

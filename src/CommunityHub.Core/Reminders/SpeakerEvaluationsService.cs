@@ -87,10 +87,9 @@ public sealed class SpeakerEvaluationsService
 
         // Own-row scope: only sessions this participant is a SessionSpeaker on, in
         // this edition, excluding service sessions. SQL-translatable.
+        // §428: the shared "is this my session?" predicate (SpeakerSessionScope).
         var sessions = await _db.Sessions
-            .Where(s => s.EventId == eventId
-                        && !s.IsServiceSession
-                        && s.SessionSpeakers.Any(ss => ss.ParticipantId == participantId))
+            .MineAsSpeaker(eventId, participantId)
             .Select(s => new { s.Id, s.Title, s.Room, s.Type })
             .ToListAsync(ct);
 

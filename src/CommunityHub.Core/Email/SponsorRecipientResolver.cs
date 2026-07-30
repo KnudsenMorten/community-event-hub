@@ -5,11 +5,16 @@ using Microsoft.EntityFrameworkCore;
 namespace CommunityHub.Core.Email;
 
 /// <summary>One resolved sponsor-mail recipient (a coordinator contact).</summary>
+/// <param name="CcEmail">§422 — the ALREADY-RESOLVED alternate inbox to copy (organizer-set
+/// <c>SecondaryEmail</c> first, then the contact's OWN <c>AlternateEmail</c>), or null for none.
+/// Named for what it is rather than which column it came from: it used to be
+/// <c>SecondaryEmail</c> verbatim, which is precisely how a coordinator who added their own
+/// alternate address ended up never being copied on anything.</param>
 public sealed record SponsorRecipient(
     int ParticipantId,
     string Email,
     string FullName,
-    string? SecondaryEmail)
+    string? CcEmail)
 {
     /// <summary>
     /// The Company Manager / WordPress <c>user_id</c> id-link for this contact
@@ -124,7 +129,8 @@ public sealed class SponsorRecipientResolver
             // neither and are excluded; both-roles contacts pass on the flag/ERP.
             .Where(p => p.IsEventCoordinator || (erpSet is not null && erpSet.Contains(p.Email.Trim())))
             .Select(p => new SponsorRecipient(
-                p.Id, p.Email.Trim(), p.FullName, p.SecondaryEmail)
+                p.Id, p.Email.Trim(), p.FullName,
+                Participants.AlternateEmailPolicy.CcFor(p.SecondaryEmail, p.AlternateEmail))
             {
                 // Carry the CM id-link so CM → hub correlation keys on the id.
                 CmUserId = p.CmUserId,

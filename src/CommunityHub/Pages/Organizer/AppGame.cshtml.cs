@@ -184,8 +184,11 @@ public class AppGameModel : PageModel
                     ? "the gift your team committed" : row.GiftDescription;
                 var rendered = _templates.Render("app-game-gift-reminder", tokens);
                 // Ring-governed by the sponsor-reminders feature (operator 2026-06-22).
+                // 🔒 §707.2b — the key was already the FIRST argument (`Category`), not `TemplateName`,
+                // so the gate saw no mail identity and used the feature ring. Position, not name.
                 using (_context?.Set(new EmailContext(
                     "app-game-gift-reminder", row.EventId, null, c.FullName,
+                    TemplateName: "app-game-gift-reminder",
                     FeatureKey: "sponsor-reminders")))
                 {
                     await _emailSender.SendAsync(c.Email, rendered.Subject, rendered.HtmlBody, ct);

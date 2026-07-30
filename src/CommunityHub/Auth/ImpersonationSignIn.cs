@@ -58,6 +58,10 @@ public static class ImpersonationSignIn
             AllowRefresh = false,
         };
 
+        // §428: the acting-as switch changes WHO the next page renders for, so the previous
+        // identity's pending flash must not ride along (see ParticipantSessionSignIn).
+        ParticipantSessionSignIn.DropPendingFlash(http);
+
         return http.SignInAsync(
             CookieAuthenticationDefaults.AuthenticationScheme,
             new ClaimsPrincipal(identity),
@@ -89,6 +93,8 @@ public static class ImpersonationSignIn
             ExpiresUtc = clock.GetUtcNow().AddHours(8),
             AllowRefresh = true,
         };
+        // §428: returning to the organizer is an identity change too.
+        ParticipantSessionSignIn.DropPendingFlash(http);
         return http.SignInAsync(
             CookieAuthenticationDefaults.AuthenticationScheme,
             new ClaimsPrincipal(identity),

@@ -46,6 +46,9 @@ public class ExportsModel : PageModel
     public IReadOnlyList<RoomSheetRow> RoomSheets { get; private set; } = Array.Empty<RoomSheetRow>();
     public IReadOnlyList<VolunteerRotaRow> VolunteerRota { get; private set; } = Array.Empty<VolunteerRotaRow>();
     public IReadOnlyList<BadgeRow> BadgeData { get; private set; } = Array.Empty<BadgeRow>();
+    public DinnerHeadcountRow DinnerHeadcount { get; private set; } = new(0, 0, 0);
+    public IReadOnlyList<DinnerPersonRow> DinnerPeople { get; private set; } = Array.Empty<DinnerPersonRow>();
+    public IReadOnlyList<DietaryCountRow> DietaryHeadcount { get; private set; } = Array.Empty<DietaryCountRow>();
 
     public async Task<IActionResult> OnGetAsync(CancellationToken ct)
     {
@@ -59,6 +62,9 @@ public class ExportsModel : PageModel
         RoomSheets = await _exports.BuildRoomSheetsAsync(me.EventId, ct);
         VolunteerRota = await _exports.BuildVolunteerRotaAsync(me.EventId, ct);
         BadgeData = await _exports.BuildBadgeDataAsync(me.EventId, ct);
+        DinnerHeadcount = await _exports.BuildDinnerHeadcountAsync(me.EventId, ct);
+        DinnerPeople = await _exports.BuildDinnerRunSheetAsync(me.EventId, ct);
+        DietaryHeadcount = await _exports.BuildDietaryHeadcountAsync(me.EventId, ct);
         return Page();
     }
 
@@ -81,6 +87,12 @@ public class ExportsModel : PageModel
     public Task<IActionResult> OnGetBadgesCsvAsync(CancellationToken ct)
         => CsvAsync(id => _exports.BuildBadgeDataCsvAsync(id, ct), "badge-data.csv");
 
+    public Task<IActionResult> OnGetDinnerCsvAsync(CancellationToken ct)
+        => CsvAsync(id => _exports.BuildDinnerCsvAsync(id, ct), "dinner-run-sheet.csv");
+
+    public Task<IActionResult> OnGetDietaryCsvAsync(CancellationToken ct)
+        => CsvAsync(id => _exports.BuildDietaryCsvAsync(id, ct), "catering-dietary.csv");
+
     // --- Excel (.xlsx) download handlers ------------------------------------
     // Each reuses the exact same CSV builder the CSV handler uses (single source
     // of truth for the data), then converts via CsvToXlsx — the data is never
@@ -100,6 +112,12 @@ public class ExportsModel : PageModel
 
     public Task<IActionResult> OnGetBadgesXlsxAsync(CancellationToken ct)
         => XlsxAsync(id => _exports.BuildBadgeDataCsvAsync(id, ct), "badge-data.xlsx", "Badge data");
+
+    public Task<IActionResult> OnGetDinnerXlsxAsync(CancellationToken ct)
+        => XlsxAsync(id => _exports.BuildDinnerCsvAsync(id, ct), "dinner-run-sheet.xlsx", "Dinner run-sheet");
+
+    public Task<IActionResult> OnGetDietaryXlsxAsync(CancellationToken ct)
+        => XlsxAsync(id => _exports.BuildDietaryCsvAsync(id, ct), "catering-dietary.xlsx", "Catering dietary");
 
     private async Task<IActionResult> CsvAsync(Func<int, Task<string>> build, string fileName)
     {

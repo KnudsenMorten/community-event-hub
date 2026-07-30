@@ -1,0 +1,58 @@
+@page
+@model CommunityHub.Pages.Organizer.LinkedInConnectModel
+@{
+    ViewData["Title"] = "Connect LinkedIn";
+}
+
+<div class="card">
+    <h1>Connect LinkedIn</h1>
+
+    @if (Model.AccessDenied)
+    {
+        <p class="error">This page is for organizers.</p>
+    }
+    else
+    {
+        @if (!string.IsNullOrEmpty(Model.Message))
+        {
+            <p role="status" style="padding:10px 12px;border-radius:8px;
+               background:@(Model.IsError ? "#fef2f2" : "#ecfdf5");
+               color:@(Model.IsError ? "#991b1b" : "#065f46");
+               border:1px solid @(Model.IsError ? "#fecaca" : "#a7f3d0");">@Model.Message</p>
+        }
+
+        <p>LinkedIn posting (full text + native graphic) needs a token that LinkedIn only
+           issues through a one-time consent by a <strong>page admin</strong>. Click Connect,
+           approve on LinkedIn, and the token is stored + auto-refreshed.</p>
+
+        @if (!Model.AppConfigured)
+        {
+            <p class="error">The LinkedIn app credentials (LinkedIn__ClientId / ClientSecret)
+               are not configured on this host yet.</p>
+        }
+        else if (Model.Current is null)
+        {
+            <form method="post" asp-page-handler="Start">
+                <button type="submit" class="task-link-btn" style="border:none;cursor:pointer;">
+                    🔗 Connect LinkedIn
+                </button>
+            </form>
+        }
+        else
+        {
+            <p>✅ Connected by <strong>@Model.Current.ConnectedByEmail</strong> —
+               token expires <strong>@Model.Current.ExpiresAt.ToString("d MMM yyyy")</strong>
+               @(string.IsNullOrEmpty(Model.Current.RefreshToken) ? "(no refresh token — reconnect near expiry)" : "(auto-refreshes)").</p>
+            <form method="post" asp-page-handler="Start">
+                <button type="submit" class="task-link-btn" style="border:none;cursor:pointer;">
+                    🔁 Reconnect
+                </button>
+            </form>
+        }
+        <p style="color:#6b7280;font-size:13px;margin-top:12px;">
+            Note: posting stays held by the LinkedIn DryRun switch until it is explicitly
+            turned off — connecting alone publishes nothing.
+        </p>
+    }
+    <p><a asp-page="/Organizer/Index">Back to organizer area</a></p>
+</div>

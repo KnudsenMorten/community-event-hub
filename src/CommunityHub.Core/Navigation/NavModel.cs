@@ -33,7 +33,37 @@ namespace CommunityHub.Core.Navigation;
 /// "Ring N" pill while it is not yet Broad/GA — so a ring tester sees exactly what
 /// is scoped to them to test. Null for ungated, always-visible items.
 /// </param>
-public sealed record NavItem(string Href, string? LabelKey, string? FallbackLabel = null, bool ExactMatch = false, string? SectionKey = null, bool External = false, string? FeatureKey = null);
+/// <param name="Redirect">
+/// When not <see cref="ExternalRedirectKind.None"/>, the link routes the user OUT of
+/// the hub into a third-party system that needs its OWN login (the Zoho exhibitor
+/// dashboard §175, the sponsor webshop §176). The view renders a <c>data-confirm</c>
+/// attribute carrying the kind's localized "you're leaving for X, here's how to log in"
+/// message, and a small shared JS handler shows a <c>confirm()</c> before navigating
+/// (OK proceeds as today, Cancel stays). Pure UX metadata — it never changes the route
+/// or the gating.
+/// </param>
+// §297: SubSectionKey is an OPTIONAL resx key naming a NESTED sub-fold-out inside this item's
+// SectionKey section (two-level menu) — e.g. "Policies" (Code of Conduct + Privacy Policy) nested
+// inside "Event Info". Null = a direct leaf of the section.
+public sealed record NavItem(string Href, string? LabelKey, string? FallbackLabel = null, bool ExactMatch = false, string? SectionKey = null, bool External = false, string? FeatureKey = null, ExternalRedirectKind Redirect = ExternalRedirectKind.None, string? SubSectionKey = null);
+
+/// <summary>
+/// Which third-party system a nav link redirects to, for the "you'll need to log in
+/// there" confirm popup (REQUIREMENTS §175 Zoho, §176 sponsor webshop). The view maps
+/// each non-<see cref="None"/> kind to its localized message and renders it as a
+/// <c>data-confirm</c> attribute; <see cref="None"/> links navigate with no prompt.
+/// </summary>
+public enum ExternalRedirectKind
+{
+    /// <summary>Internal hub link (or a plain external link) — navigate with no confirm.</summary>
+    None = 0,
+
+    /// <summary>The Zoho exhibitor dashboard — email login + a one-time password (§175).</summary>
+    Zoho = 1,
+
+    /// <summary>The sponsor webshop — email + password login, with a "lost your password" link (§176).</summary>
+    Webshop = 2,
+}
 
 /// <summary>
 /// A named, collapsible sub-group of nav items within a single <see cref="NavGroup"/>
@@ -81,6 +111,36 @@ public sealed record NavGroup(string? HeadingKey, IReadOnlyList<NavItem> Items, 
         }
         return order
             .Select(key => new NavSection(key == NullSection ? null : key, buckets[key]))
+            .ToList();
+    }
+
+    /// <summary>
+    /// Like <see cref="Sections()"/>, but the leaves inside the section(s) named in
+    /// <paramref name="alphabetizeSectionKeys"/> are ordered by their RESOLVED, localized
+    /// display label (ascending, case-insensitive) rather than insertion order
+    /// (REQUIREMENTS §173d — the shared "Event logistics" fold-out gathers leaves from
+    /// several code paths in mixed order and should read A→Z to the user).
+    /// <paramref name="resolveLabel"/> turns a <see cref="NavItem"/> into the label the
+    /// user actually SEES (the view passes the localizer; a test passes a stub), so the
+    /// sort is by the rendered text, never the resx key. Every other section keeps its
+    /// insertion order, and the section grouping/order is unchanged — pure view projection.
+    /// </summary>
+    public IReadOnlyList<NavSection> Sections(
+        Func<NavItem, string?> resolveLabel, params string[] alphabetizeSectionKeys)
+    {
+        var sections = Sections();
+        if (resolveLabel is null || alphabetizeSectionKeys is null || alphabetizeSectionKeys.Length == 0)
+            return sections;
+
+        var sortKeys = new HashSet<string>(alphabetizeSectionKeys);
+        return sections
+            .Select(s => s.HeadingKey is not null && sortKeys.Contains(s.HeadingKey)
+                ? new NavSection(s.HeadingKey,
+                    s.Items
+                        .OrderBy(i => resolveLabel(i) ?? string.Empty,
+                                 System.StringComparer.CurrentCultureIgnoreCase)
+                        .ToList())
+                : s)
             .ToList();
     }
 }

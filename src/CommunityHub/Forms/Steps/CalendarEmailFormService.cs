@@ -80,6 +80,19 @@ public sealed class CalendarEmailFormService : IWizardFormService
             model.CalendarEmail = profile.CalendarEmail;
             model.Saved = profile.CalendarEmailSetAt != null;
         }
+
+        // §422: fall back to the participant-owned alternate address. This step and My Hub
+        // Profile are two doors onto ONE fact — an address the person wants us to also use —
+        // so setting it on either must show on both. Without this fallback a speaker who added
+        // it on their profile would open this step and find it empty, then wonder which of the
+        // two the platform believes.
+        if (string.IsNullOrWhiteSpace(model.CalendarEmail))
+        {
+            model.CalendarEmail = await _db.Participants
+                .Where(p => p.Id == participantId && p.EventId == eventId)
+                .Select(p => p.AlternateEmail)
+                .FirstOrDefaultAsync(ct);
+        }
         return model;
     }
 
@@ -106,6 +119,21 @@ public sealed class CalendarEmailFormService : IWizardFormService
         // Field-level validation (the email/length DataAnnotations ran during binding).
         if (!modelState.IsValid) return WizardStepOutcome.Invalid;
 
+        // §422: this address now ALSO becomes the participant-owned alternate (see below), so it
+        // has to clear the same bar as the profile field — a valid shape, not the person's own
+        // primary, and not an address that already resolves to somebody else in the edition.
+        // That last check is what makes it safe for the address to be a sign-in identity.
+        var alternate = CommunityHub.Core.Participants.AlternateEmailPolicy.Normalize(model.CalendarEmail);
+        var error = await CommunityHub.Core.Participants.AlternateEmailPolicy.ValidateAsync(
+            _db, eventId, participantId, email, alternate, ct);
+        if (error is not null)
+        {
+            modelState.AddModelError(nameof(CalendarEmailFormModel.CalendarEmail), error);
+            model.Message = error;
+            model.Saved = false;
+            return WizardStepOutcome.Invalid;
+        }
+
         var now = _clock.GetUtcNow();
         var profile = await Load(eventId, participantId, ct);
         if (profile is null)
@@ -125,18 +153,29 @@ public sealed class CalendarEmailFormService : IWizardFormService
         }
 
         // Normalise: blank => no override (calendar mail falls back to the primary).
-        profile.CalendarEmail = string.IsNullOrWhiteSpace(model.CalendarEmail) ? null : model.CalendarEmail.Trim();
+        profile.CalendarEmail = alternate;
         // ALWAYS stamp the "speaker acted" marker so this OPTIONAL step counts as done even when
         // left blank / skipped (mirrors the details step's BioLastEditedBySpeakerAt marker).
         profile.CalendarEmailSetAt = now;
+
+        // §422 — WRITE THROUGH to the participant-owned alternate address. The operator set an
+        // address here and then found it on none of the other screens (2026-07-27: "i dont see
+        // it in in my hub profile", "it still shows primary email here"). Nothing had failed to
+        // save: this step only ever wrote SpeakerProfile.CalendarEmail, which moves the
+        // calendar-invite To-address and nothing else. One address the person typed once now
+        // lands on the one column every other screen reads.
+        var me = await _db.Participants.FirstOrDefaultAsync(
+            p => p.Id == participantId && p.EventId == eventId, ct);
+        if (me is not null) me.AlternateEmail = alternate;
 
         await _db.SaveChangesAsync(ct);
 
         model.CalendarEmail = profile.CalendarEmail;
         model.Saved = true;
         model.Message = string.IsNullOrWhiteSpace(profile.CalendarEmail)
-            ? "Saved. Calendar invites and notifications will go to your primary email."
-            : "Saved. Calendar invites and notifications will go to " + profile.CalendarEmail + ".";
+            ? "Saved. Calendar invites, reminders and sign-in will use your primary email only."
+            : "Saved. " + profile.CalendarEmail + " will receive your calendar invites, be copied "
+              + "on your reminders, and can be used to sign in.";
         return WizardStepOutcome.Advance;
     }
 

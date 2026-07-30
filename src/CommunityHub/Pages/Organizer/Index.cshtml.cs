@@ -47,8 +47,23 @@ public class IndexModel : PageModel
             return Page();
         }
 
+        // §498/§499 — this card claims "the hub is already reminding them", so it must list the
+        // people the hub ACTUALLY reminds. It listed every attendee row with an open mismatch,
+        // including someone whose ticket had been cancelled — and since §499b those people are
+        // explicitly no longer reminded, which made the sentence untrue.
+        //
+        // Exclude the DROPPED-OUT (was in, now out). Deliberately NOT "keep only remindable": an
+        // attendee who has simply not been provisioned yet has no participant row at all, and
+        // dropping them would hide real outstanding work rather than a departed person.
+        var droppedOutEmails = await _db.Participants
+            .Where(p => p.EventId == me.EventId)
+            .DroppedOut()
+            .Select(p => p.Email.ToLower())
+            .ToListAsync(ct);
+
         Mismatches = await _db.Attendees
-            .Where(a => a.EventId == me.EventId && a.HasReconciliationMismatch)
+            .Where(a => a.EventId == me.EventId && a.HasReconciliationMismatch
+                        && !droppedOutEmails.Contains(a.Email.ToLower()))
             .OrderBy(a => a.LastName)
             .ToListAsync(ct);
         OpenActionItems = await _actions.CountOpenAsync(me.EventId, ct);

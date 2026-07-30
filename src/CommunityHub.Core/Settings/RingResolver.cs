@@ -76,10 +76,10 @@ public sealed class RingResolver
     /// their own ring.
     ///
     /// Returns <c>(found:false, Broad)</c> when NO participant matches the address
-    /// in this edition — the sender treats an UNKNOWN address as "not ring-gated"
-    /// (it is not a participant), deferring to the allowlist floor rather than
-    /// inventing a ring for a stranger. A known address always returns
-    /// <c>(found:true, effectiveRing)</c>.
+    /// in this edition — the sender then falls back to the ambient participant id
+    /// (<see cref="TryGetEffectiveRingByParticipantAsync"/>, §234 Fix 3) and, when
+    /// that too is unresolvable, FAILS CLOSED (drops) rather than inventing a ring
+    /// for a stranger. A known address always returns <c>(found:true, effectiveRing)</c>.
     /// </summary>
     public async Task<(bool found, Ring ring)> TryGetEffectiveRingByEmailAsync(
         int eventId, string? email, CancellationToken ct = default)
@@ -106,6 +106,85 @@ public sealed class RingResolver
             .FirstOrDefaultAsync(ct);
 
         return (true, EffectiveForContact(p.Ring, companyRing));
+    }
+
+    /// <summary>
+    /// The effective ring of a recipient identified by PARTICIPANT ID within one
+    /// edition — the fallback the email sender ring-gate uses when the DELIVERY
+    /// ADDRESS is not a participant address (§234, Fix 3): a speaker's
+    /// <c>ContactEmailOverride</c> or a participant's <c>SecondaryEmail</c> CC is
+    /// unknown by address, but the ambient <see cref="Email.EmailContext.ParticipantId"/>
+    /// identifies the PERSON, whose ring must gate the send. Applies the exact same
+    /// effective-ring rule as <see cref="TryGetEffectiveRingByEmailAsync"/> (sponsor
+    /// contact inherits/overrides the company default; everyone else their own ring).
+    ///
+    /// Returns <c>(found:false, Broad)</c> when no participant with that id exists
+    /// in this edition — the sender then stays FAIL-CLOSED, exactly as for an
+    /// unknown address.
+    /// </summary>
+    public async Task<(bool found, Ring ring)> TryGetEffectiveRingByParticipantAsync(
+        int eventId, int participantId, CancellationToken ct = default)
+    {
+        var p = await _db.Participants
+            .Where(x => x.EventId == eventId && x.Id == participantId)
+            .Select(x => new { x.Ring, x.Role, x.SponsorCompanyId })
+            .FirstOrDefaultAsync(ct);
+
+        if (p is null) return (false, Rings.Default);
+
+        // Non-sponsor (or sponsor with no company): own ring only.
+        if (p.Role != ParticipantRole.Sponsor || string.IsNullOrWhiteSpace(p.SponsorCompanyId))
+        {
+            return (true, Rings.Effective(p.Ring));
+        }
+
+        var companyRing = await _db.SponsorInfos
+            .Where(s => s.EventId == eventId && s.SponsorCompanyId == p.SponsorCompanyId)
+            .Select(s => (Ring?)s.Ring)
+            .FirstOrDefaultAsync(ct);
+
+        return (true, EffectiveForContact(p.Ring, companyRing));
+    }
+
+    /// <summary>
+    /// §705.3b — the recipient's ROLE, so the transport can resolve a ring per <c>(mail × role)</c>.
+    /// </summary>
+    /// <remarks>
+    /// Added as a SEPARATE lookup rather than by changing
+    /// <see cref="TryGetEffectiveRingByEmailAsync"/>'s signature: that method is called from several
+    /// send paths and its tuple is asserted by tests, and widening it would have rippled through all of
+    /// them for one extra field.
+    ///
+    /// <para>Resolves by ADDRESS first, then by the ambient participant id — the same two-step
+    /// <see cref="Email.EmailContext"/> fallback the ring gate itself uses (§234 Fix 3), so a speaker's
+    /// <c>ContactEmailOverride</c> or a CC'd secondary address still resolves to the right PERSON.</para>
+    ///
+    /// <para>Returns <c>null</c> when neither resolves. 🔒 That is NOT an error: it means only the
+    /// all-roles ring can apply, which is the correct conservative answer for someone we cannot
+    /// classify.</para>
+    /// </remarks>
+    public async Task<ParticipantRole?> TryGetRoleAsync(
+        int eventId, string? email, int? participantId, CancellationToken ct = default)
+    {
+        var normalized = (email ?? string.Empty).Trim().ToLowerInvariant();
+        if (normalized.Length > 0)
+        {
+            var byEmail = await _db.Participants
+                .Where(x => x.EventId == eventId && x.Email == normalized)
+                .Select(x => (ParticipantRole?)x.Role)
+                .FirstOrDefaultAsync(ct);
+            if (byEmail is not null) return byEmail;
+        }
+
+        if (participantId is int pid)
+        {
+            return await _db.Participants
+                .Where(x => x.EventId == eventId && x.Id == pid)
+                .Select(x => (ParticipantRole?)x.Role)
+                .FirstOrDefaultAsync(ct);
+        }
+
+        return null;
     }
 
     /// <summary>

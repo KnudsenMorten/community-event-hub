@@ -1,0 +1,128 @@
+@model CommunityHub.Forms.Steps.MasterClassWaitlistFormModel
+@*
+    §384 — fields-ONLY partial for the WAITLIST step (step 2 of the Master Class flow).
+    No <form>, no Prev/Next, no chrome — the HOST (/Forms/Wizard) owns those.
+
+    Why this step exists: booking a seat and joining a waitlist are NOT mutually exclusive — you can
+    hold a seat in one class and queue for another — but the single radio group on step 1 could
+    express only one choice, so the UI misrepresented the rules (operator 2026-07-26: "i can only
+    select 1 and i annot sign-up for wait list in one go"). Step 1 books; this step queues.
+*@
+
+@if (Model.NotEligible)
+{
+    <p class="info">Master Class selection applies to 2-day tickets only.</p>
+}
+else if (Model.FullOptions.Count == 0)
+{
+    @* Belt and braces: the wizard only offers this step when something is full, but a class can
+       free up between building the step list and rendering it. *@
+    <p class="info">Every Master Class currently has seats available — there is nothing to queue for.</p>
+    <p style="color:#6b7280;font-size:13.5px;">Pick your class on the previous step.</p>
+}
+else
+{
+    <p>
+        These Master Classes are <strong>full</strong>. You can join one waitlist &mdash; we e-mail you
+        if a seat opens up. This is optional: leave it blank and continue if you'd rather not queue.
+    </p>
+
+    @if (Model.Confirmed is not null)
+    {
+        <p class="success" role="status" style="margin:10px 0;">
+            &#10003; You keep your seat in <strong>@Model.Confirmed.Title</strong> while you wait.
+        </p>
+    }
+
+    @if (Model.Pending is not null)
+    {
+        <p class="info" style="margin:8px 0;">
+            You're already on the waitlist for <strong>@Model.Pending.Title</strong>@if (Model.Pending.WaitlistPosition is int pos)
+            { <text> (position @pos)</text> }. Choosing another below moves your place &mdash; you can
+            only be on one waitlist at a time.
+        </p>
+    }
+
+    <div asp-validation-summary="ModelOnly" class="error"></div>
+    <span asp-validation-for="SessionId" class="error"></span>
+
+    <div style="display:flex;flex-direction:column;gap:10px;margin:12px 0;">
+        @* An explicit "no thanks" option, so continuing without queueing is a CHOICE the attendee
+           makes rather than something they do by leaving the form untouched. *@
+        <label style="display:flex;gap:10px;align-items:flex-start;background:#f3f6fb;border:1px solid #dde4ee;border-radius:10px;padding:12px;cursor:pointer;">
+            <input type="radio" name="SessionId" value="0" checked="@(Model.Pending is null)"
+                   style="margin-top:3px;width:18px;height:18px;" />
+            <span><strong>No waitlist for me</strong><br />
+                <span style="font-size:13.5px;color:#5b636e;">Continue without joining a queue.</span>
+            </span>
+        </label>
+
+        @foreach (var o in Model.FullOptions)
+        {
+            var isMine = Model.Pending?.SessionId == o.SessionId;
+            <label style="display:flex;gap:10px;align-items:flex-start;background:@(isMine ? "#fff8e1" : "#f3f6fb");border:1px solid @(isMine ? "#f5d98a" : "#dde4ee");border-radius:10px;padding:12px;cursor:pointer;">
+                <input type="radio" name="SessionId" value="@o.SessionId" checked="@isMine"
+                       style="margin-top:3px;width:18px;height:18px;" />
+                <span>
+                    <strong>@o.Title</strong>
+                    @if (o.SpeakerNames.Count > 0)
+                    {
+                        <span style="color:#5b636e;"> &mdash; @string.Join(", ", o.SpeakerNames)</span>
+                    }
+                    <br />
+                    <span style="font-size:13.5px;color:#b91c1c;">Full &mdash; join the waitlist</span>
+                    @if (!string.IsNullOrWhiteSpace(o.Abstract))
+                    {
+                        <details style="margin-top:6px;">
+                            <summary style="cursor:pointer;font-size:13.5px;">Session details</summary>
+                            <p style="margin:6px 0 0;font-size:13.5px;color:#3a4250;">@o.Abstract</p>
+                        </details>
+                    }
+                </span>
+            </label>
+        }
+    </div>
+
+    @* The seat-SWAP consent — only meaningful to someone who holds a seat to trade, so it is only
+       shown to them (the §377 lesson: shown to everyone, it read as a pointless duplicate).
+
+       §384d (operator 2026-07-26): it is ALSO irrelevant while "No waitlist for me" is selected —
+       it asks about a queue you are not joining, and he reported people cannot tell whether they
+       are supposed to answer it. Hidden until a real class is picked.
+
+       Belt AND braces on purpose: the wording is unambiguous on its own ("Only if you join a
+       waitlist above"), so with JavaScript off the box simply stays visible and still reads
+       correctly. The JS only removes a question that does not apply yet — it is never the thing
+       that makes the form understandable. *@
+    @if (Model.Confirmed is not null)
+    {
+        <div id="mc-swap-consent" class="optin" style="display:flex;gap:10px;align-items:flex-start;margin:14px 0 4px;background:#fff8e1;border:1px solid #f5d98a;border-radius:10px;padding:12px;">
+            <input type="checkbox" id="AutoSwitchConsent" name="AutoSwitchConsent" value="true"
+                   checked="@Model.AutoSwitchConsent" style="margin-top:2px;width:18px;height:18px;" />
+            <label for="AutoSwitchConsent" style="font-weight:500;">
+                <span style="color:#7a5b00;">Only if you join a waitlist above:</span>
+                if a seat opens up in that class, <strong>move me there and release my seat in
+                @Model.Confirmed.Title</strong>. Without this we leave your current seat alone.
+            </label>
+        </div>
+
+        <script>
+            (function () {
+                var box = document.getElementById('mc-swap-consent');
+                if (!box) return;
+                var form = box.closest('form');
+                if (!form) return;
+                function sync() {
+                    var picked = form.querySelector('input[name="SessionId"]:checked');
+                    // value "0" is the explicit "No waitlist for me" option.
+                    var queueing = picked && picked.value !== '0';
+                    box.style.display = queueing ? 'flex' : 'none';
+                }
+                form.querySelectorAll('input[name="SessionId"]').forEach(function (r) {
+                    r.addEventListener('change', sync);
+                });
+                sync();
+            })();
+        </script>
+    }
+}

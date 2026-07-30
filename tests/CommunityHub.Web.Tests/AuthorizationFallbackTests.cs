@@ -49,7 +49,8 @@ public sealed class AuthorizationFallbackTests
         "CommunityHub.Pages.MasterClassesPublicModel",         // /MasterClasses
         "CommunityHub.Pages.MasterClassPageModel",             // /MasterClassPage (logistics)
         "CommunityHub.Pages.MyMasterClassModel",               // /MyMasterClass (landing)
-        "CommunityHub.Pages.PartyModel",                       // /Party (anon RSVP)
+        // §206: /Party is now AUTHENTICATED-only (no anonymous RSVP) — see
+        // Protected_pages_are_not_anonymous below.
         "CommunityHub.Pages.Volunteer.SignupModel",            // /Volunteer/Signup
         "CommunityHub.Pages.Survey.IndexModel",                // /Survey
         "CommunityHub.Pages.Survey.ResultsModel",              // /Survey/Results
@@ -57,8 +58,6 @@ public sealed class AuthorizationFallbackTests
         "CommunityHub.Pages.LoginModel",                       // /Login (+ PIN request/verify handlers)
         "CommunityHub.Pages.Login.MagicModel",                 // /Login/Magic
         // Token-secured API controllers (the token IS the credential; no cookie)
-        "CommunityHub.Api.PublicSessionCalendarController",    // /Sessions/{id}.ics
-        "CommunityHub.Api.CalendarController",                 // /cal/{token}.ics, /calendar/{token}.ics
         "CommunityHub.Api.SecretaryController",                // /s/{token}
         "CommunityHub.Api.SponsorLeadsController",             // /api/v1/sponsors/{id}/leads.*
     };
@@ -87,6 +86,7 @@ public sealed class AuthorizationFallbackTests
     // never served 200. AttendeesModel is the example named in the task.
     [InlineData("CommunityHub.Pages.Organizer.AttendeesModel")]
     [InlineData("CommunityHub.Pages.Organizer.ParticipantsModel")]
+    [InlineData("CommunityHub.Pages.PartyModel")]   // §206: authenticated-only party signup
     public void Organizer_pages_are_not_anonymous(string fullTypeName)
     {
         var type = WebAssembly.GetType(fullTypeName, throwOnError: true)!;

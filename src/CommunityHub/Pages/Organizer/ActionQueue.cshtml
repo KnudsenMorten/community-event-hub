@@ -48,11 +48,17 @@
             <p class="info">@Model.Message</p>
         }
 
+        @* §326bo: the intro used to describe ONLY late hotel/dinner changes, while the
+           queue actually carries webshop-classification gaps, refunded sponsor orders,
+           re-opened onboarding steps and shift reassignments too — so it read as wrong
+           for most of what is listed. Filter by type with the chips below. *@
         <p style="color:#6b7280;font-size:13px;">
-            Late changes participants made to an already-submitted hotel booking
-            or dinner RSVP (within the final stretch before the lock date). Each
-            one likely needs re-confirming with the vendor. Mark it resolved once
-            you have actioned it.
+            Everything that needs a human decision, in one list — late changes to an
+            already-submitted hotel booking or dinner RSVP (which usually need
+            re-confirming with the vendor), webshop products no classification rule
+            matched, refunded or cancelled sponsor orders, re-opened onboarding steps and
+            volunteer shifts needing reassignment. Use the chips to filter by type, and
+            mark an item resolved once you have actioned it.
         </p>
 
         <!-- Type filter chips (open counts) -->
@@ -83,13 +89,19 @@
             </p>
         }
 
-        <form method="post" asp-page-handler="SendStepResets" style="margin-bottom:12px;">
-            <button type="submit">Send onboarding-step-reset reminders now</button>
-            <span style="color:#6b7280;font-size:13px;margin-left:6px;">
-                Emails each person whose wizard step was re-opened, then resolves the item
-                (the nightly job does this automatically).
-            </span>
-        </form>
+        @* §326bo: this button only ever acts on "onboarding step re-opened" items, so it is
+           now hidden unless at least one is OPEN. It used to render always — offering to
+           send reminders on a queue that held none, which is why it read as a stray control. *@
+        @if (Model.HasOpenStepResets)
+        {
+            <form method="post" asp-page-handler="SendStepResets" style="margin-bottom:12px;">
+                <button type="submit">Send onboarding-step-reset reminders now</button>
+                <span style="color:#6b7280;font-size:13px;margin-left:6px;">
+                    Emails each person whose wizard step was re-opened, then resolves the item
+                    (the nightly job does this automatically — this only sends it sooner).
+                </span>
+            </form>
+        }
 
         <h3>Open (@Model.OpenItems.Count)</h3>
         @if (Model.OpenItems.Count == 0)
@@ -103,7 +115,14 @@
                 <div class="aq-item">
                     <div class="aq-body">
                         <span class="aq-type">@r.TypeLabel</span>
-                        <div class="aq-who">@r.Who</div>
+                        @* §326bo: several item types are about a PRODUCT or an ORDER, not a
+                           person (webshop classification, refunded sponsor order), so they
+                           carry no participant. Printing "(unknown participant)" made a
+                           normal item look like broken data — show nothing instead. *@
+                        @if (!string.IsNullOrWhiteSpace(r.Who))
+                        {
+                            <div class="aq-who">@r.Who</div>
+                        }
                         @if (!string.IsNullOrEmpty(r.Email))
                         {
                             <div class="aq-email">@r.Email</div>
@@ -130,7 +149,14 @@
                 <div class="aq-item resolved">
                     <div class="aq-body">
                         <span class="aq-type">@r.TypeLabel</span>
-                        <div class="aq-who">@r.Who</div>
+                        @* §326bo: several item types are about a PRODUCT or an ORDER, not a
+                           person (webshop classification, refunded sponsor order), so they
+                           carry no participant. Printing "(unknown participant)" made a
+                           normal item look like broken data — show nothing instead. *@
+                        @if (!string.IsNullOrWhiteSpace(r.Who))
+                        {
+                            <div class="aq-who">@r.Who</div>
+                        }
                         <div class="aq-summary">@r.Summary</div>
                         <div class="aq-meta">
                             Resolved @(r.ResolvedAt?.ToLocalTime().ToString("ddd d MMM, HH:mm"))

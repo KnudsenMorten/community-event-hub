@@ -105,7 +105,51 @@ public sealed class HotelEmailContentTests
 
         Assert.False(c.IsConfirmed);
         Assert.Null(c.EffectiveConfirmationNumber);
-        Assert.Contains("[NOT CONFIRMED]", c.Subject);
+        Assert.Contains("[PLACEHOLDER]", c.Subject);
         Assert.Contains("your assigned hotel", c.HtmlBody);
+    }
+
+    // §257 — when the automatic invite is NOT attached, the email must not claim an
+    // invitation was added to the inbox, and must carry the manual add-to-calendar block.
+    [Fact]
+    public void No_attached_invite_drops_invitation_wording_and_embeds_add_to_calendar_block()
+    {
+        var c = HotelEmailContentBuilder.Build(
+            eventCode: "ELDK27",
+            fullName: "Ada Fake",
+            checkInDate: CheckIn,
+            checkOutDate: CheckOut,
+            vendorConfirmed: false,
+            vendorConfirmationNumber: null,
+            roomType: null,
+            hotelName: "Central Plaza Hotel",
+            hotelAddress: null,
+            hotelConfirmationNumber: null,
+            inviteAttached: false,
+            addToCalendarHtml: "<p>ADD-TO-CAL-MARKER</p>");
+
+        Assert.DoesNotContain("calendar invitation to your inbox", c.HtmlBody);
+        Assert.Contains("ADD-TO-CAL-MARKER", c.HtmlBody);
+    }
+
+    // §257 — the default (invite attached) path keeps the legacy wording and does NOT
+    // append an add-to-calendar block, so existing behaviour is byte-for-byte preserved.
+    [Fact]
+    public void Attached_invite_keeps_invitation_wording_and_no_add_to_calendar_block()
+    {
+        var c = HotelEmailContentBuilder.Build(
+            eventCode: "ELDK27",
+            fullName: "Ada Fake",
+            checkInDate: CheckIn,
+            checkOutDate: CheckOut,
+            vendorConfirmed: false,
+            vendorConfirmationNumber: null,
+            roomType: null,
+            hotelName: "Central Plaza Hotel",
+            hotelAddress: null,
+            hotelConfirmationNumber: null);
+
+        Assert.Contains("calendar invitation to your inbox", c.HtmlBody);
+        Assert.DoesNotContain("ADD-TO-CAL-MARKER", c.HtmlBody);
     }
 }

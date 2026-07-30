@@ -45,6 +45,18 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- REQUIREMENTS §684.18 - the authored TASK BODIES, so TaskBodyCatalogTests parses and renders
+         the REAL shipped files rather than a fixture that only agrees with itself. That test is what
+         turns an unknown directive, an unresolved placeholder or a body that throws in one of the
+         three renderers into a BUILD FAILURE instead of a live defect on a sponsor's page. -->
+    <None Include="..\..\config\tasks\**\*.md">
+      <Link>config\tasks\%(RecursiveDir)%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>Always</CopyToPublishDirectory>
+    </None>
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\src\CommunityHub.Core\CommunityHub.Core.csproj" />
     <!-- The §23 job-gate tests drive the timer-job Run() methods directly to prove a
          disabled edition makes the job no-op (no integration call). The Jobs project

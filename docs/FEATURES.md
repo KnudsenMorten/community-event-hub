@@ -1,6 +1,8 @@
 # Community Event Hub — Feature Catalog
 
-*Delivered feature set, as of 2026-06-27.*
+*Delivered feature set, as of 2026-06-27. Accuracy pass 2026-07-07 (§224/§234 review): claims that
+described since-retired behavior are annotated inline as "(retired/corrected 2026-07-07: …)" — the
+original text is kept as history, the note states what the hub does today.*
 
 Community Event Hub (CEH) is the all-in-one workspace that runs a tech-community
 conference end to end: one home for your organizers, speakers, volunteers,
@@ -64,9 +66,11 @@ Hosting & Reliability.
   once. No passwords to create, reset or forget. Sensible safeguards are built in
   (rate limiting, lockout after repeated wrong tries, and neutral messaging that
   never reveals whether an email is registered).
-- **"Stay signed in" your way.** At login you choose how long to stay signed in —
-  a day, a week (the default), a month, or until you sign out — and your session
-  refreshes itself as you keep using the hub.
+- **"Stay signed in" — one simple choice.** *(corrected 2026-07-07 — the old
+  day/week/month dropdown was replaced by a single checkbox, operator 2026-06-22.)*
+  At login a **Remember me** checkbox (ticked by default, §170) keeps you signed in
+  for a year on that device; untick it for a short 8-hour session that refreshes as
+  you keep using the hub. See §25 for the full one-tap sign-in model.
 - **Magic-link login.** Invitation emails can carry a tap-to-sign-in link, so crew
   land straight in their hub without typing a PIN.
 - **Never a dead end — gentle sign-in recovery.** ✅ 2026-06-17 — if a tap-to-sign-in
@@ -75,8 +79,10 @@ Hosting & Reliability.
   code"** that takes the person to the email + code sign-in — and, when the expired
   link is recognised, it pre-fills their email and remembers where the link was
   taking them, so they get a fresh code and land on the right page without retyping
-  anything. A deactivated account is told to contact the organizers instead. Fully
-  bilingual (English / Dansk) and mobile-friendly.
+  anything. A deactivated account is told to contact the organizers instead.
+  Mobile-friendly. *(Language note 2026-07-07: the hub is **English-only** by operator
+  directive 2026-06-18 — every "bilingual / English and Danish" claim in this catalog
+  describes the pre-directive state; the Danish UI was retired.)*
 - **Pre-filled login links.** A link of the form `/Login?email=<address>` opens the
   sign-in page with the email already filled in, so a person only has to request their
   code — a small convenience that never bypasses the PIN. It works in every environment
@@ -100,13 +106,20 @@ Hosting & Reliability.
 
 - **A complete crew profile.** Each person has one profile per edition: name,
   contact details, role, accreditation (MVP / Expert / RD / MS Employee), awards,
-  clothing sizes, and status flags like verified and packed.
+  clothing sizes, and status flags like verified and packed. *(corrected 2026-07-07:
+  the "awards", "verified" and "packed" fields do not exist on the participant
+  profile — the profile carries name/contact/role/accreditation/clothing sizes;
+  award PREFERENCES are captured on the swag form, not as profile status flags.)*
 - **Test-data tagging for a clean go-live (2026-06-14).** Any profile can be marked
   as test/dummy data, so when the event goes live the team can remove or deactivate
   all test entries in one step without touching a single real registration.
-- **A tailored hub per role.** Every role — Organizer, Speaker, Masterclass
-  Speaker, Volunteer, Sponsor, Speaker-Sponsor, Video, Photography, VIP, Attendee —
-  sees a hub built around what that person actually needs to do.
+- **A tailored hub per role.** Every role — **Organizer, Speaker, Volunteer, Sponsor,
+  Media (press / photo / video), Event partner, Attendee** — sees a hub built around
+  what that person actually needs to do. *(Corrected 2026-07-07: the earlier list named
+  roles that no longer exist as roles — "Masterclass Speaker" became the
+  `SpeakingPreDay/MainDay` speaker flags, "Speaker-Sponsor" became the multi-hat
+  capability model (✅ 2026-06-22), Video/Photography are covered by Media, and VIP has
+  no hub role.)*
 - **A friendly one-time welcome.** New crew get a welcome page the first time they
   arrive, once per edition.
 - **Activate or deactivate people in a click.** Organizers can filter crew by role
@@ -115,7 +128,7 @@ Hosting & Reliability.
 - **Edit any participant from the grid.** Every row has an obvious **Edit / Modify**
   action that opens the full participant editor — name, email, persona/role, active
   state and sponsor-company link — validated and saved with a confirmation. The
-  lighter "Modify on behalf" stays for quick hotel/swag tweaks. *(✅ 2026-06-15)*
+  "Modify on behalf" was DELETED 2026-07-24 (§303b) — "Switch to user" is the one act-as feature. *(✅ 2026-06-15, revised 2026-07-24)*
 - **Delete a participant safely, with a confirmation prompt.** Every row has a
   **Delete** that opens a confirmation modal first. People with linked data
   (sessions, volunteer tasks, claims, history) are **deactivated** instead of being
@@ -213,6 +226,9 @@ when?" at a glance — built for someone standing at the venue with their phone.
 - **Add it to your own calendar.** Subscribe your shifts to the calendar you
   already use, or download a single shift as a `.ics` — the same private, always-up-
   to-date personal feed used for deadlines, now carrying your volunteer work too.
+  *(retired 2026-07-07: the subscribable per-person calendar feed and the `.ics`
+  downloads were removed (§193/§201) — "add to calendar" actions now EMAIL a proper
+  calendar invite to your inbox instead; see §38.)*
 - **Update your progress.** Move a task along (Open / In progress / Done) without
   leaving the page.
 - **Fully bilingual + accessible.** English and Danish throughout, mobile-first at
@@ -395,6 +411,8 @@ follow-up automatically.
   & Social · Photo · Sessions). The bio is seeded from Sessionize but owned by the
   speaker — anything they change is kept and the nightly Sessionize sync won't
   overwrite it (see §6). Mobile-first, keyboard- and screen-reader-friendly.
+  *(corrected 2026-07-07: the bio editor has FOUR tabs — Bio · Tagline · Links &
+  Social · Photo; there is no Sessions tab (sessions live on the speaker hub).)*
 - **Preferred email for calendar & messages (✅ 2026-06-15).** Many speakers don't
   use the email they registered with on Sessionize for their day-to-day calendar
   and mail. A speaker can set a preferred address on their form ("blank = use your
@@ -468,7 +486,10 @@ follow-up automatically.
   verify bio + photo in the hub (1 Oct 2026), upload a draft preview deck (20 Jan
   2027) and upload the final slide deck (3 Feb 2027) for all speakers, plus a
   Master-Class-only "submit title and abstract" (20 Jun 2026). Reminders count down
-  (14 / 7 / 3 / 1 days) to each fixed date.
+  (14 / 7 / 3 / 1 days) to each fixed date. *(corrected 2026-07-07: the countdown
+  cadence was simplified — the hub sends a SINGLE reminder on the day a task is due
+  (never twice), plus the §232 attendee sign-up cadence: first nudge two weeks after
+  the welcome, then every two weeks until answered.)*
 - **A speaker hub that shows the whole journey at a glance.** Speakers (and
   master-class speakers) get their own page that turns those milestones into one
   cohesive, mobile-first tracker: a progress bar (X of N done), a per-milestone
@@ -476,6 +497,10 @@ follow-up automatically.
   a one-tap "Mark done" / "Reopen", a clear "next up" summary, and a quick link to
   finish their speaker details and travel claim — so a speaker always knows exactly
   where they stand without digging through the generic task list. *(✅ 2026-06-14)*
+  *(retired 2026-07-07: the milestone tracker (progress bar / countdown / "next up"
+  cards) was removed from the speaker hub on 2026-06-24 — it duplicated the task
+  list. The hub now leads with "My Sessions"; deadline work lives on My Tasks, and
+  the readiness rollup is the "Am I ready?" page (/Speaker/Readiness).)*
 
   | Speaker hub | …on a phone |
   |---|---|
@@ -492,14 +517,17 @@ follow-up automatically.
 - **A My Sessions hub — every session as a card with its own actions.** *(✅ 2026-06-21)*
   The speaker's sessions are now laid out as a **per-session grid**, each card carrying
   the actions for that talk: **SoMe Promote** (build a share post), **Calendar Sync**
-  (download the session `.ics`), an **Evaluations** link once results are published, and
+  (download the session `.ics`) *(corrected 2026-07-07: Calendar Sync now EMAILS a
+  calendar invite (§193/§38) rather than downloading a file)*, an **Evaluations** link once results are published, and
   a **Session Template**. A small **per-session action legend** explains what each action
   does, so a speaker manages each talk in place. Mobile-first, in English and Danish.
 - **Bio is now a dedicated bio-only page.** *(✅ 2026-06-21)* A speaker's public bio lives
   on its own focused page, separate from their personal details, so editing the bio is a
   single clear task. The other **speaker details — preferred email, accreditation,
   country, gender and "first-time speaker"** — have moved to **My Profile**, keeping each
-  page about one thing.
+  page about one thing. *(corrected 2026-07-07: since 2026-06-24 those fields live on
+  the **Speaker Details** page (/Speaker/Details), not My Profile — see the "One
+  'Speaker Details' page" entry in §6.)*
 - **Speaking days are derived automatically.** *(✅ 2026-06-21)* A speaker's **speaking
   days** are now worked out from their accepted sessions rather than asked for separately,
   and are shown and managed on the organizer **Speakers** page — so the days a speaker is
@@ -516,7 +544,10 @@ follow-up automatically.
   overall score across all their sessions. Speakers no longer have to wait for an
   organizer to forward the results; they can check the feedback for their own talks
   whenever they like. The comments are anonymous and a speaker only ever sees their
-  own sessions. *(✅ 2026-06-17)*
+  own sessions. *(✅ 2026-06-17)* *(corrected 2026-07-07: final session results are
+  now delivered as the organizer-uploaded per-session **Score / Open-feedback PDFs**
+  (§28/§37), downloaded from the speaker's session cards; the "My session ratings"
+  page (/Speaker/Evaluations) remains for the in-room QR ratings/comments view.)*
 - **Preview your public profile.** From the hub a speaker can preview their public
   speaker page exactly as attendees will see it — the moment the organizers select
   them for the line-up. Until then the hub explains the preview unlocks at
@@ -525,15 +556,24 @@ follow-up automatically.
 - **Speaker deadlines in your own calendar.** Speakers can subscribe their milestone
   deadlines to their personal calendar with one tap (copy link or subscribe), so new
   and moved dates stay in sync automatically — the same trusted per-person calendar
-  feed volunteers already use. *(✅ 2026-06-16)*
+  feed volunteers already use. *(✅ 2026-06-16)* *(retired 2026-07-07: the per-person
+  calendar feed and subscribe/copy buttons were removed (§201); tasks now offer an
+  emailed calendar invite instead (§193/§38).)*
 - **A reminder engine that's gentle and reliable.** Reminders go out on a sensible
   cadence per type — speaker milestones counting down (and a nudge if overdue), a
   weekly digest of what's still pending, weekly sponsor and form chasers, and a
   short series for general tasks. It never double-sends and quietly catches up if a
-  day is missed.
+  day is missed. *(corrected 2026-07-07: the multi-touch cadences (countdowns,
+  weekly digests, chaser series) were simplified to a SINGLE reminder on the day a
+  task is due — never re-sent — plus the §232 attendee sign-up cadence (first nudge
+  two weeks after the welcome, then biweekly until answered). "Never double-sends
+  and catches up quietly" still holds.)*
 - **Tuned entirely through settings.** Whether each reminder type is on, how often
   it goes, exactly what it says, and who receives it (including CC, BCC and
-  escalation) are all configurable — no code changes.
+  escalation) are all configurable — no code changes. *(corrected 2026-07-07: not
+  implemented as described — what exists is the per-edition feature switches (§16)
+  and the editable email templates (§10); per-type cadence, CC/BCC and escalation
+  tuning are NOT settings today.)*
 - **Built to minimize email.** The guiding principle is to nudge only when
   something is actually overdue.
 - **Sync your reminders to your own calendar.** Every speaker, volunteer and
@@ -546,19 +586,27 @@ follow-up automatically.
   "Download .ics" button to drop a single item straight into a calendar. The
   subscribe link is private to each person and an organizer can reset it at any
   time. *(✅ 2026-06-15)* The subscribe link now uses a short, friendly address.
+  *(retired 2026-07-07: the whole subscribable per-person feed — subscribe link,
+  copy button, per-app instructions and the .ics downloads — was removed (§201);
+  "add to calendar" is now an emailed calendar invite per item (§193/§38).)*
 - **The event lands in your calendar the moment you're activated.** When an
   organizer activates a person, their activation email carries a calendar invite
   for the event itself — one tap and the dates are in their calendar, alongside the
-  link to subscribe to their personal deadlines. *(✅ 2026-06-15)*
+  link to subscribe to their personal deadlines. *(✅ 2026-06-15)* *(retired
+  2026-07-07: the activation-email .ics attachment and the subscribe link went with
+  the feed retirement (§201); calendar entries now arrive as per-action emailed
+  invites (§193/§38).)*
 - **Organizers can turn calendar sync on or off.** A simple switch (on by default)
   controls calendar sync for the whole edition — when off, the personal feed and
   the activation invite are disabled and the "Add to my calendar" card is hidden.
-  *(✅ 2026-06-15)*
+  *(✅ 2026-06-15)* *(corrected 2026-07-07: the switch remains, but it now governs the
+  EMAILED calendar invites for the edition — the personal feed and activation invite
+  it used to control were retired (§201).)*
 - **Preview your own calendar feed before you share it.** Right on the calendar
   settings page, an organizer now sees a read-only preview of exactly what their
   personal calendar feed contains — each item with its date and where it happens —
   so they can confirm the feed looks right before passing the subscribe link along.
-  *(✅ 2026-06-18)*
+  *(✅ 2026-06-18)* *(retired 2026-07-07: removed together with the personal feed (§201).)*
 - **Key dates, tailored to each role — and synced to your calendar.** Everyone now
   sees a short table of the dates that actually apply to them: move-in, logistics,
   packing, setup, pre-day/master-class and main day, plus the timed moments on the
@@ -570,13 +618,18 @@ follow-up automatically.
   Organizers manage it all at **Schedule / key dates** (reached from the Logistics
   hub) — add/remove entries, mark them all-day or timed, and tick which roles see
   each one; sensible defaults are seeded automatically. *(✅ 2026-06-20)*
+  *(retired 2026-07-07: the role-tailored key-dates table was retired — the
+  participant-facing list, its per-row "+ calendar" downloads and its place in the
+  personal feed are gone; key dates reach people through the get-started flows,
+  tasks and emailed invites instead.)*
 - **Key dates that open straight in your calendar — and read more clearly.**
   *(✅ 2026-06-24)* Each Key Dates entry now carries **Outlook** and **Google**
   "add to calendar" links that **open the calendar with the event prefilled** (the
   `.ics` stays as an Apple/other fallback), so adding a date is one tap instead of a
   file download. The list is also **grouped by month** with headers and tidier rows on a
   phone, and the calendar **subscribe** link now uses a plain `https` address so more
-  calendar apps accept it.
+  calendar apps accept it. *(retired 2026-07-07: retired together with the key-dates
+  table and the subscribable feed — see the entry above.)*
 - **Anyone can RSVP to the Party — no login.** A public page at **`/Party`** asks for
   name + email and an opt-in to attend the Party (16:00–18:00 on the pre-day). It's
   spam-hardened (honeypot + IP hash), upserts by email (re-submit to change your
@@ -708,7 +761,9 @@ follow-up automatically.
   talk also offers a one-click **"Add to my calendar"** download (`.ics`) so an attendee
   can drop the session straight into Outlook / Google / Apple Calendar from the public page
   — no login, and re-downloading updates the same entry instead of duplicating it.
-  Read-only and mobile-first. *(✅ 2026-06-15)*
+  Read-only and mobile-first. *(✅ 2026-06-15)* *(retired 2026-07-07: the public
+  per-session `.ics` download was removed (§193) — signed-in flows email a proper
+  calendar invite instead; the public page itself remains.)*
 - **A public speaker lineup anyone can browse.** A clean, no-login page at
   **`/Speakers`** introduces this year's speakers — each with their **photo, tagline and
   the session(s) they're presenting** (each session linked to its detail page). Only
@@ -801,6 +856,9 @@ follow-up automatically.
   unguessable per-session token so it can't be guessed) that lands on a clean
   mobile-first page showing the session and its speaker(s) with a single "ask a
   question" form. Great for masterclass logistics or topics attendees want covered.
+  *(corrected 2026-07-07: the anonymous public ask page was removed — asking a
+  question now requires being signed in, so every submission is attributable; the
+  in-hub Q&A boards (speaker Questions, Master Class Q&A) carry the flow.)*
   - **Questions stay inside the hub — never posted publicly.** A submitted question
     goes only to the organizers and the session's speakers. Name and email are
     optional (ask anonymously if you like); only the question text is required.
@@ -826,7 +884,9 @@ follow-up automatically.
 - **Or import from a spreadsheet.** Prefer files? Upload your Sessionize Excel export
   instead and the hub reads the columns in any order, with the same create/update
   rules and skip reporting. No network dependency — just the file. *(Speakers only;
-  the API pull is the path that also brings sessions.)*
+  the API pull is the path that also brings sessions.)* *(retired 2026-07-07: the
+  Sessionize Excel/spreadsheet import was removed — the API pull is the only import
+  path.)*
 - **Imported speakers get welcomed automatically.** New speakers receive their
   welcome email on import, once — sent to their preferred address if they set one.
 - **Re-imports respect a speaker's preferred email.** A speaker's preferred
@@ -843,6 +903,10 @@ follow-up automatically.
   - **Off until you turn it on.** There is no automatic or scheduled push; it runs
     only when an organizer chooses to run it. *(◻ live activation pending — needs your
     Backstage credentials and a selected lineup; built + tested, off by default.)*
+    *(corrected 2026-07-07: "manual only" is no longer accurate — an HOURLY push job
+    runs once the edition's speaker/session sync direction is set to CEH→Zoho (§57/§58);
+    updates to an already-linked record are queued for operator APPROVAL before they
+    push (§59), and the per-speaker "selected for publish" gate still applies.)*
 - **Speakers own their bio — Sessionize just seeds it.** Each speaker's public
   profile (bio, tagline, LinkedIn / X / blog links, photo) is seeded from
   Sessionize but **belongs to the speaker** once they touch it. *(✅ 2026-06-15)*
@@ -905,6 +969,9 @@ follow-up automatically.
   in the normal validation queue (they can't sign in until an organizer activates
   them). Until your Booking endpoint and credentials are connected it honestly
   reports "not configured" rather than inventing participants. *(✅ 2026-06-15)*
+  *(retired 2026-07-07: the Zoho Booking participant sync was retired on 2026-06-27 —
+  Master Class seats are chosen and managed IN the hub (§9); attendees come from the
+  ticket/order sync, not Booking.)*
 - **Speaker emails pulled from Sessionize's secured side-view.** Sessionize keeps
   speaker emails off the public speaker view (privacy) and serves them only through
   a separate, token-protected view. The hub now reads that secured view and matches
@@ -918,7 +985,9 @@ follow-up automatically.
 - **Your own talk lands in your calendar.** Each speaker's accepted session(s) —
   title, room and time — are added to their personal calendar feed automatically, so
   the talk they're giving sits alongside the key dates they need to be there for.
-  *(✅ 2026-06-20)*
+  *(✅ 2026-06-20)* *(retired 2026-07-07: the personal feed was retired (§201); a
+  speaker now uses the per-session "Calendar Sync" action, which emails them the
+  session's calendar invite (§193/§38).)*
 - **One "Speaker Details" page, with a cleaner speaker menu.** *(✅ 2026-06-24)* A
   speaker's name, bio and socials, photo, accreditation/skills, country and contact email
   now live on a single **Speaker Details** page (with **Save** and **Save & Sync to Zoho**),
@@ -1281,7 +1350,9 @@ follow-up automatically.
 - **Scheduled task reminders, per group.** *(✅ 2026-06-15)* The daily deadline reminders now carry the
   person's group, so reminders to volunteers, speakers, media crew, sponsors and organizers are tracked
   per persona in the log. As before, reminders fire at 14 / 7 / 3 / 1 days before a deadline and are never
-  sent twice.
+  sent twice. *(corrected 2026-07-07: the countdown was simplified — a task now gets a
+  SINGLE reminder on its due day (still never twice); the §232 attendee sign-up nudges
+  run on their own welcome-anchored biweekly cadence.)*
 - **"Complete this step" emails when a step is re-opened.** *(✅ 2026-06-15)* When an organizer re-opens
   someone's onboarding step, the hub emails that person a friendly note pointing them straight at the
   wizard to finish it — automatically on the nightly run, or instantly via a **"send now"** button on the
@@ -1436,6 +1507,20 @@ follow-up automatically.
   anything and is **not** an event check-in tool (that lives in your ticketing system).
   Mobile-first, English / Danish, and screen-reader friendly (captioned tables,
   labelled download buttons).
+- **Dinner run-sheet & the catering dietary roll-up — what the kitchen actually needs.**
+  *(✅ 2026-07-25)*
+  Two more lists on the same **Exports & run-sheets** page, both as CSV and Excel. The
+  **Appreciation Dinner run-sheet** turns the dinner into a real order: the seat total
+  (confirmed people **plus their guests**), then a row per confirmed guest with their
+  role, how many they bring, their diet and their allergens. The **catering dietary
+  roll-up** is the sheet you hand the kitchen — how many people need each diet and each
+  allergen avoided, per occasion, plus how many free-text notes a human still has to
+  read. Allergy information your guests give you now reaches the people cooking, instead
+  of only sitting in the form they filled in.
+  Both count **active people who actually said yes** — someone who withdrew, or who
+  declined the dinner, never inflates a food order — and the roll-up always reconciles
+  with the run-sheet, so the numbers you order against and the names you seat can never
+  disagree.
 - **A live dashboard.** See form completion, participants by role, tasks and
   overdues, sponsor completion, attendee mismatches and volunteer coverage at a
   glance, with live pipeline cards for leads and event prep.
@@ -1608,6 +1693,20 @@ follow-up automatically.
 - **Scheduled jobs that just work.** Background jobs handle reminders, order pulls,
   attendee reconciliation, portal sync, sponsor-lead delivery and upload-change
   watching on their own schedules, each individually switchable.
+- **Set how often a job runs — yourself, with no release.** *(2026-07-28)* The jobs page has a
+  **Runs every** box: type a number of minutes, press Set, and the new frequency applies from the
+  next check. Jobs tied to a **time of day** ("every morning at 07:20") instead read *fixed time*,
+  with no box — an input that cannot work is worse than none. The Schedule column states each job's
+  real cadence, so what you read and what you set are always the same number.
+- **The settings page tells you when a release will not take effect.** *(2026-07-28)* Email
+  audience is always the **narrower** of a feature's own release ring and the outbound-email master
+  switch. Release a feature more broadly than the master and the page now says so, naming the ring
+  that actually applies — instead of displaying an audience that would never receive anything.
+- **Welcome emails have their own safety ceiling.** *(2026-07-28)* Every welcome — speaker, sponsor,
+  volunteer, media, event partner — is held to a dedicated release cap that starts at the internal
+  test audience and is raised deliberately, in phases. It sits *underneath* the on-screen switch, so
+  widening a setting by mistake cannot release a welcome to everyone. Re-sending a welcome by hand
+  obeys exactly the same limits as the automatic send.
 - **Scripted, safe deploys with rollback.** Releases build a versioned artifact,
   deploy, and health-check; a one-command rollback is always available.
 - **Zero-downtime production releases.** Production deploys go to a staging slot,
@@ -1627,7 +1726,10 @@ follow-up automatically.
   or dashboards.
 - **A safe public-mirror workflow.** Publishing to the public template runs through a
   controlled, allow-listed process with a dry-run pre-flight, so only intended
-  content is ever made public.
+  content is ever made public. *(corrected 2026-07-07: the mirror filter is
+  DENYLIST-based — everything is published EXCEPT the excluded paths (internal docs,
+  per-edition config, secrets patterns) — not an allowlist; the dry-run pre-flight
+  stands.)*
 - **Strong delivery governance.** Protected branches, required reviews, automated
   checks that scan for secrets, and a consistent commit convention keep the codebase
   clean and safe.
@@ -1702,6 +1804,9 @@ only (no database or data-model change).
       home, the Speaker hub and the Volunteer schedule) now copies the link and briefly confirms
       **"Copied!"** on the button — announced to screen readers — instead of silently doing nothing.
       (This unifies three slightly different copy buttons onto one shared behaviour.)
+      *(retired 2026-07-07: those subscribable-calendar cards were removed with the
+      personal feed (§201); the shared "Copied!" behaviour lives on in the remaining
+      copy buttons, e.g. the survey and leads links.)*
     - **Live character counters.** Long free-text fields show a live **"used / limit"** counter as
       you type — turning amber as you approach the cap — so you are never surprised by a hard limit.
       It is on the public **ask-a-question** and **rate-this-session** boxes, the **volunteer
@@ -1714,7 +1819,14 @@ only (no database or data-model change).
     All four are progressive enhancements (everything still works with JavaScript off), mobile-first
     (~360px), and bilingual (English + Danish).
 
-## 14. Bilingual UI — English and Danish *(✅ 2026-06-15)*
+## 14. Bilingual UI — English and Danish *(✅ 2026-06-15)* *(retired 2026-07-07)*
+
+> **Retired 2026-07-07:** the hub is **English-only** by operator directive
+> **2026-06-18** — the language switcher, the Danish translations
+> (`SharedResource.da-DK.resx`) and the browser-language fallback were removed.
+> This whole section (and every "English and Danish" / "bilingual" claim elsewhere
+> in this catalog) describes the pre-directive state; the resource-key architecture
+> it built remains and still serves the English strings.
 
 The participant-facing pages can now be shown in **English (default) or Danish**.
 The work is markup + resource files only — **no database or data-model change**.
@@ -1887,7 +1999,11 @@ time, test each, and never have a new release spring a surprise on a live event.
   **"Attendee welcome & auto sign-in"**, enables **attendee auto-provisioning** plus a
   **one-click magic-link welcome** when a 2-day ticket is synced — so a new attendee can be
   set up and signed in from a single link. It ships **switched off** and only runs once an
-  organizer turns it on.
+  organizer turns it on. *(corrected 2026-07-07: the dedicated "attendee-welcome"
+  flag was removed on 2026-06-23 — attendee welcomes (§34/§217) are now gated by the
+  shared **welcome-email** feature (plus **magic-link** for the sign-in link) and
+  released ring-by-ring like all user-impact email; there is no separate attendee
+  switch on the Feature settings page.)*
 - **Disabled features stay visible.** A turned-off capability is never hidden — it stays on the page,
   **dimmed with a small "Disabled" label**, so you always know it exists and can turn it on later.
 - **Switches that really take effect everywhere.** Turning a capability off makes it genuinely inert:
@@ -1920,7 +2036,10 @@ record is never lost and a contact's address is never accidentally locked out.
 - **Booth sponsors become exhibitors automatically.** The moment a sponsor with a booth package is
   picked up from the webshop, the hub **creates the matching exhibitor** in your booth platform
   (not just a request that waits for a human). A sponsor who buys a booth simply appears as an
-  exhibitor, with no manual step.
+  exhibitor, with no manual step. *(corrected 2026-07-07: auto-creation happens only
+  when the booth-platform write credential is configured — otherwise the run records
+  a **"would create"** outcome and emails the event coordinator to create the
+  exhibitor by hand, so "no manual step" holds only in the fully-connected setup.)*
 - **Booth category and slot filled in for you.** Each new exhibitor is created with the right
   **booth category** for its tier and its **booth slot** (e.g. `E-26`) read from the order — and an
   existing exhibitor is updated in place when the slot is assigned later, never re-created.
@@ -2053,6 +2172,11 @@ the live agenda, automatic notice when a session moves, and one-click sharing.
   (the `agenda.READ` scope) — until then it safely no-ops rather than guessing. The **broad rings
   (ring 2/3) are auto-enabled by date — 1 Dec 2026 by default** (an organizer can override the date),
   while **ring 0/1 are unrestricted for testing** and receive alerts immediately.
+  *(corrected 2026-07-07: a detected change is no longer emailed inline — it is
+  **queued for operator approval** and the speaker is emailed when the change is
+  APPROVED (§59, with the sender still ring-gating each recipient). The separate
+  "1 Dec 2026 broad-rings" date gate became dead code under that model and was
+  retired (§234) — there is no date-based auto-enable.)*
 - **A tidier profile and task list.** "My Hub Profile" drops duplicated email fields and surfaces the
   read-only sign-in email and role up top; redundant speaker tasks are removed; each remaining task
   gets an **"Add reminder to calendar"** button; and the wizard marks a step done from saved data.
@@ -2148,7 +2272,10 @@ notification only when an organizer actually commits.
 - **Safe by design.** The link only establishes a normal sign-in (it never bypasses any in-app check),
   is stored only as a one-way hash, records when it was last used, and can be **revoked or rotated**
   per person from the organizer's sign-in-links page. A stale or revoked link simply lands on the normal
-  sign-in page — never an error (§169).
+  sign-in page — never an error (§169). *(corrected 2026-07-07: not "hash only" — the
+  lookup key is a one-way hash, but a **reversible, DataProtection-ENCRYPTED copy of
+  the token is also stored** so the same personal link can be re-embedded in later
+  emails; revoke/rotate invalidates both.)*
 - **"Remember me" is on by default.** On your own phone or laptop you stay signed in between visits;
   the choice is still yours to uncheck, and Sign-out is always one tap away for shared devices (§170).
 
@@ -2193,3 +2320,442 @@ notification only when an organizer actually commits.
 - **Score on speed and accuracy, climb the leaderboard.** A correct answer earns more the faster it's
   given; each topic has a **leaderboard** showing the top players and **your own rank**, with the top five
   in line for a prize. Organizers can edit or add questions, and a ready-made starter set ships in the box (§171).
+
+## 31. Share a single session -- with its graphic in the post *(✅ 2026-06-30)*
+
+- **Every session has its own share button.** From the speaker Help-Promote page, each session and
+  master class gets its own tailored LinkedIn / X share, so the post is about THAT talk -- not one
+  generic message for everything (§172).
+- **The graphic shows up in the post.** Each public session page now carries proper social preview
+  tags (title, description and image), and the session's released promo graphic is served from a
+  public, no-login endpoint so LinkedIn and X can fetch it -- so the shared link previews the artwork.
+  If a session has no graphic yet, a sensible default event image is used, so a picture always appears
+  (§172/§196).
+
+## 32. Get-started and your task list, finally in step *(✅ 2026-06-30)*
+
+- **Every get-started step is a real task, for every role.** The steps in the guided get-started wizard
+  and the items on your My-Tasks list are now the same set -- Signal groups, party sign-up, speaker
+  details, help-promote, code of conduct and the rest each appear in both places, with matching wording,
+  and ticking one updates the other. Finished steps show up under Completed instead of quietly vanishing
+  (§173).
+
+## 33. A clearer party sign-up *(✅ 2026-06-30)*
+
+- **An explicit yes or no -- nothing assumed.** The party sign-up asks you to actively choose Yes or No
+  (no default is pre-selected), and clearly states the date, time and location before you answer. Say Yes
+  and you can send yourself a calendar invite for the evening in one tap (§206).
+- **Signed-in and simple.** Sign-up is for signed-in people only -- your name and email come from your
+  profile, there is a friendly link back to the hub afterwards, and it lives under Event logistics for
+  crew while attendees keep a direct "Party Sign-up" in their main menu. Change your answer any time
+  (§173/§177/§206).
+
+## 34. A warm welcome for every attendee *(✅ 2026-06-30)*
+
+- **Two-day and one-day attendees each get their own welcome.** Two-day attendees receive a welcome that
+  covers both their master-class selection and the party; one-day attendees -- who used to get nothing --
+  now get a welcome of their own with the party sign-up. Both open onto a get-started wizard in the main
+  menu that walks them through their sign-ups and lets them edit any choice later (§207/§208/§215).
+- **A gentle nudge until you've answered.** If an attendee hasn't finished their sign-ups, the hub sends
+  a friendly reminder every couple of weeks and stops the moment everything's answered (§207/§208).
+
+## 35. Tickets that keep themselves tidy *(✅ 2026-06-30)*
+
+- **Hand your ticket to someone else and it just works.** When a two-day ticket is reassigned, the
+  master-class seat travels to the new holder (who is asked to confirm or change it), while the previous
+  holder's party answer is cleared so the new person makes their own choice (§209).
+- **Cancel and everything is released cleanly.** Cancelling frees the master-class seat for the next
+  person on the waitlist and resets the party sign-up -- for one-day and two-day tickets alike (§209).
+- **Access follows your ticket.** If you no longer hold an active ticket your hub sign-in pauses, and the
+  moment you buy again it is restored on the very same account -- no duplicates, nothing to set up twice
+  (§216).
+
+## 36. A calmer master-class morning *(✅ 2026-06-30)*
+
+- **The confirmation invite helps everyone arrive in good time.** The master-class seat confirmation now
+  says doors and breakfast open early, blocks the morning in your calendar so you plan to arrive ahead of
+  the start, and points you to the invite for the details -- all to spread out the morning check-in for a
+  large crowd (§210).
+
+## 37. Session evaluations -- score and open feedback, delivered to speakers *(✅ 2026-06-30)*
+
+- **Two files per session, cleanly separated.** Organizers can upload both a score summary and an
+  open-feedback document for each session, each shown with who uploaded it and when. Speakers see their
+  own results as clearly-labelled links -- and the open-feedback link only appears when there is open
+  feedback to read (§192).
+
+## 38. Calendar invites, straight to your inbox *(✅ 2026-06-30)*
+
+- **No more fiddly download files -- we email you the invite.** Every "add to calendar" action now sends
+  a proper calendar invitation to your inbox that you accept in one tap, honouring your preferred calendar
+  address. It covers tasks, the volunteer schedule, sponsor reminders, your sessions and the master-class
+  confirmation -- so it lands in your calendar the way meeting invites always do (§193).
+
+## 39. Sponsor logistics that name your company *(✅ 2026-06-30)*
+
+- **Your real company name, everywhere it matters.** Sponsor shipping and bag-marking instructions now
+  show your actual public company name instead of a placeholder, and the freight block spells out exactly
+  how to mark every box -- event code, booth number and company -- so materials arrive at the right stand
+  (§174).
+
+## 40. A heads-up before you leave the hub *(✅ 2026-06-30)*
+
+- **A friendly confirm before an external system.** Links that hand you off to the event system or the
+  sponsor webshop now show a short heads-up first -- explaining you will need to sign in there and how --
+  so nobody is surprised by an unfamiliar login screen (§175/§176).
+
+## 41. A simpler lunch sign-up *(✅ 2026-06-30)*
+
+- **One consistent way to choose your lunches.** The volunteer lunch form uses the same tick-to-select
+  style for every day, labels the Sunday correctly as a packing day, and gently disables a lunch on a day
+  you are not on site -- so your meal choices always match your availability (§178).
+
+## 42. Survey results you can actually read *(✅ 2026-06-30)*
+
+- **A cleaner, self-navigating results page.** The audience survey results now open with quick links to
+  jump to each track, drop the internal step labels, lead with the most useful sections, and turn the long
+  share URLs into tidy named links -- with the header text properly centred on phone and desktop
+  (§183/§184).
+
+## 43. A cleaner people list for organizers *(✅ 2026-06-30)*
+
+- **Less clutter, clearer signals.** The organizer people grid drops the email column (which pushed the
+  actions off-screen), trims the ring to a simple number, and adds at-a-glance flags -- a "Test" badge for
+  the internal ring and a "Design" badge for the preview ring -- so the whole row fits and reads at a
+  glance. Email is still searchable behind the scenes and still included in exports (§185/§186).
+
+## 44. Every event email, consistently tagged and gently paced *(✅ 2026-06-30)*
+
+- **The event tag, exactly once, at the end.** Every outgoing email is guaranteed to carry the
+  "[ELDK27]" tag once, as a postfix, no matter which message it is -- handled in one place so it can never
+  be missed or doubled (§180).
+- **A controlled, safe rollout of attendee mail.** Attendee welcome emails are released ring-by-ring, so
+  the operator opens them to a small internal group first and widens to everyone only when ready (§217).
+- **Bulk sends that stay within limits.** Large mailings are paced with a small gap between messages and
+  automatically retried on a temporary hiccup, so a big send goes out smoothly and no recipient is quietly
+  dropped (§219).
+
+## 45. Every master-class seat counted exactly once *(✅ 2026-06-30)*
+
+- **No oversold classes, even under a rush.** Seat allocation was reworked so that when many people book
+  the same master class at once, the last seat is granted to exactly one person and everyone after is
+  waitlisted -- verified correct on the production database with hundreds, then a thousand, booking at the
+  same instant, with zero oversell (§218/§222).
+
+## 46. One-tap sign-in that genuinely signs you in *(✅ 2026-06-30)*
+
+- **Click the email button, land signed in.** The one-tap sign-in links in emails were hardened so a
+  signed-out recipient who clicks a hub button is signed in and taken to the right page -- not bounced to
+  a login screen -- with a safe fall-back to normal sign-in if a link is ever stale (§190).
+- **Buttons you can actually read.** Email buttons now use high-contrast, bulletproof styling that stays
+  legible in light and dark themes on both desktop and mobile (§191).
+
+## 47. Nothing waiting slips through *(✅ 2026-06-30)*
+
+- **Organizers get told when something needs them.** When there are people in an approval queue, new
+  speakers synced in for review, or volunteers to approve, the hub emails the organizers with direct links
+  to the right queue -- batched so it is a helpful heads-up, not noise (§203).
+- **Speakers without an email still show up.** Speakers pulled in before they have accepted their invite
+  (so they have no email yet) are now brought into the pre-selection queue, clearly flagged as pending, so
+  organizers can see and act on them and they merge cleanly once their email arrives (§204).
+
+## 48. Welcome emails that point at your first step *(✅ 2026-07-07)*
+
+- **Every welcome letter now sends you straight to Get Started.** All role welcomes (speaker, volunteer,
+  sponsor, media, event partner, attendee) explicitly ask you to **complete the tasks in the Get Started
+  flow** and carry a one-tap button that signs you in and lands you ON your role's wizard (§226, via the
+  §169 magic link).
+- **A party invitation that speaks your language.** The party sign-up page opens with copy written for
+  YOUR role — attendee, sponsor, speaker, volunteer, event partner, media or organizer — telling you why
+  the pre-day party (9 Feb 2027, 16:00–18:30, expo/food area) is worth staying for (§227).
+
+## 49. One party reservation for your whole sponsor team *(✅ 2026-07-07)*
+
+- **Register the group in one go.** A sponsor contact signs their whole team up for the party with a single
+  group reservation and head count — nobody else on the team needs to sign up separately (§228).
+- **Everyone linked to the company sees it.** Every contact of the sponsor company sees who registered the
+  group, how many are coming and when — and can update the same single reservation. The party task
+  completes for the whole team and the reminder nudges stop company-wide.
+- **Booth check-in, planned ahead.** A new sponsor Get-Started step asks when your team expects to arrive
+  at the booth on the pre-day (7:30–9:00 / 9:00–10:30 / 10:30–12:00 / 12:00–15:00 — or "we don't expect to
+  participate"), shared with the whole team and visible to organizers (§229).
+
+## 50. Tickets, sync and email cadence — tightened *(✅ 2026-07-07)*
+
+- **Hand your ticket over and the hub follows.** When a ticket is renamed to someone else, the previous
+  holder's sign-in (and their one-tap email links) stop working immediately, and the new holder gets their
+  own welcome with their own personal link (§230).
+- **Fresher attendee data.** The ticket/order sync now runs every 10 minutes instead of hourly (§231).
+- **A calmer inbox.** The welcome IS the first nudge: sign-up reminders now wait a full two weeks after
+  your welcome before the first one arrives, then repeat every two weeks until you've answered (§232).
+- **Order bursts can't flood the integration.** Webhook bursts (e.g. five orders in two minutes) are
+  queued and coalesced into at most ONE data pull per minute — every order still reconciles, the
+  ticket platform's API is never hammered (§233).
+
+## 51. Lifecycle truth — drop-outs stop costing money *(✅ 2026-07-07/08)*
+
+- **One switch, everything follows.** Deactivating anyone — grid toggle, Delete, bulk action or inline
+  edit — now runs ONE cascade: their party RSVP is cancelled, their hotel room-block claim is released,
+  their open tasks close (so reminder emails stop), their volunteer shifts are vacated, and an audit
+  entry records exactly what was touched (§253 G1).
+- **Vendor numbers you can order from.** Every headcount, roster and export — hotel room blocks and
+  confirmed-invite lists, the caterer's lunch run-sheet, the polo/jacket order sheets, dinner plus-ones,
+  party food counts, the volunteer rota and the on-site attendee list — counts ACTIVE people only. A
+  drop-out can no longer inflate what you order or pay for (§253 G2–G6, G13).
+- **Vacated shifts propose their own cover.** When a volunteer is deactivated, backfill candidates are
+  seeded straight into your allocation queue as draft proposals — you review and commit, nothing is
+  auto-assigned — and coverage math counts only active, non-declined helpers (§253 G7).
+- **Sponsor exits that stick.** A contact you deactivate STAYS deactivated (the 15-minute webshop sync
+  respects your decision), a whole company can be withdrawn in one click (public logo hidden, group
+  party reservation cancelled, contacts deactivated — external records untouched), and a refunded or
+  cancelled webshop order now lands in your action queue instead of passing silently (§253 G8).
+- **No prompts to the wrong people.** Reminder mails skip deactivated participants end-to-end (with a
+  transport-level backstop), a sponsor-funded speaker never gets the travel-reimbursement task, a role
+  change prunes the old role's tasks and seeds the new one's, and an entitlement override that removes
+  a wizard step also removes its lingering task (§253 G9–G11, G17).
+- **Coming back is honest too.** Re-activating someone restores nothing silently: the hub tells you
+  which dormant dinner/lunch/swag signups just rejoined the counts (and whether a Master-Class seat was
+  still held), so you can re-verify the vendor numbers. A cancelled attendee who re-buys a ticket is
+  re-invited and re-asked instead of being stuck in their cancelled-era answers (§253 G16 + 2026-07-08).
+- **Deep-dive automation audit closed out.** The §252 truth audit (timer cadences, retired-but-alive
+  code, feature-flag honesty) fixed its 8 findings the same day: the whole Master-Class email funnel
+  rides ONE release ring, two do-nothing Settings toggles were removed or wired for real, and two
+  retired jobs can never fire unattended again (§252 F1–F8).
+
+## 52. Sync direction, order-driven sponsor tasks and funded counts — now documented *(✅ 2026-07-23)*
+
+Three capabilities that have been shipping for a while are now part of the catalog:
+
+- **You choose the sync direction — per edition, sessions and speakers separately.** An organizer
+  page (**Setup → Session source**) sets how the schedule flows between the call-for-speakers
+  system (Sessionize), the hub and the public event site (Zoho Backstage), in three stages:
+  **stage 1** — the call-for-speakers system is the source and the hub imports from it (the
+  default); **stage 2** — the hub pushes to the public event site; **stage 3** — changes made in
+  the public event site (for example a room or time change) are detected and **applied
+  automatically** (the public event site is the source of truth at this stage), with every applied
+  change kept in the sync queue as an audit record and the affected speakers notified. Sessions and speakers
+  each have their **own independent stage**, so you can run them at different maturity levels.
+  (Stage 1 and stage 3 for sessions are live today; stage 2 records your choice and is being
+  built out.)
+- **Sponsor tasks come from what the company actually bought.** Webshop orders are pulled in on a
+  schedule, and every order line is classified by its product category using **configurable
+  rules — not code** — so a webshop restructure is a configuration change. The classification
+  decides the company's booth tier, whether booth steps appear at all, and exactly which
+  deliverable tasks are generated (deduplicated, with deadlines). Buying a mix of sponsor and
+  exhibitor products yields the **union** of everything that applies, and a company's tier only
+  ever moves **up**, never silently down.
+- **Funded counts for ordering stock.** The swag export and headcount views don't just list
+  preferences — they compute what the event actually funds: a speaker who presents on both days is
+  counted for **two polos and two hotel nights**, a main-day-only speaker for one of each, and
+  sponsor-funded speakers for none. Organizers see the totals per size and role, ready for the
+  vendor order. (Refined by the speaker categories in §54: counts now follow the category + the
+  days derived from linked sessions.)
+
+## 53. Safer sponsor orders, gated 1-day access and test sessions *(✅ 2026-07-23)*
+
+- **A bought speaking session now unlocks its wizard step.** When a sponsor's webshop order
+  includes a speaking-session product, the hub now reliably flags the company so the extra
+  Get-Started step — register your session title, abstract and speakers — appears, even when the
+  company bought no booth. (Previously the step could fail to appear.)
+- **Unknown webshop products can't slip through silently.** An order line that matches no
+  classification rule now lands in the organizer **action queue** ("Webshop category not
+  recognized") with the company and product named — so a webshop restructure or a new product can
+  never quietly mean a sponsor missing their tasks.
+- **1-day ticket holders are gated at sign-in.** The hub is built for 2-day ticket holders; a
+  1-day holder signing in now sees a clear message instead of a half-empty hub, and 1-day holders
+  receive no hub tasks. The gate holds server-side too — including for previously issued sign-in
+  links — and rides the standard release-ring mechanism, so access could be widened deliberately
+  later if the event ever wants 1-day holders in the hub.
+- **Booth members require a booth.** A contact at a digital-only (no-booth) sponsor can no longer
+  be marked as a booth member — the assignment is refused with an explanation, keeping booth
+  counts and pre-day catering honest.
+- **Test sessions that can never leak.** Organizers can mark a session as a **TEST session**: it
+  never appears on the public programme or its ask/rate pages, and it is never pushed to the
+  public event site's agenda — in any environment — while remaining available to the test rings
+  inside the hub.
+
+## 54. Speaker categories — Community, Sponsor, Guest *(✅ 2026-07-23)*
+
+Every speaker now carries one clear, organizer-set **category** that answers the money questions
+in one place — who funds them, what they're entitled to, and which tasks they get:
+
+- **Three categories, one rule each.** A **Community** speaker is funded by the event: polo, swag,
+  award, hotel, travel reimbursement, appreciation dinner and lunches. A **Sponsor** speaker is
+  brought and paid for by a sponsor: they join the dinner and lunches, nothing more — and they get
+  **no presentation-upload deadlines** (their session content is the sponsor's business). A
+  **Guest** speaker is hired by the event on individual terms: **identical to Community except the
+  travel-reimbursement option never appears** — their travel is settled individually, so the hub
+  never asks them to claim it.
+- **Presenting days come from the schedule, not a checkbox.** Which days a speaker presents is now
+  **derived from their linked sessions** — a master class or a session scheduled on the pre-day
+  counts as pre-day, everything else as the main day. That single truth drives the polo count
+  (**one polo per distinct presenting day**: both days = 2, one day = 1, no sessions yet = 0) and a
+  Community speaker's **funded hotel nights** (same rule). No more manually maintained day flags
+  drifting out of sync with the agenda.
+- **Guest hotel nights are entered, not guessed.** A guest's agreement covers all the nights they
+  need, which no schedule can compute — so the organizer enters the funded night count directly on
+  the speaker review page, and the hotel view shows it.
+- **Uncategorized speakers can't slip into the numbers.** A freshly imported speaker starts
+  **uncategorized** and is clearly badged as such: they count for **nothing** — no polos, no hotel
+  nights, no entitlements — and they **cannot be activated** until an organizer picks their
+  category. New speakers from the call-for-speakers import now land in the pre-selection queue for
+  exactly that review, so every activated speaker is a classified speaker and every count is
+  trustworthy. (Sponsor-session speakers registered through the sponsor wizard are auto-classified
+  as Sponsor and flow straight through, as before.)
+
+## 55. Rooms, lengths and levels — configured, validated, flexible *(✅ 2026-07-23)*
+
+Session logistics now come from per-edition **configuration** instead of hardcoded lists — so next
+year's rooms, formats and levels are a data change, not a code change:
+
+- **A room registry that guards the names.** The edition's rooms live in configuration: venue rooms
+  with their floor and seat capacity (the pre-day master-class set is its own list — the same
+  physical room can hold a different number of people per day), plus the expo locations (expert
+  tables and the expo stage) which deliberately have **no capacity at all**. Room names must match
+  **byte-for-byte** across the call-for-speakers system, the hub and the public event site, and the
+  hub now watches for drift everywhere — the schedule import warns about any room it doesn't
+  recognize, the organizer sessions grid badges the row and offers the registered names as
+  type-ahead suggestions (free text still allowed), and the agenda push logs a warning. Nothing is
+  ever blocked on a room name: the checks warn, a human decides.
+- **Any session length, in minutes.** A session's length is now a plain **number of minutes**: the
+  forms offer the edition's quick-picks (15, 20, 30, 40, 45, 50, 60 and the 420-minute full-day
+  master class — all configuration), but any custom length up to the configured maximum is
+  accepted, so a 37-minute format never needs a code change again. The public programme filters by
+  the same configured picks.
+- **Levels sort by difficulty, not the alphabet.** Audience levels (Advanced 300, Expert 400, Black
+  Belt 500 — configuration; other communities use 100/200 levels) now carry their **numeric code**,
+  and every level list sorts by it — so Black Belt correctly comes after Expert instead of before
+  it. Session **tags** from the call-for-speakers system also flow through and show as chips on the
+  public session page.
+- **A manually set date stays set.** When an organizer edits a session's schedule — or adds a hub
+  session and picks its day (the add form now asks: pre-day or main day, stamping the chosen date
+  at 09:00) — the session is marked as manually scheduled, and the recurring import **keeps the
+  organizer's date** instead of silently reverting it, exactly like the existing manual type
+  override.
+
+## 56. Every hub-made change on the public event site is flagged for the operator *(✅ 2026-07-23)*
+
+- **No silent writes to the public event site.** Every change the hub makes in the public event
+  site's backend — a created or updated agenda session, a created speaker, a created sponsor or
+  exhibitor, an assigned booth, added or removed booth members, an updated exhibitor profile — now
+  sends **one batched notification per run** to the event mailbox, so it can
+  be **published or pruned**: API writes are never auto-published, and the operator must manually
+  publish the change and/or delete any now-redundant item in the backend UI. The mail says exactly
+  what was written (one human-readable line per change) and links to the admin. It is ops-only
+  (ring-exempt, like the engine alerts — participant mail stays ring-governed), **unthrottled** so
+  no real change batch is ever swallowed, and silent when a run wrote nothing.
+- **Agenda pushes now carry the room and the speakers — and create missing rooms.** A session the
+  hub creates on the public event site's agenda now arrives complete: its hall (room) and its
+  speaker line-up are attached on create, and when the hall doesn't exist on the site yet the hub
+  creates it automatically with the registered capacity — the created hall is listed in the same
+  operator notification as the session, so nothing needs a second manual pass. The **full agenda
+  push** (not just the one-off pilot) now ships these same complete sessions — a shared new track
+  or room is created once and reused across the whole run — and it **never includes a session
+  marked as test-only**. The **speaker push** likewise only sends **approved speakers** (active,
+  fully activated, categorized) who are inside the speaker-sync feature's released ring (ring 1
+  today), so switching the sync direction to "hub pushes to the event site" cannot leak drafts or
+  test data to the public site.
+
+## 57. The introduction page only lists features this event actually has *(✅ 2026-07-26)*
+
+- **No more advertising a switched-off capability.** The "Introduction to the Community Event Hub"
+  page — and its public, sign-in-free copy — includes a full **features-per-role** breakdown. Those
+  tables are now tied to the event's own feature switches: a capability the organizers have turned
+  off for this edition **disappears from the list** instead of promising something nobody can find
+  in the menu. Turn it back on and the entry returns, with no content edit.
+- **Written once, correct in both places.** The in-hub page and the public copy render the same
+  source, so the version strangers read can never drift from the version participants read. Rows
+  are removed from the text before the page is built, not hidden with styling — what is not for
+  this edition genuinely is not on the page.
+
+## 58. Session graphics: told the moment they're ready, shared as a real picture *(✅ 2026-07-27)*
+
+- **Speakers hear about a graphic when it becomes usable — not the next morning.** The "your
+  session graphics are ready" email, with its **Open Help Promote** button, now goes out **the
+  moment the graphic is released to them**: when an organizer clicks **Release**, and when the
+  quarter-hourly SharePoint pull picks up a newly-uploaded file (which releases it in the same
+  run). Drop a finished graphic in the shared folder and the speaker is told within minutes; the
+  organizer's own screen confirms it — *"Graphic released to the speaker — and they have been
+  emailed a Help Promote link."*
+- **Still exactly one email per speaker.** All the ways a graphic can be released share one
+  "already told them" record, so a batch of releases is not a batch of emails, and nobody who was
+  already notified is notified again. A nightly catch-up pass remains as a safety net for anything
+  the live path missed — it never repeats a message that was already delivered.
+- **Post your session graphic as a real, full-width picture.** On **Help Promote**, the first
+  button is now **Post with the picture**: one click downloads the graphic, copies your post text,
+  and opens an empty LinkedIn composer — then tells you the two steps only you can do (attach the
+  image, paste the text). Attaching the file is what makes LinkedIn show the graphic full-width
+  instead of shrinking it into a small link thumbnail.
+- **The quick route is still there, and honestly labelled.** **Share as a link card** is the old
+  one-click share; the page now says plainly what each button gives you, so the choice is
+  informed rather than a surprise after posting. Publishing to the **event's** LinkedIn page has
+  always uploaded the picture natively — no attaching needed there.
+- **Two answers to "is this my session?" can no longer disagree.** Uploading a deck and the
+  session list a speaker sees are now driven by a single shared rule, so a session can never be
+  uploadable while the page says it isn't linked to you.
+- **A confirmation message never follows you into someone else's view.** Pending status messages
+  are cleared when the signed-in person changes, so a success notice from one account can't appear
+  on another account's page and read as a contradiction.
+
+## 59. Your tasks now do the work in the task *(✅ 2026-07-29)*
+
+**Upload where you're asked.** A task that needs a file now takes the file **in the task itself** —
+no jumping to another page to find the right upload box. Every upload is versioned automatically, so
+sending a newer version is safe: nothing is overwritten by accident and the organizers are told each
+time.
+
+**Tasks that know whether they're actually done.** A task backed by a file completes itself **when
+the file arrives**, and there's no "mark complete" button to tick on its behalf. If the file is
+later removed, the task honestly reopens and the reminders resume — so "done" always means the
+organizers really have what they asked for. Tasks with nothing to verify (reading a document,
+sharing a post on social media) keep a simple acknowledgement, which is the honest option there.
+
+**Clearer wording.** Task descriptions are properly formatted — headings, bullets, **bold** for the
+things that matter (file formats, size limits, deadlines) and *italics* for emphasis — instead of one
+long block of text. Each task states what's needed, in what format, and what happens next. Speaker
+deadlines now spell out the accepted formats and size limit, and say plainly that uploading again
+simply replaces the previous version.
+
+## 60. Controls that say exactly what they do *(✅ 2026-07-29)*
+
+**Every e-mail, named the way you'd recognise it.** The organizer settings page lists each e-mail by
+its **real subject line, read from the message itself** — so what you see on screen cannot drift from
+what actually gets sent — alongside its internal name and the audience it currently reaches. Mails
+are grouped by the role that receives them, and one button sets an entire role at once.
+
+**A control only shows an audience setting when it has one.** Switches that never limited an audience
+no longer display one, so nothing implies a restriction that was never in force.
+
+**The environment is stated on screen.** Controls that behave differently between the test and live
+environments now say which one you're looking at, so a test window can't be mistaken for the live one.
+
+## 61. Find every e-mail under every role it reaches *(✅ 2026-07-30)*
+
+**A shared e-mail now appears under each role it goes to.** Some messages serve several audiences at
+once — the "get started" digest reaches speakers, sponsors and attendees; task reminders reach
+everyone. Previously each one was filed under a single heading, so a role's section could look
+complete while quietly leaving out messages that role really does receive. Now the same message is
+listed under **every** role it reaches, marked as shared so the repeat reads as deliberate.
+
+**Each appearance controls only that role.** The row under Sponsors sets what sponsors receive and
+changes nothing for anyone else. The message's overall setting stays in one place — its main
+audience — so there is never more than one control over the same value. **"Apply to all in this
+role"** follows the same rule: on a shared message it adjusts that role alone and leaves the others
+untouched, and says so both before you press it and afterwards.
+
+**Company shown for attendees.** The people list now shows an attendee's company, taken from their
+current ticket, so the column is filled in for attendees as well as sponsors and speakers.
+
+**Internal notices are visible too.** The last few automatic notices that go to internal mailboxes —
+a travel-reimbursement claim to finance, a question raised through the in-app helper, and engine
+alerts — now appear in the list with their subject and who receives them. They are always sent and
+carry no audience setting, and each states why in plain words: the recipient is a shared mailbox, not
+a person, so there is no audience to narrow.
+
+**Clearer wording in two messages.** The speaker promo e-mail now reads correctly whether a speaker
+has one session or several, and the two social-media notices carry the **event name** in the subject
+instead of an internal tag.
+
+**Fewer false alarms.** The health monitor no longer reports the order webhook as a leftover from a
+rename. It is triggered by incoming orders rather than a schedule, so it is now recognised as such —
+while genuine leftovers are still flagged exactly as before.

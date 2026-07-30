@@ -200,6 +200,58 @@ public sealed class AttendeeTelemetryServiceTests
     }
 
     [Fact]
+    public async Task Headline_word_of_mouth_and_first_timer_are_percentages_of_all_attendees()
+    {
+        using var db = NewDb();
+        await SeedEventAsync(db);
+        // 4 active attendees: 1 heard via word of mouth, 2 are first-timers.
+        db.Attendees.AddRange(
+            WithCustom("w1", "w1@x.dk", hear: "Word of mouth", firstTime: "No, ELDK27 is my first"),
+            WithCustom("w2", "w2@x.dk", hear: "LinkedIn", firstTime: "No, ELDK27 is my first"),
+            WithCustom("w3", "w3@x.dk", hear: "Newsletter", firstTime: "Yes, I have attended before"),
+            WithCustom("w4", "w4@x.dk", hear: "Newsletter", firstTime: "Yes, I have attended before"));
+        await db.SaveChangesAsync();
+
+        var t = await NewService(db).GetAsync("all");
+
+        Assert.NotNull(t);
+        Assert.Equal(4, t!.TotalAll);
+        // §181: cards show a % of ALL attendees, not a raw count.
+        Assert.Equal(1, t.WordOfMouthCount);
+        Assert.Equal(25, t.WordOfMouthPct);   // 1 of 4
+        Assert.Equal(2, t.FirstTimerCount);
+        Assert.Equal(50, t.FirstTimerPct);    // 2 of 4
+    }
+
+    [Fact]
+    public async Task Headline_percentages_guard_divide_by_zero_when_no_attendees()
+    {
+        using var db = NewDb();
+        await SeedEventAsync(db);
+        // No attendees seeded.
+
+        var t = await NewService(db).GetAsync("all");
+
+        Assert.NotNull(t);
+        Assert.Equal(0, t!.TotalAll);
+        Assert.Equal(0, t.WordOfMouthPct);    // no divide-by-zero
+        Assert.Equal(0, t.FirstTimerPct);
+        Assert.Equal(0, t.Pct2DayAll);
+    }
+
+    private static Attendee WithCustom(string ticketId, string email, string hear, string firstTime)
+    {
+        var a = Att(ticketId, email, "1-day Main Event");
+        // single_choice_3 = "how did you hear", multiple_choice = "attended before?" (2026-06-28 swap).
+        a.CustomFieldsJson = System.Text.Json.JsonSerializer.Serialize(new Dictionary<string, string>
+        {
+            ["single_choice_3"] = hear,
+            ["multiple_choice"] = firstTime,
+        });
+        return a;
+    }
+
+    [Fact]
     public async Task Country_filter_dimension_built_from_active_rows()
     {
         using var db = NewDb();

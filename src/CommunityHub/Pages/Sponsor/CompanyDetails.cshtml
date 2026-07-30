@@ -284,7 +284,7 @@
 
         @if (Model.CanUploadSoMe)
         {
-            <form method="post" asp-page-handler="Upload" asp-route-kind="some" enctype="multipart/form-data"
+            <form method="post" asp-page-handler="Upload" asp-route-kind="some" enctype="multipart/form-data" data-direct-upload="some"
                   style="margin:0 0 18px;padding-bottom:16px;border-bottom:1px solid #eee;">
                 <label style="display:block;font-weight:600;margin-bottom:2px;">Upload Logo for Social Media branding</label>
                 <p style="font-size:12px;color:#6b7280;margin:0 0 6px;">PNG, good quality, max 5 MB.</p>
@@ -297,7 +297,7 @@
 
         @if (Model.CanUploadPrint)
         {
-            <form method="post" asp-page-handler="Upload" asp-route-kind="print" enctype="multipart/form-data"
+            <form method="post" asp-page-handler="Upload" asp-route-kind="print" enctype="multipart/form-data" data-direct-upload="print"
                   style="margin:0 0 18px;padding-bottom:16px;border-bottom:1px solid #eee;">
                 <label style="display:block;font-weight:600;margin-bottom:2px;">Upload Logo for Printing</label>
                 <p style="font-size:12px;color:#6b7280;margin:0 0 6px;">Vector format (typically .eps, .ai or .pdf).</p>
@@ -310,7 +310,7 @@
 
         @if (Model.CanUploadZoho)
         {
-            <form method="post" asp-page-handler="Upload" asp-route-kind="zoho" enctype="multipart/form-data"
+            <form method="post" asp-page-handler="Upload" asp-route-kind="zoho" enctype="multipart/form-data" data-direct-upload="zoho"
                   style="margin:0 0 18px;@(Model.CanUploadWall ? "padding-bottom:16px;border-bottom:1px solid #eee;" : "")">
                 <label style="display:block;font-weight:600;margin-bottom:2px;">Upload Logo for Event System (Zoho) lead system</label>
                 <p style="font-size:12px;color:#6b7280;margin:0 0 6px;">PNG, optimal dimension 200×160px, max 5 MB.</p>
@@ -321,9 +321,19 @@
             </form>
         }
 
-        @if (Model.CanUploadWall)
-        {
-            <form method="post" asp-page-handler="Upload" asp-route-kind="wall" enctype="multipart/form-data"
+    </div>
+
+    @* §286: the exhibitor WALL is a LATER task, NOT onboarding — split into its own section so the
+       Get-Started logo step (which lands at #logos) focuses only on the 3 onboarding logos. *@
+    @if (Model.CanUploadWall)
+    {
+        <div class="card">
+            <h2 id="exhibitor-wall">Exhibitor wall artwork</h2>
+            <p style="color:#8a5a00;background:#fff8e6;border:1px solid #f0dcb8;border-radius:6px;padding:9px 12px;font-size:13px;">
+                <strong>Later task — not part of onboarding.</strong> Your booth wall artwork, due by
+                <strong>10 January 2027</strong> (sent for printing after that date).
+            </p>
+            <form method="post" asp-page-handler="Upload" asp-route-kind="wall" enctype="multipart/form-data" data-direct-upload="wall"
                   style="margin:0;">
                 <label style="display:block;font-weight:600;margin-bottom:2px;">Upload Exhibitor Wall</label>
                 <p style="font-size:12px;color:#6b7280;margin:0 0 6px;">Your booth wall artwork (.eps, .ai or .pdf, max 1 GB).</p>
@@ -344,8 +354,8 @@
                 }
                 <partial name="_UploadedFile" model='Model.LatestUploads.GetValueOrDefault("wall")' />
             </form>
-        }
-    </div>
+        </div>
+    }
 }
 
 @if (Model.IsExhibitor)
@@ -433,6 +443,53 @@
 
 @if (Model.IsExhibitor)
 {
+    @* §229 — booth check-in: when the team expects to arrive at the booth on pre-day. *@
+    <div class="card">
+        <h2 id="booth-checkin">Booth check-in</h2>
+        <p style="color:#4b5563;margin-top:0;font-size:13.5px;">
+            Tell us when you expect to arrive at your booth on <strong>9 Feb 2027</strong> (pre-day),
+            so we can plan check-in and be ready to help you get set up.
+        </p>
+        <form method="post" asp-page-handler="BoothCheckIn">
+            @foreach (var s in CommunityHub.Core.Domain.BoothCheckInSlots.All)
+            {
+                <div style="display:flex;gap:10px;align-items:center;margin:8px 0;background:#f3f6fb;border:1px solid #dde4ee;border-radius:10px;padding:12px;">
+                    <input type="radio" id="slot-@s" name="slot" value="@s" required
+                           checked="@(Model.CurrentBoothCheckInSlot == s)" style="width:18px;height:18px;margin:0;" />
+                    <label for="slot-@s" style="margin:0;font-weight:500;cursor:pointer;">@CommunityHub.Core.Domain.BoothCheckInSlots.Label(s)</label>
+                </div>
+            }
+            @* §298: how many booth members will check in — feeds the organizer pre-day lunch order. *@
+            <label for="memberCount" style="margin-top:14px;">How many of your booth members will check in on the pre-day?</label>
+            <input type="number" id="memberCount" name="memberCount" min="0" max="50" inputmode="numeric"
+                   value="@(Model.CurrentBoothCheckInMemberCount)" placeholder="e.g. 3" style="max-width:120px;" />
+            <p style="color:#6b7280;font-size:12px;margin:2px 0 12px;">Used to plan the pre-day lunch — count everyone from your team who'll be on site.</p>
+            <button type="submit">Save booth check-in</button>
+        </form>
+        <div style="background:#eef6ff;border:1px solid #d3e6fb;border-radius:10px;padding:14px;margin-top:10px;font-size:13.5px;line-height:1.6;color:#1f3f6b;">
+            <strong>Tue 9 Feb 2027 — Pre-day (Master Classes + Expo)</strong>
+            <ul style="margin:8px 0 0;padding-left:18px;">
+                <li>07:00 — Doors open · breakfast for attendees</li>
+                <li>07:30 — Exhibitor check-in to booth (set up swag, demos, etc.)</li>
+                <li>09:00 — Master Classes start</li>
+                <li>10:30 — Coffee break (15 min)</li>
+                <li>11:00–14:00 — Media team photographs the exhibitor booths (used in the welcome video)</li>
+                <li>12:00 — Exhibitor ready for the attendee lunch break (1 hr)</li>
+                <li>14:15 — Coffee &amp; cake break (30 min)</li>
+                <li>16:00–18:30 — Party in the Expo / food area</li>
+            </ul>
+        </div>
+        @if (Model.BoothCheckInSetAt is { } bciAt)
+        {
+            <p style="font-size:12px;color:#6b7280;margin:8px 0 0;">
+                Answered @bciAt.ToUniversalTime().ToString("dd MMM yyyy HH:mm") UTC@(string.IsNullOrWhiteSpace(Model.BoothCheckInSetByEmail) ? "" : $" by {Model.BoothCheckInSetByEmail}") — everyone on your team sees this shared answer.
+            </p>
+        }
+    </div>
+}
+
+@if (Model.IsExhibitor)
+{
     <div class="card">
         <h2 id="booth-materials">Booth materials</h2>
 
@@ -483,10 +540,16 @@
         }
         @if (Model.CanUploadCollateral && Model.BoothCollateral.Count < CommunityHub.Pages.Sponsor.CompanyDetailsModel.MaxCollateral)
         {
-            <form method="post" asp-page-handler="UploadCollateral" enctype="multipart/form-data" style="display:flex;gap:6px;flex-wrap:wrap;margin:8px 0 0;">
-                <input type="file" name="UploadFile" accept=".jpg,.jpeg,.png,.pdf" required style="flex:1 1 200px;min-width:0;" />
+            @* §494 — DIRECT-TO-STORAGE. The classic multipart form stays as the NO-JS fallback
+               (progressive enhancement, §21): with scripting the file goes browser → SharePoint and
+               never occupies a request thread here; without it the old server-proxied post still
+               works exactly as before. *@
+            <form method="post" asp-page-handler="UploadCollateral" enctype="multipart/form-data"
+                  id="collateral-form" data-direct-upload="collateral" style="display:flex;gap:6px;flex-wrap:wrap;margin:8px 0 0;">
+                <input type="file" id="collateral-file" name="UploadFile" accept=".jpg,.jpeg,.png,.pdf" required style="flex:1 1 200px;min-width:0;" />
                 <button type="submit" style="flex:0 0 auto;">Upload file</button>
             </form>
+            <p id="collateral-progress" hidden style="font-size:12.5px;color:#1f3f6b;margin:6px 0 0;"></p>
         }
         else if (!Model.CanUploadCollateral)
         {
@@ -576,5 +639,101 @@
             });
         });
     });
+})();
+</script>
+
+@* §494/§494b — DIRECT-TO-STORAGE for every marked upload form (collateral, the three logos and
+   the exhibitor wall). One handler for all of them: the form's data-direct-upload attribute names
+   the KIND, and the server decides the destination from it — the browser never sends a path.
+
+   The file goes browser → SharePoint and never occupies a request thread here. That matters most
+   for the exhibitor wall, which is capped at 1 GB.
+
+   PROGRESSIVE ENHANCEMENT (§21): each form remains a working multipart post. With no JS, no fetch,
+   or after any failure in the direct path, the ordinary server-proxied upload runs instead — so a
+   sponsor is never left at a dead end, only on a slower road. *@
+<script>
+(function () {
+    if (!window.fetch) return;   // old browser → every form posts normally
+
+    document.querySelectorAll('form[data-direct-upload]').forEach(function (form) {
+        var kind = form.getAttribute('data-direct-upload');
+        var input = form.querySelector('input[type=file]');
+        if (!kind || !input) return;
+
+        var out = document.createElement('p');
+        out.hidden = true;
+        out.style.cssText = 'font-size:12.5px;color:#1f3f6b;margin:6px 0 0;';
+        form.parentNode.insertBefore(out, form.nextSibling);
+
+        var useDirect = true;   // flipped off after a failure so the retry uses the form post
+
+        function say(msg, bad) {
+            out.hidden = false;
+            out.textContent = msg;
+            out.style.color = bad ? '#b91c1c' : '#1f3f6b';
+        }
+
+        form.addEventListener('submit', function (e) {
+            var file = input.files && input.files[0];
+            if (!file || !useDirect) return;   // fall through to the ordinary multipart post
+            e.preventDefault();
+
+            var btn = form.querySelector('button[type=submit]');
+            if (btn) btn.disabled = true;
+            say('Preparing upload…');
+
+            fetch('/sponsor/uploads/' + encodeURIComponent(kind) + '/begin', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ fileName: file.name, sizeBytes: file.size })
+            })
+            .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+            .then(function (res) {
+                if (!res.ok) { throw new Error(res.j && res.j.error ? res.j.error : 'Upload could not start.'); }
+                return putChunks(res.j.uploadUrl, file, say).then(function () { return res.j.path; });
+            })
+            .then(function (path) {
+                say('Finishing…');
+                return fetch('/sponsor/uploads/' + encodeURIComponent(kind) + '/complete', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ path: path, fileName: file.name })
+                }).then(function (r) {
+                    if (!r.ok) {
+                        return r.json().then(function (j) { throw new Error(j.error || 'Could not record the file.'); });
+                    }
+                });
+            })
+            .then(function () { window.location.reload(); })
+            .catch(function (err) {
+                say((err && err.message ? err.message : 'Upload failed.')
+                    + ' Press the upload button again to retry using the standard upload.', true);
+                if (btn) btn.disabled = false;
+                useDirect = false;
+            });
+        });
+    });
+
+    // 10 MiB chunks — a multiple of Graph's 320 KiB granularity, matching the server-side loop.
+    function putChunks(url, file, say) {
+        var CHUNK = 10 * 1024 * 1024;
+        var offset = 0;
+        function next() {
+            if (offset >= file.size) return Promise.resolve();
+            var end = Math.min(offset + CHUNK, file.size);
+            var range = 'bytes ' + offset + '-' + (end - 1) + '/' + file.size;
+            return fetch(url, { method: 'PUT', headers: { 'Content-Range': range }, body: file.slice(offset, end) })
+                .then(function (r) {
+                    if (!r.ok && r.status !== 202) {
+                        throw new Error('Upload failed at ' + Math.round(offset / 1048576) + ' MB.');
+                    }
+                    offset = end;
+                    say('Uploading… ' + Math.round((offset / file.size) * 100) + '%');
+                    return next();
+                });
+        }
+        return next();
+    }
 })();
 </script>

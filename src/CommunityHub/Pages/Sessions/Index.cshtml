@@ -134,11 +134,13 @@
             </div>
             <div class="f-field">
                 <label for="FilterLength">@Localizer["SessOv.Length"]</label>
+                @* §299.8/b7: config-driven MINUTES quick-picks (labels from the
+                   per-edition sessionLengths config), replacing the retired enum. *@
                 <select id="FilterLength" name="FilterLength" asp-for="FilterLength">
                     <option value="">@Localizer["SessOv.AnyLength"]</option>
-                    @foreach (var l in Enum.GetValues<SessionLength>())
+                    @foreach (var qp in Model.LengthQuickPicks)
                     {
-                        <option value="@l">@lengthLabel(l)</option>
+                        <option value="@qp.Minutes">@qp.Label</option>
                     }
                 </select>
             </div>
@@ -262,27 +264,35 @@
                         {
                             <div class="so-speakers">
                                 <span class="lbl">@Localizer["SessOv.With"]</span>
-                                @for (var i = 0; i < s.Speakers.Count; i++)
-                                {
-                                    var sp = s.Speakers[i];
-                                    @* §156: the speaker name is BOLD, and hyperlinked to their
-                                       LinkedIn when we have one; otherwise a PUBLISHED speaker links
-                                       to the internal /Speakers hub page (hard gate), and an
-                                       unpublished co-speaker shows as bold plain text. *@
-                                    if (!string.IsNullOrWhiteSpace(sp.LinkedIn))
+                                @* §156: the speaker name is BOLD, and hyperlinked to their
+                                   LinkedIn when we have one; otherwise a PUBLISHED speaker links
+                                   to the internal /Speakers hub page (hard gate), and an
+                                   unpublished co-speaker shows as bold plain text.
+                                   §179: the comma-separated list is assembled in code and emitted as
+                                   ONE run so there is no source-newline whitespace between a name and
+                                   its following comma — renders "A, B, C" (comma tight to the name,
+                                   single space after), never "A , B". Names + hrefs are HTML-encoded. *@
+                                @{
+                                    var enc = System.Text.Encodings.Web.HtmlEncoder.Default;
+                                    var speakerParts = new List<string>(s.Speakers.Count);
+                                    foreach (var sp in s.Speakers)
                                     {
-                                        <a href="@sp.LinkedIn" target="_blank" rel="noopener noreferrer"><strong>@sp.Name</strong></a>
+                                        var nameHtml = $"<strong>{enc.Encode(sp.Name)}</strong>";
+                                        if (!string.IsNullOrWhiteSpace(sp.LinkedIn))
+                                        {
+                                            speakerParts.Add($"<a href=\"{enc.Encode(sp.LinkedIn)}\" target=\"_blank\" rel=\"noopener noreferrer\">{nameHtml}</a>");
+                                        }
+                                        else if (sp.IsPublished)
+                                        {
+                                            speakerParts.Add($"<a href=\"/Speakers/{sp.ParticipantId}\">{nameHtml}</a>");
+                                        }
+                                        else
+                                        {
+                                            speakerParts.Add(nameHtml);
+                                        }
                                     }
-                                    else if (sp.IsPublished)
-                                    {
-                                        <a href="/Speakers/@sp.ParticipantId"><strong>@sp.Name</strong></a>
-                                    }
-                                    else
-                                    {
-                                        <strong>@sp.Name</strong>
-                                    }
-                                    @(i < s.Speakers.Count - 1 ? ", " : "")
                                 }
+                                @Html.Raw(string.Join(", ", speakerParts))
                             </div>
                         }
                         @if (!string.IsNullOrWhiteSpace(s.Abstract))

@@ -4,6 +4,25 @@ using CommunityHub.Core.Integrations.Sessions;
 namespace CommunityHub.Core.Reminders;
 
 /// <summary>
+/// The on-demand / scheduled Sessionize speaker+session import. A seam over
+/// <see cref="SessionizeApiImportService"/> so callers (the organizer "trigger
+/// import now" page button, the timer job) can run the SAME import and so the
+/// page handler is unit-testable with a fake (REQUIREMENTS §198).
+/// </summary>
+public interface ISessionizeApiImportService
+{
+    /// <summary>
+    /// Pull speakers (and sessions) from the Sessionize API and upsert them for
+    /// the edition. Mirrors <see cref="SessionizeApiImportService.ImportAsync"/>.
+    /// </summary>
+    Task<SessionizeImportResult> ImportAsync(
+        int eventId,
+        CancellationToken ct = default,
+        bool sendWelcome = false,
+        SessionizeImportMode mode = SessionizeImportMode.Delta);
+}
+
+/// <summary>
 /// Imports Sessionize speakers by pulling the Sessionize v2 view API (JSON) —
 /// the only import source (§82, Excel upload removed). The fetch + JSON mapping
 /// lives in <see cref="SessionizeApiClient"/>; the upsert semantics (match on
@@ -14,7 +33,7 @@ namespace CommunityHub.Core.Reminders;
 /// web app also exposes a button that calls it. Disabled (no-op) unless
 /// <see cref="SessionizeApiOptions.Enabled"/> is true and an endpoint id is set.
 /// </summary>
-public sealed class SessionizeApiImportService
+public sealed class SessionizeApiImportService : ISessionizeApiImportService
 {
     private readonly SessionizeApiClient _client;
     private readonly SessionizeApiOptions _options;
@@ -68,9 +87,12 @@ public sealed class SessionizeApiImportService
                 0, 0, 0, 0, fetched.Warnings, fetched.Error);
         }
 
-        // 1. Speakers first, so the participants exist for the session links.
+        // 1. Speakers first, so the participants exist for the session links. §204:
+        //    pass the email-less speakers too so they land in the pre-selection queue
+        //    (inactive, keyed by Sessionize id) instead of being silently dropped.
         var speakerResult = await _import.ImportSpeakersAsync(
-            eventId, fetched.Speakers, fetched.Warnings, ct, sendWelcome, mode);
+            eventId, fetched.Speakers, fetched.Warnings, ct, sendWelcome, mode,
+            emailLessSpeakers: fetched.EmailLessSpeakers);
 
         // 2. Then SESSIONS, from the same v2 view API, linked to the speakers we
         //    just imported (matched on the Sessionize speaker id -> email ->

@@ -145,6 +145,9 @@ public class EmailLogModel : PageModel
             ActionResultSummarizer.NoOp(_loc["EmailLog.Resend.NotResendable"].Value),
         EmailResendOutcome.ParticipantGone =>
             ActionResultSummarizer.NoOp(_loc["EmailLog.Resend.ParticipantGone"].Value),
+        // §252 F8: the email-resend feature is OFF for this edition — refused, nothing sent.
+        EmailResendOutcome.FeatureDisabled =>
+            ActionResultSummarizer.NoOp(_loc["EmailLog.Resend.FeatureDisabled"].Value),
         EmailResendOutcome.NotFound =>
             ActionResultSummarizer.Failure(_loc["EmailLog.Resend.NotFound"].Value),
         _ => ActionResultSummarizer.Failure(string.Format(

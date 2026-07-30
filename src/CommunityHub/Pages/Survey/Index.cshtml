@@ -36,8 +36,10 @@
         display: flex; flex-direction: column;
         align-items: center; justify-content: center;
     }
-    .survey-hero h1 { margin: 0; font-size: 22px; font-weight: 700; line-height: 1.25; }
-    .survey-hero .meta { font-size: 13.5px; opacity: .92; margin-top: 8px; line-height: 1.35; }
+    /* §184e: bulletproof HORIZONTAL centering of the hero text (flex cross-axis + text-align,
+       full width) so a one- or two-line title is always centered, mobile + desktop. */
+    .survey-hero h1 { margin: 0 auto; width: 100%; text-align: center; font-size: 22px; font-weight: 700; line-height: 1.25; }
+    .survey-hero .meta { width: 100%; text-align: center; font-size: 13.5px; opacity: .92; margin-top: 8px; line-height: 1.35; }
     @@media (max-width: 600px) {
         .survey-hero { padding: 18px 16px; min-height: 70px; }
         .survey-hero h1 { font-size: 19px; }

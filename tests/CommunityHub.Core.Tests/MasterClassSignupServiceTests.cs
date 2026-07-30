@@ -11,10 +11,10 @@ namespace CommunityHub.Core.Tests;
 /// person, and the §93/§94 automatic atomic promotion: a freed/opened seat goes to the
 /// waitlist FIRST (public booking blocked while anyone waits), the highest waitlister is
 /// promoted and auto-switched out of any other class (no offer/choose step), cascading
-/// into the released class. EF in-memory — these cover the logic/ordering invariants;
-/// the serializable-transaction / real DB-locking path can only be exercised against
-/// SQL Server (the in-memory provider has no transactions, and the EF SQLite provider
-/// cannot translate the engine's DateTimeOffset ordering/comparisons).
+/// into the released class. EF in-memory — these cover the logic/ordering invariants.
+/// The §218 OPTIMISTIC atomic seat-claim (the guarded conditional UPDATE) and the real
+/// relational constraint/concurrency behaviour are exercised separately against the EF
+/// SQLite provider in <see cref="MasterClassSignupRelationalTests"/> (§220).
 /// </summary>
 public class MasterClassSignupServiceTests
 {
@@ -368,5 +368,40 @@ public class MasterClassSignupServiceTests
         var still = Assert.Single(await svc.GetForAttendeeAsync(ev, morgan));
         Assert.Equal(mcB, still.SessionId);
         Assert.Equal(MasterClassSignupStatus.Confirmed, still.Status);
+    }
+
+    [Fact]
+    public async Task ResolveByEmail_prefers_the_active_two_day_row_when_one_email_holds_several_tickets()
+    {
+        // §234 5: (EventId, Email) is non-unique — one email can hold a 1-day ticket
+        // AND a 2-day ticket, or an old soft-cancelled row plus a live one. The
+        // resolver must deterministically pick the row that carries the entitlement:
+        // ACTIVE mirror first, then the 2-day (Master-Class) ticket.
+        using var db = ScenarioFixture.NewDb();
+        var (ev, _, _) = await SeedAsync(db, capA: 1, capB: 1);
+
+        var cancelledTwoDay = new Attendee
+        {
+            EventId = ev, Email = "multi@example.test", FirstName = "M", LastName = "Multi",
+            TicketStatus = TicketStatus.TwoDay, MirrorState = MirrorState.Cancelled,
+        };
+        var activeOneDay = new Attendee
+        {
+            EventId = ev, Email = "multi@example.test", FirstName = "M", LastName = "Multi",
+            TicketStatus = TicketStatus.Other, MirrorState = MirrorState.Active,
+        };
+        var activeTwoDay = new Attendee
+        {
+            EventId = ev, Email = "multi@example.test", FirstName = "M", LastName = "Multi",
+            TicketStatus = TicketStatus.TwoDay, MirrorState = MirrorState.Active,
+        };
+        db.Attendees.AddRange(cancelledTwoDay, activeOneDay, activeTwoDay);
+        await db.SaveChangesAsync();
+
+        var svc = new MasterClassSignupService(db);
+        var resolved = await svc.ResolveByEmailAsync(ev, "Multi@Example.test ");
+
+        Assert.NotNull(resolved);
+        Assert.Equal(activeTwoDay.Id, resolved!.Id);   // active + 2-day wins
     }
 }

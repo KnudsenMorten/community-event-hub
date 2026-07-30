@@ -20,12 +20,9 @@
 }
 else
 {
-    <label for="DinnerName">@Localizer["Common.Name"]</label>
-    <input type="text" id="DinnerName" value="@Model.FullName" readonly />
-
-    <label for="DinnerEmail">@Localizer["Common.Email"]</label>
-    <input type="text" id="DinnerEmail" value="@Model.Email" readonly />
-
+    @* §326i (operator 2026-07-25): the read-only Name/Email display is GONE on every
+       Get-Started form — the session is authenticated and the answer is keyed to the
+       signed-in participant; showing them as (dead) inputs only confused. *@
     <fieldset style="border:0;padding:0;margin:0;">
         <legend style="font-weight:600;font-size:14px;margin-top:10px;">@Localizer["Dinner.JoinLegend"]</legend>
         <div style="display:flex; flex-direction:column; gap:8px; margin:6px 0 14px;">
@@ -51,6 +48,45 @@ else
     </fieldset>
     <span asp-validation-for="Rsvp" class="ceh-field-error"></span>
 
+    @* §322n calendar invite — §326g (operator 2026-07-25): moved UP right under the
+       Yes/No/Maybe choices ("it disappears at the bottom") and given its own color
+       (green, distinct from the slate hotel button). formaction posts to the HOST page's
+       DinnerInvite handler (never a nested form).
+
+       §424 (operator 2026-07-27: "i am missing the button to send calendar invite for
+       Appreciation Dinner + Hotel in the get started wizard for all roles if they choose yes").
+       It USED to render only when the LOADED model already said Yes — so on the first pass
+       through the wizard it was never on screen: you picked Yes, pressed Save & next, and the
+       wizard advanced. The only way to see it was to save, leave, and navigate back.
+
+       It is now always rendered and revealed the moment Yes is picked, and the host handler
+       saves the step before sending (§424), so pressing it does what it says immediately. *@
+    @if (TempData["DinnerInviteMessage"] is string dim)
+    {
+        <p role="status" style="margin:10px 0 0;padding:8px 12px;border-radius:8px;background:#ecfdf5;color:#065f46;border:1px solid #a7f3d0;">@dim</p>
+    }
+    <div id="dinnerInviteBox" style="margin:2px 0 12px;@(Model.Rsvp == CommunityHub.Core.Domain.DinnerRsvp.Yes ? "" : "display:none;")">
+        <button type="submit" asp-page-handler="DinnerInvite"
+                style="background:#15803d;color:#fff;border:none;padding:8px 14px;border-radius:6px;font-size:13.5px;font-weight:600;cursor:pointer;">
+            📅 Email me a calendar invite for the dinner
+        </button>
+    </div>
+    <script>
+        // Progressive enhancement (§21): with JS off the button is visible exactly when the
+        // SAVED answer is Yes — the pre-§424 behaviour, never worse.
+        (function () {
+            var box = document.getElementById('dinnerInviteBox');
+            if (!box) return;
+            var radios = document.querySelectorAll('input[name="Rsvp"]');
+            function refresh() {
+                var picked = document.querySelector('input[name="Rsvp"]:checked');
+                box.style.display = (picked && picked.value === 'Yes') ? '' : 'none';
+            }
+            radios.forEach(function (r) { r.addEventListener('change', refresh); });
+            refresh();
+        })();
+    </script>
+
     <label for="PlusOneCount">@Localizer["Dinner.PlusOne"]</label>
     <input type="number" asp-for="PlusOneCount" min="0" max="10" style="max-width:120px;" />
 
@@ -62,7 +98,6 @@ else
     <label for="Comments">@Localizer["Dinner.CommentsLabel"]</label>
     <textarea asp-for="Comments" rows="3"></textarea>
 
-    <p style="color:#6b7280;font-size:12px;margin-top:10px;">
-        @Localizer["Dinner.IcsNote", Model.Email]
-    </p>
+    @* §326g: the §322n calendar-invite button moved UP under the RSVP choices — the
+       auto e-mail on RSVP=Yes stays GONE (§322n); the on-demand invite is above. *@
 }

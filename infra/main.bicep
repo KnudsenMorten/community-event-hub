@@ -50,6 +50,9 @@ param customDomain string = ''
 @description('TEST MODE master switch (CommunityHub.Core.Integrations.TestModeOptions.Enabled). When true the integrations perform NO real outbound writes: no Zoho Backstage / Booking calls, no WooCommerce writes, coordinator notifications routed to the test address only. Both dev + prod share the SAME upstream services (Zoho Backstage, Zoho Booking, WooCommerce store) -- TestMode is the safety latch that lets dev READ live data without WRITING. Defaults to true for dev, false for prod.')
 param testModeEnabled bool = (environmentName == 'dev')
 
+@description('§340-H MASTER SWITCH for outbound WRITES to third-party systems (Zoho Backstage, e-conomic, LinkedIn, SharePoint), surfaced as Integrations__AllowExternalWrites on BOTH hosts. This is the environment half of the guarantee that DEV cannot change external systems: as the testModeEnabled description above states, dev and prod share the SAME upstream Zoho / WooCommerce, and TestMode covered only the exhibitor + ERP seams -- the Zoho session and speaker pushes were gated solely by per-edition feature flags, which are an EDITION concept, not an environment one. Defaults to true for prod, false for dev. An organizer can override it per edition on the Settings page ("except if i specifically enable so it can do this").')
+param allowExternalWrites bool = (environmentName != 'dev')
+
 // --- Naming ----------------------------------------------------------------
 //  A short suffix keeps globally-unique names (Key Vault, SQL, Storage) within
 //  length limits while staying readable. uniqueString keeps them collision-safe.
@@ -143,9 +146,13 @@ module appService 'modules/appservice.bicep' = {
     sqlConnectionStringTemplate: sql.outputs.sqlConnectionStringTemplate
     blobEndpoint:                storage.outputs.blobEndpoint
     appInsightsConnectionString: monitoring.outputs.appInsightsConnectionString
+    // §392: the READ side of telemetry. The connection string above says where telemetry
+    // GOES; the resource id is what the organizer Platform-health page QUERIES.
+    appInsightsResourceId:       monitoring.outputs.appInsightsId
     backstageEmbedOrigin:        backstageEmbedOrigin
     customDomain:                customDomain
     testModeEnabled:             testModeEnabled
+    allowExternalWrites:         allowExternalWrites
   }
 }
 
@@ -162,6 +169,13 @@ module functions 'modules/functions.bicep' = {
     keyVaultUri:                 keyVault.outputs.keyVaultUri
     sqlConnectionStringTemplate: sql.outputs.sqlConnectionStringTemplate
     appInsightsConnectionString: monitoring.outputs.appInsightsConnectionString
+    // §340-D: the Jobs host is where the TestMode swaps actually happen, so it must
+    // receive the SAME explicit value the web app gets -- dev true / prod false. It
+    // was never passed here, so BOTH Functions apps fell back to the .NET default:
+    // prod silently stubbed Zoho exhibitor + e-conomic writes, and dev depended on
+    // that default for its safety rather than on a stated value.
+    testModeEnabled:             testModeEnabled
+    allowExternalWrites:         allowExternalWrites
   }
 }
 

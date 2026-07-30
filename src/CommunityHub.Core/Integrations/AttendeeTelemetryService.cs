@@ -48,7 +48,9 @@ public sealed record AttendeeTelemetry(
     // Dashboard headline KPIs (2026-06-28) — computed over ALL attendees, not the segment:
     int Pct2DayAll,        // % who bought a 2-day ticket
     int WordOfMouthCount,  // people who heard via word of mouth
+    int WordOfMouthPct,    // §181: word-of-mouth as % of ALL attendees (0 when no attendees)
     int FirstTimerCount,   // first-timers ("No, ELDK27 is my first…")
+    int FirstTimerPct,     // §181: first-timers as % of ALL attendees (0 when no attendees)
     IReadOnlyList<TelemetryDay> Daily,
     IReadOnlyList<TelemetryTable> Tables,
     DateTimeOffset GeneratedAtUtc,
@@ -174,7 +176,11 @@ public sealed class AttendeeTelemetryService
             Pct2DayInSegment: count > 0 ? (int)Math.Round(100.0 * twoDay / count) : 0,
             Pct2DayAll: total > 0 ? (int)Math.Round(100.0 * twoDayAll / total) : 0,
             WordOfMouthCount: wordOfMouth,
+            // §181: every headline card is a PERCENTAGE of the whole attendee base, never a raw
+            // count. Divide-by-zero guarded (0 attendees ⇒ 0%; the panel shows "—" in that case).
+            WordOfMouthPct: total > 0 ? (int)Math.Round(100.0 * wordOfMouth / total) : 0,
             FirstTimerCount: firstTimers,
+            FirstTimerPct: total > 0 ? (int)Math.Round(100.0 * firstTimers / total) : 0,
             Daily: BuildDaily(segData),
             Tables: BuildTables(segData, isOrganizer),
             GeneratedAtUtc: DateTimeOffset.UtcNow,

@@ -16,6 +16,19 @@ public enum RingResourceKind
     SponsorContact = 1,
     Speaker = 2,
     Volunteer = 3,
+
+    /// <summary>
+    /// §706 — ATTENDEES. Operator 2026-08-11 go-live plan: synced attendees default to Broad, he
+    /// assigns a few to Ring 2 when ticket sales open, tests attendee mail on them, then raises the
+    /// mails to Broad once proven.
+    /// </summary>
+    /// <remarks>
+    /// 🔑 An attendee is a PARTICIPANT with <see cref="ParticipantRole.Attendee"/> — operator
+    /// 2026-07-29: *"a participant is anyone that are part of the event"*. The ring therefore lives on
+    /// <c>Participant.Ring</c> like every other role; the separate <c>Attendees</c> table is the Zoho
+    /// TICKET mirror, not the person record, and carries no ring.
+    /// </remarks>
+    Attendee = 4,
 }
 
 /// <summary>One assignable resource row for the admin ring surface.</summary>
@@ -74,13 +87,34 @@ public sealed class ResourceRingService
     /// contacts resolve their effective ring against the company default; other
     /// roles' effective ring equals their own ring.
     /// </summary>
+    /// <param name="search">
+    /// §706 — optional name/email filter, applied SERVER-side. Needed for attendees: the operator
+    /// picks a handful of ring-2 test recipients out of a list heading for ~1500 rows, so the page must
+    /// not try to render them all.
+    /// </param>
+    /// <param name="take">
+    /// §706 — optional cap on rows returned (after ordering). Null = no cap, which is the existing
+    /// behaviour every other kind relies on.
+    /// </param>
     public async Task<IReadOnlyList<RingResourceRow>> GetParticipantsAsync(
-        int eventId, RingResourceKind kind, CancellationToken ct = default)
+        int eventId, RingResourceKind kind, CancellationToken ct = default,
+        string? search = null, int? take = null)
     {
         var roles = RolesFor(kind);
-        var people = await _db.Participants
-            .Where(p => p.EventId == eventId && roles.Contains(p.Role))
-            .OrderBy(p => p.FullName)
+        var q = _db.Participants
+            .Where(p => p.EventId == eventId && roles.Contains(p.Role));
+
+        var term = (search ?? string.Empty).Trim();
+        if (term.Length > 0)
+        {
+            // Name OR email, case-insensitive by the database collation.
+            q = q.Where(p => p.FullName.Contains(term) || p.Email.Contains(term));
+        }
+
+        q = q.OrderBy(p => p.FullName);
+        if (take is int n && n > 0) q = q.Take(n);
+
+        var people = await q
             .Select(p => new
             {
                 p.Id, p.FullName, p.Email, p.Ring, p.SponsorCompanyId, p.Role,
@@ -113,7 +147,27 @@ public sealed class ResourceRingService
         }).ToList();
     }
 
-    /// <summary>Set a participant's own ring (sponsor contact / speaker / volunteer). Edition-scoped.</summary>
+    /// <summary>
+    /// §706 — how many participants MATCH (before <c>take</c>), so a capped list can say so instead of
+    /// silently looking complete. 🔒 A truncated list that does not admit it is how someone concludes
+    /// "that attendee isn't in the system".
+    /// </summary>
+    public Task<int> CountParticipantsAsync(
+        int eventId, RingResourceKind kind, string? search = null, CancellationToken ct = default)
+    {
+        var roles = RolesFor(kind);
+        var q = _db.Participants.Where(p => p.EventId == eventId && roles.Contains(p.Role));
+
+        var term = (search ?? string.Empty).Trim();
+        if (term.Length > 0)
+        {
+            q = q.Where(p => p.FullName.Contains(term) || p.Email.Contains(term));
+        }
+
+        return q.CountAsync(ct);
+    }
+
+    /// <summary>Set a participant's own ring (sponsor contact / speaker / volunteer / attendee). Edition-scoped.</summary>
     public async Task<bool> SetParticipantRingAsync(
         int eventId, int participantId, Ring ring, CancellationToken ct = default)
     {
@@ -146,6 +200,7 @@ public sealed class ResourceRingService
         RingResourceKind.Speaker => new[]
             { ParticipantRole.Speaker },
         RingResourceKind.Volunteer => new[] { ParticipantRole.Volunteer },
+        RingResourceKind.Attendee => new[] { ParticipantRole.Attendee },   // §706
         _ => Array.Empty<ParticipantRole>(),
     };
 }

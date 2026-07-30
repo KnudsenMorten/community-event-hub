@@ -89,7 +89,6 @@ themselves.
 | `masterclass-promoted` | `MasterClassPromotionEmailService.cs` (`SendPromotionAsync`, Confirmed) | `{{masterClassTitle}}`, `{{selfServiceUrl}}` |
 | `masterclass-month-reminder` | `MasterClassEmailService.cs` (`SendMonthReminderAsync`) | `{{masterClassTitle}}` *(+ .ics attachment)* |
 | `pin-signin` | `PinLoginService.cs` (`RequestPinAsync`) | `{{subjectPrefix}}`, `{{pin}}`, `{{expiryMinutes}}` |
-| `calendar-invite` | `CalendarInviteEmailService.cs` (`SendActivationInviteAsync`) | *(base tokens only; + .ics attachment)* |
 | `session-evaluation-results` | `SessionEvaluationMailService.cs` (`EmailResultsToSpeakersAsync`) | `{{sessionTitle}}`, `{{resultsHtml}}` *(raw HTML)* |
 | `broadcast` | `Broadcast.cshtml.cs:308-325` | `{{messageHtml}}` (see broadcast note below) |
 

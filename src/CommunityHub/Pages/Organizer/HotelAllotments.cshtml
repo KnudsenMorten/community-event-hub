@@ -1,0 +1,236 @@
+@page
+@model CommunityHub.Pages.Organizer.HotelAllotmentsModel
+@{
+    ViewData["Title"] = "Hotel allotments";
+}
+
+<style>
+    /* Mobile-first: the night matrix scrolls sideways on a ~360px phone; the hotel
+       name column stays put so a row is still readable while scrolling. */
+    .al-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    table.al-tbl { border-collapse: collapse; min-width: 640px; }
+    .al-tbl th, .al-tbl td { border: 1px solid #e6e8ee; padding: 6px 8px; font-size: 13px; text-align: center; }
+    .al-tbl th { background: #f9fafb; font-size: 11.5px; text-transform: uppercase; letter-spacing: .04em; color: #6b7280; white-space: nowrap; }
+    .al-tbl th.al-name, .al-tbl td.al-name { text-align: left; white-space: nowrap; position: sticky; left: 0; background: #fff; z-index: 1; }
+    .al-tbl th.al-name { background: #f9fafb; }
+    .al-tbl input[type=number] { width: 58px; padding: 4px; font-size: 13px; text-align: center; }
+    .al-demand { color: #6b7280; font-size: 11.5px; display: block; }
+    .al-legend span { display: inline-block; margin-right: 14px; font-size: 12.5px; color: #374151; }
+    .al-key { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: -1px; margin-right: 5px; }
+    .al-total td { font-weight: 700; background: #f3f4f6; }
+    .al-cut { border-left: 3px solid #f4b400; background: #fffbeb; padding: 10px 12px; border-radius: 4px; margin: 8px 0; }
+    .al-note { color: #6b7280; font-size: 12.5px; }
+</style>
+
+<div class="card">
+    <h1>Hotel allotments</h1>
+    @if (Model.AccessDenied)
+    {
+        <p class="error" role="alert">This area is for organizers only.</p>
+        <p><a asp-page="/Index">Back to hub</a></p>
+    }
+    else
+    {
+        <p class="al-note">
+            What we have <strong>contracted</strong> per night against what people have actually
+            <strong>asked for</strong>. Two questions this answers: where do we need
+            <strong>more rooms</strong>, and where can we <strong>release rooms</strong> before a
+            deadline makes them non-refundable. Demand counts one room per ACTIVE person who asked
+            for one — a withdrawn participant never inflates what we pay for.
+        </p>
+        <p class="al-legend">
+            <span><i class="al-key" style="background:#dcfce7;"></i>exactly right</span>
+            <span><i class="al-key" style="background:#fef3c7;"></i>spare rooms — release candidate</span>
+            <span><i class="al-key" style="background:#fee2e2;"></i>short — need more rooms</span>
+        </p>
+        @if (!string.IsNullOrEmpty(Model.Message))
+        {
+            <p class="info">@Model.Message</p>
+        }
+        <p><a asp-page="/Organizer/Hotels">&larr; Hotels</a> &nbsp;·&nbsp;
+           <a asp-page="/Organizer/HotelRoomBlocks">Room blocks</a></p>
+    }
+</div>
+
+@if (!Model.AccessDenied)
+{
+    @if (Model.Board.IsEmpty)
+    {
+        <div class="card">
+            <p class="al-note">
+                Nothing to show yet — no rooms are contracted and nobody has asked for one.
+                Add a hotel on the <a asp-page="/Organizer/Hotels">Hotels</a> page, then record
+                its contracted rooms per night below once the first booking arrives.
+            </p>
+        </div>
+    }
+    else
+    {
+        <div class="card">
+            <h2>Contracted vs needed, per night</h2>
+            <div class="al-scroll">
+                <table class="al-tbl">
+                    <thead>
+                        <tr>
+                            <th class="al-name">Hotel</th>
+                            @foreach (var n in Model.Board.Nights)
+                            {
+                                <th>@n.ToString("ddd")<br />@n.ToString("d MMM")</th>
+                            }
+                        </tr>
+                    </thead>
+                    <tbody>
+                    @foreach (var row in Model.Board.Rows)
+                    {
+                        <tr>
+                            <td class="al-name">
+                                @row.HotelName
+                                @if (row.IsUnassigned)
+                                {
+                                    <br /><span class="al-demand">not placed in a hotel yet</span>
+                                }
+                            </td>
+                            @foreach (var c in row.Cells)
+                            {
+                                <td style="@CommunityHub.Pages.Organizer.HotelAllotmentsModel.CellStyle(c)">
+                                    @if (row.IsUnassigned)
+                                    {
+                                        @(c.Demand == 0 ? "" : c.Demand.ToString())
+                                    }
+                                    else
+                                    {
+                                        <strong>@(c.Allotted?.ToString() ?? "—")</strong>
+                                        <span class="al-demand">need @c.Demand</span>
+                                    }
+                                </td>
+                            }
+                        </tr>
+                    }
+                        <tr class="al-total">
+                            <td class="al-name">All hotels</td>
+                            @foreach (var n in Model.Board.Nights)
+                            {
+                                var v = Model.Board.VarianceOn(n);
+                                <td title="@Model.Board.AllottedOn(n) held · @Model.Board.DemandOn(n) needed">
+                                    @Model.Board.AllottedOn(n) / @Model.Board.DemandOn(n)
+                                    <span class="al-demand">@(v == 0 ? "ok" : (v > 0 ? $"+{v}" : v.ToString()))</span>
+                                </td>
+                            }
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+            @if (Model.Board.ShortNights.Count > 0)
+            {
+                <p class="al-note" style="color:#b42318;margin-top:10px;">
+                    <strong>Short on @Model.Board.ShortNights.Count night(s):</strong>
+                    @string.Join(", ", Model.Board.ShortNights.Select(n => n.ToString("d MMM")))
+                    — ask for more rooms, or place people at another hotel.
+                </p>
+            }
+            @if (Model.Board.SlackNights.Count > 0)
+            {
+                <p class="al-note" style="color:#92400e;">
+                    <strong>Spare rooms on @Model.Board.SlackNights.Count night(s):</strong>
+                    @string.Join(", ", Model.Board.SlackNights.Select(n => n.ToString("d MMM")))
+                    — release them before the next deadline below.
+                </p>
+            }
+        </div>
+
+        @* One editable form per hotel: the whole row saves in a single post. *@
+        @foreach (var row in Model.Board.Rows.Where(r => !r.IsUnassigned))
+        {
+            <div class="card">
+                <h2>@row.HotelName</h2>
+                <form method="post" asp-page-handler="SaveRow">
+                    <input type="hidden" name="hotelId" value="@row.HotelId" />
+                    <div class="al-scroll">
+                        <table class="al-tbl">
+                            <thead>
+                                <tr>
+                                    @foreach (var c in row.Cells)
+                                    {
+                                        <th>@c.Night.ToString("ddd d MMM")</th>
+                                    }
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    @foreach (var c in row.Cells)
+                                    {
+                                        <td style="@CommunityHub.Pages.Organizer.HotelAllotmentsModel.CellStyle(c)">
+                                            <input type="hidden" name="nights" value="@c.Night.ToString("yyyy-MM-dd")" />
+                                            <input type="number" name="rooms" min="0" max="9999"
+                                                   value="@(c.Allotted?.ToString() ?? "")"
+                                                   aria-label="Rooms contracted at @row.HotelName on @c.Night.ToString("d MMM")" />
+                                            <span class="al-demand">need @c.Demand</span>
+                                        </td>
+                                    }
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <p class="al-note">Leave a box empty for “not part of the contract”. 0 means the
+                       contract covers that night with no rooms held — the two are different.</p>
+                    <button type="submit">Save @row.HotelName</button>
+                </form>
+
+                <details style="margin-top:14px;">
+                    <summary>Fill a range with one number</summary>
+                    <form method="post" asp-page-handler="FillRange" style="margin-top:8px;display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end;">
+                        <input type="hidden" name="hotelId" value="@row.HotelId" />
+                        <label>From night<br /><input type="date" name="fromNight" required /></label>
+                        <label>To night<br /><input type="date" name="toNight" required /></label>
+                        <label>Rooms<br /><input type="number" name="rooms" min="0" max="9999" value="0" required /></label>
+                        <button type="submit">Fill</button>
+                    </form>
+                </details>
+
+                <h3 style="margin-top:18px;">Release deadlines</h3>
+                @if (row.Cutoffs.Count == 0)
+                {
+                    <p class="al-note">No deadline recorded. Add the contract's cancellation dates so
+                       the hub can warn you 3 days before each one.</p>
+                }
+                else
+                {
+                    @foreach (var c in row.Cutoffs)
+                    {
+                        <div class="al-cut">
+                            <strong>@c.CutoffDate.ToString("d MMMM yyyy")</strong> — @c.Label
+                            @if (c.ReleasePercent is int pct) { <text> (up to @pct% releasable)</text> }
+                            @if (!string.IsNullOrWhiteSpace(c.Notes))
+                            {
+                                <br /><span class="al-note">@c.Notes</span>
+                            }
+                            <form method="post" asp-page-handler="DeleteCutoff" style="display:inline;margin-left:8px;"
+                                  onsubmit="return confirm('Remove this release deadline?');">
+                                <input type="hidden" name="cutoffId" value="@c.Id" />
+                                <button type="submit" class="secondary">Remove</button>
+                            </form>
+                        </div>
+                    }
+                }
+                <details>
+                    <summary>Add / update a release deadline</summary>
+                    <form method="post" asp-page-handler="SaveCutoff" style="margin-top:8px;display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end;">
+                        <input type="hidden" name="hotelId" value="@row.HotelId" />
+                        <label>Date<br /><input type="date" name="cutoffDate" required /></label>
+                        <label style="flex:1 1 260px;">What it allows<br />
+                            <input type="text" name="label" maxlength="200" required
+                                   placeholder="e.g. Period 1: max 20% of the original per day" style="width:100%;" /></label>
+                        <label>% releasable<br /><input type="number" name="releasePercent" min="0" max="100" placeholder="20" /></label>
+                        <label style="flex:1 1 100%;">Notes (optional)<br />
+                            <input type="text" name="notes" maxlength="1000" style="width:100%;" /></label>
+                        <button type="submit">Save deadline</button>
+                    </form>
+                    <p class="al-note">Saving the same hotel + date again updates that deadline.
+                       You get an email 3 days before each one, with this hotel's over/under in it.</p>
+                </details>
+            </div>
+        }
+    }
+
+    <p><a asp-page="/Organizer/Index">&larr; Organizer area</a></p>
+}

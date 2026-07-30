@@ -97,6 +97,56 @@ public sealed class VolunteerStructureScenarioTests
     }
 
     // =====================================================================
+    //  §199 — read-only "All volunteer tasks" review
+    // =====================================================================
+
+    [Fact]
+    public async Task LoadAllTasks_lists_every_defined_task_with_its_full_detail()
+    {
+        using var db = ScenarioFixture.NewDb();
+        var seed = await ScenarioSeed.SeedAsync(db);
+        var svc = NewService(db);
+        var org = Organizer(seed);
+
+        // Two categories, each with a subcategory + a fully-detailed task.
+        var reg = await svc.CreateCategoryAsync(org, "Registration", null);
+        var regSub = await svc.CreateSubcategoryAsync(org, reg.Id, "Badge desk", null);
+        await svc.CreateTaskAsync(
+            org, regSub.Id, "Staff badge desk", "Hand out badges to arriving attendees.",
+            new DateOnly(2027, 2, 4), "Day 1, 08:00",
+            resourcesNeeded: 2,
+            criticality: VolunteerTaskCriticality.NeedToHave,
+            responsibleTeam: "Front-of-house",
+            expectations: "Every attendee has a badge before the keynote.",
+            instructions: "Use the alphabetised pickup boxes.",
+            timeEnd: "10:00");
+
+        var av = await svc.CreateCategoryAsync(org, "A/V", null);
+        var avSub = await svc.CreateSubcategoryAsync(org, av.Id, "Stage", null);
+        await svc.CreateTaskAsync(org, avSub.Id, "Mic check", null, null, null);
+
+        var all = await svc.LoadAllTasksAsync(seed.EventId);
+
+        // Both defined tasks render, ordered Category → Subcategory → Title.
+        Assert.Equal(2, all.Count);
+        Assert.Equal("Mic check", all[0].Title);          // A/V sorts before Registration
+        Assert.Equal("Staff badge desk", all[1].Title);
+
+        // The detailed task carries its full content + the owning path is loaded.
+        var detailed = all[1];
+        Assert.Equal("Registration", detailed.Subcategory.Category.Name);
+        Assert.Equal("Badge desk", detailed.Subcategory.Name);
+        Assert.Equal("Hand out badges to arriving attendees.", detailed.Description);
+        Assert.Equal("Every attendee has a badge before the keynote.", detailed.Expectations);
+        Assert.Equal("Front-of-house", detailed.ResponsibleTeam);
+        Assert.Equal("Use the alphabetised pickup boxes.", detailed.Instructions);
+        Assert.Equal(VolunteerTaskCriticality.NeedToHave, detailed.Criticality);
+        Assert.Equal("Day 1, 08:00", detailed.Shift);
+        Assert.Equal("10:00", detailed.TimeEnd);
+        Assert.Equal(2, detailed.ResourcesNeeded);
+    }
+
+    // =====================================================================
     //  Lead = organizer, supervisor = volunteer
     // =====================================================================
 

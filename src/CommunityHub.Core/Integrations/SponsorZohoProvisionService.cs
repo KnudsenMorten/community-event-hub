@@ -32,13 +32,19 @@ public sealed class SponsorZohoProvisionService
     private readonly SponsorZohoSyncService _sync;
     private readonly ILogger<SponsorZohoProvisionService> _log;
 
+    // RULE (operator 2026-07-23): every CEH-made Zoho write must notify info@expertslive.dk
+    // (the operator must publish/delete manually in Backstage). Optional so tests/legacy
+    // constructions keep compiling; null ⇒ no notification.
+    private readonly Email.ZohoChangeNotifier? _zohoChanges;
+
     public SponsorZohoProvisionService(
         ZohoClient zoho, CommunityHubDbContext db, ZohoOptions options,
         CompanyManagerClient cm, CompanyManagerOptions cmOptions,
         IBackstageExhibitorApi exhibitorApi,
         EventEditionConfigLoader cfg, EventConfigOptions cfgOptions,
         SponsorZohoSyncService sync,
-        ILogger<SponsorZohoProvisionService> log)
+        ILogger<SponsorZohoProvisionService> log,
+        Email.ZohoChangeNotifier? zohoChanges = null)
     {
         _zoho = zoho;
         _db = db;
@@ -50,6 +56,7 @@ public sealed class SponsorZohoProvisionService
         _cfgOptions = cfgOptions;
         _sync = sync;
         _log = log;
+        _zohoChanges = zohoChanges;
     }
 
     public sealed record ProvisionResult(
@@ -86,6 +93,9 @@ public sealed class SponsorZohoProvisionService
         var boothCatIds = cfg.ZohoBoothCategoryIds ?? new Dictionary<string, string>();
 
         int created = 0, linked = 0, exCreated = 0, exRequested = 0, exLinked = 0, skipped = 0;
+        // Operator 2026-07-23: collect every SUCCESSFUL Zoho write for ONE batched ops mail
+        // per provision run (linking a cached id is CEH-side only — not a Zoho write).
+        var zohoWrites = new List<string>();
 
         foreach (var info in infos)
         {
@@ -160,13 +170,24 @@ public sealed class SponsorZohoProvisionService
             // run RE-creates and re-stores the new id. The webshop order is the source of
             // truth for "who is a sponsor/exhibitor"; Zoho is reconstructed to match. No
             // manual scripts — the engine reconciles itself on its next run.
-            if (!string.IsNullOrWhiteSpace(info.ZohoSponsorId)
+            // §326aw AMBIGUITY GUARD (the §301b pattern, missing here). GetSponsorsAsync /
+            // GetExhibitorsAsync return an EMPTY list on any auth/HTTP failure — their own
+            // doc comments say "Returns empty on auth/HTTP failure". Without the count check
+            // a failed read makes EVERY cached id look stale, and the create arms below then
+            // POST a fresh sponsor + exhibitor record into Zoho for every company, each
+            // carrying the coordinator's e-mail. CEH has no delete path for those (§56), so
+            // cleanup is manual in the Backstage GUI — and this runs on the 15-minute
+            // WooCommerce timer. An empty live list is never evidence that a record was
+            // deleted: skip the heal and let the next run decide.
+            if (existingSponsors.Count > 0
+                && !string.IsNullOrWhiteSpace(info.ZohoSponsorId)
                 && !existingSponsors.Any(s => string.Equals(s.Id, info.ZohoSponsorId, StringComparison.Ordinal)))
             {
                 info.ZohoSponsorId = null;
                 notes.Add($"{name}: cached Zoho sponsor id was stale (not in Zoho) — re-creating.");
             }
-            if (!string.IsNullOrWhiteSpace(info.ZohoExhibitorId)
+            if (existingExhibitors.Count > 0
+                && !string.IsNullOrWhiteSpace(info.ZohoExhibitorId)
                 && !existingExhibitors.Any(e => string.Equals(e.Id, info.ZohoExhibitorId, StringComparison.Ordinal)))
             {
                 info.ZohoExhibitorId = null;
@@ -209,6 +230,8 @@ public sealed class SponsorZohoProvisionService
                                 info.ZohoContactEmail = NullIf(info.EventCoordinatorEmail);
                             created++;
                             notes.Add($"{name}: sponsor created in Zoho.");
+                            zohoWrites.Add($"Created sponsor '{name}'"
+                                + (string.IsNullOrEmpty(newId) ? string.Empty : $" (Zoho id {newId})"));
                         }
                     }
                 }
@@ -253,6 +276,7 @@ public sealed class SponsorZohoProvisionService
                             info.ZohoContactEmail = NullIf(info.EventCoordinatorEmail);
                         exCreated++;
                         notes.Add($"{name}: exhibitor created in Zoho.");
+                        zohoWrites.Add($"Created exhibitor '{name}' (Zoho id {exResult.Id})");
                     }
                     else
                     {
@@ -270,14 +294,27 @@ public sealed class SponsorZohoProvisionService
             // FIX UP the booth slot on an EXISTING/linked exhibitor: exhibitors created
             // before booth_label was sent show "No booth selected" in Zoho. Assign the
             // parsed booth (e.g. "E-26") with a minimal PUT (no other field touched, never
-            // the email). Idempotent (booth has no Zoho update-limit).
+            // the email). §302 (operator 2026-07-24, the 70-mail night): SKIP when Zoho's
+            // live booth_id ALREADY equals the target — the unconditional re-PUT fired a
+            // "change" mail line on EVERY 10-minute pass. An exhibitor absent from the
+            // start-of-run live list was created THIS run (booth_label rode the create).
             if (info.HasBooth && !string.IsNullOrWhiteSpace(info.ZohoExhibitorId)
                 && !string.IsNullOrWhiteSpace(info.BoothLabel))
             {
                 try
                 {
-                    if (await _zoho.AssignExhibitorBoothAsync(token!, info.ZohoExhibitorId!, info.BoothLabel!, ct, boothMap))
+                    var targetBoothId = boothMap.TryGetValue(info.BoothLabel!.Trim(), out var tb) ? tb : null;
+                    var liveEx = existingExhibitors.FirstOrDefault(
+                        e => string.Equals(e.Id, info.ZohoExhibitorId, StringComparison.Ordinal));
+                    var alreadySet = targetBoothId is not null
+                        && (liveEx is null   // created this run, booth carried on the create
+                            || string.Equals(liveEx.BoothId, targetBoothId, StringComparison.Ordinal));
+                    if (!alreadySet
+                        && await _zoho.AssignExhibitorBoothAsync(token!, info.ZohoExhibitorId!, info.BoothLabel!, ct, boothMap))
+                    {
                         notes.Add($"{name}: booth {info.BoothLabel} assigned in Zoho.");
+                        zohoWrites.Add($"Assigned booth {info.BoothLabel} to exhibitor '{name}' (Zoho GUI field: Booth)");
+                    }
                 }
                 catch (Exception ex) { _log.LogWarning(ex, "Provision: assign booth failed for {Co}.", info.SponsorCompanyId); }
             }
@@ -298,9 +335,19 @@ public sealed class SponsorZohoProvisionService
             {
                 try
                 {
-                    var sr = await _sync.SyncAsync(eventId, info.SponsorCompanyId, name, ct, accessToken: token);
-                    if (sr.SponsorSynced || sr.ExhibitorSynced)
-                        notes.Add($"{name}: blank-only social/web reconciled to Zoho.");
+                    // notifyZohoChange: false — this run sends ONE batched change mail below.
+                    // §302: SyncAsync now skips the PUT when Zoho already matches CEH, and
+                    // reports the Zoho GUI fields it wrote — so a quiet pass adds NO line
+                    // (the old unconditional "blank-only reconcile" line fired every 10 min).
+                    var sr = await _sync.SyncAsync(eventId, info.SponsorCompanyId, name, ct,
+                        accessToken: token, notifyZohoChange: false);
+                    var fields = (sr.SponsorFields ?? Array.Empty<string>())
+                        .Concat(sr.ExhibitorFields ?? Array.Empty<string>()).Distinct().ToList();
+                    if (fields.Count > 0)
+                    {
+                        notes.Add($"{name}: reconciled to Zoho ({string.Join(", ", fields)}).");
+                        zohoWrites.Add($"Updated sponsor/exhibitor '{name}' — Zoho GUI fields: {string.Join(", ", fields)}");
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -310,6 +357,11 @@ public sealed class SponsorZohoProvisionService
 
             await _db.SaveChangesAsync(ct);
         }
+
+        // Operator 2026-07-23: ONE batched ops mail per provision run listing every
+        // successful Zoho write (publish/delete is manual in Backstage). Never throws.
+        if (_zohoChanges is not null)
+            await _zohoChanges.NotifyAsync("Sponsors / exhibitors", zohoWrites, ct);
 
         return new ProvisionResult(true, created, linked, exCreated, exRequested, exLinked, skipped, notes);
     }

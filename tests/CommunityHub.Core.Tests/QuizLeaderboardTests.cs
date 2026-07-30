@@ -75,8 +75,40 @@ public sealed class QuizLeaderboardTests
     [InlineData("  Carol  Danvers  ", "Carol D.")]
     [InlineData("", "Player")]
     [InlineData(null, "Player")]
+    // §173g: a blank / whitespace / punctuation-only last name must NOT produce a stray
+    // "(" or a dangling "." — it falls back to just the first name.
+    [InlineData("MOK .", "MOK")]            // last token is just a dot
+    [InlineData("MOK (", "MOK")]            // last token is just an open paren
+    [InlineData("MOK ...", "MOK")]          // punctuation-only last token
+    [InlineData("MOK -", "MOK")]            // dash-only last token
+    [InlineData("Dan O'Brien", "Dan O.")]   // real last name still gives "First L."
     public void DisplayName_is_first_name_plus_last_initial(string? full, string expected)
     {
         Assert.Equal(expected, QuizLeaderboard.DisplayName(full));
+    }
+
+    [Theory]
+    [InlineData("MOK .")]
+    [InlineData("MOK (")]
+    [InlineData("MOK")]
+    [InlineData("Alice Smith")]
+    public void Viewer_label_appends_you_exactly_once_with_balanced_parens(string full)
+    {
+        // §173g: the leaderboard view appends " (you)" to the viewer's row. Whatever the
+        // builder returns, the composed viewer label must read cleanly — no stray "(.",
+        // the "(you)" present exactly once, and balanced parentheses.
+        var label = $"{QuizLeaderboard.DisplayName(full)} (you)";   // mirrors the view
+
+        Assert.DoesNotContain("(.", label);
+        Assert.DoesNotContain("..", label);
+        Assert.Equal(1, CountOccurrences(label, "(you)"));
+        Assert.Equal(label.Count(c => c == '('), label.Count(c => c == ')'));   // balanced
+    }
+
+    private static int CountOccurrences(string haystack, string needle)
+    {
+        int count = 0, i = 0;
+        while ((i = haystack.IndexOf(needle, i, System.StringComparison.Ordinal)) >= 0) { count++; i += needle.Length; }
+        return count;
     }
 }

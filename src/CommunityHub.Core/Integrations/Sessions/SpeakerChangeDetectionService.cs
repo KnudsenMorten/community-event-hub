@@ -94,16 +94,20 @@ public sealed class SpeakerChangeDetectionService
     /// </summary>
     public async Task<Result> RunAsync(int eventId, CancellationToken ct = default)
     {
-        // §58 DIRECTION GATE — only stage 3 (SpeakerSyncDirection == ZohoToCeh) is active.
-        var direction = await _db.SessionSourceSettings.AsNoTracking()
-            .Where(s => s.EventId == eventId)
-            .Select(s => (SessionSyncDirection?)s.SpeakerSyncDirection)
-            .FirstOrDefaultAsync(ct) ?? SessionSyncDirection.SessionizeToCeh;
-        if (direction != SessionSyncDirection.ZohoToCeh)
-        {
-            return Result.Inactive(
-                $"speaker sync direction is stage {(int)direction} ({direction}) — Zoho→CEH change detection inactive");
-        }
+        // 🔒 §576 — THE STAGE-3 DIRECTION GATE IS GONE. DO NOT REINTRODUCE IT.
+        //
+        // This gate required SpeakerSyncDirection == stage 3 (ZohoToCeh). The operator deleted
+        // stage 3 long ago ("stage 3 was deleted long ago (we will not have that)") and stage 2 is
+        // the permanent mode — so the condition was UNSATISFIABLE and this engine has been a no-op
+        // on every 5-minute run, while the Jobs page reported a healthy green run.
+        //
+        // That is exactly what he was asking about: "dont we have a comparison job based on the
+        // field mapper". We do. This gate is the only reason it never produced anything.
+        //
+        // DETECTION IS READ-ONLY AND SAFE UNGATED: it pulls the live Backstage speakers, diffs the
+        // LINKED CEH profiles, seeds a first populate silently, and ENQUEUES for approval — it never
+        // auto-applies, never creates, never deletes. The feature kill switch below still governs
+        // whether anything is enqueued.
 
         // Pull the current speakers. Unavailable ⇒ no-op (never fake / never enqueue).
         var pull = await PullAsync(ct);

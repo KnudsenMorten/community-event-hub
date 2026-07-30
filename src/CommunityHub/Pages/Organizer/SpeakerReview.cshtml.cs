@@ -12,15 +12,22 @@ namespace CommunityHub.Pages.Organizer;
 /// <summary>
 /// Post-Sessionize-import <b>"Speaker &amp; order review"</b> organizer page. It is
 /// the UI consumer of the shipped order-entitlement model: the organizer classifies
-/// every speaker (funding, days, cross-email dedup, per-item overrides) and verifies
-/// the deduped "what to order" counts the logistics team buys against.
+/// every speaker (§299 6.1 category — Community / Sponsor / Guest, Guest hotel
+/// nights, cross-email dedup, per-item overrides) and classifies them for the deduped "what
+/// to order" counts the logistics team buys against. Presenting days are DERIVED
+/// from linked sessions (§299 C5) and shown read-only.
 ///
 /// <para>
-/// Three sections: (1) the per-<see cref="OrderItem"/> deduped counts
-/// (<see cref="OrderCountService"/>); (2) a per-speaker review list with live
-/// effective-entitlement chips and per-row editable controls (each its own POST
-/// handler, redirect-after-post); (3) a compact sponsor booth-member toggle list.
+/// Two sections: (1) a per-speaker review list with live effective-entitlement chips and
+/// per-row editable controls (each its own POST handler, redirect-after-post); (2) a
+/// compact sponsor booth-member toggle list.
 /// </para>
+///
+/// <para>§327j — the deduped "what to order" count strip was REMOVED (operator 2026-07-25:
+/// the page "mixed 2 major things into one page"). Those numbers now live with the thing
+/// being ordered, where each reconciles against a named run-sheet — Swag, Lunch, the dinner
+/// run-sheet and HotelAllotments. Two surfaces showing the same count is how they end up
+/// disagreeing. Classification here still DRIVES them.</para>
 ///
 /// <para>
 /// Auth: read (GET) is gated on a signed-in <see cref="ParticipantRole.Organizer"/>;
@@ -34,18 +41,15 @@ public class SpeakerReviewModel : PageModel
 {
     private readonly CommunityHubDbContext _db;
     private readonly ICurrentParticipantAccessor _participant;
-    private readonly OrderCountService _counts;
     private readonly TimeProvider _clock;
 
     public SpeakerReviewModel(
         CommunityHubDbContext db,
         ICurrentParticipantAccessor participant,
-        OrderCountService counts,
         TimeProvider clock)
     {
         _db = db;
         _participant = participant;
-        _counts = counts;
         _clock = clock;
     }
 
@@ -60,8 +64,6 @@ public class SpeakerReviewModel : PageModel
 
     [BindProperty(SupportsGet = true)] public string? Msg { get; set; }
 
-    /// <summary>Deduped per-item count for the edition's "what to order" summary.</summary>
-    public Dictionary<OrderItem, int> Counts { get; private set; } = new();
 
     /// <summary>One review row per participant who HAS a speaker profile.</summary>
     public List<SpeakerRow> Speakers { get; private set; } = new();
@@ -72,18 +74,34 @@ public class SpeakerReviewModel : PageModel
     /// <summary>Compact sponsor booth-member section.</summary>
     public List<BoothRow> BoothMembers { get; private set; } = new();
 
+    /// <summary>
+    /// §299 OPEN-22 completeness check: ACTIVE participant rows that share an e-mail with
+    /// another row in the edition but are NOT linked via <c>SamePersonAsId</c> — each group is
+    /// one human counted more than once. The ordering counts must not be trusted
+    /// while this list is non-empty. (Cross-e-mail duplicates — the same human under two
+    /// addresses — are only detectable once linked; this catches the same-address kind.)
+    /// </summary>
+    public List<string> UnlinkedDuplicateWarnings { get; private set; } = new();
+
     /// <summary>The full <see cref="OrderItem"/> set, in declared order, for the UI.</summary>
     public static IReadOnlyList<OrderItem> AllItems { get; } = Enum.GetValues<OrderItem>();
 
     /// <summary>One speaker review row (a participant + their speaker profile + effective items).</summary>
+    /// <param name="Category">§299 6.1 — the organizer-set category; null = uncategorized (blocks activation, excluded from counts).</param>
+    /// <param name="GuestFundedNights">§299 6.3 — organizer-entered ELDK-funded hotel nights; Guest category only.</param>
+    /// <param name="LegacyFunding">LEGACY (§299 C3) — the retired funding value, shown for audit only.</param>
+    /// <param name="PresentsPreDay">§299 C5 — DERIVED from linked sessions (read-only; the stored flag is retired).</param>
+    /// <param name="PresentsMainDay">§299 C5 — DERIVED from linked sessions (read-only).</param>
     public sealed record SpeakerRow(
         int ParticipantId,
         string FullName,
         string Email,
         ParticipantRole Role,
-        SpeakerFunding Funding,
-        bool SpeakingPreDay,
-        bool SpeakingMainDay,
+        SpeakerCategory? Category,
+        int? GuestFundedNights,
+        SpeakerFunding LegacyFunding,
+        bool PresentsPreDay,
+        bool PresentsMainDay,
         int? SamePersonAsId,
         string? SamePersonAsLabel,
         IReadOnlySet<OrderItem> Effective,
@@ -121,9 +139,18 @@ public class SpeakerReviewModel : PageModel
         return Page();
     }
 
-    // --- Section 1 funding ---------------------------------------------------
-    /// <summary>Set a speaker's <see cref="SpeakerFunding"/> (drives the speaker-hat entitlements).</summary>
-    public async Task<IActionResult> OnPostFundingAsync(int participantId, SpeakerFunding funding, CancellationToken ct)
+    // --- Section 1 category --------------------------------------------------
+    /// <summary>
+    /// §299 6.1 — set (or clear) a speaker's <see cref="SpeakerCategory"/>, the
+    /// canonical classification driving the speaker-hat entitlements. A null
+    /// <paramref name="category"/> (the "(not set)" option) marks the speaker
+    /// uncategorized again: excluded from every count and blocked from
+    /// activation. Also accepts the Guest-only ELDK-funded hotel nights
+    /// (<paramref name="guestFundedNights"/>) so category + nights save in one
+    /// post; the nights value is ignored (cleared) for non-Guest categories.
+    /// </summary>
+    public async Task<IActionResult> OnPostCategoryAsync(
+        int participantId, SpeakerCategory? category, int? guestFundedNights, CancellationToken ct)
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
@@ -132,28 +159,21 @@ public class SpeakerReviewModel : PageModel
         var profile = await GetProfileAsync(me.EventId, participantId, ct);
         if (profile is null) return RedirectToPage(new { Msg = "Speaker profile not found." });
 
-        profile.SpeakerFunding = funding;
+        if (guestFundedNights is < 0)
+            return RedirectToPage(new { Msg = "Guest hotel nights cannot be negative." });
+
+        profile.Category = category;
+        // Guest nights are meaningful for the Guest category only — a switch away
+        // from Guest clears the stale value so the tallies never read it again.
+        profile.GuestFundedNights = category == SpeakerCategory.Guest ? guestFundedNights : null;
         profile.UpdatedAt = _clock.GetUtcNow();
         await _db.SaveChangesAsync(ct);
-        return RedirectToPage(new { Msg = "Funding updated." });
-    }
-
-    /// <summary>Set both speaking-day flags on a speaker profile.</summary>
-    public async Task<IActionResult> OnPostDaysAsync(
-        int participantId, bool preDay, bool mainDay, CancellationToken ct)
-    {
-        var me = _participant.Current;
-        if (me is null) return RedirectToPage("/Login");
-        if (!OrganizerAuth.IsRealOrganizer(me)) return Forbid();
-
-        var profile = await GetProfileAsync(me.EventId, participantId, ct);
-        if (profile is null) return RedirectToPage(new { Msg = "Speaker profile not found." });
-
-        profile.SpeakingPreDay = preDay;
-        profile.SpeakingMainDay = mainDay;
-        profile.UpdatedAt = _clock.GetUtcNow();
-        await _db.SaveChangesAsync(ct);
-        return RedirectToPage(new { Msg = "Speaking days updated." });
+        return RedirectToPage(new
+        {
+            Msg = category is null
+                ? "Category cleared — this speaker is uncategorized (excluded from all counts, cannot be activated)."
+                : $"Category set to {category}.",
+        });
     }
 
     /// <summary>
@@ -267,6 +287,25 @@ public class SpeakerReviewModel : PageModel
             .FirstOrDefaultAsync(x => x.Id == participantId && x.EventId == me.EventId, ct);
         if (p is null) return RedirectToPage(new { Msg = "Participant not found." });
 
+        // §299 7.4 hard constraint: a non-exhibitor (no-booth) sponsor cannot have a booth
+        // member — enforced at ASSIGNMENT time, not just hidden in the GUI.
+        if (isBoothMember)
+        {
+            var hasBooth = !string.IsNullOrWhiteSpace(p.SponsorCompanyId)
+                && await _db.SponsorInfos.AnyAsync(
+                    s => s.EventId == me.EventId
+                         && s.SponsorCompanyId == p.SponsorCompanyId
+                         && s.SponsorPackage >= SponsorPackage.Gold, ct);
+            if (!hasBooth)
+            {
+                return RedirectToPage(new
+                {
+                    Msg = "Cannot mark as booth member: this company has no exhibitor booth "
+                          + "(digital-only sponsorship). Raise the company's package first if that is wrong.",
+                });
+            }
+        }
+
         p.IsBoothMember = isBoothMember;
         await _db.SaveChangesAsync(ct);
         return RedirectToPage(new { Msg = isBoothMember ? "Marked as booth member." : "Removed from booth members." });
@@ -279,8 +318,6 @@ public class SpeakerReviewModel : PageModel
 
     private async Task LoadAsync(int eventId, CancellationToken ct)
     {
-        Counts = await _counts.CountsAsync(eventId, ct);
-
         var participants = await _db.Participants
             .Where(p => p.EventId == eventId)
             .ToListAsync(ct);
@@ -297,6 +334,21 @@ public class SpeakerReviewModel : PageModel
         var overridesByParticipant = overrides
             .GroupBy(o => o.ParticipantId)
             .ToDictionary(g => g.Key, g => g.ToList());
+
+        // §299 C5: presenting days DERIVE from linked sessions (SpeakerDayScope) —
+        // shown read-only per row and fed into the entitlement computation.
+        var daysBySpeaker = await SpeakerDayScope.DaysBySpeakerAsync(_db, eventId, ct);
+
+        // §299 OPEN-22 completeness check: same-e-mail groups with more than one UNLINKED
+        // active row = one human who would be counted twice. Surface before ordering.
+        UnlinkedDuplicateWarnings = participants
+            .Where(p => p.IsActive && !string.IsNullOrWhiteSpace(p.Email))
+            .GroupBy(p => p.Email.Trim().ToLowerInvariant())
+            .Where(g => g.Count(x => x.SamePersonAsId is null) > 1)
+            .Select(g => $"{g.First().Email}: {string.Join(" + ", g.Select(x => x.Role))} "
+                         + "— link the secondary row (\"same person as\") so the human is counted once.")
+            .OrderBy(s => s)
+            .ToList();
 
         // Candidate "same person as" targets: every PRIMARY row (no chains).
         LinkTargets = participants
@@ -315,7 +367,8 @@ public class SpeakerReviewModel : PageModel
                 var ov = overridesByParticipant.TryGetValue(p.Id, out var list)
                     ? list
                     : new List<ParticipantOrderOverride>();
-                var effective = OrderEntitlements.Effective(p, profile, ov);
+                var days = daysBySpeaker.TryGetValue(p.Id, out var d) ? d : SpeakerDays.None;
+                var effective = OrderEntitlements.Effective(p, profile, days, ov);
                 var overrideMap = ov.ToDictionary(o => o.Item, o => o.Include);
 
                 string? linkLabel = null;
@@ -324,7 +377,8 @@ public class SpeakerReviewModel : PageModel
 
                 return new SpeakerRow(
                     p.Id, p.FullName, p.Email, p.Role,
-                    profile.SpeakerFunding, profile.SpeakingPreDay, profile.SpeakingMainDay,
+                    profile.Category, profile.GuestFundedNights, profile.SpeakerFunding,
+                    days.PresentsPreDay, days.PresentsMainDay,
                     p.SamePersonAsId, linkLabel,
                     effective, overrideMap);
             })

@@ -237,7 +237,8 @@ public sealed class SponsorUploadWatchService
         // details (not a tiny inline link inside the list).
         var openButton = string.IsNullOrEmpty(loc.EditLinkUrl)
             ? string.Empty
-            : $"<p style=\"margin:20px 0;\"><a href=\"{System.Net.WebUtility.HtmlEncode(loc.EditLinkUrl)}\" style=\"display:inline-block;background:#1565c0;color:#ffffff;text-decoration:none;font-weight:700;font-size:16px;padding:14px 30px;border-radius:8px;\">Open folder</a></p>";
+            // §191: bulletproof button — white text forced with !important (dark-mode safe).
+            : $"<p style=\"margin:20px 0;\"><a href=\"{System.Net.WebUtility.HtmlEncode(loc.EditLinkUrl)}\" style=\"display:inline-block;background-color:#1565c0;color:#ffffff !important;text-decoration:none;font-weight:700;font-size:16px;padding:14px 30px;border-radius:8px;\">Open folder</a></p>";
 
         return $@"<p>Sponsor <b>{System.Net.WebUtility.HtmlEncode(loc.CompanyName)}</b> {verb} a file in their <code>{System.Net.WebUtility.HtmlEncode(loc.Subfolder)}</code> folder.</p>
 <ul>

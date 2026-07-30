@@ -9,49 +9,56 @@
     model binding (empty prefix) is unchanged between the page and the wizard.
 *@
 
-<label for="LunchName">@Localizer["Common.Name"]</label>
-<input type="text" id="LunchName" value="@Model.FullName" readonly />
+@* §326i: read-only Name/Email removed — authenticated session, answers keyed to the
+   signed-in participant. *@
 
-<label for="LunchEmail">@Localizer["Common.Email"]</label>
-<input type="text" id="LunchEmail" value="@Model.Email" readonly />
-
+@*
+    §178b: a day the person is marked UNAVAILABLE on is rendered disabled + dimmed
+    with a short hint — you can't have lunch on a day you're not on site. A disabled
+    checkbox is never submitted, and the service force-unchecks + server-guards it, so
+    the value can't round-trip true. A local helper keeps the three days consistent.
+*@
 <fieldset style="border:0;padding:0;margin:0;">
     <legend style="font-weight:600;font-size:14px;margin-top:10px;">@Localizer["Lunch.WhichLegend"]</legend>
     @if (Model.ShowSetupDay)
     {
-        <label style="font-weight:normal; display:flex; align-items:flex-start; gap:8px; margin-top:8px;">
-            <input type="checkbox" asp-for="LunchEarlySetupDay" style="width:auto;margin:5px 0 0;" />
+        @* §178c: every lunch day is the SAME checkbox select/unselect style. *@
+        <label style="font-weight:normal; display:flex; align-items:flex-start; gap:8px; margin-top:8px;@(Model.EarlySetupDayUnavailable ? "opacity:.55;" : "")">
+            <input type="checkbox" asp-for="LunchEarlySetupDay" style="width:auto;margin:5px 0 0;" disabled="@(Model.EarlySetupDayUnavailable ? "disabled" : null)" />
             <span>
                 <strong>@Localizer["Lunch.SetupDay", Model.EarlySetupDayLabel]</strong>
+                @if (Model.EarlySetupDayUnavailable)
+                {
+                    <span style="display:block;font-size:12px;color:#6b7280;">@Localizer["Lunch.NotAvailableHint"]</span>
+                }
             </span>
         </label>
-        <label style="font-weight:normal; display:flex; align-items:flex-start; gap:8px; margin-top:8px;">
-            <input type="checkbox" asp-for="LunchSetupDay" style="width:auto;margin:5px 0 0;" />
+        <label style="font-weight:normal; display:flex; align-items:flex-start; gap:8px; margin-top:8px;@(Model.SetupDayUnavailable ? "opacity:.55;" : "")">
+            <input type="checkbox" asp-for="LunchSetupDay" style="width:auto;margin:5px 0 0;" disabled="@(Model.SetupDayUnavailable ? "disabled" : null)" />
             <span>
                 <strong>@Localizer["Lunch.SetupDay", Model.SetupDayLabel]</strong>
+                @if (Model.SetupDayUnavailable)
+                {
+                    <span style="display:block;font-size:12px;color:#6b7280;">@Localizer["Lunch.NotAvailableHint"]</span>
+                }
             </span>
         </label>
     }
 
     @if (Model.ShowPreDay)
     {
-        @* PRE-DAY lunch is a REQUIRED Yes/No choice (operator §62): a checkbox can't
-           be counted (unchecked == no == not-answered), so submit must always record
-           an explicit answer. *@
-        <div style="margin:8px 0 14px;">
-            <p style="font-weight:normal;margin:8px 0 6px;">
-                <strong>@Localizer["Lunch.PreDayQuestion", Model.PreDayLabel]</strong>
-            </p>
-            <label style="font-weight:normal; display:block; margin:6px 0;">
-                <input type="radio" asp-for="LunchPreDay" value="true" required />
-                @Localizer["Common.Yes"]
-            </label>
-            <label style="font-weight:normal; display:block; margin:6px 0;">
-                <input type="radio" asp-for="LunchPreDay" value="false" required />
-                @Localizer["Common.No"]
-            </label>
-            <span asp-validation-for="LunchPreDay" class="ceh-field-error"></span>
-        </div>
+        @* §178c: the pre-day lunch is a CHECKBOX like the others now (operator wants ONE
+           select/unselect style) — checked = yes, unchecked = no. *@
+        <label style="font-weight:normal; display:flex; align-items:flex-start; gap:8px; margin-top:8px;@(Model.PreDayUnavailable ? "opacity:.55;" : "")">
+            <input type="checkbox" asp-for="LunchPreDay" style="width:auto;margin:5px 0 0;" disabled="@(Model.PreDayUnavailable ? "disabled" : null)" />
+            <span>
+                <strong>@Localizer["Lunch.SetupDay", Model.PreDayLabel]</strong>
+                @if (Model.PreDayUnavailable)
+                {
+                    <span style="display:block;font-size:12px;color:#6b7280;">@Localizer["Lunch.NotAvailableHint"]</span>
+                }
+            </span>
+        </label>
     }
     else if (Model.PreDayAutoCounted)
     {

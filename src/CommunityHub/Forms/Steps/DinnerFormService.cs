@@ -75,7 +75,9 @@ public sealed class DinnerFormService : IWizardFormService
         IOptions<EmailOptions> emailOptions,
         OrganizerActionItemService actions,
         IStringLocalizer<SharedResource> loc,
-        IEmailContextAccessor? context = null)
+        IEmailContextAccessor? context = null,
+        // §322n: optional + last (existing unit tests need not construct it; DI injects).
+        CommunityHub.Core.Email.CalendarInviteEmailService? calendarInvite = null)
     {
         _db = db;
         _clock = clock;
@@ -84,7 +86,10 @@ public sealed class DinnerFormService : IWizardFormService
         _actions = actions;
         _loc = loc;
         _context = context;
+        _calendarInvite = calendarInvite;
     }
+
+    private readonly CommunityHub.Core.Email.CalendarInviteEmailService? _calendarInvite;
 
     /// <summary>
     /// FEATURE B eligibility (REQUIREMENTS §148 relevance gate): the appreciation-dinner
@@ -227,23 +232,63 @@ public sealed class DinnerFormService : IWizardFormService
                 participantId, summary, ct);
         }
 
-        // Auto-send calendar invitation when a participant is attending.
-        if (model.Rsvp == DinnerRsvp.Yes)
-        {
-            try
-            {
-                await SendCalendarInviteAsync(model, signup, fullName, email, ct);
-                signup.CalendarInviteSentAt = _clock.GetUtcNow();
-                await _db.SaveChangesAsync(ct);
-                model.Message += " A calendar invitation has been emailed to you.";
-            }
-            catch (Exception ex)
-            {
-                model.Message += $" (Calendar invitation could not be sent: {ex.Message})";
-            }
-        }
+        // §322n (operator 2026-07-24): the AUTO e-mail on RSVP=Yes is GONE ("drop these 2
+        // auto-emails") — it had degraded to a links-only mail (§257 auto-invite off).
+        // The participant now clicks "Email me a calendar invite" on the form instead
+        // (SendInviteEmailAsync below sends the REGULAR invitation).
 
         return WizardStepOutcome.Advance;
+    }
+
+    /// <summary>
+    /// §322n: USER-INITIATED dinner calendar invite — the standard §193 invitation
+    /// (CalendarInviteEmailService: honors the calendar/override e-mail, stable UID so a
+    /// re-send UPDATES the existing entry). Requires a saved RSVP = Yes.
+    /// </summary>
+    public async Task<(bool Ok, string Message)> SendInviteEmailAsync(
+        int eventId, int participantId, CancellationToken ct = default)
+    {
+        if (_calendarInvite is null)
+            return (false, "Calendar invitations aren't available right now.");
+
+        var signup = await _db.DinnerSignups.AsNoTracking().FirstOrDefaultAsync(
+            d => d.EventId == eventId && d.ParticipantId == participantId, ct);
+        if (signup is null || !signup.Attending)
+        {
+            return (false, "RSVP Yes and save first — then the invite has something to contain.");
+        }
+
+        var eventCode = await _db.Events.Where(e => e.Id == eventId)
+            .Select(e => e.Code).FirstOrDefaultAsync(ct) ?? "Event Hub";
+        var model = new DinnerFormModel();   // carries the venue/date labels
+
+        // §298: dinner 18:30–22:30 CET on 9 Feb 2027 (17:30–21:30 UTC).
+        var startUtc = new DateTimeOffset(2027, 2, 9, 17, 30, 0, TimeSpan.Zero);
+        var endUtc = startUtc.AddHours(4);
+        var totalSeats = 1 + signup.PlusOneCount;
+
+        // The SAME UID the retired auto-mail used — a button re-send UPDATES that entry.
+        var sent = await _calendarInvite.SendItemInviteAsync(
+            participantId,
+            uid: $"dinner-{eventId}-{participantId}@eventhub.expertslive.dk",
+            summary: $"{eventCode} Appreciation Dinner",
+            description: $"You are confirmed for the {eventCode} Appreciation Dinner.\n"
+                + $"Seats: {totalSeats}\n"
+                + $"Venue: {model.DinnerVenue}\n"
+                + "Time: 18:30 - 22:30 CET (the evening BEFORE the conference day).",
+            location: model.DinnerVenue,
+            start: startUtc,
+            end: endUtc,
+            allDay: false,
+            fileName: "dinner.ics",
+            introHtml: $"Here is your calendar invitation for the {System.Net.WebUtility.HtmlEncode(eventCode)} Appreciation Dinner.",
+            ct: ct,
+            // §705.15a — name the mail so it stops sharing one Settings row with the activation and
+            // hotel calendar invites. Still user-initiated, so still ring-exempt.
+            mailKey: "calendar-dinner");
+        return sent
+            ? (true, sent.Confirmation())
+            : (false, "Calendar invitations are turned off for this event.");
     }
 
     private async Task PopulateContextAsync(DinnerFormModel model, int eventId, CancellationToken ct)
@@ -332,54 +377,6 @@ public sealed class DinnerFormService : IWizardFormService
         return today > lockDate.Value;
     }
 
-    private async Task SendCalendarInviteAsync(
-        DinnerFormModel model, DinnerSignup signup, string fullName, string toEmail, CancellationToken ct)
-    {
-        // 9 Feb 2027 18:00 CET = 17:00 UTC; ends 22:00 CET = 21:00 UTC (4h).
-        var startUtc = new DateTimeOffset(2027, 2, 9, 17, 0, 0, TimeSpan.Zero);
-        var endUtc   = startUtc.AddHours(4);
-
-        var totalSeats = 1 + signup.PlusOneCount;
-        var description =
-            $"You are confirmed for the {model.EventCode} Appreciation Dinner.\n\n" +
-            $"Seats: {totalSeats}\n" +
-            $"Venue: {model.DinnerVenue}\n" +
-            $"Time: 18:00 - 22:00 CET (the evening BEFORE the conference day).\n\n" +
-            $"Allergies: {(string.IsNullOrWhiteSpace(signup.AllergyNotes) ? "(none)" : signup.AllergyNotes)}\n" +
-            $"Comments: {(string.IsNullOrWhiteSpace(signup.Comments) ? "(none)" : signup.Comments)}\n\n" +
-            $"See you there!\n\nCheers,\nELDK-team";
-
-        var uid = $"dinner-{signup.EventId}-{signup.ParticipantId}@eventhub.expertslive.dk";
-        var summary = $"{model.EventCode} Appreciation Dinner";
-
-        var ics = IcsCalendarBuilder.BuildVEvent(
-            uid: uid,
-            summary: summary,
-            description: description,
-            location: model.DinnerVenue,
-            startUtc: startUtc,
-            endUtc: endUtc,
-            organizerEmail: _emailOptions.FromAddress,
-            organizerName: _emailOptions.FromDisplayName);
-
-        var subject = summary;  // e.g. "ELDK27 Appreciation Dinner"
-        var firstName = string.IsNullOrWhiteSpace(fullName) ? "there" : fullName.Split(' ')[0];
-        var htmlBody =
-            $"<p>Hi {System.Net.WebUtility.HtmlEncode(firstName)},</p>" +
-            $"<p>Thank you for confirming your attendance at the {model.EventCode} Appreciation Dinner. " +
-            $"Your calendar invitation is attached &mdash; open it to add the event to your calendar.</p>" +
-            $"<p><strong>When:</strong> {model.DinnerDateLabel}, 18:00 / 6 pm CET<br/>" +
-            $"<strong>Where:</strong> {model.DinnerVenue}<br/>" +
-            $"<strong>Seats:</strong> {totalSeats}</p>" +
-            $"<p>See you there!</p>" +
-            $"<p>Cheers,<br/>ELDK-team</p>";
-
-        // Ring-governed by the dinner-invite feature (operator 2026-06-22).
-        using (_context?.Set(new EmailContext(
-            "dinner-invite", signup.EventId, signup.ParticipantId, fullName, FeatureKey: "dinner-invite")))
-        {
-            await _emailSender.SendWithIcsAsync(
-                toEmail, subject, htmlBody, ics, "dinner.ics", ct);
-        }
-    }
+    // (§322n: the old auto-send mail builder is gone — the user-initiated button uses
+    // CalendarInviteEmailService.SendItemInviteAsync, the standard §193 invitation.)
 }

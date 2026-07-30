@@ -21,6 +21,23 @@ public enum ParticipantStatusFilter
 
     /// <summary>Everyone in the edition, regardless of status.</summary>
     All = 2,
+
+    /// <summary>
+    /// §707.38 — lifecycle-active people <b>PLUS</b> the 1-day ticket holders, who are inactive
+    /// <i>by design</i> (operator 2026-07-30).
+    /// </summary>
+    /// <remarks>
+    /// 🔒 <b>A 1-day holder being INACTIVE is not a fault to be repaired.</b> Operator 2026-07-30:
+    /// *"make a note that it is by design that 1-day ticket holders have their state as inactive as
+    /// they dont require access to hub"*. They attend the main event only; the hub exists for
+    /// Master-Class selection, tasks and onboarding, none of which apply to them. `attendee-1day-access`
+    /// (§242, default OFF) is what holds that, reversibly.
+    ///
+    /// <para>So "Active only" legitimately hides them and "Inactive only" mixes them in with genuinely
+    /// withdrawn people — neither answers *"everyone who is really coming"*. This filter does, without
+    /// pretending they can sign in.</para>
+    /// </remarks>
+    ActivePlusOneDay = 3,
 }
 
 /// <summary>The column a participant grid is sorted on.</summary>
@@ -111,6 +128,8 @@ public sealed class ParticipantSearchService
         {
             "inactive" => ParticipantStatusFilter.Inactive,
             "all" => ParticipantStatusFilter.All,
+            // §707.38 — "Active + 1-day attendees".
+            "active+1day" => ParticipantStatusFilter.ActivePlusOneDay,
             _ => ParticipantStatusFilter.Active,
         };
 
@@ -148,6 +167,22 @@ public sealed class ParticipantSearchService
             ParticipantStatusFilter.Active => query.Where(ParticipantActivation.IsActiveExpr),
             ParticipantStatusFilter.Inactive =>
                 query.Where(p => !(p.IsActive && p.LifecycleState == ParticipantLifecycleState.Active)),
+
+            // §707.38 — active people PLUS 1-day ticket holders, who are inactive BY DESIGN.
+            //
+            // 🔒 The 1-day arm is keyed on an ACTIVE MIRROR ROW whose ticket is not 2-day
+            // (`TicketStatus.Other` — the sync's own label for "an active ticket that is not 2-day"),
+            // NOT on the participant being inactive. That distinction is the whole point: it lets a
+            // genuinely WITHDRAWN person stay hidden while a 1-day holder shows, where a naive
+            // "active OR inactive-attendee" rule would drag both in.
+            ParticipantStatusFilter.ActivePlusOneDay =>
+                query.Where(p => (p.IsActive && p.LifecycleState == ParticipantLifecycleState.Active)
+                                 || _db.Attendees.Any(a =>
+                                        a.EventId == p.EventId
+                                        && a.MirrorState == MirrorState.Active
+                                        && a.TicketStatus == TicketStatus.Other
+                                        && a.Email.ToLower() == p.Email.ToLower())),
+
             _ => query, // All
         };
 

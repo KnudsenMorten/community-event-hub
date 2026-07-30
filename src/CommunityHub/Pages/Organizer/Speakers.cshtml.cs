@@ -1,4 +1,3 @@
-using ClosedXML.Excel;
 using CommunityHub.Auth;
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
@@ -17,18 +16,15 @@ public class SpeakersModel : PageModel
     private readonly ICurrentParticipantAccessor _participant;
     private readonly TimeProvider _clock;
     private readonly SpeakerDeletionService _deletion;
-    private readonly CommunityHub.Core.Settings.FeatureGateService _gate;
 
     public SpeakersModel(
         CommunityHubDbContext db, ICurrentParticipantAccessor participant, TimeProvider clock,
-        SpeakerDeletionService deletion,
-        CommunityHub.Core.Settings.FeatureGateService gate)
+        SpeakerDeletionService deletion)
     {
         _db = db;
         _participant = participant;
         _clock = clock;
         _deletion = deletion;
-        _gate = gate;
     }
 
     public bool AccessDenied { get; private set; }
@@ -50,16 +46,14 @@ public class SpeakersModel : PageModel
     public string AriaSort(string col) => Sort != col ? "none" : (Desc ? "descending" : "ascending");
 
     [BindProperty] public int[] SelectedIds { get; set; } = Array.Empty<int>();
-    [BindProperty] public string? EmailList { get; set; }
-    /// <summary>"preday" | "mainday".</summary>
-    [BindProperty] public string FieldToSet { get; set; } = "preday";
-    /// <summary>true = tick the flag; false = clear it.</summary>
-    [BindProperty] public bool TargetValue { get; set; } = true;
 
     public List<Row> Rows { get; private set; } = new();
+    // §308 (operator 2026-07-24): the manual pre-/main-day flags are GONE from this
+    // grid — "we have dates when speakers are speaking", so SpeakingDays is DERIVED
+    // from the linked sessions' dates (read-only).
     public record Row(
         int Id, string Name, string Email, string Role,
-        bool SpeakingPreDay, bool SpeakingMainDay,
+        IReadOnlyList<string> SpeakingDays,
         string? Accreditation, string? Country, bool? IsFirstTime, bool IsActive,
         IReadOnlyList<string> Sessions)
     {
@@ -84,58 +78,8 @@ public class SpeakersModel : PageModel
         return Page();
     }
 
-    public async Task<IActionResult> OnPostBulkSelectedAsync(CancellationToken ct)
-    {
-        var me = _participant.Current;
-        if (me is null) return RedirectToPage("/Login");
-        if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
-
-        if (SelectedIds.Length == 0)
-        {
-            Error = "No speakers selected.";
-            await LoadAsync(me.EventId, ct);
-            return Page();
-        }
-
-        var affected = await ApplyToParticipantsAsync(me.EventId, SelectedIds, ct);
-        Message = $"{FieldLabel()} = {(TargetValue ? "Yes" : "No")} applied to {affected} speaker(s).";
-        await LoadAsync(me.EventId, ct);
-        return Page();
-    }
-
-    public async Task<IActionResult> OnPostBulkPasteAsync(CancellationToken ct)
-    {
-        var me = _participant.Current;
-        if (me is null) return RedirectToPage("/Login");
-        if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
-
-        if (string.IsNullOrWhiteSpace(EmailList))
-        {
-            Error = "Paste at least one email.";
-            await LoadAsync(me.EventId, ct);
-            return Page();
-        }
-
-        var emails = EmailList
-            .Split(new[] { '\n', '\r', ',', ';', ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries)
-            .Select(e => e.Trim().ToLowerInvariant())
-            .Where(e => e.Contains('@'))
-            .Distinct()
-            .ToList();
-
-        var ids = await _db.Participants
-            .Where(p => p.EventId == me.EventId && emails.Contains(p.Email)
-                        && p.Role == ParticipantRole.Speaker)
-            .Select(p => p.Id)
-            .ToArrayAsync(ct);
-
-        var notFound = emails.Count - ids.Length;
-        var affected = await ApplyToParticipantsAsync(me.EventId, ids, ct);
-        Message = $"{FieldLabel()} = {(TargetValue ? "Yes" : "No")} applied to {affected} speaker(s)."
-                  + (notFound > 0 ? $" {notFound} email(s) did not match an active speaker and were skipped." : "");
-        await LoadAsync(me.EventId, ct);
-        return Page();
-    }
+    // §308: OnPostBulkSelectedAsync (manual pre-/main-day flag setter) DELETED —
+    // speaking days derive from the sessions' dates; nothing to define by hand.
 
     /// <summary>
     /// Remove a single person from the speaker roster (REQUIREMENTS §22 "Speakers
@@ -155,7 +99,7 @@ public class SpeakersModel : PageModel
         switch (result.Status)
         {
             case SpeakerDeletionService.DeletionStatus.Deleted:
-                Message = $"\"{result.Name}\" was removed from the speaker roster "
+                Message = $"\"{result.Name}\" was removed from the speaker registrations "
                           + "(the person stays as a participant).";
                 break;
             case SpeakerDeletionService.DeletionStatus.Blocked:
@@ -203,7 +147,7 @@ public class SpeakersModel : PageModel
         }
         else
         {
-            Message = $"{result.Deleted} speaker(s) removed from the roster"
+            Message = $"{result.Deleted} speaker(s) removed from the registrations"
                 + (result.Blocked > 0 ? $", {result.Blocked} kept (still on the agenda)" : string.Empty)
                 + (skipped > 0 ? $", {skipped} not found" : string.Empty)
                 + ".";
@@ -213,232 +157,15 @@ public class SpeakersModel : PageModel
         return Page();
     }
 
-    private async Task<int> ApplyToParticipantsAsync(
-        int eventId, int[] participantIds, CancellationToken ct)
-    {
-        if (participantIds.Length == 0) return 0;
-        var now = _clock.GetUtcNow();
-        var existing = await _db.SpeakerProfiles
-            .Where(sp => sp.EventId == eventId && participantIds.Contains(sp.ParticipantId))
-            .ToDictionaryAsync(sp => sp.ParticipantId, sp => sp, ct);
-
-        int n = 0;
-        foreach (var pid in participantIds)
-        {
-            if (!existing.TryGetValue(pid, out var prof))
-            {
-                prof = new SpeakerProfile
-                {
-                    EventId = eventId,
-                    ParticipantId = pid,
-                    CreatedAt = now,
-                };
-                _db.SpeakerProfiles.Add(prof);
-            }
-            if (FieldToSet == "mainday") prof.SpeakingMainDay = TargetValue;
-            else                         prof.SpeakingPreDay  = TargetValue;
-            prof.UpdatedAt = now;
-            n++;
-        }
-        await _db.SaveChangesAsync(ct);
-        return n;
-    }
-
-    private string FieldLabel() => FieldToSet == "mainday" ? "SpeakingMainDay" : "SpeakingPreDay";
-
-    /// <summary>
-    /// Download an xlsx template the organizer can fill out + upload.
-    /// Columns: Email | SpeakingPreDay | SpeakingMainDay
-    /// Empty cell = no change. Yes/Y/1/true/x = tick. No/N/0/false = untick.
-    /// </summary>
-    public IActionResult OnGetTemplate()
-    {
-        using var wb = new XLWorkbook();
-        var ws = wb.Worksheets.Add("Speakers");
-        ws.Cell(1, 1).Value = "Email";
-        ws.Cell(1, 2).Value = "SpeakingPreDay";
-        ws.Cell(1, 3).Value = "SpeakingMainDay";
-        ws.Range(1, 1, 1, 3).Style.Font.Bold = true;
-
-        ws.Cell(2, 1).Value = "alice@example.com";
-        ws.Cell(2, 2).Value = "Yes";
-        ws.Cell(2, 3).Value = "No";
-
-        ws.Cell(3, 1).Value = "bob@example.com";
-        ws.Cell(3, 2).Value = "No";
-        ws.Cell(3, 3).Value = "Yes";
-
-        ws.Cell(4, 1).Value = "carol@example.com";
-        ws.Cell(4, 2).Value = "Yes";
-        ws.Cell(4, 3).Value = "Yes";
-
-        var notes = wb.Worksheets.Add("Notes");
-        notes.Cell(1, 1).Value = "Header row is REQUIRED. Email is the match key (lower-cased, trimmed).";
-        notes.Cell(2, 1).Value = "Yes / Y / 1 / true / x  =  tick the flag.";
-        notes.Cell(3, 1).Value = "No / N / 0 / false       =  untick the flag.";
-        notes.Cell(4, 1).Value = "Empty cell                =  leave that flag unchanged.";
-        notes.Cell(5, 1).Value = "Only matching active Speakers / Master Class Speakers are updated.";
-        notes.Columns().AdjustToContents();
-        ws.Columns().AdjustToContents();
-
-        using var ms = new MemoryStream();
-        wb.SaveAs(ms);
-        return File(ms.ToArray(),
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            "speakers-template.xlsx");
-    }
-
-    [BindProperty] public IFormFile? UploadFile { get; set; }
-
-    public async Task<IActionResult> OnPostImportXlsxAsync(CancellationToken ct)
-    {
-        var me = _participant.Current;
-        if (me is null) return RedirectToPage("/Login");
-        if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
-
-        // GATE (REQUIREMENTS §23): the Excel speaker import is the same speaker-import
-        // capability as the Sessionize integration, so it honours the
-        // 'sessionize-import' switch. Disabled ⇒ no-op with a clear "feature disabled"
-        // message, GUI state == actual behaviour.
-        if (!await _gate.IsFeatureEnabledAsync("sessionize-import", me.EventId, ct))
-        {
-            Error = "Speaker import is turned off for this event. "
-                + "Enable Sessionize import in Settings to upload speakers.";
-            await LoadAsync(me.EventId, ct);
-            return Page();
-        }
-
-        if (UploadFile is null || UploadFile.Length == 0)
-        {
-            Error = "Pick a file to upload.";
-            await LoadAsync(me.EventId, ct);
-            return Page();
-        }
-        var ext = Path.GetExtension(UploadFile.FileName).ToLowerInvariant();
-        if (ext != ".xlsx" && ext != ".xlsm")
-        {
-            Error = "Upload an Excel .xlsx file (the .xls binary format is not supported).";
-            await LoadAsync(me.EventId, ct);
-            return Page();
-        }
-
-        var emailIdx = await _db.Participants
-            .Where(p => p.EventId == me.EventId
-                        && p.Role == ParticipantRole.Speaker)
-            .ToDictionaryAsync(p => p.Email, p => p.Id, StringComparer.OrdinalIgnoreCase, ct);
-
-        var profileIdx = await _db.SpeakerProfiles
-            .Where(sp => sp.EventId == me.EventId)
-            .ToDictionaryAsync(sp => sp.ParticipantId, sp => sp, ct);
-
-        await using var stream = UploadFile.OpenReadStream();
-        using var wb = new XLWorkbook(stream);
-        var ws = wb.Worksheets.FirstOrDefault();
-        if (ws is null)
-        {
-            Error = "Workbook has no sheets.";
-            await LoadAsync(me.EventId, ct);
-            return Page();
-        }
-
-        // Locate columns by header (case-insensitive).
-        var headerRow = ws.FirstRowUsed();
-        var headers = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        if (headerRow is not null)
-        {
-            foreach (var c in headerRow.CellsUsed())
-            {
-                var k = c.GetString().Trim();
-                if (!string.IsNullOrEmpty(k)) headers[k] = c.Address.ColumnNumber;
-            }
-        }
-        if (!headers.TryGetValue("Email", out var emailCol))
-        {
-            Error = "No 'Email' column found in the header row.";
-            await LoadAsync(me.EventId, ct);
-            return Page();
-        }
-        headers.TryGetValue("SpeakingPreDay",  out var preCol);
-        headers.TryGetValue("SpeakingMainDay", out var mainCol);
-
-        int updated = 0, notMatched = 0;
-        var firstData = headerRow!.RowNumber() + 1;
-        var lastRow   = ws.LastRowUsed()?.RowNumber() ?? 0;
-        var now = _clock.GetUtcNow();
-        for (var rowNum = firstData; rowNum <= lastRow; rowNum++)
-        {
-            var row = ws.Row(rowNum);
-            var email = row.Cell(emailCol).GetString().Trim().ToLowerInvariant();
-            if (string.IsNullOrEmpty(email)) continue;
-
-            if (!emailIdx.TryGetValue(email, out var pid))
-            {
-                notMatched++;
-                continue;
-            }
-
-            if (!profileIdx.TryGetValue(pid, out var prof))
-            {
-                prof = new SpeakerProfile
-                {
-                    EventId = me.EventId,
-                    ParticipantId = pid,
-                    CreatedAt = now,
-                };
-                _db.SpeakerProfiles.Add(prof);
-                profileIdx[pid] = prof;
-            }
-
-            bool changed = false;
-            if (preCol > 0)
-            {
-                var v = ParseYesNoNull(row.Cell(preCol).GetString());
-                if (v is not null) { prof.SpeakingPreDay = v.Value; changed = true; }
-            }
-            if (mainCol > 0)
-            {
-                var v = ParseYesNoNull(row.Cell(mainCol).GetString());
-                if (v is not null) { prof.SpeakingMainDay = v.Value; changed = true; }
-            }
-            if (changed) { prof.UpdatedAt = now; updated++; }
-        }
-        await _db.SaveChangesAsync(ct);
-
-        Message = $"Updated {updated} speaker(s)."
-                  + (notMatched > 0 ? $" {notMatched} row(s) did not match any speaker email in this edition." : "");
-        await LoadAsync(me.EventId, ct);
-        return Page();
-    }
-
-    private static bool? ParseYesNoNull(string raw)
-    {
-        var s = (raw ?? "").Trim().ToLowerInvariant();
-        if (s.Length == 0) return null;
-        return s switch
-        {
-            "yes" or "y" or "1" or "true"  or "x" or "tick"    => true,
-            "no"  or "n" or "0" or "false" or "-"              => false,
-            _ => null,  // ambiguous -> leave unchanged
-        };
-    }
-
     private async Task LoadAsync(int eventId, CancellationToken ct)
     {
-        // Flattened, filterable+sortable speaker query. Profile flags are pulled
-        // via correlated subqueries so the whole thing stays server-side (we can
-        // count + sort + page in SQL, never loading every speaker into memory).
+        // Flattened, filterable+sortable speaker query — server-side count/sort/page.
         var baseQuery = _db.Participants
             .Where(p => p.EventId == eventId
                         && p.Role == ParticipantRole.Speaker)
             .Select(p => new
             {
                 p.Id, p.FullName, p.Email, p.Role, p.IsActive,
-                PreDay = _db.SpeakerProfiles
-                    .Where(sp => sp.EventId == eventId && sp.ParticipantId == p.Id)
-                    .Select(sp => (bool?)sp.SpeakingPreDay).FirstOrDefault() ?? false,
-                MainDay = _db.SpeakerProfiles
-                    .Where(sp => sp.EventId == eventId && sp.ParticipantId == p.Id)
-                    .Select(sp => (bool?)sp.SpeakingMainDay).FirstOrDefault() ?? false,
             });
 
         if (!string.IsNullOrWhiteSpace(Search))
@@ -454,10 +181,6 @@ public class SpeakersModel : PageModel
         {
             ("email", false)   => baseQuery.OrderBy(r => r.Email).ThenBy(r => r.Id),
             ("email", true)    => baseQuery.OrderByDescending(r => r.Email).ThenByDescending(r => r.Id),
-            ("preday", false)  => baseQuery.OrderBy(r => r.PreDay).ThenBy(r => r.FullName).ThenBy(r => r.Id),
-            ("preday", true)   => baseQuery.OrderByDescending(r => r.PreDay).ThenBy(r => r.FullName).ThenBy(r => r.Id),
-            ("mainday", false) => baseQuery.OrderBy(r => r.MainDay).ThenBy(r => r.FullName).ThenBy(r => r.Id),
-            ("mainday", true)  => baseQuery.OrderByDescending(r => r.MainDay).ThenBy(r => r.FullName).ThenBy(r => r.Id),
             (_, true)          => baseQuery.OrderByDescending(r => r.FullName).ThenByDescending(r => r.Id),
             _                  => baseQuery.OrderBy(r => r.FullName).ThenBy(r => r.Id),
         };
@@ -477,13 +200,28 @@ public class SpeakersModel : PageModel
                 sp.Accreditation, sp.Country, sp.IsFirstTimeSpeaker
             }, ct);
 
-        var sessionsById = (await _db.SessionSpeakers
+        var sessionRows = await _db.SessionSpeakers
             .Where(ss => ss.Session.EventId == eventId && pageIds.Contains(ss.ParticipantId))
             .OrderBy(ss => ss.Session.StartsAt).ThenBy(ss => ss.Session.Title)
-            .Select(ss => new { ss.ParticipantId, ss.Session.Title })
-            .ToListAsync(ct))
+            .Select(ss => new { ss.ParticipantId, ss.Session.Title, ss.Session.StartsAt })
+            .ToListAsync(ct);
+        var sessionsById = sessionRows
             .GroupBy(x => x.ParticipantId)
             .ToDictionary(g => g.Key, g => g.Select(x => x.Title).ToList());
+        // §308: SPEAKING DAYS are DERIVED from the linked sessions' dates (Danish
+        // time) — the old manual pre-/main-day flags are gone from this grid.
+        var daysById = sessionRows
+            .Where(x => x.StartsAt is not null)
+            .GroupBy(x => x.ParticipantId)
+            .ToDictionary(
+                g => g.Key,
+                g => (IReadOnlyList<string>)g
+                    .Select(x => TimeZoneInfo.ConvertTime(x.StartsAt!.Value,
+                        CommunityHub.Core.Integrations.EventTimezone.Tz).Date)
+                    .Distinct()
+                    .OrderBy(d => d)
+                    .Select(d => d.ToString("ddd d MMM", System.Globalization.CultureInfo.InvariantCulture))
+                    .ToList());
 
         SessionCount = await _db.Sessions.CountAsync(s => s.EventId == eventId, ct);
 
@@ -491,7 +229,7 @@ public class SpeakersModel : PageModel
             .Select(r => new Row(
                 r.Id, r.FullName, r.Email,
                 CommunityHub.Branding.RoleDisplay.Name(r.Role),
-                r.PreDay, r.MainDay,
+                daysById.TryGetValue(r.Id, out var days) ? days : Array.Empty<string>(),
                 profileById.TryGetValue(r.Id, out var pr) ? pr.Accreditation : null,
                 profileById.TryGetValue(r.Id, out var pc) ? pc.Country : null,
                 profileById.TryGetValue(r.Id, out var pf) ? pf.IsFirstTimeSpeaker : null,

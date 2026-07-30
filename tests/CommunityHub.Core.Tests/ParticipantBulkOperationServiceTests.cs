@@ -25,6 +25,12 @@ public sealed class ParticipantBulkOperationServiceTests
             .UseInMemoryDatabase($"bulkops-{Guid.NewGuid():N}")
             .Options);
 
+    /// <summary>The bulk service wired with the real §253 G1 cascade (audited).</summary>
+    private static ParticipantBulkOperationService NewSvc(CommunityHubDbContext db) =>
+        new(db, new ParticipantDeactivationService(
+            db, TimeProvider.System,
+            new CommunityHub.Core.Audit.AuditTrailService(db, TimeProvider.System)));
+
     private static Participant P(
         int eventId, string email, ParticipantRole role = ParticipantRole.Attendee,
         bool active = true) =>
@@ -59,7 +65,7 @@ public sealed class ParticipantBulkOperationServiceTests
         db.Participants.Add(synced);
         await db.SaveChangesAsync();
 
-        var svc = new ParticipantBulkOperationService(db);
+        var svc = NewSvc(db);
         var result = await svc.ReactivateAsync(EventId, new[] { synced.Id }, default);
 
         Assert.Equal(1, result.Matched);
@@ -79,7 +85,7 @@ public sealed class ParticipantBulkOperationServiceTests
         db.Participants.AddRange(a, b, c);
         await db.SaveChangesAsync();
 
-        var svc = new ParticipantBulkOperationService(db);
+        var svc = NewSvc(db);
         var result = await svc.DeactivateAsync(EventId, new[] { a.Id, b.Id, c.Id }, default);
 
         Assert.Equal(3, result.Matched);
@@ -97,7 +103,7 @@ public sealed class ParticipantBulkOperationServiceTests
         db.Participants.Add(a);
         await db.SaveChangesAsync();
 
-        var svc = new ParticipantBulkOperationService(db);
+        var svc = NewSvc(db);
         var first = await svc.DeactivateAsync(EventId, new[] { a.Id }, default);
         var second = await svc.DeactivateAsync(EventId, new[] { a.Id }, default);
 
@@ -115,7 +121,7 @@ public sealed class ParticipantBulkOperationServiceTests
         db.Participants.AddRange(a, b);
         await db.SaveChangesAsync();
 
-        var svc = new ParticipantBulkOperationService(db);
+        var svc = NewSvc(db);
         var result = await svc.ReactivateAsync(EventId, new[] { a.Id, b.Id }, default);
 
         Assert.Equal(2, result.Matched);
@@ -133,7 +139,7 @@ public sealed class ParticipantBulkOperationServiceTests
         db.Participants.AddRange(a, b);
         await db.SaveChangesAsync();
 
-        var svc = new ParticipantBulkOperationService(db);
+        var svc = NewSvc(db);
         var result = await svc.SetRingAsync(EventId, new[] { a.Id, b.Id }, Ring.Ring1, default);
 
         Assert.Equal(2, result.Matched);
@@ -151,7 +157,7 @@ public sealed class ParticipantBulkOperationServiceTests
         db.Participants.AddRange(mine, theirs);
         await db.SaveChangesAsync();
 
-        var svc = new ParticipantBulkOperationService(db);
+        var svc = NewSvc(db);
         var result = await svc.SetRingAsync(EventId, new[] { mine.Id, theirs.Id }, Ring.Ring2, default);
 
         Assert.Equal(1, result.Matched);
@@ -168,7 +174,7 @@ public sealed class ParticipantBulkOperationServiceTests
         db.Participants.AddRange(a, b);
         await db.SaveChangesAsync();
 
-        var svc = new ParticipantBulkOperationService(db);
+        var svc = NewSvc(db);
         var result = await svc.ChangeRoleAsync(
             EventId, new[] { a.Id, b.Id }, ParticipantRole.Volunteer, default);
 
@@ -185,7 +191,7 @@ public sealed class ParticipantBulkOperationServiceTests
         db.Participants.Add(a);
         await db.SaveChangesAsync();
 
-        var svc = new ParticipantBulkOperationService(db);
+        var svc = NewSvc(db);
         await svc.ChangeRoleAsync(EventId, new[] { a.Id }, ParticipantRole.Speaker, default);
 
         var reloaded = (await db.Participants.FindAsync(a.Id))!;
@@ -202,7 +208,7 @@ public sealed class ParticipantBulkOperationServiceTests
         db.Participants.AddRange(mine, theirs);
         await db.SaveChangesAsync();
 
-        var svc = new ParticipantBulkOperationService(db);
+        var svc = NewSvc(db);
         // Ask to deactivate BOTH ids, but scoped to EventId.
         var result = await svc.DeactivateAsync(EventId, new[] { mine.Id, theirs.Id }, default);
 
@@ -221,7 +227,7 @@ public sealed class ParticipantBulkOperationServiceTests
         db.Participants.Add(a);
         await db.SaveChangesAsync();
 
-        var svc = new ParticipantBulkOperationService(db);
+        var svc = NewSvc(db);
         var empty = await svc.DeactivateAsync(EventId, Array.Empty<int>(), default);
         var bogus = await svc.DeactivateAsync(EventId, new[] { 0, -5, 9999 }, default);
 
@@ -240,7 +246,7 @@ public sealed class ParticipantBulkOperationServiceTests
         db.Participants.Add(a);
         await db.SaveChangesAsync();
 
-        var svc = new ParticipantBulkOperationService(db);
+        var svc = NewSvc(db);
         var result = await svc.DeactivateAsync(EventId, new[] { a.Id, a.Id, a.Id }, default);
 
         Assert.Equal(1, result.Matched);           // de-duped to one

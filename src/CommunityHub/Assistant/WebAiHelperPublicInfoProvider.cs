@@ -184,6 +184,73 @@ public sealed class WebAiHelperPublicInfoProvider : IAiHelperPublicInfoProvider
                 "appreciation dinner, etc.:\n" + string.Join("\n", lines)));
         }
 
+        // --- (4) §490 PUBLIC sponsors & exhibitors -----------------------------------
+        // Operator: "it is also relevant with any information that is also synced to zoho
+        // like sponsor & exhibitor names, information, etc."
+        //
+        // The gate is the SAME as the public /Sponsors page (PublicSponsorsService):
+        // Status == Active, so a withdrawn company (§253 G8b) drops out of the helper the
+        // moment it drops off the public wall — one rule, not two that can drift apart.
+        //
+        // COMPANY-LEVEL FIELDS ONLY. Everything below is marketing copy the sponsor wrote
+        // FOR publication, already rendered publicly and synced to Zoho. Deliberately
+        // EXCLUDED as personal data (GDPR): contact names, e-mails, phone numbers, signer /
+        // coordinator identities, booth-member lists, check-in slots and head counts. Those
+        // are not "sponsor information" — they are people.
+        var sponsors = await _db.SponsorInfos
+            .Where(s => s.EventId == eventId && s.Status == SponsorStatus.Active)
+            .Select(s => new
+            {
+                s.SponsorCompanyId,
+                s.Tier,
+                s.BoothLabel,
+                s.WebsiteUrl,
+                s.LinkedInUrl,
+                s.CompanyDescription,
+                s.CompanyDescriptionShort,
+            })
+            .ToListAsync(ct);
+
+        if (sponsors.Count > 0)
+        {
+            // The hub has no company entity — the public NAME lives on SponsorUploadLocation
+            // and resolves through the shared fallback chain, so the helper says exactly the
+            // same company name as every other sponsor surface (§443).
+            var names = await _db.SponsorUploadLocations
+                .Where(l => l.EventId == eventId)
+                .Select(l => new { l.SponsorCompanyId, l.CompanyName })
+                .ToListAsync(ct);
+            var nameByCompany = names
+                .Where(n => !string.IsNullOrWhiteSpace(n.CompanyName))
+                .GroupBy(n => n.SponsorCompanyId)
+                .ToDictionary(g => g.Key, g => g.First().CompanyName!, StringComparer.OrdinalIgnoreCase);
+
+            var lines = new List<string>();
+            foreach (var s in sponsors)
+            {
+                nameByCompany.TryGetValue(s.SponsorCompanyId, out var publicName);
+                var name = CommunityHub.Core.Integrations.SponsorCompanyName.Resolve(
+                    publicName, legalName: null, billingName: null, companyId: s.SponsorCompanyId);
+
+                var bits = new List<string> { $"tier: {s.Tier}" };
+                if (!string.IsNullOrWhiteSpace(s.BoothLabel)) bits.Add($"booth: {s.BoothLabel!.Trim()}");
+                if (!string.IsNullOrWhiteSpace(s.WebsiteUrl)) bits.Add($"web: {s.WebsiteUrl!.Trim()}");
+                if (!string.IsNullOrWhiteSpace(s.LinkedInUrl)) bits.Add($"LinkedIn: {s.LinkedInUrl!.Trim()}");
+
+                var about = s.CompanyDescriptionShort ?? s.CompanyDescription;
+                var blurb = string.IsNullOrWhiteSpace(about) ? "" : " — " + Truncate(about!.Trim(), 600);
+
+                lines.Add($"- {name} ({string.Join(", ", bits)}){blurb}");
+            }
+
+            sections.Add(new AiHelperGroundingSection(
+                "Sponsors & exhibitors",
+                "The event's sponsor and exhibitor companies — the same public information " +
+                "shown on the sponsors page and synced to Zoho. Booth labels say where to find " +
+                "an exhibitor on the expo floor. Company information only; no contact people.\n"
+                + string.Join("\n", lines)));
+        }
+
         return sections;
     }
 

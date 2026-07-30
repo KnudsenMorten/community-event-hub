@@ -96,8 +96,10 @@ public sealed class ErpSyncTests
     [Fact]
     public void MapCustomer_falls_back_through_the_chain()
     {
-        // No public, no legal, no billing → "Company {id}".
-        Assert.Equal("Company 7",
+        // No public, no legal, no billing → the §528b unresolved-name label (was "Company 7",
+        // which read as a real company name and hid a failed sync).
+        Assert.Equal(
+            CommunityHub.Core.Integrations.SponsorCompanyName.UnresolvedName("7"),
             EconomicCustomerSyncService.MapCustomer("7", cm: null, billingName: null, contactEmail: null).Name);
 
         // Legal when public blank.

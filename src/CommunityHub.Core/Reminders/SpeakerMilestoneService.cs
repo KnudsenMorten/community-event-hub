@@ -132,10 +132,11 @@ public sealed class SpeakerMilestoneService
     }
 
     /// <summary>
-    /// Toggle one of the speaker's own milestone tasks between Done and Open.
-    /// Scoped hard to (eventId, participantId, speakerdl: prefix) so a speaker
-    /// can only ever flip their own milestones. Returns true when a row was
-    /// changed.
+    /// Toggle one of the speaker's own tasks between Done and Open. Scoped hard to
+    /// (eventId, participantId) so a speaker can only ever flip their OWN tasks —
+    /// the speakerdl: deadline milestones AND the §173e Get-Started step tasks
+    /// (Calendar / Speaker details / Promote / Signal / Code of Conduct) that now
+    /// list on the same page. Returns true when a row was changed.
     /// </summary>
     public async Task<bool> ToggleAsync(
         int eventId, int participantId, int taskId, CancellationToken ct = default)
@@ -143,9 +144,7 @@ public sealed class SpeakerMilestoneService
         var task = await _db.Tasks.FirstOrDefaultAsync(
             t => t.Id == taskId
                  && t.EventId == eventId
-                 && t.AssignedParticipantId == participantId
-                 && t.SourceKey != null
-                 && t.SourceKey.StartsWith(SourceKeyPrefix),
+                 && t.AssignedParticipantId == participantId,
             ct);
         if (task is null) return false;
 

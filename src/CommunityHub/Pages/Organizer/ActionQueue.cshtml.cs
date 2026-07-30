@@ -47,6 +47,12 @@ public class ActionQueueModel : PageModel
     public IReadOnlyList<(string Code, string Label, int Count)> TypeCounts { get; private set; }
         = Array.Empty<(string, string, int)>();
 
+    /// <summary>§326bo — is at least one "onboarding step re-opened" item OPEN? The
+    /// "Send onboarding-step-reset reminders now" button acts only on those, so it is
+    /// hidden otherwise rather than offering to send reminders for an empty set.
+    /// Counted from the UNFILTERED open set so switching a type chip cannot hide it.</summary>
+    public bool HasOpenStepResets { get; private set; }
+
     public sealed record Row(
         int Id, string Type, string TypeLabel, string Who, string? Email,
         string Summary, DateTimeOffset LastActivity,
@@ -162,13 +168,21 @@ public class ActionQueueModel : PageModel
             .OrderByDescending(x => x.Item3)
             .ThenBy(x => x.Item2)
             .ToList();
+
+        // §326bo: from the same unfiltered set the chips use.
+        HasOpenStepResets = allOpen.Any(
+            a => a.Type == OrganizerActionItemService.TypeOnboardingStepReset);
     }
 
     private static Row ToRow(OrganizerActionItem a) => new(
         a.Id,
         a.Type,
         OrganizerActionItemService.LabelFor(a.Type),
-        a.Participant?.FullName ?? "(unknown participant)",
+        // §326bo: EMPTY, not "(unknown participant)". Webshop-classification and
+        // refunded-order items are about a product/order and legitimately have no
+        // person attached; the old placeholder made them look like corrupt rows.
+        // The view omits the line entirely when this is blank.
+        a.Participant?.FullName ?? string.Empty,
         a.Participant?.Email,
         a.Summary,
         a.UpdatedAt ?? a.CreatedAt,

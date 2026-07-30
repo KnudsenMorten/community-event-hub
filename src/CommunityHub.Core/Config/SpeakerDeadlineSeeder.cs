@@ -4,6 +4,8 @@ using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
 using CommunityHub.Core.Entitlements;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace CommunityHub.Core.Config;
 
@@ -38,11 +40,35 @@ public sealed class SpeakerDeadlineDefinition
     public bool NonDenmarkOnly { get; set; }
 }
 
+/// <summary>
+/// §326b (operator 2026-07-25): the Get-Started completion deadline for speakers.
+/// On <see cref="ReminderDate"/> the daily reminder run sends ONE reminder (once
+/// ever per speaker) to every active speaker whose Get-Started wizard is not yet
+/// 100% complete; the send window runs through <see cref="Deadline"/> so a
+/// ring-dropped or missed-run send self-heals before the deadline passes. Absent
+/// block = the reminder is inert. Consumed by
+/// <c>CommunityHub.Core.Reminders.GetStartedDeadlineReminderBuilder</c>.
+/// </summary>
+public sealed class GetStartedDeadlineDefinition
+{
+    /// <summary>The day the one-shot reminder fires (yyyy-MM-dd, event-local date).</summary>
+    [JsonPropertyName("reminderDate")]
+    public DateOnly ReminderDate { get; set; }
+
+    /// <summary>The Get-Started completion deadline the mail names (yyyy-MM-dd).</summary>
+    [JsonPropertyName("deadline")]
+    public DateOnly Deadline { get; set; }
+}
+
 /// <summary>The speaker-deadlines config file.</summary>
 public sealed class SpeakerDeadlineConfig
 {
     [JsonPropertyName("deadlines")]
     public List<SpeakerDeadlineDefinition> Deadlines { get; set; } = new();
+
+    /// <summary>§326b: optional Get-Started completion deadline block (null = inert).</summary>
+    [JsonPropertyName("getStartedDeadline")]
+    public GetStartedDeadlineDefinition? GetStartedDeadline { get; set; }
 }
 
 /// <summary>Where the speaker-deadlines config file is.</summary>
@@ -76,27 +102,37 @@ public sealed class SpeakerDeadlineSeeder
     private readonly CommunityHubDbContext _db;
     private readonly SpeakerDeadlineOptions _options;
     private readonly TimeProvider _clock;
+    private readonly ILogger<SpeakerDeadlineSeeder> _log;
 
     public SpeakerDeadlineSeeder(
         CommunityHubDbContext db,
         SpeakerDeadlineOptions options,
-        TimeProvider clock)
+        TimeProvider clock,
+        ILogger<SpeakerDeadlineSeeder>? log = null)
     {
         _db = db;
         _options = options;
         _clock = clock;
+        // §682 — optional so the existing test construction sites keep working; DI always
+        // supplies a real one. Only used to report a config body that will not fit.
+        _log = log ?? NullLogger<SpeakerDeadlineSeeder>.Instance;
     }
 
     /// <summary>Create any missing speaker-deadline tasks. Returns the count created.</summary>
     public async Task<int> SeedAsync(int eventId, CancellationToken ct = default)
     {
-        if (!File.Exists(_options.ConfigPath))
+        // §326bb: the same relative-path trap as the §326b reminder — this seeder also runs
+        // in the FUNCTIONS host (ReminderJob), whose working directory is not the content
+        // root, so the bare relative path missed and SeedAsync was a silent no-op there.
+        // Masked in practice only because the WEB app seeds the same tasks on page load.
+        var configPath = ConfigPaths.Resolve(_options.ConfigPath);
+        if (!File.Exists(configPath))
         {
             return 0; // no config => nothing to seed
         }
 
         var config = JsonSerializer.Deserialize<SpeakerDeadlineConfig>(
-            File.ReadAllText(_options.ConfigPath), JsonOptions);
+            File.ReadAllText(configPath), JsonOptions);
         if (config is null || config.Deadlines.Count == 0)
         {
             return 0;
@@ -108,9 +144,14 @@ public sealed class SpeakerDeadlineSeeder
             return 0;
         }
 
-        // The pre-day ("Master Class") nuance now lives on the speaker PROFILE
-        // (SpeakingPreDay), not on a separate role — so a masterclass-only
-        // deadline is gated on the profile's SpeakingPreDay flag below.
+        // ACTIVE speakers only. NOTE (§299 6.1): an UNCATEGORIZED (null-Category)
+        // speaker cannot be ACTIVATED any more (the pre-selection queue's hard
+        // gate), so the IsActive scope below already excludes new uncategorized
+        // speakers from seeding. The one exception is a LEGACY active speaker
+        // whose old SpeakerFunding.Organizer value migrated to a null Category
+        // (frozen pending ❓OPEN-22): they keep the pre-gate behaviour — no
+        // entitlement-gated logistics deadlines (a null category grants nothing),
+        // but still the non-gated presentation deadlines, exactly as before.
         var speakers = await _db.Participants
             .Where(p => p.EventId == eventId
                         && p.IsActive
@@ -118,10 +159,11 @@ public sealed class SpeakerDeadlineSeeder
             .Select(p => new
             {
                 p.Id,
-                SpeakingPreDay = _db.SpeakerProfiles
+                // §299 6.2: Sponsor-category speakers get NO presentation deadlines.
+                Category = _db.SpeakerProfiles
                     .Where(s => s.EventId == eventId && s.ParticipantId == p.Id)
-                    .Select(s => (bool?)s.SpeakingPreDay)
-                    .FirstOrDefault() ?? false,
+                    .Select(s => s.Category)
+                    .FirstOrDefault(),
                 // Speaker Details country (2-letter code, e.g. "DK"); null when no
                 // profile / not yet filled in. Gates the §143 non-Denmark travel task.
                 Country = _db.SpeakerProfiles
@@ -131,15 +173,24 @@ public sealed class SpeakerDeadlineSeeder
             })
             .ToListAsync(ct);
 
+        // §299 C5: whether a speaker presents on the pre-day now DERIVES from
+        // their linked sessions (the SpeakingPreDay flag is retired) — drives
+        // the masterclassOnly deadline gate below. Loaded once for the edition.
+        var daysBySpeaker = await SpeakerDayScope.DaysBySpeakerAsync(_db, eventId, ct);
+
         var now = _clock.GetUtcNow();
         var created = 0;
         var removed = 0;
 
         foreach (var speaker in speakers)
         {
+            var days = daysBySpeaker.TryGetValue(speaker.Id, out var d) ? d : SpeakerDays.None;
+
             // P12: this speaker's EFFECTIVE entitlement set, computed once, so the
             // per-deadline logistics gate (below) can drop tasks they can't act on.
-            var entitled = await EffectiveItemsAsync(eventId, speaker.Id, ct);
+            // NOTE: Guest speakers lack TravelReimbursement (§299 6.2), so the travel
+            // deadline is excluded for them here automatically.
+            var entitled = await EffectiveItemsAsync(eventId, speaker.Id, days, ct);
 
             // The speakerdl SourceKeys that SHOULD exist for this speaker after this
             // run — every deadline that still applies once the masterclass + P12
@@ -149,9 +200,10 @@ public sealed class SpeakerDeadlineSeeder
 
             foreach (var dl in config.Deadlines)
             {
-                // A masterclass-only deadline is skipped unless this speaker is
-                // delivering on the pre-day (SpeakingPreDay).
-                if (dl.MasterclassOnly && !speaker.SpeakingPreDay)
+                // A masterclass-only deadline is skipped unless this speaker
+                // PRESENTS on the pre-day — DERIVED from their linked sessions
+                // (§299 C5; the stored SpeakingPreDay flag is retired).
+                if (dl.MasterclassOnly && !days.PresentsPreDay)
                 {
                     continue;
                 }
@@ -165,6 +217,30 @@ public sealed class SpeakerDeadlineSeeder
                 }
 
                 var slug = Slug(dl.Title);
+
+                // §299 6.2: a SPONSOR-category speaker gets NO presentation deadlines by
+                // default. Their logistics deadlines are still governed by the P12
+                // entitlement gate below (dinner + lunches stay); Community + Guest keep
+                // everything.
+                //
+                // §458 (operator 2026-07-27): the §314 Help-Promote EXEMPTION IS REMOVED —
+                // *"sponsor speaker category should not get the task 'Help promote'"*. §314
+                // had exempted it on the reasoning that every speaker should promote their
+                // session; the operator's decision is that a sponsor speaker's promotion is
+                // the sponsor's own business, and their menu entry is hidden too (§457), so
+                // leaving the TASK would have meant e-mail reminders for something with no
+                // page behind it.
+                //
+                // §456 (same turn): the ONE deliverable an exhibitor-speaker DOES own is the
+                // FINAL presentation — *"only task relevant for a sponsor (exhibitor) speaker
+                // is the task for upload final presentation"*. So final is allowed through
+                // while preview stays excluded.
+                if (speaker.Category == SpeakerCategory.Sponsor
+                    && !IsLogisticsSlug(slug)
+                    && !IsSponsorSpeakerAllowedSlug(slug))
+                {
+                    continue;
+                }
 
                 // P12 ENTITLEMENT GATE: a logistics deadline (hotel/dinner/swag/lunch)
                 // is seeded only when the speaker is entitled to the underlying item —
@@ -186,6 +262,22 @@ public sealed class SpeakerDeadlineSeeder
                     continue; // idempotent
                 }
 
+                // §682 — same guard as SponsorOrderPullService: a config body too long for the
+                // column must fail ONLY itself. This seeder runs on page load AND in the
+                // Functions host, so an oversized deadline body here would otherwise throw on
+                // every speaker's home page as well as inside the reminder job.
+                // sourceKey is already in desiredKeys (above), so the orphan prune below will
+                // not delete an existing good row just because the new config text is too long.
+                if (!TaskFieldGuard.Fits(dl.Title, dl.Description, out var tooLongReason))
+                {
+                    _log.LogError(
+                        "SpeakerDeadlineSeeder: deadline '{Slug}' was SKIPPED for speaker {SpeakerId} — {Reason}. "
+                        + "Other deadlines were unaffected. Shorten it in speaker-deadlines.<edition>.json; "
+                        + "it is never auto-truncated.",
+                        slug, speaker.Id, tooLongReason);
+                    continue;
+                }
+
                 _db.Tasks.Add(new ParticipantTask
                 {
                     EventId = eventId,
@@ -204,10 +296,12 @@ public sealed class SpeakerDeadlineSeeder
             // SourceKey the CURRENT config + entitlement set no longer produces —
             // e.g. a deadline renamed (the slug, hence the SourceKey, changes,
             // leaving the old row orphaned) or a speaker who lost an entitlement
-            // (P12). GUARD: only prune when this run produced a non-empty desired
-            // set, so a transient empty/missing config can never wipe a speaker's
-            // tasks. Mirrors the orphan-prune precedent in SponsorOrderPullService.
-            if (desiredKeys.Count > 0)
+            // (P12) / whose category excludes them (§299 6.2 — a Sponsor-category
+            // speaker's desired set may be legitimately EMPTY, and their stale
+            // tasks must still be pruned). GUARD against a transient empty/missing
+            // config wiping tasks = the early "no config / no deadlines" returns
+            // above: this loop only runs with a non-empty config in hand. Mirrors
+            // the orphan-prune precedent in SponsorOrderPullService.
             {
                 var keyPrefix = $"speakerdl:{speaker.Id}:";
                 var orphans = await _db.Tasks
@@ -222,6 +316,67 @@ public sealed class SpeakerDeadlineSeeder
                     removed += orphans.Count;
                 }
             }
+        }
+
+        // §253 G11: EX-SPEAKER sweep — the per-speaker prune above only reaches
+        // participants who are STILL active speakers, so a role change away from
+        // Speaker used to orphan the person's dated speakerdl: tasks forever (they
+        // kept firing due-day reminders). Delete every speakerdl:-managed task whose
+        // assignee is no longer a Speaker. Deactivated speakers are NOT swept — they
+        // may be reactivated (reminders are already silenced by the builders'
+        // IsActive gate, §253 G9).
+        var exSpeakerOrphans = await _db.Tasks
+            .Where(t => t.EventId == eventId
+                        && t.SourceKey != null
+                        && t.SourceKey.StartsWith("speakerdl:")
+                        && t.AssignedParticipantId != null
+                        && t.AssignedParticipant!.Role != ParticipantRole.Speaker)
+            .ToListAsync(ct);
+        if (exSpeakerOrphans.Count > 0)
+        {
+            _db.Tasks.RemoveRange(exSpeakerOrphans);
+            removed += exSpeakerOrphans.Count;
+        }
+
+        // §264: the Master-Class "submit session title and abstract" deadline was RETIRED
+        // (titles/abstracts come from Sessionize, not a speaker task) and removed from config,
+        // but stale rows seeded before the removal can survive the per-speaker orphan-prune
+        // above (that prune is skipped for a speaker whose current desired set is empty).
+        // Sweep them UNCONDITIONALLY here so no speaker keeps seeing the retired task.
+        //
+        // §340-F — MATCHED BY EXACT KEY, NEVER BY A TITLE SUBSTRING. This used to carry
+        // `SourceKey.StartsWith("speakerdl:") && Title.Contains("abstract")`, which was a trap
+        // armed and waiting: this seeder runs ON SPEAKER PAGE LOAD (§326a), so the moment anyone
+        // added a deadline titled e.g. "Review your session abstract", the per-speaker loop above
+        // would CREATE it and this sweep would DELETE it in the same pass — forever, on every page
+        // load, with no error anywhere. A task that can never exist and cannot be debugged from its
+        // symptom. `Contains` also translates to SQL LIKE, case-insensitive under the default
+        // collation, so "Abstract" matched too.
+        //
+        // Verified on PROD before narrowing (2026-07-27): zero rows match anywhere — no task title
+        // contains "abstract", and the distinct `speakerdl:` slugs in use are appreciation-dinner,
+        // help-to-promote-your-sessions, hotel, preday-lunch, submit-travel-reimbursement,
+        // swag--speaker-gift, upload-final-presentation and upload-preview-presentation. So this
+        // narrowing removes a future hazard without leaving a single real retired row behind.
+        //
+        // What remains matches only things that can no longer be legitimately created: the LEGACY
+        // `seed:speaker:abstract` key the retired seeder actually used (found on prod 2026-07-10),
+        // the EXACT slug that deadline would have had in `speakerdl:` form, and the EXACT retired
+        // title as a last-resort backstop regardless of prefix. All three are equality tests, so a
+        // new deadline can share a word with them and still be safe.
+        const string retiredAbstractSlug = ":submit-session-title-and-abstract";
+        var retiredTitleAbstract = await _db.Tasks
+            .Where(t => t.EventId == eventId
+                        && t.SourceKey != null
+                        && ((t.SourceKey.StartsWith("speakerdl:")
+                             && t.SourceKey.EndsWith(retiredAbstractSlug))
+                            || t.SourceKey == "seed:speaker:abstract"
+                            || t.Title == "Submit session title and abstract"))
+            .ToListAsync(ct);
+        if (retiredTitleAbstract.Count > 0)
+        {
+            _db.Tasks.RemoveRange(retiredTitleAbstract);
+            removed += retiredTitleAbstract.Count;
         }
 
         if (created > 0 || removed > 0)
@@ -249,8 +404,43 @@ public sealed class SpeakerDeadlineSeeder
             return entitled.Contains(OrderItem.Swag) || entitled.Contains(OrderItem.Polo);
         if (slug.Contains("lunch", StringComparison.Ordinal))
             return entitled.Contains(OrderItem.LunchPreDay) || entitled.Contains(OrderItem.LunchMainDay);
+        // §253 G10: TRAVEL is a logistics deadline too — a Sponsor-category / Guest
+        // speaker (no TravelReimbursement entitlement, §299 6.2) must never get the
+        // travel-reimbursement task or its due-day reminder. The nightly orphan
+        // prune (desiredKeys, above) removes any already-seeded travel task from a
+        // speaker who is not (or no longer) entitled.
+        if (slug.Contains("travel", StringComparison.Ordinal))
+            return entitled.Contains(OrderItem.TravelReimbursement);
         return true; // non-logistics deadline (e.g. presentation upload) — no gate
     }
+
+    /// <summary>
+    /// True when the deadline slug denotes a LOGISTICS deadline (one of the
+    /// entitlement-gated families in <see cref="DeadlineAllowedByEntitlement"/>).
+    /// Everything else (the preview/final presentation uploads) is a
+    /// PRESENTATION-style deadline — the set a Sponsor-category speaker is
+    /// excluded from (§299 6.2).
+    /// </summary>
+    private static bool IsLogisticsSlug(string slug) =>
+        slug.Contains("hotel", StringComparison.Ordinal)
+        || slug.Contains("dinner", StringComparison.Ordinal)
+        || slug.Contains("swag", StringComparison.Ordinal)
+        || slug.Contains("lunch", StringComparison.Ordinal)
+        || slug.Contains("travel", StringComparison.Ordinal);
+
+    /// <summary>
+    /// §456 (operator 2026-07-27) — the NON-logistics deadlines a SPONSOR-category speaker still
+    /// owns: *"only task relevant for a sponsor (exhibitor) speaker is the task for upload final
+    /// presentation"*.
+    ///
+    /// <para>Deliberately matched on <c>final</c> AND <c>presentation</c> together rather than on
+    /// "final" alone — a future deadline called "final headcount" or similar must not slip into a
+    /// sponsor speaker's list because it happens to contain the word. The PREVIEW upload stays
+    /// excluded, which is the distinction he drew.</para>
+    /// </summary>
+    private static bool IsSponsorSpeakerAllowedSlug(string slug) =>
+        slug.Contains("final", StringComparison.Ordinal)
+        && slug.Contains("presentation", StringComparison.Ordinal);
 
     /// <summary>
     /// Compute a participant's EFFECTIVE <see cref="OrderItem"/> entitlement set —
@@ -261,7 +451,7 @@ public sealed class SpeakerDeadlineSeeder
     /// delegate to the shared <see cref="OrderEntitlements.Effective"/> rules.
     /// </summary>
     private async Task<IReadOnlySet<OrderItem>> EffectiveItemsAsync(
-        int eventId, int participantId, CancellationToken ct)
+        int eventId, int participantId, SpeakerDays days, CancellationToken ct)
     {
         var participant = await _db.Participants
             .FirstOrDefaultAsync(p => p.Id == participantId && p.EventId == eventId, ct);
@@ -277,7 +467,7 @@ public sealed class SpeakerDeadlineSeeder
             .Where(o => o.EventId == eventId && o.ParticipantId == participantId)
             .ToListAsync(ct);
 
-        return OrderEntitlements.Effective(participant, speaker, overrides);
+        return OrderEntitlements.Effective(participant, speaker, days, overrides);
     }
 
     /// <summary>
@@ -285,13 +475,14 @@ public sealed class SpeakerDeadlineSeeder
     /// 2-letter upper code ("DK"); we also tolerate the full name "Denmark"
     /// case-insensitively. Null/blank = unknown = NOT Denmark (they get the task).
     /// </summary>
-    private static bool IsDenmark(string? country)
-    {
-        if (string.IsNullOrWhiteSpace(country)) return false;
-        var c = country.Trim();
-        return string.Equals(c, "DK", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(c, "Denmark", StringComparison.OrdinalIgnoreCase);
-    }
+    /// <remarks>
+    /// §399: delegates to the SHARED <see cref="Entitlements.TravelReimbursementPolicy"/>. This was
+    /// once the ONLY implementation of the rule, which is precisely why the nav entry and
+    /// <c>/Forms/Travel</c> never applied it — the deadline task was withheld from Danish speakers
+    /// while the form happily offered them the claim. One rule, one place, every caller.
+    /// </remarks>
+    private static bool IsDenmark(string? country) =>
+        Entitlements.TravelReimbursementPolicy.IsDenmark(country);
 
     private static string Slug(string title)
     {

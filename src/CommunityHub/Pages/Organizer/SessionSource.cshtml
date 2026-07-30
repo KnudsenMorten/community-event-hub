@@ -23,7 +23,48 @@
     .ss-tag { display:inline-block; font-size:11px; font-weight:700; border-radius:999px; padding:1px 8px; margin-left:6px; vertical-align:middle; }
     .ss-on  { background:#e7f6ec; color:#1c6b35; }
     .ss-off { background:#fef6e7; color:#8a5a00; }
+    /* §551 — the "nobody ever chose this" warning and the audited history line. */
+    .ss-unset { border:1px solid #fcd34d; background:#fffbeb; border-left:4px solid #d97706;
+                border-radius:8px; padding:10px 12px; margin:0 0 10px; font-size:13.5px; line-height:1.55; }
+    .ss-hist { color:#6b7280; font-size:12.5px; margin:0 0 10px; }
 </style>
+
+@* §551 — one block, used for BOTH stage cards. It answers the question the operator could not
+   answer during a live incident: is this stage a decision, and who made it? *@
+@{
+    Func<CommunityHub.Core.Integrations.Sessions.SyncStageState, string,
+         Microsoft.AspNetCore.Html.IHtmlContent> StageProvenance = (state, what) =>
+    {
+        var sb = new System.Text.StringBuilder();
+        if (!state.IsConfigured)
+        {
+            sb.Append("<div class=\"ss-unset\"><strong>Not configured for this edition.</strong> ")
+              .Append("Nothing has ever set a ").Append(what).Append(" stage for edition <strong>#")
+              .Append(Model.EventId)
+              .Append("</strong>, so the jobs fall back to stage&nbsp;1 &mdash; which looks identical to ")
+              .Append("choosing stage&nbsp;1 on purpose. <strong>If you expected stage&nbsp;2, this is why ")
+              .Append("it stopped.</strong> Activate the stage you want below and it becomes a stored ")
+              .Append("decision.</div>");
+        }
+        if (state.LastChangeAt is not null)
+        {
+            sb.Append("<p class=\"ss-hist\">Last change: ")
+              .Append(System.Net.WebUtility.HtmlEncode(state.LastChangeSummary ?? string.Empty))
+              .Append(" &mdash; by <strong>")
+              .Append(System.Net.WebUtility.HtmlEncode(state.LastChangeBy ?? "unknown"))
+              .Append("</strong> on ")
+              .Append(state.LastChangeAt.Value.UtcDateTime.ToString("yyyy-MM-dd HH:mm"))
+              .Append(" UTC.</p>");
+        }
+        else
+        {
+            sb.Append("<p class=\"ss-hist\">No ").Append(what)
+              .Append(" stage change has been recorded for this edition yet. Every change from now on ")
+              .Append("is written to the audit trail with who made it, when, and from which stage.</p>");
+        }
+        return new Microsoft.AspNetCore.Html.HtmlString(sb.ToString());
+    };
+}
 
 @if (!string.IsNullOrEmpty(Model.Message))
 {
@@ -60,20 +101,41 @@
 <div class="card">
     <h2 style="margin-top:0;">Session sync direction</h2>
     <p>Choose the <strong>active sync stage</strong> for this edition. Only one stage is active at a time —
-       you import one way, then later flip the direction. The default (stage 1) is the only stage that runs
-       today; stage 3 is what activates the Zoho&nbsp;Backstage&nbsp;&rarr;&nbsp;CEH change-detection engine.</p>
+       you import one way, then later flip the direction. Stage&nbsp;1 is the default; stage&nbsp;2 pushes CEH
+       sessions up to Zoho&nbsp;Backstage; stage&nbsp;3 activates the Zoho&nbsp;Backstage&nbsp;&rarr;&nbsp;CEH
+       change-detection engine. Whichever stage is Active is the one the hourly jobs obey.</p>
 
+    @StageProvenance(Model.SessionStage, "session")
+
+    @* §326bm: "Active" now tracks the EFFECTIVE stage — a stage with no implementation can
+       never be shown as Active (it used to be able to be both Active and "Not implemented
+       yet" at once, which claimed a push that does not exist). *@
+    @if (Model.DirectionIsStale)
+    {
+        <p class="ss-note" style="color:#92400e;">
+            A stage with no implementation was previously selected and is being <strong>ignored</strong>.
+            Sessionize&nbsp;&rarr;&nbsp;CEH (stage&nbsp;1) is what actually runs.
+        </p>
+    }
     @foreach (var d in Model.DirectionOptions)
     {
-        var isActive = d.Direction == Model.ActiveDirection;
+        var isActive = d.Direction == Model.EffectiveDirection;
         <div class="ss-opt @(isActive ? "active" : "")">
             <h3>
                 Stage @d.Stage — @d.Label
                 @if (isActive) { <span class="ss-tag ss-on">Active</span> }
                 @if (!d.Implemented) { <span class="ss-tag ss-off">Not implemented yet</span> }
+                @if (d.Implemented && d.Blocker is not null) { <span class="ss-tag ss-off">Needs setup</span> }
             </h3>
             <p class="ss-note">@d.Note</p>
-            @if (!isActive)
+            @* §333: a stage can be fully built and still do nothing today because an upstream
+               scope is missing. Say which — "not implemented" would be a lie, and silence
+               would be worse. *@
+            @if (d.Blocker is not null)
+            {
+                <p class="ss-note" style="color:#92400e;">@d.Blocker</p>
+            }
+            @if (!isActive && d.Implemented)
             {
                 <form method="post" asp-page-handler="SetDirection" style="margin-top:8px;">
                     <input type="hidden" name="stage" value="@d.Stage" />
@@ -87,21 +149,37 @@
 <div class="card">
     <h2 style="margin-top:0;">Speaker sync direction</h2>
     <p>Choose the <strong>active sync stage</strong> for this edition's <strong>speakers</strong> — separate from the
-       session direction above. Only one stage is active at a time. The default (stage 1) is the only stage that runs
-       today; stage 3 would activate a Zoho&nbsp;Backstage&nbsp;&rarr;&nbsp;CEH speaker change-detection engine (not
-       built yet).</p>
+       session direction above. Only one stage is active at a time. All three stages have an engine behind them;
+       stage&nbsp;3 additionally needs a Zoho&nbsp;Backstage scope before it can read anything (see the card).</p>
 
+    @StageProvenance(Model.SpeakerStage, "speaker")
+
+    @if (Model.SpeakerDirectionIsStale)
+    {
+        <p class="ss-note" style="color:#92400e;">
+            A stage with no implementation was previously selected and is being <strong>ignored</strong>.
+            Speakers are imported Sessionize&nbsp;&rarr;&nbsp;CEH (stage&nbsp;1).
+        </p>
+    }
     @foreach (var d in Model.SpeakerDirectionOptions)
     {
-        var isActive = d.Direction == Model.ActiveSpeakerDirection;
+        var isActive = d.Direction == Model.EffectiveSpeakerDirection;
         <div class="ss-opt @(isActive ? "active" : "")">
             <h3>
                 Stage @d.Stage — @d.Label
                 @if (isActive) { <span class="ss-tag ss-on">Active</span> }
                 @if (!d.Implemented) { <span class="ss-tag ss-off">Not implemented yet</span> }
+                @if (d.Implemented && d.Blocker is not null) { <span class="ss-tag ss-off">Needs setup</span> }
             </h3>
             <p class="ss-note">@d.Note</p>
-            @if (!isActive)
+            @* §333: a stage can be fully built and still do nothing today because an upstream
+               scope is missing. Say which — "not implemented" would be a lie, and silence
+               would be worse. *@
+            @if (d.Blocker is not null)
+            {
+                <p class="ss-note" style="color:#92400e;">@d.Blocker</p>
+            }
+            @if (!isActive && d.Implemented)
             {
                 <form method="post" asp-page-handler="SetSpeakerDirection" style="margin-top:8px;">
                     <input type="hidden" name="stage" value="@d.Stage" />

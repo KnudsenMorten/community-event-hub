@@ -129,7 +129,44 @@ public sealed record ResendCandidate(
     string Category,
     CommsOutcome Outcome,
     DateTimeOffset At,
-    string? Error);
+    string? Error,
+    // §644 — what the row will ACTUALLY do, rather than what it looks like it will do.
+    string? Template = null,
+    string? CurrentEmail = null,
+    // §656 — this "failure" was followed by a successful send of the same message. Hidden by
+    // default; when shown, the row says so instead of reading as undelivered.
+    bool WasSuperseded = false)
+{
+    /// <summary>
+    /// §644 — the template this row should resend: the one that FAILED, never a guess.
+    /// </summary>
+    /// <remarks>
+    /// 🔒 The page offered a HARD-CODED list of two templates (<c>onboarding-getting-started</c>,
+    /// <c>invitation</c>) whatever had actually failed — so a failed <c>calendar-invite</c> could
+    /// not be resent at all, and pressing "Resend" sent a real speaker an unrelated onboarding
+    /// mail. <b>A resend that cannot send the thing that failed is not a resend.</b>
+    /// <see cref="Domain.EmailLog.TemplateName"/> is blank on older rows, so the Category — which
+    /// IS always set — is the fallback.
+    /// </remarks>
+    public string? ResendTemplate =>
+        !string.IsNullOrWhiteSpace(Template) ? Template!.Trim()
+        : !string.IsNullOrWhiteSpace(Category) ? Category.Split(':')[0].Trim()
+        : null;
+
+    /// <summary>
+    /// §644 — true when the person's CURRENT address differs from the one that failed, so the page
+    /// can say where the resend is really going.
+    /// </summary>
+    /// <remarks>
+    /// Per Larsen's failed mail was addressed to a historical <c>per@famlarsen.se</c> while his
+    /// record now reads <c>per.larsen@microsoft.com</c>. The resend used the current address, which
+    /// is CORRECT — but the row still showed the old one, so the confirmation named someone the
+    /// operator had not seen on screen. Right behaviour, alarming presentation.
+    /// </remarks>
+    public bool GoesToADifferentAddress =>
+        !string.IsNullOrWhiteSpace(CurrentEmail)
+        && !string.Equals(CurrentEmail, Email, StringComparison.OrdinalIgnoreCase);
+}
 
 /// <summary>
 /// The whole Comms-cockpit snapshot for one edition (REQUIREMENTS §20 Organizer
@@ -217,7 +254,12 @@ public sealed class CommsCockpitService
         _clock = clock;
     }
 
-    public async Task<CommsCockpitSnapshot> BuildAsync(int eventId, CancellationToken ct = default)
+    /// <param name="includeDropped">
+    /// §650 — include RING-DROPPED mail in the resend list. Defaults to <c>false</c>: a ring drop is
+    /// the system obeying the operator, not a fault, and 1,242 of them buried the 2 real failures.
+    /// </param>
+    public async Task<CommsCockpitSnapshot> BuildAsync(
+        int eventId, CancellationToken ct = default, bool includeDropped = false)
     {
         var now = _clock.GetUtcNow();
         var since = now.AddDays(-TimelineDays);
@@ -245,7 +287,25 @@ public sealed class CommsCockpitService
         BuildTimeline(snap, emails, posts, now);
         BuildWhoGotWhat(snap, emails);
         BuildCampaigns(snap, emails);
-        BuildResendCandidates(snap, emails);
+        BuildResendCandidates(snap, emails, includeDropped);
+
+        // §644 — stamp each candidate with the person's CURRENT address, so the row can warn when
+        // the resend will not go to the address printed above it (a historical address on an old
+        // log row is common and the silent divergence is what alarmed the operator).
+        if (snap.ResendCandidates.Count > 0)
+        {
+            var ids = snap.ResendCandidates.Select(c => c.ParticipantId).ToList();
+            var current = await _db.Participants
+                .Where(p => ids.Contains(p.Id))
+                .Select(p => new { p.Id, p.Email })
+                .ToDictionaryAsync(x => x.Id, x => x.Email, ct);
+
+            snap.ResendCandidates = snap.ResendCandidates
+                .Select(c => current.TryGetValue(c.ParticipantId, out var mail)
+                    ? c with { CurrentEmail = mail }
+                    : c)
+                .ToList();
+        }
         BuildCounters(snap, emails, posts);
 
         return snap;
@@ -394,13 +454,32 @@ public sealed class CommsCockpitService
 
     // --- resend candidates ---------------------------------------------------
 
-    private static void BuildResendCandidates(CommsCockpitSnapshot s, IReadOnlyList<EmailLog> emails)
+    private static void BuildResendCandidates(
+        CommsCockpitSnapshot s, IReadOnlyList<EmailLog> emails, bool includeDropped)
     {
         // Only participant-linked undelivered mail can be resent (a resend needs a
         // person to target via ParticipantEmailService). One candidate per
         // participant — the most recent undelivered item.
+        // 🔒 §650 — RING-DROPPED MAIL IS NOT A PROBLEM TO TROUBLESHOOT. Operator 2026-07-29: *"it is
+        // not relevant when you troubleshoot to see dropped mails due to ring-gates. i should be
+        // able to enable it but by default it should not be shown"*. A ring drop is the system
+        // obeying him, and 1,242 of them buried the 2 real failures completely.
+        // §656 — a failure that was ALREADY SUPERSEDED by a successful send is not undelivered.
+        // SendMaxAttempts writes one log row per attempt, so a message that failed and then
+        // succeeded a second later leaves both rows — and the Failed one was being shown as though
+        // the person never received it. Operator, on finding this: *"hide the superseded rows like
+        // ring-drops"*. Same SHARED rule the retry job uses, so the two cannot disagree.
+        var delivered = emails
+            .Where(e => e.Error == null && e.ParticipantId != null)
+            .Select(e => new Email.SupersededSendDetector.Delivery(e.ParticipantId, e.Category, e.SentAt))
+            .ToList();
+
         s.ResendCandidates = emails
             .Where(e => e.ParticipantId != null && OutcomeOf(e) != CommsOutcome.Sent)
+            .Where(e => includeDropped || OutcomeOf(e) != CommsOutcome.Dropped)
+            .Where(e => includeDropped
+                        || !Email.SupersededSendDetector.IsSuperseded(
+                               e.ParticipantId, e.Category, e.SentAt, delivered))
             .GroupBy(e => e.ParticipantId!.Value)
             .Select(g => g.OrderByDescending(e => e.SentAt).First())
             .OrderByDescending(e => e.SentAt)
@@ -413,7 +492,13 @@ public sealed class CommsCockpitService
                 Category: string.IsNullOrWhiteSpace(e.Category) ? "other" : e.Category,
                 Outcome: OutcomeOf(e),
                 At: e.SentAt,
-                Error: e.Error))
+                Error: e.Error,
+                // §644 — carry the template that FAILED so the row can resend that, not a guess.
+                Template: e.TemplateName,
+                // §656 — only ever true when the toggle is showing them; the label then explains
+                // WHY the row is here rather than leaving it looking like a real failure.
+                WasSuperseded: Email.SupersededSendDetector.IsSuperseded(
+                    e.ParticipantId, e.Category, e.SentAt, delivered)))
             .ToList();
     }
 

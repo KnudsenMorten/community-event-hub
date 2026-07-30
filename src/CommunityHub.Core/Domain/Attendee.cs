@@ -65,6 +65,31 @@ public class Attendee
     /// <summary>Lower-cased, trimmed. A mutable attribute now (it changes on reassignment), not the key.</summary>
     public string Email { get; set; } = string.Empty;
 
+    /// <summary>
+    /// 🔒 §707.23 — the address this ticket was held by BEFORE the most recent reassignment,
+    /// lower-cased and trimmed. Null when the ticket has never moved.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-07-30: *"ceh must align 100% to zoho method … we keep old references when
+    /// cancellations or reassignments happen"*. Cancellation already complied — the row is kept with
+    /// <see cref="MirrorState"/> Cancelled and <see cref="CancelledAt"/> stamped. REASSIGNMENT did
+    /// not: the row is keyed on <see cref="BackstageTicketId"/>, so a reassignment rewrote
+    /// <see cref="Email"/> IN PLACE and the previous holder vanished without trace.</para>
+    ///
+    /// <para>🔑 It matters most for the bulk case he described: a manager buys 15 tickets on
+    /// plus-addresses (<c>mok+eldk27-1@…</c>) and later assigns them to real people. Without this
+    /// there is no way to answer *"which of my placeholders became this person?"* — the chain is
+    /// simply gone.</para>
+    ///
+    /// <para>Deliberately ONE previous address, not a full history table: it answers the question
+    /// actually asked, keeps Zoho's one-row-per-ticket shape, and the audit trail already records
+    /// each reassignment event for anything deeper.</para>
+    /// </remarks>
+    public string? PreviousEmail { get; set; }
+
+    /// <summary>§707.23 — when this ticket was last reassigned, or null if it never was.</summary>
+    public DateTimeOffset? ReassignedAt { get; set; }
+
     public string FirstName { get; set; } = string.Empty;
     public string LastName { get; set; } = string.Empty;
     /// <summary>
@@ -79,6 +104,26 @@ public class Attendee
 
     /// <summary>The ticket class name as seen in Zoho, for display / audit.</summary>
     public string? TicketClassName { get; set; }
+
+    /// <summary>
+    /// §707.35b — Zoho's STABLE <c>ticket_class_id</c> for this ticket. The authoritative answer to
+    /// "is this a 2-day (Master Class) ticket", per <see cref="MasterClassTicketPolicy"/>.
+    /// </summary>
+    /// <remarks>
+    /// 🔒 <b>Operator 2026-07-30: *"ticket class has a unique number, dont use the displayname of the
+    /// ticket class"*.</b> The NAME is an editable label — and it was edited (§447) — so anything
+    /// keyed on it can be changed by a rename in Zoho. Mail audience must never hang on that.
+    ///
+    /// <para><b>Why this column had to exist.</b> The feed always carried the id
+    /// (<c>ZohoClient</c> reads <c>ticket_class_id</c>) and the SYNC used it — but nothing persisted
+    /// it, so every DOWNSTREAM consumer could only see the name. That is exactly how §707.34b's
+    /// cancellation sweep ended up reaching for <see cref="TicketClassName"/>.</para>
+    ///
+    /// <para>Null on rows mirrored before this column existed, and on any payload Zoho hands us
+    /// without an id; <see cref="MasterClassTicketPolicy"/> then falls back to the name markers, which
+    /// is its documented behaviour — so historic rows keep resolving exactly as before.</para>
+    /// </remarks>
+    public string? TicketClassId { get; set; }
 
     // --- Mirror state (SOFT-CANCEL, §128) -----------------------------------
     /// <summary>
@@ -158,6 +203,19 @@ public class Attendee
     /// attendee (tracked per user, sent vs not-sent). Null = not yet invited.
     /// </summary>
     public DateTimeOffset? MasterClassInviteSentAt { get; set; }
+
+    /// <summary>
+    /// §234 3 — set when a ticket REASSIGNMENT put this attendee in need of the
+    /// reassignment-VALIDATION email, cleared only when that email is actually
+    /// DELIVERED (not ring-dropped, not failed). Persisting the intent makes the
+    /// send retryable across sync runs: reassignment detection is one-shot (the
+    /// mirror already holds the new email on the next pull), so without this marker
+    /// a failed/dropped validation email was silently lost forever. Null = nothing
+    /// pending. The inherited-MC title is NOT stored — it is recomputed at send time
+    /// from the attendee's current confirmed signup, so a retry always states the
+    /// CURRENT truth.
+    /// </summary>
+    public DateTimeOffset? ReassignmentValidationPendingSince { get; set; }
 
     // --- Self check-in ------------------------------------------------------
     /// <summary>

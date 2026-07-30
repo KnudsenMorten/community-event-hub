@@ -141,6 +141,17 @@ public class Participant
     /// </summary>
     public bool IsActive { get; set; } = true;
 
+    /// <summary>
+    /// TOMBSTONE (REQUIREMENTS §253, G8): stamped by the
+    /// <see cref="Organizer.ParticipantDeactivationService"/> when an ORGANIZER
+    /// deactivates this person. External syncs (the sponsor contact sync used to
+    /// re-activate any inactive contact on the next 15-min pull) must respect it
+    /// and never silently undo an organizer decision. Cleared by a manual
+    /// organizer re-activation. Null = never organizer-deactivated (a ticket-sync
+    /// lockout, for example, does NOT set this).
+    /// </summary>
+    public DateTimeOffset? DeactivatedByOrganizerAt { get; set; }
+
     // --- Onboarding lifecycle (pre-selection gate) --------------------------
     /// <summary>
     /// The onboarding pre-selection state: <c>Inactive → Preselected → Active</c>

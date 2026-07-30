@@ -1,16 +1,28 @@
 Subject: Welcome to {{eventDisplayName}} — info for volunteers
 <h2 style="margin:0 0 16px;font-size:20px;line-height:1.3;color:#1a1a2e;">Hi {{firstName}}, welcome to the crew.</h2>
 <p style="margin:0 0 16px;">You have been added to the <strong>Event Hub</strong> for <strong>{{eventDisplayName}}{{eventCodeParens}}</strong> as a <strong>volunteer</strong>.</p>
-<p style="margin:0 0 16px;">Start with the <strong>Get Started</strong> flow in the hub — it walks you through everything you need to set up. Afterwards you can change anything under Event Logistics if needed.</p>
-<table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:8px 0 20px;"><tr>
+<p style="margin:0 0 16px;">Please open the hub and <strong>complete the tasks in the Get Started flow</strong> — it walks you through everything you need to set up, one short step at a time. Afterwards you can change any of your preferences from the hub. You can access the hub using <a href="https://hub.expertslive.dk">https://hub.expertslive.dk</a> &mdash; save the link to your favourites.</p>
+<table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:8px 0 6px;"><tr>
   <td align="center">
-    <table role="presentation" cellpadding="0" cellspacing="0"><tr>
-      <td style="background-color:{{brandColor}};border-radius:6px;">
-        <a href="{{hubUrl}}" style="display:inline-block;padding:14px 30px;color:#ffffff;font-size:16px;font-weight:bold;text-decoration:none;">Open the Event Hub</a>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
+      <td align="center">
+        <!--[if mso]>
+        <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="{{hubUrl}}/Forms/Wizard" style="height:52px;v-text-anchor:middle;width:439px;" arcsize="50%" stroke="f" fillcolor="#1565c0">
+          <w:anchorlock/>
+          <center style="color:#ffffff;font-family:Aptos,'Segoe UI',Arial,sans-serif;font-size:16px;font-weight:bold;">Open the Event Hub to Get Started</center>
+        </v:roundrect>
+        <![endif]-->
+        <!--[if !mso]><!-- -->
+        <a href="{{hubUrl}}/Forms/Wizard" style="background-color:#1565c0;border-radius:999px;color:#ffffff;display:inline-block;font-family:Aptos,'Segoe UI',Arial,sans-serif;font-size:16px;font-weight:700;line-height:52px;text-align:center;text-decoration:none;width:439px;-webkit-text-size-adjust:none;">Open the Event Hub to Get Started</a>
+        <!--<![endif]-->
       </td>
     </tr></table>
   </td>
 </tr></table>
-<p style="margin:6px 0 16px;color:#6b7280;font-size:13px;text-align:center;">(Log in with your email, if prompted)</p>
+<table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:16px 0 6px;"><tr>
+  <td align="center">
+  </td>
+</tr></table>
+<p style="margin:0 0 16px;color:#6b7280;font-size:13px;text-align:center;">The button signs you in automatically — no password needed.</p>
 <p style="margin:16px 0 0;color:#6b7280;font-size:14px;">Questions? Email <a href="mailto:{{supportEmail}}">{{supportEmail}}</a>.</p>
 <p style="margin:16px 0 0;color:#6b7280;">See you at <strong>{{eventDisplayName}}{{eventCodeParens}}</strong>.</p>

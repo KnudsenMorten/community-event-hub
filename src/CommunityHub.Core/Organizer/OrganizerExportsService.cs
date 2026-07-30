@@ -62,6 +62,30 @@ public sealed record VolunteerRotaRow(
 /// Read-only projection of <see cref="Participant"/>; carries no secrets.</summary>
 public sealed record BadgeRow(string Name, string Role, string? Company);
 
+/// <summary>The Appreciation-Dinner headcount the venue is ordered against:
+/// confirmed people, their guests, and the seat total (§326bh Defect 3 — before
+/// this, the only dinner number in the product was a Command Center tile).</summary>
+public sealed record DinnerHeadcountRow(int Attending, int PlusOnes, int Total);
+
+/// <summary>One person on the Appreciation-Dinner run-sheet, so the venue gets
+/// names + guest counts + the allergy detail per seat rather than a single integer.
+/// <paramref name="Allergens"/> is the comma-joined structured allergen set;
+/// <paramref name="OtherRequirements"/> merges the structured free-text with the
+/// legacy <see cref="DinnerSignup.AllergyNotes"/> so nothing collected is lost.</summary>
+public sealed record DinnerPersonRow(
+    string Name,
+    string Role,
+    int PlusOnes,
+    string Diet,
+    string Allergens,
+    string? OtherRequirements,
+    string? Comments);
+
+/// <summary>One catering roll-up line — how many people need a given diet or a given
+/// allergen avoided, per occasion. This is the surface <see cref="DietaryAggregator"/>
+/// was written for (§21 Participant [H]) and, until §326bh, never had.</summary>
+public sealed record DietaryCountRow(string Occasion, string Kind, string Item, int Count);
+
 /// <summary>
 /// Builds the organizer on-site EXPORTS / run-sheets (REQUIREMENTS §20 Organizer —
 /// "Exports &amp; printable run-sheets"). Every projection is a <b>pure, read-only,
@@ -95,8 +119,11 @@ public sealed class OrganizerExportsService
     public async Task<IReadOnlyList<AttendeeListRow>> BuildAttendeeListAsync(
         int eventId, CancellationToken ct = default)
     {
+        // §253 G13: only the ACTIVE mirror set — a soft-cancelled ticket (§128:
+        // MirrorState.Cancelled, TicketStatus intact) must not print on the on-site
+        // list. Same filter the organizer Attendees page uses (§216).
         var rows = await _db.Attendees
-            .Where(a => a.EventId == eventId)
+            .Where(a => a.EventId == eventId && a.MirrorState == MirrorState.Active)
             .OrderBy(a => a.LastName).ThenBy(a => a.FirstName)
             .Select(a => new
             {
@@ -138,8 +165,10 @@ public sealed class OrganizerExportsService
     public async Task<IReadOnlyList<LunchHeadcountRow>> BuildLunchHeadcountAsync(
         int eventId, CancellationToken ct = default)
     {
+        // ACTIVE people only (§253 G4): the caterer order must never count a
+        // sign-up whose person has been deactivated.
         var signups = await _db.LunchSignups
-            .Where(l => l.EventId == eventId)
+            .Where(l => l.EventId == eventId && l.Participant.IsActive)
             .Select(l => new { l.LunchSetupDay, l.LunchPreDay })
             .ToListAsync(ct);
 
@@ -155,8 +184,11 @@ public sealed class OrganizerExportsService
     public async Task<IReadOnlyList<LunchPersonRow>> BuildLunchPeopleAsync(
         int eventId, CancellationToken ct = default)
     {
+        // ACTIVE people only (§253 G4) — matches BuildLunchHeadcountAsync so the
+        // run-sheet names always sum to the headcount.
         var rows = await _db.LunchSignups
-            .Where(l => l.EventId == eventId && (l.LunchSetupDay || l.LunchPreDay))
+            .Where(l => l.EventId == eventId && (l.LunchSetupDay || l.LunchPreDay)
+                        && l.Participant.IsActive)
             .Select(l => new
             {
                 l.Participant.FullName,
@@ -188,6 +220,187 @@ public sealed class OrganizerExportsService
             }));
     }
 
+    // --- Appreciation Dinner + catering dietary roll-up ---------------------
+    // §326bh: the dinner had NO run-sheet and NO export, and the structured
+    // dietary capture had no reader at all — allergies were collected from every
+    // dinner respondent and reached nobody who orders food. Both are served here,
+    // ACTIVE people only (§253 G6), so the venue order and the allergy list are
+    // built from the same rows the headcount counts.
+
+    /// <summary>Who is confirmed for the Appreciation Dinner, and how many seats
+    /// that is once plus-ones are added.</summary>
+    public async Task<DinnerHeadcountRow> BuildDinnerHeadcountAsync(
+        int eventId, CancellationToken ct = default)
+    {
+        var plusOnes = await _db.DinnerSignups
+            .Where(d => d.EventId == eventId
+                        && d.Rsvp == DinnerRsvp.Yes
+                        && d.Participant.IsActive)
+            .Select(d => d.PlusOneCount)
+            .ToListAsync(ct);
+
+        var guests = plusOnes.Sum(n => Math.Max(0, n));
+        return new DinnerHeadcountRow(plusOnes.Count, guests, plusOnes.Count + guests);
+    }
+
+    /// <summary>The per-person dinner run-sheet — a confirmed (RSVP = Yes) seat per
+    /// row with its guest count and dietary detail, ordered by name. Only RSVP=Yes
+    /// is listed: a Maybe has not taken a seat, and ordering food for one is the
+    /// same waste as ordering for a drop-out.</summary>
+    public async Task<IReadOnlyList<DinnerPersonRow>> BuildDinnerRunSheetAsync(
+        int eventId, CancellationToken ct = default)
+    {
+        var signups = await _db.DinnerSignups
+            .Where(d => d.EventId == eventId
+                        && d.Rsvp == DinnerRsvp.Yes
+                        && d.Participant.IsActive)
+            .Select(d => new
+            {
+                d.ParticipantId,
+                d.Participant.FullName,
+                d.Participant.Email,
+                Role = d.Participant.Role,
+                d.PlusOneCount,
+                d.AllergyNotes,
+                d.Comments,
+            })
+            .ToListAsync(ct);
+        if (signups.Count == 0) return Array.Empty<DinnerPersonRow>();
+
+        var ids = signups.Select(s => s.ParticipantId).ToList();
+        var dietById = (await _db.DietaryRequirements
+                .Where(x => x.EventId == eventId
+                            && x.Surface == DietarySurface.Dinner
+                            && ids.Contains(x.ParticipantId))
+                .ToListAsync(ct))
+            .ToDictionary(x => x.ParticipantId);
+
+        return signups
+            .Select(s =>
+            {
+                dietById.TryGetValue(s.ParticipantId, out var d);
+                return new DinnerPersonRow(
+                    string.IsNullOrWhiteSpace(s.FullName) ? s.Email : s.FullName,
+                    s.Role.ToString(),
+                    Math.Max(0, s.PlusOneCount),
+                    DietLabel(d),
+                    AllergenLabel(d),
+                    // The structured "other" plus the legacy free-text note (no longer
+                    // written, but historic rows still carry one) — a caterer must see both.
+                    MergeNotes(d?.OtherAllergens, s.AllergyNotes),
+                    string.IsNullOrWhiteSpace(s.Comments) ? null : s.Comments);
+            })
+            .OrderBy(r => r.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    /// <summary>The catering roll-up per occasion: diet head-counts, allergen
+    /// head-counts, and the two totals a kitchen needs (how many people carry any
+    /// requirement, and how many free-text notes a human must still read).
+    ///
+    /// The Dinner occasion counts only people whose RSVP is Yes, so its numbers
+    /// reconcile exactly with <see cref="BuildDinnerRunSheetAsync"/> — a diet filled
+    /// in by someone who then declined must not reach the kitchen order.</summary>
+    public async Task<IReadOnlyList<DietaryCountRow>> BuildDietaryHeadcountAsync(
+        int eventId, CancellationToken ct = default)
+    {
+        var rows = await _db.DietaryRequirements
+            .Where(x => x.EventId == eventId && x.Participant.IsActive)
+            .ToListAsync(ct);
+        if (rows.Count == 0) return Array.Empty<DietaryCountRow>();
+
+        var dinnerAttending = (await _db.DinnerSignups
+                .Where(d => d.EventId == eventId
+                            && d.Rsvp == DinnerRsvp.Yes
+                            && d.Participant.IsActive)
+                .Select(d => d.ParticipantId)
+                .ToListAsync(ct))
+            .ToHashSet();
+
+        var result = new List<DietaryCountRow>();
+
+        // Dinner first (the order with a deadline), then day-catering. A surface with
+        // no rows is skipped rather than printed as a row of zeros.
+        foreach (var surface in new[] { DietarySurface.Dinner, DietarySurface.SpeakerCatering })
+        {
+            var forSurface = rows
+                .Where(r => r.Surface == surface)
+                .Where(r => surface != DietarySurface.Dinner
+                            || dinnerAttending.Contains(r.ParticipantId))
+                .ToList();
+            if (forSurface.Count == 0) continue;
+
+            var summary = DietaryAggregator.Aggregate(forSurface);
+            var occasion = OccasionLabel(surface);
+
+            foreach (var diet in summary.Diets)
+                result.Add(new DietaryCountRow(occasion, "Diet", diet.Key, diet.Count));
+            foreach (var allergen in summary.Allergens)
+                result.Add(new DietaryCountRow(occasion, "Allergen", allergen.Key, allergen.Count));
+
+            result.Add(new DietaryCountRow(
+                occasion, "Total", "People with any requirement", summary.PeopleWithAnyRequirement));
+            result.Add(new DietaryCountRow(
+                occasion, "Total", "Free-text notes to read", summary.FreeTextCount));
+        }
+
+        return result;
+    }
+
+    /// <summary>The dinner run-sheet as CSV. The headcount line is carried in the
+    /// header comment-free by design (CSV stays machine-readable) — the screen view
+    /// and <see cref="BuildDinnerHeadcountAsync"/> report the totals.</summary>
+    public async Task<string> BuildDinnerCsvAsync(int eventId, CancellationToken ct = default)
+    {
+        var people = await BuildDinnerRunSheetAsync(eventId, ct);
+        return CsvWriter.Write(
+            new[] { "Name", "Role", "PlusOnes", "Diet", "Allergens", "OtherRequirements", "Comments" },
+            people.Select(p => (IReadOnlyList<string>)new[]
+            {
+                p.Name, p.Role, p.PlusOnes.ToString(), p.Diet, p.Allergens,
+                p.OtherRequirements ?? string.Empty, p.Comments ?? string.Empty,
+            }));
+    }
+
+    /// <summary>The catering dietary roll-up as CSV — the sheet that goes to the kitchen.</summary>
+    public async Task<string> BuildDietaryCsvAsync(int eventId, CancellationToken ct = default)
+    {
+        var rows = await BuildDietaryHeadcountAsync(eventId, ct);
+        return CsvWriter.Write(
+            new[] { "Occasion", "Kind", "Item", "Count" },
+            rows.Select(r => (IReadOnlyList<string>)new[]
+            {
+                r.Occasion, r.Kind, r.Item, r.Count.ToString(),
+            }));
+    }
+
+    private static string OccasionLabel(DietarySurface surface) => surface switch
+    {
+        DietarySurface.Dinner => "Appreciation Dinner",
+        DietarySurface.SpeakerCatering => "Speaker / crew day catering",
+        _ => surface.ToString(),
+    };
+
+    private static string DietLabel(DietaryRequirement? d) =>
+        !string.IsNullOrWhiteSpace(d?.DietChoice) && d.DietChoice != "None"
+            ? d.DietChoice!
+            : string.Empty;
+
+    private static string AllergenLabel(DietaryRequirement? d) =>
+        d is null
+            ? string.Empty
+            : string.Join(", ", d.Allergens().Where(a => a.IsSet).Select(a => a.Token));
+
+    private static string? MergeNotes(string? structured, string? legacy)
+    {
+        var parts = new[] { structured, legacy }
+            .Where(s => !string.IsNullOrWhiteSpace(s))
+            .Select(s => s!.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        return parts.Count == 0 ? null : string.Join(" | ", parts);
+    }
+
     // --- Room / session sheets ---------------------------------------------
 
     /// <summary>The room/session run-sheet, ordered by room then start time. Carries
@@ -204,6 +417,7 @@ public sealed class OrganizerExportsService
                 s.Title,
                 s.Type,
                 s.Length,
+                s.LengthMinutes,
                 s.StartsAt,
                 s.EndsAt,
                 s.RoomQrUrl,
@@ -219,7 +433,9 @@ public sealed class OrganizerExportsService
                 string.IsNullOrWhiteSpace(s.Room) ? "(unassigned)" : s.Room,
                 s.Title,
                 s.Type.ToString(),
-                LengthLabel(s.Length),
+                // §299.8/b7: the exact minutes are the source of truth ("37 min",
+                // "420 min"); the legacy bucket label only covers old rows without one.
+                s.LengthMinutes is int lm ? $"{lm} min" : LengthLabel(s.Length),
                 string.Join(", ", s.Speakers.Where(n => !string.IsNullOrWhiteSpace(n))),
                 s.StartsAt,
                 s.EndsAt,
@@ -253,9 +469,14 @@ public sealed class OrganizerExportsService
     public async Task<IReadOnlyList<VolunteerRotaRow>> BuildVolunteerRotaAsync(
         int eventId, CancellationToken ct = default)
     {
+        // EFFECTIVE assignments only (§253 G7): a withdrawn (deactivated)
+        // volunteer — or a shift the volunteer declined — must not print on the
+        // day-of rota the crew works from.
         var rows = await _db.VolunteerTaskAssignments
             .Where(a => a.EventId == eventId
-                        && a.Task.Status != VolunteerTaskStatus.Cancelled)
+                        && a.Task.Status != VolunteerTaskStatus.Cancelled
+                        && a.Participant.IsActive
+                        && a.DecisionStatus != ShiftDecisionStatus.Declined)
             .Select(a => new
             {
                 a.Participant.FullName,

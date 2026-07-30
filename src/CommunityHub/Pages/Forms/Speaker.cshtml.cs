@@ -35,6 +35,9 @@ public class SpeakerModel : PageModel
         ParticipantRole.Speaker,
     };
 
+    // §306 (operator 2026-07-24): accreditation is MANDATORY; "Microsoft Expert" is
+    // PRE-SELECTED as the default (operator: 'remove the None … instead pre-select
+    // Microsoft Expert') — no "None" option.
     public static readonly string[] AccreditationOptions =
     {
         "Microsoft Employee",

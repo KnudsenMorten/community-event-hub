@@ -1,10 +1,21 @@
 {
   "version": "2.0",
   "logging": {
+    "logLevel": {
+      "default": "Information",
+      "Host.Triggers.Timer": "Warning",
+      "Host.Aggregator": "Warning",
+      "Host.Results": "Warning",
+      "Microsoft": "Warning",
+      "Microsoft.Hosting.Lifetime": "Warning",
+      "Function.ZohoWebhookDrainJob": "Warning",
+      "Function.SoMeDispatchJob": "Warning"
+    },
     "applicationInsights": {
       "samplingSettings": {
         "isEnabled": true,
-        "excludedTypes": "Request"
+        "maxTelemetryItemsPerSecond": 20,
+        "excludedTypes": "Request;Exception"
       }
     }
   }

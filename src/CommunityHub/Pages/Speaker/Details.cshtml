@@ -28,11 +28,10 @@
             <partial name="/Pages/Speaker/_DetailsFields.cshtml" model="Model.Form" />
 
             <div style="margin-top:14px;display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
-                @* Plain "Save" keeps your edits in the hub WITHOUT touching Zoho — so a
-                   small tweak never re-emails the organizers (the manual-update alert).
-                   "Save & sync to Zoho" also pushes to Backstage. *@
+                @* §195: ONE Save button — it saves your edits to the hub AND syncs them to the
+                   public event system. If the sync can't go through, your edits are still saved
+                   and a notice is shown (you never lose the save). *@
                 <button type="submit" asp-page-handler="Save" data-ceh-loading-text="Saving…">Save</button>
-                <button type="submit" asp-page-handler="SaveAndSync" class="secondary" data-ceh-loading-text="Saving &amp; syncing…">Save &amp; sync to Event System (Zoho)</button>
                 <partial name="_LastSaved" model="Model.Form.LastSavedAt" />
             </div>
         </form>

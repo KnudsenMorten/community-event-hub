@@ -1,4 +1,5 @@
 using CommunityHub.Core.Domain;
+using CommunityHub.Core.Email;
 using CommunityHub.Core.Participants;
 using CommunityHub.Core.Reminders;
 using Microsoft.AspNetCore.Mvc.ModelBinding;
@@ -37,6 +38,14 @@ public sealed class PartyFormModel
 
     /// <summary>True when there is no active party window (the step then renders a neutral note).</summary>
     [BindNever] public bool NoParty { get; set; }
+
+    /// <summary>§316: the party location (e.g. "Expo / food area, Bella Center").</summary>
+    [BindNever] public string? Location { get; set; }
+
+    /// <summary>§316: one-tap "open the calendar entry" web links for the party window —
+    /// the same §252 links the e-mailed invite carries, surfaced directly on the step.</summary>
+    [BindNever] public string? GoogleCalendarUrl { get; set; }
+    [BindNever] public string? OutlookCalendarUrl { get; set; }
 }
 
 /// <summary>
@@ -118,5 +127,13 @@ public sealed class PartyFormService : IWizardFormService
         if (p is null) { model.NoParty = true; return; }
         model.TimeWindow = $"{p.StartHour:00}:{p.StartMinute:00}–{p.EndHour:00}:{p.EndMinute:00}";
         model.DateLine = p.Date.ToDateTime(new TimeOnly(0, 0)).ToString("dddd, d MMMM yyyy");
+        model.Location = p.Location;
+
+        // §316: the direct add-to-calendar links (same content as the e-mailed invite).
+        var (startUtc, endUtc) = PartyRsvpService.WindowUtc(p);
+        var summary = $"{p.EventName} — Party";
+        var details = $"Join us for the {p.EventName} party — {p.Location}.";
+        model.GoogleCalendarUrl = CalendarLinkBuilder.GoogleUrl(summary, startUtc, endUtc, details, p.Location);
+        model.OutlookCalendarUrl = CalendarLinkBuilder.OutlookUrl(summary, startUtc, endUtc, details, p.Location);
     }
 }

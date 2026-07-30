@@ -244,6 +244,86 @@ public sealed class EmailTemplateProvider
         string templateName, IReadOnlyDictionary<string, string> tokens) =>
         _renderer.Value.RenderBodyFragment(ResolveContent(templateName), tokens);
 
+    /// <summary>
+    /// §566 step 4 — the template's REAL subject line, with tokens turned into readable
+    /// placeholders, for the Settings page row: <c>Subject: "Master Class cancelled: [Master Class]"</c>.
+    /// </summary>
+    /// <remarks>
+    /// 🔒 READ FROM THE TEMPLATE, NEVER HAND-WRITTEN. Operator 2026-07-28: *"include both the
+    /// internal jargon + subject so it is 100% clear to everyone !"* — and the point of reading it
+    /// is that the page CANNOT drift from the mail that actually goes out. A hand-maintained label
+    /// is exactly how the page became machine output nobody trusted (§563/§564).
+    ///
+    /// <para>Honours the per-edition override layer, so what is shown is what THIS edition sends,
+    /// not the shipped default.</para>
+    ///
+    /// <para>Tokens become bracketed, spaced placeholders (<c>{{masterClassTitle}}</c> →
+    /// <c>[Master Class Title]</c>) rather than being left raw or blanked: raw braces read as a
+    /// bug, and blanking them makes three different subjects collapse into the same string — which
+    /// is why the internal key is shown on the second line as the disambiguator.</para>
+    ///
+    /// <para>Returns an empty string when the template has no <c>Subject:</c> line. A
+    /// build-failing test asserts none do; this stays non-throwing so a page never 500s over a
+    /// cosmetic gap.</para>
+    /// </remarks>
+    public string SubjectFor(string templateName)
+    {
+        string raw;
+        try { raw = ResolveContent(templateName); }
+        catch { return string.Empty; }
+        return ReadableSubject(raw);
+    }
+
+    /// <summary>
+    /// Extract the <c>Subject:</c> line from raw template text and make its tokens readable.
+    /// Static + public so the classification test can assert every shipped template has one
+    /// without standing up a provider.
+    /// </summary>
+    public static string ReadableSubject(string? rawTemplateText)
+    {
+        if (string.IsNullOrWhiteSpace(rawTemplateText)) return string.Empty;
+
+        string? subjectLine = null;
+        using (var reader = new StringReader(rawTemplateText))
+        {
+            // The Subject: line is the FIRST line by convention. Scan a few lines anyway so a
+            // stray leading blank line or comment does not silently blank the page row.
+            for (var i = 0; i < 5; i++)
+            {
+                var line = reader.ReadLine();
+                if (line is null) break;
+                var trimmed = line.TrimStart();
+                if (trimmed.StartsWith("Subject:", StringComparison.OrdinalIgnoreCase))
+                {
+                    subjectLine = trimmed["Subject:".Length..].Trim();
+                    break;
+                }
+            }
+        }
+        if (string.IsNullOrWhiteSpace(subjectLine)) return string.Empty;
+
+        return System.Text.RegularExpressions.Regex.Replace(
+            subjectLine,
+            @"\{\{\s*([A-Za-z0-9_]+)\s*\}\}",
+            m => "[" + Humanize(m.Groups[1].Value) + "]");
+    }
+
+    /// <summary>
+    /// camelCase / snake_case token name → "Spaced Words" for a readable placeholder.
+    /// EVERY word is capitalised (not just the first) so the placeholder reads as a label —
+    /// "[Master Class Title]", "[Full Name]" — rather than a half-formatted variable name.
+    /// </summary>
+    private static string Humanize(string token)
+    {
+        var spaced = System.Text.RegularExpressions.Regex.Replace(
+            token.Replace('_', ' '), "(?<=[a-z0-9])(?=[A-Z])", " ").Trim();
+        if (spaced.Length == 0) return token;
+
+        var words = spaced.Split(' ', StringSplitOptions.RemoveEmptyEntries)
+            .Select(w => char.ToUpperInvariant(w[0]) + w[1..]);
+        return string.Join(' ', words);
+    }
+
     /// <summary>The shipped content-template keys (file names without ".html", excluding the _layout shell).</summary>
     public IReadOnlyList<string> ListTemplateKeys()
     {

@@ -1,6 +1,7 @@
 using CommunityHub.Auth;
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
+using CommunityHub.Core.Organizer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
@@ -55,6 +56,9 @@ public class VolunteerStructureModel : PageModel
     [BindProperty(SupportsGet = true)] public string? Msg { get; set; }
 
     public List<VolunteerCategory> Tree { get; private set; } = new();
+    /// <summary>§199 — every defined volunteer task (flat, read-only) for the
+    /// "All volunteer tasks" review section, with full detail.</summary>
+    public List<VolunteerTask> AllTasks { get; private set; } = new();
     /// <summary>Organizers in the edition (candidate leads).</summary>
     public List<SelectListItem> OrganizerOptions { get; private set; } = new();
     /// <summary>Volunteers in the edition (candidate supervisors / assignees).</summary>
@@ -73,10 +77,13 @@ public class VolunteerStructureModel : PageModel
 
     private VolunteerStructureService.ActorContext? Actor()
     {
+        // Used ONLY by the OnPost* (write) handlers — the OnGet view keeps its own
+        // role-only gate. Writes require a REAL organizer: an acting-as / secretary
+        // session carries Role==Organizer but must never mutate (§234 / OrganizerAuth).
         var me = _participant.Current;
-        if (me is null || me.Role != ParticipantRole.Organizer) return null;
+        if (!OrganizerAuth.IsRealOrganizer(me)) return null;
         return new VolunteerStructureService.ActorContext(
-            me.ParticipantId, me.Email, me.Role, me.EventId);
+            me!.ParticipantId, me.Email, me.Role, me.EventId);
     }
 
     private async Task<IActionResult> RunAsync(Func<VolunteerStructureService.ActorContext, Task<string>> op)
@@ -98,8 +105,22 @@ public class VolunteerStructureModel : PageModel
     public Task<IActionResult> OnPostRenameCategoryAsync(int categoryId, string name, string? description, CancellationToken ct)
         => RunAsync(async a => { await _svc.RenameCategoryAsync(a, categoryId, name, description, ct); return "Category updated."; });
 
-    public Task<IActionResult> OnPostDeleteCategoryAsync(int categoryId, CancellationToken ct)
-        => RunAsync(async a => { await _svc.DeleteCategoryAsync(a, categoryId, ct); return "Category removed."; });
+    // §334: deleting a category takes every subcategory and every task under it. With 127
+    // imported volunteer tasks / 229 slots that is a whole area of the event in one click, so
+    // the phrase is verified HERE rather than by the row's confirm().
+    public Task<IActionResult> OnPostDeleteCategoryAsync(
+        int categoryId, string? confirmPhrase, CancellationToken ct)
+    {
+        if (!TypedConfirmation.Matches(confirmPhrase, TypedConfirmation.ConfirmPhrase))
+        {
+            return Task.FromResult<IActionResult>(RedirectToPage(new
+            {
+                Msg = TypedConfirmation.Rejection(
+                    TypedConfirmation.ConfirmPhrase, "delete this category and everything under it"),
+            }));
+        }
+        return RunAsync(async a => { await _svc.DeleteCategoryAsync(a, categoryId, ct); return "Category removed."; });
+    }
 
     public Task<IActionResult> OnPostSetLeadAsync(int categoryId, int? leadParticipantId, CancellationToken ct)
         => RunAsync(async a => { await _svc.SetLeadAsync(a, categoryId, leadParticipantId, ct); return "Lead updated."; });
@@ -186,6 +207,7 @@ public class VolunteerStructureModel : PageModel
     private async Task LoadAsync(int eventId, CancellationToken ct)
     {
         Tree = await _svc.LoadTreeAsync(eventId, ct);
+        AllTasks = await _svc.LoadAllTasksAsync(eventId, ct);
 
         var people = await _db.Participants
             .Where(p => p.EventId == eventId && p.IsActive

@@ -12,6 +12,7 @@ using Microsoft.AspNetCore.Mvc.ModelBinding;
 using Microsoft.AspNetCore.Mvc.RazorPages;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
 namespace CommunityHub.Web.Tests;
@@ -57,7 +58,68 @@ public sealed class SponsorTasksDeliverablesPageTests
             db,
             accessor,
             TimeProvider.System,
-            new SponsorDeliverablesService(db));
+            new SponsorDeliverablesService(db),
+            new CommunityHub.Core.Email.CalendarInviteEmailService(
+                db, new NoopEmailSender(),
+                new CommunityHub.Core.Email.EmailContextAccessor(), TimeProvider.System),
+            // §603 — the shared artefact uploader. Null is safe here: these tests exercise the task
+            // LIST and the deliverables rollup, and the model only touches the uploader inside
+            // OnPostUploadTaskFileAsync, which they never call.
+            uploader: null!,
+            // §684 — the migrated-body pipeline. REAL instances, not nulls: LoadAsync asks the
+            // service whether each task is migrated, so a null here would NRE on every page load
+            // these tests exercise. The resolver gets NO data providers, which is the honest
+            // configuration for a test with no webshop — a :::data directive then renders
+            // "we could not check", exactly as it would in production with the integration off.
+            new CommunityHub.Core.Tasks.TaskBodyService(
+                CommunityHub.Core.Tasks.Definitions.TaskDefinitionRegistry.Shipped,
+                new CommunityHub.Core.Tasks.Definitions.TaskBodyStore(),
+                new CommunityHub.Core.Tasks.Data.TaskDataResolver(
+                    Array.Empty<CommunityHub.Core.Tasks.Data.ITaskDataProvider>(),
+                    new Microsoft.Extensions.Caching.Memory.MemoryCache(
+                        new Microsoft.Extensions.Caching.Memory.MemoryCacheOptions()),
+                    NullLogger<CommunityHub.Core.Tasks.Data.TaskDataResolver>.Instance)),
+            new CommunityHub.Core.Tasks.SponsorTaskPlaceholderBuilder(
+                db,
+                new CommunityHub.Core.Config.EventEditionConfigLoader(),
+                new CommunityHub.Core.Config.EventConfigOptions(),
+                new CommunityHub.Core.Config.SponsorConfigLoader(),
+                new CommunityHub.Core.Config.SponsorConfigOptions(),
+                NullLogger<CommunityHub.Core.Tasks.SponsorTaskPlaceholderBuilder>.Instance),
+            // §687.8 — the purchase reconciler. Given a REAL instance with a webshop-less summary
+            // service: it then reports "could not check" for every category, and the reconciler's
+            // outage guard means it changes NOTHING. That is exactly the behaviour these tests want
+            // (they assert the task LIST and the rollup), and it exercises the guard for free.
+            new CommunityHub.Core.Tasks.PurchaseTaskReconciler(
+                db,
+                new CommunityHub.Core.Integrations.SponsorPurchaseSummaryService(
+                    new CommunityHub.Core.Integrations.WooCommerceClient(
+                        new HttpClient(), new CommunityHub.Core.Integrations.WooCommerceOptions()),
+                    new CommunityHub.Core.Integrations.WooCommerceOptions(),
+                    new Microsoft.Extensions.Caching.Memory.MemoryCache(
+                        new Microsoft.Extensions.Caching.Memory.MemoryCacheOptions()),
+                    NullLogger<CommunityHub.Core.Integrations.SponsorPurchaseSummaryService>.Instance),
+                CommunityHub.Core.Tasks.Definitions.TaskDefinitionRegistry.Shipped,
+                new CommunityHub.Core.Tasks.TaskBodyService(
+                    CommunityHub.Core.Tasks.Definitions.TaskDefinitionRegistry.Shipped,
+                    new CommunityHub.Core.Tasks.Definitions.TaskBodyStore(),
+                    new CommunityHub.Core.Tasks.Data.TaskDataResolver(
+                        Array.Empty<CommunityHub.Core.Tasks.Data.ITaskDataProvider>(),
+                        new Microsoft.Extensions.Caching.Memory.MemoryCache(
+                            new Microsoft.Extensions.Caching.Memory.MemoryCacheOptions()),
+                        NullLogger<CommunityHub.Core.Tasks.Data.TaskDataResolver>.Instance)),
+                TimeProvider.System,
+                NullLogger<CommunityHub.Core.Tasks.PurchaseTaskReconciler>.Instance),
+            // §688.12 — the Zoho sync behind the embedded booth-members editor. Null is safe here:
+            // these tests exercise the task LIST and the deliverables rollup, and the model only
+            // touches it inside the booth-member handlers, which they never call.
+            zohoSync: null!,
+            // §690 — the per-tier booth-member allowance. REAL instances: LoadAsync reads them on
+            // every page load, and the lookup is already fail-soft, so a config the test box cannot
+            // resolve simply omits the allowance line.
+            new CommunityHub.Core.Config.SponsorConfigLoader(),
+            new CommunityHub.Core.Config.SponsorConfigOptions(),
+            NullLogger<TasksModel>.Instance);
 
         var actionContext = new ActionContext(
             http, new RouteData(), new PageActionDescriptor(), new ModelStateDictionary());
@@ -129,5 +191,14 @@ public sealed class SponsorTasksDeliverablesPageTests
         // No company link -> nothing to roll up; the view omits the card.
         Assert.True(model.NoCompanyLink);
         Assert.Null(model.Deliverables);
+    }
+
+    private sealed class NoopEmailSender : CommunityHub.Core.Email.IEmailSender
+    {
+        public Task SendAsync(string toEmail, string subject, string htmlBody, CancellationToken ct = default) => Task.CompletedTask;
+        public Task SendAsync(string toEmail, string subject, string htmlBody, IReadOnlyCollection<string>? cc, CancellationToken ct = default) => Task.CompletedTask;
+        public Task SendAsync(string toEmail, string subject, string htmlBody, string textBody, CancellationToken ct = default) => Task.CompletedTask;
+        public Task SendWithIcsAsync(string toEmail, string subject, string htmlBody, string icsContent, string icsFileName, CancellationToken ct = default) => Task.CompletedTask;
+        public Task SendWithAttachmentsAsync(string toEmail, string subject, string htmlBody, IReadOnlyCollection<CommunityHub.Core.Email.EmailAttachment> attachments, CancellationToken ct = default) => Task.CompletedTask;
     }
 }

@@ -3,9 +3,20 @@
 @{
     ViewData["Title"] = Model.View?.Title ?? "Master Class";
     string Stamp(DateTimeOffset at) => at.UtcDateTime.ToString("d MMM yyyy HH:mm 'UTC'");
+
+    // §383 (operator 2026-07-26): "can we restucture the text into 3 boxes (instead of 1
+    // paragraph)". One shared card style so the three boxes read as siblings rather than three
+    // hand-styled sections that drift apart the next time one of them is edited.
+    const string Box = "background:#fff;border:1px solid #dde4ee;border-radius:12px;"
+                     + "padding:16px 18px;margin:18px 0;box-shadow:0 1px 2px rgba(16,24,40,.04);";
 }
 
-<div style="max-width:760px;margin:0 auto;padding:16px;box-sizing:border-box;overflow-wrap:anywhere;">
+@* §383b (operator 2026-07-26: "it seems as the width of the page is limited") — this page set its
+   OWN 760px cap, half of what §309 gives the rest of the hub, so it wasted most of a desktop screen
+   while every other page had already been widened. Raised to the §309 field-form width (1100px)
+   rather than removed entirely: the layout's main column goes to min(94vw, 1700px), and prose set
+   that wide is genuinely hard to read. Still fluid below 1100px, so phones are unchanged. *@
+<div style="max-width:1100px;margin:0 auto;padding:16px;box-sizing:border-box;overflow-wrap:anywhere;">
     @if (Model.NotFoundState)
     {
         <h1>Master Class not found</h1>
@@ -23,13 +34,15 @@
     else if (Model.View is not null)
     {
         <h1 style="margin:0 0 4px;">@Model.View.Title</h1>
+        @* §451 (operator 2026-07-27): bold the VALUES, not the labels — the speaker name and the
+           room are the two facts someone scans this header for. *@
         @if (Model.View.Speakers.Count > 0)
         {
-            <p style="color:#555;margin:0 0 4px;">Presented by @string.Join(", ", Model.View.Speakers)</p>
+            <p style="color:#555;margin:0 0 4px;">Presented by <strong>@string.Join(", ", Model.View.Speakers)</strong></p>
         }
         @if (!string.IsNullOrWhiteSpace(Model.View.Room))
         {
-            <p style="color:#555;margin:0 0 12px;">Room: @Model.View.Room</p>
+            <p style="color:#555;margin:0 0 12px;">Room: <strong>@Model.View.Room</strong></p>
         }
 
         @if (!string.IsNullOrEmpty(Model.Message))
@@ -44,8 +57,9 @@
         <!-- ============ Orientation: what is a Master Class (standard copy) ============ -->
         @* Consolidated here (operator 2026-06-24): the "Master Class info & what to bring"
            details now live ON this Q&A page so attendees find everything in one place. *@
-        <section aria-labelledby="mc-about-h" style="margin:18px 0;">
-            <h2 id="mc-about-h" style="font-size:1.25rem;">What is an Experts Live Master Class?</h2>
+        <!-- ============ BOX 1 — generic intro (§383: copy unchanged, now its own card) ======= -->
+        <section aria-labelledby="mc-about-h" style="@Box">
+            <h2 id="mc-about-h" style="font-size:1.25rem;margin-top:0;">What is an Experts Live Master Class?</h2>
             <p>An Experts Live Master Class is a full-day, in-person learning event where people with a shared interest in a topic come together to learn from experienced professionals—mainly Microsoft MVPs and sometimes Microsoft itself.</p>
             <p>There isn't a strict definition of what makes up a master class. Our main goal is to create a room of peers and provide honest, practical insight — the "no filter" version of what works and what doesn't.</p>
             <p><strong>Key points:</strong></p>
@@ -62,37 +76,54 @@
             <p>Due to Danish fire safety regulations, we cannot run charging cables along the classroom table rows. Each room has a charging table (up to 15 devices at once) for laptops or phones. For the best start, please arrive with your laptop fully charged.</p>
         </section>
 
-        <!-- ============ Before you arrive / what to bring (speaker logistics) ============ -->
-        <section aria-labelledby="mc-bring-h" style="margin:18px 0;">
-            <h2 id="mc-bring-h" style="font-size:1.25rem;">Before you arrive — what to bring</h2>
-            @if (string.IsNullOrWhiteSpace(Model.View.LogisticsText))
-            {
-                <p style="color:#374151;">The speakers haven't posted specifics for this class yet — check back soon.</p>
-            }
-            else
-            {
-                <div style="white-space:pre-wrap;line-height:1.55;overflow-wrap:anywhere;">@Model.View.LogisticsText</div>
-                @if (Model.View.LogisticsUpdatedAt is { } lu)
-                {
-                    <p style="color:#888;font-size:.85rem;margin-top:8px;">Last updated @Stamp(lu)</p>
-                }
-            }
-        </section>
+        @*
+            §266: "what to bring" (LogisticsText) and "How to prepare" (PrepContent) are two
+            SEPARATE fields with separate editors. A speaker who filled only one used to see the
+            OTHER section's "nothing posted yet" placeholder — reading as "nothing was added" even
+            though they clearly added text. Fix: show a section only when it HAS content; show the
+            "check back soon" placeholder ONCE, and only when BOTH are empty.
+        *@
+        <!-- ============ BOX 2 — everything the SPEAKERS authored (§383) =====================
+             Renamed from "How to prepare" at the operator's request, and the two speaker-edited
+             fields (§266 PrepContent + LogisticsText) are now ONE box: they are both "instructions
+             from the speakers", and splitting them into two top-level sections was what made the
+             page read as a wall of paragraphs. The §266 rule still holds INSIDE the box — a field
+             with no content renders nothing, and the "check back soon" line appears once, only when
+             BOTH are empty, so a speaker who filled one never sees the other's placeholder. -->
+        <section aria-labelledby="prep-h" style="@Box">
+            <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:baseline;justify-content:space-between;">
+                <h2 id="prep-h" style="font-size:1.25rem;margin:0;">
+                    Instructions from Master Class Speakers | How to prepare?
+                </h2>
+                <partial name="_McSubscribeToggle" model='new CommunityHub.Pages.McSubscribeToggle(
+                    Model.SessionId, Model.Token,
+                    CommunityHub.Core.Domain.MasterClassNotificationKind.SpeakerInstructions,
+                    Model.SubscribedInstructions,
+                    "E-mail me when the speakers update this")' />
+            </div>
 
-        <!-- ============ Prep content ============ -->
-        <section aria-labelledby="prep-h" style="margin:18px 0;">
-            <h2 id="prep-h" style="font-size:1.25rem;">How to prepare</h2>
-            @if (string.IsNullOrWhiteSpace(Model.View.PrepContent))
-            {
-                <p style="color:#374151;">The speakers have not posted preparation notes yet — check back soon.</p>
-            }
-            else
+            @if (!string.IsNullOrWhiteSpace(Model.View.PrepContent))
             {
                 <div style="white-space:pre-wrap;line-height:1.55;overflow-wrap:anywhere;">@Model.View.PrepContent</div>
                 @if (Model.View.PrepUpdatedAt is { } pu)
                 {
                     <p style="color:#888;font-size:.85rem;margin-top:8px;">Last updated @Stamp(pu)</p>
                 }
+            }
+
+            @if (!string.IsNullOrWhiteSpace(Model.View.LogisticsText))
+            {
+                <h3 style="font-size:1.05rem;margin:18px 0 4px;">Before you arrive &mdash; what to bring</h3>
+                <div style="white-space:pre-wrap;line-height:1.55;overflow-wrap:anywhere;">@Model.View.LogisticsText</div>
+                @if (Model.View.LogisticsUpdatedAt is { } lu)
+                {
+                    <p style="color:#888;font-size:.85rem;margin-top:8px;">Last updated @Stamp(lu)</p>
+                }
+            }
+
+            @if (string.IsNullOrWhiteSpace(Model.View.LogisticsText) && string.IsNullOrWhiteSpace(Model.View.PrepContent))
+            {
+                <p style="color:#374151;margin:0;">The speakers haven't posted specifics for this class yet — check back soon.</p>
             }
         </section>
 
@@ -103,9 +134,18 @@
            ability to create new 1:1 questions is gone. *@
 
         <!-- ============ Group Q&A — unique to THIS Master Class ============ -->
-        <section aria-labelledby="qa-h" style="margin:18px 0;">
-            <h2 id="qa-h" style="font-size:1.25rem;">Group Q&amp;A for this Master Class</h2>
-            <p style="color:#374151;margin:0 0 4px;">
+        <section aria-labelledby="qa-h" style="@Box">
+            <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:baseline;justify-content:space-between;">
+                <h2 id="qa-h" style="font-size:1.25rem;margin:0;">Master Class Q&amp;A</h2>
+                <partial name="_McSubscribeToggle" model='new CommunityHub.Pages.McSubscribeToggle(
+                    Model.SessionId, Model.Token,
+                    CommunityHub.Core.Domain.MasterClassNotificationKind.QandA,
+                    Model.SubscribedQandA,
+                    "E-mail me about new questions")' />
+            </div>
+            @* §450 (operator 2026-07-27): these two paragraphs were 4px apart, so they read as one
+               run-on block. A normal paragraph gap separates them. *@
+            <p style="color:#374151;margin:8px 0 12px;">
                 This is the question board for <strong>@Model.View.Title</strong> only — it is
                 shared with everyone in this Master Class and its speakers. Each Master Class has
                 its own separate board, so what you post here stays with this class.
@@ -133,7 +173,17 @@
                     @foreach (var c in Model.Comments)
                     {
                         <li style="border:1px solid #e3e3e3;border-radius:8px;padding:10px 12px;margin-bottom:8px;@(c.ParentCommentId is null ? "" : "margin-left:20px;")">
-                            <div style="font-weight:600;">@c.AuthorDisplayName</div>
+                            @* §383: show the poster's ROLE after their name, so an answer from a
+                               speaker is distinguishable from a fellow attendee's at a glance.
+                               Derived from WHICH author column is set — the two are mutually
+                               exclusive by construction (AddAttendeeCommentAsync vs
+                               AddParticipantCommentAsync), so no extra column or join is needed. *@
+                            <div style="font-weight:600;">
+                                @c.AuthorDisplayName
+                                <span style="font-weight:500;font-size:.8rem;color:#fff;background:@(c.AuthorAttendeeId is not null ? "#5b6b8c" : "#1c6b35");border-radius:999px;padding:1px 8px;margin-left:6px;vertical-align:middle;">
+                                    @(c.AuthorAttendeeId is not null ? "Attendee" : "Speaker")
+                                </span>
+                            </div>
                             <div style="white-space:pre-wrap;">@c.Body</div>
                             <div style="color:#888;font-size:.8rem;margin-top:4px;">@Stamp(c.CreatedAt)</div>
                         </li>

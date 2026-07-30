@@ -111,7 +111,7 @@ public class MyMasterClassModel : PageModel
     {
         if (promo?.PromotedSignupId is int id)
         {
-            try { await _promo.SendPromotionAsync(id, $"{Request.Scheme}://{Request.Host}", ct); }
+            try { await _promo.SendPromotionAsync(id, $"{Request.Scheme}://{Request.Host}", ct, promo.ReleasedTitle); }
             catch { /* promotion stands even if the notify mail fails; retryable */ }
         }
     }
@@ -201,19 +201,6 @@ public class MyMasterClassModel : PageModel
 
         // The target is now the confirmed seat (section 1) — anchor the success there.
         return RedirectToPage(new { t = Token, msg = $"Switched — you've got a seat in {newTitle}. 🎉", sid = sessionId });
-    }
-
-    /// <summary>"Add to my calendar" — the attendee's confirmed Master Class as an .ics.</summary>
-    public async Task<IActionResult> OnGetIcsAsync(string? t, CancellationToken ct)
-    {
-        var a = await LoadAsync(t, ct);
-        if (a is null || Confirmed is null) return NotFound();
-        var s = await _svc.GetSessionForIcsAsync(a.EventId, Confirmed.SessionId, ct);
-        if (s is null) return NotFound();
-        var ics = MasterClassEmailService.BuildIcs(
-            Request.Host.Host, Confirmed.SessionId, s.Title, s.StartsAt, s.EndsAt, s.EditionStart);
-        // Inline (no filename) so it opens in the calendar app rather than downloading.
-        return File(System.Text.Encoding.UTF8.GetBytes(ics), "text/calendar; charset=utf-8");
     }
 
     /// <summary>Toggle the "remind me ~1 month before" calendar opt-in on the confirmed seat.</summary>

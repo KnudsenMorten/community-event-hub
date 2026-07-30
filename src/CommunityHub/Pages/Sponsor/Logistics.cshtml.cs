@@ -54,6 +54,38 @@ public class LogisticsModel : PageModel
     /// <summary>The sponsor's real company name (CM public name, falling back to legal name).</summary>
     public string? CompanyDisplayName { get; private set; }
 
+    /// <summary>The sponsor's physical booth number (e.g. "E-29"), or null when unassigned.</summary>
+    public string? BoothNumber { get; private set; }
+
+    /// <summary>
+    /// The company token used on the "Mark every box with: …" lines (§174). Uses the
+    /// resolved public/legal name; degrades to a soft "your company" (never the literal
+    /// "&lt;your company&gt;" placeholder) when Company Manager is off or the lookup failed.
+    /// </summary>
+    public string BoxMarkingCompany => ResolveBoxMarkingCompany(CompanyDisplayName);
+
+    /// <summary>
+    /// The DSV freight box-marking line (§174b): "&lt;edition&gt; / Booth &lt;number&gt; / &lt;company&gt;"
+    /// (e.g. "ELDK27 / Booth E-29 / 2LINKIT"). Degrades to "Booth (TBA)" when no booth is
+    /// assigned yet, mirroring the "Booth TBD" graceful state on the Our Booth page.
+    /// </summary>
+    public string DsvBoxMarking => ResolveDsvBoxMarking(EditionCode, BoothNumber, CompanyDisplayName);
+
+    /// <summary>
+    /// Pure box-marking company token (§174a) — the resolved public/legal name, or the soft
+    /// "your company" fallback (never the literal "&lt;your company&gt;" placeholder).
+    /// </summary>
+    public static string ResolveBoxMarkingCompany(string? companyDisplayName) =>
+        !string.IsNullOrWhiteSpace(companyDisplayName) ? companyDisplayName! : "your company";
+
+    /// <summary>
+    /// Pure DSV freight box-marking line (§174b) — "&lt;edition&gt; / Booth &lt;number&gt; / &lt;company&gt;",
+    /// degrading the booth to "Booth (TBA)" when unassigned and the company via
+    /// <see cref="ResolveBoxMarkingCompany"/>.
+    /// </summary>
+    public static string ResolveDsvBoxMarking(string editionCode, string? boothNumber, string? companyDisplayName) =>
+        $"{editionCode} / {(string.IsNullOrWhiteSpace(boothNumber) ? "Booth (TBA)" : $"Booth {boothNumber!.Trim()}")} / {ResolveBoxMarkingCompany(companyDisplayName)}";
+
     public string? ExhibitorGuideUrl { get; private set; }
     public string? VenueFloorPlanUrl { get; private set; }
     public string? FreightContactPhone { get; private set; }
@@ -100,6 +132,19 @@ public class LogisticsModel : PageModel
             {
                 _log.LogWarning(ex, "Sponsor/Logistics: Company Manager lookup failed for company {Co}.", companyIdInt);
             }
+        }
+
+        // Booth number for the DSV box-marking line (§174b) — the SAME source the Our
+        // Booth page uses: SponsorInfo.BoothLabel for this company (EventId +
+        // SponsorCompanyId), parsed from the booth product during the order pull. Stays
+        // null (→ "Booth (TBA)") when no booth is assigned yet.
+        if (!string.IsNullOrWhiteSpace(companyId))
+        {
+            var info = await _db.SponsorInfos
+                .AsNoTracking()
+                .FirstOrDefaultAsync(s => s.EventId == me.EventId && s.SponsorCompanyId == companyId, ct);
+            if (info is not null && !string.IsNullOrWhiteSpace(info.BoothLabel))
+                BoothNumber = info.BoothLabel!.Trim();
         }
 
         var cfg = _eventConfigLoader.Load(_eventConfigOptions.EventConfigPath);

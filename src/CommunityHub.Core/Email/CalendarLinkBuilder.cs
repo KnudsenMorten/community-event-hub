@@ -42,4 +42,23 @@ public static class CalendarLinkBuilder
         if (!string.IsNullOrWhiteSpace(location)) url += $"&location={Uri.EscapeDataString(location)}";
         return url;
     }
+
+    /// <summary>
+    /// A ready-to-embed HTML paragraph offering the recipient a MANUAL "add to
+    /// calendar" choice (Google + Outlook web links that open a pre-filled event —
+    /// nothing is pushed into their calendar). REQUIREMENTS §257: this is the option
+    /// that stays available on the Dinner / Hotel / Master-Class confirmation e-mails
+    /// when the AUTOMATIC calendar invite is disabled, so people who want the entry add
+    /// it themselves. The URLs are HTML-encoded for safe embedding.
+    /// </summary>
+    public static string AddToCalendarHtml(
+        string title, DateTimeOffset startUtc, DateTimeOffset endUtc,
+        string? details = null, string? location = null)
+    {
+        var g = System.Net.WebUtility.HtmlEncode(GoogleUrl(title, startUtc, endUtc, details, location));
+        var o = System.Net.WebUtility.HtmlEncode(OutlookUrl(title, startUtc, endUtc, details, location));
+        return "<p><strong>Add this to your calendar:</strong> "
+             + $"<a href=\"{g}\">Google Calendar</a> &middot; "
+             + $"<a href=\"{o}\">Outlook</a></p>";
+    }
 }

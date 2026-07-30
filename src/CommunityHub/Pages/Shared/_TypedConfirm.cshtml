@@ -1,0 +1,23 @@
+@model CommunityHub.Pages.Shared.TypedConfirmField
+@*
+    §334 — the typed-confirmation input for an irreversible action.
+
+    Drop this INSIDE the form that posts the destructive handler. It renders the labelled
+    text box; the handler must call TypedConfirmation.Matches(...) and refuse when it does
+    not match. The guard is the SERVER check — this partial is only how a human supplies
+    the phrase, which is why nothing here is required for correctness (no `required`, no
+    JS gate): with JavaScript off the box still posts, and the server still decides.
+*@
+<div style="margin-top:14px;padding:12px;border:1px solid #fecaca;border-radius:8px;background:#fef2f2;">
+    <label for="@Model.InputId" style="display:block;font-size:13px;color:#7f1d1d;margin-bottom:6px;">
+        This cannot be undone. Type <strong>@Model.Phrase</strong> to confirm.
+    </label>
+    <input type="text" id="@Model.InputId" name="@Model.FieldName"
+           autocomplete="off" autocapitalize="characters" spellcheck="false"
+           placeholder="@Model.Phrase"
+           aria-describedby="@(Model.InputId)-hint"
+           style="width:100%;max-width:220px;padding:8px 10px;border:1px solid #c4c8d4;border-radius:6px;font-size:15px;" />
+    <div id="@(Model.InputId)-hint" style="font-size:12px;color:#7f1d1d;margin-top:6px;">
+        @Model.What
+    </div>
+</div>

@@ -107,9 +107,10 @@ public sealed class ScheduleService
             E(D(start, 11, 0),             "Media team booth photos (for welcome video)", "sponsor,media", false, D(start, 14, 0)),
             E(D(start, 16, 0),             "Party",                         "all", false),
             // Group photo + Appreciation Dinner pushed +30 min (operator 2026-06-28). Group photo
-            // excludes attendees; Appreciation Dinner is all roles EXCEPT attendees.
+            // excludes attendees; §298 (operator 2026-07-11): Appreciation Dinner is for speakers,
+            // organizers, volunteers, event partners and media — NOT attendees or sponsors.
             E(D(start, 18, 0),             "Group photo",                   "organizer,volunteer,speaker,media", false),
-            E(D(start, 18, 30),            "Appreciation Dinner",           "organizer,volunteer,speaker,media,sponsor", false),
+            E(D(start, 18, 30),            "Appreciation Dinner",           "organizer,volunteer,speaker,media,eventpartner", false),
             // Main day is for everyone (incl. attendees).
             E(D(end, 7, 0),                "Main day",                      "all", false, D(end, 17, 15)),
         };

@@ -26,6 +26,15 @@ public sealed class SpeakerQuestionDigestServiceTests
 
     private static readonly FixedClock Clock = new(Now);
 
+    /// <summary>§246: an advanceable clock so the WEEKLY cadence can be exercised —
+    /// the daily job's re-runs are simulated by moving this forward.</summary>
+    private sealed class MutableClock : TimeProvider
+    {
+        public DateTimeOffset Now;
+        public MutableClock(DateTimeOffset now) => Now = now;
+        public override DateTimeOffset GetUtcNow() => Now;
+    }
+
     private static CommunityHubDbContext NewDb() =>
         new(new DbContextOptionsBuilder<CommunityHubDbContext>()
             .UseInMemoryDatabase($"sqdigest-{Guid.NewGuid():N}")
@@ -39,8 +48,9 @@ public sealed class SpeakerQuestionDigestServiceTests
         }));
 
     private static SpeakerQuestionDigestService NewService(
-        CommunityHubDbContext db, CapturingEmailSender sender) =>
-        new(db, new ParticipantEmailService(db, RealTemplates(), sender, new EmailContextAccessor()), Clock);
+        CommunityHubDbContext db, CapturingEmailSender sender, TimeProvider? clock = null) =>
+        new(db, new ParticipantEmailService(db, RealTemplates(), sender, new EmailContextAccessor()),
+            clock ?? Clock);
 
     // ----- seed helpers -----------------------------------------------------
 
@@ -239,7 +249,7 @@ public sealed class SpeakerQuestionDigestServiceTests
     }
 
     [Fact]
-    public async Task A_brand_new_question_triggers_one_more_digest()
+    public async Task A_brand_new_question_triggers_one_more_digest_after_the_weekly_window()
     {
         using var db = NewDb();
         var eventId = await SeedEventAsync(db);
@@ -247,12 +257,45 @@ public sealed class SpeakerQuestionDigestServiceTests
         var s1 = await SeedSessionAsync(db, eventId, "Talk A", spk);
         await AddQuestionAsync(db, eventId, s1);
         var sender = new CapturingEmailSender();
-        var svc = NewService(db, sender);
+        var clock = new MutableClock(Now);
+        var svc = NewService(db, sender, clock);
 
         Assert.Equal(1, await svc.SendPendingAsync(eventId));
         await AddQuestionAsync(db, eventId, s1);                 // new question arrives
-        Assert.Equal(1, await svc.SendPendingAsync(eventId));    // exactly one more
+        // §246: inside the 7-day quiet window nothing is sent, even for a raised
+        // fingerprint — the daily job simply defers.
+        Assert.Equal(0, await svc.SendPendingAsync(eventId));
+        clock.Now = Now.AddDays(SpeakerQuestionDigestService.MinIntervalDays).AddMinutes(1);
+        Assert.Equal(1, await svc.SendPendingAsync(eventId));    // exactly one more, weekly
         Assert.Equal(0, await svc.SendPendingAsync(eventId));    // then settled again
+        Assert.Equal(2, sender.Sent.Count);
+    }
+
+    [Fact]
+    public async Task Weekly_cadence_coalesces_all_new_questions_into_one_digest()
+    {
+        // §246: several questions arriving DURING the quiet window produce ONE
+        // consolidated digest after it — never a mail per question, never daily.
+        using var db = NewDb();
+        var eventId = await SeedEventAsync(db);
+        var spk = await SeedSpeakerAsync(db, eventId, "spk@example.test");
+        var s1 = await SeedSessionAsync(db, eventId, "Talk A", spk);
+        await AddQuestionAsync(db, eventId, s1);
+        var sender = new CapturingEmailSender();
+        var clock = new MutableClock(Now);
+        var svc = NewService(db, sender, clock);
+
+        Assert.Equal(1, await svc.SendPendingAsync(eventId));    // day 0
+
+        for (var day = 1; day <= 6; day++)
+        {
+            clock.Now = Now.AddDays(day);
+            await AddQuestionAsync(db, eventId, s1);             // a question a day...
+            Assert.Equal(0, await svc.SendPendingAsync(eventId)); // ...but no daily nag
+        }
+
+        clock.Now = Now.AddDays(7).AddMinutes(1);                // window over
+        Assert.Equal(1, await svc.SendPendingAsync(eventId));    // one consolidated update
         Assert.Equal(2, sender.Sent.Count);
     }
 

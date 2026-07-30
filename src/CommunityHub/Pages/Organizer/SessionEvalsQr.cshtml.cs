@@ -79,10 +79,19 @@ public class SessionEvalsQrModel : PageModel
         if (me is null) return RedirectToPage("/Login");
         if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
 
-        if (_qr.CanManage && !string.IsNullOrWhiteSpace(FileName))
+        // §330: validate the value we actually DELETE with, not the raw input. FileName can
+        // be non-empty while Path.GetFileName(FileName) is "" (anything ending in '/'), and
+        // an empty path used to resolve to the QR FOLDER itself. The client now refuses that
+        // outright; this avoids the pointless call and says something honest instead.
+        var leaf = string.IsNullOrWhiteSpace(FileName) ? null : Path.GetFileName(FileName);
+        if (_qr.CanManage && !string.IsNullOrWhiteSpace(leaf))
         {
-            await _qr.DeleteAsync(Path.GetFileName(FileName), ct);
-            Message = $"Deleted \"{FileName}\".";
+            await _qr.DeleteAsync(leaf, ct);
+            Message = $"Deleted \"{leaf}\".";
+        }
+        else if (_qr.CanManage && !string.IsNullOrWhiteSpace(FileName))
+        {
+            Message = $"\"{FileName}\" is not a file name — nothing was deleted.";
         }
         await LoadAsync(ct);
         return Page();

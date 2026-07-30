@@ -18,21 +18,36 @@
 <label for="ProfileRole">Role <span style="font-weight:400;color:#6b7280;">(set by organizers &mdash; read-only)</span></label>
 <input type="text" id="ProfileRole" value="@CommunityHub.Branding.RoleDisplay.Name(Model.Role)" disabled />
 
-<label for="Phone">Phone <span style="font-weight:400;color:#6b7280;">(optional)</span></label>
-<input type="tel" asp-for="Phone" autocomplete="tel" maxlength="40" />
+@* §262: phone is REQUIRED for volunteers (we must be able to reach them on the day),
+   OPTIONAL for every other role — the label + the HTML5 required hint follow the role. *@
+@{ var phoneRequired = Model.Role == CommunityHub.Core.Domain.ParticipantRole.Volunteer; }
+<label for="Phone">Phone <span style="font-weight:400;color:#6b7280;">(@(phoneRequired ? "required" : "optional"))</span></label>
+<input type="tel" asp-for="Phone" autocomplete="tel" maxlength="40" required="@phoneRequired" />
 
 @* One additional-email field only (operator 2026-06-25 — the separate "secondary
-   CC" field was redundant): an alternate address you can ALSO sign in with. *@
-<label for="AlternateEmail">Alternate sign-in email <span style="font-weight:400;color:#6b7280;">(optional &mdash; sign in with this OR your main email)</span></label>
+   CC" field was redundant): an alternate address you can ALSO sign in with.
+
+   §422 — the label now states ALL THREE things this address does. It used to say
+   "Alternate sign-in email", which described one of them, so the tasks banner could
+   invite someone to "add an alternative email" for reminders, land them on this box,
+   and leave them believing they had done something this field did not then do. The
+   id="AlternateEmail" is also the banner's link fragment — do not rename it without
+   updating _SecondaryEmailBanner. *@
+<label for="AlternateEmail">Alternate email <span style="font-weight:400;color:#6b7280;">(optional &mdash; sign in with it, and we&rsquo;ll copy your reminders and calendar invites there too)</span></label>
 <input type="email" asp-for="AlternateEmail" autocomplete="email" maxlength="320"
-       placeholder="blank = sign in with your main email only" />
+       placeholder="blank = use your main email only" />
 
 @if (Model.IsSpeaker)
 {
-    @* Speaker details (bio, accreditation, country, photo, preferred email) moved
-       to the consolidated Speaker Details page (operator 2026-06-24). *@
+    @* Speaker details (bio, accreditation, country, photo) moved to the consolidated
+       Speaker Details page (operator 2026-06-24).
+
+       §422 — "preferred email" removed from this list. That field left Speaker Details
+       on 2026-06-28 and this sentence kept pointing at it, so a speaker looking for
+       where their other address lives was sent to a page that no longer has one. The
+       alternate address is the box directly above. *@
     <p style="font-size:13px;color:#374151;background:#eef2fb;border-left:4px solid var(--el-darkblue,#1D3380);padding:8px 12px;border-radius:6px;margin:16px 0;">
-        Your speaker details (bio, photo, accreditation, country, preferred email) live on
+        Your speaker details (bio, photo, accreditation, country) live on
         <a asp-page="/Speaker/Details">Speaker Details</a>.
     </p>
 }

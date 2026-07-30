@@ -1,28 +1,51 @@
 namespace CommunityHub.Core.Domain;
 
 /// <summary>
-/// Who pays for this speaker's appreciation package (hotel/travel/swag/etc).
-/// Drives the speaker-hat order entitlements in
-/// <see cref="Entitlements.OrderEntitlements"/>.
+/// LEGACY (§299 C3 — retired from logic 2026-07-23). Who paid for a speaker's
+/// appreciation package under the OLD model. Superseded by
+/// <see cref="SpeakerCategory"/>; kept ONLY because migrations are additive
+/// (never drop) — the stored value is display/audit-only and no logic may read
+/// it any more.
 /// </summary>
 public enum SpeakerFunding
 {
-    /// <summary>Organizer-supported speaker: the full speaker appreciation set.</summary>
+    /// <summary>LEGACY: organizer-supported speaker (migrated to <see cref="SpeakerCategory.Community"/>).</summary>
     Supported = 0,
 
-    /// <summary>
-    /// A speaker brought + paid for by a sponsor (e.g. a sponsor-session
-    /// speaker): only the shared social items (dinner + main-day lunch), no
-    /// polo/swag/award/hotel/travel.
-    /// </summary>
+    /// <summary>LEGACY: sponsor-brought/self-funded speaker (migrated to <see cref="SpeakerCategory.Sponsor"/>).</summary>
     SponsorSelfFunded = 1,
 
     /// <summary>
-    /// An organizer who is also speaking: contributes NOTHING from the speaker
-    /// hat (they are excluded from speaker tallies); their Organizer-role
-    /// entitlements still apply.
+    /// LEGACY: an organizer who is also speaking (migrated to a NULL
+    /// <see cref="SpeakerProfile.Category"/> — the double-identity handling is
+    /// frozen pending ❓OPEN-22 <c>SamePersonAsId</c> linking).
     /// </summary>
     Organizer = 2,
+}
+
+/// <summary>
+/// §299 6.1 — the canonical speaker classification, organizer-set. Replaces
+/// <see cref="SpeakerFunding"/> (C3): funding is DERIVED, not stored — see
+/// <see cref="SpeakerProfile.EldkFunded"/>. Drives the speaker-hat order
+/// entitlements (<see cref="Entitlements.OrderEntitlements"/>), the polo /
+/// funded-hotel-night tallies (<see cref="Entitlements.SpeakerDayScope"/>) and
+/// the presentation-deadline seeding.
+/// </summary>
+public enum SpeakerCategory
+{
+    /// <summary>A community speaker — ELDK-funded (polo, swag, hotel, travel, the full set).</summary>
+    Community = 0,
+
+    /// <summary>A sponsor-brought / self-funded speaker — the sponsor pays; only the shared social items.</summary>
+    Sponsor = 1,
+
+    /// <summary>
+    /// A guest speaker ELDK hires on individual terms — same as Community except
+    /// the travel-reimbursement option/tasks are never presented (§299 6.2), and
+    /// their funded hotel nights are organizer-entered
+    /// (<see cref="SpeakerProfile.GuestFundedNights"/>), not schedule-derived.
+    /// </summary>
+    Guest = 2,
 }
 
 /// <summary>
@@ -50,6 +73,13 @@ public class SpeakerProfile
     /// <summary>One of: "Microsoft Employee", "Microsoft Expert", "Microsoft MVP", "Microsoft Regional Director", "None".</summary>
     public string? Accreditation { get; set; }
 
+    /// <summary>
+    /// §302b (operator 2026-07-24): the speaker's COMPANY NAME — hub-collected on the
+    /// get-started/Details form (Sessionize has no such field) and pushed to the Zoho
+    /// speaker's "Company Name" when filled (optional in Zoho).
+    /// </summary>
+    public string? CompanyName { get; set; }
+
     /// <summary>True if this is the participant's first time speaking at this event series.</summary>
     public bool? IsFirstTimeSpeaker { get; set; }
 
@@ -58,19 +88,55 @@ public class SpeakerProfile
     /// <summary>"Male" / "Female" / "Non-binary" / "Prefer not to say".</summary>
     public string? Gender { get; set; }
 
-    /// <summary>True if the speaker is delivering a session on Pre-day (Master Class / workshop day).</summary>
+    /// <summary>
+    /// LEGACY (§299 C5 — retired from logic 2026-07-23). Speaking days now DERIVE
+    /// from the speaker's linked sessions
+    /// (<see cref="Entitlements.SpeakerDayScope"/>); no logic may read this flag
+    /// any more. Column kept (additive-only rule) for display/audit only.
+    /// </summary>
     public bool SpeakingPreDay { get; set; }
 
-    /// <summary>True if the speaker is delivering a session on the main conference day.</summary>
+    /// <summary>
+    /// LEGACY (§299 C5 — retired from logic 2026-07-23). Speaking days now DERIVE
+    /// from the speaker's linked sessions
+    /// (<see cref="Entitlements.SpeakerDayScope"/>); no logic may read this flag
+    /// any more. Column kept (additive-only rule) for display/audit only.
+    /// </summary>
     public bool SpeakingMainDay { get; set; }
 
     /// <summary>
-    /// Who funds this speaker's appreciation package — drives the speaker-hat
-    /// order entitlements (<see cref="Entitlements.OrderEntitlements"/>).
-    /// Defaults to <see cref="SpeakerFunding.Supported"/> (organizer-supported,
-    /// full speaker set).
+    /// LEGACY (§299 C3 — retired from logic 2026-07-23). Superseded by
+    /// <see cref="Category"/> (funding is derived via <see cref="EldkFunded"/>).
+    /// Column kept (additive-only rule) for display/audit only; no logic may read
+    /// it any more.
     /// </summary>
     public SpeakerFunding SpeakerFunding { get; set; } = SpeakerFunding.Supported;
+
+    /// <summary>
+    /// §299 6.1 — the organizer-linked speaker category (canonical). NULLABLE:
+    /// null = NOT YET CATEGORIZED — the speaker hat contributes NOTHING to
+    /// entitlements, the speaker is EXCLUDED from the polo / funded-hotel-night
+    /// tallies (not counted as zero), and they CANNOT be activated (the
+    /// pre-selection queue's activation hard gate). Stored in the additive
+    /// <c>SpeakerCategory</c> column.
+    /// </summary>
+    public SpeakerCategory? Category { get; set; }
+
+    /// <summary>
+    /// §299 6.3 — organizer-entered count of ELDK-funded hotel nights for a
+    /// GUEST speaker (individual agreement — all nights needed; cannot be
+    /// computed from the schedule). Meaningful only when <see cref="Category"/>
+    /// is <see cref="SpeakerCategory.Guest"/>; ignored for every other category.
+    /// </summary>
+    public int? GuestFundedNights { get; set; }
+
+    /// <summary>
+    /// §299 C3 — funding is DERIVED from the category, never stored:
+    /// ELDK funds Community and Guest speakers; Sponsor speakers are
+    /// sponsor-paid and an uncategorized (null) speaker funds nothing.
+    /// </summary>
+    public static bool EldkFunded(SpeakerCategory? c) =>
+        c is SpeakerCategory.Community or SpeakerCategory.Guest;
 
     // --- Publish gate (hub-collected; the HARD GATE for the Backstage bio sync) -
     /// <summary>
@@ -261,6 +327,17 @@ public class SpeakerProfile
 
     /// <summary>Last-known Zoho Backstage speaker TWITTER url.</summary>
     public string? BackstageTwitter { get; set; }
+
+    /// <summary>
+    /// §623 — hash of the LAST speaker-gap report mailed to the organizers, so the same outstanding
+    /// set is never re-sent. Null = never reported.
+    /// </summary>
+    /// <remarks>
+    /// His standing rule, and the §302 "70-mail night" is why it exists: ONE mail when a gap appears
+    /// or CHANGES, never one per run. Stamped on every linked profile so the dedupe is stable
+    /// whichever row is read back first.
+    /// </remarks>
+    public string? ZohoGapNotifiedHash { get; set; }
 
     /// <summary>
     /// When the §58 Zoho→CEH speaker change-detection engine last checked this

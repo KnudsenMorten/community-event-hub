@@ -1,0 +1,42 @@
+@model CommunityHub.Forms.Steps.SponsorLogosModel
+@*
+    Fields-ONLY partial for the sponsor Logos wizard step (§32 / §285 Phase 2). Three file inputs —
+    the shared wizard host form is multipart. Field names match SponsorLogosModel. §297: each input
+    shows the CURRENTLY uploaded file for that logo (file inputs can't be pre-filled), from the
+    per-kind upload audit, so a coordinator can see what's already there. Upload replaces it
+    (versioned); the step completes only when all THREE are present.
+*@
+@{
+    string CurrentLine(string? name) => string.IsNullOrEmpty(name)
+        ? "No file uploaded yet"
+        : "Uploaded: " + name;
+    string CurrentColor(string? name) => string.IsNullOrEmpty(name) ? "#b45309" : "#15803d";
+}
+
+<p style="font-size:13.5px;color:#4b5563;margin-top:0;">
+    Upload all three logos. Each is versioned automatically — the latest file is always the one we
+    use, and re-uploading replaces the current one. The step is complete once all three are uploaded.
+</p>
+@* §473 — "where is the upload button". There ISN'T one, and that was the whole problem: the wizard
+   host owns a single form, so the files upload when the STEP is saved. Nothing said so, leaving
+   sponsors hunting for a button that does not exist. Say it, rather than adding a second competing
+   submit inside someone else's form. *@
+<p style="font-size:13.5px;color:#1f3f6b;background:#eef6ff;border:1px solid #d3e6fb;border-radius:8px;padding:10px 12px;margin:0 0 14px;">
+    Choose your files below, then press <strong>Save &amp; next</strong> at the bottom — that is what
+    uploads them. There is no separate upload button.
+</p>
+
+<label for="SoMeLogo">Logo for Social Media branding <span style="color:#6b7280;font-weight:400;">(PNG, max 5 MB)</span></label>
+<input type="file" id="SoMeLogo" name="SoMeLogo" accept=".png,image/png" />
+<p style="font-size:12px;color:@CurrentColor(Model.CurrentSoMeFileName);margin:2px 0 12px;">@(string.IsNullOrEmpty(Model.CurrentSoMeFileName) ? "○ " : "✓ ")@CurrentLine(Model.CurrentSoMeFileName)</p>
+<span asp-validation-for="SoMeLogo" class="error"></span>
+
+<label for="PrintLogo">Logo for Printing <span style="color:#6b7280;font-weight:400;">(vector: .eps, .ai or .pdf, max 25 MB)</span></label>
+<input type="file" id="PrintLogo" name="PrintLogo" accept=".eps,.ai,.pdf" />
+<p style="font-size:12px;color:@CurrentColor(Model.CurrentPrintFileName);margin:2px 0 12px;">@(string.IsNullOrEmpty(Model.CurrentPrintFileName) ? "○ " : "✓ ")@CurrentLine(Model.CurrentPrintFileName)</p>
+<span asp-validation-for="PrintLogo" class="error"></span>
+
+<label for="ZohoLogo">Logo for the Event System (Zoho) lead system <span style="color:#6b7280;font-weight:400;">(PNG ~200×160, max 5 MB)</span></label>
+<input type="file" id="ZohoLogo" name="ZohoLogo" accept=".png,image/png" />
+<p style="font-size:12px;color:@CurrentColor(Model.CurrentZohoFileName);margin:2px 0 12px;">@(string.IsNullOrEmpty(Model.CurrentZohoFileName) ? "○ " : "✓ ")@CurrentLine(Model.CurrentZohoFileName)</p>
+<span asp-validation-for="ZohoLogo" class="error"></span>

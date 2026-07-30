@@ -248,4 +248,20 @@ public class EmailMagicLinkServiceTests
         Assert.Equal("https://hub.example/go/TOK", svc.BuildUrl("https://hub.example", "TOK", "//evil.example.com/phish"));
         Assert.Equal("https://hub.example/go/TOK", svc.BuildUrl("https://hub.example", "TOK", "https://evil.example.com"));
     }
+
+    [Fact]
+    public void SafeLocalPath_rejects_backslash_and_protocol_relative_targets()
+    {
+        // §234 4a: browsers treat "/\evil.com" (and any backslash variant) as
+        // protocol-relative, so a "starts with / but not //" check alone is an
+        // open-redirect. Any '\' anywhere must fail the guard.
+        Assert.Equal("/Tasks", EmailMagicLinkService.SafeLocalPath("/Tasks"));
+        Assert.Null(EmailMagicLinkService.SafeLocalPath("//evil.example.com"));
+        Assert.Null(EmailMagicLinkService.SafeLocalPath("/\\evil.example.com"));
+        Assert.Null(EmailMagicLinkService.SafeLocalPath("\\\\evil.example.com"));
+        Assert.Null(EmailMagicLinkService.SafeLocalPath("/Tasks\\..\\evil"));
+        Assert.Null(EmailMagicLinkService.SafeLocalPath("https://evil.example.com"));
+        Assert.Null(EmailMagicLinkService.SafeLocalPath(""));
+        Assert.Null(EmailMagicLinkService.SafeLocalPath(null));
+    }
 }

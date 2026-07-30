@@ -240,69 +240,7 @@ public sealed class AttendeePlanService
         return AttendeePlanBuilder.Build(rows);
     }
 
-    /// <summary>
-    /// Build a downloadable RFC 5545 calendar (METHOD:PUBLISH VCALENDAR) of the
-    /// participant's own <b>scheduled</b> saved talks, so they can add their whole
-    /// personal running order to their calendar in one click from the My plan page.
-    /// One VEVENT per saved talk that has a confirmed time — room as LOCATION,
-    /// speaker name(s) in the DESCRIPTION, the public detail deep-link appended, and
-    /// a 1-hour fallback duration when no end time is set. A 30-minute pop-up alarm
-    /// before each talk is emitted (AlarmsDaysBefore carries the single 0-day entry
-    /// so the underlying builder fires a same-day VALARM).
-    ///
-    /// Each VEVENT carries a stable <c>plan-session:{id}@{host}</c> UID so a
-    /// re-download UPDATES the existing entry (a moved talk shifts, never
-    /// duplicates) and removing a talk from the plan drops its event on the next
-    /// download. Own-row scoped + edition-scoped exactly like the rest of the
-    /// service. Unscheduled saved talks are intentionally excluded — there is
-    /// nothing to put on a calendar yet. Returns <c>null</c> when the participant
-    /// has no scheduled saved talks (the caller renders a friendly "nothing to add
-    /// yet" note instead of an empty .ics download). Read-only.
-    /// </summary>
-    public async Task<string?> BuildPlanIcsAsync(
-        int eventId,
-        int participantId,
-        string ownerName,
-        string ownerEmail,
-        string host,
-        CancellationToken ct = default)
-    {
-        var plan = await BuildPlanAsync(eventId, participantId, ct);
-
-        var safeHost = string.IsNullOrWhiteSpace(host) ? "communityhub" : host;
-        var items = new List<CalendarItem>();
-        foreach (var s in plan.Sessions)
-        {
-            if (s.StartsAt is null) continue; // only scheduled talks land on a calendar
-
-            var start = s.StartsAt.Value;
-            // No explicit end → a sensible 1-hour block, never a zero-length point.
-            var end = s.EndsAt ?? start.AddHours(1);
-            if (end <= start) end = start.AddHours(1);
-
-            var descParts = new List<string>();
-            if (!string.IsNullOrWhiteSpace(s.Speakers)) descParts.Add(s.Speakers);
-            descParts.Add($"https://{safeHost}{s.DetailUrl}");
-            var description = string.Join("\n\n", descParts);
-
-            items.Add(new CalendarItem(
-                Uid: $"plan-session:{s.SessionId}@{safeHost}",
-                Summary: s.Title,
-                Description: description,
-                Location: string.IsNullOrWhiteSpace(s.Room) ? null : s.Room,
-                Start: start,
-                End: end,
-                AllDay: false,
-                // A single same-day (0-day) alarm → a pop-up before the talk.
-                AlarmsDaysBefore: new[] { 0 }));
-        }
-
-        if (items.Count == 0) return null;
-
-        return IcsCalendarBuilder.BuildFeed(
-            calendarName: "My plan",
-            ownerEmail: ownerEmail ?? string.Empty,
-            ownerName: ownerName ?? string.Empty,
-            items: items);
-    }
+    // §193: the "download my plan as .ics" export (BuildPlanIcsAsync) was removed —
+    // attendees no longer download a calendar file. Calendar entries arrive as e-mailed
+    // invitations via CalendarInviteEmailService.
 }

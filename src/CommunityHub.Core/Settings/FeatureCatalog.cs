@@ -54,9 +54,12 @@ public enum FeatureTier
 /// reviewer sees the whole portal) — and NOT yet to ring-2 / Broad users; it is then
 /// PROMOTED to <see cref="Ring.Broad"/> for general availability once proven. Every
 /// EXISTING / already-delivered feature is also at ring 1 (the guardrail below). This
-/// SUPERSEDES the earlier "new features are ring 0" rule (2026-06-20). New features
-/// are conventionally declared in <see cref="FeatureGroup.Incubation"/> and graduated
-/// to a target group later (adopting that group's ring).
+/// SUPERSEDES the earlier "new features are ring 0" rule (2026-06-20).
+///
+/// §700 Batch A — a new feature is now declared DIRECTLY in the group it belongs to
+/// (its role, or <see cref="FeatureGroup.EventSettings"/>) and carries its own ring.
+/// The old "born in Incubation, graduate later" convention is gone: nothing ever
+/// graduated, so the birthplace became a parking space for 14 shipped features.
 ///
 /// OPERATOR RULE 2 — every outbound-EMAIL feature also pins this to
 /// <see cref="Ring.Ring1"/> so mail reaches only ring 0 + ring 1 (a critical
@@ -71,7 +74,8 @@ public sealed record FeatureDescriptor(
     bool DefaultEnabled,
     IReadOnlyList<string> DependsOn,
     Ring DefaultReleasedToRing = Ring.Ring1,
-    FeatureSurface Surface = FeatureSurface.Engine)
+    FeatureSurface Surface = FeatureSurface.Engine,
+    bool TileOnly = false)
 {
     /// <summary>Convenience: advanced features default OFF, core default ON.</summary>
     public bool IsAdvanced => Tier == FeatureTier.Advanced;
@@ -88,10 +92,92 @@ public sealed record FeatureDescriptor(
     /// queue-fed engine). Never ring-scoped — governed only by the kill switch (GA).</summary>
     public bool IsEngine => Surface is FeatureSurface.Engine or FeatureSurface.EngineQueued;
 
-    /// <summary>True when the feature is RING-SCOPED (categories 3 Queue + 4 UserImpact):
-    /// staged rollout limits who it touches. Engine/EngineQueued are NOT ring-scoped.
-    /// This is the single predicate the GUI badge+gate and the ring gate key off.</summary>
-    public bool IsRingScoped => Surface is FeatureSurface.Queue or FeatureSurface.UserImpact;
+    /// <summary>
+    /// True when the feature is RING-SCOPED — i.e. the ring genuinely decides WHO a
+    /// participant-facing thing reaches. The single predicate the GUI badge+gate and the ring
+    /// gate key off.
+    /// </summary>
+    /// <remarks>
+    /// 🔒 §566 step 3 — THIS DELIBERATELY EXCLUDES Queue AND TileOnly. Do not widen it back.
+    ///
+    /// The operator lost confidence in the Settings page (§563/§564) because a ring badge appeared
+    /// on switches whose ring did not limit any audience. His rule (§569, and the §566 sign-off):
+    /// **rings are for participant-facing rollout only — who RECEIVES an e-mail, who SEES a
+    /// feature.** Everything else is organizer tooling, and an organizer's authority is their role,
+    /// not a ring.
+    ///
+    ///   • <b>Queue</b> — organizer staging/approval surfaces. §589 (operator 2026-07-28):
+    ///     *"queues are all managed by an organizer who accept/approve, etc. so no need for
+    ///     ring-gate here"*. The organizer's APPROVAL is the gate; a participant rollout ring on
+    ///     top of it is the same category error §569 removed from the Zoho speaker/session push.
+    ///   • <b>TileOnly</b> — the ring only ever hid an organizer TILE; it never gated the function
+    ///     or the e-mail whose name it carried. That is the §326bx incident verbatim: "Sponsor
+    ///     welcome … Released to Ring 1" read as if sponsor welcome MAILS were limited to Ring 1.
+    ///     They were not. He dropped this category outright: *"Category 4 (tile-only) - drop-it"*.
+    ///   • <b>Engine / EngineQueued</b> — backend, on/off only, runs for everyone (unchanged).
+    ///
+    /// A TileOnly or Queue feature keeps its enabled/disabled switch and its role visibility; it
+    /// simply has no ring. A ring badge appears ONLY where a ring does something.
+    ///
+    /// ⚠️ <b>THE ONE AUDIENCE CONSEQUENCE, STATED PLAINLY AND ACCEPTED BY HIM.</b> A few Queue keys
+    /// are passed as the <c>EmailContext.FeatureKey</c> at a real send site — notably
+    /// <c>volunteer-allocation</c> on the volunteer COMMIT notification. With the queue ring gone,
+    /// that mail is bounded only by the <c>outbound-email</c> ceiling, so a Broad-ring volunteer who
+    /// is held today WILL receive it. That is the §566 model working as signed off
+    /// (<c>audience = MIN(ceiling, that mail's own ring)</c>, and a send with no mail-level ring
+    /// rides the ceiling alone) and it is coherent: an organizer who COMMITS an allocation is
+    /// deciding those volunteers should be told.
+    /// </remarks>
+    /// <remarks>
+    /// 🔒 THE E-MAIL ESCAPE HATCH IS A SAFETY PROPERTY, NOT A SPECIAL CASE. Any key that is a
+    /// known e-mail FeatureKey keeps its ring no matter how it is classified, because dropping a
+    /// ring from an e-mail WIDENS ITS AUDIENCE — silently, on the next deploy, to real people.
+    /// <c>magic-link</c> is exactly this collision: flagged <c>TileOnly</c> AND present in
+    /// <see cref="FeatureCatalog.EmailFeatureKeys"/>. Without this clause the §326bx tile-only
+    /// cleanup would have un-gated sign-in link mails as a side effect of a page tidy-up.
+    /// Re-classifying such a key is a decision to take deliberately, per key, with him — never a
+    /// by-product of this predicate.
+    /// </remarks>
+    public bool IsRingScoped => Surface == FeatureSurface.UserImpact && !TileOnly;
+
+    /// <summary>
+    /// §327e — this switch's ONLY consumer is an organizer HUB TILE: its `FeatureKey` in a
+    /// `.cshtml` tile list, which `_HubGrid` uses to badge the tile and hide it from an
+    /// organizer outside the released ring. It does NOT gate the underlying function or the
+    /// e-mail its name describes. The §326bx audit found six of these reading as if they
+    /// controlled the feature itself — "Sponsor welcome … Released to Ring 1" invites the
+    /// conclusion that sponsor welcome MAILS are limited to Ring 1. They are not.
+    /// Flagged so the Settings page can say what the ring actually does.
+    /// </summary>
+    public bool GatesTileVisibilityOnly => TileOnly;
+
+    /// <summary>
+    /// §326bz — which of THREE things this switch governs, for the Settings page. The four
+    /// <see cref="FeatureSurface"/> values describe the engineering shape; an organizer needs
+    /// the simpler question answered: does turning the ring down stop an <b>e-mail</b>, hide a
+    /// <b>feature</b>, or do <b>nothing</b> (backend)?
+    /// </summary>
+    public FeatureGoverns Governs =>
+        !IsRingScoped ? FeatureGoverns.Backend
+        : FeatureCatalog.EmailFeatureKeys.Contains(Key) ? FeatureGoverns.Email
+        : FeatureGoverns.Feature;
+}
+
+/// <summary>
+/// §326bz — the three plain-language classes the Settings page is organised by (operator
+/// 2026-07-25: "restructure the page into features w/user impact (ring-gated), emails with
+/// user impact (ring-gated) — and lastly backend features (no ring-gates)").
+/// </summary>
+public enum FeatureGoverns
+{
+    /// <summary>Ring-gated in-app capability — the ring decides WHO SEES / can use it.</summary>
+    Feature = 0,
+
+    /// <summary>Ring-gated e-mail — the ring decides WHO RECEIVES it.</summary>
+    Email = 1,
+
+    /// <summary>Backend plumbing — on/off only, runs for everyone, no ring.</summary>
+    Backend = 2,
 }
 
 /// <summary>
@@ -131,23 +217,52 @@ public enum FeatureSurface
 /// </summary>
 public enum FeatureGroup
 {
-    Email = 0,
+    // 🗑 §695 — the four MECHANISM groups (Email = 0, SocialMedia = 3, Surveys = 4, Reminders = 5)
+    // are DELETED. Every member was re-homed to a ROLE or to EventSettings, per his rule: *"things
+    // must only exist 1 time - no overlap. structured per role or a generic Event settings"*. A group
+    // named after a MECHANISM competing with one named after a ROLE is what gave a sponsor mail two
+    // plausible homes in the first place.
+    //
+    // 🔒 THE VALUES ARE NOT REUSED, and the `Email = 0` slot in particular stays vacant. Two reasons,
+    // both checked before deleting rather than assumed:
+    //   • `FeatureGroupSetting.Group` and `FeatureSetting.GroupOverride` persist this enum as an INT,
+    //     so re-using a value would silently re-point any surviving row at a different group. Verified
+    //     zero rows and zero non-null overrides in BOTH editions.
+    //   • 0 was the enum's DEFAULT. Leaving it vacant means `default(FeatureGroup)` names nothing,
+    //     which is honest — an unset group should not silently read as "Email". Verified no
+    //     `default(FeatureGroup)` path exists: `FeatureGroupSetting.Group` is always assigned
+    //     explicitly (`SetGroupRingAsync`), never defaulted.
     SpeakersSessions = 1,
     Sponsors = 2,
-    SocialMedia = 3,
-    Surveys = 4,
-    Reminders = 5,
     Attendees = 6,
 
+    // 🗑 §700 Batch A — `Incubation = 7` DELETED 2026-07-29. It was declared as a
+    // BIRTHPLACE with graduation as the exit (§23a), but nothing ever graduated, so it
+    // silently became the default parking space: 14 shipped, daily-use features sat in a
+    // group labelled "Incubation (test)" and therefore read as provisional. The operator
+    // (§695): *"things must only exist 1 time - no overlap. structured per role or a
+    // generic Event settings"*. The three members below are the homes those features
+    // actually needed — their absence is the whole reason Incubation filled up.
+    //
+    // 🔒 The value 7 is NOT reused. `FeatureSetting.GroupOverride` and
+    // `FeatureGroupSetting.Group` persist this enum as an int, so re-using 7 would
+    // silently re-point any surviving row at a different group. Verified 2026-07-29
+    // against BOTH editions: zero `FeatureGroupSettings` rows and zero non-null
+    // `GroupOverride` values exist, so nothing points at 7 today — but the gap stays.
+
+    /// <summary>§695 — organizer-facing tooling and allocation (the organizer's own role home).</summary>
+    Organizers = 8,
+
+    /// <summary>§695 — everything filed under the VOLUNTEER role.</summary>
+    Volunteers = 9,
+
     /// <summary>
-    /// The incubation / "test" group (REQUIREMENTS §23a): the birthplace of NEW
-    /// features. Its group lifecycle ring defaults to <see cref="Ring.Ring1"/>
-    /// (operator 2026-06-21: default is ring 1), so anything new is visible to ring-0
-    /// AND ring-1 testers until promoted to Broad. "Graduating" a feature = re-homing
-    /// it into a target group, after which it adopts that group's ring. Rendered last
-    /// in the GUI.
+    /// §695 — the generic home for anything NOT tied to a single role: the outbound-email
+    /// controls composed in the GUI, event logistics (hotel, group photo) and operational
+    /// tooling (test-data cleanup). Operator 2026-07-29: *"move the group photo into Event
+    /// settings and other relevant to here"*. Rendered last in the GUI.
     /// </summary>
-    Incubation = 7,
+    EventSettings = 10,
 }
 
 /// <summary>
@@ -165,6 +280,59 @@ public static class FeatureCatalog
 {
     /// <summary>The global outbound-email kill switch feature key.</summary>
     public const string OutboundEmailKey = "outbound-email";
+
+    /// <summary>
+    /// §326bz — the RING-SCOPED feature keys that govern an outbound E-MAIL, i.e. the ones
+    /// where lowering the ring stops a message reaching someone. Two sources, both real:
+    /// <list type="number">
+    ///   <item>every key an <see cref="Email.EmailTemplateCatalog"/> template is filed
+    ///         under — derived, so a new template classifies itself; and</item>
+    ///   <item>keys a send site passes as <c>EmailContext.FeatureKey</c> without owning a
+    ///         catalog template (calendar invites, sign-in links, resends).</item>
+    /// </list>
+    /// A key here that is NOT ring-scoped is ignored — an Engine key such as
+    /// <c>outbound-email</c> is the transport itself, not a per-audience gate.
+    /// <para><b>Keep list (2) in step with the send sites.</b> A ring-gated mail whose key is
+    /// missing here is only mis-GROUPED on the Settings page; a mail whose send site passes
+    /// no key at all is not ring-gated AT ALL — see §326bx.</para>
+    /// </summary>
+    public static readonly IReadOnlySet<string> EmailFeatureKeys =
+        Email.EmailTemplateCatalog.Map.Values
+            .Select(v => v.FeatureKey)
+            .Concat(new[]
+            {
+                "hotel-invite",     // HotelCalendarInviter passes FeatureKey: "hotel-invite"
+                "email-resend",     // organizer-triggered resend of a previous mail
+                // 🔒 §619 — "sponsor-welcome" REMOVED, found by the §566-step-5 declared-vs-observed
+                // test the moment it was written. NO send site ever passed it: the sponsor welcome
+                // is sent through WelcomeEmailService and is gated by "welcome-email". So its
+                // presence here declared a ring that governed nothing — the §326bx defect, the same
+                // shape as "magic-link" (§589). Removing it changes NO audience, because nothing
+                // consulted it.
+                // 🔒 §589 — "magic-link" REMOVED (operator 2026-07-28: "magic-link is ok it goes
+                // out to anyone and should not be ringgated … we can remove ring gates for magic
+                // link"). VERIFIED before removing, not assumed:
+                //   • NO send site passes "magic-link" as a FeatureKey — the only references were
+                //     this list, the catalog row, one DependsOn and EnableEmailFeaturesJob.
+                //   • NO e-mail template declares it.
+                //   • Sign-in mail is gated by a DIFFERENT and correct mechanism: PinLoginService
+                //     sends with EmailContext("pin-signin", RingExempt: true), which bypasses the
+                //     ring outright — a person who asks for a sign-in link and hears nothing back
+                //     cannot diagnose it, so that mail is never ring-gated.
+                //   • Its live PROD ring was already Broad (3), so nothing changes operationally.
+                // It was therefore a ring badge that gated nothing — the exact §326bx defect.
+            })
+            .ToHashSet(StringComparer.Ordinal);
+
+    /// <summary>§326ay — the Zoho webhook DRAIN job (the real-time reconcile leg).
+    /// Separate from <c>attendee-reconcile</c> so the minute-by-minute incremental path can
+    /// be retired while the guarded 10-minute full sync keeps running. Default OFF.</summary>
+    public const string WebhookDrainKey = "zoho-webhook-drain";
+
+    /// <summary>§707.13 — the webhook RECEIVER (the <c>ZohoOrderWebhook</c> HTTP endpoint that
+    /// ACCEPTS Backstage's POST and queues it). Separate from <see cref="WebhookDrainKey"/>, which
+    /// only decides whether queued rows are APPLIED. Default ON — see the descriptor.</summary>
+    public const string WebhookReceiverKey = "zoho-webhook-receiver";
 
     /// <summary>
     /// Every customizable capability, in GUI order. Each carries its key, names,
@@ -188,26 +356,43 @@ public static class FeatureCatalog
         // EMAIL feature is released only to ring 1 (mail reaches ring 0 + 1 only).
         new(OutboundEmailKey, "Settings.Feat.OutboundEmail.Name",
             "Settings.Feat.OutboundEmail.Desc",
-            FeatureGroup.Email, FeatureTier.Advanced, DefaultEnabled: true,
+            FeatureGroup.EventSettings, FeatureTier.Advanced, DefaultEnabled: true,
             DependsOn: Array.Empty<string>(), DefaultReleasedToRing: Ring.Ring1),
 
         new("welcome-email", "Settings.Feat.WelcomeEmail.Name",
             "Settings.Feat.WelcomeEmail.Desc",
-            FeatureGroup.Email, FeatureTier.Advanced, DefaultEnabled: false,
+            FeatureGroup.EventSettings, FeatureTier.Advanced, DefaultEnabled: false,
             DependsOn: new[] { OutboundEmailKey }, DefaultReleasedToRing: Ring.Ring1,
             Surface: FeatureSurface.UserImpact),
 
+        // §336 — TILE ONLY, a SEVENTH one (§327e found six). Verified by exhausting every form
+        // a key can take: the only quoted consumers are the two organizer HubTiles on
+        // People.cshtml ("Welcome sign-in links", "Permanent sign-in links"). There is NO
+        // IsFeatureEnabledAsync / IsTargetInReleasedRingAsync call in MagicLinkService,
+        // WelcomeLinks or AccessLinks, and no EmailTemplateCatalog row maps to this key — so no
+        // e-mail carries it as a FeatureKey either. (EnableEmailFeaturesJob names it, but that
+        // ENABLES the switch; it does not gate on it.) Turning this ring down hides two
+        // organizer tiles and does NOT stop a single auto-login link being issued or used.
         new("magic-link", "Settings.Feat.MagicLink.Name",
             "Settings.Feat.MagicLink.Desc",
-            FeatureGroup.Email, FeatureTier.Advanced, DefaultEnabled: false,
+            FeatureGroup.EventSettings, FeatureTier.Advanced, DefaultEnabled: false,
             DependsOn: new[] { OutboundEmailKey }, DefaultReleasedToRing: Ring.Ring1,
-            Surface: FeatureSurface.UserImpact),
+            Surface: FeatureSurface.UserImpact, TileOnly: true),
 
         // §26c "Help Promote": email speakers when their promo graphics are released,
         // pointing them to /Speaker/Graphics. Ring-scoped + off by default.
+        // §694.1 — GROUPED UNDER SPEAKERS, NOT EMAIL (operator 2026-07-29: "this one should be
+        // under speaker role"). Grouping by DELIVERY MECHANISM put every speaker-facing switch into
+        // one long Email list, so an organizer asking "what do speakers get?" had to read a list
+        // sorted by something they were not asking about. The mechanism is the least interesting
+        // thing about it: this is a SPEAKER feature that happens to arrive by mail.
+        //
+        // 🔒 A group carries a lifecycle RING, so re-homing normally adopts the new group's ring.
+        // This row keeps its own explicit per-feature override, which WINS over the group — so the
+        // move changes where it is LISTED, not who receives it.
         new("speaker-graphics-promote", "Settings.Feat.SpeakerGraphicsPromote.Name",
             "Settings.Feat.SpeakerGraphicsPromote.Desc",
-            FeatureGroup.Email, FeatureTier.Advanced, DefaultEnabled: false,
+            FeatureGroup.SpeakersSessions, FeatureTier.Advanced, DefaultEnabled: false,
             DependsOn: new[] { OutboundEmailKey }, DefaultReleasedToRing: Ring.Ring1,
             Surface: FeatureSurface.UserImpact),
 
@@ -230,10 +415,10 @@ public static class FeatureCatalog
         // §38e (operator 2026-06-25): an automatic engine that detects when a session's
         // TIME or LOCATION changed in Zoho Backstage vs what CEH stored, and EMAILS the
         // affected speaker(s). USER-IMPACT (a speaker receives mail) ⇒ ring-scoped; off
-        // by default; born at Ring1 so ring-0/ring-1 testers exercise it NOW. The
-        // additional DATE gate (FeatureSetting.ActiveFromForBroadRings = 1 Dec 2026)
-        // holds ring-2/ring-3 participants out until that date — ring 0/1 are never
-        // date-limited. Depends on outbound email.
+        // by default; born at Ring1 so ring-0/ring-1 testers exercise it NOW. Depends on
+        // outbound email. (§234, 2026-07-07: the extra broad-rings DATE gate
+        // (FeatureSetting.ActiveFromForBroadRings = 1 Dec 2026) was retired — dead code
+        // since §59 moved the speaker email to the operator-approved queue apply step.)
         new("session-change-alerts", "Settings.Feat.SessionChangeAlerts.Name",
             "Settings.Feat.SessionChangeAlerts.Desc",
             FeatureGroup.SpeakersSessions, FeatureTier.Advanced, DefaultEnabled: false,
@@ -260,10 +445,10 @@ public static class FeatureCatalog
             FeatureGroup.Sponsors, FeatureTier.Advanced, DefaultEnabled: false,
             DependsOn: Array.Empty<string>(), DefaultReleasedToRing: Ring.Broad),
 
-        new("economic-erp-sync", "Settings.Feat.EconomicErp.Name",
-            "Settings.Feat.EconomicErp.Desc",
-            FeatureGroup.Sponsors, FeatureTier.Advanced, DefaultEnabled: false,
-            DependsOn: Array.Empty<string>(), DefaultReleasedToRing: Ring.Broad),
+        // economic-erp-sync feature REMOVED (§252 gap audit F7, 2026-07-07): it was
+        // an inert DUPLICATE toggle — the ERP reconcile job actually gates on
+        // erp-webshop-reconcile (below), so Settings showed two switches where one
+        // did nothing (GUI ≠ behavior).
 
         // GA (operator 2026-06-22): tested backend pull — released to Broad, unscoped.
         new("sponsor-order-pull", "Settings.Feat.SponsorOrderPull.Name",
@@ -304,13 +489,13 @@ public static class FeatureCatalog
         // ring-scoped, but inert until the SoMe queue commits scoped posts) -------
         new("some-scheduling", "Settings.Feat.SoMe.Name",
             "Settings.Feat.SoMe.Desc",
-            FeatureGroup.SocialMedia, FeatureTier.Advanced, DefaultEnabled: false,
+            FeatureGroup.EventSettings, FeatureTier.Advanced, DefaultEnabled: false,
             DependsOn: Array.Empty<string>(), DefaultReleasedToRing: Ring.Broad,
             Surface: FeatureSurface.EngineQueued),
 
         new("linkedin-queue", "Settings.Feat.LinkedIn.Name",
             "Settings.Feat.LinkedIn.Desc",
-            FeatureGroup.SocialMedia, FeatureTier.Advanced, DefaultEnabled: false,
+            FeatureGroup.EventSettings, FeatureTier.Advanced, DefaultEnabled: false,
             DependsOn: new[] { "some-scheduling" }, DefaultReleasedToRing: Ring.Broad,
             Surface: FeatureSurface.EngineQueued),
 
@@ -320,28 +505,28 @@ public static class FeatureCatalog
         // default OFF so it's opt-in.
         new("content-studio", "Settings.Feat.ContentStudio.Name",
             "Settings.Feat.ContentStudio.Desc",
-            FeatureGroup.SocialMedia, FeatureTier.Advanced, DefaultEnabled: false,
+            FeatureGroup.EventSettings, FeatureTier.Advanced, DefaultEnabled: false,
             DependsOn: Array.Empty<string>(), DefaultReleasedToRing: Ring.Broad,
             Surface: FeatureSurface.Engine),
 
         // --- Surveys --------------------------------------------------------
         new("surveys", "Settings.Feat.Surveys.Name",
             "Settings.Feat.Surveys.Desc",
-            FeatureGroup.Surveys, FeatureTier.Advanced, DefaultEnabled: false,
+            FeatureGroup.EventSettings, FeatureTier.Advanced, DefaultEnabled: false,
             DependsOn: Array.Empty<string>(), DefaultReleasedToRing: Ring.Ring1,
-            Surface: FeatureSurface.UserImpact),
+            Surface: FeatureSurface.UserImpact, TileOnly: true),
 
         // --- Reminders / digests --------------------------------------------
         // RULE 2: reminders + digests are OUTBOUND EMAIL ⇒ released to ring 1 only.
         new("reminder-jobs", "Settings.Feat.ReminderJobs.Name",
             "Settings.Feat.ReminderJobs.Desc",
-            FeatureGroup.Reminders, FeatureTier.Advanced, DefaultEnabled: false,
+            FeatureGroup.EventSettings, FeatureTier.Advanced, DefaultEnabled: false,
             DependsOn: Array.Empty<string>(), DefaultReleasedToRing: Ring.Ring1,
             Surface: FeatureSurface.UserImpact),
 
         new("digest-emails", "Settings.Feat.DigestEmails.Name",
             "Settings.Feat.DigestEmails.Desc",
-            FeatureGroup.Reminders, FeatureTier.Advanced, DefaultEnabled: false,
+            FeatureGroup.SpeakersSessions, FeatureTier.Advanced, DefaultEnabled: false,
             DependsOn: new[] { "reminder-jobs", OutboundEmailKey },
             DefaultReleasedToRing: Ring.Ring1, Surface: FeatureSurface.UserImpact),
 
@@ -355,45 +540,118 @@ public static class FeatureCatalog
             FeatureGroup.Attendees, FeatureTier.Advanced, DefaultEnabled: false,
             DependsOn: Array.Empty<string>(), DefaultReleasedToRing: Ring.Broad),
 
+        // §326ay (operator 2026-07-25: "i also propose we simplify and disable the webhook
+        // so we only have 1 sync routine") — the real-time webhook DRAIN, split out of
+        // attendee-reconcile so it can be switched off WITHOUT stopping the full sync.
+        // DEFAULT OFF. The drain ran its own reconcile every minute through
+        // SyncOrderAsync, which has none of the §326ao/§326aq/§326as guards the full sync
+        // has — six times more often, and unprotected. With one reconcile path there is one
+        // place to reason about and one place to guard. Cost: a purchase or cancellation
+        // shows up within 10 minutes instead of ~1. The webhook RECEIVER keeps queueing
+        // rows either way, so nothing is lost and switching this back on replays them.
+        new(WebhookDrainKey, "Settings.Feat.ZohoWebhookDrain.Name",
+            "Settings.Feat.ZohoWebhookDrain.Desc",
+            FeatureGroup.Attendees, FeatureTier.Advanced, DefaultEnabled: false,
+            DependsOn: new[] { "attendee-reconcile" }, DefaultReleasedToRing: Ring.Broad),
+
+        // 🔒 §707.13 — THE RECEIVER, which until now had NO control on any page. Operator
+        // 2026-07-30, after reading "Zoho webhook drain — FEATURE OFF" on the Jobs page and
+        // reasonably concluding webhooks were off: *"ok, then we need the receiver in the portal
+        // as well (settings)"*.
+        //
+        // The DRAIN (above) and the RECEIVER are different halves. Switching the drain off stops
+        // queued events being APPLIED; the endpoint keeps ACCEPTING Backstage's POSTs and writing
+        // queue rows — verified live on 2026-07-30: 2 pending, 0 ever processed. Nothing was
+        // wrong, but the only visible switch described half the system, and the queue grows
+        // unattended (harmless at 2 rows, less so at ticket-launch volume).
+        //
+        // Until now the receiver's only control was the `Zoho__WebhookEnabled` APP SETTING on the
+        // Functions host — invisible here and changeable only by a deploy.
+        //
+        // ⚠️ DEFAULTS **OFF**, and that IS a behaviour change on the day it deploys: the
+        // `Zoho__WebhookEnabled` app setting is currently true, so Backstage POSTs are being
+        // accepted and queued right now. After this, they get a clean 200 no-op and nothing is
+        // queued until the operator switches it on here.
+        //
+        // 🔑 That is the state he believes he is already in ("we have turned off webhooks, as i was
+        // worried of the impact"), and the 10-minute full pull is VERIFIED sufficient on its own —
+        // his 2026-07-30 purchase was queued by the receiver, never drained (2 pending, 0 ever
+        // processed), and the pull handled it two minutes later. It also stops the queue growing
+        // unattended, which matters at ticket-launch volume.
+        //
+        // Effective rule stays `app setting AND this switch`, so the app setting remains a
+        // deploy-level kill and this is the day-to-day control.
+        new(WebhookReceiverKey, "Settings.Feat.ZohoWebhookReceiver.Name",
+            "Settings.Feat.ZohoWebhookReceiver.Desc",
+            FeatureGroup.Attendees, FeatureTier.Advanced, DefaultEnabled: false,
+            DependsOn: new[] { "attendee-reconcile" }, DefaultReleasedToRing: Ring.Broad),
+
         // attendee-welcome feature REMOVED (operator 2026-06-23): there is no separate
         // attendee welcome — attendees receive only the Master Class confirmed-seat
         // mail (masterclass-confirmed). The attendee-missing-* chasers ride on
         // attendee-reconcile.
 
-        // --- Incubation: NEW user-impact GUI actions, ring-tested before GA -----
+        // §242 (operator 2026-07-07): the whole 1-DAY ATTENDEE hub experience is
+        // SUSPENDED behind this flag (default OFF — "we might open up for this later").
+        // While OFF: 1-day tickets are STILL mirror-synced (attendee-reconcile), but no
+        // 1-day login participant is provisioned, the welcome-attendee-1day send is
+        // skipped, their party task/reminders stop, and EXISTING 1-day-only logins are
+        // locked out (reversibly — the sync's ReconcileOneDayAccessAsync sweep restores
+        // them when this turns back ON). 2-day holders are entirely unaffected.
+        // UserImpact: sign-in + welcome + tasks are all things the person notices.
+        new("attendee-1day-access", "Settings.Feat.Attendee1DayAccess.Name",
+            "Settings.Feat.Attendee1DayAccess.Desc",
+            FeatureGroup.Attendees, FeatureTier.Advanced, DefaultEnabled: false,
+            DependsOn: Array.Empty<string>(), DefaultReleasedToRing: Ring.Ring1,
+            Surface: FeatureSurface.UserImpact),
+
+        // --- USER-IMPACT GUI actions, ring-tested before GA ---------------------
         // (operator 2026-06-22) Every GUI action that a person NOTICES happening to
         // them — a mass email, a task that appears, an assignment, an account being
-        // provisioned — is a USER-IMPACT feature: born in Incubation at Ring1 so only
-        // ring-1 testers see + exercise it, promoted group/feature -> Broad in
-        // /Organizer/Settings once proven. No deploy springs these on a live event.
-        // These back the hub TILES (HubTile.FeatureKey) so _HubGrid badges + gates
-        // them the same way the nav does. They graduate into a real group later.
+        // provisioned — is a USER-IMPACT feature, declared at Ring1 so only ring-1
+        // testers see + exercise it, promoted to Broad in /Organizer/Settings once
+        // proven. No deploy springs these on a live event. These back the hub TILES
+        // (HubTile.FeatureKey) so _HubGrid badges + gates them as the nav does.
+        //
+        // §700 Batch A — these used to sit in `Incubation` as a block. They are now
+        // filed by ROLE (or EventSettings), which is what §695 asked for. The RING is
+        // what protects the audience, and every one of them keeps the ring it had.
 
-        // Mass / one-off outbound mail composed in the GUI (Email Center, Broadcast).
-        new("broadcast-email", "Settings.Feat.BroadcastEmail.Name",
-            "Settings.Feat.BroadcastEmail.Desc",
-            FeatureGroup.Incubation, FeatureTier.Advanced, DefaultEnabled: false,
-            DependsOn: new[] { OutboundEmailKey }, DefaultReleasedToRing: Ring.Ring1,
-            Surface: FeatureSurface.UserImpact),
-
-        // Invitation email blast (SendInvitations) — mints + emails sign-in links.
-        new("invitation-email", "Settings.Feat.InvitationEmail.Name",
-            "Settings.Feat.InvitationEmail.Desc",
-            FeatureGroup.Incubation, FeatureTier.Advanced, DefaultEnabled: false,
-            DependsOn: new[] { OutboundEmailKey, "magic-link" }, DefaultReleasedToRing: Ring.Ring1,
-            Surface: FeatureSurface.UserImpact),
+        // 🗑 §705.12 — "broadcast-email" and "invitation-email" DELETED 2026-07-29, with the pages,
+        // templates and filters behind them.
+        //
+        // BROADCAST (operator: "you are welcome to delete broadcast as i will newer use it, as my
+        // point i will build a new"). It was also the ONE mail that could never satisfy §705: its
+        // subject, wording AND audience were all chosen at send time, so it could carry no fixed
+        // name, no fixed subject and no meaningful per-role ring. Deleting it removes the only real
+        // exception to "every mail has a subject, an internal name and a ring".
+        //
+        // INVITATION (operator: "same with invitation - delete it if not used" … "maybe it was an
+        // early wording, we changed to welcome"). Exactly right, and the evidence agrees: it was an
+        // early access-mail concept superseded by the welcome mails, which already carry a magic
+        // link (§226).
+        //
+        // 🔒 VERIFIED UNUSED BEFORE DELETING, not assumed: PROD `SentReminders` held **zero rows**
+        // for both `invitation` and `broadcast` — neither had ever sent a single mail in the live
+        // edition. `invitation-email` had one caller (the deleted page) and no job; its function is
+        // covered three times over by the welcome magic link, `pin-signin`, and the `calendar-invite`
+        // 1-year link (§169).
+        //
+        // ⚠️ "Broadcast" still exists in this codebase as a DIFFERENT concept — the Signal CHAT
+        // broadcast group (`SignalGroupsConfig.BroadcastLabel`, the Signal wizard step). That is
+        // unrelated and stays.
 
         // Re-send an arbitrary logged/templated email to people (Comms, Email log).
         new("email-resend", "Settings.Feat.EmailResend.Name",
             "Settings.Feat.EmailResend.Desc",
-            FeatureGroup.Incubation, FeatureTier.Advanced, DefaultEnabled: false,
+            FeatureGroup.EventSettings, FeatureTier.Advanced, DefaultEnabled: false,
             DependsOn: new[] { OutboundEmailKey }, DefaultReleasedToRing: Ring.Ring1,
             Surface: FeatureSurface.UserImpact),
 
         // Bulk "redo this onboarding step" emails (Action queue).
         new("onboarding-step-reset", "Settings.Feat.OnboardingStepReset.Name",
             "Settings.Feat.OnboardingStepReset.Desc",
-            FeatureGroup.Incubation, FeatureTier.Advanced, DefaultEnabled: false,
+            FeatureGroup.EventSettings, FeatureTier.Advanced, DefaultEnabled: false,
             DependsOn: new[] { OutboundEmailKey }, DefaultReleasedToRing: Ring.Ring1,
             Surface: FeatureSurface.UserImpact),
 
@@ -401,42 +659,53 @@ public static class FeatureCatalog
         // participant ops) — enables sign-in for real people.
         new("participant-activation", "Settings.Feat.ParticipantActivation.Name",
             "Settings.Feat.ParticipantActivation.Desc",
-            FeatureGroup.Incubation, FeatureTier.Advanced, DefaultEnabled: false,
+            FeatureGroup.EventSettings, FeatureTier.Advanced, DefaultEnabled: false,
             DependsOn: Array.Empty<string>(), DefaultReleasedToRing: Ring.Ring1,
-            Surface: FeatureSurface.UserImpact),
+            Surface: FeatureSurface.UserImpact, TileOnly: true),
 
-        // Master Class invite + waitlist-promotion emails w/ self-service links.
-        new("masterclass-invites", "Settings.Feat.MasterClassInvites.Name",
-            "Settings.Feat.MasterClassInvites.Desc",
-            FeatureGroup.Incubation, FeatureTier.Advanced, DefaultEnabled: false,
-            DependsOn: new[] { OutboundEmailKey }, DefaultReleasedToRing: Ring.Ring1,
-            Surface: FeatureSurface.UserImpact),
+        // masterclass-invites feature REMOVED (§252 gap audit F5, 2026-07-07): the
+        // whole Master Class email funnel (selection invite §241, confirmed,
+        // waitlisted, cancelled §243, reassignment, offer, promotion) rides the ONE
+        // welcome-email ring, so raising a single ring at go-live can never split
+        // the funnel (invited but never confirmed, or confirmed-mail without invites).
 
         // Email session-evaluation (HappyOrNot) results to speakers.
+        // §694.4 — GRADUATED out of Incubation (operator 2026-07-29: "if these are still active,
+        // then they are placed wrong"). It emails SPEAKERS their evaluation results, so it belongs
+        // with speakers, not in the group labelled "Incubation (test)" — which made shipped,
+        // daily-use functionality read as provisional.
         new("session-eval-email", "Settings.Feat.SessionEvalEmail.Name",
             "Settings.Feat.SessionEvalEmail.Desc",
-            FeatureGroup.Incubation, FeatureTier.Advanced, DefaultEnabled: false,
+            FeatureGroup.SpeakersSessions, FeatureTier.Advanced, DefaultEnabled: false,
             DependsOn: new[] { OutboundEmailKey }, DefaultReleasedToRing: Ring.Ring1,
             Surface: FeatureSurface.UserImpact),
 
-        // Sponsor welcome / intro email (per-company or all).
-        new("sponsor-welcome", "Settings.Feat.SponsorWelcome.Name",
-            "Settings.Feat.SponsorWelcome.Desc",
-            FeatureGroup.Incubation, FeatureTier.Advanced, DefaultEnabled: false,
-            DependsOn: new[] { OutboundEmailKey }, DefaultReleasedToRing: Ring.Ring1,
-            Surface: FeatureSurface.UserImpact),
+        // 🗑 §699 — "sponsor-welcome" DELETED 2026-07-29 (operator: "we must not have anything which
+        // are not used, then delete it").
+        //
+        // §619 already established the finding and removed it from the declared-user-impact list:
+        // "NO send site ever passed it: the sponsor welcome is sent through WelcomeEmailService and
+        // is gated by 'welcome-email'. So its presence here declared a ring that governed nothing."
+        // The CATALOG ENTRY was left behind, so /Organizer/Settings kept rendering a switch — with
+        // an on/off and a ring — that controlled nothing at all. Verified again before deleting:
+        // the ONLY two references in the whole solution were §619's comment and this declaration.
+        //
+        // 🔒 Removing it changes NO audience, because nothing consulted it. A control that does
+        // nothing is worse than a missing one: it invites an operator to "fix" a mail problem by
+        // flipping it, and then to trust the result.
 
         // Tasks created for sponsor companies (appear to all their contacts).
         new("sponsor-tasks", "Settings.Feat.SponsorTasks.Name",
             "Settings.Feat.SponsorTasks.Desc",
-            FeatureGroup.Incubation, FeatureTier.Advanced, DefaultEnabled: false,
+            FeatureGroup.Sponsors, FeatureTier.Advanced, DefaultEnabled: false,
             DependsOn: Array.Empty<string>(), DefaultReleasedToRing: Ring.Ring1,
-            Surface: FeatureSurface.UserImpact),
+            Surface: FeatureSurface.UserImpact, TileOnly: true),
 
         // Reminder emails to sponsors (App game).
+        // §694.4 — GRADUATED into Sponsors. Live: gates the app-game gift reminder (§693).
         new("sponsor-reminders", "Settings.Feat.SponsorReminders.Name",
             "Settings.Feat.SponsorReminders.Desc",
-            FeatureGroup.Incubation, FeatureTier.Advanced, DefaultEnabled: false,
+            FeatureGroup.Sponsors, FeatureTier.Advanced, DefaultEnabled: false,
             DependsOn: new[] { OutboundEmailKey }, DefaultReleasedToRing: Ring.Ring1,
             Surface: FeatureSurface.UserImpact),
 
@@ -450,13 +719,13 @@ public static class FeatureCatalog
         // (A genuinely NEW queue feature is born Ring1 — the catalog default.)
         new("volunteer-tasks", "Settings.Feat.VolunteerTasks.Name",
             "Settings.Feat.VolunteerTasks.Desc",
-            FeatureGroup.Incubation, FeatureTier.Advanced, DefaultEnabled: false,
+            FeatureGroup.Volunteers, FeatureTier.Advanced, DefaultEnabled: false,
             DependsOn: Array.Empty<string>(), DefaultReleasedToRing: Ring.Broad,
             Surface: FeatureSurface.Queue),
 
         new("volunteer-allocation", "Settings.Feat.VolunteerAllocation.Name",
             "Settings.Feat.VolunteerAllocation.Desc",
-            FeatureGroup.Incubation, FeatureTier.Advanced, DefaultEnabled: false,
+            FeatureGroup.Volunteers, FeatureTier.Advanced, DefaultEnabled: false,
             DependsOn: Array.Empty<string>(), DefaultReleasedToRing: Ring.Broad,
             Surface: FeatureSurface.Queue),
 
@@ -468,57 +737,79 @@ public static class FeatureCatalog
         // Ring1 in /Organizer/Settings to ring-TEST a change.
         new("organizer-allocation", "Settings.Feat.OrganizerAllocation.Name",
             "Settings.Feat.OrganizerAllocation.Desc",
-            FeatureGroup.Incubation, FeatureTier.Advanced, DefaultEnabled: false,
+            FeatureGroup.Organizers, FeatureTier.Advanced, DefaultEnabled: false,
             DependsOn: Array.Empty<string>(), DefaultReleasedToRing: Ring.Broad,
             Surface: FeatureSurface.Queue),
 
         new("hotel-assignment", "Settings.Feat.HotelAssignment.Name",
             "Settings.Feat.HotelAssignment.Desc",
-            FeatureGroup.Incubation, FeatureTier.Advanced, DefaultEnabled: false,
+            FeatureGroup.EventSettings, FeatureTier.Advanced, DefaultEnabled: false,
             DependsOn: Array.Empty<string>(), DefaultReleasedToRing: Ring.Broad,
             Surface: FeatureSurface.Queue),
 
         // Group-photo session invite emails.
+        // §700 Batch A — re-homed to EventSettings, named explicitly by the operator (§695):
+        // "move the group photo into Event settings". 🔒 This is the ONE the §694.4 hazard was
+        // written about — his screenshot read "(inherited from group)", and it does inherit: it
+        // has a PROD FeatureSettings row with a NULL ReleasedToRingOverride. Verified before
+        // moving: there are ZERO FeatureGroupSettings rows in either edition, so the inheritance
+        // step resolves past the group to this catalog default (Ring1) both before and after.
+        // Effective ring unchanged.
         new("group-photo-invites", "Settings.Feat.GroupPhotoInvites.Name",
             "Settings.Feat.GroupPhotoInvites.Desc",
-            FeatureGroup.Incubation, FeatureTier.Advanced, DefaultEnabled: false,
+            FeatureGroup.EventSettings, FeatureTier.Advanced, DefaultEnabled: false,
             DependsOn: new[] { OutboundEmailKey }, DefaultReleasedToRing: Ring.Ring1,
             Surface: FeatureSurface.UserImpact),
 
         // Travel-reimbursement payment confirmation emails.
+        // §694.4 — GRADUATED into SpeakersSessions (operator 2026-07-29: "this one is fo speaker").
+        // Travel reimbursement is a SPEAKER deliverable — it has its own speaker deadline task
+        // (§679) — so the confirmation belongs beside the rest of the speaker features.
         new("travel-reimbursement-email", "Settings.Feat.TravelReimbursementEmail.Name",
             "Settings.Feat.TravelReimbursementEmail.Desc",
-            FeatureGroup.Incubation, FeatureTier.Advanced, DefaultEnabled: false,
+            FeatureGroup.SpeakersSessions, FeatureTier.Advanced, DefaultEnabled: false,
             DependsOn: new[] { OutboundEmailKey }, DefaultReleasedToRing: Ring.Ring1,
             Surface: FeatureSurface.UserImpact),
 
-        // Release SoMe graphics to speakers (becomes visible to them).
-        new("graphics-release", "Settings.Feat.GraphicsRelease.Name",
-            "Settings.Feat.GraphicsRelease.Desc",
-            FeatureGroup.Incubation, FeatureTier.Advanced, DefaultEnabled: false,
-            DependsOn: Array.Empty<string>(), DefaultReleasedToRing: Ring.Ring1,
-            Surface: FeatureSurface.UserImpact),
+        // 🗑 §705.14a — "graphics-release" DELETED 2026-07-29. The operator asked *"graphics-release is
+        // an email to speakers"* … *"or does it target something else"*. It targets something else, and
+        // the NAME was the defect: its only two references were this entry and ONE organizer tile
+        // (/Organizer/SoMe → /Organizer/Graphics). It sent no mail at all.
+        //
+        // The email to speakers DOES exist, under a different key: `speaker-graphics-promote` →
+        // template `speaker-graphics-ready` ("Speaker: promo graphics ready"), sent by
+        // SpeakerGraphicsReadyNotifier. That one keeps its own ring.
+        //
+        // 🔒 So this was §326bx BY NAME rather than by ring: the yellow ring badge was already removed
+        // from TileOnly switches, but a name implying it governed the speaker mail was left behind —
+        // and it misled its own author. Per his EmailCenter correction, organizer tooling is gated by
+        // ROLE, not by a switch, so the tile needs no key.
 
         // Bulk delete of test participants / data — impactful, ring-test only.
         new("test-data-cleanup", "Settings.Feat.TestDataCleanup.Name",
             "Settings.Feat.TestDataCleanup.Desc",
-            FeatureGroup.Incubation, FeatureTier.Advanced, DefaultEnabled: false,
+            FeatureGroup.EventSettings, FeatureTier.Advanced, DefaultEnabled: false,
             DependsOn: Array.Empty<string>(), DefaultReleasedToRing: Ring.Ring1,
+            Surface: FeatureSurface.UserImpact, TileOnly: true),
+
+        // §383 — Master Class landing-page notifications (a Q&A post, or a speaker updating the
+        // preparation instructions). UserImpact: an attendee/speaker receives mail because SOMEONE
+        // ELSE acted, so it is outreach and IS ring-scoped — the §326by participant-clicked
+        // exemption deliberately does not apply. The per-person opt-out lives on the page itself.
+        new("masterclass-notifications", "Settings.Feat.MasterClassNotifications.Name",
+            "Settings.Feat.MasterClassNotifications.Desc",
+            FeatureGroup.Attendees, FeatureTier.Advanced, DefaultEnabled: false,
+            DependsOn: new[] { OutboundEmailKey }, DefaultReleasedToRing: Ring.Ring1,
             Surface: FeatureSurface.UserImpact),
 
         // Attendee calendar invites — independently dialable per email (operator 2026-06-22).
         new("hotel-invite", "Settings.Feat.HotelInvite.Name",
             "Settings.Feat.HotelInvite.Desc",
-            FeatureGroup.Incubation, FeatureTier.Advanced, DefaultEnabled: false,
-            DependsOn: new[] { OutboundEmailKey }, DefaultReleasedToRing: Ring.Ring1,
-            Surface: FeatureSurface.UserImpact),
-
-        new("dinner-invite", "Settings.Feat.DinnerInvite.Name",
-            "Settings.Feat.DinnerInvite.Desc",
-            FeatureGroup.Incubation, FeatureTier.Advanced, DefaultEnabled: false,
+            FeatureGroup.EventSettings, FeatureTier.Advanced, DefaultEnabled: false,
             DependsOn: new[] { OutboundEmailKey }, DefaultReleasedToRing: Ring.Ring1,
             Surface: FeatureSurface.UserImpact),
     };
+
 
     /// <summary>Look up a descriptor by key, or null if not in the catalog.</summary>
     public static FeatureDescriptor? Find(string key) =>
@@ -536,6 +827,34 @@ public static class FeatureCatalog
     public static Ring DefaultReleasedToRing(string key) =>
         Find(key)?.DefaultReleasedToRing ?? Rings.Default;
 
+    /// <summary>
+    /// §700 Batch B — the order groups are RENDERED in: roles first, <see cref="FeatureGroup.EventSettings"/>
+    /// last. Lower sorts earlier.
+    /// </summary>
+    /// <remarks>
+    /// 🔒 <b>Deliberately NOT the enum's numeric order.</b> §695 asks for a per-ROLE page, but the enum is
+    /// append-only — Batch A's three groups landed at 8/9/10 and would otherwise render after every
+    /// mechanism group. Renumbering the enum would fix the order and is exactly what must NOT happen:
+    /// <c>FeatureSetting.GroupOverride</c> and <c>FeatureGroupSetting.Group</c> persist these as ints, so
+    /// renumbering silently re-points any stored row at a different group. That is safe TODAY only
+    /// because no such row exists in either edition (Batch A verified it) — luck, not a guarantee.
+    /// Display order belongs in the display layer.
+    ///
+    /// <para>The mechanism groups (Email, Reminders, Social media, Surveys) are not roles and sort after
+    /// the roles. Re-homing their members is an audience-affecting change and is not part of the IA.</para>
+    /// </remarks>
+    public static int DisplayOrder(FeatureGroup group) => group switch
+    {
+        FeatureGroup.SpeakersSessions => 0,
+        FeatureGroup.Sponsors         => 1,
+        FeatureGroup.Volunteers       => 2,
+        FeatureGroup.Attendees        => 3,
+        FeatureGroup.Organizers       => 4,
+        // §695 — the four MECHANISM groups are DELETED (see the enum); nothing to order.
+        FeatureGroup.EventSettings    => 20,
+        _                             => 99,
+    };
+
     /// <summary>The catalog grouped by chapter, in display order, groups in enum order.</summary>
     public static IReadOnlyList<IGrouping<FeatureGroup, FeatureDescriptor>> ByGroup() =>
         All.GroupBy(f => f.Group)
@@ -545,18 +864,28 @@ public static class FeatureCatalog
     /// <summary>
     /// The DEFAULT lifecycle ring for a feature GROUP (REQUIREMENTS §23a) — the
     /// initial value shown for the group's ring control until an organizer sets a
-    /// per-group ring. Email + Reminders (outbound mail) start at <see cref="Ring.Ring1"/>;
-    /// Incubation at <see cref="Ring.Ring0"/> (innermost — new features); every other
-    /// group at <see cref="Ring.Broad"/> (GA). NOTE: the runtime gate uses an explicit
-    /// per-group ring row if set, else the FEATURE's own catalog default — this is for
-    /// DISPLAY + the group control's starting point, not a hidden gate input.
+    /// per-group ring.
+    ///
+    /// 🔒 <b>EVERY group returns <see cref="Ring.Ring1"/></b> — there is no per-group
+    /// variation. (The previous summary here claimed Email + Reminders at Ring1,
+    /// Incubation at Ring0 and everything else at Broad. That was never what the code
+    /// did; it was left behind by the operator's 2026-06-21 "default is ring 1"
+    /// decision, and it is the §700/§ceh-decision-vs-hold shape: a doc that reads as
+    /// settled while the code says otherwise. Corrected 2026-07-29.)
+    ///
+    /// NOTE: the runtime gate uses an explicit per-group ring ROW if set, else the
+    /// FEATURE's own catalog default — this is for DISPLAY + the group control's
+    /// starting point, not a hidden gate input.
     /// </summary>
     public static Ring GroupDefaultRing(FeatureGroup group) => group switch
     {
-        // Operator 2026-06-21: ALL groups (incl. Incubation, the birthplace of new
-        // features) default to Ring1 — controlled-rollout posture before go-live, so
-        // ring-0 AND ring-1 testers see every feature until an organizer promotes it
-        // (group or feature) up to Broad for general availability.
+        // Operator 2026-06-21: ALL groups default to Ring1 — controlled-rollout posture
+        // before go-live, so ring-0 AND ring-1 testers see every feature until an
+        // organizer promotes it (group or feature) up to Broad for general availability.
+        //
+        // 🔑 §700 Batch A relies on this being UNIFORM: because no group has a different
+        // default, and no edition has a persisted FeatureGroupSettings row, re-homing a
+        // feature between groups cannot change its effective ring.
         _ => Ring.Ring1,
     };
 }

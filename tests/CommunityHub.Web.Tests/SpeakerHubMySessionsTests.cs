@@ -78,6 +78,16 @@ public sealed class SpeakerHubMySessionsTests
                 new CommunityHub.Core.Integrations.Graphics.NullSharePointFileStore(),
                 Microsoft.Extensions.Options.Options.Create(
                     new CommunityHub.Core.Integrations.Graphics.GraphicsSharePointOptions())),
+            // §192: eval-PDF service — reads provenance from the DB (no store needed for the
+            // "which kinds exist" lookup the speaker page uses).
+            new CommunityHub.Core.Integrations.Graphics.SessionEvalPdfService(
+                new CommunityHub.Core.Integrations.Graphics.NullSharePointFileStore(),
+                Microsoft.Extensions.Options.Options.Create(
+                    new CommunityHub.Core.Integrations.Graphics.GraphicsSharePointOptions()),
+                db),
+            new CommunityHub.Core.Email.CalendarInviteEmailService(
+                db, new NoopEmailSender(),
+                new CommunityHub.Core.Email.EmailContextAccessor(), TimeProvider.System),
             new CommunityHub.Core.Integrations.ZohoOptions(),
             NullLogger<IndexModel>.Instance);
 
@@ -87,6 +97,15 @@ public sealed class SpeakerHubMySessionsTests
         // A minimal UrlHelper so Url.Page(...) doesn't NRE when the profile is published.
         model.Url = new FakeUrlHelper(actionContext);
         return model;
+    }
+
+    private sealed class NoopEmailSender : CommunityHub.Core.Email.IEmailSender
+    {
+        public Task SendAsync(string toEmail, string subject, string htmlBody, CancellationToken ct = default) => Task.CompletedTask;
+        public Task SendAsync(string toEmail, string subject, string htmlBody, IReadOnlyCollection<string>? cc, CancellationToken ct = default) => Task.CompletedTask;
+        public Task SendAsync(string toEmail, string subject, string htmlBody, string textBody, CancellationToken ct = default) => Task.CompletedTask;
+        public Task SendWithIcsAsync(string toEmail, string subject, string htmlBody, string icsContent, string icsFileName, CancellationToken ct = default) => Task.CompletedTask;
+        public Task SendWithAttachmentsAsync(string toEmail, string subject, string htmlBody, IReadOnlyCollection<CommunityHub.Core.Email.EmailAttachment> attachments, CancellationToken ct = default) => Task.CompletedTask;
     }
 
     private sealed class FakeUrlHelper(ActionContext ctx) : IUrlHelper
@@ -305,6 +324,34 @@ public sealed class SpeakerHubMySessionsTests
         var mine = Assert.Single(sessions);
         Assert.NotNull(mine.StartsAt);
         Assert.Null(mine.FallbackDate);
+    }
+
+    [Fact]
+    public async Task Eval_kinds_drive_score_always_and_open_feedback_only_when_present()
+    {
+        // §192d: the speaker page renders the Score download for every session (always) and
+        // the Open-feedback download only for a session that HAS an open-feedback PDF. The
+        // model exposes EvalKinds, the per-session set of uploaded kinds, which drives that.
+        using var db = NewDb();
+        var s = await SeedAsync(db, aliceSelected: false);
+        var aliceSession = await db.Sessions.FirstAsync(x => x.SessionizeId == "s-alice");
+
+        // Only a SCORE file exists for Alice's session (no open feedback).
+        db.SessionEvaluationFiles.Add(new SessionEvaluationFile
+        {
+            EventId = s.EventId, SessionId = aliceSession.Id, Kind = EvaluationPdfKind.Score,
+            UploadedByName = "Org Person", UploadedAt = DateTimeOffset.UtcNow,
+            FileName = $"session-{aliceSession.Id}-score.pdf",
+        });
+        await db.SaveChangesAsync();
+
+        var http = new DefaultHttpContext { User = Session(s.Alice) };
+        var model = NewModel(db, http);
+        await model.OnGetAsync(default);
+
+        Assert.True(model.EvalKinds.TryGetValue(aliceSession.Id, out var kinds));
+        Assert.Contains(EvaluationPdfKind.Score, kinds!);          // score present
+        Assert.DoesNotContain(EvaluationPdfKind.Open, kinds!);     // open-feedback absent → button hidden
     }
 
     [Fact]

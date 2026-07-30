@@ -1,5 +1,6 @@
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
+using CommunityHub.Core.Participants;
 using Microsoft.EntityFrameworkCore;
 
 namespace CommunityHub.Core.Organizer;
@@ -156,8 +157,13 @@ public sealed class OrganizerOverviewService
     {
         // Pull the per-participant task list once with the assignee role so the
         // by-role completion split needs no extra query.
+        // §332: ExcludingAbandoned drops the work the deactivation cascade closed on a departed
+        // person's behalf. It is stored as Done (it has to be — otherwise the §81 reminder track
+        // would keep chasing somebody who left), which is why every ratio below used to count a
+        // drop-out's untouched tasks as completed, in both numerator and denominator.
         var tasks = await _db.Tasks
             .Where(t => t.EventId == eventId)
+            .ExcludingAbandoned()
             .Select(t => new
             {
                 t.State,
@@ -215,10 +221,13 @@ public sealed class OrganizerOverviewService
         // speaker. The same milestone produces one task per speaker, so the task
         // Title is the milestone; grouping by it shows how many speakers cleared
         // each deadline.
+        // §332: without ExcludingAbandoned a WITHDRAWN speaker read as having cleared every
+        // milestone — their tasks were force-closed to Done when they were deactivated.
         var speakerTasks = await _db.Tasks
             .Where(t => t.EventId == eventId
                         && t.AssignedParticipant != null
                         && t.AssignedParticipant.Role == ParticipantRole.Speaker)
+            .ExcludingAbandoned()
             .Select(t => new { t.Title, t.State, t.DueDate })
             .ToListAsync(ct);
 
@@ -242,13 +251,17 @@ public sealed class OrganizerOverviewService
         // Volunteer-structure coverage: of the VolunteerTask rows for the
         // edition, how many have at least one volunteer assigned vs. still open.
         // "Cancelled" tasks are excluded from coverage (no longer needed).
+        // EFFECTIVE assignments only (§253 G7): a task held solely by deactivated
+        // (or declining) volunteers reads as OPEN, not covered.
         var tasks = await _db.VolunteerTasks
             .Where(t => t.EventId == eventId && t.Status != VolunteerTaskStatus.Cancelled)
             .Select(t => new
             {
                 t.Id,
                 Category = t.Subcategory.Category.Name,
-                AssignmentCount = t.Assignments.Count,
+                AssignmentCount = t.Assignments.Count(a =>
+                    a.Participant.IsActive
+                    && a.DecisionStatus != ShiftDecisionStatus.Declined),
             })
             .ToListAsync(ct);
 
@@ -278,6 +291,7 @@ public sealed class OrganizerOverviewService
         var sponsorTasks = await _db.Tasks
             .Where(t => t.EventId == eventId
                         && t.SourceKey != null && t.SourceKey.StartsWith(SponsorTaskPrefix))
+            .ExcludingAbandoned()   // §332 — a departed contact's deliverables are not "done"
             .Select(t => t.State)
             .ToListAsync(ct);
         o.SponsorTaskTotal = sponsorTasks.Count;

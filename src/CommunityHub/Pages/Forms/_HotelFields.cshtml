@@ -8,12 +8,21 @@
     (NeedsRoom / CheckInDate / …) so the toggle script + model binding are unchanged.
 *@
 
-@* Role-specific policy. Organizers see no policy (not relevant to them). *@
+@* Role-specific policy. Organizers see no policy (not relevant to them).
+   §326q (operator 2026-07-25): the SPEAKER policy (+ the §326c extra-nights cost box
+   below) is COMMUNITY-category only — a Guest speaker's hotel is an individual
+   agreement (§299 6.2), so the two-nights/one-night wording would be wrong; Sponsor
+   speakers never reach this form (no Hotel entitlement). *@
 @{
     var policyKey = Model.Role switch
     {
-        ParticipantRole.Speaker => "Hotel.PolicySpeaker",
-        ParticipantRole.Volunteer or ParticipantRole.Media or ParticipantRole.EventPartner => "Hotel.PolicyVolunteer",
+        ParticipantRole.Speaker when Model.SpeakerCategory == CommunityHub.Core.Domain.SpeakerCategory.Community
+            => "Hotel.PolicySpeaker",
+        ParticipantRole.Speaker => (string?)null,
+        ParticipantRole.Volunteer => "Hotel.PolicyVolunteer",
+        // Media / event partners have no "days you agreed to help" mechanism — the
+        // volunteer wording read as meaningless for them; use the crew-neutral line.
+        ParticipantRole.Media or ParticipantRole.EventPartner => "Hotel.PolicyCrew",
         _ => (string?)null,
     };
 }
@@ -22,6 +31,11 @@
     <p style="background:#eef6ff;padding:10px 14px;border-radius:6px;font-size:14px;">
         <strong>@Localizer["Hotel.PolicyLead"]</strong><br />
         @Localizer[policyKey]
+    </p>
+    @* §326c (operator 2026-07-25): extra-nights pricing, shown wherever a policy
+       applies (speakers/volunteers/media/event partners — not organizers). *@
+    <p style="background:#fffbeb;border:1px solid #fde68a;padding:10px 14px;border-radius:6px;font-size:14px;color:#78350f;">
+        @Localizer["Hotel.ExtraNightsCost"]
     </p>
 }
 
@@ -45,7 +59,7 @@
     <p>@Localizer["Hotel.NeedsRoomLabel"] <strong>@(Model.NeedsRoom == true ? Localizer["Common.Yes"].Value : Model.NeedsRoom == false ? Localizer["Common.No"].Value : Localizer["Common.NotChosen"].Value)</strong></p>
     @if (Model.NeedsRoom == true)
     {
-        <p>@Localizer["Hotel.CheckInOut", Model.CheckInDate?.ToString("dd/MM/yyyy") ?? "", Model.CheckOutDate?.ToString("dd/MM/yyyy") ?? ""]</p>
+        <p>@Localizer["Hotel.CheckInOut", Model.CheckInDate?.ToString("d MMM yyyy") ?? "", Model.CheckOutDate?.ToString("d MMM yyyy") ?? ""]</p>
     }
     <partial name="_RequestChangeLink" model="@("Hotel")" />
 }
@@ -63,14 +77,72 @@ else
     <span asp-validation-for="NeedsRoom" class="ceh-field-error"></span>
 
     <div id="hotelDetails">
+        @* §403 (operator 2026-07-26: "bug - i dont see year - can it default to feb 9, 2027 instead
+           of taking the dates today"). An EMPTY <input type="date"> opens on TODAY, so he was
+           looking at July 2026 while booking for a February 2027 event. A `min` that lies in the
+           future makes every browser open the picker THERE instead — no JavaScript, and it catches
+           a typo'd year from the other direction too. Bounds come from the edition config; when it
+           carries no dates both are null and the inputs render exactly as before. *@
+        @{
+            var stayMin = Model.StayWindowStart?.ToString("yyyy-MM-dd");
+            var stayMax = Model.StayWindowEnd?.ToString("yyyy-MM-dd");
+        }
         <label for="CheckInDate">@Localizer["Hotel.CheckInDate"]</label>
-        <input type="date" asp-for="CheckInDate" />
+        <input type="date" asp-for="CheckInDate" min="@stayMin" max="@stayMax" />
         <span asp-validation-for="CheckInDate" class="ceh-field-error"></span>
         <label for="CheckOutDate">@Localizer["Hotel.CheckOutDate"]</label>
-        <input type="date" asp-for="CheckOutDate" />
+        <input type="date" asp-for="CheckOutDate" min="@stayMin" max="@stayMax" />
         <span asp-validation-for="CheckOutDate" class="ceh-field-error"></span>
+
+        @* §173f: surface the organizer-provided booking CONFIRMATION NUMBER with a clear label so
+           it sits right next to — and is never confused with — the free-text Notes field.
+
+           §426 (operator 2026-07-27: "remove this from the get started wizard if the field is not
+           filed out - it is ok to show it later when field is with confirmation number is known -
+           but dont show it if it is not known"). The empty state used to render a box whose entire
+           message was "nothing to fill in" — a form field that is not a field, sitting in the
+           middle of a form, adding a step to read and nothing to do. It now appears only once
+           there is actually a number to show. *@
+        @if (!string.IsNullOrWhiteSpace(Model.HotelConfirmationNumber))
+        {
+            <div style="background:#f3f6fb;border:1px solid #dde4ee;border-radius:6px;padding:10px 14px;margin:10px 0;font-size:14px;">
+                <strong>@Localizer["Hotel.ConfirmationNumberHeading"]</strong><br />
+                <span>@Localizer["Hotel.ConfirmationNumberLabel"] <strong>@Model.HotelConfirmationNumber</strong></span>
+            </div>
+        }
+
+        @* §310 (operator 2026-07-24): the notes guidance lives WITH the Notes field —
+           the confirmation-number box above talks only about the confirmation number. *@
         <label for="Notes">@Localizer["Common.NotesOptional"]</label>
+        <p style="color:#6b7280;font-size:12.5px;margin:0 0 4px;">@Localizer["Hotel.NotesHint"]</p>
         <textarea asp-for="Notes" rows="3"></textarea>
+
+        @* §322n (operator 2026-07-24): the auto e-mail on save is GONE — instead the
+           participant sends themselves a REGULAR calendar invitation on demand (same
+           §193 invite as every other "Send Calendar Invite" button). Renders once saved
+           dates exist; formaction posts to the HOST page's HotelInvite handler (never a
+           nested form). *@
+        @* §424 (operator 2026-07-27: the button was "missing … if they choose yes"). It used to
+           additionally require SAVED dates, so on a first pass — where nothing is saved yet — it
+           never appeared. §425 now pre-fills the dates, and this whole block already lives inside
+           #hotelDetails, which the script below shows only when "Yes" is picked. So the single
+           remaining condition is "there are dates to put in the invite", and the host handler
+           saves the step before sending (§424). *@
+        @if (Model.CheckInDate is not null && Model.CheckOutDate is not null)
+        {
+            @if (TempData["HotelInviteMessage"] is string him)
+            {
+                <p role="status" style="margin:10px 0 0;padding:8px 12px;border-radius:8px;background:#ecfdf5;color:#065f46;border:1px solid #a7f3d0;">@him</p>
+            }
+            @* §326j green + operator 2026-07-25 "too cramped": clear space above AND
+               below so the invite button doesn't crowd the Notes box or the Save button. *@
+            <div style="margin:16px 0 20px;">
+                <button type="submit" asp-page-handler="HotelInvite"
+                        style="background:#15803d;color:#fff;border:none;padding:8px 14px;border-radius:6px;font-size:13.5px;font-weight:600;cursor:pointer;">
+                    📅 Email me a calendar invite for my hotel stay
+                </button>
+            </div>
+        }
     </div>
 
     <script>

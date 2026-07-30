@@ -18,6 +18,12 @@
         @await Html.PartialAsync("Shared/_SecondaryEmailBanner")
     }
 
+    @* §315: flash from the "Add reminder to calendar" postback. *@
+    @if (TempData["CalendarInviteMessage"] is string inviteMsg)
+    {
+        <p role="status" style="margin:6px 0 10px;padding:10px 12px;border-radius:8px;background:#ecfdf5;color:#065f46;border:1px solid #a7f3d0;">@inviteMsg</p>
+    }
+
     @if (Model.NotSpeaker)
     {
         <p class="error">This page is for speakers.</p>
@@ -32,8 +38,22 @@
         <div style="margin:6px 0 14px;padding:12px 14px;background:#f8fafc;border:1px solid #cbd5e0;border-left:4px solid var(--el-blue);border-radius:6px;color:#444;font-size:14px;line-height:1.5;">
             <p style="margin:0 0 10px;"><strong>Instructions:</strong></p>
             <p style="margin:0 0 10px;">Below are your speaker tasks. Please complete each one by its stated due date — it helps us finalise the programme, logistics and attendee planning in good time.</p>
-            <p style="margin:0;">A red badge means a task is overdue; a yellow badge is an upcoming deadline. Mark a task complete once you're done. If you can't meet a deadline, contact the organizers as soon as possible.</p>
+            @* §660 (operator 2026-07-29): "contact the organizers" was plain text — the one
+               instruction on the page that asks the reader to DO something had nothing to click. *@
+            <p style="margin:0;">A red badge means a task is overdue; a yellow badge is an upcoming deadline. Mark a task complete once you're done. If you can't meet a deadline, <a href="mailto:@Model.OrganizerEmail">contact the organizers</a> as soon as possible.</p>
         </div>
+
+        @* §321: one click — one calendar invitation per dated open task. *@
+        @if (Model.Tasks.Any(t => t.State != CommunityHub.Core.Domain.TaskState.Done && t.DueDate is not null))
+        {
+            <form method="post" asp-page-handler="AddReminderAll" style="margin:0 0 12px;">
+                @* §326j: calendar-button family recolored green (slate was hard to read). *@
+                <button type="submit"
+                        style="display:inline-block;background:#15803d;color:#fff;border:none;padding:8px 18px;border-radius:6px;font-size:14px;font-weight:600;cursor:pointer;line-height:1.2;">
+                    &#128197; @Localizer["TaskRow.AddReminderAll"]
+                </button>
+            </form>
+        }
 
         @* §147: the unified task list (completion % header → pending at the top →
            completed collapsed at the bottom), the SAME shared _TaskListPanel the /Tasks

@@ -1,0 +1,252 @@
+@page "/Sessions/Slides"
+@model CommunityHub.Pages.Sessions.SlidesModel
+@{
+    ViewData["Title"] = "Session slides for ELDK27";
+    @* §322j (operator 2026-07-24): STANDALONE attendee page — no site/hub menus, just the
+       event header. *@
+    ViewData["HidePublicNav"] = true;
+}
+
+<style>
+    .sl-btn { display:inline-block;padding:6px 12px;border-radius:6px;font-size:13px;
+              font-weight:600;text-decoration:none;color:#fff;margin:2px 4px 2px 0;
+              border:none;cursor:pointer; }
+    .sl-view { background:#008BD2; }
+    .sl-view:hover { background:#0079b8;color:#fff; }
+    .sl-dl { background:#475569; }
+    .sl-dl:hover { background:#334155;color:#fff; }
+    .sl-none { color:#9ca3af;font-size:13px; }
+    .sl-table td, .sl-table th { padding:10px 8px;border-bottom:1px solid #e5e7eb;
+                                 vertical-align:top;text-align:left; }
+    .sl-speakers { color:#6b7280;font-size:13px; }
+    .sl-badge { display:inline-block;margin:2px 6px 2px 0;padding:2px 10px;font-size:11.5px;
+                font-weight:700;border-radius:9px; }
+    /* §659 — the busy state for the ZIP build. */
+    .sl-spin { display:inline-block;width:13px;height:13px;margin-right:6px;
+               border:2px solid #cbd5e1;border-top-color:#475569;border-radius:50%;
+               vertical-align:-2px;animation:sl-rot .8s linear infinite; }
+    @@keyframes sl-rot { to { transform:rotate(360deg); } }
+    /* Respect a reduced-motion preference: keep the message, drop the spin. */
+    @@media (prefers-reduced-motion: reduce) { .sl-spin { animation:none; } }
+    /* Mobile-first: at ~360px the notice sits under the button rather than beside it. */
+    @@media (max-width: 480px) {
+        #sl-busy { display:block; margin:8px 0 0 !important; }
+    }
+</style>
+
+<div class="card">
+    <h1>Session slides for ELDK27</h1>
+    @* §322e: attendee-facing introduction (operator wording). *@
+    <p style="margin-top:0;">With so many great sessions running at the same time, choosing
+       where to be can be hard. To help you plan your conference, the speakers share their
+       presentations here <strong>before the actual session</strong> — first as a
+       <strong>preview</strong>, later as the <strong>final</strong> slides. Browse them below,
+       view any deck right in the browser, and build your personal agenda with confidence.</p>
+    <p style="color:#6b7280;font-size:13.5px;">You always get the newest uploaded version;
+       once a session's final slides are in, they replace the preview here.</p>
+
+    @if (!Model.Configured)
+    {
+        <p class="info">Slides aren't available yet — check back closer to the event.</p>
+    }
+    else
+    {
+        @* §322f/§322g: track + multi-select speaker filters — e.g. pick "Azure", select
+           all, download every deck at once. *@
+        @if (Model.Tracks.Count > 0 || Model.AllSpeakers.Count > 0)
+        {
+            <form method="get" style="display:flex;flex-wrap:wrap;gap:14px;align-items:flex-start;margin:0 0 12px;">
+                @if (Model.Tracks.Count > 0)
+                {
+                    <div>
+                        <label for="Track" style="display:block;font-weight:600;font-size:14px;">Track</label>
+                        <select id="Track" name="Track" style="max-width:280px;">
+                            <option value="">All tracks</option>
+                            @foreach (var t in Model.Tracks)
+                            {
+                                <option value="@t" selected="@(string.Equals(t, Model.Track, StringComparison.OrdinalIgnoreCase))">@t</option>
+                            }
+                        </select>
+                    </div>
+                }
+                @if (Model.AllSpeakers.Count > 0)
+                {
+                    <div>
+                        <label for="Speakers" style="display:block;font-weight:600;font-size:14px;">Speakers</label>
+                        <select id="Speakers" name="Speakers" multiple size="6" style="max-width:320px;min-width:220px;">
+                            @foreach (var n in Model.AllSpeakers)
+                            {
+                                <option value="@n" selected="@Model.Speakers.Contains(n, StringComparer.OrdinalIgnoreCase)">@n</option>
+                            }
+                        </select>
+                        <p style="color:#6b7280;font-size:12px;margin:2px 0 0;">Ctrl/Cmd-click for several; leave empty for all.</p>
+                    </div>
+                }
+                <div style="align-self:flex-end;display:flex;gap:8px;">
+                    <button type="submit" class="sl-btn sl-view" style="margin:0;">Apply</button>
+                    <a class="sl-btn sl-dl" style="margin:0;" href="/Sessions/Slides">Reset</a>
+                </div>
+            </form>
+        }
+
+        @if (Model.Sessions.Count == 0)
+        {
+            <p class="info">No sessions match — try another track.</p>
+        }
+        else
+        {
+            @* §322f: multi-select batch download — checkboxes post (GET) to the anonymous
+               batch route, which zips the selected sessions' EFFECTIVE decks. *@
+            <form method="get" action="/session-slides/batch-download">
+                <table class="sl-table" style="width:100%;border-collapse:collapse;">
+                    <thead>
+                        <tr style="color:#6b7280;font-size:12.5px;">
+                            <th style="width:34px;">
+                                <input type="checkbox" id="sl-all" title="Select all"
+                                       onclick="document.querySelectorAll('.sl-pick:not(:disabled)').forEach(c => c.checked = this.checked)" />
+                            </th>
+                            <th>Session</th>
+                            <th style="width:300px;">Slides</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var s in Model.Sessions)
+                        {
+                            var slug = s.FinalFileName is not null ? "final" : "preview";
+                            var file = s.FinalFileName ?? s.PreviewFileName;
+                            // §467 — the size of the SAME deck this row shows (Final wins).
+                            var size = s.FinalFileName is not null ? s.FinalSizeBytes : s.PreviewSizeBytes;
+                            var tooBig = Model.TooLargeToView(file, size);
+                            <tr>
+                                <td>
+                                    <input type="checkbox" class="sl-pick" name="ids" value="@s.SessionId"
+                                           disabled="@(file is null)" title="Select for download" />
+                                </td>
+                                <td>
+                                    <strong>@s.Title</strong>
+                                    @if (s.Track is not null)
+                                    {
+                                        <span class="sl-badge" style="background:#eef6ff;color:#1e40af;border:1px solid #bfdbfe;">@s.Track</span>
+                                    }
+                                    @if (s.SpeakerNames.Count > 0)
+                                    {
+                                        <div class="sl-speakers">@string.Join(", ", s.SpeakerNames)</div>
+                                    }
+                                </td>
+                                <td>
+                                    @if (file is null)
+                                    {
+                                        <span class="sl-none">Not uploaded yet</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="sl-badge"
+                                              style="background:@(slug == "final" ? "#d6f3e0" : "#fff3cd");
+                                                     color:@(slug == "final" ? "#1f6d3a" : "#7a5b00");
+                                                     border:1px solid @(slug == "final" ? "#87cda0" : "#f0d878");">
+                                            @(slug == "final" ? "Final" : "Preview")
+                                        </span>
+                                        @* §322e: View opens the EMBEDDED in-hub viewer (same tab).
+                                           §467: a deck over the Office-viewer ceiling can NEVER
+                                           render online, so the button is shown DISABLED with the
+                                           reason rather than removed — an absent button is a
+                                           mystery, a greyed-out one explains itself. Download stays
+                                           fully enabled: the FILE is fine, only the preview is not. *@
+                                        @if (tooBig)
+                                        {
+                                            <span class="sl-btn sl-view" aria-disabled="true"
+                                                  style="opacity:.5;cursor:not-allowed;"
+                                                  title="Larger than the online preview supports (@Model.OfficeViewerMaxDisplay) — please download it instead.">
+                                                👁 View
+                                            </span>
+                                            <span class="sl-none" style="display:block;font-size:12px;">
+                                                Too large to preview online — download it instead.
+                                            </span>
+                                        }
+                                        else if (CommunityHub.Pages.Sessions.SlidesModel.CanView(file))
+                                        {
+                                            <a class="sl-btn sl-view" href="/Sessions/Slides/@s.SessionId/@slug">👁 View</a>
+                                        }
+                                        <a class="sl-btn sl-dl" href="/session-slides/@s.SessionId/@slug/download">⬇️ Download</a>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+                @* §659 (operator 2026-07-29): "session download should add a notification when
+                   someone downloads the page, so people can see something is in process". Zipping
+                   several decks takes a noticeable moment and NOTHING changed on screen, so the
+                   click read as ignored and people clicked again — starting a second build. *@
+                <button type="submit" id="sl-zip" class="sl-btn sl-dl" style="margin-top:12px;">
+                    ⬇️ Download selected as ZIP
+                </button>
+                <span id="sl-busy" role="status" aria-live="polite"
+                      style="display:none;margin-left:10px;font-size:13px;color:#334155;">
+                    <span class="sl-spin" aria-hidden="true"></span>
+                    Preparing your download… this can take a moment for several decks.
+                </span>
+            </form>
+
+            @* §659 — the busy state, cleared by the cookie the download response echoes back.
+               A file download never navigates the page, so there is no load/submit event to hang
+               this off; the cookie is the only signal that the bytes actually started flowing.
+               The 3-minute cap is a backstop so a failed download can never leave the button
+               permanently dead — the operator must always be able to try again. *@
+            <script>
+            (function () {
+                var form = document.querySelector('form[action="/session-slides/batch-download"]');
+                if (!form) return;
+                var btn = document.getElementById('sl-zip');
+                var busy = document.getElementById('sl-busy');
+                var COOKIE = 'slides-dl';
+                var poll = null, giveUp = null;
+
+                function readCookie() {
+                    return document.cookie.split('; ').find(function (c) {
+                        return c.indexOf(COOKIE + '=') === 0;
+                    });
+                }
+                function clearCookie() {
+                    document.cookie = COOKIE + '=; Path=/; Max-Age=0';
+                }
+                function idle() {
+                    if (poll) { clearInterval(poll); poll = null; }
+                    if (giveUp) { clearTimeout(giveUp); giveUp = null; }
+                    busy.style.display = 'none';
+                    btn.disabled = false;
+                    btn.style.opacity = '';
+                    btn.style.cursor = '';
+                }
+
+                form.addEventListener('submit', function () {
+                    // Nothing selected ⇒ the server 404s; don't show a busy state for that.
+                    if (!form.querySelector('.sl-pick:checked')) return;
+
+                    var token = String(Date.now()) + '-' + Math.random().toString(36).slice(2, 8);
+                    var field = form.querySelector('input[name="dl"]')
+                        || Object.assign(document.createElement('input'),
+                                         { type: 'hidden', name: 'dl' });
+                    field.value = token;
+                    form.appendChild(field);
+
+                    clearCookie();
+                    busy.style.display = '';
+                    btn.disabled = true;
+                    btn.style.opacity = '.6';
+                    btn.style.cursor = 'progress';
+
+                    poll = setInterval(function () {
+                        var hit = readCookie();
+                        if (hit && hit.indexOf(token) !== -1) { clearCookie(); idle(); }
+                    }, 400);
+                    giveUp = setTimeout(idle, 180000);
+                });
+
+                // Back/forward cache: returning to this page must never show a stale busy state.
+                window.addEventListener('pageshow', idle);
+            })();
+            </script>
+        }
+    }
+</div>

@@ -14,6 +14,19 @@
     var daysOverdue = (Model.State != TaskState.Done && Model.DueDate is DateOnly due && due < today)
         ? today.DayNumber - due.DayNumber
         : 0;
+
+    // DATA-SIGNAL tasks (§173e/§164/§207): FormTaskReconciler syncs these BOTH ways off
+    // the underlying data, so a manual Mark-complete is silently reverted on the next
+    // page load (and a manual Done would disagree with the Get-Started wizard). Hide the
+    // toggle for them and say what actually completes the task instead.
+    var key = Model.SourceKey ?? string.Empty;
+    var isDataSignal =
+        key.StartsWith(CommunityHub.Core.Participants.WizardStepTaskKeys.CalendarPrefix, StringComparison.Ordinal)
+        || key.StartsWith(CommunityHub.Core.Participants.WizardStepTaskKeys.SpeakerDetailsPrefix, StringComparison.Ordinal)
+        || key.StartsWith(CommunityHub.Core.Participants.WizardStepTaskKeys.ProfilePrefix, StringComparison.Ordinal)
+        || key.StartsWith(CommunityHub.Core.Participants.WizardStepTaskKeys.AcceptPrefix, StringComparison.Ordinal)
+        || key.StartsWith(CommunityHub.Core.Config.PartyTaskSeeder.PartyTaskKey + ":", StringComparison.Ordinal)
+        || key.StartsWith(CommunityHub.Core.Config.AttendeeMasterClassTaskSeeder.MasterClassTaskKey + ":", StringComparison.Ordinal);
 }
 
 <details style="border-bottom:2px solid var(--el-blue);padding:18px 0 22px;">
@@ -25,35 +38,47 @@
         }
         else if (daysOverdue > 0)
         {
-            <span style="display:inline-block;margin-left:8px;padding:2px 10px;font-size:0.78em;background:#fde2e1;color:#c0392b;border:1px solid #e9a8a3;border-radius:9px;vertical-align:middle;font-weight:700;">&#9888; @Localizer["Hub.Overdue"] (@Localizer["TaskRow.OverdueDays", daysOverdue]) &middot; @Localizer["TaskRow.WasDue", Model.DueDate?.ToString("dd/MM/yyyy") ?? ""]</span>
+            <span style="display:inline-block;margin-left:8px;padding:2px 10px;font-size:0.78em;background:#fde2e1;color:#c0392b;border:1px solid #e9a8a3;border-radius:9px;vertical-align:middle;font-weight:700;">&#9888; @Localizer["Hub.Overdue"] &mdash; @Localizer["TaskRow.WasDue", Model.DueDate?.ToString("d MMM yyyy") ?? ""] (@Localizer[daysOverdue == 1 ? "TaskRow.OverdueDay" : "TaskRow.OverdueDays", daysOverdue])</span>
         }
         else if (Model.DueDate is not null)
         {
-            <span style="display:inline-block;margin-left:8px;padding:2px 10px;font-size:0.78em;background:#fff3cd;color:#7a5b00;border:1px solid #f0d878;border-radius:9px;vertical-align:middle;font-weight:700;">@Localizer["TaskRow.Due", Model.DueDate?.ToString("dd/MM/yyyy") ?? ""]</span>
+            <span style="display:inline-block;margin-left:8px;padding:2px 10px;font-size:0.78em;background:#fff3cd;color:#7a5b00;border:1px solid #f0d878;border-radius:9px;vertical-align:middle;font-weight:700;">@Localizer["TaskRow.Due", Model.DueDate?.ToString("d MMM yyyy") ?? ""]</span>
         }
     </summary>
     @if (!string.IsNullOrWhiteSpace(Model.Description))
     {
         <p style="margin:8px 0;white-space:pre-line;font-size:15px;">@CommunityHub.Branding.TaskTextLinkifier.Render(Model.Description)</p>
     }
-    <div style="display:flex;align-items:center;gap:14px;margin-top:22px;flex-wrap:wrap;">
-        <form method="post" asp-page-handler="Toggle" style="display:inline;">
-            <input type="hidden" name="taskId" value="@Model.Id" />
-            @if (Model.State == TaskState.Done)
-            {
-                <button type="submit" class="secondary">@Localizer["TaskRow.Reopen"]</button>
-            }
-            else
-            {
-                <button type="submit"
-                        style="background:#198754;color:#fff;border:1px solid #198754;padding:8px 18px;border-radius:6px;font-weight:600;cursor:pointer;">
-                    @Localizer["TaskRow.MarkComplete"]
-                </button>
-            }
-        </form>
+    @* §673 — the SHARED .task-act rhythm, identical to the speaker and sponsor rows, so the
+       volunteer / media / event-partner task list matches every other role's. *@
+    @if (isDataSignal)
+    {
+        @* No manual toggle — the reconciler would revert it. Explain the real path. *@
+        <div class="task-actions__note task-actions__note--muted">
+            @(Model.State == TaskState.Done
+                ? "Completed automatically from your saved answer — change the answer on its page to reopen it."
+                : "This task completes automatically once you save the matching step — use the link above (or Get started).")
+        </div>
+    }
+    else
+    {
+        <div class="task-actions">
+            <form method="post" asp-page-handler="Toggle">
+                <input type="hidden" name="taskId" value="@Model.Id" />
+                @if (Model.State == TaskState.Done)
+                {
+                    <button type="submit" class="task-act task-act--secondary">@Localizer["TaskRow.Reopen"]</button>
+                }
+                else
+                {
+                    <button type="submit" class="task-act task-act--complete">@Localizer["TaskRow.MarkComplete"]</button>
+                }
+            </form>
+        </div>
+        @* §677.2 — the note sits under the row, not inline with the buttons. *@
         @if (Model.State != TaskState.Done)
         {
-            <span style="color:#555;font-size:13px;font-style:italic;">@Localizer["TaskRow.CompleteBeforeDue"]</span>
+            <div class="task-actions__note task-actions__note--muted">@Localizer["TaskRow.CompleteBeforeDue"]</div>
         }
-    </div>
+    }
 </details>

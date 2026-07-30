@@ -192,6 +192,16 @@
                     @Model.Result.Created created,
                     @Model.Result.Updated updated,
                     @Model.Result.Skipped unchanged.
+                    @if (Model.Result.PreselectedNoEmail > 0)
+                    {
+                        @* §204: email-less speakers (invite not accepted) parked in the
+                           pre-selection queue rather than skipped. *@
+                        <span>
+                            @Model.Result.PreselectedNoEmail added to
+                            <a asp-page="/Organizer/PreselectionQueue" asp-route-SourceFilter="SessionizeSync">pre-selection</a>
+                            (no email yet).
+                        </span>
+                    }
                     @if (Model.ResultWasFullImport)
                     {
                         <span>All bio fields were force-refreshed from Sessionize.</span>
@@ -199,9 +209,11 @@
                 </p>
             }
 
+            @* §198: skipped reasons (e.g. a speaker with no email on the Sessionize view)
+               are reported here so the organizer can see WHY a speaker did not import. *@
             @if (Model.Result.Warnings.Count > 0)
             {
-                <p><strong>Warnings:</strong></p>
+                <p><strong>Skipped / warnings:</strong></p>
                 <ul>
                     @foreach (var w in Model.Result.Warnings)
                     {

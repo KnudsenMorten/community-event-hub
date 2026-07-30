@@ -26,10 +26,12 @@
         background: #fff8e1; border: 1px solid #f0d878; border-left: 4px solid #e0a800;
         border-radius: 8px; color: #7a5b00; font-size: 16px; font-weight: 600;
     }
+    /* §282: expo maps render FULL WIDTH (single column) so the floor plan is large + readable
+       — the previous 2-column desktop grid halved each map. Tap/click opens the full-size image. */
     .expo-gallery { display: grid; grid-template-columns: 1fr; gap: 12px; margin: 12px 0; }
     .expo-gallery figure { margin: 0; }
     .expo-gallery img { width: 100%; height: auto; border-radius: 8px; display: block; }
-    @@media (min-width: 560px) { .expo-gallery { grid-template-columns: repeat(2, 1fr); } }
+    .expo-gallery figcaption { font-size: 12px; color: #6b7280; margin-top: 4px; }
 </style>
 
 <div class="card">
@@ -56,7 +58,10 @@
         <div class="expo-gallery">
             @foreach (var img in Model.ExpoImages)
             {
-                <figure><img src="@img.Url" alt="@img.Alt" loading="lazy" /></figure>
+                <figure>
+                    <a href="@img.Url" target="_blank" rel="noopener"><img src="@img.Url" alt="@img.Alt" loading="lazy" /></a>
+                    <figcaption>Tap the map to open it full size.</figcaption>
+                </figure>
             }
         </div>
     }

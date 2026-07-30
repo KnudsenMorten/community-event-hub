@@ -45,7 +45,9 @@ public sealed class VolunteerAvailabilityStepHandler : IWizardStepHandler
         await ctx.TryUpdateModelAsync(model);
         Model = model;
 
+        // §234 UX: on Invalid (a day left without a choice) the service adds the error to
+        // ctx.ModelState, so the wizard host re-renders this step with the message.
         return await _service.SaveAsync(
-            model, ctx.EventId, ctx.ParticipantId, ctx.FullName, ctx.Email, ctx.Ct);
+            model, ctx.EventId, ctx.ParticipantId, ctx.FullName, ctx.Email, ctx.ModelState, ctx.Ct);
     }
 }

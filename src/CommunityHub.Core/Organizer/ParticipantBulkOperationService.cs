@@ -19,8 +19,10 @@ namespace CommunityHub.Core.Organizer;
 ///     re-assigning the role a participant already has) changes nothing and is
 ///     not counted as "changed". <see cref="BulkResult.Changed"/> reflects the
 ///     real number of rows whose state actually moved.
-///   - One <see cref="DbContext.SaveChangesAsync(CancellationToken)"/> per call:
-///     the whole batch commits together or not at all.
+///   - Role/ring ops commit in one <see cref="DbContext.SaveChangesAsync(CancellationToken)"/>;
+///     activate/deactivate delegate per row to <see cref="ParticipantDeactivationService"/>
+///     (§253 G1) so the bulk path runs exactly the same cascade as the single-row
+///     paths — each row's cascade commits atomically.
 ///
 /// The service deliberately operates only on fields that already exist on
 /// <see cref="Participant"/> (<see cref="Participant.IsActive"/>,
@@ -31,10 +33,13 @@ namespace CommunityHub.Core.Organizer;
 public sealed class ParticipantBulkOperationService
 {
     private readonly CommunityHubDbContext _db;
+    private readonly ParticipantDeactivationService _cascade;
 
-    public ParticipantBulkOperationService(CommunityHubDbContext db)
+    public ParticipantBulkOperationService(
+        CommunityHubDbContext db, ParticipantDeactivationService cascade)
     {
         _db = db;
+        _cascade = cascade;
     }
 
     /// <summary>Outcome of a bulk call.</summary>
@@ -77,17 +82,19 @@ public sealed class ParticipantBulkOperationService
             if (ParticipantActivation.IsActive(p) == active) continue;
             if (active)
             {
-                p.IsActive = true;
-                p.LifecycleState = ParticipantLifecycleState.Active;
+                // §253 G1: re-activation clears flags + tombstone and restores
+                // NOTHING (the person re-RSVPs / the organizer re-books).
+                await _cascade.ReactivateAsync(eventId, p.Id, ct: ct);
             }
             else
             {
-                p.IsActive = false; // the withdrawal switch — enough to read inactive
+                // §253 G1: bulk deactivation runs the SAME full cascade as the
+                // single-row paths (party RSVP, room block, tasks, shifts, audit).
+                await _cascade.DeactivateAsync(eventId, p.Id, "bulk deactivate", ct: ct);
             }
             changed++;
         }
 
-        if (changed > 0) await _db.SaveChangesAsync(ct);
         return new BulkResult(targets.Count, changed);
     }
 

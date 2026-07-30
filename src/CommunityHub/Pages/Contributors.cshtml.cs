@@ -25,19 +25,22 @@ namespace CommunityHub.Pages;
 [AllowAnonymous]
 public class ContributorsModel : PageModel
 {
+    // Titles/roles removed (operator 2026-07-24: "remove all titles as they are wrong") \u2014
+    // names + LinkedIn only; the view hides the blank role line.
+
     /// <summary>Organizer team -- the people running the event year-round.</summary>
     public List<Contributor> Organizers { get; } = new()
     {
-        new("Morten Knudsen",          "Microsoft MVP -- Security \u00b7 Azure \u00b7 Security Copilot", "https://www.linkedin.com/in/knudsenmorten/",                      "Organizer"),
-        new("Martin Byskov",           "Microsoft MVP -- Modern Workplace",                              "https://www.linkedin.com/in/byskov",                                "Organizer"),
-        new("Morten Leth Hedegaard",   "Microsoft MVP -- Modern Workplace",                              "https://www.linkedin.com/in/morten-leth-hedegaard-37756820/",       "Organizer"),
-        new("Kent Agerlund",           "Microsoft MVP -- Enterprise Mobility",                           "https://www.linkedin.com/in/kentagerlund",                          "Organizer"),
+        new("Morten Knudsen",          "", "https://www.linkedin.com/in/knudsenmorten/",                "Organizer"),
+        new("Martin Byskov",           "", "https://www.linkedin.com/in/byskov",                        "Organizer"),
+        new("Morten Leth Hedegaard",   "", "https://www.linkedin.com/in/morten-leth-hedegaard-37756820/", "Organizer"),
+        new("Kent Agerlund",           "", "https://www.linkedin.com/in/kentagerlund",                  "Organizer"),
     };
 
     /// <summary>External contributors who helped the hub in any way.</summary>
     public List<Contributor> Contributors { get; } = new()
     {
-        new("Laura Gulbe",             "Software Central",                                                "https://www.linkedin.com/in/lauragulbe/",                           "Contributor"),
+        new("Laura Gulbe",             "", "https://www.linkedin.com/in/lauragulbe/",                   "Contributor"),
     };
 
     /// <summary>

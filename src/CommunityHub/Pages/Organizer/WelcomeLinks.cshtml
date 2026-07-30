@@ -49,6 +49,9 @@
     }
     else
     {
+        @* Same mobile scroll wrapper as the second table — a 6-column table
+           otherwise forces whole-page horizontal overflow at ~360px. *@
+        <div class="wl-scroll">
         <table class="wl-tbl">
             <thead>
                 <tr><th>Recipient</th><th>Role</th><th>Issued</th><th>Expires</th><th>Status</th><th></th></tr>
@@ -91,6 +94,7 @@
             }
             </tbody>
         </table>
+        </div>
     }
 </div>
 

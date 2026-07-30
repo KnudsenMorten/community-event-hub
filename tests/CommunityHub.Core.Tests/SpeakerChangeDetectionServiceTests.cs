@@ -203,9 +203,16 @@ public sealed class SpeakerChangeDetectionServiceTests
 
     [Theory]
     [InlineData(SessionSyncDirection.SessionizeToCeh)] // stage 1 = default
-    [InlineData(SessionSyncDirection.CehToZoho)]        // stage 2
-    public async Task Engine_is_inert_unless_speaker_direction_is_stage3(SessionSyncDirection dir)
+    [InlineData(SessionSyncDirection.CehToZoho)]        // stage 2 = the permanent mode
+    [InlineData(SessionSyncDirection.ZohoToCeh)]        // stage 3 = deleted long ago
+    public async Task Engine_runs_whatever_the_stored_speaker_direction_says(SessionSyncDirection dir)
     {
+        // 🔒 §576 — THE STAGE-3 GATE IS REMOVED; it could never be satisfied.
+        //
+        // Stage 3 was deleted long ago, so this comparison engine no-opped on every 5-minute run.
+        // That is the direct cause of §578: CEH held Per Larsen's country ("DK") and skills
+        // ("Microsoft Employee, Microsoft Expert"), Zoho had NEITHER, and nothing ever compared the
+        // two. `BackstageChangeCheckedAt` was still NULL in PROD — the proof it never once looked.
         using var db = ScenarioFixture.NewDb();
         await EnableFeatureAsync(db, enabled: true, direction: dir);
         await SeedSpeakerAsync(db, "bs-1", "Sam", "Old", "Old bio.");
@@ -214,20 +221,17 @@ public sealed class SpeakerChangeDetectionServiceTests
 
         var r = await svc.RunAsync(EventId);
 
-        Assert.True(r.DirectionInactive);
-        Assert.False(r.SourceAvailable);
-        Assert.Contains($"stage {(int)dir}", r.UnavailableReason);
-        Assert.Equal(0, r.Matched);
-        Assert.Equal(0, r.Changed);
-        Assert.Empty(db.SyncDeltas);
-        // Nothing written back — stored baseline untouched.
-        Assert.Equal("Old", db.SpeakerProfiles.Single().BackstageTagline);
+        Assert.False(r.DirectionInactive);
+        Assert.True(r.SourceAvailable);
+        Assert.Equal(1, r.Matched);
+        Assert.Equal(1, r.Changed);
     }
 
     [Fact]
-    public async Task Default_edition_with_no_setting_row_is_inert()
+    public async Task Default_edition_with_no_setting_row_still_runs()
     {
-        // No SessionSourceSetting row at all ⇒ speaker direction defaults to stage 1 ⇒ inert.
+        // §576 — a MISSING SessionSourceSetting row must not silently disable a comparison engine.
+        // Absence of configuration is not a decision to stop checking.
         using var db = ScenarioFixture.NewDb();
         db.Events.Add(new Event
         {
@@ -248,10 +252,9 @@ public sealed class SpeakerChangeDetectionServiceTests
 
         var r = await svc.RunAsync(EventId);
 
-        Assert.True(r.DirectionInactive);
-        Assert.Contains("stage 1", r.UnavailableReason);
-        Assert.Empty(db.SyncDeltas);
-        Assert.Equal("Old", db.SpeakerProfiles.Single().BackstageTagline); // untouched
+        Assert.False(r.DirectionInactive);
+        Assert.True(r.SourceAvailable);
+        Assert.Equal(1, r.Matched);
     }
 
     [Fact]
