@@ -319,7 +319,7 @@
 
 @if (!Model.AccessDenied && Model.Post is { } p)
 {
-    <form method="post" asp-page-handler="Save" class="post-form">
+    <form method="post" asp-page-handler="Save" class="post-form" id="save-post-form">
         <input type="hidden" name="PostId" value="@p.Id" />
 
         <div class="card">
@@ -336,10 +336,51 @@
                         style="min-width:150px;min-height:52px;font-size:1.05rem;font-weight:600;">
                     Save post text
                 </button>
+                @* 🔒 §863.4 (second half) — THE UNSAVED-CHANGES INDICATOR. Moving Save next to the
+                   textarea was only half the fix, because the way an edit is actually lost here is
+                   NAVIGATION: `Next →` is an ordinary link, he walks 84 posts with it, and a GET
+                   throws away whatever is in the box without a word. That is precisely how §859.6
+                   lost a real edit — a post published carrying a paragraph he had already deleted.
+                   Nothing on the page could have told him.
+
+                   ⚠️ It says UNSAVED, not "saving…": the failure was never a slow save, it was a
+                   save that was never submitted. *@
+                <span id="unsaved-flag" class="error"
+                      style="display:none;font-weight:600;align-items:center;gap:6px;">
+                    ● Unsaved changes — press <strong>Save post text</strong> or they are lost
+                </span>
                 <span class="muted">
                     Clear the box completely to go back to the text the engine composed.
                 </span>
             </div>
+            <script>
+                (function () {
+                    var ta = document.getElementById('text');
+                    var flag = document.getElementById('unsaved-flag');
+                    if (!ta || !flag) return;
+                    var initial = ta.value;
+                    var dirty = false;
+
+                    function refresh() {
+                        dirty = ta.value !== initial;
+                        flag.style.display = dirty ? 'inline-flex' : 'none';
+                    }
+                    ta.addEventListener('input', refresh);
+
+                    // Saving is the one navigation that must never warn — it is the fix, not the risk.
+                    var saveForm = document.getElementById('save-post-form');
+                    if (saveForm) saveForm.addEventListener('submit', function () { dirty = false; });
+
+                    // 🔑 EVERY OTHER navigation warns, including the other action forms on this page
+                    // (approve, delete, reschedule). That is not over-zealous: each one re-renders
+                    // the page and discards the box, so the edit really would be gone.
+                    window.addEventListener('beforeunload', function (e) {
+                        if (!dirty) return;
+                        e.preventDefault();
+                        e.returnValue = '';
+                    });
+                })();
+            </script>
 
             @* 🔒 §864.4 — THE PREVIEW: WHAT PUBLISHES, WITH VARIABLES IN A DIFFERENT COLOUR.
                Operator: "did you include the variables in the preview with different color so i can
