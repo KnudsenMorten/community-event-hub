@@ -71,10 +71,19 @@ public sealed class SessionizeEmailLessPreselectionTests
         var prof = await db.SpeakerProfiles.SingleAsync(sp => sp.ParticipantId == prospect.Id);
         Assert.Equal("spk-pending", prof.SessionizeSpeakerId);
 
-        // And it actually shows up in the pre-selection queue the organizer reviews.
+        // 🔒 §756 — it is NOT in the pre-selection queue, and that is the new correct behaviour.
+        // Operator 2026-08-01: "preselection queue must ONLY contain volunteers as all other roles
+        // are selected and have their own onboarding." This assertion used to be
+        // Assert.Contains(...); it is inverted deliberately, not deleted, so the change of home is
+        // pinned rather than merely un-tested.
+        //
+        // ⚠️ The ROW still exists, still inactive, still flagged, still carrying its Sessionize id
+        // (asserted above) — what changed is only WHICH organizer surface reviews it. Speakers are
+        // reviewed on /Organizer/PendingSpeakers, which reads SpeakerProfiles, and the profile row
+        // is confirmed present above.
         var queue = await new PreselectionQueueService(db).GetQueueAsync(
             seed.EventId, ParticipantQueueSource.SessionizeSync);
-        Assert.Contains(queue, p => p.Id == prospect.Id);
+        Assert.DoesNotContain(queue, p => p.Id == prospect.Id);
     }
 
     [Fact]

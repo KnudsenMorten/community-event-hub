@@ -47,6 +47,7 @@ public sealed class SponsorOrderPullService
     private readonly EventConfigOptions _eventConfigOptions;
     private readonly SponsorContactSyncService _contactSync;
     private readonly SharePointUploadClient _sharePoint;
+    private readonly DocLibrary.IDocLibraryPathResolver? _paths;
     private readonly ILogger<SponsorOrderPullService> _log;
 
     public SponsorOrderPullService(
@@ -59,8 +60,13 @@ public sealed class SponsorOrderPullService
         EventConfigOptions eventConfigOptions,
         SponsorContactSyncService contactSync,
         SharePointUploadClient sharePoint,
-        ILogger<SponsorOrderPullService> log)
+        ILogger<SponsorOrderPullService> log,
+        // 🔴 §784.14 — the DocLibrary registry, so per-sponsor upload folders are created under the
+        // SAME root every other reader uses. Optional (last, defaulted) so existing constructions
+        // and tests keep compiling; null ⇒ the legacy config root, which is what shipped before.
+        DocLibrary.IDocLibraryPathResolver? paths = null)
     {
+        _paths = paths;
         _db = db;
         _woo = woo;
         _configLoader = configLoader;
@@ -83,7 +89,8 @@ public sealed class SponsorOrderPullService
 
         var activeEvent = await _db.Events
             .Where(e => e.IsActive)
-            .Select(e => new { e.Id, e.StartDate })
+            // §783.6 — EndDate too: a POST-event deadline anchors on the edition's LAST day.
+            .Select(e => new { e.Id, e.StartDate, e.EndDate })
             .FirstOrDefaultAsync(ct);
         if (activeEvent is null)
         {
@@ -133,6 +140,12 @@ public sealed class SponsorOrderPullService
             .Where(o => !string.IsNullOrWhiteSpace(o.CompanyId))
             .GroupBy(o => o.CompanyId!)
             .ToList();
+
+        // §757 — every "unmatched product" marker this run actually re-detected. An OPEN queue item
+        // whose marker is NOT in here is orphaned: either a classification rule now covers it, or
+        // the order is gone. Collected during the pass so the sweep below judges on THIS run's
+        // evidence rather than on the age of a timestamp.
+        var seenUnmatched = new HashSet<string>(StringComparer.Ordinal);
 
         foreach (var group in ordersByCompany)
         {
@@ -225,7 +238,7 @@ public sealed class SponsorOrderPullService
                         companyTier = cls.Tier;
                     }
                     foreach (var st in expander.Expand(
-                        cls, activeEvent.StartDate, firstOrderDate, today))
+                        cls, activeEvent.StartDate, activeEvent.EndDate, firstOrderDate, today))
                     {
                         tasksByTitleKey.TryAdd(st.Title, st);
                     }
@@ -301,8 +314,10 @@ public sealed class SponsorOrderPullService
                 BuildAudiencePredicates(companyTier, companyHasSession));
             var definitions = TaskDefinitionRegistry.Shipped.For(facts);
 
-            var uploadUrls = await ProvisionUploadFoldersAsync(
-                activeEvent.Id, companyId, companyName,
+            // ⚰️ §822 — this used to PRE-CREATE a SharePoint folder per company per upload task,
+            // mint an edit link and write a SponsorUploadLocation row. It now only seeds the
+            // description placeholders: the flat upload portal is the mechanism.
+            var uploadUrls = SeedUploadPlaceholders(
                 // Both sources, while the two models coexist: the JSON task sets and the migrated
                 // definitions. A migrated definition carries the SAME upload shape it had in JSON,
                 // so this is a move rather than a redesign.
@@ -317,8 +332,7 @@ public sealed class SponsorOrderPullService
                             Placeholder = d.Upload.Placeholder,
                             NotifyEmails = d.Upload.NotifyEmails.ToList(),
                             NotifySubject = d.Upload.NotifySubject,
-                        })),
-                editionFacts, ct);
+                        })));
 
             var desiredKeys = new HashSet<string>(StringComparer.Ordinal);
 
@@ -355,7 +369,8 @@ public sealed class SponsorOrderPullService
                 var defDue = definition.Due switch
                 {
                     TaskDue.FromConfig fromConfig => expander.ResolveDeadlineRule(
-                        fromConfig.RuleName, activeEvent.StartDate, firstOrderDate, today),
+                        fromConfig.RuleName, activeEvent.StartDate, activeEvent.EndDate,
+                        firstOrderDate, today),
                     TaskDue.Fixed fixedDate => fixedDate.Date,
                     TaskDue.EventMinus eventMinus => activeEvent.StartDate.AddDays(-eventMinus.Days),
                     _ => null,
@@ -583,6 +598,9 @@ public sealed class SponsorOrderPullService
                 foreach (var line in unmatchedLines.Distinct(StringComparer.OrdinalIgnoreCase))
                 {
                     var marker = $"{companyName}: {line}";
+                    // §757 — recorded BEFORE the dedup skip: an item that already exists is still
+                    // being re-detected, and must not be swept away as orphaned.
+                    seenUnmatched.Add(marker);
                     if (knownUnmatched.Any(s => s.StartsWith(marker, StringComparison.Ordinal))) continue;
                     _db.OrganizerActionItems.Add(new OrganizerActionItem
                     {
@@ -617,10 +635,25 @@ public sealed class SponsorOrderPullService
                 m => m.EventId == activeEvent.Id
                      && m.SponsorCompanyId == companyId
                      && m.DeletedAt == null, ct);
+            // 🔒 §784.14 — BOTH sources, because the folder one is being retired.
+            //
+            // The watcher-seen file in `SPONSORWALL` was the ONLY evidence here, and
+            // `/Sponsors/Sponsor Upload` is now retired ("that tree is retired and shouldn't be
+            // pre-created at all"). Once those folders are gone this check would silently answer NO
+            // forever, and the wall task would become impossible to auto-complete — with no error
+            // anywhere, which is the §335 shape: "the only symptom is that nothing happens".
+            //
+            // Since §783.4 the sponsor uploads through the WIZARD, which writes a `wall` audit row
+            // against Sponsors/Logo/… — so the audit is the durable evidence and the folder is the
+            // legacy one. `SponsorDeliverablesService` already ORs the two; this call site did not.
             var wallUploadOnFile = await _db.SponsorUploadFiles.AnyAsync(
                 f => f.Location.EventId == activeEvent.Id
                      && f.Location.SponsorCompanyId == companyId
-                     && f.Location.FolderKey == "SPONSORWALL", ct);
+                     && f.Location.FolderKey == "SPONSORWALL", ct)
+                || await _db.SponsorUploadAudits.AnyAsync(
+                    a => a.EventId == activeEvent.Id
+                         && a.SponsorCompanyId == companyId
+                         && a.Kind == "wall", ct);
             var overviewOnFile = await _db.SponsorInfos.AnyAsync(
                 s => s.EventId == activeEvent.Id
                      && s.SponsorCompanyId == companyId
@@ -696,20 +729,50 @@ public sealed class SponsorOrderPullService
             }
         }
 
-        // §253 G8d: refunded/cancelled orders were INVISIBLE — the pull reads
-        // status=completed only, tiers/packages are raise-only and nothing ever
-        // rolled a mirrored order back. Probe the refund statuses and raise ONE
-        // organizer action-queue item per order (dedup by Woo order id, resolved
-        // items never re-raise) so a human decides the rollback. Fail-soft: a
-        // probe hiccup never breaks the pull.
-        try
+        // 🗑 §757 — THE REFUNDED/CANCELLED ACTION ITEM IS GONE. Do not reinstate it.
+        //
+        // Operator 2026-08-01, on the 7 of these sitting in his action queue: *"cancel/refund must
+        // not be approved. this is handled inside zoho billing and must not stop anything."*
+        //
+        // §253 G8d raised one queue item per refunded order "so a human decides the rollback". That
+        // decision is not CEH's to ask for: a refund or cancellation is settled in ZOHO BILLING,
+        // which is the system of record for money. Surfacing it here asked him to re-approve
+        // something already decided elsewhere — and it sat in a queue whose entire premise is
+        // "everything that needs a human decision", so it made that queue lie.
+        //
+        // 🔑 The test is NOT "is this a real event that never self-heals?" — a refund is exactly
+        // that, and it still does not belong here. The test is "is there a decision left for CEH to
+        // make?". There is not.
+        //
+        // ⚠️ Nothing else about refund handling changed: the pull still reads status=completed only,
+        // so a refunded order simply stops being mirrored. If a rollback of entitlements is ever
+        // wanted it must be a deliberate feature, not a nag item.
+
+        // §757 — CLOSE THE ORPHANS OURSELVES. Operator 2026-08-01: *"you must fix these and close
+        // them if they are orphaned - dont ask me to fix them."*
+        //
+        // 🔒 Guarded on the pull having actually returned orders. A Woo outage returns an empty
+        // list, and sweeping on that evidence would resolve every open item at once — the same
+        // "an empty read is indistinguishable from a real empty" trap as §301b and §754.3.
+        if (orders.Count > 0)
         {
-            await RaiseRefundedOrderAlertsAsync(activeEvent.Id, ct);
-        }
-        catch (Exception ex)
-        {
-            _log.LogError(ex,
-                "SponsorOrderPullService: refunded-order probe failed; continuing (next run retries).");
+            try
+            {
+                var (closed, stillOpen) = await AutoResolveObsoleteActionItemsAsync(
+                    activeEvent.Id, seenUnmatched, ct);
+                // 🔒 Logged on EVERY run, including zero. Logging only when something closed made
+                // "the queue is already drained" and "the sweep never ran" produce identical
+                // silence — which is exactly the ambiguity I then could not resolve from the logs
+                // when the operator asked whether it had drained. Silence is not evidence.
+                _log.LogInformation(
+                    "SponsorOrderPull: action-queue sweep closed {Closed}, {Open} still open.",
+                    closed, stillOpen);
+            }
+            catch (Exception ex)
+            {
+                // Housekeeping must never break the pull it rides on.
+                _log.LogWarning(ex, "SponsorOrderPull: obsolete action-item sweep failed; ignored.");
+            }
         }
 
         _log.LogInformation(
@@ -735,6 +798,70 @@ public sealed class SponsorOrderPullService
         => value.Length <= max ? value : value[..max] + "…";
 
     /// <summary>
+    /// <summary>
+    /// §757 — resolve action-queue items that are no longer true, so the queue drains itself.
+    /// Returns how many were closed.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-08-01: <i>"you must fix these and close them if they are orphaned - dont
+    /// ask me to fix them."</i> He had 22 open items, 15 of which had been answered by a config
+    /// change two hours after they were raised, and 7 which should never have been raised at all.
+    /// Telling him to tick them off was the wrong answer twice over — it is work he should not do,
+    /// and it would have happened again the next time a category was renamed.</para>
+    ///
+    /// <para>🔑 <b>The rule is re-detection, not age.</b> An unmatched-product item survives only
+    /// while the pull keeps re-detecting that exact product as unmatched. Add a classification rule
+    /// and it stops being detected; the order goes away and it stops being detected. Either way the
+    /// item closes on the next run, with a note saying why — so the queue can never again accumulate
+    /// a tail of things that were fixed elsewhere.</para>
+    ///
+    /// <para>🔒 <b>Resolved, never deleted.</b> The row keeps its history and its note, and
+    /// <c>ReopenAsync</c> still works — this is the queue draining, not the evidence disappearing.
+    /// </para>
+    /// </remarks>
+    /// <returns>How many were closed, and how many remain open after the sweep.</returns>
+    private async Task<(int Closed, int StillOpen)> AutoResolveObsoleteActionItemsAsync(
+        int eventId, HashSet<string> seenUnmatched, CancellationToken ct)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var closed = 0;
+
+        var open = await _db.OrganizerActionItems
+            .Where(a => a.EventId == eventId && a.ResolvedAt == null)
+            .ToListAsync(ct);
+
+        foreach (var item in open)
+        {
+            string? why = null;
+
+            // The refund family is retired outright (see the note at the call site): it is settled
+            // in Zoho billing and CEH has no decision to ask for.
+            if (item.Type == Reminders.OrganizerActionItemService.TypeSponsorOrderRefunded)
+            {
+                why = "Closed automatically (§757): refunds and cancellations are handled in Zoho "
+                      + "billing, so CEH no longer raises them for approval.";
+            }
+            // An unmatched-product item the pull did NOT re-detect this run: a classification rule
+            // now covers the product, or the order is gone.
+            else if (item.Type == Reminders.OrganizerActionItemService.TypeWebshopCategoryUnrecognized
+                     && !seenUnmatched.Any(m => item.Summary.StartsWith(m, StringComparison.Ordinal)))
+            {
+                why = "Closed automatically (§757): this product is no longer unmatched — a "
+                      + "classification rule now covers it, or the order is gone. The pull "
+                      + "re-checked and did not raise it again.";
+            }
+
+            if (why is null) continue;
+
+            item.ResolvedAt = now;
+            item.ResolvedNotes = why;
+            closed++;
+        }
+
+        if (closed > 0) await _db.SaveChangesAsync(ct);
+        return (closed, open.Count - closed);
+    }
+
     /// §253 G8d — surface WooCommerce order REFUNDS/CANCELLATIONS to the organizer
     /// action queue. One <see cref="OrganizerActionItem"/> per Woo order id, ever:
     /// the marker "Woo order {id}" in the Summary is the dedup key, so a resolved
@@ -789,148 +916,42 @@ public sealed class SponsorOrderPullService
     }
 
     /// <summary>
-    /// Pre-create the per-task SharePoint upload folders for one sponsor
-    /// company, mint anonymous edit-link URLs, and persist a
-    /// <see cref="SponsorUploadLocation"/> row per folder so the watcher
-    /// knows where to poll and who to notify. Returns a dictionary keyed by
-    /// the task's upload placeholder name (e.g. "logoFolderUrl") -&gt; the
-    /// minted URL, used to substitute the URL into the task description.
-    ///
-    /// Best-effort: any SharePoint failure (mis-config, 403, network) leaves
-    /// the URL absent so <see cref="SubstitutePlaceholders"/> can fall back
-    /// to <c>{{uploadPortalUrl}}</c>. Existing location rows are UPSERTed so
-    /// re-running the pull refreshes the link / recipients without duplicating.
+    /// ⚰️ §822 — THE PER-COMPANY UPLOAD FOLDERS ARE RETIRED. This now only SEEDS the task
+    /// description placeholders so they fall back to <c>{{uploadPortalUrl}}</c>. It creates nothing.
     /// </summary>
-    private async Task<Dictionary<string, string>> ProvisionUploadFoldersAsync(
-        int eventId,
-        string companyId,
-        string companyName,
-        IEnumerable<SponsorTaskUploadDefinition> uploads,
-        EventEditionConfig editionFacts,
-        CancellationToken ct)
+    /// <remarks>
+    /// <para>Operator 2026-08-04, pointing at <c>SponsorUploadRoot</c> on the DocLibrary settings
+    /// page: <i>"retire this legacy"</i>. It had already been decided in substance on 2026-08-03 —
+    /// <i>"we should NOT create any folder - that was the old method"</i>, <i>"sponsor data like logo
+    /// is in flat folder structure"</i> — and §816/§817.3(2) left this half standing pending his
+    /// call.</para>
+    ///
+    /// <para>🔑 <b>This is the third and last part of the old model to go.</b> §816 removed the
+    /// welcome guard that WAITED for a folder; §819 retired the job that WATCHED for the folder; this
+    /// removes the code that CREATED it. Leaving any one of them behind is what made the other two
+    /// look healthy while a real sponsor went unwelcomed — [[ceh-two-switch-trap]] three times over on
+    /// one mechanism.</para>
+    ///
+    /// <para>🔒 <b>The placeholder seeding STAYS, and it is not vestigial.</b> Every upload task
+    /// description carries a <c>{{logoFolderUrl}}</c>-style marker. Seeding it blank is what makes
+    /// <see cref="SubstitutePlaceholders"/> fall back to the generic upload portal; deleting the seed
+    /// would render a literal <c>{{logoFolderUrl}}</c> to a sponsor. The flat portal IS the upload
+    /// mechanism now, so the fallback is no longer a fallback — it is the path.</para>
+    ///
+    /// <para>⚠️ Existing <c>SponsorUploadLocation</c> rows are LEFT ALONE. No new ones are written,
+    /// but three surfaces still read the company NAME off them as a legacy fallback, and deleting
+    /// live rows to tidy up a retirement would break a read that has nothing to do with folders.</para>
+    /// </remarks>
+    private Dictionary<string, string> SeedUploadPlaceholders(
+        IEnumerable<SponsorTaskUploadDefinition> uploads)
     {
         var urls = new Dictionary<string, string>(StringComparer.Ordinal);
 
-        // De-dup uploads by subfolder so the same folder is not provisioned
-        // twice if two tasks reference it (rare but defensive).
-        //
-        // 🔒 §686.2 — this takes UPLOAD DEFINITIONS rather than tasks now, because they arrive from
-        // two places during the migration: the JSON task sets and the code registry. Leaving it
-        // reading only the JSON tasks is a trap worth naming — the sponsor-wall task's folder would
-        // simply stop being provisioned the moment that task migrated. Nothing would look broken:
-        // the task still renders, the Upload button is still there, and the file lands somewhere
-        // nobody is watching.
-        var uploadDefs = uploads
-            .Where(u => !string.IsNullOrWhiteSpace(u.Subfolder))
-            .GroupBy(u => u.Subfolder, StringComparer.OrdinalIgnoreCase)
-            .Select(g => g.First())
-            .ToList();
-
-        // SEED every upload placeholder with a blank value up-front so the
-        // description NEVER renders a literal "{{logoFolderUrl}}". A blank value
-        // makes SubstitutePlaceholders fall back to the generic {{uploadPortalUrl}};
-        // a successful SharePoint provision below overrides it with the real
-        // per-company edit link. This keeps the button working even when SharePoint
-        // is disabled or provisioning fails.
-        foreach (var def in uploadDefs)
+        foreach (var def in uploads)
         {
             if (!string.IsNullOrWhiteSpace(def.Placeholder))
             {
                 urls[def.Placeholder] = string.Empty;
-            }
-        }
-
-        var sp = editionFacts.SharePoint;
-        if (sp is null || string.IsNullOrWhiteSpace(sp.SiteUrl) || !_sharePoint.IsConfigured)
-        {
-            // §326cd — this used to return in SILENCE, and the silence had a consequence
-            // nobody could see: with no SharePoint, no SponsorUploadLocation is ever written,
-            // and the sponsor-welcome provisioning guard then blocks EVERY Gold+ booth company
-            // FOREVER (SponsorWelcomeEmailService ~:63-85). The welcome never goes out and the
-            // only symptom is an absence. Say it, on every pull, at Warning.
-            _log.LogWarning(
-                "SponsorOrderPullService: SharePoint NOT configured for this edition "
-                + "(site '{Site}', client configured={Configured}) — upload folders will not be "
-                + "provisioned for {Co}. CONSEQUENCE: every Gold+ booth company stays BLOCKED "
-                + "from the sponsor welcome until this is configured.",
-                sp?.SiteUrl ?? "(none)", _sharePoint.IsConfigured, companyName);
-            return urls;
-        }
-
-        foreach (var def in uploadDefs)
-        {
-            var relPath = $"{companyName}/{def.Subfolder}";
-            try
-            {
-                var provisioned = await _sharePoint.EnsureFolderWithEditLinkAsync(
-                    sp.SiteUrl, sp.DriveName, sp.RootFolderPath, relPath, ct);
-
-                if (!string.IsNullOrWhiteSpace(def.Placeholder)
-                    && !string.IsNullOrWhiteSpace(provisioned.WebUrl))
-                {
-                    urls[def.Placeholder] = provisioned.WebUrl;
-                }
-
-                // UPSERT the watcher's row -- keyed (EventId, CompanyId, FolderKey).
-                // FolderKey uses Subfolder as the stable identity; if the config
-                // renames a subfolder, the old row is orphaned (no auto-cleanup
-                // today; orphans are harmless because the watcher swallows
-                // 404s).
-                var existing = await _db.SponsorUploadLocations
-                    .FirstOrDefaultAsync(
-                        l => l.EventId == eventId
-                             && l.SponsorCompanyId == companyId
-                             && l.FolderKey == def.Subfolder, ct);
-
-                var notifyCsv = string.Join(",",
-                    (def.NotifyEmails ?? new List<string>())
-                    .Where(s => !string.IsNullOrWhiteSpace(s)));
-
-                if (existing is null)
-                {
-                    _db.SponsorUploadLocations.Add(new SponsorUploadLocation
-                    {
-                        EventId = eventId,
-                        SponsorCompanyId = companyId,
-                        CompanyName = companyName,
-                        FolderKey = def.Subfolder,
-                        Subfolder = def.Subfolder,
-                        FolderPath = provisioned.FolderPath,
-                        EditLinkUrl = provisioned.WebUrl,
-                        NotifyEmailsCsv = notifyCsv,
-                        NotifySubject = def.NotifySubject ?? string.Empty,
-                    });
-                }
-                else
-                {
-                    existing.CompanyName = companyName;
-                    existing.FolderPath  = provisioned.FolderPath;
-                    existing.EditLinkUrl = provisioned.WebUrl;
-                    existing.NotifyEmailsCsv = notifyCsv;
-                    existing.NotifySubject   = def.NotifySubject ?? string.Empty;
-                }
-            }
-            catch (SharePointUploadException ex)
-            {
-                _log.LogWarning(ex,
-                    "SponsorOrderPullService: failed to provision SharePoint folder '{Path}' for {Co}; "
-                    + "task description will fall back to {{uploadPortalUrl}}.",
-                    relPath, companyName);
-            }
-            // §102: a slow SharePoint call can surface a TaskCanceledException
-            // (HttpClient timeout) rather than a SharePointUploadException — that
-            // previously bubbled out and FAILED the whole WooCommerce pull (the
-            // 13:32 engine alert). Treat any non-shutdown transient failure as a
-            // per-folder skip + continue so one slow SharePoint call never aborts
-            // the pull. A REAL host-shutdown cancellation (our ct) still propagates.
-            catch (Exception ex) when (ex is not OperationCanceledException
-                                       || !ct.IsCancellationRequested)
-            {
-                _log.LogWarning(ex,
-                    "SponsorOrderPullService: transient/slow SharePoint failure provisioning "
-                    + "'{Path}' for {Co} (e.g. Graph HttpClient timeout); skipping this folder "
-                    + "and continuing the pull.",
-                    relPath, companyName);
             }
         }
 

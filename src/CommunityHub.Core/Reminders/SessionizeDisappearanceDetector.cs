@@ -190,7 +190,10 @@ public sealed class SessionizeDisappearanceDetector
 
         // Throttle per edition so a still-missing set won't email on every import tick.
         var throttleKey = $"sessionize-disappearance-{eventId}";
-        await _alerts!.AlertAsync(subject, html, ct, throttleKey);
+        // §752.9 — DEV-silent: DEV's Sessionize fixtures are edited and re-seeded, so speakers and
+        // sessions "disappear" as a matter of routine. In PROD a disappearance is real data loss and
+        // still alerts.
+        await _alerts!.AlertAsync(subject, html, ct, throttleKey, devSilent: true);
         return true;
     }
 

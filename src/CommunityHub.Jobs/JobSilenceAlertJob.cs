@@ -37,9 +37,8 @@ public sealed class JobSilenceAlertJob
 
     [Function("JobSilenceAlertJob")]
     public async Task Run(
-        // Daily at 06:40 UTC — after the other nightly jobs have had their chance to run, so a job
-        // that legitimately runs at 05:00 is not reported as silent at 04:00.
-        [TimerTrigger("0 40 6 * * *")] TimerInfo timer,
+        // §878 — BASE TICK ONLY; the cadence is the operator's interval on /Organizer/Jobs.
+        [TimerTrigger("0 */5 * * * *")] TimerInfo timer,
         CancellationToken ct)
     {
         var silent = await _detector.DetectAsync(ct);
@@ -65,7 +64,11 @@ public sealed class JobSilenceAlertJob
             + $"<ul>{lines}</ul>"
             + "<p>A job can report a healthy run while being blocked by a setting, a deleted "
             + "configuration value, or an upstream read that silently returns nothing.</p>",
-            ct, throttleKey: "JobSilenceAlertJob");
+            // §752.9 — DEV-SILENT. On DEV most of these jobs are idle BY CONFIGURATION: their
+            // features are switched off on purpose, so "4 look asleep" is the operator's own setup
+            // read back to him. In PROD a job that has quietly stopped doing anything is precisely
+            // the failure nothing else reports, which is why the alert exists at all.
+            ct, throttleKey: "JobSilenceAlertJob", devSilent: true);
 
         _log.LogInformation("JobSilenceAlertJob: reported {Count} silent job(s).", silent.Count);
     }

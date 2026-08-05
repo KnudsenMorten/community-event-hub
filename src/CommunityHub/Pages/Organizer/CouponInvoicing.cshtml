@@ -1,0 +1,595 @@
+@page
+@model CommunityHub.Pages.Organizer.CouponInvoicingModel
+@using CommunityHub.Core.Domain
+@{
+    ViewData["Title"] = "Coupon invoicing";
+}
+
+@* 🔒 §787.2 — mobile-first (~360px). One CARD per coupon, not a five-column grid: the edit form
+   has to be usable on a phone, and a table with an inline form in every row is not. *@
+<style>
+    .ci-card { border:1px solid #e5e7eb; border-radius:10px; padding:12px 14px; margin:10px 0; }
+    .ci-card.attention { border-left:4px solid #c8322a; background:#fdf6f5; }
+    .ci-name { font-weight:700; font-size:16px; overflow-wrap:anywhere; }
+    .ci-meta { color:#6b7280; font-size:13px; }
+    .ci-chip { display:inline-block; border-radius:999px; padding:2px 9px; font-size:12px; font-weight:700; }
+    .ci-chip.warn { background:#fdecea; color:#c8322a; }
+    .ci-chip.ok { background:#eef7ee; color:#1E7A3C; }
+    .ci-chip.muted { background:#eef2f7; color:#475569; }
+    .ci-grid { display:flex; flex-wrap:wrap; gap:10px; align-items:flex-end; margin-top:10px; }
+    .ci-grid label { display:block; font-size:12px; color:#6b7280; }
+    .ci-grid input, .ci-grid select { min-width:0; max-width:100%; }
+    .ci-actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; }
+</style>
+
+<div class="card">
+    <h1>Coupon invoicing</h1>
+
+    @if (Model.AccessDenied)
+    {
+        <p class="error">This area is for organizers only.</p>
+        <p><a asp-page="/Index">Back to hub</a></p>
+        return;
+    }
+
+    <p>
+        Which Backstage coupon is billed to which e-conomic customer. This replaces the
+        <code>ZohoBackstageCoupons_Invoicing.csv</code> file &mdash; edit it here and it takes effect
+        without a deploy.
+    </p>
+    @* §787.12 — BEFORE TICKET SALE there is nothing to discover, so the page must not read as
+       "nothing to do". Configuring the list up front is the whole job at this point. *@
+    @if (Model.TotalClaims == 0)
+    {
+        <p class="ci-meta">
+            <strong>No coupon tickets have been claimed yet</strong> &mdash; ticket sale has not
+            started. That is expected: set up the full promo-code list now, and every claim is
+            billable the moment it arrives instead of waiting for someone to map it.
+        </p>
+    }
+    else
+    {
+        <p class="ci-meta">
+            Claims are read from the orders CEH already mirrors, so this page needs no Zoho call.
+            <strong>@Model.TotalClaims claimed coupon ticket(s)</strong> found in this edition.
+        </p>
+    }
+    <p class="ci-meta">
+        Editing a rule here never invoices anything &mdash; the hourly job does that, and only when
+        its feature switch is on and dry-run is off.
+    </p>
+
+    @* 🔴 §787.14 — Zoho exposes NO create-coupon API, so this page cannot make a coupon exist in
+       Backstage. Saying so here is not pedantry: adding a row and assuming the code is now live is
+       exactly the mistake that ends with a partner given a code that nothing accepts. *@
+    <p style="background:#fff4e5;border-left:4px solid #d97706;padding:10px 12px;border-radius:4px;">
+        <strong>This page does not create coupons in Zoho.</strong> Backstage has no API for that,
+        so the promo code itself must be created in <strong>Zoho Backstage</strong>. What you set
+        here is only <em>who gets invoiced</em> when that code is claimed &mdash; the two lists have
+        to be kept in step by hand, and a code mapped here that does not exist in Backstage simply
+        never gets claimed.
+    </p>
+    <p><a asp-page="/Organizer/Setup">&larr; Back to setup</a></p>
+</div>
+
+@if (Model.Message is not null)
+{
+    <div class="card"><p role="status" style="color:#0a6;margin:0;">@Model.Message</p></div>
+}
+@if (Model.Error is not null)
+{
+    <div class="card"><p role="alert" class="error" style="margin:0;">@Model.Error</p></div>
+}
+
+@* §798.2 — THE ADD FORM IS AT THE TOP. Operator 2026-08-04: *"can the add a single coupn be added
+   to top instead of bottom to avoid scrolling"*. With a real list of coupons it sat below every
+   row, so adding one meant scrolling past all of them. Mapping a code BEFORE it is used is also the
+   good case — no claim ever waits for a decision. *@
+<div class="card">
+    <h2 style="margin-top:0;">Add a single coupon</h2>
+    <p class="ci-meta">
+        Mapping a code before it is used means no claim ever waits for a decision.
+    </p>
+    <form method="post" asp-page-handler="Save">
+        <input type="hidden" name="SettingId" value="0" />
+        <div class="ci-grid">
+            <div>
+                <label for="new-name">Coupon name</label>
+                @* §797.3 — the redirect loses posted fields, so a refused name comes back here
+                   rather than having to be typed again. *@
+                <input id="new-name" type="text" name="CouponName" required maxlength="200"
+                       value="@(Model.DraftCouponName ?? "")" />
+            </div>
+            <div>
+                <label for="new-bt">Billing type</label>
+                <select id="new-bt" name="BillingType">
+                    @foreach (var t in Enum.GetValues<CouponBillingType>())
+                    {
+                        <option value="@t">@CommunityHub.Pages.Organizer.CouponInvoicingModel.DisplayName(t)</option>
+                    }
+                </select>
+            </div>
+            <div>
+                <label for="new-cust">e-conomic customer</label>
+                @if (Model.CustomerPickerAvailable)
+                {
+                    <select id="new-cust" name="ErpCustomerNumber" style="max-width:260px;">
+                        <option value="">— none —</option>
+                        @foreach (var c in Model.Customers)
+                        {
+                            <option value="@c.CustomerNumber">@c.Name (@c.CustomerNumber)</option>
+                        }
+                    </select>
+                }
+                else
+                {
+                    <input id="new-cust" type="number" name="ErpCustomerNumber" min="1" style="width:150px;" />
+                }
+            </div>
+            <div style="flex:1 1 200px;">
+                <label for="new-note">Notes</label>
+                <input id="new-note" type="text" name="Notes" maxlength="400" style="width:100%;" />
+            </div>
+            <button type="submit" class="btn">Add</button>
+        </div>
+    </form>
+    @* ⚠️ The requester is picked on the SAVED row, not here: its dropdown is the contact list of
+       the customer this coupon is billed to, and that customer does not exist until it is saved. *@
+    <p class="ci-meta" style="margin-bottom:0;">
+        Pick the <strong>requester</strong> (the invoice&rsquo;s Att person) on the coupon once it is
+        added &mdash; the list comes from that customer&rsquo;s own e-conomic contacts.
+    </p>
+</div>
+
+@* 🔴 THE POINT OF THE PAGE. A claimed-but-unmapped coupon is a ticket nobody can bill — lost
+   revenue with a clock on it, not a tidy-up task. It goes at the top and it is loud. *@
+@if (Model.AttentionCount > 0)
+{
+    <div class="card" style="border-left:4px solid #c8322a;">
+        <h2 style="margin-top:0;color:#c8322a;">
+            @Model.AttentionCount coupon(s) need a decision
+        </h2>
+        <p style="margin:0;">
+            Either someone has claimed a ticket with these codes and CEH cannot invoice anyone for it
+            &mdash; set the billing type and the e-conomic customer below and the next hourly run
+            picks them up &mdash; or a <strong>prepaid pool</strong> is out of tickets or has no
+            e-conomic invoice number recorded against it (§795.2), which means nothing here says the
+            partner was ever billed for what they bought.
+        </p>
+    </div>
+}
+
+@foreach (var r in Model.Rows)
+{
+    <div class="ci-card @(r.NeedsAttention ? "attention" : "")">
+        <div class="ci-name">@r.CouponName</div>
+        <div class="ci-meta">
+            @if (r.ClaimCount > 0)
+            {
+                <text><strong>@r.ClaimCount claim(s)</strong> &middot; @r.ClaimedValueDkk.ToString("N2") DKK</text>
+            }
+            else
+            {
+                <text>no claims yet</text>
+            }
+            @if (r.Setting?.FirstSeenClaimedAt is { } seen)
+            {
+                <text> &middot; first claimed @seen.UtcDateTime.ToString("dd MMM yyyy")</text>
+            }
+        </div>
+
+        <div style="margin-top:6px;">
+            @if (r.NeedsAttention)
+            {
+                <span class="ci-chip warn">needs a decision</span>
+            }
+            else if (r.BillingType == CouponBillingType.NoInvoicing)
+            {
+                <span class="ci-chip muted">never invoiced</span>
+            }
+            else if (r.Setting?.IsPrepaid == true)
+            {
+                @* §794 — prepaid is NEVER invoiced. Saying "prepaid" rather than "billable" is the
+                   point: this partner already paid, and billing them per claim would charge them
+                   twice for tickets they own. *@
+                <span class="ci-chip ok">prepaid &mdash; drawn from pool, never invoiced</span>
+            }
+            else if (r.Setting?.IsInvoiceable == true)
+            {
+                <span class="ci-chip ok">billable &rarr; customer @r.ErpCustomerNumber</span>
+            }
+            else
+            {
+                <span class="ci-chip muted">not mapped</span>
+            }
+            <span class="ci-meta"> @CommunityHub.Pages.Organizer.CouponInvoicingModel.Describe(r.BillingType)</span>
+        </div>
+
+        @* 🔴 §794 — THE PREPAID POOL. This is the number the partner plans against, so it is shown
+           before the editing controls, not below them. Remaining is deliberately allowed to go
+           NEGATIVE: "0 left" reads as "fully used, fine", where "-3" says three people have tickets
+           nobody paid for. *@
+        @if (r.Pools.Count > 0)
+        {
+            <div style="margin-top:10px;padding:8px 10px;border-radius:8px;background:#f8fafc;">
+                <div class="ci-meta" style="margin-bottom:4px;"><strong>Prepaid allocation</strong></div>
+                @foreach (var view in r.Pools)
+                {
+                    var p = view.Balance;
+                    <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:baseline;margin:3px 0;">
+                        <span style="min-width:90px;">@(p.Label ?? p.TicketClassId)</span>
+                        <span>
+                            <strong style="font-size:17px;color:@(p.IsOversubscribed ? "#c8322a" : p.IsLow ? "#b45309" : "#1E7A3C");">
+                                @p.Remaining
+                            </strong>
+                            <span class="ci-meta"> left of @p.Purchased &middot; @p.Claimed claimed</span>
+                            @if (view.Purchases.Count > 1)
+                            {
+                                @* §798.4 — say the total is a SUM. "75" alone hides that it was two
+                                   agreements, which is the thing he needs when an invoice is queried. *@
+                                <span class="ci-meta"> (@view.Purchases.Count purchases)</span>
+                            }
+                        </span>
+                        @* §795.1 — the STATE. "closed" is a decision somebody made; "used in full"
+                           is arithmetic and un-closes itself the moment a ticket is cancelled. *@
+                        @if (p.ClosedByHand)
+                        {
+                            <span class="ci-chip muted">closed &mdash; agreement ended</span>
+                        }
+                        else if (p.IsOversubscribed)
+                        {
+                            <span class="ci-chip warn">
+                                @(-p.Remaining) ticket(s) beyond what was paid for
+                            </span>
+                        }
+                        else if (p.IsExhausted)
+                        {
+                            <span class="ci-chip warn">used in full</span>
+                        }
+                        else if (p.IsLow)
+                        {
+                            <span class="ci-chip warn">running low</span>
+                        }
+                        else
+                        {
+                            <span class="ci-chip ok">open</span>
+                        }
+
+                        @* 🔴 §795.2/§798.4 — per PURCHASE. A pool topped up after being invoiced
+                           once is NOT billed, and one flag on the pool would have said it was. *@
+                        @if (p.IsBilled)
+                        {
+                            <span class="ci-chip ok">all purchases billed</span>
+                        }
+                        else
+                        {
+                            <span class="ci-chip warn">
+                                @p.UnbilledPurchases purchase(s) with no invoice number
+                            </span>
+                        }
+                    </div>
+
+                    @* 🔴 §798.4 — THE PURCHASE HISTORY. "50 in January on invoice 20147, 25 more in
+                       March on 20233" — same coupon code, separate agreements, separate invoices.
+                       Each row carries its own number because each one was billed on its own. *@
+                    <div style="margin:2px 0 8px 0;padding-left:8px;border-left:2px solid #e5e7eb;">
+                        @foreach (var buy in view.Purchases)
+                        {
+                            <form method="post" asp-page-handler="SetPoolInvoice" class="ci-grid"
+                                  style="margin:2px 0;gap:8px;">
+                                <input type="hidden" name="PoolPurchaseId" value="@buy.Id" />
+                                <span style="min-width:150px;">
+                                    <strong>@buy.Quantity</strong> ticket(s)
+                                    <span class="ci-meta">&middot; @buy.CreatedAt.UtcDateTime.ToString("dd MMM yyyy")</span>
+                                </span>
+                                <div>
+                                    <label for="pin-@buy.Id">e-conomic invoice no.</label>
+                                    <input id="pin-@buy.Id" type="text" name="PoolErpInvoiceNumber"
+                                           value="@(buy.ErpInvoiceNumber ?? "")" maxlength="60"
+                                           placeholder="not billed yet" style="width:150px;" />
+                                </div>
+                                <button type="submit" class="btn">Save invoice no.</button>
+                                @if (!buy.IsBilled)
+                                {
+                                    <span class="ci-chip warn">not billed</span>
+                                }
+                                @if (!string.IsNullOrWhiteSpace(buy.Notes))
+                                {
+                                    <span class="ci-meta">@buy.Notes</span>
+                                }
+                            </form>
+                        }
+                    </div>
+
+                    <div class="ci-actions" style="margin:0 0 8px 0;">
+                        @* 🔴 §798.4 — TOP UP: same coupon code, more tickets, its own invoice. *@
+                        <form method="post" asp-page-handler="AddTickets" class="ci-grid" style="margin:0;">
+                            <input type="hidden" name="SettingId" value="@r.Setting!.Id" />
+                            <input type="hidden" name="PoolTicketClassId" value="@p.TicketClassId" />
+                            <div>
+                                <label for="top-@p.AllocationId">Buy more (same code)</label>
+                                <input id="top-@p.AllocationId" type="number" name="PoolQuantity" min="1"
+                                       placeholder="25" style="width:90px;" />
+                            </div>
+                            <div>
+                                <label for="topinv-@p.AllocationId">Invoice no. (optional)</label>
+                                <input id="topinv-@p.AllocationId" type="text" name="PoolErpInvoiceNumber"
+                                       maxlength="60" style="width:140px;" />
+                            </div>
+                            <button type="submit" class="btn">Add tickets</button>
+                        </form>
+
+                        <form method="post" asp-page-handler="SetPoolThreshold" class="ci-grid" style="margin:0;">
+                            <input type="hidden" name="PoolAllocationId" value="@p.AllocationId" />
+                            <div>
+                                <label for="pt-@p.AllocationId">Warn at</label>
+                                <input id="pt-@p.AllocationId" type="number" name="PoolThreshold" min="0"
+                                       value="@p.LowBalanceThreshold" style="width:80px;" />
+                            </div>
+                            <button type="submit" class="btn">Set</button>
+                        </form>
+
+                        <form method="post" asp-page-handler="RemovePool" style="margin:0;">
+                            <input type="hidden" name="PoolAllocationId" value="@p.AllocationId" />
+                            <button type="submit" style="background:none;border:1px solid #d1d5db;color:#374151;
+                                                         padding:4px 10px;border-radius:6px;font-size:13px;cursor:pointer;">
+                                Remove allocation
+                            </button>
+                        </form>
+
+                        @* §795.1 — closing EARLY is the case no derivation can express. *@
+                        <form method="post" asp-page-handler="ClosePool" style="margin:0;">
+                            <input type="hidden" name="PoolAllocationId" value="@p.AllocationId" />
+                            <input type="hidden" name="reopen" value="@(p.ClosedByHand ? "true" : "false")" />
+                            <button type="submit" style="background:none;border:1px solid #d1d5db;color:#374151;
+                                                         padding:4px 10px;border-radius:6px;font-size:13px;cursor:pointer;">
+                                @(p.ClosedByHand ? "Re-open allocation" : "Close allocation")
+                            </button>
+                        </form>
+                    </div>
+                }
+                <div class="ci-meta" style="margin-top:4px;">
+                    Cancelled tickets return to the pool automatically &mdash; the balance is worked
+                    out from live claims, so nothing needs crediting back. A pool that runs out
+                    re-opens by itself when a ticket is cancelled; one you <strong>close</strong>
+                    stays closed until you re-open it.
+                </div>
+            </div>
+        }
+
+        @* 🔑 §795.4 — "ability to see invoice number of sent invoices for coupon invoices". The
+           numbers are READ BACK from e-conomic on every load and never stored: they live there, and
+           a copy in CEH would go stale the moment one is booked, credited or deleted.
+           ⚠️ A DRAFT number is provisional and is replaced when a human books it — so it is labelled
+           as a draft, because a draft number quoted to a partner is not one they will recognise. *@
+        @if (r.Invoices.Count > 0)
+        {
+            <div style="margin-top:10px;padding:8px 10px;border-radius:8px;background:#f8fafc;">
+                <div class="ci-meta" style="margin-bottom:4px;"><strong>e-conomic invoices</strong></div>
+                @foreach (var inv in r.Invoices)
+                {
+                    <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:baseline;margin:2px 0;">
+                        <span class="ci-chip @(inv.IsBooked ? "ok" : "muted")">@inv.Display</span>
+                        <span class="ci-meta">@inv.Reference</span>
+                    </div>
+                }
+                @if (r.Invoices.Any(i => !i.IsBooked))
+                {
+                    <div class="ci-meta" style="margin-top:4px;">
+                        A <strong>draft</strong> reaches nobody until it is booked in e-conomic, and
+                        its number changes when it is. Until then the customer has no invoice.
+                    </div>
+                }
+            </div>
+        }
+        else if (r.ClaimCount > 0 && r.Setting?.IsInvoiceable == true)
+        {
+            <div class="ci-meta" style="margin-top:8px;">
+                @if (Model.EconomicReachable)
+                {
+                    <text>No e-conomic invoice carries this coupon&rsquo;s reference yet.</text>
+                }
+                else
+                {
+                    @* ⚠️ Not the same statement, and the difference is the whole point: one means
+                       uninvoiced, the other means we could not ask. *@
+                    <text>e-conomic could not be read, so invoice numbers are unknown for now.</text>
+                }
+            </div>
+        }
+
+        @* 🔴 §799 — A POOL FROM A PREVIOUS BILLING TYPE. Operator 2026-08-04: *"i chaned type of
+           coupon from claimed to prepaid and back to claimed. then count was still showing"*. The
+           allocation is KEPT because it records money — what was bought and which invoice covered it
+           — but it counts nowhere while the coupon is not prepaid: no balance, no chips, no
+           attention, no alerts. Removing it is his decision, with the number in front of him. *@
+        @if (r.DormantPools.Count > 0)
+        {
+            <div style="margin-top:10px;padding:8px 10px;border-radius:8px;background:#f3f4f6;color:#4b5563;">
+                <div class="ci-meta" style="margin-bottom:4px;">
+                    <strong>Prepaid allocation kept, but not in use</strong> &mdash; this coupon is
+                    billed <em>@CommunityHub.Pages.Organizer.CouponInvoicingModel.DisplayName(r.BillingType)</em>,
+                    so nothing is drawn from a pool. Switch it back to prepaid and this returns exactly
+                    as it was.
+                </div>
+                @foreach (var view in r.DormantPools)
+                {
+                    <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:baseline;margin:3px 0;">
+                        <span style="min-width:90px;">@(view.Balance.Label ?? view.Balance.TicketClassId)</span>
+                        <span class="ci-meta">
+                            @view.Balance.Purchased bought in @view.Purchases.Count purchase(s)
+                            @{
+                                var numbers = view.Purchases
+                                    .Where(x => !string.IsNullOrWhiteSpace(x.ErpInvoiceNumber))
+                                    .Select(x => x.ErpInvoiceNumber);
+                            }
+                            @if (numbers.Any())
+                            {
+                                <text>&middot; invoice @string.Join(", ", numbers)</text>
+                            }
+                        </span>
+                        <form method="post" asp-page-handler="RemovePool" style="margin:0;">
+                            <input type="hidden" name="PoolAllocationId" value="@view.Balance.AllocationId" />
+                            <button type="submit" style="background:none;border:1px solid #d1d5db;color:#374151;
+                                                         padding:3px 9px;border-radius:6px;font-size:12px;cursor:pointer;">
+                                Remove it
+                            </button>
+                        </form>
+                    </div>
+                }
+            </div>
+        }
+
+        @* §798.4 — buy tickets into a NEW pool (a class this coupon has no allocation for yet).
+           Topping up an existing pool is the "Buy more" form on the pool itself, because that is
+           where the balance and the earlier invoices are. *@
+        @if (r.Setting is not null && r.Setting.IsPrepaid)
+        {
+            <form method="post" asp-page-handler="AddTickets" class="ci-grid" style="margin-top:8px;">
+                <input type="hidden" name="SettingId" value="@r.Setting.Id" />
+                <div>
+                    <label for="pc-@r.Setting.Id">Ticket class</label>
+                    <select id="pc-@r.Setting.Id" name="PoolTicketClassId">
+                        @foreach (var kv in Model.TicketClassLabels)
+                        {
+                            <option value="@kv.Key">@kv.Value</option>
+                        }
+                        @foreach (var pv in r.Pools.Where(pv => !Model.TicketClassLabels.ContainsKey(pv.Balance.TicketClassId)))
+                        {
+                            <option value="@pv.Balance.TicketClassId">@(pv.Balance.Label ?? pv.Balance.TicketClassId)</option>
+                        }
+                    </select>
+                </div>
+                <div>
+                    <label for="pq-@r.Setting.Id">Tickets bought</label>
+                    <input id="pq-@r.Setting.Id" type="number" name="PoolQuantity" min="1" placeholder="50" style="width:110px;" />
+                </div>
+                <div>
+                    <label for="pinv-@r.Setting.Id">Invoice no. (optional)</label>
+                    <input id="pinv-@r.Setting.Id" type="text" name="PoolErpInvoiceNumber" maxlength="60" style="width:140px;" />
+                </div>
+                <div>
+                    <label for="pt-@r.Setting.Id">Warn at</label>
+                    <input id="pt-@r.Setting.Id" type="number" name="PoolThreshold" min="0" placeholder="5" style="width:90px;" />
+                </div>
+                <button type="submit" class="btn">Buy tickets</button>
+            </form>
+        }
+
+        <form method="post" asp-page-handler="Save">
+            <input type="hidden" name="SettingId" value="@(r.Setting?.Id ?? 0)" />
+            <input type="hidden" name="CouponName" value="@r.CouponName" />
+            <div class="ci-grid">
+                <div>
+                    <label for="bt-@r.CouponName">Billing type</label>
+                    @* §798.3 — his words, not the enum's. The stored value is unchanged. *@
+                    <select id="bt-@r.CouponName" name="BillingType">
+                        @foreach (var t in Enum.GetValues<CouponBillingType>())
+                        {
+                            <option value="@t" selected="@(t == r.BillingType)">
+                                @CommunityHub.Pages.Organizer.CouponInvoicingModel.DisplayName(t)
+                            </option>
+                        }
+                    </select>
+                </div>
+                <div>
+                    <label for="cust-@r.CouponName">e-conomic customer</label>
+                    @* §787.13 — pick by NAME from the live API. The CSV's 111111111 for CBS was a
+                       number that does not exist in e-conomic at all; a picked name cannot be
+                       wrong that way. Falls back to the number box when e-conomic is unreachable,
+                       so the page never becomes unusable because a third party is down. *@
+                    @if (Model.CustomerPickerAvailable)
+                    {
+                        <select id="cust-@r.CouponName" name="ErpCustomerNumber" style="max-width:260px;">
+                            <option value="">— none —</option>
+                            @foreach (var c in Model.Customers)
+                            {
+                                <option value="@c.CustomerNumber" selected="@(c.CustomerNumber == r.ErpCustomerNumber)">
+                                    @c.Name (@c.CustomerNumber)
+                                </option>
+                            }
+                        </select>
+                    }
+                    else
+                    {
+                        <input id="cust-@r.CouponName" type="number" name="ErpCustomerNumber"
+                               value="@(r.ErpCustomerNumber?.ToString() ?? "")" min="1" style="width:150px;" />
+                    }
+                </div>
+                @* 🔑 §798.1 — THE REQUESTER = the invoice's Att person. The list is this coupon's own
+                   customer's e-conomic contacts; a contact from another customer is one e-conomic
+                   rejects, or worse accepts against the wrong account. Changing the customer clears
+                   it, which is why it is saved by the same button. *@
+                <div>
+                    <label for="req-@r.CouponName">Requester (Att on invoice)</label>
+                    @{
+                        var contacts = r.ErpCustomerNumber is { } cn
+                            && Model.ContactsByCustomer.TryGetValue(cn, out var list)
+                            ? list : null;
+                    }
+                    @if (contacts is { Count: > 0 })
+                    {
+                        <select id="req-@r.CouponName" name="RequesterContactNumber" style="max-width:240px;">
+                            <option value="">— customer default —</option>
+                            @foreach (var c in contacts)
+                            {
+                                <option value="@c.ContactNumber"
+                                        selected="@(c.ContactNumber == r.Setting?.RequesterContactNumber)">
+                                    @c.Name
+                                </option>
+                            }
+                        </select>
+                    }
+                    else if (r.ErpCustomerNumber is null)
+                    {
+                        <span class="ci-meta">pick a customer first</span>
+                    }
+                    else
+                    {
+                        @* ⚠️ Says WHY it is empty. "No contacts" and "e-conomic could not be read"
+                           are different problems and only one of them is fixable here. *@
+                        <span class="ci-meta">
+                            @(Model.EconomicReachable
+                                ? "no contacts on this customer"
+                                : "e-conomic could not be read")
+                            @if (r.Setting?.RequesterName is { Length: > 0 } who)
+                            {
+                                <text> &mdash; currently @who</text>
+                            }
+                        </span>
+                    }
+                </div>
+                <div style="flex:1 1 200px;">
+                    <label for="note-@r.CouponName">Notes</label>
+                    <input id="note-@r.CouponName" type="text" name="Notes"
+                           value="@(r.Setting?.Notes ?? "")" maxlength="400" style="width:100%;" />
+                </div>
+                <button type="submit" class="btn">Save</button>
+            </div>
+        </form>
+
+        @if (r.Setting is not null)
+        {
+            <div class="ci-actions">
+                <form method="post" asp-page-handler="Delete">
+                    <input type="hidden" name="SettingId" value="@r.Setting.Id" />
+                    <button type="submit" style="background:none;border:1px solid #d1d5db;color:#374151;
+                                                 padding:4px 10px;border-radius:6px;font-size:13px;cursor:pointer;">
+                        Delete rule
+                    </button>
+                </form>
+                @if (r.Setting.LastUpdatedByEmail is { Length: > 0 } who)
+                {
+                    <span class="ci-meta">last changed by @who</span>
+                }
+            </div>
+        }
+    </div>
+}
+
+@* ⚰️ §787.13 — the CSV paste box is GONE. Operator: "are we not using api integr and a db table
+   now. no files should be needed". He is right: §787.2 moved this OFF a file, and a paste box in
+   CSV syntax quietly dragged file-thinking back in. Customers are picked by NAME from the live
+   e-conomic API instead. Do not reintroduce it. *@
+
+@* §798.2 — the add form now lives at the TOP of the page. *@

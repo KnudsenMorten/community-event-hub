@@ -162,7 +162,9 @@ internal static class WebRepoPaths
     public static string[] CounterViews =>
     [
         Pages("Sponsor", "CaptureLead.cshtml"),
-        Pages("Sessions", "Evaluate.cshtml"),
+        // §748: was Sessions/Evaluate — that 1–5 form is retired and only redirects now. The public
+        // free-text field moved to /f/{token} (Feedback.cshtml, at the Pages root).
+        Pages("Feedback.cshtml"),
         // Sessions/Ask dropped — 1:1 questions disabled (§136), the page no longer has a counter field.
         Pages("Forms", "Speaker.cshtml"),
     ];

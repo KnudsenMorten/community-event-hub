@@ -31,6 +31,8 @@ rules about which doc owns what, see [`../CLAUDE.md`](../CLAUDE.md).
 17. [Configuration & Key Vault reference](#17-configuration--key-vault-reference)
 18. [Legacy automation: webhooks & deployment topology](#18-legacy-automation-webhooks--deployment-topology)
 19. [Attendee onboarding, party, seat allocation & test policy](#19-attendee-onboarding-party-seat-allocation--test-policy-206223)
+20. [Graphics release, Get-Started composition & the resend queue](#20-graphics-release-get-started-composition--the-resend-queue-784-790)
+21. [Coupon billing: prepaid pools, invoice confirmation & draft notices](#21-coupon-billing-prepaid-pools-invoice-confirmation--draft-notices-787-794-795)
 
 ---
 
@@ -648,7 +650,12 @@ and database, so `JobFrequencyTests` can exercise it directly.
    so two consecutive ticks can never both run.
 2. **Clock-anchored jobs are NEVER converted.** "Daily 07:20 UTC" and "hourly at :15" are anchored to
    a wall-clock time; tick+interval would drift the send off the hour. `DefaultIntervalMinutes` stays
-   null, and the page shows *"fixed time — set in code"* instead of an input that cannot work.
+   null, and the page hides the input rather than showing one that cannot work.
+   **It shows the REASON instead** (§869.3): every unconverted job carries a `FixedTimeWhy`
+   sentence — *"It mails people once a day at a chosen hour…"* — because the previous wording,
+   *"fixed time — set in code"*, stated the mechanism and withheld the reason, so it read as an
+   arbitrary refusal. `JobFixedTimeReasonTests` fails the build on a missing, terse, or
+   mechanism-shaped reason, so a new clock-anchored job cannot ship silent.
 3. **The page states the EFFECTIVE cadence.** Describing the raw cron would print "Every 5 minutes"
    beside a "Runs every 30" box — two adjacent columns disagreeing about frequency, which was the
    §509 complaint. For the same reason the "LIMITED" badge is suppressed on interval-driven jobs,
@@ -659,8 +666,27 @@ rejected with a message, never stored to silently do nothing. Catalog invariants
 `JobFrequencyTests` fail the build if a converted job carries a cron other than the base tick, a
 default that is not a whole multiple of it, or an hour-pinned (clock-anchored) cron.
 
-**Status:** piloted on `ErpWebshopReconcileJob` at its existing 30 minutes, so the conversion is
-behaviour-neutral. The remaining interval jobs are not yet converted.
+**Status (§869.3, 2026-08-05): the split is complete.** Every job whose schedule is a *poll* is now
+interval-driven — 24 of them — and each conversion kept its shipped cadence as the default, so no
+behaviour changed on the day. The remaining 11 are clock-anchored, manual-only, or already faster
+than the floor, and each states why.
+
+**What decides which side a job lands on** — and this is the part worth carrying to the next one:
+*a job converts freely when nothing holds state about WHEN it runs.* The dependency is never in the
+cron expression itself. Three real examples, all found by looking rather than reasoning:
+
+- **`GetStartedCompletionSweepJob` reads its own tick minute** (`UtcNow.Minute < 5`) to choose
+  between a cheap pass and its hourly full sweep. A stored interval is spaced from `LastRunAt`, so
+  it drifts against the wall clock — the full sweep would land later each hour until it stopped
+  firing at all, silently, with the job still reporting green (§544's exact shape). **Not converted;
+  the full-sweep decision must move off the tick minute first.**
+- **The e-conomic invoicing jobs are PHASE-locked** at `:40` and `:50` so each reads orders the
+  15-minute webshop pull has finished landing. That relationship lives in a comment, not the cron.
+- **A TEST pinned a cron string as a proxy for a cadence rule** (§595's "the webshop pull must not
+  move with the ERP sync"). It failed on conversion while the rule it protects was intact — the pin
+  now asserts `DefaultIntervalMinutes` directly.
+
+⇒ **Grep for what reads the clock before changing what drives it.**
 
 **Do NOT implement this via `%AppSetting%` cron substitution.** Functions supports it, but app
 settings **swap with the slot**, so every change would have to be applied to both web slots or a
@@ -850,6 +876,90 @@ longer misses files past the first page).
 - Zoho is the **EU** data centre — token endpoint `accounts.zoho.eu`, API `zohoapis.eu`, OAuth
   refresh-token based. Config: a `zoho` block with the EU API domain, Backstage portal id + event
   id, the Bookings service-name regex and 2-day ticket-class regex, and KV secret names.
+
+#### Signage agenda mirror (REQUIREMENTS §754, 2026-08-01)
+
+The venue screens are driven from a CEH table, not from Zoho at request time. `SignageAgendaSyncJob`
+(every 5 minutes, interval-tunable on the Jobs page) calls `SignageAgendaSyncService`, which pulls the
+**complete** Backstage agenda via `ZohoClient.GetBackstageAgendaAsync` and upserts it into
+**`AgendaActivities`**.
+
+- **Why Backstage and not CEH's own `Sessions`.** Backstage holds every activity on the floor —
+  breaks, registration, lunch, the party — which `Sessions` does not model at all. Modelling a break
+  as a `Session` would leak it into the public agenda, the speaker pages, evaluation attribution and
+  the session-change alerts, so every consumer would need a "…but not this kind" filter.
+- **The pull** enumerates `/agendas` for the day count, then `/sessions?day=N` (1-based; a bare
+  `/sessions` is a 400), and resolves each session's `venue` → hall name, `track` → track name and
+  `speakers` → display names from `/halls`, `/tracks` and `/speakers`. `session_type` (snake_case,
+  live-verified) carries the activity type through as a **string** — types are event-configurable in
+  Backstage, so an enum would need a deploy whenever the operator adds one.
+- **No scope gate, because there is no missing scope.** It uses the same STRICT reads the §301b
+  self-heal already relies on in production. 🔒 The Zoho Backstage credentials carry every permission
+  CEH needs and always have; the §585 matrix live-probed `agendas/sessions/tracks/halls/speakers` at
+  200 against PROD on 2026-07-28. The two config flags that once claimed otherwise
+  (`AgendaReadEnabled` / `SpeakerReadEnabled`) are **deleted** — see REQUIREMENTS §754.5. Do not
+  reinstate them; a test fails the build if anything shaped like them returns.
+- **Upsert on `(EventId, BackstageSessionId)`**, so a title or room change updates the row in place
+  and a card keeps its identity — and therefore its page position — instead of jumping mid-rotation.
+  `LastSyncedAt` is stamped on every confirmed row (sync health); an activity that vanished from Zoho
+  is removed.
+- 🔒 **Fail-safes.** Any read failure writes **nothing** and leaves `LastSyncedAt` untouched (a sync
+  that stamps itself on failure reports health it does not have). An **empty pull never empties a
+  non-empty table** — a failed read and a cleared agenda are indistinguishable, and the cost of
+  guessing wrong is 15 blank screens mid-event; it is reported as `RefusedToEmpty` and alerted
+  (DEV-silent per §752.9). An empty pull against an empty table is an ordinary success, so an edition
+  whose agenda is not built yet does not alert every 5 minutes.
+- **Skipped, not guessed:** an activity with no start or no duration is dropped with a count. End
+  time is derived (`start + duration`) because Backstage sends no end; a fabricated end would drop the
+  activity out of its hour slot, which on a wall reads as a cancellation.
+- **Never printed:** an unresolvable speaker e-mail or an unresolved track/hall id renders as nothing
+  rather than as raw data — these cards are two metres tall in a public corridor.
+- **Manual "sync now"** is the existing `/Organizer/Jobs` trigger (§543): it starts this very timer
+  function through the Functions admin endpoint, so the manual path runs the production routine
+  rather than a second copy of it. Switch: `signage-agenda-sync` (Event settings, Engine surface, off
+  by default).
+
+#### Venue signage screens (REQUIREMENTS §754, 2026-08-01)
+
+Eight anonymous URLs, served by one page model:
+`/signage/{portrait|landscape}/{rotate|now|next|feedback}?t={token}`. The **rotate** URL is what goes
+into an OptiSigns playlist; it cycles Happening Now → Next → Session Feedback internally. The other
+three pin a screen to a single view. `/Organizer/Signage` prints them assembled, mints and rotates the
+tokens, holds the six on/off switches and the schedule, exposes the tunable grid/timing values, and
+reports agenda sync health.
+
+- 🔒 **The pages never return an error status.** Every refusal — switched off, outside the schedule,
+  wrong or missing token, no settings row, a mistyped view segment — renders a **holding screen at
+  HTTP 200** (event name + the next thing on the programme). A player has no way to report a failed
+  asset to a human; it shows whatever came back, so an error page IS the failure, displayed two metres
+  tall. The reason is logged and shown in the admin page, never on the screen.
+- **Access** is `SignageAccessService` (pure): one token per ORIENTATION, constant-time compared, with
+  a blank stored token treated as *not configured* so an empty column plus an empty query string can
+  never authorise anything. Six on/off switches (view × orientation). The schedule is a venue-local
+  daily window inside an optional date range; every field is nullable and **unset means always on**,
+  and a window whose end precedes its start crosses midnight.
+- **Slots** are `SignageSlotBuilder` (pure): full clock hours, "now" = the current hour, "next" = the
+  following one, half-open overlap so an activity is in every hour it spans but not in the one it
+  ends on. Sort track → room → start → Backstage id (the id, not the title, is the tiebreak — two
+  runs of one workshop share a title). Pagination is columns × rows per orientation.
+- 🔑 **The data arrives by fetch, carrying the PLAYER's clock.** §5 requires the player's clock to
+  drive the rollover with no reload for 12+ hours, so the page re-asks for its content with
+  `at=<its own ISO time>` and the server computes the slot with the tested builder. That keeps the
+  §5–§7 rules in **one** implementation — a JavaScript copy is what would eventually disagree with the
+  speaker's schedule. During an outage the slot stops advancing, which is exactly §9's "keep
+  displaying the last successfully retrieved data"; after an hour the page swaps to a clean failure
+  state and recovers by itself.
+- **Three independent timers** (§7): view rotation, internal page flip, data refresh. The rotation
+  advances on its own cycle regardless of which page is showing.
+- **Colour** is `SignagePalette`, which returns background/foreground **as a pair** so unreadable
+  combinations are unreachable: never white on Experts Live Green (~2:1 — what the current OptiSigns
+  portrait template does). Rating colours are derived from `EvaluationReportLayout` rather than
+  re-typed, so the wall and the speaker's PDF cannot drift; rating 2 is yellow `#E4B400`.
+- **The feedback view** reuses the PDF report's hero + distribution (§754.2): the event-wide pooled
+  score (no response floor — §754.1), its band **with its range** and no `%` sign, "based on N
+  responses", and the four faces with count **and** percentage on a white panel, each bar floored to a
+  minimum width so a single response draws a stub rather than vanishing into what reads as missing
+  data.
 
 #### Sponsor/exhibitor provision & reconcile engine (REQUIREMENTS §40/§41/§41a/§41b/§49/§56, 2026-06-25)
 
@@ -1203,9 +1313,11 @@ view filters and per-room lookup. Enums are stored as int (`HasConversion<int>()
   the pasted results to every linked speaker (at their preferred address — `ContactEmailOverride ??
   Email`, same routing as the welcome mail), through the `IEmailSender` seam (so the DEV redirect / ring
   gate apply and test sends never reach real people), and stamps `EvaluationEmailedAt`. The
-  **results-text argument is the seam** for a future own-devices-via-API ingester (◻) — it would
-  populate that text and reuse the same send. A **QR-code evaluation** form URL is stored per session
-  (`EvaluationFormUrl`).
+  **results-text argument was the intended seam** for a future own-devices ingester. ⚠️ **2026-07-31:
+  that assumption is now void** — the physical box with no API was replaced by our OWN devices, which
+  post directly to our ingest endpoints, so per-session results no longer arrive as pasted text and
+  this hook is part of the superseded path (see *Session Evaluation — the current design*). A
+  **QR-code evaluation** form URL is stored per session (`EvaluationFormUrl`).
 The organizer page `/Organizer/Sessions` (`SessionsModel`, organizer-only) surfaces all of it: a Type +
 Length **filter** (querystring-bound), **add a hub session**, **provision a room QR**, an inline **edit**
 (type/length/room/eval-url) and **email-evaluation** form per row, the **Download QR** link, and a
@@ -1311,7 +1423,107 @@ preview table (name/email/role/outcome) + a count-aware `_ConfirmModal` posting 
 re-reads the preview to reflect the post-cleanup state. No new deletion logic (reuses the proven
 `ParticipantDeletionService`); no schema change; en/da strings under `TestCleanup.*`.
 
-**Per-session attendee evaluation (HappyOrNot-style public rating + organizer dashboard) — 2026-06-15.**
+### Session Evaluation — the current design (SUPERSEDES the 1–5 rating below) — 2026-07-31
+
+Feedback is collected on a **four-point forced-choice scale** — dark green 4, light green 3, yellow
+2, red 1 — from **two channels that are one instrument**: a battery-powered four-button device in
+each room, and a per-session QR page offering the same four choices plus an optional free-text
+comment to the speaker. Same ratings, same weights, same threshold, same score; the channel is
+recorded for diagnostics only and is never reported as a separate figure.
+
+**Why four and not five.** The scale has **no neutral midpoint**, deliberately: with an even number
+of options every respondent lands on the positive or the negative side, whereas a neutral option
+absorbs a large share of responses and blunts the result. Rating 2 is therefore a *negative*
+response for every reporting purpose, notwithstanding that its colloquial phrasing reads as neutral.
+The numeric rating is the stored value; colour and label are presentation mappings resolved at
+render time, so relabelling never invalidates history.
+
+**Attribution is the core mechanism.** Every response carries two timestamps that are not
+interchangeable: the **collection** timestamp (when the button was pressed — drives attribution and
+every metric) and the **received** timestamp (when the backend accepted it — diagnostics and
+duplicate detection only). Devices cache offline and upload when connectivity returns, so **late
+data is normal operation**: a press belongs to the session running at its collection time no matter
+how much later it arrives. The chain is **device → room → session**; a session's collection window
+opens at its scheduled start and closes **30 minutes** after its scheduled end, and where that grace
+tail overlaps the next session's start, **the session actually in progress wins**. Ingestion is
+idempotent on a device-generated record id, so a retried batch cannot inflate counts.
+
+**The score.** A **0–100 index**, `Σ(weight × count) / responses`, with linear weights
+100 / 66⅔ / 33⅓ / 0 — the normalised-mean (POMP) construction, which assumes only rank order and
+does not flatter positively-skewed feedback. Published alongside it: the **positive share** (the
+proportion pressing either green) and the **response count**, which is never omitted — a score
+without its sample size is not interpretable. **Below 10 responses no score is published** (the
+field is null, never zero), because one response would otherwise move the result by more than ten
+points. Interpretation bands accompany the number everywhere: **80–100 Very strong · 60–79 Strong ·
+40–59 Mixed · 0–39 Weak**. The figure is labelled an *index*, never a percentage.
+
+**Aggregation names two different figures.** *Pooled* recomputes from the raw responses of every
+session in scope ("what was the average attendee's experience?" — the event headline); *mean
+session* averages the individual session scores, excluding those below the threshold ("how good was
+the programme?"). They differ, both are legitimate, and neither may appear under a shared label.
+
+**Storage.** Raw responses are stored and every metric is derived at query time; no computed score
+is authoritative, and responses are **append-only** — corrections are new rows or flags, never
+edits. That is what makes recomputation after late data safe to run repeatedly, and what allows the
+weighting or the bands to change without invalidating history.
+
+**Surfaces.** Organizers register the devices and watch their health — last-seen (never a live
+connection: the units sleep), battery, signal, and the count of records a unit is holding but not
+uploading, which is the one that catches silent failure. Speakers see their own session's results
+**inside the hub**, not in a separate system: the hub pulls them over a service credential and
+authorises with its existing "is this my session?" rule, so there is no second login. Free-text
+comments reach the session's own speakers and organizers only — never a public scoreboard, an
+aggregate endpoint, or venue signage.
+
+**The QR channel.** Each session carries **one permanent code of its own**, generated inside the
+platform rather than by an outside renderer — no session token leaves our infrastructure to be drawn,
+and there is no third-party URL that has to still exist at print time. The code is bound to the
+**session, not the room or the schedule**, so moving a session to another room or another hour leaves
+already-printed material valid; that is the whole reason for the choice, because printing happens
+before a programme stops moving. There is consequently no way to regenerate a code: doing so would
+invalidate signs already on walls, with nothing to say which. Deleting a session revokes its code,
+which then resolves to an honest "not found" rather than collecting orphan feedback.
+
+Rendering avoids any platform imaging library, so nothing about it is tied to the operating system it
+happens to run on, and the encoded address is deliberately the shortest route in the system — every
+extra character raises the module density of a symbol that has to scan from the back row. Error
+correction is set well above the minimum, because these are printed objects that spend a day being
+creased, smudged and photographed at an angle.
+
+The page a scan opens is anonymous, names the session and its speakers, and offers the same four
+options as the room unit plus an optional comment to the speaker. **The two channels are one
+instrument**: a scan and a button press write the same record and score identically. Feedback is
+accepted during the session and for a grace period after it ends — people rate on their way out — and
+the window is re-checked when the answer is submitted, not merely when the page was drawn, because a
+page can sit open on a phone long after the window shuts. Outside the window the page **refuses and
+says which reason applies**, still naming the session, rather than accepting input it will not count:
+a form that appears to work but discards the result is worse than an honest refusal, and it is worse
+precisely because the person walks away believing they were heard.
+
+**The report, and how an external system collects it.** A session's report is a **PDF generated on
+request** — nothing is filed, so it always reflects the data as it stands, and late data simply
+produces a newer version. **One assembly path serves both the organizer download and the outbound
+pull**, so the two can never drift into different documents; this matters because the report becomes
+the permanent record once raw responses are purged at twelve months. External systems collect it
+over a read-only endpoint authorised by a **service credential**: a key held only as a salted hash,
+sent in a request header rather than a URL, **scoped to a single event**, revocable without a
+deployment, and rotatable with a window during which the old key keeps working so a consumer can
+switch over on its own schedule. Every refusal looks identical from outside, so a key holder cannot
+discover which other events exist.
+
+Because reports are generated rather than filed, supersession is signalled by a **version identifier
+derived from the data the report is made of** — the responses behind it, the event-wide figure it
+prints alongside, and the session's own details — rather than from the file. It changes exactly when
+a recomputation would change the figures, and not otherwise, so a consumer polling repeatedly is
+told "unchanged" until something genuinely moved, and can ask for the version alone without a
+document being generated. Two alternatives were rejected for concrete reasons: a version based on
+generation time would report a change on every single request, and one based on response counts
+alone would miss a session being retitled or moved to another room.
+
+---
+
+**(SUPERSEDED 2026-07-31 by the design above — retained for history; the 1–5 path is being retired
+and holds no data.)** **Per-session attendee evaluation (HappyOrNot-style public rating + organizer dashboard) — 2026-06-15.**
 A quick public rating, distinct from the pre-event attendee *questions* (§ below): a new `SessionEvaluation`
 entity (EF migration `SessionEvaluations`) holds a **1–5 `Rating`**, an optional `Comment`, a soft per-attendee
 de-dup `VoterKey`, and an `IpHash` — edition-scoped, FK to `Session` with `NoAction` (the `Event` cascade
@@ -1335,9 +1547,12 @@ ask / survey forms** — a honeypot (`Website` → silent 200, no write), a soft
 `HttpOnly`/essential **voter cookie** (`ceh_eval_{sessionId}`) carrying the de-dup token. The organizer dashboard
 `/Organizer/SessionEvaluations` (`SessionEvaluationsModel`, organizer-only) renders the per-room + per-session
 tables with smiley averages and collapsible comment lists, mobile-first + a11y (scoped table headers, off-screen
-captions, `role="status"` summary); wired into the organizer nav as "Session evaluations". **Future ◻
-(own-devices-via-API ingestion):** a live ingester would write the same `SessionEvaluation` rows and reuse the same
-dashboard — no caller changes.
+captions, `role="status"` summary); wired into the organizer nav as "Session evaluations".
+**✅ 2026-07-31 — the "own devices via API" future arrived, and it did NOT reuse these rows.** The
+device programme is built on the four-point model described above, with its own ingest endpoints,
+its own append-only response store and its own scoring. Writing device presses into a 1–5 table
+would have produced two different scores for the same session; the two scales cannot be reconciled
+by arithmetic, so this path is superseded rather than extended.
 
 **Public sessions overview — 2026-06-15.** A read-only, no-login page `/Sessions`
 (`Sessions/IndexModel`, `[AllowAnonymous]`) lists the **active edition's** sessions for anyone to browse,
@@ -1702,6 +1917,33 @@ signs the post, and the difference is not fixable in the UI:
 in the admin page); per-user LinkedIn/X OAuth for posting. Until set, the null store / draft-only gateway
 keep everything inert with nothing faked.
 
+### Post text: composed at PUBLISH time, never stored resolved (2026-08-05)
+
+A scheduled post is written months before it goes out, so **what it says must be decided when it
+publishes, not when it was planned.** The model that makes that work:
+
+- **One stored field: the BODY.** It holds the organizer's own words, including any `{tokens}` they
+  typed. A second column survives only so the planner can recompose a post nobody has touched without
+  ever overwriting an edited one — the editor shows a single field.
+- **Everything else is a variable.** `{Organizers}`, `{EventTags}`, `{SponsorTier}`, `{Speakers}` and
+  the rest resolve from settings and event data **at publish time**, through the same resolver the
+  editor's preview uses — so the preview shows exactly what will publish.
+- **The organizer credit is appended at publish** unless the body places `{Organizers}` itself, so
+  the author chooses its position without the value ever freezing into the text.
+- **An unresolved token never blocks a post.** At compose time an unknown token is refused; at
+  publish time it is preserved verbatim, logged and the post still goes out — a silent
+  non-publication is far worse than a visible gap.
+
+> **Why this shape.** The earlier model composed once and never recomposed, freezing whatever was
+> true on planning day. Editing a post captured the footer as literal text, so a later change reached
+> the un-edited posts and silently skipped the edited ones. Storing only the body removes that class
+> of defect by construction rather than by discipline.
+
+**Readiness is asked in one place** (`SoMeApprovalGate`), for a single-sponsor post and a sponsor-tier
+post alike: a sponsor owes **both** their social-media text and a logo, and the refusal names what is
+missing so it can be chased. The dispatcher consults the same gate at send time — approval is a
+moment, eligibility is a state.
+
 ### LinkedIn company-page SoMe scheduling queue (REQUIREMENTS §19)
 
 An organizer-curated **scheduled-post queue** that publishes to the event's LinkedIn **company page** on a
@@ -1860,8 +2102,8 @@ pinned against each job's real `[TimerTrigger]` by `JobCadenceWordsMatchCronTest
 
 | Mail | Job | Job runs | Who is due |
 |---|---|---|---|
-| `task-deadline-reminder` | `ReminderJob` | **daily 08:00 UTC** | ONLY on the due day, and once more if overdue (§81) |
-| `getstarted-digest` | `ReminderJob` | daily 08:00 UTC | not finished Get Started — **one per 14-day window** |
+| `task-deadline-reminder` | `ReminderJob` | **daily 08:00 UTC** | ONLY on the due day, then repeats at the organizer's interval — **settable per role** (2026-08-05) |
+| `getstarted-digest` | `ReminderJob` | daily 08:00 UTC | not finished Get Started — repeats at the organizer's interval (default 14 days), **settable per role** (2026-08-05) |
 | `getstarted-deadline-reminder` | `ReminderJob` | daily 08:00 UTC | **one-shot**, before the configured speaker deadline |
 | attendee **party** + attendee **Master Class** task chasers | `ReminderJob` | daily 08:00 UTC | **every 14 days** from the task's creation |
 | `hotel-cutoff-reminder` | `ReminderJob` | daily 08:00 UTC | **3 days before** a hotel release deadline (organizers) |
@@ -1878,14 +2120,45 @@ pinned against each job's real `[TimerTrigger]` by `JobCadenceWordsMatchCronTest
 therefore arrives **the morning of the due date**, never earlier.
 
 ### 7.0a Can an organizer change these?
-- **Cadence: NO, not for the reminder mails.** Every cron is a literal compiled into the job's
-  `[TimerTrigger]`, and the 14-day windows are `const IntervalDays = 14`. Changing either is a
-  **deploy**, not a setting. `/Organizer/Jobs` **lists** every job with its cadence in words and lets
-  an organizer **trigger a job now**; the "set interval" control applies only to jobs flagged
-  `IsIntervalDriven`, and **none of the mail-driving jobs is**.
+> ⚠️ **This section used to read "Cadence: NO, not for the reminder mails … none of the mail-driving
+> jobs is interval-driven."** That was true when written and is now false in both halves. It is
+> corrected rather than deleted because a doc that argues with the product is the same defect as a
+> page that argues with itself — and this one had survived three changes that each disproved it.
+
+- **How often a JOB runs: YES, every timer job** (2026-08-05). Each one carries a **frequency box**
+  on `/Organizer/Jobs`; the cron is only a fast base tick and `JobsPauseMiddleware` enforces the
+  operator's interval, so a change takes effect with **no deploy**. There is no longer a class of
+  job that answers "ask for a deploy".
+- **How often a MAIL repeats: YES, per mail — and since 2026-08-05 per mail × ROLE.** A recurring
+  mail (one that chases a goal until it is done) carries a *"Repeat every N days"* box on
+  `/Organizer/Settings`, measured from the **last send to that person**, never a calendar window.
+  A mail shared across roles resolves **per-role → all-roles → shipped default**, so the Get Started
+  chase can run at one interval for sponsors and another for speakers. `0` = send once, ever; a role
+  returns to the shared value with **"Follow the all-roles interval"**.
+  *(Confirmations and receipts have no box: they fire once because the thing they report already
+  happened, so a repeat control there would govern nothing.)*
 - **Audience: YES.** `/Organizer/Settings` sets the ring per **mail × role** — that is the control
   that decides who receives it (§707.6).
 - **On/off: YES.** Each email feature switch, plus the global *Outbound email* master.
+
+### 7.0b The two organizer-review mails (2026-08-05)
+Work waiting on an organizer is reported by **two** jobs, deliberately not one — they were split
+because a single cadence had to be wrong for one of them:
+
+| Mail | Job | Cadence | Dedup |
+|---|---|---|---|
+| **Speakers held from the Zoho flow** | `SpeakersHeldJob` | every **10 min** | a durable **content hash** of the held set (`JobRunState.LastContentHash`) — one mail per CHANGE, silence while nothing moves |
+| **Volunteers awaiting review** | `VolunteersAwaitingReviewJob` | **weekly** | none — a weekly mail about an untouched queue *is* the reminder |
+
+Both go to the ops mailbox via the ring-exempt `EngineAlertSender`, are DEV-silent, and share the
+`digest-emails` feature key (the key is a live DB row; only the display wording changed). The speaker
+mail body is `SpeakerApprovalService.BuildPendingMailHtml`, so it carries the one-click approve-all
+buttons — and the import job no longer sends its own copy, because two senders with one hash would
+double-mail every import.
+
+🔒 **Why the hash is a COLUMN and not the alert sender's throttle:** that throttle lives in process
+memory, so every deploy would re-mail a queue nobody had touched, and it releases on a timer whether
+or not anything changed.
 
 All email renders through a small **template engine** (`EmailTemplateRenderer` +
 `EmailTemplateProvider` + `BrevoEmailSender` behind the `IEmailSender` seam). An email = a branded
@@ -2447,6 +2720,38 @@ messages.
 - **Old entry points are thin redirects.** `/Forms/SpeakerWizard` and `/Forms/GetStarted` now redirect
   into the generic `/Forms/Wizard` host, so existing links keep working.
 
+#### The WELCOME step — step 1 for every role (REQUIREMENTS §680, 2026-07-31)
+
+Every role's plan opens with a read-only **welcome** step: a thank-you, a short introduction to the
+event, and the list of what the participant will find in the hub. It asks nothing and stores nothing.
+
+- **Copy is CONFIG, not markup.** `config/welcome/<edition>/<role>.md`, one file per welcomed role,
+  derived from that role's welcome *e-mail* minus the Get-Started CTA and the support block (both
+  meaningless to someone already inside the wizard). `WelcomeCopyStore` (Core) resolves it through
+  `ConfigPaths`, caches one read per role per process, substitutes `{{firstName}}` /
+  `{{eventDisplayName}}` / `{{eventCodeParens}}` — the SAME values the welcome mail uses, so the two
+  cannot greet the same person differently — and `WelcomeFormService` (web) renders it with the same
+  Markdig pipeline the content-hub pages use. Token values are **HTML-encoded at the substitution
+  seam**: the copy is trusted in-repo markdown, but a participant's name is imported data.
+- **All FOUR wizard services emit it first** — speaker, role, sponsor and attendee — each gated on
+  `WelcomeCopyStore.Exists(role)`, so a role with no copy (organizer, and any future role) simply has
+  no welcome step and the rest of its wizard is untouched. The store is an OPTIONAL constructor
+  argument, so a service constructed without it behaves exactly as before.
+- **`Done: true`, always** — the §400 deadlines precedent: a step that asks nothing must never hold
+  the progress bar below 100%.
+- **`WizardModel.IsFirstRun` decides where an unqualified `/Forms/Wizard` lands.** Because the host
+  lands on the first *incomplete* step, an always-Done step at the START would be skipped past on the
+  very first visit — the one visit it exists for. A plan that opens with `welcome` and has **no
+  non-informational step Done** lands on step 1. `welcome` and `deadlines` are the informational pair,
+  so an always-Done deadlines step cannot suppress the welcome. An explicit `?step=` always wins, and
+  a returning participant resumes where they left off.
+- **No task mirror.** `WizardStepTaskSeeder.MapStep` has no case for the key, so the step is never
+  mirrored into a `ParticipantTask` and never pruned — Get Started and tasks stay the two different
+  things §684.25 settled they are.
+- **Packaging is load-bearing.** The `.md` files are shipped by an explicit `None Include` in the web
+  csproj (and both test csprojs). Without it they are absent from the published bundle, `Exists()`
+  answers false for every role, and the step silently disappears in Azure while working locally.
+
 ### Role-tagged schedule / key-dates (2026-06-20)
 
 A generic, organizer-editable, role-filtered event schedule that replaces the old static
@@ -2966,6 +3271,40 @@ landing surfaces. Two parts:
   scrollable tables on ~360px), accessible (`role="status"` live regions on the counters / banners /
   empty-states + the resend confirmation, captioned tables, `role="alert"` access-denied), localized en +
   da-DK.
+  - **§818 — UNSTAMPED MAIL (`EventId = 0`).** `LoggingEmailSender` writes `EventId = ctx?.EventId ?? 0`,
+    so any send whose ambient `EmailContext` names no edition lands on **event 0** — and because every
+    query above is edition-scoped, such a row rendered **nowhere** in the organizer UI (375 rows in
+    six weeks). Event 0 is not "another edition", it is **no** edition, which is why reading it here
+    cannot leak one edition's mail onto another's page. The snapshot now also reads the unstamped rows
+    in the same 30-day window and **partitions them by AUDIENCE, not by `EventId`** — where the
+    audience is read from the mail's own TEMPLATE IDENTITY via
+    `EmailTemplateCatalog.IsInternalMailboxMail(EmailLog.TemplateName)`:
+    - a **registered** template that is not an internal-mailbox mail ⇒ it is that person's mail and
+      is **folded into the ordinary views** — `WhoGotWhat` already groups by `ToEmail`, so it lands
+      on their row. It can never become a `ResendCandidate`: those require a `ParticipantId`, which
+      an unstamped row does not have.
+    - no template identity, an unregistered one, or an internal-mailbox one ⇒ **ops mail** → its own
+      `OpsMail` list + `OpsMailSent` /
+      `OpsMailFailed` / `OpsMailTotal` counters, rendered in a **separate card** and never merged into
+      the participant tables or counters (§815.1 — the two audiences must stay distinguishable; 252
+      engine alerts folded into the timeline would bury the participant mail the page tracks). Ops
+      mail is ring-**exempt** by construction, so a "drop" there is not the system obeying a ring
+      (§650) — dropped and failed are therefore counted together as *did not arrive*.
+
+    🔒 **NEVER partition this on the RECIPIENT ADDRESS.** That was the first implementation, it passed
+    every unit test, and the first DEV render showed the section EMPTY beside 25 live engine alerts —
+    they go to `mok@`, which is also the organizer's own participant address, so all 25 were filed as
+    his personal mail (§818.5). A blank template counts as ops deliberately: ops senders carry no
+    template identity (PROD 2026-08-04 — all 364 ops rows have none, every `session-eval` row has
+    one), and a participant's mail inside a labelled ops section is a far milder error than an alert
+    hidden inside one person's row.
+    `/Organizer/EmailLog` reads `EventId == eventId || EventId == 0` for the same reason (its tile
+    promises *"the full delivery log of every email sent"*), marking unstamped rows **ops**.
+    The two send sites that were losing the stamp — `SessionEvaluationMailService` and
+    `EvaluationReportReadyMailService` — now set the context **per recipient** rather than once around
+    the recipient loop, carrying `eventId` + `participantId` + name. Ring-neutral:
+    `BrevoEmailSender.ShouldRingDropAsync` gates on the recipient ADDRESS and consults `ParticipantId`
+    only when the address is unknown.
 - Exports & run-sheets (`/Organizer/Exports`) — `CommunityHub.Core.Organizer.OrganizerExportsService`
   (REQUIREMENTS §20 Organizer). On-site operations run on paper, so this is the **download + print** surface
   for five offline artifacts, each a **pure, read-only, edition-scoped projection** of existing entities:
@@ -4359,3 +4698,283 @@ exercises the seat guard faithfully. If no dev/prod target is configured the har
 message and exits cleanly (it never falls back to a local or SQLite engine). The harness is a standalone
 console tool, **not** part of `dotnet test`. Full prod stress results (SQL 400/1000-concurrent, 500-email
 Brevo, 400 concurrent web logins) are in `docs/TEST-RESULTS-masterclass-concurrency.md`.
+
+## 20. Graphics release, Get-Started composition & the resend queue (§784, §790)
+
+### 20.1 Graphic asset status is decided in ONE place (§784.12a)
+`GraphicsService.InitialStatusFor(GraphicAssetType)` is the sole rule for what status a **newly
+created** `GraphicAsset` gets. Speaker-facing types (Session / Track / Speaker) are created
+`Released` and stamped `ReleasedAt` + `ReleasedByEmail = "system (auto-release §784.12a)"`; the
+internal **Sponsor** type is still created `Generated`.
+
+**This reverses the §603/§435 review gate deliberately.** Three creation sites previously read
+*"THE GATE — never auto-released"*; they now call the shared rule, and the reasoning lives on that
+function so a later reader does not restore the gate.
+
+- **Why Sponsor is excluded:** sponsor graphics never reach a speaker, and `BrandingGraphicsProvider`
+  gates its lookups on `Released`. Auto-releasing them would silently change which artwork the
+  branding surfaces pick up.
+- **Visibility is unchanged.** `SpeakerGraphicVisibility.GraphicsVisibleToSpeaker` is still the one
+  definition of who may see a released graphic. This changed what status a row is *born* with, not
+  who can see one.
+- **The backlog** (rows written under the old gate) is cleared by `ReleaseAllGeneratedAsync` in the
+  quarter-hourly `SpeakerGraphicsSyncJob`, which no longer distinguishes pulled from engine-rendered
+  artwork.
+- 🔒 **The Help Promote mail is LOCKED TO ITS TASK'S DUE DATE (§790.1), not to the release.**
+  `SpeakerGraphicsReadyNotifier.PromoteDeadlineHasArrivedAsync` holds it until the `promote` speaker
+  deadline (`SpeakerTaskDefinitions` `speaker.promote` → `config/speaker-deadlines.<edition>.json`,
+  2027-01-15 for ELDK27; §81 = one reminder on the due day). Auto-release would otherwise have
+  announced it to 21 speakers seventeen months early. **A held run writes no ledger row**, so the
+  occasion survives and still sends on the day; the gate **fails closed** (unreadable config or a
+  missing `promote` entry holds + warns) and resolves its path through `ConfigPaths.Resolve` because
+  of the §326bb Functions-host working-directory trap. ⚠️ Graphics are still Released and visible
+  immediately — what is deferred is the ANNOUNCEMENT, never the visibility.
+- **`SpeakerGraphicsReadyNotifier` is called with a FULL sweep (`null`), not the bulk-released set.**
+  Rows are already `Released` when written, so the bulk release returns nothing in the steady state
+  and an empty (not null) set means "notify nobody" — passing it would have degraded §436's
+  quarter-hourly notification to the daily sweep. The `ReminderEngine` ledger key remains the
+  idempotency; the narrowing was only ever an optimisation.
+- `/Organizer/Graphics` is a **listing** (`GetSpeakerFacingGraphicsAsync` — every non-sponsor row,
+  any status) with **Replace** only. `GetReviewQueueAsync` (status == Generated) survives for the
+  sponsor-internal rows and for diagnostics.
+
+### 20.2 The Get-Started step list has ONE definition (§784.9c)
+`SpeakerWizardService.ComposeSteps(SpeakerWizardFacts)` is a **pure** function — it must never touch
+the database. Two callers load the facts differently:
+
+| Caller | Loading | Why |
+|---|---|---|
+| `SpeakerWizardService.BuildAsync` | per-speaker queries | the speaker's own wizard page |
+| `SpeakerReadinessService.BuildRosterAsync` | batch sets per table | the organizer roster builds for every speaker at once and must not do per-speaker round-trips |
+
+⚠️ **Add a step ⇒ add its fact to `SpeakerWizardFacts`.** A step that reads the database inside
+`ComposeSteps` is silently lost from the readiness roster. The alternative — a second set of queries
+in the readiness service — would have produced two rules that agree on the day they are written and
+diverge afterwards.
+
+Readiness surfaces the composed steps as `getstarted:{key}` signals via `GetStartedLabels`. Five
+steps are excluded on purpose: `details` / `hotel` / `dinner` already have their own readiness signal
+(double counting), and `welcome` / `deadlines` are always-Done summary steps that would hand free
+progress to a speaker who has done nothing — the §784.9(d) defect.
+
+### 20.3 Resend-queue dismissal is scoped to the queue (§784.1)
+`EmailLog.ResendDismissedAt` / `ResendDismissedByEmail` (additive, nullable) are written by
+`CommsCockpitService.DismissFromResendQueueAsync` and **read in exactly one place**: the resend
+queue's own filter. Dismissal never touches `Success`, `Error` or the timeline/campaign/who-got-what
+aggregates — `EmailLog` rows are **attempts**, and this flag must never become a second answer to
+"was this delivered".
+
+One press covers **every** undelivered row for that participant inside the 30-day window: the queue
+shows one row per person, so hiding only the newest would resurface an older failure that reads as a
+new problem. Delivered rows are never stamped.
+
+---
+
+## 21. Coupon billing: prepaid pools, invoice confirmation & draft notices (§787, §794, §795)
+
+Two billing types share one page (`/Organizer/CouponInvoicing`) and behave in opposite ways.
+
+| | `AllocatedPrepaymentByCustomer` (prepaid) | `ClaimableAdHocPaymentByCustomer` |
+|---|---|---|
+| Money | paid up front | invoiced after a claim |
+| A claim | draws on the partner's pool | becomes a line on their next invoice |
+| A cancellation | returns to the pool by itself | must not be billed |
+| Invoice number | **entered by hand** (§795.2) | **read back** from the ERP (§795.4) |
+
+### 21.1 The pool balance is derived, never accumulated (§794)
+
+```
+remaining = quantity purchased − claims of that class on that coupon that are NOT cancelled
+```
+
+Only the PURCHASE is stored (`CouponPrepaidAllocation`); `CouponPrepaidBalance` re-derives the rest
+on every read from the mirrored order feed. A cancelled ticket therefore releases its allocation by
+simply no longer counting — no release event, nothing to replay, and a sweep that is missed, repeated
+or run twice gives the same number. 🔒 Pools are matched on `ticket_class_id`, never on the class
+name, and two classes on one coupon are spent independently. `Remaining` is **not clamped at zero**:
+"-3" says three people hold tickets nobody paid for, where "0" would read as "fully used, fine".
+
+### 21.2 Pool state — one half derived, one half a decision (§795.1)
+
+`CouponPoolBalance.State` is `ClosedByHand` → `UsedInFull` → `Open`, **in that order of precedence**:
+
+- **Used in full** is `remaining <= 0`, computed on every read, so it **re-opens by itself** when a
+  ticket is cancelled and the allocation genuinely comes back.
+- **Closed by hand** (`ClosedAt` / `ClosedByEmail` / `ClosedReason`) is the only part stored, because
+  "the agreement ended" is not expressible as arithmetic — and it must survive a cancellation, or the
+  hub would silently hand a partner back a ticket nobody agreed to.
+
+⚠️ A hand-closed pool is excluded from the low-balance warning: warning about a decision somebody
+already made is the §302 failure mode. ⚠️ Closing a pool does **not** close the promo code — Zoho
+Backstage has no coupon API (§787.14), so the page says so where the button is.
+
+### 21.3 A prepayment must be confirmed billed (§795.2)
+
+`CouponPrepaidAllocation.ErpInvoiceNumber` (+ `ErpInvoiceConfirmedAt` / `…ByEmail`) is a **human
+confirmation**, not a link the hub validates: the hub never raises this invoice, so nothing here can
+look it up. It is stored as text — it is quoted back to a partner, and a number typed with a prefix
+must survive verbatim.
+
+`CouponPrepaidBillingReminderService` chases pools with no number, from `CouponInvoiceJob`:
+
+- 🔴 **It runs BEFORE the `coupon-erp-invoicing` feature gate.** That switch governs whether the hub
+  WRITES invoices; prepaid is precisely the type it never writes, so gating the chase behind it would
+  leave the one billing type nobody invoices as the one nobody is reminded about. Its real gate is
+  the data — a pool exists only because a human created one.
+- Quiet by construction: **24h grace** from `CreatedAt`, then **one mail per row per 7 days**
+  (`LastBillingReminderAt`), silent the moment a number is entered, and silent when nothing is due.
+  Clearing a number **resets the stamp** so the chase resumes on the next pass.
+- Skips allocations whose coupon is no longer prepaid — asking for a hand-entered confirmation on a
+  coupon the hub invoices itself would be asking for the same money twice.
+
+### 21.4 Draft-invoice notices (§795.3)
+
+`DraftInvoiceCreatedNotifier` mails `info@` (the actionable mailbox, §556) after **both**
+`CouponInvoiceJob` and `WebshopInvoiceJob`: what was created, which customer, how much, the draft
+number and the reference.
+
+🔒 **Silence is structural, not remembered.** `CouponInvoiceRunResult.CreatedDrafts` /
+`WebshopInvoiceRunResult.CreatedDrafts` are populated **only after e-conomic accepts the POST**, so a
+dry run — which composes everything and writes nothing — cannot produce an entry, and an empty list
+sends nothing. ⚠️ Totals are only summed when every draft shares a currency.
+
+### 21.5 Invoice numbers are read, not stored (§795.4)
+
+`IEconomicInvoiceClient.ListInvoiceReferencesAsync` returns `(Reference, Number, IsBooked)` from the
+same paged scan of `/invoices/booked` + `/invoices/drafts` that the idempotency interlock already
+ran; `ListInvoicedOrderReferencesAsync` is now **derived from it**, so the numbers shown and the
+"already invoiced" check can never disagree. No new integration and no extra API traffic.
+
+⚠️ **The two lists carry different number fields** — `bookedInvoiceNumber` vs `draftInvoiceNumber` —
+for the same invoice, so the page renders *"invoice 20147 (booked)"* against *"draft 1042"*. A draft
+number is provisional and is replaced when a human books it. 🔒 Nothing is copied into the hub: the
+numbers live in the finance system, and a stored copy would go stale the moment one is booked,
+credited or deleted. The page fails soft and distinguishes *"no invoice carries this reference"* from
+*"the finance system could not be read"*.
+
+### 21.6 The low-balance alert, and the throttle that must not hide a worsening pool (§796)
+
+`CouponPrepaidLowBalanceAlertService` runs from `CouponInvoiceJob`, **before** the
+`coupon-erp-invoicing` gate — the §795.2 argument, sharper: **the hub cannot stop a claim.** Zoho
+Backstage has no coupon API (§787.14), so an exhausted pool leaves the promo code working and the
+next claimant takes a ticket nobody paid for. A warning held behind an invoicing switch would arrive
+after the money was gone.
+
+- **"Low" is asked, never re-derived.** The service reads `CouponPoolBalance.IsLow` — the same
+  arithmetic the organizer page shows — so the mail and the screen cannot drift apart, and
+  hand-closed pools (§795.1) are excluded at the source rather than by a second rule here.
+- **Threshold:** the pool's own `LowBalanceThreshold`, default 5. Oversubscribed pools are counted
+  and titled separately: *"3 left"* is a heads-up, *"-2"* is money already gone.
+- 🔴 **The quiet period (24h, per row) is broken by DETERIORATION.** `LastLowBalanceAlertRemaining`
+  stores the balance each alert was sent at, so a pool warned at *"3 left"* and now at *"-2"*
+  re-alerts within the hour. A plain time-based suppression would silence exactly the transition the
+  alert exists to catch. ⚠️ Recovery is deliberately silent — a cancellation putting tickets back
+  needs no mail, and storing the number rather than a flag is what tells the two apart.
+- The mail states the operational fact the reader would otherwise assume away: **an empty pool does
+  not close the promo code**, and closing it is a manual step in Backstage.
+
+### 21.7 A pool is the SUM of its purchases, and each one is invoiced on its own (§798.4)
+
+`CouponPrepaidAllocation` is the *agreement* (coupon × ticket class, warning threshold, open/closed
+state). What was bought lives on `CouponPrepaidPurchase` rows:
+
+```
+purchased = SUM(purchases)      remaining = purchased − live claims of that class
+billed?   = EVERY purchase carries an e-conomic invoice number
+```
+
+- 🔒 **Topping up adds a row; nothing is edited.** "50 in January on invoice 20147, 25 more in March
+  on 20233" stays answerable, and the balance keeps the §794.4 property of being derived rather than
+  accumulated — a mistake is a visible row, not a figure nobody can audit.
+- 🔴 **The §795.2 chase is per purchase**, or a partner who bought 25 more would read as settled
+  because the first 50 were invoiced two months ago. The reminder names the top-up as one.
+- ⚠️ **Quantity 0 is refused, not treated as delete.** Removing a pool is its own action: with
+  top-ups, reading 0 as "destroy this agreement" turns a typo into lost history.
+- The migration is **hand-ordered create → MOVE → drop**; the scaffold's default order would have
+  discarded every existing pool's quantity and invoice number.
+
+### 21.8 The requester is the coupon invoice's Att person (§798.1)
+
+`CouponInvoicingSetting.RequesterContactNumber` (+ a display-only `RequesterName`) is passed as
+`EconomicDraftInvoice.AttentionContactNumber`. Before this, coupon invoices passed **no attention at
+all** and fell back to whatever the customer record pointed at.
+
+- ⚠️ **Scoped to the coupon's own customer.** The organizer page lists only that customer's e-conomic
+  contacts, and a posted contact belonging to another customer is **dropped rather than saved** — one
+  e-conomic would reject, or worse accept against a different account.
+- 🔒 **"Your reference" is untouched**: §786.1(b) is a webshop decision, and applying it here would
+  change what prints on a partner's invoice without being asked.
+- 🔒 Null is the shipped default and behaves exactly as before.
+
+### 21.9 Billing-type wording is display-only (§798.3)
+
+`CouponInvoicingModel.DisplayName` renders *"Prepaid tickets with ticket-pool"* and *"Ad-hoc
+invoicing when claimed"*. 🔒 **The enum values are unchanged** — they persist as integers and are read
+by the sweep, the pool and the alerts, so renaming the stored contract to relabel a dropdown would be
+a silent data change. (The dropdown previously rendered the raw enum name, which is why it read like
+code.)
+
+### 21.10 Dormant pools, and post-redirect-get on the coupon page (§799, §797.3)
+
+**A prepaid allocation survives a billing-type change, but stops counting** (§799). The page renders
+pools only while `CouponInvoicingSetting.IsPrepaid`; the same rows are surfaced separately as
+*dormant* and are excluded from the balance, the ⚠ chips, `HasPoolTrouble` / `HasUnbilledPool` and
+therefore from the attention list.
+
+- 🔒 **Nothing is deleted on the way out.** The allocation records what a partner bought and which
+  invoice covered it (§798.4); a dropdown flipped by mistake must not destroy that, and switching
+  back restores the pool exactly. Removing it is an explicit button with the number in front of you.
+- 🔑 This was always a page-level defect: `CouponDraftInvoiceService`, the §795.2 chase and the §796
+  alert have all filtered on `IsPrepaid` from the start, so a dormant pool never reached a mail.
+
+**Every POST on the page redirects** (§797.3). Handlers end in `RedirectToPage()` and the outcome
+travels in `TempData`, so `?handler=Save` never persists in the address bar and a refresh re-runs the
+GET rather than re-submitting the form. Errors redirect too — the failure page is the one most likely
+to be refreshed.
+
+⚠️ The flash is backed by `TempData` **directly, not by `[TempData]`**: the attribute is applied by an
+MVC page filter, so a property set outside the full pipeline carries nothing. That makes the one
+behaviour worth testing — does the message survive the redirect? — untestable, and silently wrong if
+the filter is ever absent. The ADD form's typed coupon name rides along on a refusal, since it is the
+only input not re-rendered from its own row.
+
+### 15.1 Job health on /Organizer/Jobs — two keys, one fallback (§786.8)
+
+A `JobHealthMarker` row is written under **two different keys depending on who writes it**:
+
+| Writer | Key |
+|---|---|
+| `EngineErrorAlertMiddleware` (every timer function) | the **function name** |
+| A service that swallows its own failures (e.g. `ErpSyncCustomerContactJob`) | its own `JobKey` constant, which the catalog declares as `HealthKey` |
+
+`JobScheduleService` reads `HealthKey` first and **falls back to the function name** when that row
+does not exist. Without the fallback, any job declaring a `HealthKey` nobody writes shows a blank
+"last succeeded" while running perfectly — which is what `WebshopInvoiceJob` and `CouponInvoiceJob`
+did, and the first of those is now the only system invoicing webshop orders (§786.4).
+
+🔒 HealthKey wins when both rows exist: the service's own row reflects the ENGINE's outcome, where the
+middleware would have recorded the same run as a success. ⚠️ No marker at all still reads as *never
+reported*. `JobSilenceDetector` already tried both keys, which is why this surfaced as a display gap
+rather than a missing alert.
+
+### 6.x Push lines say PUSHED, not "Updated" (§791.2)
+
+Every CEH→Zoho ops line for a WRITE now reads *"Pushed to sponsor/exhibitor …"*. A `200` from
+Backstage means the PUT was **accepted**, not that the field was kept — §791.3 measured Zoho
+accepting a PUT and storing nothing, which is how §784.13 survived three sessions of "the log says it
+updated". 🔒 Booth-member create/delete keep *"Added"* / *"Deleted"*: §793.4 proved those end-to-end,
+so the words are earned. The rule is to stop claiming what is unverified — not to hedge everything.
+
+### 21.11 Un-invoiceable orders are alerted, not just logged (§813)
+
+`InvoiceProblemNotifier` mails the refusal reasons from both invoice sweeps. Before the §786.4
+cutover a skipped order was covered by the VM script; now nothing else invoices it, so the reason has
+to leave the log.
+
+🔑 **The throttle key is `sha256(sorted problems)`**, not the job name: an unchanged set stays quiet
+inside `EngineAlertSender`'s 6-hour window, while one new stuck order changes the key and is reported
+on the next run. That is §796's deterioration rule expressed without a stamp table — at the cost of
+the window living in process memory, so a deploy can allow one repeat.
+
+⚠️ Fires in a dry run too: dry run governs whether CEH may WRITE to e-conomic, never whether a human
+is told something cannot be billed (the §787 precedent).

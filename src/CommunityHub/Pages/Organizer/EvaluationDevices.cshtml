@@ -1,0 +1,418 @@
+@page
+@model CommunityHub.Pages.Organizer.EvaluationDevicesModel
+@{
+    ViewData["Title"] = "Evaluation Devices";
+}
+
+@* §784.7(A) — ONE page. "Feedback devices" and "Device onboarding" were the same job (get the fleet
+   working) at two different moments, so approving a unit and then checking whether it ever arrived
+   meant two pages. Onboarding is the sections at the bottom now. *@
+<style>
+    .ob-warn { background:#fff4e5; border-left:4px solid #d97706; padding:12px 14px; border-radius:4px; margin:0 0 16px; }
+    .ob-stop { background:#fdecea; border-left:4px solid #c8322a; padding:12px 14px; border-radius:4px; margin:0 0 16px; }
+    .ob-ok   { background:#eef7ee; border-left:4px solid #1E7A3C; padding:12px 14px; border-radius:4px; margin:0 0 16px; }
+    .ob-table { width:100%; border-collapse:collapse; }
+    .ob-table th { text-align:left; font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:#6b7280; padding:6px 8px; border-bottom:1px solid #e5e7eb; }
+    .ob-table td { padding:10px 8px; border-bottom:1px solid #f0f1f3; vertical-align:top; }
+    .ob-serial { font-weight:700; font-size:15px; }
+    .ob-id { font-family:ui-monospace,Consolas,monospace; font-size:12px; color:#6b7280; word-break:break-all; }
+    .ob-muted { color:#6b7280; font-size:13px; }
+    .ob-pill { display:inline-block; padding:2px 9px; border-radius:999px; font-size:12px; font-weight:600; }
+    .ob-on  { background:#eef7ee; color:#1E7A3C; }
+    .ob-off { background:#fdecea; color:#c8322a; }
+    .ob-actions form { display:inline-block; margin-right:6px; }
+    @@media (max-width: 600px) {
+        .ob-table, .ob-table tbody, .ob-table tr, .ob-table td { display:block; width:100%; box-sizing:border-box; }
+        .ob-table thead { display:none; }
+        .ob-table td { border:none; padding:4px 8px; }
+        .ob-table tr { border:1px solid #e5e7eb; border-radius:10px; margin:10px 0; padding:8px; }
+    }
+</style>
+
+<div class="card">
+    <h1>Evaluation Devices</h1>
+    <p>The four-button units in each room &mdash; register them, approve the ones asking to join, and
+       watch their health. A device must be known here <strong>before</strong> it is used &mdash; the
+       ingest API refuses any identifier it does not already know.</p>
+
+    @if (Model.AccessDenied)
+    {
+        <p class="error">This area is for organizers only.</p>
+    }
+    else
+    {
+        @if (!string.IsNullOrWhiteSpace(Model.Message))
+        {
+            <p class="notice">@Model.Message</p>
+        }
+
+        @* 🔒 The ONLY moment a key is ever visible. We store a PBKDF2 hash, so nobody — including
+           us — can read one back afterwards. Say that here rather than let it be discovered. *@
+        @if (Model.IssuedKeys.Count > 0)
+        {
+            <div class="card" style="border:2px solid #b45309;background:#fffbeb;">
+                <h2 style="margin-top:0;">Copy these keys now</h2>
+                <p><strong>They cannot be shown again.</strong> Only a hash is stored, so if a key is
+                   lost the only way forward is to rotate it and re-flash the unit.</p>
+                <table class="grid">
+                    <thead><tr><th>Device</th><th>Key</th></tr></thead>
+                    <tbody>
+                    @foreach (var (serialNumber, key) in Model.IssuedKeys)
+                    {
+                        <tr>
+                            <td><code>@serialNumber</code></td>
+                            <td><code style="user-select:all;word-break:break-all;">@key</code></td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+                <p class="set-deps">Hand these to the vendor with the matching identifiers. The unit
+                   sends its key in the <code>X-Device-Key</code> header over HTTPS.</p>
+            </div>
+        }
+
+        <h2>Register devices</h2>
+        <form method="post" asp-page-handler="Add">
+            <p>
+                <label for="identifiers">Device identifiers &mdash; <strong>one per line</strong></label><br />
+                <textarea id="identifiers" name="identifiers" rows="6" style="width:100%;max-width:520px;"
+                          placeholder="A1:B2:C3:D4:E5:F6&#10;A1:B2:C3:D4:E5:F7"></textarea>
+            </p>
+            <p class="set-deps">
+                Paste all 25 at once. The identifier is whatever is printed on the enclosure &mdash;
+                MAC address or serial number. It is stored exactly as entered and never interpreted,
+                so either is fine.
+            </p>
+            <p>
+                <label for="label">Label (optional, applied to all)</label><br />
+                <input id="label" name="label" type="text" maxlength="200" style="width:100%;max-width:320px;"
+                       placeholder="e.g. Batch 1" />
+            </p>
+            <button type="submit" class="set-btn">Register</button>
+        </form>
+
+        <h2 style="margin-top:24px;">Registered (@Model.Devices.Count)</h2>
+        @if (Model.Devices.Count == 0)
+        {
+            <p>No devices registered yet. Until at least one is, every upload will be refused.</p>
+        }
+        else
+        {
+            <div style="overflow-x:auto;">
+            <table class="grid">
+                <thead>
+                    <tr>
+                        <th>Identifier</th>
+                        <th>Room</th>
+                        <th>Status</th>
+                        <th>Last seen</th>
+                        <th>Battery</th>
+                        <th>Signal</th>
+                        <th>Cached</th>
+                        <th>Responses</th>
+                        <th>Firmware</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                @foreach (var d in Model.Devices)
+                {
+                    var status = Model.StatusOf(d);
+                    var lowBattery = d.LastBatteryPercent is int b && b < CommunityHub.Pages.Organizer.EvaluationDevicesModel.LowBatteryPercent;
+                    var stuckCache = d.CachedRecordCount is int c && c >= CommunityHub.Pages.Organizer.EvaluationDevicesModel.CachedRecordAlert;
+                    <tr style="@(d.IsActive ? "" : "opacity:.55;")">
+                        <td>
+                            <code>@d.SerialNumber</code>
+                            @if (!d.IsActive) { <br /><strong style="color:#b91c1c;">revoked</strong> }
+                            @if (!string.IsNullOrWhiteSpace(d.Label)) { <br /><span class="set-deps">@d.Label</span> }
+                            @if (d.PreviousKeyHash is not null)
+                            {
+                                <br /><span class="set-deps">old key still accepted</span>
+                            }
+                        </td>
+                        @* 🔑 device → room → session is the whole attribution chain. An unlinked
+                           unit collects presses that can never reach a session. *@
+                        <td>
+                            <form method="post" asp-page-handler="SetRoom" style="display:inline;">
+                                <input type="hidden" name="id" value="@d.Id" />
+                                <select name="roomId" onchange="this.form.submit()"
+                                        aria-label="Room for @d.SerialNumber">
+                                    <option value="">— not linked —</option>
+                                    @foreach (var room in Model.Rooms)
+                                    {
+                                        <option value="@room.Id" selected="@(room.Id == d.RoomId)">@room.Name</option>
+                                    }
+                                </select>
+                            </form>
+                            @if (d.RoomId is null)
+                            {
+                                <br /><span class="set-deps" style="color:#b45309;">presses cannot be attributed</span>
+                            }
+                        </td>
+                        <td>@status</td>
+                        <td>@(d.LastSeenAt?.ToString("dd MMM HH:mm") ?? "&mdash;")</td>
+                        <td style="@(lowBattery ? "color:#b91c1c;font-weight:600;" : "")">
+                            @(d.LastBatteryPercent is null ? "—" : d.LastBatteryPercent + "%")
+                        </td>
+                        <td>@(d.LastSignalQuality?.ToString() ?? "—")</td>
+                        @* 🔑 The column that catches SILENT failure: a unit that is online and
+                           heartbeating but not draining its buffer is losing presses, and nothing
+                           else on this board would show it. *@
+                        <td style="@(stuckCache ? "color:#b91c1c;font-weight:600;" : "")">
+                            @(d.CachedRecordCount?.ToString() ?? "—")
+                        </td>
+                        <td>
+                            @(Model.ResponseCounts.TryGetValue(d.SerialNumber, out var n) ? n : 0)
+                            @if (Model.UnattributedCounts.TryGetValue(d.SerialNumber, out var un) && un > 0)
+                            {
+                                <br />
+                                <span class="set-deps" style="color:#b45309;" title="Presses that fell outside every session window — often a drifted device clock or a schedule that no longer matches reality.">
+                                    @un unattributed
+                                </span>
+                            }
+                        </td>
+                        <td>@(d.FirmwareVersion ?? "—")</td>
+                        <td style="white-space:nowrap;">
+                            <form method="post" asp-page-handler="Rotate" style="display:inline;">
+                                <input type="hidden" name="id" value="@d.Id" />
+                                <button type="submit" class="set-btn">New key</button>
+                            </form>
+                            @if (d.PreviousKeyHash is not null)
+                            {
+                                <form method="post" asp-page-handler="RetirePrevious" style="display:inline;">
+                                    <input type="hidden" name="id" value="@d.Id" />
+                                    <button type="submit" class="set-btn">Retire old key</button>
+                                </form>
+                            }
+                            <form method="post" asp-page-handler="SetActive" style="display:inline;">
+                                <input type="hidden" name="id" value="@d.Id" />
+                                <input type="hidden" name="active" value="@((!d.IsActive).ToString().ToLowerInvariant())" />
+                                <button type="submit" class="set-btn @(d.IsActive ? "off" : "")">
+                                    @(d.IsActive ? "Revoke" : "Restore")
+                                </button>
+                            </form>
+                            <form method="post" asp-page-handler="Delete" style="display:inline;">
+                                <input type="hidden" name="id" value="@d.Id" />
+                                <button type="submit" class="set-btn off">Delete</button>
+                            </form>
+                        </td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+            </div>
+
+            <p class="set-deps" style="margin-top:10px;">
+                <strong>Status is last-seen, not a live connection.</strong> These units are battery
+                powered and sleep between uploads, so &ldquo;silent&rdquo; overnight is normal.
+                Battery turns red below @CommunityHub.Pages.Organizer.EvaluationDevicesModel.LowBatteryPercent%,
+                and <em>Cached</em> turns red at @CommunityHub.Pages.Organizer.EvaluationDevicesModel.CachedRecordAlert
+                &mdash; a device that is reporting but not draining its cache is losing presses.
+            </p>
+        }
+    }
+</div>
+
+@* ================================================================================
+   §784.7(A) — ONBOARDING, merged in from the retired /Organizer/EvaluationOnboarding.
+
+   🔴 THIS SECTION IS THE SECURITY CONTROL, and moving it did not weaken it. The provisioning
+   endpoint is the only one in the system that accepts an UNAUTHENTICATED write, and it is safe
+   precisely because everything it can do is put a row in the queue below. A unit there has no key,
+   no upload URL, and cannot post a single response until somebody approves it here.
+   ================================================================================ *@
+@if (!Model.AccessDenied)
+{
+    <div class="card">
+        <h2 style="margin-top:0;">
+            Waiting for approval @if (Model.Pending.Count > 0) { <text>(@Model.Pending.Count)</text> }
+        </h2>
+        <p class="ob-muted" style="margin-top:0;">
+            Units ask to join by calling the provisioning endpoint with the number printed on their
+            enclosure. They can do nothing at all until you approve them &mdash; no key, no upload
+            URL, no responses.
+        </p>
+
+        @if (Model.ProvisioningUnconfigured)
+        {
+            @* 🔒 The endpoint fails CLOSED without its secret. Say so here, because from the
+               device's side this is indistinguishable from the server being down. *@
+            <div class="ob-stop">
+                <strong>Provisioning is switched off.</strong> The fleet bootstrap secret
+                (<code>Evaluation:ProvisionSecret</code>) is not configured on this host, so the
+                endpoint refuses every request with <code>503</code> and no device can onboard. This
+                is the safe state, not a fault &mdash; but nothing will appear here until it is set.
+            </div>
+        }
+
+        @if (Model.Pending.Count == 0)
+        {
+            <p class="ob-muted">
+                Nothing waiting. A unit appears here within minutes of being powered on with the
+                provisioning URL and bootstrap secret configured.
+            </p>
+        }
+        else
+        {
+            <table class="ob-table">
+                <thead>
+                    <tr>
+                        <th>Printed serial</th>
+                        <th>Firmware</th>
+                        <th>Asking since</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                @foreach (var r in Model.Pending)
+                {
+                    <tr>
+                        @* 🔑 Serial FIRST and largest: the organizer doing this is holding the box,
+                           and the printed number is the only one they can read off it. *@
+                        <td data-label="Serial"><span class="ob-serial">@r.SerialNumber</span></td>
+                        <td data-label="Firmware" class="ob-muted">@(r.FirmwareVersion ?? "—")</td>
+                        <td data-label="Asking since" class="ob-muted">
+                            @Model.Local(r.RequestedAt)<br>
+                            <span style="font-size:12px;">
+                                asked @r.RequestCount&times;, last @Model.Local(r.LastRequestedAt)
+                            </span>
+                        </td>
+                        <td class="ob-actions">
+                            <form method="post" asp-page-handler="Approve">
+                                <input type="hidden" name="id" value="@r.Id" />
+                                <button type="submit" class="btn btn-primary">Approve</button>
+                            </form>
+                            <form method="post" asp-page-handler="Reject">
+                                <input type="hidden" name="id" value="@r.Id" />
+                                <button type="submit" class="btn">Refuse</button>
+                            </form>
+                        </td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+            <p class="ob-muted" style="margin-top:12px;">
+                After approval the unit collects its key on its next check-in &mdash; up to an hour
+                away &mdash; and appears in the device list above once it has.
+            </p>
+        }
+    </div>
+
+    <div class="card">
+        <h2 style="margin-top:0;">Health telemetry schedule</h2>
+
+        @if (Model.TelemetryOffNow)
+        {
+            @* ⚠️ The consequence the operator accepted, said out loud. Silent telemetry also means
+               no battery level and no cached-record count — the two numbers that catch a failing
+               unit. *@
+            <div class="ob-warn">
+                <strong>Telemetry is OFF right now.</strong> No window covers this moment, so devices
+                are not reporting battery level, signal or unflushed cache &mdash; the figures that
+                catch a unit failing quietly.
+                @if (Model.TelemetryNextOn is not null)
+                {
+                    <text> It comes back on <strong>@Model.Local(Model.TelemetryNextOn.Value)</strong>.</text>
+                }
+                else
+                {
+                    <text> No future window is scheduled.</text>
+                }
+            </div>
+        }
+        else
+        {
+            <div class="ob-ok"><strong>Telemetry is ON right now.</strong></div>
+        }
+
+        <p class="ob-muted">
+            Times are <strong>Copenhagen time</strong>. Devices send health data only inside an
+            active window; outside every window they stay quiet, which is what keeps the SIM data
+            plan and the battery intact.
+        </p>
+
+        <table class="ob-table">
+            <thead><tr><th>From</th><th>To</th><th>What for</th><th>Scope</th><th></th></tr></thead>
+            <tbody>
+            @foreach (var w in Model.Windows)
+            {
+                var live = w.IsActive && w.FromUtc <= Model.Now && Model.Now < w.ToUtc;
+                <tr style="@(w.IsActive ? "" : "opacity:.55;")">
+                    <td data-label="From">@Model.Local(w.FromUtc)</td>
+                    <td data-label="To">@Model.Local(w.ToUtc)</td>
+                    <td data-label="What for">
+                        @(w.Label ?? "—")
+                        @if (live) { <span class="ob-pill ob-on" style="margin-left:6px;">active now</span> }
+                    </td>
+                    <td data-label="Scope" class="ob-muted">
+                        @(w.EvaluationDeviceId is null ? "all devices" : $"device #{w.EvaluationDeviceId}")
+                    </td>
+                    <td>
+                        <form method="post" asp-page-handler="ToggleWindow">
+                            <input type="hidden" name="id" value="@w.Id" />
+                            <button type="submit" class="btn">@(w.IsActive ? "Park" : "Enable")</button>
+                        </form>
+                    </td>
+                </tr>
+            }
+            @if (Model.Windows.Count == 0)
+            {
+                <tr><td colspan="5" class="ob-muted">
+                    No windows yet &mdash; telemetry is off permanently until you add one.
+                </td></tr>
+            }
+            </tbody>
+        </table>
+
+        <form method="post" asp-page-handler="AddWindow"
+              style="margin-top:16px;display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;">
+            <div>
+                <label class="ob-muted" for="from">From (Copenhagen)</label><br>
+                <input type="datetime-local" id="from" name="from" required />
+            </div>
+            <div>
+                <label class="ob-muted" for="to">To (Copenhagen)</label><br>
+                <input type="datetime-local" id="to" name="to" required />
+            </div>
+            <div>
+                <label class="ob-muted" for="label">What for</label><br>
+                <input type="text" id="label" name="label" placeholder="install week" maxlength="200" />
+            </div>
+            <button type="submit" class="btn btn-primary">Add window</button>
+        </form>
+
+        @if (Model.TelemetryRows.Count > 0)
+        {
+            <h3>Per-unit telemetry</h3>
+            <table class="ob-table">
+                <thead><tr><th>Serial</th><th>Telemetry</th><th>Hard switch</th></tr></thead>
+                <tbody>
+                @foreach (var row in Model.TelemetryRows)
+                {
+                    <tr>
+                        <td data-label="Serial"><span class="ob-serial">@row.Device.SerialNumber</span></td>
+                        <td data-label="Telemetry">
+                            <span class="ob-pill @(row.EffectivelyOn ? "ob-on" : "ob-off")">
+                                @(row.EffectivelyOn ? "sending" : "silent")
+                            </span>
+                            <span class="ob-muted" style="margin-left:6px;">@row.Why</span>
+                        </td>
+                        <td>
+                            <form method="post" asp-page-handler="ToggleDeviceHealth">
+                                <input type="hidden" name="id" value="@row.Device.Id" />
+                                <button type="submit" class="btn">
+                                    @(row.Device.HealthTelemetryEnabled ? "Hard-disable" : "Allow")
+                                </button>
+                            </form>
+                        </td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+            <p class="ob-muted" style="margin-top:12px;">
+                The hard switch always wins: a unit hard-disabled here stays silent no matter what
+                the schedule says.
+            </p>
+        }
+    </div>
+}

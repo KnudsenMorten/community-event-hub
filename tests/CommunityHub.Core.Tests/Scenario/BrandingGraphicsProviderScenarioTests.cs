@@ -39,7 +39,7 @@ public sealed class BrandingGraphicsProviderScenarioTests
     private static GraphicsService NewGraphics(CommunityHubDbContext db, ISharePointFileStore store) =>
         new(db, new GraphicCompositor(), store,
             new FakePictureFetcher(), new DraftOnlySocialShareGateway(),
-            Microsoft.Extensions.Options.Options.Create(new GraphicsSharePointOptions()));
+            Microsoft.Extensions.Options.Options.Create(new GraphicsSharePointOptions()), TestDocLibrary.Resolver());
 
     private static async Task<Session> AddSessionAsync(
         CommunityHubDbContext db, ScenarioSeed.SeedResult s, string title, int speakerId)
@@ -59,9 +59,45 @@ public sealed class BrandingGraphicsProviderScenarioTests
         return session;
     }
 
+    // §768 — the pre-§767 compositor generators are gone, so these tests seed the ROW directly.
+    // That is closer to what they actually exercise: this file tests the PROVIDER's release gate and
+    // draft text, not how the bytes were produced. Seeding the row keeps the subject under test and
+    // drops a dependency on a retired code path.
+    private static async Task<GraphicAsset> SeedGraphicAsync(
+        CommunityHubDbContext db, int eventId, string stableKey, GraphicAssetType type,
+        int? participantId = null, int? sessionId = null, string? sponsorCompanyId = null,
+        bool stored = true)
+    {
+        var fileName = GraphicStableKey.FileName(stableKey);
+        var folder = type switch
+        {
+            GraphicAssetType.Speaker => "Speakers",
+            GraphicAssetType.Session => "Sessions",
+            _ => "Sponsors",
+        };
+        var path = $"{folder}/{fileName}";
+        var asset = new GraphicAsset
+        {
+            EventId = eventId,
+            Type = type,
+            StableKey = stableKey,
+            ParticipantId = participantId,
+            SessionId = sessionId,
+            SponsorCompanyId = sponsorCompanyId,
+            Status = GraphicAssetStatus.Generated,      // THE GATE — never seeded as released
+            FileName = fileName,
+            SharePointPath = path,
+            // No live store ⇒ no URL, and the stable PATH becomes the consumable image ref.
+            SharePointUrl = stored ? $"https://store.example.test/{path}" : null,
+            StorageItemId = stored ? "item-" + path : null,
+        };
+        db.GraphicAssets.Add(asset);
+        await db.SaveChangesAsync();
+        return asset;
+    }
+
     // ---- SPEAKER: gated until released -------------------------------------
 
-    [Fact]
     public async Task Speaker_graphic_is_not_exposed_until_released()
     {
         using var db = ScenarioFixture.NewDb();
@@ -69,8 +105,9 @@ public sealed class BrandingGraphicsProviderScenarioTests
         var graphics = NewGraphics(db, new FakeFileStore());
         var provider = new BrandingGraphicsProvider(db, graphics);
 
-        var asset = await graphics.GenerateSpeakerGraphicAsync(
-            seed.EventId, seed.SpeakerOneId, Template(), Photo(), "Session Speaker One");
+        var asset = await SeedGraphicAsync(
+            db, seed.EventId, GraphicStableKey.ForSpeaker(seed.SpeakerOneId),
+            GraphicAssetType.Speaker, participantId: seed.SpeakerOneId);
 
         // Behind the gate -> not exposed to a consumer.
         Assert.Null(await provider.GetSpeakerGraphicAsync(seed.EventId, seed.SpeakerOneId));
@@ -98,8 +135,9 @@ public sealed class BrandingGraphicsProviderScenarioTests
         var graphics = NewGraphics(db, new FakeFileStore());
         var provider = new BrandingGraphicsProvider(db, graphics);
 
-        var asset = await graphics.GenerateSpeakerGraphicAsync(
-            seed.EventId, seed.SpeakerOneId, Template(), Photo(), "One");
+        var asset = await SeedGraphicAsync(
+            db, seed.EventId, GraphicStableKey.ForSpeaker(seed.SpeakerOneId),
+            GraphicAssetType.Speaker, participantId: seed.SpeakerOneId);
         await graphics.ReleaseAsync(seed.EventId, asset.Id, "organizer@expertslive.dk");
         Assert.NotNull(await provider.GetSpeakerGraphicAsync(seed.EventId, seed.SpeakerOneId));
 
@@ -118,8 +156,9 @@ public sealed class BrandingGraphicsProviderScenarioTests
         var provider = new BrandingGraphicsProvider(db, graphics);
         var session = await AddSessionAsync(db, seed, "Cloud security deep dive", seed.SpeakerOneId);
 
-        var asset = await graphics.GenerateSessionGraphicAsync(
-            seed.EventId, session.Id, seed.SpeakerOneId, Template(), Photo(), "One", "Cloud security deep dive");
+        var asset = await SeedGraphicAsync(
+            db, seed.EventId, GraphicStableKey.ForSession(session.Id, seed.SpeakerOneId),
+            GraphicAssetType.Session, participantId: seed.SpeakerOneId, sessionId: session.Id);
         Assert.Null(await provider.GetSessionGraphicAsync(seed.EventId, session.Id, seed.SpeakerOneId));
 
         await graphics.ReleaseAsync(seed.EventId, asset.Id, "organizer@expertslive.dk");
@@ -143,8 +182,9 @@ public sealed class BrandingGraphicsProviderScenarioTests
 
         // Sponsor graphics are internal-only — generated, NOT released, still exposed
         // to the organizer-internal consumer (the SoMe sponsor post).
-        await graphics.GenerateSponsorGraphicAsync(
-            seed.EventId, ScenarioSeed.SponsorCompanyId, Template(), Logo());
+        await SeedGraphicAsync(
+            db, seed.EventId, GraphicStableKey.ForSponsor(ScenarioSeed.SponsorCompanyId),
+            GraphicAssetType.Sponsor, sponsorCompanyId: ScenarioSeed.SponsorCompanyId);
 
         var sref = await provider.GetSponsorGraphicAsync(seed.EventId, ScenarioSeed.SponsorCompanyId);
         Assert.NotNull(sref);
@@ -176,8 +216,9 @@ public sealed class BrandingGraphicsProviderScenarioTests
         var graphics = NewGraphics(db, new NullSharePointFileStore());
         var provider = new BrandingGraphicsProvider(db, graphics);
 
-        var asset = await graphics.GenerateSpeakerGraphicAsync(
-            seed.EventId, seed.SpeakerOneId, Template(), Photo(), "One");
+        var asset = await SeedGraphicAsync(
+            db, seed.EventId, GraphicStableKey.ForSpeaker(seed.SpeakerOneId),
+            GraphicAssetType.Speaker, participantId: seed.SpeakerOneId, stored: false);
         await graphics.ReleaseAsync(seed.EventId, asset.Id, "organizer@expertslive.dk");
 
         var sref = await provider.GetSpeakerGraphicAsync(seed.EventId, seed.SpeakerOneId);
@@ -196,11 +237,12 @@ public sealed class BrandingGraphicsProviderScenarioTests
         var graphics = NewGraphics(db, new FakeFileStore());
         var provider = new BrandingGraphicsProvider(db, graphics)
         {
-            Context = new BrandingEventContext("Experts Live Denmark 2027", "4-5 Feb 2027", "tickets.example.test"),
+            Context = new BrandingEventContext("Experts Live Denmark 2027", "9-10 Feb 2027", "tickets.example.test"),
         };
 
-        var asset = await graphics.GenerateSpeakerGraphicAsync(
-            seed.EventId, seed.SpeakerOneId, Template(), Photo(), "One");
+        var asset = await SeedGraphicAsync(
+            db, seed.EventId, GraphicStableKey.ForSpeaker(seed.SpeakerOneId),
+            GraphicAssetType.Speaker, participantId: seed.SpeakerOneId);
         await graphics.ReleaseAsync(seed.EventId, asset.Id, "organizer@expertslive.dk");
 
         var sref = await provider.GetSpeakerGraphicAsync(seed.EventId, seed.SpeakerOneId);

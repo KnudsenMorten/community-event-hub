@@ -218,6 +218,41 @@ public sealed class CommsCockpitServiceTests
         Assert.All(s.WhoGotWhat, w => Assert.True(w.HasUndelivered));
     }
 
+    /// <summary>
+    /// §784.2 — the row carries the ACTUAL MAILS, not just a tally. Operator 2026-08-03: *"i only
+    /// see count. I need to see subject,date,time"*.
+    /// </summary>
+    [Fact]
+    public async Task WhoGotWhat_carries_the_real_messages_newest_first_and_they_agree_with_the_counts()
+    {
+        using var db = NewDb();
+        await SeedAsync(db);
+
+        var s = await NewSvc(db).BuildAsync(EventId);
+        var alex = Assert.Single(s.WhoGotWhat, w => w.Email == "alex@expertslive.dk");
+
+        // The two in-window mails — the 90-day-old welcome is outside the window and must NOT
+        // appear, or the list would disagree with the counts printed next to it.
+        Assert.Equal(2, alex.Messages.Count);
+        Assert.Equal(alex.Total, alex.Messages.Count);
+
+        // Newest first — the failed task-deadline (yesterday) before the welcome (three days ago).
+        Assert.Equal("task-deadline", alex.Messages[0].Category);
+        Assert.Equal(CommsOutcome.Failed, alex.Messages[0].Outcome);
+        Assert.Equal("task-deadline subject", alex.Messages[0].Subject);
+        Assert.Equal(Now.AddDays(-1), alex.Messages[0].SentAt);
+
+        Assert.Equal("welcome", alex.Messages[1].Category);
+        Assert.Equal(CommsOutcome.Sent, alex.Messages[1].Outcome);
+        Assert.True(alex.Messages[0].SentAt > alex.Messages[1].SentAt);
+
+        // A ring-DROPPED mail is still listed under the person — the column is what he asked to
+        // hide, not the record of it. Hiding the row too would make the list disagree with the
+        // Email Log, which is the one thing this view must never do.
+        var sam = Assert.Single(s.WhoGotWhat, w => w.Email == "sam@example.test");
+        Assert.Contains(sam.Messages, m => m.Outcome == CommsOutcome.Dropped);
+    }
+
     [Fact]
     public async Task Campaigns_group_by_category_with_real_outcome()
     {
@@ -257,6 +292,107 @@ public sealed class CommsCockpitServiceTests
         Assert.Equal(CommsOutcome.Failed, c.Outcome);
         Assert.Equal("task-deadline", c.Category);
         Assert.Contains("550", c.Error);
+    }
+
+    // ---------------------------------------------------------------------
+    // §784.1 — DISMISS a row from the resend queue.
+    //
+    // The operator had a stale undelivered mail stuck in the queue with no way
+    // out: resending it was wrong (the person was handled elsewhere) and the
+    // only other exit was waiting 30 days for the age rule. These tests pin the
+    // two halves of the contract — the row LEAVES the queue, and NOTHING about
+    // delivery changes. EmailLogs are attempts; dismissal must never become a
+    // second answer to "did this arrive".
+    // ---------------------------------------------------------------------
+
+    [Fact]
+    public async Task Dismiss_removes_the_row_from_the_resend_queue()
+    {
+        using var db = NewDb();
+        var alexId = await SeedAsync(db);
+        var svc = NewSvc(db);
+
+        Assert.Single((await svc.BuildAsync(EventId)).ResendCandidates);
+
+        var hidden = await svc.DismissFromResendQueueAsync(EventId, alexId, "org@expertslive.dk");
+
+        Assert.Equal(1, hidden);
+        Assert.Empty((await svc.BuildAsync(EventId)).ResendCandidates);
+    }
+
+    [Fact]
+    public async Task Dismiss_changes_nothing_about_delivery()
+    {
+        using var db = NewDb();
+        var alexId = await SeedAsync(db);
+        var svc = NewSvc(db);
+
+        var before = await svc.BuildAsync(EventId);
+        await svc.DismissFromResendQueueAsync(EventId, alexId, "org@expertslive.dk");
+        var after = await svc.BuildAsync(EventId);
+
+        // The failure is still a failure everywhere it is REPORTED — only the
+        // queue hides it. If any of these move, the button has started lying
+        // about delivery.
+        Assert.Equal(before.TotalEmails, after.TotalEmails);
+        Assert.Equal(before.EmailsSent, after.EmailsSent);
+        Assert.Equal(before.EmailsFailed, after.EmailsFailed);
+        Assert.Equal(before.Timeline.Count, after.Timeline.Count);
+        Assert.Equal(before.WhoGotWhat.Count, after.WhoGotWhat.Count);
+
+        var row = await db.EmailLogs.SingleAsync(e => e.ParticipantId == alexId && !e.Success);
+        Assert.False(row.Success);
+        Assert.Contains("550", row.Error);
+        Assert.Equal("org@expertslive.dk", row.ResendDismissedByEmail);
+        Assert.NotNull(row.ResendDismissedAt);
+    }
+
+    [Fact]
+    public async Task Dismiss_covers_every_undelivered_row_for_that_person_but_never_a_delivered_one()
+    {
+        using var db = NewDb();
+        var alexId = await SeedAsync(db);
+
+        // A SECOND undelivered mail for the same person, older than the one the
+        // queue shows. Dismissing only the newest would make the row reappear
+        // showing this older failure — which reads as a brand-new problem.
+        db.EmailLogs.Add(new EmailLog
+        {
+            EventId = EventId, ToEmail = "alex@expertslive.dk", ActualToEmail = string.Empty,
+            RecipientName = "Alex Speaker", Category = "invitation",
+            Subject = "invitation subject", Success = false, Error = "SMTP 550 again",
+            SentAt = Now.AddDays(-6), ParticipantId = alexId,
+        });
+        await db.SaveChangesAsync();
+        var svc = NewSvc(db);
+
+        var hidden = await svc.DismissFromResendQueueAsync(EventId, alexId, "org@expertslive.dk");
+
+        Assert.Equal(2, hidden);
+        Assert.Empty((await svc.BuildAsync(EventId)).ResendCandidates);
+
+        // The DELIVERED welcome was never in the queue, so it must not be stamped —
+        // dismissal data has no business sitting on healthy mail.
+        var delivered = await db.EmailLogs
+            .Where(e => e.ParticipantId == alexId && e.Success)
+            .ToListAsync();
+        Assert.NotEmpty(delivered);
+        Assert.All(delivered, e => Assert.Null(e.ResendDismissedAt));
+    }
+
+    [Fact]
+    public async Task Dismiss_is_idempotent_and_scoped_to_the_edition()
+    {
+        using var db = NewDb();
+        var alexId = await SeedAsync(db);
+        var svc = NewSvc(db);
+
+        Assert.Equal(1, await svc.DismissFromResendQueueAsync(EventId, alexId, "org@expertslive.dk"));
+        // Second press: nothing left to hide, and it must not error or re-stamp.
+        Assert.Equal(0, await svc.DismissFromResendQueueAsync(EventId, alexId, "org@expertslive.dk"));
+        // Same participant id asked for under the OTHER edition touches nothing.
+        Assert.Equal(0, await svc.DismissFromResendQueueAsync(OtherEventId, alexId, "org@expertslive.dk"));
+        Assert.Equal(0, await svc.DismissFromResendQueueAsync(EventId, 999_999, "org@expertslive.dk"));
     }
 
     [Fact]

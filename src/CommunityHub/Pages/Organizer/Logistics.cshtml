@@ -18,6 +18,159 @@
     }
 </div>
 
+@* ============================================================================
+   §6.3 — THE GENERATED §3.5 FILES.
+   The work order: "The page exists but links elsewhere. Repoint it to the §3.5
+   generated files" — per artifact a filename, a link, a last-generated stamp and
+   a headline figure, a per-artifact "Generate now", and the last automatic run's
+   status and any error.
+   ============================================================================ *@
+@if (!Model.AccessDenied && Model.Files is not null)
+{
+    <div class="card">
+        <h2 style="margin-top:0;">Generated logistics files</h2>
+
+        @if (Model.Flash is not null)
+        {
+            <div class="@(Model.FlashIsError ? "vol-error" : "vol-ok")" role="status">@Model.Flash</div>
+        }
+
+        @* The last automatic run. A run that did nothing still appears — "it has not run since
+           Friday" and "it ran and had nothing to do" need opposite responses. *@
+        @if (Model.Files.Run is { } run)
+        {
+            <p style="margin:0 0 6px;">
+                <strong>Last automatic run:</strong>
+                @run.RanAt.UtcDateTime.ToString("yyyy-MM-dd HH:mm") UTC —
+                @run.Published published, @run.Unchanged unchanged, @run.Mailed mailed.
+                @if (run.Ok)
+                {
+                    <span style="color:#166534;">No failures.</span>
+                }
+                else
+                {
+                    <span style="color:#b91c1c;font-weight:600;">The run had failures.</span>
+                }
+            </p>
+
+            @if (run.Problems.Count > 0)
+            {
+                <ul style="margin:4px 0 12px;padding-left:18px;color:#7a5b00;">
+                    @foreach (var p in run.Problems)
+                    {
+                        <li>@p</li>
+                    }
+                </ul>
+            }
+        }
+        else
+        {
+            <p class="vol-error" role="status">
+                The daily logistics job has not completed a run for this edition yet, so nothing has
+                been written to the document library.
+            </p>
+        }
+
+        @if (Model.Files.MailsAreHeld)
+        {
+            @* 🔒 Stated, because "mailed to the review mailbox" without the reason reads as a
+               misconfiguration rather than the deliberate gate it is. *@
+            <p style="font-size:13px;color:#7a5b00;background:#fff8e1;padding:8px 10px;border-radius:6px;">
+                <strong>Notification mails are held for review.</strong> Every logistics mail goes to
+                the review mailbox until the reports are approved — no venue, hotel or supplier is
+                contacted. Approving them is a settings change, not a deploy.
+            </p>
+        }
+
+        @if (Model.Files.Artifacts.Count == 0)
+        {
+            <p>No files have been generated yet.</p>
+        }
+        else
+        {
+            <div style="overflow-x:auto;">
+                <table class="grid">
+                    <thead>
+                        <tr>
+                            <th scope="col">File</th>
+                            <th scope="col">Figure</th>
+                            <th scope="col">Last generated</th>
+                            <th scope="col">Last mailed</th>
+                            <th scope="col"></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var a in Model.Files.Artifacts)
+                        {
+                            <tr>
+                                <td>
+                                    @* No link is offered when we do not have one — a link that 404s
+                                       makes somebody doubt the file exists at all. *@
+                                    @if (a.WebUrl is not null)
+                                    {
+                                        <a href="@a.WebUrl" target="_blank" rel="noopener">@a.FileName</a>
+                                    }
+                                    else
+                                    {
+                                        <span>@a.FileName</span>
+                                    }
+                                    <br />
+                                    <span style="font-size:12px;color:#6b7280;">@a.Folder</span>
+                                </td>
+                                <td>@(a.Headline ?? "—")</td>
+                                <td>@a.PublishedAt.UtcDateTime.ToString("yyyy-MM-dd HH:mm")</td>
+                                <td>
+                                    @if (a.LastMailedAt is { } mailedAt)
+                                    {
+                                        @mailedAt.UtcDateTime.ToString("yyyy-MM-dd")
+                                        <br />
+                                        <span style="font-size:12px;color:#6b7280;">@a.LastMailedTo</span>
+                                    }
+                                    else
+                                    {
+                                        <span style="color:#6b7280;">Never</span>
+                                    }
+                                </td>
+                                <td>
+                                    <form method="post" asp-page-handler="Generate">
+                                        <input type="hidden" name="fileName" value="@a.FileName" />
+                                        <button type="submit">Generate now</button>
+                                    </form>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+            <p style="font-size:12px;color:#6b7280;margin-top:8px;">
+                <strong>Generate now</strong> rebuilds that one file and overwrites it in the library.
+                It never sends mail — the daily run owns the mail schedule.
+            </p>
+        }
+
+        @* §6.8 — the on-demand AI-grounding trigger. The work order puts this control "in the
+           organizer menu alongside the §6.3 Generate now buttons", and it is the same shape of
+           action: go and re-read the document library on request. *@
+        <div style="border-top:1px solid #eef0f4;margin-top:18px;padding-top:14px;">
+            <h3 style="margin:0 0 6px;font-size:15px;">AI Community Helper grounding</h3>
+            <p style="margin:0 0 10px;font-size:13px;color:#4b5563;">
+                The helper answers from the documents in the library's
+                <strong>ExtraAIGroundingInfo</strong> folder, re-read automatically every 15 minutes.
+                Press this after dropping a file in if you do not want to wait.
+            </p>
+
+            @if (Model.GroundingFlash is not null)
+            {
+                <div class="@(Model.GroundingFlashIsError ? "vol-error" : "vol-ok")" role="status">@Model.GroundingFlash</div>
+            }
+
+            <form method="post" asp-page-handler="RefreshGrounding">
+                <button type="submit">Refresh AI grounding now</button>
+            </form>
+        </div>
+    </div>
+}
+
 @if (!Model.AccessDenied)
 {
     var tiles = new List<CommunityHub.Pages.Shared.HubTile>

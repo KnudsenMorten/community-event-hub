@@ -2,10 +2,13 @@
 @using CommunityHub.Core.Integrations
 @model CommunityHub.Pages.Organizer.ContentStudioModel
 @{
-    ViewData["Title"] = "Content Studio";
+    // §832 (operator 2026-08-05): "this must be renamd to WordPress BlogPost Content".
+    // The title is also the breadcrumb LEAF (the shared partial reuses ViewData["Title"]),
+    // so this one line renames the page and the trail together. Route unchanged by design.
+    ViewData["Title"] = "WordPress BlogPost Content";
 }
 
-<h1>Content Studio</h1>
+<h1>WordPress BlogPost Content</h1>
 <p class="muted">Generate marketing content from live hub data, then create a <strong>WordPress draft</strong> to validate before publishing. Nothing is published automatically.</p>
 
 @if (Model.AccessDenied)
@@ -59,7 +62,7 @@ else
                 else
                 {
                     <button type="submit" class="btn-primary" disabled>Create WordPress draft</button>
-                    <span class="muted" style="margin-left:8px;">WordPress connector is not configured yet — set <code>WordPress__SiteUrl</code> / <code>WordPress__Username</code> / <code>WordPress__AppPassword</code> and enable the <em>Content Studio</em> feature.</span>
+                    <span class="muted" style="margin-left:8px;">WordPress connector is not configured yet — set <code>WordPress__SiteUrl</code> / <code>WordPress__Username</code> / <code>WordPress__AppPassword</code> and enable the <em>WordPress BlogPost Content</em> feature.</span>
                 }
             </form>
         </div>

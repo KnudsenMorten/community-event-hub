@@ -88,11 +88,21 @@ Describe "/survey/eldk27-topics renders on <Name>" -ForEach $script:Environments
         It "centers the logos in the header"  { $script:html | Should -Match 'justify-content:\s*center' }
     }
 
-    Context "Topbar (event-site + ticket sale)" {
-        It "renders the topbar"                       { $script:html | Should -Match 'class="topbar"' }
-        It "shows the ticket-sale info"               { $script:html | Should -Match 'Ticket sale starts' }
-        It "links to https://eldk27.expertslive.dk/"  { $script:html | Should -Match 'https://eldk27\.expertslive\.dk/' }
-        It "has the 'Visit event site' CTA button"    { $script:html | Should -Match 'Visit event site' }
+    # 🔒 §712 — NO TOPBAR on an anonymous page. Operator 2026-07-31: *"no topbar"*.
+    #
+    # These four assertions used to demand the OPPOSITE and had been red on DEV and PROD for five
+    # weeks: 59f0cda8 (§27) moved the anonymous pages onto `_PublicLayout`, which has no topbar,
+    # and nobody noticed because this FILE was never in the quoted "Pester 68/0" figure (that is
+    # Features.Tests.ps1 alone). Asked to choose between restoring the ticket banner and leaving
+    # these pages bare, he chose bare — a survey is just a survey.
+    #
+    # Inverted rather than deleted, deliberately: his decision is now ENFORCED, so re-adding a
+    # topbar to `_PublicLayout` (or pointing a survey at `_Layout`) fails here instead of quietly
+    # putting a ticket CTA back on the public face of the event.
+    Context "No topbar on an anonymous page (§712 — operator: 'no topbar')" {
+        It "renders NO topbar"                       { $script:html | Should -Not -Match 'class="topbar"' }
+        It "shows NO ticket-sale banner"             { $script:html | Should -Not -Match 'Ticket sale starts|Tickets on sale' }
+        It "has NO 'Visit event site' CTA button"    { $script:html | Should -Not -Match 'Visit event site' }
     }
 
     Context "Footer (consistent across CEH)" {

@@ -101,17 +101,17 @@ public class SessionSourceModel : PageModel
         // name/tagline/bio/country/social against the CEH snapshot and ENQUEUES a Pending delta
         // for approval (first-populate seeds silently, never auto-applies, never deletes),
         // driven hourly at :50 by SpeakerChangeDetectionJob, and SyncDeltaQueueService has the
-        // arm that writes an approved upstream value back into CEH. What is missing is not code
-        // but an upstream SCOPE — hence Blocker rather than Implemented: false.
+        // arm that writes an approved upstream value back into CEH.
+        // 🗑 §754.5 — THE BLOCKER IS GONE. It said this would "find nothing until Zoho Backstage
+        // grants the speaker READ scope", which was never true: the credentials have always had it.
+        // This was the operator-facing face of that false claim — a warning on the page telling him
+        // the stage he was choosing could not work. Nothing blocks it.
         new DirectionOption(SessionSyncDirection.ZohoToCeh, 3, "Zoho Backstage → CEH",
             "Pull Zoho Backstage speaker changes back into CEH and raise them for approval — the hourly "
             + "change-detection engine diffs each linked speaker's name, tagline, bio, country and social "
             + "links against CEH and queues anything that differs. It never auto-applies and never deletes; "
             + "you approve or reject each change in the Sync Approval Queue.",
-            Implemented: true,
-            Blocker: "Built, but it will find nothing until Zoho Backstage grants the speaker READ scope "
-                     + "(ZohoBackstage.speaker.READ) and speaker reads are switched on. Until then the job "
-                     + "runs, logs that the source is unavailable, and changes nothing."),
+            Implemented: true),
     };
 
     /// <summary>§326bm — is this stage backed by real behaviour? Only an implemented
@@ -144,10 +144,14 @@ public class SessionSourceModel : PageModel
         new SourceOption(SessionSourceKinds.Sessionize, "Sessionize",
             Available(SessionSourceKinds.Sessionize),
             "Sessions from the Sessionize v2 view API (current default)."),
+        // 🗑 §754.5 — was "Not yet enabled — needs the ZohoBackstage.agenda.READ scope". False:
+        // reading the Backstage agenda works today (the change-detection engine and the signage
+        // mirror both do it). What is genuinely missing is the IMPORT wiring, and the copy now says
+        // that instead of blaming a permission he already granted.
         new SourceOption(SessionSourceKinds.ZohoBackstage, "Zoho Backstage",
             Available(SessionSourceKinds.ZohoBackstage),
-            "The finalized agenda from Zoho Backstage. Not yet enabled — needs the "
-            + "ZohoBackstage.agenda.READ scope on the refresh token."),
+            "The finalized agenda from Zoho Backstage. Reading it works, but the IMPORT path is not "
+            + "built yet — selecting this changes no sessions. Keep Sessionize as the import source."),
     };
 
     public async Task<IActionResult> OnGetAsync(string? msg, CancellationToken ct)

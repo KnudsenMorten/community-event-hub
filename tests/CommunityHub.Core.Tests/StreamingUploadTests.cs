@@ -78,7 +78,7 @@ public sealed class StreamingUploadTests
                 PresentationPreviewFolderPath = $"Ev/{Guid.NewGuid():N}/Preview",
                 PresentationFinalFolderPath = $"Ev/{Guid.NewGuid():N}/Final",
             }),
-            db, TimeProvider.System);
+            db, TimeProvider.System, TestDocLibrary.Resolver($"General/TEST-{Guid.NewGuid():N}/EventHub"));
 
     private static async Task<(int ev, int pid, int sid)> SeedAsync(CommunityHubDbContext db)
     {

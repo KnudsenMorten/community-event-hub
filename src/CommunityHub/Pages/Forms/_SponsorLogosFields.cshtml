@@ -1,10 +1,14 @@
 @model CommunityHub.Forms.Steps.SponsorLogosModel
 @*
-    Fields-ONLY partial for the sponsor Logos wizard step (§32 / §285 Phase 2). Three file inputs —
+    Fields-ONLY partial for the sponsor Logos wizard step (§32 / §285 Phase 2). Two file inputs —
     the shared wizard host form is multipart. Field names match SponsorLogosModel. §297: each input
     shows the CURRENTLY uploaded file for that logo (file inputs can't be pre-filled), from the
     per-kind upload audit, so a coordinator can see what's already there. Upload replaces it
-    (versioned); the step completes only when all THREE are present.
+    (versioned); the step completes only when BOTH are present.
+
+    §6.7 / §768.14 — the third input, "Logo for the Event System (Zoho) lead system", is gone. One
+    Web PNG now serves both the promotion graphics and the external event system, so we stopped
+    asking a sponsor to upload the same logo twice into two folders we then had to keep in step.
 *@
 @{
     string CurrentLine(string? name) => string.IsNullOrEmpty(name)
@@ -14,29 +18,49 @@
 }
 
 <p style="font-size:13.5px;color:#4b5563;margin-top:0;">
-    Upload all three logos. Each is versioned automatically — the latest file is always the one we
-    use, and re-uploading replaces the current one. The step is complete once all three are uploaded.
+    Upload both logos. Each is versioned automatically — the latest file is always the one we use,
+    and re-uploading replaces the current one. The step is complete once both are uploaded.
 </p>
-@* §473 — "where is the upload button". There ISN'T one, and that was the whole problem: the wizard
-   host owns a single form, so the files upload when the STEP is saved. Nothing said so, leaving
-   sponsors hunting for a button that does not exist. Say it, rather than adding a second competing
-   submit inside someone else's form. *@
-<p style="font-size:13.5px;color:#1f3f6b;background:#eef6ff;border:1px solid #d3e6fb;border-radius:8px;padding:10px 12px;margin:0 0 14px;">
-    Choose your files below, then press <strong>Save &amp; next</strong> at the bottom — that is what
-    uploads them. There is no separate upload button.
-</p>
+@* §783.4 — THERE IS NOW AN UPLOAD BUTTON, and it reports progress.
+   Operator 2026-08-03: "i am missing an upload button … problem is that the system hangs for 6
+   seconds when you click next so it is not user friendly. i prefer a buttn and it must show that it
+   is uploading etc. Use same functionality as for exhibitor wall upload or speaker preview/final
+   presentation upload".
 
-<label for="SoMeLogo">Logo for Social Media branding <span style="color:#6b7280;font-weight:400;">(PNG, max 5 MB)</span></label>
+   🔒 §473 answered this SAME complaint with a paragraph saying no button exists. That explained the
+   surprise without removing it, and left a six-second upload with no feedback at all — which is how
+   somebody concludes it has hung and presses again.
+
+   It is a submit carrying `__dir=stay`, NOT a nested <form> (§304b — a nested form does not post at
+   all). Same progressive enhancement as _PresentationUpload: it posts normally with JavaScript off;
+   the script only disables the button and relabels it, so a slow upload looks busy, not broken. *@
+@if (TempData["WizardStepSaved"] is string wss)
+{
+    <p role="status" style="margin:0 0 12px;padding:8px 12px;border-radius:8px;background:#ecfdf5;color:#065f46;border:1px solid #a7f3d0;font-size:13.5px;">@wss</p>
+}
+
+<div style="background:#f8fafc;border:1px solid #e5e7eb;border-radius:8px;padding:10px 12px;margin:0 0 14px;">
+    <p style="font-size:13px;color:#4b5563;margin:0 0 8px;">
+        Choose your files below, then press <strong>Upload logos now</strong>. A large file takes a
+        few seconds &mdash; the button says so while it works, and stays on this step so you can see
+        the result.
+    </p>
+    <button type="submit" name="__dir" value="stay" formnovalidate class="task-act task-act--primary"
+            onclick="var f=this.form; if(f.__stayMsg){f.__stayMsg.value='Your logos were uploaded.';}
+                     var b=this;
+                     setTimeout(function(){ b.disabled=true; b.style.opacity='0.75';
+                        b.innerHTML='<span class=&quot;ceh-spin&quot;></span> Uploading&hellip; please keep this page open'; }, 0);
+                     return true;">
+        &#11014;&#65039; Upload logos now
+    </button>
+</div>
+
+<label for="SoMeLogo">Logo for Web <span style="color:#6b7280;font-weight:400;">(PNG, max 5 MB)</span></label>
 <input type="file" id="SoMeLogo" name="SoMeLogo" accept=".png,image/png" />
 <p style="font-size:12px;color:@CurrentColor(Model.CurrentSoMeFileName);margin:2px 0 12px;">@(string.IsNullOrEmpty(Model.CurrentSoMeFileName) ? "○ " : "✓ ")@CurrentLine(Model.CurrentSoMeFileName)</p>
 <span asp-validation-for="SoMeLogo" class="error"></span>
 
-<label for="PrintLogo">Logo for Printing <span style="color:#6b7280;font-weight:400;">(vector: .eps, .ai or .pdf, max 25 MB)</span></label>
+<label for="PrintLogo">Logo for Print <span style="color:#6b7280;font-weight:400;">(vector: .eps, .ai or .pdf, max 25 MB)</span></label>
 <input type="file" id="PrintLogo" name="PrintLogo" accept=".eps,.ai,.pdf" />
 <p style="font-size:12px;color:@CurrentColor(Model.CurrentPrintFileName);margin:2px 0 12px;">@(string.IsNullOrEmpty(Model.CurrentPrintFileName) ? "○ " : "✓ ")@CurrentLine(Model.CurrentPrintFileName)</p>
 <span asp-validation-for="PrintLogo" class="error"></span>
-
-<label for="ZohoLogo">Logo for the Event System (Zoho) lead system <span style="color:#6b7280;font-weight:400;">(PNG ~200×160, max 5 MB)</span></label>
-<input type="file" id="ZohoLogo" name="ZohoLogo" accept=".png,image/png" />
-<p style="font-size:12px;color:@CurrentColor(Model.CurrentZohoFileName);margin:2px 0 12px;">@(string.IsNullOrEmpty(Model.CurrentZohoFileName) ? "○ " : "✓ ")@CurrentLine(Model.CurrentZohoFileName)</p>
-<span asp-validation-for="ZohoLogo" class="error"></span>

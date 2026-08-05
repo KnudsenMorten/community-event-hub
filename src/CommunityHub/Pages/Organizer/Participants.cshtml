@@ -73,8 +73,9 @@
         <form method="get" style="margin-bottom:16px;display:flex;flex-wrap:wrap;gap:12px;align-items:end;">
             <span style="display:flex;flex-direction:column;gap:2px;">
                 <label for="Search">@Localizer["OrgGrid.Search"]</label>
+                @* §769.10 — the CEH id is searchable here too: type 73 to find participant 73. *@
                 <input type="search" id="Search" name="Search" value="@Model.Search"
-                       placeholder="@Localizer["OrgGrid.Col.Name"] / @Localizer["OrgGrid.Col.Email"]" />
+                       placeholder="ID / @Localizer["OrgGrid.Col.Name"] / @Localizer["OrgGrid.Col.Email"]" />
             </span>
             <span style="display:flex;flex-direction:column;gap:2px;">
                 <label for="ActiveFilter">Status</label>
@@ -121,12 +122,39 @@
                     <option value="coordinator" selected="@(Model.FlagFilter == "coordinator")">Event coordinators</option>
                 </select>
             </span>
+            @* §735 (operator 2026-07-31: "add ability to filter on ring here") — the page already
+               had a BULK "change ring to" and no way to SEE who is in a ring, so an organizer
+               assigning rings could act but never check the result. Labels come from Rings.Label,
+               the same source the bulk control and the e-mail Settings page use, so the three
+               places can never name a ring differently. *@
+            <span style="display:flex;flex-direction:column;gap:2px;">
+                <label for="RingFilter">Ring</label>
+                <select id="RingFilter" name="RingFilter">
+                    <option value="">Any ring</option>
+                    @foreach (var r in Enum.GetValues<CommunityHub.Core.Settings.Ring>())
+                    {
+                        <option value="@r" selected="@(Model.RingFilter == r)">@CommunityHub.Core.Settings.Rings.Label(r)</option>
+                    }
+                </select>
+            </span>
             <!-- Keep the active sort when re-filtering; a new search starts at page 1
                  (PageNo is intentionally not carried over by the filter form). -->
             <input type="hidden" name="Sort" value="@Model.Sort" />
             <input type="hidden" name="Desc" value="@Model.Desc" />
             <button type="submit">@Localizer["OrgGrid.Apply"]</button>
         </form>
+
+        @* §769.11 — export EVERY participant (operator: "i need ability to export all participants
+           and sessions to excel file … i need id,name,email,role").
+           🔒 These download ALL participants, deliberately ignoring the filters above — a button
+           that says "all" and quietly honours a filter hands you a short file you have no reason
+           to distrust. Inactive people are included for the same reason. *@
+        <p style="margin:-6px 0 16px;font-size:13px;">
+            <a asp-page-handler="ExportXlsx" style="font-weight:600;">⬇ Export all participants (Excel)</a>
+            <span style="color:#9ca3af;"> · </span>
+            <a asp-page-handler="Export">CSV</a>
+            <span style="color:#6b7280;"> — ID, name, email, role, active. Every participant, not the current filter.</span>
+        </p>
 
         @if (Model.Participants.Count == 0)
         {
@@ -188,21 +216,33 @@
                             <input type="checkbox" id="selectAll" aria-label="@Localizer["OrgGrid.SelectAll"]"
                                    onclick="for(const c of document.querySelectorAll('.rowChk'))c.checked=this.checked;" />
                         </th>
+                        @* §769.10 — the CEH participant id. It is the key that names this person's
+                           photo in the document library (speaker-photo-{id}, volunteer-photo-{id}),
+                           so it is how you get from a file back to a person. Searchable. *@
+                        <th scope="col" style="width:56px;" title="CEH participant id — the key in photo file names. Type it in the search box to find this person.">ID</th>
                         <th scope="col" aria-sort="@Model.AriaSort("name")">
                             <a asp-page="/Organizer/Participants"
                                asp-route-ActiveFilter="@Model.ActiveFilter" asp-route-RoleFilter="@Model.RoleFilter"
                                asp-route-SponsorCompanyFilter="@Model.SponsorCompanyFilter" asp-route-Search="@Model.Search"
                                asp-route-Sort="name" asp-route-Desc="@Model.NextDescFor("name")" asp-route-PageNo="1">@Localizer["OrgGrid.Col.Name"]@Model.SortIndicator("name")</a>
                         </th>
-                        @* §186: Email column removed (not relevant on-screen + the long
-                           addresses overflowed the row and hid the Actions dropdown). Email is
-                           still searchable and stays in the Excel/CSV export. *@
+                        @* §830 (operator 2026-08-05: "in participants view, i need the email to be
+                           listen as a column before company") — the Email column is BACK, and it sits
+                           immediately before Company, where he asked for it.
+
+                           ⚠️ §186 removed this column for a REAL defect, not a preference: long
+                           addresses widened the row until the Actions dropdown was pushed out of
+                           reach. Re-adding it plainly would reproduce that. So the column is width-
+                           capped and ellipsised (see the cell below) — the full address stays
+                           readable via the title tooltip, and it is still searchable and still in
+                           the Excel/CSV export. *@
                         <th scope="col" aria-sort="@Model.AriaSort("persona")">
                             <a asp-page="/Organizer/Participants"
                                asp-route-ActiveFilter="@Model.ActiveFilter" asp-route-RoleFilter="@Model.RoleFilter"
                                asp-route-SponsorCompanyFilter="@Model.SponsorCompanyFilter" asp-route-Search="@Model.Search"
                                asp-route-Sort="persona" asp-route-Desc="@Model.NextDescFor("persona")" asp-route-PageNo="1">@Localizer["OrgGrid.Col.Persona"]@Model.SortIndicator("persona")</a>
                         </th>
+                        <th scope="col" style="width:200px;">@Localizer["OrgGrid.Col.Email"]</th>
                         <th scope="col">Company</th>
                         <th scope="col" aria-sort="@Model.AriaSort("status")">
                             <a asp-page="/Organizer/Participants"
@@ -221,9 +261,34 @@
                                 <input class="rowChk" type="checkbox" name="SelectedIds" value="@p.Id"
                                        aria-label="Select @p.FullName" />
                             </td>
+                            @* §769.10 — monospace so ids line up and read easily against a file
+                               name in the document library. *@
+                            <td style="font-family:ui-monospace,Consolas,monospace;font-size:13px;color:#374151;">@p.Id</td>
                             <td>@p.FullName</td>
                             @* §186: Email cell removed — email stays searchable + in the export. *@
-                            <td>@p.Role</td>
+                            <td>
+                                @p.Role
+                                @* §707.50 (operator 2026-07-30: "it would be nice to have flag like
+                                   (2-day or 1-day here)") — the ticket kind beside the persona, so
+                                   "Attendee" stops meaning two materially different things: a 2-day
+                                   holder has a Master Class and a hub login, a 1-day holder has
+                                   neither (§707.38). Decided by the ticket CLASS ID, not its
+                                   editable display name (§707.35b). *@
+                                @{ var ticketKind = Model.AttendeeTicketKindFor(p.Email); }
+                                @if (ticketKind.Length > 0)
+                                {
+                                    <span class="set-tag @(ticketKind == "2-day" ? "on" : "opt")"
+                                          title="@(ticketKind == "2-day"
+                                              ? "2-day ticket — includes the pre-day Master Class, and a hub login."
+                                              : "1-day ticket — main event only. No Master Class and no hub login, by design.")">@ticketKind</span>
+                                }
+                            </td>
+                            @* §830 — the address itself. Capped + ellipsised rather than free-flowing:
+                               that is the §186 defect (a long address widened the row and pushed the
+                               Actions dropdown out of reach) and the cap is what keeps it fixed. The
+                               full value is in the tooltip, and selectable by widening nothing. *@
+                            <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
+                                title="@p.Email">@p.Email</td>
                             <td>
                                 @* §591 (operator 2026-07-28, flagged low prio): "if a speaker fills
                                    out the company field, it could be nice to show it here under

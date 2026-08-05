@@ -76,10 +76,41 @@ public sealed class EngineAlertSender
     /// <see cref="Recipient"/>. Stays ring-exempt either way. Never throws — a mail failure
     /// must not break the engine that is reporting.
     /// </summary>
+    /// <param name="devSilent">
+    /// §752.9 — <c>true</c> for an alert that reports CONFIGURATION or INTEGRATION state which is
+    /// deliberately different on DEV, and is therefore news only in PROD.
+    /// </param>
     public async Task AlertAsync(
         string subject, string htmlBody, CancellationToken ct,
-        string? throttleKey = null, string? recipient = null)
+        string? throttleKey = null, string? recipient = null, bool devSilent = false)
     {
+        // 🔑 §752.9 (operator 2026-08-01: *"i still get alerts from dev env which i thought we
+        // disabled"*). §716 silenced the "Engine INACTIVE" family by guarding ONE call site. It
+        // worked — that family stopped dead on 31 Jul and has not returned — and it did not
+        // generalise: two others ("Background jobs: N look asleep", "Stage-2 CEH→Zoho push:
+        // failures") kept arriving, because a per-call-site guard only fixes the sites someone
+        // remembered to visit. He reasonably read the first fix as "DEV alerts are off".
+        //
+        // ⇒ The decision now lives HERE, at the single choke point every alert already passes
+        // through for its §702 [DEV]/[PROD] tag. A call site declares intent with one flag instead
+        // of re-implementing an environment check.
+        //
+        // 🔒 OPT-IN, deliberately. Defaulting to "silent on DEV" would silence every alert nobody
+        // has reviewed — including the ones §716 was careful to KEEP, like an engine that actually
+        // threw. Suppression must be a decision someone made about a specific alert, never
+        // something inherited by omission.
+        //
+        // 🔒 DEV is matched POSITIVELY (§716's rule): UNKNOWN still alerts. An unrecognised host is
+        // not evidence of DEV, and guessing "probably dev" is how a real PROD alert goes missing.
+        if (devSilent && string.Equals(
+                _env.Label, CommunityHub.Core.Diagnostics.HubEnvironment.Dev, StringComparison.Ordinal))
+        {
+            _log.LogInformation(
+                "EngineAlert suppressed on DEV (§752.9): {Subject}. This alert reports state that is "
+                + "intentionally different here; it still fires in PROD.", subject);
+            return;
+        }
+
         if (throttleKey is not null)
         {
             var now = _clock.GetUtcNow();

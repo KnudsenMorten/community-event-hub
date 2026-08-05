@@ -31,16 +31,52 @@ public sealed class ZohoAccessTokenCache
     /// <summary>Assumed lifetime when Zoho omits <c>expires_in</c>. Zoho's real value is 3600.</summary>
     public const int DefaultLifetimeSeconds = 3600;
 
+    /// <summary>
+    /// §783.12 — after a FAILED exchange, refuse to ask Zoho again for this long.
+    /// </summary>
+    /// <remarks>
+    /// <para>🔒 <b>This is the fix for a self-sustaining outage, not a politeness delay.</b> Zoho
+    /// allows <b>10 access-token requests per 10 minutes</b> per refresh token
+    /// (<c>zoho.com/accounts/protocol/oauth/token-limits.html</c>). The previous behaviour was to
+    /// cache nothing on failure so "the next caller is free to try again" — which, with ~21 timer
+    /// jobs on 5- and 10-minute cadences across two hosts, means the spent budget is hammered by
+    /// every one of them, forever. The retries are what stop the window from ever refilling, so a
+    /// transient throttle becomes a permanent 401. Operator 2026-08-03: <i>"the api will throw an
+    /// error back when you hit the limit and then you have to wait for 1 hr"</i>.</para>
+    ///
+    /// <para>⚠️ <b>15 minutes, deliberately, not the full hour.</b> Long enough that the 10-minute
+    /// window fully resets even with several hosts sharing one refresh token, short enough that a
+    /// credential fixed in the Zoho console starts working again without a redeploy. The one thing
+    /// it must never be is ZERO.</para>
+    /// </remarks>
+    public static readonly TimeSpan FailureCooldown = TimeSpan.FromMinutes(15);
+
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly TimeProvider _clock;
 
     private string? _token;
     private DateTimeOffset _expiresAtUtc;
+    private DateTimeOffset _retryNotBeforeUtc;
 
     public ZohoAccessTokenCache(TimeProvider? clock = null) => _clock = clock ?? TimeProvider.System;
 
     /// <summary>Diagnostics only: how many times the refresh delegate has actually been invoked.</summary>
     public int RefreshCount { get; private set; }
+
+    /// <summary>
+    /// Diagnostics: how many callers were refused WITHOUT asking Zoho because the §783.12 cooldown
+    /// was still in force. A large number here is the loop being prevented, not a problem.
+    /// </summary>
+    public int SuppressedByCooldownCount { get; private set; }
+
+    /// <summary>
+    /// When the cooldown lifts, or null when there is none. Surfaced so a job can SAY why it is not
+    /// talking to Zoho instead of going quietly idle (§545(b)).
+    /// </summary>
+    public DateTimeOffset? RetryNotBeforeUtc =>
+        _retryNotBeforeUtc == default || _clock.GetUtcNow() >= _retryNotBeforeUtc
+            ? null
+            : _retryNotBeforeUtc;
 
     /// <summary>
     /// The cached token when it is still comfortably valid, otherwise ONE refresh shared by every
@@ -55,21 +91,42 @@ public sealed class ZohoAccessTokenCache
     {
         if (IsFresh()) return _token;
 
+        // §783.12 — checked BEFORE the lock as well, so a burst of jobs waking together is turned
+        // away immediately rather than queueing up to each discover the cooldown in turn.
+        if (InCooldown())
+        {
+            SuppressedByCooldownCount++;
+            return null;
+        }
+
         await _gate.WaitAsync(ct);
         try
         {
             if (IsFresh()) return _token;   // another caller refreshed while we waited
+            if (InCooldown())
+            {
+                SuppressedByCooldownCount++;
+                return null;
+            }
 
             var result = await refresh(ct);
             RefreshCount++;
 
             if (string.IsNullOrEmpty(result.Token))
             {
-                // NEVER cache a failure: the next caller must be free to try again (the credential
-                // may be throttled for a moment, not broken). The alerting in §524 is throttled
-                // separately, so retrying here cannot flood the operator's inbox.
+                // §783.12 — HOLD OFF instead of freeing everyone to retry.
+                //
+                // 🔒 This line used to read "NEVER cache a failure: the next caller must be free to
+                // try again". That is right for a one-off blip and catastrophically wrong for GRANT
+                // THROTTLING, which is the failure Zoho actually produces here: the budget is 10
+                // token requests per 10 minutes, and ~21 jobs each "free to try again" spend it the
+                // instant it refills. The outage then sustains itself with no bad credential
+                // anywhere — the exact PROD signature in §783.12, the same 401 every tick for hours.
+                //
+                // The token is still cleared (it is not usable), but the RETRY is gated.
                 _token = null;
                 _expiresAtUtc = default;
+                _retryNotBeforeUtc = _clock.GetUtcNow() + FailureCooldown;
                 return null;
             }
 
@@ -79,6 +136,7 @@ public sealed class ZohoAccessTokenCache
 
             _token = result.Token;
             _expiresAtUtc = _clock.GetUtcNow().AddSeconds(lifetime);
+            _retryNotBeforeUtc = default;   // a success clears any standing cooldown
             return _token;
         }
         finally
@@ -101,4 +159,8 @@ public sealed class ZohoAccessTokenCache
 
     private bool IsFresh() =>
         _token is not null && _clock.GetUtcNow() < _expiresAtUtc - RenewMargin;
+
+    /// <summary>§783.12 — is a post-failure cooldown still in force?</summary>
+    private bool InCooldown() =>
+        _retryNotBeforeUtc != default && _clock.GetUtcNow() < _retryNotBeforeUtc;
 }

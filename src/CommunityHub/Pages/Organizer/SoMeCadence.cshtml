@@ -1,0 +1,93 @@
+@page
+@using CommunityHub.Core.Integrations
+@model CommunityHub.Pages.Organizer.SoMeCadenceModel
+@{
+    ViewData["Title"] = "Posting frequency";
+}
+
+<div class="card">
+    <h1>Posting frequency</h1>
+    <p class="muted">
+        How many times each subject is announced. The engine plans the campaign from these — change
+        one and the <strong>next</strong> planning run follows it.
+    </p>
+    <p class="muted">
+        <strong>Nothing already scheduled is affected.</strong> A lower number means fewer new posts,
+        never the removal of posts you have approved or edited.
+    </p>
+
+    @if (Model.AccessDenied)
+    {
+        <p class="error">@Localizer["Common.OrganizersOnly"]</p>
+    }
+    else
+    {
+        @if (Model.Message is not null)
+        {
+            <p class="@(Model.MessageIsError ? "error" : "success")">@Model.Message</p>
+        }
+
+        <div style="overflow-x:auto;">
+            <table>
+                <caption class="sr-only">Announcement frequency per post type</caption>
+                <tr style="text-align:left;border-bottom:2px solid #ddd;">
+                    <th scope="col">Post type</th>
+                    <th scope="col">Times per subject</th>
+                    <th scope="col">On</th>
+                    <th scope="col"></th>
+                </tr>
+                @foreach (var row in Model.Rows)
+                {
+                    <tr style="border-bottom:1px solid #eee;">
+                        <form method="post" asp-page-handler="Save">
+                            <input type="hidden" name="KindValue" value="@((int)row.Kind)" />
+                            <td>
+                                <strong>@CommunityHub.Pages.Organizer.SoMeCadenceModel.Label(row.Kind)</strong>
+                                @if (CommunityHub.Pages.Organizer.SoMeCadenceModel.IsLegal(row.Kind))
+                                {
+                                    @* 🔴 §842.5 — stated on the row, not buried in help text. He
+                                       must see WHY the number cannot go down before he tries. *@
+                                    <div class="error" style="font-size:12px;margin-top:4px;">
+                                        Contractual: every sponsor must be announced
+                                        @SoMeCadenceService.SponsorLegalMinimum times. This cannot be
+                                        lowered or turned off.
+                                    </div>
+                                }
+                                @if (row.IsDefault)
+                                {
+                                    <div class="muted" style="font-size:12px;">
+                                        Using the default (@CommunityHub.Pages.Organizer.SoMeCadenceModel.DefaultFor(row.Kind)).
+                                    </div>
+                                }
+                            </td>
+                            <td>
+                                <input type="number" name="Occurrences" value="@row.Occurrences"
+                                       min="@(CommunityHub.Pages.Organizer.SoMeCadenceModel.IsLegal(row.Kind) ? SoMeCadenceService.SponsorLegalMinimum : 0)"
+                                       max="12" style="width:80px;"
+                                       aria-label="Times per subject for @CommunityHub.Pages.Organizer.SoMeCadenceModel.Label(row.Kind)" />
+                            </td>
+                            <td>
+                                <input type="checkbox" name="Enabled" value="true"
+                                       @(row.Enabled ? "checked" : "")
+                                       @(CommunityHub.Pages.Organizer.SoMeCadenceModel.IsLegal(row.Kind) ? "onclick=\"return false;\"" : "")
+                                       aria-label="Plan @CommunityHub.Pages.Organizer.SoMeCadenceModel.Label(row.Kind) at all" />
+                            </td>
+                            <td><button type="submit" class="btn">Save</button></td>
+                        </form>
+                    </tr>
+                }
+            </table>
+        </div>
+
+        @* 🔒 Type 5 is listed but NOT editable — its dates come from his own deck, so a frequency
+           here would either be ignored or would override what he wrote. Saying so is better than
+           leaving him to wonder why it is absent. *@
+        <h2>Your own event posts</h2>
+        <p class="muted">
+            Type 5 has no frequency setting on purpose: <strong>the dates come from your markdown
+            deck</strong>, one scheduled run per date you wrote. To change when they go out, change
+            the deck and re-import, or move a single post in
+            <a asp-page="/Organizer/SoMePostEditor">Edit posts</a>.
+        </p>
+    }
+</div>

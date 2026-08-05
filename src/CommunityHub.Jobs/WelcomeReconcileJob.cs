@@ -65,7 +65,9 @@ public sealed class WelcomeReconcileJob
     }
 
     [Function("WelcomeReconcileJob")]
-    public async Task Run([TimerTrigger("0 */10 * * * *")] TimerInfo timer, CancellationToken ct)
+    // §869.3 — BASE TICK ONLY. The real cadence is the operator's §510 interval on the Jobs page
+    // (JobCatalog default 10), enforced in JobsPauseMiddleware.
+    public async Task Run([TimerTrigger("0 */5 * * * *")] TimerInfo timer, CancellationToken ct)
     {
         var eventId = await _db.Events
             .Where(e => e.IsActive).Select(e => (int?)e.Id).FirstOrDefaultAsync(ct);

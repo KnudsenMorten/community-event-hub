@@ -71,12 +71,32 @@ public sealed class PurchaseTaskReconciler
 
         foreach (var task in tasks)
         {
-            if (_bodies.DefinitionFor(task)?.Completion is not TaskCompletion.Purchase purchase)
+            var completion = _bodies.DefinitionFor(task)?.Completion;
+
+            // §687.5 — a DecisionAndPurchase task needs BOTH gates. Intent is not delivery: a
+            // sponsor can answer "we would like to contribute" and never buy the packaging, and then
+            // their brochures sit in a box nobody packs.
+            string category;
+            switch (completion)
             {
-                continue;
+                case TaskCompletion.Purchase p:
+                    category = p.Category;
+                    break;
+
+                case TaskCompletion.DecisionAndPurchase dp:
+                    // 🔑 Only ACCEPTED owes a purchase. Unanswered ⇒ the decision gate owns the
+                    // state; DECLINED completes on its own — "not interested" is a real recorded
+                    // answer (§670) and there is nothing left to buy, so holding it open would
+                    // chase a sponsor for a decision they already made.
+                    if (task.DecisionAnswer != TaskDecisionAnswer.Accepted) continue;
+                    category = dp.Category;
+                    break;
+
+                default:
+                    continue;
             }
 
-            var summary = await _purchases.ByCategoryAsync(purchase.Category, ct);
+            var summary = await _purchases.ByCategoryAsync(category, ct);
 
             // 🔒 THE OUTAGE GUARD. "We could not check" is not "they bought nothing" — leave the
             // stored state exactly as it is and say nothing.
@@ -85,7 +105,7 @@ public sealed class PurchaseTaskReconciler
                 _log.LogWarning(
                     "PurchaseTaskReconciler: could not check '{Category}' for company {CompanyId} "
                     + "({Reason}) — leaving task {TaskId} exactly as it is.",
-                    purchase.Category, sponsorCompanyId, summary.Reason, task.Id);
+                    category, sponsorCompanyId, summary.Reason, task.Id);
                 continue;
             }
 
@@ -112,7 +132,7 @@ public sealed class PurchaseTaskReconciler
                 changed++;
                 _log.LogInformation(
                     "PurchaseTaskReconciler: reopened task {TaskId} for company {CompanyId} — no "
-                    + "'{Category}' purchase remains.", task.Id, sponsorCompanyId, purchase.Category);
+                    + "'{Category}' purchase remains.", task.Id, sponsorCompanyId, category);
             }
         }
 

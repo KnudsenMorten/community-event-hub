@@ -376,8 +376,21 @@ public sealed class Scenario253ResidualFixesTests
                 ? RefundedOrderJson
                 : "[]");   // completed orders + products: empty
 
+    /// <summary>
+    /// 🗑 §757 — a refunded/cancelled order raises NOTHING. This inverts §253 G8d.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-08-01: <i>"cancel/refund must not be approved. this is handled inside
+    /// zoho billing and must not stop anything."</i></para>
+    ///
+    /// <para>G8d raised one queue item per refunded order "so a human decides the rollback". That
+    /// decision is not CEH's to ask for — the money is settled in Zoho billing — and the item sat in
+    /// a queue whose premise is "everything that needs a human decision", so it made that queue lie.
+    /// The test is inverted rather than deleted, so the reversal is pinned instead of merely
+    /// untested.</para>
+    /// </remarks>
     [Fact]
-    public async Task Refunded_order_raises_one_action_item_and_never_re_raises()
+    public async Task Refunded_order_raises_NOTHING_because_billing_owns_that_decision()
     {
         using var db = NewDb();
         await SeedEventAsync(db);
@@ -386,19 +399,49 @@ public sealed class Scenario253ResidualFixesTests
         var first = await pull.RunAsync();
         Assert.True(first.RanToCompletion);
 
-        var item = await db.OrganizerActionItems.SingleAsync();
-        Assert.Equal(Core.Reminders.OrganizerActionItemService.TypeSponsorOrderRefunded, item.Type);
-        Assert.StartsWith("Woo order 9001 ", item.Summary, StringComparison.Ordinal);
-        Assert.Contains("Corp ApS", item.Summary);
+        Assert.Empty(await db.OrganizerActionItems.ToListAsync());
 
-        // A later run must not duplicate — the order id is the forever-dedup key.
+        // And it stays quiet on every subsequent run — no slow accumulation.
         await pull.RunAsync();
-        Assert.Equal(1, await db.OrganizerActionItems.CountAsync());
+        Assert.Empty(await db.OrganizerActionItems.ToListAsync());
+    }
 
-        // Even a RESOLVED item keeps the order silenced (no re-nag after handling).
-        item.ResolvedAt = Now;
+    /// <summary>
+    /// 🔒 §757 — an ALREADY-OPEN refund item closes itself. Operator: <i>"you must fix these and
+    /// close them if they are orphaned - dont ask me to fix them."</i>
+    /// </summary>
+    [Fact]
+    public async Task An_existing_open_refund_item_is_auto_resolved_not_left_for_him_to_tick_off()
+    {
+        using var db = NewDb();
+        await SeedEventAsync(db);
+
+        db.OrganizerActionItems.Add(new Core.Domain.OrganizerActionItem
+        {
+            EventId = EventId,
+            Type = Core.Reminders.OrganizerActionItemService.TypeSponsorOrderRefunded,
+            Summary = "Woo order 9001 (Corp ApS) was refunded",
+        });
         await db.SaveChangesAsync();
+
+        // A pull that returns at least one COMPLETED order, so the sweep is allowed to run.
+        var pull = NewPull(db, new StubHandler(req =>
+            req.RequestUri!.Query.Contains("cancelled", StringComparison.OrdinalIgnoreCase)
+                ? RefundedOrderJson
+                : """
+                  [ {
+                      "id": 9100, "status": "completed",
+                      "billing": { "email": "buyer@corp.test", "company": "Corp ApS" },
+                      "meta_data": [ { "key": "_cm_company_id", "value": "42" } ],
+                      "line_items": [ { "product_id": 7, "name": "Booth E-01" } ],
+                      "date_created_gmt": "2026-07-01T10:00:00"
+                  } ]
+                  """));
+
         await pull.RunAsync();
-        Assert.Equal(1, await db.OrganizerActionItems.CountAsync());
+
+        var item = await db.OrganizerActionItems.SingleAsync();
+        Assert.NotNull(item.ResolvedAt);                       // closed, not deleted
+        Assert.Contains("Zoho billing", item.ResolvedNotes);   // and it says why
     }
 }

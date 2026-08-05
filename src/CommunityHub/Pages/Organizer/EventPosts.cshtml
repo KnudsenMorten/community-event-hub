@@ -1,0 +1,178 @@
+@page
+@model CommunityHub.Pages.Organizer.EventPostsModel
+@{
+    ViewData["Title"] = "Event posts";
+}
+
+<div class="card">
+    <h1>Event posts</h1>
+    <p class="muted">
+        The general event posts (<strong>Type 5</strong>) you write yourself, imported from your
+        markdown deck in the document library. Once imported, <strong>CEH owns the text</strong> —
+        edit it here, and a later deck will not overwrite your edits unless you allow it per post.
+    </p>
+
+    @if (Model.AccessDenied)
+    {
+        <p class="error">@Localizer["Common.OrganizersOnly"]</p>
+    }
+    else
+    {
+        @if (Model.Message is not null)
+        {
+            <p class="@(Model.MessageIsError ? "error" : "success")">@Model.Message</p>
+        }
+
+        <form method="post" asp-page-handler="Import">
+            @if (Model.CanImport)
+            {
+                <button type="submit" class="btn primary">Import posts from the deck</button>
+                <p class="muted" style="margin-top:8px;">
+                    Reads <code>Event/SoMe/Text-SoMe/ELDK27-LinkedIn-posts.md</code>. New slugs are
+                    created; posts you already have are <strong>left exactly as they are</strong>
+                    unless you have ticked <em>allow overwrite</em> on them below.
+                </p>
+            }
+            else
+            {
+                <p class="muted">
+                    The document library is not wired for reads on this environment, so the deck
+                    cannot be fetched here.
+                </p>
+            }
+        </form>
+    }
+</div>
+
+@if (!Model.AccessDenied && Model.Report is not null && Model.Report.Lines.Count > 0)
+{
+    @* ⚠️ §828.2(3): a silent importer is THE failure mode here. He must be able to read that his
+       second deck landed 4 new posts and left 6 alone — not a bare "import complete". *@
+    <div class="card">
+        <h2>Last import — @Model.Report.SourceFileName</h2>
+        <p><strong>@Model.Report.Summary</strong></p>
+
+        <div style="overflow-x:auto;">
+            <table>
+                <caption class="sr-only">What the import did to each post</caption>
+                <tr style="text-align:left;border-bottom:2px solid #ddd;">
+                    <th scope="col">Slug</th>
+                    <th scope="col">Outcome</th>
+                    <th scope="col">Detail</th>
+                </tr>
+                @foreach (var line in Model.Report.Lines)
+                {
+                    <tr style="border-bottom:1px solid #eee;">
+                        <td style="font-family:ui-monospace,Consolas,monospace;">@line.Slug</td>
+                        <td>
+                            @switch (line.Outcome)
+                            {
+                                case CommunityHub.Core.Integrations.EventSoMePostImportOutcome.Created:
+                                    <span class="set-tag on">created</span>
+                                    break;
+                                case CommunityHub.Core.Integrations.EventSoMePostImportOutcome.SkippedNotAllowed:
+                                    <span class="set-tag opt">left alone</span>
+                                    break;
+                                case CommunityHub.Core.Integrations.EventSoMePostImportOutcome.Overwritten:
+                                    <span class="set-tag on">overwritten</span>
+                                    break;
+                                default:
+                                    <span class="set-tag off">failed</span>
+                                    break;
+                            }
+                        </td>
+                        <td class="muted">@line.Detail</td>
+                    </tr>
+                }
+            </table>
+        </div>
+
+        @if (Model.Report.Problems.Count > 0)
+        {
+            @* Never swallowed: a deck that parses 26 of 27 posts must say which one it could not. *@
+            <h3>Problems in the deck</h3>
+            <ul>
+                @foreach (var problem in Model.Report.Problems)
+                {
+                    <li class="error">@problem</li>
+                }
+            </ul>
+        }
+    </div>
+}
+
+@if (!Model.AccessDenied)
+{
+    <div class="card">
+        <h2>Posts in the repo (@Model.Posts.Count)</h2>
+
+        @if (Model.Posts.Count == 0)
+        {
+            <p class="muted">Nothing imported yet. Use the button above once your deck is in place.</p>
+        }
+        else
+        {
+            <p class="muted">
+                @Model.Posts.Count posts, @Model.TotalRuns scheduled runs. A post can run more than
+                once — each run has its own graphic.
+            </p>
+
+            <div style="overflow-x:auto;">
+                <table>
+                    <caption class="sr-only">Imported event posts and their scheduled runs</caption>
+                    <tr style="text-align:left;border-bottom:2px solid #ddd;">
+                        <th scope="col">Slug</th>
+                        <th scope="col">Title</th>
+                        <th scope="col">Runs</th>
+                        <th scope="col">Overwrite on next import</th>
+                    </tr>
+                    @foreach (var post in Model.Posts)
+                    {
+                        <tr style="border-bottom:1px solid #eee;">
+                            <td style="font-family:ui-monospace,Consolas,monospace;">@post.Slug</td>
+                            <td>@post.Title</td>
+                            <td>
+                                @foreach (var run in post.Occurrences.OrderBy(o => o.PostDate))
+                                {
+                                    <div style="white-space:nowrap;">
+                                        <strong>@run.PostDate.ToString("yyyy-MM-dd")</strong>
+                                        <span class="muted" style="margin-left:6px;">@run.GraphicFileName</span>
+                                    </div>
+                                }
+                                @if (post.Occurrences.Count == 0)
+                                {
+                                    <span class="muted">no dated runs</span>
+                                }
+                            </td>
+                            <td>
+                                @* 🔒 §828.1 — the tick is PER POST. There is deliberately no
+                                   "allow all overwrites" switch: that would be the mode that
+                                   quietly flattens every edit he has made since the last deck. *@
+                                <form method="post" asp-page-handler="ToggleOverwrite">
+                                    <input type="hidden" name="id" value="@post.Id" />
+                                    <input type="hidden" name="allow" value="@((!post.AllowImportOverwrite).ToString().ToLowerInvariant())" />
+                                    @if (post.AllowImportOverwrite)
+                                    {
+                                        <span class="set-tag on">allowed</span>
+                                        <button type="submit" class="btn">Protect again</button>
+                                    }
+                                    else
+                                    {
+                                        <span class="set-tag off">protected</span>
+                                        <button type="submit" class="btn">Allow overwrite</button>
+                                    }
+                                </form>
+                                @if (post.LastOverwrittenAt is not null)
+                                {
+                                    <div class="muted" style="margin-top:4px;">
+                                        last replaced @post.LastOverwrittenAt.Value.ToString("yyyy-MM-dd")
+                                    </div>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </table>
+            </div>
+        }
+    </div>
+}

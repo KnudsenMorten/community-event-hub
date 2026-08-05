@@ -48,8 +48,15 @@ public sealed class ZohoExhibitorSocialFillBlankTests
         }
     }
 
+    /// <param name="pushSocial">
+    /// 🔴 §791.4/§801.2 — the social push now ships <b>OFF</b>: the v3 exhibitor PUT SILENTLY
+    /// DISCARDS <c>company_social_pages</c> (measured twice against live PROD — 200, echoed back in
+    /// the response, absent from the very next GET). These tests still pin the payload SHAPE, because
+    /// the shape was never the problem (§791.3) and is what must be right if Zoho ever repairs the
+    /// endpoint — so they turn the switch on explicitly. The OFF default has its own test below.
+    /// </param>
     private static (ZohoClient Client, StubHandler Handler) NewClient(
-        Func<HttpRequestMessage, (HttpStatusCode, string)> respond)
+        Func<HttpRequestMessage, (HttpStatusCode, string)> respond, bool pushSocial = true)
     {
         var options = new ZohoOptions
         {
@@ -57,6 +64,7 @@ public sealed class ZohoExhibitorSocialFillBlankTests
             ApiDomain = "https://zoho.test",
             BackstagePortalId = Portal,
             BackstageEventId = Event,
+            PushExhibitorSocialPages = pushSocial,
         };
         var handler = new StubHandler(respond);
         var client = new ZohoClient(new HttpClient(handler), options, NullLogger<ZohoClient>.Instance);

@@ -23,6 +23,16 @@
     {
         <p role="status" style="margin:6px 0 10px;padding:10px 12px;border-radius:8px;background:#ecfdf5;color:#065f46;border:1px solid #a7f3d0;">@inviteMsg</p>
     }
+    @* §707.57d: flash from the deck upload embedded in the task. A 1 GB upload that reports nothing
+       is indistinguishable from one that failed, so both outcomes speak. *@
+    @if (!string.IsNullOrEmpty(Model.UploadMessage))
+    {
+        <p role="status" style="margin:6px 0 10px;padding:10px 12px;border-radius:8px;background:#ecfdf5;color:#065f46;border:1px solid #a7f3d0;">@Model.UploadMessage</p>
+    }
+    @if (!string.IsNullOrEmpty(Model.UploadError))
+    {
+        <p role="alert" style="margin:6px 0 10px;padding:10px 12px;border-radius:8px;background:#fef2f2;color:#991b1b;border:1px solid #fecaca;">@Model.UploadError</p>
+    }
 
     @if (Model.NotSpeaker)
     {
@@ -60,6 +70,16 @@
            and /Sponsor/Tasks pages use. The "Task checklist" % here is ParticipantTask
            completion — deliberately distinct from the "Am I ready?" readiness rollup
            card above (which aggregates richer profile/upload signals). *@
+        @* §708 step 2 — the pre-rendered bodies of MIGRATED tasks, keyed by task id. Same ViewData
+           channel the sponsor page uses, flowing through the shared panel down to the row. A task
+           absent from this map is not migrated and renders its stored Description as before, so the
+           two models coexist without the row having to know about either. *@
+        ViewData["RenderedBodies"] = Model.RenderedBodies;
+        @* §707.57d — the embedded upload control reads the speaker's sessions + each deck's current
+           file; the row derives its badge and note from the KINDS actually satisfied. Same ViewData
+           channel, flowing through the shared panel down to the row. *@
+        ViewData["SessionSlots"] = Model.SessionSlots;
+        ViewData["UploadedKinds"] = Model.UploadedKinds;
         @await Html.PartialAsync("Shared/_TaskListPanel",
             new CommunityHub.Pages.Shared.TaskListPanelView { Tasks = Model.Tasks, RowPartialName = "_SpeakerTaskRow" })
     }

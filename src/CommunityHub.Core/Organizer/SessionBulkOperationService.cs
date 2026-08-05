@@ -76,8 +76,12 @@ public sealed class SessionBulkOperationService
         var withQuestions = await _db.SessionQuestions
             .Where(q => targetIds.Contains(q.SessionId)).Select(q => q.SessionId)
             .Distinct().ToListAsync(ct);
-        var withEvaluations = await _db.SessionEvaluations
-            .Where(e => targetIds.Contains(e.SessionId)).Select(e => e.SessionId)
+        // §748.1 — the LIVE four-point responses, not the retired 1–5 table (which can no longer
+        // have rows, so this probe had quietly stopped blocking anything). SessionId is nullable on
+        // a response (a device reading not yet matched to a session), hence the != null.
+        var withEvaluations = await _db.EvaluationResponses
+            .Where(e => e.SessionId != null && targetIds.Contains(e.SessionId.Value))
+            .Select(e => e.SessionId!.Value)
             .Distinct().ToListAsync(ct);
         var withSignups = await _db.MasterClassSignups
             .Where(m => targetIds.Contains(m.SessionId)).Select(m => m.SessionId)

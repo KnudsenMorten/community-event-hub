@@ -1,4 +1,5 @@
 using CommunityHub.Core.Audit;
+using CommunityHub.Core.Config;
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
 using CommunityHub.Core.Email;
@@ -57,10 +58,19 @@ public sealed class SpeakerGraphicsReadyNotifierScenarioTests
             SendAsync(toEmail, subject, htmlBody, ct);
     }
 
+    /// <summary>
+    /// 🔒 §790.1 — the day the Help Promote deadline (<c>promote</c>, 2027-01-15) has ARRIVED.
+    /// Every "it mails" fact below runs on this clock, because the mail is now locked to that task's
+    /// due date: on any earlier date the correct answer is silence, which is what
+    /// <see cref="It_is_HELD_before_the_Help_Promote_deadline_and_leaves_no_ledger_row"/> asserts.
+    /// </summary>
+    private static readonly DateTimeOffset OnTheDeadline =
+        new(2027, 1, 15, 9, 0, 0, TimeSpan.Zero);
+
     private static SpeakerGraphicsReadyNotifier NewNotifier(
-        CommunityHubDbContext db, SpyEmailSender sender)
+        CommunityHubDbContext db, SpyEmailSender sender, DateTimeOffset? now = null)
     {
-        var clock = TimeProvider.System;
+        var clock = new FixedClock(now ?? OnTheDeadline);
         var templates = new EmailTemplateProvider(Options.Create(new EmailTemplateOptions
         {
             TemplateDirectory = RepoPaths.EmailTemplates(),
@@ -72,7 +82,11 @@ public sealed class SpeakerGraphicsReadyNotifierScenarioTests
             new ReminderEngine(db, sender, clock),
             templates,
             new FeatureGateService(db),
-            new AuditTrailService(db, clock));
+            new AuditTrailService(db, clock),
+            // The REAL shipped date table — the gate must obey the date an organizer actually
+            // edits, not a value invented by the test.
+            new SpeakerDeadlineOptions { ConfigPath = RepoPaths.SpeakerDeadlinesConfig() },
+            clock);
     }
 
     /// <summary>The feature is OFF by default in the catalog — every test that expects a mail
@@ -119,6 +133,51 @@ public sealed class SpeakerGraphicsReadyNotifierScenarioTests
         db.GraphicAssets.Add(asset);
         await db.SaveChangesAsync();
         return asset;
+    }
+
+    /// <summary>
+    /// 🔴 §790.1 — <b>THE MAIL IS LOCKED TO THE HELP PROMOTE DUE DATE.</b>
+    ///
+    /// <para>Operator 2026-08-04, on the day §784.12(a) made graphics auto-release:
+    /// *"rgr the help promote, this is a task locked to a certain due date"* … *"so it must not send
+    /// an email today"*. Help Promote is an ordinary dated speaker task
+    /// (<c>SpeakerTaskDefinitions</c> <c>speaker.promote</c> → speaker-deadlines key
+    /// <c>promote</c>, due 2027-01-15), and §81 means a deadline mails on its due day.</para>
+    ///
+    /// <para>Without this gate, auto-release would have announced Help Promote to <b>21 real
+    /// speakers seventeen months early</b> — measured against PROD before the deploy, not
+    /// hypothesised.</para>
+    ///
+    /// <para>🔒 The second assertion is the one that keeps §436 alive: holding must leave <b>NO
+    /// ledger row</b>. A gate that consumed the occasion would silence the announcement for ever,
+    /// which is a worse bug than the one it fixes and an invisible one.</para>
+    /// </summary>
+    [Fact]
+    public async Task It_is_HELD_before_the_Help_Promote_deadline_and_leaves_no_ledger_row()
+    {
+        using var db = ScenarioFixture.NewDb();
+        var seed = await ScenarioSeed.SeedAsync(db);
+        await EnableFeatureAsync(db, seed.EventId);
+        await ActivateAsync(db, seed.SpeakerOneId, seed.SpeakerTwoId);
+        await AddGraphicAsync(db, seed.EventId, seed.SpeakerOneId, GraphicAssetStatus.Released);
+
+        // The day the operator gave the instruction — the graphic is Released and visible, and the
+        // deadline is still months away.
+        var sender = new SpyEmailSender();
+        var beforeDue = new DateTimeOffset(2026, 8, 4, 12, 0, 0, TimeSpan.Zero);
+        var sent = await NewNotifier(db, sender, beforeDue).NotifyAsync(seed.EventId);
+
+        Assert.Equal(0, sent);
+        Assert.Empty(sender.Sent);
+        Assert.Empty(await db.SentReminders
+            .Where(r => r.ReminderType == GraphicsReadyOccasion.ReminderType)
+            .ToListAsync());
+
+        // Same edition, same graphic, same speaker — on the due date it goes out. The hold deferred
+        // the mail; it did not cancel it.
+        var onTheDay = new SpyEmailSender();
+        Assert.Equal(1, await NewNotifier(db, onTheDay, OnTheDeadline).NotifyAsync(seed.EventId));
+        Assert.Single(onTheDay.Sent);
     }
 
     [Fact]

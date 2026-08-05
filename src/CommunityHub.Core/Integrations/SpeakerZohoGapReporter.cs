@@ -132,10 +132,23 @@ public sealed class SpeakerZohoGapReporter
             }
             lines.Add("<br><i>You will not be mailed about the same set again — only when it changes.</i>");
 
+            // 🔴 §762 — the CTA used to point at /Organizer/PendingSpeakers with the text "Open
+            // Organizer → Speakers". He clicked it and found it EMPTY, and reasonably concluded the
+            // mail was broken: that page lists speakers HELD FROM THE ZOHO FLOW (uncategorized, not
+            // activated, out of ring) — a completely different population from "speaker records in
+            // Backstage missing a field". A link that reliably shows nothing is worse than no link.
+            //
+            // It now opens the participants list, from which each speaker's row carries the §761
+            // read-only "Speaker details (copy/paste)" block — which is the value he actually needs
+            // in front of him while typing into Backstage.
+            //
+            // §763 — manualOnly: the speakers API is create-only, so CEH wrote NOTHING here. The mail
+            // must not claim it did, nor ask him to publish a change that does not exist.
             await _notifier.NotifyAsync("Speakers — details missing in Backstage", lines, ct,
                 actionable: true,
-                actionUrl: "https://eldk27.eventhub.expertslive.dk/Organizer/PendingSpeakers",
-                actionText: "Open Organizer → Speakers");
+                actionUrl: "https://eldk27.eventhub.expertslive.dk/Organizer/Participants?role=Speaker",
+                actionText: "Open the speakers in CEH (to copy the values)",
+                manualOnly: true);
             mailed = found.Count;
         }
 
@@ -153,6 +166,16 @@ public sealed class SpeakerZohoGapReporter
     /// <summary>
     /// The gaps for one speaker — CEH has a value, Zoho does not. Only READABLE fields are compared.
     /// </summary>
+    /// <remarks>
+    /// 🔒 §760 — <b>VALUES ARE PRINTED BARE, never wrapped in quotes.</b> Operator 2026-08-01:
+    /// <i>"remove the "" around string as it makes it impossible to easily cut/paste"</i>.
+    /// <para>This mail exists BECAUSE the Backstage speakers API is create-only, so every value here
+    /// has to be pasted into Backstage <b>by hand</b>. A double-click selects a URL but not the
+    /// quotes; a drag selection catches them — and a pasted <c>"https://…/in/klabier"</c> is a broken
+    /// link. The quotes made the one action the mail exists for harder, on every line.</para>
+    /// <para>The label and its colon already delimit the value. Where a value could be genuinely
+    /// ambiguous, SAY so in words (as the bio line does) rather than relying on quote marks.</para>
+    /// </remarks>
     public static IReadOnlyList<string> GapsFor(SpeakerProfile ceh, BackstageSpeaker z)
     {
         var gaps = new List<string>();
@@ -161,32 +184,62 @@ public sealed class SpeakerZohoGapReporter
         // accreditation + MVP categories (ZohoFieldMap.SpeakerSkills, §302b).
         var skills = ZohoFieldMap.SpeakerSkills(ceh);
         if (Has(skills) && !Has(z.Skills))
-            gaps.Add($"{ZohoFieldMap.Speaker.Skills.GuiLabel}: \"{skills!.Trim()}\"");
+            gaps.Add($"{ZohoFieldMap.Speaker.Skills.GuiLabel}: {skills!.Trim()}");
 
         // COMPANY / DESIGNATION / BIO — all readable, so a blank in Zoho is a REAL gap.
         if (Has(ceh.CompanyName) && !Has(z.Company))
-            gaps.Add($"{ZohoFieldMap.Speaker.Company.GuiLabel}: \"{ceh.CompanyName!.Trim()}\"");
+            gaps.Add($"{ZohoFieldMap.Speaker.Company.GuiLabel}: {ceh.CompanyName!.Trim()}");
         if (Has(ceh.Tagline) && !Has(z.Tagline))
-            gaps.Add($"{ZohoFieldMap.Speaker.Tagline.GuiLabel}: \"{ceh.Tagline!.Trim()}\"");
+            gaps.Add($"{ZohoFieldMap.Speaker.Tagline.GuiLabel}: {ceh.Tagline!.Trim()}");
         if (Has(ceh.Biography) && !Has(z.Bio))
             gaps.Add($"{ZohoFieldMap.Speaker.Biography.GuiLabel}: (bio text is set in CEH but empty in Backstage)");
 
         // SOCIAL — the two CEH fields merge into Zoho's single social object (FieldKind.Object), so
         // existence is the only meaningful check (§302b: "just validate it exist").
         if (Has(ceh.LinkedIn) && !Has(z.LinkedIn))
-            gaps.Add($"{ZohoFieldMap.Speaker.LinkedIn.GuiLabel}: \"{ceh.LinkedIn!.Trim()}\"");
+            gaps.Add($"{ZohoFieldMap.Speaker.LinkedIn.GuiLabel}: {ceh.LinkedIn!.Trim()}");
         if (Has(ceh.Twitter) && !Has(z.Twitter))
-            gaps.Add($"{ZohoFieldMap.Speaker.Twitter.GuiLabel}: \"{ceh.Twitter!.Trim()}\"");
+            gaps.Add($"{ZohoFieldMap.Speaker.Twitter.GuiLabel}: {ceh.Twitter!.Trim()}");
 
         // 🔒 COUNTRY — NOT a comparison. Zoho never returns it (§623), so we cannot know whether it
         // is set. Reported as an unverifiable check, and ONLY when CEH actually has a value, so the
         // line carries the answer rather than just a chore.
-        if (!BackstageSpeaker.CountryIsReadable && Has(ceh.Country))
-            gaps.Add($"{ZohoFieldMap.Speaker.Country.GuiLabel}: \"{ceh.Country!.Trim()}\" "
-                     + "— Backstage does not report this field, so please confirm it is set");
+        //
+        // 🔒 §762 — …UNLESS an organizer has already CONFIRMED this exact value is set over there.
+        // Without this the line could never clear: Backstage never reports country back, so the
+        // reporter re-emitted it on every comparison for ever, and those permanent lines rode along
+        // on every future re-send triggered by someone else's real gap. Operator: *"i have just
+        // completed all the changes. so i need to approve/complete them somewhere so they dont come
+        // again."*
+        //
+        // 🔑 Compared by VALUE, not by a flag: if CEH's country later changes, the confirmation no
+        // longer matches and the line comes back — a new value is a new fact, and suppressing it
+        // would silently hide a genuinely wrong Backstage record.
+        if (!BackstageSpeaker.CountryIsReadable && Has(ceh.Country)
+            && !CountryIsConfirmed(ceh))
+        {
+            gaps.Add($"{ZohoFieldMap.Speaker.Country.GuiLabel}: {ceh.Country!.Trim()} "
+                     + "— Backstage does not report this field, so please confirm it is set "
+                     + "(tick it off on the speaker's page in CEH once you have)");
+        }
 
         return gaps;
     }
+
+    /// <summary>
+    /// §762 — has an organizer confirmed that THIS country value is set in Backstage?
+    /// </summary>
+    /// <remarks>
+    /// Trimmed + case-insensitive so "dk" and "DK " count as the same confirmation — the value is
+    /// typed by a human on both sides, and a whitespace difference re-nagging him about work he has
+    /// done would be the defect all over again.
+    /// </remarks>
+    public static bool CountryIsConfirmed(SpeakerProfile ceh) =>
+        Has(ceh.CountryConfirmedInBackstage)
+        && string.Equals(
+            ceh.CountryConfirmedInBackstage!.Trim(),
+            (ceh.Country ?? string.Empty).Trim(),
+            StringComparison.OrdinalIgnoreCase);
 
     private static bool Has(string? v) => !string.IsNullOrWhiteSpace(v);
     private static string Enc(string? s) => System.Net.WebUtility.HtmlEncode(s ?? string.Empty);

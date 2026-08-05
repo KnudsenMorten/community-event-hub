@@ -66,6 +66,26 @@ public sealed record CommsTimelineItem(
     string? Error);
 
 /// <summary>
+/// §784.2 — ONE MAIL, as the organizer needs to read it: subject, when, how it landed.
+/// </summary>
+/// <remarks>
+/// 🔒 <b>This is a view of an ATTEMPT, not of a delivery.</b> <see cref="Outcome"/> is what CEH
+/// observed at send time — the same classification the rest of the cockpit uses — and a
+/// <c>Sent</c> row means the transport accepted it, not that a human read it. Reconciling with
+/// Brevo remains the only way to answer that, and this list must never be presented as proof of
+/// arrival.
+/// </remarks>
+/// <param name="SentAt">When the attempt was made.</param>
+/// <param name="Subject">The subject line, as logged.</param>
+/// <param name="Category">The campaign/category the mail belongs to.</param>
+/// <param name="Outcome">Sent / Dropped / Failed, from the real log row.</param>
+public sealed record WhoGotWhatMessage(
+    DateTimeOffset SentAt,
+    string? Subject,
+    string Category,
+    CommsOutcome Outcome);
+
+/// <summary>
 /// One person's "who-got-what" line: every email outcome the hub has for one
 /// address, sourced from the real <see cref="EmailLog"/> so the counts reflect
 /// actual delivery (sent / dropped-by-allowlist / failed), never an optimistic
@@ -79,6 +99,12 @@ public sealed record CommsTimelineItem(
 /// <param name="Failed">Count that failed to send.</param>
 /// <param name="LastAt">The most recent send time for this address.</param>
 /// <param name="LastSubject">The most recent subject for this address.</param>
+/// <param name="Messages">
+/// §784.2 — THE ACTUAL MAILS behind the counts, newest first. Operator 2026-08-03: *"i must have a
+/// button to show all emails that was sent to people. i only see count. I need to see
+/// subject,date,time"*. A count answers "how many", which is never the question being asked at this
+/// page — the question is "did HER invitation go out, and when".
+/// </param>
 public sealed record WhoGotWhatRow(
     string Email,
     string? Name,
@@ -87,7 +113,8 @@ public sealed record WhoGotWhatRow(
     int Dropped,
     int Failed,
     DateTimeOffset LastAt,
-    string? LastSubject)
+    string? LastSubject,
+    IReadOnlyList<WhoGotWhatMessage> Messages)
 {
     /// <summary>Total emails the hub has on record for this address.</summary>
     public int Total => Sent + Dropped + Failed;
@@ -203,6 +230,29 @@ public sealed class CommsCockpitSnapshot
     /// <summary>The next scheduled SoMe posts that have not fired yet (the queue ahead).</summary>
     public List<CommsTimelineItem> UpcomingScheduled { get; set; } = new();
 
+    /// <summary>
+    /// §818 — ENGINE &amp; OPS MAIL: what the machine sent to a MAILBOX, not to a person.
+    /// </summary>
+    /// <remarks>
+    /// <para>Job-failure alerts, hand-entry lists, invoice notices, ERP refusals. Operator 2026-08-04
+    /// (§815): <i>"why can I not see the emails sent here in a logged form"</i> — 375 such rows existed
+    /// in PROD and none of them rendered anywhere in the organizer UI, because they carry no edition
+    /// stamp and every view on this page is edition-scoped.</para>
+    ///
+    /// <para>🔒 <b>Deliberately its own list, never merged into <see cref="Timeline"/> or
+    /// <see cref="WhoGotWhat"/>.</b> §815.1: a participant's welcome and an ops alert answer different
+    /// questions, and 252 engine alerts poured into the participant timeline would bury the mail this
+    /// page exists to track — the same burial §650 already had to undo once for ring-drops.</para>
+    /// </remarks>
+    public List<CommsTimelineItem> OpsMail { get; set; } = new();
+
+    // --- ops counters, kept apart from the participant ones for the same reason ----
+    public int OpsMailSent { get; set; }
+    public int OpsMailFailed { get; set; }
+
+    /// <summary>Ops mail in the window BEFORE the display cap — the list may be shorter.</summary>
+    public int OpsMailTotal { get; set; }
+
     // --- headline counters (all from the real outcome, never optimistic) -----
     public int TotalEmails { get; set; }
     public int EmailsSent { get; set; }
@@ -243,6 +293,30 @@ public sealed class CommsCockpitService
     private const int TimelineCap = 100;
     private const int WhoGotWhatCap = 200;
     private const int ResendCap = 50;
+
+    /// <summary>§818 — most ops/engine mails listed before the section says it was cut short.</summary>
+    private const int OpsMailCap = 100;
+
+    /// <summary>§784.2 — most mails listed under ONE person before the list is cut short.</summary>
+    public const int MessagesPerPersonCap = 100;
+
+    /// <summary>
+    /// §784.1 — a failed send stops being a RESEND CANDIDATE after this long.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-08-03: <i>"if mail has been in the 'Resend undelivered mail' queue for
+    /// more than 1 month, then remove it from the resend queue"</i>.</para>
+    ///
+    /// <para>🔑 <b>Stated separately from <see cref="TimelineDays"/> on purpose.</b> The two happen
+    /// to be the same number today, which is exactly why the rule was invisible — the queue aged out
+    /// only as a SIDE EFFECT of how far back the timeline reads. Widen the timeline for any unrelated
+    /// reason and stale rows silently reappear in the resend queue. The queue's own rule now lives
+    /// where the queue is built.</para>
+    ///
+    /// <para>⚠️ A month-old undelivered mail is not something to re-send: the moment has passed, and
+    /// re-sending it now would deliver a message whose content refers to a deadline that is gone.</para>
+    /// </remarks>
+    private const int ResendMaxAgeDays = 30;
     private const int SnippetLen = 60;
 
     private readonly CommunityHubDbContext _db;
@@ -252,6 +326,49 @@ public sealed class CommsCockpitService
     {
         _db = db;
         _clock = clock;
+    }
+
+    /// <summary>
+    /// §784.1 — DISMISS one participant's row from the resend queue ("I have dealt with this").
+    /// Returns the number of log rows hidden, or 0 when there was nothing to dismiss.
+    /// </summary>
+    /// <remarks>
+    /// <para>The queue shows ONE row per participant (their most recent undelivered mail), but the
+    /// same participant may have several undelivered rows inside the window. Dismissing only the
+    /// newest would make the row reappear showing an OLDER failure — which reads as a new problem.
+    /// So dismissal covers every undelivered row for that participant within the age window.</para>
+    ///
+    /// <para>🔒 <b>It changes nothing about delivery.</b> No <see cref="EmailLog.Error"/>, no
+    /// <see cref="EmailLog.Success"/>, no resend. The mail is exactly as undelivered as it was; the
+    /// organizer has simply said they are not going to act on it. Reversible by clearing the column.
+    /// See <see cref="EmailLog.ResendDismissedAt"/> for why this must not spread.</para>
+    /// </remarks>
+    public async Task<int> DismissFromResendQueueAsync(
+        int eventId, int participantId, string? byEmail, CancellationToken ct = default)
+    {
+        var now = _clock.GetUtcNow();
+        var cutoff = now.AddDays(-ResendMaxAgeDays);
+
+        var rows = await _db.EmailLogs
+            .Where(e => e.EventId == eventId
+                        && e.ParticipantId == participantId
+                        && e.SentAt >= cutoff
+                        && e.ResendDismissedAt == null)
+            .ToListAsync(ct);
+
+        // Only rows that are actually IN the queue (undelivered) are dismissed — a delivered row
+        // was never shown, and stamping it would put dismissal data on healthy mail.
+        var undelivered = rows.Where(e => OutcomeOf(e) != CommsOutcome.Sent).ToList();
+        if (undelivered.Count == 0) return 0;
+
+        foreach (var row in undelivered)
+        {
+            row.ResendDismissedAt = now;
+            row.ResendDismissedByEmail = byEmail;
+        }
+
+        await _db.SaveChangesAsync(ct);
+        return undelivered.Count;
     }
 
     /// <param name="includeDropped">
@@ -284,10 +401,56 @@ public sealed class CommsCockpitService
                             || (p.PublishedAtUtc != null && p.PublishedAtUtc >= since)))
             .ToListAsync(ct);
 
+        // 🔑 §818 — THE MAIL WITH NO EDITION STAMP. `LoggingEmailSender` writes
+        // `EventId = ctx?.EventId ?? 0`, so any send whose ambient EmailContext carries no edition
+        // lands on event 0 — and every query above is edition-scoped, so it renders NOWHERE. In PROD
+        // that was 375 rows (252 engine alerts, 111 ops notices, 11 speaker evaluation mails, 1
+        // AiHelper intake) sent over six weeks, none of it visible to the organizer.
+        //
+        // 🔒 It is split by AUDIENCE, not by EventId — the whole point of §815.1 — and the audience
+        // is read from the mail's own TEMPLATE IDENTITY (`EmailTemplateCatalog.IsInternalMailboxMail`),
+        // never from who received it.
+        //
+        // ⚠️ THE RECIPIENT ADDRESS LOOKS LIKE THE OBVIOUS TEST AND IS WRONG. It was written that way
+        // first — "unstamped mail to a known participant address is that person's mail" — every unit
+        // test passed, and the first real render on DEV showed the section EMPTY beside 25 live
+        // engine alerts: they go to `mok@`, which is also the organizer's own participant address, so
+        // all 25 were filed as his personal mail. That is the exact burial §815.1 forbids, and no
+        // test caught it because the fixtures used addresses nobody had registered.
+        var unscoped = eventId > 0
+            ? await _db.EmailLogs
+                .Where(e => e.EventId == 0 && e.SentAt >= since)
+                .OrderByDescending(e => e.SentAt)
+                .ToListAsync(ct)
+            : new List<EmailLog>();
+
+        var opsMail = new List<EmailLog>();
+        if (unscoped.Count > 0)
+        {
+            var participantMail = new List<EmailLog>();
+            foreach (var row in unscoped)
+            {
+                var isOps = Email.EmailTemplateCatalog.IsInternalMailboxMail(row.TemplateName);
+                (isOps ? opsMail : participantMail).Add(row);
+            }
+
+            if (participantMail.Count > 0)
+            {
+                // Fold in, newest first, exactly as if the stamp had been there — who-got-what
+                // already groups by ADDRESS, so the mail lands on the right person's row.
+                // ⚠️ These rows carry NO ParticipantId, so `BuildResendCandidates` — which requires
+                // one — can never offer them for resend. Deliberate: the row says whose mail it is,
+                // not who to send it to.
+                emails = emails.Concat(participantMail)
+                    .OrderByDescending(e => e.SentAt)
+                    .ToList();
+            }
+        }
+
         BuildTimeline(snap, emails, posts, now);
         BuildWhoGotWhat(snap, emails);
         BuildCampaigns(snap, emails);
-        BuildResendCandidates(snap, emails, includeDropped);
+        BuildResendCandidates(snap, emails, includeDropped, now);
 
         // §644 — stamp each candidate with the person's CURRENT address, so the row can warn when
         // the resend will not go to the address printed above it (a historical address on an old
@@ -307,8 +470,38 @@ public sealed class CommsCockpitService
                 .ToList();
         }
         BuildCounters(snap, emails, posts);
+        BuildOpsMail(snap, opsMail);
 
         return snap;
+    }
+
+    // --- ops / engine mail ----------------------------------------------------
+
+    private static void BuildOpsMail(CommsCockpitSnapshot s, IReadOnlyList<EmailLog> opsMail)
+    {
+        s.OpsMailTotal = opsMail.Count;
+        s.OpsMailSent = opsMail.Count(e => OutcomeOf(e) == CommsOutcome.Sent);
+        // 🔒 Dropped and Failed are counted TOGETHER here, unlike the participant counters. A ring
+        // drop is a meaningful, benign outcome for participant mail (§650) — but ops mail is
+        // ring-EXEMPT by construction (EngineAlertSender sets RingExempt), so a drop on this side is
+        // never the system obeying a ring. It is an alert that did not arrive, which is the one
+        // failure mode this whole section exists to make visible.
+        s.OpsMailFailed = opsMail.Count(e => OutcomeOf(e) != CommsOutcome.Sent);
+
+        s.OpsMail = opsMail
+            .OrderByDescending(e => e.SentAt)
+            .Take(OpsMailCap)
+            .Select(e => new CommsTimelineItem(
+                When: e.SentAt,
+                Channel: CommsChannel.Email,
+                Outcome: OutcomeOf(e),
+                Title: string.IsNullOrWhiteSpace(e.Subject) ? "(no subject)" : e.Subject,
+                Recipient: e.ToEmail,
+                Category: string.IsNullOrWhiteSpace(e.Category) ? "other" : e.Category,
+                IsFuture: false,
+                ParticipantId: null,
+                Error: e.Success ? null : e.Error))
+            .ToList();
     }
 
     // --- timeline ------------------------------------------------------------
@@ -425,7 +618,18 @@ public sealed class CommsCockpitService
                     Dropped: g.Count(e => OutcomeOf(e) == CommsOutcome.Dropped),
                     Failed: g.Count(e => OutcomeOf(e) == CommsOutcome.Failed),
                     LastAt: latest.SentAt,
-                    LastSubject: latest.Subject);
+                    LastSubject: latest.Subject,
+                    // §784.2 — the mails themselves, newest first. Capped per person so one
+                    // address with a thousand log rows cannot make the page unusable for the
+                    // other 199; the cap is stated in the UI rather than silently truncating.
+                    Messages: g.OrderByDescending(e => e.SentAt)
+                        .Take(MessagesPerPersonCap)
+                        .Select(e => new WhoGotWhatMessage(
+                            e.SentAt,
+                            e.Subject,
+                            string.IsNullOrWhiteSpace(e.Category) ? "other" : e.Category,
+                            OutcomeOf(e)))
+                        .ToList());
             })
             // Anyone with undelivered mail first (most undelivered first), then by recency.
             .OrderByDescending(r => r.HasUndelivered)
@@ -455,7 +659,10 @@ public sealed class CommsCockpitService
     // --- resend candidates ---------------------------------------------------
 
     private static void BuildResendCandidates(
-        CommsCockpitSnapshot s, IReadOnlyList<EmailLog> emails, bool includeDropped)
+        CommsCockpitSnapshot s, IReadOnlyList<EmailLog> emails, bool includeDropped,
+        // §784.1 — passed in rather than read from a clock field: this method is static and
+        // deterministic, which is what makes the age rule testable without a real clock.
+        DateTimeOffset now)
     {
         // Only participant-linked undelivered mail can be resent (a resend needs a
         // person to target via ParticipantEmailService). One candidate per
@@ -474,7 +681,15 @@ public sealed class CommsCockpitService
             .Select(e => new Email.SupersededSendDetector.Delivery(e.ParticipantId, e.Category, e.SentAt))
             .ToList();
 
+        // §784.1 — the queue's OWN age rule, not a by-product of the timeline window.
+        var resendCutoff = now.AddDays(-ResendMaxAgeDays);
+
         s.ResendCandidates = emails
+            .Where(e => e.SentAt >= resendCutoff)
+            // §784.1 — a row the organizer has explicitly dismissed stays out of the queue.
+            // 🔒 This is the ONLY place ResendDismissedAt may be read: it means "I have dealt with
+            // this", not "this was delivered". Nothing about the mail's outcome changes.
+            .Where(e => e.ResendDismissedAt == null)
             .Where(e => e.ParticipantId != null && OutcomeOf(e) != CommsOutcome.Sent)
             .Where(e => includeDropped || OutcomeOf(e) != CommsOutcome.Dropped)
             .Where(e => includeDropped

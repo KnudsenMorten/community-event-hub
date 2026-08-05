@@ -59,6 +59,83 @@ public class SoMeSettings
     /// </summary>
     public bool NotifyOnPublish { get; set; } = true;
 
+    /// <summary>
+    /// §842.7/§843.3 — <b>THE EVERYDAY RHYTHM</b>: how many posts a normal day carries.
+    /// </summary>
+    /// <remarks>
+    /// 🔒 DEFAULT 2. ⚠️ The name says "Max" for history; since §843.3 it is the NORMAL number, and
+    /// <see cref="ExceptionPostsPerDay"/> is the ceiling. Measured on the real campaign, whatever
+    /// this is set to becomes what almost every day looks like — at 2, 100% of days held exactly 2 —
+    /// so changing it changes the page's everyday appearance, not just its capacity.
+    /// </remarks>
+    public int MaxPostsPerDay { get; set; } = 2;
+
+    /// <summary>
+    /// §843.3 — the ceiling a day may reach for posts that <b>cannot otherwise be placed</b>.
+    /// </summary>
+    /// <remarks>
+    /// <para>🔑 Operator 2026-08-05: <i>"i am worried that the planner will post 3 by default … we
+    /// had a few days with exceptions as we ended with more posts than we had capacity for"</i>. His
+    /// busier ELDK26 days were days they had run OUT of room, not a chosen cadence — so this is an
+    /// EXCEPTION, granted only to what the normal rhythm could not fit.</para>
+    ///
+    /// <para>🔒 Set equal to <see cref="MaxPostsPerDay"/> to forbid exceptions entirely. Capped in
+    /// use by the number of <c>SoMeSchedulePlanner.PreferredTimes</c> (4): a further post would have
+    /// to share a minute with another or break his 08:00–16:00 rule.</para>
+    /// </remarks>
+    public int ExceptionPostsPerDay { get; set; } = 3;
+
+    /// <summary>
+    /// §851 — the earliest date a SPEAKER-derived post may be scheduled: Type 1 (speaker tracks) and
+    /// Type 2 (sessions). Null = no gate.
+    /// </summary>
+    /// <remarks>
+    /// <para>🔑 Operator 2026-08-05: <i>"we run the call for speaker process now, and we wont have
+    /// the complete list of speakers until 7th of sept 2026 … call for speakers ends 31 aug 2026 and
+    /// then we spend 1 week deciding who is selected. planner must adjust to this"</i>. For ELDK27
+    /// the value is <b>2026-09-07</b>.</para>
+    ///
+    /// <para>🔒 A SETTING, not a constant — the mechanism belongs to the edition, the date belongs to
+    /// this one. A later edition has a different CfS deadline, and a hardcoded 2026 would gate
+    /// nothing for it.</para>
+    ///
+    /// <para>⚠️ It gates SCHEDULING, not planning-in-principle: the posts are still created, they
+    /// simply cannot land before the speakers are known. A track post lists its speakers, so
+    /// publishing one earlier would announce a line-up that does not exist yet.</para>
+    /// </remarks>
+    public DateOnly? SpeakerAnnouncementFrom { get; set; }
+
+    // --- §824.16: the three edition-level values every template ends with --------------------
+    // They live HERE, per edition and editable, rather than in code: the tag block and the
+    // organizer credit differ between editions (ELDK26's list is not ELDK27's, §824.3), and a
+    // wording change to a line that appears on EVERY post must not need a deploy.
+
+    /// <summary>
+    /// §824.3 <c>{EventSystemUrl}</c> — the link every post points at, e.g.
+    /// <c>https://eldk27.expertslive.dk</c>.
+    /// </summary>
+    /// <remarks>
+    /// 🔒 The RAW url, not a shortener. The <c>lnkd.in</c> links in the ELDK26 samples are what
+    /// LinkedIn's own composer produces when a human pastes a URL; reproducing them would put a
+    /// second system in charge of the event's address (§824.8b).
+    /// </remarks>
+    public string? EventSystemUrl { get; set; }
+
+    /// <summary>§824.3 <c>{EventTags}</c> — the standing hashtag block, one line.</summary>
+    public string? EventTags { get; set; }
+
+    /// <summary>
+    /// §824.3 <c>{OrganizerLinkedInUrls}</c> — the four organizers as the credit line shows them.
+    /// </summary>
+    /// <remarks>
+    /// ⚠️ <b>Names, not mentions — measured, not assumed.</b> A LinkedIn mention needs the person's
+    /// member URN, which cannot be derived from a public profile URL, and §824.14c confirmed even
+    /// <c>/v2/userinfo</c> is denied to this app. His own ELDK26 posts carry the four as plain text
+    /// for the same reason: LinkedIn's composer resolves an "@" a human types, and an API post has no
+    /// such affordance.
+    /// </remarks>
+    public string? OrganizerCredits { get; set; }
+
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? UpdatedAt { get; set; }
     public string? LastUpdatedByEmail { get; set; }

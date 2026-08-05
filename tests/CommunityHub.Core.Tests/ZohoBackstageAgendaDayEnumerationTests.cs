@@ -49,7 +49,6 @@ public sealed class ZohoBackstageAgendaDayEnumerationTests
                 ApiDomain = "https://zoho.test",
                 BackstagePortalId = Portal,
                 BackstageEventId = Event,
-                AgendaReadEnabled = true,
             },
             NullLogger<ZohoClient>.Instance);
 
@@ -127,24 +126,34 @@ public sealed class ZohoBackstageAgendaDayEnumerationTests
         Assert.Single(result.Sessions);
     }
 
+    /// <summary>
+    /// 🗑 §754.5 — replaces <c>Agenda_read_disabled_returns_unavailable_without_calling</c>, which
+    /// pinned the opposite behaviour: a config flag that made this method return "unavailable"
+    /// WITHOUT EVER CALLING ZOHO.
+    /// </summary>
+    /// <remarks>
+    /// That flag claimed the refresh token lacked <c>ZohoBackstage.agenda.READ</c>. It never did —
+    /// the Backstage credentials carry every permission CEH needs. The flag is deleted, and this
+    /// test now pins the behaviour that matters: the pull ALWAYS talks to Zoho, and "unavailable"
+    /// can only mean a real failure the API reported.
+    /// </remarks>
     [Fact]
-    public async Task Agenda_read_disabled_returns_unavailable_without_calling()
+    public async Task The_agenda_pull_always_calls_zoho_and_never_self_reports_unavailable()
     {
-        var handler = new RouteHandler(_ => (HttpStatusCode.OK, "{}"));
-        var client = new ZohoClient(new HttpClient(handler),
-            new ZohoOptions
-            {
-                Enabled = true,
-                ApiDomain = "https://zoho.test",
-                BackstagePortalId = Portal,
-                BackstageEventId = Event,
-                AgendaReadEnabled = false, // gate closed
-            },
-            NullLogger<ZohoClient>.Instance);
+        var handler = new RouteHandler(url =>
+        {
+            if (url.Contains("/halls")) return (HttpStatusCode.OK, "{\"halls\":[]}");
+            if (url.Contains("/agendas")) return (HttpStatusCode.OK, "{\"agendas\":[{\"index\":0}]}");
+            if (url.Contains("/sessions?day=1"))
+                return (HttpStatusCode.OK,
+                    "{\"sessions\":[{\"id\":\"x\",\"title\":\"T\",\"start_time\":\"2027-02-09T08:00:00Z\",\"duration\":30}]}");
+            return (HttpStatusCode.OK, "{\"sessions\":[]}");
+        });
 
-        var result = await client.GetBackstageSessionsAsync("tok");
+        var result = await NewClient(handler).GetBackstageSessionsAsync("tok");
 
-        Assert.False(result.IsAvailable);
-        Assert.Empty(handler.Requests); // never hit the network
+        Assert.True(result.IsAvailable);
+        Assert.Single(result.Sessions);
+        Assert.NotEmpty(handler.Requests);   // it went to the network, as it always must
     }
 }

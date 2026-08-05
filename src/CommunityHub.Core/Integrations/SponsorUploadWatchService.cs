@@ -161,39 +161,18 @@ public sealed class SponsorUploadWatchService
 
                 known.LastNotifiedAt = DateTimeOffset.UtcNow;
 
-                // Also COPY a new/changed LOGO into the central logo-collection
-                // folder so organizers have every sponsor logo in one place
-                // (operator 2026-06-23). Same site + drive; named
-                // "{Company} - {file}" so logos never collide and a re-upload
-                // overwrites cleanly. Tolerant: a copy failure is logged and never
-                // aborts the run (re-run the watcher, or the sponsor re-uploads, to
-                // re-attempt).
-                if (!string.IsNullOrWhiteSpace(sp.LogoCollectionFolderPath)
-                    && string.Equals(loc.Subfolder, "LOGO", StringComparison.OrdinalIgnoreCase))
-                {
-                    try
-                    {
-                        var bytes = await _sp.DownloadItemContentAsync(sp.SiteUrl, sp.DriveName, file.ItemId, ct);
-                        if (bytes is not null)
-                        {
-                            var destName = $"{SanitizeNameComponent(loc.CompanyName)} - {file.Name}";
-                            await _sp.UploadFileAsync(
-                                sp.SiteUrl, sp.DriveName, sp.LogoCollectionFolderPath, destName,
-                                bytes, GuessContentType(file.Name), ct);
-                            _log.LogInformation(
-                                "SponsorUploadWatchService: copied logo '{File}' for {Co} into the collection folder as '{Dest}'.",
-                                file.Name, loc.CompanyName, destName);
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        errors++;
-                        _log.LogError(ex,
-                            "SponsorUploadWatchService: failed to copy logo '{File}' for {Co} into the collection folder; "
-                            + "notification still sent, will re-attempt on the next change.",
-                            file.Name, loc.CompanyName);
-                    }
-                }
+                // 🔒 §768.10 D7 / §768.14 — the logo-COLLECTION COPY is RETIRED, not migrated.
+                //
+                // It duplicated every uploaded logo into a second folder as "{Company} - {file}",
+                // serving the 2026-06-23 request to have "every sponsor logo in one place". Under
+                // the §768 taxonomy that place already exists and is authoritative:
+                // Sponsors/Logo/Web holds one current logo per sponsor, named to a contract a
+                // machine can read. The copy therefore produced a SECOND set of the same images
+                // under a THIRD naming convention — and §767 recorded what that cost: a reader
+                // matched the collection's "{Company} - {file}" shape rather than the upload's and
+                // found nothing at all, silently, through four production runs.
+                //
+                // This also removes the service's only SharePoint WRITE. It watches and notifies.
             }
         }
 
@@ -256,37 +235,7 @@ public sealed class SponsorUploadWatchService
         return s.Length <= max ? s : s.Substring(0, max);
     }
 
-    /// <summary>
-    /// Make a company name safe to use as part of a SharePoint file name: drop the
-    /// characters SharePoint rejects (<c>" * : &lt; &gt; ? / \ |</c>) and collapse
-    /// whitespace, so the collected logo lands as a clean "{Company} - {file}".
-    /// </summary>
-    private static string SanitizeNameComponent(string? name)
-    {
-        if (string.IsNullOrWhiteSpace(name)) return "Sponsor";
-        var cleaned = new string(name
-            .Where(c => "\"*:<>?/\\|".IndexOf(c) < 0)
-            .ToArray());
-        cleaned = string.Join(" ", cleaned.Split(
-            (char[]?)null, StringSplitOptions.RemoveEmptyEntries));
-        return string.IsNullOrWhiteSpace(cleaned) ? "Sponsor" : cleaned;
-    }
-
-    /// <summary>Best-effort content type from a logo file's extension (PUT infers from the name anyway).</summary>
-    private static string GuessContentType(string fileName)
-    {
-        var ext = System.IO.Path.GetExtension(fileName).ToLowerInvariant();
-        return ext switch
-        {
-            ".png"  => "image/png",
-            ".jpg" or ".jpeg" => "image/jpeg",
-            ".gif"  => "image/gif",
-            ".svg"  => "image/svg+xml",
-            ".webp" => "image/webp",
-            ".pdf"  => "application/pdf",
-            ".eps"  => "application/postscript",
-            ".ai"   => "application/postscript",
-            _        => "application/octet-stream",
-        };
-    }
+    // §768.14 — SanitizeNameComponent and GuessContentType went with the collection copy. They
+    // existed only to build "{Company} - {file}" and to label those bytes on the way out; with the
+    // copy retired this service no longer names or writes a file at all.
 }

@@ -52,6 +52,22 @@ public sealed class FeatureCatalogClassificationTests
                     "The outbound-email master switch must default ON (it is the global kill switch).");
                 continue;
             }
+
+            // 🔒 §871 — SECOND documented exception, and the SAME SHAPE as the first: a KILL SWITCH
+            // over behaviour that ALREADY SHIPS, not a new capability.
+            //
+            // The rule above exists so a deploy never STARTS something new. This switch was added
+            // (operator 2026-08-05: "it could be nice to have a button to DISABLE this one") over a
+            // job that has been mailing un-gated since §623. Defaulting it OFF would make the deploy
+            // silently STOP a mail he relies on — the opposite failure, and just as bad.
+            if (f.Key == "speaker-gap-report")
+            {
+                Assert.True(f.DefaultEnabled,
+                    "speaker-gap-report is a kill switch over an already-shipping job — defaulting "
+                    + "it OFF would silently stop the gap mail on deploy.");
+                continue;
+            }
+
             Assert.False(f.DefaultEnabled,
                 $"Advanced feature '{f.Key}' must default OFF (opt-in) so a deploy never springs new behaviour.");
         }

@@ -61,4 +61,21 @@ public class SignalModel : PageModel
         await _signal.ToggleAsync(me.EventId, me.ParticipantId, me.Role, ct);
         return RedirectToPage();
     }
+
+    /// <summary>
+    /// §779 — mail the participant their own Signal join links, so they can open them on a phone.
+    /// </summary>
+    /// <remarks>
+    /// The handler name matches the one on the wizard shell, so the SAME shared partial renders a
+    /// working button on both surfaces (§148's whole point: the two hosts cannot diverge).
+    /// </remarks>
+    public async Task<IActionResult> OnPostMailSignalLinksAsync(CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+
+        var (_, message) = await _signal.SendLinksEmailAsync(me.EventId, me.ParticipantId, me.Role, ct);
+        TempData["SignalLinksMessage"] = message;
+        return RedirectToPage();
+    }
 }

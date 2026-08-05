@@ -33,6 +33,12 @@ public sealed class ZohoChangeNotifier
     ///
     /// <para>Matches <see cref="EngineAlertSender.Recipient"/>, so EVERY system alert in the
     /// product lands in one place.</para>
+    ///
+    /// <para>⚠️ §736 (operator 2026-07-31) — <b>this is no longer where a CEH→Zoho change notice
+    /// goes.</b> He restated the line as *"only alert mails goes to mok@expertslive.dk"*, and a
+    /// publish/delete notice is not an alert, it is a job for whoever is free. `NotifyAsync` now
+    /// defaults to <see cref="ActionableRecipient"/>; this constant remains for a genuinely
+    /// informational notice, of which there are none today.</para>
     /// </summary>
     public const string Recipient = "mok@expertslive.dk";
 
@@ -63,21 +69,60 @@ public sealed class ZohoChangeNotifier
     /// <paramref name="changes"/> are human-readable lines (e.g. "Created session
     /// 'Azure Master Class' (Backstage id 123)"). Empty batch ⇒ no mail. Never throws.
     /// </summary>
+    /// <param name="actionable">
+    /// 🔒 §736 — DEFAULTS TO TRUE (operator 2026-07-31: *"this mail should go to info@expertslive.dk
+    /// so any organizer can do it … only alert mails goes to mok@expertslive.dk"*).
+    ///
+    /// <para>Every mail this notifier sends says, in its own body, *"please open Backstage and
+    /// publish the change and/or delete any now-redundant item"*. There is no informational variant
+    /// — the whole reason it exists is that a HUMAN must go and do something. So "actionable" is not
+    /// a property of the call site; it is a property of this notifier.</para>
+    ///
+    /// <para>The default was <c>false</c> and NO caller ever passed <c>true</c>, so all six send
+    /// sites routed to the single operator mailbox. §556 had already drawn the right line
+    /// (*"alerts that require actions from organizers like this goes to info@ as we should be more
+    /// that can fix this"*) and built <see cref="ActionableRecipient"/> for it — the default simply
+    /// never followed. Flipping it here fixes every site at once and makes the wrong thing the one
+    /// you have to ask for.</para>
+    /// </param>
+    /// <param name="intro">
+    /// §745 — an optional lead-in rendered ABOVE the change list and deliberately NOT counted.
+    /// Operator 2026-07-31: *"it says 3 changes in subject but mention 2, why. is skill conuted as
+    /// 2"*. It was neither — the speaker-edit mail passed its "ACTION NEEDED …" heading as the FIRST
+    /// ENTRY of the change list, so the subject counted the heading as a change. Anything that is
+    /// not a field change belongs here, where it cannot inflate the number.
+    /// </param>
+    /// <param name="manualOnly">
+    /// 🔒 §763 — TRUE when CEH wrote NOTHING and every line is hand-work for the operator.
+    /// </param>
+    /// <remarks>
+    /// Operator 2026-08-01: <i>"this is wrong as hub cannot update an existing speaker via api.
+    /// there is no update endpoint in zoho. therefore it is a manual task - wording is wrong"</i>.
+    /// The Backstage <b>speakers</b> API is CREATE-ONLY (per-id POST/PUT/PATCH and DELETE all answer
+    /// 404 "Please provide valid method", live-verified 2026-06-25), so a speaker mail must never
+    /// say the hub "just wrote" anything or ask him to "publish" it — there is nothing there to
+    /// publish. Sessions are different: those really are created, and keep the original wording.
+    /// </remarks>
     public async Task NotifyAsync(
         string area, IReadOnlyList<string> changes, CancellationToken ct,
-        bool actionable = false, string? actionUrl = null, string? actionText = null)
+        bool actionable = true, string? actionUrl = null, string? actionText = null,
+        string? intro = null, bool manualOnly = false)
     {
         try
         {
             if (changes is null || changes.Count == 0) return; // nothing written ⇒ no mail
 
-            var (subject, html) = Build(area, changes, actionUrl, actionText);
+            var (subject, html) = Build(area, changes, actionUrl, actionText, intro, manualOnly);
             // §556 — an alert someone must ACT on goes to the shared ops inbox so more than one
             // person can fix it; a pure record of what the hub wrote stays with the single operator
             // (§493), because for the shared inbox that is noise nobody can act on.
             var to = actionable ? ActionableRecipient : Recipient;
             // throttleKey: null — every real change batch must reach the operator.
-            await _alerts.AlertAsync(subject, html, ct, throttleKey: null, recipient: to);
+            // §752.9 — DEV-silent: these announce CHANGES to test data, and say "publish/delete may
+            // be needed" about a sandbox nobody publishes. throttleKey stays null for PROD, where
+            // every real change batch must reach the operator.
+            await _alerts.AlertAsync(subject, html, ct, throttleKey: null, recipient: to,
+                devSilent: true);
         }
         catch (Exception ex)
         {
@@ -89,16 +134,53 @@ public sealed class ZohoChangeNotifier
     /// Build the subject + HTML body for a change batch. Public + pure so a test can
     /// assert the format without sending.
     /// </summary>
-    public static (string Subject, string Html) Build(string area, IReadOnlyList<string> changes, string? actionUrl = null, string? actionText = null)
+    public static (string Subject, string Html) Build(
+        string area, IReadOnlyList<string> changes, string? actionUrl = null,
+        string? actionText = null, string? intro = null, bool manualOnly = false)
     {
-        var subject =
-            $"[CEH→Zoho] {area}: {changes.Count} change(s) — publish/delete may be needed";
+        // 🔒 §745 — the count is the number of CHANGES, and `changes` must therefore contain only
+        // changes. A caller with a heading passes it as `intro`; putting it in this list made the
+        // subject say 3 while the body listed 2.
+        //
+        // 🔒 §763 — the SUBJECT follows the same truth as the body. "publish/delete may be needed"
+        // describes an outcome that never happened for a create-only area, and he read the subject
+        // before the body.
+        var subject = manualOnly
+            ? $"[CEH→Zoho] {area}: {changes.Count} item(s) to add by hand in Backstage"
+            : $"[CEH→Zoho] {area}: {changes.Count} change(s) — publish/delete may be needed";
 
         var sb = new StringBuilder();
-        sb.Append("<p>The hub just wrote the following change(s) to Zoho Backstage. ")
-          .Append("API writes are <strong>not auto-published</strong> — please open Backstage and ")
-          .Append("<strong>publish</strong> the change and/or <strong>delete</strong> any ")
-          .Append("now-redundant item so the public event site stays correct.</p>");
+        if (manualOnly)
+        {
+            // 🔴 §763 — CEH WROTE NOTHING. The old preamble ("the hub just wrote … please publish")
+            // was inherited from the session push, where it is true, and it flatly contradicted the
+            // body two lines below ("the speakers API is create-only"). He went looking for a change
+            // that was not there.
+            sb.Append("<p><strong>CEH could not write these to Zoho Backstage</strong> — the ")
+              .Append("Backstage speakers API is <strong>create-only</strong>, with no update or ")
+              .Append("delete endpoint. Nothing has changed over there, so there is nothing to ")
+              .Append("publish: please open Backstage and <strong>make the changes below by ")
+              .Append("hand</strong>.</p>");
+        }
+        else
+        {
+            sb.Append("<p>The hub just wrote the following change(s) to Zoho Backstage. ")
+              .Append("API writes are <strong>not auto-published</strong> — please open Backstage and ")
+              .Append("<strong>publish</strong> the change and/or <strong>delete</strong> any ")
+              .Append("now-redundant item so the public event site stays correct.</p>");
+        }
+
+        if (!string.IsNullOrWhiteSpace(intro))
+        {
+            // Same encode-or-trust rule as the list items below (§558): a caller that composes its
+            // own emphasis keeps it; plain text is encoded.
+            sb.Append("<p>")
+              .Append(RendersAsHtml(intro)
+                  ? intro.Replace("\n", "<br/>")
+                  : System.Net.WebUtility.HtmlEncode(intro).Replace("\n", "<br/>"))
+              .Append("</p>");
+        }
+
         sb.Append("<ul>");
         // §322m (operator: "make the email more easy to cut/paste from"): a change entry
         // may be MULTI-LINE ("\n") — e.g. a label line followed by the full description

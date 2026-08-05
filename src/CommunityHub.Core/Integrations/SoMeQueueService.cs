@@ -54,12 +54,18 @@ public sealed class SoMeQueueService
     public SoMeQueueService(
         CommunityHubDbContext db,
         TimeProvider clock,
-        IBrandingGraphicsProvider? graphics = null)
+        IBrandingGraphicsProvider? graphics = null,
+        // §850 — the approval blocker (a sponsor who has not delivered their social-media text).
+        // Optional so existing test constructions keep working; absent ⇒ no gate, as before.
+        SoMeApprovalGate? approvalGate = null)
     {
         _db = db;
         _clock = clock;
         _graphics = graphics;
+        _approvalGate = approvalGate;
     }
+
+    private readonly SoMeApprovalGate? _approvalGate;
 
     /// <summary>The edition's queue, newest-scheduled last (calendar order).</summary>
     public async Task<IReadOnlyList<SoMePost>> ListAsync(
@@ -198,13 +204,35 @@ public sealed class SoMeQueueService
     /// <summary>Flip the Active/Inactive toggle (an Inactive post never publishes).</summary>
     public async Task<bool> SetActiveAsync(
         int eventId, int postId, bool isActive, string? byEmail, CancellationToken ct = default)
+        => await TrySetActiveAsync(eventId, postId, isActive, byEmail, ct) is null;
+
+    /// <summary>
+    /// §850 — approve / un-approve, returning the REASON when approval is refused.
+    /// </summary>
+    /// <remarks>
+    /// 🔒 The gate lives HERE, not in a page: a post can be approved from the queue, from the post
+    /// editor, and from anything added later, so a check in one of them would be enforced in one of
+    /// them.
+    ///
+    /// ⚠️ Only APPROVING is gated. Turning a post OFF must always work — a blocker that also stopped
+    /// him withdrawing a post would be a trap rather than a safeguard.
+    /// </remarks>
+    public async Task<string?> TrySetActiveAsync(
+        int eventId, int postId, bool isActive, string? byEmail, CancellationToken ct = default)
     {
         var post = await GetAsync(eventId, postId, ct);
-        if (post is null) return false;
+        if (post is null) return "Post not found.";
+
+        if (isActive && _approvalGate is not null
+            && await _approvalGate.BlockedReasonAsync(post, ct) is { } blocked)
+        {
+            return blocked;
+        }
+
         post.IsActive = isActive;
         Touch(post, byEmail);
         await _db.SaveChangesAsync(ct);
-        return true;
+        return null;
     }
 
     /// <summary>Reschedule a post to a new date/time.</summary>

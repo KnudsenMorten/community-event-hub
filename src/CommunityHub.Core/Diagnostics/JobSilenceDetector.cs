@@ -17,9 +17,10 @@ namespace CommunityHub.Core.Diagnostics;
 /// <list type="number">
 /// <item>§576 — both change-detection engines demanded a sync stage that had been DELETED, so they
 /// no-opped every 5 minutes for months while the Jobs page showed a healthy run.</item>
-/// <item>§621 — <c>Zoho:SpeakerReadEnabled</c> was never set, so the speaker read returned
-/// "unavailable" without ever calling Zoho. <c>BackstageChangeCheckedAt</c> was NULL on all 28
-/// speakers: the engine had never once looked.</item>
+/// <item>§621 — a config flag nobody had set made the speaker read return "unavailable" without
+/// ever calling Zoho. <c>BackstageChangeCheckedAt</c> was NULL on all 28 speakers: the engine had
+/// never once looked. <i>(🗑 §754.5 — that flag is DELETED. It existed to wait for a Backstage
+/// OAuth scope the credentials had all along, so it could only ever have blocked.)</i></item>
 /// <item>§585 — <c>halls</c> was missing from the <c>?page</c> reject list, so every hall read came
 /// back EMPTY and no session could get a room. No error, no failure count.</item>
 /// </list>

@@ -288,22 +288,31 @@ public class SessionSourceTests
         Assert.Same(sessionize, await resolverNoBackstage.ResolveAsync(1));
     }
 
+    /// <summary>
+    /// 🗑 §754.5 — the Backstage source is SELECTABLE (reading the agenda works), but importing is
+    /// not built, so it changes nothing and says so.
+    /// </summary>
+    /// <remarks>
+    /// This replaces two tests that pinned a config flag: one asserting the source was unavailable
+    /// by default, one asserting it became available when the flag was flipped. The flag claimed a
+    /// <c>ZohoBackstage.agenda.READ</c> scope was missing, which was never true — so the "clear
+    /// error" it produced blamed a permission the operator had already granted, on his own settings
+    /// page. What is genuinely missing is the import wiring, and the refusal now says that.
+    /// </remarks>
     [Fact]
-    public void Backstage_source_is_not_available_and_returns_a_clear_error()
+    public async Task Backstage_source_is_selectable_but_importing_is_not_built_and_it_says_so()
     {
-        // Default ZohoOptions ⇒ AgendaReadEnabled=false ⇒ source not selectable.
         var src = new BackstageSessionSource(new ZohoOptions());
-        Assert.False(src.IsAvailable);
-        var r = src.FetchSessionsAsync(1, Array.Empty<SessionizeSpeaker>()).Result;
+
+        Assert.True(src.IsAvailable);
+
+        var r = await src.FetchSessionsAsync(1, Array.Empty<SessionizeSpeaker>());
+
+        // A no-op with a reason — never a silent overwrite of the session list.
         Assert.NotNull(r.Error);
         Assert.Empty(r.Sessions);
-    }
-
-    [Fact]
-    public void Backstage_source_becomes_selectable_when_agenda_read_enabled()
-    {
-        // Flipping the §38e gate makes the Organizer source selector offer Backstage.
-        var src = new BackstageSessionSource(new ZohoOptions { AgendaReadEnabled = true });
-        Assert.True(src.IsAvailable);
+        Assert.Contains("IMPORT", r.Error, StringComparison.OrdinalIgnoreCase);
+        // 🔒 And it must NOT blame a missing scope — that is the sentence that cost ten sessions.
+        Assert.DoesNotContain("scope", r.Error, StringComparison.OrdinalIgnoreCase);
     }
 }

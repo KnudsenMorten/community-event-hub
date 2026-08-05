@@ -1,4 +1,6 @@
+using System.Text.Json;
 using CommunityHub.Core.Audit;
+using CommunityHub.Core.Config;
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
 using CommunityHub.Core.Email;
@@ -53,11 +55,22 @@ public sealed class SpeakerGraphicsReadyNotifier
     /// <summary>The feature key that both ENABLES this mail and supplies its ring.</summary>
     public const string FeatureKey = "speaker-graphics-promote";
 
+    /// <summary>
+    /// §790.1 — the speaker-deadline key whose DUE DATE this mail is locked to.
+    /// </summary>
+    /// <remarks>
+    /// Operator 2026-08-04: *"rgr the help promote, this is a task locked to a certain due date"* …
+    /// *"so it must not send an email today"*. See <see cref="PromoteDeadlineHasArrivedAsync"/>.
+    /// </remarks>
+    public const string PromoteDeadlineKey = "promote";
+
     private readonly CommunityHubDbContext _db;
     private readonly ReminderEngine _engine;
     private readonly EmailTemplateProvider _templates;
     private readonly FeatureGateService _gate;
     private readonly IAuditTrail _audit;
+    private readonly SpeakerDeadlineOptions _deadlines;
+    private readonly TimeProvider _clock;
     private readonly ILogger<SpeakerGraphicsReadyNotifier>? _log;
 
     public SpeakerGraphicsReadyNotifier(
@@ -66,6 +79,8 @@ public sealed class SpeakerGraphicsReadyNotifier
         EmailTemplateProvider templates,
         FeatureGateService gate,
         IAuditTrail audit,
+        SpeakerDeadlineOptions deadlines,
+        TimeProvider clock,
         ILogger<SpeakerGraphicsReadyNotifier>? log = null)
     {
         _db = db;
@@ -73,7 +88,83 @@ public sealed class SpeakerGraphicsReadyNotifier
         _templates = templates;
         _gate = gate;
         _audit = audit;
+        _deadlines = deadlines;
+        _clock = clock;
         _log = log;
+    }
+
+    /// <summary>
+    /// 🔒 §790.1 — <b>HAS THE HELP PROMOTE DEADLINE ARRIVED?</b> This mail asks the speaker to go
+    /// and promote their session, and that is not a thing they may do whenever artwork appears — it
+    /// is the dated speaker task <c>promote</c> (§314), due <c>2027-01-15</c> in
+    /// <c>config/speaker-deadlines.&lt;edition&gt;.json</c>. §81: a deadline mails on its due day.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Why this gate had to exist at all.</b> §784.12(a) made generated graphics publish on
+    /// sight. Because this notification RIDES THE RELEASE (§436), auto-release would have announced
+    /// Help Promote to every speaker with waiting artwork — measured against PROD: <b>21 speakers,
+    /// seventeen months early</b>. Operator 2026-08-04: *"it must not send an email today"*.</para>
+    ///
+    /// <para>🔒 <b>Holding writes NO ledger row</b> — the check runs before <c>SendDueAsync</c>, so
+    /// nothing is recorded as sent and the mail still goes out on/after the due date. A gate that
+    /// consumed the occasion would silence the announcement permanently.</para>
+    ///
+    /// <para>⚠️ <b>It FAILS CLOSED, and that is a deliberate trade.</b> An unreadable config or a
+    /// missing <c>promote</c> entry HOLDS the mail and logs a warning. A wrong send is 21 live mails
+    /// to real speakers; a wrong hold is a log line. ⚠️ The known trap this must not repeat is
+    /// §326bb: the Functions host's working directory is not the content root, so a bare relative
+    /// path silently missed. <see cref="ConfigPaths.Resolve"/> is the fix that was proven there, and
+    /// the warning below is what makes a hold visible instead of mysterious.</para>
+    /// </remarks>
+    private async Task<bool> PromoteDeadlineHasArrivedAsync(CancellationToken ct)
+    {
+        await Task.CompletedTask;   // keeps the call site uniform with the other async gates
+
+        DateOnly? due = null;
+        try
+        {
+            var path = ConfigPaths.Resolve(_deadlines.ConfigPath);
+            if (File.Exists(path))
+            {
+                var cfg = JsonSerializer.Deserialize<SpeakerDeadlineConfig>(
+                    File.ReadAllText(path),
+                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                if (cfg is not null
+                    && cfg.DueDatesByKey().TryGetValue(PromoteDeadlineKey, out var d))
+                {
+                    due = d;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _log?.LogWarning(ex,
+                "SpeakerGraphicsReady §790.1: could not read the '{Key}' speaker deadline; "
+                + "HOLDING the Help Promote mail.", PromoteDeadlineKey);
+            return false;
+        }
+
+        if (due is null)
+        {
+            _log?.LogWarning(
+                "SpeakerGraphicsReady §790.1: no '{Key}' entry in the speaker-deadlines config, so "
+                + "the Help Promote mail has no due date to obey — HELD. Add the entry (or its "
+                + "date) to release it.", PromoteDeadlineKey);
+            return false;
+        }
+
+        var today = DateOnly.FromDateTime(_clock.GetUtcNow().UtcDateTime);
+        if (today < due.Value)
+        {
+            _log?.LogInformation(
+                "SpeakerGraphicsReady §790.1: Help Promote is due {Due} and today is {Today} — the "
+                + "graphics are VISIBLE to their speakers, but the mail is held until the deadline. "
+                + "No ledger row written, so it still sends on the day.",
+                due.Value, today);
+            return false;
+        }
+
+        return true;
     }
 
     /// <summary>
@@ -109,20 +200,52 @@ public sealed class SpeakerGraphicsReadyNotifier
             return 0;
         }
 
-        // Speakers who have at least one RELEASED graphic.
-        var q = _db.GraphicAssets
+        // 🔒 §790.1 — THE DEADLINE GATE. Help Promote is a normal dated speaker task
+        // (SpeakerTaskDefinitions "speaker.promote" → speaker-deadlines key "promote"), so this
+        // mail obeys that date and not the moment artwork happens to appear. It runs BEFORE any
+        // ledger write, so a held run still sends on the due day.
+        if (!await PromoteDeadlineHasArrivedAsync(ct)) return 0;
+
+        // Speakers who have at least one RELEASED graphic — under BOTH ownership rules.
+        //
+        // 🔒 §767 phase 2: a session graphic is keyed `session:{id}` and carries NO ParticipantId —
+        // one file for the whole session. Asking only for `ParticipantId != null` would mean the
+        // graphic a speaker is actually waiting for never triggers this mail: the artwork would be
+        // released, visible on their page, and never announced. So the released set is the union of
+        //   (a) graphics carrying their own ParticipantId, and
+        //   (b) graphics for a SESSION THEY SPEAK ON — which is exactly what
+        //       GraphicsService.GetSpeakerVisibleAsync shows them. The two must agree, or the mail
+        //       announces something the page does not show (or worse, the other way round).
+        // ⚠️ It is the same rule as SpeakerGraphicVisibility.GraphicsVisibleToSpeaker, expressed per
+        // speaker-set rather than per speaker — this sweep must not run one query per speaker. Change
+        // one, change the other: the mail announcing what the page will not show (or the reverse) is
+        // the failure both halves exist to prevent.
+        var ownRows = await _db.GraphicAssets
             .Where(g => g.EventId == eventId
                         && g.Status == GraphicAssetStatus.Released
-                        && g.ParticipantId != null);
-        if (onlySpeakerIds is not null)
-        {
-            q = q.Where(g => onlySpeakerIds.Contains(g.ParticipantId!.Value));
-        }
-        // §664 — the released graphic IDS per speaker, not just the speaker ids: the occasion key
-        // is built from the set, so a new graphic becomes a new occasion.
-        var released = await q
+                        && g.Type != GraphicAssetType.Sponsor
+                        && g.ParticipantId != null)
             .Select(g => new { ParticipantId = g.ParticipantId!.Value, g.Id, g.ReleasedAt })
             .ToListAsync(ct);
+
+        var sessionRows = await _db.GraphicAssets
+            .Where(g => g.EventId == eventId
+                        && g.Status == GraphicAssetStatus.Released
+                        && g.Type != GraphicAssetType.Sponsor
+                        && g.ParticipantId == null
+                        && g.SessionId != null)
+            .SelectMany(g => _db.SessionSpeakers
+                .Where(ss => ss.SessionId == g.SessionId!.Value)
+                .Select(ss => new { ParticipantId = ss.ParticipantId, g.Id, g.ReleasedAt }))
+            .ToListAsync(ct);
+
+        // §664 — the released graphic IDS per speaker, not just the speaker ids: the occasion key
+        // is built from the set, so a new graphic becomes a new occasion.
+        var released = ownRows.Concat(sessionRows).ToList();
+        if (onlySpeakerIds is not null)
+        {
+            released = released.Where(g => onlySpeakerIds.Contains(g.ParticipantId)).ToList();
+        }
 
         var graphicsBySpeaker = released
             .GroupBy(g => g.ParticipantId)

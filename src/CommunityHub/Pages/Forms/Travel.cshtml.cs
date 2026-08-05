@@ -58,7 +58,15 @@ public class TravelModel : PageModel
         ILogger<TravelModel> logger,
         IEmailContextAccessor? emailContext = null)
         : this(
-            new TravelFormService(db, clock, loc, email, NullLogger<TravelFormService>.Instance, emailContext),
+            // §6.10 — the freeze travels with the service on THIS path too, so the raw-deps
+            // constructor and the DI one enforce the same rule. A construction that silently
+            // skipped the lock would let the tests prove the wrong thing.
+            new TravelFormService(
+                db, clock, loc, email, NullLogger<TravelFormService>.Instance, emailContext,
+                // The freeze follows its switch here too — this constructor must not enforce a rule
+                // the DI path has turned off.
+                new CommunityHub.Core.Entitlements.TravelClaimLock(
+                    db, clock, new CommunityHub.Core.Entitlements.TravelClaimLockOptions())),
             participant)
     {
     }

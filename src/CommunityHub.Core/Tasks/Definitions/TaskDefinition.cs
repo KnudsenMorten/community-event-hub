@@ -52,15 +52,72 @@ public enum TaskAudiencePredicate
 
     /// <summary>Entitled to lunch on the pre-day.</summary>
     EntitledToLunchPreDay = 7,
+
+    /// <summary>Entitled to claim travel reimbursement.</summary>
+    EntitledToTravelReimbursement = 8,
+
+    /// <summary>
+    /// §299 6.2 — the speaker is an EXHIBITOR's speaker (<c>SpeakerCategory.Sponsor</c>).
+    /// </summary>
+    /// <remarks>
+    /// 🔒 <b>Stated positively and EXCLUDED at the definition</b> (see <see cref="TaskAudience"/>),
+    /// because the rule is a subtraction: §458 <i>"sponsor speaker category should not get the task
+    /// 'Help promote'"</i> and §456 <i>"only task relevant for a sponsor (exhibitor) speaker is the
+    /// task for upload final presentation"</i>. Written as a requirement it would need inverting on
+    /// every OTHER definition, which is how a new task silently defaults to the wrong audience.
+    /// </remarks>
+    IsSponsorCategorySpeaker = 9,
+
+    /// <summary>
+    /// §708.11 — §109: this participant's role is in scope for the Signal groups, per the
+    /// signal-groups CONFIG (volunteers + event partners get chat + broadcast, media broadcast only,
+    /// organizers are out of scope).
+    /// </summary>
+    /// <remarks>
+    /// 🔒 <b>A predicate, not a role list on the definition</b> — the membership lives in config and
+    /// the operator changes it there. Writing today's answer as <c>Roles</c> would freeze a config
+    /// value into C# and quietly stop tracking it, which is the evergreen rule (CLAUDE.md) inverted.
+    /// The seeder supplies the fact by asking the same config the wizard asks.
+    /// </remarks>
+    IsSignalInScope = 10,
 }
 
-/// <summary>Who a task is for. Roles AND every predicate must hold.</summary>
+/// <summary>Who a task is for. Roles AND every <see cref="Requires"/> hold; no <see cref="Excludes"/> does.</summary>
+/// <remarks>
+/// <para>🔒 <b>§708.3 — <see cref="Excludes"/> exists because some audience rules are SUBTRACTIONS.</b>
+/// The seeder this replaces expressed §299 6.2 / §456 as slug substring matching
+/// (<c>IsLogisticsSlug</c> + "contains <c>final</c> AND <c>presentation</c>"), which is the exact
+/// §707.43 / §707.54a failure family: a title-derived string test that stops matching when a title
+/// changes or a slug truncates, silently and in the permissive direction.</para>
+///
+/// <para>Expressing the same rule as a NEGATIVE predicate on the two definitions it applies to keeps
+/// it visible at the definition and testable by the audience matrix — a new task cannot inherit it by
+/// accident, and cannot lose it to a rename.</para>
+/// </remarks>
 public sealed record TaskAudience(
     IReadOnlyList<ParticipantRole> Roles,
-    IReadOnlyList<TaskAudiencePredicate> Requires)
+    IReadOnlyList<TaskAudiencePredicate> Requires,
+    IReadOnlyList<TaskAudiencePredicate> Excludes)
 {
     public static TaskAudience For(ParticipantRole role, params TaskAudiencePredicate[] requires) =>
-        new(new[] { role }, requires);
+        new(new[] { role }, requires, Array.Empty<TaskAudiencePredicate>());
+
+    /// <summary>
+    /// §708.11 — the same audience for SEVERAL roles. The generic-role tasks (profile, Code of
+    /// Conduct, the logistics forms) are genuinely one task offered to four roles, not four tasks.
+    /// </summary>
+    /// <remarks>
+    /// 🔒 <c>Roles</c> was already a LIST — every caller so far just happened to pass one. This adds
+    /// the factory, not the capability, so <c>Satisfies</c> is untouched and the sponsor/speaker sets
+    /// cannot be affected by it.
+    /// </remarks>
+    public static TaskAudience ForRoles(
+        IReadOnlyList<ParticipantRole> roles, params TaskAudiencePredicate[] requires) =>
+        new(roles, requires, Array.Empty<TaskAudiencePredicate>());
+
+    /// <summary>The same audience, minus anyone satisfying <paramref name="excludes"/>.</summary>
+    public TaskAudience Except(params TaskAudiencePredicate[] excludes) =>
+        this with { Excludes = excludes };
 }
 
 /// <summary>§684.11 — where a task's due date comes from. It always LANDS on the same column.</summary>
@@ -89,6 +146,27 @@ public abstract record TaskDue
     /// <c>contractPlus</c> bases. Keeps the DATES per edition while the definition stays in code.
     /// </summary>
     public sealed record FromConfig(string RuleName) : TaskDue;
+
+    /// <summary>
+    /// §708 step 1 — an ABSOLUTE date from <c>config/speaker-deadlines.&lt;edition&gt;.json</c>,
+    /// looked up by that entry's stable <c>key</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>🔒 <b>A SECOND source, deliberately — not <see cref="Fixed"/>.</b> Speaker deadlines have
+    /// never been event-relative: they are absolute calendar dates the organizers negotiate per
+    /// edition, so there is no <c>deadlineRules</c> expression that produces them and
+    /// <see cref="FromConfig"/> cannot reach them. The tempting shortcut is <see cref="Fixed"/>, which
+    /// would bake <c>2027-01-20</c> into evergreen C# — breaking the CLAUDE.md rule that a new edition
+    /// is a new config file, never a code change. §708 names this out explicitly: <i>"Do NOT use
+    /// <c>TaskDue.Fixed</c>"</i>.</para>
+    ///
+    /// <para>🔒 <b>Keyed, not title-matched.</b> The key is stable across a re-title; matching on the
+    /// title would put the date back on the same string-derived join that §707.43 and §707.54a both
+    /// failed on. A key that resolves to nothing leaves the task UNDATED — which drops it out of the
+    /// due-day chase silently — so <c>SpeakerTaskDefinitionTests</c> makes an unresolved key a build
+    /// failure rather than a live surprise.</para>
+    /// </remarks>
+    public sealed record FromSpeakerConfig(string DeadlineKey) : TaskDue;
 }
 
 /// <summary>§684.12 — reminder cadence. Selection only; the machinery is unchanged.</summary>
@@ -147,6 +225,32 @@ public abstract record TaskCompletion
     /// </remarks>
     /// <param name="Category">The WooCommerce product category, e.g. <c>"Booth Furniture"</c>.</param>
     public sealed record Purchase(string Category) : TaskCompletion;
+
+    /// <summary>
+    /// §687.5 — completes only when the sponsor BOTH <see cref="TaskDecisionAnswer.Accepted"/>
+    /// decision <paramref name="DecisionKey"/> AND actually bought something in
+    /// <paramref name="Category"/>. Declining completes it on its own.
+    /// </summary>
+    /// <remarks>
+    /// <para>🔒 <b>TWO GATES, and they are different things.</b> Operator 2026-07-29: <i>"app
+    /// packaging is also a product they must have bought to get that service"</i>. §676 made the
+    /// attendee-bag task a DECISION, which records INTENT — but intent is not delivery. <b>A sponsor
+    /// can say "we would like to contribute" and never buy the packaging</b>, and then their
+    /// brochures sit in a box nobody packs. A task reading <i>"you answered: we would like to
+    /// contribute"</i> while nothing was bought is exactly the false confidence §687.3 exists to
+    /// remove.</para>
+    ///
+    /// <para>🔑 <b>Declining completes immediately.</b> "Not interested" is a real, recorded answer
+    /// (§670) and there is nothing left to buy — holding that task open would chase a sponsor for a
+    /// decision they already made.</para>
+    ///
+    /// <para>Same two safety rules as <see cref="Purchase"/>: a failed lookup never reopens, and a
+    /// derived-Done task stays readable and actionable.</para>
+    /// </remarks>
+    /// <param name="DecisionKey">The decision this task records, e.g. <c>"attendeeBag"</c>.</param>
+    /// <param name="Category">The WooCommerce category that must contain a purchase.</param>
+    public sealed record DecisionAndPurchase(
+        string DecisionKey, string Category) : TaskCompletion;
 
     /// <summary>
     /// The participant ticks it. 🔒 <b>Must be the EXCEPTION and visible as such</b> — §600.3:

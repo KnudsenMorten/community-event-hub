@@ -46,6 +46,19 @@ public sealed record SponsorPurchaseSummary(
 }
 
 /// <summary>
+/// §770.9 — the READ seam over <see cref="SponsorPurchaseSummaryService"/>, so a consumer (the §6.4
+/// expo files) can be tested without standing up a WooCommerce client.
+/// </summary>
+public interface ISponsorPurchaseSummary
+{
+    /// <summary>Per-sponsor quantities of ONE product id.</summary>
+    Task<SponsorPurchaseSummary> ByProductAsync(long productId, CancellationToken ct = default);
+
+    /// <summary>Per-sponsor quantities of every line in a product CATEGORY.</summary>
+    Task<SponsorPurchaseSummary> ByCategoryAsync(string category, CancellationToken ct = default);
+}
+
+/// <summary>
 /// §687 / §666 — THE one place that answers "which sponsors bought this, and how many?".
 /// </summary>
 /// <remarks>
@@ -59,7 +72,7 @@ public sealed record SponsorPurchaseSummary(
 /// <c>ordersAfter</c>/<c>ordersBefore</c> window applies and a previous edition's purchases can
 /// never leak into this one's totals.</para>
 /// </remarks>
-public sealed class SponsorPurchaseSummaryService
+public sealed class SponsorPurchaseSummaryService : ISponsorPurchaseSummary
 {
     /// <summary>Short: the organizer refreshes this page while chasing sponsors.</summary>
     private static readonly TimeSpan CacheFor = TimeSpan.FromMinutes(2);

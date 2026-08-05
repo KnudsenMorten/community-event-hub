@@ -24,20 +24,29 @@ public sealed class EngineFailureAlertGate
     /// <summary>
     /// Consecutive failures of the SAME function required before an alert is sent. Operator
     /// agreement (2026-06-27): a single failure is likely transient, so suppress it and only
-    /// page on the 2nd in a row. Named const so the gate is tunable in one place.
+    /// page on the 3rd in a row (§784.4 — was the 2nd). Named const so the gate is tunable in one
+    /// place, and DERIVED from <see cref="JobFailureTracker.DefaultAlertThreshold"/> so the engine
+    /// gate and the per-job tracker can never disagree about what "too many" means.
     /// </summary>
-    public const int ConsecutiveFailureAlertThreshold = JobFailureTracker.DefaultAlertThreshold; // = 2
+    public const int ConsecutiveFailureAlertThreshold = JobFailureTracker.DefaultAlertThreshold; // §784.4: = 3
 
     private readonly JobFailureTracker _failures;
     private readonly EngineAlertSender _alerts;
     private readonly ILogger<EngineFailureAlertGate> _log;
+    private readonly HubEnvironment _env;
 
     public EngineFailureAlertGate(
-        JobFailureTracker failures, EngineAlertSender alerts, ILogger<EngineFailureAlertGate> log)
+        JobFailureTracker failures, EngineAlertSender alerts, ILogger<EngineFailureAlertGate> log,
+        // §716 — optional + last, the same pattern EngineAlertSender uses for the very same type,
+        // so existing tests construct this gate unchanged and DI always supplies the real one.
+        HubEnvironment? env = null)
     {
         _failures = failures;
         _alerts = alerts;
         _log = log;
+        // A null env resolves to UNKNOWN, which is deliberately NOT Dev: an unrecognised host keeps
+        // alerting. Silence is only ever granted to a positively-identified DEV.
+        _env = env ?? new HubEnvironment(null, null);
     }
 
     /// <summary>
@@ -79,6 +88,21 @@ public sealed class EngineFailureAlertGate
     /// </summary>
     public async Task OnActivityAsync(
         string functionName, string? inactiveReason, CancellationToken ct = default)
+        => await OnActivityAsync(functionName, inactiveReason, isDataStarvation: true, ct);
+
+    /// <summary>
+    /// §707.42 — as above, but only ALERTS when <paramref name="isDataStarvation"/>: every gate
+    /// passed and the data did not arrive. A gate turning the job away is a setting, not news.
+    /// </summary>
+    /// <remarks>
+    /// The streak is still RECORDED either way, so the Jobs page keeps showing how long a job has
+    /// been idle and why. Only the mail is suppressed — the state stays visible where a state
+    /// belongs. The older 3-argument overload keeps the previous behaviour for any caller that has
+    /// not been taught the difference.
+    /// </remarks>
+    public async Task OnActivityAsync(
+        string functionName, string? inactiveReason, bool isDataStarvation,
+        CancellationToken ct = default)
     {
         int streak;
         try
@@ -96,6 +120,44 @@ public sealed class EngineFailureAlertGate
         }
 
         if (streak == 0 || streak % ConsecutiveNoOpAlertThreshold != 0) return;
+
+        // 🔒 §716 (operator 2026-07-31: "turn off these alerts in dev for me, sa we have turned off
+        // this in dev") — DEV NEVER SENDS THE INACTIVE ALERT.
+        //
+        // In DEV the features these jobs depend on are switched off ON PURPOSE, so the mail reports
+        // his own configuration back to him — five in ten minutes in the inbox he showed me
+        // (SessionChangeDetectionJob, ErpSyncCustomerContactJob, SpeakerChangeDetectionJob,
+        // SponsorZohoReconcileJob, WelcomeReconcileJob), and again every 100 runs, for ever. The
+        // alert is only NEWS in PROD, where an engine that has quietly stopped feeding something is
+        // a real defect — so the suppression is scoped to DEV rather than removing the alert.
+        //
+        // ⚠️ This suppresses the INACTIVE mail ONLY. OnFailureAsync is untouched: a DEV engine that
+        // THROWS is a genuine fault and still pages, in both environments.
+        //
+        // Placed AFTER RecordActivityAsync on purpose — §707.42's rule: the streak is still
+        // recorded, so the Jobs page keeps showing how long a job has been idle and why. What is
+        // suppressed is the mail, not the state.
+        if (string.Equals(_env.Label, HubEnvironment.Dev, StringComparison.Ordinal))
+        {
+            _log.LogInformation(
+                "EngineFailureAlertGate[{Fn}]: inactive for {N} runs — NOT alerting, this is DEV "
+                + "(§716). Reason: {Reason}. Visible on the Jobs page instead.",
+                functionName, streak, inactiveReason);
+            return;
+        }
+
+        // 🔒 §707.42 — the streak is RECORDED above whatever happens, so the Jobs page still shows
+        // how long this job has been idle and why. What stops here is the MAIL: a job skipped
+        // because its feature is switched off is reporting the operator's own configuration back to
+        // him, and an alert that cannot tell a setting from a fault is one he learns to delete.
+        if (!isDataStarvation)
+        {
+            _log.LogInformation(
+                "EngineFailureAlertGate[{Fn}]: inactive for {N} runs — NOT alerting, a gate turned "
+                + "it away ({Reason}). Visible on the Jobs page instead.",
+                functionName, streak, inactiveReason);
+            return;
+        }
 
         var fnEnc = System.Net.WebUtility.HtmlEncode(functionName);
         var reasonEnc = System.Net.WebUtility.HtmlEncode(inactiveReason ?? "(no reason given)");

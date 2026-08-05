@@ -86,6 +86,19 @@
     </None>
   </ItemGroup>
 
+  <!-- §6.5 - the survey DEFINITIONS. SurveySummaryFilesJob rebuilds the three post-event summaries
+       daily, so this host must read the same JSON the web app serves the forms from.
+       LINKED, not copied: one file in the repo, two build outputs. A second copy would be two files
+       to edit, one of them would be forgotten, and the host reading the stale one would publish a
+       summary for questions nobody was asked. Same warning as the task bodies above. -->
+  <ItemGroup>
+    <None Include="..\CommunityHub\App_Data\Surveys\*.json">
+      <Link>App_Data\Surveys\%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>Always</CopyToPublishDirectory>
+    </None>
+  </ItemGroup>
+
   <!-- PRIVATE per-edition email templates (publish-safe layer): the edition's
        real, named copy, denylisted from the public mirror. EmailTemplateProvider
        resolves config/email-templates/{key}.html ahead of the shipped default. -->

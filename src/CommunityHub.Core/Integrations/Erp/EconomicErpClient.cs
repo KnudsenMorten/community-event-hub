@@ -36,6 +36,76 @@ public sealed class EconomicErpOptions
     /// <summary>§323: the agreement's payment-terms number for hub-created customers
     /// (the legacy automation's default terms 1).</summary>
     public int PaymentTermsNumber { get; set; } = 1;
+
+    // --- §786 draft-invoice settings ------------------------------------------------------------
+    // Defaults are the values the retired script hard-coded, so an unconfigured environment produces
+    // the invoice he already gets rather than a differently-shaped one.
+
+    /// <summary>§786: the e-conomic invoice LAYOUT to use, matched on the start of its name.</summary>
+    /// <remarks>
+    /// 🔴 <b>"Dansk" was WRONG and would have blocked the first real invoice</b> (§809). Listed
+    /// against the live e-conomic agreement 2026-08-04 — the layouts are <c>21 'Danish'</c>,
+    /// <c>23 'English'</c>, <c>24 'Allerede betalt'</c>. Nothing starts with "Dansk", so
+    /// <c>FindLayoutAsync</c> returned null and every draft was refused with *"no e-conomic layout
+    /// matching 'Dansk' was found"*.
+    ///
+    /// <para>⚠️ It stayed invisible because the 11 invoices in PROD were created by the RETIRED
+    /// PowerShell script, not by CEH — so CEH's own layout lookup had never once succeeded against
+    /// real data. The first order it had to invoice by itself (10726) is what exposed it.</para>
+    ///
+    /// <para>🔑 §767's rule, again: <b>list what is actually there before matching on a name.</b>
+    /// This default was inferred from the script rather than read from the API.</para>
+    /// </remarks>
+    public string InvoiceLayoutNameLike { get; set; } = "Danish";
+
+    /// <summary>§786: the employee behind "Our reference" on the invoice.</summary>
+    /// <remarks>
+    /// 🔴 §811(c) — <b>employee 3 (Morten Waltorp Knudsen)</b>, his instruction 2026-08-04:
+    /// *"our ref should be employee 3 - Morten Waltorp Knudsen"*.
+    ///
+    /// <para>⚠️ The port inherited <b>1</b> from the retired script, and the script's own invoices do
+    /// carry employee 1 (Martin Byskov) — so this is a CHANGE he is making, not a defect being
+    /// repaired. Recorded that way so nobody "restores" it to match the old invoices.</para>
+    ///
+    /// <para>Employees on the agreement: 1 Martin Byskov · 2 Kasper Sven Mozart Johansen ·
+    /// 3 Morten Waltorp Knudsen · 4 Thomas Poppelgaard · 5 Kent Agerlund · 6 Heine Koldbro Madsen ·
+    /// 7 Henrik F. Wojcik · 100 Morten Leth Hedegaard.</para>
+    /// </remarks>
+    public int InvoiceVendorEmployeeNumber { get; set; } = 3;
+
+    /// <summary>
+    /// §811(c) — the SECOND employee reference on the invoice (<c>references.salesPerson</c>):
+    /// **employee 1, Martin Byskov**. Operator 2026-08-04: *"ref is Morten Waltorp Knudsen, ref 2 is
+    /// Martin Byskov"* … *"both must be mentioned"*.
+    /// </summary>
+    /// <remarks>
+    /// ⚠️ Which of the two prints as "ref" and which as "ref 2" is the e-conomic LAYOUT's decision,
+    /// not the API's — he said *"or opporsite"* himself. If the printed invoice has them the wrong
+    /// way round, swap this with <see cref="InvoiceVendorEmployeeNumber"/>; nothing else changes.
+    /// 🔒 Null omits the field entirely, which is the pre-§811 behaviour.
+    /// </remarks>
+    public int? InvoiceSalesPersonEmployeeNumber { get; set; } = 1;
+
+    /// <summary>§786: the heading printed on the draft invoice.</summary>
+    /// <remarks>
+    /// 🔴 <b>"Webshop Order" was wrong and reached a real invoice</b> (§811(b), operator 2026-08-04:
+    /// *"the headline of the invoice is wrongly Webshop Order - It should state ELDK27 - Experts Live
+    /// Denmark Sponsorship"*). Read off the retired script's own output: every invoice it made carries
+    /// <c>notes.heading = "ELDK27 - Experts Live Denmark"</c> and
+    /// <c>notes.textLine1 = "Sponsorship"</c> — two fields that print as one phrase.
+    ///
+    /// <para>⚠️ The value was invented when the port was written rather than read from an invoice the
+    /// script had produced. §786's promise was *"the invoice it produces is the invoice he already
+    /// gets"*, and this is the second place that promise was met by assumption (see also the layout
+    /// name, §809.2).</para>
+    /// </remarks>
+    public string InvoiceHeading { get; set; } = "ELDK27 - Experts Live Denmark";
+
+    /// <summary>
+    /// §811(b) — the line under the heading. The script prints "Sponsorship" there; together the two
+    /// read as *"ELDK27 - Experts Live Denmark Sponsorship"*, which is the phrase he quoted.
+    /// </summary>
+    public string InvoiceTextLine1 { get; set; } = "Sponsorship";
 }
 
 /// <summary>

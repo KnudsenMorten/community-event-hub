@@ -25,6 +25,7 @@ public sealed class GraphicsService
     private readonly ISpeakerPictureFetcher _pictureFetcher;
     private readonly ISocialShareGateway _share;
     private readonly GraphicsSharePointOptions _spOptions;
+    private readonly DocLibrary.IDocLibraryPathResolver _paths;
 
     public GraphicsService(
         CommunityHubDbContext db,
@@ -32,7 +33,8 @@ public sealed class GraphicsService
         ISharePointFileStore store,
         ISpeakerPictureFetcher pictureFetcher,
         ISocialShareGateway share,
-        IOptions<GraphicsSharePointOptions> spOptions)
+        IOptions<GraphicsSharePointOptions> spOptions,
+        DocLibrary.IDocLibraryPathResolver paths)
     {
         _db = db;
         _compositor = compositor;
@@ -40,109 +42,235 @@ public sealed class GraphicsService
         _pictureFetcher = pictureFetcher;
         _share = share;
         _spOptions = spOptions.Value;
+        _paths = paths;
     }
 
+    // ⚰️ §768 — the four pre-§767 compositor generators were DELETED here.
+    //   FetchAndStoreSpeakerPictureAsync · GenerateSpeakerGraphicAsync ·
+    //   GenerateSponsorGraphicAsync · GenerateSessionGraphicAsync
+    //
+    // Verified before removal: ZERO production callers (tests only), and ZERO rows of the two
+    // asset types they wrote — GraphicAssetType.Speaker and .Track have no rows in production.
+    // They were the old GraphicCompositor path, superseded by the renderer-based generators
+    // below (session bundle / track bundle / sponsor single / sponsor category).
+    //
+    // 🔑 They could not simply be repointed: they wrote to Pictures/, Speakers/ and a
+    // per-speaker Sessions/ shape the canonical registry gives no home to. Keeping them alive
+    // would have meant registering folders nothing should ever write to — inventing paths to
+    // keep dead code compiling.
+
     // ===================================================================
-    //  Sessionize picture: fetch DOWN + store on SharePoint (step 2)
+    //  §767 — GIF BUNDLES (tracks, sponsor groupings)
     // ===================================================================
 
     /// <summary>
-    /// Fetch the speaker picture from its (Sessionize-provided) URL and store the
-    /// BYTES on SharePoint under a stable per-speaker path — so the hub holds the
-    /// stored copy, not just a foreign URL. Returns the stored picture's path/URL,
-    /// or null when there is no picture URL / the fetch fails / no live store is
-    /// wired. Pure fetch+store; does NOT run the Sessionize import.
+    /// §767 — build the ONE GIF bundle for a track: a frame per speaker, in the locked design.
     /// </summary>
-    public async Task<StoredFile?> FetchAndStoreSpeakerPictureAsync(
-        int eventId, int participantId, string? pictureUrl, CancellationToken ct = default)
+    /// <remarks>
+    /// Organizer-facing promotion material for the event's own channels, so it is stored and gated
+    /// like everything else but is NOT per-speaker and is never released to one.
+    /// An overruled bundle is left alone unless <paramref name="force"/> — a human's replacement wins.
+    /// </remarks>
+    public async Task<BundleOutcome> GenerateTrackBundleAsync(
+        int eventId, string trackSlug, string trackName, byte[] template,
+        IReadOnlyList<(byte[]? Photo, string Name)> speakers, byte[]? eventLogo = null,
+        string? inputHash = null, bool force = false, CancellationToken ct = default)
     {
-        var image = await _pictureFetcher.FetchAsync(pictureUrl, ct);
-        if (image is null) return null;
+        if (speakers.Count == 0)
+            throw new ArgumentException("A track graphic needs at least one speaker.", nameof(speakers));
 
-        var relativePath = $"Pictures/speaker-{participantId}";
-        // Keep the source extension via content type; default png.
-        var ext = image.ContentType.Contains("png", StringComparison.OrdinalIgnoreCase) ? ".png"
-                : image.ContentType.Contains("gif", StringComparison.OrdinalIgnoreCase) ? ".gif"
-                : ".jpg";
-        relativePath += ext;
-
-        if (!_store.CanStore)
-        {
-            // No live store wired (◻): we fetched bytes but cannot persist them —
-            // report the intended path; nothing is faked.
-            return new StoredFile(relativePath, string.Empty, null);
-        }
-
-        return await _store.StoreAsync(relativePath, image.Content, image.ContentType, ct);
-    }
-
-    // ===================================================================
-    //  Generate graphics (composite + store + upsert row, gated)
-    // ===================================================================
-
-    /// <summary>
-    /// Generate (or regenerate) a SPEAKER graphic: composite the template + photo +
-    /// name, store the PNG on SharePoint at the stable per-speaker path, and upsert
-    /// the <see cref="GraphicAsset"/> row. The graphic is created
-    /// <see cref="GraphicAssetStatus.Generated"/> (NOT released — hidden from the
-    /// speaker until an organizer releases it). An existing OVERRULED row is left
-    /// untouched unless <paramref name="force"/> is set, so a human replacement is
-    /// not clobbered by a re-run.
-    /// </summary>
-    public async Task<GraphicAsset> GenerateSpeakerGraphicAsync(
-        int eventId, int participantId, byte[] templatePng, byte[]? photoPng, string speakerName,
-        bool force = false, CancellationToken ct = default)
-    {
-        var key = GraphicStableKey.ForSpeaker(participantId);
+        var key = GraphicStableKey.ForTrackGraphic(trackSlug);
         var existing = await FindByKeyAsync(eventId, key, ct);
-        if (existing is { IsOrganizerOverridden: true } && !force) return existing;
+        if (existing is { IsOrganizerOverridden: true } && !force)
+            return new BundleOutcome(existing, Rendered: false);
 
-        var png = _compositor.ComposeSpeakerGraphic(templatePng, photoPng, speakerName);
-        return await StoreAndUpsertAsync(
-            eventId, key, GraphicAssetType.Speaker, png, existing,
-            participantId: participantId, sessionId: null, sponsorCompanyId: null,
-            subfolder: "Speakers", ct);
+        // §767 — nothing composed into this track changed, so do not re-render it. A NULL stored
+        // hash means "unknown inputs" (a pulled or pre-§767 row), which is not the same as stale.
+        if (!force && inputHash is not null && existing?.InputHash == inputHash)
+            return new BundleOutcome(existing, Rendered: false);
+
+        var renderer = SoMeGraphicRenderer.LockedDesign();
+        renderer.EventLogo = eventLogo;
+        renderer.Subtitle = trackName;
+        ApplyEventStrip(renderer);
+        var gif = renderer.RenderSpeakerGif(template, speakers);
+
+        var asset = await StoreAndUpsertAsync(
+            eventId, key, GraphicAssetType.TrackBundle, gif, existing,
+            participantId: null, sessionId: null, sponsorCompanyId: null,
+            ct, isGif: true, inputHash: inputHash);
+        return new BundleOutcome(asset, Rendered: true);
     }
 
     /// <summary>
-    /// Generate a SPONSOR graphic (template + logo). INTERNAL-ONLY — never shown in
-    /// the sponsor view (enforced by <see cref="GetSponsorFacingAsync"/> /
-    /// <see cref="GetInternalSponsorGraphicsAsync"/>). Same overrule protection.
+    /// §767 — the bottom strip: <c>9-10 FEB 2027 · COPENHAGEN, DENMARK</c>, and nothing else.
     /// </summary>
-    public async Task<GraphicAsset> GenerateSponsorGraphicAsync(
-        int eventId, string sponsorCompanyId, byte[] templatePng, byte[] logoPng,
-        bool force = false, CancellationToken ct = default)
+    /// <remarks>
+    /// 🔒 <b>Dates and location ONLY — the event NAME is deliberately absent.</b> Operator
+    /// 2026-08-01: <i>"i am worried of too much text makes it cramped and noicy"</i>. He was right,
+    /// and it was a collision rather than a preference: name + dates + location ran under the SPEAKER
+    /// plate. The wordmark top-left already says the name, so the name is what got subtracted.
+    ///
+    /// <para>⚠️ <b>Why this exists as a call rather than a renderer default:</b> the strip was set on
+    /// the EXAMPLE renders the operator approved, and on nothing else. Every track GIF the live sweep
+    /// wrote on 2026-08-01 therefore shipped with a BLANK strip — no dates, no location — while the
+    /// examples he signed off showed both. Producing artwork that differs from the approved sample is
+    /// the failure this prevents; the two paths must set the same values, so they set them here.</para>
+    /// </remarks>
+    private static void ApplyEventStrip(SoMeGraphicRenderer renderer)
+    {
+        var brand = BrandingEventContext.Default;
+        renderer.EventDates = brand.EventDates;
+        renderer.EventLocation = brand.EventLocation;
+    }
+
+    /// <summary>
+    /// §767 — build a sponsor GROUPING bundle: one frame per sponsor in a tier or a type.
+    /// </summary>
+    /// <param name="kind">
+    /// <c>tier</c> or <c>type</c> — part of the stable key, because the two groupings share a key
+    /// space and a name collision would otherwise silently overwrite one bundle with the other.
+    /// </param>
+    public async Task<BundleOutcome> GenerateSponsorCategoryBundleAsync(
+        int eventId, string kind, string slug, string caption, byte[] template,
+        IReadOnlyList<byte[]> logos, byte[]? eventLogo = null,
+        string? inputHash = null, bool force = false, CancellationToken ct = default)
+    {
+        if (logos.Count == 0)
+            throw new ArgumentException("A sponsor grouping needs at least one logo.", nameof(logos));
+
+        var key = GraphicStableKey.ForSponsorCategory(kind, slug);
+        var existing = await FindByKeyAsync(eventId, key, ct);
+        if (existing is { IsOrganizerOverridden: true } && !force)
+            return new BundleOutcome(existing, Rendered: false);
+
+        // §767 — same members and the same logo VERSIONS, so there is nothing to re-render. A new
+        // upload writes _v{N+1}, which changes the hash and brings the graphic with it.
+        if (!force && inputHash is not null && existing?.InputHash == inputHash)
+            return new BundleOutcome(existing, Rendered: false);
+
+        var renderer = SoMeGraphicRenderer.LockedDesign();
+        renderer.EventLogo = eventLogo;
+        ApplyEventStrip(renderer);
+        var gif = renderer.RenderSponsorGif(template, logos, caption);
+
+        var asset = await StoreAndUpsertAsync(
+            eventId, key, GraphicAssetType.SponsorCategory, gif, existing,
+            participantId: null, sessionId: null, sponsorCompanyId: null,
+            ct, isGif: true, inputHash: inputHash);
+        return new BundleOutcome(asset, Rendered: true);
+    }
+
+    // ===================================================================
+    //  §767 PHASE 2 — the per-SESSION graphic and the per-SPONSOR graphic
+    // ===================================================================
+
+    /// <summary>
+    /// §767 phase 2 — build the ONE graphic for a session: <b>PNG for a single speaker, GIF (a frame
+    /// each) for two or more</b>, keyed <c>session:{id}</c> with no speaker in the key.
+    /// </summary>
+    /// <remarks>
+    /// <para>🔒 <b>Single vs multi is not a second graphic.</b> Operator 2026-08-01, Round 11:
+    /// <i>"sessions are 2 types. single vs multi"</i> — but both are the same subject rendered two
+    /// ways, and the EXTENSION carries which. So a second speaker joining a session UPDATES that
+    /// session's graphic (png → gif) instead of creating a rival one.</para>
+    ///
+    /// <para>🔒 <b>A human's uploaded file wins, and it is a DIFFERENT ROW.</b> The SharePoint pull
+    /// writes per-speaker <c>session:{id}:speaker:{pid}</c> rows for artwork the operator uploaded
+    /// himself. This key cannot collide with those, so generating never overwrites an upload — the
+    /// caller decides whether to generate at all (see
+    /// <see cref="SoMeBundleBuildService"/>, which skips a session that already has one).</para>
+    ///
+    /// <para>⚠️ <b>ParticipantId stays NULL.</b> The row belongs to the session, not to a speaker —
+    /// which is exactly why <see cref="GetSpeakerVisibleAsync"/> had to stop being a
+    /// <c>ParticipantId</c> lookup and resolve session → speakers.</para>
+    /// </remarks>
+    public async Task<BundleOutcome> GenerateSessionBundleAsync(
+        int eventId, int sessionId, string sessionTitle, byte[] template,
+        IReadOnlyList<(byte[]? Photo, string Name)> speakers, byte[]? eventLogo = null,
+        string? inputHash = null, bool force = false, CancellationToken ct = default)
+    {
+        if (speakers.Count == 0)
+            throw new ArgumentException("A session graphic needs at least one speaker.", nameof(speakers));
+
+        var key = GraphicStableKey.ForSessionGraphic(sessionId);
+        var existing = await FindByKeyAsync(eventId, key, ct);
+        if (existing is { IsOrganizerOverridden: true } && !force)
+            return new BundleOutcome(existing, Rendered: false);
+
+        // Nothing composed into this session changed. The speaker SET is in the hash, so an add or a
+        // remove — including the one that flips PNG→GIF — rebuilds by construction.
+        if (!force && inputHash is not null && existing?.InputHash == inputHash)
+            return new BundleOutcome(existing, Rendered: false);
+
+        var renderer = SoMeGraphicRenderer.LockedDesign();
+        renderer.EventLogo = eventLogo;
+        renderer.Subtitle = sessionTitle;
+        ApplyEventStrip(renderer);
+
+        var multi = speakers.Count > 1;
+        var bytes = multi
+            ? renderer.RenderSpeakerGif(template, speakers)
+            : renderer.RenderSpeakerPng(template, speakers[0].Photo, speakers[0].Name);
+
+        var asset = await StoreAndUpsertAsync(
+            eventId, key, GraphicAssetType.Session, bytes, existing,
+            participantId: null, sessionId: sessionId, sponsorCompanyId: null,
+            ct, isGif: multi, inputHash: inputHash);
+        return new BundleOutcome(asset, Rendered: true);
+    }
+
+    /// <summary>
+    /// §767 phase 2 — the ONE graphic for a single sponsor (their logo on the locked design). PNG.
+    /// </summary>
+    /// <remarks>
+    /// Same key as the pre-§767 sponsor graphic (<c>sponsor:{companyId}</c>) ON PURPOSE: it is the
+    /// same subject, so this REPLACES that graphic's bytes rather than adding a second row and a
+    /// second file for the same company. INTERNAL-ONLY like every sponsor graphic — never shown in
+    /// the sponsor's own view.
+    /// <para>🔑 The hash carries the resolved logo FILE NAME (its <c>_v{N}</c>), so a re-upload —
+    /// which writes a new version rather than overwriting — rebuilds on the next sweep.</para>
+    /// </remarks>
+    public async Task<BundleOutcome> GenerateSponsorSingleAsync(
+        int eventId, string sponsorCompanyId, byte[] template, byte[] logo,
+        string? caption = null, byte[]? eventLogo = null,
+        string? inputHash = null, bool force = false, CancellationToken ct = default)
     {
         var key = GraphicStableKey.ForSponsor(sponsorCompanyId);
         var existing = await FindByKeyAsync(eventId, key, ct);
-        if (existing is { IsOrganizerOverridden: true } && !force) return existing;
+        if (existing is { IsOrganizerOverridden: true } && !force)
+            return new BundleOutcome(existing, Rendered: false);
 
-        var png = _compositor.ComposeSponsorGraphic(templatePng, logoPng);
-        return await StoreAndUpsertAsync(
+        if (!force && inputHash is not null && existing?.InputHash == inputHash)
+            return new BundleOutcome(existing, Rendered: false);
+
+        var renderer = SoMeGraphicRenderer.LockedDesign();
+        renderer.EventLogo = eventLogo;
+        if (!string.IsNullOrWhiteSpace(caption)) renderer.SponsorCaption = caption;
+        ApplyEventStrip(renderer);
+        var png = renderer.RenderSponsorPng(template, logo);
+
+        var asset = await StoreAndUpsertAsync(
             eventId, key, GraphicAssetType.Sponsor, png, existing,
             participantId: null, sessionId: null, sponsorCompanyId: sponsorCompanyId,
-            subfolder: "Sponsors", ct);
+            ct, inputHash: inputHash);
+        return new BundleOutcome(asset, Rendered: true);
     }
 
     /// <summary>
-    /// Generate a per-SESSION graphic for one speaker on a session (template +
-    /// photo + name + session title). Created <see cref="GraphicAssetStatus.Generated"/>
-    /// (gated like speaker graphics). Same overrule protection.
+    /// §767 — what a bundle call actually DID: the row, and whether a new file was rendered.
     /// </summary>
-    public async Task<GraphicAsset> GenerateSessionGraphicAsync(
-        int eventId, int sessionId, int participantId, byte[] templatePng, byte[]? photoPng,
-        string speakerName, string sessionTitle, bool force = false, CancellationToken ct = default)
-    {
-        var key = GraphicStableKey.ForSession(sessionId, participantId);
-        var existing = await FindByKeyAsync(eventId, key, ct);
-        if (existing is { IsOrganizerOverridden: true } && !force) return existing;
-
-        var png = _compositor.ComposeSessionGraphic(templatePng, photoPng, speakerName, sessionTitle);
-        return await StoreAndUpsertAsync(
-            eventId, key, GraphicAssetType.Session, png, existing,
-            participantId: participantId, sessionId: sessionId, sponsorCompanyId: null,
-            subfolder: "Sessions", ct);
-    }
+    /// <remarks>
+    /// 🔑 <b>Why the flag exists.</b> The sweep used to infer "built" from the returned row
+    /// (<c>asset.InputHash == hash</c>) — which is true for an UP-TO-DATE bundle as well as a
+    /// freshly rendered one, because the unchanged path returns the existing row. So the job logged
+    /// <i>"7 track GIF(s)"</i> every 15 minutes for ever, on runs that wrote nothing (verified in
+    /// PROD 2026-08-01 19:40: log said 7, SharePoint said 0 of 7 files touched, and the run took 4s
+    /// against 18s for the real rebuild). A number that never changes cannot report anything, and it
+    /// would have hidden the opposite fault — a genuine rebuild that failed to happen — just as well.
+    /// Only the render path can honestly claim a build, so only it sets <c>Rendered</c>.
+    /// </remarks>
+    public sealed record BundleOutcome(GraphicAsset Asset, bool Rendered);
 
     // ===================================================================
     //  Pull session graphics FROM SharePoint (operator pre-uploaded)
@@ -191,12 +319,31 @@ public sealed class GraphicsService
             return new PullSessionGraphicsResult(0, 0);
         }
 
-        var mcFolder = _spOptions.MasterClassFolderPath;
-        var sessFolder = _spOptions.SessionsFolderPath;
+        // 🔒 §768 — ONE FOLDER for master classes AND technical sessions.
+        //
+        // Operator 2026-08-02: *"master class and technical sessions gor into same folder"*, and on
+        // whether the two config keys should survive: *"i dont see a need to split"*. So the routing
+        // that used to pick between two folders now resolves ONE registry key for both.
+        //
+        // 🔑 The per-type branch below is KEPT rather than flattened, and that is deliberate: it is
+        // what makes the folder listing cache do the work. Both types resolve the same path, the
+        // cache keys on the path, so the folder is enumerated EXACTLY ONCE per run — the same
+        // property the two-folder version had, without a second folder to keep in step.
+        var sessFolder = _paths.TryResolve(
+            DocLibrary.DocLibraryPaths.SpeakerSessionGraphics, out var resolvedSessions)
+            ? resolvedSessions
+            : string.Empty;
+        var mcFolder = sessFolder;
+
+        // ⚰️ The §158 per-speaker TRACK pull stays on its legacy option, UNCONFIGURED everywhere.
+        // §767 Round 9 ruled precisely this: *"No code removed … the pull branch stays where it is,
+        // inert and unconfigured"* — because deleting it buys one string check and risks needing the
+        // §158 behaviour back for an edition that does hand-made track stills. It gets no registry
+        // key on purpose: a registered key is an invitation to fill it in, and the standing
+        // instruction is *do not configure that folder for ELDK27*.
         var trackFolder = _spOptions.TrackGraphicsFolderPath;
-        if (string.IsNullOrWhiteSpace(mcFolder)
-            && string.IsNullOrWhiteSpace(sessFolder)
-            && string.IsNullOrWhiteSpace(trackFolder))
+
+        if (string.IsNullOrWhiteSpace(sessFolder) && string.IsNullOrWhiteSpace(trackFolder))
         {
             return new PullSessionGraphicsResult(0, 0); // no folder configured ⇒ inert
         }
@@ -399,13 +546,29 @@ public sealed class GraphicsService
     /// straight to the speaker) and by the organizer "Release all" action. Sponsor graphics stay
     /// internal-only and are never touched.
     /// </summary>
+    /// <param name="includeEngineRendered">
+    /// 🔒 <b>FALSE for the quarter-hourly sync. This is the §767 release gate.</b>
+    /// <para>The sync releases in bulk because <i>placing a file in the SharePoint folder IS the
+    /// curation</i> — a human chose that artwork. That reasoning covers PULLED rows and nothing
+    /// else. §767 phase 2 makes the same job also RENDER session graphics, and releasing those on
+    /// the same pass would put machine-made artwork on every speaker's Help Promote page fifteen
+    /// minutes after a deploy, un-reviewed — the exact outcome the standing constraint
+    /// <i>"never release, never send from the sweep; releasing is the organizer's click"</i>
+    /// exists to prevent.</para>
+    /// <para>The tell is <see cref="GraphicAsset.InputHash"/>: the engine always records what it
+    /// composed from, a pulled or hand-placed file never can. Same signal the rebuild already
+    /// trusts, read the other way round. The organizer's own "Release all" passes TRUE — there the
+    /// click IS the curation, which is the whole distinction.</para>
+    /// </param>
     public async Task<ReleasedGraphics> ReleaseAllGeneratedAsync(
-        int eventId, string releasedByEmail, CancellationToken ct = default)
+        int eventId, string releasedByEmail, CancellationToken ct = default,
+        bool includeEngineRendered = true)
     {
         var pending = await _db.GraphicAssets
             .Where(g => g.EventId == eventId
                         && g.Status == GraphicAssetStatus.Generated
-                        && g.Type != GraphicAssetType.Sponsor)
+                        && g.Type != GraphicAssetType.Sponsor
+                        && (includeEngineRendered || g.InputHash == null))
             .ToListAsync(ct);
         if (pending.Count == 0) return ReleasedGraphics.None;
 
@@ -449,11 +612,24 @@ public sealed class GraphicsService
 
         if (_store.CanStore && asset.SharePointPath is not null)
         {
-            // Strip the configured root prefix is unnecessary — StoreAsync takes the
-            // relative path; we stored under "<subfolder>/<file>", which is what the
-            // path's tail is. Recompute the same relative path from the stable key.
-            var relative = RelativePathFor(asset);
-            var stored = await _store.StoreAsync(relative, replacementPng, GraphicCompositor.PngContentType, ct);
+            // §768: resolve the folder from the registry, exactly as generation does, so an overrule
+            // lands on top of the generated file instead of beside it. (This is where an overruled
+            // bundle used to be written into a stray "Other/" folder.)
+            //
+            // ⚠️ A RETIRED type (Speaker/Track) has no registered folder. Those have no rows in
+            // production, but an overrule must never THROW at an organizer who is replacing a file
+            // that does exist — so it falls back to where that row was originally written. Fixing a
+            // row is not the moment to enforce a taxonomy.
+            var folder = TryFolderFor(asset.Type) ?? LegacyFolderFor(asset.Type);
+            var fileName = asset.FileName ?? GraphicStableKey.FileName(asset.StableKey);
+            // The FILE decides the content type, not the caller's assumption. A GIF bundle overruled
+            // as "image/png" is served as a PNG under a .gif name — the kind of mismatch that only
+            // shows up in the one place it matters, on the post that carries it.
+            var contentType = fileName.EndsWith(".gif", StringComparison.OrdinalIgnoreCase)
+                ? "image/gif"
+                : GraphicCompositor.PngContentType;
+            var stored = await _store.UploadToFolderAsync(
+                folder, fileName, replacementPng, contentType, ct);
             asset.SharePointPath = stored.Path;
             asset.SharePointUrl = stored.WebUrl;
             asset.StorageItemId = stored.ItemId;
@@ -476,13 +652,45 @@ public sealed class GraphicsService
     /// The graphics a SPEAKER may see: only their OWN, only RELEASED, and NEVER
     /// sponsor graphics. Both speaker + per-session graphics are included.
     /// </summary>
+    /// <remarks>
+    /// <para>🔒 <b>§767 phase 2 — "mine" is TWO things now, and it has to be.</b> It used to be one
+    /// rule, <c>ParticipantId == me</c>. A phase-2 session graphic is keyed <c>session:{id}</c> and
+    /// carries <b>no</b> <c>ParticipantId</c> — one file for the whole session, a frame per speaker —
+    /// so under the old rule every speaker on it would see NOTHING while their graphic sat released
+    /// on SharePoint. So a speaker sees:</para>
+    /// <list type="number">
+    /// <item>every released graphic carrying their own <c>ParticipantId</c> (speaker graphics, and
+    ///   the per-speaker session/track rows the SharePoint pull still writes), and</item>
+    /// <item>every released graphic for a SESSION THEY SPEAK ON, whoever it is keyed to.</item>
+    /// </list>
+    /// <para>⚠️ Rule 2 is a genuine widening: a session graphic reaches every speaker on that
+    /// session, which is the point — it is their shared graphic, and it has their face on it. It is
+    /// still gated on RELEASE and still never a sponsor graphic, so the trust boundary is unchanged.
+    /// A speaker leaving a session stops seeing it on the next load, with nothing to clean up.</para>
+    /// </remarks>
     public async Task<IReadOnlyList<GraphicAsset>> GetSpeakerVisibleAsync(
         int eventId, int participantId, CancellationToken ct = default) =>
+        await _db.GraphicsVisibleToSpeaker(eventId, participantId)
+            .OrderBy(g => g.Type).ThenBy(g => g.Id)
+            .ToListAsync(ct);
+
+    /// <summary>
+    /// §784.12(a) — EVERY speaker-facing graphic that exists, whatever its status. This is what
+    /// <c>/Organizer/Graphics</c> lists now that the review gate is retired: the page answers
+    /// "what artwork exists and what is it of", not "what is waiting for my approval".
+    /// </summary>
+    /// <remarks>
+    /// 🔒 <b>Why this replaced the review queue on that page rather than being an extra view.</b>
+    /// The queue is <c>Status == Generated</c>. Auto-release makes that set permanently empty for
+    /// speaker-facing artwork, so the page would have shown "Nothing waiting for review" for ever
+    /// — a page that silently stops showing anything is worse than the gate it replaced.
+    /// <see cref="GetReviewQueueAsync"/> stays for the sponsor-internal rows, which are still
+    /// created <see cref="GraphicAssetStatus.Generated"/> and never reach a speaker.
+    /// </remarks>
+    public async Task<IReadOnlyList<GraphicAsset>> GetSpeakerFacingGraphicsAsync(
+        int eventId, CancellationToken ct = default) =>
         await _db.GraphicAssets
-            .Where(g => g.EventId == eventId
-                        && g.ParticipantId == participantId
-                        && g.Status == GraphicAssetStatus.Released
-                        && g.Type != GraphicAssetType.Sponsor)
+            .Where(g => g.EventId == eventId && g.Type != GraphicAssetType.Sponsor)
             .OrderBy(g => g.Type).ThenBy(g => g.Id)
             .ToListAsync(ct);
 
@@ -541,12 +749,10 @@ public sealed class GraphicsService
     public async Task<SpeakerGraphicFile?> GetSpeakerGraphicFileAsync(
         int eventId, int participantId, int graphicAssetId, CancellationToken ct = default)
     {
-        var asset = await _db.GraphicAssets.FirstOrDefaultAsync(g =>
-            g.EventId == eventId
-            && g.Id == graphicAssetId
-            && g.ParticipantId == participantId
-            && g.Status == GraphicAssetStatus.Released
-            && g.Type != GraphicAssetType.Sponsor, ct);
+        // §767 phase 2: the SAME ownership rule the page used to build the card — otherwise a
+        // shared session graphic renders with a download button that 404s.
+        var asset = await _db.GraphicsVisibleToSpeaker(eventId, participantId)
+            .FirstOrDefaultAsync(g => g.Id == graphicAssetId, ct);
         if (asset?.StorageItemId is null || !_store.CanRead) return null;
 
         byte[]? bytes;
@@ -818,6 +1024,40 @@ public sealed class GraphicsService
 
     // ----- internals -------------------------------------------------------
 
+    /// <summary>
+    /// 🔒 §784.12(a) — THE ONE PLACE that decides what status a NEWLY CREATED graphic gets.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-08-03: <i>"when SoMe Graphic service or Sessional Evaluation release
+    /// files (graphics for SOMe promotion + QR code), then they should be published to speaker right
+    /// away so they can see them"</i>. ⇒ <b>The review gate is retired for speaker-facing artwork.</b>
+    /// It is created <see cref="GraphicAssetStatus.Released"/>, so <c>/Speaker/Graphics</c> shows it
+    /// the moment it renders.</para>
+    ///
+    /// <para><b>This deliberately reverses the §603/§435-era rule, so here is WHY</b> — three sites
+    /// used to say <i>"THE GATE — never auto-released"</i>, and without this note the next reader
+    /// restores them. The gate existed so an organizer could vet artwork before a speaker saw it. He
+    /// has decided the delay costs more than the vetting is worth: a speaker who cannot see their own
+    /// promo graphic cannot promote the event. Vetting becomes <b>correct it after</b> (the organizer
+    /// Replace, which keeps the link identical), not <b>approve it before</b>.</para>
+    ///
+    /// <para>⚠️ <b>SPONSOR graphics are NOT included and that is not an oversight.</b> They are
+    /// internal-only — organizers' own SoMe material, never shown to the sponsor — so "publish it to
+    /// the speaker at once" says nothing about them. They also feed
+    /// <c>BrandingGraphicsProvider</c>, which gates on Released; auto-releasing them would change
+    /// which artwork the branding surfaces pick up, which is a different decision nobody has made.</para>
+    ///
+    /// <para>🔒 Visibility still runs through <see cref="SpeakerGraphicVisibility"/> — this changes
+    /// what status a row is BORN with, never who may see a released one.</para>
+    /// </remarks>
+    public static GraphicAssetStatus InitialStatusFor(GraphicAssetType type) =>
+        type == GraphicAssetType.Sponsor
+            ? GraphicAssetStatus.Generated
+            : GraphicAssetStatus.Released;
+
+    /// <summary>Who a row auto-released by <see cref="InitialStatusFor"/> is stamped as released by.</summary>
+    public const string AutoReleasedBy = "system (auto-release §784.12a)";
+
     private Task<GraphicAsset?> FindByKeyAsync(int eventId, string key, CancellationToken ct) =>
         _db.GraphicAssets.FirstOrDefaultAsync(g => g.EventId == eventId && g.StableKey == key, ct);
 
@@ -825,9 +1065,9 @@ public sealed class GraphicsService
     /// Upsert (by stable key) the <see cref="GraphicAsset"/> for a PULLED session
     /// graphic — same upsert-by-key shape as <see cref="StoreAndUpsertAsync"/>, but the
     /// SharePoint location comes from the operator-uploaded file (no compositor, no
-    /// store write). A NEW row is created <see cref="GraphicAssetStatus.Generated"/>
-    /// (the review gate); a re-pull refreshes the file pointer in place and PRESERVES
-    /// the release status. An organizer OVERRULE is never clobbered.
+    /// store write). A NEW row is created <see cref="GraphicAssetStatus.Released"/>
+    /// (§784.12(a) — see <see cref="InitialStatusFor"/>); a re-pull refreshes the file pointer in
+    /// place and PRESERVES the release status. An organizer OVERRULE is never clobbered.
     /// </summary>
     private async Task<GraphicAsset> UpsertPulledSessionGraphicAsync(
         int eventId, int sessionId, int participantId,
@@ -849,7 +1089,9 @@ public sealed class GraphicsService
                 StableKey = key,
                 ParticipantId = participantId,
                 SessionId = sessionId,
-                Status = GraphicAssetStatus.Generated, // THE GATE — never auto-released
+                Status = InitialStatusFor(GraphicAssetType.Session),   // §784.12(a) — released on sight
+                ReleasedAt = now,
+                ReleasedByEmail = AutoReleasedBy,
                 SharePointPath = sharePointPath,
                 SharePointUrl = string.IsNullOrEmpty(file.WebUrl) ? null : file.WebUrl,
                 StorageItemId = file.ItemId,
@@ -880,8 +1122,9 @@ public sealed class GraphicsService
     /// graphic and it never collides with the session graphic. <paramref name="sessionId"/>
     /// is recorded as a REPRESENTATIVE session (so the page can resolve the track name); the
     /// stable key keeps a speaker on two same-track sessions to ONE row. Created
-    /// <see cref="GraphicAssetStatus.Generated"/> (the gate); a re-pull refreshes the file
-    /// pointer in place and PRESERVES the release status. An organizer OVERRULE is never clobbered.
+    /// <see cref="GraphicAssetStatus.Released"/> (§784.12(a) — see <see cref="InitialStatusFor"/>);
+    /// a re-pull refreshes the file pointer in place and PRESERVES the release status. An organizer
+    /// OVERRULE is never clobbered.
     /// </summary>
     private async Task<GraphicAsset> UpsertPulledTrackGraphicAsync(
         int eventId, int sessionId, int participantId,
@@ -903,7 +1146,9 @@ public sealed class GraphicsService
                 StableKey = key,
                 ParticipantId = participantId,
                 SessionId = sessionId,                  // representative session (resolves the track name)
-                Status = GraphicAssetStatus.Generated,  // THE GATE — never auto-released
+                Status = InitialStatusFor(GraphicAssetType.Track),     // §784.12(a) — released on sight
+                ReleasedAt = now,
+                ReleasedByEmail = AutoReleasedBy,
                 SharePointPath = sharePointPath,
                 SharePointUrl = string.IsNullOrEmpty(file.WebUrl) ? null : file.WebUrl,
                 StorageItemId = file.ItemId,
@@ -966,48 +1211,114 @@ public sealed class GraphicsService
         return slug.Length > 80 ? slug[..80] : slug;
     }
 
-    /// <summary>The relative store path for an asset (subfolder/file), derived from its key/type.</summary>
-    private static string RelativePathFor(GraphicAsset asset)
+    /// <summary>The registered DocLibrary key an asset type is stored under.</summary>
+    /// <remarks>
+    /// <para>⚠️ <b>Every LIVE type must be named here.</b> The §767 bundle types once fell through to
+    /// a <c>_ => "Other"</c> default, so an organizer overruling a track or sponsor-category bundle
+    /// wrote their replacement into <c>Other/</c> — a folder nobody looks in — and repointed the row
+    /// at it, silently moving the live file out of the folder the LinkedIn helper step names. There
+    /// is no catch-all now: an unmapped type throws.</para>
+    ///
+    /// <para>🔒 <c>Speaker</c> and <c>Track</c> are deliberately absent. Both are retired
+    /// (§768; §767 Round 9), both have ZERO rows in production, and the canonical registry gives
+    /// them no folder. Throwing beats inventing a path — and beats the old silent <c>Other/</c>.</para>
+    /// </remarks>
+    private static string PathKeyFor(GraphicAssetType type) => type switch
     {
-        var subfolder = asset.Type switch
-        {
-            GraphicAssetType.Speaker => "Speakers",
-            GraphicAssetType.Sponsor => "Sponsors",
-            GraphicAssetType.Session => "Sessions",
-            GraphicAssetType.Track => "Tracks",
-            _ => "Other",
-        };
-        var file = asset.FileName ?? GraphicStableKey.FileName(asset.StableKey);
-        return $"{subfolder}/{file}";
-    }
+        GraphicAssetType.Session => DocLibrary.DocLibraryPaths.SpeakerSessionGraphics,
+        GraphicAssetType.TrackBundle => DocLibrary.DocLibraryPaths.SpeakerTrackGraphics,
+        GraphicAssetType.Sponsor => DocLibrary.DocLibraryPaths.SponsorGraphicsSponsors,
+        GraphicAssetType.SponsorCategory => DocLibrary.DocLibraryPaths.SponsorGraphicsCategories,
+        _ => throw new DocLibrary.DocLibraryPathException(
+            type.ToString(),
+            "no document-library folder is registered for this asset type. Speaker and Track "
+            + "graphics are retired (§768) and must not be written."),
+    };
+
+    /// <summary>The FULL drive-relative folder an asset lives in, resolved through the registry.</summary>
+    private string FolderFor(GraphicAssetType type) => _paths.Resolve(PathKeyFor(type));
+
+    /// <summary>The registered folder, or null for a type the registry does not cover.</summary>
+    private string? TryFolderFor(GraphicAssetType type) => type switch
+    {
+        GraphicAssetType.Session or GraphicAssetType.TrackBundle
+            or GraphicAssetType.Sponsor or GraphicAssetType.SponsorCategory => FolderFor(type),
+        _ => null,
+    };
+
+    /// <summary>
+    /// ⚰️ Where a RETIRED type's rows were originally written. Reachable only when overruling a
+    /// legacy row — of which production has none.
+    /// </summary>
+    private static string LegacyFolderFor(GraphicAssetType type) => type switch
+    {
+        GraphicAssetType.Speaker => "Speakers",
+        GraphicAssetType.Track => "Tracks",
+        _ => "Other",
+    };
 
     /// <summary>
     /// Store the PNG (when a live store is wired) and create/update the asset row by
-    /// stable key. The row is always created <see cref="GraphicAssetStatus.Generated"/>
-    /// for a NEW asset (the gate). A regenerate of an existing, non-overruled asset
-    /// refreshes the bytes/URL but PRESERVES its release status (a released graphic
-    /// stays released after a benign re-render).
+    /// stable key. A NEW asset is created via <see cref="InitialStatusFor"/> — Released for
+    /// speaker-facing artwork (§784.12(a)), Generated for the internal sponsor rows. A regenerate
+    /// of an existing, non-overruled asset refreshes the bytes/URL but PRESERVES its release
+    /// status (a released graphic stays released after a benign re-render).
     /// </summary>
+    /// <summary>
+    /// Store the bytes and upsert the row. <paramref name="isGif"/> carries the §767 PNG-vs-GIF rule
+    /// through to the file name and the content type.
+    /// </summary>
+    /// <remarks>
+    /// <para>⚠️ The extension is part of the STORED PATH, so a subject that flips PNG→GIF (a second
+    /// speaker joins a session) writes a NEW file and leaves the old one behind. The upsert repoints
+    /// the row, so the hub is correct either way — but the stale file is why the §326af retire sweep
+    /// exists.</para>
+    ///
+    /// <para>🔒 <b>§768 — the folder now comes from the registry, and writes go INSIDE the
+    /// configured root.</b> This used to take a bare subfolder name and store it beneath
+    /// <c>RootFolderPath</c>, which defaulted to <c>Graphics</c> — the DRIVE ROOT, a sibling of the
+    /// event tree. So every generated graphic lived outside the folder structure the operator
+    /// actually curates. It now resolves the full drive-relative folder and uploads there, which is
+    /// the same convention every READ already used.</para>
+    /// </remarks>
     private async Task<GraphicAsset> StoreAndUpsertAsync(
         int eventId, string key, GraphicAssetType type, byte[] png, GraphicAsset? existing,
-        int? participantId, int? sessionId, string? sponsorCompanyId, string subfolder,
-        CancellationToken ct)
+        int? participantId, int? sessionId, string? sponsorCompanyId,
+        CancellationToken ct, bool isGif = false, string? inputHash = null)
     {
-        var fileName = GraphicStableKey.FileName(key);
-        var relativePath = $"{subfolder}/{fileName}";
+        var fileName = GraphicStableKey.FileName(key, isGif ? ".gif" : ".png");
+        var folder = FolderFor(type);
 
-        string? path = relativePath;
+        string? path = $"{folder}/{fileName}";
         string? url = null;
         string? itemId = null;
 
         if (_store.CanStore)
         {
-            var stored = await _store.StoreAsync(relativePath, png, GraphicCompositor.PngContentType, ct);
+            var contentType = isGif ? "image/gif" : GraphicCompositor.PngContentType;
+            // UploadToFolderAsync takes a DRIVE-RELATIVE folder — the same convention ListAsync uses.
+            // StoreAsync would re-prefix the legacy RootFolderPath and put the file back outside the tree.
+            var stored = await _store.UploadToFolderAsync(folder, fileName, png, contentType, ct);
             path = stored.Path;
             url = stored.WebUrl;
             itemId = stored.ItemId;
         }
 
+        return await UpsertRowAsync(
+            eventId, key, type, existing, participantId, sessionId, sponsorCompanyId,
+            fileName, path, url, itemId, inputHash, ct);
+    }
+
+    // ⚰️ §768 — LegacyStoreAndUpsertAsync deleted with the generators it served. It was the last
+    // writer that wrote beneath the old drive-root RootFolderPath, OUTSIDE the event tree.
+
+    /// <summary>Create or refresh the row. Shared by the live and legacy write paths.</summary>
+    private async Task<GraphicAsset> UpsertRowAsync(
+        int eventId, string key, GraphicAssetType type, GraphicAsset? existing,
+        int? participantId, int? sessionId, string? sponsorCompanyId,
+        string fileName, string? path, string? url, string? itemId, string? inputHash,
+        CancellationToken ct)
+    {
         var now = DateTimeOffset.UtcNow;
         if (existing is null)
         {
@@ -1019,11 +1330,17 @@ public sealed class GraphicsService
                 ParticipantId = participantId,
                 SessionId = sessionId,
                 SponsorCompanyId = sponsorCompanyId,
-                Status = GraphicAssetStatus.Generated,   // THE GATE — never auto-released
+                // §784.12(a) — speaker-facing artwork is born Released; SPONSOR rows stay
+                // Generated (internal-only, and they feed the branding gate).
+                Status = InitialStatusFor(type),
+                ReleasedAt = InitialStatusFor(type) == GraphicAssetStatus.Released ? now : null,
+                ReleasedByEmail = InitialStatusFor(type) == GraphicAssetStatus.Released
+                    ? AutoReleasedBy : null,
                 SharePointPath = path,
                 SharePointUrl = url,
                 StorageItemId = itemId,
                 FileName = fileName,
+                InputHash = inputHash,
                 CreatedAt = now,
                 UpdatedAt = now,
             };
@@ -1039,6 +1356,10 @@ public sealed class GraphicsService
         existing.SharePointUrl = url ?? existing.SharePointUrl;
         existing.StorageItemId = itemId ?? existing.StorageItemId;
         existing.FileName = fileName;
+        // Only overwrite a KNOWN hash. A null here means this caller did not compute one, and it
+        // must not erase what a previous run recorded — that would make the next sweep think the
+        // graphic had never been hashed and re-render it for ever.
+        if (inputHash is not null) existing.InputHash = inputHash;
         existing.IsOrganizerOverridden = false;
         existing.UpdatedAt = now;
         await _db.SaveChangesAsync(ct);

@@ -76,6 +76,28 @@
         document.addEventListener('DOMContentLoaded', function () {
             if (typeof flatpickr === 'undefined') return;
             flatpickr.localize(flatpickr.l10ns.da);
+
+            // §849 — DATE-AND-TIME fields, same treatment as plain dates.
+            //
+            // 🔴 <input type="datetime-local"> is drawn by the BROWSER, which formats to the USER's
+            // locale — so it showed "08/05/2026 01:00 PM" under a label promising Danish time, which
+            // reads as a wrong VALUE rather than a wrong rendering. §844.5 converted everything CEH
+            // renders itself and could not reach this one.
+            //
+            // altInput shows d/m/Y H:i (Danish, 24-hour) while the hidden original keeps the
+            // ISO yyyy-MM-ddTHH:mm the model binder parses — the same split the date inputs use.
+            document.querySelectorAll('input[type="datetime-local"]').forEach(function (el) {
+                flatpickr(el, {
+                    locale:     'da',
+                    enableTime: true,
+                    time_24hr:  true,
+                    dateFormat: 'Y-m-d\\TH:i',   // value posted to the server (hidden)
+                    altInput:   true,
+                    altFormat:  'd/m/Y H:i',     // value shown to the user
+                    allowInput: true
+                });
+            });
+
             document.querySelectorAll('input[type="date"]').forEach(function (el) {
                 // altInput=true: flatpickr hides the original, shows a sibling
                 // input formatted dd/mm/yyyy (Danish), while the hidden one
@@ -112,8 +134,51 @@
             });
         })();
     </script>
+    @* §839 (operator 2026-08-05: "bug when i share ceh intro which is anonymous, then icons
+       defaults to signin which confuses people" … "same for other anonymous pages in ceh").
+
+       🔴 THE CAUSE: CEH emitted OpenGraph meta on exactly ONE page (/Sessions/{id}, §172). Every
+       other page — including the public intro he shares — had NONE, so LinkedIn/Teams/Slack fell
+       back to scraping whatever they could find and produced a sign-in-flavoured card. People he
+       sent the link to concluded they needed an account to read a PUBLIC page.
+
+       🔒 The default belongs in the LAYOUT, not on each page: the failure mode was every page that
+       did not opt IN, so a per-page fix would leave the next new page wrong in the same silent way
+       (the §831 lesson). A page with richer data still wins — see OgHandledByPage below. *@
+    @{
+        var ogHandledByPage = ViewData["OgHandledByPage"] is true;
+    }
+    @if (!ogHandledByPage)
+    {
+        var ogReq = Context.Request;
+        var ogOrigin = $"{ogReq.Scheme}://{ogReq.Host}";
+        var ogUrl = $"{ogOrigin}{ogReq.Path}{ogReq.QueryString}";
+        var ogSite = communityName;
+        @* The page's own title when it has one, else the edition name — never the bare edition
+           CODE, which is part of what made the card read as a system screen and not an event. *@
+        var ogTitle = (ViewData["OgTitle"] as string)
+                      ?? (string.IsNullOrWhiteSpace(pageTitle) ? ogSite : pageTitle);
+        var ogDescription = (ViewData["OgDescription"] as string)
+                            ?? $"{ogSite} — agenda, sessions, speakers and sponsors.";
+        @* Absolute, and a real event image: a relative path is not resolved by a crawler. *@
+        var ogImage = (ViewData["OgImage"] as string) ?? $"{ogOrigin}/img/logo-eldk27-event.png";
+
+        <meta property="og:type" content="website" />
+        <meta property="og:site_name" content="@ogSite" />
+        <meta property="og:title" content="@ogTitle" />
+        <meta property="og:description" content="@ogDescription" />
+        <meta property="og:url" content="@ogUrl" />
+        <meta property="og:image" content="@ogImage" />
+        <meta name="description" content="@ogDescription" />
+        <meta name="twitter:card" content="summary_large_image" />
+        <meta name="twitter:title" content="@ogTitle" />
+        <meta name="twitter:description" content="@ogDescription" />
+        <meta name="twitter:image" content="@ogImage" />
+    }
     @* §172: per-page <head> extras (e.g. the public session page's OpenGraph / Twitter-card
-       meta so a shared link renders a rich preview). Optional — most pages render nothing. *@
+       meta so a shared link renders a rich preview). Optional — most pages render nothing.
+       ⚠️ A page emitting its OWN og: tags MUST set ViewData["OgHandledByPage"] = true, or the card
+       carries two og:title values and which one wins is the crawler's choice, not ours. *@
     @await RenderSectionAsync("Head", required: false)
 </head>
 <body>

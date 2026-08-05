@@ -1,0 +1,163 @@
+@page
+@model CommunityHub.Pages.Speaker.ResultsModel
+@using CommunityHub.Core.Evaluation
+@{
+    ViewData["Title"] = "My session results";
+}
+
+@if (Model.AccessDenied)
+{
+    <div class="card">
+        <h1>My session results</h1>
+        <p class="error">This page is for speakers.</p>
+        <p><a asp-page="/Index">Back to the hub</a></p>
+    </div>
+    return;
+}
+
+@* §752 C10 — mobile-first: a speaker opens this from the report-ready email, on a phone,
+   usually while still at the venue. Nothing here may need a wide viewport. *@
+<style>
+    .r-card { border:1px solid #e4e7ee; border-radius:12px; padding:16px; margin:0 0 16px; }
+    .r-head { display:flex; flex-wrap:wrap; gap:6px 14px; align-items:baseline; }
+    .r-title { font-size:17px; font-weight:700; color:var(--el-darkblue,#1D3380); flex:1 1 220px; min-width:0; }
+    .r-when { color:#6a7280; font-size:12.5px; }
+    .r-hero { display:flex; align-items:center; gap:14px; margin:14px 0 6px; }
+    .r-score { font-size:44px; font-weight:800; line-height:1; }
+    .r-band { font-size:14px; font-weight:700; }
+    .r-sub { color:#6a7280; font-size:12.5px; margin-top:2px; }
+    .r-bar { display:flex; align-items:center; gap:10px; margin:5px 0; font-size:13.5px; }
+    .r-swatch { width:11px; height:11px; border-radius:3px; flex:0 0 auto; }
+    .r-label { flex:0 0 138px; }
+    .r-track { flex:1 1 auto; background:#f1f2f5; border-radius:6px; height:11px; min-width:60px; }
+    .r-fill { height:11px; border-radius:6px; }
+    .r-count { flex:0 0 34px; text-align:right; font-weight:600; }
+    .r-quote { background:#f6f8fb; border-left:3px solid var(--el-blue,#008BD2);
+               border-radius:0 8px 8px 0; padding:9px 12px; margin:8px 0; font-size:13.5px; line-height:1.5; }
+    .r-none { color:#6a7280; font-size:13.5px; }
+</style>
+
+<div class="card">
+    <h1 style="margin-top:0;">My session results</h1>
+    <p class="set-deps" style="margin-top:0;">
+        What the room thought, from the buttons in the room and the QR code on your slide.
+        @* §752.6 — the page must not reintroduce the jargon the PDF just dropped. *@
+        The <strong>satisfaction score</strong> runs from 0 to 100 and is <strong>not a percentage</strong>
+        &mdash; if everyone pressed the light green button it comes to 67, which is <strong>Happy</strong>.
+        The words are the same four the buttons use: 80&ndash;100 very happy &middot; 60&ndash;79 happy
+        &middot; 40&ndash;59 somewhat unhappy &middot; 0&ndash;39 unhappy.
+    </p>
+
+    @if (Model.Rows.Count == 0)
+    {
+        <p class="r-none">
+            You have no sessions with feedback yet. Results appear here once your session has been
+            held and the feedback has been collected.
+        </p>
+    }
+</div>
+
+@foreach (var r in Model.Rows)
+{
+    var s = r.Score;
+    var band = s.Score switch
+    {
+        >= 80 => "#1E7A3C",
+        >= 60 => "#6DBE45",
+        >= 40 => "#E4B400",
+        not null => "#C8322A",
+        _ => "#6a7280",
+    };
+    var total = s.Distribution.Four + s.Distribution.Three + s.Distribution.Two + s.Distribution.One;
+    var peak = Math.Max(1, new[] { s.Distribution.Four, s.Distribution.Three, s.Distribution.Two, s.Distribution.One }.Max());
+
+    <div class="card r-card">
+        <div class="r-head">
+            <div class="r-title">@r.Title</div>
+        </div>
+        <div class="r-when">
+            @r.Start.ToString("ddd dd MMM HH:mm")&ndash;@r.End.ToString("HH:mm")
+            @if (!string.IsNullOrWhiteSpace(r.Room)) { <text> &middot; @r.Room</text> }
+        </div>
+
+        @if (s.Score is double score)
+        {
+            <div class="r-hero">
+                <div class="r-score" style="color:@band;">@Math.Round(score, MidpointRounding.AwayFromZero)</div>
+                <div>
+                    @* 🔒 §11 — the band ALWAYS accompanies the number, and a label that stops it
+                       being read as a percentage with it. §752.6: that label is words, not "index". *@
+                    @* 🔒 §752.7 — the RANGE goes with the band. Since the band words are now the
+                       BUTTON words, the range is what stops "Happy" being read as a count of Happy
+                       presses. The brief makes a bare band non-conformant. *@
+                    <div class="r-band">
+                        Satisfaction score &middot; @s.Band
+                        (@SatisfactionScore.BandRange(s.Score) of 100)
+                    </div>
+                    <div class="r-sub">
+                        @(s.Distribution.Four + s.Distribution.Three) of the @s.Responses people who
+                        answered were happy or very happy &middot; @r.DeviceCount from the room device,
+                        @r.QrCount from your QR code
+                    </div>
+                </div>
+            </div>
+        }
+        else
+        {
+            <div class="r-hero">
+                <div>
+                    <div class="r-band">Not enough responses yet</div>
+                    @* 🔒 Progress toward the threshold, never a number volatile enough to mislead. *@
+                    <div class="r-sub">
+                        @s.Responses of @Model.Threshold responses needed before a score is shown &mdash;
+                        below that a single press moves the result by more than ten points.
+                    </div>
+                </div>
+            </div>
+        }
+
+        @if (total > 0)
+        {
+            <div style="margin-top:10px;">
+                @foreach (var (label, count, colour) in new[]
+                {
+                    (EvaluationRatingLabels.Label(4), s.Distribution.Four,  "#1E7A3C"),
+                    (EvaluationRatingLabels.Label(3), s.Distribution.Three, "#6DBE45"),
+                    (EvaluationRatingLabels.Label(2), s.Distribution.Two,   "#E4B400"),
+                    (EvaluationRatingLabels.Label(1), s.Distribution.One,   "#C8322A"),
+                })
+                {
+                    <div class="r-bar">
+                        <span class="r-swatch" style="background:@colour;"></span>
+                        <span class="r-label">@label</span>
+                        <span class="r-track"><span class="r-fill" style="width:@(count == 0 ? 0 : Math.Max(8, 100.0 * count / peak))%;background:@colour;display:block;"></span></span>
+                        <span class="r-count">@count</span>
+                    </div>
+                }
+            </div>
+        }
+
+        <div style="margin-top:14px;">
+            <strong style="font-size:14px;">What people wrote</strong>
+            @if (r.Comments.Count == 0)
+            {
+                <p class="r-none" style="margin:6px 0 0;">No written feedback for this session.</p>
+            }
+            else
+            {
+                @* 🔒 Verbatim — never summarised or filtered. The score says whether the talk landed;
+                   these say why. *@
+                @foreach (var c in r.Comments)
+                {
+                    <div class="r-quote">&ldquo;@c&rdquo;</div>
+                }
+            }
+        </div>
+
+        <p style="margin:14px 0 0;">
+            <a class="set-btn" asp-page-handler="Report" asp-route-sessionId="@r.EvaluationSessionId">
+                &#128202; Download the full PDF report
+            </a>
+        </p>
+    </div>
+}

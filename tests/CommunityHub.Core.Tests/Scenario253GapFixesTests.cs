@@ -108,7 +108,7 @@ public sealed class Scenario253GapFixesTests
         Assert.Equal("active@x.dk", msg.RecipientEmail);
     }
 
-    [Fact]
+    [Fact(Skip = "733.1 - the per-task party/master-class cadences are RETIRED (operator 2026-07-31: the Get Started wizard is chased once every 14 days by getstarted-digest). Kept, not deleted, so re-enabling restores this coverage.")]
     public async Task G9_MasterClass_biweekly_nag_stops_for_organizer_deactivated_attendee()
     {
         using var db = NewDb();
@@ -358,7 +358,18 @@ public sealed class Scenario253GapFixesTests
             Assert.True(await db.Tasks.AnyAsync(t =>
                 t.AssignedParticipantId == mcSpeaker.Id
                 && t.SourceKey == $"speakerdl:{mcSpeaker.Id}:prepare-master-class-materials"));
-            Assert.False(await db.Tasks.AnyAsync(t => t.AssignedParticipantId == mainOnly.Id));
+
+            // 🔒 §708 — ASSERT THE GATE, NOT "NO TASKS AT ALL".
+            //
+            // This used to assert `mainOnly` held NO tasks whatsoever, which was true only while the
+            // JSON config was a speaker's ONLY source of tasks. Since the migration the registry
+            // also seeds the eight code-defined speaker tasks, so a main-day speaker legitimately
+            // holds some (the presentation uploads and Help Promote — no entitlements here, so no
+            // logistics). The rule under test is the masterclass-only GATE, and it is unchanged:
+            // this speaker does not present on the pre-day, so they must not get THAT deadline.
+            Assert.False(await db.Tasks.AnyAsync(t =>
+                t.AssignedParticipantId == mainOnly.Id
+                && t.SourceKey == $"speakerdl:{mainOnly.Id}:prepare-master-class-materials"));
         }
         finally
         {

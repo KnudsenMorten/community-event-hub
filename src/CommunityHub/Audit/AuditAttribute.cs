@@ -27,4 +27,17 @@ public sealed class AuditAttribute : Attribute
 
     /// <summary>Optional subject type (e.g. "Participant", "Hotel").</summary>
     public string? TargetType { get; set; }
+
+    /// <summary>
+    /// §728 — a STABLE action code (e.g. <c>masterclass.cancel</c>) instead of the auto-captured
+    /// <c>METHOD path [handler]</c>.
+    /// </summary>
+    /// <remarks>
+    /// Operator 2026-07-31: *"i would like also to see things like selected master class, cancelled
+    /// master class, signed up for waitlist, party sign-up, etc"*. Those events were all ALREADY in
+    /// the trail — as 302 identical <c>POST /Forms/Wizard</c> rows. Nothing was missing; the NAMING
+    /// was. A stable code is what makes the trail filterable, which is what "see them" means at
+    /// this volume.
+    /// </remarks>
+    public string? Action { get; set; }
 }

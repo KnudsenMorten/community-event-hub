@@ -1,0 +1,113 @@
+@page
+@model CommunityHub.Pages.Organizer.SoMeTemplatesModel
+@{
+    ViewData["Title"] = "SoMe post templates";
+}
+
+<div class="card">
+    <h1>SoMe post templates</h1>
+    @if (Model.AccessDenied)
+    {
+        <p class="error" role="alert">@Localizer["Common.OrganizersOnly"]</p>
+        <p><a asp-page="/Index">@Localizer["Common.BackToHub"]</a></p>
+    }
+    else
+    {
+        <p>The wording of every automatic LinkedIn post, in five templates — one per post type.
+           Edits apply to <strong>this edition only</strong> and take effect on the next post
+           composed; nothing here publishes anything.</p>
+        <p><a asp-page="/Organizer/Comms">&larr; Back to Emails &amp; comms</a></p>
+    }
+</div>
+
+@if (!Model.AccessDenied)
+{
+    @if (!string.IsNullOrWhiteSpace(Model.Msg))
+    {
+        <div class="card" role="status" aria-live="polite"
+             style="border-left:4px solid @(Model.MsgIsWarning ? "#9a6700" : "#137333");">
+            <p style="margin:0;">@Model.Msg</p>
+        </div>
+    }
+
+    @* The variable legend sits ABOVE the editors: he should never have to remember a name, and a
+       mistyped one prints verbatim into a public post. *@
+    <div class="card">
+        <h2>Variables you can use</h2>
+        <p style="margin-top:-6px;">Anything else in <code>{curly braces}</code> is left exactly as
+           typed, so a typo shows up in the preview rather than in a published post.</p>
+        <div style="display:flex;flex-wrap:wrap;gap:6px;">
+            @foreach (var v in Model.KnownVariables)
+            {
+                <code style="background:#f3f4f6;border-radius:3px;padding:2px 7px;font-size:12.5px;">@v</code>
+            }
+        </div>
+    </div>
+
+    @foreach (var t in Model.Templates)
+    {
+        <div class="card" id="type-@((int)t.Kind)">
+            <h2>@t.Title</h2>
+            <p style="margin-top:-6px;font-size:13.5px;color:#6b7280;">
+                @if (t.IsOverridden)
+                {
+                    <span>✏️ <strong>Edited for this edition</strong>
+                        @if (t.UpdatedAt is { } at)
+                        {
+                            <span>&middot; @at.UtcDateTime.ToString("dd MMM yyyy HH:mm") UTC</span>
+                        }
+                        @if (!string.IsNullOrWhiteSpace(t.UpdatedByEmail))
+                        {
+                            <span>&middot; by @t.UpdatedByEmail</span>
+                        }
+                    </span>
+                }
+                else
+                {
+                    <span>Shipped wording &mdash; not yet changed for this edition.</span>
+                }
+            </p>
+
+            @if (t.UnknownPlaceholders.Count > 0)
+            {
+                <p class="error" role="alert" style="font-size:13.5px;">
+                    @string.Join(", ", t.UnknownPlaceholders) matches no variable and will print
+                    exactly like that in the post.
+                </p>
+            }
+
+            <form method="post" asp-page-handler="Save">
+                <input type="hidden" name="kind" value="@((int)t.Kind)" />
+                <label for="body-@((int)t.Kind)" class="sr-only">@t.Title body</label>
+                @* A plain textarea: emoji are ordinary text in one, so pasting 🚀 or typing with the
+                   OS emoji picker works with no editor library — and no library means nothing that
+                   can silently reformat the blank lines that ARE the layout on LinkedIn. *@
+                <textarea id="body-@((int)t.Kind)" name="body" rows="14"
+                          spellcheck="false"
+                          style="width:100%;font-family:ui-monospace,Consolas,monospace;font-size:13.5px;
+                                 line-height:1.5;padding:10px;border:1px solid #d0d7de;border-radius:6px;">@t.Body</textarea>
+
+                <div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:10px;">
+                    <button type="submit">Save</button>
+                    @if (t.IsOverridden)
+                    {
+                        <button type="submit" asp-page-handler="Reset" class="secondary"
+                                name="kind" value="@((int)t.Kind)"
+                                onclick="return confirm('Put this template back to the shipped wording? Your edits for this edition are removed.');">
+                            Reset to shipped wording
+                        </button>
+                    }
+                </div>
+            </form>
+
+            <details style="margin-top:14px;" @(Model.Focus == (int)t.Kind ? "open" : "")>
+                <summary style="cursor:pointer;">Preview with sample values</summary>
+                @* Sample values are obviously fake (Contoso, Sample Speaker): a preview carrying a
+                   REAL sponsor's name is one screenshot away from looking like a post that went out. *@
+                <pre style="white-space:pre-wrap;word-break:break-word;background:#f9fafb;
+                            border:1px solid #e5e7eb;border-radius:6px;padding:12px;margin-top:10px;
+                            font-family:inherit;font-size:14px;">@Model.Preview(t.Body)</pre>
+            </details>
+        </div>
+    }
+}

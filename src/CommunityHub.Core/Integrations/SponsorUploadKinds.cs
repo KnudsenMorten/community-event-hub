@@ -1,6 +1,7 @@
 using CommunityHub.Core.Config;
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
+using CommunityHub.Core.Integrations.DocLibrary;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -15,45 +16,82 @@ namespace CommunityHub.Uploads;
 /// shape that produced §482 (a list and an editor that quietly described different things), so the
 /// rules live here once and both callers read them.</para>
 /// </summary>
+/// <param name="Folder">Resolved from the document-library registry — never from a config literal.</param>
+/// <param name="Kind">The kind token, so the caller can build the file name via
+/// <see cref="SponsorUploadNaming"/> rather than assembling one itself.</param>
+/// <param name="Exts">Permitted extensions; empty ⇒ any format.</param>
 public sealed record SponsorUploadSpec(
     string Folder,
-    string Prefix,
+    string Kind,
     IReadOnlyList<string> Exts,
     long MaxBytes,
     IReadOnlyList<string>? Notify,
-    bool IsWall);
+    bool IsWall)
+{
+    /// <summary>True when <paramref name="ext"/> may be uploaded for this kind.</summary>
+    /// <remarks>An EMPTY <see cref="Exts"/> means "any format" — the exhibitor wall. Asking here
+    /// rather than at four call sites keeps that empty-means-everything rule from being read as
+    /// "nothing is allowed" by whichever caller is written next.</remarks>
+    public bool Accepts(string? ext) =>
+        Exts.Count == 0
+        || (ext is not null && Exts.Contains(ext, StringComparer.OrdinalIgnoreCase));
+
+    /// <summary>Human-readable list of what is allowed, for a validation message.</summary>
+    public string AllowedText => Exts.Count == 0 ? "any file type" : string.Join(", ", Exts);
+}
 
 public static class SponsorUploadKinds
 {
     private const long Mb = 1024 * 1024;
 
     /// <summary>
-    /// Resolve an upload kind to its destination, or null when the kind is unknown or its folder
-    /// is not configured. Mirrors <c>CompanyDetailsModel.ResolveKind</c> exactly — same folders,
-    /// prefixes, extensions and caps.
+    /// THE definition of what an upload kind means: destination folder, permitted extensions, size
+    /// cap, who is notified, and whether it goes direct-to-storage. Null when the kind is unknown or
+    /// its folder does not resolve.
     /// </summary>
-    public static SponsorUploadSpec? Resolve(string? kind, SharePointEditionConfig? sp) =>
-        sp is null || string.IsNullOrWhiteSpace(sp.SiteUrl)
-            ? null
-            : kind switch
-            {
-                "some" when !string.IsNullOrWhiteSpace(sp.LogoSoMeBrandingFolderPath) =>
-                    new(sp.LogoSoMeBrandingFolderPath, "SoMeBrandingLogo_", new[] { ".png" },
-                        5 * Mb, sp.SponsorUploadNotify, false),
-                "print" when !string.IsNullOrWhiteSpace(sp.LogoPrintFolderPath) =>
-                    new(sp.LogoPrintFolderPath, "PrintLogo_", new[] { ".eps", ".ai", ".pdf" },
+    /// <remarks>
+    /// <para>🔒 §768 — this used to say <i>"Mirrors CompanyDetailsModel.ResolveKind exactly"</i>, and
+    /// it did: the sponsor Company Details page carried a second, hand-maintained copy of these
+    /// rules. §768.13 collapsed that copy and §768.14 collapsed a THIRD in the Get Started wizard,
+    /// whose own comment described itself as <i>"helpers replicated from CompanyDetailsModel so the
+    /// two stay byte-consistent"</i>. <b>A comment asserting that two copies agree is not a mechanism
+    /// for keeping them in agreement</b> — the next edit to one of them is where they part company,
+    /// and the symptom would be a sponsor's file landing under a different name depending on which
+    /// page they uploaded from.</para>
+    ///
+    /// <para>🔒 §768.14 — the folder now comes from <see cref="IDocLibraryPathResolver"/>, not from
+    /// the edition config. <paramref name="sp"/> is still required, but only for the things that are
+    /// genuinely not paths: the site the upload seam authenticates against, and the notification
+    /// recipients.</para>
+    ///
+    /// <para>The <c>"zoho"</c> kind is GONE (§6.7): one Web logo now serves both the promotion
+    /// graphics and the external event system. It resolves to null rather than to a plausible
+    /// folder, so a stale form field fails loudly instead of writing somewhere nothing reads.</para>
+    /// </remarks>
+    public static SponsorUploadSpec? Resolve(
+        string? kind, IDocLibraryPathResolver paths, SharePointEditionConfig? sp)
+    {
+        if (sp is null || string.IsNullOrWhiteSpace(sp.SiteUrl) || paths is null) return null;
+
+        var (key, exts, maxBytes, notify, isWall) = kind switch
+        {
+            "some" => (DocLibraryPaths.SponsorLogoWeb, new[] { ".png" },
+                       5 * Mb, sp.SponsorUploadNotify, false),
+            "print" => (DocLibraryPaths.SponsorLogoPrint, new[] { ".eps", ".ai", ".pdf" },
                         25 * Mb, sp.SponsorUploadNotify, false),
-                "zoho" when !string.IsNullOrWhiteSpace(sp.LogoZohoFolderPath) =>
-                    new(sp.LogoZohoFolderPath, "ZohoLogo_", new[] { ".png" },
-                        5 * Mb, sp.SponsorUploadNotifyZoho, false),
-                // Exhibitor wall = print artwork: vector/PDF only, up to 1 GB. This is THE case
-                // direct-to-storage exists for — a gigabyte was never sane to push through a
-                // request thread.
-                "wall" when !string.IsNullOrWhiteSpace(sp.ExhibitorWallFolderPath) =>
-                    new(sp.ExhibitorWallFolderPath, "ExhibitorWall_", new[] { ".eps", ".ai", ".pdf" },
-                        1024 * Mb, sp.SponsorUploadNotify, true),
-                _ => null,
-            };
+            // The exhibitor wall takes ANY format (work order §111) and up to 1 GB. This is THE case
+            // direct-to-storage exists for — a gigabyte was never sane to push through a request
+            // thread.
+            "wall" => (DocLibraryPaths.SponsorExhibitorWall, Array.Empty<string>(),
+                       1024 * Mb, sp.SponsorUploadNotify, true),
+            _ => (null!, null!, 0L, null!, false),
+        };
+
+        if (key is null) return null;
+        if (!paths.TryResolve(key, out var folder)) return null;
+
+        return new SponsorUploadSpec(folder, kind!, exts, maxBytes, notify, isWall);
+    }
 
     /// <summary>
     /// §494b — record a completed sponsor upload: the logo pointer (for the three LOGO kinds) and
@@ -68,7 +106,7 @@ public static class SponsorUploadKinds
         CommunityHubDbContext db, string kind, int eventId, string companyId,
         string fileName, string? webUrl, string email, DateTimeOffset now, CancellationToken ct)
     {
-        if (kind is "some" or "zoho" or "print")
+        if (kind is "some" or "print")
         {
             var info = await db.SponsorInfos
                 .FirstOrDefaultAsync(s => s.EventId == eventId && s.SponsorCompanyId == companyId, ct);
@@ -136,11 +174,46 @@ public static class SponsorUploadKinds
         }
     }
 
-    /// <summary>The trailing <c>_v{N}</c> of a versioned name, or 1 when absent.</summary>
-    public static int ParseVersion(string fileName)
+    /// <summary>The version a stored name carries, or 1. See <see cref="SponsorUploadNaming.ParseVersion"/>.</summary>
+    public static int ParseVersion(string fileName) => SponsorUploadNaming.ParseVersion(fileName);
+
+    /// <summary>
+    /// The next free file name for a sponsor upload in <paramref name="folder"/> — THE one
+    /// implementation, shared by all four upload paths.
+    /// </summary>
+    /// <remarks>
+    /// <para>🔒 §768.14 — this existed in FOUR hand-copied forms (Company Details, the direct-upload
+    /// endpoints, the sponsor artefact uploader and the Get Started wizard). They agreed by
+    /// inspection only, and each one built the name itself, which is how the writers and
+    /// <c>ResolveNewestSponsorLogo</c> came to disagree about where the version number lives.</para>
+    ///
+    /// <para>⚠️ A listing failure must NOT block the upload: it falls back to version 1. Overwriting
+    /// a same-named file is recoverable; refusing a sponsor's artwork at a deadline is not. The
+    /// listing is also the reason this cannot be a pure function — the next version is a fact about
+    /// the folder, not about the request.</para>
+    /// </remarks>
+    public static async Task<string> NextVersionedNameAsync(
+        Core.Integrations.SharePointUploadClient sp,
+        string siteUrl, string driveName, string folder,
+        string kind, string? sponsorName, string ext,
+        ILogger? log, CancellationToken ct)
     {
-        var stem = Path.GetFileNameWithoutExtension(fileName);
-        var i = stem.LastIndexOf("_v", StringComparison.OrdinalIgnoreCase);
-        return i >= 0 && int.TryParse(stem[(i + 2)..], out var v) && v > 0 ? v : 1;
+        var next = 1;
+        try
+        {
+            foreach (var file in await sp.ListFolderFilesAsync(siteUrl, driveName, folder, ct))
+            {
+                if (SponsorUploadNaming.Matches(file.Name, kind, sponsorName, out var v) && v >= next)
+                    next = v + 1;
+            }
+        }
+        catch (Exception ex)
+        {
+            log?.LogWarning(
+                ex, "Sponsor upload: could not list '{Folder}' to version the {Kind} name; using v1.",
+                folder, kind);
+        }
+
+        return SponsorUploadNaming.Build(kind, sponsorName, next, ext);
     }
 }

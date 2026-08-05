@@ -229,6 +229,96 @@
                 </script>
             </details>
 
+            @* §761 — the speaker's own details, READ-ONLY and copy/paste ready. The Backstage
+               speakers API is create-only, so when the gap mail reports a field missing over there,
+               this is where the value is copied from instead of hunting on another page.
+               🔒 Values render BARE — no quotes (§760): quotes get caught by a drag-selection, and a
+               pasted "https://…" is a broken link. *@
+            @if (Model.Speaker is { } spk)
+            {
+                <details open class="spk-box">
+                    <summary>Speaker details (copy/paste)</summary>
+                    <p class="spk-intro">
+                        Read-only. The speaker edits these on their <strong>Speaker details</strong>
+                        onboarding step; they are shown here so you can copy a value straight into
+                        Zoho Backstage, whose speakers API CEH cannot update.
+                    </p>
+                    <dl class="spk-detail">
+                        @{
+                            var rows = new (string Label, string? Value, string? Note)[]
+                            {
+                                ("Company", spk.CompanyName, null),
+                                ("Tagline", spk.Tagline, null),
+                                ("Biography", spk.Biography, null),
+                                ("Skills (comma separated)", Model.SpeakerSkills,
+                                    "derived from the Microsoft accreditation + MVP categories"),
+                                ("LinkedIn", spk.LinkedIn, null),
+                                ("X / Twitter", spk.Twitter, null),
+                                ("Blog / website", spk.Blog, null),
+                                ("Photo URL", spk.PhotoUrl, null),
+                                // 🔒 §623 — Backstage NEVER returns country on any read, so CEH can
+                                // never tell whether it is set over there. Say so, rather than let a
+                                // blank imply "already fine".
+                                ("Country", spk.Country, Model.CountryConfirmed
+                                    ? $"confirmed set in Backstage by {spk.CountryConfirmedBy} "
+                                      + $"on {spk.CountryConfirmedAt:dd MMM yyyy}"
+                                    : "Backstage never reports this field back — confirm it visually"),
+                            };
+                        }
+                        @foreach (var (label, value, note) in rows)
+                        {
+                            <dt>@label</dt>
+                            <dd>
+                                @if (string.IsNullOrWhiteSpace(value))
+                                {
+                                    <span class="spk-empty">— not set in CEH</span>
+                                }
+                                else
+                                {
+                                    <span class="spk-value">@value</span>
+                                }
+                                @if (!string.IsNullOrWhiteSpace(note))
+                                {
+                                    <span class="spk-note">@note</span>
+                                }
+                            </dd>
+                        }
+                    </dl>
+
+                    @* §762 — the only way this mail can ever go quiet about country. Backstage never
+                       reports the field back, so CEH cannot verify it; an organizer acknowledges it
+                       instead. The confirmation stores the VALUE, so changing the country in CEH
+                       re-asks rather than staying silently suppressed. *@
+                    @if (!string.IsNullOrWhiteSpace(spk.Country))
+                    {
+                        <form method="post" style="margin-top:14px;">
+                            <input type="hidden" name="Id" value="@Model.Id" />
+                            @if (Model.CountryConfirmed)
+                            {
+                                <button type="submit" asp-page-handler="UnconfirmCountry">
+                                    Country is NOT set in Backstage after all
+                                </button>
+                                <span class="spk-note">
+                                    Confirmed — the missing-details mail no longer asks about this
+                                    speaker's country. Change the country in CEH and it will ask again.
+                                </span>
+                            }
+                            else
+                            {
+                                <button type="submit" asp-page-handler="ConfirmCountry">
+                                    I have set the country in Backstage
+                                </button>
+                                <span class="spk-note">
+                                    Ticking this stops the "details missing in Backstage" mail asking
+                                    about this speaker's country. CEH cannot check it — Backstage
+                                    never reports the field back — so this is your confirmation.
+                                </span>
+                            }
+                        </form>
+                    }
+                </details>
+            }
+
             <p style="margin-top:18px;font-size:13px;color:#6b7280;">
                 Tip: to edit hotel dates / dinner / swag answers on behalf of this person,
                 use <a asp-page="/Organizer/DataGrid">the participant data grid</a>.
@@ -237,3 +327,19 @@
     }
     <p><a asp-page="/Organizer/Participants">Back to participants</a></p>
 </div>
+
+<style>
+    /* §761 — the speaker copy/paste block. Mobile-first: the two-column grid collapses at 640px. */
+    .spk-box { margin-top:18px; border:1px solid #e5e7eb; border-radius:8px; padding:12px 14px; }
+    .spk-box > summary { cursor:pointer; font-weight:600; }
+    .spk-intro { font-size:13px; color:#6b7280; margin:8px 0 12px; }
+    .spk-detail { display:grid; grid-template-columns:210px 1fr; gap:8px 14px; margin:0; }
+    .spk-detail dt { font-weight:600; color:#374151; font-size:13.5px; }
+    .spk-detail dd { margin:0; font-size:13.5px; }
+    /* user-select:all — ONE click selects the whole value. With no quotes around it (§760) that
+       selection is exactly what goes into Backstage. */
+    .spk-value { user-select:all; white-space:pre-wrap; word-break:break-word; }
+    .spk-empty { color:#9ca3af; font-style:italic; }
+    .spk-note { display:block; color:#6b7280; font-size:12px; margin-top:2px; }
+    @@media (max-width:640px) { .spk-detail { grid-template-columns:1fr; } .spk-detail dd { margin-bottom:6px; } }
+</style>

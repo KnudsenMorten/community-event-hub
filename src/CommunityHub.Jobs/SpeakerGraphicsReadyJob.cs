@@ -41,10 +41,14 @@ public sealed class SpeakerGraphicsReadyJob
     /// This is the CATCH-UP pass: a speaker is normally told the moment a graphic is RELEASED, so it
     /// only picks up whoever the live release missed. At a daily cadence a missed speaker waited up
     /// to 24 hours, which makes a safety net that is not much of one.
+    ///
+    /// <para>§869.3a — HE NAMED THIS JOB: *"same for this - i must be able to control timer so it
+    /// runs every 10 min"*. His 30 minutes is now the §510 DEFAULT interval over a 5-minute base
+    /// tick, so how long the safety net waits is set on the Jobs page, with no deploy.</para>
     /// </summary>
     [Function("SpeakerGraphicsReadyJob")]
     public async Task Run(
-        [TimerTrigger("0 */30 * * * *")] TimerInfo timer,
+        [TimerTrigger("0 */5 * * * *")] TimerInfo timer,
         CancellationToken ct)
     {
         var eventId = await _db.Events

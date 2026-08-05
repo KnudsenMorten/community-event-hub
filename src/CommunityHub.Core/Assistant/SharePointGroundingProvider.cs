@@ -50,28 +50,38 @@ public sealed class SharePointGroundingProvider : IAiHelperSharePointGroundingPr
     private readonly IMemoryCache _cache;
     private readonly ILogger<SharePointGroundingProvider>? _log;
 
+    private readonly CommunityHub.Core.Integrations.DocLibrary.IDocLibraryPathResolver _paths;
+
     public SharePointGroundingProvider(
         ISharePointFileStore store,
         IOptions<GraphicsSharePointOptions> options,
         IMemoryCache cache,
+        CommunityHub.Core.Integrations.DocLibrary.IDocLibraryPathResolver paths,
         ILogger<SharePointGroundingProvider>? log = null)
     {
         _store = store;
         _options = options.Value;
         _cache = cache;
+        _paths = paths;
         _log = log;
     }
 
+    /// <summary>§768 — resolved from the registry (was <c>GroundingFolderPath</c>).</summary>
+    private string GroundingFolder =>
+        _paths.TryResolve(
+            CommunityHub.Core.Integrations.DocLibrary.DocLibraryPaths.AiGrounding, out var p)
+            ? p : string.Empty;
+
     /// <summary>True when the store can read AND a grounding folder is configured (else inert).</summary>
     public bool CanRead =>
-        _store.CanRead && !string.IsNullOrWhiteSpace(_options.GroundingFolderPath);
+        _store.CanRead && !string.IsNullOrWhiteSpace(GroundingFolder);
 
     public async Task<IReadOnlyList<AiHelperGroundingSection>> GetGroundingAsync(
         CancellationToken ct = default)
     {
         if (!CanRead) return Array.Empty<AiHelperGroundingSection>();
 
-        var folder = _options.GroundingFolderPath.Trim();
+        var folder = GroundingFolder;
         var cacheKey = $"ai-grounding:sp:{folder}";
         if (_cache.TryGetValue(cacheKey, out IReadOnlyList<AiHelperGroundingSection>? cached) &&
             cached is not null)
@@ -82,6 +92,44 @@ public sealed class SharePointGroundingProvider : IAiHelperSharePointGroundingPr
         var sections = await BuildAsync(folder, ct);
         _cache.Set(cacheKey, sections, CacheTtl);
         return sections;
+    }
+
+    /// <summary>
+    /// §6.8 — REBUILD the grounding NOW, ignoring the cache.
+    /// </summary>
+    /// <remarks>
+    /// <para>Work order §6.8: <i>"Trigger: daily scheduled + manual on-demand."</i> The grounding is
+    /// a cached read of the folder, so "run now" means exactly this: throw the cached copy away and
+    /// go and look again.</para>
+    ///
+    /// <para>🔑 <b>It returns WHAT IT FOUND, not just "done".</b> The operator presses this straight
+    /// after dropping a file into the folder, and the only question he has is whether the file was
+    /// picked up. "Refreshed" alone answers a question nobody asked — and it reads identically
+    /// whether the folder held six documents or none.</para>
+    ///
+    /// <para>⚠️ Inert hosts answer honestly rather than reporting a successful refresh of nothing:
+    /// a DEV box with no library read seam has nothing to refresh.</para>
+    /// </remarks>
+    public async Task<GroundingRefreshResult> RefreshAsync(CancellationToken ct = default)
+    {
+        if (!CanRead)
+        {
+            return new GroundingRefreshResult(
+                false, 0,
+                "The document library is not readable on this host, or no grounding folder is configured.");
+        }
+
+        var folder = GroundingFolder;
+        _cache.Remove($"ai-grounding:sp:{folder}");
+
+        var sections = await BuildAsync(folder, ct);
+        _cache.Set($"ai-grounding:sp:{folder}", sections, CacheTtl);
+
+        _log?.LogInformation(
+            "§6.8 AI grounding refreshed on request: {Count} document(s) from {Folder}.",
+            sections.Count, folder);
+
+        return new GroundingRefreshResult(true, sections.Count, null);
     }
 
     private async Task<IReadOnlyList<AiHelperGroundingSection>> BuildAsync(

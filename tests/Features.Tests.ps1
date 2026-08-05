@@ -756,8 +756,11 @@ Describe "10. Email & notifications" {
             'pin-signin.html','session-evaluation-results.html',
             'session-time-location-changed.html','speaker-graphics-ready.html',
             'speaker-question-digest.html','sponsor-leads-digest.html',
-            'broadcast.html','app-game-gift-reminder.html','group-photo-invite.html',
-            'invitation.html','travel-reimbursement-paid.html','volunteer-help-raised.html'
+            # §708.15 — 'broadcast.html' and 'invitation.html' are NOT missing: §705.12-14
+            # DELETED both templates and the SendInvitations page with them. Asserting a
+            # deleted feature is still present is how a red suite stops meaning anything.
+            'app-game-gift-reminder.html','group-photo-invite.html',
+            'travel-reimbursement-paid.html','volunteer-help-raised.html'
         )
         foreach ($t in $expected) {
             $path = Join-Path $script:TplDir $t
@@ -779,8 +782,10 @@ Describe "10. Email & notifications" {
     # ACCEPTANCE: each page renders a named template via EmailTemplateProvider and
     # carries no hand-rolled brand string ("ELDK-team" / hardcoded "#008BD2").
     It "Brand-template holdouts moved — SendInvitations/SpeakerReminders/Travel render via the provider" {
+        # §708.15 — SendInvitations is GONE (§705.12-14 deleted the page and the 'invitation'
+        # template together). The two survivors still carry the contract; asserting the third
+        # only proved the file was missing.
         $map = @{
-            'src/CommunityHub/Pages/Organizer/SendInvitations.cshtml.cs'       = 'invitation'
             'src/CommunityHub/Pages/Organizer/SpeakerReminders.cshtml.cs'      = 'task-manual-reminder'
             'src/CommunityHub/Pages/Organizer/TravelReimbursements.cshtml.cs'  = 'travel-reimbursement-paid'
         }
@@ -797,7 +802,10 @@ Describe "10. Email & notifications" {
     # FEATURE: Broadcast to chosen groups — one personalized "Hi {firstName}"
     # message; resilient batch (one failure never stops the rest).
     # ACCEPTANCE: the broadcast template carries the {{firstName}} token.
-    It "Broadcast — personalized {{firstName}} token present in the broadcast template" {
+    # §708.15 — RETIRED. §705.12-14 deleted broadcast.html outright, so this asserted a token
+    # in a file that no longer exists. Kept as a skip rather than removed so the DECISION stays
+    # visible: if broadcast ever returns, the personalization contract comes back with it.
+    It "Broadcast — personalized {{firstName}} token present in the broadcast template" -Skip {
         $b = Get-Content -LiteralPath (Join-Path $script:TplDir 'broadcast.html') -Raw
         $b | Should -Match '\{\{firstName\}\}' -Because "broadcasts greet each recipient by first name"
     }
@@ -954,13 +962,20 @@ Describe "13. Bug-fix regressions (REQUIREMENTS §13)" {
     # FIX (since centralized): the fallback chain lives in the single
     # SponsorCompanyName.Resolve helper (public → legal → billing → "Company {id}")
     # so the fetched name always wins and the chain can't drift per call site.
-    It "Company-name resolution returns the fetched name, not 'Company {id}'" {
+    # §708.15 — the final fallback is NO LONGER "Company {id}". §528b renamed it to
+    # "(name not synced — CM id {id})", because "Company 30" reads like a real company
+    # name and hid an unsynced record in plain sight. This test asserted the OLD string
+    # and had been red on main ever since: the assertion outlived the decision, it is
+    # not a regression. Now asserted through UnresolvedName, so the wording lives in ONE
+    # place and the next rename needs no test edit at all.
+    It "Company-name resolution returns the fetched name, not the unresolved placeholder" {
         $resolver = Get-SrcText 'src/CommunityHub.Core/Integrations/SponsorCompanyName.cs'
         $resolver | Should -Not -BeNullOrEmpty -Because "the fallback chain is centralized in SponsorCompanyName"
         $resolver | Should -Match '!string\.IsNullOrWhiteSpace\(publicName\)\s*\?\s*publicName!\.Trim\(\)' -Because "the fetched public name must win"
-        $resolver | Should -Match '\$"Company \{companyId\}"' -Because "'Company {id}' is only the final all-blank fallback"
-        # The regressed shape (id returned in both ternary branches) must not exist anywhere.
-        $resolver | Should -Not -Match '\?\s*\$"Company \{companyId\}"\s*:\s*\$"Company \{companyId\}"' -Because "the both-branches-id bug was the defect"
+        $resolver | Should -Match 'UnresolvedName' -Because "the all-blank case falls back to the one named placeholder"
+        $resolver | Should -Match 'name not synced' -Because "an unsynced record must not read like a real company name (§528b)"
+        # The regressed shape (the placeholder returned in BOTH ternary branches) was the defect.
+        $resolver | Should -Not -Match '\?\s*UnresolvedName\(companyId\)\s*:\s*UnresolvedName\(companyId\)' -Because "the both-branches bug was the defect"
     }
 
     # DEFECT: ZohoPipelinePending was hard-coded true, so the "Zoho pipeline not

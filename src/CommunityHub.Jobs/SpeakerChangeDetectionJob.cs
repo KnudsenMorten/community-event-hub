@@ -17,9 +17,12 @@ namespace CommunityHub.Jobs;
 /// to the §59 approval queue (first-populate seeds silently; never auto-applies, never
 /// deletes). Gated: Zoho enabled, an active edition, the <c>speaker-change-alerts</c> feature
 /// enabled, and the edition's SPEAKER sync direction at stage 3 (Zoho→CEH) — else the service
-/// returns Inactive and the job no-ops. The speakers API is inert until the
-/// <c>ZohoBackstage.speaker.READ</c> scope + Zoho:SpeakerReadEnabled are set, so the service
-/// no-ops gracefully and the job logs the unavailable reason until the source is wired.
+/// returns Inactive and the job no-ops.
+///
+/// <para>🗑 <b>§754.5 — the claim that "the speakers API is inert until the
+/// <c>ZohoBackstage.speaker.READ</c> scope is set" is DELETED and must not come back.</b> The Zoho
+/// Backstage credentials carry every permission CEH needs, and <c>/speakers</c> is read ungated in
+/// production by the push engines. The gates are the ones listed above.</para>
 /// </summary>
 public sealed class SpeakerChangeDetectionJob
 {
@@ -79,8 +82,10 @@ public sealed class SpeakerChangeDetectionJob
         {
             _log.LogWarning(
                 "SpeakerChangeDetectionJob: source unavailable — {Reason}", result.UnavailableReason);
-            // 🔒 §621 was EXACTLY this branch: Zoho:SpeakerReadEnabled was never set, so this
-            // returned "unavailable" without ever calling Zoho — for as long as the feature existed.
+            // 🔒 §621 was EXACTLY this branch: a config flag nobody had set made this return
+            // "unavailable" without ever calling Zoho — for as long as the feature existed.
+            // 🗑 §754.5: that flag is DELETED. Reaching this branch now means a REAL failed call, so
+            // the reason below is the API's own — never a config excuse.
             _activity?.ReportInactive(
                 "The Zoho speaker list could not be read, so nothing was compared: "
                 + (result.UnavailableReason ?? "reason not given") + ".");
@@ -89,8 +94,9 @@ public sealed class SpeakerChangeDetectionJob
 
         _activity?.ReportWork();
 
-        // §59: a real change is ENQUEUED to the delta-approval queue (not auto-applied);
-        // the operator approves/rejects it in /Organizer/SyncQueue.
+        // §737.2: a real change is ENQUEUED to the delta queue and AUTO-APPLIED in the same
+        // pass (Zoho owns these fields). The row lands in /Organizer/SyncQueue's recently-decided
+        // list marked "(auto)", so {Enqueued} counts changes applied, NOT changes awaiting him.
         _log.LogInformation(
             "SpeakerChangeDetectionJob: matched {Matched} — seeded {Seeded}, changed {Changed}, enqueued {Enqueued}, unmatched {Unmatched}.",
             result.Matched, result.Seeded, result.Changed, result.Enqueued, result.Unmatched);

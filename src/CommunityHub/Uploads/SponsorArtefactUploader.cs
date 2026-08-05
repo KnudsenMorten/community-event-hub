@@ -16,13 +16,15 @@ namespace CommunityHub.Uploads;
 /// rather than sending the sponsor to another page. Adding a fifth copy of the upload code to do
 /// that would be the exact mistake <see cref="SponsorUploadKinds"/> was created to prevent.</para>
 ///
-/// <para><b>The duplication is real and pre-existing:</b> <c>NextVersionedNameAsync</c> exists in
-/// FOUR places today — <c>SponsorLogosFormService</c>, <c>CompanyDetails</c>,
-/// <c>DirectUploadEndpoints</c> and here. §494b already documented what that costs: *"Two copies of
-/// those rules is exactly the shape that produced §482 (a list and an editor that quietly described
-/// different things)"*, and §494d records a live instance — the direct-to-storage path silently
-/// skipped the designer notification because it was a second copy. This class is the single
-/// implementation; the older call sites should be migrated onto it (◻ §609).</para>
+/// <para><b>The duplication was real, and is now gone (§768.14).</b> <c>NextVersionedNameAsync</c>
+/// used to exist in FOUR places — <c>SponsorLogosFormService</c>, <c>CompanyDetails</c>,
+/// <c>DirectUploadEndpoints</c> and here — each building the versioned name itself. §494b documented
+/// what that costs: *"Two copies of those rules is exactly the shape that produced §482 (a list and
+/// an editor that quietly described different things)"*, and §494d records a live instance — the
+/// direct-to-storage path silently skipped the designer notification because it was a second copy.
+/// All four now call <see cref="SponsorUploadKinds.NextVersionedNameAsync"/>, which names the file
+/// through <see cref="SponsorUploadNaming"/> — the same code the graphics matcher reads it back
+/// with.</para>
 ///
 /// <para><b>Streaming, not buffering (§455).</b> Exhibitor-wall artwork is capped at 1 GB, so the
 /// file goes straight into Graph's chunked session — peak memory is one chunk, whatever the artwork
@@ -37,14 +39,17 @@ public sealed class SponsorArtefactUploader
     private readonly IEmailSender _email;
     private readonly EventEditionConfigLoader _cfg;
     private readonly EventConfigOptions _cfgOptions;
+    private readonly Core.Integrations.DocLibrary.IDocLibraryPathResolver _paths;
     private readonly ILogger<SponsorArtefactUploader> _log;
 
     public SponsorArtefactUploader(
         CommunityHubDbContext db, SharePointUploadClient sp, IEmailSender email,
         EventEditionConfigLoader cfg, EventConfigOptions cfgOptions,
+        Core.Integrations.DocLibrary.IDocLibraryPathResolver paths,
         ILogger<SponsorArtefactUploader> log)
     {
-        _db = db; _sp = sp; _email = email; _cfg = cfg; _cfgOptions = cfgOptions; _log = log;
+        _db = db; _sp = sp; _email = email; _cfg = cfg; _cfgOptions = cfgOptions;
+        _paths = paths; _log = log;
     }
 
     /// <summary>The outcome of one upload. <paramref name="Error"/> is null on success.</summary>
@@ -62,7 +67,7 @@ public sealed class SponsorArtefactUploader
         string byEmail, CancellationToken ct)
     {
         var sp = _cfg.Load(_cfgOptions.EventConfigPath).SharePoint;
-        var spec = SponsorUploadKinds.Resolve(kind, sp);
+        var spec = SponsorUploadKinds.Resolve(kind, _paths, sp);
         if (spec is null || sp is null)
             return Result.Fail("That upload isn't available right now.");
 
@@ -73,13 +78,13 @@ public sealed class SponsorArtefactUploader
             return Result.Fail($"That file is too large — the limit is {spec.MaxBytes / Mb} MB.");
 
         var ext = Path.GetExtension(file.FileName).ToLowerInvariant();
-        if (!spec.Exts.Contains(ext))
+        if (!spec.Accepts(ext))
             return Result.Fail($"That file type isn't supported here. Please upload {string.Join(" or ", spec.Exts)}.");
 
         try
         {
-            var fileName = await NextVersionedNameAsync(
-                sp.SiteUrl, sp.DriveName, spec.Folder, spec.Prefix, Sanitize(sponsorName), ext, ct);
+            var fileName = await SponsorUploadKinds.NextVersionedNameAsync(
+                _sp, sp.SiteUrl, sp.DriveName, spec.Folder, kind, sponsorName, ext, _log, ct);
 
             // §455 — stream, never buffer.
             await using var stream = file.OpenReadStream();
@@ -109,35 +114,14 @@ public sealed class SponsorArtefactUploader
     }
 
     /// <summary>
-    /// The next <c>{Prefix}{Sponsor}_v{N}{ext}</c> for a folder. A listing failure must NOT block the
-    /// upload: the version restarts at 1 and SharePoint's replace-on-conflict keeps the newest file.
-    /// </summary>
-    private async Task<string> NextVersionedNameAsync(
-        string siteUrl, string driveName, string folder, string prefix, string sponsor, string ext,
-        CancellationToken ct)
-    {
-        var stem = $"{prefix}{sponsor}_v";
-        var next = 1;
-        try
-        {
-            foreach (var f in await _sp.ListFolderFilesAsync(siteUrl, driveName, folder, ct))
-            {
-                var name = Path.GetFileNameWithoutExtension(f.Name);
-                if (!name.StartsWith(stem, StringComparison.OrdinalIgnoreCase)) continue;
-                if (int.TryParse(name[stem.Length..], out var v) && v >= next) next = v + 1;
-            }
-        }
-        catch (Exception ex)
-        {
-            _log.LogWarning(ex, "Could not list '{Folder}' to pick a version; starting at 1.", folder);
-        }
-        return $"{stem}{next}{ext}";
-    }
-
-    /// <summary>
     /// File-name-safe component — letters, digits, dash, underscore. Everything else, including any
     /// path separator or traversal attempt, collapses to '-'.
     /// </summary>
+    /// <remarks>
+    /// ⚠️ §768.14 — no longer used for the VERSIONED sponsor uploads, which take their whole name
+    /// from <see cref="SponsorUploadNaming"/> (that slug is what the graphics matcher reads back).
+    /// Kept for callers that name a file from free text and have no naming contract to honour.
+    /// </remarks>
     public static string Sanitize(string? s) =>
         string.IsNullOrWhiteSpace(s)
             ? "file"

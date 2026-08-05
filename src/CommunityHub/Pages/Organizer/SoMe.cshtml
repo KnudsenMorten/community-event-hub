@@ -27,10 +27,39 @@
            "speaker-graphics-promote", which keeps its own ring). Organizer tooling is gated by ROLE,
            so no key here — same as its neighbours. *@
         new("/Organizer/Graphics", Localizer["Nav.OrgGraphics"].Value, Localizer["OrgSoMe.Graphics"].Value),
-        new("/Organizer/DesignerGraphics", "Designer graphics pipeline", "Pull speaker photos named by name (speaker upload wins), build per-session / master-class / track folders, and download an Excel brief for an external designer."),
+        @* §768: the "Designer graphics pipeline" tile is gone — §767 builds that artwork
+           automatically, so there is no human build step to send anyone to. *@
         new("/Organizer/ContentStudio", Localizer["Nav.OrgContentStudio"].Value, Localizer["OrgSoMe.ContentStudio"].Value, "content-studio"),
+        @* §828 — the Type 5 event-post repo, imported from his markdown deck. Beside the queue on
+           purpose: this is where the WORDS come from, the queue is when they go out. *@
+        new("/Organizer/EventPosts", "Event posts",
+            "The general event posts you write yourself, imported from your markdown deck. CEH owns the text once imported."),
+        @* §834 — FIRST CARD on purpose: it is the "where do I start" answer, and it stands down on
+           its own once the four setup steps are done. *@
+        new("/Organizer/SoMeSetup", "Set up social media",
+            "Start here for a new edition: connect LinkedIn, write the post footer, design the post types and import your posts."),
+        @* §833 (operator 2026-08-05: "i did not find any page for managing all new some features",
+           "where are a features like scheduler, post editor etc") — the three §824 features that
+           were built but never given a home on THIS hub, which is where he came looking. *@
+        new("/Organizer/SoMeScheduler", "Post planner",
+            "Plan the announcement campaign across all five post types. Every post is held for your approval."),
+        new("/Organizer/SoMeTemplates", "SoMe post templates",
+            "The wording every automatic post is built from — five templates, variables and the AI intro."),
+        @* §835 — "i also need a calendar where i can see when and how". *@
+        new("/Organizer/SoMeCalendar", "Post calendar",
+            "Everything that goes out, day by day, with the text and graphic of each post."),
+        @* §841 — one post at a time: previous/next, edit the text, pick the picture, move the date. *@
+        new("/Organizer/SoMePostEditor", "Edit posts",
+            "Walk through every post one at a time — edit the text, preview and change its picture, and move its date."),
+        @* §842.2 — how often each type is announced. *@
+        new("/Organizer/SoMeCadence", "Posting frequency",
+            "How many times each post type is announced. Sponsors are fixed at two — a contractual obligation."),
         new("/Organizer/SoMeQueue", Localizer["Nav.OrgSoMeQueue"].Value, Localizer["OrgSoMe.Queue"].Value),
         new("/Organizer/SoMeSettings", Localizer["Nav.OrgSoMeSettings"].Value, Localizer["OrgSoMe.Settings"].Value),
+        @* §833 — this page was on NO hub at all and reachable only by typing the URL, while being
+           the thing that decides whether CEH can post to LinkedIn at all (§824.11). *@
+        new("/Organizer/LinkedInConnect", "Connect LinkedIn",
+            "Connect the LinkedIn company page and see when the connection expires."),
         new("/Organizer/AssetLocations", Localizer["Nav.OrgAssetLocations"].Value, Localizer["OrgSoMe.AssetLocations"].Value),
     };
     <partial name="_HubGrid" model="@tiles" />

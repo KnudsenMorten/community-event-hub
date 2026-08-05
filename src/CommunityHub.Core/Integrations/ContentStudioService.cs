@@ -100,7 +100,8 @@ public sealed class ContentStudioService
     {
         if (!await _gate.IsFeatureEnabledAsync(FeatureKey, eventId, ct))
             return new WordPressPublishResult(false, null, null,
-                "Content Studio is turned off for this event. Enable it in Settings first.");
+                // §832 — the operator-facing name, matching the page and the Settings switch.
+                "WordPress BlogPost Content is turned off for this event. Enable it in Settings first.");
 
         if (!_wordpress.CanWrite)
             return new WordPressPublishResult(false, null, null,

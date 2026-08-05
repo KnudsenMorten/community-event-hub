@@ -127,7 +127,20 @@ public sealed class SpeakerMilestoneScenarioTests
         // Non-Denmark speaker: gets it, dated 10 Jan 2027, linking to the travel form.
         var travel = Assert.Single(nonDkTasks, t => t.Title == TravelTitle);
         Assert.Equal(TravelDue, travel.DueDate);
-        Assert.Contains("/Forms/Travel", travel.Description);
+
+        // 🔒 §708 — THE LINK MOVED, AND THAT MOVE *IS* THE MIGRATION.
+        //
+        // This used to assert `travel.Description` contained "/Forms/Travel". A registry-backed row
+        // stores NO prose (§684.14), so the column is null by design — asserting on it now would
+        // pass only if the migration had failed. The destination lives in the authored body, as a
+        // canonical route resolved from FormRoutes rather than the absolute
+        // "https://eldk27.eventhub.expertslive.dk/Forms/Travel" the config used to hardcode
+        // (§708.2a — "door 3 must go": edition-specific, unable to follow a route change).
+        Assert.Null(travel.Description);
+
+        var body = new CommunityHub.Core.Tasks.Definitions.TaskBodyStore().LoadRaw("speaker/travel");
+        Assert.Contains("{{travelFormUrl}}", body);
+        Assert.Equal("/Forms/Travel", CommunityHub.Core.Forms.FormRoutes.For("travel"));
     }
 
     [Fact]

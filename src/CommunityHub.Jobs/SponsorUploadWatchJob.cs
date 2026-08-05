@@ -39,10 +39,14 @@ public sealed class SponsorUploadWatchJob
         _log = log;
     }
 
-    /// <summary>Every 15 minutes. NCRONTAB: sec min hour day month weekday.</summary>
+    /// <summary>
+    /// §869.3 — base tick only; the cadence is the operator's §510 interval (default 15 minutes).
+    /// He named this job: it was showing "fixed time — set in code" with no input.
+    /// NCRONTAB: sec min hour day month weekday.
+    /// </summary>
     [Function("SponsorUploadWatchJob")]
     public async Task Run(
-        [TimerTrigger("0 */15 * * * *")] TimerInfo timer,
+        [TimerTrigger("0 */5 * * * *")] TimerInfo timer,
         CancellationToken ct)
     {
         // GATE (REQUIREMENTS §23): the sponsor upload watcher is an advanced

@@ -34,4 +34,31 @@ else
                style="display:inline-block;text-align:center;">@Model.Links.BroadcastLabel</a>
         }
     </div>
+
+    @* §779 (operator 2026-08-03) — "add button and instruction so they can send both links to their
+       mail from their mobile so they can join there. this is relevant when they signup from desktop
+       with no signal app installed".
+
+       🔒 A submit button with asp-page-handler, NOT a nested <form>: this partial renders INSIDE the
+       host's form (the standalone page and the wizard shell each own one), and a form inside a form
+       is invalid HTML that browsers silently drop. Both hosts implement OnPostMailSignalLinks, so
+       one button works on either — which is the §148 contract these two surfaces are built on. *@
+    <div style="border-top:1px solid #eef0f4;margin-top:18px;padding-top:14px;">
+        <p style="margin:0 0 10px;">
+            <strong>On a computer, without Signal installed?</strong>
+            The buttons above only do something on a device that has Signal. Send the
+            link@(Model.Links.HasChat && Model.Links.HasBroadcast ? "s" : "") to yourself, then open
+            the mail <strong>on your phone</strong> and tap @(Model.Links.HasChat && Model.Links.HasBroadcast ? "them" : "it") there.
+        </p>
+
+        @if (TempData["SignalLinksMessage"] is string signalFlash && signalFlash.Length > 0)
+        {
+            <p class="success" role="status" style="margin:0 0 10px;">@signalFlash</p>
+        }
+
+        <button type="submit" asp-page-handler="MailSignalLinks" class="btn-secondary"
+                style="width:100%;max-width:360px;">
+            Email me the join link@(Model.Links.HasChat && Model.Links.HasBroadcast ? "s" : "")
+        </button>
+    </div>
 }

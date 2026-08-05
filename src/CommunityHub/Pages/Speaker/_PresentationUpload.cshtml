@@ -1,0 +1,86 @@
+@using CommunityHub.Core.Domain
+@model ParticipantTask
+@*
+    §707.57d / §688.12 — THE DECK UPLOAD, INSIDE THE TASK.
+
+    Operator, on the sponsor redesign: "the control is EMBEDDED IN THE TASK, not a link out to
+    another page … which today live only on /Speaker — appear in the task itself, showing the
+    current file". So the task becomes the place the work is DONE, which is §600's original
+    complaint about the old task format.
+
+    🔒 The BODY decides placement (:::embed presentationUpload) and the PAGE owns the form. A
+    renderer cannot emit a working form — it has no antiforgery token — and a view cannot decide
+    layout without parsing the body. Same split as the sponsor decision buttons and booth-members
+    editor.
+
+    🔒 WHICH deck this task wants comes from the task's own completion kind, never from the body or
+    a hidden field a replayed POST could change.
+*@
+@{
+    var kind = CommunityHub.Core.Organizer.TaskArtefactRules.UploadKindFor(Model);
+    var slots = (ViewData["SessionSlots"]
+        as IReadOnlyList<CommunityHub.Core.Integrations.Graphics.PresentationSessionSlot>)
+        ?? Array.Empty<CommunityHub.Core.Integrations.Graphics.PresentationSessionSlot>();
+    var isFinal = string.Equals(kind, "final", StringComparison.OrdinalIgnoreCase);
+}
+
+@if (kind is not null)
+{
+    <div class="task-embed-upload" style="margin:10px 0 4px;background:#f8fafc;border:1px solid #e5e7eb;border-radius:8px;padding:10px 12px;">
+        @if (slots.Count == 0)
+        {
+            @* 🔒 NOT an error, and NOT silently blank. A speaker with no linked session has nothing
+               to upload against; saying so beats an upload box that cannot work. *@
+            <p style="margin:0;font-size:13.5px;color:#7a5b00;">
+                We don't have a session linked to you yet, so there's nothing to upload against.
+                Please contact the organizers if that looks wrong.
+            </p>
+        }
+        else
+        {
+            <p style="font-size:12.5px;color:#4b5563;margin:0 0 6px;">
+                @* §465 — his exact wording on /Speaker, kept identical so the two surfaces agree. *@
+                Upload a newer version at any time — versions are assigned automatically, and the
+                system always uses the latest one.
+            </p>
+
+            foreach (var slot in slots)
+            {
+                var existing = isFinal ? slot.FinalFileName : slot.PreviewFileName;
+                <div style="border-top:1px solid #eef1f5;padding:8px 0 2px;">
+                    <div style="font-weight:600;font-size:13.5px;color:var(--el-darkblue);">@slot.Title</div>
+                    <div style="margin:2px 0 4px;">
+                        @if (existing is not null)
+                        {
+                            <a href="/session-slides/@slot.SessionId/@(isFinal ? "final" : "preview")/download" style="font-size:13px;">
+                                📄 @CommunityHub.Core.Integrations.Graphics.SpeakerPresentationService.DisplayName(existing)
+                            </a>
+                        }
+                        else
+                        {
+                            <span style="color:#9ca3af;font-size:13px;">not uploaded yet</span>
+                        }
+                    </div>
+                    @* §421 — a 1 GB PPTX can take minutes and the page used to give NO feedback, so
+                       the natural reaction is to press again and start a second upload of the same
+                       file. PROGRESSIVE ENHANCEMENT (§21): the form posts normally with JavaScript
+                       off; the script only relabels and disables the button. *@
+                    <form method="post" asp-page-handler="UploadPresentation" enctype="multipart/form-data"
+                          onsubmit="var b=this.querySelector('button[type=submit]');
+                                    if(b){b.disabled=true;b.style.opacity='0.75';
+                                          b.innerHTML='<span class=&quot;ceh-spin&quot;></span> Uploading… please keep this page open';}
+                                    return true;"
+                          style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:4px;">
+                        <input type="hidden" name="kind" value="@(isFinal ? "final" : "preview")" />
+                        <input type="hidden" name="sessionId" value="@slot.SessionId" />
+                        <input type="file" name="file" accept=".pdf,.pptx,.zip" required
+                               style="font-size:13px;max-width:100%;" />
+                        <button type="submit" class="task-act task-act--primary">
+                            @(existing is not null ? "Upload a new version" : "Upload")
+                        </button>
+                    </form>
+                </div>
+            }
+        }
+    </div>
+}

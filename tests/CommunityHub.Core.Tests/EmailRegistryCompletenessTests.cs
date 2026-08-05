@@ -187,6 +187,12 @@ public sealed class EmailRegistryCompletenessTests
             "calendar-invite",         // CalendarInviteEmailService
             "calendar-dinner",         // CalendarInviteEmailService (dinner mailKey)
             "hotel-calendar-selfsend", // CalendarInviteEmailService (hotel self-send mailKey)
+            // §779 — the send site was READ before this line was added, per the ⚠ above:
+            // SignalFormService.SendLinksEmailAsync passes `RingExempt: true`, so the registry moved
+            // to match the code and not the other way round. Same class as the two calendar
+            // self-sends: the participant pressed the button and is waiting for the mail — on a
+            // phone they are about to pick up, which is the whole reason the mail exists.
+            "signal-join-links",       // SignalFormService ("email me the join links")
             "some-speaker-prealert",   // SoMeDispatchService
             "some-published",          // SoMeDispatchService
             // §707.27 F — registered read-only for visibility on 2026-07-30. Each send site was READ

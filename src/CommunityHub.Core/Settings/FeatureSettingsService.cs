@@ -29,7 +29,10 @@ public sealed record FeatureState(
     FeatureDescriptor Descriptor, bool Enabled, bool IsPersisted, Ring ReleasedToRing,
     Ring? OverrideRing, FeatureGroup EffectiveGroup, Ring GroupRing,
     // §514 — the outbound-email master ring, so the page can tell when it overrules this one.
-    Ring? TransportRing = null)
+    Ring? TransportRing = null,
+    // §742 — the operator's stored "send this feature's notice to" address, or null when unset
+    // (⇒ the built-in ops mailbox). Only meaningful when Descriptor.SendsOpsNotice.
+    string? NotificationRecipientEmail = null)
 {
     public string Key => Descriptor.Key;
     public bool IsAdvanced => Descriptor.IsAdvanced;
@@ -100,7 +103,9 @@ public sealed class FeatureSettingsService
             .Where(f => f.EventId == eventId)
             .ToDictionaryAsync(
                 f => f.FeatureKey,
-                f => new { f.Enabled, f.ReleasedToRingOverride, f.GroupOverride }, ct);
+                // §742 — NotificationRecipientEmail joins the projection so the page can STATE
+                // where each notice goes without a second query per row.
+                f => new { f.Enabled, f.ReleasedToRingOverride, f.GroupOverride, f.NotificationRecipientEmail }, ct);
 
         var groupRings = await GetGroupRingMapAsync(eventId, ct);
 
@@ -141,7 +146,9 @@ public sealed class FeatureSettingsService
                 return new FeatureState(d, enabled, IsPersisted: has,
                     ReleasedToRing: effective, OverrideRing: overrideRing,
                     EffectiveGroup: effGroup, GroupRing: groupRing,
-                    TransportRing: transportRing);
+                    TransportRing: transportRing,
+                    // §742 — so the page can STATE where this feature's notice goes.
+                    NotificationRecipientEmail: row?.NotificationRecipientEmail);
             })
             .ToList();
     }
@@ -322,6 +329,37 @@ public sealed class FeatureSettingsService
         row.GroupOverride = group == descriptor.Group ? null : group;
         Stamp(row, byEmail);
         await _db.SaveChangesAsync(ct);
+    }
+
+    /// <summary>
+    /// §742 — set WHERE this feature's ops notice is e-mailed. Blank/null CLEARS it, restoring the
+    /// built-in ops mailbox. Returns false when the feature does not send a notice at all.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-07-31: <i>"i need to be able to control where it goes and state in
+    /// settings page"</i>, scoped to the Get Started 100% notice.</para>
+    ///
+    /// <para>🔒 Refusing a feature whose descriptor has no <c>SendsOpsNotice</c> is the point: an
+    /// address stored against a switch that mails nobody would be a setting that governs nothing —
+    /// the §326bx defect this page has twice had removed. The caller reports the refusal rather
+    /// than silently accepting a value that would never be read.</para>
+    ///
+    /// <para>The address is trimmed but deliberately NOT otherwise validated here: the page does
+    /// that (an <c>input type="email"</c>), and a service that silently dropped a malformed value
+    /// would leave him looking at a box that appears to have saved nothing.</para>
+    /// </remarks>
+    public async Task<bool> SetNotificationRecipientAsync(
+        int eventId, string featureKey, string? email, string? byEmail,
+        CancellationToken ct = default)
+    {
+        var descriptor = FeatureCatalog.Find(featureKey);
+        if (descriptor is null || !descriptor.SendsOpsNotice) return false;
+
+        var row = await UpsertRowAsync(eventId, featureKey, descriptor, ct);
+        row.NotificationRecipientEmail = string.IsNullOrWhiteSpace(email) ? null : email.Trim();
+        Stamp(row, byEmail);
+        await _db.SaveChangesAsync(ct);
+        return true;
     }
 
     /// <summary>

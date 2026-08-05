@@ -23,7 +23,13 @@ public sealed record CompanyManagerCompany(
     string VatZone = "",
     string ErpCustomerNumber = "",
     // Internal notes / special agreements (CM company "notes" field).
-    string Notes = "");
+    string Notes = "",
+    // §821 — the customer's PURCHASE-ORDER reference, entered in Company Manager as
+    // `billing_reference` (e.g. "POCUG000347"). It prints on the invoice so the customer's finance
+    // department can match it against their own PO — the usual reason a correct invoice goes unpaid.
+    // A property of the COMPANY, not of an order, so every invoice for that customer carries it
+    // until they change it in CM. Empty when they have not given one.
+    string BillingReference = "");
 
 /// <summary>One user linked to a Company Manager company.</summary>
 public sealed record CompanyManagerUser(
@@ -127,7 +133,10 @@ public sealed class CompanyManagerClient
             Currency: GetString(o, "currency"),
             VatZone: GetString(o, "vat_zone"),
             ErpCustomerNumber: GetString(o, "erp_customer_number"),
-            Notes: GetString(o, "notes"));
+            Notes: GetString(o, "notes"),
+            // §821 — verified against the live payload for company 18 on 2026-08-04:
+            // "billing_reference": "POCUG000347". The retired script read the same key.
+            BillingReference: GetString(o, "billing_reference"));
     }
 
     /// <summary>

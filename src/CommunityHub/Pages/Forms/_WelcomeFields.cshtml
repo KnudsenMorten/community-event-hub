@@ -1,0 +1,39 @@
+@model CommunityHub.Forms.Steps.WelcomeFormModel
+@*
+    §680 — fields-ONLY partial for the WELCOME step (step 1, every role).
+    No <form>, no Prev/Next — the HOST (/Forms/Wizard) owns those. There is nothing to submit:
+    the only action is Continue, which the host already renders.
+
+    The copy is NOT here. It lives in config/welcome/<edition>/<role>.md, derived from the role's
+    welcome e-mail, so the operator can edit it without a code change and the two cannot drift
+    (§660). This partial is the frame around it, nothing more.
+
+    Rendered HTML: the source is trusted, in-repo, operator-authored markdown; participant values
+    ({{firstName}}) are HTML-encoded at substitution time by WelcomeCopyStore.Substitute.
+*@
+
+@if (string.IsNullOrWhiteSpace(Model?.Html))
+{
+    @* Defensive only — a role with no copy is never offered this step. Never a blank card. *@
+    <p class="info">Welcome to the Event Hub. Continue to get started.</p>
+}
+else
+{
+    <div class="ceh-welcome">
+        @Html.Raw(Model!.Html)
+    </div>
+
+    <style>
+        /* Scoped to this step. Mobile-first: everything below is fluid, nothing is fixed-width. */
+        .ceh-welcome { font-size: 15.5px; line-height: 1.6; color: #1f2937; }
+        .ceh-welcome > :first-child { margin-top: 0; }
+        .ceh-welcome > :last-child { margin-bottom: 0; }
+        .ceh-welcome p { margin: 0 0 14px; }
+        /* The "What you will find here" lead-in is a bold paragraph in every role's file. */
+        .ceh-welcome strong { color: var(--el-darkblue); }
+        .ceh-welcome ul { margin: 0 0 14px; padding-left: 22px; }
+        .ceh-welcome li { margin: 0 0 8px; }
+        .ceh-welcome li::marker { color: var(--el-blue, #008BD2); }
+        .ceh-welcome a { color: var(--el-blue, #008BD2); }
+    </style>
+}

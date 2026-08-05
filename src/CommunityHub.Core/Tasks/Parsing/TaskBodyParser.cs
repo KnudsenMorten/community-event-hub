@@ -283,16 +283,24 @@ public static class TaskBodyParser
                     return null;
                 }
                 // 🔒 CLOSED SET, checked at parse time. An embed the row partial does not know how
-                // to render would leave a silent hole where the sponsor expects to do the work —
+                // to render would leave a silent hole where the participant expects to do the work —
                 // worse than a link, because nothing indicates anything is missing.
-                if (!arg.Equals("boothMembers", StringComparison.OrdinalIgnoreCase))
+                //
+                // §708 adds `presentationUpload`: the speaker's preview/final deck upload, moved off
+                // /Speaker and INTO the task (§707.57d — "the control is EMBEDDED IN THE TASK, not a
+                // link out to another page"). _SpeakerTaskRow owns the form and its antiforgery
+                // token; the body only decides placement.
+                if (!TaskEmbedComponents.IsKnown(arg))
                 {
                     diagnostics.Add(new TaskBodyDiagnostic(
                         openLine,
-                        $"unknown embed component '{arg}'. The set is closed: boothMembers."));
+                        $"unknown embed component '{arg}'. The set is closed: "
+                        + $"{string.Join(", ", TaskEmbedComponents.All)}."));
                     return null;
                 }
-                return new TaskEmbed(arg);
+                // Canonical casing, so the marker the renderer emits and the name the row partial
+                // looks for are the same string however the author capitalised it.
+                return new TaskEmbed(TaskEmbedComponents.Canonical(arg)!);
             }
 
             case "decision":

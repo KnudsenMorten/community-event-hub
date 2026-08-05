@@ -21,15 +21,24 @@ public sealed class SurveySummaryService
     private readonly CommunityHubDbContext _db;
     private readonly TimeProvider _clock;
     private readonly ILogger<SurveySummaryService> _log;
+    private readonly Surveys.ISurveyDefinitionSource? _definitions;
 
+    /// <param name="definitions">
+    /// §6.5 — OPTIONAL, so every existing construction and test keeps working. When present, the
+    /// open/closed answer also honours the survey's DERIVED close date (event end + N months).
+    /// Absent ⇒ only the organizer's manual flag applies, which is exactly the behaviour the
+    /// preliminary survey has always had.
+    /// </param>
     public SurveySummaryService(
         CommunityHubDbContext db,
         TimeProvider clock,
-        ILogger<SurveySummaryService> log)
+        ILogger<SurveySummaryService> log,
+        Surveys.ISurveyDefinitionSource? definitions = null)
     {
         _db = db;
         _clock = clock;
         _log = log;
+        _definitions = definitions;
     }
 
     // --- Catalog projection (passed in from the JSON definition) -------------
@@ -162,7 +171,38 @@ public sealed class SurveySummaryService
     {
         var row = await _db.SurveyStates.AsNoTracking()
             .FirstOrDefaultAsync(s => s.SurveySlug == slug, ct);
-        return row?.IsOpen ?? true;
+        if (!(row?.IsOpen ?? true)) return false;
+
+        return !await IsPastAutoCloseAsync(slug, ct);
+    }
+
+    /// <summary>
+    /// §6.5 — has this survey passed its own DERIVED close date (event end + N months)?
+    /// </summary>
+    /// <remarks>
+    /// <para>🔒 <b>The derived date can only ever CLOSE a survey, never re-open one.</b> It is an
+    /// extra gate on top of the organizer's flag, so closing one early still works and stays
+    /// closed — the two controls cannot fight.</para>
+    ///
+    /// <para>⚠️ <b>Every uncertainty answers "not past".</b> No definition source, no definition, no
+    /// close rule, no active event: all of them leave the survey exactly as the organizer set it.
+    /// The alternative is a missing config file silently closing a live survey, which looks to a
+    /// respondent like the event simply stopped caring.</para>
+    /// </remarks>
+    public async Task<bool> IsPastAutoCloseAsync(string slug, CancellationToken ct)
+    {
+        if (_definitions?.TryGet(slug) is not { } def) return false;
+        if (def.ClosesMonthsAfterEventEnd is null) return false;
+
+        var end = await _db.Events.AsNoTracking()
+            .Where(e => e.IsActive)
+            .Select(e => (DateOnly?)e.EndDate)
+            .FirstOrDefaultAsync(ct);
+
+        if (end is null) return false;
+        if (def.AutoCloseAt(end.Value) is not { } closesAt) return false;
+
+        return _clock.GetUtcNow() >= closesAt;
     }
 
     /// <summary>Open/closed state for many slugs in one query (defaults to OPEN).</summary>
@@ -176,6 +216,15 @@ public sealed class SurveySummaryService
         var map = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
         foreach (var slug in set) map[slug] = true; // default open
         foreach (var r in rows) map[r.SurveySlug] = r.IsOpen;
+
+        // 🔒 §6.5 — the SAME derived close date the public page applies. Two answers to "is this
+        // open?" is the §767 failure in miniature: the organizer list would say OPEN about a survey
+        // that turns visitors away, and nobody would know which one to believe.
+        foreach (var slug in set.Where(s => map[s]).ToList())
+        {
+            if (await IsPastAutoCloseAsync(slug, ct)) map[slug] = false;
+        }
+
         return map;
     }
 

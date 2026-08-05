@@ -9,7 +9,9 @@
         : 0;
 }
 
-<details style="border-bottom:2px solid var(--el-blue);padding:18px 0 22px;">
+@* §708.4 — the anchor Home's task links land on. ONE id shape, from
+   ParticipantChecklistBuilder.TaskAnchor, so the link and the row can never disagree. *@
+<details id="task-@Model.Id" style="border-bottom:2px solid var(--el-blue);padding:18px 0 22px;">
     <summary style="font-size:18px;font-weight:700;color:var(--el-darkblue);line-height:1.45;cursor:pointer;">
         @Model.Title
         @if (Model.State == TaskState.Done)
@@ -25,7 +27,45 @@
             <span style="display:inline-block;margin-left:8px;padding:2px 10px;font-size:0.78em;background:#fff3cd;color:#7a5b00;border:1px solid #f0d878;border-radius:9px;vertical-align:middle;font-weight:700;">@Localizer["TaskRow.Due", Model.DueDate?.ToString("d MMM yyyy") ?? ""]</span>
         }
     </summary>
-    @if (!string.IsNullOrWhiteSpace(Model.Description))
+    @{
+        // §708 step 2 — A MIGRATED TASK RENDERS ITS AUTHORED BODY; everything else keeps the legacy
+        // markup path, byte for byte (§684.21's regression gate). The page model pre-rendered the
+        // migrated bodies because :::data directives resolve asynchronously, so the row only has to
+        // pick one of the two.
+        //
+        // 🔒 The branches are mutually exclusive BY THE ROW, not by the body: a migrated row carries
+        // Description = null (§684.14 — rendered prose lives nowhere), so there is no second copy
+        // that could disagree with what is on screen.
+        var renderedBodies = (ViewData["RenderedBodies"] as IReadOnlyDictionary<int, string>)
+            ?? new Dictionary<int, string>();
+        var migratedBody = renderedBodies.TryGetValue(Model.Id, out var body) ? body : null;
+
+        // §707.57d — SPLIT ON THE EMBED MARKER so the real upload control lands exactly where the
+        // BODY put it. The renderer cannot emit the component itself: its form needs an antiforgery
+        // token, which only a Razor tag helper produces. So the body decides placement and the page
+        // owns the form — the same division the sponsor booth-members editor uses.
+        var embedMarker = CommunityHub.Core.Tasks.Rendering.TaskBodyHtmlRenderer.EmbedMarker(
+            CommunityHub.Core.Tasks.Model.TaskEmbedComponents.PresentationUpload);
+        var embedAt = migratedBody?.IndexOf(embedMarker, StringComparison.Ordinal) ?? -1;
+    }
+    @if (migratedBody is not null)
+    {
+        @* Html.Raw is correct here and only here: TaskBodyHtmlRenderer HTML-ENCODES every authored
+           string first and emits only the tags it writes itself (§684.17), which
+           TaskBodyRendererTests pins with its "raw html in authored copy cannot execute" test. The
+           string is renderer output, never author input. *@
+        @if (embedAt >= 0)
+        {
+            <div class="task-body">@Html.Raw(migratedBody[..embedAt])</div>
+            @await Html.PartialAsync("_PresentationUpload", Model)
+            <div class="task-body">@Html.Raw(migratedBody[(embedAt + embedMarker.Length)..])</div>
+        }
+        else
+        {
+            <div class="task-body">@Html.Raw(migratedBody)</div>
+        }
+    }
+    else if (!string.IsNullOrWhiteSpace(Model.Description))
     {
         <p style="margin:8px 0;white-space:pre-line;font-size:15px;">@CommunityHub.Branding.TaskTextLinkifier.Render(Model.Description)</p>
     }
@@ -35,17 +75,29 @@
        an anchor-only selector that never matched a <button>. The pair rendered at different
        weights, sizes and font-families, on every role's task list. *@
     <div class="task-actions">
-        <form method="post" asp-page-handler="Toggle">
-            <input type="hidden" name="taskId" value="@Model.Id" />
-            @if (Model.State == TaskState.Done)
-            {
-                <button type="submit" class="task-act task-act--secondary">@Localizer["TaskRow.Reopen"]</button>
-            }
-            else
-            {
-                <button type="submit" class="task-act task-act--complete">@Localizer["TaskRow.MarkComplete"]</button>
-            }
-        </form>
+        @* 🔥 §707.57d / §602.5 — AN ARTEFACT-BACKED TASK OFFERS NO MANUAL COMPLETE OR REOPEN.
+           Its state follows the deck, so "Mark complete" here is precisely what let a speaker
+           declare "Upload final presentation" done with no file — photographed on PROD, beside
+           /Speaker reading "Final: not uploaded yet". Both buttons disappear by construction
+           (TaskArtefactRules.AllowsManualCompletion excludes Artefact), and the page enforces it
+           server-side too, because hiding a control is not enforcing a rule.
+
+           A FORM-backed logistics task (hotel/dinner/swag/lunch) is excluded for the same reason:
+           its state follows what was actually submitted, and FormTaskReconciler already closes it. *@
+        @if (CommunityHub.Core.Organizer.TaskArtefactRules.AllowsManualCompletion(Model))
+        {
+            <form method="post" asp-page-handler="Toggle">
+                <input type="hidden" name="taskId" value="@Model.Id" />
+                @if (Model.State == TaskState.Done)
+                {
+                    <button type="submit" class="task-act task-act--secondary">@Localizer["TaskRow.Reopen"]</button>
+                }
+                else
+                {
+                    <button type="submit" class="task-act task-act--complete">@Localizer["TaskRow.MarkComplete"]</button>
+                }
+            </form>
+        }
         @* §315 (operator 2026-07-24): the same "Add reminder to calendar" the Home
            pending-tasks table offers — dated open tasks only (SIBLING form, never nested). *@
         @if (Model.State != TaskState.Done && Model.DueDate is not null)
@@ -58,7 +110,40 @@
             </form>
         }
     </div>
-    @* §677.2 — the note sits under the row, not inline with the buttons. *@
+    @* §677.2 — notes go UNDER the action row, never inline with the buttons.
+       §708 — and a DERIVED task says so, in the place the sponsor row says it: beside the control
+       that will actually close it. Without this line a task with no "Mark complete" reads as
+       broken rather than as automatic. *@
+    @{
+        var uploadedKinds = (ViewData["UploadedKinds"] as IReadOnlySet<string>)
+            ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var isArtefactBacked = CommunityHub.Core.Organizer.TaskArtefactRules.IsArtefactBacked(Model);
+        var hasArtefact = isArtefactBacked
+            && CommunityHub.Core.Organizer.TaskArtefactRules.HasArtefact(Model, uploadedKinds);
+        var isFormBacked = !string.IsNullOrWhiteSpace(Model.FormStepKey);
+
+        string? actionNote = null;
+        var actionNoteClass = "task-actions__note--pending";
+        if (isArtefactBacked)
+        {
+            actionNote = hasArtefact
+                ? "✓ Received — this task completed itself when your presentation arrived. Uploading again creates a new version."
+                : "This task completes on its own once your presentation is uploaded — there is nothing to tick off.";
+            actionNoteClass = hasArtefact ? "task-actions__note--done" : "task-actions__note--pending";
+        }
+        else if (isFormBacked)
+        {
+            actionNote = Model.State == TaskState.Done
+                ? "✓ Received — you can still change anything up to the deadline."
+                : "This task completes on its own once the form is submitted — there is nothing to tick off.";
+            actionNoteClass = Model.State == TaskState.Done
+                ? "task-actions__note--done" : "task-actions__note--pending";
+        }
+    }
+    @if (!string.IsNullOrEmpty(actionNote))
+    {
+        <div class="task-actions__note @actionNoteClass">@actionNote</div>
+    }
     @if (Model.State != TaskState.Done)
     {
         <div class="task-actions__note task-actions__note--muted">@Localizer["TaskRow.CompleteBeforeDue"]</div>

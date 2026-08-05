@@ -32,20 +32,18 @@ public sealed class SessionizeImportJob
     private readonly CommunityHubDbContext _db;
     private readonly FeatureGateService _gate;
     private readonly IAuditTrail _audit;
-    private readonly CommunityHub.Core.Organizer.SpeakerApprovalService _approval;
-    private readonly CommunityHub.Core.Email.EngineAlertSender _alerts;
-    private readonly Microsoft.Extensions.Configuration.IConfiguration _config;
     private readonly ILogger<SessionizeImportJob> _log;
 
+    // ⚰️ §879 — `SpeakerApprovalService`, `EngineAlertSender` and `IConfiguration` were injected
+    // ONLY to build and send the §304 pending-speaker mail, which SpeakersHeldJob now owns. Left
+    // in place they would be a dependency nobody could explain, and the next reader would assume
+    // this job still mails.
     public SessionizeImportJob(
         SessionizeApiImportService service,
         SessionizeApiOptions options,
         CommunityHubDbContext db,
         FeatureGateService gate,
         IAuditTrail audit,
-        CommunityHub.Core.Organizer.SpeakerApprovalService approval,
-        CommunityHub.Core.Email.EngineAlertSender alerts,
-        Microsoft.Extensions.Configuration.IConfiguration config,
         ILogger<SessionizeImportJob> log)
     {
         _service = service;
@@ -53,13 +51,25 @@ public sealed class SessionizeImportJob
         _db = db;
         _gate = gate;
         _audit = audit;
-        _approval = approval;
-        _alerts = alerts;
-        _config = config;
         _log = log;
     }
 
-    /// <summary>Hourly, at the top of every hour UTC (matches scheduledJobs.sessionizeImport cron).</summary>
+    /// <summary>
+    /// A BASE TICK, not the cadence — the real frequency is the operator-editable
+    /// <c>JobRunState.MinIntervalMinutes</c>, defaulting to <c>JobCatalog.DefaultIntervalMinutes</c>
+    /// and enforced centrally by <c>JobsPauseMiddleware</c>.
+    /// </summary>
+    /// <remarks>
+    /// §825 — that default is now <b>60</b> (operator 2026-08-04: <i>"the queue functionality and
+    /// notification mail for pending speakers must run every 1 hr"</i>). This job both drains the
+    /// CEH→Zoho hand-entry queue and sends the pending-speaker notice, and at ten minutes it produced
+    /// five notices in half an hour all saying the same thing (measured 3 Aug: 21:06, 21:15, 21:20,
+    /// 21:30, 21:30) — the pattern that trains someone to stop reading the Action queue.
+    ///
+    /// <para>🔒 <b>The cron stays a 5-minute tick on purpose.</b> Making it hourly TOO would stack an
+    /// hourly tick on an hourly throttle, and a single missed or slightly-early tick then costs a
+    /// whole hour instead of five minutes. The tick is cheap; the throttle is the cadence.</para>
+    /// </remarks>
     [Function("SessionizeImportJob")]
     public async Task Run(
         [TimerTrigger("0 */5 * * * *")] TimerInfo timer,
@@ -120,34 +130,20 @@ public sealed class SessionizeImportJob
                 $"Sessionize import: {result.Fetched} fetched, {result.Created} created, "
                 + $"{result.Updated} updated, {result.Skipped} skipped", ct);
 
-        // §304 (operator 2026-07-24): NEW speakers arrive Ring 3 / inactive /
-        // uncategorized (fail-closed) and are HELD from the Zoho flow — mail info@
-        // IMMEDIATELY with the pending list + the admin link so the organizer can set
-        // category + ring (Save activates) and the speaker "flows to zoho fast".
-        // Fires only when this pass CREATED someone (never on idle hourly pulls).
-        if (result.Created > 0)
-        {
-            try
-            {
-                var pending = await _approval.PendingAsync(activeEventId.Value, ct);
-                var domain = _config["Hub:CustomDomain"];
-                var baseUrl = string.IsNullOrWhiteSpace(domain)
-                    ? "https://eldk27.eventhub.expertslive.dk" : $"https://{domain}";
-                var html = CommunityHub.Core.Organizer.SpeakerApprovalService
-                    .BuildPendingMailHtml(pending, baseUrl);
-                if (html is not null)
-                {
-                    await _alerts.AlertAsync(
-                        $"ACTION: {pending.Speakers.Count} pending speaker(s) need approval for the Zoho flow [ELDK27]",
-                        html, ct, throttleKey: null,
-                        recipient: CommunityHub.Core.Email.ZohoChangeNotifier.Recipient);
-                }
-            }
-            catch (Exception ex)
-            {
-                _log.LogWarning(ex, "SessionizeImportJob: pending-speaker mail failed.");
-            }
-        }
+        // ⚰️ §879 — THE §304 PENDING-SPEAKER MAIL NO LONGER GOES FROM HERE. `SpeakersHeldJob` owns
+        // it, runs every 10 minutes, and mails the SAME body (the §877 approve-all buttons included
+        // — it calls the same `SpeakerApprovalService.BuildPendingMailHtml`).
+        //
+        // 🔒 WHY IT HAD TO MOVE RATHER THAN COEXIST. That job speaks once per CHANGE, keyed on a
+        // durable hash of the held set. A second sender here would have mailed on the import AND
+        // again on the job's next pass, because the import does not (and should not) know the job's
+        // fingerprint. §765 learned the same lesson from the other side: with two callers, the one
+        // whose cadence the operator can SEE is not the one deciding.
+        //
+        // ⚠️ The cost is a delay of at most ten minutes on a brand-new import — which is exactly the
+        // ten minutes he asked for (2026-08-05: *"i need that to run every 10 min and be notified
+        // after 10 min"*), and in exchange a held speaker is now reported every ten minutes for as
+        // long as they are held, not only in the pass that happened to create them.
 
         if (result.Sessions is { } sx)
         {

@@ -1,0 +1,41 @@
+@model IReadOnlyList<CommunityHub.Core.Integrations.SoMeAnnouncement>
+
+@* §837/§838 — one renderer for a list of announcements, shared by the sponsor and speaker pages.
+   Deliberately shared: two copies of "how a post is previewed" would drift, and the copy that
+   drifted would be the one an external audience reads. *@
+
+@if (Model.Count == 0)
+{
+    <p class="muted">Nothing scheduled here yet.</p>
+}
+else
+{
+    @foreach (var post in Model)
+    {
+        <div style="border-left:3px solid #ddd;padding:8px 0 8px 12px;margin-bottom:16px;">
+            <div style="display:flex;gap:8px;align-items:baseline;flex-wrap:wrap;">
+                @* §844.5 — Danish local time, Danish date order. Storage stays UTC. *@
+                <strong>@CommunityHub.Core.Integrations.SoMeDisplayTime.DayHeading(post.ScheduledAtUtc)</strong>
+                <span class="muted">@CommunityHub.Core.Integrations.SoMeDisplayTime.Time(post.ScheduledAtUtc)</span>
+                <span class="set-tag opt">@post.KindLabel</span>
+                @if (post.IsPublished)
+                {
+                    <span class="set-tag on">published</span>
+                }
+            </div>
+
+            <div style="margin-top:6px;white-space:pre-wrap;">@post.PreviewText</div>
+
+            @if (!string.IsNullOrWhiteSpace(post.ImageRef))
+            {
+                <div class="muted" style="margin-top:4px;">🖼 @post.ImageRef</div>
+            }
+
+            @* 🔒 §824.14c — the honest line about tagging. CEH names people in the TEXT; it cannot
+               @-mention an external speaker (no member URN is obtainable) and the sponsor company-id
+               lookup is refused even for our own org. A preview implying a real LinkedIn mention
+               would promise a notification that never arrives. *@
+            <div class="muted" style="margin-top:4px;">@post.MentionLine</div>
+        </div>
+    }
+}

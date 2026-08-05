@@ -121,12 +121,14 @@ public class JobsModel : PageModel
         var job = CommunityHub.Core.Settings.JobCatalog.All
             .FirstOrDefault(d => d.FunctionName == functionName);
 
+        // §878 — the floor is PER JOB now (the webhook drain ticks every minute, everything else
+        // every five), so validate against THIS job's tick rather than a global constant.
         if (job is not null && job.IsIntervalDriven && minutes > 0
-            && minutes < CommunityHub.Core.Settings.JobDescriptor.BaseTickMinutes)
+            && minutes < job.BaseTickMinutes)
         {
             return RedirectToPage(new { msg =
                 $"{Title(functionName)}: {minutes} minute(s) is below the " +
-                $"{CommunityHub.Core.Settings.JobDescriptor.BaseTickMinutes}-minute minimum, so nothing changed — " +
+                $"{job.BaseTickMinutes}-minute minimum, so nothing changed — " +
                 "the host only offers each job a run that often." });
         }
 

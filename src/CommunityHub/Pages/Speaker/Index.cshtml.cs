@@ -238,15 +238,40 @@ public class IndexModel : PageModel
     public DateOnly? PreDayDate { get; private set; }
 
     /// <summary>
+    /// §783.1 — Backstage session id → the 1-based Zoho agenda day, straight out of the mirrored
+    /// agenda (<c>AgendaActivity.DayIndex</c>). Empty when the agenda has not been synced.
+    /// </summary>
+    public IReadOnlyDictionary<string, int> AgendaDayByBackstageId { get; private set; } =
+        new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
     /// The PUBLIC Zoho Backstage session page URL for a session (§52), or null when the
     /// session has no Backstage agenda id — the caller then keeps the internal link.
     /// §326u (operator 2026-07-25, live URL sample): the public deep-link format is
     /// <c>{base}#/agenda?day={n}&amp;lang=en&amp;sessionId={id}</c> — the old
-    /// <c>#/sessions/{id}</c> shape landed on a wrong page. <c>day</c> is the 1-based
-    /// Zoho event day: the pre-day (Master Classes, 9 Feb) is day 1, the main day day 2 —
-    /// derived from the session's (Danish-local) date against the edition's PreDayDate,
-    /// falling back to the Master-Class flag when no date is known. Never fabricated for
-    /// a session with no Backstage id.
+    /// <c>#/sessions/{id}</c> shape landed on a wrong page.
+    /// <para>
+    /// 🔒 <b>§783.1 — <c>day</c> now comes from the MIRRORED AGENDA, not from a derivation.</b>
+    /// Operator 2026-08-03: <i>"View Public session links to wrong url … you can look in the agenda,
+    /// which is stored in CEH and get the day number and zoho backstage session id"</i>.
+    /// <c>AgendaActivity.DayIndex</c> is the literal <c>?day=</c> index the §754 sync pulled the
+    /// activity from, keyed on the same Backstage id this link carries — so the number in the URL is
+    /// Zoho's own answer and cannot disagree with the page it opens.
+    /// </para>
+    /// <para>
+    /// ⚠️ <b>Why the derivation was the wrong tool.</b> It asked "is this session on
+    /// <see cref="Event.PreDayDate"/>?" and answered day 1 or day 2 — which encodes TWO assumptions
+    /// that are not ours to make: that the edition has exactly two agenda days, and that CEH's
+    /// pre-day date agrees with how Zoho numbered them. The edition config already disagrees with
+    /// itself on the second (<c>dates.preDay</c> is 2027-02-08 while <c>crewDays</c> puts the
+    /// master-class pre-day on 2027-02-09), and a wrong <c>day</c> still renders a perfectly valid
+    /// agenda page — just the wrong one, with the session nowhere on it.
+    /// </para>
+    /// <para>
+    /// The derivation is KEPT as the fallback for a session the agenda has no row for (not yet
+    /// published, or the agenda has never synced), so this is strictly better than before and never
+    /// worse. Never fabricated for a session with no Backstage id.
+    /// </para>
     /// </summary>
     public string? BackstagePublicSessionUrl(MySpeakerSession s)
     {
@@ -256,6 +281,23 @@ public class IndexModel : PageModel
             : _zohoOptions.BackstagePublicBaseUrl;
         if (!baseUrl.EndsWith('/')) baseUrl += "/";
 
+        var day = AgendaDayFor(s);
+        return $"{baseUrl}#/agenda?day={day}&lang=en&sessionId={Uri.EscapeDataString(s.BackstageSessionId)}";
+    }
+
+    /// <summary>
+    /// §783.1 — the 1-based Zoho agenda day for a session: the mirrored agenda's own
+    /// <c>DayIndex</c> when it knows the session, else the §326u pre-day derivation.
+    /// </summary>
+    private int AgendaDayFor(MySpeakerSession s)
+    {
+        if (!string.IsNullOrWhiteSpace(s.BackstageSessionId)
+            && AgendaDayByBackstageId.TryGetValue(s.BackstageSessionId, out var mirrored)
+            && mirrored > 0)
+        {
+            return mirrored;
+        }
+
         var sessionDate = s.StartsAt is { } starts
             ? DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(
                 starts, CommunityHub.Core.Integrations.EventTimezone.Tz).DateTime)
@@ -263,8 +305,7 @@ public class IndexModel : PageModel
         var isPreDay = sessionDate is { } d && PreDayDate is { } pre
             ? d == pre
             : s.IsMasterClass;
-        var day = isPreDay ? 1 : 2;
-        return $"{baseUrl}#/agenda?day={day}&lang=en&sessionId={Uri.EscapeDataString(s.BackstageSessionId)}";
+        return isPreDay ? 1 : 2;
     }
 
     /// <summary>One master class this speaker is linked to, with its public logistics + landing links.</summary>
@@ -317,9 +358,9 @@ public class IndexModel : PageModel
         new HashSet<int>();
 
     /// <summary>
-    /// §192d: per session, which evaluation PDFs EXIST (Score / Open-feedback). Drives the
-    /// two per-session download buttons — the Score button always renders, the Open-feedback
-    /// button only when an open-feedback PDF is present for that session.
+    /// §192d: per session, which evaluation PDFs EXIST (Score / Open-feedback). Drives the two
+    /// per-session download buttons — §783.2: EACH renders only when its PDF is actually present
+    /// in the document library, which is the same question the download itself asks.
     /// </summary>
     public IReadOnlyDictionary<int, IReadOnlySet<EvaluationPdfKind>> EvalKinds { get; private set; } =
         new Dictionary<int, IReadOnlySet<EvaluationPdfKind>>();
@@ -368,10 +409,20 @@ public class IndexModel : PageModel
         // Idempotent + no-op when nothing needs changing.
         await _formTaskReconciler.ReconcileAsync(me.EventId, me.ParticipantId, ct);
 
-        // §326u: the edition's pre-day date — drives the Zoho public-agenda ?day= number
-        // (pre-day = Zoho day 1, main day = day 2) for "View public session page".
+        // §326u: the edition's pre-day date — the FALLBACK for the Zoho public-agenda ?day=
+        // number when the mirrored agenda does not know the session (see §783.1 below).
         PreDayDate = await _db.Events.Where(e => e.Id == me.EventId)
             .Select(e => e.PreDayDate).FirstOrDefaultAsync(ct);
+
+        // §783.1 — the ?day= number comes from the MIRRORED AGENDA, which is Zoho's own answer.
+        // Operator 2026-08-03: "you can look in the agenda, which is stored in CEH and get the day
+        // number and zoho backstage session id". AgendaActivity.DayIndex is the literal `?day=`
+        // index the §754 sync pulled the activity from, keyed on the same BackstageSessionId the
+        // link carries — so no derivation can disagree with the page the link opens.
+        AgendaDayByBackstageId = await _db.AgendaActivities
+            .Where(a => a.EventId == me.EventId && a.DayIndex > 0)
+            .Select(a => new { a.BackstageSessionId, a.DayIndex })
+            .ToDictionaryAsync(a => a.BackstageSessionId, a => a.DayIndex, StringComparer.OrdinalIgnoreCase, ct);
 
         // My sessions (own-row scoped server-side) — room/time + question links.
         MySessions = await _sessions.GetMySessionsAsync(

@@ -1,0 +1,148 @@
+@page "/f/{token}"
+@model CommunityHub.Pages.FeedbackModel
+@using CommunityHub.Core.Evaluation
+@{
+    ViewData["Title"] = "Session feedback";
+    var r = Model.Resolution!;
+    var open = r.State == EvaluationQrService.FeedbackState.Open;
+}
+
+@* 🔒 Mobile-first and self-contained: this page is opened on a phone, in a room, on venue wifi,
+   by someone who is about to walk out. Nothing here may depend on a wide viewport. *@
+<div class="card" style="max-width:560px;margin:0 auto;">
+
+    @* 🔑 The session title is shown in EVERY state, including refusals. The brief wants an attendee
+       who scanned the WRONG code to notice before submitting — and that is just as true when the
+       answer is "closed" as when the form is live.
+       §748.4 — NotFound is the ONE state with no session to name (that is what it means), so it
+       gets its own heading instead of an empty <h1>. The refusal text itself is in the switch
+       below with the other three, and the page still returns a real 404. *@
+    @if (r.State == EvaluationQrService.FeedbackState.NotFound)
+    {
+        <h1 style="font-size:1.35rem;margin-bottom:.25rem;">This code doesn&rsquo;t match a session</h1>
+    }
+    else
+    {
+        <h1 style="font-size:1.35rem;margin-bottom:.25rem;">@r.Title</h1>
+    }
+    @if (!string.IsNullOrWhiteSpace(r.Room) || r.Speakers.Count > 0)
+    {
+        <p class="set-deps" style="margin-top:0;">
+            @if (r.Speakers.Count > 0)
+            {
+                <span>@string.Join(", ", r.Speakers)</span>
+            }
+            @if (!string.IsNullOrWhiteSpace(r.Room))
+            {
+                <span> &middot; @r.Room</span>
+            }
+        </p>
+    }
+
+    @if (Model.SubmittedOk)
+    {
+        <div style="text-align:center;padding:24px 0;">
+            @if (Model.SubmittedRating is int sent)
+            {
+                <div style="font-size:2.5rem;line-height:1;color:@FeedbackModel.ColourFor(sent);">&#10003;</div>
+            }
+            <h2 style="margin:.5rem 0;">Thank you</h2>
+            <p>Your feedback has been recorded and goes to the speaker.</p>
+        </div>
+    }
+    else if (!open)
+    {
+        @* 🔒 An honest refusal, per the brief: "A form that appears to work but discards the result
+           is worse than an honest refusal." Each state says something DIFFERENT and true, because
+           "closed" and "not started" send the attendee to different conclusions. *@
+        <div style="padding:20px 0;">
+            @switch (r.State)
+            {
+                case EvaluationQrService.FeedbackState.Closed:
+                    <h2 style="margin-top:0;">Feedback for this session is closed</h2>
+                    <p>The window for rating this session has ended, so this form is no longer
+                       accepting answers. Thank you for scanning &mdash; and sorry you just missed it.</p>
+                    break;
+
+                case EvaluationQrService.FeedbackState.NotOpenYet:
+                    <h2 style="margin-top:0;">Feedback isn&rsquo;t open yet</h2>
+                    <p>This session hasn&rsquo;t started. Scan the same code again once it&rsquo;s
+                       under way and this page will let you rate it.</p>
+                    break;
+
+                case EvaluationQrService.FeedbackState.NotFound:
+                    @* §748.4 — a cancelled session's printed code, or a mis-scan. Say that nothing
+                       was recorded: the attendee's real worry is whether their rating vanished. And
+                       give them the one useful action, since a bad sign on a wall stays bad until
+                       someone is told about it. *@
+                    <p style="margin-top:0;">The sign you scanned may belong to a session that was
+                       cancelled or removed from the programme, or the code may not have scanned
+                       cleanly.</p>
+                    <p><strong>Nothing was recorded.</strong> If the session is running right now,
+                       please mention it to someone on the organiser team &mdash; the code needs
+                       replacing.</p>
+                    break;
+
+                default:
+                    @* NotSynced — an organiser problem (the schedule hasn't been mirrored yet).
+                       Never phrase this as the attendee's fault or ask them to do anything. *@
+                    <h2 style="margin-top:0;">Feedback isn&rsquo;t open yet</h2>
+                    <p>This session isn&rsquo;t accepting feedback at the moment. Please try again
+                       a little later.</p>
+                    break;
+            }
+        </div>
+    }
+    else
+    {
+        <p style="margin-top:1rem;">How was this session?</p>
+
+        @if (!string.IsNullOrWhiteSpace(Model.ErrorMessage))
+        {
+            <p class="error">@Model.ErrorMessage</p>
+        }
+
+        @* data-ceh-loading: guards the double-tap, which is likely here — a phone, one hand, a
+           room emptying. data-ceh-dirty: warns if a comment was typed and never sent. *@
+        <form method="post" data-ceh-loading data-ceh-dirty>
+            @* 🔒 The honeypot. Off-screen rather than display:none — some bots skip hidden inputs
+               but fill positioned ones, and a screen reader is told to ignore it. *@
+            <div style="position:absolute;left:-9999px;" aria-hidden="true">
+                <label for="Website">Leave this empty</label>
+                <input id="Website" asp-for="Website" type="text" tabindex="-1" autocomplete="off" />
+            </div>
+
+            @* Four buttons, highest first — the same order and colours as the physical unit in the
+               room, so the two channels do not feel like different questions. Each SUBMITS on tap:
+               one action, no "choose then send", because the attendee is already standing up. *@
+            <div style="display:flex;flex-direction:column;gap:10px;margin:14px 0;">
+                @foreach (var rating in Model.RatingOrder)
+                {
+                    <button type="submit" name="Rating" value="@rating"
+                            style="display:block;width:100%;padding:16px 14px;border:0;border-radius:10px;
+                                   background:@FeedbackModel.ColourFor(rating);color:#fff;
+                                   font-size:1.05rem;font-weight:600;cursor:pointer;
+                                   min-height:56px;text-align:left;">
+                        @FeedbackModel.LabelFor(rating)
+                    </button>
+                }
+            </div>
+
+            <p style="margin-bottom:.35rem;">
+                <label for="Comment">Anything you&rsquo;d like to tell the speaker? (optional)</label>
+            </p>
+            <textarea id="Comment" asp-for="Comment" rows="3"
+                      maxlength="@EvaluationQrService.MaxFreeTextLength"
+                      @* 🔒 .GetString(..).Value, NOT the indexer — the indexer form crashed every
+                         page that emitted this counter, and a test pins the safe form. *@
+                      data-ceh-counter="@Localizer.GetString("Common.CharCount").Value"
+                      style="width:100%;box-sizing:border-box;"
+                      placeholder="Your comment goes to the speaker and the organizers."></textarea>
+
+            <p class="set-deps" style="margin-top:.5rem;">
+                Anonymous &mdash; we don&rsquo;t record who you are. Tap one of the four buttons
+                above to send; your comment goes with it.
+            </p>
+        </form>
+    }
+</div>

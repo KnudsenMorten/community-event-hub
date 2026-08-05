@@ -75,6 +75,25 @@ public class FeatureSetting
     /// </summary>
     public DateTimeOffset? ActiveFromForBroadRings { get; set; }
 
+    /// <summary>
+    /// §742 — WHERE this feature's ops notice is e-mailed, when it sends one. <c>null</c> ⇒ the
+    /// built-in <c>EngineAlertSender.Recipient</c> (<c>mok@expertslive.dk</c>), so behaviour is
+    /// unchanged until an organizer sets it.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-07-31: <i>"it must go to mok@expertslive.dk and i need to be able to
+    /// control where it goes and state in settings page"</i>, scoped by him to the Get Started
+    /// 100%-completion notice.</para>
+    ///
+    /// <para>🔑 Lives on the FEATURE row because that is the exact grain: the on/off and the
+    /// destination are two halves of one control, per edition. A switch that says it sends but not
+    /// WHERE is the §694/§698 complaint — a control that does not state what it governs.</para>
+    ///
+    /// <para>🔒 Only meaningful where the descriptor sets <c>SendsOpsNotice</c>; the Settings page
+    /// renders the box on those rows ONLY, so the field can never appear where it governs nothing.</para>
+    /// </remarks>
+    public string? NotificationRecipientEmail { get; set; }
+
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
 
     /// <summary>The organizer who last changed this switch (audit; nullable).</summary>

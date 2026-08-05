@@ -44,22 +44,24 @@
         </p>
         <p class="jb-note">
             @* §510 — this paragraph used to explain a throttle. It now explains a frequency,
-               because that is what the box actually is. *@
-            <strong>Runs every N minutes</strong> is the job's real frequency and you can change it
-            right now, with no deploy &mdash; set 10 and it runs every 10 minutes. The smallest
-            value is <strong>5 minutes</strong>, because that is how often the host offers the job
-            a chance to run; anything below the minimum is rejected rather than silently ignored.
-            <br />
-            Jobs that run at a <strong>fixed time</strong> ("every day at 07:20 UTC", "every hour
-            at :00") have no box &mdash; their schedule is anchored to the clock, so it is set in
-            code. Ask and it can be changed with a deploy.
+               because that is what the box actually is.
+               🔴 §878 (operator 2026-08-05: "the whole timer is misunderstood totally") — §875
+               converted 13 more jobs and this prose still described the OLD world, so the page
+               argued against its own controls. When the mechanism changes, this text changes. *@
+            <strong>Runs every N minutes</strong> is the job's real frequency, and you can change it
+            right now with no deploy &mdash; set 10 and it runs every 10 minutes.
+            <strong>This works in BOTH directions</strong>: lower the number and the job runs more
+            often, raise it and it runs less often. The smallest value is
+            <strong>5 minutes</strong>, because that is how often the host offers the job a chance
+            to run &mdash; anything below it is rejected with a message rather than silently
+            ignored.
         </p>
         <p class="jb-note">
-            @* §440 — answer the question this page provoked but never addressed. *@
-            <strong>To make a job run MORE often</strong> the <em>Schedule</em> itself has to
-            change, and that lives in code &mdash; deployed with the app, so it can be reviewed and
-            rolled back. Nothing on this page can speed a job up, so ask for a change rather than
-            hunting for a control that is not here.
+            @* §869.3 — say WHY, never "set in code". The reason lives on each row (FixedTimeWhy). *@
+            A few jobs show <strong>fixed time</strong> and no box, because an interval genuinely
+            cannot express their schedule &mdash; a daily mail goes out at a chosen hour, and an
+            invoice run has to land after the order sync. <strong>Each of those rows says why</strong>,
+            in its own words. If you want one of them changed anyway, ask: it is a code change.
         </p>
         @* 🔒 §707.13 — hide switched-off jobs by default (operator 2026-07-30: "it disturbs my eye
            that the first one is off"). A switched-off job does nothing, so it is noise at the top
@@ -202,20 +204,18 @@
                                30" box. Two adjacent columns disagreeing about frequency is the §509
                                complaint itself, so state the EFFECTIVE cadence here and demote the
                                tick to a footnote. *@
+                            @* 🔒 §878 (operator 2026-08-05: "I dont care about the text of how
+                               often it runs as it is clear with the field and you can remove the
+                               text") — the frequency is stated ONCE, by the field. This column
+                               used to repeat it in words and add a cron footnote, which is the
+                               duplication he asked to remove. *@
                             @if (r.Job.IsIntervalDriven)
                             {
                                 <text>Every @r.EffectiveIntervalMinutes minutes</text>
-                                <div class="jb-what" style="opacity:.75;">
-                                    set here &rarr; &middot; checked every
-                                    @CommunityHub.Core.Settings.JobDescriptor.BaseTickMinutes min
-                                </div>
                             }
                             else
                             {
-                                @CommunityHub.Pages.Organizer.JobsModel.DescribeCron(r.Job.Cron)
-                                <div class="jb-what" style="opacity:.75;">
-                                    <code>@r.Job.Cron</code> &middot; set in code
-                                </div>
+                                <span class="jb-what">Manual only</span>
                             }
                         </td>
                         <td>
@@ -281,24 +281,29 @@
                             @* §510 — the box only appears where it can actually do something. On a
                                clock-anchored job ("every day at 07:20 UTC") there is nothing to set,
                                and showing an input that silently does nothing WAS the §509 bug. *@
+                            @* 🔒 §878 — EVERY TIMER JOB HAS THIS BOX. He marked the one row without
+                               it as WRONG and the boxed rows as CORRECT: "make all background jobs
+                               consistent". The only row without a box is the manual-only pilot,
+                               which has no timer at all — a different statement, not a refusal.
+                               The floor is PER JOB now (the webhook drain ticks every minute). *@
                             @if (r.Job.IsIntervalDriven)
                             {
                                 <form method="post" asp-page-handler="SetInterval" style="display:flex;gap:6px;justify-content:flex-end;align-items:center;">
                                     <input type="hidden" name="functionName" value="@r.Job.FunctionName" />
                                     <input type="number" name="minutes"
-                                           min="@CommunityHub.Core.Settings.JobDescriptor.BaseTickMinutes" max="10080"
-                                           step="@CommunityHub.Core.Settings.JobDescriptor.BaseTickMinutes"
+                                           min="@r.Job.BaseTickMinutes" max="10080"
+                                           step="@r.Job.BaseTickMinutes"
                                            value="@(r.MinIntervalMinutes > 0 ? r.MinIntervalMinutes : r.Job.DefaultIntervalMinutes)"
                                            aria-label="How often @r.Job.Title runs, in minutes" />
                                     <button type="submit" class="set-btn">Set</button>
                                 </form>
                                 <div class="jb-what" style="text-align:right;margin-top:2px;">
-                                    minutes &middot; min @CommunityHub.Core.Settings.JobDescriptor.BaseTickMinutes
+                                    minutes &middot; min @r.Job.BaseTickMinutes
                                 </div>
                             }
                             else
                             {
-                                <span class="jb-what">fixed time &mdash; set in code</span>
+                                <span class="jb-what">no timer &mdash; use Run now</span>
                             }
                         </td>
                     </tr>

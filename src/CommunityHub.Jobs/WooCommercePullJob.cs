@@ -55,7 +55,9 @@ public sealed class WooCommercePullJob
     /// </summary>
     [Function("WooCommercePullJob")]
     public async Task Run(
-        [TimerTrigger("0 */15 * * * *")] TimerInfo timer,
+        // §869.3 — BASE TICK ONLY. The real cadence is the operator's §510 interval on the Jobs
+        // page (JobCatalog default 15), enforced in JobsPauseMiddleware.
+        [TimerTrigger("0 */5 * * * *")] TimerInfo timer,
         CancellationToken ct)
     {
         // GATE (REQUIREMENTS §23): the sponsor-order pull is an advanced feature,
@@ -176,7 +178,9 @@ public sealed class WooCommercePullJob
             + $"<li><b>{pr.ExhibitorsCreated}</b> exhibitor(s) created, {pr.ExhibitorsRequested} request(s), {pr.ExhibitorsLinked} linked</li></ul>"
             + (items.Length > 0 ? $"<p><b>Records:</b></p><ul>{items}</ul>" : "");
         // No throttle: creation fires once per record, so this never floods.
-        await _alerts.AlertAsync($"New sponsor/exhibitor records created in Zoho ({label}) [ELDK27]", html, ct);
+        // §752.9 — DEV-silent: on DEV these are test orders being provisioned into a sandbox.
+        await _alerts.AlertAsync($"New sponsor/exhibitor records created in Zoho ({label}) [ELDK27]",
+            html, ct, devSilent: true);
     }
 
     /// <summary>Email the developer the list of webshop sponsors/exhibitors that are NOT in
@@ -198,7 +202,11 @@ public sealed class WooCommercePullJob
             + "for the exact Zoho response body.</p>";
         await _alerts.AlertAsync(
             $"Sponsor/exhibitor NOT in Zoho — {pr.Skipped} need attention ({label}) [ELDK27]",
-            html, ct, throttleKey: $"sponsor-drift:{eventId}");
+            // §752.9 — DEV-silent. Drift against a Zoho sandbox full of test orders is the normal
+            // state of DEV, not news. 🔒 The `Sponsor→Zoho provision FAILED` alert in the caller is
+            // deliberately NOT flagged: it fires when the engine THREW, and a throwing engine stays
+            // loud in both environments.
+            html, ct, throttleKey: $"sponsor-drift:{eventId}", devSilent: true);
     }
 
     /// <summary>Human label for an event in engine/ops emails — the edition Code

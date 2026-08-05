@@ -160,18 +160,15 @@ public sealed class SpeakerQuestionDigestService
             .FirstOrDefaultAsync(x => x.Id == digest.ParticipantId && x.EventId == eventId, ct);
         if (p is null || string.IsNullOrWhiteSpace(p.Email)) return false;
 
-        // RING GATE (§23 progressive rollout): when the ring-aware gate is wired,
-        // a speaker only receives the digest when their EFFECTIVE ring is at or
-        // below the released-to ring of this feature. A speaker still in a later
-        // (higher) ring than the rollout has reached is skipped — the SAME rule the
-        // GUI applies, so the scheduler never mails out-of-ring recipients.
-        if (_gate is not null && _rings is not null)
+        // 🔒 §724 — the FEATURE RING no longer gates this send; only its ON/OFF does.
+        // Same leftover as WelcomeEmailService: §707.6 removed the feature-ring clamp from the
+        // transport, and this second enforcement point was missed, so the digest's audience was
+        // still MIN(feature ring, mail ring) while every other mail was governed by its own ring.
+        // Operator 2026-07-31: *"we now control all on the actual email templates"*.
+        // The audience is now `speaker-question-digest`'s own (mail × role) ring, in BrevoEmailSender.
+        if (_gate is not null && !await _gate.IsFeatureEnabledAsync(FeatureKey, eventId, ct))
         {
-            var effectiveRing = await _rings.GetEffectiveRingAsync(p.Id, ct);
-            if (!await _gate.IsFeatureActiveForRingAsync(FeatureKey, eventId, effectiveRing, ct))
-            {
-                return false;
-            }
+            return false;
         }
 
         // §246 WEEKLY cadence: skip any speaker whose LAST digest (any fingerprint)

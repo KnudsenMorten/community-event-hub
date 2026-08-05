@@ -259,7 +259,12 @@ public sealed class SpeakerDetailsSaveDedupeTests
         await model.OnPostSaveAsync(default);
 
         var m = Assert.Single(email.Messages);            // exactly ONE mail, not two
-        Assert.Equal(ZohoChangeNotifier.Recipient, m.To);
+        // §736 (operator 2026-07-31: "only alert mails goes to mok@expertslive.dk") — a
+        // publish/delete notice is a JOB anyone can pick up, not an alert, so it goes to the shared
+        // ops inbox. 🔑 The comment at the top of this test already said "info@expertslive.dk gets
+        // ONE mail" — that was the 2026-07-24 intent; §493 later moved the CONSTANT to mok@ and left
+        // the comment stale. Assertion and comment agree again.
+        Assert.Equal(ZohoChangeNotifier.ActionableRecipient, m.To);
         Assert.Contains("ACTION NEEDED", m.Html);
         Assert.Contains("bs-77", m.Html);                 // the existing Backstage speaker id
         // §302: the mail speaks in ZOHO GUI field names — the bio is "Description" in

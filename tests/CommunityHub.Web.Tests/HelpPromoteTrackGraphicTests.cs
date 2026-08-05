@@ -49,7 +49,7 @@ public sealed class HelpPromoteTrackGraphicTests
 
     private static GraphicsService Graphics(CommunityHubDbContext db, ISharePointFileStore store) =>
         new(db, new GraphicCompositor(), store, new NullFetcher(), new DraftOnlySocialShareGateway(),
-            Options.Create(new GraphicsSharePointOptions()));
+            Options.Create(new GraphicsSharePointOptions()), TestDocLibrary.Resolver());
 
     private static SpeakerLinkedInPublishService Publish(CommunityHubDbContext db, GraphicsService graphics)
     {

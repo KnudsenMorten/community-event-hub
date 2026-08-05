@@ -35,6 +35,9 @@ public class WelcomeModel : PageModel
 
     private readonly CommunityHub.Core.Settings.FeatureGateService _gate;
     private readonly CommunityHub.Core.Settings.RingResolver _rings;
+    // §724 — the MAIL's own ring is now what decides the audience, so the monitor reads it from
+    // the same service the transport does. Optional + last so existing construction still compiles.
+    private readonly EmailTemplateRingService? _templateRings;
 
     public WelcomeModel(
         CommunityHubDbContext db,
@@ -42,7 +45,8 @@ public class WelcomeModel : PageModel
         SponsorRecipientResolver recipients,
         SponsorWelcomeEmailService welcome,
         CommunityHub.Core.Settings.FeatureGateService gate,
-        CommunityHub.Core.Settings.RingResolver rings)
+        CommunityHub.Core.Settings.RingResolver rings,
+        EmailTemplateRingService? templateRings = null)
     {
         _db = db;
         _participant = participant;
@@ -50,6 +54,7 @@ public class WelcomeModel : PageModel
         _welcome = welcome;
         _gate = gate;
         _rings = rings;
+        _templateRings = templateRings;
     }
 
     public bool AccessDenied { get; private set; }
@@ -219,16 +224,27 @@ public class WelcomeModel : PageModel
                 .ToListAsync(ct))
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-        // GATE 2 — the per-recipient ring, evaluated with the SAME call WelcomeEmailService
+        // GATE 2 — the per-recipient ring, evaluated with the SAME rule WelcomeEmailService
         // uses, so this column can never disagree with what the job will actually do.
+        //
+        // 🔒 §724 — that rule CHANGED, so this had to change with it. The feature ring no longer
+        // gates a welcome; the audience is the MAIL's own (mail × role) ring. Left as it was, this
+        // monitor would have kept reporting "out of ring" from a number nothing consults any more —
+        // a page confidently wrong about the one thing it exists to answer, which is the §326bx
+        // defect this page was built to end.
         var outOfRing = new HashSet<int>();
+        var sponsorWelcomeKey =
+            Core.Email.WelcomeVariants.TemplateKeyFor(ParticipantRole.Sponsor) ?? "welcome";
+        CommunityHub.Core.Settings.Ring? sponsorMailRing = _templateRings is not null
+            ? await _templateRings.GetEffectiveRingAsync(
+                eventId, sponsorWelcomeKey, ct, ParticipantRole.Sponsor)
+            : null;
+
         foreach (var c in sponsors.Where(p => p.IsEventCoordinator && p.IsActive))
         {
-            if (!await _gate.IsFeatureActiveForParticipantAsync(
-                    "welcome-email", eventId, c.Id, _rings, ct))
-            {
-                outOfRing.Add(c.Id);
-            }
+            if (sponsorMailRing is not { } mailRing) break;   // ring service unwired (tests) ⇒ no claim
+            var theirs = await _rings.GetEffectiveRingAsync(c.Id, ct);
+            if (!CommunityHub.Core.Settings.Rings.IsActiveForRing(theirs, mailRing)) outOfRing.Add(c.Id);
         }
 
         // Welcome ledger for the edition (one row per welcomed recipient).

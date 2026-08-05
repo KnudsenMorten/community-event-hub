@@ -209,7 +209,18 @@ public sealed class ParticipantSearchService
         if (!string.IsNullOrWhiteSpace(request.Text))
         {
             var s = request.Text;
-            query = query.Where(p => p.FullName.Contains(s) || p.Email.Contains(s));
+
+            // §769.10 — SEARCH BY CEH ID (operator 2026-08-02: "i need to be able to search for
+            // id"). The id is what names files in the document library now
+            // (speaker-photo-{id}, volunteer-photo-{id}), so "who is 73?" is a question the grid
+            // has to be able to answer.
+            //
+            // 🔑 A digits-only term matches the id EXACTLY **and** still matches name/email: ids
+            // occur inside phone numbers and addresses, so an exact-only search would hide the
+            // person somebody was actually looking for.
+            query = int.TryParse(s, out var id)
+                ? query.Where(p => p.Id == id || p.FullName.Contains(s) || p.Email.Contains(s))
+                : query.Where(p => p.FullName.Contains(s) || p.Email.Contains(s));
         }
 
         return ApplySort(query, request.Sort, request.Descending);
@@ -233,9 +244,14 @@ public sealed class ParticipantSearchService
         var s = text.Trim();
         var take = limit <= 0 ? DefaultGlobalLimit : Math.Min(limit, MaxGlobalLimit);
 
+        // §769.10 — the global "find a person fast" box searches the CEH id too, on the same rule
+        // as the grid: an id hit does not suppress name/email hits.
+        var isId = int.TryParse(s, out var idTerm);
+
         var rows = await _db.Participants
             .Where(p => p.EventId == eventId
-                        && (p.FullName.Contains(s) || p.Email.Contains(s)))
+                        && ((isId && p.Id == idTerm)
+                            || p.FullName.Contains(s) || p.Email.Contains(s)))
             .OrderBy(p => p.FullName).ThenBy(p => p.Id)
             .Take(take)
             .Select(p => new

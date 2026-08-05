@@ -63,16 +63,20 @@ public sealed class SponsorWizardService
     private readonly CompanyManagerOptions _cmOptions;
     private readonly EconomicContactAdminService _erpContacts;
     private readonly ILogger<SponsorWizardService> _log;
+    private readonly Core.Content.WelcomeCopyStore? _welcome;
 
     public SponsorWizardService(
         CommunityHubDbContext db, CompanyManagerClient cm, CompanyManagerOptions cmOptions,
-        EconomicContactAdminService erpContacts, ILogger<SponsorWizardService> log)
+        EconomicContactAdminService erpContacts, ILogger<SponsorWizardService> log,
+        // §680 — optional + last, the same pattern the other three wizard services use.
+        Core.Content.WelcomeCopyStore? welcome = null)
     {
         _db = db;
         _cm = cm;
         _cmOptions = cmOptions;
         _erpContacts = erpContacts;
         _log = log;
+        _welcome = welcome;
     }
 
     public async Task<SponsorWizardView?> BuildAsync(
@@ -88,6 +92,17 @@ public sealed class SponsorWizardService
             .FirstOrDefaultAsync(s => s.EventId == eventId && s.SponsorCompanyId == companyId, ct);
 
         var steps = new List<SponsorWizardStep>();
+
+        // 0. §680 — the WELCOME step, first: thank the sponsor contact, introduce the event, and
+        //    name what they will find in the hub. Read-only and always Done, so it can never keep
+        //    a finished sponsor below 100%. The Anchor is the step key rather than a Company
+        //    Details section — see WizardModel.SponsorStepRoute, which maps it to the wizard
+        //    itself because this step has no section to deep-link to.
+        if (_welcome?.Exists(CommunityHub.Core.Domain.ParticipantRole.Sponsor) == true)
+        {
+            steps.Add(new(
+                Core.Content.WelcomeCopyStore.StepKey, Core.Content.WelcomeCopyStore.StepKey, true));
+        }
 
         // 1. Company Details — basic info filled (website or company description).
         var detailsDone = info is not null &&
@@ -144,14 +159,19 @@ public sealed class SponsorWizardService
         //    used as the "Continue" target — rather than wrongly marking it incomplete.
         steps.Add(new("contacts", "contacts", await ContactsDoneAsync(companyId, ct)));
 
-        // 4. Logos & artwork — §297: done only when ALL THREE logos (SoMe + Print + Zoho) are
-        //    uploaded. SoMe + Zoho both persist to LogoRasterPath on SponsorInfo, so the per-kind
-        //    upload audit is the only place all three are distinguishable.
+        // 4. Logos & artwork — §297: done only when BOTH logos (Web + Print) are uploaded. The
+        //    per-kind upload audit is the only place the two are distinguishable, since SponsorInfo
+        //    records raster-vs-vector rather than the kind.
+        //
+        //    §6.7 / §768.14 — this used to require THREE, the third being the retired Zoho logo. A
+        //    historical "zoho" row is deliberately NOT counted: Sponsors/Logo/Web started empty, so
+        //    crediting an old lead-system upload would mark the step done for a sponsor who has no
+        //    current logo on file at all.
         var logoKinds = await _db.SponsorUploadAudits.AsNoTracking()
             .Where(a => a.EventId == eventId && a.SponsorCompanyId == companyId
-                        && (a.Kind == "some" || a.Kind == "print" || a.Kind == "zoho"))
+                        && (a.Kind == "some" || a.Kind == "print"))
             .Select(a => a.Kind).Distinct().ToListAsync(ct);
-        var logoDone = logoKinds.Contains("some") && logoKinds.Contains("print") && logoKinds.Contains("zoho");
+        var logoDone = logoKinds.Contains("some") && logoKinds.Contains("print");
         steps.Add(new("logos", "logos", logoDone));
 
         // 5 + 6. Booth steps — exhibitors only.
@@ -167,9 +187,17 @@ public sealed class SponsorWizardService
         // dated, chased and completable from My Tasks; it just stops gating the wizard.
         if (info?.HasBooth == true)
         {
-            var hasMaterials = await _db.SponsorBoothMaterials
-                .AnyAsync(m => m.EventId == eventId && m.SponsorCompanyId == companyId, ct);
-            steps.Add(new("booth-materials", "booth-materials", hasMaterials));
+            // 🔒 §732 — ALWAYS DONE, because the step is OPTIONAL. Operator 2026-07-31: *"same with
+            // this task - which is also optional but it keeps coming back to it as noncompleted"*.
+            //
+            // The step's own copy says it plainly — *"No booth materials yet — this is optional, and
+            // you can come back later"* — while `hasMaterials` held the sponsor at 7 of 8 for not
+            // doing the optional thing. Same defect as the Master Class waitlist above it in this
+            // file's sibling service: a step nobody can be REQUIRED to finish must not gate the
+            // progress bar (the §400 deadlines / §680 welcome rule).
+            //
+            // Uploading materials is unaffected — it just stops being an obligation.
+            steps.Add(new("booth-materials", "booth-materials", true));
 
             // §229 — booth check-in: when the team expects to arrive on pre-day. Done once
             // ANY answer is saved (a time slot or the not-participating opt-out).

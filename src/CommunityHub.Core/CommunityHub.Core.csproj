@@ -14,6 +14,14 @@
     <RootNamespace>CommunityHub.Core</RootNamespace>
   </PropertyGroup>
 
+  <!-- §804 — the unit suite may see `internal` members. Added for SponsorZohoSyncService's
+       ManualReportHash: it decides whether a booth video / collateral is ever mailed AT ALL, and
+       there is no Zoho API for either (§804.1), so that stamp is the only delivery guarantee.
+       Testing it directly beats inferring it from a service that needs six fakes to stand up. -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="CommunityHub.Core.Tests" />
+  </ItemGroup>
+
   <ItemGroup>
     <PackageReference Include="Microsoft.EntityFrameworkCore" Version="10.0.9" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="10.0.9" />
@@ -41,6 +49,16 @@
     <PackageReference Include="Microsoft.Extensions.Http" Version="10.0.9" />
     <PackageReference Include="Microsoft.Extensions.Options" Version="10.0.9" />
     <PackageReference Include="ClosedXML" Version="0.102.2" />
+    <!-- §752.5 — the evaluation report renderer. This is the OFFICIAL PDFsharp (MIT), NOT the
+         PdfSharpCore community fork we started on.
+         🔴 The fork had to go because it decodes images through SixLabors.ImageSharp and calls
+         Image.Load(Stream, out IImageFormat) — an overload REMOVED in ImageSharp 3.x. Since this
+         project pins ImageSharp 3.1.12 deliberately (see below), PdfSharpCore could not decode ANY
+         raster image, so the report silently lost its logo. Official PDFsharp 6.x does its own image
+         decoding and takes NO ImageSharp dependency, which removes the conflict outright instead of
+         trading the ImageSharp pin away for it. -->
+    <PackageReference Include="PDFsharp" Version="6.2.1" />
+    <PackageReference Include="QRCoder" Version="1.8.0" />
     <!-- ClosedXML pulls System.IO.Packaging 6.0.0 transitively, which carries a
          known high-severity advisory (NU1903: GHSA-f32c-w444-8ppv /
          GHSA-qj66-m88j-hmgj). Pin a direct reference to the patched, .NET-10-
@@ -65,4 +83,21 @@
     <PackageReference Include="PdfPig" Version="0.1.10" />
   </ItemGroup>
 
+  <!-- §750.7 — the evaluation report's FONTS, embedded in the assembly.
+       PdfSharpCore resolves a font by asking the OS, and an Azure Linux container
+       has NO system fonts: every render threw
+       "System.IO.FileNotFoundException: No Fonts installed on this device!".
+       That is invisible on a Windows dev box and in the test suite, which is why
+       it survived to production. Embedding removes the OS from the path entirely,
+       so the report renders identically everywhere.
+       Open Sans, SIL OFL 1.1 — redistribution permitted; the licence ships beside
+       the files as OFL requires. -->
+  <ItemGroup>
+    <EmbeddedResource Include="Evaluation\Fonts\OpenSans-Regular.ttf" />
+    <EmbeddedResource Include="Evaluation\Fonts\OpenSans-Bold.ttf" />
+    <!-- §750.8 — the event wordmark, on the report he expects people to screenshot. -->
+    <EmbeddedResource Include="Evaluation\Fonts\logo-eldk.png" />
+  </ItemGroup>
+
 </Project>
+

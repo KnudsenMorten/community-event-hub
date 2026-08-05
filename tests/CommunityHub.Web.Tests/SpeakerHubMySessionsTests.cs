@@ -55,7 +55,11 @@ public sealed class SpeakerHubMySessionsTests
             new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme));
     }
 
-    private static IndexModel NewModel(CommunityHubDbContext db, DefaultHttpContext http)
+    private static IndexModel NewModel(
+        CommunityHubDbContext db, DefaultHttpContext http,
+        // §783.2 — the eval-PDF store is now the authority for "is there a file to serve?", so a
+        // test that cares must be able to supply one. Default stays the inert null store.
+        CommunityHub.Core.Integrations.Graphics.ISharePointFileStore? evalStore = null)
     {
         http.Request.Host = new HostString("ceh.example.test");
         var accessor = new HttpCurrentParticipantAccessor(new HttpContextAccessorOver(http));
@@ -77,14 +81,14 @@ public sealed class SpeakerHubMySessionsTests
             new CommunityHub.Core.Integrations.Graphics.SessionEvalsQrService(
                 new CommunityHub.Core.Integrations.Graphics.NullSharePointFileStore(),
                 Microsoft.Extensions.Options.Options.Create(
-                    new CommunityHub.Core.Integrations.Graphics.GraphicsSharePointOptions())),
+                    new CommunityHub.Core.Integrations.Graphics.GraphicsSharePointOptions()), TestDocLibrary.Resolver()),
             // §192: eval-PDF service — reads provenance from the DB (no store needed for the
             // "which kinds exist" lookup the speaker page uses).
             new CommunityHub.Core.Integrations.Graphics.SessionEvalPdfService(
-                new CommunityHub.Core.Integrations.Graphics.NullSharePointFileStore(),
+                evalStore ?? new CommunityHub.Core.Integrations.Graphics.NullSharePointFileStore(),
                 Microsoft.Extensions.Options.Options.Create(
                     new CommunityHub.Core.Integrations.Graphics.GraphicsSharePointOptions()),
-                db),
+                db, TestDocLibrary.Resolver()),
             new CommunityHub.Core.Email.CalendarInviteEmailService(
                 db, new NoopEmailSender(),
                 new CommunityHub.Core.Email.EmailContextAccessor(), TimeProvider.System),
@@ -326,17 +330,60 @@ public sealed class SpeakerHubMySessionsTests
         Assert.Null(mine.FallbackDate);
     }
 
-    [Fact]
-    public async Task Eval_kinds_drive_score_always_and_open_feedback_only_when_present()
+    /// <summary>
+    /// §783.2 — a store whose folder contents the test controls, so "is there a file to serve?"
+    /// can actually be asked. Only the members the kinds lookup uses do anything.
+    /// </summary>
+    private sealed class FakeEvalStore(bool canRead, params string[] fileNames)
+        : CommunityHub.Core.Integrations.Graphics.ISharePointFileStore
     {
-        // §192d: the speaker page renders the Score download for every session (always) and
-        // the Open-feedback download only for a session that HAS an open-feedback PDF. The
-        // model exposes EvalKinds, the per-session set of uploaded kinds, which drives that.
+        public bool CanRead => canRead;
+        public bool CanStore => false;
+
+        public Task<IReadOnlyList<CommunityHub.Core.Integrations.Graphics.SharePointFileRef>> ListAsync(
+            string relativeFolder, CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<CommunityHub.Core.Integrations.Graphics.SharePointFileRef>>(
+                fileNames.Select(n =>
+                    new CommunityHub.Core.Integrations.Graphics.SharePointFileRef(
+                        $"item-{n}", n, $"https://sp.example.test/{n}")).ToList());
+
+        public Task<byte[]?> DownloadAsync(string itemId, CancellationToken ct = default) =>
+            Task.FromResult<byte[]?>(new byte[] { 1 });
+
+        public Task<CommunityHub.Core.Integrations.Graphics.StoredFile> StoreAsync(
+            string relativePath, byte[] content, string contentType, CancellationToken ct = default) =>
+            throw new InvalidOperationException();
+
+        public Task DeleteAsync(string relativePath, CancellationToken ct = default) => Task.CompletedTask;
+
+        public Task<CommunityHub.Core.Integrations.Graphics.StoredFile> UploadToFolderAsync(
+            string relativeFolder, string fileName, byte[] content, string contentType,
+            CancellationToken ct = default) => throw new InvalidOperationException();
+
+        public Task DeleteFromFolderAsync(
+            string relativeFolder, string fileName, CancellationToken ct = default) =>
+            Task.CompletedTask;
+    }
+
+    [Fact]
+    public async Task Eval_buttons_appear_only_when_the_PDF_REALLY_EXISTS_in_the_library()
+    {
+        // 🔄 §783.2 REPLACES `Eval_kinds_drive_score_always_and_open_feedback_only_when_present`,
+        // whose name states the bug: the Score button rendered ALWAYS.
+        //
+        // 🔒 THE OPERATOR HIT THIS IN PRODUCTION (2026-08-03): "Evaluation score button must not be
+        // shown, if the session evaluation has not been released as pdf. Right now clicking the link
+        // takes med to an http 404". The button was driven by SessionEvaluationFiles — the upload
+        // PROVENANCE table — while the download streams from the DocLibrary folder. Two sources of
+        // truth for one question. Verified against PROD SharePoint the same day: the results folder
+        // held ZERO files, so that button could only ever 404.
+        //
+        // The corrected contract: the button asks EXACTLY what the download asks — is the file there?
         using var db = NewDb();
         var s = await SeedAsync(db, aliceSelected: false);
         var aliceSession = await db.Sessions.FirstAsync(x => x.SessionizeId == "s-alice");
 
-        // Only a SCORE file exists for Alice's session (no open feedback).
+        // A provenance row WITHOUT a file behind it — precisely the state that produced the 404.
         db.SessionEvaluationFiles.Add(new SessionEvaluationFile
         {
             EventId = s.EventId, SessionId = aliceSession.Id, Kind = EvaluationPdfKind.Score,
@@ -346,12 +393,46 @@ public sealed class SpeakerHubMySessionsTests
         await db.SaveChangesAsync();
 
         var http = new DefaultHttpContext { User = Session(s.Alice) };
-        var model = NewModel(db, http);
+        var orphaned = NewModel(db, http, new FakeEvalStore(canRead: true));
+        await orphaned.OnGetAsync(default);
+
+        Assert.False(orphaned.EvalKinds.ContainsKey(aliceSession.Id));   // ⇒ no button, no 404
+
+        // Now the SCORE file is genuinely in the folder — and only the score.
+        var http2 = new DefaultHttpContext { User = Session(s.Alice) };
+        var present = NewModel(db, http2, new FakeEvalStore(
+            canRead: true,
+            CommunityHub.Core.Integrations.Graphics.SessionEvalPdfService.FileNameFor(
+                aliceSession.Id, EvaluationPdfKind.Score)));
+        await present.OnGetAsync(default);
+
+        Assert.True(present.EvalKinds.TryGetValue(aliceSession.Id, out var kinds));
+        Assert.Contains(EvaluationPdfKind.Score, kinds!);
+        Assert.DoesNotContain(EvaluationPdfKind.Open, kinds!);
+    }
+
+    [Fact]
+    public async Task No_readable_library_means_no_eval_buttons_at_all()
+    {
+        // §783.2 — nothing can be served, so nothing may be offered. The old DB-driven answer
+        // happily advertised downloads on an edition with no document library wired up.
+        using var db = NewDb();
+        var s = await SeedAsync(db, aliceSelected: false);
+        var aliceSession = await db.Sessions.FirstAsync(x => x.SessionizeId == "s-alice");
+
+        db.SessionEvaluationFiles.Add(new SessionEvaluationFile
+        {
+            EventId = s.EventId, SessionId = aliceSession.Id, Kind = EvaluationPdfKind.Score,
+            UploadedByName = "Org Person", UploadedAt = DateTimeOffset.UtcNow,
+            FileName = $"session-{aliceSession.Id}-score.pdf",
+        });
+        await db.SaveChangesAsync();
+
+        var http = new DefaultHttpContext { User = Session(s.Alice) };
+        var model = NewModel(db, http, new FakeEvalStore(canRead: false));
         await model.OnGetAsync(default);
 
-        Assert.True(model.EvalKinds.TryGetValue(aliceSession.Id, out var kinds));
-        Assert.Contains(EvaluationPdfKind.Score, kinds!);          // score present
-        Assert.DoesNotContain(EvaluationPdfKind.Open, kinds!);     // open-feedback absent → button hidden
+        Assert.Empty(model.EvalKinds);
     }
 
     [Fact]

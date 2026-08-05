@@ -29,7 +29,9 @@
         || key.StartsWith(CommunityHub.Core.Config.AttendeeMasterClassTaskSeeder.MasterClassTaskKey + ":", StringComparison.Ordinal);
 }
 
-<details style="border-bottom:2px solid var(--el-blue);padding:18px 0 22px;">
+@* §708.4 — the anchor Home's task links land on. ONE id shape, from
+   ParticipantChecklistBuilder.TaskAnchor, so the link and the row can never disagree. *@
+<details id="task-@Model.Id" style="border-bottom:2px solid var(--el-blue);padding:18px 0 22px;">
     <summary style="font-size:18px;font-weight:700;color:var(--el-darkblue);line-height:1.45;cursor:pointer;">
         @Model.Title
         @if (Model.State == TaskState.Done)
@@ -45,19 +47,103 @@
             <span style="display:inline-block;margin-left:8px;padding:2px 10px;font-size:0.78em;background:#fff3cd;color:#7a5b00;border:1px solid #f0d878;border-radius:9px;vertical-align:middle;font-weight:700;">@Localizer["TaskRow.Due", Model.DueDate?.ToString("d MMM yyyy") ?? ""]</span>
         }
     </summary>
-    @if (!string.IsNullOrWhiteSpace(Model.Description))
+    @{
+        // §708.11 — a MIGRATED row renders its authored body; everything else keeps the legacy
+        // markup path byte for byte (§684.21's regression gate). Mutually exclusive BY THE ROW:
+        // a migrated row's stored Description is nulled by the seeder (§684.14), so there is no
+        // second copy on screen that could disagree with the body.
+        var renderedBodies = (ViewData["RenderedBodies"] as IReadOnlyDictionary<int, string>)
+            ?? new Dictionary<int, string>();
+        var migratedBody = renderedBodies.TryGetValue(Model.Id, out var body) ? body : null;
+
+        // Where the BODY asked for the form. The renderer cannot emit the form itself — it needs an
+        // antiforgery token, which only a Razor tag helper produces — so the body decides placement
+        // and the page owns the markup. Same split _PresentationUpload uses.
+        var embedMarker = CommunityHub.Core.Tasks.Rendering.TaskBodyHtmlRenderer.EmbedMarker(
+            CommunityHub.Core.Tasks.Model.TaskEmbedComponents.StepForm);
+        var embedAt = migratedBody?.IndexOf(embedMarker, StringComparison.Ordinal) ?? -1;
+    }
+    @if (migratedBody is null && !string.IsNullOrWhiteSpace(Model.Description))
     {
         <p style="margin:8px 0;white-space:pre-line;font-size:15px;">@CommunityHub.Branding.TaskTextLinkifier.Render(Model.Description)</p>
+    }
+    @{
+        // §708.10 — THE FORM, IN THE ROW. Operator 2026-07-30: "yes go with shared tasks page with
+        // forms embedded". The page loaded the step's own handler (the SAME one /Forms/Wizard uses),
+        // so this renders the real fields partial, not a copy of it.
+        var rowForms = ViewData["RowForms"]
+            as IReadOnlyDictionary<int, CommunityHub.Forms.IWizardStepHandler>;
+        var rowForm = rowForms is not null && rowForms.TryGetValue(Model.Id, out var h) ? h : null;
+        var invalidTaskId = ViewData["InvalidTaskId"] as int?;
+
+        // 🔴 §708.10a — RESOLVE THE PARTIAL BY FULL PATH, NEVER BY BARE NAME.
+        //
+        // The handlers' PartialName is mostly a BARE name ("_HotelFields"), and those partials live
+        // in /Pages/Forms/ — beside the WIZARD, which is why a bare name works there. Razor resolves
+        // a bare partial name against the current page's folder, then /Pages/, then /Pages/Shared/.
+        // It never looks in /Pages/Forms/. So from this row (in /Pages/Tasks/) every bare name threw
+        // "The partial view '_HotelFields' was not found" — taking the whole task list down for every
+        // generic role, including organizers.
+        //
+        // Two handlers ALREADY return a full path (/Pages/Speaker/_DetailsFields.cshtml,
+        // /Pages/Volunteer/_AvailabilityFields.cshtml), so both shapes must be supported: pass a path
+        // through untouched, and qualify a bare name to where those partials actually live.
+        // The rule itself lives in WizardStepPartials so a TEST can reach it — Razor markup cannot
+        // be unit-tested, and this is precisely the rule that was wrong in production.
+        var partialPath = rowForm is null
+            ? null
+            : CommunityHub.Forms.WizardStepPartials.PathFor(rowForm.PartialName);
+    }
+    @* The authored body, split at the point it asked for the form. Html.Raw is correct here and
+       only here: TaskBodyHtmlRenderer HTML-ENCODES every authored string and emits only tags it
+       writes itself (§684.17). The string is renderer output, never author input. *@
+    @if (migratedBody is not null && embedAt < 0)
+    {
+        <div class="task-body">@Html.Raw(migratedBody)</div>
+    }
+    else if (migratedBody is not null)
+    {
+        <div class="task-body">@Html.Raw(migratedBody[..embedAt])</div>
+    }
+    @if (rowForm is not null)
+    {
+        @* enctype multipart so a file-bearing step behaves here exactly as it does in the wizard;
+           harmless for the text/radio steps. One form PER ROW, never nested — the antiforgery token
+           comes from the tag helper, which is why the page owns this markup and the renderer cannot
+           emit it (the same split _PresentationUpload uses). *@
+        <form method="post" asp-page-handler="Step" enctype="multipart/form-data"
+              style="margin:10px 0 4px;">
+            <input type="hidden" name="taskId" value="@Model.Id" />
+            @if (invalidTaskId == Model.Id)
+            {
+                <div asp-validation-summary="All" class="ceh-validation-summary"></div>
+            }
+            <partial name="@partialPath" model="@rowForm.Model" />
+            <div class="task-actions" style="margin-top:12px;">
+                <button type="submit" class="task-act task-act--complete">@Localizer["Wizard.Save"]</button>
+            </div>
+        </form>
+    }
+    @if (migratedBody is not null && embedAt >= 0)
+    {
+        <div class="task-body">@Html.Raw(migratedBody[(embedAt + embedMarker.Length)..])</div>
     }
     @* §673 — the SHARED .task-act rhythm, identical to the speaker and sponsor rows, so the
        volunteer / media / event-partner task list matches every other role's. *@
     @if (isDataSignal)
     {
-        @* No manual toggle — the reconciler would revert it. Explain the real path. *@
+        @* No manual toggle — the reconciler would revert it. Explain the real path.
+           §708.10 — and the wording now depends on whether the form is ACTUALLY on this row. The
+           old copy said "use the link above" unconditionally, while the row rendered no link at
+           all: it told the reader to click something that was not there. *@
         <div class="task-actions__note task-actions__note--muted">
             @(Model.State == TaskState.Done
-                ? "Completed automatically from your saved answer — change the answer on its page to reopen it."
-                : "This task completes automatically once you save the matching step — use the link above (or Get started).")
+                ? (rowForm is not null
+                    ? "Completed automatically from your saved answer — change it above to reopen this task."
+                    : "Completed automatically from your saved answer — change the answer on its page to reopen it.")
+                : (rowForm is not null
+                    ? "This task completes on its own once you save the form above — there is nothing to tick off."
+                    : "This task completes automatically once you save the matching step in Get started."))
         </div>
     }
     else

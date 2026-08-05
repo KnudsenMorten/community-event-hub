@@ -31,6 +31,33 @@ public sealed class JobActivityReporter
     public bool Reported { get; private set; }
 
     /// <summary>
+    /// 🔒 §707.42 — true only when the job RAN NORMALLY and found NOTHING TO DO, which is the one
+    /// inactive state worth alerting about. False when a GATE turned the job away.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-07-30, on the *"has now run 300 times in a row WITHOUT DOING ANYTHING"*
+    /// mail: <i>"this is too much info - and not relevant"</i>. He is right, and the flaw is
+    /// structural rather than editorial: the alert fired because a job was skipped, but the reason it
+    /// was skipped is that HE switched the feature off. It reported his own configuration back to him
+    /// as an anomaly and then argued with itself about it — *"If that is deliberate, nothing needs
+    /// doing."* An alert that opens by conceding it may be pointless should not have been sent, and
+    /// one that cannot tell a fault from a setting is one he learns to delete — taking the next real
+    /// one with it.</para>
+    ///
+    /// <para>🔑 The split is semantic, not a threshold tweak: <see cref="ReportInactive"/> means a
+    /// gate said no (a feature is off, no active edition, external writes blocked) — a CHOICE, and
+    /// never news. <see cref="ReportExamined"/> with zero means every gate passed and the DATA did
+    /// not arrive — §545/§585's real case, where nothing is misconfigured and something is wrong.
+    /// Only the second raises the alert.</para>
+    ///
+    /// <para>⚠️ <b>The residual risk, stated rather than hidden:</b> a feature switched off by
+    /// ACCIDENT is now never chased. The Jobs page still shows the inactive reason — a state belongs
+    /// on a page, not in an alert — and the mitigation if he wants one is a periodic "features
+    /// currently OFF" summary, one line per feature, not a mail per job per 100 runs.</para>
+    /// </remarks>
+    public bool InactiveIsDataStarvation { get; private set; }
+
+    /// <summary>
     /// The job ran but deliberately did nothing — a feature switch off, a sync direction that
     /// excludes it, external writes blocked, no active edition. <paramref name="reason"/> is what
     /// the operator will read in the alert, so write it for him, not for a log grep.
@@ -50,6 +77,7 @@ public sealed class JobActivityReporter
     public void ReportWork()
     {
         InactiveReason = null;
+        InactiveIsDataStarvation = false;
         Reported = true;
     }
 
@@ -80,5 +108,9 @@ public sealed class JobActivityReporter
         ReportInactive(
             $"Ran normally but found NO {what} at all — every gate passed, so nothing is switched "
             + "off; the data itself is not arriving.");
+
+        // §707.42 — THIS is the alertable inactive state: nothing is misconfigured and the data
+        // stopped arriving. A gate saying no is a setting; this is a symptom.
+        InactiveIsDataStarvation = true;
     }
 }

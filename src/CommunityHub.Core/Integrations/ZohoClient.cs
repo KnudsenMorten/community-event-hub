@@ -79,10 +79,11 @@ public sealed record BackstageSession(
 
 /// <summary>
 /// The outcome of a Backstage agenda pull (REQUIREMENTS §38e). <see cref="IsAvailable"/>
-/// is false when the live agenda API cannot be read (today: the refresh token lacks the
-/// <c>ZohoBackstage.agenda.READ</c> scope, so get-all-sessions / get-all-halls both 401)
-/// — the engine then no-ops gracefully instead of treating an empty pull as "everything
-/// was deleted". When available, <see cref="Sessions"/> is the current agenda.
+/// is false when the live agenda API could not be read — a transport or auth FAILURE observed at
+/// call time — so the engine no-ops gracefully instead of treating an empty pull as "everything was
+/// deleted". When available, <see cref="Sessions"/> is the current agenda.
+/// <para>🗑 §754.5: this used to say the refresh token "lacks the ZohoBackstage.agenda.READ scope".
+/// It does not, and never did — the credentials carry every permission CEH needs.</para>
 /// </summary>
 public sealed record BackstageSessionsResult(
     bool IsAvailable,
@@ -139,10 +140,11 @@ public sealed record BackstageSpeaker(
 
 /// <summary>
 /// The outcome of a Backstage speaker pull (REQUIREMENTS §38e/§58). <see cref="IsAvailable"/>
-/// is false when the live speakers API cannot be read (the refresh token lacks the
-/// <c>ZohoBackstage.speaker.READ</c> scope, or <see cref="ZohoOptions.SpeakerReadEnabled"/> is
-/// off) — the engine then no-ops gracefully instead of treating an empty pull as "every
-/// speaker was deleted". Mirrors <see cref="BackstageSessionsResult"/>.
+/// is false when the live speakers API could not be read — a transport or auth FAILURE observed at
+/// call time — so the engine no-ops gracefully instead of treating an empty pull as "every speaker
+/// was deleted". Mirrors <see cref="BackstageSessionsResult"/>.
+/// <para>🗑 §754.5: the "missing ZohoBackstage.speaker.READ scope" story was never true — see the
+/// note on <see cref="ZohoOptions"/>.</para>
 /// </summary>
 public sealed record BackstageSpeakersResult(
     bool IsAvailable,
@@ -183,27 +185,47 @@ public sealed class ZohoOptions
     public string ClientSecret { get; set; } = string.Empty;
     public string RefreshToken { get; set; } = string.Empty;
 
-    /// <summary>
-    /// Master switch for the Backstage AGENDA pull (REQUIREMENTS §38e/§6). Default
-    /// FALSE: the agenda endpoints (get-all-sessions / get-all-halls) require the
-    /// <c>ZohoBackstage.agenda.READ</c> scope on the refresh token, which is not yet
-    /// granted. Flip to true (Zoho:AgendaReadEnabled=true) only AFTER the operator
-    /// extends the token; until then <see cref="ZohoClient.GetBackstageSessionsAsync"/>
-    /// reports unavailable and never fakes data, so the §38e engine no-ops gracefully.
-    /// </summary>
-    public bool AgendaReadEnabled { get; set; }
+    // 🗑 §754.5 — `AgendaReadEnabled` and `SpeakerReadEnabled` are DELETED (2026-08-01).
+    //
+    // 🔒 DO NOT REINTRODUCE THEM, AND DO NOT WRITE ANOTHER COMMENT SAYING A BACKSTAGE READ SCOPE IS
+    // MISSING. **The Zoho Backstage credentials already carry every permission CEH needs.** They
+    // have carried them the whole time. The two flags defaulted FALSE and claimed the token lacked
+    // `ZohoBackstage.agenda.READ` / `.speaker.READ`, which was never verified against the live API —
+    // and the claim then spread into five other files as settled fact.
+    //
+    // Operator 2026-08-01: *"this error has bitten me 10 times now due to you dont update this wrong
+    // assumption in the docs. the zoho backstage creds have all the needed permissions already."*
+    //
+    // The evidence it was false was always in this file: `GetLiveSessionMapAsync` and
+    // `GetSpeakerIdsByEmailAsync` read `/agendas`, `/sessions?day=N` and `/speakers` UNGATED on the
+    // strict path — where a 401 THROWS — and the §301b self-heal has depended on them in production
+    // for months. The §585 matrix live-probed all five agenda-family endpoints at 200 against PROD.
+    //
+    // What still gates these engines is what always should have: the per-edition FEATURE SWITCH
+    // (`session-change-alerts` / `speaker-change-alerts`, both off by default) and the sync
+    // direction. Those are real controls an organiser can see and reason about. A phantom scope was
+    // not.
 
     /// <summary>
-    /// Master switch for the Backstage SPEAKER pull (REQUIREMENTS §38e/§58 — the
-    /// Zoho→CEH speaker change-detection source). Mirrors
-    /// <see cref="AgendaReadEnabled"/>: the speakers list/get endpoints require the
-    /// <c>ZohoBackstage.speaker.READ</c> scope on the refresh token. Default FALSE so
-    /// <see cref="ZohoClient.GetBackstageSpeakersAsync"/> reports unavailable and never
-    /// fakes data — the §58 speaker change-detection engine then no-ops gracefully
-    /// (exactly as §38e does when the agenda scope is missing). Flip to true
-    /// (Zoho:SpeakerReadEnabled=true) only AFTER the operator extends the token.
+    /// 🔴 §791.4 — push <c>company_social_pages</c> on an exhibitor UPDATE. <b>Defaults OFF, and the
+    /// reason is measured, not assumed.</b>
     /// </summary>
-    public bool SpeakerReadEnabled { get; set; }
+    /// <remarks>
+    /// <para>§791.3, four controlled calls against PROD 2026-08-04: the v3 exhibitor PUT returns
+    /// <b>200 and echoes the field back</b>, and a subsequent GET shows it <b>absent</b> — including
+    /// with Zoho's own documented sample key (<c>facebook</c>), and including on a record whose
+    /// <c>linkedin</c> was already set. <b>The field is not writable over v3.</b> CEH's payload was
+    /// correct the whole time (§791.3), which is why this is a switch and not a bug fix.</para>
+    ///
+    /// <para>⚠️ Leaving it ON cost three sessions: every pass re-sent it, the log said *"Updated
+    /// exhibitor"*, and Zoho kept nothing (§784.13 → §791). The values now reach Backstage as the
+    /// §792 hand-entry mail instead — a list somebody can act on beats a sync that reports success
+    /// for ever.</para>
+    ///
+    /// <para>🔒 Flip this to <c>true</c> if Zoho ever fixes the endpoint — one config setting, no
+    /// deploy. Do NOT delete the code path: the measurement above is what makes re-testing cheap.</para>
+    /// </remarks>
+    public bool PushExhibitorSocialPages { get; set; }
 
     /// <summary>
     /// The PUBLIC Zoho Backstage event-site base URL (REQUIREMENTS §52). The "View
@@ -351,11 +373,18 @@ public sealed class ZohoClient
     // legacy constructions keep the old uncached behaviour.
     private readonly ZohoAccessTokenCache? _tokenCache;
 
+    // 🔒 §783.12b — the ENVIRONMENT posture, used to block Zoho entirely on a non-writing host.
+    // Deliberately the raw OPTIONS and not IExternalWriteGuard: the guard folds in the per-edition
+    // organizer override, and no override may put DEV back onto the shared token budget.
+    // Optional + last so every existing construction and test keeps compiling; null ⇒ allowed.
+    private readonly ExternalWriteOptions? _externalOptions;
+
     public ZohoClient(
         HttpClient http, ZohoOptions options, ILogger<ZohoClient>? log = null,
         IExternalWriteGuard? writes = null,
         Email.EngineAlertSender? alerts = null,
-        ZohoAccessTokenCache? tokenCache = null)
+        ZohoAccessTokenCache? tokenCache = null,
+        ExternalWriteOptions? externalOptions = null)
     {
         _http = http;
         _options = options;
@@ -363,7 +392,31 @@ public sealed class ZohoClient
         _writes = writes ?? new AllowAllExternalWrites();
         _alerts = alerts;
         _tokenCache = tokenCache;
+        _externalOptions = externalOptions;
     }
+
+    /// <summary>
+    /// §783.12b — may this HOST talk to Zoho at all? False only when the environment explicitly
+    /// says it may not reach third parties.
+    /// </summary>
+    /// <remarks>
+    /// <para>🔒 <b>Why this is checked at the TOKEN and not per call.</b> Every one of this client's
+    /// ~21 outbound calls needs an access token first, so the exchange is the one chokepoint that
+    /// covers all of them. Gating each call site instead would mean 21 chances to forget one — and
+    /// forgetting one is exactly how this happened (the write guard covers 3 of the 21).</para>
+    ///
+    /// <para>⚠️ <b>Why READS had to be gated, when §340-H deliberately did not gate them.</b> That
+    /// decision rested on <i>"a read changes nothing outside CEH"</i>. For a METERED API the premise
+    /// is false: DEV's reads spend the same 10-requests-per-10-minutes token budget as PROD, on the
+    /// SAME refresh token (verified byte-identical 2026-08-03), and exhausting it takes PROD down
+    /// with 401s that read exactly like a revoked credential. DEV cannot corrupt Zoho's DATA — which
+    /// is what the write guard was reasoned about — but it can and did exhaust Zoho's QUOTA.</para>
+    ///
+    /// <para>🔑 Null options ⇒ ALLOWED, so tests and legacy constructions are unaffected. Only an
+    /// explicit <c>AllowExternalWrites=false</c> blocks — which both DEV hosts already carry from
+    /// bicep, so there is no new app setting to deploy and nothing for a config copy to get wrong.</para>
+    /// </remarks>
+    public bool HostMayReachZoho => _externalOptions?.AllowExternalWrites != false;
 
     /// <summary>
     /// §340-H — may this host perform the Zoho WRITE <paramref name="operation"/>?
@@ -424,11 +477,54 @@ public sealed class ZohoClient
         var url = $"{_options.ApiDomain}/backstage/v3/portals/{_options.BackstagePortalId}"
             + $"/events/{_options.BackstageEventId}/exhibitors/{exhibitorId}";
         var payload = new Dictionary<string, object?>();
-        if (companyOverview is not null) payload["company_overview"] = companyOverview;
-        if (companyShortDescription is not null) payload["company_short_description"] = companyShortDescription;
+
+        // 🔴 §802.2 — CAP BEFORE SENDING. Zoho rejects the ENTIRE update when one field is too long
+        // (measured §801.2: `shortDescription` 80, `company_overview` 1000), so an over-long
+        // description does not just lose itself — it takes the website and every other field in the
+        // same PUT down with it.
+        //
+        // 🔒 The FORM refuses and the SYNC truncates, on purpose: a person typing can choose which
+        // words to cut (§802.1), while this is a value already in the database — from before the
+        // rule, from an import, or set by an organizer — where the only alternatives are a truncated
+        // value or a 400 that lands nothing at all.
+        //
+        // ⚠️ Truncation is REPORTED (the warning below), never silent: a cap nobody is told about is
+        // how the public event site ends up with a sentence that stops mid-word.
+        if (companyOverview is not null)
+        {
+            payload["company_overview"] = ZohoExhibitorLimits.Cap(
+                companyOverview, ZohoExhibitorLimits.Overview);
+        }
+        if (companyShortDescription is not null)
+        {
+            payload["company_short_description"] = ZohoExhibitorLimits.Cap(
+                companyShortDescription, ZohoExhibitorLimits.ShortDescription);
+        }
+
+        if (ZohoExhibitorLimits.IsTooLong(companyOverview, ZohoExhibitorLimits.Overview)
+            || ZohoExhibitorLimits.IsTooLong(companyShortDescription, ZohoExhibitorLimits.ShortDescription))
+        {
+            _log.LogWarning(
+                "§802: exhibitor {Id} — a description exceeded Zoho's limit and was TRUNCATED for the "
+                + "push (overview {OvLen}/{OvMax}, short {ShLen}/{ShMax}). The stored CEH value is "
+                + "unchanged; shorten it on the sponsor's Company Details page so Backstage carries "
+                + "the whole sentence.",
+                exhibitorId, companyOverview?.Length ?? 0, ZohoExhibitorLimits.Overview,
+                companyShortDescription?.Length ?? 0, ZohoExhibitorLimits.ShortDescription);
+        }
+
         if (!string.IsNullOrWhiteSpace(websiteUrl)) payload["website_url"] = websiteUrl;
-        // company_social_pages is an object keyed by platform (linkedin / twitter / facebook).
-        if (!string.IsNullOrWhiteSpace(linkedInUrl) || !string.IsNullOrWhiteSpace(twitterUrl))
+
+        // 🔴 §791.3/§791.4 — company_social_pages is SILENTLY DISCARDED by the v3 exhibitor PUT.
+        // Measured twice: four controlled calls on 2026-08-03 (including Zoho's own documented
+        // `facebook` sample key) and again on 2026-08-04 — 200 every time, echoed back in the
+        // response, and absent from the very next GET. CEH's payload shape is correct (§791.3), so
+        // this is a switch and not a fix, and it ships OFF: the values reach Backstage as the §792
+        // hand-entry mail instead.
+        //
+        // 🔒 The code path stays so re-testing is one config setting away if Zoho ever repairs it.
+        if (_options.PushExhibitorSocialPages
+            && (!string.IsNullOrWhiteSpace(linkedInUrl) || !string.IsNullOrWhiteSpace(twitterUrl)))
         {
             var social = new Dictionary<string, object?>();
             if (!string.IsNullOrWhiteSpace(linkedInUrl)) social["linkedin"] = linkedInUrl;
@@ -439,21 +535,17 @@ public sealed class ZohoClient
         // (æøåÆØÅ shown as "?") is overwritten. JsonContent serializes UTF-8.
         if (!string.IsNullOrWhiteSpace(companyName)) payload["company_name"] = companyName;
         // The contact EMAIL is sent on UPDATE ONLY when the CALLER passes a non-blank value
-        // (REQUIREMENTS §41a). Zoho hard-caps email updates at 3 attempts — even a no-op resend
-        // burns one — so the caller passes contactEmail ONLY when it actually CHANGED vs the last
-        // value sent (SponsorInfo.ZohoContactEmail). Name + mobile updates are always allowed.
-        if (!string.IsNullOrWhiteSpace(contactFirstName) || !string.IsNullOrWhiteSpace(contactLastName)
-            || !string.IsNullOrWhiteSpace(contactMobile) || !string.IsNullOrWhiteSpace(contactEmail))
-        {
-            var contact = new Dictionary<string, object?>
-            {
-                ["first_name"] = contactFirstName ?? string.Empty,
-                ["last_name"] = contactLastName ?? string.Empty,
-            };
-            if (!string.IsNullOrWhiteSpace(contactMobile)) contact["mobile_no"] = contactMobile;
-            if (!string.IsNullOrWhiteSpace(contactEmail)) contact["email"] = contactEmail;
-            payload["contact"] = contact;
-        }
+        // ⚰️ §791.5 / §802.4(3) — THE CONTACT BLOCK IS GONE FROM THE UPDATE, AND MUST NOT COME BACK.
+        //
+        // Operator 2026-08-04: *"we should NEWER have an api trying to update contact details for
+        // both sponsor and exhibitor"* (and earlier: *"dont send the contact details again due to
+        // zoho limitations as mentioned in code"*). Zoho hard-caps contact e-mail updates at THREE
+        // attempts and a no-op resend burns one, so a block that travelled along on every unrelated
+        // profile push was spending a budget nobody was watching.
+        //
+        // 🔒 The parameters are kept so callers compile, and are DELIBERATELY IGNORED here rather
+        // than removed: a future caller passing a contact name must not silently start sending it
+        // again. The contact is set at CREATE time and changed by hand in Backstage.
 
         using var req = new HttpRequestMessage(HttpMethod.Put, url)
         {
@@ -461,7 +553,25 @@ public sealed class ZohoClient
         };
         req.Headers.Add("Authorization", $"Zoho-oauthtoken {accessToken}");
         using var resp = await _http.SendAsync(req, ct);
-        return resp.IsSuccessStatusCode;
+
+        // 🔴 §802.4(2) — READ THE FAILURE BODY. This used to be `return resp.IsSuccessStatusCode`,
+        // and Zoho had been naming the problem the whole time:
+        //   400 {"status_code":"400","message":"`shortDescription` is too long"}
+        // Three sessions of §784.13 were spent guessing at a per-record mystery that the response
+        // body would have answered on the first run (§801.2).
+        if (!resp.IsSuccessStatusCode)
+        {
+            string detail;
+            try { detail = await resp.Content.ReadAsStringAsync(ct); }
+            catch { detail = "<body unreadable>"; }
+
+            _log.LogWarning(
+                "Zoho exhibitor UPDATE {Id} failed: {Status}. Zoho said: {Detail}",
+                exhibitorId, (int)resp.StatusCode, detail);
+            return false;
+        }
+
+        return true;
     }
 
     /// <summary>
@@ -572,22 +682,15 @@ public sealed class ZohoClient
         if (description is not null) payload["description"] = description;
         if (!string.IsNullOrWhiteSpace(websiteUrl)) payload["website_url"] = websiteUrl;
         if (!string.IsNullOrWhiteSpace(companyName)) payload["company_name"] = companyName;
-        // The contact EMAIL is sent on UPDATE ONLY when the CALLER passes a non-blank value
-        // (operator 2026-06-25, confirmed by Zoho: "sponsor email addresses can only be updated
-        // up to 3 times — hard-coded limit"; REQUIREMENTS §41a). Even a no-op resend burns one of
-        // the 3, so the caller passes contactEmail ONLY when it actually CHANGED vs the last value
-        // sent (SponsorInfo.ZohoContactEmail). Name updates are always allowed.
-        if (!string.IsNullOrWhiteSpace(contactFirstName) || !string.IsNullOrWhiteSpace(contactLastName)
-            || !string.IsNullOrWhiteSpace(contactEmail))
-        {
-            var contact = new Dictionary<string, object?>
-            {
-                ["first_name"] = contactFirstName ?? string.Empty,
-                ["last_name"] = contactLastName ?? string.Empty,
-            };
-            if (!string.IsNullOrWhiteSpace(contactEmail)) contact["email"] = contactEmail;
-            payload["contact"] = contact;
-        }
+        // ⚰️ §791.5 / §802.4(3) — THE CONTACT BLOCK IS GONE FROM THE SPONSOR UPDATE TOO.
+        //
+        // Operator 2026-08-04: *"we should NEWER have an api trying to update contact details for
+        // both sponsor and exhibitor"* — both, explicitly. Zoho hard-caps sponsor e-mail updates at
+        // THREE and a no-op resend burns one, so a contact block riding along on an unrelated
+        // description push spends a budget nobody is watching.
+        //
+        // 🔒 The parameters are kept and DELIBERATELY IGNORED, so a future caller passing a name
+        // cannot silently restart it. The contact is set at CREATE and changed by hand in Backstage.
 
         using var req = new HttpRequestMessage(HttpMethod.Put, url)
         {
@@ -604,8 +707,16 @@ public sealed class ZohoClient
     /// fields are blank in Zoho and therefore safe to push from CEH. All values are
     /// trimmed; an absent/blank field comes back as <c>null</c>.
     /// </summary>
+    /// <param name="ShortDescription">
+    /// 🔑 §801.2 — the exhibitor's <c>company_short_description</c>, as Zoho actually returns it.
+    /// <b>The GET does echo it</b>: measured 2026-08-04, present on every exhibitor that has one.
+    /// The older claim that this endpoint *"NEVER echoes them back"* was never verified and is
+    /// false — the same shape as the phantom read-scope (§754.5). Null for a sponsor (that record
+    /// has no such field) and for an exhibitor that has none.
+    /// </param>
     public sealed record BackstageSponsorDetail(
-        string? WebsiteUrl, string? Description, string? LinkedInUrl, string? TwitterUrl);
+        string? WebsiteUrl, string? Description, string? LinkedInUrl, string? TwitterUrl,
+        string? ShortDescription = null);
 
     /// <summary>
     /// GET a single Backstage SPONSOR by id and read its current website /
@@ -704,7 +815,10 @@ public sealed class ZohoClient
                 WebsiteUrl: NullIf(GetString(root, "website_url")),
                 Description: NullIf(GetString(root, descriptionProp)),
                 LinkedInUrl: linkedIn,
-                TwitterUrl: twitter),
+                TwitterUrl: twitter,
+                // §801.2 — measured: the exhibitor GET returns this whenever it is set. A sponsor
+                // record simply has no such property, so it reads null there.
+                ShortDescription: NullIf(GetString(root, "company_short_description"))),
             ExternalLinkProbe.ProbeOne(foundExplicitly: true, notFoundExplicitly: false,
                 detail: $"Zoho returned this {rootProp} — the link is good."));
     }
@@ -1374,24 +1488,17 @@ public sealed class ZohoClient
     /// country and linkedin/twitter. This is the SOURCE the §58 Zoho→CEH speaker
     /// change-detection engine diffs against the CEH stored snapshot.
     ///
-    /// <b>AVAILABILITY (fail-soft, mirrors <see cref="GetBackstageSessionsAsync"/>).</b> The
-    /// speakers list endpoint requires the <c>ZohoBackstage.speaker.READ</c> scope on the
-    /// refresh token; until the operator extends the token AND sets
-    /// <see cref="ZohoOptions.SpeakerReadEnabled"/>, this returns
-    /// <see cref="BackstageSpeakersResult.Unavailable"/> and NEVER fakes data, so the engine
-    /// no-ops instead of mistaking an empty pull for "all speakers changed/were removed".
+    /// <b>AVAILABILITY (fail-soft, mirrors <see cref="GetBackstageSessionsAsync"/>).</b> An HTTP
+    /// failure yields <see cref="BackstageSpeakersResult.Unavailable"/> and NEVER fakes data, so the
+    /// engine no-ops instead of mistaking an empty pull for "all speakers changed/were removed".
+    /// <para>🗑 §754.5 — this is no longer gated on a config flag. The credentials have the
+    /// permission; the real gate is the <c>speaker-change-alerts</c> feature switch.</para>
     /// </summary>
     public async Task<BackstageSpeakersResult> GetBackstageSpeakersAsync(
         string accessToken, CancellationToken ct = default)
     {
-        // The speaker scope is not on the token yet ⇒ report unavailable (do not fake).
-        if (!_options.SpeakerReadEnabled)
-        {
-            return BackstageSpeakersResult.Unavailable(
-                "Zoho Backstage speaker API is not enabled — it requires the "
-                + "ZohoBackstage.speaker.READ OAuth scope on the refresh token and "
-                + "Zoho:SpeakerReadEnabled=true. Speakers were not pulled.");
-        }
+        // 🗑 §754.5 — the "the speaker scope is not on the token yet" early return is GONE, for the
+        // same reason as the agenda one: it was never true. See the note on ZohoOptions.
 
         var list = new List<BackstageSpeaker>();
         await foreach (var el in PageV3Async("speakers", "speakers", accessToken, ct))
@@ -1404,14 +1511,14 @@ public sealed class ZohoClient
 
     /// <summary>
     /// GET a single Backstage SPEAKER by id and read its current name / tagline / bio /
-    /// country / social fields (REQUIREMENTS §38e/§58). Scope:
-    /// <c>ZohoBackstage.speaker.READ</c>. Returns null on auth/HTTP failure or when the
-    /// speaker scope is not enabled (fail-soft, like <see cref="GetSponsorByIdAsync"/>).
+    /// country / social fields (REQUIREMENTS §38e/§58). Returns null on an auth/HTTP failure
+    /// (fail-soft, like <see cref="GetSponsorByIdAsync"/>) — 🗑 §754.5: no longer on a config flag,
+    /// because the Backstage credentials have the permission.
     /// </summary>
     public async Task<BackstageSpeaker?> GetSpeakerByIdAsync(
         string accessToken, string speakerId, CancellationToken ct = default)
     {
-        if (string.IsNullOrWhiteSpace(speakerId) || !_options.SpeakerReadEnabled) return null;
+        if (string.IsNullOrWhiteSpace(speakerId)) return null;
         var url = $"{_options.ApiDomain}/backstage/v3/portals/{_options.BackstagePortalId}"
             + $"/events/{_options.BackstageEventId}/speakers/{speakerId}";
         using var req = new HttpRequestMessage(HttpMethod.Get, url);
@@ -1569,17 +1676,49 @@ public sealed class ZohoClient
     }
 
     /// <summary>
+    /// 🔴 §793 — what Zoho actually did with each requested member. <b>A 200 is NOT "all created".</b>
+    /// </summary>
+    /// <param name="Ok">The HTTP call itself succeeded.</param>
+    /// <param name="Skipped">
+    /// The addresses Zoho REFUSED, each with the reason IT gave — read from the response body's
+    /// <c>skipped_emails</c>. Empty when everything was created.
+    /// </param>
+    public sealed record BoothMemberCreateResult(
+        bool Ok, IReadOnlyList<(string Email, string Reason)> Skipped)
+    {
+        /// <summary>True only when the call worked AND Zoho refused nobody.</summary>
+        public bool AllCreated => Ok && Skipped.Count == 0;
+    }
+
+    /// <summary>
     /// POST create booth members in bulk for an exhibitor.
     /// Body: <c>{ members: [ { role, first_name, last_name, email, company_name } ] }</c>
     /// (role = "ADMIN" | "staff"). Scope: <c>ZohoBackstage.exhibitor.CREATE</c>.
     /// </summary>
-    public async Task<bool> CreateBoothMembersAsync(
+    /// <remarks>
+    /// <para>🔴 <b>§793 — THIS RETURNED A BARE <c>IsSuccessStatusCode</c> AND THAT LOST REAL DATA.</b>
+    /// Measured against PROD 2026-08-04, creating a member on an exhibitor at its limit:</para>
+    /// <code>
+    /// HTTP 200
+    /// {"members":[],"skipped_emails":[{"email":"…","reason":
+    ///   "The booth member limit has been reached. To add more, please modify the Exhibitor Benefits."}]}
+    /// </code>
+    /// <para>⇒ 200 with an EMPTY members array and a precise, human-readable refusal. The old code
+    /// read that as success, the caller stamped <c>SyncedToZoho = true</c>, and the member never
+    /// existed in Zoho — with nobody told, ever. Same shape as §784.13's discarded social pages,
+    /// except here <b>Zoho explained itself and we threw the explanation away</b>.</para>
+    ///
+    /// <para>🔒 So the refusals are parsed and returned. A caller must check
+    /// <see cref="BoothMemberCreateResult.AllCreated"/>, never just <c>Ok</c>.</para>
+    /// </remarks>
+    public async Task<BoothMemberCreateResult> CreateBoothMembersAsync(
         string accessToken, string exhibitorId,
         IReadOnlyList<(string FirstName, string LastName, string Email, string Role, string? CompanyName)> members,
         CancellationToken ct = default)
     {
-        if (!await MayWriteAsync(nameof(CreateBoothMembersAsync), ct)) return false;
-        if (members.Count == 0) return true;
+        var none = Array.Empty<(string, string)>();
+        if (!await MayWriteAsync(nameof(CreateBoothMembersAsync), ct)) return new(false, none);
+        if (members.Count == 0) return new(true, none);
         var url = $"{_options.ApiDomain}/backstage/v3/portals/{_options.BackstagePortalId}"
             + $"/events/{_options.BackstageEventId}/exhibitors/{exhibitorId}/members";
         var payload = new Dictionary<string, object?>
@@ -1599,7 +1738,38 @@ public sealed class ZohoClient
         };
         req.Headers.Add("Authorization", $"Zoho-oauthtoken {accessToken}");
         using var resp = await _http.SendAsync(req, ct);
-        return resp.IsSuccessStatusCode;
+        if (!resp.IsSuccessStatusCode) return new(false, none);
+
+        // §793 — read WHO Zoho refused and WHY. Parsing is FAIL-SOFT: an unreadable body must not
+        // turn a successful create into a reported failure, so it degrades to "created everything",
+        // which is exactly what this method assumed unconditionally before.
+        var skipped = new List<(string Email, string Reason)>();
+        try
+        {
+            var body = await resp.Content.ReadAsStringAsync(ct);
+            using var doc = JsonDocument.Parse(body);
+            if (doc.RootElement.TryGetProperty("skipped_emails", out var arr)
+                && arr.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var el in arr.EnumerateArray())
+                {
+                    var email = GetString(el, "email");
+                    var reason = GetString(el, "reason");
+                    if (email.Length > 0) skipped.Add((email, reason));
+                }
+            }
+        }
+        catch { /* fail-soft — see above */ }
+
+        if (skipped.Count > 0)
+        {
+            _log?.LogWarning(
+                "Zoho REFUSED {Count} booth member(s) on exhibitor {Exhibitor} despite HTTP 200: {Detail}",
+                skipped.Count, exhibitorId,
+                string.Join("; ", skipped.Select(s => $"{s.Email} — {s.Reason}")));
+        }
+
+        return new(true, skipped);
     }
 
     /// <summary>
@@ -1614,6 +1784,23 @@ public sealed class ZohoClient
     /// </summary>
     public async Task<string?> GetAccessTokenAsync(CancellationToken ct = default)
     {
+        // 🔒 §783.12b — the DEV cut-off. Refused BEFORE the cache and before any HTTP, so a blocked
+        // host never spends a single request from the shared 10-per-10-minutes token budget.
+        //
+        // Logged at Warning, not swallowed: per §335 ("the only symptom is that nothing happens"), a
+        // blocked integration must SAY it is blocked. On DEV this line is the expected, correct
+        // state; seeing it in PROD means Integrations:AllowExternalWrites is missing there.
+        if (!HostMayReachZoho)
+        {
+            _log?.LogWarning(
+                "Zoho BLOCKED for this host — no access token requested. "
+                + "Integrations:AllowExternalWrites is false, so this environment may not reach "
+                + "Zoho at all (§783.12b: DEV and PROD share ONE refresh token, and Zoho meters "
+                + "token requests at 10 per 10 minutes — DEV spending them is what 401s PROD). "
+                + "Expected in DEV; in PROD it means the app setting is missing.");
+            return null;
+        }
+
         if (_tokenCache is null) return (await RefreshAccessTokenAsync(ct)).Token;
         return await _tokenCache.GetAsync(RefreshAccessTokenAsync, ct);
     }
@@ -1866,21 +2053,18 @@ public sealed class ZohoClient
     /// the time/location SOURCE the §38e change-detection engine diffs against the CEH
     /// stored values.
     ///
-    /// <b>AVAILABILITY (critical dependency).</b> The Backstage agenda endpoints
-    /// (<c>get-all-sessions</c> / <c>get-all-halls</c>) require the
-    /// <c>ZohoBackstage.agenda.READ</c> OAuth scope on the refresh token; without it both
-    /// 401 (REQUIREMENTS §6, mirrored by <c>BackstageSessionSource.IsAvailable</c>). Until
-    /// the operator extends the token AND sets <see cref="ZohoOptions.AgendaReadEnabled"/>,
-    /// this returns <see cref="BackstageSessionsResult.Unavailable"/> and NEVER fakes
-    /// data, so the engine no-ops instead of mistaking an empty pull for "all sessions
-    /// changed/were removed". When enabled, it pulls halls → id→name, then sessions, and
+    /// <b>AVAILABILITY (fail-soft).</b> It pulls halls → id→name, then sessions per agenda day, and
     /// resolves each session's hall id to a room name (shape per
-    /// <see cref="Sessions.BackstageSessionParser"/>).
+    /// <see cref="Sessions.BackstageSessionParser"/>). A read FAILURE yields
+    /// <see cref="BackstageSessionsResult.Unavailable"/> and NEVER fakes data, so the engine no-ops
+    /// instead of mistaking an empty pull for "all sessions changed/were removed".
+    /// <para>🗑 §754.5 — no longer gated on a config flag. The Backstage credentials carry the
+    /// agenda permission and always have; the real gate is the <c>session-change-alerts</c> feature
+    /// switch. See the note on <see cref="ZohoOptions"/>.</para>
     /// </summary>
     /// <summary>
-    /// UNGATED live session-id set (§301b self-heal): every session id currently in the
-    /// Backstage agenda, across all agenda days. Unlike <see cref="GetBackstageSessionsAsync"/>
-    /// this is NOT behind <see cref="ZohoOptions.AgendaReadEnabled"/> — the stage-2 push
+    /// Live session-id set (§301b self-heal): every session id currently in the Backstage agenda,
+    /// across all agenda days. The stage-2 push
     /// engines use it to detect a stored id whose record was DELETED in the Backstage UI
     /// (NULL the link and re-create). ⚠ FAIL-SAFE CONTRACT: an EMPTY set is
     /// indistinguishable from a failed read — callers MUST skip healing on an empty set,
@@ -1963,6 +2147,168 @@ public sealed class ZohoClient
     }
 
     /// <summary>
+    /// §754 — ONE activity on the Backstage agenda, as the SIGNAGE screens need it: the card's
+    /// four lines plus the fields the hour-slot logic runs on. Room/track/speakers arrive here
+    /// RESOLVED to display names, not as the ids the raw session carries.
+    /// </summary>
+    public sealed record BackstageAgendaActivity(
+        string SessionId, string Title, DateTimeOffset? StartsAt, int? DurationMinutes,
+        string? Room, string? Track, string? ActivityType,
+        IReadOnlyList<string> Speakers, int DayIndex);
+
+    /// <summary>
+    /// §754 — pull the COMPLETE Backstage agenda for signage: every activity on every agenda day,
+    /// including the breaks, registration, lunch and party that CEH's own sessions table does not
+    /// model. Halls, tracks and speakers are resolved to display names here so the caller stores
+    /// text a screen can print.
+    /// </summary>
+    /// <remarks>
+    /// <para>🔒 <b>No scope gate, because there was never a missing scope.</b> The Backstage
+    /// credentials carry every permission CEH needs (§754.5). The flags that once claimed otherwise
+    /// are deleted — do not add another. Evidence, if it is ever doubted again: the §301b self-heal
+    /// reads <c>/agendas</c> + <c>/sessions?day=N</c> on the strict path, where a 401 THROWS, and has
+    /// done so in production for months; the §585 matrix live-probed
+    /// <c>agendas/sessions/tracks/halls/speakers</c> at 200 against PROD.</para>
+    ///
+    /// <para>🔒 <b>STRICT reads throughout: any failed page THROWS.</b> The caller's fail-safe
+    /// depends on it. A silently-partial agenda is worse here than no agenda at all — the sync would
+    /// delete every activity the failed page would have carried, and 15 screens would confidently
+    /// display a half-empty conference. The non-strict pager <c>yield break</c>s on a non-2xx, which
+    /// is exactly the §585 silent-empty-list failure; it must never be used for this.</para>
+    ///
+    /// <para>⚠️ <b>An unresolvable speaker e-mail is DROPPED, never printed.</b> The session
+    /// <c>speakers</c> array may hold ids, e-mails or objects. Ids and e-mails are resolved against
+    /// the <c>/speakers</c> index; anything left that looks like an e-mail address is discarded
+    /// rather than shown, because these cards render two metres tall in a public corridor and a
+    /// leaked personal e-mail cannot be recalled from a photograph.</para>
+    /// </remarks>
+    public async Task<IReadOnlyList<BackstageAgendaActivity>> GetBackstageAgendaAsync(
+        string accessToken, CancellationToken ct = default)
+    {
+        // 1. Lookups first — a session references its hall, track and speakers by id.
+        var halls = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        await foreach (var h in StrictPageV3Async("halls", "halls", accessToken, ct))
+        {
+            var id = FirstNonEmpty(GetString(h, "id"), GetString(h, "hall_id"));
+            var name = FirstNonEmpty(GetString(h, "name"), GetString(h, "title"));
+            if (id.Length > 0 && name.Length > 0) halls[id] = name;
+        }
+
+        var tracks = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        await foreach (var t in StrictPageV3Async("tracks", "tracks", accessToken, ct))
+        {
+            var id = FirstNonEmpty(GetString(t, "track_id"), GetString(t, "id"));
+            var name = FirstNonEmpty(GetString(t, "name"), GetString(t, "title"));
+            if (id.Length > 0 && name.Length > 0) tracks[id] = name;
+        }
+
+        // Speakers are indexed by BOTH id and lower-cased e-mail, because the session's
+        // `speakers` array has been observed carrying either and the create endpoint takes
+        // e-mails. One index, two key spaces, so the resolve never depends on which it is.
+        var speakerNames = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        await foreach (var s in StrictPageV3Async("speakers", "speakers", accessToken, ct))
+        {
+            var name = $"{GetString(s, "name")} {GetString(s, "last_name")}".Trim();
+            if (name.Length == 0) continue;
+            var id = GetString(s, "id");
+            if (id.Length > 0) speakerNames[id] = name;
+            foreach (var f in new[] { "email", "email_address" })
+            {
+                var mail = GetString(s, f);
+                if (mail.Length > 0) speakerNames[mail.Trim()] = name;
+            }
+        }
+
+        // 2. Agenda days. /sessions REQUIRES ?day= (1-based); enumerate /agendas to learn how
+        //    many there are. Unlike the probing fallback elsewhere, a day count of zero here is
+        //    a genuine "this event has no agenda" and yields an empty list — the caller's
+        //    fail-safe decides what that means, not this method.
+        var dayCount = 0;
+        await foreach (var _ in StrictPageV3Async("agendas", "agendas", accessToken, ct)) dayCount++;
+
+        // 3. The activities themselves.
+        var list = new List<BackstageAgendaActivity>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        for (var day = 1; day <= dayCount; day++)
+        {
+            await foreach (var s in StrictPageV3Async($"sessions?day={day}", "sessions", accessToken, ct))
+            {
+                var id = GetString(s, "id");
+                if (id.Length == 0 || !seen.Add(id)) continue;
+
+                int? duration = null;
+                if (s.TryGetProperty("duration", out var d))
+                {
+                    if (d.ValueKind == JsonValueKind.Number && d.TryGetInt32(out var di)) duration = di;
+                    else if (d.ValueKind == JsonValueKind.String && int.TryParse(d.GetString(), out var ds)) duration = ds;
+                }
+
+                var hallId = FirstNonEmpty(GetString(s, "venue"), GetString(s, "hallId"), GetString(s, "hall"));
+                var trackId = GetString(s, "track");
+
+                list.Add(new BackstageAgendaActivity(
+                    SessionId: id,
+                    Title: FirstNonEmpty(GetString(s, "title"), GetString(s, "name")),
+                    StartsAt: ParseTimeAny(s, "start_time", "startTime", "startsAt", "startsOn"),
+                    DurationMinutes: duration,
+                    Room: hallId.Length > 0 && halls.TryGetValue(hallId, out var room) ? room : null,
+                    // An UNRESOLVED track id is dropped rather than printed: "4823901000000123456"
+                    // on a wall is worse than a card with no track line.
+                    Track: trackId.Length > 0 && tracks.TryGetValue(trackId, out var tr) ? tr : null,
+                    ActivityType: NullIf(GetString(s, "session_type")),
+                    Speakers: ResolveSpeakerNames(s, speakerNames),
+                    DayIndex: day));
+            }
+        }
+        return list;
+    }
+
+    /// <summary>
+    /// §754 — turn a session's <c>speakers</c> array into display names. Tolerates the three shapes
+    /// the field has been seen in (id strings, e-mail strings, objects) and drops anything that
+    /// cannot be resolved to a human name.
+    /// </summary>
+    /// <remarks>
+    /// ⚠️ An e-mail that resolves to no speaker record is DISCARDED, not shown. Everything that
+    /// reaches here is printed on a public screen, so "unknown" must fail to blank rather than to
+    /// raw data. A non-e-mail string that resolves to nothing IS kept — Backstage has been seen
+    /// returning plain names, and dropping those would silently empty the speaker line.
+    /// </remarks>
+    private static IReadOnlyList<string> ResolveSpeakerNames(
+        JsonElement session, IReadOnlyDictionary<string, string> index)
+    {
+        var names = new List<string>();
+        if (!session.TryGetProperty("speakers", out var arr) || arr.ValueKind != JsonValueKind.Array)
+            return names;
+
+        foreach (var el in arr.EnumerateArray())
+        {
+            string? name = null;
+            if (el.ValueKind == JsonValueKind.String)
+            {
+                var raw = (el.GetString() ?? string.Empty).Trim();
+                if (raw.Length == 0) continue;
+                if (index.TryGetValue(raw, out var hit)) name = hit;
+                else if (!raw.Contains('@')) name = raw;   // a plain name, not an identifier
+            }
+            else if (el.ValueKind == JsonValueKind.Object)
+            {
+                var id = GetString(el, "id");
+                var mail = FirstNonEmpty(GetString(el, "email"), GetString(el, "email_address"));
+                var composed = $"{GetString(el, "name")} {GetString(el, "last_name")}".Trim();
+                if (id.Length > 0 && index.TryGetValue(id, out var byId)) name = byId;
+                else if (mail.Length > 0 && index.TryGetValue(mail, out var byMail)) name = byMail;
+                else if (composed.Length > 0 && !composed.Contains('@')) name = composed;
+                else name = NullIf(FirstNonEmpty(GetString(el, "full_name"), GetString(el, "title")));
+            }
+
+            if (!string.IsNullOrWhiteSpace(name) && !names.Contains(name!, StringComparer.OrdinalIgnoreCase))
+                names.Add(name!.Trim());
+        }
+        return names;
+    }
+
+    /// <summary>
     /// STRICT variant of <see cref="PageV3Async"/> for the §301b self-heal reads: an HTTP
     /// failure on ANY page THROWS instead of silently ending the enumeration, so callers
     /// can never mistake a partial read for the complete live state.
@@ -1978,14 +2324,8 @@ public sealed class ZohoClient
     public async Task<BackstageSessionsResult> GetBackstageSessionsAsync(
         string accessToken, CancellationToken ct = default)
     {
-        // The agenda scope is not on the token yet ⇒ report unavailable (do not fake).
-        if (!_options.AgendaReadEnabled)
-        {
-            return BackstageSessionsResult.Unavailable(
-                "Zoho Backstage agenda API is not enabled — it requires the "
-                + "ZohoBackstage.agenda.READ OAuth scope on the refresh token and "
-                + "Zoho:AgendaReadEnabled=true. Sessions were not pulled.");
-        }
+        // 🗑 §754.5 — the "the agenda scope is not on the token yet" early return is GONE. It was
+        // never true; the credentials have always had the permission. See the note on ZohoOptions.
 
         // 1. Halls → id → display name (rooms are "halls" in Backstage; a session
         //    references its hall via the `venue` field). Tolerant of id/name field aliases.

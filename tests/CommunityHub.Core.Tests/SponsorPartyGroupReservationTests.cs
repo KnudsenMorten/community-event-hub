@@ -134,7 +134,7 @@ public class SponsorPartyGroupReservationTests
             t => Assert.Equal(TaskState.Done, t.State));
     }
 
-    [Fact]
+    [Fact(Skip = "733.1 - the per-task party/master-class cadences are RETIRED (operator 2026-07-31: the Get Started wizard is chased once every 14 days by getstarted-digest). Kept, not deleted, so re-enabling restores this coverage.")]
     public async Task Reminder_cadence_stops_for_the_whole_company_once_the_group_is_registered()
     {
         using var db = ScenarioFixture.NewDb();

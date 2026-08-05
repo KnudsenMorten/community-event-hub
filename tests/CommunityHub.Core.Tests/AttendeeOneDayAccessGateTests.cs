@@ -184,7 +184,7 @@ public sealed class AttendeeOneDayAccessGateTests
         Assert.False(await db.Tasks.AnyAsync(t => t.AssignedParticipantId == p.Id));
     }
 
-    [Fact]
+    [Fact(Skip = "733.1 - the per-task party/master-class cadences are RETIRED (operator 2026-07-31: the Get Started wizard is chased once every 14 days by getstarted-digest). Kept, not deleted, so re-enabling restores this coverage.")]
     public async Task Party_reminder_builder_skips_a_deactivated_participants_existing_task()
     {
         using var db = ScenarioFixture.NewDb();

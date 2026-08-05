@@ -21,8 +21,15 @@ namespace CommunityHub.Forms;
 public sealed class AttendeeWizardService
 {
     private readonly CommunityHubDbContext _db;
+    private readonly Core.Content.WelcomeCopyStore? _welcome;
 
-    public AttendeeWizardService(CommunityHubDbContext db) => _db = db;
+    // §680 — welcome is optional + last, the same pattern the other three wizard services use.
+    public AttendeeWizardService(
+        CommunityHubDbContext db, Core.Content.WelcomeCopyStore? welcome = null)
+    {
+        _db = db;
+        _welcome = welcome;
+    }
 
     public async Task<RoleWizardView> BuildAsync(
         int eventId, int participantId, CancellationToken ct = default)
@@ -39,6 +46,15 @@ public sealed class AttendeeWizardService
                  && a.Email.ToLower() == norm, ct);
 
         var steps = new List<RoleWizardStep>();
+
+        // 0. §680 — the WELCOME step, first. An attendee's wizard is the shortest of all (often a
+        //    single party RSVP), which is exactly why the welcome matters here: without it the
+        //    ticket holder's first screen in the hub is a bare yes/no question.
+        if (_welcome?.Exists(ParticipantRole.Attendee) == true)
+        {
+            steps.Add(new(
+                Core.Content.WelcomeCopyStore.StepKey, Core.Content.WelcomeCopyStore.StepRoute, true));
+        }
 
         // 1. Master Class selection — 2-day attendees only. Done once a CONFIRMED Master Class
         //    signup exists for the attendee row matching this participant's email.
@@ -72,15 +88,20 @@ public sealed class AttendeeWizardService
 
             if (anyFull)
             {
-                // DONE = they already hold a waitlist place or a held offer. Deliberately NOT
-                // "they answered": a waitlist place is optional, so the step must never be able to
-                // block wizard completion — the form service returns Advance on an empty choice.
-                var waitDone = !string.IsNullOrEmpty(norm) && await _db.MasterClassSignups.AnyAsync(
-                    s => s.EventId == eventId
-                         && (s.Status == MasterClassSignupStatus.Waitlisted
-                             || s.Status == MasterClassSignupStatus.Offered)
-                         && s.Attendee.Email.ToLower() == norm, ct);
-                steps.Add(new("masterclass-waitlist", "/Attendee/Waitlist", waitDone));
+                // 🔒 §732 — ALWAYS DONE. Operator 2026-07-31: *"the stauts of this get start tasks
+                // is wrong as it should be ticked off as completed … wait list is optional"*.
+                //
+                // The comment below this used to say the step "must never be able to block wizard
+                // completion" — and then set Done from "they already hold a waitlist place", which
+                // is precisely what blocked it. An attendee who does not WANT a waitlist place had
+                // no way to complete the step: he saw 3 of 4 / 75% with this the only unticked
+                // chip, while the step itself said "Every Master Class currently has seats
+                // available — there is nothing to queue for".
+                //
+                // A step nobody can be REQUIRED to finish must not gate the progress bar — the same
+                // rule as the §400 deadlines step and the §680 welcome. Joining a waitlist stays
+                // fully available; it just stops being an obligation.
+                steps.Add(new("masterclass-waitlist", "/Attendee/Waitlist", true));
             }
         }
 

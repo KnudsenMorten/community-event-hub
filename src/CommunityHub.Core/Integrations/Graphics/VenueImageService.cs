@@ -71,12 +71,25 @@ public sealed class VenueImageService
     private readonly IMemoryCache _cache;
     private readonly ILogger<VenueImageService>? _log;
 
+    private readonly DocLibrary.IDocLibraryPathResolver _paths;
+
+    /// <summary>§768 — the venue root, resolved from the registry.</summary>
+    /// <remarks>
+    /// 🔒 Only the ROOT is configuration. The slug→subfolder allowlist above stays in code because
+    /// it is a security boundary — it is what stops a crafted folder key reading an arbitrary part
+    /// of the library through the image proxy.
+    /// </remarks>
+    private string VenueRoot =>
+        _paths.TryResolve(DocLibrary.DocLibraryPaths.VenueRoot, out var p) ? p : string.Empty;
+
     public VenueImageService(
         ISharePointFileStore store,
         IOptions<GraphicsSharePointOptions> options,
         IMemoryCache cache,
+        DocLibrary.IDocLibraryPathResolver paths,
         ILogger<VenueImageService>? log = null)
     {
+        _paths = paths;
         _store = store;
         _options = options.Value;
         _cache = cache;
@@ -109,13 +122,13 @@ public sealed class VenueImageService
     {
         if (string.IsNullOrWhiteSpace(folderKey)) return null;
         if (!Allowlist.TryGetValue(folderKey.Trim(), out var sub)) return null;
-        var root = _options.VenueRootFolderPath?.Trim().Trim('/');
+        var root = VenueRoot;
         if (string.IsNullOrWhiteSpace(root)) return null;
         return $"{root}/{sub}";
     }
 
     /// <summary>True when the live SharePoint venue proxy can read (store wired + root set).</summary>
-    public bool CanRead => _store.CanRead && !string.IsNullOrWhiteSpace(_options.VenueRootFolderPath);
+    public bool CanRead => _store.CanRead && !string.IsNullOrWhiteSpace(VenueRoot);
 
     /// <summary>
     /// Sanitize a requested file name to a safe LEAF: rejects path separators, traversal

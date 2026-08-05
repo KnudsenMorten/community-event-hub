@@ -82,12 +82,15 @@ public sealed class BackstageExhibitorProfileSync
                 companyName: companyName, contactFirstName: contactFirstName, contactLastName: contactLastName);
             if (ok)
             {
-                _log.LogInformation("Backstage exhibitor profile updated for '{Co}' (id {Id}).", companyName, match.Id);
+                _log.LogInformation("Backstage exhibitor profile pushed for '{Co}' (id {Id}).", companyName, match.Id);
                 // Operator 2026-07-23: a successful Zoho write must notify the ops mailbox
                 // (publish/delete is manual in Backstage). One save = one-item batch.
+                // §791.2 — "PUSHED", not "Updated": `ok` means the PUT was ACCEPTED, and §791.3
+                // measured Zoho accepting a PUT and keeping nothing. The mail must not promise more
+                // than the response can support.
                 if (_zohoChanges is not null)
                     await _zohoChanges.NotifyAsync("Exhibitor profiles",
-                        new[] { $"Updated exhibitor profile for '{companyName}' (Backstage id {match.Id})" }, ct);
+                        new[] { $"Pushed exhibitor profile for '{companyName}' (Backstage id {match.Id})" }, ct);
             }
             else
             {

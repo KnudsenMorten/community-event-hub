@@ -72,6 +72,27 @@ public sealed class FeatureGateService
     }
 
     /// <summary>
+    /// §742 — WHERE this feature's ops notice goes: the organizer's per-edition address, or
+    /// <paramref name="fallback"/> when he has not set one.
+    /// </summary>
+    /// <remarks>
+    /// Operator 2026-07-31: <i>"i need to be able to control where it goes and state in settings
+    /// page"</i>. 🔒 Blank is treated as UNSET, so clearing the box restores the built-in mailbox
+    /// rather than sending the notice to nobody — the safe direction for a control whose failure
+    /// mode is silence.
+    /// </remarks>
+    public async Task<string> GetNotificationRecipientAsync(
+        string featureKey, int eventId, string fallback, CancellationToken ct = default)
+    {
+        var stored = await _db.FeatureSettings
+            .Where(f => f.EventId == eventId && f.FeatureKey == featureKey)
+            .Select(f => f.NotificationRecipientEmail)
+            .FirstOrDefaultAsync(ct);
+
+        return string.IsNullOrWhiteSpace(stored) ? fallback : stored.Trim();
+    }
+
+    /// <summary>
     /// The RELEASE RING a feature is currently released to for an edition
     /// (REQUIREMENTS §23a group-ring model). Resolution, in order:
     ///   1. the per-feature ring OVERRIDE (<see cref="FeatureSetting.ReleasedToRingOverride"/>)

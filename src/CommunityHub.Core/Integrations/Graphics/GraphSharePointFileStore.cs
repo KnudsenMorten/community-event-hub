@@ -39,19 +39,15 @@ public sealed class GraphicsSharePointOptions
     /// </summary>
     public long OfficeViewerMaxBytes { get; set; } = 10L * 1024 * 1024;
 
-    /// <summary>
-    /// Drive-relative folder the operator uploads MASTER CLASS session graphics into
-    /// (the PULL source for <see cref="CommunityHub.Core.Domain.SessionType.MasterClass"/>
-    /// sessions — REQUIREMENTS §18). EMPTY by default so the pull is INERT (no folder ⇒ nothing
-    /// listed) until an operator configures it.
-    /// </summary>
-    public string MasterClassFolderPath { get; set; } = string.Empty;
-
-    /// <summary>
-    /// Drive-relative folder the operator uploads ALL OTHER session graphics into (the
-    /// PULL source for non-master-class sessions). EMPTY by default ⇒ inert until set.
-    /// </summary>
-    public string SessionsFolderPath { get; set; } = string.Empty;
+    // ⚰️ §768 — MasterClassFolderPath and SessionsFolderPath REMOVED.
+    //
+    // They were TWO settings for what turned out to be ONE folder: master classes and technical
+    // sessions share `Speakers/Graphics-SoMe/Sessions` (operator: "i dont see a need to split"), and
+    // the pull now resolves that through DocLibraryPaths.SpeakerSessionGraphics.
+    //
+    // 🔒 Deleted rather than left as unused aliases. An unread path setting still LOOKS
+    // authoritative in the Azure portal, and the next person to find one pointing at a stale folder
+    // will "fix" it — changing nothing, and believing they have.
 
     /// <summary>
     /// Drive-relative folder the operator uploads pre-made per-TRACK promo graphics into —
@@ -78,15 +74,31 @@ public sealed class GraphicsSharePointOptions
     public string SpeakerPhotosFolderPath { get; set; } = string.Empty;
 
     /// <summary>
-    /// Drive-relative ROOT folder under which the EXTERNAL-DESIGNER pipeline (REQUIREMENTS
-    /// §165) builds one BUILD FOLDER per TRACK (named by the track title), each holding the
-    /// photos of every speaker on that track's sessions — e.g.
-    /// <c>General/Events/ELDK 2027/EventHub/DesignerBuild/Tracks</c>. The per-SESSION and
-    /// per-MASTER-CLASS build folders reuse <see cref="SessionsFolderPath"/> /
-    /// <see cref="MasterClassFolderPath"/>. EMPTY by default ⇒ no track folders are built
-    /// (the rest of the pipeline still runs) until an operator configures it.
+    /// §767 — drive-relative folder holding the SoMe TEMPLATE: the event photograph the graphics are
+    /// composed on, and (optionally) the white event logo dropped beside it.
     /// </summary>
-    public string TracksFolderPath { get; set; } = string.Empty;
+    /// <remarks>
+    /// 🔒 Operator 2026-08-01: <i>"just put it in template folder"</i>. The background and the mark
+    /// are ASSETS HE OWNS — replacing either is a file drop here, never a deploy. The loader takes
+    /// the first image it finds as the template (the real file is <c>Template.JPG</c>, so it must
+    /// accept .jpg as well as .png) and any file whose name contains <c>logo</c> as the mark.
+    /// EMPTY ⇒ the §767 build sweep is INERT and says so in the log.
+    /// </remarks>
+    public string TemplateFolderPath { get; set; } = string.Empty;
+
+    /// <summary>
+    /// §767 — drive-relative folder holding every sponsor logo in one place, the collection folder
+    /// <c>SponsorUploadWatchService</c> fills (files named <c>"{Company} - {file}"</c>).
+    /// </summary>
+    /// <remarks>
+    /// Used by the sponsor CATEGORY bundles to find each sponsor's mark by company-name prefix.
+    /// EMPTY ⇒ the sponsor bundles are inert (and logged as such); the track bundles still run.
+    /// </remarks>
+    public string SponsorLogosFolderPath { get; set; } = string.Empty;
+
+    // ⚰️ §768 — TracksFolderPath REMOVED with the §165 external-designer pipeline it belonged to.
+    // Nothing reads it: the designer build folders are gone, and the §158 TRACK PULL uses the
+    // separate TrackGraphicsFolderPath above (still present, still unconfigured by design).
 
     /// <summary>
     /// Drive-relative folder holding the per-ROOM session-evaluation QR codes
@@ -212,15 +224,32 @@ public sealed class GraphSharePointFileStore : ISharePointFileStore
     /// quietly did nothing leaves a file the caller believes is gone.</para>
     ///
     /// <para>READS (<c>ListAsync</c> / <c>DownloadAsync</c>) are deliberately NOT gated.</para>
+    ///
+    /// <para>🔒 <b>§768 — THE DOCUMENT LIBRARY IS AN EXPLICIT EXCEPTION TO §612.</b> Operator
+    /// 2026-08-02: <i>"612. allow sharepoint write. exception to external writes rule … as we now
+    /// have dev env in sharepoint"</i>.</para>
+    ///
+    /// <para>Why the exception is safe, and why it was NOT safe before. §612's rule exists for a
+    /// concrete reason he gave: a DEV run writing to a third-party record system creates
+    /// <i>"2 set of everything in zoho"</i> and can e-mail real people. That danger is about
+    /// systems of RECORD shared with production. The document library is not one — it is the
+    /// event's own file store, and <b>DEV now writes into its own isolated root</b>
+    /// (<c>General/DEVELOPMENT/EventHub</c>). A DEV file lands in a DEV folder and reaches nobody.
+    /// Before that root existed, the only thing standing between a DEV run and the live artwork was
+    /// this guard — which is exactly why it stayed shut until today.</para>
+    ///
+    /// <para>⚠️ <b>The isolation is now carried by the ROOT, not by this switch.</b> Point a DEV
+    /// host's <c>DocLibrary:RootFolderPath</c> at the live tree and it will happily overwrite real
+    /// artwork. That single setting is the safety boundary — treat it as one.</para>
+    ///
+    /// <para>Everything else the guard covers — the external event system, the ERP, mail — remains
+    /// blocked in DEV exactly as §612 requires. This exempts the file store and nothing besides.</para>
     /// </summary>
-    private async Task EnsureMayWriteAsync(string operation, CancellationToken ct)
+    private Task EnsureMayWriteAsync(string operation, CancellationToken ct)
     {
-        if (!await _writes.AllowAsync("SharePoint", operation, ct))
-        {
-            throw new InvalidOperationException(
-                $"SharePoint {operation} refused: external writes are disabled for this host "
-                + "(Integrations:AllowExternalWrites — §340-H).");
-        }
+        _ = operation;
+        _ = ct;
+        return Task.CompletedTask;
     }
 
     public bool CanStore => _options.IsConfigured && _client.IsConfigured;
@@ -259,7 +288,10 @@ public sealed class GraphSharePointFileStore : ISharePointFileStore
             _options.SiteUrl, _options.DriveName, relativeFolder, ct);
 
         return files
-            .Select(f => new SharePointFileRef(f.ItemId, f.Name, f.WebUrl ?? string.Empty, f.SizeBytes))
+            // §769.4 — the modified stamp travels with the file now: the organizer's session view
+            // needs WHEN a deck arrived, not only that one exists.
+            .Select(f => new SharePointFileRef(
+                f.ItemId, f.Name, f.WebUrl ?? string.Empty, f.SizeBytes, f.LastModifiedUtc))
             .ToList();
     }
 

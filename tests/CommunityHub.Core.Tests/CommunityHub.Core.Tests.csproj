@@ -42,6 +42,7 @@
          ResourceManagerStringLocalizerFactory against the SharedResource .resx
          (English) that ships in CommunityHub.Core. -->
     <PackageReference Include="Microsoft.Extensions.Localization" Version="10.0.9" />
+    <PackageReference Include="ZXing.Net" Version="0.16.11" />
   </ItemGroup>
 
   <ItemGroup>
@@ -51,6 +52,15 @@
          three renderers into a BUILD FAILURE instead of a live defect on a sponsor's page. -->
     <None Include="..\..\config\tasks\**\*.md">
       <Link>config\tasks\%(RecursiveDir)%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>Always</CopyToPublishDirectory>
+    </None>
+    <!-- REQUIREMENTS §680 - the authored WELCOME copy, so WelcomeCopyCatalogTests asserts over the
+         REAL shipped files. The runtime is fail-soft (a missing file = no welcome step), which is
+         correct and is also how a missing file becomes invisible; this Include is what lets the
+         test see the same content the app will. -->
+    <None Include="..\..\config\welcome\**\*.md">
+      <Link>config\welcome\%(RecursiveDir)%(Filename)%(Extension)</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>Always</CopyToPublishDirectory>
     </None>

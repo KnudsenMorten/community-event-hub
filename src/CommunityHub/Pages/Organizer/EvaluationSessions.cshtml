@@ -1,0 +1,13 @@
+@page
+@model CommunityHub.Pages.Organizer.EvaluationSessionsModel
+@{
+    ViewData["Title"] = "Evaluation sessions";
+}
+@* ⚰️ §784.7(C) — merged into /Organizer/SessionFeedback. OnGet redirects; this markup renders only
+   if the redirect is ever suppressed, and it still tells the reader where the page went. *@
+<div class="card">
+    <h1>Moved</h1>
+    <p>Evaluation sessions is now part of
+        <a asp-page="/Organizer/SessionFeedback">Session feedback</a> &mdash; one row per session,
+        with its QR code, whether it can collect, its score and its report state.</p>
+</div>

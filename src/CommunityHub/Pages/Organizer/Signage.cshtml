@@ -1,0 +1,159 @@
+@page
+@model CommunityHub.Pages.Organizer.SignageModel
+@{
+    ViewData["Title"] = "Venue screens";
+    var s = Model.Settings;
+}
+
+@if (Model.AccessDenied)
+{
+    <div class="card"><p>This page is for organizers.</p></div>
+    return;
+}
+
+<h1>Venue screens</h1>
+<p class="muted">
+    The signage pages CEH serves to the OptiSigns players around the venue. They show what is
+    happening this hour, what is on next, and the event's live satisfaction score.
+</p>
+
+@if (!string.IsNullOrWhiteSpace(Model.Message))
+{
+    <div class="card" role="status"><p>@Model.Message</p></div>
+}
+
+@* --- sync health (§4) ------------------------------------------------------ *@
+<div class="card">
+    <h2>Agenda</h2>
+    <p>
+        <strong>@Model.CachedActivities</strong> activities are cached for the screens,
+        @if (Model.LastSyncedAt is { } at)
+        {
+            <text>last confirmed against Zoho <strong>@at.ToString("dd MMM HH:mm")</strong> UTC.</text>
+        }
+        else
+        {
+            <text>and none has been synced yet.</text>
+        }
+    </p>
+    @if (Model.SyncSwitchedOff)
+    {
+        @* 🔒 A full cache with the switch off is the state that LOOKS healthy and is quietly going
+           stale — so the page says it outright rather than leaving him to infer it from a date. *@
+        <p><strong>The agenda sync is switched off.</strong> The screens will keep showing the
+        agenda above, and it will not be updated. Turn on <em>Signage agenda (venue screens)</em>
+        in <a asp-page="/Organizer/Settings">Settings</a> to resume the 5-minute refresh.</p>
+    }
+    else
+    {
+        <p class="muted">The agenda refreshes every 5 minutes. To pull it immediately, run
+        <em>Signage agenda sync</em> on the <a asp-page="/Organizer/Jobs">Jobs</a> page.</p>
+    }
+</div>
+
+@* --- the URLs (deliverable 5) ---------------------------------------------- *@
+<div class="card">
+    <h2>URLs for the OptiSigns playlists</h2>
+    <p class="muted">
+        Paste the <strong>rotate</strong> URL for each orientation into that orientation's playlist —
+        it cycles all three views on its own. The other three are for a screen you want pinned to a
+        single view.
+    </p>
+    <table>
+        <thead><tr><th>Screen</th><th>URL</th></tr></thead>
+        <tbody>
+        @foreach (var (label, url) in Model.PlaylistUrls)
+        {
+            <tr>
+                <td>@label</td>
+                <td><code style="word-break:break-all;">@url</code></td>
+            </tr>
+        }
+        </tbody>
+    </table>
+
+    <form method="post" asp-page-handler="RotateTokens"
+          onsubmit="return confirm('Generate new tokens? The URLs currently in OptiSigns will stop working until you paste the new ones.');">
+        <button type="submit">Generate new tokens</button>
+        <span class="muted">
+            Use this if a URL has leaked.
+            @if (s.TokensRotatedAt is { } rotated)
+            {
+                <text>Last generated @rotated.ToString("dd MMM yyyy HH:mm") UTC.</text>
+            }
+        </span>
+    </form>
+</div>
+
+<form method="post" asp-page-handler="Save">
+    @* --- on/off (§10) ------------------------------------------------------ *@
+    <div class="card">
+        <h2>What each wall shows</h2>
+        <p class="muted">
+            A view that is switched off shows the holding screen — the event name and the next thing
+            on the programme — never an error.
+        </p>
+        <table>
+            <thead><tr><th>View</th><th>Portrait</th><th>Landscape</th></tr></thead>
+            <tbody>
+                <tr>
+                    <td>Happening now</td>
+                    <td><input type="checkbox" name="input.PortraitNowEnabled" value="true" @(s.PortraitNowEnabled ? "checked" : "") /></td>
+                    <td><input type="checkbox" name="input.LandscapeNowEnabled" value="true" @(s.LandscapeNowEnabled ? "checked" : "") /></td>
+                </tr>
+                <tr>
+                    <td>Next</td>
+                    <td><input type="checkbox" name="input.PortraitNextEnabled" value="true" @(s.PortraitNextEnabled ? "checked" : "") /></td>
+                    <td><input type="checkbox" name="input.LandscapeNextEnabled" value="true" @(s.LandscapeNextEnabled ? "checked" : "") /></td>
+                </tr>
+                <tr>
+                    <td>Session feedback</td>
+                    <td><input type="checkbox" name="input.PortraitFeedbackEnabled" value="true" @(s.PortraitFeedbackEnabled ? "checked" : "") /></td>
+                    <td><input type="checkbox" name="input.LandscapeFeedbackEnabled" value="true" @(s.LandscapeFeedbackEnabled ? "checked" : "") /></td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    @* --- schedule (§10) ---------------------------------------------------- *@
+    <div class="card">
+        <h2>When the screens are on</h2>
+        <p class="muted">
+            Venue-local time. <strong>Leave a field blank for no restriction</strong> — an empty
+            schedule means the screens are always on, never always off. An end time earlier than the
+            start time is read as crossing midnight, so 22:00–02:00 covers the party.
+        </p>
+        <label>Each day from <input type="time" name="input.DailyFromLocal" value="@(s.DailyFromLocal?.ToString("HH\\:mm"))" /></label>
+        <label>to <input type="time" name="input.DailyToLocal" value="@(s.DailyToLocal?.ToString("HH\\:mm"))" /></label>
+        <label>Between <input type="date" name="input.ActiveFromLocal" value="@(s.ActiveFromLocal?.ToString("yyyy-MM-dd"))" /></label>
+        <label>and <input type="date" name="input.ActiveToLocal" value="@(s.ActiveToLocal?.ToString("yyyy-MM-dd"))" /></label>
+    </div>
+
+    @* --- timing + layout (§6/§7) ------------------------------------------- *@
+    <div class="card">
+        <h2>Timing and layout</h2>
+        <p class="muted">
+            The rotation and the page flip run on separate clocks on purpose: the views keep
+            changing every @s.RotateSeconds seconds no matter which page of a busy hour is showing.
+        </p>
+        <label>Seconds per view <input type="number" name="input.RotateSeconds" min="3" max="600" value="@s.RotateSeconds" /></label>
+        <label>Seconds per page <input type="number" name="input.PageSeconds" min="2" max="600" value="@s.PageSeconds" /></label>
+
+        <h3>Portrait (1080 × 1920)</h3>
+        <label>Columns <input type="number" name="input.PortraitColumns" min="1" max="8" value="@s.PortraitColumns" /></label>
+        <label>Rows <input type="number" name="input.PortraitRows" min="1" max="12" value="@s.PortraitRows" /></label>
+        <label>Gap <input type="number" name="input.PortraitGap" min="0" max="200" value="@s.PortraitGap" /></label>
+        <label>Row gap <input type="number" name="input.PortraitRowGap" min="0" max="400" value="@s.PortraitRowGap" /></label>
+
+        <h3>Landscape (3840 × 2160)</h3>
+        <label>Columns <input type="number" name="input.LandscapeColumns" min="1" max="10" value="@s.LandscapeColumns" /></label>
+        <label>Rows <input type="number" name="input.LandscapeRows" min="1" max="12" value="@s.LandscapeRows" /></label>
+        <label>Gap <input type="number" name="input.LandscapeGap" min="0" max="400" value="@s.LandscapeGap" /></label>
+        <label>Row gap <input type="number" name="input.LandscapeRowGap" min="0" max="600" value="@s.LandscapeRowGap" /></label>
+
+        <p class="muted">Columns × rows is how many cards fit on one page: @(s.PortraitColumns * s.PortraitRows)
+        portrait, @(s.LandscapeColumns * s.LandscapeRows) landscape. A busier hour than that paginates.</p>
+
+        <button type="submit">Save settings</button>
+    </div>
+</form>

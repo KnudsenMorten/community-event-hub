@@ -19,17 +19,21 @@
 </style>
 <div class="card">
     <h1>Pre-selection queue</h1>
+    @* §756 — VOLUNTEERS ONLY. The old copy said "prospective volunteers, speakers and media-team",
+       and the old explainer documented a speakers-skip-Preselect flow. Both are gone with the rows:
+       every other role is selected elsewhere and has its own onboarding. Leaving the copy behind
+       would describe a flow this page no longer performs (the §730 stale-copy trap). *@
     <p class="info" style="margin-top:0;">
-        Prospective volunteers, speakers and media-team land here from the
-        Sessionize sync and the interest form. Validate the data, then preselect
-        or activate. Only an <strong>Active</strong> row can sign in.
+        Prospective <strong>volunteers</strong> land here from the interest form. Validate the data,
+        then preselect or activate. Only an <strong>Active</strong> row can sign in.
     </p>
     <p class="psq-help">
         <strong>Preselect</strong> = shortlist this person but keep them <em>inactive</em> — they
         <strong>cannot sign in yet</strong> (a "we intend to include them, not confirmed" state).
         <strong>Activate</strong> = make them <em>active</em> so they <strong>can sign in</strong> and get hub access.
-        <br /><strong>Speakers skip the Preselect step</strong> (their pre-selection already happened in
-        Sessionize) — a speaker row goes straight <em>Inactive → Active</em> in one step.
+        <br />Other roles are not reviewed here: speakers have their own
+        <a asp-page="/Organizer/PendingSpeakers">Pending speakers</a> page (which also sets their
+        category and ring), and attendees arrive reconciled from ticket orders.
     </p>
 
     @if (Model.AccessDenied)

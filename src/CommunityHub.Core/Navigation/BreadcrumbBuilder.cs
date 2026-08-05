@@ -63,6 +63,25 @@ public static class BreadcrumbBuilder
     /// Logistics / Setup), so the breadcrumb agrees with the nav. Routes are the
     /// normalized (lower-case, no trailing slash) request path.
     /// </summary>
+    /// <remarks>
+    /// 🔒 §831 — THIS MAP MUST LIST EVERY PAGE A HUB CARD LINKS TO. He reported the breadcrumb as
+    /// wrong "on every page": <c>/Organizer/ContentStudio</c> showed <c>Organizer Area / Content
+    /// Studio</c>, dropping the Marketing / SoMe hub he had just clicked through. The builder was
+    /// never broken — <b>ContentStudio simply was not in this map</b>, so it hit the closing
+    /// root-only fallback. 54 of the 95 organizer pages were in that state.
+    ///
+    /// <para>The authoritative parent is <b>the hub whose landing page carries a card pointing at the
+    /// page</b> — that is literally the path he walked, and it is the same grouping the nav uses.
+    /// <c>BreadcrumbHubCardCoverageTests</c> (Web.Tests) parses the hub Razor pages and fails if a
+    /// card target is missing here, so the next page added to a hub cannot silently degrade to
+    /// root-only the way ContentStudio did.</para>
+    ///
+    /// <para>⚠️ Three pages are carded on TWO hubs. A trail has one parent, so the primary is chosen
+    /// explicitly and noted at the entry rather than left to dictionary insertion order.</para>
+    ///
+    /// <para>Pages with NO hub card (Dashboard, CommandCenter, Overview, …) are deliberately absent:
+    /// they are reached from the root, so root-only is their CORRECT trail, not a gap.</para>
+    /// </remarks>
     private static readonly IReadOnlyDictionary<string, string> FeatureToHub =
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
@@ -75,7 +94,11 @@ public static class BreadcrumbBuilder
             ["/organizer/attendees"]             = "/organizer/people",
             ["/organizer/actionqueue"]           = "/organizer/people",
             ["/organizer/findperson"]            = "/organizer/people",
-            ["/organizer/testdatacleanup"]       = "/organizer/people",
+            ["/organizer/accesslinks"]           = "/organizer/people",
+            ["/organizer/welcomelinks"]          = "/organizer/people",
+            ["/organizer/pendingspeakers"]       = "/organizer/people",
+            ["/organizer/economiccontacts"]      = "/organizer/people",
+            ["/organizer/sponsorwebshopcompany"] = "/organizer/people",
 
             // Sessions & speakers hub (route is /Organizer/Content)
             ["/organizer/speakers"]              = "/organizer/content",
@@ -83,8 +106,15 @@ public static class BreadcrumbBuilder
             ["/organizer/sessionquestions"]      = "/organizer/content",
             ["/organizer/sessionevaluations"]    = "/organizer/content",
             ["/organizer/sessionizeimport"]      = "/organizer/content",
+            // Carded on BOTH Content and Setup. Primary = Content: it configures the Sessionize
+            // import, which is a content concern; Setup lists it as a convenience.
             ["/organizer/sessionizeendpointsettings"] = "/organizer/content",
-            ["/organizer/speakerreminders"]      = "/organizer/content",
+            ["/organizer/masterclasses"]         = "/organizer/content",
+            ["/organizer/sessionfeedback"]       = "/organizer/content",
+            ["/organizer/sessionsource"]         = "/organizer/content",
+            ["/organizer/speakerreadiness"]      = "/organizer/content",
+            ["/organizer/surveys"]               = "/organizer/content",
+            ["/organizer/syncqueue"]             = "/organizer/content",
 
             // Comms hub
             ["/organizer/emailcenter"]           = "/organizer/comms",
@@ -92,16 +122,46 @@ public static class BreadcrumbBuilder
             ["/organizer/broadcast"]             = "/organizer/comms",
             ["/organizer/sendinvitations"]       = "/organizer/comms",
             ["/organizer/sendwelcomelogin"]      = "/organizer/comms",
+            ["/organizer/emailtemplates"]        = "/organizer/comms",
+            ["/organizer/feed"]                  = "/organizer/comms",
+            // Carded on Comms (not SoMe) — it is the speaker MAIL cadence.
+            ["/organizer/speakerreminders"]      = "/organizer/comms",
 
             // Marketing / SoMe hub
             ["/organizer/graphics"]              = "/organizer/some",
             ["/organizer/designergraphics"]      = "/organizer/some",
             ["/organizer/assetlocations"]        = "/organizer/some",
-            ["/organizer/groupphotos"]           = "/organizer/some",
+            // §831 — THE PAGE HE REPORTED. Renamed to "WordPress BlogPost Content" in §832;
+            // the ROUTE deliberately stays /Organizer/ContentStudio.
+            ["/organizer/contentstudio"]         = "/organizer/some",
+            // §828 — the event-post repo (Type 5 copy, imported from his deck).
+            ["/organizer/eventposts"]            = "/organizer/some",
+            // §833 — the three §824 features that had no home on this hub. Carded on BOTH SoMe and
+            // Comms; primary = SoMe, because "where is the post editor" is a SoMe question — being
+            // filed only under Comms is why he could not find it.
+            ["/organizer/sometemplates"]         = "/organizer/some",
+            ["/organizer/somescheduler"]         = "/organizer/some",
+            // §834 — the setup wizard. §835 — the campaign calendar.
+            ["/organizer/somesetup"]             = "/organizer/some",
+            ["/organizer/somecalendar"]          = "/organizer/some",
+            // §841 — the one-post-at-a-time editor.
+            ["/organizer/someposteditor"]        = "/organizer/some",
+            // §842.2 — the per-type frequency page.
+            ["/organizer/somecadence"]           = "/organizer/some",
+            // Was on NO hub at all, while deciding whether CEH can post to LinkedIn.
+            ["/organizer/linkedinconnect"]       = "/organizer/some",
+            // Carded on BOTH SoMe and Comms. Primary = SoMe: it is the social queue.
+            ["/organizer/somequeue"]             = "/organizer/some",
+            // Carded on BOTH SoMe and Setup. Primary = SoMe: these are the SoMe channel settings.
+            ["/organizer/somesettings"]          = "/organizer/some",
 
             // Volunteers hub
             ["/organizer/volunteerstructure"]    = "/organizer/volunteers",
             ["/organizer/bucketallocation"]      = "/organizer/volunteers",
+            ["/organizer/allocationscenarios"]   = "/organizer/volunteers",
+            ["/organizer/editvolunteertask"]     = "/organizer/volunteers",
+            ["/organizer/organizerallocation"]   = "/organizer/volunteers",
+            ["/organizer/volunteertasksexcel"]   = "/organizer/volunteers",
 
             // Logistics hub
             ["/organizer/hotels"]                = "/organizer/logistics",
@@ -113,10 +173,26 @@ public static class BreadcrumbBuilder
             ["/organizer/exports"]               = "/organizer/logistics",
             ["/organizer/datafreshness"]         = "/organizer/logistics",
             ["/organizer/impersonationlog"]      = "/organizer/logistics",
+            // Carded on Logistics (not SoMe) — the group PHOTO shoot is a schedule/logistics job.
+            ["/organizer/groupphotos"]           = "/organizer/logistics",
+            ["/organizer/partyrsvps"]            = "/organizer/logistics",
+            ["/organizer/schedule"]              = "/organizer/logistics",
+            ["/organizer/sessionevalsqr"]        = "/organizer/logistics",
+            ["/organizer/speakerreview"]         = "/organizer/logistics",
+            ["/organizer/synchealth"]            = "/organizer/logistics",
 
             // Setup hub
             ["/organizer/calendarsettings"]      = "/organizer/setup",
             ["/organizer/settings"]              = "/organizer/setup",
+            ["/organizer/audittrail"]            = "/organizer/setup",
+            ["/organizer/couponinvoicing"]       = "/organizer/setup",
+            ["/organizer/doclibrarypaths"]       = "/organizer/setup",
+            ["/organizer/evaluationapiclients"]  = "/organizer/setup",
+            ["/organizer/evaluationdevices"]     = "/organizer/setup",
+            ["/organizer/jobs"]                  = "/organizer/setup",
+            ["/organizer/platformhealth"]        = "/organizer/setup",
+            // Carded on Setup (moved from People, which had no card for it).
+            ["/organizer/testdatacleanup"]       = "/organizer/setup",
         };
 
     /// <summary>

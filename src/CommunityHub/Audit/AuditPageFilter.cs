@@ -24,6 +24,12 @@ namespace CommunityHub.Audit;
 /// </summary>
 public sealed class AuditPageFilter : IAsyncPageFilter
 {
+    /// <summary>
+    /// §728 — a handler sets this in <c>HttpContext.Items</c> once it has written its OWN named
+    /// audit row, so this filter does not add a second, generic one for the same request.
+    /// </summary>
+    public const string SuppressGenericKey = "ceh.audit.named-row-written";
+
     private readonly IAuditTrail _audit;
     private readonly ICurrentParticipantAccessor _participant;
 
@@ -49,6 +55,14 @@ public sealed class AuditPageFilter : IAsyncPageFilter
         }
 
         var executed = await next();   // run the handler, then record the outcome
+
+        // 🔒 §728 — a handler that recorded its OWN, better row suppresses this generic one.
+        //
+        // Without this the trail DOUBLES every named action: one meaningful row ("Selected Master
+        // Class: …") and one `POST /Forms/Wizard` beside it. The flag is set by the handler AFTER
+        // it has written its row, so a handler that fails before recording still gets the generic
+        // capture — the safety net is never lost, only replaced when something better exists.
+        if (context.HttpContext.Items.ContainsKey(SuppressGenericKey)) return;
 
         try
         {
@@ -77,7 +91,10 @@ public sealed class AuditPageFilter : IAsyncPageFilter
             {
                 EventId = me?.EventId ?? 0,
                 Category = attr is not null ? attr.Category : (isAuth ? AuditCategory.Auth : AuditCategory.UserAction),
-                Action = handler is null ? $"{method} {path}" : $"{method} {path} [{handler}]",
+                // §728: a declared [Audit(Action = "…")] gives the row a STABLE, filterable code;
+                // otherwise it keeps the auto-captured route shape.
+                Action = attr?.Action
+                    ?? (handler is null ? $"{method} {path}" : $"{method} {path} [{handler}]"),
                 Summary = attr?.Summary
                     ?? (handler is null ? $"{method} {path}" : $"{Verb(handler)} on {path}"),
                 TargetType = attr?.TargetType,

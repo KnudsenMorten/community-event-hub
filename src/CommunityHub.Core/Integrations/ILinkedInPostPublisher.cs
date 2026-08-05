@@ -20,6 +20,20 @@ namespace CommunityHub.Core.Integrations;
 /// <param name="AccessTokenOverride">§324b: a MEMBER token to post in the speaker's OWN
 /// context (author = their <c>urn:li:person:{id}</c> in <paramref name="OrganizationUrnOrId"/>).
 /// Null = the publisher's own org/page token.</param>
+/// <param name="VideoBytes">
+/// §844 — the video's RAW BYTES for a NATIVE video upload. When set, this post is a VIDEO post and
+/// <paramref name="ImageBytes"/> is ignored.
+///
+/// <para>🔒 §844.2 (operator: <i>"we prefer videos more than graphics, but fallback is graphics for
+/// us"</i>) — the fallback belongs to whoever BUILDS this record: it applies when there is no video
+/// at all. Once bytes are here the post publishes as a video or <b>fails honestly</b>. It must never
+/// silently downgrade to the graphic, which would publish the lesser asset he chose against with no
+/// way for him to know.</para>
+///
+/// <para>⚠️ Video upload is NOT the image flow with a different URL. It is MULTIPART
+/// (initializeUpload → PUT each part → finalizeUpload) and the video is then <b>PROCESSED
+/// ASYNCHRONOUSLY</b> — it is not postable the moment the bytes land.</para>
+/// </param>
 public sealed record LinkedInPost(
     string OrganizationUrnOrId,
     string Text,
@@ -27,7 +41,25 @@ public sealed record LinkedInPost(
     IReadOnlyList<string> Tags,
     byte[]? ImageBytes = null,
     string? ImageAltText = null,
-    string? AccessTokenOverride = null);
+    string? AccessTokenOverride = null,
+    byte[]? VideoBytes = null);
+
+/// <summary>
+/// §844 — the video uploaded fine but LinkedIn has not finished PROCESSING it yet.
+/// </summary>
+/// <remarks>
+/// 🔒 A distinct type on purpose: it is <b>not a failure</b>. §844.2 says video is preferred and the
+/// graphic is only a fallback for "there is no video" — so this must leave the post QUEUED for a
+/// later run, never downgrade it to the graphic and never mark it failed. Catching a generic
+/// exception here would lose that distinction.
+/// </remarks>
+public sealed class VideoStillProcessingException : Exception
+{
+    public VideoStillProcessingException(string videoUrn)
+        : base($"LinkedIn is still processing {videoUrn}.") => VideoUrn = videoUrn;
+
+    public string VideoUrn { get; }
+}
 
 /// <summary>The outcome of one publish attempt.</summary>
 /// <param name="Published">True only when the post was actually posted to LinkedIn.</param>

@@ -29,10 +29,10 @@ public sealed class WelcomeGrantPruneJob
         _log = log;
     }
 
-    /// <summary>Daily at 03:30 UTC.</summary>
+    /// <summary>§878 — base tick only; the cadence is the operator's interval on /Organizer/Jobs.</summary>
     [Function("WelcomeGrantPruneJob")]
     public async Task Run(
-        [TimerTrigger("0 30 3 * * *")] TimerInfo timer,
+        [TimerTrigger("0 */5 * * * *")] TimerInfo timer,
         CancellationToken ct)
     {
         var removed = await _admin.PruneAsync(_clock.GetUtcNow(), ct: ct);

@@ -44,6 +44,12 @@ public sealed class SubmitButtonHasAFormTests
         "_DinnerFields.cshtml",
         "_SignalFields.cshtml",
         "_SponsorSessionFields.cshtml",
+        // §783.3/§783.4/§783.5 — these three gained their own action buttons (remove a contact;
+        // upload logos; set video URLs / upload collateral). Each is a SUBMIT inside the wizard
+        // host's single form, never a nested <form> — which is precisely what this list records.
+        "_SponsorContactsFields.cshtml",
+        "_SponsorLogosFields.cshtml",
+        "_SponsorBoothMaterialsFields.cshtml",
     };
 
     [Fact]

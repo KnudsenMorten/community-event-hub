@@ -22,6 +22,28 @@ using System.Globalization;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// 🔒 §783.10 — FAIL AT STARTUP, NOT ON ONE PAGE.
+//
+// /Organizer/Logistics returned HTTP 500 in production because `ExpoLogisticsProducer` was
+// registered while its `ISponsorPurchaseSummary` dependency was not. Nothing could catch it: a
+// missing DI registration compiles cleanly, every unit test passes (they construct services
+// directly), and the post-deploy check only proved the ANONYMOUS auth gate answered — the failure
+// lives past the login, in the page body.
+//
+// `ValidateOnBuild` resolves every registered service at container build time, so this exact defect
+// becomes a STARTUP failure instead. That is strictly better here because PROD is deployed through
+// the staging slot: a broken container fails the slot's warm-up and the deploy stops BEFORE the
+// swap, so the fault never reaches a signed-in user. A page that 500s for one organizer is far
+// harder to notice than a deploy that refuses to go green.
+//
+// `ValidateScopes` catches the sibling mistake — a singleton capturing a scoped DbContext, which
+// corrupts state under concurrency rather than throwing anywhere near the cause.
+builder.Host.UseDefaultServiceProvider((_, options) =>
+{
+    options.ValidateOnBuild = true;
+    options.ValidateScopes = true;
+});
+
 // --- Configuration: SQL connection -----------------------------------------
 //  Credential-free template (from the Bicep). In Azure we authenticate to SQL
 //  with the app's system-assigned managed identity (passwordless). For local
@@ -93,6 +115,13 @@ builder.Services.AddSingleton(TimeProvider.System);
 // (REQUIREMENTS §104-§123). Stateless + thread-safe Markdig pipeline, so a
 // singleton is fine.
 builder.Services.AddSingleton<CommunityHub.Content.ContentMarkdownRenderer>();
+
+// §680 — the per-role WELCOME copy for the Get-Started wizard's step 1
+// (config/welcome/<edition>/<role>.md). SINGLETON: it caches one file read per role per
+// process, and the four wizard services ask it on every wizard build. Registered here rather
+// than picked up by the handler-discovery loop below because it lives in Core (the wizard
+// services need it to decide whether to OFFER the step at all).
+builder.Services.AddSingleton<CommunityHub.Core.Content.WelcomeCopyStore>();
 
 // --- Email (Brevo SMTP) ----------------------------------------------------
 //  SmtpUsername / SmtpKey are bound from Key Vault-backed config; the rest
@@ -294,12 +323,11 @@ builder.Services.AddScoped<CommunityHub.Core.Reminders.PublicSpeakersService>();
 builder.Services.AddScoped<CommunityHub.Core.Reminders.PublicSponsorsService>();
 builder.Services.AddScoped<CommunityHub.Core.Reminders.ScheduleService>();
 builder.Services.AddScoped<CommunityHub.Core.Domain.SessionQuestionService>();
-// Per-session attendee EVALUATION (HappyOrNot-style 1–5 rating + comment): a public,
-// no-login submit page reached via the room QR (reusing the same Session.PublicToken as
-// the ask page), one rating per attendee/session (cookie-soft), and an organizer
-// results dashboard with per-session + per-room aggregates. Future ◻: own-devices-via-API
-// ingestion would populate the same SessionEvaluation rows — no caller changes.
-builder.Services.AddScoped<CommunityHub.Core.Domain.SessionEvaluationService>();
+// 🗑 §748.1 — SessionEvaluationService (the 1–5 rating) is GONE. The live four-point channel is
+// EvaluationQrService + the /f/{token} page. Its one still-used member, EnsurePublicTokenAsync,
+// was a DUPLICATE of the identical method on SessionQuestionService above, which now serves both
+// callers: the ask page and the feedback link mint the SAME Session.PublicToken, so nothing
+// already shared breaks. Two copies of one token rule was the drift risk; there is now one.
 
 // --- Master-class features (REQUIREMENTS §6) -------------------------------
 // Public logistics page: per-master-class no-auth page where an involved
@@ -322,9 +350,15 @@ builder.Services.AddScoped<CommunityHub.Core.Reporting.ReportingService>();
 // the app lifetime. Restart picks up edits. Responses persist to the DB
 // (SurveyResponse + SurveyResponsePick).
 builder.Services.AddSingleton<CommunityHub.Surveys.SurveyDefinitionProvider>();
+// 🔒 §6.5 — the SAME provider instance, seen through the Core seam. Core needs a definition for one
+// thing only: the derived close date (event end + N months). Registering a SECOND instance here
+// would give the app two definition caches that could disagree after an edit.
+builder.Services.AddSingleton<CommunityHub.Core.Surveys.ISurveyDefinitionSource>(
+    sp => sp.GetRequiredService<CommunityHub.Surveys.SurveyDefinitionProvider>());
 // Survey response aggregation + organizer admin state (open/close, reset).
 // Scoped: it uses the per-request DbContext.
 builder.Services.AddScoped<CommunityHub.Core.Domain.SurveySummaryService>();
+builder.Services.AddScoped<CommunityHub.Core.Surveys.SurveyQuestionSummaryService>();
 
 // --- Session cookie --------------------------------------------------------
 //  SameSite=None + Secure so the cookie survives inside the cross-site
@@ -531,6 +565,35 @@ builder.Services.AddScoped<CommunityHub.Core.Diagnostics.EmailTransportHealth>()
 builder.Services.AddScoped<CommunityHub.Core.Organizer.VolunteerTaskBulkOperationService>();
 builder.Services.AddScoped<CommunityHub.Core.Organizer.OrganizerOverviewService>();
 builder.Services.AddScoped<CommunityHub.Core.Entitlements.OrderCountService>();
+// §6.10 / §768.10 D5 — the travel-claim freeze + the organizer reopen.
+// 🔒 MUST be registered: TravelFormService takes it as an OPTIONAL parameter (so its existing
+// constructions keep working), which means an unregistered lock does not throw — the claim would
+// simply never freeze, silently. That is the §768.15 failure shape, and the reason this line
+// carries a comment instead of sitting anonymously in the list.
+// §6.10 — the freeze is OFF until TravelClaim:FreezeEnabled=true. It ships to production without
+// changing any speaker's experience, and is switched on after the operator has validated it.
+builder.Services.AddSingleton(sp =>
+{
+    var o = new CommunityHub.Core.Entitlements.TravelClaimLockOptions();
+    builder.Configuration
+        .GetSection(CommunityHub.Core.Entitlements.TravelClaimLockOptions.SectionName)
+        .Bind(o);
+    return o;
+});
+builder.Services.AddScoped<CommunityHub.Core.Entitlements.TravelClaimLock>();
+
+// §6.9 — photo cleanup on deactivation. 🔒 THE ONLY SERVICE IN CEH THAT DELETES A DOCUMENT-LIBRARY
+// FILE, so it ships DRY-RUN and stays that way until PhotoCleanup:DryRun is set to false. Bound from
+// configuration so switching it on is an operator act with a diff, not a redeploy.
+builder.Services.AddSingleton(sp =>
+{
+    var o = new CommunityHub.Core.Integrations.Graphics.PhotoCleanupOptions();
+    builder.Configuration
+        .GetSection(CommunityHub.Core.Integrations.Graphics.PhotoCleanupOptions.SectionName)
+        .Bind(o);
+    return o;
+});
+builder.Services.AddScoped<CommunityHub.Core.Integrations.Graphics.ParticipantPhotoCleanupService>();
 builder.Services.AddScoped<CommunityHub.Core.Organizer.DataFreshnessService>();
 builder.Services.AddScoped<CommunityHub.Core.Organizer.SyncHealthService>();
 builder.Services.AddScoped<CommunityHub.Core.Organizer.PreselectionQueueService>();
@@ -779,6 +842,51 @@ builder.Services.AddSingleton<
 builder.Services.Configure<CommunityHub.Core.Integrations.Graphics.GraphicsSharePointOptions>(
     builder.Configuration.GetSection(
         CommunityHub.Core.Integrations.Graphics.GraphicsSharePointOptions.SectionName));
+
+// §768 Phase 2 — the DocLibrary registry + the ONE resolver allowed to build a library path.
+// Registered ALONGSIDE the legacy graphics options while call sites migrate. 🔒 The legacy options
+// are DELETED once nothing reads them — not left behind as a second source of truth, which is
+// precisely the defect this replaces.
+builder.Services.Configure<CommunityHub.Core.Integrations.DocLibrary.DocLibraryOptions>(
+    builder.Configuration.GetSection(
+        CommunityHub.Core.Integrations.DocLibrary.DocLibraryOptions.SectionName));
+builder.Services.AddSingleton<
+    CommunityHub.Core.Integrations.DocLibrary.IDocLibraryPathResolver,
+    CommunityHub.Core.Integrations.DocLibrary.DocLibraryPathResolver>();
+
+// §769 — the operator's SAVED path edits. The cache is a singleton because the resolver is, and
+// because resolving a path is synchronous on hot paths; the store is scoped (it writes). 🔒 The
+// cache must be registered in BOTH hosts: the jobs host resolves the same keys, and an edit that
+// reached only the web host would move a folder for the pages and not for the sweeps.
+builder.Services.AddSingleton<CommunityHub.Core.Integrations.DocLibrary.DocLibraryOverrideCache>();
+builder.Services.AddScoped<CommunityHub.Core.Integrations.DocLibrary.DocLibraryOverrideStore>();
+builder.Services.AddScoped<CommunityHub.Core.Integrations.DocLibrary.DocLibraryPathTester>();
+
+// --- §6.3 — the logistics chain, in the WEB host too -------------------------
+// 🔒 The jobs host already registers all of this for LogisticsFilesJob. /Organizer/Logistics now
+// LISTS the generated files and offers "Generate now", so the web host needs the same chain — and
+// it needs the WHOLE chain: a page that injects LogisticsRunService with one producer missing fails
+// at ACTIVATION, which is a 500 on a real page that no build and no unit test can catch.
+// ⚠️ The recipients object is registered here as well even though this host never mails on a
+// schedule: LogisticsArtifactsService reads ApprovedForRealRecipients to tell the organizer that
+// mails are held, and a default-constructed one would silently claim they are not.
+builder.Services.AddSingleton(sp =>
+{
+    var o = new CommunityHub.Core.Integrations.DocLibrary.LogisticsRecipients();
+    builder.Configuration
+        .GetSection(CommunityHub.Core.Integrations.DocLibrary.LogisticsRecipients.SectionName)
+        .Bind(o);
+    return o;
+});
+builder.Services.AddScoped<CommunityHub.Core.Integrations.DocLibrary.DocLibraryFilePublisher>();
+builder.Services.AddScoped<CommunityHub.Core.Integrations.DocLibrary.SwagLogisticsProducer>();
+builder.Services.AddScoped<CommunityHub.Core.Integrations.DocLibrary.FoodLogisticsProducer>();
+builder.Services.AddScoped<CommunityHub.Core.Integrations.DocLibrary.LunchLogisticsProducer>();
+builder.Services.AddScoped<CommunityHub.Core.Integrations.DocLibrary.ExpoLogisticsProducer>();
+builder.Services.AddScoped<CommunityHub.Core.Integrations.DocLibrary.HotelLogisticsProducer>();
+builder.Services.AddScoped<CommunityHub.Core.Integrations.DocLibrary.LogisticsRunService>();
+builder.Services.AddScoped<CommunityHub.Core.Integrations.DocLibrary.LogisticsArtifactsService>();
+
 // SharePoint upload client (SPN creds, deployment-scoped, Key Vault) — registered
 // UNCONDITIONALLY so any web page (volunteer photo upload, etc.) can inject it. It
 // no-ops when the "SharePoint" section is not configured (IsConfigured=false), so
@@ -848,12 +956,10 @@ builder.Services.AddScoped<CommunityHub.Core.Integrations.Graphics.SessionEvalPd
 // (and overwrites) the deck on SharePoint; speakers never get a SharePoint link/login. Inert
 // until Graphics:SharePoint:PresentationPreviewFolderPath / PresentationFinalFolderPath are set.
 builder.Services.AddScoped<CommunityHub.Core.Integrations.Graphics.SpeakerPresentationService>();
-// §165: external-designer graphics pipeline — pulls speaker photos NAMED BY NAME (speaker-upload
-// wins over Sessionize), builds per-session/master-class/track folders, and generates an Excel
-// brief. Organizer-only; reuses the SharePoint file-store + picture-fetch seams. Inert until the
-// relevant Graphics:SharePoint folder paths (SpeakerPhotosFolderPath / Sessions / MasterClass /
-// TracksFolderPath) are configured — every stage independently no-ops when its folder is unset.
-builder.Services.AddScoped<CommunityHub.Core.Integrations.Graphics.ExternalDesignerGraphicsService>();
+// ⚰️ §768 — the §165 external-designer pipeline is RETIRED. It prepared per-session build folders
+// and an Excel brief for a human designer to work from; §767's graphics service now produces that
+// artwork automatically. Operator 2026-08-02: "some graphics service builds now. it replaces human
+// build process". Service, page, naming helper and brief workbook all deleted.
 builder.Services.AddScoped<CommunityHub.Core.Integrations.Graphics.AssetLocationService>();
 // Read-only contract that EXPOSES publishable branding graphics to a downstream
 // consumer (the §19 SoMe queue, or any other) — the release/visibility gate is
@@ -898,7 +1004,43 @@ else
 }
 builder.Services.AddScoped<CommunityHub.Core.Integrations.SoMeSettingsService>();
 builder.Services.AddScoped<CommunityHub.Core.Integrations.SoMeQueueService>();
+// §824.2C/§824.16 — the post-template editor and the variable resolver behind its preview.
+// 🔒 WEB-ONLY is deliberate for now: the editor is a page, and nothing in the Functions host
+// composes posts yet. The moment the scheduler (§824.2E) does, BOTH hosts need these —
+// [[ceh-di-two-hosts]]: a service registered in one host and not the other deploys green and
+// then fails on the first tick.
+builder.Services.AddScoped<CommunityHub.Core.Integrations.SoMeTemplateService>();
+builder.Services.AddScoped<CommunityHub.Core.Integrations.SoMeVariableResolver>();
+// §864 — resolves a post's {tokens} at PUBLISH time and drives the coloured editor preview.
+// 🔒 Registered in BOTH hosts (see JobsServiceRegistration) — a service in one host only deploys
+// green and then fails on the first tick ([[ceh-di-two-hosts]]).
+builder.Services.AddScoped<CommunityHub.Core.Integrations.SoMePostComposer>();
+// §828 — the event-post deck importer (his markdown drop-box → the Type 5 post repo).
+// 🔒 WEB-ONLY, and for a stronger reason than the two above: the import is an OPERATOR ACTION
+// (he clicks it after landing a new deck), never a timer. §828.1's overwrite tick is a per-post
+// decision he makes in the UI, so an unattended job importing on a schedule would be the very
+// thing that rule forbids. If a job is ever added, the Functions host must register this too —
+// [[ceh-di-two-hosts]].
+builder.Services.AddScoped<CommunityHub.Core.Integrations.EventSoMePostImportService>();
+// §824.2D — the AI intro writer, on the same Azure OpenAI options the AiHelper binds above.
+builder.Services.AddHttpClient<CommunityHub.Core.Integrations.SoMeIntroGenerator>();
 builder.Services.AddScoped<CommunityHub.Core.Integrations.SoMeDispatchService>();
+// §833 — the scheduler was JOBS-ONLY, which is why it had no page and he could not find it. The
+// planner page reads its readiness and can run it on demand, so it is registered here too.
+// 🔒 Safe to run from a page: every post it creates is IsActive = false (§824.21a), so an on-demand
+// run can never publish anything — it only fills the queue he then approves.
+builder.Services.AddScoped<CommunityHub.Core.Integrations.SoMeScheduleService>();
+// §834 — the setup wizard, and §835–§838's shared "which posts mention this subject" query.
+// Both are read-only projections over data the engine already owns; neither stores anything.
+builder.Services.AddScoped<CommunityHub.Core.Integrations.SoMeWizardService>();
+builder.Services.AddScoped<CommunityHub.Core.Integrations.SoMeAnnouncementQuery>();
+// §841 — the picture library behind the post editor's preview + picker.
+builder.Services.AddScoped<CommunityHub.Core.Integrations.SoMeGraphicLibrary>();
+// §842.2 — per-type announcement frequency (and the §842.5 sponsor guard).
+builder.Services.AddScoped<CommunityHub.Core.Integrations.SoMeCadenceService>();
+// §850 — the approval blocker. Registered in BOTH hosts: the queue/editor approve through it, and
+// the DISPATCHER re-checks eligibility at send time. [[ceh-di-two-hosts]].
+builder.Services.AddScoped<CommunityHub.Core.Integrations.SoMeApprovalGate>();
 // Speaker self-service LinkedIn publish (REQUIREMENTS §52): a speaker pushes their
 // RELEASED announcement graphic + generated text to the event's LinkedIn page
 // through the SAME gated queue/publisher path above — so the credential gate and
@@ -1039,11 +1181,9 @@ builder.Services.AddScoped<CommunityHub.Core.Reminders.SpeakerMilestoneService>(
 // only the signed-in speaker's own linked sessions. Scoped (per-request DbContext).
 builder.Services.AddScoped<CommunityHub.Core.Reminders.SpeakerSessionsService>();
 
-// SpeakerEvaluationsService: the read-model behind the Speaker self-service
-// "My session ratings" page (per-session attendee evaluation count / average /
-// anonymous comments). Own-row scoped -- only the signed-in speaker's own linked
-// sessions. Read-only. Scoped (per-request DbContext).
-builder.Services.AddScoped<CommunityHub.Core.Reminders.SpeakerEvaluationsService>();
+// 🗑 §748.1 — SpeakerEvaluationsService is GONE with the 1–5 model it read. The speaker's view of
+// the four-point results is C10, not yet built; until it exists /Speaker/Evaluations redirects
+// (§748.5) rather than showing an empty page that would read as "nobody rated me".
 
 // AttendeePlanService: the read+write model behind the attendee self-service
 // "My plan" page and the "Save to my plan" toggle on the public sessions list.
@@ -1097,6 +1237,8 @@ builder.Services.AddScoped<CommunityHub.Forms.AttendeeWizardService>();
 // matching task (idempotent), so My-Tasks lists exactly the role's steps + deadline tasks.
 // Driven off the wizard services above; its done-state is synced by FormTaskReconciler.
 builder.Services.AddScoped<CommunityHub.Forms.WizardStepTaskSeeder>();
+// §720 - the "someone completed Get Started" notice to the operator (Settings on/off).
+builder.Services.AddScoped<CommunityHub.Core.Reminders.GetStartedCompletionNotifier>();
 // §253 G11: on an organizer ROLE change, prunes the old role's auto-seeded tasks
 // (wizard mirrors + dated speakerdl: deadlines) and seeds/reconciles the new role's.
 builder.Services.AddScoped<CommunityHub.Forms.RoleChangeTaskReconciler>();
@@ -1136,6 +1278,57 @@ builder.Services.AddScoped<CommunityHub.Core.Integrations.Erp.EconomicContactAdm
 // ERP→webshop reconcile (create missing webshop users + set defaults from ERP
 // contact roles + alert on missing roles).
 builder.Services.AddScoped<CommunityHub.Core.Integrations.Erp.ErpWebshopContactSyncService>();
+
+// 🔴 §786.6 — THE FX PROVIDER, AND WHY IT IS REGISTERED HERE.
+//
+// WebshopDraftInvoiceService needs IFxRateProvider. The JOBS host has always registered it; the web
+// host never had to, because nothing here had ever needed it. Adding the service below without this
+// broke the PROD deploy at the staging warm-up: `ValidateOnBuild` (§783.10) resolves every
+// registration when the container is built, so the app did not start, the slot never answered 200,
+// and deploy-app.ps1 correctly REFUSED TO SWAP. Prod was never touched.
+//
+// 🔒 That is the §687.9 / §783.10 / §784.15 defect one more time — a service registered in one host
+// and not the other — and it is the third distinct host-pair it has bitten. The guard did its job
+// here; what it cost was a deploy cycle, because the web host's check only runs when the app starts.
+var fxRateOptionsWeb = new CommunityHub.Core.Integrations.Erp.FxRateOptions();
+builder.Configuration.GetSection(CommunityHub.Core.Integrations.Erp.FxRateOptions.SectionName)
+    .Bind(fxRateOptionsWeb);
+builder.Services.AddSingleton(fxRateOptionsWeb);
+builder.Services.AddHttpClient<CommunityHub.Core.Integrations.Erp.IFxRateProvider,
+    CommunityHub.Core.Integrations.Erp.FxRateProvider>();
+
+// §786 — webshop order → e-conomic DRAFT invoice. The JOB that uses this runs in the Functions host,
+// but 🔒 CLAUDE.md's rule applies: a Core service registered in one host only is half live, and
+// /Organizer/Jobs can trigger this job, which activates the chain HERE. The client self-gates on
+// CanWrite, so registering it unconditionally cannot reach e-conomic before it is configured —
+// and the FEATURE switch (webshop-erp-invoicing, off) is what decides whether it ever runs.
+builder.Services.AddHttpClient<CommunityHub.Core.Integrations.Erp.IEconomicInvoiceClient,
+    CommunityHub.Core.Integrations.Erp.LiveEconomicInvoiceClient>()
+    .AddCredentialFailureAlert("e-conomic");
+
+// §788 — the shared DRY-RUN switch for BOTH invoice modules. 🔒 An absent section leaves DryRun at
+// its safe default of TRUE. Registered in BOTH hosts because WebshopDraftInvoiceService resolves
+// here too — the §786.6 lesson applied rather than relearned.
+// 🔒 FromConfiguration, NOT .Bind(): Bind THROWS on a blank or unparseable bool, and this host runs
+// ValidateOnBuild — so a typo'd Invoicing:DryRun app setting would fail the container, leave the
+// staging slot answering nothing and abandon the swap (§786.6, again). The reader keeps dry run ON.
+builder.Services.AddSingleton(
+    CommunityHub.Core.Integrations.Erp.InvoicingOptions.FromConfiguration(builder.Configuration));
+builder.Services.AddScoped<CommunityHub.Core.Integrations.Erp.WebshopDraftInvoiceService>();
+// §787 — the coupon half. Registered in BOTH hosts for the same §786.6 reason as the line above:
+// the web host resolves it for /Organizer/CouponInvoicing, the jobs host for CouponInvoiceJob, and
+// a service present in one and missing in the other deploys green and then fails on the first tick.
+builder.Services.AddScoped<CommunityHub.Core.Integrations.Erp.CouponDraftInvoiceService>();
+builder.Services.AddScoped<CommunityHub.Core.Integrations.Erp.CouponMappingAlertService>();
+// §795.2/§795.3 — same rule, same reason: /Organizer/Jobs can trigger CouponInvoiceJob from HERE,
+// which resolves both of these. Registered in one host only, that is a green deploy and a 500 on
+// the first trigger.
+builder.Services.AddScoped<CommunityHub.Core.Integrations.Erp.CouponDiscoveryService>();
+builder.Services.AddScoped<CommunityHub.Core.Integrations.Erp.CouponPrepaidBillingReminderService>();
+builder.Services.AddScoped<CommunityHub.Core.Integrations.Erp.CouponPrepaidLowBalanceAlertService>();
+builder.Services.AddScoped<CommunityHub.Core.Integrations.Erp.DraftInvoiceCreatedNotifier>();
+builder.Services.AddScoped<CommunityHub.Core.Integrations.Erp.InvoiceProblemNotifier>();
+
 var economicRolesOptionsWeb = new CommunityHub.Core.Integrations.Erp.EconomicRolesOptions();
 builder.Configuration.GetSection(CommunityHub.Core.Integrations.Erp.EconomicRolesOptions.SectionName)
     .Bind(economicRolesOptionsWeb);
@@ -1184,6 +1377,21 @@ builder.Services.AddSingleton<CommunityHub.Core.Tasks.Definitions.TaskBodyStore>
 // §666 — the first :::data provider. Registered against the interface so TaskDataResolver picks it
 // up from IEnumerable<ITaskDataProvider>; adding the next provider is one more line here.
 builder.Services.AddScoped<CommunityHub.Core.Integrations.SponsorPurchaseSummaryService>();
+// 🔴 §783.10 — the INTERFACE mapping, which was missing here and 500'd /Organizer/Logistics live.
+// `ExpoLogisticsProducer` takes `ISponsorPurchaseSummary`, not the concrete class, and only the
+// CONCRETE one was registered in this host — so the page died at ACTIVATION with "Unable to resolve
+// service for type 'ISponsorPurchaseSummary'".
+//
+// 🔒 It is worth being precise about why this survived review: the jobs host registers both, and its
+// comment there states "It is registered in the WEB host already". That sentence was WRONG, and it
+// is the kind of wrong that reads as a completed check — the concrete registration on the line above
+// makes the file LOOK like it covers this. A grep for the service name finds it; only a grep for the
+// INTERFACE finds the hole.
+//
+// ⚠️ A missing DI registration cannot fail a build and cannot fail any test that does not construct
+// the real web container — which is why the deploy check passed. See §783.10.
+builder.Services.AddScoped<CommunityHub.Core.Integrations.ISponsorPurchaseSummary>(sp =>
+    sp.GetRequiredService<CommunityHub.Core.Integrations.SponsorPurchaseSummaryService>());
 builder.Services.AddScoped<CommunityHub.Core.Tasks.Data.ITaskDataProvider,
     CommunityHub.Core.Tasks.Data.TvPurchaseTaskDataProvider>();
 // §687.1 — which shipment services this sponsor already bought. Same summary service as the TV
@@ -1203,6 +1411,12 @@ builder.Services.AddScoped<CommunityHub.Core.Tasks.Data.ITaskDataProvider,
 builder.Services.AddScoped<CommunityHub.Core.Tasks.Data.TaskDataResolver>();
 builder.Services.AddScoped<CommunityHub.Core.Tasks.TaskBodyService>();
 builder.Services.AddScoped<CommunityHub.Core.Tasks.SponsorTaskPlaceholderBuilder>();
+// §708 — the speaker twin. Much smaller (no company/tier/coupon); its real job is publishing the
+// §708.2a canonical FORM ROUTES to the bodies, so no body carries a URL of its own.
+builder.Services.AddScoped<CommunityHub.Core.Tasks.SpeakerTaskPlaceholderBuilder>();
+// §707.57d — "the task said DONE and the file did not exist". Derives the two presentation tasks
+// from the decks that actually exist, and NEVER reopens on a lookup it could not perform.
+builder.Services.AddScoped<CommunityHub.Core.Tasks.SpeakerPresentationTaskReconciler>();
 // §687.8 — "a furniture order should auto-close that task". Derives Done from the real order.
 builder.Services.AddScoped<CommunityHub.Core.Tasks.PurchaseTaskReconciler>();
 
@@ -1255,6 +1469,47 @@ builder.Services.AddScoped<CommunityHub.Core.Email.EmailTemplateRingService>();
 // Settings control; the JOBS host needs it because that is where the builders run.
 builder.Services.AddScoped<CommunityHub.Core.Email.EmailReminderCadenceService>();
 
+// §743 C4a — the device-facing ingest path (Session Evaluation). Web-only for now: the two
+// endpoints the feedback devices call are served by this host, and nothing in the jobs host
+// touches them yet.
+builder.Services.AddScoped<CommunityHub.Core.Evaluation.EvaluationIngestService>();
+// §753 — device self-service onboarding + the health-telemetry directive. Registered once and used
+// by BOTH the provisioning endpoint and the heartbeat, so the two cannot return different answers.
+builder.Services.AddScoped<CommunityHub.Core.Evaluation.EvaluationProvisioningService>();
+// §743 C3 — mirror CEH's sessions + rooms into the evaluation model, and backfill attribution.
+builder.Services.AddScoped<CommunityHub.Core.Evaluation.EvaluationSessionSyncService>();
+// §743 C7 — derive the satisfaction figures from the raw responses (nothing is stored).
+builder.Services.AddScoped<CommunityHub.Core.Evaluation.EvaluationScoreService>();
+// §784.7(C) — the merged per-session view (/Organizer/SessionFeedback). It owns the CEH-session ↔
+// evaluation-session join that the four merged pages each did differently.
+builder.Services.AddScoped<CommunityHub.Core.Evaluation.SessionFeedbackOverviewService>();
+// §743 C7 — the per-session PDF, rendered on request (PdfSharpCore, MIT).
+builder.Services.AddScoped<CommunityHub.Core.Evaluation.EvaluationReportService>();
+// §747 C8 — ONE assembly site for the report, shared by the organiser download and the outbound
+// pull, plus the version identifier that tells a consumer a recomputation superseded its copy.
+builder.Services.AddScoped<CommunityHub.Core.Evaluation.EvaluationReportBuilder>();
+// §747 C8 — the service credentials external systems present to pull reports.
+builder.Services.AddScoped<CommunityHub.Core.Evaluation.EvaluationApiClientService>();
+// §748 C5/C6 — the QR channel: resolve a printed token, and record the scan as an ordinary
+// EvaluationResponse (same table, same weights as a device press).
+builder.Services.AddScoped<CommunityHub.Core.Evaluation.EvaluationQrService>();
+// §748 C5 — we generate the QR images ourselves (operator: "qr must be gerated by you"); QRCoder,
+// MIT, via PngByteQRCode so nothing touches the Windows-only System.Drawing.
+builder.Services.AddSingleton<CommunityHub.Core.Evaluation.SessionQrCodeService>();
+// §749.1/§749.2 — push what we GENERATE into SharePoint (operator: "dont forget to download pdf
+// files intonsharepoint source with correct naming ... solution exist in cost with paths", plus
+// "both qr code link download"). Reuses the EXISTING stores and path settings — it adds no second
+// SharePoint integration, and every file name comes from the service that already owns it.
+builder.Services.AddScoped<CommunityHub.Core.Evaluation.EvaluationArtifactPublishService>();
+// §750 C7 — the report-ready notification (a LINK, never the PDF: it carries verbatim attendee
+// comments, and an attachment would put uncontrolled copies outside the retention schedule), and
+// the 30-minute debounce that decides WHEN a report is rebuilt, published and notified.
+builder.Services.AddScoped<CommunityHub.Core.Reminders.EvaluationReportReadyMailService>();
+builder.Services.AddScoped<CommunityHub.Core.Evaluation.EvaluationReportDebounceService>();
+// §751 — organizer LOG views show event-local time, not UTC. Scoped so the timezone is resolved
+// once per request rather than once per rendered row.
+builder.Services.AddScoped<CommunityHub.Services.OrganizerLogClock>();
+
 // --- Current-participant accessor (Stage 4) --------------------------------
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<
@@ -1267,6 +1522,16 @@ builder.Services.AddScoped<
 builder.Services.AddHostedService<CommunityHub.Startup.StartupWarmupService>();
 
 var app = builder.Build();
+
+// --- §768 DocLibrary configuration check ------------------------------------
+// Says at boot which path key is wrong, by name. A misconfigured folder does NOT throw at runtime —
+// the store returns an empty listing and every caller reads that as "nothing to do", which is how a
+// sweep ran four production cycles reporting success while matching nothing. Logs; does not kill the
+// host, because one unset folder must not take down sign-in and the agenda with it.
+CommunityHub.Core.Integrations.DocLibrary.DocLibraryStartupCheck.Run(
+    app.Services.GetRequiredService<
+        CommunityHub.Core.Integrations.DocLibrary.IDocLibraryPathResolver>(),
+    app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("DocLibrary"));
 
 // --- §303 per-integration field maps (layer 2) ------------------------------
 // Apply the shipped zoho-backstage.fieldmap.json over the ZohoFieldMap code
@@ -1533,6 +1798,41 @@ app.MapGet("/speaker-graphic/{id:int}", async (
         : Results.File(f.Content, f.ContentType, fileDownloadName: f.FileName);
 }).RequireAuthorization();
 
+// §841: ORGANIZER-ONLY preview of an event SoMe graphic, by FILE NAME — what SoMePost.ImageRef
+// holds (§828.7). Streamed from SharePoint with the app's creds because an organizer's browser has
+// no SharePoint permission of its own, mirroring the speaker-graphic proxy above.
+// 🔒 Organizer-gated, not merely authenticated: these are unpublished campaign assets.
+// 🔒 The service refuses a name containing a path separator — ImageRef is operator-editable, so it
+// is untrusted input and must never be able to walk out of the folder.
+app.MapGet("/organizer/some-graphic", async (
+        string? name,
+        int? kind,
+        CommunityHub.Core.Domain.SoMePostMediaKind? media,
+        CommunityHub.Core.Integrations.SoMeGraphicLibrary library,
+        CommunityHub.Auth.ICurrentParticipantAccessor participant,
+        HttpContext http,
+        CancellationToken ct) =>
+{
+    var me = participant.Current;
+    if (me is null) return Results.Unauthorized();
+    if (me.Role != CommunityHub.Core.Domain.ParticipantRole.Organizer) return Results.Forbid();
+
+    // §844.3 — the post TYPE and MEDIUM decide which library folder the name is resolved from.
+    // Both default to the event-graphics folder, which is what the §841 callers relied on.
+    var f = await library.GetAsync(
+        name,
+        kind is null ? CommunityHub.Core.Integrations.SoMeTemplateKind.EventPost
+                     : (CommunityHub.Core.Integrations.SoMeTemplateKind)kind.Value,
+        media ?? CommunityHub.Core.Domain.SoMePostMediaKind.Graphic,
+        ct);
+
+    if (f is null) return Results.NotFound();
+
+    // The gallery loads dozens of these per page; they are immutable per name.
+    http.Response.Headers["Cache-Control"] = "private, max-age=3600";
+    return Results.File(f.Content, f.ContentType);
+}).RequireAuthorization();
+
 // §172: PUBLIC (no-auth) OpenGraph image for a session's public detail page. Streams the
 // session's RELEASED SoMe session-graphic (lowest id, active edition) from SharePoint with the
 // app's creds, so social crawlers (LinkedIn/X) can fetch it for the shared link's preview card —
@@ -1699,3 +1999,4 @@ app.MapRazorPages();
 app.MapControllers();
 
 app.Run();
+

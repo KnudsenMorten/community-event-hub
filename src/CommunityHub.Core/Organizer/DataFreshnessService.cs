@@ -158,9 +158,14 @@ public sealed class DataFreshnessService
             .Where(q => q.EventId == eventId)
             .MaxAsync(q => (DateTimeOffset?)q.CreatedAt, ct);
 
-        var sessionEvals = await _db.SessionEvaluations
+        // §748.1 — freshness now comes from the LIVE four-point responses. Against the retired 1–5
+        // table this read could only ever return null, so the panel was reporting "no evaluation
+        // data" no matter how much feedback had actually arrived. CollectionTimestamp is when the
+        // attendee pressed the button; ReceivedTimestamp is when we got it — freshness means the
+        // former, since a late upload of an old reading is not fresh data.
+        var sessionEvals = await _db.EvaluationResponses
             .Where(e => e.EventId == eventId)
-            .MaxAsync(e => (DateTimeOffset?)e.CreatedAt, ct);
+            .MaxAsync(e => (DateTimeOffset?)e.CollectionTimestamp, ct);
 
         var soMePublished = await _db.SoMePosts
             .Where(p => p.EventId == eventId)

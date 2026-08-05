@@ -23,7 +23,12 @@ public sealed record SessionizeImportResult(
     // PRE-SELECTION QUEUE this run (created as inactive prospective participants
     // keyed by Sessionize id), as opposed to skipped. Reported to the organizer
     // as "added to pre-selection (no email yet)". Default 0.
-    int PreselectedNoEmail = 0);
+    int PreselectedNoEmail = 0,
+    // §827.6 — standing sign-in links revoked this run because their owner changed
+    // e-mail address in Sessionize. Surfaced rather than silent: revoking a
+    // credential is exactly the kind of thing that must be visible in the run's own
+    // summary, since this service has no audit trail of its own (§827.4).
+    int RevokedMagicLinks = 0);
 
 /// <summary>
 /// How a Sessionize import treats the speaker bio fields (Tagline, Biography,
@@ -73,19 +78,30 @@ public sealed class SessionizeImportService
     // Null in unit tests / when SharePoint isn't configured — picture import is then
     // simply skipped (best-effort), never failing the import.
     private readonly ISharePointFileStore? _pictureStore;
+    // §768.16 — where the photo goes. The SAME registry key every other speaker-photo writer and
+    // reader uses; without it this service is the one that writes somewhere nobody looks.
+    private readonly Core.Integrations.DocLibrary.IDocLibraryPathResolver? _paths;
     // Shared client for the best-effort picture fetch (low volume; one per process).
-    private static readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(30) };
+    private static readonly HttpClient _shared = new() { Timeout = TimeSpan.FromSeconds(30) };
+    // §768.16 — an INJECTABLE fetch seam. It was a static field, so where the picture copy landed
+    // could not be asserted at all: the only test that could reach it would have to hit the real
+    // network. That is why it went four §768 phases writing to a retired root unnoticed.
+    private readonly HttpClient _http;
 
     public SessionizeImportService(
         CommunityHubDbContext db,
         WelcomeEmailService welcome,
         TimeProvider clock,
-        ISharePointFileStore? pictureStore = null)
+        ISharePointFileStore? pictureStore = null,
+        Core.Integrations.DocLibrary.IDocLibraryPathResolver? paths = null,
+        HttpClient? http = null)
     {
         _db = db;
         _welcome = welcome;
         _clock = clock;
         _pictureStore = pictureStore;
+        _paths = paths;
+        _http = http ?? _shared;
     }
 
     /// <summary>
@@ -133,12 +149,24 @@ public sealed class SessionizeImportService
             where sp.EventId == eventId && sp.SessionizeSpeakerId != null
             select new { sp.SessionizeSpeakerId, Participant = p })
             .ToListAsync(ct);
+        // §827 — prefer an ACTIVE row when one Sessionize id already maps to several participants.
+        // 🔒 Not hypothetical: the defect fixed below created exactly that pair for one speaker (two
+        // participants sharing one Sessionize id), and the DEACTIVATED one was the older. Reconciling
+        // onto a row an organizer has deliberately deactivated would resurrect it and collide its
+        // e-mail with the live row.
         var participantBySessionizeId = bySessionizeId
             .GroupBy(x => x.SessionizeSpeakerId!)
-            .ToDictionary(g => g.Key, g => g.First().Participant, StringComparer.OrdinalIgnoreCase);
+            .ToDictionary(
+                g => g.Key,
+                g => g.OrderBy(x => x.Participant.DeactivatedByOrganizerAt != null ? 1 : 0)
+                      .ThenByDescending(x => x.Participant.Id)
+                      .First().Participant,
+                StringComparer.OrdinalIgnoreCase);
 
         var now = _clock.GetUtcNow();
         int created = 0, updated = 0, skipped = 0;
+        // §827.6 — standing sign-in links revoked because their owner changed e-mail address.
+        int revokedLinks = 0;
         var newParticipants = new List<Participant>();
         // Stash the Sessionize-imported fields per email so we can fan them
         // into SpeakerProfile after EF assigns the new participants their Ids.
@@ -164,19 +192,78 @@ public sealed class SessionizeImportService
             }
             else if (!string.IsNullOrWhiteSpace(s.SessionizeId)
                      && participantBySessionizeId.TryGetValue(s.SessionizeId, out var placeholder)
-                     && IsPlaceholderEmail(placeholder.Email))
+                     // 🔴 §827 — THE `IsPlaceholderEmail` GUARD USED TO BE HERE, AND IT FORKED PEOPLE.
+                     //
+                     // Reconciling by Sessionize id only when the OLD address was a placeholder meant
+                     // a speaker who changed one REAL e-mail for another fell through to "create a
+                     // new participant" — with the same SessionizeSpeakerId as the row that already
+                     // existed. Measured on 2026-08-04: a speaker became two participants, his
+                     // SESSION moved to the new row leaving the old one with none, he was welcomed a
+                     // second time, and he resurfaced as a pending speaker two days after completing
+                     // Get Started. The importer had his stable identity in hand the whole time.
+                     //
+                     // 🔒 E-mail is a MUTABLE ATTRIBUTE of a person; the Sessionize id IS the person.
+                     // So an id match now reconciles whatever the old address was — placeholder or
+                     // real.
+                     //
+                     // ⚠️ The exemption is "an organizer DEACTIVATED this row", NOT "the row is
+                     // inactive". A first guard used `IsActive` and broke §204 immediately: a newly
+                     // imported speaker lands PRESELECTED and inactive by design (§299 6.1), so that
+                     // test would have excluded the very rows the placeholder reconcile exists for.
+                     // `DeactivatedByOrganizerAt` is the deliberate act; `IsActive == false` is also
+                     // just "not reviewed yet".
+                     && placeholder.DeactivatedByOrganizerAt is null)
             {
-                // §204 RECONCILE: this speaker previously had no email and was parked in
-                // the pre-selection queue under a placeholder address; their real email
-                // has now appeared (invite accepted). Merge onto the SAME row (keyed by
-                // Sessionize id) — set the real email + name — so there is no duplicate.
+                // §204 RECONCILE (a placeholder gaining its real address) and §827 RECONCILE (a real
+                // address CHANGING) are the same operation: this Sessionize id already has a
+                // participant, so keep that person and move their e-mail.
+                //
+                // ◻ §827.4 — the address is the LOGIN identity, so a change deserves its own audit
+                // entry naming the old and new value. This service has no logger or audit trail
+                // injected, and adding one changes its constructor and every caller, so it is NOT
+                // done here: the run's own audit line moves from "1 created" to "1 updated", which
+                // is a weaker signal than it should be. Recorded rather than quietly skipped.
+                //
                 // Email is the match key from here on. We DO NOT auto-activate: the row
                 // stays in the pre-selection queue for the organizer to review/activate
                 // (pairs with §203 pending-approval notifications).
+                var previousEmail = placeholder.Email;
+
                 placeholder.Email = s.Email;
                 if (!string.IsNullOrWhiteSpace(fullName)) placeholder.FullName = fullName;
                 existing[s.Email] = placeholder; // so a duplicate row in the same pull is a no-op
                 updated++;
+
+                // 🔒 §827.6 — REVOKE THE MAGIC LINKS MINTED FOR THE ADDRESS THEY JUST LEFT.
+                //
+                // Operator 2026-08-04, on being told what a rename does to sign-in links: *"can your
+                // reconsile fix this magic link issue"*. It can, and this is the ONLY place that
+                // knows both the old and the new address at the moment they change.
+                //
+                // Why it is needed: a grant is keyed on ParticipantId and redemption never compares
+                // RecipientEmail to the current address, so WITHOUT this every multi-use link ever
+                // mailed to the old inbox keeps signing in as this person — and the usual reason an
+                // address changes is that somebody left the company that owns the old one.
+                //
+                // ⚠️ Scoped to the OLD address, not to the participant: a link already issued at the
+                // NEW address is theirs and must keep working. And a placeholder→real reconcile
+                // (§204) revokes nothing, because no real link was ever sent to a placeholder.
+                if (!string.IsNullOrWhiteSpace(previousEmail)
+                    && !string.Equals(previousEmail, s.Email, StringComparison.OrdinalIgnoreCase))
+                {
+                    var stale = await _db.MagicLinkGrants
+                        .Where(g => g.ParticipantId == placeholder.Id
+                                    && g.RevokedAt == null
+                                    && g.RecipientEmail == previousEmail)
+                        .ToListAsync(ct);
+
+                    foreach (var g in stale) g.RevokedAt = now;
+
+                    // The count is the only trace this leaves, so it goes in the run's own summary
+                    // rather than nowhere — see the §827.4 note about this service having no audit
+                    // trail of its own.
+                    revokedLinks += stale.Count;
+                }
             }
             else
             {
@@ -186,13 +273,29 @@ public sealed class SessionizeImportService
                     Email = s.Email,
                     FullName = fullName,
                     Role = ParticipantRole.Speaker,
-                    // §299 6.1: NEW imported speakers land as PRESELECTED (not Active)
-                    // so the activation hard gate applies — they sit in the
-                    // pre-selection queue until an organizer sets their
-                    // SpeakerCategory (Community / Sponsor / Guest) and activates.
-                    // EXISTING participants are never touched on re-import.
-                    IsActive = false,
-                    LifecycleState = ParticipantLifecycleState.Preselected,
+                    // 🔑 §880 (operator 2026-08-05: *"can we change so speakers synced from
+                    // sessionize are active by default … i need the blocking"*). A speaker Sessionize
+                    // has already ACCEPTED arrives ACTIVE. This replaces §299 6.1's Preselected
+                    // landing for the import path only.
+                    //
+                    // 🔒 THE BLOCKING SURVIVES, because it was never `IsActive` that did it.
+                    // `SpeakerBackstagePushService` holds on three INDEPENDENT conditions and
+                    // `SpeakerProfile.Category is null` blocks on its own — so arriving Active drops
+                    // two of them and keeps the one an organizer actually uses. His pending entry
+                    // goes from three blockers for one decision down to "needs a speaker category".
+                    //
+                    // ⚠️ WHAT ACTIVE COSTS, and it is a decision he took with the corrected facts
+                    // (§880.5/§880.6): Active is what lets a person SIGN IN, so an accepted speaker
+                    // has hub access before any organizer has looked at them. He accepted that.
+                    // He did NOT accept being mailed — welcome-email is released to Ring 3 in PROD
+                    // and speakers arrive Ring 3, so without a second gate this line alone would
+                    // welcome an unreviewed import within ~10 minutes. ⇒ `WelcomeEmailService` now
+                    // holds a speaker's welcome while their category is null, which is the SAME
+                    // predicate as the push gate: one decision point, used in both places.
+                    //
+                    // EXISTING participants are never touched on re-import — only this create.
+                    IsActive = true,
+                    LifecycleState = ParticipantLifecycleState.Active,
                     // §26c: imported speakers default to the LOCKED ring (Broad = released
                     // last) so NOTHING ring-gated (email, Zoho sync) fires for them until an
                     // organizer explicitly promotes them. Set explicitly, not relying on the
@@ -361,7 +464,8 @@ public sealed class SessionizeImportService
 
         return new SessionizeImportResult(
             parsed.Speakers.Count, created, updated, skipped,
-            parsed.Warnings, null, PreselectedNoEmail: preselectedNoEmail);
+            parsed.Warnings, null, PreselectedNoEmail: preselectedNoEmail,
+            RevokedMagicLinks: revokedLinks);
     }
 
     /// <summary>
@@ -414,9 +518,34 @@ public sealed class SessionizeImportService
     /// null when nothing could be fetched/stored. Best-effort: the caller swallows
     /// failures so a picture issue never fails the speaker import.
     /// </summary>
+    /// <summary>
+    /// §26c — copy a Sessionize profile picture into the speaker-photo folder, once, best-effort.
+    /// </summary>
+    /// <remarks>
+    /// 🔒 <b>§768.16 — this used to write somewhere nobody reads.</b> It stored
+    /// <c>Speakers/speaker-{id}.jpg</c> through <c>StoreAsync</c>, which is relative to the GRAPHICS
+    /// root — the drive-root <c>Graphics/</c> that §768.7 retired. So the file landed outside both
+    /// document-library roots, under a fourth naming convention, while
+    /// <c>PhotoSharePointPath</c> was set to it — and <see cref="SpeakerPhotoUrl.Resolve"/> prefers
+    /// that path, serving <c>/speaker-photo/speaker-42.jpg</c>, a leaf the §665 proxy looks for in
+    /// <c>Speakers/Photos</c> where it has never existed. A broken image, healed later by the archive
+    /// job overwriting the path, which is why it never looked like a bug.
+    ///
+    /// <para>Now: the registry's <c>SpeakerPhotos</c> folder, drive-relative
+    /// (<c>UploadToFolderAsync</c>, NOT <c>StoreAsync</c>), named by
+    /// <see cref="SpeakerPhotoFileName.Build"/>. With no resolver or no resolvable folder it stores
+    /// NOTHING — a skipped best-effort copy is a non-event; a file in the wrong place is not.</para>
+    /// </remarks>
     private async Task<string?> FetchAndStorePictureAsync(int participantId, string url, CancellationToken ct)
     {
         if (_pictureStore is null) return null;
+        if (_paths is null
+            || !_paths.TryResolve(Core.Integrations.DocLibrary.DocLibraryPaths.SpeakerPhotos, out var folder)
+            || string.IsNullOrWhiteSpace(folder))
+        {
+            return null;
+        }
+
         using var resp = await _http.GetAsync(url, ct);
         if (!resp.IsSuccessStatusCode) return null;
         var bytes = await resp.Content.ReadAsByteArrayAsync(ct);
@@ -425,7 +554,12 @@ public sealed class SessionizeImportService
         var ext = contentType.Contains("png") ? ".png"
                 : contentType.Contains("gif") ? ".gif"
                 : contentType.Contains("webp") ? ".webp" : ".jpg";
-        var stored = await _pictureStore.StoreAsync($"Speakers/speaker-{participantId}{ext}", bytes, contentType, ct);
-        return stored.Path;
+        var fileName = SpeakerPhotoFileName.Build(participantId, ext);
+        await _pictureStore.UploadToFolderAsync(
+            folder.Trim().Trim('/'), fileName, bytes, contentType, ct);
+
+        // 🔒 The LEAF, not the full path: the §665 proxy resolves a leaf inside the photo folder, and
+        // storing a folder-qualified path here is what made the old copy unservable.
+        return fileName;
     }
 }

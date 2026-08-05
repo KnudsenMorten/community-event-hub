@@ -203,28 +203,35 @@ public sealed class SpeakerBackstagePushService
                 continue;
             }
 
-            // §415 GET-STARTED GATE (operator 2026-07-27: "dont push to zoho before the get started
-            // have completed - otherwise it will fail").
+            // 🔒 §876 — THERE IS NO DATA GATE ON THIS PUSH AT ALL. APPROVAL IS THE ONLY GATE.
             //
-            // A speaker who has not finished onboarding has a half-filled profile, and Zoho
-            // VALIDATES on create: his run failed 4 of 4 with HTTP 400 "The country code must be in
-            // ISO Alpha-2 format". Pushing an incomplete profile cannot succeed — it just burns an
-            // API call and puts an alarming failure line in the ops mail every pass.
+            // Operator 2026-08-05: *"country must not be a dependency or the accrediation"* ·
+            // *"remove those 2 dependency for zoho sync of speaker"* · *"we add those later
+            // manuslly"*.
             //
-            // Gated on the SPEAKER-DETAILS step specifically, not the whole wizard. That step is
-            // where every field Zoho needs is collected (country, accreditation, bio, links), and it
-            // is marked done by `BioLastEditedBySpeakerAt` — the "the speaker actually edited this"
-            // marker (P13), which the Sessionize import never sets. Requiring the FULL wizard would
-            // hold a complete, Zoho-ready profile hostage to an unrelated step like Swag or Party,
-            // which is not what the failure was about.
-            if (p.BioLastEditedBySpeakerAt is null)
-            {
-                skipped++;
-                items.Add(new SpeakerPushResult(p.ParticipantId, email, PushAction.Skipped,
-                    p.BackstageSpeakerId,
-                    "Get Started not completed (speaker details not filled in yet) — held"));
-                continue;
-            }
+            // ⚠️ THE HISTORY MATTERS, because this looks like a gate being deleted twice:
+            //   §415 gated on GET STARTED. §870 removed that and replaced it with a COUNTRY check —
+            //   which looked like a narrower gate and was actually the SAME gate wearing one
+            //   field's clothing: `SpeakerProfile.Country` is written only by the speaker's own
+            //   Get-Started form, or by a Backstage change notification that cannot arrive until
+            //   the speaker EXISTS in Backstage. For a NEW speaker that is a closed loop, and it is
+            //   the loop he hit tonight with Ronni Pedersen — approved, activated, categorized,
+            //   ring 3, and silently held on an empty country he had no way to fill in (§876.2).
+            //
+            // 🔑 So the rule is now simply: IF AN ORGANIZER HAS APPROVED THEM, PUSH THEM.
+            // Country, accreditation and the rest are added by hand in Backstage afterwards —
+            // §870.2's "speed wins", with nothing left to wait on.
+            //
+            // ⚠️ §415/§870.1 recorded that Zoho refuses a create without a country (HTTP 400,
+            // *"The country code must be in ISO Alpha-2 format"*). Read that error closely: it
+            // rejects the FORMAT of a value that WAS sent — §415 was sending "Denmark" where Zoho
+            // wanted "DK". Omitting the field is a different request, and nobody had tested it.
+            // If Zoho does refuse, this now surfaces as a NAMED, VISIBLE `Failed` result carrying
+            // Zoho's own message (see the create-error path below) rather than as a silent hold —
+            // which is the outcome he actually needs either way.
+            //
+            // 🔒 Country is still SENT when we have it; it is simply no longer REQUIRED.
+            // 🔒 Accreditation was never a gate here — it only feeds the derived Skills field.
 
             // 🔒 §569 — KILL SWITCH ONLY. The per-speaker RING test is REMOVED.
             // It is what made every speaker read "outside the backstage-speaker-sync released ring

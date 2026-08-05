@@ -10,6 +10,9 @@ public class RealEventConfigParseTests
         Assert.NotNull(cfg.Volunteer);
         Assert.Contains(cfg.Volunteer!.ExtraAvailabilityDays, d => d.Date == "2027-02-07");
         Assert.NotNull(cfg.SharePoint);
-        Assert.False(string.IsNullOrEmpty(cfg.SharePoint!.VolunteerPhotoFolderPath));
+        // §768.14 — the photo FOLDERS left this block for the document-library registry
+        // (DocLibrary:Paths:VolunteerPhotos). What must still parse here is what is genuinely not a
+        // path: the site the upload seam authenticates against.
+        Assert.False(string.IsNullOrEmpty(cfg.SharePoint!.SiteUrl));
     }
 }

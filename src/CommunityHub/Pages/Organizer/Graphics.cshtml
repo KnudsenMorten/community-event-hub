@@ -43,16 +43,24 @@
 }
 
 <div class="card">
-    <h1>SoMe graphics — review &amp; release</h1>
+    <h1>SoMe graphics</h1>
+    @* 🔒 §784.12(a) — THIS COPY HAD TO GO WITH THE BUTTON. It said "Generated speaker and session
+       graphics wait here until you release them. A speaker cannot see a graphic until you release
+       it." Both sentences became FALSE the moment graphics started publishing on sight, and a page
+       that describes a gate that no longer exists is worse than no copy at all. *@
     <p>
-        Generated speaker and session graphics wait here until you release them.
-        A speaker cannot see a graphic until you release it. You can also replace a
-        generated graphic with your own design — the link to it stays the same.
+        Every speaker and session graphic that exists, and what it is of.
+        <strong>Speakers see a graphic as soon as it is made</strong> — there is no release step.
+        If one is wrong, replace it with your own design: the link to it stays the same, so the
+        speaker's page picks up the new file.
+    </p>
+    <p style="color:#6b7280;font-size:13.5px;margin-top:-6px;">
+        Nobody is emailed by this page. Speakers are told their graphics are ready by the
+        Help&nbsp;Promote mail, which is its own feature and its own audience ring.
     </p>
     <p>
         Already uploaded the session graphics to SharePoint? Pull them in: each session
-        is matched to the file whose name matches the session title, then queued below
-        for review and release.
+        is matched to the file whose name matches the session title, and appears below.
     </p>
     <form method="post" asp-page-handler="PullSharePointGraphics">
         <button type="submit" class="btn">Pull session graphics from SharePoint</button>
@@ -60,25 +68,40 @@
 </div>
 
 <div class="card">
-    <h3>Review queue (speaker &amp; session graphics)</h3>
+    <h3>Speaker &amp; session graphics</h3>
     @if (Model.ReviewQueue.Count == 0)
     {
-        <p>Nothing waiting for review.</p>
+        <p>No speaker or session graphics have been made yet.</p>
     }
     else
     {
         <table class="og-table">
             <thead>
-                <tr><th>Type</th><th>Speaker</th><th>Status</th><th>Preview</th><th>Actions</th></tr>
+                @* §784.12 — "speaker is not relevant". The column was headed "Speaker" but holds
+                   whatever the graphic is OF — a session title, a sponsor name, a track — and it
+                   read "—" on every row because only a PARTICIPANT was ever looked up. *@
+                <tr><th>Type</th><th>Session / subject</th><th>Status</th><th>Preview</th><th>Actions</th></tr>
             </thead>
             <tbody>
                 @foreach (var r in Model.ReviewQueue)
                 {
                     <tr>
                         <td data-label="Type">@r.Type</td>
-                        <td data-label="Speaker">@(r.Subject ?? "—")</td>
+                        <td data-label="Session / subject">@(r.Subject ?? "—")</td>
                         <td data-label="Status">
-                            <span class="og-badge gen">@r.Status</span>
+                            @* §784.12(a) — the badge was hard-coded "gen" because the queue could
+                               only ever hold Generated rows. The page lists everything now, so it
+                               has to read the row. "Visible to speaker" says what Released MEANS
+                               here; a leftover Generated row (nothing new creates one) is named as
+                               not yet visible rather than as awaiting an approval nobody gives. *@
+                            @if (r.Status == "Released")
+                            {
+                                <span class="og-badge rel">Visible to speaker</span>
+                            }
+                            else
+                            {
+                                <span class="og-badge gen">Not visible yet</span>
+                            }
                             @if (r.Overridden) { <span class="og-badge ovr">Replaced</span> }
                         </td>
                         <td data-label="Preview">
@@ -89,10 +112,6 @@
                             else { <span>Not stored</span> }
                         </td>
                         <td data-label="Actions" class="og-actions">
-                            <form method="post" asp-page-handler="Release">
-                                <input type="hidden" name="AssetId" value="@r.Id" />
-                                <button type="submit" class="btn">Release to speaker</button>
-                            </form>
                             <form method="post" asp-page-handler="Overrule" enctype="multipart/form-data">
                                 <input type="hidden" name="AssetId" value="@r.Id" />
                                 <label for="rep-@r.Id" class="visually-hidden">Replacement PNG for graphic @r.Id</label>

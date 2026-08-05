@@ -152,7 +152,9 @@ public sealed class SessionBackstagePushService
         var missing = new List<string>();
 
         // --- Carried by CEH, but the create payload has no field for it -------------------
-        manual.Add(Has(s.Level) ? $"level \"{s.Level!.Trim()}\"" : "level (none in CEH)");
+        // §760 — value printed BARE: this is a value he has to paste into Backstage by hand, and
+        // quotes get caught by a drag-selection. The label already delimits it.
+        manual.Add(Has(s.Level) ? $"level {s.Level!.Trim()}" : "level (none in CEH)");
         manual.Add("language");
         if (Has(s.Abstract)) manual.Add("description/abstract");
 

@@ -36,13 +36,16 @@ public sealed class SponsorArtefactVerifier
     private readonly EventEditionConfigLoader _cfg;
     private readonly EventConfigOptions _cfgOptions;
     private readonly TimeProvider _clock;
+    private readonly Core.Integrations.DocLibrary.IDocLibraryPathResolver _paths;
     private readonly ILogger<SponsorArtefactVerifier> _log;
 
     public SponsorArtefactVerifier(
         CommunityHubDbContext db, SharePointUploadClient sp, EventEditionConfigLoader cfg,
-        EventConfigOptions cfgOptions, TimeProvider clock, ILogger<SponsorArtefactVerifier> log)
+        EventConfigOptions cfgOptions, TimeProvider clock,
+        Core.Integrations.DocLibrary.IDocLibraryPathResolver paths, ILogger<SponsorArtefactVerifier> log)
     {
-        _db = db; _sp = sp; _cfg = cfg; _cfgOptions = cfgOptions; _clock = clock; _log = log;
+        _db = db; _sp = sp; _cfg = cfg; _cfgOptions = cfgOptions; _clock = clock;
+        _paths = paths; _log = log;
     }
 
     /// <summary>The outcome of one verification pass, for the job log and tests.</summary>
@@ -78,10 +81,12 @@ public sealed class SponsorArtefactVerifier
 
         foreach (var group in byKind)
         {
-            var spec = SponsorUploadKinds.Resolve(group.Key, sp);
+            var spec = SponsorUploadKinds.Resolve(group.Key, _paths, sp);
             if (spec is null)
             {
-                // An artefact kind we no longer configure. NOT evidence the file is gone.
+                // An artefact kind we no longer configure — since §768.14 that includes the retired
+                // "zoho" logo, whose historical rows land here. NOT evidence the file is gone: these
+                // records are left exactly as they are rather than marked missing.
                 unreadable++;
                 _log.LogWarning(
                     "SponsorArtefactVerifier: upload kind '{Kind}' has no configured folder — "

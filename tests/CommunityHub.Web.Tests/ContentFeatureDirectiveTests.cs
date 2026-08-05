@@ -161,8 +161,10 @@ public sealed class ContentFeatureDirectiveTests
         Assert.Contains("**Sponsor leads**", on, StringComparison.Ordinal);
 
         // …and the untagged prose is untouched in both directions.
-        Assert.Contains("## 7. Features per role", off, StringComparison.Ordinal);
-        Assert.Contains("## 7. Features per role", on, StringComparison.Ordinal);
+        // §707.48 — was "## 7." until "2. CEH by the numbers" was inserted and shifted every
+        // chapter by one.
+        Assert.Contains("## 8. Features per role", off, StringComparison.Ordinal);
+        Assert.Contains("## 8. Features per role", on, StringComparison.Ordinal);
     }
 
     /// <summary>Walk up from the test binaries to the repo's config/content folder.</summary>

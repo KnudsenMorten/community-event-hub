@@ -50,7 +50,7 @@
         <h3 style="color:var(--el-darkblue);margin-top:14px;">Filter</h3>
         <form method="get" style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;margin-bottom:18px;">
             <div style="flex:2 1 220px;min-width:160px;">
-                <label for="Search">@Localizer["OrgGrid.Search"] (title, room, speaker)</label>
+                <label for="Search">@Localizer["OrgGrid.Search"] (ID, title, room, speaker)</label>
                 <input type="text" asp-for="Search" id="Search" />
             </div>
             <div style="flex:1 1 160px;min-width:140px;">
@@ -79,6 +79,15 @@
                 <a asp-page="Sessions" style="margin-left:8px;font-size:13px;">Clear</a>
             </div>
         </form>
+
+        @* §769.11 — export EVERY session. Same rule as the participants export: "all" means all,
+           not the current filter. Service sessions (breaks, lunch) stay out, matching the grid. *@
+        <p style="margin:-8px 0 16px;font-size:13px;">
+            <a asp-page-handler="ExportXlsx" style="font-weight:600;">⬇ Export all sessions (Excel)</a>
+            <span style="color:#9ca3af;"> · </span>
+            <a asp-page-handler="Export">CSV</a>
+            <span style="color:#6b7280;"> — ID, title, type, length, room, track, schedule, speakers + their emails, hub-added, slug, Sessionize id.</span>
+        </p>
 
         <!-- ---- Add a hub-only session ------------------------------------- -->
         <h3 style="color:var(--el-darkblue);margin-top:14px;">Add a hub session</h3>
@@ -219,6 +228,10 @@
                             <input type="checkbox" id="selectAllSessions" aria-label="@Localizer["OrgGrid.SelectAll"]"
                                    onclick="for(const c of document.querySelectorAll('.sessionChk'))c.checked=this.checked;" />
                         </th>
+                        @* §769.10 — the CEH session id. It names every derived file
+                           ({id} - Title_v3.pdf, session-{id}.gif, session-{id}-…-qr.png), so it is
+                           the way back from a file in the library to the session it belongs to. *@
+                        <th scope="col" style="width:56px;" title="CEH session id — the key in every generated file name. Searchable.">ID</th>
                         <th scope="col" aria-sort="@Model.AriaSort("title")">
                             <a asp-page="Sessions" asp-route-FilterType="@Model.FilterType" asp-route-FilterLength="@Model.FilterLength"
                                asp-route-Search="@Model.Search" asp-route-Sort="title" asp-route-Desc="@Model.NextDescFor("title")" asp-route-PageNo="1">Title@(Model.SortIndicator("title"))</a>
@@ -240,6 +253,16 @@
                         <th scope="col">Evaluation</th>
                         @* §322h: public /Sessions/Slides views+downloads (one number). *@
                         <th scope="col" title="Slides opened on the public Session slides page (views + downloads)">Slides</th>
+                        @* §769.4 / work-order §6.2 — the point of the column: which sessions still
+                           have NO deck, before the deadline. *@
+                        <th scope="col" title="Uploaded presentation — final and preview, with version and upload date">Deck</th>
+                        @* §769.5 / §6.2 — the promo graphic, and whether it has been RELEASED. *@
+                        <th scope="col" title="Session promo graphic: generated, released to the speakers, or not built yet">Graphic</th>
+                        @* §836 (operator 2026-08-05: "i also want for each sessions in my sessions
+                           when we will announce the session"). Held posts show too — this is the
+                           ORGANIZER's grid, and "planned but not approved yet" is exactly what he
+                           needs to see here. *@
+                        <th scope="col" title="When this session's announcement goes out on LinkedIn">Announced</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -256,6 +279,9 @@
                                        aria-label="Select @r.Title" />
                             }
                         </td>
+                        @* §769.10 — monospace so ids line up and are easy to read off against a
+                           file name in the document library. *@
+                        <td style="font-family:ui-monospace,Consolas,monospace;font-size:13px;color:#374151;">@r.Id</td>
                         <td>
                             @r.Title
                             @if (r.IsHubAdded)
@@ -293,7 +319,7 @@
                                 <span style="color:#9ca3af;">none</span>
                             }
                         </td>
-                        <td>
+                        <td style="font-size:12px;">
                             @if (r.EvaluationEmailedAt is not null)
                             {
                                 <span style="color:#059669;">emailed</span>
@@ -302,12 +328,158 @@
                             {
                                 <span style="color:#9ca3af;">—</span>
                             }
+                            @* §769.6 / §6.2 — the evaluation ARTEFACTS, folded into this column
+                               rather than two more columns: the grid already has ten and a phone
+                               has ~360px. Printed QR first (needed BEFORE the session), then the
+                               result PDFs (which only exist after it). *@
+                            @{
+                                var hasQr = Model.QrSessionIds.Contains(r.Id);
+                                Model.EvalResultKinds.TryGetValue(r.Id, out var kinds);
+                            }
+                            <br />
+                            @if (!Model.QrReadable)
+                            {
+                                <span style="color:#9ca3af;" title="The QR folder cannot be read, so this is unknown — NOT 'no QR'.">QR unknown</span>
+                            }
+                            else if (hasQr)
+                            {
+                                <span style="color:#065f46;" title="A printed evaluation QR exists for this session.">QR ready</span>
+                            }
+                            else
+                            {
+                                <span style="color:#92400e;" title="No printed evaluation QR for this session yet.">no QR</span>
+                            }
+                            @if (kinds is { Count: > 0 })
+                            {
+                                <span style="color:#6b7280;"> &middot; results: @string.Join(" + ", kinds.Select(k => k.ToString().ToLowerInvariant()))</span>
+                            }
+                            @* §6.2 — STALE: ratings have arrived since the published report was
+                               produced, so the PDF on file no longer reflects the scores. Only ever
+                               shown for a report that WAS published — "not published yet" is a
+                               different fact and the column above already carries it. *@
+                            @if (Model.StaleReportSessionIds.Contains(r.Id))
+                            {
+                                <br />
+                                <span style="color:#b91c1c;font-weight:600;"
+                                      title="More ratings have arrived since this session's report was published. The next publish will supersede it.">results stale</span>
+                            }
                         </td>
                         <td>@(Model.SlideStats.TryGetValue(r.Id, out var slHits) ? slHits : 0)</td>
+                        @* §769.4 / §6.2 — deck state. "unknown" is deliberately NOT "missing": if the
+                           library cannot be read, saying "missing" would send the organizer chasing
+                           speakers who have all uploaded. *@
+                        <td style="font-size:12px;white-space:nowrap;">
+                            @if (!Model.DecksReadable)
+                            {
+                                <span style="color:#9ca3af;" title="The document library cannot be read from this host, so deck state is unknown — this is NOT 'no deck'.">unknown</span>
+                            }
+                            else
+                            {
+                                Model.DeckStates.TryGetValue(r.Id, out var deck);
+                                if (deck is null || deck.NothingUploaded)
+                                {
+                                    <span style="color:#b91c1c;font-weight:600;" title="No presentation uploaded for this session.">none</span>
+                                }
+                                else
+                                {
+                                    @if (deck.Final is { } fin)
+                                    {
+                                        <span style="color:#065f46;" title="@fin.DisplayName">final v@fin.Version</span>
+                                        @if (fin.UploadedAt is { } fu)
+                                        {
+                                            <span style="color:#6b7280;"> @fu.UtcDateTime.ToString("dd MMM")</span>
+                                        }
+                                    }
+                                    else
+                                    {
+                                        <span style="color:#92400e;" title="Only a preview deck so far — the final is still missing.">preview only</span>
+                                    }
+                                    @if (deck.Preview is { } prev && deck.Final is not null)
+                                    {
+                                        <br />
+                                        <span style="color:#6b7280;" title="@prev.DisplayName">preview v@prev.Version</span>
+                                    }
+                                }
+                            }
+                        </td>
+                        @* §769.5 / §6.2 — promo graphic. "generated" and "released" are different
+                           facts: the engine renders, an organizer releases, and only the second one
+                           means the speakers can see it. *@
+                        <td style="font-size:12px;white-space:nowrap;">
+                            @if (!Model.GraphicStates.TryGetValue(r.Id, out var gfx))
+                            {
+                                <span style="color:#9ca3af;" title="No promo graphic has been built for this session yet.">not built</span>
+                            }
+                            else
+                            {
+                                @if (gfx.Released)
+                                {
+                                    <span style="color:#065f46;font-weight:600;" title="@gfx.FileName">released</span>
+                                }
+                                else
+                                {
+                                    <span style="color:#92400e;" title="Built, but not yet released — the speakers cannot see it.">awaiting release</span>
+                                }
+                                @if (gfx.Variant is { } v)
+                                {
+                                    <span style="color:#6b7280;"> @v.TrimStart('.')</span>
+                                }
+                                @if (gfx.OrganizerOverridden)
+                                {
+                                    <br />
+                                    <span style="color:#3730a3;" title="An organizer replaced the generated artwork — the engine will not regenerate over it.">your own artwork</span>
+                                }
+                                @* §6.2 — STALE: the session changed after this picture was made, so
+                                   the graphic advertises a session that no longer exists in that
+                                   form. It is a promise, not a guess: the same comparison the sweep
+                                   makes, so the next sweep WILL replace it. *@
+                                @if (gfx.IsStale)
+                                {
+                                    <br />
+                                    <span style="color:#b91c1c;font-weight:600;"
+                                          title="The session's title or line-up changed after this graphic was generated. The next graphics sweep will rebuild it.">stale</span>
+                                }
+                            }
+                        </td>
+                        @* §836 — when this session's announcement runs. A session can be announced
+                           more than once, so every date is listed rather than only the first. *@
+                        <td style="white-space:nowrap;">
+                            @if (!Model.Announcements.TryGetValue(r.Id, out var posts) || posts.Count == 0)
+                            {
+                                <span class="muted" title="No announcement post is scheduled for this session yet.">—</span>
+                            }
+                            else
+                            {
+                                foreach (var post in posts.OrderBy(p => p.ScheduledAtUtc))
+                                {
+                                    <div>
+                                        @* §844.5 — Danish date, day first. *@
+                                        <strong>@CommunityHub.Core.Integrations.SoMeDisplayTime.ShortDate(post.ScheduledAtUtc)</strong>
+                                        @if (post.IsPublished)
+                                        {
+                                            <span class="set-tag on" title="Published on LinkedIn.">sent</span>
+                                        }
+                                        else if (post.IsApproved)
+                                        {
+                                            <span class="set-tag on" title="Approved — it will publish on this date.">approved</span>
+                                        }
+                                        else
+                                        {
+                                            @* 🔒 §824.21a — held is the safety model. Showing a date
+                                               without this badge would read as "it is going out". *@
+                                            <span class="set-tag off" title="Planned but NOT approved — it will not publish until you turn it on in the queue.">held</span>
+                                        }
+                                    </div>
+                                }
+                            }
+                        </td>
                     </tr>
                     <!-- Edit row (Type/Length/Room/eval form) -->
                     <tr>
-                        <td colspan="9" style="background:#fafafa;">
+                        @* ⚠️ KEEP THIS IN STEP WITH THE HEADER: 13 columns since §836 added
+                           "Announced" (12 before). A short colspan leaves the edit drawer
+                           misaligned under the last column. *@
+                        <td colspan="13" style="background:#fafafa;">
                             <details>
                                 <summary style="cursor:pointer;font-size:13px;">Edit &amp; evaluation</summary>
                                 <div style="padding:8px 0 0;">
@@ -391,7 +563,7 @@
                                         <span style="font-size:12.5px;color:#6b7280;">
                                             Public, no-login rating page for attendees (1–5 smiley + comment).
                                             Point this room's QR here, or share the link directly. Results roll up in
-                                            <a href="/Organizer/SessionEvaluations">Session evaluations</a>.
+                                            <a asp-page="/Organizer/SessionFeedback">Session feedback</a>.
                                         </span>
                                         <form method="post" asp-page-handler="ShowEvaluateLink">
                                             <input type="hidden" name="SessionId" value="@r.Id" />

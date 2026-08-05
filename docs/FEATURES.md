@@ -537,6 +537,12 @@ follow-up automatically.
   **hotel, dinner, lunch, speaker gift and travel** — plus a one-tap **Contact
   Organizers**, so everything a speaker needs for the day is gathered in one place.
   Mobile-first, in English and Danish.
+- 🗑 **RETIRED 2026-08-02 (§748.1) — the speaker ratings page is gone until its four-point
+  replacement (C10) is built.** It read the retired 1–5 scale, so it could only ever have shown an
+  empty list — which to a speaker reads as *"nobody rated me"* rather than *"not built yet"*. The
+  page now redirects to the speaker home; the per-session evaluation-QR download it also carried is
+  unaffected and still works. Speakers continue to receive their **Score / Open-feedback PDFs**.
+  History below.
 - **See how your sessions were rated.** A speaker now has a self-service "My session
   ratings" page: for each of their own sessions it shows how attendees rated it
   (the quick 1–5 smiley score they leave via the room QR code), the average and
@@ -838,6 +844,11 @@ follow-up automatically.
   evaluation** form you can attach per session. Both reach the speaker's preferred
   inbox. *(A future option to collect feedback on attendees' own devices via an API is
   designed as a drop-in.)* *(✅ 2026-06-15)*
+- 🗑 **RETIRED 2026-08-02 (§748.1) — superseded by the four-point QR feedback page.** What follows is
+  kept as history, not as a description of the hub today: the 1–5 page now redirects to the current
+  feedback page and its results dashboard is gone (the live one is *Evaluation results*). The two
+  scales measure differently and cannot be mixed, which is why one had to go rather than both being
+  offered.
 - **Quick attendee evaluation page (HappyOrNot-style) + results dashboard.** Every
   session has a **public, no-login rating page** (`/sessions/<token>/evaluate`,
   addressed by the same unguessable per-session token as the ask page) where an
@@ -1334,6 +1345,10 @@ follow-up automatically.
   reminders, broadcasts, onboarding and manual re-sends — is recorded. Organizers get a log view that
   shows **all** emails and **per person**, **filterable by name or email**, with the subject, category,
   the address it went to (and any CC), and whether it succeeded. Nothing is sent off the books.
+- **The log now includes what the system sends to itself.** *(✅ 2026-08-04)* Alerts and notices the
+  platform sends to a **mailbox** rather than to a person — job failures, hand-entry lists, invoice
+  notices, integration refusals — are listed in the email log alongside participant mail, marked
+  **ops** so the two can never be confused. They were always recorded; now they are visible.
 - **Re-send a failed email straight from the log.** *(✅ 2026-06-18)* When a logged email
   shows **Failed**, organizers get a one-click **Re-send** button right on that row — it
   retries the exact same template to the exact same person, with their secondary-email CC
@@ -1492,6 +1507,13 @@ follow-up automatically.
   invitations, welcome, reminders and the social-post queue — it brings them
   together rather than replacing them. Mobile-first, English / Danish, screen-reader
   friendly (live status regions, captioned tables).
+- **See the mail the machine sends — "Engine & ops mail".** *(✅ 2026-08-04)* The cockpit now has
+  its own section for everything the platform sent to a **mailbox** instead of to a person: job
+  failures, hand-entry lists, invoice notices and integration refusals, with when it went, what it
+  said and whether it arrived. It is deliberately kept **apart** from the participant tables — a
+  welcome mail and a job-failure alert answer different questions, and hundreds of alerts mixed into
+  one list would bury the mail the page exists to track. The participant counters at the top say how
+  much ops mail there is and how much of it did not arrive, and link straight down to it.
 - **Exports & printable run-sheets — on-site operations on paper.** *(✅ 2026-06-16)*
   The day of the event still runs on offline artifacts, so an **"Exports & run-sheets"**
   page (under Logistics) gives you both **downloadable CSV files** and **print-friendly
@@ -1894,6 +1916,36 @@ screen reader announces only the localized word, and the chip styling moved from
 styles into mobile-first `.hub-badge` CSS classes (the chip stays on one line and wraps
 with its caption at ~360px). No schema or data change.
 
+## 15a. Social-media post editor: one field, live variables, first publish *(✅ 2026-08-05)*
+
+The hub now **publishes to the community's LinkedIn company page** on a schedule the organizer
+controls, and the post editor was rebuilt around a single idea: **you write the words, the hub fills
+in the rest — every time it publishes, not once when the post was planned.**
+
+**Write once, stays current.** A post has **one text field**. Anything that can change on its own —
+the organizer credit, the event hashtags, sponsor and speaker details — is written as a **variable**
+such as `{Organizers}` or `{EventTags}`, placed wherever you want it in your own copy. The value is
+filled in **at the moment the post publishes**, so a sponsor who updates their description the day
+before, or a speaker added to a session later, is picked up automatically. Posts are planned months
+ahead, which makes this the difference between a campaign that stays accurate and one that quietly
+goes stale.
+
+**A preview that tells the truth.** The editor shows the post exactly as it will publish, with
+today's real values in place — and every variable **highlighted in colour**, so you can see at a
+glance which words are yours and which keep updating themselves. A variable with nothing behind it
+yet is shown in red rather than hidden: the post still publishes, and you can see what is missing.
+
+**Built for working through a long campaign.** Walk the posts one at a time with large
+previous/next buttons, filter by **post type** and by **state** — *Planned (not approved)*,
+*Scheduled (approved)* or *Published* — and see each post's id, the exact date and time it goes out,
+and whether it is approved, at the top of the page. The graphic is shown **above** the text, the way
+LinkedIn displays it.
+
+**Nothing publishes by accident.** A post is planned, then approved, then published — three separate
+steps. Posts whose sponsor has not yet delivered both their **logo and their social-media text** are
+held back and named, so you know exactly who to chase. When a post does go out, the organizers are
+e-mailed with a **link to the live post**, the graphic it used, and the exact text that published.
+
 ## 15. Social-media graphics & shared file store *(✅ 2026-06-15)*
 
 The hub now produces **ready-to-share social graphics** for speakers and sponsors, keeps every
@@ -1916,6 +1968,36 @@ it's approved.
 - **Speakers share in their own context.** On a **"My share graphics"** page, speakers see their
   released graphics and can **download the PNG** or open a **ready-to-edit draft on LinkedIn or
   X** — they review and post it themselves; the hub never posts on anyone's behalf.
+
+### The ELDK27 promotion artwork — designed and locked *(✅ design 2026-08-01 · engine in build)*
+
+The 2027 edition's social artwork is **composed by the hub from the event photograph**, rather than
+drawn by hand for each speaker as it was for ELDK26. The look is now fixed in code, so every graphic
+across the line-up is identical in treatment:
+
+- **One canvas, one layout.** 1200 × 627 (the LinkedIn/X link-card size) — the event photograph
+  toned down behind a thin white frame, the **Experts Live Denmark mark** top-left, the speaker's
+  name and session title lower-left, and a **circular speaker badge** on the right: the photo cropped
+  to a circle inside a blue ring reading *"Where the Microsoft community meets"*, with a **SPEAKER**
+  plate across the bottom.
+- **The decorative layers are drawn, not supplied.** The frame, the ring and the sponsor panel are
+  composed from the brand palette at render time, so the artwork follows a palette change instead of
+  needing a designer to redraw a template each edition.
+- **A GIF is the same design, repeated.** A session with one speaker is a **PNG**; a session with two
+  or more is a **GIF**, one frame per speaker, two seconds a frame, in the identical layout. A
+  master class is always a GIF of everyone teaching it.
+- **The sponsor panel takes the logo's shape.** The white plate is sized to the logo it carries —
+  a square mark gets a near-square panel, a long wordmark a long one — with the logo fitted inside,
+  never cropped or stretched to fill.
+- **When and where, once.** A single line carries the **event dates and city**; the event name is
+  deliberately left off it, because the wordmark already says it.
+- **The event mark is a file, not a deploy.** The white logo is read from the same SharePoint
+  template folder as the background photograph, so replacing it is a file drop.
+- **Coming with the engine:** graphics rebuilt automatically every 15 minutes when something
+  changes — a speaker joining or leaving a session, a replaced photo, a sponsor changing tier — plus
+  **grouped GIF sets per speaker track and per sponsor category**. The renderer and the approved design
+  ship today; the automatic build sweep is the next step, so graphics are still placed by an
+  organizer until it lands.
 - **"I'm speaking at &lt;event&gt;" button.** One click builds a **LinkedIn draft** with the event
   dates, the ticket link (the edition's public event URL) and the speaker's session — the speaker
   finalizes the wording and posts when ready.
@@ -2168,8 +2250,8 @@ the live agenda, automatic notice when a session moves, and one-click sharing.
 - **Automatic notice when a session changes.** A background engine watches the agenda for **time or
   location changes** and **emails the affected speaker** when their session moves. It is
   organizer-controllable and ring-gated, and it seeds quietly the first time so no one is emailed for
-  a change that didn't really happen. It **activates once the Zoho Backstage agenda feed is connected**
-  (the `agenda.READ` scope) — until then it safely no-ops rather than guessing. The **broad rings
+  a change that didn't really happen. It is **connected to the event platform's agenda feed and reads
+  it live**; if a read ever fails it safely no-ops rather than guessing. The **broad rings
   (ring 2/3) are auto-enabled by date — 1 Dec 2026 by default** (an organizer can override the date),
   while **ring 0/1 are unrestricted for testing** and receive alerts immediately.
   *(corrected 2026-07-07: a detected change is no longer emailed inline — it is
@@ -2305,11 +2387,10 @@ notification only when an organizer actually commits.
 - **Per-track promo graphics for speakers.** Alongside each session's own graphic, the hub can pull a
   **per-track** promotion image (matched by the session's track) and surface it on the speaker's
   Help-Promote page, ready to share — all through the hub's safe download (§158).
-- **One organized pack for an external designer.** Organizers can generate a tidy structure for a
-  designer: every **speaker photo pulled and named by speaker**, a **folder per session, master class and
-  track** with the right photo inside, and an **Excel brief** listing each session with its details and
-  folder link. If a speaker has uploaded their own photo, **that photo always wins** — a re-pull never
-  overwrites it (§165).
+- ~~**One organized pack for an external designer.**~~ **Retired 2026-08-02.** The hub used to build a
+  folder per session, master class and track with the right speaker photo inside, plus an Excel brief,
+  so a designer could make the artwork by hand. **The hub now builds that artwork itself**, so the pack
+  has nothing left to prepare. Speaker photos still live in **one folder, one per speaker**.
 
 ## 30. Fun, timed learning games with a leaderboard *(✅ 2026-06-29)*
 
@@ -2759,3 +2840,292 @@ instead of an internal tag.
 **Fewer false alarms.** The health monitor no longer reports the order webhook as a leftover from a
 rename. It is triggered by incoming orders rather than a schedule, so it is now recognised as such —
 while genuine leftovers are still flagged exactly as before.
+
+## 62. Get Started now opens with a welcome *(✅ 2026-07-31)*
+
+**The first thing you see is a hello, not a form field.** Get Started now begins with a short welcome
+step written for your role — speaker, sponsor, volunteer, media, event partner or ticket holder. It
+thanks you for taking part, says what the event is, and lists what you will find in the Event Hub, so
+you know where things live before you are asked for anything.
+
+**It matches the welcome e-mail you were sent.** The wording comes from the same welcome message, so
+the hub does not greet you differently from your inbox — minus the two parts that make no sense once
+you are already inside: the button telling you to open the hub, and the "any questions?" footer.
+
+**Nothing to fill in, and it never holds you up.** There is nothing to answer, so the step never
+counts against your progress and never leaves you short of complete. You see it on your first visit;
+after that Get Started takes you straight back to wherever you left off, and the welcome stays one tap
+away on the step bar if you want to read it again.
+
+**Every menu item it names is one you actually have.** The list is written per role against the real
+menu, so it never points you at something that is not there.
+
+**Organizers do not get one.** The welcome is for people arriving at the event, not the team running
+it.
+
+## 63. Session reports your other systems can collect for themselves *(✅ 2026-07-31)*
+
+**A session's evaluation report as a PDF, on demand.** Each session's results — its satisfaction
+index, the band it falls in, the four-way breakdown, the event figure for comparison, and any written
+comments — come as a report you can download from the organizer hub, or that another system can
+collect on its own.
+
+**It is always current, because it is made when you ask for it.** Nothing is filed away to go stale.
+If ratings arrive late — a room unit that was offline finally uploading, for instance — the next
+report simply reflects them. The organizer download and the version another system collects are the
+same document, produced the same way, so they can never disagree.
+
+**Other systems are told when a report has been superseded.** A system that has already collected a
+report can ask whether anything has changed and be told "no" without a new document being produced,
+so it can check as often as it likes. The moment late ratings actually change the figures — or the
+session is retitled or moved — it is given the new report instead. It reports a change when something
+genuinely changed, and stays quiet when nothing did.
+
+**Access is by a key you issue and can take back.** Under *Report API credentials* in the organizer
+hub you create one key per system, named for whoever will hold it, and you can see when each was last
+used — so you know whether anything still depends on it before you withdraw it. Keys work for your
+edition only.
+
+**Replacing a key does not break anything mid-flight.** When you issue a replacement, the old key
+keeps working until you retire it, so the other side can switch over on its own schedule rather than
+at an agreed second. Retiring it is a separate, deliberate step — until you take it, the old key is
+still valid.
+
+**A key is shown once.** Only a scrambled form is stored, so nobody — including us — can look one up
+afterwards. If it is lost, you issue a replacement. The page says so before you create one.
+
+**These reports quote attendees word for word.** Written comments are the most sensitive thing the
+system holds, so a key is worth treating like a password, and issuing one per system is what makes it
+possible to withdraw one without disturbing the rest.
+
+## 64. Rate a session by scanning its QR code *(✅ 2026-07-31)*
+
+**Every session gets its own QR code, made here.** One code per session, generated by the Event Hub
+itself — no outside service involved, nothing about your programme sent anywhere to be drawn. Under
+*Session QR codes* in the organizer hub you generate any that are missing, see each one, and download
+them all as a single ZIP for the printer. The files are named after the session, so nobody has to
+match codes to a list by hand the evening before the doors open.
+
+**A code never changes, so printing early is safe.** The code identifies the session, not its time or
+its room. Move a session to another room, shift it an hour, and the sign you already printed keeps
+working. That is deliberate, and it is why there is no button to regenerate one — doing so would
+quietly invalidate signs already on the wall.
+
+**Attendees rate in one tap, with no login.** Scanning opens a short page that names the session and
+its speakers, then offers the same four choices as the button units in the room. One tap sends it.
+Underneath, an optional comment goes to the speaker. Nothing identifies the person rating, and we
+don't ask.
+
+**The scan and the room unit are the same measurement.** A QR rating and a button press count
+identically — same four options, same weighting, same threshold. There is no separate "QR score" to
+reconcile against anything else.
+
+**It always tells the truth about whether it is open.** Feedback is accepted while the session runs
+and for half an hour after it ends, so people can rate on their way out. Outside that, the page says
+plainly that feedback is closed, or hasn't opened yet, rather than showing a form and quietly
+discarding the answer. It still names the session when it refuses, so someone who scanned the wrong
+code notices.
+
+**A code for a deleted session stops working.** It resolves to an honest "not found" rather than
+collecting feedback that belongs to nothing.
+
+**The older 1–5 smiley rating has been retired.** It measured on a different scale and the two cannot
+be mixed, so anyone opening an old link is taken to the current page instead.
+
+## 65. Your promo graphics are yours the moment they exist *(✅ 2026-08-04)*
+
+**A graphic no longer waits for approval.** When the hub renders your session artwork — or an
+organizer drops a finished file in the shared folder — it appears on your Help Promote page straight
+away. There is no release step in between. A speaker who cannot see their own promo graphic cannot
+promote the event, and the wait was costing more than the check was worth.
+
+**Organizers still have the last word, just later.** The graphics page lists every graphic that
+exists and what it is of, and any of them can be replaced with your own design. The replacement keeps
+the same link, so the speaker's page picks up the new picture without anything to re-send.
+
+**Being visible is not the same as being announced.** Publishing a graphic tells nobody by itself.
+The "your graphics are ready" e-mail is its own feature with its own audience, and it still only
+reaches people once per set of graphics.
+
+**Session QR codes work the same way** — they are on your speaker page as soon as they exist, ready
+to download and print.
+
+## 66. Comms: see the actual e-mails, and clear the ones you have dealt with *(✅ 2026-08-04)*
+
+**Who got what now shows the messages, not just a tally.** Every person's row opens into the real
+list: subject, date, time and how each one landed. A count told you that six things had happened; it
+never told you whether *her* invitation was one of them.
+
+**The "dropped" column is hidden by default.** Mail held back on purpose by an audience setting is
+not a delivery problem, and a column of zeroes was crowding out the ones that are. One switch shows
+the held-back mail everywhere on the page when you do want it.
+
+**A message you have already handled can be taken off the resend list.** Some undelivered mail gets
+dealt with another way — you phoned them, or they replied from a different address. Dismiss takes the
+row off the list and does nothing else: the mail is still recorded exactly as it went, and the e-mail
+log still tells the truth about it. It works even on the rows that cannot be resent, which were the
+ones with no way out at all.
+
+## 67. Speaker readiness now includes the get-started steps *(✅ 2026-08-04)*
+
+**The readiness view shows what the speaker is actually being asked to do.** Party sign-up, lunch
+sign-up, swag preferences, the calendar-e-mail step and the code-of-conduct acceptance now appear
+alongside the bio, headshot and slide uploads. They were missing, so an organizer could be chasing a
+speaker about steps the view never mentioned.
+
+**It lists only the steps that person was offered.** Someone with no lunch included does not get a
+lunch row at all, rather than an unfinished one for something never available to them — the same rule
+the speaker's own get-started list uses, so the two always agree.
+
+**Scores are lower than they were, on purpose.** There are more things to complete now, and a speaker
+who filled in the forms but never answered the party invitation is no longer counted as ready.
+
+## 68. Partner coupon pools: what is left, and whether anyone was billed *(✅ 2026-08-04)*
+
+**A prepaid pool now has a state, and it means what it says.** A partner who buys an allocation of
+tickets up front has a balance: bought, used, left. When the last one is claimed the pool reads as
+*used in full* — and if one of those tickets is later cancelled, the allocation comes back and the
+pool is open again on its own. Nothing is credited, nothing is replayed; the number is worked out
+from the live claims every time it is shown.
+
+**An agreement you end stays ended.** Closing a pool by hand is a different thing from running out of
+tickets, so it behaves differently: a cancelled ticket can re-open a pool that merely ran out, but it
+can never re-open one somebody closed. Re-opening it is a decision, and it takes a click.
+
+**A prepayment now has to be confirmed billed.** The hub never invoices a prepaid partner — they
+already paid — which used to mean nothing anywhere recorded that they had been charged at all. The
+invoice number from the finance system is now entered against the pool as confirmation, and while it
+is missing, the pool is chased by e-mail. Entering the number stops the reminder; clearing a wrong
+one starts the chase again.
+
+**New draft invoices announce themselves.** Whenever the hub creates draft invoices — for claimed
+coupons or for webshop orders — the shared mailbox gets a message saying what was created, for whom,
+how much, and the draft number. A draft reaches nobody until a person books it, so an unannounced
+draft is an invoice the customer never receives and nobody is chasing.
+
+**And the invoice numbers are visible where the coupon is.** Each coupon shows the invoices raised
+against it, marked plainly as a draft or a booked invoice — because a draft number is provisional and
+is replaced when it is booked, and quoting one to a partner sends them looking for something that
+does not exist yet. The numbers are read from the finance system as the page loads, so they are never
+a stale copy.
+
+## 69. A prepaid pool warns you before it runs out *(✅ 2026-08-04)*
+
+**You hear about it while there is still something to do.** When a partner's prepaid allocation gets
+down to its last few tickets, the shared mailbox gets a message naming the coupon, the ticket class,
+how many are left and how many have been used. The level that counts as "low" is set per pool, so a
+partner with fifty tickets and one with five can both be warned at the right moment.
+
+**Running low and being overdrawn are different messages.** "Three left" is a heads-up. A negative
+balance means people are already holding tickets nobody has paid for, and it is titled that way — it
+is not a warning about the future.
+
+**The important part is what the hub cannot do.** An empty pool does **not** close the promo code:
+the ticket system has no way for the hub to switch a code off, so it keeps working and the next
+person to use it gets a ticket nobody paid for. The message says so plainly, because assuming the
+system handled it is exactly how that ends up being discovered by an attendee.
+
+**It repeats once a day — and immediately if it gets worse.** A pool that drops further after you
+have been told is a new problem, not a repeat, so it speaks up straight away. A pool that recovers
+because a ticket was cancelled says nothing more, and a pool you have closed is never warned about at
+all.
+
+## 70. New coupon codes announce themselves, and a prepaid pool can grow *(✅ 2026-08-04)*
+
+**A code you have not mapped no longer waits to be noticed.** The moment someone uses a promo code
+the hub has no rule for, it creates one and e-mails the shared mailbox with what it knows: how many
+claims, what they are worth, which ticket class, and that nobody has said who pays. The status is
+never guessed — inventing a customer would be worse than leaving it unbilled.
+
+**Including the ones whose only claims were cancelled.** Those used to be invisible: the invoicing
+sweep skips cancelled tickets, so it never reached the point of creating a rule for them. The code
+still exists and still works, so the next person who uses it produces a real, billable ticket.
+
+**It can only see codes that have been used.** The ticket system offers no way to list the promo
+codes that exist, so this is not a complete inventory — a code created and never claimed stays
+unknown until its first claim. Adding one by hand before it is used is still the case where nothing
+ever waits.
+
+**A prepaid pool can be topped up under the same code.** If a partner buys 25 more, you add them to
+the existing pool instead of issuing a new coupon: the balance grows, the history shows both
+purchases, and each one carries its own invoice number. That matters because "has this been billed?"
+is asked per purchase — a partner who bought more after their first invoice is not settled, and the
+reminder chases exactly the purchase that is missing a number.
+
+**Every coupon can name a requester.** Picked from that customer's own contacts in the finance
+system, the requester becomes the **Att** person on the invoice — so it reaches the person who asked
+for the tickets rather than whoever the customer record happened to point at.
+
+**Smaller things in the same pass:** the "add a coupon" form is now at the top of the page instead of
+below the whole list, and the billing types read as *"Prepaid tickets with ticket-pool"* and *"Ad-hoc
+invoicing when claimed"* rather than in the system's own vocabulary.
+
+## 71. Set how often the background jobs run — yourself *(✅ 2026-08-05)*
+
+The hub runs a couple of dozen background jobs: pulling attendees and orders, watching sponsor
+upload folders, sending welcomes that are still owed, publishing scheduled posts. **Now you set how
+often almost all of them run**, from the jobs page, with no code change and no deploy.
+
+**How it works.** Each of these jobs has a **minutes box** and a **Set** button. Type 10, press Set,
+and it runs every 10 minutes from then on. The change takes effect immediately. Beside it the page
+shows what it is doing — when it last ran, and how many times it has been held back by the limit you
+set, so you can see the setting working rather than wonder whether the job has died.
+
+**What you can now re-time.** Everything that simply *checks for new work on a loop*: the attendee
+sync, the webshop order pull, sponsor upload watching and file verification, speaker graphics sync
+and the graphics-ready catch-up, welcome e-mails still owed (crew and sponsor), scheduled post
+dispatch, session and speaker change detection, evaluation reports, the leads pull and the failed-mail
+retry.
+
+**Every timer job has the box — there is no second class.** An earlier version of this page said a
+few jobs would keep a fixed time "set in code" and explain why instead of offering a control. That is
+no longer the case: **every scheduled job now has a frequency box**, the daily reminder pass
+included. One rule, one control, no exceptions to remember.
+
+**Two things worth knowing when you put a daily job on an interval.** "Every 1440 minutes" counts
+from the job's **last run**, not from the clock, so its time of day drifts slowly — a couple of hours
+over a month. And the single job with no schedule at all is marked **"Manual only"**: it exists to be
+started by hand with **Run now**, and giving it a frequency would start it on a timer.
+
+**Nothing changed on the day this shipped.** Every job kept the exact schedule it already had — the
+difference is that the schedule is now yours to change.
+
+## 72. Two separate mails: a held speaker, and volunteers waiting *(✅ 2026-08-05)*
+
+One mail used to carry two completely different things: **a speaker stuck before they can reach the
+speaker system**, and **volunteers waiting to be reviewed**. They shared one schedule, so whichever
+you picked was wrong for one of them — and it was wrong for the urgent one.
+
+**They are now two mails on two schedules.**
+
+- **Speakers held** — **within 10 minutes**. A speaker is held while nobody has set their speaker
+  category, and nothing about them flows onward until someone does. The mail names exactly who is
+  held and what is missing, and carries the **one-click approve-all buttons**, so the common case is
+  a single press from your inbox.
+- **Volunteers awaiting review** — **weekly**. A list to work through, not an incident. It says
+  plainly that it is the volunteer list only, so a held speaker can never be hiding inside it.
+
+**Ten minutes without a flood.** The speaker mail speaks **once per change**, not once per run: it
+remembers who was held and why, and stays quiet until that actually differs. So you hear within ten
+minutes when someone becomes held, and then nothing while the queue sits still. **It also survives a
+deploy** — restarting the hub does not re-send you a queue nobody has touched.
+
+**Both schedules are yours** on the jobs page, like every other job.
+
+## 73. Set the reminder interval separately for each role *(✅ 2026-08-05)*
+
+Some reminders reach several roles at once — the **Get Started** chase goes to speakers, sponsors and
+attendees; task reminders go to everyone. Until now a single repeat interval covered all of them, and
+the box appeared only in the section of the role the message is filed under. Working in the
+**Sponsors** section, you found a sentence telling you the control lived somewhere else.
+
+**Now each role's section carries its own box.** Set sponsors to 7 days and speakers stay exactly
+where they were. It is the same rule the release rings already use: **a role with its own interval
+uses it; the rest follow the shared one above.** Setting one role never moves another.
+
+**The way back is a button, not a number.** *"Follow the all-roles interval"* returns a role to the
+shared value — because `0` already means *"send once, never repeat"* and cannot also mean "unset".
+
+**Every interval counts from the last send to that person**, never from a fixed calendar date, and
+the chase still stops the moment that person is done. The shared box now also says when a role has
+broken away from it, so a number you are looking at never quietly governs fewer people than you think.

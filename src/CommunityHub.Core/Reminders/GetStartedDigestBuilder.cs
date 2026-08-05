@@ -105,10 +105,14 @@ public sealed class GetStartedDigestBuilder
             .FirstOrDefaultAsync(ct);
         if (ev is null) return System.Array.Empty<ReminderMessage>();
 
-        // §707.11 — the operator's cadence for this mail + every recipient's last send, read ONCE.
-        var intervalDays = _cadence is null
-            ? IntervalDays
-            : await _cadence.GetIntervalDaysAsync(eventId, TemplateName, ct);
+        // §707.11/§881 — the operator's cadence MAP for this mail + every recipient's last send,
+        // read ONCE. A map rather than a single number because this mail reaches three roles and he
+        // can now set them apart (operator 2026-08-05: *"i need to define the cadence for reminders
+        // for get started pending for sponsor"*). Resolving per person is the whole feature —
+        // reading one interval before the loop is the bug it fixes.
+        var intervalMap = _cadence is null
+            ? null
+            : await _cadence.GetIntervalMapAsync(eventId, TemplateName, ct);
         IReadOnlyDictionary<string, DateOnly> lastSentByOccasion = await EmailReminderCadenceService.LastSentByOccasionAsync(_db, eventId, ReminderTypeName, ct);
 
         // Every ACTIVE participant (deactivated logins — incl. §242-suspended 1-day
@@ -138,8 +142,20 @@ public sealed class GetStartedDigestBuilder
             // signer-only / booth-member contacts are never nagged about it).
             if (p.Role == ParticipantRole.Sponsor && !p.IsEventCoordinator) continue;
 
-            // §232 cadence, anchored on the welcome: WelcomeWithLoginSentAt ?? CreatedAt.
-            var anchor = DateOnly.FromDateTime((p.WelcomeWithLoginSentAt ?? p.CreatedAt).UtcDateTime);
+            // 🔒 §738 — NEVER WELCOMED ⇒ NEVER CHASED. This used to fall back to CreatedAt, so a
+            // MISSING welcome stamp read as "welcomed in June" and the person was maximally OVERDUE
+            // — due the instant their ring opened. On 2026-07-31 that delivered "a few Get Started
+            // steps are still waiting for you" at 08:00 to sponsors whose welcome went out at 08:45.
+            // §232 is the opposite rule: the welcome IS the day-0 nudge and the first digest waits a
+            // full interval after it. A null date must never read as "long ago".
+            //
+            // ⚠️ 61 active participants had no welcome stamp when this was found, so this is the
+            // difference between one bad morning and every ring-widening from here to ticket launch.
+            // They go quiet until they are welcomed — which is the actual thing to fix (§721).
+            if (p.WelcomeWithLoginSentAt is null) continue;
+
+            // §232 cadence, anchored on the welcome that was actually sent.
+            var anchor = DateOnly.FromDateTime(p.WelcomeWithLoginSentAt.Value.UtcDateTime);
             if (today < anchor) continue;                 // clock skew — not due yet
 
             // 🔒 §707.11 — DUE = lastSent + interval (§707.10), not `daysSince / IntervalDays`. The
@@ -147,6 +163,11 @@ public sealed class GetStartedDigestBuilder
             var occasionRoot = $"getstarted:{p.Id}";
             var lastSent = lastSentByOccasion.TryGetValue(occasionRoot, out var ls)
                 ? ls : (DateOnly?)null;
+            // §881 — THIS PERSON'S interval: their role's own value, else the all-roles one, else
+            // the shipped default.
+            var intervalDays = intervalMap is null
+                ? IntervalDays
+                : EmailReminderCadenceService.Resolve(intervalMap, TemplateName, p.Role);
             if (!EmailReminderCadenceService.IsDue(today, anchor, lastSent, intervalDays)) continue;
 
             // Enumerate the role's wizard via the WIZARD SERVICE itself (never tasks).

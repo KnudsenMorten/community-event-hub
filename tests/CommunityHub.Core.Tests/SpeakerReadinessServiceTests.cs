@@ -35,7 +35,8 @@ public sealed class SpeakerReadinessServiceTests
     private static async Task<int> NewSpeakerAsync(
         CommunityHubDbContext db, int eventId, string name, string email,
         SpeakerCategory? category = SpeakerCategory.Community,
-        DateTimeOffset? bioEdited = null, string? photoUrl = null)
+        DateTimeOffset? bioEdited = null, string? photoUrl = null,
+        DateTimeOffset? calendarSet = null)
     {
         var p = new Participant
         {
@@ -51,6 +52,7 @@ public sealed class SpeakerReadinessServiceTests
             Category = category,
             BioLastEditedBySpeakerAt = bioEdited,
             PhotoUrl = photoUrl,
+            CalendarEmailSetAt = calendarSet,
         });
         await db.SaveChangesAsync();
         return p.Id;
@@ -85,12 +87,25 @@ public sealed class SpeakerReadinessServiceTests
         var r = await NewService(db).BuildForSpeakerAsync(eventId, pid);
 
         Assert.NotNull(r);
-        // Master Class is NOT applicable (not linked) -> 7 applicable items.
-        Assert.Equal(7, r!.ApplicableCount);
+
+        // 🔴 §784.9(d) — THIS TEST USED TO ENCODE THE BUG. It asserted that a fresh speaker with no
+        // tasks at all had "Other to-dos" DONE ("nothing open") — which is exactly how a speaker who
+        // had NEVER LOGGED IN scored "1 of 8 done" on the organizer's roster. Something counted as
+        // complete that nobody had done, and one vacuously-true item makes every number in that
+        // column untrustworthy.
+        //
+        // Correct behaviour: with no other to-dos there is nothing to report, so the item is not
+        // applicable at all — and a speaker who has done nothing scores ZERO.
+        Assert.DoesNotContain(r!.Items, i => i.Key == "tasks");
+        Assert.Equal(0, r.DoneCount);
+        Assert.Equal(0, r.Percent);
+        Assert.False(r.IsReady);
+
+        // 11 applicable: the 6 original — details, headshot, hotel, dinner, upload-preview,
+        // upload-final — PLUS the 5 Get-Started steps this speaker is entitled to (§784.9(c)).
+        // masterclass is gone entirely (§784.9(a)); tasks is not applicable (above).
+        Assert.Equal(11, r.ApplicableCount);
         Assert.DoesNotContain(r.Items, i => i.Key == "masterclass");
-        // A fresh speaker with no tasks at all has "Other to-dos" satisfied (nothing open),
-        // but everything else is missing.
-        Assert.Contains(r.DoneItems, i => i.Key == "tasks");
         Assert.Contains(r.MissingItems, i => i.Key == "details");
         Assert.Contains(r.MissingItems, i => i.Key == "headshot");
         Assert.Contains(r.MissingItems, i => i.Key == "hotel");
@@ -98,6 +113,26 @@ public sealed class SpeakerReadinessServiceTests
         Assert.Contains(r.MissingItems, i => i.Key == "upload-preview");
         Assert.Contains(r.MissingItems, i => i.Key == "upload-final");
         Assert.Equal("/Speaker/Details", r.MissingItems.First(i => i.Key == "details").FixLink);
+
+        // 🔴 §784.9(c) — the two he named by hand: *"some are not shown like party or lunch
+        // sign-up"*. They were absent from this view entirely, so an organizer could not see the
+        // steps the speaker was being chased about.
+        Assert.Contains(r.MissingItems, i => i.Key == "getstarted:party");
+        Assert.Contains(r.MissingItems, i => i.Key == "getstarted:lunch");
+        Assert.Contains(r.MissingItems, i => i.Key == "getstarted:swag");
+        Assert.Contains(r.MissingItems, i => i.Key == "getstarted:calendar");
+        Assert.Contains(r.MissingItems, i => i.Key == "getstarted:accept");
+        Assert.Equal("/Party", r.MissingItems.First(i => i.Key == "getstarted:party").FixLink);
+
+        // 🔒 And the ones that must NOT appear. `details`/`hotel`/`dinner` already have their own
+        // signal — the wizard's copy would double-count them — and `welcome`/`deadlines` are
+        // always-Done summary steps that would hand a speaker who has done nothing free progress,
+        // which is §784.9(d) all over again.
+        Assert.DoesNotContain(r.Items, i => i.Key == "getstarted:details");
+        Assert.DoesNotContain(r.Items, i => i.Key == "getstarted:hotel");
+        Assert.DoesNotContain(r.Items, i => i.Key == "getstarted:dinner");
+        Assert.DoesNotContain(r.Items, i => i.Key == "getstarted:welcome");
+        Assert.DoesNotContain(r.Items, i => i.Key == "getstarted:deadlines");
     }
 
     [Fact]
@@ -122,10 +157,26 @@ public sealed class SpeakerReadinessServiceTests
         using var db = NewDb();
         var eventId = await NewEventAsync(db);
         var pid = await NewSpeakerAsync(db, eventId, "Done Speaker", "done@x.test",
-            bioEdited: DateTimeOffset.UtcNow, photoUrl: "https://img/headshot.jpg");
+            bioEdited: DateTimeOffset.UtcNow, photoUrl: "https://img/headshot.jpg",
+            calendarSet: DateTimeOffset.UtcNow);
 
         db.HotelBookings.Add(new HotelBooking { EventId = eventId, ParticipantId = pid, NeedsRoom = true });
         db.DinnerSignups.Add(new DinnerSignup { EventId = eventId, ParticipantId = pid, Attending = true });
+
+        // §784.9(c) — 100% now means the Get-Started steps too. That is the point of the change:
+        // a speaker who has filled in the forms but never RSVP'd to the party is NOT ready, and
+        // this view used to say they were.
+        db.SwagPreferences.Add(new SwagPreference { EventId = eventId, ParticipantId = pid });
+        db.LunchSignups.Add(new LunchSignup { EventId = eventId, ParticipantId = pid });
+        db.PartyRsvps.Add(new PartyRsvp
+        {
+            EventId = eventId, ParticipantId = pid, Name = "Done Speaker",
+            Email = "done@x.test", Attending = true,
+        });
+        db.ParticipantPolicyAcceptances.Add(new ParticipantPolicyAcceptance
+        {
+            EventId = eventId, ParticipantId = pid, AcceptedAt = DateTimeOffset.UtcNow,
+        });
         db.Tasks.AddRange(
             new ParticipantTask
             {
@@ -167,8 +218,19 @@ public sealed class SpeakerReadinessServiceTests
         Assert.Contains(r!.MissingItems, i => i.Key == "tasks");
     }
 
+    /// <summary>
+    /// ⚰️ §784.9(a) — the inverse of the test that used to live here. Master Class prep is an
+    /// OPTIONAL SERVICE, not a task (operator 2026-08-03), so it must never appear in readiness.
+    /// </summary>
+    /// <remarks>
+    /// This is a REGRESSION GUARD, not a leftover. The old test asserted the signal was applicable
+    /// when a speaker was linked to a master class and done once prep was published — which meant a
+    /// master-class speaker who simply chose not to publish prep notes sat permanently below 100%
+    /// and was pushed to the top of a roster sorted by "who needs chasing". Deleting the test with
+    /// the feature would leave nothing to stop the next person reinstating it.
+    /// </remarks>
     [Fact]
-    public async Task Master_class_prep_is_applicable_when_linked_and_done_when_prep_published()
+    public async Task Master_class_prep_is_NOT_a_readiness_signal_however_the_speaker_is_linked()
     {
         using var db = NewDb();
         var eventId = await NewEventAsync(db);
@@ -183,16 +245,20 @@ public sealed class SpeakerReadinessServiceTests
         db.SessionSpeakers.Add(new SessionSpeaker { SessionId = session.Id, ParticipantId = pid });
         await db.SaveChangesAsync();
 
-        // Linked but no prep yet -> applicable + missing.
+        // Linked to a master class, no prep published: still no such item, and it does not drag
+        // the score down.
         var before = await NewService(db).BuildForSpeakerAsync(eventId, pid);
-        Assert.Contains(before!.MissingItems, i => i.Key == "masterclass");
+        Assert.DoesNotContain(before!.Items, i => i.Key == "masterclass");
 
-        // Publish prep -> done.
+        // Prep published: still no such item — readiness is unchanged either way, which is the
+        // whole point of it being an option rather than an obligation.
         session.PrepContent = "Bring a laptop with Docker installed.";
         await db.SaveChangesAsync();
 
         var after = await NewService(db).BuildForSpeakerAsync(eventId, pid);
-        Assert.Contains(after!.DoneItems, i => i.Key == "masterclass");
+        Assert.DoesNotContain(after!.Items, i => i.Key == "masterclass");
+        Assert.Equal(before.ApplicableCount, after.ApplicableCount);
+        Assert.Equal(before.DoneCount, after.DoneCount);
     }
 
     [Fact]

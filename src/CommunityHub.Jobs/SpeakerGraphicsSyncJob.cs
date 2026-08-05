@@ -12,10 +12,12 @@ namespace CommunityHub.Jobs;
 /// Hourly timer that SYNCS the speaker/session SoMe graphics from SharePoint to the hub
 /// (REQUIREMENTS §18/§158). The operator pre-stages one finished graphic per session in the
 /// configured SharePoint folders (file name = session title); this job PULLS them
-/// (<see cref="GraphicsService.PullSessionGraphicsAsync"/>) and then RELEASES every pulled
-/// graphic to its speaker (<see cref="GraphicsService.ReleaseAllGeneratedAsync"/>). Because the
-/// operator's act of placing the file in the folder IS the curation, the pulled graphic is
-/// released straight to the speaker — no separate per-graphic review click.
+/// (<see cref="GraphicsService.PullSessionGraphicsAsync"/>) and then RELEASES anything still
+/// unreleased (<see cref="GraphicsService.ReleaseAllGeneratedAsync"/>).
+///
+/// <para>🔒 §784.12(a): there is no review gate any more. Speaker-facing graphics are born
+/// Released, so the bulk release here is the BACKLOG sweep — the rows that predate that decision —
+/// and it no longer distinguishes pulled from engine-rendered artwork.</para>
 ///
 /// INERT (logged, no-op) when the graphics SharePoint store is not configured (no site / folder
 /// paths) or no event is active. Idempotent: a re-run upserts the same rows by stable key and
@@ -27,6 +29,7 @@ public sealed class SpeakerGraphicsSyncJob
     private readonly CommunityHubDbContext _db;
     private readonly IAuditTrail _audit;
     private readonly SpeakerGraphicsReadyNotifier _ready;
+    private readonly SoMeBundleBuildService _bundles;
     private readonly ILogger<SpeakerGraphicsSyncJob> _log;
 
     public SpeakerGraphicsSyncJob(
@@ -34,19 +37,28 @@ public sealed class SpeakerGraphicsSyncJob
         CommunityHubDbContext db,
         IAuditTrail audit,
         SpeakerGraphicsReadyNotifier ready,
+        SoMeBundleBuildService bundles,
         ILogger<SpeakerGraphicsSyncJob> log)
     {
         _graphics = graphics;
         _db = db;
         _audit = audit;
         _ready = ready;
+        _bundles = bundles;
         _log = log;
     }
 
     /// <summary>
-    /// Every 15 minutes at :10/:25/:40/:55 UTC. The :40 slot is kept — it is offset from the
-    /// Sessionize import at :00 so the sessions exist before their graphics are matched by title,
-    /// and that reason still holds for the slot that matters most.
+    /// §869.3 — every 15 minutes, as a §510 interval over a 5-minute base tick. This was the row in
+    /// his screenshot: "0 10,25,40,55 * * * · set in code", with no input beside neighbours that had
+    /// one.
+    ///
+    /// <para>⚠️ The four fixed slots USED to be justified by being offset from the Sessionize import
+    /// at :00, so sessions existed before their graphics were matched by title. <b>That anchor is
+    /// already gone</b> — §825 made the Sessionize import interval-driven (hourly over a base tick),
+    /// so it no longer lands at :00 and the offset had nothing left to be offset from. The ordering
+    /// argument had quietly stopped being true before this change; converting only makes that
+    /// visible. Matching by title is idempotent, so a pass that runs early simply matches fewer.</para>
     ///
     /// <para>§435 (operator 2026-07-27): he dropped a file in the SharePoint MasterClass folder and
     /// expected it within *"1-5 min"*, then asked <i>"is the folder or name or method wrong"</i>.
@@ -56,7 +68,7 @@ public sealed class SpeakerGraphicsSyncJob
     /// </summary>
     [Function("SpeakerGraphicsSyncJob")]
     public async Task Run(
-        [TimerTrigger("0 10,25,40,55 * * * *")] TimerInfo timer,
+        [TimerTrigger("0 */5 * * * *")] TimerInfo timer,
         CancellationToken ct)
     {
         var activeEventId = await _db.Events
@@ -67,6 +79,40 @@ public sealed class SpeakerGraphicsSyncJob
         {
             _log.LogWarning("SpeakerGraphicsSyncJob: no active event in DB.");
             return;
+        }
+
+        // §767 PHASE 1 — BUILD the GIF bundles (per track, per sponsor tier) before anything else.
+        // ⚠️ Deliberately AHEAD of the pull, because the pull RETURNS EARLY when the SharePoint
+        // graphics store is not configured. Put the build after it and the sweep would silently
+        // never run in exactly the setup where it matters most.
+        // Inert and self-logging when there is no template; never throws the job.
+        try
+        {
+            var bundles = await _bundles.BuildAsync(activeEventId.Value, ct);
+            // 🔑 Only a run that actually RENDERED something is worth an audit row. A quiet sweep is
+            // the steady state every 15 minutes; auditing it would bury the runs that matter.
+            if (bundles.TrackBundles > 0 || bundles.SponsorBundles > 0
+                || bundles.SessionGraphics > 0 || bundles.SponsorGraphics > 0)
+            {
+                await _audit.RecordAsync(new AuditEntry
+                {
+                    EventId = activeEventId.Value,
+                    Category = AuditCategory.Engine,
+                    Action = "some-graphics-bundles",
+                    ActorEmail = "system",
+                    Source = AuditSource.Job,
+                    Summary = $"§767: {bundles.TrackBundles} track GIF(s), "
+                              + $"{bundles.SessionGraphics} session graphic(s), "
+                              + $"{bundles.SponsorBundles} sponsor grouping GIF(s), "
+                              + $"{bundles.SponsorGraphics} sponsor graphic(s) built.",
+                }, ct);
+            }
+        }
+        catch (Exception ex)
+        {
+            // A failed render must not cost the PULL + RELEASE below — those are what speakers are
+            // waiting on. Logged loudly rather than swallowed.
+            _log.LogError(ex, "§767 bundle build failed; continuing with the SharePoint pull.");
         }
 
         // PULL from SharePoint (inert/zero when not configured — never throws). Pulls the
@@ -80,17 +126,30 @@ public sealed class SpeakerGraphicsSyncJob
             return;
         }
 
-        // RELEASE every generated (pulled) speaker/session/track graphic to its speaker.
+        // RELEASE every generated speaker/session/track graphic to its speaker.
+        //
+        // 🔒 §784.12(a) RETIRED THE ENGINE-RENDERED CARVE-OUT (operator 2026-08-03: generated files
+        // "should be published to speaker right away so they can see them"). This used to pass
+        // includeEngineRendered:FALSE so machine-made artwork waited for an organizer click. It now
+        // releases everything, and new rows are already born Released
+        // (GraphicsService.InitialStatusFor) — so in the steady state this call finds nothing.
+        // ⚠️ Its remaining job is the BACKLOG: the rows that were sitting at Generated when this
+        // shipped. Without it the decision would only have applied to future graphics.
         var released = await _graphics.ReleaseAllGeneratedAsync(
-            activeEventId.Value, "system (SharePoint sync)", ct);
+            activeEventId.Value, "system (SharePoint sync)", ct, includeEngineRendered: true);
 
         // §436 (operator 2026-07-27: "when it detects, i expect also an email to arrive").
-        // THIS is the detection path he meant: the file appears in SharePoint, this job pulls
-        // it and — because placing the file IS the curation — releases it in the same run. So
-        // the mail goes out here, quarter-hourly, instead of waiting for the next 08:30 sweep.
-        // Narrowed to the speakers this run actually released; the shared ledger key means an
-        // already-notified speaker is skipped either way.
-        var notified = await _ready.NotifyAsync(activeEventId.Value, released.SpeakerIds, ct);
+        // THIS is the detection path he meant: the file appears in SharePoint, this job pulls it,
+        // and the speaker can act on it in the same run — so the mail goes out here, quarter-hourly,
+        // instead of waiting for the next 08:30 sweep.
+        //
+        // 🔒 A FULL SWEEP (null), NOT released.SpeakerIds. Under §784.12(a) a pulled or rendered
+        // graphic is ALREADY Released when it is written, so the bulk release above returns an empty
+        // set in the steady state — and an empty (not null) set means "notify nobody". Passing it
+        // would have silently reduced §436 back to the daily sweep on the very first run after the
+        // backlog cleared. The narrowing was only ever an optimisation; the ReminderEngine ledger
+        // key is the idempotency, and it still collapses re-runs about the same graphics to one mail.
+        var notified = await _ready.NotifyAsync(activeEventId.Value, onlySpeakerIds: null, ct);
 
         _log.LogInformation(
             "SpeakerGraphicsSyncJob: pulled {Matched} session-matched ({Unmatched} had no file), "

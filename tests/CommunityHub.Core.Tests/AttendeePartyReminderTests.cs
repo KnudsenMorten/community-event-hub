@@ -65,7 +65,7 @@ public sealed class AttendeePartyReminderTests
         return (ev.Id, p.Id);
     }
 
-    [Fact]
+    [Fact(Skip = "733.1 - the party cadence is RETIRED (operator 2026-07-31: the wizard is chased once every 14 days by getstarted-digest). Kept, not deleted, so re-enabling restores the coverage. See PartyCadenceRetiredTests.")]
     public async Task First_reminder_waits_2_weeks_after_welcome()
     {
         // §232 (operator 2026-07-07): the welcome IS the day-0 nudge — no reminder fires
@@ -116,7 +116,7 @@ public sealed class AttendeePartyReminderTests
     /// send delayed by a ring drop landed late in its window while the NEXT window opened on
     /// schedule, so one person could get two mails a day apart. Coverage is rewritten, not deleted.
     /// </remarks>
-    [Fact]
+    [Fact(Skip = "733.1 - the party cadence is RETIRED (operator 2026-07-31: the wizard is chased once every 14 days by getstarted-digest). Kept, not deleted, so re-enabling restores the coverage. See PartyCadenceRetiredTests.")]
     public async Task Repeats_are_measured_from_the_last_send_not_a_calendar_window()
     {
         using var db = ScenarioFixture.NewDb();
@@ -157,7 +157,7 @@ public sealed class AttendeePartyReminderTests
         Assert.Single(await builder.BuildDueAsync(ev));
     }
 
-    [Fact]
+    [Fact(Skip = "733.1 - the party cadence is RETIRED (operator 2026-07-31: the wizard is chased once every 14 days by getstarted-digest). Kept, not deleted, so re-enabling restores the coverage. See PartyCadenceRetiredTests.")]
     public async Task Cancelled_attendee_gets_no_party_reminder()
     {
         // §234 1: a soft-cancelled ATTENDEE (their email holds NO MirrorState.Active
@@ -177,7 +177,7 @@ public sealed class AttendeePartyReminderTests
         Assert.Empty(await builder.BuildDueAsync(ev));
     }
 
-    [Fact]
+    [Fact(Skip = "733.1 - the party cadence is RETIRED (operator 2026-07-31: the wizard is chased once every 14 days by getstarted-digest). Kept, not deleted, so re-enabling restores the coverage. See PartyCadenceRetiredTests.")]
     public async Task Attendee_with_a_cancelled_AND_an_active_ticket_still_gets_the_reminder()
     {
         // §234 (operator): "you can easily have same mail address twice — fx one cancelled
@@ -204,7 +204,7 @@ public sealed class AttendeePartyReminderTests
         Assert.Equal("a@x.dk", m.RecipientEmail);
     }
 
-    [Fact]
+    [Fact(Skip = "733.1 - the party cadence is RETIRED (operator 2026-07-31: the wizard is chased once every 14 days by getstarted-digest). Kept, not deleted, so re-enabling restores the coverage. See PartyCadenceRetiredTests.")]
     public async Task Crew_member_with_no_attendee_row_keeps_the_reminder()
     {
         // §234 1: the cancelled-attendee gate applies to Role == Attendee ONLY — crew
@@ -217,7 +217,7 @@ public sealed class AttendeePartyReminderTests
         Assert.Single(await builder.BuildDueAsync(ev));
     }
 
-    [Fact]
+    [Fact(Skip = "733.1 - the party cadence is RETIRED (operator 2026-07-31: the wizard is chased once every 14 days by getstarted-digest). Kept, not deleted, so re-enabling restores the coverage. See PartyCadenceRetiredTests.")]
     public async Task Crew_roles_also_get_the_2_week_party_cadence()
     {
         // §206: the same cadence applies to crew (here: a Media crew member), not only attendees.
@@ -229,7 +229,7 @@ public sealed class AttendeePartyReminderTests
         Assert.EndsWith(":20260714", (await builder.BuildDueAsync(ev)).Single().OccasionKey);
     }
 
-    [Fact]
+    [Fact(Skip = "733.1 - the party cadence is RETIRED (operator 2026-07-31: the wizard is chased once every 14 days by getstarted-digest). Kept, not deleted, so re-enabling restores the coverage. See PartyCadenceRetiredTests.")]
     public async Task Stops_once_the_attendee_has_rsvpd()
     {
         using var db = ScenarioFixture.NewDb();
@@ -248,7 +248,7 @@ public sealed class AttendeePartyReminderTests
         Assert.Empty(await builder.BuildDueAsync(ev));
     }
 
-    [Fact]
+    [Fact(Skip = "733.1 - the party cadence is RETIRED (operator 2026-07-31: the wizard is chased once every 14 days by getstarted-digest). Kept, not deleted, so re-enabling restores the coverage. See PartyCadenceRetiredTests.")]
     public async Task Stops_once_the_party_task_is_done()
     {
         using var db = ScenarioFixture.NewDb();

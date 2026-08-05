@@ -94,16 +94,32 @@ public class EmailLogModel : PageModel
         return Page();
     }
 
+    /// <summary>
+    /// §818 — this page's tile promises <i>"the full delivery log of every email sent"</i>. It was
+    /// edition-scoped, so it dropped every row that carries no edition stamp.
+    /// </summary>
+    /// <remarks>
+    /// <para>`LoggingEmailSender` writes <c>EventId = ctx?.EventId ?? 0</c>, so a send whose ambient
+    /// <c>EmailContext</c> names no edition lands on event 0: engine alerts, ops notices, the AiHelper
+    /// intake — 375 rows in PROD over six weeks, none of them listed here. Operator 2026-08-04 (§815):
+    /// <i>"why can I not see the emails sent here in a logged form"</i>.</para>
+    ///
+    /// <para>🔒 Event 0 is not "some other edition" — it is <b>no</b> edition, which is why including
+    /// it here cannot show one edition's mail on another's page. The rows are marked in the table so
+    /// the listing never implies they were stamped.</para>
+    /// </remarks>
+    public static bool IsUnstamped(EmailLog row) => row.EventId == 0;
+
     private async Task LoadAsync(int eventId, CancellationToken ct)
     {
         Categories = await _db.EmailLogs
-            .Where(e => e.EventId == eventId)
+            .Where(e => e.EventId == eventId || e.EventId == 0)
             .Select(e => e.Category)
             .Distinct()
             .OrderBy(c => c)
             .ToListAsync(ct);
 
-        var q = _db.EmailLogs.Where(e => e.EventId == eventId);
+        var q = _db.EmailLogs.Where(e => e.EventId == eventId || e.EventId == 0);
 
         if (!string.IsNullOrWhiteSpace(Category))
         {

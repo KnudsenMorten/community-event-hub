@@ -23,7 +23,15 @@ public sealed class ProfileStepHandler : IWizardStepHandler
     public string Key => "profile";
 
     /// <summary>Fields-only partial (no &lt;form&gt;/chrome) rendered inside the host's one form.</summary>
-    public string PartialName => "_ProfileFields";
+    /// <remarks>
+    /// 🔒 §708.10a — FULL PATH, because this partial lives in <c>/Pages/</c> and not in
+    /// <c>/Pages/Forms/</c> with the others. It resolved as a bare name only by luck: <c>/Pages/</c>
+    /// happens to be in Razor's default search chain. Stating the path makes the location a fact the
+    /// handler owns — the same thing <c>SpeakerDetailsStepHandler</c> and
+    /// <c>VolunteerAvailabilityStepHandler</c> already do — so "a bare name means /Pages/Forms/"
+    /// becomes a rule that is actually true, and testable.
+    /// </remarks>
+    public string PartialName => "/Pages/_ProfileFields.cshtml";
 
     /// <summary>The render model handed to the partial; carries posted values back on Invalid.</summary>
     public object? Model { get; private set; }

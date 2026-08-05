@@ -412,7 +412,7 @@ public sealed class AttendeeLifecycleEndToEndTests
         Assert.DoesNotContain("T090000", h.Sender.LastIcs!);
     }
 
-    [Fact]
+    [Fact(Skip = "733.1 - the per-task party/master-class cadences are RETIRED (operator 2026-07-31: the Get Started wizard is chased once every 14 days by getstarted-digest). Kept, not deleted, so re-enabling restores this coverage.")]
     public async Task TwoDay_10_reminders_fire_until_answered_then_stop_no_date_gate()
     {
         await using var h = NewHarness();
@@ -798,7 +798,7 @@ public sealed class AttendeeLifecycleEndToEndTests
     /// proves the reminder stopped for the drop-out specifically — not that the cadence was broken
     /// for everybody, which a one-person test would have happily passed.</para>
     /// </summary>
-    [Fact]
+    [Fact(Skip = "733.1 - the per-task party/master-class cadences are RETIRED (operator 2026-07-31: the Get Started wizard is chased once every 14 days by getstarted-digest). Kept, not deleted, so re-enabling restores this coverage.")]
     public async Task A_dropped_out_attendee_is_not_reminded_but_an_active_one_still_is()
     {
         await using var h = NewHarness();

@@ -1,0 +1,105 @@
+@page
+@model CommunityHub.Pages.Organizer.SoMeSchedulerModel
+@{
+    ViewData["Title"] = "Post planner";
+}
+
+<div class="card">
+    <h1>Post planner</h1>
+    <p class="muted">
+        Plans the announcement campaign across the five post types and holds every post for your
+        approval. <strong>It adds — it never rewrites.</strong> A post you have edited, approved or
+        rescheduled is left alone on every later run.
+    </p>
+
+    @if (Model.AccessDenied)
+    {
+        <p class="error">@Localizer["Common.OrganizersOnly"]</p>
+    }
+    else
+    {
+        @if (Model.Message is not null)
+        {
+            <p class="@(Model.MessageIsError ? "error" : "success")">@Model.Message</p>
+        }
+
+        @* 🔑 §833.1 — THE REASON, ON SCREEN. This refusal used to exist only in a log, which made an
+           engine that was working-as-designed look like an engine that was broken. *@
+        @if (Model.EditionAlreadyStarted)
+        {
+            <p class="error">
+                <strong>The planner is not composing.</strong> This edition has already started, and
+                announcing an event that has begun is worse than not announcing it.
+            </p>
+        }
+        else if (Model.MissingFooterParts.Count > 0)
+        {
+            <p class="error">
+                <strong>The planner is composing nothing, on purpose.</strong>
+                This edition has no
+                <strong>@string.Join(", no ", Model.MissingFooterParts)</strong> yet.
+            </p>
+            <p class="muted">
+                Posts are composed once and never rewritten, so planning now would queue them
+                permanently without that part of the footer — and the gap closes so cleanly that the
+                posts would look finished. Fill it in and the planner starts working immediately.
+            </p>
+            <a class="btn primary" asp-page="/Organizer/SoMeSettings">Fill in the post footer →</a>
+        }
+        else
+        {
+            <p class="success"><strong>Ready.</strong> The post footer is complete for this edition.</p>
+        }
+
+        <form method="post" asp-page-handler="Run" style="margin-top:12px;">
+            <button type="submit" class="btn @(Model.CanCompose ? "primary" : "")">Plan posts now</button>
+            <p class="muted" style="margin-top:8px;">
+                Safe to run at any time: every post it creates is <strong>held (not approved)</strong>,
+                so nothing can reach the company page until you turn it on in the queue.
+            </p>
+        </form>
+    }
+</div>
+
+@if (!Model.AccessDenied)
+{
+    <div class="card">
+        <h2>The campaign right now</h2>
+        <p class="muted">
+            @Model.TotalPlanned held for approval · @Model.TotalApproved approved and waiting ·
+            @Model.TotalPublished published
+        </p>
+
+        <div style="overflow-x:auto;">
+            <table>
+                <caption class="sr-only">Planned, approved and published posts by type</caption>
+                <tr style="text-align:left;border-bottom:2px solid #ddd;">
+                    <th scope="col">Post type</th>
+                    <th scope="col">Held for approval</th>
+                    <th scope="col">Approved</th>
+                    <th scope="col">Published</th>
+                    <th scope="col">Next one goes out</th>
+                </tr>
+                @foreach (var row in Model.Rows)
+                {
+                    <tr style="border-bottom:1px solid #eee;">
+                        <td>@row.Name</td>
+                        <td>@(row.Planned > 0 ? row.Planned.ToString() : "—")</td>
+                        <td>@(row.Approved > 0 ? row.Approved.ToString() : "—")</td>
+                        <td>@(row.Published > 0 ? row.Published.ToString() : "—")</td>
+                        <td class="muted">
+                            @* §844.5 — Danish local time. *@
+                            @(row.NextDue is null ? "—" : CommunityHub.Core.Integrations.SoMeDisplayTime.DateTime(row.NextDue.Value))
+                        </td>
+                    </tr>
+                }
+            </table>
+        </div>
+
+        <p class="muted" style="margin-top:12px;">
+            Approve, edit or reschedule an individual post in the
+            <a asp-page="/Organizer/SoMeQueue">SoMe queue</a>. Change the wording every post is built
+            from in <a asp-page="/Organizer/SoMeTemplates">post templates</a>.
+        </p>
+    </div>
+}

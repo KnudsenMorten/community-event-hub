@@ -22,13 +22,25 @@ public sealed class FxRateOptions
 
 /// <summary>
 /// Live FX rate provider (today's rates).
-///
-/// ◻ LIVE WIRING NOT COMPLETE. A real rate lookup needs an operator endpoint
-/// that is NOT available in this repo. Until configured, <see cref="CanQuote"/>
-/// is false and the order currency check runs as a known-currency gate only.
-/// The quote method throws if called while disabled — it must never fabricate a
-/// rate.
 /// </summary>
+/// <remarks>
+/// <para>§786.3 — WIRED against the endpoint the operator's retired invoicing script has been using
+/// in production: <c>onesimpleapi.com/api/exchange_rate</c>, which answers a conversion query with
+/// the converted VALUE as plain text. Asking it to convert exactly 1.0 therefore yields the rate.
+/// That indirection is the API's shape, not a trick — and it is the same call the script made, which
+/// is the whole reason this endpoint is trusted rather than chosen.</para>
+///
+/// <para>🔒 <b>It still never fabricates a rate.</b> Not configured ⇒ <see cref="CanQuote"/> is false
+/// and the caller must not ask; asked anyway ⇒ it throws. A lookup that fails or returns a
+/// non-positive number returns <c>null</c>, and <see cref="WebshopDraftInvoiceService"/> then leaves
+/// the order UNINVOICED with a named reason. An invented rate would reach a customer as a wrong
+/// amount, which is far worse than a missing invoice.</para>
+///
+/// <para>⚠️ <b>The API key is a SECRET and lives only in Key Vault</b> (<c>FxRates:ApiKey</c>), and it
+/// must be present on BOTH web slots and the Functions app or the invoicing job converts nothing in
+/// exactly one environment. It is never logged: the failure log below prints the currencies, never
+/// the request URL, because the key travels in the query string.</para>
+/// </remarks>
 public sealed class FxRateProvider : IFxRateProvider
 {
     private readonly HttpClient _http;
@@ -48,17 +60,55 @@ public sealed class FxRateProvider : IFxRateProvider
     public bool CanQuote =>
         _options.Enabled && !string.IsNullOrWhiteSpace(_options.ApiBaseUrl);
 
-    public Task<decimal?> GetRateAsync(string baseCurrency, string quoteCurrency, CancellationToken ct)
+    public async Task<decimal?> GetRateAsync(
+        string baseCurrency, string quoteCurrency, CancellationToken ct)
     {
         if (!CanQuote)
         {
             throw new InvalidOperationException("FxRateProvider is not configured (CanQuote is false).");
         }
-        if (string.Equals(baseCurrency, quoteCurrency, StringComparison.OrdinalIgnoreCase))
+
+        var from = (baseCurrency ?? string.Empty).Trim().ToUpperInvariant();
+        var to = (quoteCurrency ?? string.Empty).Trim().ToUpperInvariant();
+
+        if (string.Equals(from, to, StringComparison.Ordinal))
         {
-            return Task.FromResult<decimal?>(1m);
+            return 1m;
         }
-        throw new NotImplementedException(
-            "Live FX rate lookup is not wired yet (◻ — needs verified endpoint).");
+
+        // Convert exactly 1.0 — the answer IS the rate. See the remarks: this endpoint converts an
+        // amount rather than quoting a rate.
+        var url = $"{_options.ApiBaseUrl.TrimEnd('/')}/exchange_rate"
+                  + $"?token={Uri.EscapeDataString(_options.ApiKey)}"
+                  + $"&output=text&from_currency={from}&to_currency={to}&from_value=1";
+
+        try
+        {
+            using var resp = await _http.GetAsync(url, ct);
+            resp.EnsureSuccessStatusCode();
+
+            var body = (await resp.Content.ReadAsStringAsync(ct)).Trim();
+
+            // InvariantCulture: "1.1354" read under a Danish culture becomes 11354, which would
+            // multiply every converted invoice by ten thousand.
+            if (!decimal.TryParse(
+                    body, System.Globalization.NumberStyles.Any,
+                    System.Globalization.CultureInfo.InvariantCulture, out var rate)
+                || rate <= 0m)
+            {
+                _log.LogWarning(
+                    "FX lookup {From}->{To} returned an unusable answer; no rate is available.",
+                    from, to);
+                return null;
+            }
+
+            return rate;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // 🔒 The currencies, never the URL — the API key is a query parameter.
+            _log.LogWarning(ex, "FX lookup {From}->{To} failed; no rate is available.", from, to);
+            return null;
+        }
     }
 }

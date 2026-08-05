@@ -54,3 +54,6 @@ tests/playwright/_diag-*.spec.ts
 # Playwright run artifacts (traces, screenshots, last-run state) — never committed.
 test-results/
 playwright-report/
+
+# Test run artifacts (trx logger output) - never source.
+TestResults/

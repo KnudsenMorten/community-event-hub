@@ -74,6 +74,13 @@ public class SettingsModel : PageModel
         = new Dictionary<string, int?>(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
+    /// §881 — the per-ROLE repeat intervals, keyed by (template, role). A missing entry means that
+    /// role has none of its own and follows <see cref="CadenceByTemplate"/>.
+    /// </summary>
+    public IReadOnlyDictionary<(string TemplateKey, ParticipantRole Role), int?> CadenceByRole
+    { get; private set; } = new Dictionary<(string, ParticipantRole), int?>();
+
+    /// <summary>
     /// §707.25 — show mails that are RETIRED IN CODE. Default FALSE (operator 2026-07-30: *"as this
     /// is retired in code, it should not be shown here — maybe add so i can tick on to show retired
     /// features in code"*). The hidden count is always stated, so the page never lies by omission.
@@ -94,8 +101,14 @@ public class SettingsModel : PageModel
     /// keeps being corrected for. The rule it writes is <c>lastSent + N days</c> (§707.10), and the
     /// completion condition (what stops the chasing) is shown beside it.
     /// </remarks>
+    /// <param name="role">
+    /// §881 — blank/absent sets the ALL-ROLES cadence (the filing home's box). A role sets THAT ROLE
+    /// alone, which is what the box on a cross-listed section does: operator 2026-08-05, *"i need to
+    /// define the cadence for reminders for get started pending for sponsor — like this one mentioned
+    /// under speaker"*. Setting one role never moves another, exactly as with the per-role rings.
+    /// </param>
     public async Task<IActionResult> OnPostMailCadenceAsync(
-        string templateKey, int intervalDays, CancellationToken ct)
+        string templateKey, int intervalDays, CancellationToken ct, ParticipantRole? role = null)
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
@@ -104,11 +117,52 @@ public class SettingsModel : PageModel
 
         // 0 (or less) is the operator saying "stop repeating" — stored as null = once, ever.
         int? interval = intervalDays > 0 ? intervalDays : null;
-        var ok = await _cadence.SetIntervalAsync(me.EventId, templateKey, interval, me.Email, ct);
+        var ok = await _cadence.SetIntervalAsync(
+            me.EventId, templateKey, interval, me.Email, role, ct);
         Saved = ok;
         if (!ok)
         {
-            Message = $"'{templateKey}' is not a recurring mail — nothing changed.";
+            Message = role is null
+                ? $"'{templateKey}' is not a recurring mail — nothing changed."
+                : $"'{templateKey}' does not reach {role} — nothing changed.";
+        }
+        return RedirectToPage();
+    }
+
+    /// <summary>
+    /// §881 — drop a ROLE's own cadence so it follows the all-roles value again. The cadence twin of
+    /// the ring picker's "— follow the all-roles ring —"; without it a per-role number could be set
+    /// and never un-set, because 0 already means "send once, ever".
+    /// </summary>
+    public async Task<IActionResult> OnPostMailCadenceFollowAsync(
+        string templateKey, ParticipantRole role, CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+        if (!OrganizerAuth.IsRealOrganizer(me)) return Forbid();
+        if (_cadence is null) return RedirectToPage();
+
+        Saved = await _cadence.ClearIntervalAsync(me.EventId, templateKey, role, ct);
+        return RedirectToPage();
+    }
+
+    /// <summary>
+    /// §742 — set WHERE a feature's ops notice goes (operator 2026-07-31: *"i need to be able to
+    /// control where it goes and state in settings page"*). Blank CLEARS it back to the built-in
+    /// ops mailbox, which is why an empty submit is a valid action rather than a no-op.
+    /// </summary>
+    public async Task<IActionResult> OnPostNotificationRecipientAsync(
+        string key, string? email, CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+        if (!OrganizerAuth.IsRealOrganizer(me)) return Forbid();
+
+        var ok = await _settings.SetNotificationRecipientAsync(me.EventId, key, email, me.Email, ct);
+        Saved = ok;
+        if (!ok)
+        {
+            Message = $"'{key}' does not send a notification, so there is nowhere to send it.";
         }
         return RedirectToPage();
     }
@@ -524,6 +578,10 @@ public class SettingsModel : PageModel
         {
             CadenceByTemplate = (await _cadence.GetAllAsync(eventId, ct))
                 .ToDictionary(c => c.TemplateKey, c => c.IntervalDays, StringComparer.OrdinalIgnoreCase);
+
+            // §881 — and the per-role rows, so a cross-listed section can render its OWN box instead
+            // of a sentence explaining where the control lives.
+            CadenceByRole = await _cadence.GetPerRoleAsync(eventId, ct);
         }
     }
 

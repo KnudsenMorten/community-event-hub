@@ -77,13 +77,11 @@ public class JobSilenceDetectorTests
         Assert.Empty(Eval(("SessionBackstagePushJob", Now.AddMinutes(-20))));
     }
 
-    [Fact]
-    public void An_ANNUAL_placeholder_job_is_NEVER_flagged_however_old_it_is()
-    {
-        // SessionPushPilotJob runs "0 0 0 1 1 *" and is deliberately inert. Its last success in PROD
-        // is 5 days old and that is CORRECT — flagging it is exactly how a watchdog gets ignored.
-        Assert.Empty(Eval(("SessionPushPilotJob", Now.AddDays(-200))));
-    }
+    // ⚰️ §878 — `An_ANNUAL_placeholder_job_is_NEVER_flagged_however_old_it_is` lived here and used
+    // SessionPushPilotJob, the catalog's only annual job. That job is RETIRED (operator: *"i have
+    // no idea what this is doing … it should be deleted (not used)"*), so the test lost its
+    // subject. The RULE it guarded is still live and still covered — `ExpectedGap` returns null for
+    // an annual cron, asserted directly in `A_rare_cadence_job_has_no_expected_gap_at_all` below.
 
     [Fact]
     public void A_daily_job_that_ran_this_morning_is_not_flagged()
@@ -117,7 +115,14 @@ public class JobSilenceDetectorTests
     [Fact]
     public void A_rare_cadence_job_has_no_expected_gap_at_all()
     {
-        Assert.Null(JobSilenceDetector.ExpectedGap(JobCatalog.Find("SessionPushPilotJob")!));
+        // §878 — asserted against a CONSTRUCTED annual descriptor now that the catalog has no
+        // annual job left (SessionPushPilotJob retired). The rule outlives its last example: a job
+        // pinned to a day AND month is never judged stale, or the watchdog cries wolf every year.
+        var annual = new JobDescriptor(
+            "AnnualPlaceholderJob", "Annual placeholder", "Manual only", "0 0 0 1 1 *",
+            "Parked on an annual cron so it never fires on its own.");
+
+        Assert.Null(JobSilenceDetector.ExpectedGap(annual));
     }
 
     // ---------- §707.27 E — an HTTP-triggered function is not an orphan ----------

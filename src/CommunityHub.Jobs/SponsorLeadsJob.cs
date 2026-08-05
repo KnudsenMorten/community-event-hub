@@ -69,7 +69,10 @@ public sealed class SponsorLeadsJob
     }
 
     [Function("SponsorLeadsJob")]
-    public async Task Run([TimerTrigger("0 15 * * * *")] TimerInfo timer, CancellationToken ct)
+    // §869.3 — BASE TICK ONLY. Hourly is now the operator's §510 interval (default 60), not a cron
+    // pinned to :15. That minute was only spacing away from the other hourly jobs — a lead is no
+    // less pullable at :20 — so nothing depended on it.
+    public async Task Run([TimerTrigger("0 */5 * * * *")] TimerInfo timer, CancellationToken ct)
     {
         var activeEvent = await _db.Events
             .Where(e => e.IsActive)

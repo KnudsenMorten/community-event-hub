@@ -104,8 +104,11 @@ public class SoMeQueueModel : PageModel
         var me = Guard();
         if (me is null) return AccessDenied ? Page() : RedirectToPage("/Login");
 
-        var ok = await _queue.SetActiveAsync(me.EventId, PostId, SetActive, me.Email, ct);
-        Message = ok ? (SetActive ? "Post activated." : "Post deactivated (won't publish).") : "Post not found.";
+        // §850 — a refusal carries its REASON, so he is told what to fix rather than merely that
+        // something is not allowed.
+        var problem = await _queue.TrySetActiveAsync(me.EventId, PostId, SetActive, me.Email, ct);
+        Message = problem
+            ?? (SetActive ? "Post activated." : "Post deactivated (won't publish).");
         await LoadAsync(me.EventId, ct);
         return Page();
     }

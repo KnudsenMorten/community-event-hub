@@ -47,16 +47,6 @@ test.describe('@gui §10 Email center template library', () => {
         await expect(page.locator('h2', { hasText: /Delivery ledger/i })).toBeVisible();
     });
 
-    test('broadcast personalizes with {firstName} and previews a recipient count', async ({ page }) => {
-        await page.goto(`${BASE}/Organizer/Broadcast`, { waitUntil: 'domcontentloaded' });
-        await expect(page.locator('h1', { hasText: 'Broadcast email' })).toBeVisible();
-        await page.locator('input[name="Roles"][value="Organizer"]').check();
-        await page.locator('input[name="Subject"]').fill(`PW preview only ${Date.now()}`);
-        await page.locator('textarea[name="Message"]').fill('Hi {firstName}, this is a preview-only check.');
-        await page.getByRole('button', { name: /Preview \+ count/i }).click();
-        // Recipient count + rendered preview iframe (we do NOT send here).
-        await expect(page.locator('strong, p', { hasText: /recipient\(s\)/ }).first()).toBeVisible();
-        await expect(page.locator('iframe[srcdoc]')).toBeVisible();
-        await assertNoHorizontalScroll(page);
-    });
+    // 🗑 §705.12 (2026-07-29) — the broadcast {firstName}/recipient-count test was removed with
+    // /Organizer/Broadcast itself. It was also the one mail that could never satisfy §705.
 });

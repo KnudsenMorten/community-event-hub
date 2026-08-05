@@ -78,7 +78,9 @@ public sealed class MicroPolishWiringTests
     [Theory]
     // Public attendee no-login forms. (Sessions/Ask is now an inert notice — 1:1 questions
     // disabled per §136 — so it no longer carries a form/guards.)
-    [InlineData("Sessions", "Evaluate.cshtml")]
+    // §748: was Sessions/Evaluate. That 1–5 form is RETIRED and now only redirects, so the guards
+    // moved with the live form to /f/{token} — Feedback.cshtml, at the Pages root.
+    [InlineData("", "Feedback.cshtml")]
     // Public volunteer application.
     [InlineData("Volunteer", "Signup.cshtml")]
     // Speaker self-service bio.
@@ -95,7 +97,8 @@ public sealed class MicroPolishWiringTests
     [Theory]
     // Each of these has a free-text field that should carry a live char counter.
     // (Sessions/Ask dropped — 1:1 questions disabled (§136), no free-text field anymore.)
-    [InlineData("Sessions", "Evaluate.cshtml")]
+    // §748: was Sessions/Evaluate — retired; the comment-to-the-speaker field now lives here.
+    [InlineData("", "Feedback.cshtml")]
     // Volunteer/Signup dropped — the 3-step wizard has no prominent free-text field.
     [InlineData("Forms", "Speaker.cshtml")]
     [InlineData("Sponsor", "CaptureLead.cshtml")]

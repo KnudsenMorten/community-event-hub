@@ -105,9 +105,15 @@ public sealed class SessionDeletionScenarioTests
         var (db, eventId, session) = await SeedWithSessionAsync();
         using (db)
         {
-            db.SessionEvaluations.Add(new SessionEvaluation
+            // §748.1 — seed the LIVE four-point response. This test used to seed the retired 1–5
+            // table, so it went on passing against a guard that (once nothing could write that table)
+            // protected nothing at all.
+            db.EvaluationResponses.Add(new CommunityHub.Core.Domain.Evaluation.EvaluationResponse
             {
-                EventId = eventId, SessionId = session.Id, Rating = 5,
+                EventId = eventId, SessionId = session.Id, Rating = 4,
+                CollectionTimestamp = DateTimeOffset.UtcNow,
+                ReceivedTimestamp = DateTimeOffset.UtcNow,
+                Source = CommunityHub.Core.Domain.Evaluation.EvaluationResponseSources.Qr,
             });
             await db.SaveChangesAsync();
 

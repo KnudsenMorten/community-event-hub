@@ -78,9 +78,28 @@ public sealed class AttendeePartyReminderBuilder
         // ONCE per run rather than per candidate.
         var intervalDays = _cadence is null
             ? IntervalDays
-            : await _cadence.GetIntervalDaysAsync(eventId, MailKeyName, ct);
+            // §881 — the recipient role is passed explicitly now that a cadence can be per-role.
+            : await _cadence.GetIntervalDaysAsync(eventId, MailKeyName, ParticipantRole.Attendee, ct);
         IReadOnlyDictionary<string, DateOnly> lastSentByOccasion = await EmailReminderCadenceService.LastSentByOccasionAsync(_db, eventId, ReminderTypeName, ct);
 
+        // 🔒 §733.1 — THIS CADENCE IS RETIRED. Operator 2026-07-31: *"go with (a). get started
+        // wizard gets remindes every 14 days. each of the entries dont have due dates. tasks lives
+        // outside of this with due dates"*.
+        //
+        // The party sign-up IS a Get-Started step for every role that has it, so under his model it
+        // is chased ONCE by `getstarted-digest` — a 14-day cadence that already stops the moment the
+        // wizard reaches 100% — and not a second time per row by this builder.
+        //
+        // §717 is what the second chase cost: speakers and sponsors received *"task still open: Sign
+        // up for the Party"* about something they experience as a wizard step, and replied asking
+        // what it was. The digest links to the step; this mail pointed at a task row.
+        //
+        // 🔑 Left as an EARLY RETURN rather than deleting the builder: it stays registered and
+        // documented, so re-enabling is one line if he ever wants a dedicated party chase back —
+        // and the reasoning above travels with it. Its tests now assert the silence.
+        return System.Array.Empty<ReminderMessage>();
+
+#pragma warning disable CS0162 // Unreachable — deliberately preserved; see §733.1 above.
         // Open party tasks for CREW and ATTENDEES (any role) — not yet RSVP'd ⇒ still Open.
         // The party-form task is flipped to Done by FormTaskReconciler the moment an RSVP is
         // saved, so State is the stop signal. We belt-and-braces also drop anyone who already
@@ -163,9 +182,17 @@ public sealed class AttendeePartyReminderBuilder
             // §358: anchor on when the WELCOME was actually sent, not the task date. The rule is
             // "quiet for a full window after the welcome"; a RE-sent welcome (organizer §236/§355
             // reset, a re-provision) leaves an OLD task beside a NEW welcome, and the task-date
-            // anchor then let the chaser fire in the same job pass as the welcome. Falls back to the
-            // task date when the stamp is null (hand-added participants, tests) — unchanged there.
-            var anchor = DateOnly.FromDateTime((t.WelcomeSentAt ?? t.CreatedAt).UtcDateTime);
+            // anchor then let the chaser fire in the same job pass as the welcome.
+            //
+            // 🔒 §738 — and the case §358 MISSED: never welcomed at all. Falling back to the task
+            // date made a missing stamp read as "welcomed when the task was created" — months ago —
+            // so the person was maximally overdue and fired the moment their ring opened. That is
+            // how "task still open: Sign up for the Party" reached sponsors at 08:00 on 2026-07-31
+            // whose welcome did not go out until 08:45. Same rule as the digest: a null date must
+            // never read as "long ago". Never welcomed ⇒ never chased.
+            if (t.WelcomeSentAt is null) continue;
+
+            var anchor = DateOnly.FromDateTime(t.WelcomeSentAt.Value.UtcDateTime);
             if (today < anchor) continue;
 
             // 🔒 §707.11 — DUE = lastSent + interval, not a calendar window. §707.10 explains why the
@@ -208,6 +235,7 @@ public sealed class AttendeePartyReminderBuilder
         }
 
         return messages;
+#pragma warning restore CS0162
     }
 
     private const string DefaultSupportEmail = "info@expertslive.dk";

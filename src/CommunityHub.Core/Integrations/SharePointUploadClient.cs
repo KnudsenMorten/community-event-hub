@@ -865,6 +865,85 @@ public sealed class SharePointUploadClient
         return JsonDocument.Parse(raw).RootElement.Clone();
     }
 
+    /// <summary>
+    /// §769 — does this folder EXIST, what is in it, and if the answer is no, why?
+    /// </summary>
+    /// <remarks>
+    /// 🔒 <b>This exists because <see cref="ListFolderFilesAsync"/> cannot answer the question.</b>
+    /// That method tolerates a missing folder by returning an empty list — correct for a sweep that
+    /// must stay inert, and useless for a "Test path" button, because *empty* and *missing* are the
+    /// two answers an operator most needs told apart. Reporting "0 files" for a folder that does not
+    /// exist is precisely the failure §767 shipped: four production runs of confident zeros.
+    ///
+    /// <para>Never throws: a probe reports the error as DATA. A test button that 500s tells the
+    /// operator less than one that says "HTTP 403: access denied".</para>
+    /// </remarks>
+    public async Task<DocLibraryFolderProbe> ProbeFolderAsync(
+        string siteUrl, string driveName, string folderPath, CancellationToken ct = default)
+    {
+        if (!IsConfigured)
+            return DocLibraryFolderProbe.Failed("The document library integration is not configured.");
+        if (string.IsNullOrWhiteSpace(folderPath))
+            return DocLibraryFolderProbe.Failed("No folder path is set for this key.");
+
+        try
+        {
+            var driveId = await GetDriveIdAsync(siteUrl, driveName, ct);
+            var encoded = EncodePath(folderPath.Trim().Trim('/'));
+
+            var folder = await GraphGetOrNullAsync($"/drives/{driveId}/root:/{encoded}", ct);
+            if (folder is null)
+            {
+                return new DocLibraryFolderProbe(
+                    Exists: false, FileCount: 0, FolderCount: 0, LastModified: null,
+                    Error: "The folder does not exist in the document library.");
+            }
+
+            DateTimeOffset? folderModified = null;
+            if (folder.Value.TryGetProperty("lastModifiedDateTime", out var fm)
+                && fm.ValueKind == JsonValueKind.String
+                && DateTimeOffset.TryParse(fm.GetString(), out var fmParsed))
+            {
+                folderModified = fmParsed;
+            }
+
+            var children = await GraphGetOrNullAsync(
+                $"/drives/{driveId}/root:/{encoded}:/children?$top=200", ct);
+
+            int files = 0, folders = 0;
+            DateTimeOffset? newest = null;
+            if (children is not null
+                && children.Value.TryGetProperty("value", out var arr)
+                && arr.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var item in arr.EnumerateArray())
+                {
+                    if (item.TryGetProperty("folder", out _)) { folders++; }
+                    else { files++; }
+
+                    if (item.TryGetProperty("lastModifiedDateTime", out var lm)
+                        && lm.ValueKind == JsonValueKind.String
+                        && DateTimeOffset.TryParse(lm.GetString(), out var parsed)
+                        && (newest is null || parsed > newest))
+                    {
+                        newest = parsed;
+                    }
+                }
+            }
+
+            return new DocLibraryFolderProbe(
+                Exists: true, FileCount: files, FolderCount: folders,
+                LastModified: newest ?? folderModified, Error: null);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // The REAL error, verbatim — "surfaces the real error on failure" (work order §6.1).
+            // A generic "test failed" would leave the operator guessing between a typo, a permission
+            // and an outage, which are three different fixes.
+            return DocLibraryFolderProbe.Failed(ex.Message);
+        }
+    }
+
     private Task<JsonElement?> GraphGetOrNullAsync(string path, CancellationToken ct)
         => GraphGetAbsoluteOrNullAsync(GraphRoot + path, ct);
 

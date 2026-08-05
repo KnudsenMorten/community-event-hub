@@ -85,9 +85,15 @@ public sealed class SponsorTaskUploadDefinition
 }
 
 /// <summary>
-/// A named deadline rule. <c>basis</c> "eventMinus" = event date minus
-/// <c>days</c>; "contractPlus" = first-order date plus <c>days</c>, falling
-/// back to now-plus-<c>fallbackNowPlus</c> when no order date is known.
+/// A named deadline rule. <c>basis</c> "eventMinus" = the edition's START date minus
+/// <c>days</c>; "eventEndPlus" = the edition's LAST day plus <c>days</c> (§783.6 — the basis
+/// every POST-event task must use); "contractPlus" = first-order date plus <c>days</c>,
+/// falling back to now-plus-<c>fallbackNowPlus</c> when no order date is known.
+/// <para>
+/// 🔒 A post-event deadline expressed as a NEGATIVE <c>eventMinus</c> is a trap: it anchors on
+/// the FIRST day, so "start + 1" only reads as "the day after the event" while the edition is
+/// exactly two days long, and slides silently into the middle of a longer one.
+/// </para>
 /// </summary>
 public sealed class DeadlineRule
 {

@@ -9,35 +9,41 @@ using Microsoft.AspNetCore.Mvc.RazorPages;
 namespace CommunityHub.Pages.Speaker;
 
 /// <summary>
-/// SPEAKER self-service view of the post-session attendee EVALUATIONS for THEIR
-/// sessions — the same HappyOrNot-style 1–5 ratings + anonymous comments that
-/// already feed the organizer dashboard and the organizer-triggered results
-/// email, now available to the speaker on demand for their OWN sessions only
-/// (scope enforced server-side in <see cref="SpeakerEvaluationsService"/>).
-/// Read-only; mobile-first.
-///
-/// Only Speakers reach the content; any other role gets a
-/// friendly message rather than a 403 so the nav stays simple.
+/// 🗑 §748.1 — the speaker's 1–5 RATINGS VIEW is gone; this page now exists for two things only:
+/// it keeps the URL alive as a redirect, and it serves the per-session evaluation-QR download.
 /// </summary>
+/// <remarks>
+/// <para><b>Why the body went, when §748.5 had said to keep it compiled "so C10 revives a working
+/// page".</b> That reasoning does not survive §748.1 removing the 1–5 table: this body read
+/// <c>SessionEvaluation</c>, and <b>C10 is the speaker view of the FOUR-POINT model</b>. §748 is
+/// explicit that a 1–5 rating and a 1–4 forced choice are different instruments that cannot be
+/// pooled — so reviving this aggregation would have produced numbers on the wrong scale. What C10
+/// actually reuses is the PAGE (its scoping, its layout, its QR card), not the arithmetic, and that
+/// is preserved here and in git. Keeping a compiled reader of a deleted table was not possible in
+/// any case, and pretending it was ready-to-revive would have been the more expensive lie.</para>
+///
+/// <para>🔒 <b>Two things must NOT be "tidied away" here.</b></para>
+/// <list type="number">
+///   <item><b>The route.</b> The link sat in the speaker menu for weeks and may be in a sent mail or
+///   a bookmark; a 404 would make a deliberate hiding look like a broken site (§748.5).</item>
+///   <item><b>The <c>Qr</c> handler.</b> <c>/Speaker/Index</c> links straight to it for the
+///   per-SESSION QR download (§749.2) — deleting this page would break a live speaker feature that
+///   has nothing to do with the retired ratings.</item>
+/// </list>
+/// </remarks>
 [Authorize]
 public class EvaluationsModel : PageModel
 {
     private readonly ICurrentParticipantAccessor _participant;
-    private readonly SpeakerEvaluationsService _svc;
-    private readonly PublicSessionsService _publicSessions;
     private readonly SpeakerSessionsService _sessions;
     private readonly SessionEvalsQrService _qr;
 
     public EvaluationsModel(
         ICurrentParticipantAccessor participant,
-        SpeakerEvaluationsService svc,
-        PublicSessionsService publicSessions,
         SpeakerSessionsService sessions,
         SessionEvalsQrService qr)
     {
         _participant = participant;
-        _svc = svc;
-        _publicSessions = publicSessions;
         _sessions = sessions;
         _qr = qr;
     }
@@ -47,66 +53,25 @@ public class EvaluationsModel : PageModel
         ParticipantRole.Speaker,
     };
 
-    public bool AccessDenied { get; private set; }
-    public ParticipantRole Role { get; private set; }
-
-    public MySpeakerEvaluationsResult Result { get; private set; } =
-        new(System.Array.Empty<MySpeakerSessionRatings>(), 0, null);
-
     /// <summary>
-    /// Ids of the speaker's rated sessions whose PUBLIC page (<c>/Sessions/{id}</c>)
-    /// would actually resolve — the same gate <see cref="PublicSessionsService.GetByIdAsync"/>
-    /// applies (in the active edition, not a service session). The view links a
-    /// session title to its public page iff its id is in this set; otherwise it
-    /// renders the title as plain text (no link to a 404 / thin page).
+    /// Always a redirect until C10 (the speaker view of the four-point results) exists.
     /// </summary>
-    public IReadOnlySet<int> PubliclyViewableSessionIds { get; private set; } =
-        new System.Collections.Generic.HashSet<int>();
-
-    /// <summary>§124: the speaker's own sessions (id + title + room), shown in the
-    /// "evaluation QR" card regardless of whether ratings exist yet.</summary>
-    public IReadOnlyList<MySpeakerSession> MySessions { get; private set; } =
-        System.Array.Empty<MySpeakerSession>();
-
-    /// <summary>§124: sessionId → the matched per-room session-evaluation QR file
-    /// (only sessions whose room matched a QR file are present).</summary>
-    public IReadOnlyDictionary<int, SessionEvalQrFile> RoomQr { get; private set; } =
-        new System.Collections.Generic.Dictionary<int, SessionEvalQrFile>();
-
-    /// <summary>§124: true once the QR folder is wired (the QR card is shown).</summary>
-    public bool QrConfigured { get; private set; }
-
-    public async Task<IActionResult> OnGetAsync(CancellationToken ct)
+    /// <remarks>
+    /// Operator 2026-07-31: <i>"hide the page until C10 exists"</i>. An empty ratings list reads to a
+    /// speaker as <b>"nobody rated me"</b> rather than "not built yet" — which is why this redirects
+    /// instead of rendering something honest-looking but blank. <c>/Speaker</c> is where the session
+    /// cards already are.
+    /// </remarks>
+    public IActionResult OnGet()
     {
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
-        Role = me.Role;
-        if (!EligibleRoles.Contains(me.Role)) { AccessDenied = true; return Page(); }
-
-        Result = await _svc.GetMyEvaluationsAsync(me.EventId, me.ParticipantId, me.Role, ct);
-
-        // Per-session public-visibility gate — the SAME signal the public page uses,
-        // so we never link a title to a /Sessions/{id} that would 404 or render thin.
-        PubliclyViewableSessionIds = await _publicSessions.GetPubliclyViewableSessionIdsAsync(
-            Result.Sessions.Select(s => s.SessionId), ct);
-
-        // §124: the speaker's sessions + the per-room evaluation QR for each (inert
-        // until the QR folder is configured). Own-row scoped by the sessions service.
-        MySessions = await _sessions.GetMySessionsAsync(me.EventId, me.ParticipantId, me.Role, ct);
-        QrConfigured = _qr.CanRead;
-        if (QrConfigured)
-        {
-            RoomQr = await _qr.MatchSessionsAsync(
-                MySessions.Select(s => new SessionRoomRef(s.SessionId, s.Room)), ct);
-        }
-
-        return Page();
+        return RedirectToPage("/Speaker/Index");
     }
 
     /// <summary>
-    /// §124: stream the session-evaluation QR PNG for the ROOM of one of the speaker's
-    /// OWN sessions. Own-scope enforced — the session must be in the speaker's own list;
-    /// otherwise (or when nothing matches / not configured) a 404.
+    /// §124/§749.2: stream the session-evaluation QR PNG for one of the speaker's OWN sessions.
+    /// Own-scope enforced — the session must be in the speaker's own list; otherwise a 404.
     /// </summary>
     public async Task<IActionResult> OnGetQrAsync(int sessionId, CancellationToken ct)
     {
@@ -118,7 +83,11 @@ public class EvaluationsModel : PageModel
         var session = mine.FirstOrDefault(s => s.SessionId == sessionId);
         if (session is null) return NotFound();
 
-        var qr = await _qr.DownloadForRoomAsync(session.Room, ct);
+        // §749.2 (operator 2026-07-31: "current is linked to room name but now we use sessionname").
+        // 🔒 The own-scope check above already proved this session is the speaker's, so asking for
+        // the SESSION's file is both correct and narrower than asking for its room's — a room's QR
+        // would have been whoever else is scheduled in there.
+        var qr = await _qr.DownloadForSessionAsync(sessionId, ct);
         if (qr is null) return NotFound();
 
         return File(qr.Content, qr.ContentType, qr.FileName);

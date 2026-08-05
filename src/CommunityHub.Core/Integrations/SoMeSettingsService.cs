@@ -45,7 +45,17 @@ public sealed class SoMeSettingsService
         string? notificationEmails,
         bool notifyOnPublish,
         string? byEmail,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        // §824.19 — the three values every post template ends with.
+        // 🔒 Behind an explicit <paramref name="updatePostCopy"/> flag rather than "null means leave
+        // alone": every OTHER field on this method is unconditional, so a caller that omits these
+        // would otherwise be silently deciding whether they survive. An existing caller that knows
+        // nothing about post copy must not be able to WIPE the tag block by saving the LinkedIn
+        // wiring — and that is exactly what would happen with plain optional parameters.
+        string? eventSystemUrl = null,
+        string? eventTags = null,
+        string? organizerCredits = null,
+        bool updatePostCopy = false)
     {
         var now = _clock.GetUtcNow();
         var row = await GetAsync(eventId, ct);
@@ -60,6 +70,16 @@ public sealed class SoMeSettingsService
         row.SpeakerPreAlertOrganizerEmail = Trim(speakerPreAlertOrganizerEmail);
         row.NotificationEmails = Trim(notificationEmails);
         row.NotifyOnPublish = notifyOnPublish;
+
+        if (updatePostCopy)
+        {
+            // Blanking a field here IS meaningful — it is how he removes the tag block — so these
+            // are assigned exactly as given once the caller has said it owns them.
+            row.EventSystemUrl = Trim(eventSystemUrl);
+            row.EventTags = Trim(eventTags);
+            row.OrganizerCredits = Trim(organizerCredits);
+        }
+
         row.UpdatedAt = now;
         row.LastUpdatedByEmail = Trim(byEmail);
 

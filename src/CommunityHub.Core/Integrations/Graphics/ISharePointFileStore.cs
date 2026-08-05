@@ -19,8 +19,14 @@ public sealed record StoredFile(string Path, string WebUrl, string? ItemId);
 /// <param name="SizeBytes">§467 — size in bytes when SharePoint reported it, else null. Lets a
 /// caller refuse an online PREVIEW the Office viewer would reject, rather than offering a "View"
 /// button that is guaranteed to fail. Optional, so existing constructions stay valid.</param>
+/// <param name="LastModified">
+/// §769.4 — when the file last changed. Optional so every existing construction and test fake keeps
+/// working; the Graph store fills it. It is what lets the organizer see WHEN a deck arrived, which
+/// is the difference between "there is a file" and "the file is current".
+/// </param>
 public sealed record SharePointFileRef(
-    string ItemId, string Name, string WebUrl, long? SizeBytes = null);
+    string ItemId, string Name, string WebUrl, long? SizeBytes = null,
+    DateTimeOffset? LastModified = null);
 
 /// <summary>
 /// The SoMe-graphics SharePoint FILE-STORE seam (REQUIREMENTS §18): store bytes

@@ -44,7 +44,10 @@ public sealed class NavBuilderTests
         "/Organizer/Logistics",          // hub
         "/Organizer/SoMe",               // Marketing / SoMe hub
         "/Organizer/Setup",              // hub
-        "/Organizer/ImpersonationLog",   // standalone Audit
+        // §741 (operator 2026-07-31) — the standalone Audit slot holds the AUDIT TRAIL, not the
+        // acting-as log. Acting-as is one Category inside the trail, so the menu pointed at a
+        // subset of the page next to it. ImpersonationLog stays routable, linked from Participants.
+        "/Organizer/AuditTrail",         // standalone Audit
     };
 
     /// <summary>
@@ -212,7 +215,8 @@ public sealed class NavBuilderTests
         Assert.Contains("/Organizer", hrefs);
         Assert.Contains("/Organizer/CommandCenter", hrefs);
         Assert.Contains("/Organizer/Dashboard", hrefs);
-        Assert.Contains("/Organizer/ImpersonationLog", hrefs);
+        Assert.Contains("/Organizer/AuditTrail", hrefs);            // §741
+        Assert.DoesNotContain("/Organizer/ImpersonationLog", hrefs); // §741 — replaced, not kept
 
         // Feature pages are reached via their hub grid, NOT the menu.
         Assert.DoesNotContain("/Organizer/Participants", hrefs);
@@ -313,8 +317,12 @@ public sealed class NavBuilderTests
         var getStarted = g.Items.Single(i => i.Href == "/Forms/Wizard");
         Assert.Equal("Nav.SpeakerOnboarding", getStarted.LabelKey);
         Assert.Null(getStarted.SectionKey);
-        Assert.Equal("Nav.SpeakerDetails", g.Items.Single(i => i.Href == "/Speaker/Details").LabelKey);
-        Assert.Null(g.Items.Single(i => i.Href == "/Speaker/Details").SectionKey);
+        // §707.56 — the standalone "Speaker Details" NAV ENTRY IS REMOVED. It was a second door to
+        // the form the Get-Started wizard already hosts at ?step=details — one model, one service,
+        // one partial, two hosts (§708.1) — so the menu entry was a duplicate ENTRANCE, which is
+        // precisely what §708.2 is dismantling. The page itself still resolves for anyone holding a
+        // link; only the menu item went. This assertion outlived the change and was red on main.
+        Assert.DoesNotContain("/Speaker/Details", hrefs);
         Assert.DoesNotContain("/Forms/Speaker", hrefs);   // Bio replaced by Speaker Details
         Assert.Contains("/Contact", hrefs);
 
@@ -347,10 +355,17 @@ public sealed class NavBuilderTests
             "/Speaker", "/Speaker/Questions", "/Info/key-dates-times",
             "/Info/session-guidelines", "/Info/session-preview-final", "/Sponsor/Telemetry",
             "https://eldk27.eventhub.expertslive.dk/survey/eldk27-topics/results",
-            "/Speaker/Graphics", "/Info/speaker-template", "/Speaker/Evaluations#eval-qr",
+            // 🙈 §748.5 — BOTH /Speaker/Evaluations entries are gone (operator 2026-07-31: "hide the
+            // page until C10 exists"): the §320 "#eval-qr" direct entry and the §234 evaluation
+            // entry. C10 restores them — pointing at the per-SESSION QR, not the retired room one.
+            // §838 — "Social media announcements": what CEH will post about their sessions, and
+            // when. Right after "Help Promote" because it answers the same question from the other
+            // side — promote WHAT, and WHEN does the official post go out.
+            "/Speaker/Graphics", "/Speaker/Announcements", "/Info/speaker-template",
             "/Sessions/Slides",
             "/Info/av-stage-timer",
-            "/Speaker/Evaluations", "/Info/session-feedback",
+            // §752 C10 — the four-point results page, replacing the retired 1–5 one that §748.5 hid.
+            "/Speaker/Results", "/Info/session-feedback",
         }, speakerInfo.Items.Select(i => i.Href).ToList());
         // Leaves carry no SubSectionKey; every other item sits in its named sub-fold-out.
         string? Sub(string href) => speakerInfo.Items.Single(i => i.Href == href).SubSectionKey;
@@ -361,18 +376,21 @@ public sealed class NavBuilderTests
         Assert.Equal("Nav.SubPrepareSession", Sub("/Info/session-preview-final"));
         Assert.Equal("Nav.SubPrepareSession", Sub("/Sponsor/Telemetry"));
         Assert.Equal("Nav.SubPrepareSession", Sub("/Speaker/Graphics"));
+        Assert.Equal("Nav.SubPrepareSession", Sub("/Speaker/Announcements"));   // §838
         Assert.Equal("Nav.SubPrepareSession", Sub("/Info/speaker-template"));
-        Assert.Equal("Nav.SubPrepareSession", Sub("/Speaker/Evaluations#eval-qr"));   // §320
         Assert.Equal("Nav.SubPrepareSession", Sub("/Sessions/Slides"));               // §322k
         Assert.Equal("Nav.SubSessionRoom", Sub("/Info/av-stage-timer"));
-        Assert.Equal("Nav.SubSessionEvaluation", Sub("/Speaker/Evaluations"));
+        Assert.Equal("Nav.SubSessionEvaluation", Sub("/Speaker/Results"));
         Assert.Equal("Nav.SubSessionEvaluation", Sub("/Info/session-feedback"));
+        // 🙈 §748.5 — the hiding asserted directly, not merely implied by the list above: a speaker
+        // must not be able to REACH the retired 1–5 page from the menu by either route.
+        Assert.DoesNotContain("/Speaker/Evaluations", hrefs);
+        Assert.DoesNotContain("/Speaker/Evaluations#eval-qr", hrefs);
         // Speaker-specific labels (§317): the fuller Q&A + telemetry wordings.
         Assert.Equal("Nav.MySessions", speakerInfo.Items.Single(i => i.Href == "/Speaker").LabelKey);
         Assert.Equal("Nav.MasterClassQaSpeaker", speakerInfo.Items.Single(i => i.Href == "/Speaker/Questions").LabelKey);
         Assert.Equal("Nav.HelpPromote", speakerInfo.Items.Single(i => i.Href == "/Speaker/Graphics").LabelKey);
         Assert.Equal("Nav.AttendeeTelemetrySpeaker", speakerInfo.Items.Single(i => i.Href == "/Sponsor/Telemetry").LabelKey);
-        Assert.Equal("Nav.SpeakerEvaluations", speakerInfo.Items.Single(i => i.Href == "/Speaker/Evaluations").LabelKey);
         // §289: the "Social Media Guidelines" (help-promote) content page is REMOVED — its
         // copy lives on /Speaker/Graphics now.
         Assert.DoesNotContain("/Info/help-promote", hrefs);
@@ -421,18 +439,26 @@ public sealed class NavBuilderTests
     }
 
     [Fact]
-    public void Speaker_evaluations_is_in_the_menu_but_readiness_is_dropped()
+    public void Neither_readiness_nor_evaluations_is_in_the_speaker_menu()
     {
         // §234 UX surfaced both orphaned pages; §247 (operator 2026-07-07) then DROPPED
         // the "Am I ready?" (/Speaker/Readiness) entry again — the readiness rollup at
-        // the top of Speaker My Tasks covers it (the page stays routable, no menu
-        // entry). /Speaker/Evaluations stays in the menu regardless of the MC gate.
+        // the top of Speaker My Tasks covers it (the page stays routable, no menu entry).
+        //
+        // 🙈 §748.5 (operator 2026-07-31: "hide the page until C10 exists") — /Speaker/Evaluations
+        // joined it, for the same reason and with the same treatment: still routable (it redirects
+        // to /Speaker), no menu entry. It read the retired 1–5 scale, so it could only ever show a
+        // speaker an empty list of their OWN ratings — which reads as "nobody rated me".
+        //
+        // 🔑 Asserted across BOTH master-class states because the gate is what decides which speaker
+        // branch runs; hiding it on one branch only would leave it reachable for half the speakers.
         foreach (var hasMc in new[] { false, true })
         {
             var hrefs = NavBuilder.Build(ParticipantRole.Speaker, speakerHasMasterClass: hasMc)
                 .AllItems.Select(i => i.Href).ToList();
             Assert.DoesNotContain("/Speaker/Readiness", hrefs);
-            Assert.Contains("/Speaker/Evaluations", hrefs);
+            Assert.DoesNotContain("/Speaker/Evaluations", hrefs);
+            Assert.DoesNotContain("/Speaker/Evaluations#eval-qr", hrefs);
         }
     }
 
@@ -533,7 +559,10 @@ public sealed class NavBuilderTests
         Assert.Contains("/Forms/Hotel", speaker);
         Assert.Contains("/Forms/Dinner", speaker);
         Assert.Contains("/Speaker", speaker);          // now "My Sessions"
-        Assert.Contains("/Speaker/Details", speaker);  // consolidated Speaker Details (replaced Bio, §26c)
+        // §707.56 — "/Speaker/Details" left the MENU (a duplicate entrance to ?step=details), so
+        // the spot-check no longer asserts it. The constraint this test guards — relocate only,
+        // never silently drop a route — still holds: the page resolves, and the wizard step hosts
+        // the same form. Red on main since §707.56 shipped.
         Assert.Contains("/Forms/Travel", speaker);
         Assert.Contains("/Forms/Lunch", speaker);
         Assert.Contains("/Forms/Swag", speaker);
@@ -1249,3 +1278,4 @@ public sealed class NavBuilderTests
         return data;
     }
 }
+

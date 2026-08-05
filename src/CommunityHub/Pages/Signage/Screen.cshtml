@@ -1,0 +1,262 @@
+@page "/signage/{orientation}/{view}"
+@model CommunityHub.Pages.Signage.ScreenModel
+@using CommunityHub.Core.Signage
+@{
+    Layout = null;
+    var portrait = Model.Orientation == SignageOrientation.Portrait;
+    var now = SignagePalette.ViewColours(SignageView.Now);
+    var next = SignagePalette.ViewColours(SignageView.Next);
+    var feedback = SignagePalette.ViewColours(SignageView.Feedback);
+    var nowCard = SignagePalette.CardColours(SignageView.Now);
+    var nextCard = SignagePalette.CardColours(SignageView.Next);
+}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>@Model.EventDisplayName — signage</title>
+@* 🔒 No viewport meta and no responsive breakpoints: this renders at exactly 1080×1920 or
+   3840×2160 on a player that never resizes. Sizing is in vmin/vh so one stylesheet fits both. *@
+<style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { width: 100%; height: 100%; overflow: hidden; }
+    body {
+        font-family: "Segoe UI", Arial, Helvetica, sans-serif;
+        background: @SignagePalette.DarkBlue;
+        color: #fff;
+    }
+    .view { display: none; width: 100vw; height: 100vh; flex-direction: column;
+            padding: @(portrait ? "3vh 3vw" : "4vh 3vw"); }
+    .view.on { display: flex; }
+
+    .view-now      { background: @now.Background;      color: @now.Foreground; }
+    .view-next     { background: @next.Background;     color: @next.Foreground; }
+    .view-feedback { background: @feedback.Background; color: @feedback.Foreground; }
+
+    header { display: flex; align-items: baseline; justify-content: space-between;
+             margin-bottom: @(portrait ? "2.5vh" : "3vh"); flex: 0 0 auto; }
+    h1 { font-size: @(portrait ? "4.4vh" : "6vh"); letter-spacing: .06em; text-transform: uppercase; }
+    .slot { font-size: @(portrait ? "3.4vh" : "4.4vh"); font-weight: 600; opacity: .85; }
+
+    .grid { flex: 1 1 auto; display: grid;
+            grid-template-columns: repeat(@Model.Columns, 1fr);
+            grid-template-rows: repeat(@Model.Rows, 1fr);
+            column-gap: @(Model.Gap)px; row-gap: @(Model.RowGap)px; }
+
+    @* 🔒 FIXED boxes — the grid never reflows (§6). Titles vary wildly and speaker lists run to
+       seven names, so text is clamped INSIDE the box rather than being allowed to push the
+       layout around. A card that grows moves every other card on the wall. *@
+    .card { border-radius: @(portrait ? "1.2vh" : "1.4vh"); padding: @(portrait ? "1.6vh 1.6vh" : "1.8vh 1.6vw");
+            overflow: hidden; display: flex; flex-direction: column; gap: .6vh; }
+    .view-now .card  { background: @nowCard.Background;  color: @nowCard.Foreground; }
+    .view-next .card { background: @nextCard.Background; color: @nextCard.Foreground; }
+
+    @* The time/track line may drop opacity but never below 70% — it still has to read from the
+       back of a corridor (§6). *@
+    .card .meta { font-size: @(portrait ? "1.9vh" : "2.1vh"); font-weight: 700; opacity: .82;
+                  letter-spacing: .04em; text-transform: uppercase; }
+    .card .title { font-size: @(portrait ? "2.7vh" : "2.9vh"); font-weight: 700; line-height: 1.15;
+                   display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+    .card .speakers { font-size: @(portrait ? "2.1vh" : "2.2vh"); line-height: 1.2; opacity: .92;
+                      display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+    .card .room { margin-top: auto; font-size: @(portrait ? "2.1vh" : "2.3vh"); font-weight: 700; }
+
+    .empty { flex: 1 1 auto; display: flex; align-items: center; justify-content: center;
+             font-size: 4vh; opacity: .8; }
+
+    /* ---- feedback view (§754.2: the PDF report's hero + distribution) ---- */
+    .hero { display: flex; align-items: center; gap: 2.5vw; margin-bottom: 4vh; flex: 0 0 auto; }
+    .hero .score { font-size: @(portrait ? "18vh" : "22vh"); font-weight: 800; line-height: .9; }
+    .hero .band { font-size: @(portrait ? "3.6vh" : "4.4vh"); font-weight: 700; }
+    .hero .count { font-size: @(portrait ? "3vh" : "3.6vh"); opacity: .9; margin-top: .8vh; }
+    .panel { background: #fff; color: @SignagePalette.DarkBlue; border-radius: 1.5vh;
+             padding: @(portrait ? "3vh 3vw" : "3.5vh 2.5vw"); flex: 1 1 auto;
+             display: flex; flex-direction: column; justify-content: center; gap: @(portrait ? "2.4vh" : "2.8vh"); }
+    .panel h2 { font-size: @(portrait ? "3.4vh" : "4vh"); margin-bottom: 1vh; }
+    .row { display: @(portrait ? "block" : "grid");
+           @(portrait ? "" : "grid-template-columns: 26vw 1fr 14vw; align-items: center;") gap: 1.5vw; }
+    .row .label { font-size: @(portrait ? "2.8vh" : "3.2vh"); font-weight: 700; }
+    .row .barwrap { background: #EDF1F5; border-radius: .8vh; height: @(portrait ? "4.4vh" : "5vh");
+                    overflow: hidden; margin: @(portrait ? ".8vh 0" : "0"); }
+    @* 🔒 A minimum bar width, kept from the PDF: without it a rating with one response draws
+       nothing and reads as MISSING DATA rather than as a true, small number. *@
+    .row .bar { height: 100%; min-width: 1.2%; border-radius: .8vh; }
+    .row .num { font-size: @(portrait ? "2.8vh" : "3.2vh"); font-weight: 700;
+                text-align: @(portrait ? "left" : "right"); }
+
+    /* ---- holding + failure ---- */
+    .holding { width: 100vw; height: 100vh; display: flex; flex-direction: column;
+               align-items: center; justify-content: center; gap: 3vh;
+               background: @SignagePalette.DarkBlue; color: #fff; text-align: center; }
+    .holding .name { font-size: 7vh; font-weight: 800; letter-spacing: .04em; }
+    .holding .line { font-size: 4vh; opacity: .9; }
+    #stale { position: fixed; inset: 0; display: none; }
+</style>
+</head>
+<body>
+
+@if (Model.ShowHolding)
+{
+    @* §10 — a HOLDING SCREEN at HTTP 200, never an error page. Deliberately says nothing about
+       WHY: "invalid token" on a wall tells a passer-by that there is a token to guess. *@
+    <div class="holding">
+        <div class="name">@Model.EventDisplayName</div>
+        @if (!string.IsNullOrWhiteSpace(Model.HoldingLine))
+        {
+            <div class="line">@Model.HoldingLine</div>
+        }
+    </div>
+}
+else
+{
+    <div class="view view-now" data-view="now">
+        <header><h1>Happening now</h1><div class="slot"></div></header>
+        <div class="grid"></div>
+    </div>
+
+    <div class="view view-next" data-view="next">
+        <header><h1>Next</h1><div class="slot"></div></header>
+        <div class="grid"></div>
+    </div>
+
+    <div class="view view-feedback" data-view="feedback">
+        <header><h1>Session feedback</h1></header>
+        <div class="hero">
+            <div class="score">–</div>
+            <div>
+                <div class="band"></div>
+                <div class="count"></div>
+            </div>
+        </div>
+        <div class="panel">
+            <h2>How people answered</h2>
+            <div class="rows"></div>
+        </div>
+    </div>
+
+    <div class="holding" id="stale">
+        <div class="name">@Model.EventDisplayName</div>
+        <div class="line">The programme will be back shortly</div>
+    </div>
+
+<script>
+(function () {
+    "use strict";
+    // §754 §3/§5/§7/§9 — the player-side loop. Three independent timers, deliberately:
+    //   * VIEW rotation (rotator only)  — every ROTATE_S
+    //   * internal PAGE flip            — every PAGE_S
+    //   * data refresh                  — every REFRESH_S, carrying THIS PLAYER's clock
+    // 🔒 The rotation must advance on its own cycle regardless of which page is showing (§7), so
+    // the two are never derived from one another.
+    var VIEWS      = @Html.Raw(Model.IsRotator ? "[\"now\",\"next\",\"feedback\"]" : $"[\"{Model.PinnedView!.ToString()!.ToLowerInvariant()}\"]");
+    var ROTATE_S   = @Model.RotateSeconds;
+    var PAGE_S     = @Model.PageSeconds;
+    var REFRESH_S  = 60;
+    var STALE_S    = 3600;   // §9: after an hour of failure, a clean failure state
+    var TOKEN      = @Html.Raw(Json.Serialize(Model.Token));
+
+    var viewIndex = 0, pageIndex = 0, lastGoodAt = Date.now();
+    var data = {};   // view name -> last successful payload
+
+    function el(v) { return document.querySelector('.view-' + v); }
+
+    function showView(v) {
+        document.querySelectorAll('.view').forEach(function (n) { n.classList.remove('on'); });
+        var node = el(v);
+        if (node) { node.classList.add('on'); }
+    }
+
+    function esc(s) {
+        return (s == null ? '' : String(s)).replace(/[&<>"']/g, function (c) {
+            return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c];
+        });
+    }
+
+    function renderAgenda(v) {
+        var d = data[v]; var node = el(v); if (!d || !node) { return; }
+        node.querySelector('.slot').textContent = d.slotStart ? d.slotStart + ' – ' + d.slotEnd : '';
+        var grid = node.querySelector('.grid');
+        var pages = d.pages || [];
+        if (!pages.length) {
+            grid.innerHTML = '<div class="empty">Nothing scheduled this hour</div>';
+            return;
+        }
+        var page = pages[pageIndex % pages.length];
+        grid.innerHTML = page.cards.map(function (c) {
+            // Card content order is fixed by §6: time · track / title / speakers / room.
+            var meta = [c.time, c.track].filter(Boolean).join(' · ');
+            return '<div class="card">'
+                 + '<div class="meta">' + esc(meta) + '</div>'
+                 + '<div class="title">' + esc(c.title) + '</div>'
+                 + '<div class="speakers">' + esc(c.speakers || '') + '</div>'
+                 + '<div class="room">' + esc(c.room || '') + '</div>'
+                 + '</div>';
+        }).join('');
+    }
+
+    function renderFeedback() {
+        var d = data.feedback; var node = el('feedback'); if (!d || !node) { return; }
+        // 🔒 No % sign on the score (brief §11 / §752.6): the band and its RANGE state the scale.
+        node.querySelector('.score').textContent = (d.score == null ? '–' : d.score);
+        node.querySelector('.score').style.color = d.scoreColour || '#fff';
+        node.querySelector('.band').textContent =
+            d.band ? ('Satisfaction score · ' + d.band + ' (' + d.bandRange + ' of 100)') : 'Satisfaction score';
+        node.querySelector('.count').textContent = 'based on ' + (d.responses || 0) + ' responses';
+        var peak = Math.max.apply(null, (d.ratings || []).map(function (r) { return r.count; }).concat([1]));
+        node.querySelector('.rows').innerHTML = (d.ratings || []).map(function (r) {
+            var w = Math.max(1.2, (r.count / peak) * 100);
+            return '<div class="row">'
+                 + '<div class="label">' + esc(r.label) + '</div>'
+                 + '<div class="barwrap"><div class="bar" style="width:' + w + '%;background:' + esc(r.colour) + '"></div></div>'
+                 + '<div class="num">' + r.count + '  ·  ' + r.percent + '%</div>'
+                 + '</div>';
+        }).join('');
+    }
+
+    function render() {
+        var v = VIEWS[viewIndex % VIEWS.length];
+        if (v === 'feedback') { renderFeedback(); } else { renderAgenda(v); }
+        showView(v);
+    }
+
+    function fetchView(v) {
+        // The player's OWN clock goes to the server, which computes the slot with the tested
+        // builder — one implementation of the §5 rules, driven by the clock §5 requires.
+        var url = window.location.pathname + '?handler=Data&only=' + v
+                + '&t=' + encodeURIComponent(TOKEN)
+                + '&at=' + encodeURIComponent(new Date().toISOString());
+        return fetch(url, { cache: 'no-store' })
+            .then(function (r) { if (!r.ok) { throw new Error(r.status); } return r.json(); })
+            .then(function (j) { data[v] = j; lastGoodAt = Date.now(); });
+    }
+
+    function refresh() {
+        Promise.all(VIEWS.map(fetchView))
+            .then(render)
+            .catch(function () {
+                // §9 — keep showing the last good data; only after an hour is it replaced by a
+                // clean failure state. Never a stack trace, never a blank page, and it recovers by
+                // itself as soon as a fetch succeeds again.
+                if ((Date.now() - lastGoodAt) / 1000 > STALE_S) {
+                    document.querySelectorAll('.view').forEach(function (n) { n.classList.remove('on'); });
+                    document.getElementById('stale').style.display = 'flex';
+                }
+            })
+            .then(function () {
+                if ((Date.now() - lastGoodAt) / 1000 <= STALE_S) {
+                    document.getElementById('stale').style.display = 'none';
+                }
+            });
+    }
+
+    refresh();
+    setInterval(refresh, REFRESH_S * 1000);
+    setInterval(function () { pageIndex++; render(); }, PAGE_S * 1000);
+    if (VIEWS.length > 1) {
+        setInterval(function () { viewIndex++; pageIndex = 0; render(); }, ROTATE_S * 1000);
+    }
+})();
+</script>
+}
+</body>
+</html>

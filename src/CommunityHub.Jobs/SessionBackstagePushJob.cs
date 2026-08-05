@@ -102,7 +102,10 @@ public sealed class SessionBackstagePushJob
                 await _alerts.AlertAsync(
                     "Stage-2 CEH→Zoho speaker push: failures [ELDK27]",
                     $"<p>{spr.Failed} speaker push(es) failed:</p><ul>{lines}</ul>",
-                    ct, throttleKey: "SessionBackstagePushJob.speakers");
+                    // §752.9 — DEV-silent: DEV pushes test data at Zoho and these failures are an
+                    // expected property of that, not news. PROD still alerts, where a failed push
+                    // means a real speaker is missing from Backstage.
+                    ct, throttleKey: "SessionBackstagePushJob.speakers", devSilent: true);
             }
         }
 
@@ -135,7 +138,8 @@ public sealed class SessionBackstagePushJob
                 await _alerts.AlertAsync(
                     "Stage-2 CEH→Zoho session push: failures [ELDK27]",
                     $"<p>{sr.Failed} session push(es) failed:</p><ul>{lines}</ul>",
-                    ct, throttleKey: "SessionBackstagePushJob.sessions");
+                    // §752.9 — DEV-silent, same reasoning as the speaker push above.
+                    ct, throttleKey: "SessionBackstagePushJob.sessions", devSilent: true);
             }
         }
     }

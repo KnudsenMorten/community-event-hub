@@ -35,6 +35,29 @@ public class EmailReminderCadence
     public string TemplateKey { get; set; } = string.Empty;
 
     /// <summary>
+    /// §881 — which ROLE this cadence applies to. <c>null</c> = the all-roles value every role
+    /// follows unless it has its own row.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-08-05: <i>"i need to define the cadence for reminders for get started
+    /// pending for sponsor — like this one mentioned under speaker"</i>. <c>getstarted-digest</c> is
+    /// ONE template reaching Speaker, Sponsor and Attendee and filed under Speakers, so the cadence
+    /// box rendered in the Speakers section while the Sponsor section got an explanatory sentence
+    /// where the control should be. Chasing a sponsor company through a shared wizard and chasing a
+    /// speaker are not the same job, and he asked for them to be settable apart.</para>
+    ///
+    /// <para>🔑 <b>Deliberately the SAME shape as <see cref="EmailTemplateRing"/>'s nullable
+    /// <c>Role</c></b>, resolved <c>per-role ?? all-roles ?? catalog default</c>. The page already
+    /// teaches that model for rings — <i>"A role with its own ring uses it; the rest follow the ring
+    /// above"</i> — so cadence needs no second mental model, and setting one role never moves
+    /// another.</para>
+    ///
+    /// <para>⚠️ This REPLACES the original §707.11 Q3 decision (<i>"deliberately NOT per role … a
+    /// refinement nobody has asked for"</i>). That was true when it was written; he has now asked.</para>
+    /// </remarks>
+    public ParticipantRole? Role { get; set; }
+
+    /// <summary>
     /// Days between repeats, measured from the LAST SEND to that person.
     /// <c>null</c> ⇒ send once and never repeat.
     /// </summary>

@@ -287,13 +287,16 @@ public sealed class SpeakerDetailsFormService : IWizardFormService
             && _zohoChanges is not null)
         {
             var who = $"{profile.FirstName} {profile.LastName}".Trim();
-            var lines = new List<string>
-            {
+            // 🔒 §745 — the heading is an INTRO, not a change. It used to be the first ENTRY of the
+            // list below, and the subject counts that list: two edited fields were announced as
+            // "3 change(s)" (operator 2026-07-31: *"it says 3 changes in subject but mention 2,
+            // why. is skill conuted as 2"* — it was neither; Skills is one field).
+            var intro =
                 $"ACTION NEEDED: speaker '{(who.Length > 0 ? who : email)}' ({email}) edited their "
                 + $"hub profile — apply these changes in Backstage (Speakers → Edit Speaker, "
                 + $"id {profile.BackstageSpeakerId}; the speakers API is create-only). "
-                + "Field names below are the ZOHO GUI fields:",
-            };
+                + "Field names below are the ZOHO GUI fields:";
+            var lines = new List<string>();
             // §533 — this mail exists to be COPY-PASTED into Zoho, so the new value must arrive
             // WHOLE (operator 2026-07-28: "you cannot do that, as i wnt be able to copy/paste to
             // zoho - i need all text … newer cut off text, newer !"). It clipped BOTH values at
@@ -307,7 +310,10 @@ public sealed class SpeakerDetailsFormService : IWizardFormService
             lines.AddRange(changes.Select(c => IsShort(c.OldValue) && IsShort(c.NewValue)
                 ? $"  {c.Field}: '{Show(c.OldValue)}' → '{Show(c.NewValue)}'"
                 : $"  {c.Field} — set it to exactly this:\n{Show(c.NewValue)}"));
-            await _zohoChanges.NotifyAsync("Speakers", lines, ct);
+            // §763 — manualOnly: the Backstage speakers API is CREATE-ONLY, so CEH wrote nothing
+            // here. The mail must not claim it did, nor ask him to "publish" a change that does not
+            // exist over there; every line below is hand-work.
+            await _zohoChanges.NotifyAsync("Speakers", lines, ct, intro: intro, manualOnly: true);
             mailSent = true;
         }
 

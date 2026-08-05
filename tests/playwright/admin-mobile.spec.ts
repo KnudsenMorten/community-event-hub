@@ -90,34 +90,9 @@ test.describe('DEV organizer admin (mobile)', () => {
         await expect(page.locator('h2', { hasText: 'Delivery ledger' })).toBeVisible();
     });
 
-    test('broadcast: preview counts + send to organizer group only', async ({ page }) => {
-        await login(page);
-
-        await page.goto(`${BASE}/Organizer/Broadcast`, { waitUntil: 'domcontentloaded' });
-        await expect(page.locator('h2', { hasText: 'Broadcast email' })).toBeVisible();
-        await assertNoHorizontalScroll(page);
-
-        // Unique subject per run so the per-subject dedup never makes the
-        // send report "0 sent" on a re-run.
-        const subject = `Playwright broadcast ${Date.now()}`;
-        await page.locator('input[name="Roles"][value="Organizer"]').check();
-        await page.locator('input[name="Subject"]').fill(subject);
-        await page.locator('textarea[name="Message"]').fill(
-            'Hello from the admin mobile suite.\n\nSecond paragraph.');
-        await page.getByRole('button', { name: /Preview \+ count/ }).click();
-
-        // Preview shows count + rendered iframe.
-        await expect(page.locator('strong', { hasText: /recipient\(s\)/ })).toBeVisible();
-        await expect(page.locator('iframe[srcdoc]')).toBeVisible();
-        await assertNoHorizontalScroll(page);
-
-        // Send (confirm dialog) - DEV redirects all mail to the operator.
-        page.once('dialog', d => d.accept());
-        await page.getByRole('button', { name: 'Send broadcast' }).click();
-        await expect(
-            page.locator('.info', { hasText: /1 sent, 0 skipped.*0 failed/ })
-        ).toBeVisible({ timeout: 30_000 });
-    });
+    // 🗑 §705.12 (2026-07-29) — the 'broadcast: preview counts + send to organizer group only'
+    // test was removed with the page it drove. /Organizer/Broadcast no longer exists; the
+    // operator's words were "you are welcome to delete broadcast as i will newer use it".
 
     test('sponsor leads admin: counters, grid, status action + prefs save', async ({ page }) => {
         await login(page);
@@ -261,12 +236,13 @@ test.describe('DEV organizer admin (mobile)', () => {
         // its path in the error message.
         const pages = [
             '/Organizer', '/Organizer/Dashboard', '/Organizer/Attendees',
-            '/Organizer/EmailCenter', '/Organizer/Broadcast',
+            // 🗑 §705.12 deleted Broadcast + SendInvitations (2026-07-29) — do not re-add.
+            '/Organizer/EmailCenter',
             '/Organizer/GroupPhotos', '/Organizer/AppGame',
             '/Organizer/Participants', '/Organizer/Speakers',
             '/Organizer/Sponsors', '/Organizer/Swag', '/Organizer/Lunch',
             '/Organizer/TravelReimbursements', '/Organizer/DataGrid',
-            '/Organizer/TasksTable', '/Organizer/SendInvitations',
+            '/Organizer/TasksTable',
             '/Organizer/SpeakerReminders', '/Organizer/SessionizeImport',
             '/Organizer/SponsorAdmin/Index', '/Organizer/SponsorAdmin/Dashboard',
             '/Organizer/SponsorAdmin/Tasks', '/Organizer/SponsorAdmin/Leads',

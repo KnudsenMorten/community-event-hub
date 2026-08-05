@@ -49,6 +49,22 @@ public static class ScenarioFixture
         return (import, sender);
     }
 
+    /// <summary>
+    /// §880 — the welcome service alone, wired the same way <see cref="NewImporter"/> wires it, for
+    /// a test that needs to drive a welcome AFTER an import rather than during one.
+    /// </summary>
+    public static (WelcomeEmailService Welcome, CapturingEmailSender Sender)
+        NewWelcomeService(CommunityHubDbContext db)
+    {
+        var sender = new CapturingEmailSender();
+        var templates = new EmailTemplateProvider(
+            Options.Create(new EmailTemplateOptions
+            {
+                TemplateDirectory = RepoPaths.EmailTemplates(),
+            }));
+        return (new WelcomeEmailService(db, templates, sender, Clock), sender);
+    }
+
     /// <summary>The session importer wired with the deterministic clock.</summary>
     public static SessionImportService NewSessionImporter(CommunityHubDbContext db) =>
         new(db, Clock);

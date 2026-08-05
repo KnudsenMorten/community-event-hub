@@ -63,6 +63,10 @@ public sealed class VolunteerSignupSurveyTests
             new EventConfigOptions { EventConfigPath = "config/does-not-exist.json" }, // empty config => no extra days
             new SharePointUploadClient(new HttpClient(), new SharePointUploadOptions()), // IsConfigured=false => photo skipped
             new NoOpEmail(),
+            // §768.14 — an unconfigured resolver: no root, so VolunteerPhotos does not resolve and
+            // the photo step stays inert, matching the unconfigured upload client above.
+            new CommunityHub.Core.Integrations.DocLibrary.DocLibraryPathResolver(
+                new CommunityHub.Core.Integrations.DocLibrary.DocLibraryOptions()),
             NullLogger<SignupModel>.Instance)
         {
             PageContext = new PageContext { HttpContext = new DefaultHttpContext() },

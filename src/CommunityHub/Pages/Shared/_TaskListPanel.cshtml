@@ -34,6 +34,9 @@
     .ceh-tasklist .tl-progress-bar { height:100%; border-radius:999px; transition:width .3s ease; background:#0a6; }
     .ceh-tasklist .tl-alldone { background:#0a6; color:#fff; border-radius:999px; padding:2px 12px; font-size:13px; font-weight:700; white-space:nowrap; }
     .ceh-tasklist .tl-section { margin:18px 0 8px; color:var(--el-darkblue); }
+    /* §708.4 — the row a Home link just landed on, so the reader can see WHICH task
+       answered the click. Fades out; it marks a destination, it is not a state. */
+    .ceh-tasklist details.tl-targeted { background:#fffbeb; box-shadow:0 0 0 3px #fcd34d; border-radius:8px; }
 </style>
 
 <div class="ceh-tasklist">
@@ -84,3 +87,44 @@
         </details>
     }
 </div>
+
+@*
+    §708.4 — OPEN THE TASK THE READER ASKED FOR.
+
+    Home links a task title to "/<role>/Tasks#task-{id}" (ParticipantChecklistBuilder.TaskAnchor).
+    A bare fragment is not enough here for two reasons, both of which leave the reader staring at a
+    list and concluding the link is broken — which is the complaint being fixed, not a smaller
+    version of it:
+
+      1. every row is a COLLAPSED <details>, so the browser scrolls to a closed summary;
+      2. a COMPLETED row is nested inside the collapsed "Completed tasks" <details>, so it has no
+         layout position at all and the jump silently does nothing.
+
+    So walk UP from the target opening every <details> ancestor, then scroll. Progressive
+    enhancement: with JS off the link still lands on the right page, exactly as it does today.
+*@
+<script>
+    (function () {
+        function revealFromHash() {
+            var hash = window.location.hash;
+            if (!hash || hash.length < 2) return;
+            var el;
+            // A crafted fragment must not throw and take the rest of the page's scripts with it.
+            try { el = document.querySelector(hash); } catch (e) { return; }
+            if (!el || !el.closest('.ceh-tasklist')) return;
+
+            for (var node = el; node; node = node.parentElement) {
+                if (node.tagName === 'DETAILS') node.open = true;
+            }
+
+            el.scrollIntoView({ block: 'center' });
+            el.classList.add('tl-targeted');
+            // The highlight answers "which one?" and then gets out of the way; leaving it would
+            // read as a status the task does not have.
+            window.setTimeout(function () { el.classList.remove('tl-targeted'); }, 2600);
+        }
+
+        revealFromHash();
+        window.addEventListener('hashchange', revealFromHash);
+    })();
+</script>

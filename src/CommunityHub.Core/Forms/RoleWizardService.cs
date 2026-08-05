@@ -68,11 +68,18 @@ public sealed class RoleWizardService
 {
     private readonly CommunityHubDbContext _db;
     private readonly SignalGroupsProvider? _signal;
+    private readonly Core.Content.WelcomeCopyStore? _welcome;
 
-    public RoleWizardService(CommunityHubDbContext db, SignalGroupsProvider? signal = null)
+    public RoleWizardService(
+        CommunityHubDbContext db,
+        SignalGroupsProvider? signal = null,
+        // §680 — optional + last, the same pattern as _signal: unit tests that construct this
+        // service directly keep compiling and simply get no welcome step; DI always supplies it.
+        Core.Content.WelcomeCopyStore? welcome = null)
     {
         _db = db;
         _signal = signal;
+        _welcome = welcome;
     }
 
     /// <summary>The roles this generic wizard serves (the others have bespoke wizards).</summary>
@@ -90,6 +97,16 @@ public sealed class RoleWizardService
 
         var entitled = await FormEntitlementGate.EffectiveItemsAsync(_db, eventId, participantId, ct);
         var steps = new List<RoleWizardStep>();
+
+        // -1. §680 — the WELCOME step, first for every role that has copy (Volunteer / Media /
+        //     Event Partner here; Organizer has none and gets none). Read-only: it thanks the
+        //     person, introduces the event and names what they will find in the hub.
+        //     Route = the wizard itself: the step has no standalone page to open.
+        if (role is { } welcomeRole && _welcome?.Exists(welcomeRole) == true)
+        {
+            steps.Add(new(
+                Core.Content.WelcomeCopyStore.StepKey, Core.Content.WelcomeCopyStore.StepRoute, true));
+        }
 
         // 0. Profile — always, for every role. Done = the participant has filled in a
         //    phone number (the meaningful "I completed my contact basics"; name is

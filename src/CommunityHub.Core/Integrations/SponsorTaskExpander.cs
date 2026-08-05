@@ -40,6 +40,11 @@ public sealed class SponsorTaskExpander
     /// </summary>
     /// <param name="cls">The product classification (kind + tier).</param>
     /// <param name="eventDate">The edition's main start date.</param>
+    /// <param name="eventEndDate">
+    /// The edition's LAST day, for the <c>eventEndPlus</c> basis (§783.6). Passed separately
+    /// because a post-event deadline anchored on the START date is only accidentally right —
+    /// it silently moves the moment an edition is not exactly two days long.
+    /// </param>
     /// <param name="firstOrderDate">
     /// The sponsor's first-order date, for contractPlus deadlines. Null =&gt;
     /// the rule's fallbackNowPlus is used instead.
@@ -48,6 +53,7 @@ public sealed class SponsorTaskExpander
     public IReadOnlyList<SponsorTask> Expand(
         SponsorProductClass cls,
         DateOnly eventDate,
+        DateOnly eventEndDate,
         DateOnly? firstOrderDate,
         DateOnly today)
     {
@@ -96,7 +102,7 @@ public sealed class SponsorTaskExpander
                 }
 
                 var due = ResolveDeadline(
-                    def.Deadline, rules, eventDate, firstOrderDate, today);
+                    def.Deadline, rules, eventDate, eventEndDate, firstOrderDate, today);
                 tasks.Add(new SponsorTask(def.Title, due, def.Deadline, def.Description, cls.Tier, def.Mandatory, def.Upload, def.Form));
             }
         }
@@ -117,15 +123,18 @@ public sealed class SponsorTaskExpander
     public DateOnly? ResolveDeadlineRule(
         string ruleName,
         DateOnly eventDate,
+        DateOnly eventEndDate,
         DateOnly? firstOrderDate,
         DateOnly today) =>
-        ResolveDeadline(ruleName, _config.DeadlineRules(), eventDate, firstOrderDate, today);
+        ResolveDeadline(
+            ruleName, _config.DeadlineRules(), eventDate, eventEndDate, firstOrderDate, today);
 
     /// <summary>Resolve a named deadline rule to a concrete date.</summary>
     private static DateOnly? ResolveDeadline(
         string ruleName,
         IReadOnlyDictionary<string, DeadlineRule> rules,
         DateOnly eventDate,
+        DateOnly eventEndDate,
         DateOnly? firstOrderDate,
         DateOnly today)
     {
@@ -138,6 +147,13 @@ public sealed class SponsorTaskExpander
         return rule.Basis switch
         {
             "eventMinus" => eventDate.AddDays(-rule.Days),
+            // §783.6 — a POST-event deadline anchors on the edition's LAST day, not its first.
+            // 🔒 The old rule said "eventMinus: -1", i.e. start + 1, which landed on 2027-02-10 —
+            // the main conference day itself, while the event is still running and the leads the
+            // task asks the sponsor to download do not exist yet. It read as correct only because
+            // ELDK27 happens to be two days long; a three-day edition would have put the task
+            // mid-event with nothing to say so.
+            "eventEndPlus" => eventEndDate.AddDays(rule.Days),
             "contractPlus" => firstOrderDate is not null
                 ? firstOrderDate.Value.AddDays(rule.Days)
                 : today.AddDays(rule.FallbackNowPlus ?? rule.Days),

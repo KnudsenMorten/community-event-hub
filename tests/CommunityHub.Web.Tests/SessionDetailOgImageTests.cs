@@ -31,7 +31,7 @@ public sealed class SessionDetailOgImageTests
 
     private static GraphicsService Graphics(CommunityHubDbContext db, ISharePointFileStore store) =>
         new(db, new GraphicCompositor(), store, new NullFetcher(), new DraftOnlySocialShareGateway(),
-            Options.Create(new GraphicsSharePointOptions()));
+            Options.Create(new GraphicsSharePointOptions()), TestDocLibrary.Resolver());
 
     private static async Task<(Event evt, Participant speaker)> SeedEventAsync(CommunityHubDbContext db)
     {

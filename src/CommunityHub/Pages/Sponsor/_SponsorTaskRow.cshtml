@@ -78,7 +78,9 @@
     }
 }
 
-<details style="border-bottom:2px solid var(--el-blue);padding:18px 0 22px;">
+@* §708.4 — the anchor Home's task links land on. ONE id shape, from
+   ParticipantChecklistBuilder.TaskAnchor, so the link and the row can never disagree. *@
+<details id="task-@Model.Id" style="border-bottom:2px solid var(--el-blue);padding:18px 0 22px;">
     <summary style="font-size:18px;font-weight:700;color:var(--el-darkblue);line-height:1.45;cursor:pointer;">
         @Model.Title
         @if (!Model.IsMandatory)

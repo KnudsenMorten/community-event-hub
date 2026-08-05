@@ -36,4 +36,15 @@
     <ProjectReference Include="..\..\src\CommunityHub\CommunityHub.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- REQUIREMENTS §680 - the authored WELCOME copy, so WelcomeStepTests drives the four wizard
+         services and the step's form service over the REAL shipped files rather than a fixture
+         that only agrees with itself. -->
+    <None Include="..\..\config\welcome\**\*.md">
+      <Link>config\welcome\%(RecursiveDir)%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>Always</CopyToPublishDirectory>
+    </None>
+  </ItemGroup>
+
 </Project>

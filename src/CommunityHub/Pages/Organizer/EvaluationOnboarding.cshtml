@@ -1,0 +1,13 @@
+@page
+@model CommunityHub.Pages.Organizer.EvaluationOnboardingModel
+@{
+    ViewData["Title"] = "Device onboarding";
+}
+@* ⚰️ §784.7(A) — merged into /Organizer/EvaluationDevices. OnGet redirects; this markup renders only
+   if the redirect is ever suppressed. *@
+<div class="card">
+    <h1>Moved</h1>
+    <p>Device onboarding is now part of
+        <a asp-page="/Organizer/EvaluationDevices">Evaluation Devices</a> &mdash; the approval queue,
+        the telemetry schedule and the per-unit hard switch are sections on that page.</p>
+</div>

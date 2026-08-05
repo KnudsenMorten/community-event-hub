@@ -26,22 +26,24 @@ Tokens like `{{firstName}}` are substituted at send time. Every body is wrapped 
 | 18 | `onboarding-step-reset` | shipped |
 | 19 | `pending-master-class-selection` | shipped |
 | 20 | `pin-signin` | shipped |
-| 21 | `session-evaluation-results` | shipped |
-| 22 | `session-time-location-changed` | shipped |
-| 23 | `speaker-graphics-ready` | shipped |
-| 24 | `speaker-question-digest` | shipped |
-| 25 | `sponsor-leads-digest` | shipped |
-| 26 | `task-deadline-reminder` | shipped |
-| 27 | `task-manual-reminder` | shipped |
-| 28 | `travel-reimbursement-paid` | shipped |
-| 29 | `volunteer-help-raised` | shipped |
-| 30 | `welcome` | shipped |
-| 31 | `welcome-attendee-1day` | shipped |
-| 32 | `welcome-eventpartner` | **private overlay** |
-| 33 | `welcome-media` | **private overlay** |
-| 34 | `welcome-speaker` | **private overlay** |
-| 35 | `welcome-sponsor` | **private overlay** |
-| 36 | `welcome-volunteer` | **private overlay** |
+| 21 | `session-evaluation-report-ready` | shipped |
+| 22 | `session-evaluation-results` | shipped |
+| 23 | `session-time-location-changed` | shipped |
+| 24 | `speaker-graphics-ready` | shipped |
+| 25 | `speaker-question-digest` | shipped |
+| 26 | `sponsor-leads-digest` | shipped |
+| 27 | `task-deadline-reminder` | shipped |
+| 28 | `task-manual-reminder` | shipped |
+| 29 | `travel-reimbursement-paid` | shipped |
+| 30 | `volunteer-help-raised` | shipped |
+| 31 | `welcome` | shipped |
+| 32 | `welcome-attendee-1day` | shipped |
+| 33 | `welcome-eventpartner` | **private overlay** |
+| 34 | `welcome-media` | **private overlay** |
+| 35 | `welcome-speaker` | **private overlay** |
+| 36 | `welcome-sponsor` | **private overlay** |
+| 37 | `welcome-volunteer` | **private overlay** |
+| 38 | `signal-join-links` | shipped |
 
 ---
 
@@ -384,7 +386,62 @@ This code expires in {{expiryMinutes}} minutes and can be used once.
 If you did not request this, you can ignore this email.
 ```
 
-## 21. `session-evaluation-results`
+## 38. `signal-join-links`
+
+*Source: `templates/emails/signal-join-links.html`*
+
+**Subject:** {{eventDisplayName}}: your Signal join links
+
+```text
+Hi {{firstName}},
+Here are your Signal join links for {{eventDisplayName}}, sent because you asked for them from the hub.
+Open this mail on the phone that has Signal installed, then tap the button(s) below. Signal opens and
+asks you to join. Tapping them on a computer without Signal will not do anything — that is why this
+mail exists.
+[ <chat group> ]        -> the role's chat link      (omitted for a broadcast-only role)
+[ <broadcast group> ]   -> the broadcast link
+Once you have joined, go back to the hub and mark the step done.
+If a button does nothing, install Signal first and open this mail again.
+Questions? Reply to this mail or contact {{supportEmail}}.
+```
+
+**Notes.** §779 (operator 2026-08-03). Sent ONLY when the participant presses *"Email me the join
+links"* on the Signal Get-Started step — never automatically. It exists because a `signal.group` link
+does nothing on a device without Signal, and Get Started is filled in on a desktop.
+
+`{{chatBlock}}` / `{{broadcastBlock}}` are **raw-HTML tokens** (the renderer's `Block` suffix
+convention) holding the VML-roundrect buttons, built in code so no token ever sits inside the
+`<!--[if mso]>` conditional comment. **A role gets only the links it is configured for** — Media is
+broadcast-only, so its mail carries one button, never a chat link it was deliberately not given.
+
+🔒 **RING-EXEMPT** — user-initiated, so the Settings page states "always sent" instead of offering a
+ring control that would govern nothing.
+
+## 21. `session-evaluation-report-ready`
+
+*Source: `templates/emails/session-evaluation-report-ready.html`*
+
+**Subject:** {{reportStateLabel}} — {{sessionTitle}}
+
+```text
+Hi {{firstName}},
+{{reportLead}}
+{{sessionTitle}}
+{{eventDisplayName}}{{eventCodeParens}}
+[ Read your evaluation ]  -> {{hubUrl}}
+The report opens in the hub rather than arriving attached. It reproduces what attendees wrote,
+word for word, so it stays where only you and the organisers can reach it.
+Questions? Email {{supportEmail}}.
+The {{eventDisplayName}}{{eventCodeParens}} team
+```
+
+**Notes.** §750 C7/C0. Sent when the analysis engine publishes a session's PDF report, and **re-sent
+when late feedback supersedes it** — `{{reportStateLabel}}` and `{{reportLead}}` carry that state, so
+one template covers both and a second mail never reads as an unexplained duplicate.
+🔒 **A link, never an attachment**: the report reproduces attendee comments verbatim, and an emailed
+copy would escape both the access model and the 12-month retention schedule.
+
+## 22. `session-evaluation-results`
 
 *Source: `templates/emails/session-evaluation-results.html`*
 
@@ -398,7 +455,7 @@ Questions? Email {{supportEmail}}.
 The {{eventDisplayName}}{{eventCodeParens}} team
 ```
 
-## 22. `session-time-location-changed`
+## 23. `session-time-location-changed`
 
 *Source: `templates/emails/session-time-location-changed.html`*
 
@@ -419,7 +476,7 @@ Open my speaker hub
 Questions? Email {{supportEmail}}.
 ```
 
-## 23. `speaker-graphics-ready`
+## 24. `speaker-graphics-ready`
 
 *Source: `templates/emails/speaker-graphics-ready.html`*
 
@@ -434,7 +491,7 @@ Open Help Promote
 Questions? Email {{supportEmail}}.
 ```
 
-## 24. `speaker-question-digest`
+## 25. `speaker-question-digest`
 
 *Source: `templates/emails/speaker-question-digest.html`*
 
@@ -449,7 +506,7 @@ Read & answer questions
 You receive this because there are unanswered audience questions on your sessions. Questions you have already answered are not counted. Need help? Contact {{supportEmail}}.
 ```
 
-## 25. `sponsor-leads-digest`
+## 26. `sponsor-leads-digest`
 
 *Source: `templates/emails/sponsor-leads-digest.html`*
 
@@ -468,7 +525,7 @@ Open the hub
 You receive this because lead notifications are enabled for your company. Ask the organizer team ({{supportEmail}}) to change cadence or recipients.
 ```
 
-## 26. `task-deadline-reminder`
+## 27. `task-deadline-reminder`
 
 *Source: `templates/emails/task-deadline-reminder.html`*
 
@@ -484,7 +541,7 @@ Open the hub
 (the button signs you in automatically — no password needed)
 ```
 
-## 27. `task-manual-reminder`
+## 28. `task-manual-reminder`
 
 *Source: `templates/emails/task-manual-reminder.html`*
 
@@ -499,7 +556,7 @@ Open the hub
 (the button signs you in automatically — no password needed)
 ```
 
-## 28. `travel-reimbursement-paid`
+## 29. `travel-reimbursement-paid`
 
 *Source: `templates/emails/travel-reimbursement-paid.html`*
 
@@ -512,7 +569,7 @@ Your {{eventCode}} travel reimbursement of EUR {{amount}} has been processed and
 Thank you for being part of {{communityName}}.
 ```
 
-## 29. `volunteer-help-raised`
+## 30. `volunteer-help-raised`
 
 *Source: `templates/emails/volunteer-help-raised.html`*
 
@@ -532,7 +589,7 @@ Open the hub
 Questions? Reply to this mail or contact {{supportEmail}}.
 ```
 
-## 30. `welcome`
+## 31. `welcome`
 
 *Source: `templates/emails/welcome.html`*
 
@@ -551,7 +608,7 @@ Both buttons open your hub — you'll be signed in automatically.
 See you at {{eventDisplayName}}{{eventCodeParens}}.
 ```
 
-## 31. `welcome-attendee-1day`
+## 32. `welcome-attendee-1day`
 
 *Source: `templates/emails/welcome-attendee-1day.html`*
 
@@ -568,7 +625,7 @@ Questions? Email {{supportEmail}}.
 See you at {{eventDisplayName}}{{eventCodeParens}}.
 ```
 
-## 32. `welcome-eventpartner`
+## 33. `welcome-eventpartner`
 
 *Source: `config/email-templates/welcome-eventpartner.html`*
 
@@ -618,7 +675,7 @@ Morten K, Kent, Martin, Morten L
 Experts Live Denmark Organizer-team
 ```
 
-## 33. `welcome-media`
+## 34. `welcome-media`
 
 *Source: `config/email-templates/welcome-media.html`*
 
@@ -672,7 +729,7 @@ Morten K, Kent, Martin, Morten L
 Experts Live Denmark Organizer-team
 ```
 
-## 34. `welcome-speaker`
+## 35. `welcome-speaker`
 
 *Source: `config/email-templates/welcome-speaker.html`*
 
@@ -723,7 +780,7 @@ Morten K, Kent, Martin, Morten L
 Experts Live Denmark Organizer-team
 ```
 
-## 35. `welcome-sponsor`
+## 36. `welcome-sponsor`
 
 *Source: `config/email-templates/welcome-sponsor.html`*
 
@@ -781,7 +838,7 @@ Morten K, Kent, Martin, Morten L
 Experts Live Denmark Organizer-team
 ```
 
-## 36. `welcome-volunteer`
+## 37. `welcome-volunteer`
 
 *Source: `config/email-templates/welcome-volunteer.html`*
 

@@ -18,10 +18,13 @@ namespace CommunityHub.Core.Tests;
 /// </summary>
 public class SharePointGroundingProviderTests
 {
-    private const string Folder = "General/Events/ELDK 2027/EventHub/ExtraAIGroundingInfo";
+    // §768: resolved from the DocLibrary registry rather than carried as a literal here.
+    private static readonly string Folder = TestDocLibrary.PathFor(
+        CommunityHub.Core.Integrations.DocLibrary.DocLibraryPaths.AiGrounding);
 
+    /// <param name="folder">Pass <c>""</c> to model an UNCONFIGURED library — the inert case.</param>
     private static SharePointGroundingProvider NewProvider(
-        FakeSharePointFileStore store, string folder = Folder) =>
+        FakeSharePointFileStore store, string? folder = null) =>
         new(store,
             Options.Create(new GraphicsSharePointOptions
             {
@@ -29,7 +32,8 @@ public class SharePointGroundingProviderTests
                 SiteUrl = "https://contoso.sharepoint.example.test/sites/eldk",
                 GroundingFolderPath = folder,
             }),
-            new MemoryCache(new MemoryCacheOptions()));
+            new MemoryCache(new MemoryCacheOptions()),
+            TestDocLibrary.Resolver(folder == string.Empty ? string.Empty : TestDocLibrary.Root));
 
     // ---- inert (not configured) -------------------------------------------
 
@@ -105,6 +109,65 @@ public class SharePointGroundingProviderTests
         await provider.GetGroundingAsync();
 
         Assert.Equal(1, store.ListCount(Folder)); // folder listed once → 15-min TTL is the refresh window
+    }
+
+    // ---- §6.8 on-demand refresh -------------------------------------------
+
+    /// <summary>
+    /// 🔒 <b>Refresh must actually go and look.</b> If it were served from the cache it would be
+    /// theatre: the operator drops a file in, presses the button, is told everything is refreshed,
+    /// and the helper still answers from the previous contents for up to fifteen minutes.
+    /// </summary>
+    [Fact]
+    public async Task Refresh_BYPASSES_the_cache_and_re_reads_the_folder()
+    {
+        var store = new FakeSharePointFileStore(canRead: true);
+        store.Add(Folder, "info.md", Text("hello"));
+        var provider = NewProvider(store);
+
+        await provider.GetGroundingAsync();
+        Assert.Equal(1, store.ListCount(Folder));
+
+        var result = await provider.RefreshAsync();
+
+        Assert.True(result.Ok);
+        Assert.Equal(2, store.ListCount(Folder));   // it went and looked AGAIN
+    }
+
+    /// <summary>A file dropped in after the first read is visible immediately after a refresh.</summary>
+    [Fact]
+    public async Task A_newly_dropped_document_is_picked_up_by_a_refresh()
+    {
+        var store = new FakeSharePointFileStore(canRead: true);
+        store.Add(Folder, "info.md", Text("hello"));
+        var provider = NewProvider(store);
+
+        Assert.Single(await provider.GetGroundingAsync());
+
+        store.Add(Folder, "venue.md", Text("the venue"));
+
+        var result = await provider.RefreshAsync();
+
+        // 🔑 The COUNT is the answer he wants — it is why he pressed the button.
+        Assert.True(result.Ok);
+        Assert.Equal(2, result.Documents);
+
+        // ...and the refreshed set is what the helper now serves, without waiting for the TTL.
+        Assert.Equal(2, (await provider.GetGroundingAsync()).Count);
+    }
+
+    /// <summary>An inert host says so rather than reporting a successful refresh of nothing.</summary>
+    [Fact]
+    public async Task Refresh_on_an_unconfigured_host_reports_the_reason()
+    {
+        var store = new FakeSharePointFileStore(canRead: true);
+        var provider = NewProvider(store, folder: "");
+
+        var result = await provider.RefreshAsync();
+
+        Assert.False(result.Ok);
+        Assert.Equal(0, result.Documents);
+        Assert.False(string.IsNullOrWhiteSpace(result.Error));
     }
 
     // ---- caps --------------------------------------------------------------
@@ -226,5 +289,9 @@ public class SharePointGroundingProviderTests
         public FixedGroundingProvider(params AiHelperGroundingSection[] sections) => _sections = sections;
         public Task<IReadOnlyList<AiHelperGroundingSection>> GetGroundingAsync(CancellationToken ct = default) =>
             Task.FromResult(_sections);
+
+        /// <summary>§6.8 — a fixed provider has nothing to re-read; it reports what it holds.</summary>
+        public Task<GroundingRefreshResult> RefreshAsync(CancellationToken ct = default) =>
+            Task.FromResult(new GroundingRefreshResult(true, _sections.Count, null));
     }
 }

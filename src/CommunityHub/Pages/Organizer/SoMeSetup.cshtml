@@ -1,0 +1,106 @@
+@page
+@model CommunityHub.Pages.Organizer.SoMeSetupModel
+@{
+    ViewData["Title"] = "Set up social media";
+}
+
+<div class="card">
+    <h1>Set up social media</h1>
+
+    @if (Model.AccessDenied)
+    {
+        <p class="error">@Localizer["Common.OrganizersOnly"]</p>
+    }
+    else if (Model.View is { } v)
+    {
+        <p class="muted">
+            Four things to supply once for this edition. <strong>After that the engine builds the
+            campaign itself</strong> — it plans the posts, schedules them and holds every one for
+            your approval.
+        </p>
+
+        @if (v.AllDone)
+        {
+            @* 🔒 §834.2 — setup-only. Once it is done the wizard STANDS DOWN rather than continuing
+               to present tasks: the remaining work belongs to the engine, not to him. *@
+            <p class="success">
+                <strong>Setup is complete.</strong> Nothing more is needed here — the engine takes it
+                from here.
+            </p>
+        }
+        else
+        {
+            <p><strong>@v.DoneCount of @v.TotalSteps done</strong> (@v.Percent%)</p>
+            @if (v.NextStep is { } next)
+            {
+                <p>
+                    Next: <strong>@next.Title</strong> —
+                    <a asp-page="@next.Href">open it →</a>
+                </p>
+            }
+        }
+
+        <ol style="margin-top:16px;padding-left:0;list-style:none;">
+            @foreach (var step in v.Steps)
+            {
+                <li style="border-bottom:1px solid #eee;padding:12px 0;">
+                    <div style="display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;">
+                        @if (step.Done == true)
+                        {
+                            <span class="set-tag on">done</span>
+                        }
+                        else
+                        {
+                            <span class="set-tag off">to do</span>
+                        }
+                        <strong><a asp-page="@step.Href">@step.Title</a></strong>
+                    </div>
+                    <div class="muted" style="margin-top:4px;">@step.What</div>
+                    @if (!string.IsNullOrWhiteSpace(step.Detail))
+                    {
+                        <div style="margin-top:4px;" class="@(step.Done == true ? "muted" : "error")">
+                            @step.Detail
+                        </div>
+                    }
+                </li>
+            }
+        </ol>
+    }
+</div>
+
+@if (!Model.AccessDenied && Model.View is { } view)
+{
+    @* 🔑 §834.2 — REPORTED, never presented as steps. Planning, scheduling and holding are the
+       engine's work; showing them as chores would teach the opposite of how his engine runs. *@
+    <div class="card">
+        <h2>What the engine has built</h2>
+
+        @if (view.Engine.Planned == 0)
+        {
+            <p class="muted">
+                Nothing planned yet. The engine builds the campaign automatically once the setup
+                above is complete.
+            </p>
+        }
+        else
+        {
+            <p>
+                <strong>@view.Engine.Planned</strong> posts planned ·
+                <strong>@view.Engine.Held</strong> waiting for your approval ·
+                <strong>@view.Engine.Approved</strong> approved ·
+                <strong>@view.Engine.Published</strong> published
+            </p>
+            <p class="muted">
+                Approve them in the <a asp-page="/Organizer/SoMeQueue">queue</a>, or see the whole
+                campaign in the <a asp-page="/Organizer/SoMeScheduler">post planner</a>.
+            </p>
+        }
+
+        @* §834.5 — the escape hatch, named the way he named it. *@
+        <p class="muted" style="margin-top:12px;">
+            Want something the engine did not generate?
+            <a asp-page="/Organizer/SoMeQueue" fragment="write-from-scratch">Write a post from
+            scratch</a> — an empty post, exactly as you type it.
+        </p>
+    </div>
+}

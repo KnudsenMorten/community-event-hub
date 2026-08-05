@@ -13,12 +13,22 @@
 <div class="card">
     <h2>@Localizer["Tasks.Title"]</h2>
     @await Html.PartialAsync("Shared/_SecondaryEmailBanner")
+    @if (!string.IsNullOrEmpty(Model.SavedMessage))
+    {
+        <p class="success" style="margin:6px 0 12px;">@Model.SavedMessage</p>
+    }
     @if (Model.Tasks.Count == 0)
     {
         <p>@Localizer["Tasks.NoTasks"]</p>
     }
     else
     {
+        @* §708.10 — the loaded step handlers, by task id, so each row can embed its own form.
+           Passed through ViewData because the shared _TaskListPanel takes ONE model shape for
+           every role and must not grow a per-role property. *@
+        ViewData["RowForms"] = Model.RowForms;
+        ViewData["InvalidTaskId"] = Model.InvalidTaskId;
+        ViewData["RenderedBodies"] = Model.RenderedBodies;
         @await Html.PartialAsync("Shared/_TaskListPanel",
             new TaskListPanelView { Tasks = Model.Tasks, RowPartialName = "_ParticipantTaskRow" })
     }

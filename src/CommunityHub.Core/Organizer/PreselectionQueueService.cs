@@ -78,21 +78,43 @@ public sealed class PreselectionQueueService
     }
 
     /// <summary>
-    /// Load the pre-selection queue for an edition: rows not yet fully activated
-    /// (Inactive or Preselected), newest first. Optionally filter by inbound
-    /// source.
+    /// 🔒 §756 — THE ONE DEFINITION of "who is in the pre-selection queue": an edition's
+    /// <b>VOLUNTEERS</b> who are not yet fully activated. Every reader must go through this.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>VOLUNTEERS ONLY</b> (operator 2026-08-01: <i>"preselection queue must ONLY contain
+    /// volunteers as all other roles are selected and have their own onboarding"</i>). This replaces
+    /// the old "everyone except sponsors" scope, which listed speakers, attendees and media-team too
+    /// — he saw 6 inactive speakers and 2 attendees sitting in a queue none of them belong in:
+    /// <i>"Speakers will NEWER hit that queue"</i>.</para>
+    ///
+    /// <para>🔑 Every other role is <b>selected elsewhere and has its own door</b>, so nothing is
+    /// hidden by narrowing this one: speakers → <c>/Organizer/PendingSpeakers</c> (which also sets
+    /// category + ring, so it is the better surface anyway), attendees → reconciled from ticket
+    /// orders and managed in <c>/Organizer/Attendees</c>, sponsors → the sponsor admin area
+    /// (already excluded here since 2026-06-21). All of them remain reachable in
+    /// <c>/Organizer/Participants</c> with the inactive filter.</para>
+    ///
+    /// <para>🔒 <b>Exposed as a shared predicate, not duplicated.</b> §759: the ops digest had its
+    /// own copy of this WHERE clause with a comment saying "mirror GetQueueAsync's scope" — two
+    /// definitions of one population, which is exactly how he ended up with a mail announcing
+    /// "10 awaiting review" over a queue he then found empty. A mirror is not a shared definition.
+    /// Anything that counts or lists this queue calls THIS method.</para>
+    /// </remarks>
+    public static IQueryable<Participant> QueueRows(IQueryable<Participant> participants, int eventId) =>
+        participants.Where(p => p.EventId == eventId
+                                && p.LifecycleState != ParticipantLifecycleState.Active
+                                && p.Role == ParticipantRole.Volunteer);
+
+    /// <summary>
+    /// Load the pre-selection queue for an edition: volunteers not yet fully activated
+    /// (Inactive or Preselected), newest first. Optionally filter by inbound source.
     /// </summary>
     public async Task<IReadOnlyList<Participant>> GetQueueAsync(
         int eventId, ParticipantQueueSource? source = null,
         CancellationToken ct = default)
     {
-        // Sponsors are managed in the Sponsor admin area, not the onboarding
-        // pre-selection queue — exclude them so synced sponsor contacts never
-        // appear here (operator 2026-06-21).
-        var q = _db.Participants
-            .Where(p => p.EventId == eventId
-                        && p.LifecycleState != ParticipantLifecycleState.Active
-                        && p.Role != ParticipantRole.Sponsor);
+        var q = QueueRows(_db.Participants, eventId);
         if (source is not null)
         {
             q = q.Where(p => p.QueueSource == source.Value);

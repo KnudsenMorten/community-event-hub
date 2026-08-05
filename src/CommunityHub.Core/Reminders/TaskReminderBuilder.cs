@@ -122,9 +122,12 @@ public sealed class TaskReminderBuilder
         // pattern"*). It used to be once-ever (OccasionKey `task:{id}:due`, §81), so a person who
         // ignored it was never chased again. The interval is the operator's, per mail; `null` would
         // restore the old once-only behaviour.
-        var intervalDays = _cadence is null
-            ? EmailTemplateCatalog.DefaultIntervalDaysFor(TemplateName)
-            : await _cadence.GetIntervalDaysAsync(eventId, TemplateName, ct);
+        //
+        // §881 — a MAP, not a number: this mail is shared across roles (its own ring picker already
+        // says so), and the cadence is now settable per role. Resolved per assignee below.
+        var intervalMap = _cadence is null
+            ? null
+            : await _cadence.GetIntervalMapAsync(eventId, TemplateName, ct);
         IReadOnlyDictionary<string, DateOnly> lastSentByOccasion = await EmailReminderCadenceService.LastSentByOccasionAsync(_db, eventId, ReminderTypeName, ct);
 
         // Open, assigned, dated tasks for this edition. §253 G9: only ACTIVE
@@ -172,6 +175,10 @@ public sealed class TaskReminderBuilder
             var taskOccasion = $"task:{t.Id}";
             var lastSentForTask = lastSentByOccasion.TryGetValue(taskOccasion, out var tls)
                 ? tls : (DateOnly?)null;
+            // §881 — the ASSIGNEE'S role decides the interval: their own, else the all-roles value.
+            var intervalDays = intervalMap is null
+                ? EmailTemplateCatalog.DefaultIntervalDaysFor(TemplateName)
+                : EmailReminderCadenceService.Resolve(intervalMap, TemplateName, t.Participant.Role);
             if (!EmailReminderCadenceService.IsDue(
                     today, t.DueDate, lastSentForTask, intervalDays, firstSendAtAnchor: true))
             {

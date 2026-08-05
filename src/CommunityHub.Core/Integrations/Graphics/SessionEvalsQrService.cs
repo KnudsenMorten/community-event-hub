@@ -7,7 +7,14 @@ namespace CommunityHub.Core.Integrations.Graphics;
 /// <param name="RoomDisplay">The room parsed from the file name, dashes turned to spaces (e.g. "Room 16").</param>
 /// <param name="ItemId">The Graph driveItem id, used to download the bytes.</param>
 /// <param name="WebUrl">The SharePoint preview/download URL (may be empty).</param>
-public sealed record SessionEvalQrFile(string FileName, string RoomDisplay, string ItemId, string WebUrl);
+/// <param name="SessionId">
+/// 🔑 §749.2 — the CEH session this file belongs to, parsed from a <c>session-{id}-…</c> name.
+/// NULL for a legacy room-named file, which no longer matches anything: §748 replaced the per-ROOM
+/// model with one QR per SESSION (operator: <i>"1 per session"</i>), and the operator's follow-up was
+/// explicit — <i>"current is linked to room name but now we use sessionname"</i>.
+/// </param>
+public sealed record SessionEvalQrFile(
+    string FileName, string RoomDisplay, string ItemId, string WebUrl, int? SessionId = null);
 
 /// <summary>A session (id + its assigned room) to match against the room-QR files.</summary>
 public sealed record SessionRoomRef(int SessionId, string? Room);
@@ -36,14 +43,32 @@ public sealed class SessionEvalsQrService
     private readonly ISharePointFileStore _store;
     private readonly GraphicsSharePointOptions _options;
 
+    private readonly DocLibrary.IDocLibraryPathResolver _paths;
+
     public SessionEvalsQrService(
-        ISharePointFileStore store, IOptions<GraphicsSharePointOptions> options)
+        ISharePointFileStore store, IOptions<GraphicsSharePointOptions> options,
+        DocLibrary.IDocLibraryPathResolver paths)
     {
         _store = store;
         _options = options.Value;
+        _paths = paths;
     }
 
-    private string Folder => _options.SessionEvalsQrFolderPath;
+    /// <summary>
+    /// §768 — resolved from the registry. This was <c>SessionEvalsQrFolderPath</c>, which still
+    /// named <c>Speakers/SessionEvals-QR</c> after the library was reorganised to
+    /// <c>Speakers/SessionEvaluations/QR</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⚠️ The stale value did not fail loudly, because this is a READ: a listing of a folder that no
+    /// longer exists comes back EMPTY, and every caller reads that as "no QR codes have been
+    /// uploaded yet". <c>TryResolve</c> preserves the inert-when-unconfigured behaviour rather than
+    /// throwing at an organizer.
+    /// </remarks>
+    private string Folder =>
+        _paths.TryResolve(DocLibrary.DocLibraryPaths.SessionEvaluationQr, out var p)
+            ? p
+            : string.Empty;
     private bool FolderSet => !string.IsNullOrWhiteSpace(Folder);
 
     /// <summary>True when the QR folder is wired for READS (speaker download links are offered).</summary>
@@ -66,18 +91,57 @@ public sealed class SessionEvalsQrService
 
         var files = await _store.ListAsync(Folder, ct);
         return files
-            .Select(f => new SessionEvalQrFile(f.Name, RoomDisplayFromFileName(f.Name), f.ItemId, f.WebUrl))
+            .Select(f => new SessionEvalQrFile(
+                f.Name, RoomDisplayFromFileName(f.Name), f.ItemId, f.WebUrl, SessionIdFromFileName(f.Name)))
             .OrderBy(f => f.RoomDisplay, StringComparer.OrdinalIgnoreCase)
             .ThenBy(f => f.FileName, StringComparer.OrdinalIgnoreCase)
             .ToList();
     }
 
     /// <summary>
-    /// Match each given session to the QR file for its ROOM (by normalized room name),
-    /// listing the folder at most ONCE. Returns a map sessionId → matched file for the
-    /// sessions that matched; sessions with no room / no matching file are simply
-    /// absent. Empty + inert when not configured.
+    /// §749.2 — the CEH session id out of a generated QR file name
+    /// (<c>session-{id}-{title-slug}-qr.png</c>, produced by
+    /// <c>SessionQrCodeService.FileName</c>). NULL for anything else.
     /// </summary>
+    /// <remarks>
+    /// 🔒 <b>Deliberately strict.</b> It matches the generator's own prefix and nothing looser — a
+    /// fuzzy rule that also accepted, say, a bare <c>17.png</c> would eventually bind a printed code
+    /// to the wrong session, and a QR pointing at someone else's talk is worse than one that does not
+    /// resolve at all. The id must be the FIRST segment after <c>session-</c> and must be digits.
+    /// </remarks>
+    public static int? SessionIdFromFileName(string? fileName)
+    {
+        var name = (fileName ?? string.Empty).Trim();
+        const string prefix = "session-";
+        if (!name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) return null;
+
+        var rest = name[prefix.Length..];
+        var end = 0;
+        while (end < rest.Length && char.IsAsciiDigit(rest[end])) end++;
+        if (end == 0) return null;
+
+        // The digits must END the segment — "session-12x-…" is not session 12.
+        if (end < rest.Length && rest[end] is not ('-' or '.')) return null;
+
+        return int.TryParse(rest[..end], out var id) ? id : null;
+    }
+
+    /// <summary>
+    /// Match each given session to ITS OWN QR file, listing the folder at most ONCE. Returns a map
+    /// sessionId → matched file; sessions with no matching file are simply absent. Empty + inert
+    /// when not configured.
+    /// </summary>
+    /// <remarks>
+    /// <para>🔑 <b>§749.2 — matching is by SESSION now, not by room.</b> Operator 2026-07-31:
+    /// <i>"current is linked to room name but now we use sessionname"</i>. §748 had already made the
+    /// QR a property of the session rather than the room (<i>"1 per session"</i>), so a room-keyed
+    /// lookup was the last piece still describing the old model.</para>
+    ///
+    /// <para>🔒 <b>There is deliberately NO room-name fallback.</b> It is tempting — legacy files are
+    /// still sitting in the folder — but a fallback would hand a speaker the QR for whoever else used
+    /// their room, and a code that opens the WRONG session's feedback form is far worse than one that
+    /// does not resolve. Legacy room-named files now match nothing, which is the honest outcome.</para>
+    /// </remarks>
     public async Task<IReadOnlyDictionary<int, SessionEvalQrFile>> MatchSessionsAsync(
         IEnumerable<SessionRoomRef> sessions, CancellationToken ct = default)
     {
@@ -87,17 +151,38 @@ public sealed class SessionEvalsQrService
         var files = await ListAllAsync(ct);
         if (files.Count == 0) return result;
 
-        // Pre-compute the normalized room key per file once.
-        var indexed = files.Select(f => (file: f, norm: NormalizeRoom(f.RoomDisplay))).ToList();
+        var bySession = new Dictionary<int, SessionEvalQrFile>();
+        foreach (var f in files.Where(f => f.SessionId is not null))
+        {
+            // First wins, and the list is name-ordered, so the pick is stable across calls rather
+            // than depending on whatever order the store happened to return.
+            bySession.TryAdd(f.SessionId!.Value, f);
+        }
 
         foreach (var s in sessions)
         {
-            if (result.ContainsKey(s.SessionId)) continue;
-            var match = MatchRoom(s.Room, indexed);
-            if (match is not null) result[s.SessionId] = match;
+            if (bySession.TryGetValue(s.SessionId, out var match)) result[s.SessionId] = match;
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// Download the QR file for ONE session, or null when not configured / no such file / the item
+    /// is gone. The caller must already have confirmed the session belongs to this speaker.
+    /// </summary>
+    public async Task<DownloadedQr?> DownloadForSessionAsync(int sessionId, CancellationToken ct = default)
+    {
+        if (!CanRead) return null;
+
+        var files = await ListAllAsync(ct);
+        var match = files.FirstOrDefault(f => f.SessionId == sessionId);
+        if (match is null) return null;
+
+        var bytes = await _store.DownloadAsync(match.ItemId, ct);
+        if (bytes is null) return null;
+
+        return new DownloadedQr(bytes, match.FileName, ContentTypeForFile(match.FileName));
     }
 
     /// <summary>

@@ -52,7 +52,10 @@ public sealed class SponsorArtefactVerifyJob
         // as satisfied by an artefact that no longer exists, for up to 24 hours — *"otherwise will
         // the portal show wrong file if i deleted it manually"*. It is a read-and-compare against
         // SharePoint, so the added frequency costs listing calls, not writes.
-        [TimerTrigger("0 */15 * * * *")] TimerInfo timer,
+        //
+        // §869.3 — BASE TICK ONLY now. His 15 minutes became the §510 default interval instead of
+        // a hard-coded cron, so the window he was reasoning about above is his to set.
+        [TimerTrigger("0 */5 * * * *")] TimerInfo timer,
         CancellationToken ct)
     {
         var eventId = await _db.Events.Where(e => e.IsActive).Select(e => (int?)e.Id)

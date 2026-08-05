@@ -52,6 +52,81 @@ public class EditParticipantModel : PageModel
     /// <summary>True once this participant has already had a welcome email sent.</summary>
     public bool WelcomeAlreadySent { get; private set; }
 
+    /// <summary>
+    /// §761 — the speaker's own profile, shown READ-ONLY on this page so an organizer can copy the
+    /// values straight into Zoho Backstage. Null for a non-speaker (or a speaker with no profile).
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-08-01: <i>"i would like to get all speaker details here including titel,
+    /// description, country, etc so i can cut/paste it over if needed"</i>, then pointing at the
+    /// <b>Speaker details</b> onboarding step: <i>"this is the info i mean"</i>.</para>
+    ///
+    /// <para>🔑 <b>Why it belongs here.</b> The Backstage speakers API is CREATE-ONLY, so when the
+    /// §302b gap mail reports a field missing in Backstage he has to type it in by hand. Without
+    /// this block he reads the field name in the mail and hunts for the value on a different CEH
+    /// page, per speaker, per field.</para>
+    ///
+    /// <para>🔒 <b>READ-ONLY, deliberately.</b> He asked to COPY these, not to edit them — and they
+    /// are already editable on the Speaker details step that owns them. A second editable copy would
+    /// be two screens writing one profile, which is how a bio gets silently overwritten. Same reason
+    /// the values render bare, with no surrounding quotes (§760): this is a paste target.</para>
+    /// </remarks>
+    public SpeakerProfile? Speaker { get; private set; }
+
+    /// <summary>§761 — the derived Zoho "Skills" CSV, exactly as the gap mail reports it.</summary>
+    public string? SpeakerSkills { get; private set; }
+
+    /// <summary>§762 — true when this speaker's CURRENT country has been confirmed in Backstage.</summary>
+    public bool CountryConfirmed { get; private set; }
+
+    /// <summary>
+    /// §762 — record that the speaker's country IS set in Zoho Backstage, so the gap mail stops
+    /// asking. Stores the VALUE confirmed, not a flag, so a later country change re-asks.
+    /// </summary>
+    public async Task<IActionResult> OnPostConfirmCountryAsync(CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+        if (!OrganizerAuth.IsRealOrganizer(me)) return Forbid();
+
+        var profile = await _db.SpeakerProfiles
+            .FirstOrDefaultAsync(sp => sp.ParticipantId == Id && sp.EventId == me.EventId, ct);
+        if (profile is null || string.IsNullOrWhiteSpace(profile.Country))
+            return RedirectToPage(new { Id, message = "No country is set in CEH, so there is nothing to confirm." });
+
+        profile.CountryConfirmedInBackstage = profile.Country.Trim();
+        profile.CountryConfirmedAt = _clock.GetUtcNow();
+        profile.CountryConfirmedBy = me.Email;
+        await _db.SaveChangesAsync(ct);
+
+        return RedirectToPage(new
+        {
+            Id,
+            message = $"Country '{profile.Country.Trim()}' confirmed as set in Backstage — "
+                      + "it will stop appearing in the missing-details mail.",
+        });
+    }
+
+    /// <summary>§762 — undo a confirmation (mis-clicked, or it turned out not to be set).</summary>
+    public async Task<IActionResult> OnPostUnconfirmCountryAsync(CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+        if (!OrganizerAuth.IsRealOrganizer(me)) return Forbid();
+
+        var profile = await _db.SpeakerProfiles
+            .FirstOrDefaultAsync(sp => sp.ParticipantId == Id && sp.EventId == me.EventId, ct);
+        if (profile is not null)
+        {
+            profile.CountryConfirmedInBackstage = null;
+            profile.CountryConfirmedAt = null;
+            profile.CountryConfirmedBy = null;
+            await _db.SaveChangesAsync(ct);
+        }
+
+        return RedirectToPage(new { Id, message = "Country confirmation removed — it will be reported again." });
+    }
+
     [BindProperty(SupportsGet = true)] public int? Id { get; set; }
     [BindProperty(SupportsGet = true)] public string? message { get; set; }
 
@@ -96,7 +171,32 @@ public class EditParticipantModel : PageModel
         SponsorCompanyId = p.SponsorCompanyId;
 
         WelcomeAlreadySent = await WelcomeSentAsync(p, ct);
+        await LoadSpeakerDetailAsync(p, ct);
         return Page();
+    }
+
+    /// <summary>
+    /// §761 — load the speaker profile for the copy/paste block. Speakers only; a blank panel on an
+    /// attendee's page is noise, and a missing profile is not an error here.
+    /// </summary>
+    private async Task LoadSpeakerDetailAsync(Participant p, CancellationToken ct)
+    {
+        if (p.Role != ParticipantRole.Speaker) return;
+
+        Speaker = await _db.SpeakerProfiles
+            .AsNoTracking()
+            .FirstOrDefaultAsync(sp => sp.ParticipantId == p.Id && sp.EventId == p.EventId, ct);
+
+        // Derived, not stored — the same helper the §302b gap mail uses, so the page and the mail
+        // never disagree about what CEH thinks this speaker's skills are.
+        if (Speaker is not null)
+        {
+            SpeakerSkills = CommunityHub.Core.Integrations.ZohoFieldMap.SpeakerSkills(Speaker);
+            // §762 — resolved by the SAME helper the reporter uses, so the button and the mail can
+            // never disagree about whether this country still counts as confirmed.
+            CountryConfirmed =
+                CommunityHub.Core.Integrations.SpeakerZohoGapReporter.CountryIsConfirmed(Speaker);
+        }
     }
 
     public async Task<IActionResult> OnPostAsync(CancellationToken ct)

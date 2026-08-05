@@ -65,6 +65,7 @@ public static class DirectUploadEndpoints
                 EventEditionConfigLoader cfg,
                 EventConfigOptions cfgOptions,
                 SharePointUploadClient sp,
+                CommunityHub.Core.Integrations.DocLibrary.IDocLibraryPathResolver paths,
                 ILoggerFactory logs,
                 CancellationToken ct) =>
         {
@@ -98,8 +99,10 @@ public static class DirectUploadEndpoints
             }
 
             var config = cfg.Load(cfgOptions.EventConfigPath).SharePoint;
-            if (config is null || string.IsNullOrWhiteSpace(config.SiteUrl)
-                || string.IsNullOrWhiteSpace(config.BoothCollateralFolderPath) || !sp.IsConfigured)
+            if (config is null || string.IsNullOrWhiteSpace(config.SiteUrl) || !sp.IsConfigured
+                || !paths.TryResolve(
+                       CommunityHub.Core.Integrations.DocLibrary.DocLibraryPaths.SponsorBoothCollateral,
+                       out var collateralFolder))
             {
                 return Results.BadRequest(new { error = "File uploads aren't available right now." });
             }
@@ -112,7 +115,7 @@ public static class DirectUploadEndpoints
             try
             {
                 var (uploadUrl, path) = await sp.BeginDirectUploadAsync(
-                    config.SiteUrl, config.DriveName, config.BoothCollateralFolderPath, storedName, ct);
+                    config.SiteUrl, config.DriveName, collateralFolder, storedName, ct);
                 return Results.Ok(new BeginResponse(uploadUrl, path));
             }
             catch (Exception ex)
@@ -131,6 +134,7 @@ public static class DirectUploadEndpoints
                 EventEditionConfigLoader cfg,
                 EventConfigOptions cfgOptions,
                 SharePointUploadClient sp,
+                CommunityHub.Core.Integrations.DocLibrary.IDocLibraryPathResolver paths,
                 CancellationToken ct) =>
         {
             var me = participant.Current;
@@ -143,7 +147,10 @@ public static class DirectUploadEndpoints
             if (string.IsNullOrWhiteSpace(companyId)) return Results.Forbid();
 
             var config = cfg.Load(cfgOptions.EventConfigPath).SharePoint;
-            if (config is null || string.IsNullOrWhiteSpace(config.BoothCollateralFolderPath))
+            if (config is null
+                || !paths.TryResolve(
+                       CommunityHub.Core.Integrations.DocLibrary.DocLibraryPaths.SponsorBoothCollateral,
+                       out var collateralFolder))
             {
                 return Results.BadRequest(new { error = "File uploads aren't available right now." });
             }
@@ -151,7 +158,7 @@ public static class DirectUploadEndpoints
             // The path must be INSIDE this sponsor's configured folder AND carry their company
             // prefix. Without both checks a client could "complete" someone else's upload and
             // attach it to their own company.
-            var expectedPrefix = config.BoothCollateralFolderPath.TrimEnd('/') + "/";
+            var expectedPrefix = collateralFolder.TrimEnd('/') + "/";
             var expectedName = Sanitize(companyId) + "_";
             var path = req.Path ?? string.Empty;
             if (!path.StartsWith(expectedPrefix, StringComparison.OrdinalIgnoreCase)
@@ -185,19 +192,23 @@ public static class DirectUploadEndpoints
 
     /// <summary>
     /// §494b — the same begin/complete pair for the VERSIONED sponsor assets: exhibitor wall and
-    /// the three logos. One kind-driven route instead of four copies, because the alternative is
+    /// the two logos. One kind-driven route instead of four copies, because the alternative is
     /// four places to forget a rule.
     ///
     /// <para>The exhibitor wall is the reason this matters most: it is capped at <b>1 GB</b>, which
     /// was never sane to push through a request thread even while streaming.</para>
     ///
-    /// <para>The file NAME is versioned server-side (<c>{Prefix}{Sponsor}_v{N}.{ext}</c>) exactly as
-    /// the classic handler does, so both paths produce the same names and the §68 audit history
-    /// stays continuous whichever route a sponsor used.</para>
+    /// <para>The file NAME is versioned server-side via
+    /// <see cref="SponsorUploadKinds.NextVersionedNameAsync"/> — the SAME call the classic handler
+    /// makes, so both paths produce identical names and the §68 audit history stays continuous
+    /// whichever route a sponsor used.</para>
+    ///
+    /// <para>§768.14 — the <c>zoho</c> kind is gone from the route constraint, so a stale browser
+    /// posting it gets a 404 rather than an upload nothing reads.</para>
     /// </summary>
     private static void MapSponsorAssetEndpoints(WebApplication app)
     {
-        app.MapPost("/sponsor/uploads/{kind:regex(^(some|print|zoho|wall)$)}/begin", async (
+        app.MapPost("/sponsor/uploads/{kind:regex(^(some|print|wall)$)}/begin", async (
                 string kind,
                 BeginRequest req,
                 ICurrentParticipantAccessor participant,
@@ -205,6 +216,7 @@ public static class DirectUploadEndpoints
                 EventEditionConfigLoader cfg,
                 EventConfigOptions cfgOptions,
                 SharePointUploadClient sp,
+                CommunityHub.Core.Integrations.DocLibrary.IDocLibraryPathResolver paths,
                 ILoggerFactory logs,
                 CancellationToken ct) =>
         {
@@ -218,7 +230,7 @@ public static class DirectUploadEndpoints
             if (string.IsNullOrWhiteSpace(companyId)) return Results.Forbid();
 
             var config = cfg.Load(cfgOptions.EventConfigPath).SharePoint;
-            var spec = SponsorUploadKinds.Resolve(kind, config);
+            var spec = SponsorUploadKinds.Resolve(kind, paths, config);
             if (spec is null || !sp.IsConfigured)
             {
                 return Results.BadRequest(new { error = "Uploads aren't available right now." });
@@ -229,19 +241,20 @@ public static class DirectUploadEndpoints
                 return Results.BadRequest(new { error = $"File is too large (max {spec.MaxBytes / (1024 * 1024)} MB)." });
             }
             var ext = Path.GetExtension(req.FileName ?? string.Empty).ToLowerInvariant();
-            if (!spec.Exts.Contains(ext))
+            if (!spec.Accepts(ext))
             {
-                return Results.BadRequest(new { error = $"Unsupported file type. Allowed: {string.Join(", ", spec.Exts)}." });
+                return Results.BadRequest(new { error = $"Unsupported file type. Allowed: {spec.AllowedText}." });
             }
 
             var sponsorName = await ResolveSponsorNameAsync(db, me.EventId, companyId!, ct);
 
             try
             {
-                // Same versioning rule as the classic handler: the next free _v{N} in the folder.
-                var fileName = await NextVersionedNameAsync(
-                    sp, config!.SiteUrl, config.DriveName, spec.Folder, spec.Prefix,
-                    Sanitize(sponsorName), ext, ct);
+                // The SAME call the classic handler makes — one implementation, not a second copy of
+                // the rule that happens to agree today.
+                var fileName = await SponsorUploadKinds.NextVersionedNameAsync(
+                    sp, config!.SiteUrl, config.DriveName, spec.Folder, kind, sponsorName, ext,
+                    logs.CreateLogger("DirectUpload"), ct);
 
                 var (uploadUrl, path) = await sp.BeginDirectUploadAsync(
                     config.SiteUrl, config.DriveName, spec.Folder, fileName, ct);
@@ -255,7 +268,7 @@ public static class DirectUploadEndpoints
             }
         }).RequireAuthorization();
 
-        app.MapPost("/sponsor/uploads/{kind:regex(^(some|print|zoho|wall)$)}/complete", async (
+        app.MapPost("/sponsor/uploads/{kind:regex(^(some|print|wall)$)}/complete", async (
                 string kind,
                 CompleteRequest req,
                 ICurrentParticipantAccessor participant,
@@ -263,6 +276,7 @@ public static class DirectUploadEndpoints
                 EventEditionConfigLoader cfg,
                 EventConfigOptions cfgOptions,
                 SharePointUploadClient sp,
+                CommunityHub.Core.Integrations.DocLibrary.IDocLibraryPathResolver paths,
                 TimeProvider clock,
                 CommunityHub.Core.Email.IEmailSender email,
                 ILoggerFactory logs,
@@ -278,7 +292,7 @@ public static class DirectUploadEndpoints
             if (string.IsNullOrWhiteSpace(companyId)) return Results.Forbid();
 
             var config = cfg.Load(cfgOptions.EventConfigPath).SharePoint;
-            var spec = SponsorUploadKinds.Resolve(kind, config);
+            var spec = SponsorUploadKinds.Resolve(kind, paths, config);
             if (spec is null) return Results.BadRequest(new { error = "Uploads aren't available right now." });
 
             // The completed path must sit inside the folder for THIS kind. Without it, a caller
@@ -400,7 +414,11 @@ public static class DirectUploadEndpoints
             var item = await sp.GetItemByPathAsync(opts.SiteUrl, opts.DriveName, path, ct);
             if (item is null) return Results.BadRequest(new { error = "The upload did not complete. Please try again." });
 
-            await decks.CompleteDirectUploadAsync(me.EventId, me.ParticipantId, kind, ct);
+            // §730 — pass the SESSION: a deck belongs to the session, so its task closes for every
+            // speaker on it. req.SessionId is already proven above (the file name must carry its
+            // "{sessionId} - " token), so this adds no new trust in the client.
+            await decks.CompleteDirectUploadAsync(
+                me.EventId, me.ParticipantId, kind, ct, sessionId: req.SessionId);
             return Results.Ok(new { ok = true, name = item.Name });
         }).RequireAuthorization();
     }
@@ -428,33 +446,17 @@ public static class DirectUploadEndpoints
             local, legalName: null, billingName: null, companyId: companyId);
     }
 
-    /// <summary>The next free <c>{prefix}{sponsor}_v{N}{ext}</c> in the folder.</summary>
-    private static async Task<string> NextVersionedNameAsync(
-        SharePointUploadClient sp, string siteUrl, string driveName, string folder,
-        string prefix, string sponsor, string ext, CancellationToken ct)
-    {
-        var stem = $"{prefix}{sponsor}_v";
-        var next = 1;
-        try
-        {
-            var existing = await sp.ListFolderFilesAsync(siteUrl, driveName, folder, ct);
-            foreach (var f in existing)
-            {
-                var name = Path.GetFileNameWithoutExtension(f.Name);
-                if (!name.StartsWith(stem, StringComparison.OrdinalIgnoreCase)) continue;
-                if (int.TryParse(name[stem.Length..], out var v) && v >= next) next = v + 1;
-            }
-        }
-        catch
-        {
-            // A listing failure must not block the upload; worst case the version restarts at 1
-            // and SharePoint's replace-on-conflict keeps the newest file.
-        }
-        return $"{stem}{next}{ext}";
-    }
+    // §768.14 — the local NextVersionedNameAsync copy is gone; it lives in SponsorUploadKinds now,
+    // because a second implementation of the naming rule is precisely what let the writers and the
+    // graphics matcher drift apart.
 
     /// <summary>File-name-safe component — letters, digits, dash, underscore. Everything else,
     /// including any path separator or traversal attempt, collapses to '-'.</summary>
+    /// <remarks>
+    /// Booth collateral only: it is named from the sponsor's own file name and has NO versioned
+    /// naming contract to honour. The versioned uploads take their whole name from
+    /// <see cref="SponsorUploadNaming"/> instead — do not reach for this one there.
+    /// </remarks>
     private static string Sanitize(string? s) =>
         string.IsNullOrWhiteSpace(s)
             ? "file"

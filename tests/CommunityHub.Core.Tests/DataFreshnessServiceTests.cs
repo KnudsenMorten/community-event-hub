@@ -82,7 +82,15 @@ public sealed class DataFreshnessServiceTests
         db.SessionQuestions.Add(new SessionQuestion { EventId = EventId, SessionId = 0, QuestionText = "q?", CreatedAt = HoursAgo(4) });
 
         // --- Session evaluations: newest at 20 days ago (STALE; window 14d).
-        db.SessionEvaluations.Add(new SessionEvaluation { EventId = EventId, SessionId = 0, Rating = 5, CreatedAt = DaysAgo(20) });
+        // §748.1 — the LIVE four-point response. Freshness reads CollectionTimestamp (when the
+        // attendee pressed), never ReceivedTimestamp: a late upload of an old press is not fresh.
+        db.EvaluationResponses.Add(new CommunityHub.Core.Domain.Evaluation.EvaluationResponse
+        {
+            EventId = EventId, SessionId = null, Rating = 4,
+            CollectionTimestamp = DaysAgo(20),
+            ReceivedTimestamp = DaysAgo(20),
+            Source = CommunityHub.Core.Domain.Evaluation.EvaluationResponseSources.Qr,
+        });
 
         // --- SoMe published: one QUEUED (no PublishedAtUtc) only → feed has no
         //     published data yet ("no data" state, not stale).

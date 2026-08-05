@@ -204,11 +204,19 @@ public class DashboardModel : PageModel
     }
 
     /// <summary>
-    /// True only when the leads pipeline is genuinely unconfigured: the Zoho
-    /// CRM pull is off AND no SponsorLead rows exist for the event. Once the
-    /// CRM integration is switched on, or any lead has landed, the banner
-    /// stands down. Computed in OnGetAsync -- not a static default.
+    /// True only when the leads pipeline is genuinely unconfigured: the Zoho CRM pull is off AND no
+    /// SponsorLead rows exist for the event.
     /// </summary>
+    /// <remarks>
+    /// 🗑 §784.3 — the BANNER this drove is gone. It read "Zoho pipeline not yet configured … until
+    /// the Zoho sync job is wired up (Zoho OAuth + DB migration + storage SAS)", which the operator
+    /// flagged as *"seems wrong"*: Zoho has synced sponsors for months, and the sentence described a
+    /// commissioning state the system left long ago. Its only true subject was the LEAD counters,
+    /// which §784.6 removed because the feature is switched off in Settings.
+    ///
+    /// The FLAG is kept — it is still an accurate computation and the Leads page may want it — but
+    /// nothing on this page renders it. Do not resurrect the banner without rewriting its text.
+    /// </remarks>
     public bool ZohoPipelinePending { get; private set; }
 
     public record SponsorRow(

@@ -153,6 +153,28 @@ public class SponsorInfo
     public string? LinkedInUrl { get; set; }
 
     /// <summary>
+    /// §824.15 — the sponsor's NUMERIC LinkedIn organization id, e.g. <c>98360537</c>. This is what a
+    /// real company mention needs (<c>urn:li:organization:{id}</c>); a profile URL is not enough.
+    /// </summary>
+    /// <remarks>
+    /// <para>🔴 <b>Held here because LinkedIn will not tell us.</b> Measured 2026-08-04 with a live org
+    /// token (§824.14c): <c>organizations?q=vanityName</c> returns <c>403 ACCESS_DENIED</c>, and so
+    /// does fetching the organization we administer BY ID. So the id cannot be derived from
+    /// <see cref="LinkedInUrl"/> through the API with the app's current product access.</para>
+    ///
+    /// <para>Nor can it be parsed out of the URL in practice: all 14 sponsor URLs on record are vanity
+    /// slugs (<c>/company/glueckkanja</c>), not numeric (§824.12a). <c>LinkedInUrlParser</c> still
+    /// reads an id when one IS present, because a URL copied from a company's admin view carries the
+    /// number — that path just cannot be relied on.</para>
+    ///
+    /// <para>🔒 <b>Null is a first-class state, not a gap to paper over.</b> A post for a sponsor with
+    /// no id mentions them as PLAIN TEXT — exactly how the ELDK26 posts read — rather than emitting a
+    /// broken mention or refusing to publish. Tagging is an enhancement on top of the announcement,
+    /// never a precondition for it.</para>
+    /// </remarks>
+    public string? LinkedInOrganizationId { get; set; }
+
+    /// <summary>
     /// Company Twitter/X page URL (full https URL). Hub-collected on the Company
     /// Details page; synced to Zoho Backstage exhibitor <c>company_social_pages</c>.
     /// </summary>

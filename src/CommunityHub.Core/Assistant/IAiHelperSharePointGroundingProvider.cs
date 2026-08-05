@@ -27,4 +27,22 @@ public interface IAiHelperSharePointGroundingProvider
     /// never throws.
     /// </summary>
     Task<IReadOnlyList<AiHelperGroundingSection>> GetGroundingAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// §6.8 — rebuild the grounding NOW, ignoring the cache, and report what was found.
+    /// </summary>
+    /// <remarks>
+    /// The work order asks for <i>"daily scheduled + manual on-demand"</i>. The scheduled half is the
+    /// cache TTL doing its job; this is the on-demand half — for the moment right after the operator
+    /// drops a document into the folder and wants to know it was picked up.
+    /// </remarks>
+    Task<GroundingRefreshResult> RefreshAsync(CancellationToken ct = default);
 }
+
+/// <summary>§6.8 — what an on-demand grounding refresh found.</summary>
+/// <param name="Documents">
+/// How many documents the folder yielded. 🔑 The COUNT is the answer the operator actually wants:
+/// "refreshed" alone reads identically whether the folder held six files or none, and he presses
+/// this precisely because he wants to know his file was seen.
+/// </param>
+public sealed record GroundingRefreshResult(bool Ok, int Documents, string? Error);

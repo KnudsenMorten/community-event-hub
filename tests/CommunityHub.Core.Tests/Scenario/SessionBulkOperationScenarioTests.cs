@@ -75,9 +75,14 @@ public sealed class SessionBulkOperationScenarioTests
             {
                 EventId = seed.EventId, SessionId = withQ.Id, QuestionText = "Slides?",
             });
-            db.SessionEvaluations.Add(new SessionEvaluation
+            // §748.1 — the LIVE four-point response (was the retired 1–5 table, which no longer
+            // exists and which this probe could no longer be blocked by).
+            db.EvaluationResponses.Add(new CommunityHub.Core.Domain.Evaluation.EvaluationResponse
             {
-                EventId = seed.EventId, SessionId = withEval.Id, Rating = 5,
+                EventId = seed.EventId, SessionId = withEval.Id, Rating = 4,
+                CollectionTimestamp = DateTimeOffset.UtcNow,
+                ReceivedTimestamp = DateTimeOffset.UtcNow,
+                Source = CommunityHub.Core.Domain.Evaluation.EvaluationResponseSources.Qr,
             });
             db.MasterClassSignups.Add(new MasterClassSignup
             {

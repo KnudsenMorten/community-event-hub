@@ -29,8 +29,13 @@ public sealed class SponsorContactsModel
     /// is kept only as a fallback; the BOOLEANS are what the step renders, because "1,2" is an ERP
     /// integration detail that means nothing to a sponsor.
     /// </summary>
+    /// <param name="ContactNumber">
+    /// §783.3 — the e-conomic contact number, needed to REMOVE the row. e-conomic is the master, so
+    /// a contact is identified by its own number, never by name or e-mail.
+    /// </param>
     public sealed record Contact(
-        string Name, string? Email, string Roles, bool IsSigner, bool IsEventCoordinator);
+        string Name, string? Email, string Roles, bool IsSigner, bool IsEventCoordinator,
+        int ContactNumber);
 }
 
 /// <summary>
@@ -96,7 +101,8 @@ public sealed class SponsorContactsFormService : IWizardFormService
             var list = await _erp.ListContactsAsync(erpNo, ct);
             return list
                 .Select(c => new SponsorContactsModel.Contact(
-                    c.Name, c.Email, c.RoleDisplay, c.IsSigner, c.IsEventCoordinator))
+                    c.Name, c.Email, c.RoleDisplay, c.IsSigner, c.IsEventCoordinator,
+                    c.ContactNumber))
                 .ToList();
         }
         catch (Exception ex) { _log.LogWarning(ex, "Sponsor contacts step: list failed for erp {Erp}.", erpNo); return new(); }
@@ -138,6 +144,63 @@ public sealed class SponsorContactsFormService : IWizardFormService
         model.NewName = model.NewEmail = model.NewPhone = null;
         model.NewSigner = model.NewCoordinator = false;
         return WizardStepOutcome.Advance;
+    }
+
+    /// <summary>
+    /// §783.3 — REMOVE one of this company's e-conomic contacts. Returns the removed name, or a
+    /// refusal message; never throws into the caller.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-08-03: <i>"I am missing ability to remove contacts in the get started. I
+    /// can only ADD"</i>. Add existed here; edit and delete were on Company Details only.</para>
+    ///
+    /// <para>🔒 <b>Scoped by the ACTOR's own company.</b> The e-conomic customer number is resolved
+    /// from the signed-in participant's <c>SponsorCompanyId</c>, so a posted contact number can only
+    /// ever delete from the caller's own customer record — there is no customer id on the wire.</para>
+    ///
+    /// <para>⚠️ <b>The LAST Event Coordinator is refused.</b> §7c makes sponsor mail
+    /// coordinator-only: <c>SponsorRecipientResolver</c> selects coordinators and excludes
+    /// signer-only contacts. Removing the last coordinator therefore does not degrade the sponsor's
+    /// mail — it ends it, silently, with the company still looking fully configured. That is the
+    /// "reaches NOBODY, and nothing says so" failure this codebase keeps meeting, so it is refused
+    /// with a reason rather than allowed and regretted. Removing a signer, or a coordinator while
+    /// another remains, is unrestricted.</para>
+    /// </remarks>
+    public async Task<string> RemoveContactAsync(
+        int participantId, int contactNumber, CancellationToken ct)
+    {
+        var companyId = await CompanyIdAsync(participantId, ct);
+        if (companyId is null) return "That contact could not be found for your company.";
+
+        var erpNo = await ErpNumberAsync(companyId, ct);
+        if (erpNo is null)
+            return "The contacts backend isn't reachable right now — nothing was removed.";
+
+        var current = await CurrentAsync(erpNo.Value, ct);
+        var target = current.FirstOrDefault(c => c.ContactNumber == contactNumber);
+        if (target is null) return "That contact could not be found for your company.";
+
+        if (target.IsEventCoordinator
+            && current.Count(c => c.IsEventCoordinator) == 1)
+        {
+            return $"{target.Name} is your only event coordinator, so they can't be removed — "
+                 + "every message we send about your booth goes to the coordinators. Add another "
+                 + "coordinator first, then remove this one.";
+        }
+
+        try
+        {
+            await _erp.DeleteAsync(erpNo.Value, contactNumber, ct);
+            return $"{target.Name} was removed from your contacts.";
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex,
+                "Sponsor contacts step: delete failed for erp {Erp} contact {Contact}.",
+                erpNo, contactNumber);
+            return "Couldn't remove that contact in the backend right now — please try again, or "
+                 + "manage it on Company Details.";
+        }
     }
 
     private static string? Trim(string? v) => string.IsNullOrWhiteSpace(v) ? null : v.Trim();

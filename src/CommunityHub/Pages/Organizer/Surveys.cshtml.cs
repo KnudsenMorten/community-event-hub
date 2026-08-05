@@ -31,12 +31,18 @@ public class SurveysModel : PageModel
     public SurveysModel(
         ICurrentParticipantAccessor participant,
         SurveyDefinitionProvider definitions,
-        SurveySummaryService summary)
+        SurveySummaryService summary,
+        // §6.5 — optional so the existing constructions in tests are unchanged; without it a
+        // question survey simply shows no inline results rather than the wrong ones.
+        CommunityHub.Core.Surveys.SurveyQuestionSummaryService? questionSummary = null)
     {
         _participant = participant;
         _definitions = definitions;
         _summary = summary;
+        _questionSummary = questionSummary;
     }
+
+    private readonly CommunityHub.Core.Surveys.SurveyQuestionSummaryService? _questionSummary;
 
     public bool AccessDenied { get; private set; }
     public string? FlashMessage { get; private set; }
@@ -52,6 +58,9 @@ public class SurveysModel : PageModel
 
     public CommunityHub.Core.Surveys.SurveyDefinition? ViewSurvey { get; private set; }
     public SurveySummaryService.SurveySummary? ViewSummary { get; private set; }
+
+    /// <summary>§6.5 — the summary of a post-event QUESTION survey, when that is what is expanded.</summary>
+    public CommunityHub.Core.Surveys.QuestionSurveySummary? ViewQuestionSummary { get; private set; }
 
     [BindProperty(SupportsGet = true)] public string? Msg { get; set; }
     [BindProperty(SupportsGet = true)] public bool MsgErr { get; set; }
@@ -94,8 +103,18 @@ public class SurveysModel : PageModel
             ViewSurvey = _definitions.TryGet(View);
             if (ViewSurvey is not null)
             {
-                ViewSummary = await _summary.BuildSummaryAsync(
-                    View, SurveyCatalog.From(ViewSurvey), ct);
+                // §6.5 — a QUESTION survey has no tracks and no topic picks, so the wizard
+                // aggregation would hand back an empty shell that reads as "nobody answered".
+                // Different questions, different summary.
+                if (ViewSurvey.IsQuestionSurvey && _questionSummary is not null)
+                {
+                    ViewQuestionSummary = await _questionSummary.BuildAsync(ViewSurvey, ct);
+                }
+                else
+                {
+                    ViewSummary = await _summary.BuildSummaryAsync(
+                        View, SurveyCatalog.From(ViewSurvey), ct);
+                }
             }
         }
     }

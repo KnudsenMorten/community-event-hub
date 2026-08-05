@@ -1,0 +1,48 @@
+@page
+@model CommunityHub.Pages.Speaker.AnnouncementsModel
+@{
+    ViewData["Title"] = "Social media announcements";
+}
+
+<div class="card">
+    <h1>Social media announcements</h1>
+    <p class="muted">
+        The posts we will publish about your sessions on LinkedIn — what they say, and when they run.
+        Handy if you want to share or comment on them on the day.
+    </p>
+
+    @if (Model.AccessDenied)
+    {
+        <p class="error">This page is for speakers.</p>
+    }
+    else if (Model.Announcements is { } a)
+    {
+        @if (a.Total == 0)
+        {
+            @* 🔒 §834.1 — approved-only, so "yet" is the honest word: posts may already be planned. *@
+            <p class="muted">
+                Nothing is scheduled for you yet. Posts appear here once the organizers have approved
+                them.
+            </p>
+        }
+        else
+        {
+            <p><strong>@a.Total post(s)</strong> scheduled about your sessions.</p>
+        }
+    }
+</div>
+
+@if (Model.Announcements is { } ann && ann.Total > 0)
+{
+    <div class="card">
+        <h2>Your sessions</h2>
+        <p class="muted">One post per session you are speaking at.</p>
+        <partial name="_AnnouncementList" model="ann.Sessions" />
+    </div>
+
+    <div class="card">
+        <h2>Your track</h2>
+        <p class="muted">Posts about the track your session sits in, naming its speakers.</p>
+        <partial name="_AnnouncementList" model="ann.Tracks" />
+    </div>
+}

@@ -75,7 +75,12 @@ public sealed record FeatureDescriptor(
     IReadOnlyList<string> DependsOn,
     Ring DefaultReleasedToRing = Ring.Ring1,
     FeatureSurface Surface = FeatureSurface.Engine,
-    bool TileOnly = false)
+    bool TileOnly = false,
+    // §742 — this feature SENDS AN OPS NOTICE to a fixed mailbox, so its Settings row states WHERE
+    // it goes and lets an organizer change it (FeatureSetting.NotificationRecipientEmail).
+    // 🔒 Default false: the box must never appear on a switch that mails nobody — the page's own
+    // rule that a control may not appear where it governs nothing (§326bx).
+    bool SendsOpsNotice = false)
 {
     /// <summary>Convenience: advanced features default OFF, core default ON.</summary>
     public bool IsAdvanced => Tier == FeatureTier.Advanced;
@@ -365,6 +370,26 @@ public static class FeatureCatalog
             DependsOn: new[] { OutboundEmailKey }, DefaultReleasedToRing: Ring.Ring1,
             Surface: FeatureSurface.UserImpact),
 
+        // §720 (operator 2026-07-31): *"i would like to get email to mok@expertslive.dk when someone
+        // completes the get started wizard in full … make a notification on/off feature in settings
+        // for this. then i know it and can reach out to ask them for their experience"*.
+        //
+        // 🔑 Deliberately NOT ring-scoped (no Surface: UserImpact). This is an OPS notice addressed
+        // to the operator himself — the recipient is a fixed mailbox, not a participant — so there
+        // is no audience to narrow, and a ring here would be a control that governs nothing: the
+        // §326bx / §619 defect, twice found and twice removed. The ON/OFF is the whole control,
+        // which is exactly what he asked for.
+        // ⚠️ DefaultEnabled: FALSE, enforced by FeatureCatalogClassificationTests — *"an advanced
+        // feature must default OFF (opt-in) so a deploy never springs new behaviour"*. It sends
+        // MAIL, so that rule is exactly right here and I did not weaken it: he switches it on in
+        // Settings, which is the control he asked for anyway.
+        // §742 — SendsOpsNotice: the row now STATES where the mail goes and lets him change it.
+        new("getstarted-complete-notice", "Settings.Feat.GetStartedCompleteNotice.Name",
+            "Settings.Feat.GetStartedCompleteNotice.Desc",
+            FeatureGroup.EventSettings, FeatureTier.Advanced, DefaultEnabled: false,
+            DependsOn: new[] { OutboundEmailKey }, DefaultReleasedToRing: Ring.Broad,
+            SendsOpsNotice: true),
+
         // §336 — TILE ONLY, a SEVENTH one (§327e found six). Verified by exhausting every form
         // a key can take: the only quoted consumers are the two organizer HubTiles on
         // People.cshtml ("Welcome sign-in links", "Permanent sign-in links"). There is NO
@@ -378,6 +403,25 @@ public static class FeatureCatalog
             FeatureGroup.EventSettings, FeatureTier.Advanced, DefaultEnabled: false,
             DependsOn: new[] { OutboundEmailKey }, DefaultReleasedToRing: Ring.Ring1,
             Surface: FeatureSurface.UserImpact, TileOnly: true),
+
+        // §754 — the SIGNAGE agenda mirror: pull the complete Zoho Backstage agenda (talks, master
+        // classes, breaks, registration, lunch, party) into CEH every 5 minutes so the venue screens
+        // render from a local cache instead of from Zoho at request time.
+        //
+        // ENGINE surface: a pull with no per-user experience, so never ring-scoped — a screen in a
+        // corridor has no ring. Off by default like every advanced feature, which here is also the
+        // operationally right default: the screens exist for the event days, and until the operator
+        // switches this on there is no reason to ask Zoho for the whole agenda every 5 minutes.
+        //
+        // 🔒 ONE switch, deliberately. §754 §10's on/off controls are per VIEW and per ORIENTATION —
+        // they decide what a screen displays. This one decides whether the cache is refreshed at
+        // all. Wiring the views to this key as well would recreate the two-switch trap: a GUI that
+        // says a view is ON while nothing behind it is running.
+        new("signage-agenda-sync", "Settings.Feat.SignageAgendaSync.Name",
+            "Settings.Feat.SignageAgendaSync.Desc",
+            FeatureGroup.EventSettings, FeatureTier.Advanced, DefaultEnabled: false,
+            DependsOn: Array.Empty<string>(), DefaultReleasedToRing: Ring.Broad,
+            Surface: FeatureSurface.Engine),
 
         // §26c "Help Promote": email speakers when their promo graphics are released,
         // pointing them to /Speaker/Graphics. Ring-scoped + off by default.
@@ -438,6 +482,21 @@ public static class FeatureCatalog
             DependsOn: Array.Empty<string>(), DefaultReleasedToRing: Ring.Broad,
             Surface: FeatureSurface.Queue),
 
+        // §871 — the switch for the daily "Speaker detail gaps (Backstage)" mail. Operator
+        // 2026-08-05: "it could be nice to have a button to DISABLE this one, as i expect us to do
+        // that soon".
+        //
+        // ⚠️ §623 deliberately left that job UN-gated. This reverses it, and the reason is §871.1:
+        // Backstage does not return Country at all, so the mail lists it for every speaker forever
+        // and can never be satisfied.
+        // 🔒 DefaultEnabled stays TRUE — it reports real gaps today, and switching it off must be
+        // HIS decision rather than a default that quietly hides one.
+        new("speaker-gap-report", "Settings.Feat.SpeakerGapReport.Name",
+            "Settings.Feat.SpeakerGapReport.Desc",
+            FeatureGroup.SpeakersSessions, FeatureTier.Advanced, DefaultEnabled: true,
+            DependsOn: Array.Empty<string>(), DefaultReleasedToRing: Ring.Broad,
+            Surface: FeatureSurface.Queue),
+
         // --- Sponsors -------------------------------------------------------
         // GA (operator 2026-06-22): tested backend syncs — released to Broad, unscoped.
         new("backstage-sync", "Settings.Feat.BackstageSync.Name",
@@ -469,6 +528,28 @@ public static class FeatureCatalog
         // to retire the legacy script. The service self-guards on e-conomic+CM config.
         new("erp-webshop-reconcile", "Settings.Feat.ErpWebshopReconcile.Name",
             "Settings.Feat.ErpWebshopReconcile.Desc",
+            FeatureGroup.Sponsors, FeatureTier.Advanced, DefaultEnabled: false,
+            DependsOn: Array.Empty<string>(), DefaultReleasedToRing: Ring.Broad),
+
+        // §786 ENGINE (operator 2026-08-04): hourly webshop order → e-conomic DRAFT invoice (the C#
+        // port of Sync-Webshop-Orders-Create-ERP-Invoice.ps1). 🔒 OFF by default, and turning it ON
+        // IS THE CUTOVER — the scheduled script must be switched off first, or two systems are
+        // invoicing the same orders and only the shared WebshopOrderId-<n> marker is stopping a
+        // duplicate (§786.2). Same shape as erp-webshop-reconcile above, for the same reason.
+        new("webshop-erp-invoicing", "Settings.Feat.WebshopErpInvoicing.Name",
+            "Settings.Feat.WebshopErpInvoicing.Desc",
+            FeatureGroup.Sponsors, FeatureTier.Advanced, DefaultEnabled: false,
+            DependsOn: Array.Empty<string>(), DefaultReleasedToRing: Ring.Broad),
+
+        // §787 ENGINE (operator 2026-08-04): hourly claimed-COUPON ticket → e-conomic DRAFT invoice
+        // (the C# port of Create-ERP-Invoice-Coupon-Tickets.ps1). 🔒 OFF by default.
+        // ⚠️ Unlike webshop-erp-invoicing above, turning this on is NOT a cutover race: the retired
+        // coupon script has never run (§787.5), so there is no second system to switch off first.
+        // What it DOES need first is the coupon mappings on /Organizer/CouponInvoicing — without
+        // them every claim is reported as unmapped instead of invoiced.
+        // 🔒 Invoicing:DryRun (default TRUE) still holds every write even once this is on (§788).
+        new("coupon-erp-invoicing", "Settings.Feat.CouponErpInvoicing.Name",
+            "Settings.Feat.CouponErpInvoicing.Desc",
             FeatureGroup.Sponsors, FeatureTier.Advanced, DefaultEnabled: false,
             DependsOn: Array.Empty<string>(), DefaultReleasedToRing: Ring.Broad),
 

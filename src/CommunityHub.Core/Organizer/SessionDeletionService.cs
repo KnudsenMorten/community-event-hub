@@ -161,7 +161,11 @@ public sealed class SessionDeletionService
         if (questions > 0)
             blockers.Add($"{questions} attendee question(s)");
 
-        var evaluations = await _db.SessionEvaluations.CountAsync(e => e.SessionId == sessionId, ct);
+        // §748.1 — counts the LIVE four-point responses. It used to count the retired 1–5
+        // SessionEvaluations, and once nothing could write that table the guard silently stopped
+        // blocking anything — a session carrying real attendee feedback would have deleted clean.
+        // Repointing it is why the retirement had to touch this file rather than just drop the query.
+        var evaluations = await _db.EvaluationResponses.CountAsync(e => e.SessionId == sessionId, ct);
         if (evaluations > 0)
             blockers.Add($"{evaluations} attendee evaluation(s)");
 

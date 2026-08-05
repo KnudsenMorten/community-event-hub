@@ -53,6 +53,29 @@ public class JobRunState
     /// <summary>How many invocations the throttle has skipped in total (diagnostic).</summary>
     public int ThrottledCount { get; set; }
 
+    /// <summary>
+    /// §879 — a fingerprint of the CONTENT this job last mailed about, so a job that runs every few
+    /// minutes can speak once per CHANGE instead of once per run. Null = it has never sent, or the
+    /// condition cleared (which is what re-arms it).
+    /// </summary>
+    /// <remarks>
+    /// <para>🔑 <b>Why the state is durable rather than an in-process throttle.</b> The alternative
+    /// was <c>EngineAlertSender</c>'s throttle key, which lives in the singleton's memory: it forgets
+    /// on every host restart, so each deploy would re-mail a queue nobody had touched, and it
+    /// releases after a fixed window whether or not anything changed. This column is the same shape
+    /// as §623's <c>SpeakerProfile.ZohoGapNotifiedHash</c> — the established "tell me when this SET
+    /// changes" pattern — lifted onto the job, for a set with no single row to hang it on.</para>
+    ///
+    /// <para>🔒 <b>Clear it when the condition clears.</b> A job that stops finding anything must
+    /// null this, or the same set becoming true again later would be silently suppressed as
+    /// "already reported".</para>
+    /// </remarks>
+    public string? LastContentHash { get; set; }
+
+    /// <summary>When <see cref="LastContentHash"/> was last written (UTC) — i.e. when this job last
+    /// actually said something, as opposed to when it last ran.</summary>
+    public DateTimeOffset? LastContentMailedAt { get; set; }
+
     public DateTimeOffset? UpdatedAt { get; set; }
 
     /// <summary>Who last changed the interval — an operational change worth attributing.</summary>

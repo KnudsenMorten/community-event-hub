@@ -39,6 +39,42 @@ public class TravelReimbursement
     /// <summary>Free-text explanation (required when ClaimAmountEur doesn't match a standard cap).</summary>
     public string? Explanation { get; set; }
 
+    // --- §6.10 claim locking (§768.10 D5) -----------------------------------
+
+    /// <summary>
+    /// When the speaker SUBMITTED the claim. Non-null ⇒ the claim is COMPLETED and frozen: no
+    /// further receipt uploads, no deletions, no re-saving.
+    /// </summary>
+    /// <remarks>
+    /// <para>🔒 <b>Enforced server-side, not by hiding a button</b> (work-order §6.10): a stale
+    /// browser tab or a direct POST must fail identically.</para>
+    ///
+    /// <para>⚠️ <b>A timestamp, not a bool.</b> "When did this speaker submit?" is the question an
+    /// organizer asks when a receipt is missing and the deadline has passed; a bool answers it with
+    /// a shrug, and the answer cannot be reconstructed afterwards.</para>
+    /// </remarks>
+    public DateTimeOffset? SubmittedAt { get; set; }
+
+    /// <summary>
+    /// When an organizer last REOPENED a completed claim, returning it to the speaker.
+    /// </summary>
+    /// <remarks>
+    /// 🔒 §768.10 D5, and it is the reason the freeze is safe to ship at all: without a reopen, a
+    /// speaker who submits after uploading 3 of 5 receipts is locked out <b>with no recovery path</b>
+    /// — the consequence the work order asked to be flagged rather than assumed. The reopen is a
+    /// deliberate organizer action and is audit-logged; it is not a hole in the lock.
+    /// </remarks>
+    public DateTimeOffset? ReopenedAt { get; set; }
+
+    /// <summary>The organizer who reopened it (audit; null when never reopened).</summary>
+    public string? ReopenedByEmail { get; set; }
+
+    /// <summary>How many times this claim has been reopened — a pattern worth seeing.</summary>
+    public int ReopenCount { get; set; }
+
+    /// <summary>The claim is frozen: submitted, and not since reopened.</summary>
+    public bool IsCompleted => SubmittedAt is not null;
+
     // --- Organizer-only fields (not editable by the speaker) ----------------
     /// <summary>Organizer marks paid when the reimbursement has been transferred.</summary>
     public bool IsPaid { get; set; }

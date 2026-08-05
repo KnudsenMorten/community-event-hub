@@ -42,13 +42,37 @@ public static class TaskArtefactRules
     {
         var key = task.SourceKey;
         if (string.IsNullOrWhiteSpace(key)) return null;
+
+        // 🔥 §708 / §707.57d — THE SPEAKER DECKS. The reason the speaker migration exists.
+        //
+        // Photographed on PROD: /Speaker/Tasks showing "Upload final presentation" with a ✓ done
+        // badge while /Speaker showed "Final: not uploaded yet" for the same speaker at the same
+        // moment. The task said done and the file did not exist — possible only because the task
+        // was Manual and nothing checked. Naming a kind here is what removes the tick
+        // (AllowsManualCompletion excludes artefact-backed tasks) so the badge follows the FILE.
+        //
+        // 🔒 Both slugs are short (25 and 27 chars) and matched on their DISTINCTIVE middle word,
+        // not a tail. §707.54a is the warning: SponsorTaskKeys.Slug TRUNCATES at 60, so a marker
+        // near the end of a long title is simply not in the stored key, and the rule then returns
+        // false forever, silently, in the permissive direction.
+        if (key.StartsWith("speakerdl:", StringComparison.OrdinalIgnoreCase))
+        {
+            var speakerSlug = key[(key.LastIndexOf(':') + 1)..];
+            if (speakerSlug.Contains("preview-presentation", StringComparison.OrdinalIgnoreCase))
+                return "preview";
+            if (speakerSlug.Contains("final-presentation", StringComparison.OrdinalIgnoreCase))
+                return "final";
+            return null;
+        }
+
         if (!key.StartsWith("sponsor:", StringComparison.OrdinalIgnoreCase)) return null;
 
         var slug = key[(key.LastIndexOf(':') + 1)..];
 
         // The exhibitor/sponsor WALL artwork. Its versioned uploader already exists
-        // (SponsorUploadKinds "wall" → ExhibitorWallFolderPath, ExhibitorWall_<name>_v<N>), so the
-        // artefact is recorded as a SponsorUploadAudit row and completion becomes checkable.
+        // (SponsorUploadKinds "wall" → DocLibraryPaths.SponsorExhibitorWall, named
+        // <sponsor>-exhibitor-wall-<N>.<ext>), so the artefact is recorded as a SponsorUploadAudit
+        // row and completion becomes checkable.
         if (slug.Contains("sponsor-wall", StringComparison.OrdinalIgnoreCase)
             || slug.Contains("wall-design", StringComparison.OrdinalIgnoreCase))
             return "wall";
@@ -159,7 +183,20 @@ public static class TaskArtefactRules
 
         // "Event App Game - Extra Exposure Opportunity" (§670) and
         // "Brochures … for {{expectedAttendees}} attendee bags" (§676).
+        //
+        // 🔴 §707.54 — MATCH THE START OF THE TITLE, NOT ITS TAIL. `SponsorTaskKeys.Slug` TRUNCATES
+        // at 60 characters, and the attendee-bag title is longer than that: the stored key ends
+        // "…-for-expectedattendees-a", so `attendee-bags` was NEVER present and this rule silently
+        // returned false for every one of those rows. The consequence was the §603 lie — a DECISION
+        // task offering "Mark complete", letting a sponsor tick it without answering either button.
+        // Operator 2026-07-30 saw exactly that.
+        //
+        // 🔑 Same root cause as §707.43 (a {{token}} in that same title), and the same lesson: a
+        // long title plus a truncating slug means any marker near the END of the title is not there.
+        // `brochures` is the FIRST word, so it survives truncation. `attendee-bags` is kept for rows
+        // seeded from a shorter historic title.
         return slug.Contains("event-app-game", StringComparison.OrdinalIgnoreCase)
-               || slug.Contains("attendee-bags", StringComparison.OrdinalIgnoreCase);
+               || slug.Contains("attendee-bags", StringComparison.OrdinalIgnoreCase)
+               || slug.StartsWith("brochures", StringComparison.OrdinalIgnoreCase);
     }
 }

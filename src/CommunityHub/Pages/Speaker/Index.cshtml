@@ -58,6 +58,18 @@
     .ms-badge {
         display:inline-block; border-radius:999px; padding:2px 10px;
         font-size:12px; font-weight:700; white-space:nowrap;
+        /* nowrap keeps the SHORT tags ("Session", "45 min") from breaking mid-word.
+           A badge whose text is a sentence must opt out — see .ms-badge-long. */
+        max-width:100%;
+    }
+    /* 🔒 §466 made the slides badge a full sentence ("...opened N times by attendees")
+       because "Slides opened: 0" named neither the deck nor who opened it. That wording
+       is an operator decision and is NOT to be shortened to fit a phone — so the badge
+       wraps instead. With nowrap it measured 364px and pushed /Speaker to a 415px
+       scroll width on a 320px viewport, which the release gate reports as a failure. */
+    .ms-badge-long {
+        white-space:normal; overflow-wrap:anywhere;
+        border-radius:10px; line-height:1.35; text-align:left;
     }
     .ms-badge.due    { background:#fff3cd; color:#856404; border:1px solid #ffe69c; }
     .ms-badge.soon   { background:#e6f3fb; color:#055f86; border:1px solid #bfe2f4; }
@@ -163,7 +175,7 @@
                            public /Sessions/Slides page (one combined number). *@
                         @* §466 (operator 2026-07-27): "Slides opened: 0" did not say WHOSE slides,
                            WHICH deck, or who opened them. The badge now names all three. *@
-                        <span class="ms-badge" style="background:#eef6ff;color:#1e40af;border:1px solid #bfdbfe;"
+                        <span class="ms-badge ms-badge-long" style="background:#eef6ff;color:#1e40af;border:1px solid #bfdbfe;"
                               title="Views + downloads of your slides on the public Session slides page">
                             📊 Preview/Final presentations opened @(Model.SlideStats.TryGetValue(s.SessionId, out var hits) ? hits : 0) times by attendees
                         </span>

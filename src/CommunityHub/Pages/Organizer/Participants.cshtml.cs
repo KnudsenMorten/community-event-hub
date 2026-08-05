@@ -40,6 +40,32 @@ public class ParticipantsModel : PageModel
     private readonly ILogger<ParticipantsModel> _logger;
     private readonly TimeProvider _clock;
     private readonly CommunityHub.Core.Settings.FeatureGateService? _gate;
+    private readonly CommunityHub.Core.Config.EventEditionConfigLoader? _editionLoader;
+    private readonly CommunityHub.Core.Config.EventConfigOptions? _editionOptions;
+    private IReadOnlyList<string>? _twoDayIds;
+
+    /// <summary>
+    /// §707.50 — the edition's AUTHORITATIVE 2-day ticket class id(s), read once per request.
+    /// Empty when no config is wired ⇒ the policy falls back to the name markers, its documented
+    /// behaviour, so the flag still resolves rather than disappearing.
+    /// </summary>
+    private IReadOnlyList<string> TwoDayClassIds()
+    {
+        if (_twoDayIds is not null) return _twoDayIds;
+        try
+        {
+            _twoDayIds = _editionLoader is null
+                ? Array.Empty<string>()
+                : _editionLoader.Load(
+                        (_editionOptions ?? new CommunityHub.Core.Config.EventConfigOptions()).EventConfigPath)
+                    .MasterClassTwoDayClassIds;
+        }
+        catch
+        {
+            _twoDayIds = Array.Empty<string>();   // a config read must never break the grid
+        }
+        return _twoDayIds;
+    }
 
     /// <summary>
     /// §707.37 — is <c>attendee-1day-access</c> ON for this edition? Decides whether the page says
@@ -64,10 +90,14 @@ public class ParticipantsModel : PageModel
         CommunityHub.Core.Integrations.CompanyManagerClient companyManager,
         ILogger<ParticipantsModel> logger,
         TimeProvider clock,
-        // §707.37 — optional so existing constructions and tests are unchanged; wired by DI.
-        CommunityHub.Core.Settings.FeatureGateService? gate = null)
+        // §707.37 / §707.50 — optional so existing constructions and tests are unchanged; wired by DI.
+        CommunityHub.Core.Settings.FeatureGateService? gate = null,
+        CommunityHub.Core.Config.EventEditionConfigLoader? editionLoader = null,
+        CommunityHub.Core.Config.EventConfigOptions? editionOptions = null)
     {
         _gate = gate;
+        _editionLoader = editionLoader;
+        _editionOptions = editionOptions;
         _db = db;
         _participant = participant;
         _bulk = bulk;
@@ -114,6 +144,26 @@ public class ParticipantsModel : PageModel
     public Dictionary<string, string> AttendeeCompanies { get; private set; } =
         new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// §707.50 — the attendee's TICKET KIND ("2-day" / "1-day") from the same winning mirror row,
+    /// keyed by lowercase e-mail. Operator 2026-07-30: *"it would be nice to have flag like (2-day or
+    /// 1-day here)"*.
+    /// </summary>
+    /// <remarks>
+    /// 🔒 Decided by the ticket CLASS ID, never the display name (§707.35b) — a name is editable in
+    /// Zoho, and a rename must not silently relabel people. The class also SURVIVES cancellation,
+    /// where <c>TicketStatus</c> is zeroed by the sync (§707.34b), so a cancelled row still reports
+    /// what it was.
+    /// </remarks>
+    public Dictionary<string, string> AttendeeTicketKinds { get; private set; } =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>The attendee's ticket kind for this address, or empty when there is no mirror row.</summary>
+    public string AttendeeTicketKindFor(string? email) =>
+        !string.IsNullOrWhiteSpace(email) && AttendeeTicketKinds.TryGetValue(email, out var k)
+            ? k
+            : string.Empty;
+
     /// <summary>The attendee's company for this address, or empty when the mirror holds none.</summary>
     public string AttendeeCompanyFor(string? email) =>
         !string.IsNullOrWhiteSpace(email) && AttendeeCompanies.TryGetValue(email, out var n)
@@ -151,6 +201,10 @@ public class ParticipantsModel : PageModel
     /// <summary>Optional single persona-flag filter: test | booth | signer | coordinator | speaker.</summary>
     [BindProperty(SupportsGet = true)]
     public string? FlagFilter { get; set; }
+
+    /// <summary>§735 — narrow to ONE ring, or null for every ring.</summary>
+    [BindProperty(SupportsGet = true)]
+    public CommunityHub.Core.Settings.Ring? RingFilter { get; set; }
 
     /// <summary>Free-text search over name + email (server-side, case-insensitive).</summary>
     [BindProperty(SupportsGet = true)]
@@ -559,6 +613,19 @@ public class ParticipantsModel : PageModel
             _             => query,
         };
 
+        // §735 (operator 2026-07-31: *"feature req: add ability to filter on ring here"*). The page
+        // already had a BULK "change ring to" and no way to SEE who is in a ring — so an organizer
+        // assigning rings could act but not check. §721 is why that matters: the whole morning was
+        // spent reasoning about which ring people were in.
+        //
+        // Kept in the page rather than ParticipantSearchService on purpose: the ring is not part of
+        // the shared "find a person" contract the service owns, and the flag filter above sets the
+        // precedent for a page-local narrowing.
+        if (RingFilter is { } ring)
+        {
+            query = query.Where(p => p.Ring == ring);
+        }
+
         var matched = await query.CountAsync(ct);
         Paging = GridPaging.Resolve(PageNo, GridPaging.DefaultPageSize, matched);
 
@@ -659,21 +726,146 @@ public class ParticipantsModel : PageModel
         // Ordering does the work: active-first, then the §707.22a winning-row rule (newest
         // LastSyncedAt, then Id). So a live ticket always beats a cancelled one and a cancelled one
         // is used only when there is nothing live — never a mix, never a flicker.
+        // §707.50 — ONE read serves both the Company column and the 2-day/1-day flag, and both pick
+        // from the SAME ordering, so the two can never disagree about which ticket they describe.
+        // The company filter moved OUT of the query: a row with no company still tells us the ticket
+        // KIND, and dropping it here would blank the flag for anyone whose company Zoho does not hold.
         var rows = await _db.Attendees.AsNoTracking()
-            .Where(a => a.EventId == eventId
-                        && a.CompanyName != null
-                        && a.CompanyName != ""
-                        && emails.Contains(a.Email.ToLower()))
-            .Select(a => new { a.Email, a.CompanyName, a.LastSyncedAt, a.Id, a.MirrorState })
+            .Where(a => a.EventId == eventId && emails.Contains(a.Email.ToLower()))
+            .Select(a => new
+            {
+                a.Email, a.CompanyName, a.TicketClassId, a.TicketClassName,
+                a.LastSyncedAt, a.Id, a.MirrorState,
+            })
             .ToListAsync(ct);
 
-        AttendeeCompanies = rows
+        var byEmail = rows
             .GroupBy(a => a.Email.ToLowerInvariant(), StringComparer.OrdinalIgnoreCase)
             .ToDictionary(
                 g => g.Key,
                 g => g.OrderByDescending(a => a.MirrorState == CommunityHub.Core.Domain.MirrorState.Active)
                       .ThenByDescending(a => a.LastSyncedAt).ThenByDescending(a => a.Id)
-                      .First().CompanyName!,
+                      .ToList(),
                 StringComparer.OrdinalIgnoreCase);
+
+        AttendeeCompanies = byEmail
+            .Select(kv => new
+            {
+                kv.Key,
+                // The winning row that actually HAS a company (§707.41: a cancelled row still counts).
+                Company = kv.Value.FirstOrDefault(a => !string.IsNullOrWhiteSpace(a.CompanyName))?.CompanyName,
+            })
+            .Where(x => !string.IsNullOrWhiteSpace(x.Company))
+            .ToDictionary(x => x.Key, x => x.Company!, StringComparer.OrdinalIgnoreCase);
+
+        var twoDayIds = TwoDayClassIds();
+        AttendeeTicketKinds = byEmail
+            .Select(kv => new
+            {
+                kv.Key,
+                // 🔒 Id-authoritative (§707.35b). The winning row is the one that decides — an active
+                // ticket beats a cancelled one, so someone who cancelled a 2-day and bought a 1-day
+                // reads as 1-day, which is what they are actually attending on.
+                Kind = CommunityHub.Core.Domain.MasterClassTicketPolicy.IncludesMasterClass(
+                           kv.Value[0].TicketClassId, kv.Value[0].TicketClassName, twoDayIds)
+                       ? "2-day"
+                       : (string.IsNullOrWhiteSpace(kv.Value[0].TicketClassId)
+                          && string.IsNullOrWhiteSpace(kv.Value[0].TicketClassName))
+                           ? string.Empty          // no class at all ⇒ say nothing rather than guess
+                           : "1-day",
+            })
+            .Where(x => x.Kind.Length > 0)
+            .ToDictionary(x => x.Key, x => x.Kind, StringComparer.OrdinalIgnoreCase);
+    }
+
+    // ===================================================================
+    //  §769.11 — EXPORT EVERY PARTICIPANT (operator 2026-08-02: "i need ability to export all
+    //  participants and sessions to excel file … i need id,name,email,role")
+    // ===================================================================
+
+    /// <summary>
+    /// Every participant in the edition as CSV — <b>ALL of them, not the current filter</b>.
+    /// </summary>
+    /// <remarks>
+    /// 🔑 <b>"Export all" means all.</b> The other exports in this area deliberately follow the
+    /// on-screen filter; this one deliberately does not, because he asked for the whole list and a
+    /// button labelled "all" that silently honoured a filter would hand him a short file he had no
+    /// reason to distrust. Inactive people are included for the same reason — a withdrawn
+    /// participant is part of "all participants" and their absence would be invisible.
+    /// </remarks>
+    public async Task<IActionResult> OnGetExportAsync(CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+        if (!OrganizerAuth.IsRealOrganizer(me)) return Forbid();
+
+        var csv = await BuildParticipantExportCsvAsync(me.EventId, ';', ct);
+        // UTF-8 BOM so Excel detects the encoding (Danish names).
+        var bytes = System.Text.Encoding.UTF8.GetPreamble()
+            .Concat(System.Text.Encoding.UTF8.GetBytes(csv)).ToArray();
+        return File(bytes, "text/csv", "participants.csv");
+    }
+
+    /// <summary>The same rows as <see cref="OnGetExportAsync"/>, as a native .xlsx workbook.</summary>
+    public async Task<IActionResult> OnGetExportXlsxAsync(CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+        if (!OrganizerAuth.IsRealOrganizer(me)) return Forbid();
+
+        // ⚠️ Comma-delimited for the workbook: CsvToXlsx parses RFC-4180, while the CSV download
+        // keeps its semicolon contract. ONE row builder, two renderings — so the two files can
+        // never drift apart in columns or values.
+        var csv = await BuildParticipantExportCsvAsync(me.EventId, ',', ct);
+        return File(
+            CommunityHub.Export.CsvToXlsx.Build(csv, "Participants"),
+            CommunityHub.Export.CsvToXlsx.ContentType,
+            "participants.xlsx");
+    }
+
+    /// <summary>
+    /// The single source of truth for both downloads: id, name, email, role — the four columns he
+    /// asked for — plus the active flag, because a list of people that cannot tell you who has
+    /// withdrawn is a list you have to check against something else.
+    /// </summary>
+    private async Task<string> BuildParticipantExportCsvAsync(
+        int eventId, char delimiter, CancellationToken ct)
+    {
+        var rows = await _db.Participants
+            .AsNoTracking()
+            .Where(p => p.EventId == eventId)
+            .OrderBy(p => p.Id)
+            .Select(p => new { p.Id, p.FullName, p.Email, p.Role, p.IsActive })
+            .ToListAsync(ct);
+
+        var sb = new System.Text.StringBuilder();
+        sb.Append("ID").Append(delimiter)
+          .Append("Name").Append(delimiter)
+          .Append("Email").Append(delimiter)
+          .Append("Role").Append(delimiter)
+          .Append("Active").AppendLine();
+
+        foreach (var r in rows)
+        {
+            sb.Append(r.Id).Append(delimiter)
+              .Append(CsvField(r.FullName, delimiter)).Append(delimiter)
+              .Append(CsvField(r.Email, delimiter)).Append(delimiter)
+              .Append(r.Role).Append(delimiter)
+              .Append(r.IsActive ? "yes" : "no").AppendLine();
+        }
+
+        return sb.ToString();
+    }
+
+    /// <summary>RFC-4180 field: quote when it contains the delimiter, a quote or a newline.</summary>
+    internal static string CsvField(string? value, char delimiter)
+    {
+        var v = value ?? string.Empty;
+        if (v.IndexOf('"') < 0 && v.IndexOf(delimiter) < 0
+            && v.IndexOf('\n') < 0 && v.IndexOf('\r') < 0)
+        {
+            return v;
+        }
+        return $"\"{v.Replace("\"", "\"\"")}\"";
     }
 }

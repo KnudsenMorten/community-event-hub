@@ -51,9 +51,12 @@ public sealed class SponsorCategorySpeakerNavTests
 
         Assert.Contains("Nav.MySessions", sponsor);
         Assert.Contains("Nav.AttendeeTelemetrySpeaker", sponsor);
-        Assert.Contains("Nav.SpeakerEvalQr", sponsor);
-        Assert.Contains("Nav.SpeakerEvaluations", sponsor);
         Assert.Contains("Nav.SlidesForSpeakers", sponsor);
+        // 🙈 §748.5 — Nav.SpeakerEvalQr stays gone: it pointed at the retired per-ROOM QR downloads.
+        Assert.DoesNotContain("Nav.SpeakerEvalQr", sponsor);
+        // §752 C10 — the results entry is BACK for every speaker, now on /Speaker/Results. A
+        // sponsor-brought speaker still delivers a session, so they still get their own results.
+        Assert.Contains("Nav.SpeakerEvaluations", sponsor);
     }
 
     /// <summary>
@@ -88,3 +91,4 @@ public sealed class SponsorCategorySpeakerNavTests
         }
     }
 }
+

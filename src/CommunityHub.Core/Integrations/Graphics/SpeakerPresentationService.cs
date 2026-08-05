@@ -25,6 +25,35 @@ public sealed record PresentationSessionSlot(
 /// <summary>One kind's DEADLINE state for the speaker (due date + Done) — §322.</summary>
 public sealed record PresentationTaskInfo(PresentationKind Kind, DateOnly? DueDate, bool TaskDone);
 
+/// <summary>
+/// §769.4 — one stored deck as the organizer needs to see it: the display name, which version, and
+/// WHEN it arrived.
+/// </summary>
+/// <remarks>
+/// The version and the date answer different questions. "v3" says the speaker has been iterating;
+/// "uploaded 6 weeks ago" against a session whose title changed last week says the deck may no
+/// longer match the talk. Neither alone tells the organizer whether to chase.
+/// </remarks>
+public sealed record DeckFile(string FileName, string DisplayName, int Version, DateTimeOffset? UploadedAt)
+{
+    /// <summary>Map a stored file, or null when the session has none of this kind.</summary>
+    public static DeckFile? From(SharePointFileRef? file) =>
+        file is null
+            ? null
+            : new DeckFile(
+                file.Name,
+                SpeakerPresentationService.DisplayName(file.Name),
+                SpeakerPresentationService.VersionOfPublic(file.Name),
+                file.LastModified);
+}
+
+/// <summary>§769.4 — both decks for one session. Either may be null: null IS the answer "missing".</summary>
+public sealed record SessionDeckState(DeckFile? Preview, DeckFile? Final)
+{
+    /// <summary>Nothing uploaded at all — the row an organizer is looking for before a deadline.</summary>
+    public bool NothingUploaded => Preview is null && Final is null;
+}
+
 /// <summary>One session row on the PUBLIC slides page (§322c) — anonymous attendees.</summary>
 /// <param name="SessionId">The session id (the proxy-route key).</param>
 /// <param name="Title">The session title.</param>
@@ -86,22 +115,25 @@ public sealed class SpeakerPresentationService
     private readonly GraphicsSharePointOptions _options;
     private readonly CommunityHubDbContext _db;
     private readonly TimeProvider _clock;
+    private readonly DocLibrary.IDocLibraryPathResolver _paths;
 
     public SpeakerPresentationService(
         ISharePointFileStore store,
         IOptions<GraphicsSharePointOptions> options,
         CommunityHubDbContext db,
-        TimeProvider clock)
+        TimeProvider clock,
+        DocLibrary.IDocLibraryPathResolver paths)
     {
         _store = store;
         _options = options.Value;
         _db = db;
         _clock = clock;
+        _paths = paths;
     }
 
     private string FolderFor(PresentationKind kind) => kind == PresentationKind.Final
-        ? _options.PresentationFinalFolderPath
-        : _options.PresentationPreviewFolderPath;
+        ? (_paths.TryResolve(DocLibrary.DocLibraryPaths.SessionPresentationsFinal, out var f) ? f : string.Empty)
+        : (_paths.TryResolve(DocLibrary.DocLibraryPaths.SessionPresentationsPreview, out var p) ? p : string.Empty);
 
     /// <summary>True when the store + the kind's folder are wired for writes.</summary>
     public bool CanUpload(PresentationKind kind) =>
@@ -141,6 +173,9 @@ public sealed class SpeakerPresentationService
     /// survives session-title renames).</summary>
     public static string DisplayName(string fileName) =>
         Regex.Replace(fileName ?? string.Empty, @"^\d+ - ", "");
+
+    /// <summary>§769.4 — the version token, for the organizer view. Same parse, one owner.</summary>
+    public static int VersionOfPublic(string fileName) => VersionOf(fileName);
 
     /// <summary>Parses the "_v{N}" version token (0 when absent — pre-versioning files sort lowest).</summary>
     private static int VersionOf(string fileName)
@@ -227,6 +262,44 @@ public sealed class SpeakerPresentationService
     }
 
     /// <summary>
+    /// §769.4 / work-order §6.2 — EVERY session in the edition with the state of both decks, for the
+    /// organizer's session list.
+    /// </summary>
+    /// <remarks>
+    /// <para>🔑 <b>The question this answers is "which sessions still have no deck?"</b> — asked
+    /// before a deadline, about sessions that are not the asker's own, which is exactly why
+    /// <see cref="GetSessionSlotsAsync"/> (a speaker's OWN sessions) cannot answer it.</para>
+    ///
+    /// <para>TWO folder listings for the whole edition, both already cached for
+    /// <see cref="ListCacheTtl"/> — not one Graph call per session. A per-row lookup would put ~40
+    /// calls behind a single page load and earn a throttle.</para>
+    ///
+    /// <para>⚠️ An unreadable store yields "no deck" for every session, which reads as forty missing
+    /// decks rather than as "CEH cannot see the library at all". The page distinguishes the two
+    /// through <see cref="CanRead"/> instead of showing a wall of red.</para>
+    /// </remarks>
+    public async Task<IReadOnlyDictionary<int, SessionDeckState>> GetDeckStatesAsync(
+        int eventId, CancellationToken ct = default)
+    {
+        var sessionIds = await _db.Sessions
+            .Where(s => s.EventId == eventId)
+            .Select(s => s.Id)
+            .ToListAsync(ct);
+
+        var preview = await ListCachedAsync(PresentationKind.Preview, ct);
+        var final = await ListCachedAsync(PresentationKind.Final, ct);
+
+        var states = new Dictionary<int, SessionDeckState>(sessionIds.Count);
+        foreach (var id in sessionIds)
+        {
+            states[id] = new SessionDeckState(
+                DeckFile.From(Latest(preview, id)),
+                DeckFile.From(Latest(final, id)));
+        }
+        return states;
+    }
+
+    /// <summary>
     /// Upload a SESSION's deck of a kind under the app registration's credentials. Gates:
     /// the uploader must be a speaker ON the session (server-side); PDF/PPTX/ZIP only.
     /// §68-CONSISTENT VERSIONING: the file is written as "…_v{next}" (next = highest
@@ -301,18 +374,62 @@ public sealed class SpeakerPresentationService
         }
         InvalidateCache(folder);
 
-        // The upload IS the deadline's completion — close the speaker's matching task.
-        var key = TaskSourceKey(participantId, kind);
-        var task = await _db.Tasks.FirstOrDefaultAsync(
-            t => t.EventId == eventId && t.SourceKey == key, ct);
-        if (task is not null && task.State != TaskState.Done)
-        {
-            task.State = TaskState.Done;
-            task.CompletedAt = _clock.GetUtcNow();
-            await _db.SaveChangesAsync(ct);
-        }
+        // The upload IS the deadline's completion — close the matching task for EVERY speaker on
+        // this session, not just the uploader.
+        await CloseUploadTaskForSessionSpeakersAsync(eventId, sessionId, kind, ct);
 
         return fileName;
+    }
+
+    /// <summary>
+    /// §730 — a deck belongs to a SESSION, so its upload task closes for every speaker ON that
+    /// session, not only the one who pressed Upload.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-07-31: <i>"as some sessions have multiple speakers, we need to validate
+    /// that this tasks + final presentation is shared status wise across the speakers. once 1
+    /// speaker upload the preview presentation then it is shown for all linked speakers. and once
+    /// both are uploaded the task completes for all linked speakers"</i>.</para>
+    ///
+    /// <para>🔴 <b>The artefact was already per-SESSION; only the completion was per-PERSON.</b>
+    /// The deck is stored as <c>FileNameFor(sessionId, …)</c> in one shared folder and
+    /// <see cref="GetSessionSlotsAsync"/> reads it by session, so a co-speaker could always SEE the
+    /// upload — but the task closed on <c>speakerdl:{uploaderId}:…</c> alone. Every co-speaker was
+    /// left with an open task, an overdue badge and a reminder cadence chasing them for a file that
+    /// was already delivered. A task that completes per-participant while the artefact is
+    /// per-session is exactly the shape that produces "I uploaded it and it still says I haven't".</para>
+    ///
+    /// <para>Scoped by <c>SessionSpeakers</c> — the same link <c>MineAsSpeaker</c> uses — so the set
+    /// of people whose task closes is by construction the set of people who can see the deck.</para>
+    /// </remarks>
+    private async Task CloseUploadTaskForSessionSpeakersAsync(
+        int eventId, int sessionId, PresentationKind kind, CancellationToken ct)
+    {
+        var speakerIds = await _db.Sessions
+            .Where(s => s.Id == sessionId && s.EventId == eventId)
+            .SelectMany(s => s.SessionSpeakers.Select(ss => ss.ParticipantId))
+            .Distinct()
+            .ToListAsync(ct);
+
+        if (speakerIds.Count == 0) return;
+
+        var keys = speakerIds.Select(id => TaskSourceKey(id, kind)).ToList();
+        var tasks = await _db.Tasks
+            .Where(t => t.EventId == eventId
+                        && t.SourceKey != null
+                        && keys.Contains(t.SourceKey)
+                        && t.State != TaskState.Done)
+            .ToListAsync(ct);
+
+        if (tasks.Count == 0) return;
+
+        var now = _clock.GetUtcNow();
+        foreach (var t in tasks)
+        {
+            t.State = TaskState.Done;
+            t.CompletedAt = now;
+        }
+        await _db.SaveChangesAsync(ct);
     }
 
     // ===================================================================
@@ -372,10 +489,25 @@ public sealed class SpeakerPresentationService
     /// Splitting the checks that way keeps this method a recorder rather than a second gate that
     /// could drift from the first.</para>
     /// </summary>
+    /// <param name="sessionId">
+    /// §730 — the session the deck belongs to, so the task closes for EVERY speaker on it. Optional
+    /// only so older callers still compile; without it this falls back to the uploader alone, which
+    /// is the pre-§730 behaviour and leaves co-speakers chased for a delivered file.
+    /// </param>
     public async Task CompleteDirectUploadAsync(
-        int eventId, int participantId, PresentationKind kind, CancellationToken ct = default)
+        int eventId, int participantId, PresentationKind kind, CancellationToken ct = default,
+        int? sessionId = null)
     {
         InvalidateCache(FolderFor(kind));
+
+        // §730 — this is the path the BROWSER uses (§494c direct-to-storage), so it is the one that
+        // actually runs in production. Fixing only the server-proxied UploadAsync would have looked
+        // right in the code and changed nothing for a real co-speaker.
+        if (sessionId is int sid)
+        {
+            await CloseUploadTaskForSessionSpeakersAsync(eventId, sid, kind, ct);
+            return;
+        }
 
         var key = TaskSourceKey(participantId, kind);
         var task = await _db.Tasks.FirstOrDefaultAsync(

@@ -85,8 +85,51 @@
                   placeholder="one@example.org, two@example.org">@Model.NotificationEmails</textarea>
         <p class="som-hint">Comma / semicolon / newline separated. Empty = no publish notifications.</p>
 
+        @* §824.19 — the three values that close every automatic post. They belong on this page
+           because it is already "how this edition posts to LinkedIn"; a separate page for three
+           fields is one more place to have to look. *@
+        <hr style="border:none;border-top:1px solid #e5e7eb;margin:26px 0;" />
+        <h2 style="margin-bottom:4px;">Post footer</h2>
+        <p class="som-hint" style="margin-top:0;">
+            These three fill <code>{EventSystemUrl}</code>, <code>{EventTags}</code> and
+            <code>{OrganizerLinkedInUrls}</code> in every automatic post. Change the wording of the
+            posts themselves on <a asp-page="/Organizer/SoMeTemplates">SoMe post templates</a>.
+        </p>
+
+        @if (Model.PostCopyIncomplete)
+        {
+            @* ⚠️ Said out loud precisely BECAUSE the templates cope with a blank: the gap closes and
+               the post still reads well, just without its hashtags or its credit line. Nothing else
+               would ever tell him. *@
+            <p class="error" role="alert" style="font-size:13.5px;">
+                Incomplete — automatic posts will publish <strong>without part of their footer</strong>.
+                The templates close the gap silently, so nothing else will warn you.
+            </p>
+        }
+
+        <label for="eventurl">Event link (<code>{EventSystemUrl}</code>)</label>
+        <input type="url" id="eventurl" name="EventSystemUrl" value="@Model.EventSystemUrl"
+               placeholder="https://eldk27.expertslive.dk" />
+        <p class="som-hint">The real URL, not a shortener — LinkedIn shortens links itself.</p>
+
+        <label for="eventtags">Hashtags (<code>{EventTags}</code>)</label>
+        <textarea id="eventtags" name="EventTags" rows="3"
+                  placeholder="#ELDK27 #ExpertsLiveDK #Community #Microsoft …">@Model.EventTags</textarea>
+        <p class="som-hint">One line, exactly as it should appear at the end of a post.</p>
+
+        <label for="orgcredits">Organizer credit (<code>{OrganizerLinkedInUrls}</code>)</label>
+        <textarea id="orgcredits" name="OrganizerCredits" rows="2"
+                  placeholder="Morten Waltorp Knudsen [MVP] | Martin Byskov | Kent Agerlund | Morten Leth Hedegaard">@Model.OrganizerCredits</textarea>
+        <p class="som-hint">
+            Names as they should read. <strong>Not @@-mentions</strong> — LinkedIn only turns a name
+            into a mention when a human types it in their own composer, and a personal profile cannot
+            be resolved to a mention through the API.
+        </p>
+
         <div><button type="submit" class="btn">Save settings</button></div>
     </form>
 </div>
 
-<p><a asp-page="/Organizer/SoMeQueue">Go to the SoMe queue</a> · <a asp-page="/Index">Back to hub</a></p>
+<p><a asp-page="/Organizer/SoMeTemplates">SoMe post templates</a> ·
+   <a asp-page="/Organizer/SoMeQueue">Go to the SoMe queue</a> ·
+   <a asp-page="/Index">Back to hub</a></p>

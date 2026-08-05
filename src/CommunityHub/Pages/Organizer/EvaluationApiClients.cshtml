@@ -1,0 +1,137 @@
+@page
+@model CommunityHub.Pages.Organizer.EvaluationApiClientsModel
+@{
+    ViewData["Title"] = "Report API credentials";
+}
+
+<div class="card">
+    <h1>Report API credentials</h1>
+    <p>Keys that let an external system pull a session&rsquo;s evaluation report as a PDF. One key
+       per consumer, valid for <strong>this edition only</strong>.</p>
+
+    @if (Model.AccessDenied)
+    {
+        <p class="error">This area is for organizers only.</p>
+    }
+    else
+    {
+        @if (!string.IsNullOrWhiteSpace(Model.Message))
+        {
+            <p class="notice">@Model.Message</p>
+        }
+
+        @* 🔒 The ONLY moment a key is ever visible. We store a PBKDF2 hash, so nobody — including
+           us — can read one back afterwards. Say that here rather than let it be discovered. *@
+        @if (Model.IssuedKey is not null)
+        {
+            <div class="card" style="border:2px solid #b45309;background:#fffbeb;">
+                <h2 style="margin-top:0;">Copy this key now</h2>
+                <p><strong>It cannot be shown again.</strong> Only a hash is stored, so if the key is
+                   lost the only way forward is to rotate it.</p>
+                <p>
+                    <span class="set-deps">@Model.IssuedKey.Value.Name</span><br />
+                    <code style="user-select:all;word-break:break-all;">@Model.IssuedKey.Value.Key</code>
+                </p>
+                <p class="set-deps">
+                    The consumer sends it in the <code>X-Evaluation-Api-Key</code> header over HTTPS
+                    (or as <code>Authorization: Bearer &lt;key&gt;</code>).
+                </p>
+            </div>
+        }
+
+        <h2>Issue a credential</h2>
+        <form method="post" asp-page-handler="Issue">
+            <p>
+                <label for="name">Who will hold it</label><br />
+                <input id="name" name="name" type="text" maxlength="200"
+                       style="width:100%;max-width:420px;" placeholder="e.g. Vendor report sync" />
+            </p>
+            <p class="set-deps">
+                Name it after the system that will use it. When a key has to be revoked later, that
+                name is the only thing telling you what will break.
+            </p>
+            <button type="submit" class="set-btn">Issue key</button>
+        </form>
+
+        <h2 style="margin-top:24px;">Issued (@Model.Clients.Count)</h2>
+        @if (Model.Clients.Count == 0)
+        {
+            <p>None yet. Until one is issued, every report pull is refused.</p>
+        }
+        else
+        {
+            <div style="overflow-x:auto;">
+            <table class="grid">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Status</th>
+                        <th>Last used</th>
+                        <th>Issued</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                @foreach (var c in Model.Clients)
+                {
+                    <tr style="@(c.IsActive ? "" : "opacity:.55;")">
+                        <td>
+                            @c.Name
+                            @if (!c.IsActive) { <br /><strong style="color:#b91c1c;">revoked</strong> }
+                            @if (c.PreviousKeyHash is not null)
+                            {
+                                <br /><span class="set-deps" style="color:#b45309;">old key still accepted</span>
+                            }
+                        </td>
+                        <td>@(c.IsActive ? "active" : "revoked")</td>
+                        @* 🔑 The only way to answer "is anything still using this?" before revoking it. *@
+                        <td>
+                            @(c.LastUsedAt?.ToString("dd MMM HH:mm") ?? "never used")
+                        </td>
+                        <td>@c.CreatedAt.ToString("dd MMM yyyy")</td>
+                        <td style="white-space:nowrap;">
+                            <form method="post" asp-page-handler="Rotate" style="display:inline;">
+                                <input type="hidden" name="id" value="@c.Id" />
+                                <button type="submit" class="set-btn">New key</button>
+                            </form>
+                            @if (c.PreviousKeyHash is not null)
+                            {
+                                <form method="post" asp-page-handler="RetirePrevious" style="display:inline;">
+                                    <input type="hidden" name="id" value="@c.Id" />
+                                    <button type="submit" class="set-btn">Retire old key</button>
+                                </form>
+                            }
+                            <form method="post" asp-page-handler="SetActive" style="display:inline;">
+                                <input type="hidden" name="id" value="@c.Id" />
+                                <input type="hidden" name="active" value="@((!c.IsActive).ToString().ToLowerInvariant())" />
+                                <button type="submit" class="set-btn @(c.IsActive ? "off" : "")">
+                                    @(c.IsActive ? "Revoke" : "Restore")
+                                </button>
+                            </form>
+                        </td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+            </div>
+
+            <p class="set-deps" style="margin-top:10px;">
+                <strong>Rotating does not cut anyone off immediately.</strong> The old key keeps
+                working so the consumer can switch over on its own schedule &mdash; press
+                <em>Retire old key</em> once it has, or the old key stays valid.
+            </p>
+        }
+
+        <h2 style="margin-top:24px;">How a consumer uses it</h2>
+        <p class="set-deps">
+            <code>GET /evaluation/v1/events/{eventId}/sessions/{sessionId}/report</code><br />
+            The response carries an <code>ETag</code> holding the report&rsquo;s version. Sending it
+            back as <code>If-None-Match</code> returns <strong>304</strong> while nothing has
+            changed, and the new PDF once late data has changed the figures. A <code>HEAD</code>
+            request returns the version without generating a PDF, so polling is cheap.
+        </p>
+        <p class="set-deps">
+            ⚠️ Reports quote attendee comments verbatim. Treat a key as you would a password.
+        </p>
+    }
+</div>

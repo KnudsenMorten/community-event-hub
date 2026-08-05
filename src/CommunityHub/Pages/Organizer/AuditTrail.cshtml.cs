@@ -37,6 +37,25 @@ public class AuditTrailModel : PageModel
     /// <summary>Look-back window in days (0 = all time). Defaults to 7.</summary>
     [BindProperty(SupportsGet = true)] public int Days { get; set; } = 7;
 
+    /// <summary>
+    /// §784.10 — show <see cref="AuditCategory.Engine"/> rows? OFF by default.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-08-03: <i>"by default i need a filter to not show Engine category. it
+    /// should be a tick off to Show Engine related actions. i am drowning in events in audit"</i>.</para>
+    ///
+    /// <para>🔑 The engine writes on every tick of every job; a human acts a few dozen times a day.
+    /// Mixed together, the rows that answer "who did this?" are buried under rows that answer
+    /// "did the timer fire?" — and this page exists for the first question. §784.11 is the proof:
+    /// a suspected mass-mailing incident was resolved in seconds by six `UserAction` rows, which had
+    /// to be found among the engine's.</para>
+    ///
+    /// <para>🔒 Excluded from the DEFAULT VIEW, never from the RECORD. The rows are still written,
+    /// still exported by the CSV when asked for, and one tick away. An audit trail that DROPS
+    /// categories would be a different and much worse thing.</para>
+    /// </remarks>
+    [BindProperty(SupportsGet = true)] public bool ShowEngine { get; set; }
+
     public IReadOnlyList<AuditEntry> Rows { get; private set; } = Array.Empty<AuditEntry>();
     public int TotalCount { get; private set; }
     public bool Capped => TotalCount > PageSize;
@@ -76,7 +95,18 @@ public class AuditTrailModel : PageModel
 
         if (!string.IsNullOrWhiteSpace(Category)
             && Enum.TryParse<AuditCategory>(Category, out var cat))
+        {
             q = q.Where(e => e.Category == cat);
+        }
+        else if (!ShowEngine)
+        {
+            // §784.10 — hide the engine's own rows by DEFAULT so human actions are readable.
+            //
+            // 🔒 Skipped when an explicit Category is chosen: picking "Engine" from the category
+            // list must SHOW Engine rows, not silently return nothing. A filter that quietly
+            // contradicts the filter next to it is worse than no filter.
+            q = q.Where(e => e.Category != AuditCategory.Engine);
+        }
 
         if (Days > 0)
         {

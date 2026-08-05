@@ -81,6 +81,54 @@ public class SpeakerZohoGapReporterTests
         Assert.False(BackstageSpeaker.CountryIsReadable);
     }
 
+    /// <summary>
+    /// 🔒 §762 — THE MAIL MUST BE ABLE TO GO QUIET.
+    /// </summary>
+    /// <remarks>
+    /// Operator 2026-08-01: <i>"i have just completed all the changes. so i need to approve/complete
+    /// them somewhere so they dont come again - or is this mail a one-time mail"</i>. Every other
+    /// field clears itself once Backstage reports it back; country never could, because Backstage
+    /// never returns it — so the line repeated on every comparison for ever, and rode along on every
+    /// re-send triggered by someone else's real gap. An organizer acknowledges it instead.
+    /// </remarks>
+    [Fact]
+    public void A_CONFIRMED_country_is_no_longer_reported()
+    {
+        var ceh = new SpeakerProfile { Country = "DK", CountryConfirmedInBackstage = "DK" };
+
+        Assert.DoesNotContain(SpeakerZohoGapReporter.GapsFor(ceh, Zoho()), g => g.Contains("Country"));
+    }
+
+    [Fact]
+    public void The_confirmation_tolerates_case_and_whitespace()
+    {
+        // Both sides are typed by a human. Re-nagging him over "dk " vs "DK" would be the original
+        // defect wearing a different hat.
+        var ceh = new SpeakerProfile { Country = "DK", CountryConfirmedInBackstage = " dk " };
+
+        Assert.DoesNotContain(SpeakerZohoGapReporter.GapsFor(ceh, Zoho()), g => g.Contains("Country"));
+    }
+
+    [Fact]
+    public void CHANGING_the_country_re_asks_because_a_new_value_is_a_new_fact()
+    {
+        // 🔒 The confirmation stores the VALUE, not a boolean. A flag would keep suppressing the
+        // line after CEH's country changed — silently hiding a Backstage record that is now wrong,
+        // which is worse than the nagging it was meant to stop.
+        var ceh = new SpeakerProfile { Country = "SE", CountryConfirmedInBackstage = "DK" };
+
+        var gap = Assert.Single(SpeakerZohoGapReporter.GapsFor(ceh, Zoho()), g => g.Contains("Country"));
+        Assert.Contains("SE", gap);
+    }
+
+    [Fact]
+    public void A_confirmation_with_no_country_in_CEH_confirms_nothing()
+    {
+        var ceh = new SpeakerProfile { Country = null, CountryConfirmedInBackstage = "DK" };
+
+        Assert.False(SpeakerZohoGapReporter.CountryIsConfirmed(ceh));
+    }
+
     // ---------- readable fields ----------
 
     [Fact]

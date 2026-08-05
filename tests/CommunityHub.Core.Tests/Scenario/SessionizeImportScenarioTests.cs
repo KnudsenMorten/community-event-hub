@@ -79,20 +79,22 @@ public sealed class SessionizeImportScenarioTests
         Assert.Contains(result.Warnings, w => w.Contains("No Email"));
         Assert.Contains(result.Warnings, w => w.Contains("speaker emails"));
 
-        // The new speaker is now a Participant with Speaker role — landed as
-        // PRESELECTED, not active (§299 6.1): the activation hard gate holds them
-        // in the pre-selection queue until an organizer sets their SpeakerCategory.
+        // §880 (operator 2026-08-05) — the new speaker lands ACTIVE. Sessionize has already
+        // accepted them, so the two lifecycle conditions go and the ONE an organizer actually
+        // decides stays: the speaker CATEGORY. This replaced §299 6.1's Preselected landing for the
+        // import path, and it is what collapses their pending entry from three blockers to one.
         var created = await db.Participants.SingleAsync(
             p => p.Email == "newly.accepted@example.test");
         Assert.Equal(ParticipantRole.Speaker, created.Role);
-        Assert.False(created.IsActive);
-        Assert.Equal(ParticipantLifecycleState.Preselected, created.LifecycleState);
+        Assert.True(created.IsActive);
+        Assert.Equal(ParticipantLifecycleState.Active, created.LifecycleState);
         // A profile exists but is UNCATEGORIZED — the organizer classifies it on review.
         var profile = await db.SpeakerProfiles.SingleAsync(s => s.ParticipantId == created.Id);
         Assert.Null(profile.Category);
 
-        // §299 6.1: no welcome mail at import time — the new speaker is not active
-        // yet, so the welcome/onboarding flows fire at ACTIVATION instead.
+        // 🔒 §880.6 — AND STILL NO WELCOME MAIL, even though the import was asked to send one and
+        // the speaker is now Active. The hold moved from `IsActive` to `Category is null`, which is
+        // the option he chose: the mail follows the organizer's decision, not the import.
         Assert.Empty(sender.Sent);
     }
 

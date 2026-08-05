@@ -252,6 +252,141 @@
                 </ul>
             </div>
         }
+        else if (Model.Survey.IsQuestionSurvey)
+        {
+            @* §6.5 — the POST-EVENT surveys: a plain question list, not the track wizard.
+               🔒 NO JavaScript is required. The wizard needs JS to reveal its steps; this form is one
+               page, so it works with JS off and inside a mail client's in-app browser — which is
+               exactly where a post-event link gets opened. *@
+            @if (!string.IsNullOrEmpty(Model.ErrorMessage))
+            {
+                <div class="vol-error" role="alert">@Model.ErrorMessage</div>
+            }
+            @if (Model.AnswerProblems.Count > 0)
+            {
+                <div class="vol-error" role="alert">
+                    <ul style="margin:0;padding-left:18px;">
+                        @foreach (var p in Model.AnswerProblems)
+                        {
+                            <li>@p</li>
+                        }
+                    </ul>
+                </div>
+            }
+
+            <style>
+                .q { padding:16px 0; border-bottom:1px solid #eef0f4; }
+                .q:last-of-type { border-bottom:0; }
+                .q-prompt { font-weight:600; display:block; margin-bottom:4px; }
+                .q-help { font-size:13px; color:#6b7280; margin:0 0 8px; }
+                .q-req { color:#b91c1c; font-weight:400; font-size:13px; }
+                /* The rating row WRAPS on a phone rather than scrolling sideways. */
+                .q-scale { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+                .q-scale label { display:inline-flex; align-items:center; gap:6px;
+                                 border:1px solid #d0d4dd; border-radius:8px; padding:8px 12px;
+                                 min-width:44px; justify-content:center; cursor:pointer; }
+                .q-scale label:focus-within { outline:2px solid var(--el-darkblue,#1D3380); }
+                .q-scale-ends { font-size:12px; color:#6b7280; display:flex;
+                                justify-content:space-between; margin-top:6px; }
+                .q-choices label { display:flex; align-items:flex-start; gap:8px; padding:6px 0; }
+                .q textarea { width:100%; box-sizing:border-box; }
+            </style>
+
+            <form method="post" novalidate>
+                @* Honeypot — invisible to humans, irresistible to bots. Same trick as the wizard. *@
+                <div class="vol-hp" aria-hidden="true">
+                    <label for="Website">@Localizer["Survey.HoneypotLabel"]</label>
+                    <input type="text" name="Website" id="Website" tabindex="-1" autocomplete="off" />
+                </div>
+
+                @foreach (var q in Model.Survey.Questions)
+                {
+                    var current = Model.Answers.TryGetValue(q.Id, out var v) ? v : null;
+                    <fieldset class="q" style="border:0;padding:0;margin:0;">
+                        <legend class="q-prompt">
+                            @q.Prompt
+                            @if (q.Required)
+                            {
+                                <span class="q-req">*</span>
+                            }
+                        </legend>
+                        @if (!string.IsNullOrWhiteSpace(q.Help))
+                        {
+                            <p class="q-help">@q.Help</p>
+                        }
+
+                        @switch (q.Kind)
+                        {
+                            case CommunityHub.Core.Surveys.SurveyQuestionKind.Rating:
+                                <div class="q-scale">
+                                    @for (var n = q.ScaleMin; n <= q.ScaleMax; n++)
+                                    {
+                                        var rid = $"{q.Id}-{n}";
+                                        <label for="@rid">
+                                            <input type="radio" id="@rid" name="Answers[@q.Id]" value="@n"
+                                                   checked="@(current == n.ToString())" />
+                                            <span>@n</span>
+                                        </label>
+                                    }
+                                </div>
+                                @if (!string.IsNullOrWhiteSpace(q.ScaleMinLabel) || !string.IsNullOrWhiteSpace(q.ScaleMaxLabel))
+                                {
+                                    <div class="q-scale-ends">
+                                        <span>@q.ScaleMinLabel</span>
+                                        <span>@q.ScaleMaxLabel</span>
+                                    </div>
+                                }
+                                break;
+
+                            case CommunityHub.Core.Surveys.SurveyQuestionKind.FreeText:
+                                <textarea name="Answers[@q.Id]" rows="4" maxlength="@q.MaxLength"
+                                          placeholder="@q.Placeholder">@current</textarea>
+                                break;
+
+                            case CommunityHub.Core.Surveys.SurveyQuestionKind.SingleChoice:
+                                <div class="q-choices">
+                                    @foreach (var c in q.Choices)
+                                    {
+                                        var cid = $"{q.Id}-{c.Id}";
+                                        <label for="@cid">
+                                            <input type="radio" id="@cid" name="Answers[@q.Id]" value="@c.Id"
+                                                   checked="@(current == c.Id)" />
+                                            <span>@c.Label</span>
+                                        </label>
+                                    }
+                                </div>
+                                break;
+
+                            default:
+                                @* ⚠️ MULTI-choice posts several values under ONE name; the binder joins
+                                   them with a comma, which is exactly the shape the answer row stores.
+                                   The two agree by construction rather than through a converter
+                                   somebody has to remember to keep in step. *@
+                                <div class="q-choices">
+                                    @{
+                                        var chosen = (current ?? string.Empty)
+                                            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                                    }
+                                    @foreach (var c in q.Choices)
+                                    {
+                                        var mid = $"{q.Id}-{c.Id}";
+                                        <label for="@mid">
+                                            <input type="checkbox" id="@mid" name="Answers[@q.Id]" value="@c.Id"
+                                                   checked="@chosen.Contains(c.Id)" />
+                                            <span>@c.Label</span>
+                                        </label>
+                                    }
+                                </div>
+                                break;
+                        }
+                    </fieldset>
+                }
+
+                <div style="margin-top:20px;">
+                    <button type="submit">@Localizer["Survey.Submit"]</button>
+                </div>
+            </form>
+        }
         else
         {
             @if (!string.IsNullOrEmpty(Model.ErrorMessage))

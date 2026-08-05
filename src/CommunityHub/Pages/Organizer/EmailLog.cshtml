@@ -24,6 +24,14 @@
            reached them. A <strong>failed</strong> send that targeted a known person
            can be <strong>re-sent</strong> straight from here.</p>
 
+        @* §818 — the page said "every outbound email" and listed only edition-stamped rows, so
+           engine alerts and ops notices were invisible here as well as on the cockpit. *@
+        <p style="color:#6b7280;font-size:13.5px;margin-top:-8px;">
+           <strong>Engine and ops mail is listed too</strong> &mdash; alerts and notices the machine
+           sent to a mailbox rather than to a person. Those rows carry no edition and are marked
+           <span style="border:1px solid #d0d7de;border-radius:3px;padding:0 5px;font-size:11px;
+                        color:#6b7280;white-space:nowrap;">ops</span>.</p>
+
         <form method="get" role="search" aria-label="Filter the email log">
             <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;">
                 <div style="flex:1 1 220px;">
@@ -83,7 +91,15 @@
                                     <div style="color:#6b7280;font-size:13px;">@e.ToEmail</div>
                                 </td>
                                 <td style="word-break:break-all;color:#6b7280;font-size:13px;">@e.CcEmails</td>
-                                <td>@e.Category</td>
+                                <td>
+                                    @e.Category
+                                    @if (CommunityHub.Pages.Organizer.EmailLogModel.IsUnstamped(e))
+                                    {
+                                        <span title="Sent with no edition — engine / ops mail to a mailbox, not to a participant."
+                                              style="border:1px solid #d0d7de;border-radius:3px;padding:0 5px;
+                                                     font-size:11px;color:#6b7280;white-space:nowrap;">ops</span>
+                                    }
+                                </td>
                                 <td style="word-break:break-word;">@e.Subject</td>
                                 <td>
                                     @if (e.Success)

@@ -1,4 +1,5 @@
 using CommunityHub.Auth;
+using CommunityHub.Core.Domain;
 using CommunityHub.Forms;
 using CommunityHub.Forms.Steps;
 using Microsoft.AspNetCore.Authorization;
@@ -87,5 +88,51 @@ public class SessionFormModel : PageModel
         if (Saved) Form = await _session.LoadAsync(me.EventId, me.ParticipantId, ct);
 
         return Page();
+    }
+
+    /// <summary>
+    /// §783.7 — remove a speaker from this sponsor's session.
+    /// </summary>
+    /// <remarks>
+    /// <para>🔴 <b>The bug this fixes.</b> Operator 2026-08-03: <i>"When I click REMOVE button
+    /// speaker is not removed from list below of speaker. I also tried to refresh page, but speaker
+    /// is still linked to the session."</i> The removal SERVICE was fine and the button was fine —
+    /// this page simply had no <c>RemoveSpeaker</c> handler. Razor Pages does not fault an unmatched
+    /// named handler: it runs NO handler and renders the page, so the POST looked like a successful
+    /// round-trip that changed nothing. That is why it survived a refresh and why nothing was
+    /// logged.</para>
+    ///
+    /// <para>🔒 <b>The general trap.</b> <c>_SponsorSessionFields</c> is SHARED with
+    /// <c>/Forms/Wizard</c>, whose host DOES implement this handler (§734). A fields-partial that
+    /// posts to a NAMED handler silently makes that handler part of the contract for every page
+    /// hosting the partial — so adding such a button is never a local change. §651 added this page
+    /// as "a thin shell over the SAME partial", and the shell was thinner than the partial required.
+    /// Pinned by a test that asserts every handler the shared partial posts to exists on BOTH
+    /// hosts.</para>
+    ///
+    /// <para>Sponsor-only by construction: the service resolves the session from the ACTOR's own
+    /// <c>SponsorCompanyId</c>, so a posted address can only ever remove a speaker from the
+    /// caller's own session — there is no session id on the wire to tamper with.</para>
+    /// </remarks>
+    [CommunityHub.Audit.Audit("Removed a speaker from the sponsor session",
+        Action = "speaker.remove", TargetType = "SponsorSessionSpeaker")]
+    public async Task<IActionResult> OnPostRemoveSpeakerAsync(
+        string speakerEmail, CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+        if (me.Role != ParticipantRole.Sponsor) return Forbid();
+
+        var removed = await _session.RemoveSpeakerAsync(
+            me.EventId, me.ParticipantId, speakerEmail, ct);
+
+        TempData["SponsorSessionMessage"] = removed is null
+            ? "That speaker was not found on your session."
+            : $"{removed} was removed from your session. We have told the organizers so Zoho can be "
+              + "tidied up.";
+
+        // POST→redirect→GET, so the reload the operator reached for shows the new list rather than
+        // re-posting the removal.
+        return RedirectToPage();
     }
 }

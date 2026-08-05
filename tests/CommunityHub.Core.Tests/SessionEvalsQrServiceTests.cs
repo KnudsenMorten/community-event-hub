@@ -14,15 +14,21 @@ namespace CommunityHub.Core.Tests;
 /// </summary>
 public class SessionEvalsQrServiceTests
 {
-    private const string Folder = "General/Events/ELDK 2027/EventHub/Speakers/SessionEvals-QR";
+    // §768: the folder is no longer an app setting — it resolves from the DocLibrary registry.
+    // ⚠️ The literal that used to live here was `…/Speakers/SessionEvals-QR`, which the library
+    // reorganisation renamed to `SessionEvaluations/QR`. A test carrying the stale name would have
+    // gone on passing against a folder that no longer exists.
+    private static readonly string Folder = TestDocLibrary.PathFor(
+        CommunityHub.Core.Integrations.DocLibrary.DocLibraryPaths.SessionEvaluationQr);
 
-    private static SessionEvalsQrService NewService(FakeQrStore store, string folder = Folder) =>
+    /// <param name="folder">Pass <c>""</c> to model an UNCONFIGURED library — the inert case.</param>
+    private static SessionEvalsQrService NewService(FakeQrStore store, string? folder = null) =>
         new(store, Options.Create(new GraphicsSharePointOptions
         {
             Enabled = true,
             SiteUrl = "https://contoso.sharepoint.example.test/sites/eldk",
-            SessionEvalsQrFolderPath = folder,
-        }));
+        }),
+        TestDocLibrary.Resolver(folder == string.Empty ? string.Empty : TestDocLibrary.Root));
 
     // ---- file-name → room parsing -----------------------------------------
 
@@ -45,48 +51,68 @@ public class SessionEvalsQrServiceTests
 
     // ---- matching ----------------------------------------------------------
 
+    /// <summary>
+    /// 🔑 §749.2 — matching is by SESSION now (operator 2026-07-31: <i>"current is linked to room
+    /// name but now we use sessionname"</i>). §748 had already made the QR a property of the session
+    /// rather than the room; this lookup was the last piece still describing the retired model.
+    /// </summary>
     [Fact]
-    public async Task MatchSessions_matches_by_room_name_exact_and_tolerant()
+    public async Task MatchSessions_matches_each_session_to_ITS_OWN_file()
     {
         var store = new FakeQrStore(canRead: true, canStore: true)
         {
-            [Folder] = { File("Room-16-Floor-1-Device13.png"), File("Hall-A1-Keynote-Floor-2-Device3.png"),
-                         File("Room-6-7-Floor-1-Device2.png") },
+            [Folder] =
+            {
+                File("session-1-morning-keynote-qr.png"),
+                File("session-2-afternoon-panel-qr.png"),
+                File("session-3-qr.png"),                 // a title that slugged to nothing
+            },
         };
         var svc = NewService(store);
 
+        // 🔑 Sessions 1 and 2 share a ROOM. Under the old room-keyed rule they collapsed onto one
+        // file; each must now get its own — that collapse is the whole reason for the change.
         var sessions = new[]
         {
-            new SessionRoomRef(1, "Room 16"),       // exact (spaces vs dashes)
-            new SessionRoomRef(2, "Hall A1"),        // tolerant: file has extra "Keynote"
-            new SessionRoomRef(3, "Room 6-7"),       // exact (dash collapses)
-            new SessionRoomRef(4, "Room 99"),        // no file
-            new SessionRoomRef(5, null),             // no room
+            new SessionRoomRef(1, "Room 16"),
+            new SessionRoomRef(2, "Room 16"),
+            new SessionRoomRef(3, null),        // no room at all, and it still matches
+            new SessionRoomRef(4, "Room 16"),   // no file of its own
         };
 
         var map = await svc.MatchSessionsAsync(sessions);
 
-        Assert.Equal("Room-16-Floor-1-Device13.png", map[1].FileName);
-        Assert.Equal("Hall-A1-Keynote-Floor-2-Device3.png", map[2].FileName);
-        Assert.Equal("Room-6-7-Floor-1-Device2.png", map[3].FileName);
+        Assert.Equal("session-1-morning-keynote-qr.png", map[1].FileName);
+        Assert.Equal("session-2-afternoon-panel-qr.png", map[2].FileName);
+        Assert.Equal("session-3-qr.png", map[3].FileName);
         Assert.False(map.ContainsKey(4));
-        Assert.False(map.ContainsKey(5));
 
         // The folder is listed at most once per match call.
         Assert.Equal(1, store.ListCount(Folder));
     }
 
+    /// <summary>
+    /// 🔒 The deliberate break, pinned so nobody "fixes" it. Room-named files from §124 are still
+    /// sitting in the folder and must now match NOTHING — a room fallback would hand a speaker the
+    /// code for whoever ELSE was scheduled in their room, and a QR opening the wrong session's
+    /// feedback form is worse than one that does not resolve at all.
+    /// </summary>
     [Fact]
-    public async Task MatchSessions_matches_a_short_numeric_room_code()
+    public async Task MatchSessions_does_NOT_fall_back_to_a_legacy_room_named_file()
     {
         var store = new FakeQrStore(canRead: true, canStore: true)
         {
-            [Folder] = { File("Room-16-Floor-1-Device13.png") },
+            [Folder] = { File("Room-16-Floor-1-Device13.png"), File("Hall-A1-Keynote-Floor-2-Device3.png") },
         };
         var svc = NewService(store);
 
-        var map = await svc.MatchSessionsAsync(new[] { new SessionRoomRef(1, "16") });
-        Assert.Equal("Room-16-Floor-1-Device13.png", map[1].FileName);
+        var map = await svc.MatchSessionsAsync(new[]
+        {
+            new SessionRoomRef(1, "Room 16"),
+            new SessionRoomRef(2, "Hall A1"),
+        });
+
+        Assert.Empty(map);
     }
 
     [Fact]

@@ -164,9 +164,8 @@ test.describe('@gui §9/§10/§11 Organizer hub', () => {
         // §82 — Excel upload removed; speakers are imported via the Sessionize API only.
         await expect(page.locator('input[type="file"][name="UploadFile"]')).toHaveCount(0);
 
-        await page.goto(`${BASE}/Organizer/SendInvitations`, { waitUntil: 'domcontentloaded' });
-        await expect(page.locator('h1', { hasText: 'Send invitations' })).toBeVisible();
-
+        // 🗑 §705.12 — /Organizer/SendInvitations was deleted 2026-07-29; the welcome magic
+        // link, pin-signin and the calendar-invite link cover what it did.
         await page.goto(`${BASE}/Organizer/SpeakerReminders`, { waitUntil: 'domcontentloaded' });
         await expect(page.locator('h1', { hasText: 'Speaker reminders' })).toBeVisible();
     });
@@ -197,12 +196,13 @@ test.describe('@gui §9/§10/§11 Organizer hub', () => {
     test('§11 full organizer-area sweep: every page 200 + no horizontal overflow', async ({ page }) => {
         await sweep(page, [
             '/Organizer', '/Organizer/Dashboard', '/Organizer/Attendees',
-            '/Organizer/EmailCenter', '/Organizer/Broadcast',
+            // 🗑 §705.12 deleted Broadcast + SendInvitations (2026-07-29) — do not re-add.
+            '/Organizer/EmailCenter',
             '/Organizer/GroupPhotos', '/Organizer/AppGame',
             '/Organizer/Participants', '/Organizer/Speakers',
             '/Organizer/Sponsors', '/Organizer/Swag', '/Organizer/Lunch',
             '/Organizer/TravelReimbursements', '/Organizer/DataGrid',
-            '/Organizer/TasksTable', '/Organizer/SendInvitations',
+            '/Organizer/TasksTable',
             '/Organizer/SpeakerReminders', '/Organizer/SessionizeImport',
             '/Organizer/SponsorAdmin/Index', '/Organizer/SponsorAdmin/Dashboard',
             '/Organizer/SponsorAdmin/Tasks', '/Organizer/SponsorAdmin/Leads',

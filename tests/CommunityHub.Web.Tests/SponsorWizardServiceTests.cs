@@ -161,15 +161,22 @@ public sealed class SponsorWizardServiceTests
         // deadlines step (see SponsorDeliverablesServiceTests for the stage).
         Assert.DoesNotContain(v.Steps, s => s.Key == "booth-members");
 
-        Assert.False(v.Steps.Single(s => s.Key == "booth-materials").Done); // none yet
+        // 🔒 §732 — booth-materials is ALWAYS Done, because it is OPTIONAL. This assertion used to
+        // be `False` ("none yet"), which is exactly the behaviour the operator rejected on
+        // 2026-07-31: *"same with this task - which is also optional but it keeps coming back to it
+        // as noncompleted"*. The step's own copy already said *"this is optional, and you can come
+        // back later"* while holding the sponsor at 7 of 8 for not doing the optional thing.
+        // A step nobody can be REQUIRED to finish must not gate the progress bar.
+        Assert.True(v.Steps.Single(s => s.Key == "booth-materials").Done);
         Assert.False(v.Steps.Single(s => s.Key == "booth-checkin").Done);   // §229: unanswered
         Assert.False(v.Steps.Single(s => s.Key == "party").Done);           // §228: unanswered
-        // details + logos done; the rest not. §410: no tasks outside the wizard in this fixture,
-        // so no deadlines step. §597: the coordinator step is gone, so BOTH the total and the
-        // done-count drop by one — it used to be counted as done via EventCoordinatorEmail.
+        // details + logos done, plus booth-materials by §732. §410: no tasks outside the wizard in
+        // this fixture, so no deadlines step. §597: the coordinator step is gone, so BOTH the total
+        // and the done-count drop by one — it used to be counted as done via EventCoordinatorEmail.
         Assert.Equal(6, v.TotalSteps);
-        Assert.Equal(2, v.DoneCount);
-        Assert.Equal("booth-materials", v.NextStep!.Key);
+        Assert.Equal(3, v.DoneCount);
+        // §732 moved the "Continue" target past the optional step to the first REQUIRED one.
+        Assert.Equal("booth-checkin", v.NextStep!.Key);
     }
 
     [Fact]

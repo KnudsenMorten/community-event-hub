@@ -9,6 +9,12 @@
     (brochures, PDFs) here. Everything already on file is listed below.
 </p>
 
+@* §783.5 — confirmation for the two action buttons below, which stay on this step. *@
+@if (TempData["WizardStepSaved"] is string bws)
+{
+    <p role="status" style="margin:6px 0 10px;padding:8px 12px;border-radius:8px;background:#ecfdf5;color:#065f46;border:1px solid #a7f3d0;font-size:13.5px;">@bws</p>
+}
+
 @if (Model.CurrentMaterials.Count > 0)
 {
     <h3 style="color:var(--el-darkblue);margin-top:14px;font-size:15px;">Current materials (@Model.CurrentMaterials.Count)</h3>
@@ -52,6 +58,22 @@ else
     <input type="url" inputmode="url" name="@field" value="@val" placeholder="https://youtu.be/… (video @i)" style="margin:6px 0;" />
 }
 
+@* §783.5 — "i nded a button to SET booth videos URLs and a button to upload the booth collateral -
+   right now it is not use friendly in my opinion" (operator 2026-08-03).
+
+   TWO buttons, because the step does two unrelated things and until now BOTH were performed by one
+   distant "Save & next" that also LEFT the step — so you could not paste a URL and watch it appear
+   in the list above, which is the only confirmation that it took. Each posts `__dir=stay` (a submit,
+   never a nested form — §304b), runs the step's single save path, and lands back here refreshed. *@
+<button type="submit" name="__dir" value="stay" formnovalidate class="task-act task-act--primary"
+        onclick="var f=this.form; if(f.__stayMsg){f.__stayMsg.value='Your booth video links were saved.';} return true;"
+        style="margin:8px 0 2px;">
+    &#128279; Set booth video URLs
+</button>
+<p style="font-size:12px;color:#6b7280;margin:0 0 4px;">
+    Saves the links above into your materials list, without leaving this step.
+</p>
+
 @* §476 — collateral upload, inline. Shown only when the destination folder is configured: offering
    a file picker that cannot store anything would be worse than not offering one. §473: say what
    actually performs the upload, since the wizard host owns the only submit button. *@
@@ -60,10 +82,21 @@ else
 {
     <input type="file" id="CollateralFile" name="CollateralFile" accept=".jpg,.jpeg,.png,.pdf" style="margin:6px 0;" />
     <span asp-validation-for="CollateralFile" class="error"></span>
-    <p style="font-size:12px;color:#6b7280;margin:2px 0 10px;">
-        JPG, PNG or PDF, max 25 MB — one file per save, up to 6 in total. Choose the file, then press
-        <strong>Save &amp; next</strong> to upload it. Optional; you can come back later.
+    <p style="font-size:12px;color:#6b7280;margin:2px 0 8px;">
+        JPG, PNG or PDF, max 25 MB — one file per upload, up to 6 in total. Optional; you can come
+        back later.
     </p>
+    @* §783.5 — its own button, and the one that most needed progress feedback: a 25 MB PDF is the
+       "hangs for 6 seconds" case from §783.4. Progressive enhancement — posts fine with JS off. *@
+    <button type="submit" name="__dir" value="stay" formnovalidate class="task-act task-act--primary"
+            onclick="var f=this.form; if(f.__stayMsg){f.__stayMsg.value='Your booth collateral was uploaded.';}
+                     var b=this;
+                     setTimeout(function(){ b.disabled=true; b.style.opacity='0.75';
+                        b.innerHTML='<span class=&quot;ceh-spin&quot;></span> Uploading&hellip; please keep this page open'; }, 0);
+                     return true;"
+            style="margin:2px 0 10px;">
+        &#11014;&#65039; Upload booth collateral
+    </button>
 }
 else
 {

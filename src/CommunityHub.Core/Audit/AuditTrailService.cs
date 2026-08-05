@@ -23,6 +23,29 @@ public static class AuditActions
 
     /// <summary>REQUIREMENTS §551 — the edition's SPEAKER sync stage was changed (from → to).</summary>
     public const string SpeakerSyncDirectionChanged = "sync.direction.speaker";
+
+    // ===================================================================
+    //  §728 — what a PERSON did, NAMED. Operator 2026-07-31: *"i would like also to see things
+    //  like selected master class, cancelled master class, signed up for waitlist, party sign-up,
+    //  etc"*.
+    //
+    //  🔑 None of this was ever MISSING from the trail — AuditPageFilter captures every POST. The
+    //  problem was that every wizard step posts to ONE handler, so choosing a Master Class, joining
+    //  a waitlist, signing up for the party, saving a profile and accepting the Code of Conduct
+    //  were 302 identical `POST /Forms/Wizard` rows. The auto-capture answers "who posted to what
+    //  page"; he is asking "what did this person DO". A stable code per action is what makes the
+    //  trail filterable at that volume.
+    // ===================================================================
+
+    /// <summary>A Get-Started wizard step was saved — the summary names WHICH step.</summary>
+    public const string WizardStepSaved = "wizard.step-saved";
+
+    /// <summary>An attendee gave up their confirmed Master Class seat.</summary>
+    public const string MasterClassCancel = "masterclass.cancel";
+
+    /// <summary>A task was ticked off / re-opened from the task list.</summary>
+    public const string TaskComplete = "task.complete";
+    public const string TaskReopen = "task.reopen";
 }
 
 /// <summary>

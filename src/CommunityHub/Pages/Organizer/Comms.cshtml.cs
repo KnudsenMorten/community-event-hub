@@ -112,4 +112,45 @@ public class CommsModel : PageModel
         }
         return RedirectToPage(new { Msg = msg });
     }
+
+    /// <summary>
+    /// §784.1 — DISMISS a row from the resend queue: "I have dealt with this, stop showing it."
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-08-03: a stale undelivered mail sat in the queue with no way out. The
+    /// only exits were resending it (wrong — the person had already been handled elsewhere) or
+    /// waiting 30 days for the age rule to drop it.</para>
+    ///
+    /// <para>🔒 <b>This does not touch delivery in any way.</b> It stamps
+    /// <c>EmailLog.ResendDismissedAt</c>, which is read in exactly one place — the queue's own
+    /// filter. The mail stays as undelivered as it was, and the Email Log still tells the truth
+    /// about it. See <c>CommsCockpitService.DismissFromResendQueueAsync</c>.</para>
+    /// </remarks>
+    public async Task<IActionResult> OnPostDismissAsync(int participantId, CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+        if (!OrganizerAuth.IsRealOrganizer(me)) return Forbid();
+
+        string msg;
+        if (participantId <= 0)
+        {
+            msg = "Pick a person to dismiss.";
+        }
+        else
+        {
+            var hidden = await _cockpit.DismissFromResendQueueAsync(
+                me.EventId, participantId, me.Email, ct);
+            // The count is stated because dismissal covers EVERY undelivered row for that person
+            // inside the window, not just the one on screen — otherwise the row reappears showing
+            // an older failure and reads as a new problem.
+            msg = hidden == 0
+                ? "Nothing to dismiss — that row is no longer in the queue."
+                : hidden == 1
+                    ? "Dismissed. The mail is still recorded as undelivered in the Email Log."
+                    : $"Dismissed {hidden} undelivered messages for that person. They are still "
+                      + "recorded as undelivered in the Email Log.";
+        }
+        return RedirectToPage(new { Msg = msg, ShowDropped });
+    }
 }

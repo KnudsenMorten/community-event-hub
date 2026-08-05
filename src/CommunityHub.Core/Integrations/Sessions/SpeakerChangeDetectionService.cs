@@ -14,9 +14,15 @@ namespace CommunityHub.Core.Integrations.Sessions;
 /// <see cref="SpeakerProfile.BackstageSpeakerId"/> (the link), and — when the Backstage
 /// name/tagline/bio/country/linkedin/twitter differs from the value CEH last stored AND that
 /// stored baseline was already populated (a real CHANGE, not the first populate) — ENQUEUES a
-/// Pending <see cref="SyncDelta"/> (EntityType=Speaker, ChangeKind=Update, Source=ZohoToCeh)
-/// to the §59 approval queue. On every pass it refreshes the stored <c>Backstage*</c>
-/// snapshot for first-populates + stamps <see cref="SpeakerProfile.BackstageChangeCheckedAt"/>.
+/// <see cref="SyncDelta"/> (EntityType=Speaker, ChangeKind=Update, Source=ZohoToCeh) to the §59
+/// queue and <b>immediately AUTO-APPLIES it</b> (§737.2). On every pass it refreshes the stored
+/// <c>Backstage*</c> snapshot for first-populates + stamps
+/// <see cref="SpeakerProfile.BackstageChangeCheckedAt"/>.
+///
+/// <b>NO APPROVAL FOR AN INBOUND UPDATE (§737.2).</b> Zoho OWNS those fields, so an approval
+/// prompt offers only one sensible answer. The row is still written — it goes straight to
+/// <c>Applied</c> with <see cref="SyncDeltaQueueService.AutoDecider"/> as the decider — so the
+/// queue shows what changed and that nobody was asked. Deletes still wait for a human, always.
 ///
 /// <b>FIRST POPULATE is silent.</b> When the stored Backstage* values are all null the engine
 /// SEEDS them and NEVER enqueues (there is no "previous" to have changed from).
@@ -25,16 +31,17 @@ namespace CommunityHub.Core.Integrations.Sessions;
 /// produces NO auto-action — the §58 never-auto-delete rule. The disappearance/queue handles
 /// that separately; this engine only seeds + detects updates on LINKED speakers.
 ///
-/// <b>GATES.</b> (1) the <c>speaker-change-alerts</c> feature kill switch is enabled; (2) the
-/// edition's SPEAKER sync direction is stage 3 (<see cref="SessionSyncDirection.ZohoToCeh"/>)
-/// — else the engine returns <see cref="Result.Inactive"/> and writes nothing, exactly as the
-/// §38e session engine gates on the SESSION direction. The change is enqueued, not emailed
-/// inline; any user-facing effect happens on operator APPROVE in the queue.
+/// <b>GATE.</b> ONE gate: the <c>speaker-change-alerts</c> feature kill switch. 🔒 §576 removed
+/// the stage-3 direction gate — stage 3 was deleted long ago, so that condition could never be
+/// satisfied and this engine silently no-opped on every 5-minute run. Do not reintroduce it.
+/// The change is applied, never emailed inline; the speaker is not notified of a Zoho-side edit
+/// to their own profile.
 ///
-/// <b>SOURCE AVAILABILITY.</b> The speakers API needs the <c>ZohoBackstage.speaker.READ</c>
-/// scope. Until granted (and <see cref="ZohoOptions.SpeakerReadEnabled"/> set) the pull
-/// returns IsAvailable=false and this engine NO-OPS with a clear result — it never treats an
-/// empty pull as "everything changed" (mirrors §38e Unavailable).
+/// <b>SOURCE AVAILABILITY.</b> A FAILED speakers pull returns IsAvailable=false and this engine
+/// NO-OPS with a clear result — it never treats an empty pull as "everything changed" (mirrors §38e
+/// Unavailable). 🗑 §754.5: it is no longer gated on a <c>ZohoBackstage.speaker.READ</c> config
+/// flag. That flag waited for a permission the Backstage credentials have always had, so it could
+/// only ever block. It is deleted — do not reintroduce it.
 /// </summary>
 public sealed class SpeakerChangeDetectionService
 {
@@ -184,9 +191,10 @@ public sealed class SpeakerChangeDetectionService
 
             if (fieldChanges.Count == 0) continue; // nothing changed
 
-            // A REAL change: do NOT overwrite the stored Backstage* baseline here (so the
-            // old→new diff survives until a decision); ENQUEUE a Pending Update delta for the
-            // operator. Kept gated on the feature kill switch.
+            // A REAL change: ENQUEUE it (that is the record of what changed), then AUTO-APPLY it
+            // immediately — §737.2. Do NOT overwrite the stored Backstage* baseline here; the
+            // apply arm does that, so the old→new diff survives in the delta either way. Kept
+            // gated on the feature kill switch.
             changed++;
             if (_queue is null || !featureEnabled) continue;
 
@@ -194,7 +202,7 @@ public sealed class SpeakerChangeDetectionService
                 ? (string.IsNullOrWhiteSpace(hit.Email) ? "(unnamed speaker)" : hit.Email!)
                 : hit.FullName!;
 
-            await _queue.EnqueueAsync(new SyncDelta
+            var delta = await _queue.EnqueueAsync(new SyncDelta
             {
                 EventId = eventId,
                 EntityType = SyncDeltaEntityType.Speaker,
@@ -204,6 +212,17 @@ public sealed class SpeakerChangeDetectionService
                 ChangeKind = SyncDeltaChangeKind.Update,
                 Changes = fieldChanges,
             }, ct);
+
+            // §737.2 (operator 2026-07-31, on this exact row shape: *"Update — Speaker: Thomas
+            // Naunheim"*): an INBOUND update needs no approval — Zoho owns tagline/bio/country/
+            // socials, so asking is a decision with only one sensible answer. ApproveAsync runs
+            // the same apply step a manual approve would and marks the row Approved→Applied with
+            // the auto marker as decider, so the queue still SHOWS what changed and that nobody
+            // was asked. The §38e session engine has done exactly this since §299 OPEN-28.
+            //
+            // 🔒 This is the DETECTION site on purpose. The policy must not move into
+            // EnqueueAsync — see SyncDeltaQueueService.AutoDecider.
+            await _queue.ApproveAsync(delta.Id, SyncDeltaQueueService.AutoDecider, ct);
             enqueued++;
         }
 

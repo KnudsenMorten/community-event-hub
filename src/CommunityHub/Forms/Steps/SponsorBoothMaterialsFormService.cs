@@ -56,6 +56,7 @@ public sealed class SponsorBoothMaterialsFormService : IWizardFormService
     private readonly Core.Config.EventEditionConfigLoader? _cfg;
     private readonly Core.Config.EventConfigOptions? _cfgOptions;
     private readonly Core.Integrations.SharePointUploadClient? _sp;
+    private readonly Core.Integrations.DocLibrary.IDocLibraryPathResolver? _paths;
 
     /// <summary>The SharePoint dependencies are OPTIONAL (same shape as
     /// <see cref="SponsorSessionFormService"/>): unconfigured hosts and tests keep working, and the
@@ -65,24 +66,36 @@ public sealed class SponsorBoothMaterialsFormService : IWizardFormService
         TimeProvider clock,
         Core.Config.EventEditionConfigLoader? cfg = null,
         Core.Config.EventConfigOptions? cfgOptions = null,
-        Core.Integrations.SharePointUploadClient? sp = null)
+        Core.Integrations.SharePointUploadClient? sp = null,
+        Core.Integrations.DocLibrary.IDocLibraryPathResolver? paths = null)
     {
         _db = db;
         _clock = clock;
         _cfg = cfg;
         _cfgOptions = cfgOptions;
         _sp = sp;
+        _paths = paths;
     }
 
     /// <summary>The configured SharePoint block, or null when this host has no config wired.</summary>
     private Core.Config.SharePointEditionConfig? SharePointConfig() =>
         _cfg is null || _cfgOptions is null ? null : _cfg.Load(_cfgOptions.EventConfigPath).SharePoint;
 
-    /// <summary>§476 — collateral upload is possible only with a client AND a configured folder.</summary>
+    /// <summary>
+    /// §768.14 — the collateral folder, from the document-library registry rather than an edition
+    /// config key. Null when no resolver is wired (tests) or the key does not resolve.
+    /// </summary>
+    private string? CollateralFolder() =>
+        _paths is not null
+        && _paths.TryResolve(Core.Integrations.DocLibrary.DocLibraryPaths.SponsorBoothCollateral, out var f)
+            ? f
+            : null;
+
+    /// <summary>§476 — collateral upload is possible only with a client AND a resolvable folder.</summary>
     private bool CanUploadCollateral(Core.Config.SharePointEditionConfig? sp) =>
         sp is not null && _sp is not null
         && !string.IsNullOrWhiteSpace(sp.SiteUrl)
-        && !string.IsNullOrWhiteSpace(sp.BoothCollateralFolderPath)
+        && CollateralFolder() is not null
         && _sp.IsConfigured;
 
     private Task<string?> CompanyIdAsync(int participantId, CancellationToken ct) =>
@@ -255,7 +268,7 @@ public sealed class SponsorBoothMaterialsFormService : IWizardFormService
             var fileName = $"{Sanitize(companyId)}_{Sanitize(baseName)}{ext}";
             await using var upload = file.OpenReadStream();
             var (_, webUrl, _) = await _sp!.UploadFileStreamAsync(
-                sp!.SiteUrl, sp.DriveName, sp.BoothCollateralFolderPath, fileName,
+                sp!.SiteUrl, sp.DriveName, CollateralFolder()!, fileName,
                 upload, file.Length,
                 string.IsNullOrWhiteSpace(file.ContentType) ? "application/octet-stream" : file.ContentType,
                 ct);

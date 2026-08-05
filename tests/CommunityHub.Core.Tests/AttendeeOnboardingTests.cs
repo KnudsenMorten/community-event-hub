@@ -153,7 +153,7 @@ public sealed class AttendeeOnboardingTests
         Assert.Equal(TaskState.Open, (await db.Tasks.FirstAsync(t => t.SourceKey == key)).State);
     }
 
-    [Fact]
+    [Fact(Skip = "733.1 - the per-task party/master-class cadences are RETIRED (operator 2026-07-31: the Get Started wizard is chased once every 14 days by getstarted-digest). Kept, not deleted, so re-enabling restores this coverage.")]
     public async Task Mc_reminder_is_2_weeks_from_welcome_and_stops_on_confirmed()
     {
         using var db = ScenarioFixture.NewDb();
@@ -195,7 +195,7 @@ public sealed class AttendeeOnboardingTests
         Assert.Empty(await builder.BuildDueAsync(ev));
     }
 
-    [Fact]
+    [Fact(Skip = "733.1 - the per-task party/master-class cadences are RETIRED (operator 2026-07-31: the Get Started wizard is chased once every 14 days by getstarted-digest). Kept, not deleted, so re-enabling restores this coverage.")]
     public async Task Mc_reminder_stops_for_a_cancelled_attendee_and_resumes_on_reactivation()
     {
         // §234 1: a soft-cancelled attendee (no ACTIVE ticket on their email) must stop

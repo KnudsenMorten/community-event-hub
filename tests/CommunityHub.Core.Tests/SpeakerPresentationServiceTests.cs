@@ -59,7 +59,8 @@ public sealed class SpeakerPresentationServiceTests
                 PresentationPreviewFolderPath = configured ? $"Ev/{Guid.NewGuid():N}/Preview" : "",
                 PresentationFinalFolderPath = configured ? $"Ev/{Guid.NewGuid():N}/Final" : "",
             }),
-            db, TimeProvider.System);
+            db, TimeProvider.System,
+            TestDocLibrary.Resolver(configured ? $"General/TEST-{Guid.NewGuid():N}/EventHub" : string.Empty));
 
     private static async Task<(int ev, int pid, int sessionId)> SeedAsync(CommunityHubDbContext db)
     {

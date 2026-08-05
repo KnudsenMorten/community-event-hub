@@ -579,10 +579,14 @@ public sealed class CommandCenterServiceTests
         Assert.Equal(1, s.MasterClassFull);       // MC1 only
         Assert.Equal(57, s.MasterClassFillPercent); // round(4/7*100)
 
-        // Speaker readiness summary (one speaker, not ready: only "other to-dos" satisfied).
+        // Speaker readiness summary. 🔴 §784.9(d) — this used to assert a NON-ZERO average
+        // (InRange 1..99) for a speaker who had done absolutely nothing, because "other to-dos"
+        // counted as satisfied when the speaker had no to-dos at all. The same vacuous item that
+        // produced "1 of 8 done" on the roster was inflating the Command Centre average here.
+        // A speaker who has done nothing now reads as 0%.
         Assert.Equal(1, s.SpeakerTotal);
         Assert.Equal(0, s.SpeakerReady);
-        Assert.InRange(s.SpeakerReadinessAvgPercent, 1, 99);
+        Assert.Equal(0, s.SpeakerReadinessAvgPercent);
 
         // Sponsor deliverables summary (one incomplete, not overdue).
         Assert.Equal(1, s.SponsorCompaniesTotal);

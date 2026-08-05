@@ -45,33 +45,74 @@
             <p class="info" role="status">@Model.SavedMessage</p>
         }
 
-        <p style="font-size:13px;color:#374151;">
-            <strong>Currently in effect:</strong>
-            @if (string.IsNullOrWhiteSpace(Model.EffectiveEndpointId))
+        @* 🔴 §784.8 — THE VALUE WAS ALWAYS HERE. IT JUST LOST TO AN EMPTY BOX.
+           Operator 2026-08-03: *"the old url is hidden in the text - hard to see. the obvious is that
+           it is not set"*, and then: *"that is why i jumped to wrong conclusion"* — he was ready to
+           RETIRE a working page over it.
+
+           🔒 The page did print "Currently in effect: b0eeoqzm" — in 13px plain text, directly above a
+           large empty input. The eye reads the empty control as the state and the sentence as chrome,
+           so a CONFIGURED endpoint looked unconfigured. The input is empty because it is the OVERRIDE
+           field, and blank correctly means "use the deployment default" — but nothing said so where
+           the emptiness was.
+
+           Same fix as §783.11 on DocLibraryPaths, for the same reason: state the effective value
+           LOUDLY, say WHERE it comes from, and echo it into the input's placeholder so an empty box
+           reads as "using b0eeoqzm" instead of "nothing set". *@
+        var hasEffective = !string.IsNullOrWhiteSpace(Model.EffectiveEndpointId);
+        var isOverride = !string.IsNullOrWhiteSpace(Model.Setting?.EndpointId);
+
+        <div style="margin:14px 0 18px;padding:12px 14px;border-radius:8px;
+                    background:@(hasEffective ? "#ecfdf5" : "#fff7ed");
+                    border:1px solid @(hasEffective ? "#a7f3d0" : "#fed7aa");">
+            @if (hasEffective)
             {
-                <em>none configured</em>
+                <div style="font-size:13px;color:#065f46;font-weight:600;margin-bottom:4px;">
+                    ✓ Sessionize endpoint is configured and in use
+                </div>
+                <div style="font-size:20px;font-weight:700;color:#065f46;letter-spacing:.02em;">
+                    <code style="background:transparent;font-size:20px;">@Model.EffectiveEndpointId</code>
+                </div>
+                <div style="font-size:12.5px;color:#047857;margin-top:6px;">
+                    @if (isOverride)
+                    {
+                        <text>Saved for this edition on this page.</text>
+                    }
+                    else
+                    {
+                        <text>From the deployment's configured default &mdash; the box below is empty
+                              because nothing overrides it here, <strong>not</strong> because the
+                              endpoint is unset.</text>
+                    }
+                </div>
             }
             else
             {
-                <code>@Model.EffectiveEndpointId</code>
+                <div style="font-size:13px;color:#9a3412;font-weight:600;">
+                    ⚠ No Sessionize endpoint is configured &mdash; imports cannot run.
+                </div>
             }
+
             @if (Model.Setting?.EndpointLastChangedAt is not null)
             {
-                <br />
-                <span>Last changed @Model.Setting.EndpointLastChangedAt:u
+                <div style="font-size:12px;color:#4b5563;margin-top:8px;">
+                    Last changed @Model.Setting.EndpointLastChangedAt:u
                     @if (!string.IsNullOrWhiteSpace(Model.Setting.PreviousEndpointId))
                     {
                         <text>(from <code>@Model.Setting.PreviousEndpointId</code>)</text>
                     }
-                </span>
+                </div>
             }
-        </p>
+        </div>
 
         <form method="post" asp-page-handler="Save">
             <div style="margin-bottom:14px;">
                 <label for="EndpointId">Sessionize endpoint id</label>
+                @* §784.8 — the placeholder carries the value actually in effect, so an EMPTY box
+                   never again reads as "no endpoint configured". *@
                 <input type="text" id="EndpointId" name="EndpointId"
                        value="@Model.EndpointId"
+                       placeholder="@(string.IsNullOrWhiteSpace(Model.EffectiveEndpointId) ? "e.g. b0eeoqzm" : Model.EffectiveEndpointId)"
                        autocomplete="off" spellcheck="false"
                        aria-describedby="endpointHelp"
                        style="max-width:100%;width:28rem;" />

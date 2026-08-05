@@ -40,6 +40,43 @@ public sealed class PreselectionQueueServiceTests
             IsActive = active,
         };
 
+    /// <summary>
+    /// 🔒 §756 — THE PRE-SELECTION QUEUE IS VOLUNTEERS ONLY.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-08-01, seeing six inactive speakers and two attendees in it:
+    /// <i>"why does inactive speakers show up in PreSelection Queue. Speakers will NEWER hit that
+    /// queue"</i>, then the rule itself: <i>"preselection queue must ONLY contain volunteers as all
+    /// other roles are selected and have their own onboarding."</i></para>
+    ///
+    /// <para>🔑 Written as an INCLUDE-ONLY assertion, not "speakers are excluded". The first
+    /// instruction named one role; the rule is broader, and a test that only pinned speakers would
+    /// have let the attendees stay and brought this straight back.</para>
+    /// </remarks>
+    [Fact]
+    public async Task Queue_lists_VOLUNTEERS_ONLY_every_other_role_has_its_own_door()
+    {
+        using var db = NewDb();
+
+        var volunteer = P(EventId, "volunteer@example.test");
+        var speaker = P(EventId, "speaker@example.test", source: ParticipantQueueSource.SessionizeSync);
+        speaker.Role = ParticipantRole.Speaker;
+        var attendee = P(EventId, "attendee@example.test", source: ParticipantQueueSource.Manual);
+        attendee.Role = ParticipantRole.Attendee;
+        var sponsor = P(EventId, "sponsor@example.test", source: ParticipantQueueSource.Manual);
+        sponsor.Role = ParticipantRole.Sponsor;
+        var organizer = P(EventId, "organizer@example.test", source: ParticipantQueueSource.Manual);
+        organizer.Role = ParticipantRole.Organizer;
+        db.Participants.AddRange(volunteer, speaker, attendee, sponsor, organizer);
+        await db.SaveChangesAsync();
+
+        var queue = await new PreselectionQueueService(db).GetQueueAsync(EventId);
+
+        var row = Assert.Single(queue);
+        Assert.Equal(volunteer.Id, row.Id);
+        Assert.All(queue, q => Assert.Equal(ParticipantRole.Volunteer, q.Role));
+    }
+
     [Fact]
     public void Default_new_participant_is_inactive_lifecycle()
     {

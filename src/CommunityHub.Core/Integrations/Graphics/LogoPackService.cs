@@ -31,21 +31,34 @@ public sealed class LogoPackService
     private readonly IMemoryCache _cache;
     private readonly ILogger<LogoPackService>? _log;
 
+    private readonly DocLibrary.IDocLibraryPathResolver _paths;
+
     public LogoPackService(
         ISharePointFileStore store,
         IOptions<GraphicsSharePointOptions> options,
         IMemoryCache cache,
+        DocLibrary.IDocLibraryPathResolver paths,
         ILogger<LogoPackService>? log = null)
     {
         _store = store;
         _options = options.Value;
         _cache = cache;
+        _paths = paths;
         _log = log;
     }
 
-    private string? Folder => string.IsNullOrWhiteSpace(_options.LogoPackFolderPath)
-        ? null
-        : _options.LogoPackFolderPath.Trim().Trim('/');
+    /// <summary>
+    /// §768 — resolved from the registry. This was <c>LogoPackFolderPath</c>, whose production value
+    /// was <c>…/EventHub/ELDK</c> — a folder the reorganisation DELETED outright; the pack now lives
+    /// at <c>Event/LogoPack</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⚠️ Every logo reference in the product resolves through here, and a read against the deleted
+    /// folder returned an empty listing rather than an error — so the failure would have surfaced as
+    /// "the logos have gone missing", nowhere near its cause.
+    /// </remarks>
+    private string? Folder =>
+        _paths.TryResolve(DocLibrary.DocLibraryPaths.EventLogoPack, out var p) ? p : null;
 
     /// <summary>True when the live proxy can serve the pack (store wired + folder set).</summary>
     public bool IsAvailable => _store.CanRead && Folder is not null;

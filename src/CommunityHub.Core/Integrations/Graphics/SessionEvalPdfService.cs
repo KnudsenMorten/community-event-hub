@@ -66,17 +66,33 @@ public sealed class SessionEvalPdfService
     private readonly GraphicsSharePointOptions _options;
     private readonly CommunityHubDbContext _db;
 
+    private readonly DocLibrary.IDocLibraryPathResolver _paths;
+
     public SessionEvalPdfService(
         ISharePointFileStore store,
         IOptions<GraphicsSharePointOptions> options,
-        CommunityHubDbContext db)
+        CommunityHubDbContext db,
+        DocLibrary.IDocLibraryPathResolver paths)
     {
         _store = store;
         _options = options.Value;
         _db = db;
+        _paths = paths;
     }
 
-    private string Folder => _options.SessionEvalPdfFolderPath;
+    /// <summary>
+    /// §768 — resolved from the registry. This was <c>SessionEvalPdfFolderPath</c>, still pointing at
+    /// the <c>Speakers/SessionEvaluations</c> ROOT — which the reorganisation turned into a container
+    /// holding <c>QR/</c> and <c>Result/</c>. Results belong in <c>Result/</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⚠️ Reading the container instead of the leaf returns the two SUBFOLDERS and no files — and
+    /// listings skip folders, so it came back empty and read as "no results published yet".
+    /// </remarks>
+    private string Folder =>
+        _paths.TryResolve(DocLibrary.DocLibraryPaths.SessionEvaluationResults, out var p)
+            ? p
+            : string.Empty;
     private bool FolderSet => !string.IsNullOrWhiteSpace(Folder);
 
     /// <summary>True when the folder is wired for READS (the speaker download proxy can serve).</summary>
@@ -176,23 +192,58 @@ public sealed class SessionEvalPdfService
 
     /// <summary>
     /// The kinds of evaluation PDF that EXIST for each of the given sessions in an edition
-    /// (§192d) — drives the speaker page's per-kind buttons (Open-feedback renders only when
-    /// present). Sessions with no files simply have no entry.
+    /// (§192d) — drives the per-kind download buttons on the speaker "My sessions" page and the
+    /// organizer Sessions grid. Sessions with no servable file simply have no entry.
     /// </summary>
+    /// <remarks>
+    /// <para>🔒 <b>§783.2 — this asks the STORE, because the store is what the download reads.</b>
+    /// Operator 2026-08-03: <i>"Evaluation score button must not be shown, if the session evaluation
+    /// has not been released as pdf. Right now clicking the link takes med to an http 404"</i>.</para>
+    ///
+    /// <para>It used to answer from <c>SessionEvaluationFiles</c> — the upload PROVENANCE table —
+    /// while <see cref="GetPdfForParticipantAsync"/> serves by listing the DocLibrary folder. Two
+    /// sources of truth for one question, so a provenance row whose file was never in (or has since
+    /// left) the folder rendered a button that could only ever 404. Worse, it failed in BOTH
+    /// directions: the naming contract on <see cref="FileNameFor"/> lets the external evaluation
+    /// system drop PDFs straight into the folder with no row at all, and those files existed,
+    /// downloaded fine, and had no button.</para>
+    ///
+    /// <para>⚠️ <b>Not configured ⇒ no buttons.</b> When <see cref="CanRead"/> is false nothing can
+    /// be served, so nothing is offered — the previous DB-only answer happily advertised downloads
+    /// on an edition with no document library wired up at all.</para>
+    ///
+    /// <para>Costs ONE folder listing per call (the same listing the download does), not one per
+    /// session — both callers pass their whole page of session ids at once.</para>
+    /// </remarks>
     public async Task<IReadOnlyDictionary<int, IReadOnlySet<EvaluationPdfKind>>> GetKindsForSessionsAsync(
         int eventId, IEnumerable<int> sessionIds, CancellationToken ct = default)
     {
         var ids = sessionIds?.Distinct().ToList() ?? new List<int>();
         var result = new Dictionary<int, IReadOnlySet<EvaluationPdfKind>>();
-        if (ids.Count == 0) return result;
+        if (ids.Count == 0 || !CanRead) return result;
 
-        var rows = await _db.SessionEvaluationFiles
-            .Where(f => f.EventId == eventId && ids.Contains(f.SessionId))
-            .Select(f => new { f.SessionId, f.Kind })
-            .ToListAsync(ct);
+        var present = (await _store.ListAsync(Folder, ct))
+            .Select(f => f.Name)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (present.Count == 0) return result;
 
-        foreach (var g in rows.GroupBy(r => r.SessionId))
-            result[g.Key] = g.Select(x => x.Kind).ToHashSet();
+        foreach (var id in ids)
+        {
+            var kinds = new HashSet<EvaluationPdfKind>();
+            foreach (var kind in new[] { EvaluationPdfKind.Score, EvaluationPdfKind.Open })
+            {
+                // The SAME two names GetPdfForParticipantAsync accepts, in the same order —
+                // current name first, then the pre-OPEN-30 legacy one.
+                if (present.Contains(FileNameFor(id, kind))
+                    || present.Contains(LegacyFileNameFor(id, kind)))
+                {
+                    kinds.Add(kind);
+                }
+            }
+
+            if (kinds.Count > 0) result[id] = kinds;
+        }
+
         return result;
     }
 

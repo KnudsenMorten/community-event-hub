@@ -141,13 +141,11 @@ public sealed class SpeakerLinkedInPublishService
         }
 
         // Ownership + release gate: only the speaker's OWN, RELEASED, non-sponsor graphic.
-        var graphic = await _db.GraphicAssets.FirstOrDefaultAsync(
-            g => g.EventId == eventId
-                 && g.Id == graphicAssetId
-                 && g.ParticipantId == participantId
-                 && g.Status == GraphicAssetStatus.Released
-                 && g.Type != GraphicAssetType.Sponsor,
-            ct);
+        // §767 phase 2 — "own" is now the ONE shared rule, so the shared session graphic (keyed to
+        // the session, not to a speaker) can be published by the speakers it depicts. A graphic
+        // they can see on their own page must never be refused by the button next to it.
+        var graphic = await _db.GraphicsVisibleToSpeaker(eventId, participantId)
+            .FirstOrDefaultAsync(g => g.Id == graphicAssetId, ct);
         if (graphic is null)
         {
             return new SpeakerLinkedInPublishResult(

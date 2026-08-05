@@ -106,8 +106,24 @@ public sealed class JobScheduleService
             var featureEnabled = job.FeatureKey is null
                 || await _gate.IsFeatureEnabledAsync(job.FeatureKey, eventId, ct);
 
+            // §786.8 — HealthKey first, then FALL BACK TO THE FUNCTION NAME.
+            //
+            // 🔴 A job that declares a HealthKey but whose marker is only ever written by
+            // EngineErrorAlertMiddleware — which keys on the FUNCTION NAME — showed a BLANK health
+            // column while running perfectly. `WebshopInvoiceJob` and `CouponInvoiceJob` are both
+            // that shape, and the first of them is now the ONLY system invoicing webshop orders
+            // (§786.4): "last succeeded: —" on that row is the opposite of the reassurance the page
+            // exists to give.
+            //
+            // 🔒 HealthKey still WINS when its row exists. A service that writes its own health-key
+            // row does so because it swallows its failures (ErpSyncCustomerContactJob), so that row
+            // is the truthful one — the middleware would have recorded the same run as a success.
+            //
+            // ⚠️ `JobSilenceDetector` already tried both keys; only this page did not, which is why
+            // the gap showed up as cosmetic rather than as a missing alert.
             JobHealthMarker? hm = null;
             if (job.HealthKey is not null) health.TryGetValue(job.HealthKey, out hm);
+            if (hm is null) health.TryGetValue(job.FunctionName, out hm);
 
             rows.Add(new JobStatusRow(
                 job,

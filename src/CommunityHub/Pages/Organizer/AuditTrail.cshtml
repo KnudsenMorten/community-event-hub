@@ -1,11 +1,13 @@
 @page
 @model CommunityHub.Pages.Organizer.AuditTrailModel
 @{
-    ViewData["Title"] = "Audit trail";
+    @* §741 (operator 2026-07-31): "rename audit trail to Audit" — the same word the main menu now
+       uses, so the menu entry and the page he lands on say the same thing. *@
+    ViewData["Title"] = "Audit";
 }
 
 <div class="card">
-    <h1>Audit trail</h1>
+    <h1>Audit</h1>
     <p>Every user action and backend/engine event for this edition — for troubleshooting
        (“why did this happen?”) and usage insight (“how many calendar syncs?”).</p>
 
@@ -50,10 +52,19 @@
         <label style="font-size:12.5px;color:#4a5160;flex:1 1 200px;">Search (actor / action / summary)
             <input type="text" name="Filter" value="@Model.Filter" style="display:block;width:100%;box-sizing:border-box;padding:7px 9px;border:1px solid #c4c8d4;border-radius:6px;" />
         </label>
+        @* §784.10 — engine rows are hidden by DEFAULT ("i am drowning in events in audit"). The
+           engine writes on every tick of every job; a human acts a few dozen times a day, and this
+           page exists to answer "who did this?". 🔒 Hidden from the VIEW, never from the record —
+           the rows are still written and still exported. *@
+        <label style="font-size:12.5px;color:#4a5160;display:flex;align-items:center;gap:6px;padding-bottom:8px;white-space:nowrap;">
+            <input type="checkbox" name="ShowEngine" value="true" checked="@Model.ShowEngine"
+                   style="width:16px;height:16px;" />
+            Show Engine related actions
+        </label>
         <button type="submit" style="padding:8px 14px;border:0;border-radius:6px;background:#008BD2;color:#fff;font-weight:600;cursor:pointer;">Filter</button>
-        <a asp-page-handler="Export" asp-route-format="csv" asp-route-Category="@Model.Category" asp-route-Days="@Model.Days" asp-route-Filter="@Model.Filter"
+        <a asp-page-handler="Export" asp-route-format="csv" asp-route-Category="@Model.Category" asp-route-Days="@Model.Days" asp-route-Filter="@Model.Filter" asp-route-ShowEngine="@Model.ShowEngine"
            style="padding:8px 12px;border:1px solid #c4c8d4;border-radius:6px;text-decoration:none;color:#1D3380;font-weight:600;">Export CSV</a>
-        <a asp-page-handler="Export" asp-route-format="xlsx" asp-route-Category="@Model.Category" asp-route-Days="@Model.Days" asp-route-Filter="@Model.Filter"
+        <a asp-page-handler="Export" asp-route-format="xlsx" asp-route-Category="@Model.Category" asp-route-Days="@Model.Days" asp-route-Filter="@Model.Filter" asp-route-ShowEngine="@Model.ShowEngine"
            style="padding:8px 12px;border:1px solid #c4c8d4;border-radius:6px;text-decoration:none;color:#1D3380;font-weight:600;">Export XLSX</a>
     </form>
 

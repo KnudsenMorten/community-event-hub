@@ -50,10 +50,13 @@ public sealed class OrganizerActionItemService
             return "Change requested (after lock)";
         }
 
-        // §335: one row per stuck sponsor company, so the type carries the company id.
-        if (type.StartsWith(SponsorProvisioningStallDetector.TypePrefix + ":", StringComparison.Ordinal))
+        // ⚰️ §819 — the detector that RAISED these is retired, but the label stays: a historic row
+        // in any database must still read as English instead of degrading to a raw type code. The
+        // prefix is inlined for exactly that reason — it now describes DATA that may exist, not a
+        // producer that does. Nothing new can be raised under it.
+        if (type.StartsWith("sponsor-upload-folder-stuck:", StringComparison.Ordinal))
         {
-            return "Sponsor upload folder not provisioned";
+            return "Sponsor upload folder not provisioned (retired check)";
         }
 
         return type switch

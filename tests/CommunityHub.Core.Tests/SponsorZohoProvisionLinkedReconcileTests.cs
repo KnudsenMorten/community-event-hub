@@ -6,6 +6,7 @@ using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
 using CommunityHub.Core.Integrations;
 using CommunityHub.Core.Tests.Scenario;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
@@ -125,6 +126,167 @@ public class SponsorZohoProvisionLinkedReconcileTests
         return (provision, handler);
     }
 
+    private static SponsorZohoSyncService NewSyncService(CommunityHubDbContext db)
+    {
+        var handler = new StubZohoHandler();
+        var http = new HttpClient(handler) { BaseAddress = new Uri("https://stub.local/") };
+        var zohoOptions = new ZohoOptions
+        {
+            Enabled = true,
+            ApiDomain = "https://stub.local",
+            TokenEndpoint = "https://stub.local/oauth/v2/token",
+            BackstagePortalId = "p1",
+            BackstageEventId = "e1",
+            ClientId = "cid",
+            ClientSecret = "secret",
+            RefreshToken = "refresh",
+        };
+        var cmOptions = new CompanyManagerOptions { Enabled = false };
+        return new SponsorZohoSyncService(
+            new ZohoClient(http, zohoOptions, NullLogger<ZohoClient>.Instance),
+            db, zohoOptions, new CompanyManagerClient(new HttpClient(handler), cmOptions), cmOptions,
+            NullLogger<SponsorZohoSyncService>.Instance);
+    }
+
+    /// <summary>
+    /// 🔴 §792.5 — <b>the batched hand-entry mail must not repeat every pass.</b>
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-08-04: *"stamp on the batched path too"*. The per-company path stamped
+    /// inline, but both BULK paths pass <c>notifyZohoChange: false</c> and mail once per run — so
+    /// nothing was stamped, and the identical list would go out every 10 minutes for ever. A field
+    /// he has not yet typed into Backstage still does not match on the next pass, so "report every
+    /// mismatch" never converges on its own.</para>
+    ///
+    /// <para>🔒 Only the companies actually IN the mail are stamped. Stamping the edition would
+    /// silence companies he was never told about — the original <c>ZohoSocialPushedHash</c> failure
+    /// (§784.13), where a stamp recorded intent rather than delivery.</para>
+    /// </remarks>
+    [Fact]
+    public async Task Stamping_marks_only_the_reported_companies_and_stops_the_mail_repeating()
+    {
+        using var db = ScenarioFixture.NewDb();
+        var eventId = await SeedEventAsync(db);
+
+        db.SponsorInfos.AddRange(
+            new SponsorInfo
+            {
+                EventId = eventId, SponsorCompanyId = "reported",
+                ZohoSponsorId = "ZSP-R", LinkedInUrl = "https://linkedin.com/company/reported",
+            },
+            new SponsorInfo
+            {
+                EventId = eventId, SponsorCompanyId = "untouched",
+                ZohoSponsorId = "ZSP-U", LinkedInUrl = "https://linkedin.com/company/untouched",
+            });
+        await db.SaveChangesAsync();
+
+        var sync = NewSyncService(db);
+
+        // Both start unstamped — the state after the operator's catch-up flush.
+        Assert.All(await db.SponsorInfos.ToListAsync(),
+            s => Assert.Null(s.ZohoSponsorProfilePushedHash));
+
+        var stamped = await sync.StampManualReportAsync(eventId, new[] { "reported" });
+
+        Assert.Equal(1, stamped);
+
+        var reported = await db.SponsorInfos.SingleAsync(s => s.SponsorCompanyId == "reported");
+        var untouched = await db.SponsorInfos.SingleAsync(s => s.SponsorCompanyId == "untouched");
+
+        Assert.NotNull(reported.ZohoSponsorProfilePushedHash);   // told him ⇒ do not tell him again
+        Assert.Null(untouched.ZohoSponsorProfilePushedHash);     // never told ⇒ must still be told
+
+        // Idempotent: stamping the same company again changes nothing, so an overlapping run
+        // (provision + bulk re-sync both firing) cannot corrupt the record of what he was sent.
+        var before = reported.ZohoSponsorProfilePushedHash;
+        Assert.Equal(1, await sync.StampManualReportAsync(eventId, new[] { "reported" }));
+        Assert.Equal(before,
+            (await db.SponsorInfos.SingleAsync(s => s.SponsorCompanyId == "reported"))
+                .ZohoSponsorProfilePushedHash);
+
+        // And a company with nothing to report is never stamped — there is no claim to record.
+        db.SponsorInfos.Add(new SponsorInfo
+        {
+            EventId = eventId, SponsorCompanyId = "empty", ZohoSponsorId = "ZSP-E",
+        });
+        await db.SaveChangesAsync();
+        Assert.Equal(0, await sync.StampManualReportAsync(eventId, new[] { "empty" }));
+        Assert.Null((await db.SponsorInfos.SingleAsync(s => s.SponsorCompanyId == "empty"))
+            .ZohoSponsorProfilePushedHash);
+    }
+
+    /// <summary>
+    /// 🔴 §792.7 — a new booth VIDEO or COLLATERAL file must re-open the report.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-08-04: *"i must get booth collateral and videos by email also"* … *"if chg
+    /// happens"*. Zoho has NO API for either (every candidate endpoint 404s), so they can only ever
+    /// be hand-work — and they live on <c>SponsorBoothMaterials</c>, NOT on <c>SponsorInfo</c>.</para>
+    ///
+    /// <para>⚠️ That is the trap this pins: the stamp is computed from the company's reportable
+    /// values, so if the materials were left out of it, a sponsor adding a video would change
+    /// nothing the stamp can see. The mail would stay silent for ever about the one thing he asked
+    /// to be told about.</para>
+    /// </remarks>
+    [Fact]
+    public async Task Adding_a_booth_video_or_collateral_file_re_opens_the_report()
+    {
+        using var db = ScenarioFixture.NewDb();
+        var eventId = await SeedEventAsync(db);
+
+        db.SponsorInfos.Add(new SponsorInfo
+        {
+            EventId = eventId, SponsorCompanyId = "42", ZohoSponsorId = "ZSP-42",
+            WebsiteUrl = "https://example.test",
+        });
+        await db.SaveChangesAsync();
+
+        var sync = NewSyncService(db);
+        await sync.StampManualReportAsync(eventId, new[] { "42" });
+        var afterFirstReport = (await db.SponsorInfos.SingleAsync(s => s.SponsorCompanyId == "42"))
+            .ZohoSponsorProfilePushedHash;
+        Assert.NotNull(afterFirstReport);
+
+        // The sponsor uploads a video. Nothing on SponsorInfo changed.
+        db.SponsorBoothMaterials.Add(new SponsorBoothMaterial
+        {
+            EventId = eventId, SponsorCompanyId = "42",
+            Kind = BoothMaterialKind.Video, Url = "https://youtu.be/example",
+        });
+        await db.SaveChangesAsync();
+
+        await sync.StampManualReportAsync(eventId, new[] { "42" });
+        var afterVideo = (await db.SponsorInfos.SingleAsync(s => s.SponsorCompanyId == "42"))
+            .ZohoSponsorProfilePushedHash;
+
+        // A different stamp ⇒ the next pass sees "changed" ⇒ he is told about the video.
+        Assert.NotEqual(afterFirstReport, afterVideo);
+
+        // ...and a collateral file moves it again.
+        db.SponsorBoothMaterials.Add(new SponsorBoothMaterial
+        {
+            EventId = eventId, SponsorCompanyId = "42",
+            Kind = BoothMaterialKind.Collateral,
+            Url = "https://sp.example/brochure.pdf", FileName = "brochure.pdf",
+        });
+        await db.SaveChangesAsync();
+
+        await sync.StampManualReportAsync(eventId, new[] { "42" });
+        Assert.NotEqual(afterVideo,
+            (await db.SponsorInfos.SingleAsync(s => s.SponsorCompanyId == "42"))
+                .ZohoSponsorProfilePushedHash);
+
+        // 🔒 But an unchanged set must hash the SAME, or the mail fires on every pass — the
+        // 70-mail night with a different trigger.
+        var stable = (await db.SponsorInfos.SingleAsync(s => s.SponsorCompanyId == "42"))
+            .ZohoSponsorProfilePushedHash;
+        await sync.StampManualReportAsync(eventId, new[] { "42" });
+        Assert.Equal(stable,
+            (await db.SponsorInfos.SingleAsync(s => s.SponsorCompanyId == "42"))
+                .ZohoSponsorProfilePushedHash);
+    }
+
     private static async Task<int> SeedEventAsync(CommunityHubDbContext db)
     {
         var ev = new Event
@@ -139,8 +301,23 @@ public class SponsorZohoProvisionLinkedReconcileTests
         return ev.Id;
     }
 
+    /// <summary>
+    /// 🔴 §791.3 — <b>THE REVERSAL.</b> This test asserted the OPPOSITE until 2026-08-04: that a
+    /// blank-in-Zoho LinkedIn was PUSHED into <c>company_social_pages.linkedin</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>Four controlled PUTs against the live PROD API proved the field is <b>accepted, echoed
+    /// in the response body, and silently discarded</b> — with any platform key, with or without
+    /// companion fields, and even on a record whose social pages are already populated. It behaves
+    /// read-only over v3.</para>
+    ///
+    /// <para>⚠️ <b>The test passing was never evidence the value arrived.</b> It asserted the
+    /// REQUEST BODY, which was correct all along — that is exactly why this defect survived three
+    /// sessions and a green suite. What it can honestly pin is that we no longer send a field Zoho
+    /// throws away, and that the operator is told to set it by hand instead.</para>
+    /// </remarks>
     [Fact]
-    public async Task Linked_exhibitor_with_blank_in_zoho_linkedin_gets_it_pushed_by_provision()
+    public async Task Blank_linkedin_is_NOT_pushed_and_is_reported_as_a_manual_Backstage_action()
     {
         using var db = ScenarioFixture.NewDb();
         var eventId = await SeedEventAsync(db);
@@ -169,24 +346,30 @@ public class SponsorZohoProvisionLinkedReconcileTests
 
         Assert.True(result.Enabled);
 
-        // A PUT to the linked EXHIBITOR record must have been sent (and exactly once)…
-        var put = Assert.Single(
+        // 🔴 §792 PLAN B — NO UPDATE IS SENT TO ZOHO AT ALL, for either object.
+        //
+        // Operator 2026-08-04: *"Any api UPDATES related to sponsors and exhibitors must be sent to
+        // info@expertslive.dk as mail"* … *"we will not spend more time on api UPDATES in zoho
+        // anymore until they fix it"*. This asserts the ABSENCE of the call, which is the whole
+        // change — asserting the request body would keep passing if a PUT crept back in.
+        Assert.DoesNotContain(
             handler.Calls,
-            c => c.Method == HttpMethod.Put && c.Path.EndsWith("/exhibitors/ZEX-10", StringComparison.Ordinal));
+            c => c.Method == HttpMethod.Put
+                 && c.Path.EndsWith("/exhibitors/ZEX-10", StringComparison.Ordinal));
 
-        using var doc = JsonDocument.Parse(put.Body!);
-        var root = doc.RootElement;
+        Assert.DoesNotContain(
+            handler.Calls,
+            c => c.Method == HttpMethod.Put
+                 && c.Path.EndsWith("/sponsors/ZSP-10", StringComparison.Ordinal));
 
-        // …carrying the LinkedIn URL into company_social_pages.linkedin (the §41b fill).
-        Assert.True(root.TryGetProperty("company_social_pages", out var social));
-        Assert.Equal(
-            "https://linkedin.com/company/ten",
-            social.GetProperty("linkedin").GetString());
-
-        // EMAIL SAFETY (§41a): the contact email was unchanged, so the PUT must NOT carry a
-        // contact.email (a no-op resend would burn one of Zoho's 3 allowed email updates).
-        if (root.TryGetProperty("contact", out var contact))
-            Assert.False(contact.TryGetProperty("email", out _),
-                "Unchanged contact email must NOT be re-sent to Zoho.");
+        // 🔒 And nothing anywhere may carry company_social_pages or a contact block on an UPDATE —
+        // §791.3 (Zoho discards social) and §791.5 (his instruction: no contact details on update,
+        // because Zoho hard-caps contact e-mail updates at 3 and a no-op resend burns one).
+        foreach (var put in handler.Calls.Where(c => c.Method == HttpMethod.Put && c.Body is not null))
+        {
+            using var doc = JsonDocument.Parse(put.Body!);
+            Assert.False(doc.RootElement.TryGetProperty("company_social_pages", out _));
+            Assert.False(doc.RootElement.TryGetProperty("contact", out _));
+        }
     }
 }

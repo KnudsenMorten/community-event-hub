@@ -69,8 +69,9 @@ public sealed class JobFeatureGateTests
         // Config is on, but the per-edition gate defaults OFF, so the run must
         // no-op BEFORE _service.ImportAsync — proven by null services not throwing.
         var options = new CommunityHub.Core.Integrations.SessionizeApiOptions { Enabled = true };
+        // §879 — the approval service, alert sender and IConfiguration left this job with the §304
+        // pending-speaker mail, which SpeakersHeldJob now owns.
         var job = new SessionizeImportJob(service: null!, options, db, Gate(db), Audit(db),
-            approval: null!, alerts: null!, config: null!,
             NullLogger<SessionizeImportJob>.Instance);
 
         await job.Run(Timer(), default); // no throw == gate short-circuited
@@ -84,8 +85,9 @@ public sealed class JobFeatureGateTests
         await EnableAsync(db, eventId, "sessionize-import");
 
         var options = new CommunityHub.Core.Integrations.SessionizeApiOptions { Enabled = true };
+        // §879 — the approval service, alert sender and IConfiguration left this job with the §304
+        // pending-speaker mail, which SpeakersHeldJob now owns.
         var job = new SessionizeImportJob(service: null!, options, db, Gate(db), Audit(db),
-            approval: null!, alerts: null!, config: null!,
             NullLogger<SessionizeImportJob>.Instance);
 
         // Enabled ⇒ the run proceeds to the (null) import service and throws —

@@ -73,7 +73,13 @@ public static class SponsorTaskDefinitions
             Title: "Brochures, competition flyer or swags for {{expectedAttendees}} attendee bags",
             Due: new TaskDue.FromConfig("attendeeBagShipment"),
             Reminders: TaskReminderCadence.Standard,
-            Completion: new TaskCompletion.Decision("attendeeBag"),
+            // §687.5 — BOTH gates. The decision records INTENT; the packaging product is what
+            // actually gets their material into the bags. A sponsor who answers "we would like to
+            // contribute" and never buys it has brochures sitting in a box nobody packs, while the
+            // task reads done — the false confidence §687.3 exists to remove. Declining still
+            // completes on its own (§670): there is nothing left to buy.
+            Completion: new TaskCompletion.DecisionAndPurchase(
+                "attendeeBag", "Attendee Bag Packaging"),
             BodyRef: "sponsor/attendee-bag-content",
             IsMandatory: false),
 
@@ -111,11 +117,27 @@ public static class SponsorTaskDefinitions
             Reminders: TaskReminderCadence.Standard,
             Completion: new TaskCompletion.Artefact("sponsorwall"),
             BodyRef: "sponsor/sponsor-wall-design",
-            Upload: new TaskUpload(
-                Subfolder: "SPONSORWALL",
-                Placeholder: "wallFolderUrl",
-                NotifyEmails: new[] { "sb@expertslive.dk", "mok@expertslive.dk" },
-                NotifySubject: "[ELDK27] Sponsor uploaded/updated file by {{companyName}}")),
+            // 🗑 §784.14 — THE `Upload` BLOCK IS RETIRED (operator 2026-08-03).
+            //
+            // *"That tree /Sponsors/Sponsor Upload is retired and shouldn't be pre-created at all.
+            // logos are now placed under /Sponsors/Logo/Web and Sponsors/Logo/Print - that is the
+            // new path. retire the old logic and delete the old folders"*.
+            //
+            // 🔒 This was the LAST definition still declaring a `Subfolder`, and it is what drove
+            // `ProvisionUploadFoldersAsync` to create `{Company}/SPONSORWALL` under the retired root
+            // on every order pull — the empty folders he found beneath each exhibitor. With no
+            // upload definitions left, that loop now has nothing to create.
+            //
+            // ⚠️ The TASK is unchanged and still artefact-backed (`Artefact("sponsorwall")`) — there
+            // is still no manual tick, which §603 added because a sponsor once closed this task with
+            // no artwork uploaded. What changed is WHERE the artwork lands: since §783.4 it goes
+            // through the wizard into Sponsors/Logo/…, which writes a `wall` upload AUDIT row. Both
+            // completion checks read that audit (see SponsorOrderPullService +
+            // SponsorDeliverablesService), so retiring the folder does not retire the evidence.
+            //
+            // 🔒 DO NOT reintroduce a `Subfolder` here to "fix" a missing folder link. The folder is
+            // gone on purpose; a task that points at it would send sponsors somewhere deleted.
+            Upload: null),
 
         new TaskDefinition(
             Key: "sponsor.booth-layout",

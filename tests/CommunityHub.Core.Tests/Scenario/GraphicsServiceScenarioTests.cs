@@ -50,61 +50,36 @@ public sealed class GraphicsServiceScenarioTests
             store ?? new FakeFileStore(),
             fetcher ?? new FakePictureFetcher(null),
             share ?? new DraftOnlySocialShareGateway(),
-            Microsoft.Extensions.Options.Options.Create(spOptions ?? new GraphicsSharePointOptions()));
+            Microsoft.Extensions.Options.Options.Create(spOptions ?? new GraphicsSharePointOptions()), TestDocLibrary.Resolver());
 
     // ---- GENERATE: composites a PNG, stored, status Generated (not released) ----
 
+
+
+    // ---- RELEASE MECHANISM: an UNRELEASED row is invisible until released ----
+
+    /// <summary>
+    /// ⚠️ <b>This is no longer a gate that new artwork passes through.</b> §784.12(a) retired the
+    /// review gate: speaker-facing graphics are created <c>Released</c>
+    /// (<see cref="GraphicsService.InitialStatusFor"/>), so nothing the engine or the SharePoint
+    /// pull writes reaches this state any more.
+    ///
+    /// <para>It is kept because the RELEASE MECHANISM is still live — it is what
+    /// <c>ReleaseAllGeneratedAsync</c> uses to clear the pre-§784.12(a) BACKLOG, and this test is
+    /// what proves an unreleased row is genuinely invisible to the speaker until it runs. The row
+    /// is planted directly (not through the service) precisely because the service will not
+    /// produce one.</para>
+    /// </summary>
     [Fact]
-    public async Task Generate_speaker_graphic_stores_a_png_and_is_not_released()
-    {
-        using var db = ScenarioFixture.NewDb();
-        var seed = await ScenarioSeed.SeedAsync(db);
-        var store = new FakeFileStore();
-        var svc = NewService(db, store);
-
-        var asset = await svc.GenerateSpeakerGraphicAsync(
-            seed.EventId, seed.SpeakerOneId, Template(), Photo(), "Session Speaker One");
-
-        // A row exists, GENERATED (the gate) — never auto-released.
-        Assert.Equal(GraphicAssetType.Speaker, asset.Type);
-        Assert.Equal(GraphicAssetStatus.Generated, asset.Status);
-        Assert.Null(asset.ReleasedAt);
-
-        // The store received PNG bytes for the stable, key-derived path.
-        Assert.Equal(GraphicStableKey.ForSpeaker(seed.SpeakerOneId), asset.StableKey);
-        var write = Assert.Single(store.Writes);
-        Assert.Equal("Speakers/speaker-" + seed.SpeakerOneId + ".png", write.Path);
-        Assert.True(IsPng(write.Content), "stored content must be a PNG");
-        Assert.Equal(GraphicCompositor.PngContentType, write.ContentType);
-    }
-
-    [Fact]
-    public async Task Regenerate_upserts_by_stable_key_no_duplicate_row()
+    public async Task An_unreleased_legacy_row_is_hidden_from_the_speaker_until_it_is_released()
     {
         using var db = ScenarioFixture.NewDb();
         var seed = await ScenarioSeed.SeedAsync(db);
         var svc = NewService(db);
 
-        await svc.GenerateSpeakerGraphicAsync(seed.EventId, seed.SpeakerOneId, Template(), Photo(), "One");
-        await svc.GenerateSpeakerGraphicAsync(seed.EventId, seed.SpeakerOneId, Template(), Photo(), "One v2");
-
-        var rows = await db.GraphicAssets
-            .Where(g => g.EventId == seed.EventId && g.Type == GraphicAssetType.Speaker)
-            .ToListAsync();
-        Assert.Single(rows); // upsert by stable key, not a second row
-    }
-
-    // ---- RELEASE GATE: speaker sees nothing until released ------------------
-
-    [Fact]
-    public async Task Release_gate_hides_graphic_from_speaker_until_released()
-    {
-        using var db = ScenarioFixture.NewDb();
-        var seed = await ScenarioSeed.SeedAsync(db);
-        var svc = NewService(db);
-
-        var asset = await svc.GenerateSpeakerGraphicAsync(
-            seed.EventId, seed.SpeakerOneId, Template(), Photo(), "One");
+        var asset = await SeedGraphicAsync(
+            db, seed.EventId, GraphicStableKey.ForSpeaker(seed.SpeakerOneId),
+            GraphicAssetType.Speaker, participantId: seed.SpeakerOneId);
 
         // Before release: the speaker's visible list is empty.
         var before = await svc.GetSpeakerVisibleAsync(seed.EventId, seed.SpeakerOneId);
@@ -133,8 +108,9 @@ public sealed class GraphicsServiceScenarioTests
         var svc = NewService(db);
 
         // Speaker two's graphic, released.
-        var other = await svc.GenerateSpeakerGraphicAsync(
-            seed.EventId, seed.SpeakerTwoId, Template(), Photo(), "Two");
+        var other = await SeedGraphicAsync(
+            db, seed.EventId, GraphicStableKey.ForSpeaker(seed.SpeakerTwoId),
+            GraphicAssetType.Speaker, participantId: seed.SpeakerTwoId);
         await svc.ReleaseAsync(seed.EventId, other.Id, "organizer@expertslive.dk");
 
         // Speaker one sees nothing belonging to speaker two.
@@ -152,8 +128,11 @@ public sealed class GraphicsServiceScenarioTests
         var store = new FakeFileStore();
         var svc = NewService(db, store);
 
-        var asset = await svc.GenerateSpeakerGraphicAsync(
-            seed.EventId, seed.SpeakerOneId, Template(), Photo(), "One");
+        // A SESSION-type row: the overrule path resolves its folder through the registry, which
+        // is what this test is really about — the link surviving a replacement.
+        var asset = await SeedGraphicAsync(
+            db, seed.EventId, GraphicStableKey.ForSessionGraphic(4242),
+            GraphicAssetType.Session, sessionId: 4242);
 
         var keyBefore = asset.StableKey;
         var pathBefore = asset.SharePointPath;
@@ -175,22 +154,6 @@ public sealed class GraphicsServiceScenarioTests
         Assert.Equal(pathBefore, store.Writes[^1].Path);
     }
 
-    [Fact]
-    public async Task Regenerate_does_not_clobber_an_organizer_overrule()
-    {
-        using var db = ScenarioFixture.NewDb();
-        var seed = await ScenarioSeed.SeedAsync(db);
-        var svc = NewService(db);
-
-        var asset = await svc.GenerateSpeakerGraphicAsync(
-            seed.EventId, seed.SpeakerOneId, Template(), Photo(), "One");
-        await svc.OverruleAsync(seed.EventId, asset.Id, MakePng(600, 600, new Rgba32(255, 0, 0)));
-
-        // A benign re-run must leave the human's replacement in place.
-        var afterRegen = await svc.GenerateSpeakerGraphicAsync(
-            seed.EventId, seed.SpeakerOneId, Template(), Photo(), "One");
-        Assert.True(afterRegen.IsOrganizerOverridden);
-    }
 
     // ---- SPONSOR graphics are INTERNAL-ONLY --------------------------------
 
@@ -201,8 +164,9 @@ public sealed class GraphicsServiceScenarioTests
         var seed = await ScenarioSeed.SeedAsync(db);
         var svc = NewService(db);
 
-        var sponsor = await svc.GenerateSponsorGraphicAsync(
-            seed.EventId, ScenarioSeed.SponsorCompanyId, Template(), Logo());
+        var sponsor = await SeedGraphicAsync(
+            db, seed.EventId, GraphicStableKey.ForSponsor(ScenarioSeed.SponsorCompanyId),
+            GraphicAssetType.Sponsor, sponsorCompanyId: ScenarioSeed.SponsorCompanyId);
         // Even if an organizer "releases" it, the sponsor surface stays empty.
         await svc.ReleaseAsync(seed.EventId, sponsor.Id, "organizer@expertslive.dk");
 
@@ -222,7 +186,9 @@ public sealed class GraphicsServiceScenarioTests
         var seed = await ScenarioSeed.SeedAsync(db);
         var svc = NewService(db);
 
-        await svc.GenerateSponsorGraphicAsync(seed.EventId, ScenarioSeed.SponsorCompanyId, Template(), Logo());
+        await SeedGraphicAsync(
+            db, seed.EventId, GraphicStableKey.ForSponsor(ScenarioSeed.SponsorCompanyId),
+            GraphicAssetType.Sponsor, sponsorCompanyId: ScenarioSeed.SponsorCompanyId);
         var speakerQueue = await svc.GetReviewQueueAsync(seed.EventId, GraphicAssetType.Speaker);
         Assert.DoesNotContain(speakerQueue, g => g.Type == GraphicAssetType.Sponsor);
     }
@@ -264,59 +230,50 @@ public sealed class GraphicsServiceScenarioTests
 
     // ---- SESSIONIZE picture: fetched DOWN + stored on SharePoint -----------
 
-    [Fact]
-    public async Task Sessionize_picture_is_fetched_down_and_stored_on_sharepoint()
-    {
-        using var db = ScenarioFixture.NewDb();
-        var seed = await ScenarioSeed.SeedAsync(db);
-        var store = new FakeFileStore();
-        var bytes = MakePng(64, 64, new Rgba32(1, 2, 3));
-        var fetcher = new FakePictureFetcher(new FetchedImage(bytes, "image/png"));
-        var svc = NewService(db, store, fetcher);
 
-        var stored = await svc.FetchAndStoreSpeakerPictureAsync(
-            seed.EventId, seed.SpeakerOneId, "https://sessionize.example.test/pic.png");
-
-        Assert.NotNull(stored);
-        // The bytes (not the URL) were stored on SharePoint under a stable path.
-        var write = Assert.Single(store.Writes);
-        Assert.Equal("Pictures/speaker-" + seed.SpeakerOneId + ".png", write.Path);
-        Assert.Equal(bytes, write.Content);
-    }
-
-    [Fact]
-    public async Task Sessionize_picture_missing_url_stores_nothing()
-    {
-        using var db = ScenarioFixture.NewDb();
-        var seed = await ScenarioSeed.SeedAsync(db);
-        var store = new FakeFileStore();
-        var fetcher = new FakePictureFetcher(null); // nothing fetched
-        var svc = NewService(db, store, fetcher);
-
-        var stored = await svc.FetchAndStoreSpeakerPictureAsync(seed.EventId, seed.SpeakerOneId, null);
-
-        Assert.Null(stored);
-        Assert.Empty(store.Writes);
-    }
 
     // ---- NULL store: nothing faked, but the engine still upserts the row ----
 
-    [Fact]
-    public async Task Null_store_default_makes_no_call_but_still_records_the_intended_path()
+
+    // §768 — the pre-§767 compositor generators are gone. These tests are about the GATE, the
+    // OVERRULE contract and the visibility queries, not about how bytes were composed, so they seed
+    // the row directly. The generate-and-store behaviour they used to piggy-back on is covered
+    // against the LIVE generators in SoMePhase2GraphicsScenarioTests.
+    private static async Task<GraphicAsset> SeedGraphicAsync(
+        CommunityHubDbContext db, int eventId, string stableKey, GraphicAssetType type,
+        int? participantId = null, int? sessionId = null, string? sponsorCompanyId = null)
     {
-        using var db = ScenarioFixture.NewDb();
-        var seed = await ScenarioSeed.SeedAsync(db);
-        // The Null store throws if StoreAsync is called -> proves no fake call.
-        var svc = NewService(db, new NullSharePointFileStore());
-
-        var asset = await svc.GenerateSpeakerGraphicAsync(
-            seed.EventId, seed.SpeakerOneId, Template(), Photo(), "One");
-
-        Assert.Equal(GraphicAssetStatus.Generated, asset.Status);
-        Assert.Equal("Speakers/speaker-" + seed.SpeakerOneId + ".png", asset.SharePointPath);
-        Assert.Null(asset.SharePointUrl); // no live store -> no URL, nothing faked
+        var fileName = GraphicStableKey.FileName(stableKey);
+        // 🔑 Seed the path the REGISTRY would produce. "The link never breaks" can only be
+        // demonstrated if the stored path already matches what the overrule recomputes — an
+        // invented path would fail the assertion for the wrong reason.
+        var folder = type switch
+        {
+            GraphicAssetType.Session => TestDocLibrary.PathFor(
+                CommunityHub.Core.Integrations.DocLibrary.DocLibraryPaths.SpeakerSessionGraphics),
+            GraphicAssetType.Sponsor => TestDocLibrary.PathFor(
+                CommunityHub.Core.Integrations.DocLibrary.DocLibraryPaths.SponsorGraphicsSponsors),
+            _ => "Speakers",   // a retired type — the overrule's legacy fallback folder
+        };
+        var path = $"{folder}/{fileName}";
+        var asset = new GraphicAsset
+        {
+            EventId = eventId,
+            Type = type,
+            StableKey = stableKey,
+            ParticipantId = participantId,
+            SessionId = sessionId,
+            SponsorCompanyId = sponsorCompanyId,
+            Status = GraphicAssetStatus.Generated,   // THE GATE — never seeded as released
+            FileName = fileName,
+            SharePointPath = path,
+            SharePointUrl = $"https://store.example.test/{path}",
+            StorageItemId = "item-" + path,
+        };
+        db.GraphicAssets.Add(asset);
+        await db.SaveChangesAsync();
+        return asset;
     }
-
     // ---- helpers -----------------------------------------------------------
 
     private static bool IsPng(byte[] b) =>
@@ -348,8 +305,14 @@ public sealed class GraphicsServiceScenarioTests
         public Task<byte[]?> DownloadAsync(string itemId, CancellationToken ct = default) =>
             Task.FromResult<byte[]?>(null);
         public Task<StoredFile> UploadToFolderAsync(
-            string relativeFolder, string fileName, byte[] content, string contentType, CancellationToken ct = default) =>
-            Task.FromResult(new StoredFile($"{relativeFolder}/{fileName}", $"https://store.example.test/{relativeFolder}/{fileName}", "item"));
+            string relativeFolder, string fileName, byte[] content, string contentType, CancellationToken ct = default)
+        {
+            // §768: generation AND overrule both write through this method now, so it must RECORD.
+            // A fake that answers but does not record makes write assertions pass vacuously.
+            var path = $"{relativeFolder}/{fileName}";
+            Writes.Add((path, content, contentType));
+            return Task.FromResult(new StoredFile(path, $"https://store.example.test/{path}", "item-" + path));
+        }
         public Task DeleteFromFolderAsync(string relativeFolder, string fileName, CancellationToken ct = default) => Task.CompletedTask;
     }
 

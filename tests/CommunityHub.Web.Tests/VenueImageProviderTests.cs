@@ -17,19 +17,22 @@ namespace CommunityHub.Web.Tests;
 /// </summary>
 public sealed class VenueImageProviderTests
 {
-    private const string Root = "General/Events/ELDK 2027/EventHub/Venue";
+    // §768: the venue root resolves from the DocLibrary registry.
+    private static readonly string Root = TestDocLibrary.PathFor(
+        CommunityHub.Core.Integrations.DocLibrary.DocLibraryPaths.VenueRoot);
 
-    private static VenueImageService NewService(FakeStore store, string root = Root) =>
+    private static VenueImageService NewService(FakeStore store, string? root = null) =>
         new(store,
             Options.Create(new GraphicsSharePointOptions
             {
                 Enabled = true,
                 SiteUrl = "https://contoso.sharepoint.example.test/sites/eldk",
-                VenueRootFolderPath = root,
-            }),
-            new MemoryCache(new MemoryCacheOptions()));
 
-    private static (VenueImageProvider provider, string webRoot) NewProvider(FakeStore store, string root = Root)
+            }),
+            new MemoryCache(new MemoryCacheOptions()),
+            TestDocLibrary.Resolver(root == string.Empty ? string.Empty : TestDocLibrary.Root));
+
+    private static (VenueImageProvider provider, string webRoot) NewProvider(FakeStore store, string? root = null)
     {
         var webRoot = Path.Combine(Path.GetTempPath(), "ceh-venue-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(webRoot);

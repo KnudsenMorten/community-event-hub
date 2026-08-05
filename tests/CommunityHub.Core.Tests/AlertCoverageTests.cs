@@ -79,7 +79,13 @@ public sealed class AlertCoverageTests
     /// </summary>
     private static readonly Dictionary<string, string> RareCadenceByDesign = new(StringComparer.Ordinal)
     {
-        ["SessionPushPilotJob"] = "Annual cron '0 0 0 1 1 *' — a deliberately inert pilot hook.",
+        // ⚰️ §878 — "SessionPushPilotJob" WAS HERE and is RETIRED (operator 2026-08-05: *"i have no
+        // idea what this is doing … i have a feeling it should be deleted (not used)"*). He is
+        // right: it was hard-guarded off behind StageTwoPilot:Allowed, parked on an annual cron so
+        // it never fired, and its purpose — pushing one session to Backstage to prove the path —
+        // has been served by the real SessionBackstagePushJob plus "Run now" since stage-2 go-live.
+        // Its health marker was deleted in the same change (§634: retiring a job leaves an orphan
+        // the watchdog reports). Do NOT re-add it.
 
         // Found by THIS TEST on its first run, which is the point of writing it. The annual cron is
         // parking, not a schedule: §252 F1 hard-guarded Run() on EnableEmailFeatures:Allowed so the
@@ -141,7 +147,12 @@ public sealed class AlertCoverageTests
         // (BackstageSyncJob was here until §641 RETIRED it — a job with no [Function] attribute
         //  cannot run, so it has nothing to report and must not be declared.)
         "ErpSyncCustomerContactJob",    // feature off / not configured ⇒ ERP and webshop drift apart
-        "SponsorProvisioningStallJob",  // no active edition ⇒ stalled provisioning goes undetected
+        // (SponsorProvisioningStallJob was here until §819 RETIRED it — same rule as BackstageSyncJob
+        //  above: a job that no longer exists has nothing to report and must not be declared.)
+        // §824.21 — the SoMe announcement planner. Instrumented from birth: with no active edition
+        // it plans nothing, and the only symptom would be an empty queue nobody was expecting to be
+        // full — an absence, which is what nobody notices.
+        "SoMeScheduleJob",
         "SponsorWelcomeReconcileJob",   // welcome-email off ⇒ new sponsor contacts never welcomed
         "WelcomeReconcileJob",          // welcome-email off ⇒ sign-ups accumulate unwelcomed
         // §640 — the new scheduled sponsor reconcile. Instrumented from birth, so the job created
@@ -149,6 +160,58 @@ public sealed class AlertCoverageTests
         "SponsorZohoReconcileJob",
         // §655 — the failed-mail retry. Instrumented from birth for the same reason.
         "FailedMailRetryJob",
+        // §746 — the Get-Started completion sweep. It needs this more than most: it exists BECAUSE
+        // a completion notice failed silently for three people. If its switch is off, that must be
+        // visible on the Jobs page rather than looking like "nobody has finished yet".
+        "GetStartedCompletionSweepJob",
+        // §750 — the evaluation report publisher. Instrumented from birth, and it needs this more
+        // than any job so far: THREE independent things switch it off (the feature, the SharePoint
+        // folder, and the mail's ring row), and each leaves the pipeline running green while sending
+        // nothing. "No reports have gone out" and "no session has settled yet" are indistinguishable
+        // unless the job says which.
+        "EvaluationReportPublishJob",
+        // §754 — the signage agenda mirror. Instrumented from birth, and its silent-failure mode is
+        // the most public one in the product: when this stops, the screens keep displaying the last
+        // agenda they were given. That is the DESIGNED behaviour on a failed pull — which is exactly
+        // why it must be reported, since a wall showing yesterday's rooms looks entirely healthy.
+        "SignageAgendaSyncJob",
+        // §765/§879 — the two organizer-review chases, split from one mail. Instrumented from birth
+        // for the reason they exist: a speaker held on a missing category blocks the entire Zoho
+        // flow, and the failure mode is SILENCE. "Nothing is waiting", "the set has not changed" and
+        // "the feature is switched off" look identical from an inbox, so each job says which on the
+        // Jobs page.
+        "SpeakersHeldJob",
+        "VolunteersAwaitingReviewJob",
+        // §764 — the speaker-photo archive. Its whole failure mode is a folder that quietly does not
+        // fill up: on DEV the write guard blocks it by design, and an unconfigured folder looks
+        // identical. It says which, so "no photos appeared" is never a mystery.
+        "SpeakerPhotoArchiveJob",
+        // §6.4 — the logistics files. The same failure shape with higher stakes: an unwritable
+        // library means the venue's spreadsheets simply never appear, and "the folder is empty"
+        // reads identically to "nothing changed today". It reports which one it is.
+        "LogisticsFilesJob",
+        // §6.5 — the post-event survey summaries. This job sends NO mail by requirement, so the
+        // library folder is the only place its work is visible at all. An empty §3.4 folder reads
+        // identically as "nobody has answered the survey yet" and "this host cannot write the
+        // library" — and the first is a fact about the event while the second is a broken job.
+        "SurveySummaryFilesJob",
+        // §6.6 — the post-event consolidation. It is DELIBERATELY idle for most of its life, which
+        // is precisely why it must say so: "the event has not ended yet" and "this job is broken"
+        // are the same silence otherwise, and the one time it matters is the week everybody is
+        // waiting for the results.
+        "EvaluationConsolidationJob",
+        // §786 — the webshop→e-conomic draft invoicing. Instrumented from birth, and its idle state
+        // is UNUSUAL: for as long as the operator's scheduled PowerShell script still owns this,
+        // "switched off" is the CORRECT state, not a fault. Without the job saying so, a reader on
+        // the Jobs page cannot tell a deliberate pre-cutover pause from an invoicing run that has
+        // silently stopped billing sponsors — and those two look identical from an empty draft list.
+        "WebshopInvoiceJob",
+        // §787 — the coupon→e-conomic draft invoicing. It has TWO idle states and they mean opposite
+        // things, which is exactly why it must name the one it is in: the feature switch off ("not
+        // turned on yet") versus Invoicing:DryRun true ("running, composing real invoices, writing
+        // nothing"). An empty draft list looks identical from outside, and a reader who cannot tell
+        // them apart will either wait for invoices that will never come or assume it is broken.
+        "CouponInvoiceJob",
     };
 
     [Fact]
@@ -211,13 +274,21 @@ public sealed class AlertCoverageTests
             new[] { "535 auth", "535 auth", "535 auth" }).IsDown);
     }
 
+    // ⚠️ §784.15 — the JOBS host registers its typed HttpClients in JobsServiceRegistration.cs, not
+    // in Program.cs. They were moved so JobDependenciesResolveTests could build that container for
+    // real; this scan is by SOURCE TEXT, so it has to be pointed at the file that now holds them.
+    // A path that no longer contains any registration would make this test pass by finding nothing
+    // to complain about — so the file must be the one where AddHttpClient actually lives.
     [Theory]
-    [InlineData("src/CommunityHub.Jobs/Program.cs")]
+    [InlineData("src/CommunityHub.Jobs/JobsServiceRegistration.cs")]
     [InlineData("src/CommunityHub/Program.cs")]
     public void Every_named_integration_has_a_credential_alert_registered_in_BOTH_hosts(string relative)
     {
         var root = RepoRoot();
         var source = File.ReadAllText(Path.Combine(root, relative));
+
+        // Guard against the failure mode above: a registration file with no registrations in it.
+        Assert.Contains("AddCredentialFailureAlert(", source, StringComparison.Ordinal);
 
         var missing = IntegrationsNeedingCredentialAlerts
             .Where(i => !source.Contains($"AddCredentialFailureAlert(\"{i}\")", StringComparison.Ordinal))
@@ -251,6 +322,20 @@ public sealed class AlertCoverageTests
         var allowedInPlatform = new[]
         {
             "JobSilenceAlertJob", "WelcomeGrantPruneJob", "AuditPurgeJob",
+            // §746 — genuinely hub-internal: it watches CEH's own wizard state and mails the
+            // operator. No external system is involved, so Platform is the honest group rather
+            // than a forgotten argument.
+            "GetStartedCompletionSweepJob",
+            // §750 — hub-internal too. It reads CEH's own responses, renders CEH's own report and
+            // mails CEH's own speakers. SharePoint is where the file LANDS, not a system this
+            // synchronises with, so Platform is the honest group rather than a forgotten argument.
+            "EvaluationReportPublishJob",
+            // §765/§879 — hub-internal by the same test. They count CEH's own held speakers and
+            // CEH's own pre-selection queue, and mail CEH's own ops mailbox. Zoho is what a held
+            // speaker is blocked FROM, not a system either job talks to, so Platform is the honest
+            // group rather than a forgotten argument.
+            "SpeakersHeldJob",
+            "VolunteersAwaitingReviewJob",
         };
 
         var undeclared = JobCatalog.All

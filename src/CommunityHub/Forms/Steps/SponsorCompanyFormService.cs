@@ -34,11 +34,13 @@ public sealed class SponsorCompanyModel
 /// </summary>
 public sealed class SponsorCompanyFormService : IWizardFormService
 {
-    // Mirror CompanyDetailsModel's limits so the inline step + page validate identically.
-    private const int MaxOverview = 1000;
-    private const int MaxShort    = 80;
-    private const int MaxSocial   = 600;
-    private const int MaxUrl      = 400;
+    // §802.3 — Zoho's MEASURED limits (§801.2), from the one shared place. This step and
+    // CompanyDetailsModel each carried their own copy of these numbers; "mirror them" was a comment,
+    // not a mechanism, and the sync would have made a fourth copy.
+    private const int MaxOverview = CommunityHub.Core.Integrations.ZohoExhibitorLimits.Overview;
+    private const int MaxShort    = CommunityHub.Core.Integrations.ZohoExhibitorLimits.ShortDescription;
+    private const int MaxSocial   = CommunityHub.Core.Integrations.ZohoExhibitorLimits.SocialBrandingText;
+    private const int MaxUrl      = CommunityHub.Core.Integrations.ZohoExhibitorLimits.Url;
 
     private readonly CommunityHubDbContext _db;
     private readonly TimeProvider _clock;
@@ -137,8 +139,12 @@ public sealed class SponsorCompanyFormService : IWizardFormService
         return Uri.TryCreate(v, UriKind.Absolute, out _) ? null : $"{label} is not a valid URL.";
     }
 
+    // §802.1 — same refusal, same words, same numbers as the page: the sponsor is told how many
+    // characters they have and how many to remove, and the save is blocked until they do.
     private static string? ValidateLen(string label, string? value, int max) =>
-        (value?.Length ?? 0) > max ? $"{label} must be {max} characters or fewer." : null;
+        CommunityHub.Core.Integrations.ZohoExhibitorLimits.IsTooLong(value, max)
+            ? CommunityHub.Core.Integrations.ZohoExhibitorLimits.TooLongMessage(label, value, max)
+            : null;
 
     private static string? NormaliseOrNull(string? s) =>
         string.IsNullOrWhiteSpace(s) ? null : s.Trim();

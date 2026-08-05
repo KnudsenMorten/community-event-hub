@@ -1,0 +1,70 @@
+@page
+@model CommunityHub.Pages.Sponsor.AnnouncementsModel
+@{
+    ViewData["Title"] = "Social media announcements";
+}
+
+<div class="card">
+    <h1>Social media announcements</h1>
+    <p class="muted">
+        The posts we will publish about you on LinkedIn — what they say, and when they run.
+    </p>
+
+    @if (Model.AccessDenied)
+    {
+        <p class="error">This page is for sponsors.</p>
+    }
+    else if (Model.NoCompanyLink)
+    {
+        <p class="error">Your account is not linked to a sponsor company yet, so we cannot show your posts.</p>
+    }
+    else if (Model.Announcements is { } a)
+    {
+        @if (a.Total == 0)
+        {
+            @* 🔒 §834.1 — approved-only. "Nothing approved YET" is the honest phrasing: posts may
+               well be planned already, and telling a sponsor "there are none" would be wrong. *@
+            <p class="muted">
+                Nothing is scheduled for you yet. Posts appear here once the organizers have approved
+                them — check back closer to the event.
+            </p>
+        }
+        else
+        {
+            <p><strong>@a.Total post(s)</strong> scheduled about you.</p>
+        }
+    }
+</div>
+
+@if (Model.Announcements is { } ann && ann.Total > 0)
+{
+    <div class="card">
+        <h2>Your company</h2>
+        <p class="muted">Posts about your company on its own.</p>
+        <partial name="_AnnouncementList" model="ann.Company" />
+    </div>
+
+    <div class="card">
+        <h2>Your sponsor category</h2>
+        <p class="muted">Posts about your tier, naming every sponsor in it.</p>
+        <partial name="_AnnouncementList" model="ann.Category" />
+    </div>
+
+    <div class="card">
+        <h2>Your sessions</h2>
+        <p class="muted">Posts about sessions your people are speaking at.</p>
+        <partial name="_AnnouncementList" model="ann.Sessions" />
+
+        @if (ann.HasPurchasedSessions && ann.Sessions.Count == 0)
+        {
+            @* ⚠️ §837 — a §292 purchased session has NO foreign key to the agenda's Sessions table,
+               and matching them by title would be the §767 guess. So when a sponsor has bought a
+               session but no announcement is linked, say so plainly rather than showing an empty
+               box that reads as "you get nothing". *@
+            <p class="muted">
+                You have booked a sponsor session. Its announcement is scheduled once the session is
+                published in the agenda — talk to the organizers if you expected it by now.
+            </p>
+        }
+    </div>
+}

@@ -15,9 +15,13 @@ namespace CommunityHub.Core.Tests;
 /// </summary>
 public class VenueImageServiceTests
 {
-    private const string Root = "General/Events/ELDK 2027/EventHub/Venue";
+    // §768: the venue ROOT resolves from the DocLibrary registry. The slug→subfolder allowlist
+    // stays in code — it is the security boundary, not configuration.
+    private static readonly string Root = TestDocLibrary.PathFor(
+        CommunityHub.Core.Integrations.DocLibrary.DocLibraryPaths.VenueRoot);
 
-    private static VenueImageService NewService(FakeVenueStore store, string root = Root) =>
+    /// <param name="root">Pass <c>""</c> to model an UNCONFIGURED library — the inert case.</param>
+    private static VenueImageService NewService(FakeVenueStore store, string? root = null) =>
         new(store,
             Options.Create(new GraphicsSharePointOptions
             {
@@ -25,7 +29,8 @@ public class VenueImageServiceTests
                 SiteUrl = "https://contoso.sharepoint.example.test/sites/eldk",
                 VenueRootFolderPath = root,
             }),
-            new MemoryCache(new MemoryCacheOptions()));
+            new MemoryCache(new MemoryCacheOptions()),
+            TestDocLibrary.Resolver(root == string.Empty ? string.Empty : TestDocLibrary.Root));
 
     // ---- allowlist ---------------------------------------------------------
 

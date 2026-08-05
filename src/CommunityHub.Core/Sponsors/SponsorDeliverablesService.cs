@@ -81,9 +81,12 @@ public sealed class SponsorDeliverablesService
                            && f.Location.SponsorCompanyId == companyId
                            && f.Location.FolderKey == "SPONSORWALL", ct);
 
+        // §768.14 — the retired "zoho" kind is NOT counted. A deliverables report exists to show
+        // what is genuinely on file; crediting an upload to a folder the product no longer reads
+        // would report a logo delivered while Sponsors/Logo/Web sits empty.
         var logoAudit = await _db.SponsorUploadAudits
             .AnyAsync(a => a.EventId == eventId && a.SponsorCompanyId == companyId
-                           && (a.Kind == "some" || a.Kind == "print" || a.Kind == "zoho"), ct);
+                           && (a.Kind == "some" || a.Kind == "print"), ct);
 
         var wallAudit = await _db.SponsorUploadAudits
             .AnyAsync(a => a.EventId == eventId && a.SponsorCompanyId == companyId && a.Kind == "wall", ct);
@@ -144,8 +147,9 @@ public sealed class SponsorDeliverablesService
             .Where(a => a.EventId == eventId)
             .Select(a => new { a.SponsorCompanyId, a.Kind })
             .ToListAsync(ct);
+        // §768.14 — "zoho" retired; see the per-company query above for why it is not counted.
         var logoCompanies = audits
-            .Where(a => a.Kind is "some" or "print" or "zoho")
+            .Where(a => a.Kind is "some" or "print")
             .Select(a => a.SponsorCompanyId).ToHashSet(StringComparer.Ordinal);
         var wallAuditCompanies = audits
             .Where(a => a.Kind == "wall")

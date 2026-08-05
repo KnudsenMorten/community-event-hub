@@ -10,7 +10,10 @@
         new HubTile("/Organizer/SpeakerReadiness", "Speaker readiness", "Per-speaker \"am I ready?\" rollup — score + what's still missing, lowest readiness first (chase list)."),
         new HubTile("/Organizer/Sessions", Localizer["Nav.OrgSessions"].Value, Localizer["OrgContent.Sessions"].Value),
         new HubTile("/Organizer/SessionQuestions", Localizer["Nav.OrgSessionQuestions"].Value, Localizer["OrgContent.SessionQuestions"].Value),
-        new HubTile("/Organizer/SessionEvaluations", Localizer["Nav.OrgSessionEvaluations"].Value, Localizer["OrgContent.SessionEvaluations"].Value),
+        // §784.7(B)+(C) — the three-way merge lands HERE, in the speaker area, replacing the
+        // Session-evaluations tile. Evaluation results + Evaluation sessions left Setup with it
+        // (operator: they belong with the speaker-facing material, not with platform configuration).
+        new HubTile("/Organizer/SessionFeedback", "Session feedback", "One row per session: its QR code, whether it can collect feedback, its satisfaction index and whether its report has been released."),
         new HubTile("/Organizer/SessionizeImport", Localizer["Nav.OrgSessionizeImport"].Value, Localizer["OrgContent.SessionizeImport"].Value),
         new HubTile("/Organizer/SessionizeEndpointSettings", Localizer["Nav.OrgSessionizeEndpoint"].Value, "Configure the Sessionize API endpoint."),
         new HubTile("/Organizer/SessionSource", "Session source", "Choose the session source (Sessionize / Backstage)."),

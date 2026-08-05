@@ -484,6 +484,41 @@
                                 .Select(d => Localizer[d!.DisplayNameKey].Value));
                         <p class="set-deps">@Localizer["Settings.DependsOn", depNames]</p>
                     }
+                    @* 🔒 §742 (operator 2026-07-31: "it must go to mok@expertslive.dk and i need to
+                       be able to control where it goes and state in settings page"). The switch used
+                       to say THAT it notifies and never WHO it reaches, with the address hard-coded
+                       in C# — a control that does not state what it governs (§694/§698).
+                       Shown ONLY for SendsOpsNotice features, so it can never appear on a switch
+                       that mails nobody. Blank = the built-in ops mailbox, stated explicitly rather
+                       than left as an empty box the reader has to interpret. *@
+                    @if (s.Descriptor.SendsOpsNotice)
+                    {
+                        var target = string.IsNullOrWhiteSpace(s.NotificationRecipientEmail)
+                            ? CommunityHub.Core.Email.EngineAlertSender.Recipient
+                            : s.NotificationRecipientEmail!;
+                        <p class="set-deps">
+                            <strong>Sends to:</strong> @target
+                            @if (string.IsNullOrWhiteSpace(s.NotificationRecipientEmail))
+                            {
+                                <text>(the default ops mailbox)</text>
+                            }
+                        </p>
+                        <form method="post" asp-page-handler="NotificationRecipient" class="set-ring"
+                              style="margin:6px 0 0 12px;">
+                            <input type="hidden" name="key" value="@s.Key" />
+                            <label for="rcpt-@s.Key">Send to</label>
+                            <input id="rcpt-@s.Key" type="email" name="email"
+                                   value="@s.NotificationRecipientEmail"
+                                   placeholder="@CommunityHub.Core.Email.EngineAlertSender.Recipient"
+                                   style="width:260px;padding:4px;font-size:13px;"
+                                   aria-label="Notification recipient for @Localizer[s.Descriptor.DisplayNameKey].Value" />
+                            <button type="submit" class="set-btn">Set</button>
+                            <span class="set-deps" style="display:block;margin-top:4px;">
+                                Leave it empty to use the default ops mailbox
+                                (@CommunityHub.Core.Email.EngineAlertSender.Recipient).
+                            </span>
+                        </form>
+                    }
                 </div>
                 <div class="set-action">
                     <form method="post" asp-page-handler="Toggle">
@@ -670,6 +705,10 @@
                                     @CommunityHub.Branding.RoleDisplay.Name(rowRole)</strong> &mdash; it is filed
                                 under @CommunityHub.Core.Email.EmailTemplateCatalog.AudienceLabel(t.Audience),
                                 where its all-roles ring and the full per-role list live.
+                                @* §881 — but the RING and the CADENCE for THIS role are both set right here,
+                                   so the sentence no longer sends him somewhere else for a control. *@
+                                The ring <em>and</em> the repeat interval for
+                                @CommunityHub.Branding.RoleDisplay.Name(rowRole) are set on this row.
                             </p>
                             <p class="set-deps" style="color:#334155;">
                                 @CommunityHub.Core.Email.EmailTemplateCatalog.RecipientHint(t.TemplateKey)
@@ -692,6 +731,80 @@
                                         until a ring is chosen here or on the filing home.</text>
                                 }
                             </p>
+
+                            @* 🔑 §881 — THE CADENCE BOX, ON THE CROSS-LISTED ROW TOO. Operator
+                               2026-08-05: *"i need to define the cadence for reminders for get started
+                               pending for sponsor - like this one mentioned under speaker"*. This row
+                               used to carry a sentence explaining that the control lived elsewhere —
+                               which is §878 in a second place: the control for one role and an essay
+                               for another IS the inconsistency he keeps reporting. Same nullable-Role
+                               model as the ring above it, so setting one role never moves another. *@
+                            @if (CommunityHub.Core.Email.EmailTemplateCatalog.IsRecurring(t.TemplateKey))
+                            {
+                                var xOwnCad = Model.CadenceByRole.TryGetValue((t.TemplateKey, rowRole), out var xcv)
+                                    ? (int?)xcv : null;
+                                var xHasOwnCad = Model.CadenceByRole.ContainsKey((t.TemplateKey, rowRole));
+                                var xAllCad = Model.CadenceByTemplate.TryGetValue(t.TemplateKey, out var xac)
+                                    ? xac
+                                    : CommunityHub.Core.Email.EmailTemplateCatalog.DefaultIntervalDaysFor(t.TemplateKey);
+                                var xEffCad = xHasOwnCad ? xOwnCad : xAllCad;
+                                <form method="post" asp-page-handler="MailCadence" class="set-ring"
+                                      style="margin:6px 0 0 12px;">
+                                    <input type="hidden" name="templateKey" value="@t.TemplateKey" />
+                                    <input type="hidden" name="role" value="@rowRole" />
+                                    <label for="cadr-@t.TemplateKey-@rowRole">Repeat every</label>
+                                    <input id="cadr-@t.TemplateKey-@rowRole" type="number" name="intervalDays"
+                                           min="0" max="365" step="1" value="@(xEffCad ?? 0)"
+                                           style="width:72px;padding:4px;font-size:13px;text-align:right;"
+                                           aria-label="Repeat interval in days for @CommunityHub.Branding.RoleDisplay.Name(rowRole) receiving @t.TemplateKey" />
+                                    <span>days</span>
+                                    <button type="submit" class="set-btn">Set</button>
+                                    <span class="set-deps" style="display:block;margin-top:4px;">
+                                        @if (xHasOwnCad)
+                                        {
+                                            <text><strong>@CommunityHub.Branding.RoleDisplay.Name(rowRole)
+                                                have their own interval</strong> &mdash;
+                                                @if (xEffCad is int xe && xe > 0)
+                                                {
+                                                    <text>every <strong>@xe day(s)</strong>,</text>
+                                                }
+                                                else
+                                                {
+                                                    <text><strong>once only</strong>,</text>
+                                                }
+                                                counted from the LAST send to that person. The other roles are
+                                                unaffected.</text>
+                                        }
+                                        else
+                                        {
+                                            <text>Follows the all-roles interval &mdash;
+                                                @if (xEffCad is int xe2 && xe2 > 0)
+                                                {
+                                                    <text><strong>every @xe2 day(s)</strong></text>
+                                                }
+                                                else
+                                                {
+                                                    <text><strong>once only</strong></text>
+                                                }. Set a number here to give
+                                                @CommunityHub.Branding.RoleDisplay.Name(rowRole) their own.</text>
+                                        }
+                                        <br />
+                                        @CommunityHub.Core.Email.EmailTemplateCatalog.StopsWhenFor(t.TemplateKey)
+                                        <br />0 = send once, never repeat.
+                                    </span>
+                                </form>
+                                @* The way BACK to "follow the all-roles value" — 0 already means "once
+                                   only", so it cannot double as "unset" (§707.11's own trap). *@
+                                @if (xHasOwnCad)
+                                {
+                                    <form method="post" asp-page-handler="MailCadenceFollow" class="set-ring"
+                                          style="margin:2px 0 0 12px;">
+                                        <input type="hidden" name="templateKey" value="@t.TemplateKey" />
+                                        <input type="hidden" name="role" value="@rowRole" />
+                                        <button type="submit" class="set-btn">Follow the all-roles interval</button>
+                                    </form>
+                                }
+                            }
                         </div>
                         <div class="set-action">
                             <form method="post" asp-page-handler="TemplateRoleRing" class="set-ring">
@@ -890,6 +1003,35 @@
                                     <br />
                                     @CommunityHub.Core.Email.EmailTemplateCatalog.StopsWhenFor(t.TemplateKey)
                                     <br />0 = send once, never repeat.
+                                    @* §881 — say when this number is NOT the whole story. A shared mail
+                                       can now carry a different interval per role, set in that role's own
+                                       section; a box that silently governed only some of its recipients
+                                       would be the §326bx defect. *@
+                                    @{
+                                        var cadReach = CommunityHub.Core.Email.EmailTemplateCatalog
+                                            .RecipientRolesFor(t.TemplateKey);
+                                        var cadOwn = cadReach
+                                            .Where(r => Model.CadenceByRole.ContainsKey((t.TemplateKey, r)))
+                                            .ToList();
+                                    }
+                                    @if (cadReach.Count > 1)
+                                    {
+                                        <br />
+                                        <text>This is the <strong>all-roles</strong> interval for the
+                                            @cadReach.Count roles this mail reaches.</text>
+                                        @if (cadOwn.Count > 0)
+                                        {
+                                            <text> <strong style="color:#b45309;">@string.Join(", ",
+                                                cadOwn.Select(r => CommunityHub.Branding.RoleDisplay.Name(r)))
+                                                have their own interval</strong> and do not follow it &mdash;
+                                                change theirs in their own section.</text>
+                                        }
+                                        else
+                                        {
+                                            <text> Every one of them follows it; give a role its own in that
+                                                role's section.</text>
+                                        }
+                                    }
                                 </span>
                             </form>
                         }
@@ -937,7 +1079,19 @@
                 @if (Model.RoleRingsFor(t).Count > 0)
                 {
                     var roleRings = Model.RoleRingsFor(t);
-                    <details class="set-adv" style="margin:0 0 12px 12px;">
+                    @* 🔒 §723 — OPEN BY DEFAULT. Operator 2026-07-31: *"bug: these must be expand by
+                       default - i missed the misconfig earlier due to this"*.
+
+                       This is the §721 incident in one line: `welcome-speaker` and `welcome-sponsor`
+                       were set to Ring 3 while the rings that actually governed delivery sat folded
+                       away behind this summary. A per-role ring is not an "advanced" detail — it IS
+                       the audience, and §718 makes this page the authority on audience. An audience
+                       control you have to click to see is one you can be wrong about without knowing.
+
+                       Deliberately unconditional rather than `open` only when a role ring is set:
+                       "no role has its own ring" is exactly as load-bearing a fact as "three do", and
+                       it is the state you cannot spot from a collapsed summary. *@
+                    <details class="set-adv" open style="margin:0 0 12px 12px;">
                         <summary>
                             Per-role rings &mdash; this mail reaches @roleRings.Count roles
                             @if (roleRings.Any(r => r.OwnRing is not null))

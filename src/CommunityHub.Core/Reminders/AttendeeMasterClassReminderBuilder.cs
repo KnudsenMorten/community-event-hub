@@ -65,9 +65,29 @@ public sealed class AttendeeMasterClassReminderBuilder
         // ONCE per run rather than per candidate.
         var intervalDays = _cadence is null
             ? IntervalDays
-            : await _cadence.GetIntervalDaysAsync(eventId, MailKeyName, ct);
+            // §881 — an attendee-only mail, so the recipient role is not in question; passed
+            // explicitly because the signature now carries it ahead of the token.
+            : await _cadence.GetIntervalDaysAsync(eventId, MailKeyName, ParticipantRole.Attendee, ct);
         IReadOnlyDictionary<string, DateOnly> lastSentByOccasion = await EmailReminderCadenceService.LastSentByOccasionAsync(_db, eventId, ReminderTypeName, ct);
 
+        // 🔒 §733.1 — RETIRED, for the same reason as the party chaser. Operator 2026-07-31:
+        // *"get started wizard gets remindes every 14 days. each of the entries dont have due
+        // dates. tasks lives outside of this with due dates"*, and earlier *"if yes, treat them
+        // similar"*.
+        //
+        // Master Class SELECTION is a Get-Started step for a 2-day attendee — it is step 1 of
+        // AttendeeWizardService. So this per-row chase and `getstarted-digest` were chasing the SAME
+        // wizard, both every 14 days, and only the digest links to the step the attendee can see.
+        //
+        // 🔑 Coverage is not lost: the digest runs every 14 days and stops the moment the wizard is
+        // 100% complete, and §732 made the optional steps count as complete so nobody is chased for
+        // something they cannot finish. `pending-master-class-selection` (AttendeeBackstageSyncJob)
+        // also still exists for the ticket-holder who has not chosen.
+        //
+        // Early return rather than deletion — see AttendeePartyReminderBuilder for the same shape.
+        return System.Array.Empty<ReminderMessage>();
+
+#pragma warning disable CS0162 // Unreachable — deliberately preserved; see §733.1 above.
         var key = AttendeeMasterClassTaskSeeder.MasterClassTaskKey + ":";
         var tasks = await _db.Tasks
             .Where(t => t.EventId == eventId
@@ -196,6 +216,7 @@ public sealed class AttendeeMasterClassReminderBuilder
         }
 
         return messages;
+#pragma warning restore CS0162
     }
 
     private const string DefaultSupportEmail = "info@expertslive.dk";

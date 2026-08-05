@@ -27,6 +27,28 @@ public enum GraphicAssetType
     /// but labelled as the track graphic so the speaker can tell the two apart.
     /// </summary>
     Track = 3,
+
+    /// <summary>
+    /// §767 — a per-TRACK GIF BUNDLE: ONE animated file for the whole track, one frame per speaker
+    /// in it. Distinct from <see cref="Track"/>, which is one shared still per speaker.
+    /// </summary>
+    /// <remarks>
+    /// Operator 2026-08-01: <i>"make folder for track speakers and sponsor category sponsor (gif
+    /// bundles)"</i>, and <i>"we start with tracks and category"</i>. Organizer-facing promotion
+    /// material for the event's own channels — it is not per-speaker and is not released to one.
+    /// </remarks>
+    TrackBundle = 4,
+
+    /// <summary>
+    /// §767 — a SPONSOR GROUPING GIF bundle: one frame per sponsor in a tier (platinum, gold, …) or
+    /// in a webshop-derived TYPE (beverage, ice-cream, …).
+    /// </summary>
+    /// <remarks>
+    /// ⚠️ Tier and type are TWO DIFFERENT GROUPINGS over the same sponsors, not one list — a sponsor
+    /// appears in a tier bundle AND in any type bundle it qualifies for. INTERNAL-ONLY, like every
+    /// other sponsor graphic: never shown in the sponsor's own view.
+    /// </remarks>
+    SponsorCategory = 5,
 }
 
 /// <summary>
@@ -134,6 +156,24 @@ public class GraphicAsset
     /// <summary>The file name (stable, derived from the key), e.g. <c>speaker-42.png</c>.</summary>
     public string? FileName { get; set; }
 
+    /// <summary>
+    /// §767 — hash of the INPUTS this graphic was composed from: the speaker set (id, name, photo),
+    /// the session title or track, the sponsor's resolved logo VERSION, and the design version.
+    /// </summary>
+    /// <remarks>
+    /// 🔒 <b>The rebuild is keyed on this, never on "does a graphic exist."</b> Keying on existence
+    /// freezes the first render for ever — the §764.1 defect — so a replaced photo, a new sponsor
+    /// logo version, or a speaker joining or leaving would never reach the artwork.
+    /// <para>The speaker set IS part of the hash, which is what makes <i>"when chg happens like add
+    /// or remove of speaker … they must be build"</i> work by construction, with nothing to
+    /// remember to trigger. The design version is in it too, so locking a new design rebuilds
+    /// everything ONCE instead of splitting the line-up across two looks.</para>
+    /// <para>⚠️ NULL means "unknown inputs", NOT "stale": rows predating §767, and any file PULLED
+    /// from SharePoint or overruled by an organizer. Those are left alone — treating unknown as
+    /// stale would regenerate over the operator's own artwork every fifteen minutes.</para>
+    /// </remarks>
+    public string? InputHash { get; set; }
+
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 
     /// <summary>When the graphic was last (re)generated or overruled.</summary>
@@ -167,9 +207,53 @@ public static class GraphicStableKey
     public static string ForTrack(string trackSlug, int participantId) =>
         $"track:{trackSlug}:speaker:{participantId}";
 
+    /// <summary>
+    /// §767 PHASE 2 — the ONE graphic for a whole session, keyed by session id ALONE.
+    /// </summary>
+    /// <remarks>
+    /// 🔒 Operator 2026-08-01: <i>"should we drop speaker id and have only session id. only
+    /// differentiator and we dont need speaker id"</i> — and he is right. Under the PNG/GIF rule the
+    /// session graphic is ONE file for the whole session (a frame per speaker), so the speaker id in
+    /// the key was never a differentiator: it produced N rows of identical content for an N-speaker
+    /// session. The linked speakers are a LOOKUP, not part of the identity.
+    /// <para>Key <c>session:{id}</c>, file <c>session-12.png</c> (1 speaker) or <c>session-12.gif</c>
+    /// (2+), folder <c>Sessions/</c>. The EXTENSION carries single-vs-multi, which is what lets a
+    /// 1→2-speaker flip UPDATE one graphic rather than create a second one.</para>
+    /// <para>⚠️ A different SHAPE from the legacy per-speaker key <see cref="ForSession"/>
+    /// (<c>session:12:speaker:42</c>), which the SharePoint PULL still writes for operator-uploaded
+    /// artwork. They cannot collide — deliberately, so a human's uploaded file and a generated one
+    /// are never the same row.</para>
+    /// </remarks>
+    public static string ForSessionGraphic(int sessionId) => $"session:{sessionId}";
+
     public static string ForSponsor(string sponsorCompanyId) => $"sponsor:{sponsorCompanyId}";
 
+    /// <summary>§767 — the ONE track graphic, keyed by track slug alone.</summary>
+    /// <remarks>
+    /// 🔒 Operator 2026-08-01: <i>"we dont need word bundle as it is implicit"</i> — a track graphic
+    /// with no speaker in its key IS the whole track, so saying "bundle" adds a word and no meaning.
+    /// Key <c>track:{slug}</c>, file <c>track-security.gif</c>, folder <c>Tracks/</c>.
+    /// <para>⚠️ Distinct from the legacy per-speaker key <c>track:{slug}:speaker:{id}</c> (§158,
+    /// dropped and inert) — different shapes, so they cannot collide.</para>
+    /// </remarks>
+    public static string ForTrackGraphic(string trackSlug) => $"track:{trackSlug}";
+
+    /// <summary>
+    /// §767 — a sponsor grouping bundle. <paramref name="kind"/> separates the two groupings that
+    /// share this key space: <c>tier</c> (platinum, gold, …) and <c>type</c> (beverage, …).
+    /// </summary>
+    /// <remarks>
+    /// ⚠️ The kind is part of the key ON PURPOSE. Without it a tier named the same as a type would
+    /// silently overwrite it — two different bundles, one file, and nobody would see which was lost.
+    /// </remarks>
+    public static string ForSponsorCategory(string kind, string slug) =>
+        $"sponsor-{kind}:{slug}";
+
     /// <summary>The stable, path-safe file name for a key, e.g. <c>speaker-42.png</c>.</summary>
-    public static string FileName(string stableKey) =>
-        stableKey.Replace(':', '-') + ".png";
+    /// <summary>
+    /// The file name for a key. <paramref name="extension"/> carries the §767 PNG-vs-GIF rule:
+    /// a session with 2+ speakers is a GIF, everything else a PNG.
+    /// </summary>
+    public static string FileName(string stableKey, string extension = ".png") =>
+        stableKey.Replace(':', '-') + extension;
 }

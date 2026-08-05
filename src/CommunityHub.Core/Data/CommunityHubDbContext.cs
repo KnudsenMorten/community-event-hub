@@ -137,8 +137,6 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
     /// <summary>§383 — Master Class notification opt-OUTs. A row means UNSUBSCRIBED; absence
     /// means subscribed, which is how "the toggles are ON by default" holds without a backfill.</summary>
     public DbSet<MasterClassSubscription> MasterClassSubscriptions => Set<MasterClassSubscription>();
-    public DbSet<SessionEvaluation> SessionEvaluations => Set<SessionEvaluation>();
-
     /// <summary>Provenance (who/when) for the final per-session evaluation PDFs (§192):
     /// one row per (session, kind) — the Score and Open-feedback files.</summary>
     public DbSet<SessionEvaluationFile> SessionEvaluationFiles => Set<SessionEvaluationFile>();
@@ -163,6 +161,11 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
     public DbSet<SponsorUploadAudit> SponsorUploadAudits => Set<SponsorUploadAudit>();
     public DbSet<SurveyResponse> SurveyResponses => Set<SurveyResponse>();
     public DbSet<SurveyResponsePick> SurveyResponsePicks => Set<SurveyResponsePick>();
+
+    // §6.5 — answers to the RATING / FREE-TEXT / CHOICE questions the post-event
+    // surveys add. The existing preliminary survey writes no rows here, so it is
+    // untouched by their arrival.
+    public DbSet<SurveyResponseAnswer> SurveyResponseAnswers => Set<SurveyResponseAnswer>();
     public DbSet<SurveyState> SurveyStates => Set<SurveyState>();
     public DbSet<SponsorLead> SponsorLeads => Set<SponsorLead>();
     public DbSet<SponsorLeadNotificationPref> SponsorLeadNotificationPrefs => Set<SponsorLeadNotificationPref>();
@@ -172,6 +175,15 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
     public DbSet<AppGameParticipation> AppGameParticipations => Set<AppGameParticipation>();
     public DbSet<ErpCustomerLink> ErpCustomerLinks => Set<ErpCustomerLink>();
     public DbSet<ErpOrderLink> ErpOrderLinks => Set<ErpOrderLink>();
+    // §787 — the per-edition coupon → billing-type → ERP-customer mapping the operator maintains on
+    // /Organizer/CouponInvoicing. Replaces ZohoBackstageCoupons_Invoicing.csv on the VM.
+    public DbSet<CouponInvoicingSetting> CouponInvoicingSettings => Set<CouponInvoicingSetting>();
+
+    /// <summary>§794 — prepaid ticket allocations per coupon per ticket class.</summary>
+    public DbSet<CouponPrepaidAllocation> CouponPrepaidAllocations => Set<CouponPrepaidAllocation>();
+
+    /// <summary>§798.4 — the agreed purchases (top-ups) that make up a prepaid pool.</summary>
+    public DbSet<CouponPrepaidPurchase> CouponPrepaidPurchases => Set<CouponPrepaidPurchase>();
 
     // --- SoMe graphics & SharePoint asset store (REQUIREMENTS §18) -----------
     public DbSet<GraphicAsset> GraphicAssets => Set<GraphicAsset>();
@@ -204,7 +216,16 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
 
     // --- LinkedIn company-page SoMe scheduling queue (REQUIREMENTS §19) -------
     public DbSet<SoMePost> SoMePosts => Set<SoMePost>();
+    /// <summary>§828 — the event-post repo (Type 5 copy), keyed by slug. Imported from his deck.</summary>
+    public DbSet<EventSoMePost> EventSoMePosts => Set<EventSoMePost>();
+    public DbSet<EventSoMePostOccurrence> EventSoMePostOccurrences => Set<EventSoMePostOccurrence>();
+    /// <summary>§842.2 — per-type announcement frequency. A row is an OVERRIDE of the §824.1 default.</summary>
+    public DbSet<SoMeCadenceSetting> SoMeCadenceSettings => Set<SoMeCadenceSetting>();
     public DbSet<SoMeSettings> SoMeSettings => Set<SoMeSettings>();
+
+    /// <summary>§824.2C: per-edition OVERRIDES of the five shipped post templates. A row exists ONLY
+    /// where an edition diverges from <c>SoMeTemplateCatalog</c>; no row means the default is live.</summary>
+    public DbSet<SoMeTemplate> SoMeTemplates => Set<SoMeTemplate>();
 
     // --- Volunteer work structure (Category -> Subcategory -> Task) ----------
     public DbSet<VolunteerCategory> VolunteerCategories => Set<VolunteerCategory>();
@@ -240,6 +261,25 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
     // runtime. No row ⇒ the shipped default applies unchanged. No secrets here.
     public DbSet<ConfigOverride> ConfigOverrides => Set<ConfigOverride>();
 
+    // --- §769 document-library paths, edited on /Organizer/DocLibraryPaths ----
+    // The ONLY override layer over the DocLibraryPaths registry defaults — the
+    // DocLibrary:Paths:* app settings are retired (§769.1 D1). No row ⇒ the
+    // registered default applies, so a fresh install starts correct unseeded.
+    public DbSet<DocLibrarySettingOverride> DocLibrarySettingOverrides =>
+        Set<DocLibrarySettingOverride>();
+
+    // Append-only: who changed which path, when, from what to what. It OUTLIVES
+    // the override row, because "restore default" deletes that row.
+    public DbSet<DocLibrarySettingChange> DocLibrarySettingChanges =>
+        Set<DocLibrarySettingChange>();
+
+    // --- §6.4 logistics: what the last run published, and last mailed ---------
+    // The memory the mail schedule runs on: the publisher is stateless and
+    // compares the content key it is GIVEN, so the previous key lives here.
+    public DbSet<LogisticsFileState> LogisticsFileStates => Set<LogisticsFileState>();
+
+    public DbSet<LogisticsRunSummary> LogisticsRunSummaries => Set<LogisticsRunSummary>();
+
     // --- Per-edition editable email templates (REQUIREMENTS §25h) -------------
     // Override the shipped on-disk templates per edition; the renderer uses the
     // override at send + preview time, else the shipped default.
@@ -260,6 +300,40 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
     // Detected sync changes that need an operator's approve/reject in
     // /Organizer/SyncQueue before they are applied (never auto-applied).
     public DbSet<SyncDelta> SyncDeltas => Set<SyncDelta>();
+
+    // --- SESSION EVALUATION (REQUIREMENTS §743) -------------------------------
+    // The feedback-device fleet + the raw attendee ratings they collect. Built inside
+    // ELDK27 now, designed to be lifted out later — which is why every row is scoped by
+    // EventId and nothing here reads "the current event".
+    public DbSet<Domain.Evaluation.EvaluationApiClient> EvaluationApiClients =>
+        Set<Domain.Evaluation.EvaluationApiClient>();
+    public DbSet<Domain.Evaluation.EvaluationDevice> EvaluationDevices =>
+        Set<Domain.Evaluation.EvaluationDevice>();
+    // §753 — the onboarding queue and the health-telemetry schedule.
+    public DbSet<Domain.Evaluation.EvaluationDeviceProvisionRequest> EvaluationDeviceProvisionRequests =>
+        Set<Domain.Evaluation.EvaluationDeviceProvisionRequest>();
+    public DbSet<Domain.Evaluation.EvaluationTelemetryWindow> EvaluationTelemetryWindows =>
+        Set<Domain.Evaluation.EvaluationTelemetryWindow>();
+    public DbSet<Domain.Evaluation.EvaluationResponse> EvaluationResponses =>
+        Set<Domain.Evaluation.EvaluationResponse>();
+    public DbSet<Domain.Evaluation.EvaluationRoom> EvaluationRooms =>
+        Set<Domain.Evaluation.EvaluationRoom>();
+    public DbSet<Domain.Evaluation.EvaluationSession> EvaluationSessions =>
+        Set<Domain.Evaluation.EvaluationSession>();
+    public DbSet<Domain.Evaluation.EvaluationSessionSpeaker> EvaluationSessionSpeakers =>
+        Set<Domain.Evaluation.EvaluationSessionSpeaker>();
+
+    // --- SIGNAGE: the mirrored Zoho Backstage agenda (REQUIREMENTS §754) ------
+    // Every activity on the event floor — talks, master classes, breaks, registration, lunch,
+    // party — cached from Zoho every 5 minutes for the venue screens. Zoho is the source of
+    // truth; nothing but SignageAgendaSyncService ever writes here.
+    public DbSet<Domain.Signage.AgendaActivity> AgendaActivities =>
+        Set<Domain.Signage.AgendaActivity>();
+
+    // §754 §10 — the per-edition signage controls: the two orientation tokens, the six on/off
+    // switches, the schedule, and the tunable layout/timing values.
+    public DbSet<Domain.Signage.SignageSettings> SignageSettings =>
+        Set<Domain.Signage.SignageSettings>();
 
     // --- AiHelper INTAKE "CEH feed" (REQUIREMENTS §137) -----------------------
     // Bug/feature reports the AiHelper detected + questions users forwarded to the
@@ -937,6 +1011,82 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
             e.HasIndex(x => new { x.EventId, x.HasReconciliationMismatch });
         });
 
+        // --- §787 coupon invoicing rules (operator-maintained mapping) --------
+        b.Entity<CouponInvoicingSetting>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.CouponName).IsRequired().HasMaxLength(200);
+            e.Property(x => x.BillingType).HasConversion<int>();
+            e.Property(x => x.Notes).HasMaxLength(1000);
+            e.Property(x => x.LastUpdatedByEmail).HasMaxLength(320);
+            // §798.1 — the requester (the invoice's Att person). The NUMBER is the identity; the
+            // name is a display copy for when e-conomic cannot be reached.
+            e.Property(x => x.RequesterName).HasMaxLength(200);
+
+            // 🔒 ONE rule per coupon per edition. Two rows for the same coupon would mean the
+            // invoicing sweep bills whichever the query happened to return first — a wrong customer
+            // on a real invoice, chosen at random.
+            e.HasIndex(x => new { x.EventId, x.CouponName }).IsUnique();
+
+            e.HasOne<Event>()
+                .WithMany()
+                .HasForeignKey(x => x.EventId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // --- §794 prepaid coupon allocations (a partner's pool, per ticket class) ---
+        b.Entity<CouponPrepaidAllocation>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.TicketClassId).IsRequired().HasMaxLength(64);
+            e.Property(x => x.TicketClassLabel).HasMaxLength(200);
+            e.Property(x => x.Notes).HasMaxLength(1000);
+            e.Property(x => x.LastUpdatedByEmail).HasMaxLength(320);
+            // §795.1 — the human close (the derived "used in full" is never stored).
+            e.Property(x => x.ClosedByEmail).HasMaxLength(320);
+            e.Property(x => x.ClosedReason).HasMaxLength(500);
+            // ⚰️ §798.4 — the invoice-number columns moved to CouponPrepaidPurchase: a topped-up
+            // pool has one invoice per purchase, and one column could only record one of them.
+
+            // 🔒 ONE allocation per coupon per ticket class. Two rows would mean a partner's pool
+            // depends on which row is read first — and the number this feature exists to publish is
+            // "how many do you have left".
+            e.HasIndex(x => new { x.CouponInvoicingSettingId, x.TicketClassId }).IsUnique();
+
+            e.HasOne(x => x.CouponInvoicingSetting)
+                .WithMany()
+                .HasForeignKey(x => x.CouponInvoicingSettingId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // ⚠️ NO second cascade from Event. Deleting an edition already cascades through the
+            // coupon row above; a second path would give SQL Server multiple cascade paths and the
+            // migration would refuse to apply (the §326 shape).
+            e.HasOne<Event>()
+                .WithMany()
+                .HasForeignKey(x => x.EventId)
+                .OnDelete(DeleteBehavior.NoAction);
+        });
+
+        // --- §798.4 prepaid purchases (the top-ups a pool is the sum of) -----
+        b.Entity<CouponPrepaidPurchase>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.ErpInvoiceNumber).HasMaxLength(60);
+            e.Property(x => x.ErpInvoiceConfirmedByEmail).HasMaxLength(320);
+            e.Property(x => x.CreatedByEmail).HasMaxLength(320);
+            e.Property(x => x.Notes).HasMaxLength(1000);
+
+            // ⚠️ NO unique index here, unlike the pool above: two top-ups of the same size on the
+            // same day are a legitimate pair of agreements, and a uniqueness rule would refuse the
+            // second one at exactly the moment somebody is trying to record real money.
+            e.HasIndex(x => x.CouponPrepaidAllocationId);
+
+            e.HasOne(x => x.Allocation)
+                .WithMany(a => a.Purchases)
+                .HasForeignKey(x => x.CouponPrepaidAllocationId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
         // --- Order (order-level Zoho Backstage mirror, REQUIREMENTS §125) ----
         b.Entity<Order>(e =>
         {
@@ -1021,6 +1171,9 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
             e.HasKey(x => x.Id);
             e.Property(x => x.FunctionName).IsRequired().HasMaxLength(120);
             e.Property(x => x.UpdatedByEmail).HasMaxLength(320);
+            // §879 — a SHA-256 prefix, never free text. Bounded so it can never become a place
+            // someone stores the mail body itself.
+            e.Property(x => x.LastContentHash).HasMaxLength(64);
 
             // One row per FUNCTION — the upsert key the middleware writes through on every
             // invocation. Fleet-wide for the same reason as JobHealthMarker above.
@@ -1461,41 +1614,12 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
                 .HasFilter("[AttendeeId] IS NOT NULL");
         });
 
-        // --- SessionEvaluation (public post-session attendee rating; hub-only) -
-        // A HappyOrNot-style 1–5 rating + optional comment, submitted from a public,
-        // no-login page (reached via the room QR) addressed by the SAME
-        // Session.PublicToken as the ask page. Never shown publicly; aggregated for the
-        // organizer results dashboard (per-session + per-room). One-per-attendee/session
-        // is enforced softly by upserting on a per-session cookie token (VoterKey).
-        b.Entity<SessionEvaluation>(e =>
-        {
-            e.HasKey(x => x.Id);
-            e.Property(x => x.Comment).HasMaxLength(2000);
-            // 64 chars: the per-session cookie token (URL-safe base64 of 32 bytes ≈ 43).
-            e.Property(x => x.VoterKey).HasMaxLength(64);
-            e.Property(x => x.IpHash).HasMaxLength(64);
-
-            e.HasOne(x => x.Event).WithMany()
-                .HasForeignKey(x => x.EventId)
-                .OnDelete(DeleteBehavior.Cascade);
-            e.HasOne(x => x.Session).WithMany()
-                .HasForeignKey(x => x.SessionId)
-                // NoAction (not Cascade): the Event already cascade-deletes the
-                // edition's sessions AND its evaluations, so a second cascade path
-                // would be ambiguous to SQL Server (cf. SessionQuestion).
-                .OnDelete(DeleteBehavior.NoAction);
-
-            // The one-per-attendee/session upsert key: a (session, cookie-token) pair
-            // is unique so a same-device re-rate updates in place. Filtered so the many
-            // NULLs (cookie-less submits) never collide.
-            e.HasIndex(x => new { x.SessionId, x.VoterKey })
-                .IsUnique()
-                .HasFilter("[VoterKey] IS NOT NULL");
-            // Dashboard aggregation: an edition's ratings grouped by session.
-            e.HasIndex(x => new { x.EventId, x.SessionId });
-            // Soft rate-limit lookup by IP hash within an edition.
-            e.HasIndex(x => new { x.EventId, x.IpHash });
-        });
+        // 🗑 §748.1 — the SessionEvaluation entity (HappyOrNot-style 1–5 rating) is GONE, with its
+        // table. §743's four-point forced-choice scale replaced it (§748), and a 1–5 rating and a
+        // 1–4 forced choice are DIFFERENT INSTRUMENTS: they cannot be pooled or averaged, so
+        // leaving a second collectable model in the schema was a standing invitation to a figure
+        // nobody would think to question. The live model is Domain.Evaluation.EvaluationResponse.
+        // ⚠️ SessionEvaluationFile below is a DIFFERENT thing (§192 PDF provenance) and STAYS.
 
         // --- SessionEvaluationFile (final per-session eval PDF provenance, §192) -
         // One row per (session, kind): the Score PDF and the Open-feedback PDF. Records
@@ -1830,6 +1954,26 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
             e.HasIndex(x => new { x.SurveySlug, x.SubmittedAt });
             // Track-distribution aggregation.
             e.HasIndex(x => new { x.SurveySlug, x.SelectedTrackId });
+        });
+
+        // --- §6.5 SurveyResponseAnswer (rating / free text / choice) ----------
+        b.Entity<SurveyResponseAnswer>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.QuestionId).IsRequired().HasMaxLength(80);
+            e.Property(x => x.Kind).HasConversion<int>();
+            // Matches SurveyQuestion.MaxLength's ceiling — the validator refuses anything longer
+            // before it reaches here, so this is a backstop rather than the rule.
+            e.Property(x => x.Text).HasMaxLength(10000);
+            e.Property(x => x.ChoiceIds).HasMaxLength(1000);
+
+            e.HasOne(x => x.Response).WithMany()
+                .HasForeignKey(x => x.SurveyResponseId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // The summary reads "every answer to question X across responses".
+            e.HasIndex(x => new { x.SurveyResponseId, x.QuestionId }).IsUnique();
+            e.HasIndex(x => x.QuestionId);
         });
 
         b.Entity<SurveyResponsePick>(e =>
@@ -2339,10 +2483,31 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
         });
 
         // --- SoMePost (LinkedIn company-page scheduling queue, §19) -----------
+        // --- §824.2C SoMeTemplate: one row per (edition × type) ONLY when overridden ------
+        b.Entity<SoMeTemplate>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Kind).HasConversion<int>();
+            // Same ceiling as a post body: LinkedIn caps a company post at 3000 chars, and a
+            // TEMPLATE is longer than its output only by the braces around its placeholders.
+            e.Property(x => x.Body).HasMaxLength(8000);
+            e.Property(x => x.LastUpdatedByEmail).HasMaxLength(320);
+            // 🔒 One override per type per edition. Without this a double-submit silently creates a
+            // second row and "which template is live" becomes a matter of insertion order.
+            e.HasIndex(x => new { x.EventId, x.Kind }).IsUnique();
+            e.HasOne(x => x.Event).WithMany().HasForeignKey(x => x.EventId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
         b.Entity<SoMePost>(e =>
         {
             e.HasKey(x => x.Id);
             e.Property(x => x.Type).HasConversion<int>();
+            // §824.21 — what an auto-planned post is about. The index is what makes "have I already
+            // planned this?" one lookup per tick instead of a scan of the whole queue.
+            e.Property(x => x.TemplateKind).HasConversion<int?>();
+            e.Property(x => x.SubjectKey).HasMaxLength(256);
+            e.HasIndex(x => new { x.EventId, x.SubjectKey, x.Occurrence });
             e.Property(x => x.Status).HasConversion<int>();
             e.Property(x => x.SponsorCompanyId).HasMaxLength(64);
             // Post bodies: LinkedIn caps a company post at 3000 chars; 8000 is ample.
@@ -2354,6 +2519,11 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
             e.Property(x => x.ExternalPostId).HasMaxLength(200);
             e.Property(x => x.LastError).HasMaxLength(2000);
             e.Property(x => x.LastUpdatedByEmail).HasMaxLength(320);
+            // §853 — bounded like every other e-mail column here, rather than nvarchar(max).
+            e.Property(x => x.DeletedByEmail).HasMaxLength(320);
+            // A deleted post is filtered out of every view and every planner query, so the flag is
+            // indexed alongside the edition it belongs to.
+            e.HasIndex(x => new { x.EventId, x.IsDeleted });
 
             e.HasOne(x => x.Event).WithMany()
                 .HasForeignKey(x => x.EventId)
@@ -2372,6 +2542,63 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
             // The dispatcher's hot query: due, Active, Queued posts for an edition
             // ordered by schedule time (the "social media calendar").
             e.HasIndex(x => new { x.EventId, x.Status, x.IsActive, x.ScheduledAtUtc });
+        });
+
+        // --- §828: the EVENT POST REPO (Type 5 copy, imported from his markdown deck) ----------
+        b.Entity<EventSoMePost>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Slug).HasMaxLength(200).IsRequired();
+            e.Property(x => x.Title).HasMaxLength(500);
+            // Same ceiling as a queued post body — LinkedIn caps a company post at 3000 chars.
+            e.Property(x => x.Body).HasMaxLength(8000);
+            e.Property(x => x.SourceFileName).HasMaxLength(400);
+            e.Property(x => x.LastUpdatedByEmail).HasMaxLength(320);
+
+            // 🔒 §828.1 — THE SLUG IS THE IMPORT KEY, so the database enforces it. Without this a
+            // second import could create a rival row with the same slug and "which post is this
+            // slug?" would come down to insertion order — the exact ambiguity the overwrite rule
+            // exists to prevent. Unique PER EDITION: a later edition may reuse the same slugs.
+            e.HasIndex(x => new { x.EventId, x.Slug }).IsUnique();
+
+            e.HasOne(x => x.Event).WithMany()
+                .HasForeignKey(x => x.EventId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        b.Entity<EventSoMePostOccurrence>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.GraphicFileName).HasMaxLength(400);
+            e.Property(x => x.SourcePhotoFileName).HasMaxLength(400);
+
+            // One row per run of a post. Unique on (post, sequence) so a re-import that rewrites the
+            // dates block cannot leave two "v2"s behind.
+            e.HasIndex(x => new { x.EventSoMePostId, x.Sequence }).IsUnique();
+
+            // The occurrences ARE part of the post: replacing a post replaces its runs, and deleting
+            // it takes them with it. Cascade from the post only — the edition already cascades to the
+            // post, so a second path from Event would be ambiguous to SQL Server (cf. SoMePost).
+            e.HasOne(x => x.Post).WithMany(x => x.Occurrences)
+                .HasForeignKey(x => x.EventSoMePostId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // --- §842.2: per-type announcement frequency --------------------------
+        b.Entity<SoMeCadenceSetting>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Kind).HasConversion<int>();
+            e.Property(x => x.LastUpdatedByEmail).HasMaxLength(320);
+
+            // 🔒 One row per type per edition. Without this a double-submit creates a second row and
+            // "what is this type's frequency?" becomes a matter of insertion order — the same trap
+            // SoMeTemplate's unique index exists to close.
+            e.HasIndex(x => new { x.EventId, x.Kind }).IsUnique();
+
+            e.HasOne(x => x.Event).WithMany()
+                .HasForeignKey(x => x.EventId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         // --- SoMeSettings (per-edition SoMe queue config, §19) ----------------
@@ -2395,6 +2622,241 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
         });
 
         // --- FeatureSetting (per-edition kill switches, §23) ------------------
+        // --- SESSION EVALUATION §743 -----------------------------------------
+        b.Entity<Domain.Evaluation.EvaluationApiClient>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Name).HasMaxLength(200).IsRequired();
+            e.Property(x => x.KeyHash).HasMaxLength(200).IsRequired();
+            e.Property(x => x.PreviousKeyHash).HasMaxLength(200);
+
+            // 🔒 The ONLY relationship on this entity, so the Event cascade is safe here. Do not add
+            // a second FK with a delete rule — Events already cascades to four Evaluation tables,
+            // and a second path into any of them is the exact error that crash-looped the staging
+            // slot on 2026-07-31 (§744.1). If this row ever needs a second link, declare it
+            // NoAction like EvaluationDevice.Room does.
+            e.HasOne(x => x.Event).WithMany()
+                .HasForeignKey(x => x.EventId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // Two credentials may not share a name within an edition — the name is how a human
+            // decides which key to revoke, so an ambiguous one is a security problem, not a tidiness
+            // one. It is NOT part of authentication.
+            e.HasIndex(x => new { x.EventId, x.Name }).IsUnique();
+        });
+
+        b.Entity<Domain.Evaluation.EvaluationDevice>(e =>
+        {
+            e.HasKey(x => x.Id);
+            // 200 is ample for a MAC or a serial and assumes NOTHING about which it is
+            // (§743 item 10 — opaque string, never parsed).
+            e.Property(x => x.SerialNumber).HasMaxLength(200).IsRequired();
+            e.Property(x => x.KeyHash).HasMaxLength(200).IsRequired();
+            e.Property(x => x.PreviousKeyHash).HasMaxLength(200);
+            e.Property(x => x.Label).HasMaxLength(200);
+            e.Property(x => x.FirmwareVersion).HasMaxLength(50);
+
+            e.HasOne(x => x.Event).WithMany()
+                .HasForeignKey(x => x.EventId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // 🔒 One identifier, one unit, one event. The lookup on every ingest call.
+            e.HasIndex(x => new { x.EventId, x.SerialNumber }).IsUnique();
+
+            // §743 C2 — the device→room link. 🔒 NoAction, NOT SetNull: with an Event cascade
+            // already reaching both this table and EvaluationRooms, a second delete rule here gives
+            // SQL Server TWO cascade paths from Events to EvaluationDevices and it refuses the
+            // whole constraint ("may cause cycles or multiple cascade paths"). Same reasoning — and
+            // the same fix — as the SessionEvaluation FK: the Event cascade already covers these
+            // rows, so the secondary link declares no delete behaviour of its own.
+            e.HasOne(x => x.Room).WithMany()
+                .HasForeignKey(x => x.RoomId)
+                .OnDelete(DeleteBehavior.NoAction);
+        });
+
+        // §753 — the onboarding queue.
+        b.Entity<Domain.Evaluation.EvaluationDeviceProvisionRequest>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.SerialNumber).HasMaxLength(200).IsRequired();
+            e.Property(x => x.SerialNumber).HasMaxLength(200);
+            e.Property(x => x.FirmwareVersion).HasMaxLength(50);
+            e.Property(x => x.Note).HasMaxLength(400);
+            e.Property(x => x.DecidedByEmail).HasMaxLength(320);
+
+            e.HasOne(x => x.Event).WithMany()
+                .HasForeignKey(x => x.EventId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // 🔒 ONE ROW PER IDENTIFIER PER EVENT. A unit polling for a week must refresh its row,
+            // never mint a second — otherwise the approval queue fills with the same box 200 times
+            // and the organiser cannot see the other 24 units behind it.
+            e.HasIndex(x => new { x.EventId, x.SerialNumber }).IsUnique();
+
+            // 🔒 §744.1 — NoAction, NOT Cascade/SetNull. Events already cascades to this table AND
+            // to EvaluationDevices, so a second delete rule here would give SQL Server two cascade
+            // paths from Events and it refuses the whole constraint. Same trap, same fix as the
+            // device→room link above.
+            e.HasOne(x => x.EvaluationDevice).WithMany()
+                .HasForeignKey(x => x.EvaluationDeviceId)
+                .OnDelete(DeleteBehavior.NoAction);
+        });
+
+        // §753 — the health-telemetry schedule.
+        b.Entity<Domain.Evaluation.EvaluationTelemetryWindow>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Label).HasMaxLength(200);
+
+            e.HasOne(x => x.Event).WithMany()
+                .HasForeignKey(x => x.EventId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // 🔒 §744.1 again — the per-device narrowing declares no delete behaviour of its own.
+            e.HasOne(x => x.EvaluationDevice).WithMany()
+                .HasForeignKey(x => x.EvaluationDeviceId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            // The policy query is "every active line for this event", ordered by start.
+            e.HasIndex(x => new { x.EventId, x.IsActive, x.FromUtc });
+        });
+
+        // §754 — the signage agenda cache, mirrored from Zoho Backstage.
+        b.Entity<Domain.Signage.AgendaActivity>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.BackstageSessionId).HasMaxLength(100).IsRequired();
+            e.Property(x => x.Title).HasMaxLength(400).IsRequired();
+            e.Property(x => x.Room).HasMaxLength(200);
+            e.Property(x => x.Track).HasMaxLength(200);
+            e.Property(x => x.ActivityType).HasMaxLength(100);
+            // ~7 speakers of full names, with room to spare — the card truncates long lists
+            // visually, but the stored value must never be the thing that loses a name.
+            e.Property(x => x.Speakers).HasMaxLength(1000);
+
+            e.HasOne(x => x.Event).WithMany()
+                .HasForeignKey(x => x.EventId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // 🔒 The natural key. One row per Backstage activity per edition — this is what makes
+            // the 5-minute poll an UPSERT rather than a rebuild, so a card keeps its identity (and
+            // therefore its page position) when a title or room changes in Zoho.
+            e.HasIndex(x => new { x.EventId, x.BackstageSessionId }).IsUnique();
+
+            // The hot query is the §5 hour-slot overlap test: "this edition's activities where
+            // StartsAt < slotEnd AND EndsAt > slotStart", asked by every screen, every few seconds.
+            e.HasIndex(x => new { x.EventId, x.StartsAt, x.EndsAt });
+        });
+
+        // §754 §10 — one signage control row per edition.
+        b.Entity<Domain.Signage.SignageSettings>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.PortraitToken).HasMaxLength(100);
+            e.Property(x => x.LandscapeToken).HasMaxLength(100);
+
+            e.HasOne(x => x.Event).WithMany()
+                .HasForeignKey(x => x.EventId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // 🔒 ONE row per edition. Two rows would mean two sets of tokens, and the screens would
+            // work or not depending on which one a query happened to read first.
+            e.HasIndex(x => x.EventId).IsUnique();
+        });
+
+        b.Entity<Domain.Evaluation.EvaluationRoom>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Name).HasMaxLength(200).IsRequired();
+            e.Property(x => x.NameKey).HasMaxLength(200).IsRequired();
+
+            e.HasOne(x => x.Event).WithMany()
+                .HasForeignKey(x => x.EventId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // 🔒 One room per NORMALISED name per event, so "Room 1", "room  1" and "Room 1 "
+            // cannot become three rooms with one device between them.
+            e.HasIndex(x => new { x.EventId, x.NameKey }).IsUnique();
+        });
+
+        b.Entity<Domain.Evaluation.EvaluationSession>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Title).HasMaxLength(400).IsRequired();
+            e.Property(x => x.TrackName).HasMaxLength(200);
+
+            e.HasOne(x => x.Event).WithMany()
+                .HasForeignKey(x => x.EventId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // 🔥 NoAction, NOT SetNull — this exact line, as SetNull, is what broke the 2026-07-31
+            // deploy: Events cascades to EvaluationSessions AND to EvaluationRooms, so a delete
+            // rule here made TWO cascade paths from Events to this table and SQL Server rejected
+            // the constraint outright, crash-looping the staging slot and failing the swap.
+            // The Event cascade already removes these rows; the room link needs no rule of its own.
+            e.HasOne(x => x.Room).WithMany()
+                .HasForeignKey(x => x.RoomId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            // The sync's match key — one eval session per CEH session.
+            e.HasIndex(x => new { x.EventId, x.CehSessionId }).IsUnique()
+                .HasFilter("[CehSessionId] IS NOT NULL");
+
+            // The attribution query: candidate sessions for one room, by window.
+            e.HasIndex(x => new { x.RoomId, x.CollectionWindowOpensAt });
+        });
+
+        b.Entity<Domain.Evaluation.EvaluationSessionSpeaker>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.SpeakerEmail).HasMaxLength(320).IsRequired();
+            e.Property(x => x.DisplayName).HasMaxLength(300);
+
+            // 🔒 ONE relationship, and it is the reason this entity carries no EventId. Events
+            // already cascades to EvaluationSessions; adding an Event FK here as well would give
+            // SQL Server a second cascade path to the same table — the §744.1 failure exactly, and
+            // one EF InMemory cannot reproduce. The event is reached through the session.
+            e.HasOne(x => x.EvaluationSession).WithMany()
+                .HasForeignKey(x => x.EvaluationSessionId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // 🔒 One row per speaker per session. The sync reconciles against this, and a duplicate
+            // would double-count a speaker in scope=speaker aggregates and mail them the same
+            // report-ready notification twice.
+            e.HasIndex(x => new { x.EvaluationSessionId, x.SpeakerEmail }).IsUnique();
+
+            // The scope=speaker aggregate + "this speaker's other sessions" (C7 history) query.
+            e.HasIndex(x => x.SpeakerEmail);
+        });
+
+        b.Entity<Domain.Evaluation.EvaluationResponse>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.SerialNumber).HasMaxLength(200);
+            e.Property(x => x.DeviceRecordId).HasMaxLength(200);
+            e.Property(x => x.Source).HasMaxLength(10).IsRequired();
+            e.Property(x => x.FirmwareVersion).HasMaxLength(50);
+            // Free text is attendee prose to a speaker; generous but bounded.
+            e.Property(x => x.FreeText).HasMaxLength(4000);
+
+            e.HasOne(x => x.Event).WithMany()
+                .HasForeignKey(x => x.EventId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // 🔒 THIS INDEX IS THE IDEMPOTENCY GUARANTEE, not the code that checks first.
+            // A device retrying a cached batch must not inflate the counts, and two requests
+            // racing (a retry arriving while the first is still committing) would both pass a
+            // read-then-write check. Filtered so the many QR rows — which have no device record
+            // id — do not collide with each other on NULL.
+            e.HasIndex(x => new { x.SerialNumber, x.DeviceRecordId })
+                .IsUnique()
+                .HasFilter("[SerialNumber] IS NOT NULL AND [DeviceRecordId] IS NOT NULL");
+
+            // The scoring queries: every metric is "responses for this session / this event".
+            e.HasIndex(x => new { x.EventId, x.SessionId });
+            e.HasIndex(x => new { x.EventId, x.CollectionTimestamp });
+        });
+
         b.Entity<FeatureSetting>(e =>
         {
             e.HasKey(x => x.Id);
@@ -2415,6 +2877,10 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
             // catalog home group). Both stored as nullable int.
             e.Property(x => x.ReleasedToRingOverride).HasConversion<int?>();
             e.Property(x => x.GroupOverride).HasConversion<int?>();
+
+            // §742 — where this feature's ops notice goes; null = the built-in ops mailbox.
+            // 320 = the same address length used everywhere else in the schema.
+            e.Property(x => x.NotificationRecipientEmail).HasMaxLength(320);
 
             e.HasOne(x => x.Event).WithMany()
                 .HasForeignKey(x => x.EventId)
@@ -2481,6 +2947,57 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
             e.HasIndex(x => new { x.EventId, x.Section }).IsUnique();
         });
 
+        // --- §769 DocLibrary path/file-name overrides + their history ---------
+        b.Entity<DocLibrarySettingOverride>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Kind).HasConversion<int>();
+            e.Property(x => x.Key).IsRequired().HasMaxLength(100);
+            // A path can be long (nested folders with spaces); 400 is generous
+            // against SharePoint's own limits without being nvarchar(max).
+            e.Property(x => x.Value).IsRequired().HasMaxLength(400);
+            e.Property(x => x.UpdatedByEmail).HasMaxLength(320);
+            // One row per (kind, key) — upserted on save, DELETED on restore.
+            e.HasIndex(x => new { x.Kind, x.Key }).IsUnique();
+        });
+
+        b.Entity<DocLibrarySettingChange>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Kind).HasConversion<int>();
+            e.Property(x => x.Key).IsRequired().HasMaxLength(100);
+            e.Property(x => x.OldValue).HasMaxLength(400);
+            e.Property(x => x.NewValue).HasMaxLength(400);
+            e.Property(x => x.ChangedByEmail).HasMaxLength(320);
+            // The page reads "this key's history" and "everything, newest first".
+            e.HasIndex(x => new { x.Kind, x.Key, x.ChangedAt });
+            e.HasIndex(x => x.ChangedAt);
+        });
+
+        // --- §6.4 LogisticsFileState -------------------------------------------
+        b.Entity<LogisticsFileState>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.PathKey).IsRequired().HasMaxLength(100);
+            e.Property(x => x.FileName).IsRequired().HasMaxLength(260);
+            e.Property(x => x.ContentKey).IsRequired().HasMaxLength(128);
+            e.Property(x => x.LastMailedTo).HasMaxLength(320);
+            e.Property(x => x.Headline).HasMaxLength(120);
+            // A SharePoint item URL is long; leave it unbounded rather than truncating a link into
+            // one that silently does not work.
+            e.Property(x => x.WebUrl);
+            // One row per file per edition — the run upserts it.
+            e.HasIndex(x => new { x.EventId, x.FileName }).IsUnique();
+        });
+
+        // --- §6.3 LogisticsRunSummary ------------------------------------------
+        b.Entity<LogisticsRunSummary>(e =>
+        {
+            e.HasKey(x => x.Id);
+            // One row per edition — the run overwrites it. It is a status, not a history.
+            e.HasIndex(x => x.EventId).IsUnique();
+        });
+
         // --- EmailTemplateOverride (per-edition editable email templates §25h) -
         b.Entity<EmailTemplateOverride>(e =>
         {
@@ -2534,11 +3051,21 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
             e.HasOne(x => x.Event).WithMany()
                 .HasForeignKey(x => x.EventId)
                 .OnDelete(DeleteBehavior.Cascade);
-            // One cadence per (edition, mail). Deliberately NOT per role: the RING answers "who",
-            // and a different repeat rate per role is a refinement nobody has asked for — it would
-            // double the controls on the page for no stated need (§707.11 Q3, operator: "per mail
-            // template").
-            e.HasIndex(x => new { x.EventId, x.TemplateKey }).IsUnique();
+            // §881 — one cadence per (edition, mail, ROLE), with Role NULL meaning "all roles".
+            //
+            // ⚠️ This replaces the §707.11 Q3 note that used to sit here: *"deliberately NOT per
+            // role … a refinement nobody has asked for"*. He asked on 2026-08-05, about the Get
+            // Started chase reaching sponsors through a template filed under speakers. Same nullable
+            // -Role shape as EmailTemplateRing, so the page teaches ONE model for both controls.
+            //
+            // 🔒 .HasFilter(null) is REQUIRED, for the exact reason §705.3b records one entity above:
+            // EF's default for a nullable key column is `filter: "[Role] IS NOT NULL"`, which would
+            // enforce uniqueness only on role-specific rows and permit UNLIMITED all-roles rows for
+            // one template — the resolver would then pick one arbitrarily while the upsert kept
+            // adding more. SQL Server treats NULLs as EQUAL in an UNFILTERED unique index, which is
+            // exactly the intended shape: at most one all-roles row plus one row per named role.
+            e.Property(x => x.Role).HasConversion<int?>();
+            e.HasIndex(x => new { x.EventId, x.TemplateKey, x.Role }).IsUnique().HasFilter(null);
         });
 
         // --- SavedSession (attendee personal "My plan", saved sessions) -------

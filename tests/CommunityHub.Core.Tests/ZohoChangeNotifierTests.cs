@@ -16,6 +16,44 @@ namespace CommunityHub.Core.Tests;
 /// </summary>
 public sealed class ZohoChangeNotifierTests
 {
+    // ---- §745: the subject counts CHANGES, and only changes -------------------------------
+
+    [Fact]
+    public void The_subject_count_is_the_number_of_CHANGES_not_the_number_of_lines()
+    {
+        // 🔥 Operator 2026-07-31: *"it says 3 changes in subject but mention 2, why. is skill
+        // conuted as 2"*. It was neither — the speaker-edit mail passed its "ACTION NEEDED…"
+        // heading as the FIRST ENTRY of the change list, so the subject counted the heading.
+        var (subject, html) = ZohoChangeNotifier.Build(
+            "Speakers",
+            new[]
+            {
+                "  Country: '(empty)' → 'DE'",
+                "  Skills (comma separated): '(empty)' → 'Microsoft Expert, Microsoft MVP'",
+            },
+            intro: "ACTION NEEDED: speaker 'Someone' edited their hub profile — apply these changes.");
+
+        Assert.Contains("2 change(s)", subject);
+        Assert.DoesNotContain("3 change(s)", subject);
+
+        // The heading is still SHOWN — moved out of the counted list, not dropped.
+        Assert.Contains("ACTION NEEDED", html);
+        Assert.Contains("Country", html);
+        Assert.Contains("Skills", html);
+    }
+
+    [Fact]
+    public void A_multi_value_field_is_ONE_change_however_many_values_it_holds()
+    {
+        // The other half of his question: "Microsoft Expert, Microsoft MVP" is one FIELD, and a
+        // comma inside its value must never inflate the count.
+        var (subject, _) = ZohoChangeNotifier.Build(
+            "Speakers",
+            new[] { "  Skills (comma separated): '(empty)' → 'Microsoft Expert, Microsoft MVP'" });
+
+        Assert.Contains("1 change(s)", subject);
+    }
+
     private static (ZohoChangeNotifier Notifier, CapturingEmailSender Sender) NewNotifier()
     {
         var sender = new CapturingEmailSender();
@@ -77,8 +115,8 @@ public sealed class ZohoChangeNotifierTests
             CancellationToken.None);
 
         var (to, subject, html, _) = Assert.Single(sender.Messages);
-        // §493 — system alerts land in the single operator mailbox, not the shared info@ inbox.
-        Assert.Equal(ZohoChangeNotifier.Recipient, to);
+        // 736 (operator 2026-07-31: "only alert mails goes to mok@expertslive.dk") - a publish/delete notice is NOT an alert, it is a job any organizer can pick up, so it goes to the shared ops inbox (556's ActionableRecipient).
+        Assert.Equal(ZohoChangeNotifier.ActionableRecipient, to);
         Assert.Contains("Sponsors / exhibitors: 2 change(s)", subject);
         Assert.Contains("Created sponsor &#39;Fabrikam&#39;", html);
         Assert.Contains("Created exhibitor &#39;Fabrikam&#39; (Zoho id z-9)", html);
@@ -95,7 +133,7 @@ public sealed class ZohoChangeNotifierTests
         await notifier.NotifyAsync("Speakers", new[] { "Created speaker 'B' (b@x.dk)" }, CancellationToken.None);
 
         Assert.Equal(2, sender.Sent.Count);
-        Assert.All(sender.Sent, s => Assert.Equal(ZohoChangeNotifier.Recipient, s.To));
+        Assert.All(sender.Sent, s => Assert.Equal(ZohoChangeNotifier.ActionableRecipient, s.To));
     }
 
     [Fact]

@@ -70,14 +70,21 @@ public sealed class ParticipantDeactivationService
     public ParticipantDeactivationService(
         CommunityHubDbContext db, TimeProvider clock, IAuditTrail audit,
         VolunteerAllocationService? allocation = null,
-        Email.ZohoChangeNotifier? zohoNotifier = null)
+        Email.ZohoChangeNotifier? zohoNotifier = null,
+        // §6.9 — photo cleanup. Optional: a host without a document library simply skips it, and
+        // every existing construction of this cascade keeps working untouched.
+        Integrations.Graphics.ParticipantPhotoCleanupService? photos = null)
     {
         _db = db;
         _clock = clock;
         _audit = audit;
         _allocation = allocation;
         _zohoNotifier = zohoNotifier;
+        _photos = photos;
     }
+
+    // §6.9 — removes the deactivated person's photo from the document library (dry-run by default).
+    private readonly Integrations.Graphics.ParticipantPhotoCleanupService? _photos;
 
     /// <summary>What one deactivation cascade actually touched (for messages/tests).</summary>
     public sealed record CascadeResult(
@@ -125,6 +132,20 @@ public sealed class ParticipantDeactivationService
         var (shiftsVacated, vacatedTaskIds, vacatedRecord) = await VacateShiftAssignmentsAsync(p, ct);
 
         await _db.SaveChangesAsync(ct);
+
+        // §6.9 — the person's PHOTO leaves the document library, IMMEDIATELY on the status change
+        // rather than on a nightly sweep (the work order's timing).
+        //
+        // 🔒 AFTER the save, and fail-soft inside the service: the rest of this cascade — the hotel
+        // room released, the party seat cancelled, the shifts vacated — matters more than a file and
+        // must not be undone because a document library was unreachable.
+        //
+        // ⚠️ DRY-RUN by default: it logs what it WOULD delete and deletes nothing until the operator
+        // switches it on. Every other failure in this cascade is recoverable; this one loses data.
+        if (_photos is not null)
+        {
+            await _photos.CleanupParticipantAsync(eventId, participantId, ct);
+        }
 
         // §253 G7 (completes the G1 spec): the vacated shifts get backfill DRAFTS
         // seeded into the acting organizer's allocation queue — proposals only,

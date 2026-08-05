@@ -33,7 +33,6 @@ public sealed class ReminderJob
     private readonly ReminderEngine _engine;
     private readonly CommunityHub.Core.Email.OnboardingStepResetEmailService _stepResetEmails;
     private readonly CommunityHub.Core.Email.SpeakerQuestionDigestService _speakerQuestionDigest;
-    private readonly CommunityHub.Core.Email.PendingApprovalsDigestService _pendingApprovals;
     private readonly FeatureGateService _gate;
     private readonly IAuditTrail _audit;
     private readonly ILogger<ReminderJob> _log;
@@ -52,7 +51,6 @@ public sealed class ReminderJob
         ReminderEngine engine,
         CommunityHub.Core.Email.OnboardingStepResetEmailService stepResetEmails,
         CommunityHub.Core.Email.SpeakerQuestionDigestService speakerQuestionDigest,
-        CommunityHub.Core.Email.PendingApprovalsDigestService pendingApprovals,
         FeatureGateService gate,
         IAuditTrail audit,
         ILogger<ReminderJob> log)
@@ -70,16 +68,20 @@ public sealed class ReminderJob
         _engine = engine;
         _stepResetEmails = stepResetEmails;
         _speakerQuestionDigest = speakerQuestionDigest;
-        _pendingApprovals = pendingApprovals;
         _gate = gate;
         _audit = audit;
         _log = log;
     }
 
-    /// <summary>Daily at 08:00 UTC. NCRONTAB: sec min hour day month weekday.</summary>
+    /// <summary>
+    /// §878 — BASE TICK ONLY; the cadence is the operator's interval on /Organizer/Jobs.
+    /// 🔒 Safe to run often: every builder's <c>OccasionKey</c> embeds the DAY, and the
+    /// ReminderEngine ledger sends one message per occasion per day — so extra passes find
+    /// nothing to send rather than mailing anyone twice. NCRONTAB: sec min hour day month weekday.
+    /// </summary>
     [Function("ReminderJob")]
     public async Task Run(
-        [TimerTrigger("0 0 8 * * *")] TimerInfo timer,
+        [TimerTrigger("0 */5 * * * *")] TimerInfo timer,
         CancellationToken ct)
     {
         var activeEventIds = await _db.Events
@@ -165,12 +167,17 @@ public sealed class ReminderJob
                 // question raises the speaker's open-question fingerprint.
                 questionDigests = await _speakerQuestionDigest.SendPendingAsync(eventId, ct);
 
-                // §203: ONE batched ops digest to info@expertslive.dk when there is
-                // anything pending organizer action (pre-selection queue: prospective
-                // volunteers/speakers/media). Ring-exempt (EngineAlertSender) + throttled
-                // per edition; sends nothing when zero pending.
-                try { await _pendingApprovals.SendPendingDigestAsync(eventId, ct); }
-                catch { /* best-effort ops mail: never fail the reminder run */ }
+                // 🗑 §765 — THE §203 PENDING-APPROVALS MAIL MOVED OUT OF THIS JOB.
+                //
+                // §879 then SPLIT it in two, and both halves are their own interval-driven job:
+                // SpeakersHeldJob (every 10 minutes, once per change) and
+                // VolunteersAwaitingReviewJob (weekly). The operator owns both cadences on the Jobs
+                // page instead of either inheriting whatever spacing the shared engine-alert
+                // throttle window happened to impose (operator 2026-08-01: "we must receive reminder
+                // daily … And it must be configurable on settings").
+                //
+                // 🔒 REMOVED here rather than left alongside: two callers would double-send it, and
+                // the one whose cadence he can see would not be the one deciding.
             }
             else
             {

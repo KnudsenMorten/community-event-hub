@@ -21,7 +21,12 @@ namespace CommunityHub.Core.Tests;
 /// </summary>
 public sealed class SessionEvalPdfServiceTests
 {
-    private const string Folder = "General/Events/ELDK 2027/EventHub/Speakers/SessionEvals-PDF";
+    // §768: resolved from the DocLibrary registry, not an app setting. The old literal was a
+    // `SessionEvals-PDF` folder that does not exist in the reorganised library — results live at
+    // `Speakers/SessionEvaluations/Result`.
+    private static readonly string Folder = TestDocLibrary.PathFor(
+        CommunityHub.Core.Integrations.DocLibrary.DocLibraryPaths.SessionEvaluationResults);
+
     private const int EventId = 7;
 
     private static CommunityHubDbContext NewDb() =>
@@ -29,14 +34,15 @@ public sealed class SessionEvalPdfServiceTests
             .UseInMemoryDatabase($"evalpdf-{Guid.NewGuid():N}")
             .Options);
 
+    /// <param name="folder">Pass <c>""</c> to model an UNCONFIGURED library — the inert case.</param>
     private static SessionEvalPdfService NewService(
-        CommunityHubDbContext db, FakePdfStore store, string folder = Folder) =>
+        CommunityHubDbContext db, FakePdfStore store, string? folder = null) =>
         new(store, Options.Create(new GraphicsSharePointOptions
         {
             Enabled = true,
             SiteUrl = "https://contoso.sharepoint.example.test/sites/eldk",
-            SessionEvalPdfFolderPath = folder,
-        }), db);
+        }), db,
+        TestDocLibrary.Resolver(folder == string.Empty ? string.Empty : TestDocLibrary.Root));
 
     /// <summary>Seed an organizer, two speakers, and a session with only the FIRST speaker.</summary>
     private static async Task<(int sessionId, int organizerId, int ownSpeakerId, int otherSpeakerId)>
@@ -126,6 +132,55 @@ public sealed class SessionEvalPdfServiceTests
             SessionEvalPdfService.FileNameFor(sessionId, EvaluationPdfKind.Open),
             SessionEvalPdfService.FileNameFor(sessionId, EvaluationPdfKind.Score),
         }.OrderBy(n => n).ToArray(), names);
+    }
+
+    /// <summary>
+    /// 🔒 §749.3 — DECIDED (operator 2026-07-31): <i>"engine should win, overwrite the manual
+    /// upload"</i>. Pinned so nobody restores the manual file as the winner on the grounds that
+    /// overwriting somebody's work looks like a bug.
+    /// </summary>
+    /// <remarks>
+    /// <para>🔑 The overwrite must be <b>attributable, not silent</b>: the provenance row is what the
+    /// organiser and speaker views render, so re-stamping it to the automatic name is the only thing
+    /// that lets someone see the engine took over. Leaving the organiser's name on an engine-produced
+    /// file would be worse than the overwrite itself.</para>
+    ///
+    /// <para>🔒 <b>Open-feedback is NOT touched</b> by an automatic score publish. The engine
+    /// publishes the <c>scores</c> artefact only, and asserting that here is what stops a future
+    /// "publish everything" change quietly eating the one slot that stays the organiser's.</para>
+    /// </remarks>
+    [Fact]
+    public async Task An_automatic_publish_OVERWRITES_a_manual_score_upload_and_says_who()
+    {
+        using var db = NewDb();
+        var (sessionId, organizerId, _, _) = await SeedAsync(db);
+        var store = new FakePdfStore(canRead: true, canStore: true);
+        var svc = NewService(db, store);
+
+        // An organiser gets something to the speaker by hand first.
+        await svc.UploadAsync(EventId, sessionId, EvaluationPdfKind.Score,
+            new byte[] { 1, 1, 1 }, organizerId, "Org Person");
+        await svc.UploadAsync(EventId, sessionId, EvaluationPdfKind.Open,
+            new byte[] { 7, 7 }, organizerId, "Org Person");
+
+        // Then the engine publishes — the same deterministic name, no participant behind it.
+        await svc.UploadAsync(EventId, sessionId, EvaluationPdfKind.Score,
+            new byte[] { 2, 2, 2, 2 }, uploadedByParticipantId: null,
+            uploadedByName: "Session Evaluation (automatic)");
+
+        var after = Assert.Single(await svc.ListSessionsAsync(EventId));
+
+        // The engine's file won, and the row SAYS so rather than still crediting the organiser.
+        Assert.Equal("Session Evaluation (automatic)", after.Score!.UploadedByName);
+
+        // One file per kind — a replace, never a second copy accumulating beside it.
+        var scoreName = SessionEvalPdfService.FileNameFor(sessionId, EvaluationPdfKind.Score);
+        Assert.Single(store[Folder].Where(f => f.Name == scoreName));
+        Assert.Equal(2, store[Folder].Count);
+
+        // 🔒 Open-feedback is untouched: still there, still the organiser's.
+        Assert.NotNull(after.Open);
+        Assert.Equal("Org Person", after.Open!.UploadedByName);
     }
 
     [Fact]

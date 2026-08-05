@@ -76,6 +76,20 @@
         {
             <p class="info" role="status" style="margin-top:10px;">@Localizer["Comms.AllDelivered"]</p>
         }
+        @* §818 — the ops count is stated UP HERE, next to the participant numbers, because the
+           section itself is far down the page and the operator's complaint was that this mail was
+           invisible. The counters stay separate (§815.1) — this is a pointer, not a merge. *@
+        @if (snap.OpsMailTotal > 0)
+        {
+            <p style="margin:10px 0 0;font-size:13.5px;color:#6b7280;">
+                Plus <strong>@snap.OpsMailTotal</strong> engine / ops mail to a mailbox
+                @if (snap.OpsMailFailed > 0)
+                {
+                    <span style="color:#a50e0e;">(@snap.OpsMailFailed did not arrive)</span>
+                }
+                &mdash; <a href="#ops-mail">see below</a>. Not counted above: it reaches no participant.
+            </p>
+        }
     </div>
 
     <!-- Resend: undelivered participant mail, one click to send again. -->
@@ -201,6 +215,27 @@
                                             <span style="color:#6b7280;font-size:12px;">@r.ResendTemplate</span>
                                         </form>
                                     }
+                                    @* 🔒 §784.1 — THE WAY OUT. A row with no template could not be
+                                       resent AND could not be cleared, so it sat here for 30 days
+                                       until the age rule dropped it. Dismiss is deliberately
+                                       available on EVERY row, including that one — it is the case
+                                       that has no other exit. It hides the row and nothing else:
+                                       the mail stays undelivered in the Email Log, because these
+                                       rows are ATTEMPTS and this button must never become a second
+                                       answer to "did it arrive". *@
+                                    <form method="post" asp-page-handler="Dismiss"
+                                          style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:6px;">
+                                        <input type="hidden" name="participantId" value="@r.ParticipantId" />
+                                        <button type="submit" title="@Localizer["Comms.DismissTitle"]"
+                                                style="background:none;border:1px solid #d1d5db;color:#374151;
+                                                       padding:4px 10px;border-radius:6px;font-size:13px;
+                                                       cursor:pointer;">
+                                            @Localizer["Comms.Dismiss"]
+                                        </button>
+                                        <span style="color:#6b7280;font-size:12px;">
+                                            takes it off this list only
+                                        </span>
+                                    </form>
                                 </td>
                             </tr>
                         }
@@ -243,6 +278,11 @@
         }
         else
         {
+            @* 🔒 §784.2 — THE DROPPED COLUMN IS GONE BY DEFAULT. Operator 2026-08-03: "remove the
+               dropped column also by default, as it is filtered out". It is the SAME switch that
+               governs the resend list above, deliberately: two independent "show the ring drops"
+               toggles on one page is how one gets flipped and the other forgotten, and the column
+               was a column of zeroes precisely because the rest of the page already filters them. *@
             <div style="overflow-x:auto;position:relative;">
                 <table style="width:100%;border-collapse:collapse;min-width:600px;">
                     <caption class="sr-only">@Localizer["Comms.WhoGotWhat"]</caption>
@@ -250,7 +290,10 @@
                         <tr style="text-align:left;border-bottom:2px solid #ddd;">
                             <th scope="col">@Localizer["Comms.ColRecipient"]</th>
                             <th scope="col">@Localizer["Comms.Sent"]</th>
-                            <th scope="col">@Localizer["Comms.Dropped"]</th>
+                            @if (Model.ShowDropped)
+                            {
+                                <th scope="col">@Localizer["Comms.Dropped"]</th>
+                            }
                             <th scope="col">@Localizer["Comms.Failed"]</th>
                             <th scope="col">@Localizer["Comms.ColLast"]</th>
                         </tr>
@@ -262,9 +305,67 @@
                                 <td style="word-break:break-all;">
                                     @if (!string.IsNullOrWhiteSpace(w.Name)) { <div>@w.Name</div> }
                                     <div style="color:#6b7280;font-size:13px;">@w.Email</div>
+                                    @* §784.2 — THE BUTTON HE ASKED FOR: "i only see count. I need to
+                                       see subject,date,time". <details> so it works with no
+                                       JavaScript, keeps its own state per row, and collapses back
+                                       out of the way — the page still has to be readable with 200
+                                       people on it. *@
+                                    @if (w.Messages.Count > 0)
+                                    {
+                                        <details style="margin-top:6px;">
+                                            <summary style="cursor:pointer;font-size:13px;color:#008BD2;">
+                                                Show the @w.Messages.Count
+                                                @(w.Messages.Count == 1 ? "message" : "messages")
+                                            </summary>
+                                            <table style="width:100%;border-collapse:collapse;margin-top:6px;">
+                                                <caption class="sr-only">
+                                                    Messages to @(w.Name ?? w.Email)
+                                                </caption>
+                                                <thead>
+                                                    <tr style="text-align:left;">
+                                                        <th scope="col" style="font-size:12px;color:#6b7280;">Subject</th>
+                                                        <th scope="col" style="font-size:12px;color:#6b7280;">When</th>
+                                                        <th scope="col" style="font-size:12px;color:#6b7280;">Outcome</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    @foreach (var m in w.Messages)
+                                                    {
+                                                        <tr>
+                                                            <td style="font-size:13px;word-break:break-word;padding:2px 6px 2px 0;">
+                                                                @(string.IsNullOrWhiteSpace(m.Subject) ? "(no subject)" : m.Subject)
+                                                                <div style="color:#6b7280;font-size:11.5px;">@m.Category</div>
+                                                            </td>
+                                                            <td style="font-size:13px;white-space:nowrap;padding:2px 6px 2px 0;">
+                                                                @m.SentAt.UtcDateTime.ToString("dd MMM yyyy HH:mm")
+                                                            </td>
+                                                            <td style="font-size:13px;color:@OutcomeColor(m.Outcome);padding:2px 0;">
+                                                                @OutcomeLabel(m.Outcome)
+                                                            </td>
+                                                        </tr>
+                                                    }
+                                                </tbody>
+                                            </table>
+                                            @if (w.Messages.Count >= CommunityHub.Core.Organizer.CommsCockpitService.MessagesPerPersonCap)
+                                            {
+                                                <p style="font-size:12px;color:#6b7280;margin:4px 0 0;">
+                                                    Showing the most recent
+                                                    @CommunityHub.Core.Organizer.CommsCockpitService.MessagesPerPersonCap
+                                                    only — the Email Log has the rest.
+                                                </p>
+                                            }
+                                            <p style="font-size:12px;color:#6b7280;margin:4px 0 0;">
+                                                These are send <strong>attempts</strong>. &ldquo;Sent&rdquo;
+                                                means the mail was accepted for delivery, not that it was read.
+                                            </p>
+                                        </details>
+                                    }
                                 </td>
                                 <td>@w.Sent</td>
-                                <td style="color:@(w.Dropped > 0 ? "#9a6700" : "inherit");">@w.Dropped</td>
+                                @if (Model.ShowDropped)
+                                {
+                                    <td style="color:@(w.Dropped > 0 ? "#9a6700" : "inherit");">@w.Dropped</td>
+                                }
                                 <td style="color:@(w.Failed > 0 ? "#a50e0e" : "inherit");">@w.Failed</td>
                                 <td style="white-space:nowrap;color:#6b7280;font-size:13px;">@w.LastAt.UtcDateTime.ToString("dd MMM HH:mm")</td>
                             </tr>
@@ -303,6 +404,70 @@
                                 <td>@c.Sent</td>
                                 <td style="color:@(c.Dropped > 0 ? "#9a6700" : "inherit");">@c.Dropped</td>
                                 <td style="color:@(c.Failed > 0 ? "#a50e0e" : "inherit");">@c.Failed</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div>
+
+    @* §818 — ENGINE & OPS MAIL. Operator 2026-08-04 (§815): *"why can I not see the emails sent
+       here in a logged form"*. He could not because this mail carries no edition stamp and every
+       view above is edition-scoped — 375 rows over six weeks rendered nowhere.
+
+       🔒 Its OWN section, never folded into the tables above (§815.1): a participant's welcome and
+       a job-failure alert answer different questions, and 252 engine alerts dropped into the
+       timeline would bury the participant mail this page exists to track. *@
+    <div class="card" id="ops-mail">
+        <h2>Engine &amp; ops mail</h2>
+        <p>
+            What the machine sent to a <strong>mailbox</strong> rather than to a person &mdash; job
+            failures, hand-entry lists, invoice notices and ERP refusals. These reach no participant,
+            so they are counted separately and are never offered for re-send.
+        </p>
+        @if (snap.OpsMail.Count == 0)
+        {
+            <p class="info" role="status">No engine or ops mail in the last 30 days.</p>
+        }
+        else
+        {
+            <p style="margin:-6px 0 14px;font-size:13.5px;color:#6b7280;">
+                <strong>@snap.OpsMailSent</strong> delivered
+                @if (snap.OpsMailFailed > 0)
+                {
+                    <span>&middot; <strong style="color:#a50e0e;">@snap.OpsMailFailed did not arrive</strong></span>
+                }
+                @if (snap.OpsMailTotal > snap.OpsMail.Count)
+                {
+                    <span>
+                        &middot; showing the newest @snap.OpsMail.Count of @snap.OpsMailTotal &mdash;
+                        the full list is on the <a asp-page="/Organizer/EmailLog">Email log</a>.
+                    </span>
+                }
+            </p>
+            <div style="overflow-x:auto;position:relative;">
+                <table style="width:100%;border-collapse:collapse;min-width:640px;">
+                    <caption class="sr-only">Engine and ops mail</caption>
+                    <thead>
+                        <tr style="text-align:left;border-bottom:2px solid #ddd;">
+                            <th scope="col">@Localizer["Comms.ColWhen"]</th>
+                            <th scope="col">@Localizer["Comms.ColSubject"]</th>
+                            <th scope="col">@Localizer["Comms.ColRecipient"]</th>
+                            <th scope="col">@Localizer["Comms.ColOutcome"]</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var i in snap.OpsMail)
+                        {
+                            <tr style="border-bottom:1px solid #eee;">
+                                <td style="white-space:nowrap;">@i.When.UtcDateTime.ToString("dd MMM HH:mm")</td>
+                                <td style="word-break:break-word;">
+                                    <div>@i.Title</div>
+                                    <div style="color:#6b7280;font-size:12px;">@i.Category</div>
+                                </td>
+                                <td style="word-break:break-all;color:#6b7280;font-size:13px;">@i.Recipient</td>
+                                <td><span style="color:@OutcomeColor(i.Outcome);" title="@i.Error">@OutcomeLabel(i.Outcome)</span></td>
                             </tr>
                         }
                     </tbody>
@@ -373,6 +538,9 @@
                 new("/Organizer/SendWelcomeLogin", Localizer["Nav.OrgSendWelcome"].Value, "Send welcome-login emails so people can sign in.", "welcome-email"),
                 new("/Organizer/SpeakerReminders", Localizer["Nav.OrgSpeakerReminders"].Value, "Remind speakers about pending tasks and deadlines.", "reminder-jobs"),
                 new("/Organizer/SoMeQueue", Localizer["Nav.OrgSoMeQueue"].Value, "The queue of social posts ready to publish across channels."),
+                @* §824.2C — reachable from the same place as the e-mail templates it mirrors. A page
+                   nobody can navigate to is a page nobody edits. *@
+                new("/Organizer/SoMeTemplates", "SoMe post templates", "The wording of the five automatic LinkedIn post types — edit per edition, with a preview."),
                 new("/Organizer/Feed", "Community feed", "Bug reports, feature ideas and questions participants sent through the AiHelper assistant."),
             };
         }

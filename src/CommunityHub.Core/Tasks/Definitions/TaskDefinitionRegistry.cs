@@ -19,9 +19,16 @@ public sealed record TaskAudienceFacts(
         ParticipantRole role, params TaskAudiencePredicate[] predicates) =>
         new(role, predicates);
 
+    /// <remarks>
+    /// 🔒 §708.3 — <c>Excludes</c> is checked LAST and wins. A predicate appearing in both lists
+    /// therefore excludes, which is the safe direction: the exclusions encode tasks an operator
+    /// removed by name (§456/§458), and re-granting one is a visible wrong, while withholding one
+    /// shows up immediately in the audience matrix.
+    /// </remarks>
     public bool Satisfies(TaskAudience audience) =>
         audience.Roles.Contains(Role)
-        && audience.Requires.All(Predicates.Contains);
+        && audience.Requires.All(Predicates.Contains)
+        && !audience.Excludes.Any(Predicates.Contains);
 }
 
 /// <summary>
@@ -50,12 +57,19 @@ public sealed class TaskDefinitionRegistry
 
     /// <summary>The registry as shipped — every role's definitions.</summary>
     /// <remarks>
-    /// ⚠️ <b>Sponsor only so far.</b> §686.2 phase 1 migrates the sponsor set and STOPS at the
-    /// operator's approval gate; speaker / volunteer / media / event partner / attendee follow in
-    /// phase 2. Adding a role here before the gate is explicitly out of bounds (§686.5) — the point
-    /// of the gate is that he approves the shape once, cheaply, before it is replicated five times.
+    /// <para><b>Sponsor (§686.2 phase 1) + SPEAKER (§708).</b> The operator's approval gate that
+    /// §686.5 held phase 2 behind is passed: he asked for the speaker set by name — <i>"what we did
+    /// for /Sponsor/Tasks yesterday (new design) could also be implemented for /Speaker/Tasks"</i>.
+    /// Volunteer / media / event partner / attendee still follow later.</para>
+    ///
+    /// <para>🔒 <b>Party and Master Class stay OUT</b> (§707.57b), deliberately — both are single
+    /// self-contained tasks whose completion is already derived, so the registry would add authoring
+    /// flexibility they do not need. Not an omission.</para>
     /// </remarks>
-    public static TaskDefinitionRegistry Shipped { get; } = new(SponsorTaskDefinitions.All);
+    public static TaskDefinitionRegistry Shipped { get; } =
+        new(SponsorTaskDefinitions.All
+            .Concat(SpeakerTaskDefinitions.All)
+            .Concat(ParticipantTaskDefinitions.All));
 
     public IReadOnlyList<TaskDefinition> All { get; }
 

@@ -301,8 +301,11 @@ public sealed class WelcomeWithLoginEmailService
             "As a speaker, start with the \"Get Started\" flow in the hub — it walks you through everything you need to set up. Afterwards you can change any of your preferences from the hub. You can access the hub using https://hub.expertslive.dk - save the link to your favourites.",
         ParticipantRole.Volunteer =>
             "As a volunteer, start with the \"Get Started\" flow in the hub — it walks you through everything you need to set up. Afterwards you can change any of your preferences from the hub. You can access the hub using https://hub.expertslive.dk - save the link to your favourites.",
+        // §719 (operator 2026-07-31): NO in-hub lead-capture claim. "we dont support capture leads
+        // into the hub by default" — leads live in Zoho Backstage and the hub only links out to
+        // them, and only when that feature is switched on for the edition.
         ParticipantRole.Sponsor =>
-            "As a sponsor contact, start with the \"Get Started\" flow in the hub — complete its tasks to set up your company (details, contacts, logos, booth). You can also capture the leads you meet at your booth — straight from your phone.",
+            "As a sponsor contact, start with the \"Get Started\" flow in the hub — complete its tasks to set up your company (details, contacts, logos, booth). You can access the hub using https://hub.expertslive.dk - save the link to your favourites.",
         ParticipantRole.Attendee =>
             "As an attendee, start with the \"Get Started\" flow in the hub — it walks you through your sign-ups (Master Class, party) — and your \"My Event\" page keeps the countdown, status and practical info in one place.",
         ParticipantRole.Media =>

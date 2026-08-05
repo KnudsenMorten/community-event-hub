@@ -164,10 +164,12 @@ public sealed class SessionBackstagePushServiceTests
         ParticipantLifecycleState lifecycle = ParticipantLifecycleState.Active,
         Ring ring = Ring.Ring1,
         SpeakerCategory? category = SpeakerCategory.Community,
-        // §415: Get Started completed by DEFAULT. Every pre-existing test in this file is about
-        // some OTHER gate, so they must keep describing a speaker who is ready to push. Pass false
-        // to exercise the new hold.
-        bool getStartedDone = true)
+        // §870: Get Started is NO LONGER a gate (operator 2026-08-05). Kept as a parameter because
+        // the field still exists and other tests set it; it no longer affects whether a push happens.
+        bool getStartedDone = true,
+        // §870: the gate is now "does Zoho have what it REQUIRES". Country is the mandatory one —
+        // Zoho rejects a create without it in ISO Alpha-2. Pass null to exercise the hold.
+        string? country = "DK")
     {
         var p = new Participant
         {
@@ -179,7 +181,7 @@ public sealed class SessionBackstagePushServiceTests
         db.SpeakerProfiles.Add(new SpeakerProfile
         {
             EventId = EventId, ParticipantId = p.Id, FirstName = "Sam", LastName = "Speaker",
-            Country = "DK", Tagline = "Tagline", Biography = "Bio", BackstageSpeakerId = backstageId,
+            Country = country, Tagline = "Tagline", Biography = "Bio", BackstageSpeakerId = backstageId,
             SelectedForPublish = selectedForPublish, Category = category,
             BioLastEditedBySpeakerAt = getStartedDone ? DateTimeOffset.UtcNow : null,
         });
@@ -468,7 +470,7 @@ public sealed class SessionBackstagePushServiceTests
         Assert.Equal(1, r1.Updated);                             // "updated" = change-NOTIFIED
         Assert.DoesNotContain(handler.Calls, c => c.Method != HttpMethod.Get); // NEVER writes
         var (to, _, html, _) = Assert.Single(mail.Messages);
-        Assert.Equal(ZohoChangeNotifier.Recipient, to);   // §493: system alerts go to the operator mailbox
+        Assert.Equal(ZohoChangeNotifier.ActionableRecipient, to);   // §493: system alerts go to the operator mailbox
         Assert.Contains("ACTION NEEDED", html);
         Assert.Contains("Session Time", html);                   // the ZOHO GUI field name
         var hash = db.Sessions.Single().ZohoChangeNotifiedHash;
@@ -1088,7 +1090,7 @@ public sealed class SessionBackstagePushServiceTests
         // ONE batched mail per pass (never per item), to the EVENT ops mailbox, listing
         // the created session — the operator must publish/delete manually in Backstage.
         var (to, subject, html, _) = Assert.Single(mail.Messages);
-        Assert.Equal(ZohoChangeNotifier.Recipient, to);   // §493: system alerts go to the operator mailbox
+        Assert.Equal(ZohoChangeNotifier.ActionableRecipient, to);   // §493: system alerts go to the operator mailbox
         Assert.Contains("[CEH→Zoho] Agenda / sessions", subject);
         Assert.Contains("1 change(s)", subject);
         Assert.Contains("Talk A", html);
@@ -1209,39 +1211,66 @@ public sealed class SessionBackstagePushServiceTests
     }
 
     [Fact]
-    public async Task Speaker_push_HOLDS_a_speaker_who_has_not_completed_Get_Started()
+    public async Task Speaker_push_no_longer_waits_for_Get_Started()
     {
-        // §415 (operator 2026-07-27: "dont push to zoho before the get started have completed -
-        // otherwise it will fail"). His run failed 4 of 4 with HTTP 400 "The country code must be
-        // in ISO Alpha-2 format" — an incomplete profile CANNOT satisfy Zoho's validation, so
-        // pushing it burns an API call and puts an alarming failure line in the ops mail on every
-        // pass. Holding is the correct outcome, not retrying.
+        // 🔒 §870 (operator 2026-08-05): "there should not be a gate for get started before speaker
+        // is synced to zoho. that is a change we need to make".
+        //
+        // ⚠️ This test asserted the OPPOSITE until now (§415). It was not wrong when written — his
+        // instruction superseded it. The old gate's cost was concrete: Carsten Meilbak stayed
+        // un-synced until he happened to finish onboarding, and the wait was invisible (§868.5).
         using var db = ScenarioFixture.NewDb();
         await SeedEditionAsync(db, SessionSyncDirection.SessionizeToCeh, SessionSyncDirection.CehToZoho);
         await SeedSpeakerSyncFeatureAsync(db, enabled: true);
 
-        var ready = await SeedSpeakerAsync(db, "done@x.dk", null, selectedForPublish: true);
+        var done = await SeedSpeakerAsync(db, "done@x.dk", null, selectedForPublish: true);
         var notStarted = await SeedSpeakerAsync(db, "todo@x.dk", null, selectedForPublish: true,
             getStartedDone: false);
 
         var (zoho, handler) = NewZoho((_, _) => Json(HttpStatusCode.OK, "{\"id\":\"bs-ok\"}"));
         var r = await NewSpeakerSvc(db, zoho, new FeatureGateService(db)).RunAsync(EventId);
 
-        // Only the completed speaker reached Zoho.
+        // BOTH sync now — onboarding is irrelevant once Zoho has what it requires.
+        Assert.Equal(2, r.Created);
+        Assert.Equal(2, handler.Calls.Count(c => c.Method == HttpMethod.Post));
+        Assert.Equal("bs-ok", db.SpeakerProfiles.Single(p => p.ParticipantId == done).BackstageSpeakerId);
+        Assert.Equal("bs-ok", db.SpeakerProfiles.Single(p => p.ParticipantId == notStarted).BackstageSpeakerId);
+    }
+
+    [Fact]
+    public async Task Speaker_push_no_longer_holds_a_speaker_without_country_or_accreditation()
+    {
+        // 🔒 §876 (operator 2026-08-05): *"country must not be a dependency or the accrediation"* ·
+        // *"remove those 2 dependency for zoho sync of speaker"* · *"we add those later manuslly"*.
+        //
+        // ⚠️ THIS TEST ASSERTED THE OPPOSITE UNTIL NOW, AND IT WAS NOT WRONG WHEN WRITTEN (§870) —
+        // his instruction superseded it, exactly as §870 superseded §415's version of it. That is
+        // THREE rewrites of one assertion, which is the tell worth keeping: each time the gate
+        // looked narrower than the last, and each time it was the SAME gate. §870's country check
+        // was Get Started wearing one field's clothing — `SpeakerProfile.Country` is written only
+        // by the speaker's own wizard, or by a Backstage change notice that cannot arrive until the
+        // speaker EXISTS in Backstage. A brand-new speaker could therefore never satisfy it
+        // (§876.2), which is exactly what happened to Ronni Pedersen: approved, activated,
+        // categorized, ring 3 — and silently held on a country nobody had any way to fill in.
+        //
+        // 🔑 THE RULE THIS PINS: approval is the ONLY gate. If an organizer approved them, push them.
+        using var db = ScenarioFixture.NewDb();
+        await SeedEditionAsync(db, SessionSyncDirection.SessionizeToCeh, SessionSyncDirection.CehToZoho);
+        await SeedSpeakerSyncFeatureAsync(db, enabled: true);
+
+        // The exact shape that was stuck in PROD: no Get Started, no country, no accreditation.
+        var bare = await SeedSpeakerAsync(db, "nocountry@x.dk", null, selectedForPublish: true,
+            getStartedDone: false, country: null);
+
+        var (zoho, handler) = NewZoho((_, _) => Json(HttpStatusCode.OK, "{\"id\":\"bs-ok\"}"));
+        var r = await NewSpeakerSvc(db, zoho, new FeatureGateService(db)).RunAsync(EventId);
+
         Assert.Equal(1, r.Created);
-        Assert.Equal(1, r.Skipped);
-        var call = Assert.Single(handler.Calls, c => c.Method == HttpMethod.Post);
-        Assert.Contains("done@x.dk", call.Body);
-        Assert.DoesNotContain("todo@x.dk", call.Body);
+        Assert.Equal(0, r.Skipped);
+        Assert.Single(handler.Calls, c => c.Method == HttpMethod.Post);
 
-        var held = Assert.Single(r.Items, i => i.ParticipantId == notStarted
-            && i.Action == SpeakerBackstagePushService.PushAction.Skipped);
-        Assert.Contains("Get Started not completed", held.Error);
-
-        // Held, not failed — nothing was written for them, so the next pass retries cleanly once
-        // they finish onboarding.
-        Assert.Null(db.SpeakerProfiles.Single(p => p.ParticipantId == notStarted).BackstageSpeakerId);
-        Assert.Equal("bs-ok", db.SpeakerProfiles.Single(p => p.ParticipantId == ready).BackstageSpeakerId);
+        // The link is stored, so he is reachable in Backstage and the details can be added by hand.
+        Assert.Equal("bs-ok", db.SpeakerProfiles.Single(p => p.ParticipantId == bare).BackstageSpeakerId);
     }
 
     [Fact]
@@ -1980,7 +2009,7 @@ public sealed class SessionBackstagePushServiceTests
 
         Assert.Equal(1, r.Created);
         var (to, _, html, _) = Assert.Single(mail.Messages);
-        Assert.Equal(ZohoChangeNotifier.Recipient, to);   // §493: system alerts go to the operator mailbox
+        Assert.Equal(ZohoChangeNotifier.ActionableRecipient, to);   // §493: system alerts go to the operator mailbox
         Assert.Contains("ACTION NEEDED", html);
         Assert.Contains("Existing MC", html);
         Assert.Contains("sam@x.dk", html);
@@ -2043,7 +2072,7 @@ public sealed class SessionBackstagePushServiceTests
         var r = await svc.RunAsync(EventId);
         Assert.Equal(1, r.Created);
         var (to, _, html, _) = Assert.Single(mail.Messages);
-        Assert.Equal(ZohoChangeNotifier.Recipient, to);   // §493: system alerts go to the operator mailbox
+        Assert.Equal(ZohoChangeNotifier.ActionableRecipient, to);   // §493: system alerts go to the operator mailbox
         return html;
     }
 }

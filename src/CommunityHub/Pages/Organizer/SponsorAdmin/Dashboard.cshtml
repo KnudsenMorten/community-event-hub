@@ -13,8 +13,8 @@
     }
     else
     {
-        <p>Per-sponsor view of task completion and lead volume. Sorted by
-           overdue tasks first.</p>
+        @* §784.6 — "and lead volume" removed with the columns it described. *@
+        <p>Per-sponsor view of task completion. Sorted by overdue tasks first.</p>
         <p><a asp-page="/Organizer/SponsorAdmin/Index">&larr; Back to Sponsor Admin</a></p>
 
         @if (!string.IsNullOrEmpty(Model.ActionMessage))
@@ -68,16 +68,12 @@
             CancelLabel: "Cancel",
             DefaultCount: Model.Rows.Count.ToString())' />
 
-        @if (Model.ZohoPipelinePending)
-        {
-            <p class="info" style="background:#fff8e1;border-left:3px solid #f4b400;padding:8px 12px;border-radius:4px;">
-                <strong>Zoho pipeline not yet configured.</strong>
-                The lead counters render as zero until the Zoho sync job is wired up
-                (Zoho OAuth + DB migration + storage SAS). See the
-                <a asp-page="/Organizer/SponsorAdmin/Leads">Leads page</a> for the
-                full checklist.
-            </p>
-        }
+        @* 🗑 §784.3/§784.6 — the "Zoho pipeline not yet configured" notice is GONE.
+           Operator 2026-08-03: it *"seems wrong"* — and it was. It described Zoho OAuth as unwired
+           and pointed at a setup checklist, while Zoho has been syncing sponsors for months; its
+           only real subject was the LEAD counters, which are removed below because the feature is
+           switched off. A warning that describes a state the system left long ago is worse than no
+           warning: it teaches the reader that the banners on this page are not to be believed. *@
     }
 </div>
 
@@ -93,14 +89,17 @@
         {
             <div style="overflow-x:auto;">
             <table style="width:100%;border-collapse:collapse;min-width:640px;">
+                @* §784.3 — "Tasks done / Total tasks" collapse into ONE "3/10" cell. His words:
+                   "it is obvious that 3 is completed and 10 is total". Two right-aligned integer
+                   columns made the reader do the pairing; the fraction states the relationship.
+                   🗑 §784.6 — the Leads / Leads 7d columns are REMOVED: "this feature is turned off
+                   in settings", so both were columns of zeroes that implied a pipeline was running
+                   and empty rather than switched off. *@
                 <tr style="text-align:left;border-bottom:2px solid #ddd;">
                     <th>Company</th>
                     <th style="text-align:right;">Contacts</th>
-                    <th style="text-align:right;">Tasks done</th>
-                    <th style="text-align:right;">Total tasks</th>
+                    <th style="text-align:right;">Tasks</th>
                     <th style="text-align:right;">Overdue</th>
-                    <th style="text-align:right;">Leads</th>
-                    <th style="text-align:right;">Leads 7d</th>
                     <th>Last Zoho sync</th>
                 </tr>
                 @foreach (var r in Model.Rows)
@@ -108,11 +107,8 @@
                     <tr style="border-bottom:1px solid #eee; @(r.TasksOverdue > 0 ? "background:#fff5f5;" : "")">
                         <td>@r.CompanyName <span style="color:#9aa0aa;font-size:12px;">#@r.CompanyId</span></td>
                         <td style="text-align:right;">@r.Contacts</td>
-                        <td style="text-align:right;">@r.TasksDone</td>
-                        <td style="text-align:right;">@r.TasksTotal</td>
+                        <td style="text-align:right;" title="@r.TasksDone of @r.TasksTotal tasks completed">@r.TasksDone/@r.TasksTotal</td>
                         <td style="text-align:right;@(r.TasksOverdue > 0 ? "color:#c0392b;font-weight:700;" : "")">@r.TasksOverdue</td>
-                        <td style="text-align:right;">@r.LeadsTotal</td>
-                        <td style="text-align:right;">@r.LeadsLast7d</td>
                         <td>@(r.LastZohoSync?.ToString("u") ?? "-")</td>
                     </tr>
                 }

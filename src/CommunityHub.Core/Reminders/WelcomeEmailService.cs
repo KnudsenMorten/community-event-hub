@@ -81,12 +81,47 @@ public sealed class WelcomeEmailService
 
         // Route to the speaker's effective address (override ?? Sessionize).
         // Non-speakers / no override resolve to the participant's own address.
-        var overrideEmail = await _db.SpeakerProfiles
+        var profile = await _db.SpeakerProfiles
             .Where(sp => sp.ParticipantId == participant.Id)
-            .Select(sp => sp.ContactEmailOverride)
+            .Select(sp => new { sp.ContactEmailOverride, sp.Category })
             .FirstOrDefaultAsync(ct);
         var toEmail = Domain.SpeakerProfile.EffectiveEmailFor(
-            participant.Email, overrideEmail);
+            participant.Email, profile?.ContactEmailOverride);
+
+        // 🔒 §880.6 — A SPEAKER WITH NO CATEGORY IS NOT WELCOMED. This is the second half of §880
+        // and the half that makes it the option he chose.
+        //
+        // §880 lets a Sessionize speaker arrive ACTIVE, which is what lets them sign in. Active is
+        // also what this service and WelcomeReconcileJob use to decide who gets welcomed — and
+        // welcome-email is released to Ring 3 in PROD while imported speakers arrive Ring 3, so
+        // WITHOUT this gate an unreviewed import would be mailed within ~10 minutes of landing.
+        // Offered the choice with those corrected facts he chose "Active, but welcome gated on
+        // category": the mail follows the ORGANIZER'S decision, not the import.
+        //
+        // 🔑 The predicate is deliberately the SAME as the Zoho/Backstage push gate
+        // (SpeakerBackstagePushService: `p.Category is null`). One decision point — setting the
+        // category — releases both, so an organizer never has to learn two rules.
+        //
+        // 🔒 UNRECORDED SKIP, like the ring skip below: nothing is written to SentReminders, so the
+        // moment a category is set the next WelcomeReconcileJob pass welcomes them. That is what
+        // makes this a HOLD rather than a silent loss.
+        //
+        // ⚠️ Applies to Speakers only (no other role has a category), and it applies to a FORCED
+        // resend too: "send this speaker their welcome" before anyone has decided what kind of
+        // speaker they are is the exact mail he did not want. Set the category — one click on the
+        // pending-speakers page — and it sends.
+        //
+        // 🔒 A SPEAKER WITH NO PROFILE ROW AT ALL IS NOT HELD, and that is not an oversight — it is
+        // what keeps this gate the SAME predicate as the push gate rather than a stricter one.
+        // `SpeakerBackstagePushService` iterates SpeakerProfiles, so a profile-less speaker is
+        // invisible to it too; and `SpeakerApprovalService.PendingAsync` joins the same table, so
+        // such a person would be held by a mail gate while appearing on NO queue that explains why.
+        // Every §880 speaker has a profile (the importer writes one in the same pass, before the
+        // welcome loop), so the population this gate exists for is fully covered.
+        if (participant.Role == ParticipantRole.Speaker && profile is not null && profile.Category is null)
+        {
+            return false;
+        }
 
         // Idempotency: one welcome per participant, ever.
         //
@@ -108,15 +143,31 @@ public sealed class WelcomeEmailService
             return false;
         }
 
-        // DESIRED-STATE RING GATE (operator 2026-06-23): if the recipient is OUTSIDE
-        // the welcome-email feature's released ring, SKIP without recording — so a
-        // reconcile re-sends automatically when the ring is later widened. Without
-        // this, the send below would be ring-DROPPED by BrevoEmailSender yet still
-        // recorded as welcomed, and the recipient would never get it. (Null gate in
-        // legacy/test wiring ⇒ no pre-gate; the sender's ring drop still applies.)
-        if (_gate is not null && _rings is not null
-            && !await _gate.IsFeatureActiveForParticipantAsync(
-                "welcome-email", participant.EventId, participant.Id, _rings, ct))
+        // 🔒 §724 — THE FEATURE RING NO LONGER GATES THIS SEND. Operator 2026-07-31:
+        // *"but we killed the welcome-email gate !!!"* … *"i consider that as an old feature gate
+        // that we should have removed, as we now control all on the actual email templates"*.
+        //
+        // He is right, and this was a MISS in §707.6. That change deleted the feature-ring clamp
+        // from the transport (BrevoEmailSender: "the transport no longer asks a FEATURE for a ring
+        // under any circumstance") — but this second, earlier enforcement point survived, so the
+        // welcome alone still resolved its audience as MIN(feature ring, mail ring).
+        //
+        // §721 is what it cost: `welcome-speaker` and `welcome-sponsor` were set to Ring 3 and the
+        // page said Ring 3, while `welcome-email` sat at Ring 2 — so every Ring-3 speaker and
+        // sponsor was skipped HERE, silently, before their mail's own ring was ever read. 13
+        // speakers and 19 sponsors had a task reminder chasing them without ever having been
+        // welcomed.
+        //
+        // 🔑 ENABLED is still honoured — only the RING is gone. That is exactly what §707.6 did:
+        // "The feature keeps its ON/OFF — that still stops whole jobs — it simply no longer
+        // contributes a RING." So switching welcome-email OFF still stops every welcome; the
+        // AUDIENCE is now the mail's own (mail × role) ring alone, decided in BrevoEmailSender.
+        //
+        // The skip stays UNRECORDED either way, which is the property §326 wanted: a recipient who
+        // is dropped is not written to SentReminders, so widening the mail's ring re-sends to them
+        // on the next pass instead of marking them welcomed-but-never-mailed.
+        if (_gate is not null
+            && !await _gate.IsFeatureEnabledAsync("welcome-email", participant.EventId, ct))
         {
             return false;
         }
@@ -141,16 +192,37 @@ public sealed class WelcomeEmailService
         // Render the per-role VARIANT (welcome-sponsor / welcome-speaker / …) when
         // one exists for the role, so the polished role-specific copy is what goes
         // out; fall back to the generic welcome for roles without a variant.
-        var templateKey =
-            CommunityHub.Core.Email.WelcomeVariants.TemplateKeyFor(participant.Role) ?? TemplateName;
-        var rendered = _templates.Render(templateKey, tokens);
+        //
+        // §726 — for a SPEAKER the key is further split by SpeakerCategory, so each category
+        // carries its own ring. The category lives on SpeakerProfile, not on Participant.
+        //
+        // §880.6 — read from the profile already loaded above rather than querying a second time.
+        // For a Speaker it is now guaranteed non-null: the category gate returned earlier otherwise.
+        var speakerCategory = participant.Role == ParticipantRole.Speaker ? profile?.Category : null;
+
+        // 🔑 TWO keys, deliberately. `mailKey` is the mail's IDENTITY — it decides the ring and the
+        // Settings row. `fileKey` is the body to render: the three category variants have no file
+        // of their own, so one body serves all three and cannot drift (§660/§719).
+        var mailKey =
+            CommunityHub.Core.Email.WelcomeVariants.TemplateKeyFor(participant.Role, speakerCategory)
+            ?? TemplateName;
+        var fileKey = CommunityHub.Core.Email.WelcomeVariants.TemplateFileKeyFor(mailKey);
+
+        // §726 — the ONLY part of the speaker welcome that differs by category. Named …Html so the
+        // renderer inserts it verbatim (it carries <strong>) instead of encoding the markup.
+        tokens["speakerIntroHtml"] = CommunityHub.Core.Email.WelcomeVariants.SpeakerIntroHtml(
+            speakerCategory, participant.Event.DisplayName);
+
+        var rendered = _templates.Render(fileKey, tokens);
         // Ring-governed by the welcome-email feature (operator 2026-06-22).
         // §516: Welcome:true adds the Email:WelcomeMaxReleaseRing cap (default Ring1) BENEATH the
         // feature ring, so widening the Settings picker alone cannot release a persona welcome.
         // TemplateName carries the per-role variant so the transport can see WHICH welcome this is.
         using (_context?.Set(new EmailContext(
             ReminderType, participant.EventId, participant.Id, participant.FullName,
-            TemplateName: templateKey,
+            // §726 — the MAIL key, not the file key: the transport picks the ring from
+            // TemplateName, which is exactly what lets one body carry three identities.
+            TemplateName: mailKey,
             FeatureKey: "welcome-email", Welcome: true)))
         {
             await _emailSender.SendAsync(

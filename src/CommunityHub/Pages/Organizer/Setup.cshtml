@@ -26,7 +26,34 @@
         new("/Organizer/SessionizeEndpointSettings", Localizer["Nav.OrgSessionizeEndpoint"].Value, Localizer["OrgSetup.Sessionize"].Value),
         new("/Organizer/SoMeSettings", Localizer["Nav.OrgSoMeSettings"].Value, Localizer["OrgSetup.SoMe"].Value),
         new("/Organizer/Settings", Localizer["Nav.OrgSettings"].Value, Localizer["OrgSetup.Settings"].Value),
-        new("/Organizer/AuditTrail", "Audit trail", "Every user action + backend event (emails, calendar syncs) for troubleshooting and usage — filter, count, export."),
+        // §769 / work-order §6.1 — every folder the hub uses, with a test that goes and LOOKS. A
+        // wrong folder is otherwise silent: the hub finds nothing and reports success, which is what
+        // kept the §767/§768 drift invisible through four production runs.
+        new("/Organizer/DocLibraryPaths", "Document library paths", "Every folder the hub reads or writes — where it resolves to, whether it is really there, and who changed what."),
+        // §741 — "Audit" everywhere, matching the main-menu entry and the page's own heading.
+        new("/Organizer/AuditTrail", "Audit", "Every user action + backend event (emails, calendar syncs) for troubleshooting and usage — filter, count, export."),
+        // §743 C1 — the feedback-device fleet. Registration is a PREREQUISITE, not an option:
+        // ingest refuses any identifier that is not already here, so the units must be entered
+        // before the event or they collect nothing.
+        // §784.7(A) — ONE row, not two. Device onboarding (approve/refuse a unit that asked to
+        // join, telemetry windows) is a SECTION of this page now: it was never a separate job, it
+        // was the same job at a different moment. 🔒 It remains the SECURITY CONTROL for the one
+        // endpoint that accepts an unauthenticated write — a unit that has asked to join can do
+        // nothing until somebody approves it — which is why it stays here in Setup, where
+        // commissioning belongs, rather than moving with the session-facing pages.
+        new("/Organizer/EvaluationDevices", "Evaluation Devices", "Register the feedback units and approve the ones asking to join, issue and rotate their keys, set telemetry windows, and watch battery, signal and unflushed cache during the event."),
+        // §747 C8 — the keys external systems present to pull a session's PDF report. These open
+        // verbatim attendee comments, so they are managed on their own page rather than buried.
+        new("/Organizer/EvaluationApiClients", "Report API credentials", "Keys that let an external system pull session evaluation reports — issue, rotate and revoke, with when each was last used."),
+        // §787.2 — the coupon→customer mapping that replaced a CSV on the VM. 🔑 It is a PAGE and not
+        // config because the "coupon missing ERP mapping" alert is only useful if whoever gets it can
+        // act on it: the alert and the fix belong in the same place.
+        new("/Organizer/CouponInvoicing", "Coupon invoicing", "Which Backstage coupon is billed to which e-conomic customer — with the claimed-but-unmapped ones at the top, because those are tickets nobody can invoice."),
+        // ⚰️ §784.7(B)+(C) — "Evaluation sessions", "Evaluation results" and "Session QR codes" are
+        // GONE FROM SETUP. They were five facts about one session spread across four pages; they are
+        // now one expanding row each on /Organizer/SessionFeedback, which lives in the SPEAKER area
+        // (/Organizer/Content) because it is about the sessions, not about configuring the platform.
+        // The old URLs redirect. Do not re-add them here.
         // §327: the verified inventory of every background job + the per-job run limit.
         new("/Organizer/Jobs", "Background jobs", "Every job the hub runs: what it does, its schedule, when it last ran, its health — and a run limit you can change without a deploy."),
         // §392: the diagnostics view. Named PlatformHealth, NOT Telemetry — /Organizer/Telemetry is

@@ -345,60 +345,38 @@ public sealed class SharePointEditionConfig
     [JsonPropertyName("rootFolderPath")]
     public string RootFolderPath { get; set; } = string.Empty;
 
-    /// <summary>
-    /// Optional drive-relative folder where every volunteer's uploaded PHOTO lands
-    /// (anonymous sign-up wizard, operator 2026-06-23). Same site + drive. Empty
-    /// disables the photo step's upload.
-    /// </summary>
-    [JsonPropertyName("volunteerPhotoFolderPath")]
-    public string VolunteerPhotoFolderPath { get; set; } = string.Empty;
+    // 🔒 §768.14 — volunteerPhotoFolderPath and speakerPhotoFolderPath are GONE. They are registry
+    // keys now: DocLibraryPaths.VolunteerPhotos and DocLibraryPaths.SpeakerPhotos.
+    //
+    // The speaker one especially had to move. §764 established "speaker photos are in 1 place only",
+    // and this config key was that place — but THREE separate code paths looked it up independently
+    // (the sponsor upload, the archive job, the read proxy). Three lookups of one string is one
+    // edit away from being two places again, which is the exact regression §764 was raised to fix.
+    // One key, resolved once, cannot drift.
 
-    /// <summary>
-    /// §356 — optional drive-relative folder where a SPONSOR-SESSION speaker's photo lands, uploaded
-    /// by the sponsor on that speaker's behalf (operator 2026-07-26: <i>"let sponsor upload picture
-    /// per speaker and then we expose the picture as url"</i>). Same site + drive as the rest.
-    /// Empty DISABLES the upload — the form then saves every other field and says plainly that the
-    /// photo could not be stored, rather than dropping the file silently.
-    /// </summary>
-    [JsonPropertyName("speakerPhotoFolderPath")]
-    public string SpeakerPhotoFolderPath { get; set; } = string.Empty;
-
-    /// <summary>
-    /// Optional drive-relative folder where every sponsor's uploaded LOGO file is
-    /// ALSO copied (collected) so the organizers have all logos in one place
-    /// (operator 2026-06-23). On the same site + drive as the per-company upload
-    /// folders. Each copy is named <c>{CompanyName} - {fileName}</c> so logos from
-    /// different sponsors never collide and a re-upload overwrites cleanly. Empty
-    /// disables the collection copy (only the per-company folder is written).
-    /// </summary>
-    [JsonPropertyName("logoCollectionFolderPath")]
-    public string LogoCollectionFolderPath { get; set; } = string.Empty;
+    // 🔒 §768.10 D7 / §768.14 — logoCollectionFolderPath is GONE, and has NO successor key. The
+    // collection copy is retired rather than migrated: Sponsors/Logo/Web is already the one place
+    // every sponsor logo lives, holding one current file per sponsor under a machine-readable name.
+    // A second copy under a third naming convention is what §767 caught a reader matching instead
+    // of the real upload — silently, for four production runs.
 
     // --- Sponsor Company Details uploads (operator 2026-06-24) ----------------
-    // Drive-relative folders for the versioned logo / exhibitor-wall uploads on
-    // /Sponsor/CompanyDetails. Same site + drive. Empty disables that upload button.
-    [JsonPropertyName("logoSoMeBrandingFolderPath")]
-    public string LogoSoMeBrandingFolderPath { get; set; } = string.Empty;
+    //
+    // 🔒 §768.14 — the five FOLDER keys that lived here are GONE:
+    //   logoSoMeBrandingFolderPath · logoPrintFolderPath · logoZohoFolderPath
+    //   exhibitorWallFolderPath    · boothCollateralFolderPath
+    //
+    // They are now registry keys (DocLibraryPaths.SponsorLogoWeb / SponsorLogoPrint /
+    // SponsorExhibitorWall / SponsorBoothCollateral) resolved against the ONE configured root, which
+    // is what lets PROD and DEV differ in a single setting. A path defined in two rival systems is
+    // how they drifted apart in the first place (§768). logoZoho has no successor at all — §6.7
+    // merged the lead-system logo into Logo/Web.
+    //
+    // What legitimately REMAINS below is not a path: who gets told about an upload.
 
-    [JsonPropertyName("logoPrintFolderPath")]
-    public string LogoPrintFolderPath { get; set; } = string.Empty;
-
-    [JsonPropertyName("logoZohoFolderPath")]
-    public string LogoZohoFolderPath { get; set; } = string.Empty;
-
-    [JsonPropertyName("exhibitorWallFolderPath")]
-    public string ExhibitorWallFolderPath { get; set; } = string.Empty;
-
-    [JsonPropertyName("boothCollateralFolderPath")]
-    public string BoothCollateralFolderPath { get; set; } = string.Empty;
-
-    /// <summary>Recipients notified when a sponsor uploads a SoMe / print / wall file.</summary>
+    /// <summary>Recipients notified when a sponsor uploads a web / print / wall file.</summary>
     [JsonPropertyName("sponsorUploadNotify")]
     public List<string> SponsorUploadNotify { get; set; } = new();
-
-    /// <summary>Recipients notified when a sponsor uploads the Zoho lead-system logo.</summary>
-    [JsonPropertyName("sponsorUploadNotifyZoho")]
-    public List<string> SponsorUploadNotifyZoho { get; set; } = new();
 }
 
 /// <summary>Volunteer section of event.&lt;edition&gt;.json (sibling of <c>edition</c>).</summary>

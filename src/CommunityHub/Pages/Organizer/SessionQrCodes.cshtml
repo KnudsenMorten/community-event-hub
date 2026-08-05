@@ -1,0 +1,13 @@
+@page
+@model CommunityHub.Pages.Organizer.SessionQrCodesModel
+@{
+    ViewData["Title"] = "Session QR codes";
+}
+@* ⚰️ §784.7(C) — merged into /Organizer/SessionFeedback. OnGet redirects; this markup renders only
+   if the redirect is ever suppressed. *@
+<div class="card">
+    <h1>Moved</h1>
+    <p>Session QR codes are now part of
+        <a asp-page="/Organizer/SessionFeedback">Session feedback</a> &mdash; generate the missing
+        ones, download them all as a ZIP, or take one code from its session's row.</p>
+</div>

@@ -70,6 +70,18 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>Always</CopyToPublishDirectory>
     </None>
+    <!-- REQUIREMENTS §680 - the per-role WELCOME copy for the Get-Started wizard's step 1, read
+         at runtime by WelcomeCopyStore through ConfigPaths.Resolve. Same shape and the SAME
+         reason as the task bodies above: without this Include the .md files are simply ABSENT
+         from the published bundle, WelcomeCopyStore.Exists() answers false for every role, and
+         the welcome step silently disappears in Azure while working perfectly on a dev box - a
+         missing FEATURE, which reads as "you never built it" rather than as a packaging bug.
+         Recursive, to keep the per-edition sub-folder. -->
+    <None Include="..\..\config\welcome\**\*.md">
+      <Link>config\welcome\%(RecursiveDir)%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>Always</CopyToPublishDirectory>
+    </None>
     <!-- Survey definitions read at runtime by SurveyDefinitionProvider via
          {ContentRoot}\App_Data\Surveys\<slug>.json. Editing the JSON
          changes survey copy without a code change or DB migration.

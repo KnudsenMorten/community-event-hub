@@ -22,8 +22,9 @@ public sealed record SpeakerPhotoFile(byte[] Content, string ContentType);
 /// follows (§146 venue images, §153 the speaker template, §326f-c the logo pack): the app fetches
 /// with its OWN credentials and streams the bytes; an end user never receives a SharePoint URL.</para>
 ///
-/// <para>🔒 <b>Reads the SAME site/drive/folder the UPLOAD writes to</b> — the edition config's
-/// SharePoint section (<c>SpeakerPhotoFolderPath</c>), not the Graphics options. Two different
+/// <para>🔒 <b>Reads the SAME folder the UPLOAD writes to</b> — §768.14: the document-library
+/// registry key <c>SpeakerPhotos</c>, which is now what every writer resolves too. It was the
+/// edition config's <c>SpeakerPhotoFolderPath</c>; either way the rule is the point — two different
 /// sources for one file is how a proxy ends up looking in a folder nothing was ever put in.</para>
 ///
 /// <para>🔒 <b>Bounded on purpose.</b> Only that one configured folder is reachable, only image
@@ -47,6 +48,7 @@ public sealed class SpeakerPhotoService
     private readonly SharePointUploadClient? _sp;
     private readonly EventEditionConfigLoader? _cfg;
     private readonly EventConfigOptions? _cfgOptions;
+    private readonly DocLibrary.IDocLibraryPathResolver? _paths;
     private readonly IMemoryCache _cache;
     private readonly ILogger<SpeakerPhotoService>? _log;
 
@@ -55,8 +57,10 @@ public sealed class SpeakerPhotoService
         SharePointUploadClient? sp = null,
         EventEditionConfigLoader? cfg = null,
         EventConfigOptions? cfgOptions = null,
+        DocLibrary.IDocLibraryPathResolver? paths = null,
         ILogger<SpeakerPhotoService>? log = null)
     {
+        _paths = paths;
         _cache = cache;
         _sp = sp;
         _cfg = cfg;
@@ -109,8 +113,12 @@ public sealed class SpeakerPhotoService
             return null;
         }
 
-        var folder = sp?.SpeakerPhotoFolderPath?.Trim().Trim('/');
-        if (sp is null || string.IsNullOrWhiteSpace(folder)) return null;
+        // §768.14 — the folder comes from the registry, not the edition config.
+        if (sp is null || _paths is null
+            || !_paths.TryResolve(DocLibrary.DocLibraryPaths.SpeakerPhotos, out var resolved))
+            return null;
+        var folder = resolved.Trim().Trim('/');
+        if (string.IsNullOrWhiteSpace(folder)) return null;
 
         var cacheKey = $"speakerphoto:{folder}:{leaf}";
         if (_cache.TryGetValue(cacheKey, out SpeakerPhotoFile? cached) && cached is not null)
@@ -118,8 +126,18 @@ public sealed class SpeakerPhotoService
 
         try
         {
-            // Resolved BY PATH inside the configured folder, so the caller can only ever reach a
-            // file that genuinely lives there — the leaf is never concatenated into a wider scope.
+            // 🔒 §764 — ONE folder, no fallback.
+            //
+            // This method does NOT use the stored path: it takes the leaf filename and prepends the
+            // configured folder. A legacy-folder fallback existed briefly so the config change could
+            // land before the files were moved — the operator moved them the same day and asked for
+            // it gone: *"i have move the pic over - no need for fallback as it confuses. speaker
+            // photos are in 1 place only"*. He is right: a permanent fallback is exactly how "one
+            // place" quietly becomes two again, which is what §764 was raised to fix.
+            //
+            // ⚠️ So this now resolves against the CONFIGURED folder and nothing else. If a photo
+            // stops rendering, the file is not where the config says — fix the file or the config,
+            // never by re-adding a second search path.
             var item = await _sp.GetItemByPathAsync(sp.SiteUrl, sp.DriveName, $"{folder}/{leaf}", ct);
             if (item is null) return null;
 
@@ -139,6 +157,7 @@ public sealed class SpeakerPhotoService
             return null;
         }
     }
+
 }
 
 /// <summary>

@@ -1,0 +1,713 @@
+@page
+@model CommunityHub.Pages.Organizer.SoMePostEditorModel
+@{
+    ViewData["Title"] = "Edit posts";
+}
+
+@* 🔴 §865.1 — THE ROOT CAUSE OF FOUR FAILED "MAKE NEXT A BUTTON" ATTEMPTS.
+   `.btn` is declared PER PAGE in this area — AssetLocations.cshtml says so outright, and SoMeQueue,
+   Graphics and DocLibraryPaths each declare their own. THIS PAGE NEVER DID, so `class="btn"` on an
+   <a> has been a NO-OP the whole time: every previous fix added weight to a class that did not
+   exist here, and the links stayed links. Declaring it is the fix. *@
+<style>
+    .btn { display:inline-flex; align-items:center; justify-content:center; gap:6px;
+           background:#008BD2; color:#fff; border:0; border-radius:6px; padding:8px 14px;
+           font-size:1rem; font-weight:600; text-decoration:none; cursor:pointer; }
+    .btn:hover, .btn:focus { background:#0079b8; color:#fff; text-decoration:none; }
+    .btn.primary { background:#1D3380; }
+    .btn.primary:hover { background:#16276a; }
+    .btn[aria-disabled="true"] { background:#c8ccd4; cursor:default; }
+
+    /* §865.2(1) — the walk. He asked FOUR times; it is the most-used control on the page. */
+    .walk-btn { min-width:170px; min-height:56px; font-size:1.1rem; }
+
+    /* §865.2(2)(3) — the header must be READABLE. "id and date is also impossible to see", and
+       "schedule time is hard to read and it is the most important thing". */
+    .post-id { font-size:1.35rem; font-weight:700; color:#1D3380; }
+    .post-when { font-size:1.2rem; font-weight:700; color:#111; }
+    .post-when .lbl { font-size:.8rem; font-weight:600; color:#666; display:block; text-transform:uppercase; letter-spacing:.03em; }
+
+    /* §865.2(6) — planned / scheduled / posted, unmissable. */
+    .state { font-size:1rem; font-weight:700; padding:6px 12px; border-radius:14px; }
+    .state-posted    { background:#e6f4ea; color:#137333; border:1px solid #a8d5b5; }
+    .state-scheduled { background:#e8f0fe; color:#1a4f9c; border:1px solid #b9d0f5; }
+    .state-planned   { background:#fef7e0; color:#8a6100; border:1px solid #f0d78c; }
+
+    /* §865.2(2) again — operator 2026-08-05: "make it same size as id and schedueled - hard to
+       see". The approval state and the post type were still the tiny shared .set-tag, sitting beside
+       a 1.35rem id and a 1rem state pill, so they read as decoration rather than as the two facts
+       they are. Same weight as their neighbours. */
+    .hdr-tag { font-size:1rem; font-weight:600; padding:5px 10px; border-radius:12px;
+               background:#eef2f7; color:#25324a; border:1px solid #cfd8e3; }
+    .hdr-tag.off { background:#fef1f0; color:#a50e0e; border-color:#e8b4b0; }
+
+    /* 🔒 §865.2(5) — a VARIABLE inside the preview. Colour is what tells him these words are not
+       his and will update themselves; it is also what stops him retyping one into literal text and
+       re-freezing it the way the credit froze into posts 383 and 495 (§861.3). */
+    .var { background:#e8f0fe; color:#1a4f9c; border-bottom:2px solid #7aa7ea;
+           border-radius:3px; padding:0 3px; }
+    .var-missing { background:#fce8e6; color:#a50e0e; border-bottom:2px solid #e59d99; }
+    /* 🔴 Operator 2026-08-05: "impossible to read". The insert buttons inherited a pale <button>
+       colour on a pale background — near-invisible. They are the control that makes variables
+       usable, so they get the same contrast and hit size as everything else here. */
+    .tok { font-family:ui-monospace,Consolas,monospace; font-size:.95rem; font-weight:600;
+           background:#e8f0fe; color:#14418f; border:1px solid #7aa7ea; border-radius:5px;
+           padding:7px 11px; min-height:38px; cursor:pointer; }
+    .tok:hover { background:#d3e2fb; border-color:#4d84d8; }
+
+    /* §865.2(7) — the graphic renders BEFORE the text, because LinkedIn shows it that way.
+       His reasoning, and it beats a left/right split: this editor now resembles the real post. */
+    .post-form { display:flex; flex-direction:column; }
+    .post-form .media-card { order:-1; }
+</style>
+
+<div class="card">
+    <h1>Edit posts</h1>
+
+    @if (Model.AccessDenied)
+    {
+        <p class="error">@Localizer["Common.OrganizersOnly"]</p>
+    }
+    else if (Model.Total == 0)
+    {
+        <p class="muted">
+            No posts yet. The engine plans them once setup is complete —
+            <a asp-page="/Organizer/SoMeSetup">Set up social media</a>.
+        </p>
+    }
+    else if (Model.Post is { } post)
+    {
+        @if (Model.Message is not null)
+        {
+            <p class="@(Model.MessageIsError ? "error" : "success")">@Model.Message</p>
+        }
+
+        @* 🔒 §850.2 — the filter. Operator: "it doesn't make sense to approve a post that is not
+           ready", so posts he cannot act on are hidden BY DEFAULT. The hidden COUNT is always shown:
+           hidden must never mean forgotten. *@
+        @* §863.3 — ONE header block: filters, then the walk, then what this post IS. Built together
+           because they are one control surface, and four separate passes over this markup would
+           thrash it. It works at ~360px (mobile-first guardrail) — the old wrapping row of type
+           links did not. *@
+        <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-bottom:10px;
+                    padding:10px;background:#f6f7f9;border-radius:6px;">
+
+            @* §863.3(3) — the type filter is a DROPDOWN. Operator: "the type filte must be a
+               dropdown instead - this is not user friendly". The per-type COUNTS stay in the option
+               labels: §851.2 exists so he can see what choosing a type WOULD show.
+               §863.3(4) — and showing hidden is a TICK, not a link: a checkbox shows STATE. Both
+               live in one GET form so either one re-runs the same query. *@
+            <form method="get" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:0;">
+                <label for="kind" class="muted">Type</label>
+                <select id="kind" name="kind" onchange="this.form.submit()"
+                        style="padding:8px;font-size:1rem;min-height:44px;">
+                    <option value="">All types (@Model.Total)</option>
+                    @foreach (var k in new[]
+                    {
+                        CommunityHub.Core.Integrations.SoMeTemplateKind.EventPost,
+                        CommunityHub.Core.Integrations.SoMeTemplateKind.Sponsor,
+                        CommunityHub.Core.Integrations.SoMeTemplateKind.SponsorCategory,
+                        CommunityHub.Core.Integrations.SoMeTemplateKind.Session,
+                        CommunityHub.Core.Integrations.SoMeTemplateKind.SpeakerTracks,
+                    })
+                    {
+                        var n = Model.CountByKind.TryGetValue(k, out var c) ? c : 0;
+                        var lbl = CommunityHub.Core.Integrations.SoMeAnnouncementQuery.KindLabelFor(k);
+                        <option value="@((int)k)" selected="@(Model.KindFilter == k)">@lbl (@n)</option>
+                    }
+                </select>
+
+                @* 🔒 §872 — operator 2026-08-05: "filter and see scheduled vs. planned vs. published
+                   … default i want to see only planned". His wording defines the axis: Planned =
+                   NOT approved, Scheduled = approved, Published = already on LinkedIn. Counts ride
+                   in the labels so he can see what choosing one would show (§851.2's rule). *@
+                <label for="state" class="muted">State</label>
+                <select id="state" name="state" onchange="this.form.submit()"
+                        style="padding:8px;font-size:1rem;min-height:44px;">
+                    @foreach (var st in new[]
+                    {
+                        CommunityHub.Pages.Organizer.SoMePostEditorModel.SoMePostState.Planned,
+                        CommunityHub.Pages.Organizer.SoMePostEditorModel.SoMePostState.Scheduled,
+                        CommunityHub.Pages.Organizer.SoMePostEditorModel.SoMePostState.Published,
+                    })
+                    {
+                        var sn = Model.CountByState.TryGetValue(st, out var sc) ? sc : 0;
+                        var slabel = CommunityHub.Pages.Organizer.SoMePostEditorModel.StateLabel(st);
+                        <option value="@((int)st)" selected="@(Model.StateFilter == st)">@slabel (@sn)</option>
+                    }
+                </select>
+
+                <label style="display:flex;gap:6px;align-items:center;cursor:pointer;">
+                    <input type="checkbox" name="includeIneligible" value="true"
+                           checked="@Model.IncludeIneligible" onchange="this.form.submit()"
+                           style="width:18px;height:18px;" />
+                    <span>Show posts that are not ready (due to dependencies)</span>
+                </label>
+            </form>
+
+            @* 🔒 The hidden COUNT is always shown — hidden must never mean forgotten (§833/§839). *@
+            @if (Model.IncludeIneligible)
+            {
+                <span class="muted">Showing all posts, including ones that cannot be approved yet.</span>
+            }
+            else if (Model.HiddenCount > 0)
+            {
+                <span class="muted">
+                    <strong>@Model.HiddenCount</strong> post(s) hidden — their sponsor has not
+                    delivered their social-media text yet.
+                </span>
+            }
+            else
+            {
+                <span class="muted">Nothing is hidden — every post is ready to work on.</span>
+            }
+        </div>
+
+        @* §863.2 — BIG walk buttons. Operator: "the button for next must be big in size as it is
+           hard to hit it". He walks 84 posts one at a time, so Next is the most-used control on the
+           page and was the smallest thing on it. The disabled state KEEPS ITS SPACE, so the control
+           does not shift under him as he walks. *@
+        <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
+            @if (Model.PreviousId is { } prev)
+            {
+                @* The filter must survive the walk, or Next silently resets it. *@
+                <a class="btn walk-btn" asp-page="/Organizer/SoMePostEditor" asp-route-id="@prev"
+                   asp-route-kind="@Model.KindFilter" asp-route-state="@Model.StateFilter" asp-route-includeIneligible="@Model.IncludeIneligible">← Previous</a>
+            }
+            else
+            {
+                <span class="btn walk-btn" aria-disabled="true">← Previous</span>
+            }
+
+            <strong style="font-size:1.1rem;">@Model.Position of @Model.Total</strong>
+
+            @if (Model.NextId is { } next)
+            {
+                <a class="btn primary walk-btn" asp-page="/Organizer/SoMePostEditor" asp-route-id="@next"
+                   asp-route-kind="@Model.KindFilter" asp-route-state="@Model.StateFilter" asp-route-includeIneligible="@Model.IncludeIneligible">Next →</a>
+            }
+            else
+            {
+                <span class="btn walk-btn" aria-disabled="true">Next →</span>
+            }
+        </div>
+
+        @* 🔑 §863.3(1)(2) — WHICH post is this, and WHEN does it go out.
+           Operator: "i am also missing the post id - and the planned date must move up to the other
+           things". Not decoration: "@Model.Position of @Model.Total" is a POSITION and it MOVES when
+           a date changes (§863.1), so nothing on this page identified the post he was editing.
+           §859.6 lost a real edit for exactly that reason. *@
+        @* §865.2(2)(3)(6) — "id and date is also impossible to see", "schedule time is hard to read
+           and it is the most important thing", "the state of the posting must also be easy to see".
+           So: big id, big schedule time, and ONE state word rather than three small tags he has to
+           assemble in his head. *@
+        <div style="display:flex;gap:22px;align-items:center;flex-wrap:wrap;margin-top:14px;
+                    padding:12px 14px;background:#fff;border:1px solid #d8dce3;border-radius:8px;">
+
+            <span class="post-id" title="The post id — the one thing about a post that never changes.">#@post.Id</span>
+
+            <span class="post-when" title="This is what the walk is ordered by.">
+                <span class="lbl">Goes out</span>
+                @CommunityHub.Core.Integrations.SoMeDisplayTime.ToDanish(post.ScheduledAtUtc).ToString("ddd dd MMM yyyy 'at' HH:mm")
+            </span>
+
+            @* 🔒 §872 — ONE state, on the SAME axis as the filter above: approval.
+               Planned = not approved · Scheduled = approved · Published = on LinkedIn.
+               ⚠️ This used to read from PlanState (§848.2 — whether the PLANNER or he owns the slot),
+               which is a DIFFERENT question. Two meanings of "Scheduled" on one page is exactly the
+               confusion worth removing, so the badge follows HIS wording and the planner-lock keeps
+               its own tag below — nothing is lost, and the page agrees with its own filter. *@
+            @if (post.Status == CommunityHub.Core.Domain.SoMePostStatus.Published)
+            {
+                <span class="state state-posted"
+                      title="Already on LinkedIn. Editing here does not change the live post.">✔ PUBLISHED</span>
+            }
+            else if (post.IsActive)
+            {
+                <span class="state state-scheduled"
+                      title="Approved — this will publish at its scheduled time.">📌 SCHEDULED (approved)</span>
+            }
+            else
+            {
+                <span class="state state-planned"
+                      title="Not approved yet, so it cannot publish.">🗓 PLANNED (not approved)</span>
+            }
+
+            @* 🔒 §848.2 — WHOSE DECISION THE SLOT IS, kept as its own tag. This is the axis the
+               badge above USED to show, and it is genuinely separate: accepting settles the DATE,
+               approving lets it PUBLISH. A post can be locked but unapproved, or approved while the
+               planner may still move it — so folding them together would lose a real distinction. *@
+            @if (post.Status != CommunityHub.Core.Domain.SoMePostStatus.Published)
+            {
+                @if (post.PlanState == CommunityHub.Core.Domain.SoMePostPlanState.Scheduled)
+                {
+                    <span class="hdr-tag" title="You accepted this slot — the planner will not move it.">🔒 date locked</span>
+                }
+                else
+                {
+                    <span class="hdr-tag" title="The planner may still move or replace this on a later run.">↻ planner may move it</span>
+                }
+            }
+
+            <span class="hdr-tag">@CommunityHub.Core.Integrations.SoMeAnnouncementQuery.KindLabelFor(post.TemplateKind)</span>
+        </div>
+
+        @* 🔒 §850 — WHY this post cannot be approved, on the post itself rather than only as an
+           error after he tries. Approving a post that is not ready makes no sense, so the reason
+           belongs where the decision is made. *@
+        @if (Model.BlockedReason is { } blocked)
+        {
+            <p class="error" style="margin-top:10px;">
+                <strong>Not ready to approve.</strong> @blocked
+            </p>
+        }
+
+        @* The accept / hand-back action, beside the state it changes. *@
+        <form method="post" asp-page-handler="SetPlanState" style="margin-top:10px;">
+            <input type="hidden" name="id" value="@post.Id" />
+            @if (post.PlanState == CommunityHub.Core.Domain.SoMePostPlanState.Scheduled)
+            {
+                <input type="hidden" name="state" value="@CommunityHub.Core.Domain.SoMePostPlanState.Proposed" />
+                <button type="submit" class="btn">Hand back to the planner</button>
+                <span class="muted" style="margin-left:8px;">
+                    Locked — this date and post are yours. The planner leaves it alone.
+                </span>
+            }
+            else
+            {
+                <input type="hidden" name="state" value="@CommunityHub.Core.Domain.SoMePostPlanState.Scheduled" />
+                <button type="submit" class="btn primary">Accept this slot</button>
+                <span class="muted" style="margin-left:8px;">
+                    A proposal — the planner may still move or replace it. Accepting locks it.
+                </span>
+            }
+        </form>
+
+        @* §853 — delete. A soft delete: the row survives so the planner will not re-propose the
+           subject, since it re-plans its own proposals every run. *@
+        <form method="post" asp-page-handler="Delete" style="margin-top:10px;"
+              onsubmit="return confirm('Delete this post? The planner will not propose it again. You can restore it afterwards.');">
+            <input type="hidden" name="id" value="@post.Id" />
+            <input type="hidden" name="restore" value="false" />
+            <button type="submit" class="btn">Delete this post</button>
+            <span class="muted" style="margin-left:8px;">
+                @if (post.Status == CommunityHub.Core.Domain.SoMePostStatus.Published)
+                {
+                    <text>
+                        ⚠️ This post is already on LinkedIn — deleting it here removes it from CEH
+                        only and does <strong>not</strong> take it off the company page.
+                    </text>
+                }
+                else
+                {
+                    <text>Removes it from the campaign and stops the planner re-proposing it.</text>
+                }
+            </span>
+        </form>
+
+        @if (post.Status == CommunityHub.Core.Domain.SoMePostStatus.Published)
+        {
+            @* Editing a published post changes nothing on LinkedIn — say so rather than letting him
+               believe he corrected something that is already out. *@
+            <p class="error" style="margin-top:10px;">
+                This post has already been published. Editing it here does <strong>not</strong>
+                change what is on LinkedIn.
+            </p>
+        }
+    }
+</div>
+
+@if (!Model.AccessDenied && Model.Post is { } p)
+{
+    <form method="post" asp-page-handler="Save" class="post-form">
+        <input type="hidden" name="PostId" value="@p.Id" />
+
+        <div class="card">
+            <h2>The post</h2>
+            <label for="text">Post text</label>
+            <textarea id="text" name="EditText" rows="16" style="width:100%;font-family:inherit;">@Model.EditText</textarea>
+
+            @* 🔒 §863.4 — SAVE SITS WITH THE TEXT. Operator: "save button to edit text must be next
+               to the post". This is a CORRECTNESS fix, not a layout preference: an edit whose Save
+               is off-screen is an edit that never gets submitted, and §859.6 lost a real edit that
+               way — a post published carrying a paragraph he had already removed. *@
+            <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:8px 0 4px;">
+                <button type="submit" class="btn primary"
+                        style="min-width:150px;min-height:52px;font-size:1.05rem;font-weight:600;">
+                    Save post text
+                </button>
+                <span class="muted">
+                    Clear the box completely to go back to the text the engine composed.
+                </span>
+            </div>
+
+            @* 🔒 §864.4 — THE PREVIEW: WHAT PUBLISHES, WITH VARIABLES IN A DIFFERENT COLOUR.
+               Operator: "did you include the variables in the preview with different color so i can
+               see that this is a variable, which will dynamically update if changed, but it in the
+               preview shows the actual values right now".
+
+               Two things at once, and that is the point:
+                 • the ACTUAL VALUE, so he can judge the real copy (a preview full of {tokens} would
+                   be unreadable and he could not approve from it);
+                 • the FACT that it is dynamic — because a resolved value that looks like typed text
+                   invites him to edit it into literal text, which is EXACTLY how the credit froze
+                   into posts 383 and 495 (§861.3). The colour is what stops that recurring by hand.
+
+               🔒 §861 — the credit is the first variable to get this treatment. When §864 lands,
+               every resolved token uses THIS mechanism, not a second one that drifts (§858.4). *@
+            @* 🔒 §865.2(5) — ONE PREVIEW, BUILT FROM VARIABLES, COLOUR-SEPARATED.
+               Operator: "preview shows everything right now, but it is built up with variables and i
+               can separate variables and free-style text apart by colors. i cannot edit a variable
+               text". This REPLACES the separate grey credit box he twice said he disliked.
+
+               🔑 Two properties at once, and that is the whole point:
+                 • he reads TODAY'S REAL VALUES, so he can judge the actual post;
+                 • the variable runs are visibly not his, so he knows they keep updating — and does
+                   not retype one into literal text, which is exactly how the credit froze into
+                   posts 383 and 495 (§861.3). The colour is the guard, not decoration. *@
+            <div style="margin:14px 0;padding:14px;border:1px solid #d8dce3;border-radius:8px;background:#fff;">
+                <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
+                    <strong style="font-size:1.05rem;">Preview — exactly what publishes</strong>
+                    <span class="var">variable</span>
+                    <span class="muted" style="font-size:.9rem;">
+                        Blue runs are filled in automatically and keep updating.
+                        <strong>Don't retype them as plain text</strong> — they would stop updating.
+                    </span>
+                </div>
+
+                @{
+                    // 🔴 §872.2 — BUILT IN CODE, NOT AS RAZOR MARKUP. Operator 2026-08-05: "wrong
+                    // left indent". This block sits inside a `white-space:pre-wrap` div, so Razor's
+                    // OWN newlines and indentation between elements were rendered as LITERAL TEXT —
+                    // which is why every line after a variable picked up the view's indentation.
+                    // Emitting one string with no incidental whitespace is the only reliable fix: a
+                    // pre-wrap container cannot tolerate pretty-printed markup.
+                    var sb = new System.Text.StringBuilder();
+                    foreach (var seg in Model.PreviewSegments)
+                    {
+                        var text = System.Net.WebUtility.HtmlEncode(seg.Text);
+                        if (!seg.IsVariable) { sb.Append(text); continue; }
+
+                        var tip = System.Net.WebUtility.HtmlEncode(seg.Resolved
+                            ? "{" + seg.Token + "} — filled in automatically when the post publishes"
+                            : "{" + seg.Token + "} — no value for this yet; the post still publishes");
+
+                        // A token with nothing behind it TODAY shows in red rather than vanishing:
+                        // an empty gap is the §854 silent loss, and he cannot fix what he cannot
+                        // see. It does NOT block publishing (§864.3).
+                        var cls = seg.Resolved ? "var" : "var var-missing";
+                        var shown = seg.Resolved || seg.Text.Length > 0
+                            ? text
+                            : System.Net.WebUtility.HtmlEncode("{" + seg.Token + "}");
+
+                        sb.Append("<span class=\"").Append(cls).Append("\" title=\"").Append(tip)
+                          .Append("\">").Append(shown).Append("</span>");
+                    }
+                }
+                <div style="white-space:pre-wrap;line-height:1.5;">@Html.Raw(sb.ToString())</div>
+            </div>
+
+            @* §865/§864 — INSERT A VARIABLE INTO THE FREE-STYLE TEXT.
+               Operator: "other tools supports variables in the freestyle editor - can you support
+               that as well ? like {Speakers} {Organizers} {SponsorTier}". Yes — and this is better
+               than the fixed append I built first, because HE chooses where it goes. *@
+            <div style="margin:10px 0;">
+                <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:6px;">
+                    <span class="muted">
+                        Click to insert a variable at the cursor. It resolves when the post publishes,
+                        so a late change (a sponsor's text, an extra speaker) is picked up automatically.
+                    </span>
+                    @* §866(2) — "include a button in the editor to edit the variables context".
+                       The shared values (hashtags, organizer credit, event link) live on the settings
+                       page; this is the way there without losing his place. *@
+                    <a class="btn" asp-page="/Organizer/SoMeSettings"
+                       title="Edit the shared variable values — hashtags, organizer credit, event link.">
+                        ⚙ Edit variables
+                    </a>
+                </div>
+                <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                    @foreach (var t in Model.AvailableTokens)
+                    {
+                        <button type="button" class="tok" onclick="insertToken('@t')">@t</button>
+                    }
+                </div>
+                @if (!Model.BodyPlacesCredit)
+                {
+                    <div class="muted" style="margin-top:8px;font-size:.9rem;">
+                        The organizer credit is added at the end automatically. Insert
+                        <code>{Organizers}</code> above to place it yourself instead.
+                    </div>
+                }
+            </div>
+
+            <script>
+                function insertToken(tok) {
+                    var ta = document.getElementById('text');
+                    if (!ta) return;
+                    var s = ta.selectionStart || 0, e = ta.selectionEnd || 0;
+                    ta.value = ta.value.slice(0, s) + tok + ta.value.slice(e);
+                    ta.focus();
+                    ta.selectionStart = ta.selectionEnd = s + tok.length;
+                }
+            </script>
+
+            @* §844.5 — DANISH time, not UTC. The stored value stays UTC; only the display and this
+               input are local, and the handler converts back on save. *@
+            <label for="when">Posting date &amp; time (Danish time)</label>
+            <input id="when" name="ScheduledAt" type="datetime-local"
+                   value="@(Model.ScheduledAt?.ToString("yyyy-MM-ddTHH:mm"))" />
+            <p class="muted">
+                Danish local time. Changing this moves only the schedule — it does not approve or
+                un-approve the post.
+            </p>
+        </div>
+
+        <div class="card media-card">
+            <h2>Media</h2>
+
+            @* §844.3 — the graphic/video switch. Video is only offered for the types he named
+               (event, session, sponsor); the others say so rather than showing a dead control. *@
+            <input type="hidden" name="MediaKind" value="@Model.MediaKind" />
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
+                <span class="muted">Show:</span>
+                <a class="btn @(Model.MediaKind == CommunityHub.Core.Domain.SoMePostMediaKind.Graphic ? "primary" : "")"
+                   asp-page="/Organizer/SoMePostEditor" asp-route-id="@p.Id" asp-route-media="Graphic">Graphic</a>
+                @if (Model.VideoSupported)
+                {
+                    <a class="btn @(Model.MediaKind == CommunityHub.Core.Domain.SoMePostMediaKind.Video ? "primary" : "")"
+                       asp-page="/Organizer/SoMePostEditor" asp-route-id="@p.Id" asp-route-media="Video">Video</a>
+                }
+                else
+                {
+                    <span class="muted">Video is not used for this post type.</span>
+                }
+            </div>
+
+            @if (Model.VideoSupported)
+            {
+                <p class="muted">
+                    <strong>Video is preferred</strong> — when a post has one it is used, and the
+                    graphic is the fallback.
+                </p>
+            }
+
+            @{
+                var mediaIsVideo = Model.MediaKind == CommunityHub.Core.Domain.SoMePostMediaKind.Video;
+                var mediaNoun = mediaIsVideo ? "video" : "picture";
+                var previewBase = $"/organizer/some-graphic?kind={(int?)p.TemplateKind}&media={Model.MediaKind}&name=";
+                var currentSrc = string.IsNullOrWhiteSpace(Model.ImageRef)
+                    ? string.Empty
+                    : previewBase + Uri.EscapeDataString(Model.ImageRef!);
+                var linkedButMissing = !string.IsNullOrWhiteSpace(Model.ImageRef)
+                    && Model.Graphics.Count > 0
+                    && !Model.Graphics.Any(g => string.Equals(g.FileName, Model.ImageRef, StringComparison.OrdinalIgnoreCase));
+            }
+
+            @* 🔒 §844.5 — a DROPDOWN of what is really in the library, never a typed string: a typo
+               becomes a broken media reference nothing catches until publish.
+               🔒 §844.6 — the picker and its BUTTONS sit beside the preview BOX, and the box opens
+               and closes, because walking 112 posts with a full-size image forced open is scrolling
+               rather than working. *@
+            <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start;">
+                <div style="flex:1 1 320px;min-width:280px;">
+                    <label for="imgref">Linked @mediaNoun</label>
+                    @if (Model.Graphics.Count > 0)
+                    {
+                        <select id="imgref" name="ImageRef" style="width:100%;"
+                                onchange="cehSetPreview(this.value);">
+                            <option value="">— none (text-only post) —</option>
+                            @foreach (var g in Model.Graphics)
+                            {
+                                <option value="@g.FileName"
+                                        selected="@(string.Equals(g.FileName, Model.ImageRef, StringComparison.OrdinalIgnoreCase))">
+                                    @g.FileName
+                                </option>
+                            }
+                        </select>
+                        <p class="muted">@Model.Graphics.Count @(mediaNoun)s available.</p>
+                    }
+                    else
+                    {
+                        <p class="muted">
+                            Nothing to choose from — the @mediaNoun library is empty or unreachable,
+                            so the current link is left as it is.
+                        </p>
+                        <input type="hidden" name="ImageRef" value="@Model.ImageRef" />
+                    }
+
+                    @if (linkedButMissing)
+                    {
+                        @* Say it, rather than silently showing "none" selected — which would read as
+                           the link having been removed. *@
+                        <p class="error">
+                            Linked to <strong>@Model.ImageRef</strong>, which is not in this folder.
+                            Choose a file to replace it.
+                        </p>
+                    }
+
+                    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
+                        <button type="submit" class="btn primary">Save</button>
+                        <button type="button" class="btn" onclick="cehTogglePreview();"
+                                id="previewToggle">Hide preview</button>
+                    </div>
+                </div>
+
+                @* THE BOX. *@
+                <div id="previewBox"
+                     style="flex:1 1 320px;min-width:280px;border:1px solid #ddd;border-radius:6px;padding:10px;background:#fafafa;">
+                    <div class="muted" style="font-size:12px;margin-bottom:6px;">Preview</div>
+                    @if (mediaIsVideo)
+                    {
+                        @* 🔴 §844.7 — NOT auto-loaded. His samples are 19–80 MB and the proxy buffers
+                           a whole file per request, so merely OPENING a post would allocate 80 MB.
+                           He asks for the video when he wants to see it. *@
+                        <video id="mediaPreview" controls preload="none"
+                               style="width:100%;border-radius:4px;background:#000;
+                                      @(string.IsNullOrEmpty(currentSrc) ? "display:none;" : "")">
+                            Your browser cannot play this video.
+                        </video>
+                        @if (!string.IsNullOrEmpty(currentSrc))
+                        {
+                            <button type="button" class="btn" style="margin-top:6px;"
+                                    onclick="var v=document.getElementById('mediaPreview'); v.src=this.dataset.src; v.load(); this.style.display='none';"
+                                    data-src="@currentSrc">▶ Load video preview</button>
+                        }
+                    }
+                    else
+                    {
+                        <img id="mediaPreview" src="@currentSrc" alt="Preview of the linked picture"
+                             style="width:100%;height:auto;border-radius:4px;@(string.IsNullOrEmpty(currentSrc) ? "display:none;" : "")" />
+                    }
+                    <div id="previewEmpty" class="muted"
+                         style="@(string.IsNullOrEmpty(currentSrc) ? "" : "display:none;")">
+                        Nothing linked — this post would publish as text only.
+                    </div>
+                </div>
+            </div>
+
+            <script>
+                // §844.6 — swap the preview without a page load, and let the box be closed.
+                function cehSetPreview(name) {
+                    var el = document.getElementById('mediaPreview');
+                    var empty = document.getElementById('previewEmpty');
+                    if (!el) return;
+                    var isVideo = el.tagName === 'VIDEO';
+                    if (name) {
+                        var url = '@Html.Raw(previewBase)' + encodeURIComponent(name);
+                        if (isVideo) {
+                            // §844.7 — a video is only fetched when he asks for it; picking a
+                            // different one re-arms the button rather than downloading 80 MB.
+                            el.removeAttribute('src');
+                            el.load();
+                            var btn = document.querySelector('[data-src]');
+                            if (btn) { btn.dataset.src = url; btn.style.display = ''; }
+                        } else {
+                            el.src = url;
+                        }
+                        el.style.display = '';
+                        if (empty) empty.style.display = 'none';
+                    } else {
+                        el.removeAttribute('src');
+                        el.style.display = 'none';
+                        if (empty) empty.style.display = '';
+                    }
+                }
+                function cehTogglePreview() {
+                    var box = document.getElementById('previewBox');
+                    var btn = document.getElementById('previewToggle');
+                    if (!box) return;
+                    var hidden = box.style.display === 'none';
+                    box.style.display = hidden ? '' : 'none';
+                    if (btn) btn.textContent = hidden ? 'Hide preview' : 'Show preview';
+                }
+            </script>
+        </div>
+    </form>
+
+    <div class="card">
+        @{
+            var isVideo = Model.MediaKind == CommunityHub.Core.Domain.SoMePostMediaKind.Video;
+            var noun = isVideo ? "video" : "picture";
+        }
+        @* 🔒 §844.6 — "when you have many, it must be user friendly". The gallery is COLLAPSED by
+           default and is a secondary aid: the dropdown above is the primary control. 46 thumbnails
+           forced open on every one of 112 posts is what made this unusable. *@
+        <details>
+            <summary style="cursor:pointer;font-weight:600;padding:4px 0;">
+                Browse all @(Model.Graphics.Count) @(noun)s
+            </summary>
+
+        @if (!Model.GraphicsAvailable)
+        {
+            <p class="muted">
+                The media library is not reachable from this environment, so the gallery cannot be
+                shown. You can still type a file name above.
+            </p>
+        }
+        else if (Model.Graphics.Count == 0)
+        {
+            <p class="muted">
+                No @(noun)s found in the folder for this post type.
+                @if (isVideo)
+                {
+                    <text>Upload one to the videos library and it will appear here.</text>
+                }
+            </p>
+        }
+        else
+        {
+            <p class="muted">
+                @Model.Graphics.Count @(noun)s. Click one to link it to this post, then press
+                <strong>Save</strong>.
+            </p>
+            <div style="display:flex;flex-wrap:wrap;gap:12px;">
+                @foreach (var g in Model.Graphics)
+                {
+                    var isCurrent = string.Equals(g.FileName, Model.ImageRef, StringComparison.OrdinalIgnoreCase);
+                    <figure style="width:190px;margin:0;padding:6px;border:2px solid @(isCurrent ? "#1d4ed8" : "#eee");border-radius:6px;">
+                        @* Clicking writes the file name into the field above — no page load, and
+                           nothing is saved until he presses Save. *@
+                        @{
+                            var thumb = $"/organizer/some-graphic?name={Uri.EscapeDataString(g.FileName)}&kind={(int?)p.TemplateKind}&media={Model.MediaKind}";
+                        }
+                        @* Selecting from the gallery drives the SAME dropdown and refreshes the
+                           preview box, so the two controls can never disagree about what is linked. *@
+                        <a href="#imgref"
+                           onclick="var s=document.getElementById('imgref'); if(s){s.value='@g.FileName'; cehSetPreview('@g.FileName');} return false;"
+                           title="Link @g.FileName to this post">
+                            @if (isVideo)
+                            {
+                                @* 🔴 §844.7 — NO <video> HERE, DELIBERATELY. The preview proxy reads
+                                   a whole file into memory (the store's seam returns byte[]), and his
+                                   real samples are 19–80 MB each. A grid of video elements would
+                                   have allocated hundreds of MB per page view — invisible with ~1 MB
+                                   graphics, severe at video sizes. A named tile costs nothing, and
+                                   only the ONE selected video streams into the preview box. *@
+                                <div style="display:flex;align-items:center;justify-content:center;
+                                            height:110px;border-radius:4px;background:#111;color:#fff;
+                                            font-size:28px;">▶</div>
+                            }
+                            else
+                            {
+                                <img src="@thumb" alt="@g.FileName" loading="lazy"
+                                     style="width:100%;height:auto;border-radius:4px;" />
+                            }
+                        </a>
+                        <figcaption class="muted" style="font-size:11px;word-break:break-all;margin-top:4px;">
+                            @g.FileName
+                            @if (g.SizeBytes > 0)
+                            {
+                                <span> · @(Math.Round(g.SizeBytes / 1024d / 1024d, 1)) MB</span>
+                            }
+                            @if (isCurrent)
+                            {
+                                <strong> — linked</strong>
+                            }
+                        </figcaption>
+                    </figure>
+                }
+            </div>
+        }
+        </details>
+    </div>
+}

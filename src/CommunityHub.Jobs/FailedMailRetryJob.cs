@@ -44,7 +44,10 @@ public sealed class FailedMailRetryJob
     }
 
     [Function("FailedMailRetryJob")]
-    public async Task Run([TimerTrigger("0 */20 * * * *")] TimerInfo timer, CancellationToken ct)
+    // §869.3 — BASE TICK ONLY. The real cadence is the operator's §510 interval on the Jobs page
+    // (JobCatalog default 20, matching MinGapBetweenAttempts). ⚠️ Setting it BELOW 20 does not
+    // retry anything faster — the service's own per-message gap still applies.
+    public async Task Run([TimerTrigger("0 */5 * * * *")] TimerInfo timer, CancellationToken ct)
     {
         var eventId = await _db.Events
             .Where(e => e.IsActive).Select(e => (int?)e.Id).FirstOrDefaultAsync(ct);

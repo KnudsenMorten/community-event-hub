@@ -6,6 +6,12 @@
     ViewData["Title"] = Model.Session is null
         ? Localizer["Nav.Sessions"].Value
         : Model.Session.Title;
+
+    // 🔒 §839 — this page emits its OWN og: tags below (a real session graphic beats the site
+    // default), so it suppresses the layout's defaults to avoid two og:title values on one card.
+    // ⚠️ Set ONLY when it actually emits them: a session with no graphic must still fall through
+    // to the layout default, or it has no card at all — which is the §839 bug all over again.
+    ViewData["OgHandledByPage"] = Model.Session is not null && Model.OgUrl is not null;
 }
 
 @* §172: OpenGraph + Twitter-card meta so a shared /Sessions/{id} link renders a rich

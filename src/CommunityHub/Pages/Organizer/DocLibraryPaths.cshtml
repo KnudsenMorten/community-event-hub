@@ -1,0 +1,307 @@
+@page
+@using CommunityHub.Core.Domain
+@using CommunityHub.Core.Integrations.DocLibrary
+@model CommunityHub.Pages.Organizer.DocLibraryPathsModel
+@{
+    ViewData["Title"] = "Document library paths";
+}
+
+<style>
+    /* Mobile-first: the table becomes stacked cards below 900px, so nothing scrolls sideways
+       on a phone. Above it, one row per folder reads as a table. */
+    .dlp-row { border:1px solid #e5e7eb; border-radius:8px; padding:12px; margin-bottom:10px; background:#fff; }
+    .dlp-row h3 { margin:0 0 2px; font-size:15px; }
+    .dlp-meta { font-size:12px; color:#6b7280; margin:0 0 8px; }
+    .dlp-resolved { font-family:ui-monospace,Consolas,monospace; font-size:12px; overflow-wrap:anywhere;
+                    background:#f9fafb; border-radius:4px; padding:4px 6px; display:inline-block; }
+    .dlp-edit { display:flex; gap:6px; flex-wrap:wrap; align-items:center; margin-top:8px; }
+    .dlp-edit input[type=text] { flex:1 1 260px; min-width:0; font-family:ui-monospace,Consolas,monospace; font-size:13px; }
+    .dlp-tag { display:inline-block; font-size:11px; padding:1px 6px; border-radius:999px; margin-left:6px; }
+    .dlp-tag.edited { background:#fef3c7; color:#92400e; }
+    .dlp-tag.default { background:#f3f4f6; color:#4b5563; }
+    .dlp-tag.planned { background:#eef2ff; color:#3730a3; }
+    .dlp-tag.reserved { background:#f5f3ff; color:#5b21b6; }
+    .dlp-ok { color:#065f46; } .dlp-bad { color:#991b1b; }
+    .dlp-note { font-size:12px; color:#4b5563; margin:6px 0 0; }
+    .dlp-area { margin:22px 0 6px; font-size:13px; text-transform:uppercase; letter-spacing:.04em; color:#6b7280; }
+    .dlp-hist { font-size:12px; border-collapse:collapse; width:100%; }
+    .dlp-hist td, .dlp-hist th { border-bottom:1px solid #f3f4f6; padding:4px 6px; text-align:left; vertical-align:top; }
+    /* Wide content scrolls INSIDE its own box — the page body must never scroll sideways
+       on a phone (the horizontal-overflow check the post-deploy validation runs). */
+    .dlp-scroll { overflow-x:auto; }
+    /* `.btn` is defined per page in this area (see AssetLocations), not in the layout. */
+    .btn { background:#008BD2; color:#fff; border:0; border-radius:6px; padding:6px 12px;
+           font-size:13px; cursor:pointer; }
+    .btn:hover { background:#0077b3; }
+</style>
+
+<div class="card">
+    <h1>Document library paths</h1>
+
+    @if (Model.AccessDenied)
+    {
+        <p class="error">This area is for organizers only.</p>
+        <p><a asp-page="/Index">Back to the hub</a></p>
+    }
+    else
+    {
+        <p>
+            Every folder this hub reads from or writes to in the document library &mdash; what it
+            resolves to, whether it is really there, and who changed it.
+            <strong>A wrong folder does not produce an error</strong>: the hub finds nothing and
+            carries on quietly, so <em>Test</em> is how you know.
+        </p>
+
+        <p class="dlp-note">
+            Paths are <strong>relative to the root below</strong>. An edit takes effect on this site
+            immediately and in the background jobs within
+            @((int)DocLibraryOverrideCache.Ttl.TotalSeconds) seconds &mdash; they run in a separate
+            process, so a job started just before your change may still use the old folder.
+        </p>
+
+        @if (Model.ErrorMessage is not null)
+        {
+            <p class="error" role="alert">@Model.ErrorMessage</p>
+        }
+        @if (Model.SavedMessage is not null)
+        {
+            <p class="info" role="status">@Model.SavedMessage</p>
+        }
+
+        <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:10px 12px;">
+            <p style="margin:0 0 4px;font-size:13px;">
+                <strong>Root</strong> &mdash; every path below sits inside this folder.
+            </p>
+            <p style="margin:0;"><span class="dlp-resolved">@(string.IsNullOrWhiteSpace(Model.Root) ? "(not set)" : Model.Root)</span></p>
+            <p class="dlp-note">
+                🔒 The root is <strong>not editable here, deliberately</strong>. It is what keeps this
+                environment apart from the other one: pointed at the wrong tree, every job in the hub
+                would write over the other environment's files. It is changed in the hosting
+                configuration, where doing so is a deliberate act.
+            </p>
+            <p class="dlp-note">
+                Site: <code>@(string.IsNullOrWhiteSpace(Model.SiteUrl) ? "(not set)" : Model.SiteUrl)</code>
+                &middot; Library: <code>@(string.IsNullOrWhiteSpace(Model.DriveName) ? "(default)" : Model.DriveName)</code>
+                @if (Model.EventShortName is not null)
+                {
+                    <text>&middot; Edition: <code>@Model.EventShortName</code></text>
+                }
+            </p>
+            @if (!Model.LibraryConfigured)
+            {
+                <p class="error" style="margin:8px 0 0;">
+                    The document library is <strong>not configured</strong> on this host, so every
+                    folder feature is inert. Nothing below will work until the site and root are set.
+                </p>
+            }
+        </div>
+
+        @if (Model.Problems.Count > 0)
+        {
+            <div style="margin-top:12px;border:1px solid #fecaca;background:#fef2f2;border-radius:8px;padding:10px 12px;">
+                <p style="margin:0 0 6px;"><strong>Configuration problems</strong></p>
+                <ul style="margin:0;padding-left:18px;font-size:13px;">
+                    @foreach (var p in Model.Problems)
+                    {
+                        <li>@p</li>
+                    }
+                </ul>
+            </div>
+        }
+
+        <form method="post" asp-page-handler="TestAll" style="margin-top:14px;">
+            <button type="submit" class="btn">Test all folders</button>
+            <span class="dlp-note">Goes and looks at every folder below. Takes a few seconds.</span>
+        </form>
+
+        @if (Model.AllTests is not null)
+        {
+            var failed = Model.AllTests.Where(t => !t.Ok && Model.IsInUse(t.Key)).ToList();
+            var okCount = Model.AllTests.Count(t => t.Ok);
+            <div style="margin-top:12px;border:1px solid @(failed.Count == 0 ? "#bbf7d0" : "#fecaca");
+                        background:@(failed.Count == 0 ? "#f0fdf4" : "#fef2f2");border-radius:8px;padding:10px 12px;">
+                <p style="margin:0 0 6px;">
+                    <strong>@okCount of @Model.AllTests.Count folders are there.</strong>
+                    @if (failed.Count > 0)
+                    {
+                        <span class="dlp-bad">@failed.Count in-use folder(s) could not be reached.</span>
+                    }
+                </p>
+                <div class="dlp-scroll">
+                    <table class="dlp-hist">
+                        <tbody>
+                        @foreach (var t in Model.AllTests)
+                        {
+                            <tr>
+                                <td style="white-space:nowrap;">
+                                    <span class="@(t.Ok ? "dlp-ok" : "dlp-bad")">@(t.Ok ? "OK" : "FAIL")</span>
+                                </td>
+                                <td>@t.Key</td>
+                                <td>@t.Probe.Summary</td>
+                            </tr>
+                        }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        }
+
+        @foreach (var area in Model.Rows.GroupBy(r => r.Definition.Area))
+        {
+            <h2 class="dlp-area">@area.Key</h2>
+
+            @foreach (var row in area)
+            {
+                var d = row.Definition;
+                <div class="dlp-row" id="@d.Key">
+                    <h3>
+                        @d.Key
+                        @if (row.IsOverridden)
+                        {
+                            <span class="dlp-tag edited">edited</span>
+                        }
+                        else
+                        {
+                            <span class="dlp-tag default">default</span>
+                        }
+                        @if (d.Status == DocLibraryPathStatus.Planned)
+                        {
+                            <span class="dlp-tag planned">planned</span>
+                        }
+                        else if (d.Status == DocLibraryPathStatus.Reserved)
+                        {
+                            <span class="dlp-tag reserved">reserved</span>
+                        }
+                    </h3>
+                    <p class="dlp-meta">
+                        @d.Direction.ToString().Replace(",", " +")
+                        @if (d.FileNamePattern is not null)
+                        {
+                            <text>&middot; files named <code>@d.FileNamePattern</code></text>
+                        }
+                        @if (d.CorrelationKey is not null)
+                        {
+                            <text>&middot; keyed <code>@d.CorrelationKey</code></text>
+                        }
+                    </p>
+
+                    <div><span class="dlp-resolved">@(string.IsNullOrWhiteSpace(row.FullPath) ? "(resolves to nothing)" : row.FullPath)</span></div>
+
+                    <form method="post" asp-page-handler="Save" class="dlp-edit">
+                        <input type="hidden" name="Key" value="@d.Key" />
+                        <input type="hidden" name="Kind" value="@DocLibrarySettingKind.Path" />
+                        <label class="visually-hidden" for="path-@d.Key">Folder for @d.Key</label>
+                        <input type="text" id="path-@d.Key" name="Value" value="@row.RelativePath"
+                               autocomplete="off" spellcheck="false" />
+                        <button type="submit" class="btn">Save</button>
+                        <button type="submit" class="btn" asp-page-handler="Test"
+                                formnovalidate>Test</button>
+                        @if (row.IsOverridden)
+                        {
+                            <button type="submit" class="btn" asp-page-handler="Restore"
+                                    formnovalidate>Restore default</button>
+                        }
+                    </form>
+
+                    @if (row.IsOverridden)
+                    {
+                        <p class="dlp-note">Built-in default: <code>@d.DefaultRelativePath</code></p>
+                    }
+
+                    @if (Model.SingleTest is not null && Model.SingleTest.Key == d.Key)
+                    {
+                        <p class="dlp-note @(Model.SingleTest.Ok ? "dlp-ok" : "dlp-bad")">
+                            <strong>@(Model.SingleTest.Ok ? "Found it." : "Not reachable.")</strong>
+                            @Model.SingleTest.Probe.Summary
+                        </p>
+                    }
+
+                    @if (d.Notes is not null)
+                    {
+                        <p class="dlp-note">@d.Notes</p>
+                    }
+                </div>
+            }
+        }
+
+        <h2 class="dlp-area">File names</h2>
+        <p class="dlp-note" style="margin-bottom:8px;">
+            Files the hub asks for <strong>by name</strong>. Leave one blank and it uses the shipped
+            default shown in the box &mdash; an exact file name, not a guess.
+        </p>
+        @* §783.11 — show the LABEL ("Logo"), never the storage key ("TemplateWordmark"). Operator
+           2026-08-03: "i prefer logo as name instead, none knows what wordmark is". A blank row now
+           reports the DEFAULT NAME it will use: "guessing" was alarming, and once a shipped default
+           exists it is also untrue. *@
+        @foreach (var f in Model.FileNames)
+        {
+            <div class="dlp-row">
+                <h3>
+                    @f.Label
+                    @if (f.IsOverridden)
+                    {
+                        <span class="dlp-tag edited">set</span>
+                    }
+                    else if (!string.IsNullOrWhiteSpace(f.ShippedDefault))
+                    {
+                        <span class="dlp-tag default">default</span>
+                    }
+                    else
+                    {
+                        <span class="dlp-tag default">guessing</span>
+                    }
+                </h3>
+                <p class="dlp-meta">@f.Purpose</p>
+                @if (!f.IsOverridden && !string.IsNullOrWhiteSpace(f.ShippedDefault))
+                {
+                    <p class="dlp-meta" style="margin-top:-4px;">
+                        Using: <code>@f.ShippedDefault</code>
+                    </p>
+                }
+                <form method="post" asp-page-handler="Save" class="dlp-edit">
+                    <input type="hidden" name="Key" value="@f.Key" />
+                    <input type="hidden" name="Kind" value="@DocLibrarySettingKind.FileName" />
+                    <label class="visually-hidden" for="file-@f.Key">File name for @f.Label</label>
+                    <input type="text" id="file-@f.Key" name="Value" value="@f.Value"
+                           autocomplete="off" spellcheck="false"
+                           placeholder="@(f.ShippedDefault ?? "(not set)")" />
+                    <button type="submit" class="btn">Save</button>
+                    @if (f.IsOverridden)
+                    {
+                        <button type="submit" class="btn" asp-page-handler="Restore" formnovalidate>Clear</button>
+                    }
+                </form>
+            </div>
+        }
+
+        <h2 class="dlp-area">Change history</h2>
+        @if (Model.History.Count == 0)
+        {
+            <p class="dlp-note">Nothing has been changed yet &mdash; every folder is on its built-in default.</p>
+        }
+        else
+        {
+            <div class="dlp-scroll">
+                <table class="dlp-hist">
+                    <thead>
+                    <tr><th>When (UTC)</th><th>Key</th><th>From</th><th>To</th><th>By</th></tr>
+                    </thead>
+                    <tbody>
+                    @foreach (var h in Model.History)
+                    {
+                        <tr>
+                            <td style="white-space:nowrap;">@h.ChangedAt.UtcDateTime.ToString("yyyy-MM-dd HH:mm")</td>
+                            <td>@h.Key</td>
+                            <td><code>@(h.OldValue ?? "(default)")</code></td>
+                            <td><code>@(h.NewValue ?? "(default)")</code></td>
+                            <td>@(h.ChangedByEmail ?? "—")</td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+            </div>
+        }
+
+        <p style="margin-top:18px;"><a asp-page="/Organizer/Setup">&larr; Back to setup</a></p>
+    }
+</div>

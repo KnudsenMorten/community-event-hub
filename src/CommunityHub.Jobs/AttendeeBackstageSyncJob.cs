@@ -109,7 +109,9 @@ public sealed class AttendeeBackstageSyncJob
     }
 
     [Function("AttendeeBackstageSyncJob")]
-    public async Task Run([TimerTrigger("0 */10 * * * *")] TimerInfo timer, CancellationToken ct)
+    // §869.3 — BASE TICK ONLY. The real cadence is the operator's §510 interval on the Jobs page
+    // (JobCatalog default 10), enforced in JobsPauseMiddleware.
+    public async Task Run([TimerTrigger("0 */5 * * * *")] TimerInfo timer, CancellationToken ct)
     {
         if (!_options.Enabled)
         {
@@ -128,6 +130,26 @@ public sealed class AttendeeBackstageSyncJob
             _activity?.ReportInactive(
                 "The 'attendee-reconcile' feature is switched off, so ticket purchases in Zoho are "
                 + "not reaching CEH.");
+            return;
+        }
+
+        // 🔒 §784.5 — A DELIBERATELY BLOCKED HOST IS INACTIVE, NOT FAILING.
+        //
+        // Operator 2026-08-03: *"this service is now turned off in DEV, so the alerting must also
+        // stopped"* — he was receiving "AttendeeBackstageSyncJob has now FAILED 2 time(s) in a row"
+        // from an environment that is switched off ON PURPOSE.
+        //
+        // ⚠️ This check exists because the §783.12b fix would otherwise MANUFACTURE that alert:
+        // blocking DEV's token means every Zoho job here finds no token, and "no token" was an
+        // ERROR. Turning an integration off must never become a source of pages about it being off —
+        // that is how the fix for one noise problem becomes the next noise problem.
+        if (!_zoho.HostMayReachZoho)
+        {
+            _activity?.ReportInactive(
+                "Zoho is blocked for this host (Integrations:AllowExternalWrites=false), so no "
+                + "ticket data is pulled here. Expected on DEV: DEV and PROD share ONE Zoho refresh "
+                + "token and Zoho meters token requests at 10 per 10 minutes, so DEV must not spend "
+                + "them (§783.12b).");
             return;
         }
 

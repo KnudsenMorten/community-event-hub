@@ -5,8 +5,14 @@
 *@
 <p style="font-size:13.5px;color:#4b5563;margin-top:0;">
     These are your company's contacts (contract signers &amp; event coordinators). You can add one
-    here; edit or remove them on the Company Details page.
+    here, or remove one below; to EDIT a contact's details, use the Company Details page.
 </p>
+
+@* §783.3 — the outcome of a Remove, shown here because the row it refers to is gone by now. *@
+@if (TempData["SponsorContactsMessage"] is string scm)
+{
+    <p role="status" style="margin:6px 0 10px;padding:8px 12px;border-radius:8px;background:#eef6ff;color:#1e3a8a;border:1px solid #bfdbfe;font-size:13.5px;">@scm</p>
+}
 
 @if (!Model.ErpAvailable)
 {
@@ -28,13 +34,27 @@ else
                    explain it. DISPLAY-ONLY on purpose: the ERP owns these, mirrored read-only, so
                    they must NOT look like checkboxes the sponsor can change here — editing happens
                    on Company Details, which writes back to e-conomic. *@
-                <li style="border:1px solid #e6eaf2;border-radius:8px;padding:8px 12px;font-size:14px;">
-                    ✓ <strong>@c.Name</strong>
-                    <span style="color:#6b7280;">@(string.IsNullOrEmpty(c.Email) ? "" : $"<{c.Email}>")</span>
-                    <span style="display:inline-flex;gap:12px;margin-left:6px;font-size:13px;color:#334155;">
-                        <span>@(c.IsSigner ? "☑" : "☐") Signer</span>
-                        <span>@(c.IsEventCoordinator ? "☑" : "☐") Event coordinator</span>
+                @* §783.3 — Remove sits ON the contact's own row, like the §783.7 speaker list.
+                   `nowrap` + `min-width:0` keeps the button beside the name instead of letting a
+                   long address push it onto its own line at ~360px. *@
+                <li style="border:1px solid #e6eaf2;border-radius:8px;padding:8px 12px;font-size:14px;display:flex;align-items:center;gap:10px;flex-wrap:nowrap;">
+                    <span style="flex:1 1 auto;min-width:0;overflow-wrap:anywhere;">
+                        ✓ <strong>@c.Name</strong>
+                        <span style="color:#6b7280;">@(string.IsNullOrEmpty(c.Email) ? "" : $"<{c.Email}>")</span>
+                        <span style="display:inline-flex;gap:12px;margin-left:6px;font-size:13px;color:#334155;">
+                            <span>@(c.IsSigner ? "☑" : "☐") Signer</span>
+                            <span>@(c.IsEventCoordinator ? "☑" : "☐") Event coordinator</span>
+                        </span>
                     </span>
+                    @* A submit inside the wizard's ONE form (never a nested form — §304b). 🔒 Every
+                       page hosting this partial MUST implement OnPostRemoveContactAsync — an
+                       unmatched named handler renders silently and looks like a dead button
+                       (§783.7). Pinned by SharedPartialHandlerCoverageTests. *@
+                    <button type="submit" asp-page-handler="RemoveContact" name="contactNumber" value="@c.ContactNumber"
+                            formnovalidate class="secondary" style="white-space:nowrap;flex:0 0 auto;"
+                            title="Remove @c.Name from your contacts">
+                        Remove
+                    </button>
                 </li>
             }
         </ul>

@@ -96,6 +96,10 @@ public sealed class SponsorZohoProvisionService
         // Operator 2026-07-23: collect every SUCCESSFUL Zoho write for ONE batched ops mail
         // per provision run (linking a cached id is CEH-side only — not a Zoho write).
         var zohoWrites = new List<string>();
+        // §792 — hand-entry lines for the whole run, batched into ONE mail at the end.
+        var manualLines = new List<string>();
+        // §792.5 — WHICH companies contributed those lines, so only they are stamped as reported.
+        var reportedCompanyIds = new List<string>();
 
         foreach (var info in infos)
         {
@@ -346,7 +350,20 @@ public sealed class SponsorZohoProvisionService
                     if (fields.Count > 0)
                     {
                         notes.Add($"{name}: reconciled to Zoho ({string.Join(", ", fields)}).");
-                        zohoWrites.Add($"Updated sponsor/exhibitor '{name}' — Zoho GUI fields: {string.Join(", ", fields)}");
+                        // §791.2 — "PUSHED TO", not "Updated": the PUT returning success is not
+                        // evidence Zoho kept the field (§791.3). Same wording as the bulk path.
+                        zohoWrites.Add($"Pushed to sponsor/exhibitor '{name}' — Zoho GUI fields: {string.Join(", ", fields)}");
+                    }
+
+                    // 🔴 §792 — the hand-entry lines ride the SAME batched mail. Plan B writes
+                    // nothing, so `fields` above is now always empty for sponsors/exhibitors; if
+                    // these were not collected here the scheduled catch-up would run completely
+                    // SILENT and the operator would be waiting for a mail that never comes.
+                    if (sr.ManualLines is { Count: > 0 })
+                    {
+                        manualLines.AddRange(sr.ManualLines);
+                        reportedCompanyIds.Add(info.SponsorCompanyId);
+                        notes.Add($"{name}: {sr.ManualLines.Count} field(s) need entering by hand in Backstage.");
                     }
                 }
                 catch (Exception ex)
@@ -362,6 +379,26 @@ public sealed class SponsorZohoProvisionService
         // successful Zoho write (publish/delete is manual in Backstage). Never throws.
         if (_zohoChanges is not null)
             await _zohoChanges.NotifyAsync("Sponsors / exhibitors", zohoWrites, ct);
+
+        // 🔴 §792 — and ONE batched HAND-ENTRY mail for the whole run, separate from the writes
+        // above because it says the opposite thing: nothing was written, please type these in.
+        // ⚠️ One mail per RUN, not per company — 13 sponsors after a stamp flush would otherwise be
+        // 13 separate mails, which is not the "complete list" he asked for.
+        if (_zohoChanges is not null && manualLines.Count > 0)
+        {
+            await _zohoChanges.NotifyAsync(
+                "Sponsors / exhibitors", manualLines, ct,
+                actionable: true, actionUrl: null, actionText: null,
+                intro: "Zoho Backstage <strong>ignores API updates</strong> for these fields "
+                       + "(measured 2026-08-04, §791.3), so CEH no longer tries. Copy each value "
+                       + "below into the matching field in Backstage so Zoho matches CEH.",
+                manualOnly: true);
+
+            // 🔒 §792.5 — stamp AFTER the mail, and only the companies that were in it. Both bulk
+            // paths must do this: whichever one runs first would otherwise re-send the same list on
+            // every pass, and the other would then never see anything left to report.
+            await _sync.StampManualReportAsync(eventId, reportedCompanyIds, ct);
+        }
 
         return new ProvisionResult(true, created, linked, exCreated, exRequested, exLinked, skipped, notes);
     }

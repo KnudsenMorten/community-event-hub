@@ -79,11 +79,20 @@ public sealed class EngineFailureAlertGateTests
     /// <summary>§702 — the expected alert subject, environment tag included.</summary>
     private static string ExpectedSubject(string fn) => $"[DEV] Engine FAILED: {fn} [ELDK27]";
 
-    private static EngineFailureAlertGate NewGate(CommunityHubDbContext db, RecordingEmailSender mail) =>
+    private static EngineFailureAlertGate NewGate(
+        CommunityHubDbContext db, RecordingEmailSender mail,
+        // §716 — null keeps the pre-existing behaviour (env resolves to UNKNOWN, which alerts),
+        // so every test above this line is unchanged.
+        CommunityHub.Core.Diagnostics.HubEnvironment? env = null) =>
         new(
             new JobFailureTracker(db, TimeProvider.System, NullLogger<JobFailureTracker>.Instance),
             NewAlertSender(mail),
-            NullLogger<EngineFailureAlertGate>.Instance);
+            NullLogger<EngineFailureAlertGate>.Instance,
+            env);
+
+    /// <summary>An environment resolved from a real App Service site name, as in production.</summary>
+    private static CommunityHub.Core.Diagnostics.HubEnvironment EnvOf(string siteName) =>
+        new(configuredLabel: null, siteName: siteName);
 
     [Fact]
     public async Task First_failure_records_but_does_not_alert()
@@ -102,7 +111,7 @@ public sealed class EngineFailureAlertGateTests
     }
 
     [Fact]
-    public async Task Second_consecutive_failure_alerts_with_unchanged_subject()
+    public async Task Third_consecutive_failure_alerts_with_unchanged_subject()
     {
         using var db = NewDb();
         var mail = new RecordingEmailSender();
@@ -112,13 +121,17 @@ public sealed class EngineFailureAlertGateTests
         await gate.OnFailureAsync(fn, new InvalidOperationException("503"));   // #1 suppressed
         Assert.Equal(0, mail.Sends);
 
-        await gate.OnFailureAsync(fn, new InvalidOperationException("503 again")); // #2 alerts
+        // 🔴 §784.4 — the alert used to fire HERE, on #2. A 503 spanning two ticks is still a blip.
+        await gate.OnFailureAsync(fn, new InvalidOperationException("503 again"));
+        Assert.Equal(0, mail.Sends);
+
+        await gate.OnFailureAsync(fn, new InvalidOperationException("503 a third time")); // #3 alerts
 
         Assert.Equal(1, mail.Sends);
         // §702 — the subject now leads with the ENVIRONMENT. The rest of the contract is unchanged.
         Assert.Equal(ExpectedSubject(fn), mail.LastSubject);
         Assert.Equal(EngineAlertSender.Recipient, mail.LastTo);          // ring-exempt ops mailbox
-        Assert.Equal(2, (await db.JobHealthMarkers.SingleAsync(m => m.JobKey == fn)).ConsecutiveFailures);
+        Assert.Equal(3, (await db.JobHealthMarkers.SingleAsync(m => m.JobKey == fn)).ConsecutiveFailures);
     }
 
     [Fact]
@@ -140,10 +153,14 @@ public sealed class EngineFailureAlertGateTests
     }
 
     [Fact]
-    public void Threshold_const_is_two()
+    public void Threshold_const_is_three()
     {
         // Operator agreement is the source of truth; assert the tunable const matches.
-        Assert.Equal(2, EngineFailureAlertGate.ConsecutiveFailureAlertThreshold);
+        // 🔴 §784.4 — raised from 2 to 3 (2026-08-03): "only alert when it has happened for 3
+        // consequtive times … you are warning of something which we cannto do anything about (503
+        // service unavailable)". An upstream 503 routinely spans two ticks, so a threshold of 2
+        // fired on exactly the class of blip this gate exists to absorb.
+        Assert.Equal(3, EngineFailureAlertGate.ConsecutiveFailureAlertThreshold);
     }
 
     [Fact]
@@ -225,9 +242,163 @@ public sealed class EngineFailureAlertGateTests
         await gate.OnFailureAsync(jobB, new Exception("b"));
         Assert.Equal(0, mail.Sends);
 
-        // jobA fails a 2nd consecutive time -> only jobA alerts.
+        // §784.4 — jobA needs a THIRD consecutive failure before it alerts; jobB stays at one.
         await gate.OnFailureAsync(jobA, new Exception("a2"));
+        Assert.Equal(0, mail.Sends);
+
+        await gate.OnFailureAsync(jobA, new Exception("a3"));
         Assert.Equal(1, mail.Sends);
         Assert.Equal(ExpectedSubject(jobA), mail.LastSubject);
+    }
+
+    // ---------- §707.42 — a gate turning a job away is a SETTING, not news ----------
+
+    /// <summary>
+    /// 🔒 §707.42 — a job skipped because its FEATURE IS OFF must never mail, at any streak length.
+    /// </summary>
+    /// <remarks>
+    /// Operator 2026-07-30, on the *"run 300 times in a row WITHOUT DOING ANYTHING"* mail:
+    /// <i>"this is too much info - and not relevant"</i>. The alert was reporting his OWN
+    /// configuration back to him as an anomaly, then arguing with itself — <i>"If that is deliberate,
+    /// nothing needs doing."</i> An alert that cannot tell a setting from a fault is one he learns to
+    /// delete, taking the next real one with it.
+    /// </remarks>
+    [Fact]
+    public async Task A_feature_gated_skip_never_alerts_however_long_the_streak()
+    {
+        using var db = NewDb();
+        var mail = new RecordingEmailSender();
+        var gate = NewGate(db, mail);
+        var fn = NewFn();
+
+        // Three times past the threshold, every run turned away by a gate.
+        for (var i = 0; i < EngineFailureAlertGate.ConsecutiveNoOpAlertThreshold * 3; i++)
+        {
+            await gate.OnActivityAsync(
+                fn, "The 'session-change-alerts' feature is switched off.", isDataStarvation: false);
+        }
+
+        Assert.Equal(0, mail.Sends);
+
+        // 🔑 …but the STREAK IS STILL RECORDED, so the Jobs page can show how long it has been idle
+        // and why. Suppressing the mail must not also blind the page — a state belongs on a page.
+        var marker = await db.JobHealthMarkers.SingleAsync(m => m.JobKey == fn);
+        Assert.True(marker.ConsecutiveNoOps >= EngineFailureAlertGate.ConsecutiveNoOpAlertThreshold);
+    }
+
+    /// <summary>
+    /// 🔒 The other half, and why this is a SEMANTIC split rather than switching the alert off:
+    /// DATA STARVATION still alerts. Every gate passed and nothing arrived — §545/§585's real case,
+    /// where nothing is misconfigured and something is genuinely wrong.
+    /// </summary>
+    [Fact]
+    public async Task Data_starvation_still_alerts_at_the_threshold()
+    {
+        using var db = NewDb();
+        var mail = new RecordingEmailSender();
+        var gate = NewGate(db, mail);
+        var fn = NewFn();
+
+        for (var i = 0; i < EngineFailureAlertGate.ConsecutiveNoOpAlertThreshold; i++)
+        {
+            await gate.OnActivityAsync(
+                fn, "Ran normally but found NO orders in Zoho at all.", isDataStarvation: true);
+        }
+
+        Assert.Equal(1, mail.Sends);
+    }
+
+    // ---------- §716 — DEV never sends the INACTIVE alert ----------
+
+    /// <summary>
+    /// 🔒 §716 — in DEV the INACTIVE alert is silence, even for real data starvation.
+    /// </summary>
+    /// <remarks>
+    /// Operator 2026-07-31: <i>"turn off these alerts in dev for me, sa we have turned off this in
+    /// dev"</i>, showing five <c>[DEV] Engine INACTIVE: …</c> mails in ten minutes. In DEV the
+    /// features these jobs need are switched off ON PURPOSE, so the mail reports his own
+    /// configuration back to him — for ever, every 100 runs. Note this suppresses even the
+    /// data-starvation case that <see cref="Data_starvation_still_alerts_at_the_threshold"/> proves
+    /// still fires in PROD: DEV has no real data to starve of, so there is nothing to learn from it.
+    /// </remarks>
+    [Fact]
+    public async Task Dev_never_sends_the_inactive_alert_but_still_records_the_streak()
+    {
+        using var db = NewDb();
+        var mail = new RecordingEmailSender();
+        var gate = NewGate(db, mail, EnvOf("eldk27hub-fn-devz237e"));
+        var fn = NewFn();
+
+        for (var i = 0; i < EngineFailureAlertGate.ConsecutiveNoOpAlertThreshold * 2; i++)
+        {
+            await gate.OnActivityAsync(
+                fn, "The 'session-change-alerts' feature is switched off.", isDataStarvation: true);
+        }
+
+        Assert.Equal(0, mail.Sends);
+
+        // 🔑 The state still belongs on the Jobs page — §707.42's rule. Only the MAIL is suppressed.
+        var marker = await db.JobHealthMarkers.SingleAsync(m => m.JobKey == fn);
+        Assert.True(marker.ConsecutiveNoOps >= EngineFailureAlertGate.ConsecutiveNoOpAlertThreshold);
+    }
+
+    /// <summary>
+    /// The other half: PROD is untouched — this alert is genuinely news there, where an engine that
+    /// has quietly stopped feeding something is a real defect (§545/§585).
+    /// </summary>
+    [Fact]
+    public async Task Prod_still_sends_the_inactive_alert()
+    {
+        using var db = NewDb();
+        var mail = new RecordingEmailSender();
+        var gate = NewGate(db, mail, EnvOf("eldk27hub-web-prodpdrq"));
+        var fn = NewFn();
+
+        for (var i = 0; i < EngineFailureAlertGate.ConsecutiveNoOpAlertThreshold; i++)
+        {
+            await gate.OnActivityAsync(fn, "Nothing arrived.", isDataStarvation: true);
+        }
+
+        Assert.Equal(1, mail.Sends);
+    }
+
+    /// <summary>
+    /// 🔒 An UNRECOGNISED host still alerts. Silence is granted only to a positively-identified DEV —
+    /// the §702 principle that an environment we cannot name must never be guessed, applied to
+    /// suppression: guessing "probably dev" would silence a real production alert.
+    /// </summary>
+    [Fact]
+    public async Task An_unknown_environment_still_alerts()
+    {
+        using var db = NewDb();
+        var mail = new RecordingEmailSender();
+        var gate = NewGate(db, mail, EnvOf("some-host-we-do-not-recognise"));
+        var fn = NewFn();
+
+        for (var i = 0; i < EngineFailureAlertGate.ConsecutiveNoOpAlertThreshold; i++)
+        {
+            await gate.OnActivityAsync(fn, "Nothing arrived.", isDataStarvation: true);
+        }
+
+        Assert.Equal(1, mail.Sends);
+    }
+
+    /// <summary>
+    /// ⚠️ DEV suppression is scoped to the INACTIVE alert. An engine that THROWS in DEV is a genuine
+    /// fault and must still page — that is a different signal and he did not ask to lose it.
+    /// </summary>
+    [Fact]
+    public async Task A_dev_engine_that_fails_still_alerts()
+    {
+        using var db = NewDb();
+        var mail = new RecordingEmailSender();
+        var gate = NewGate(db, mail, EnvOf("eldk27hub-fn-devz237e"));
+        var fn = NewFn();
+
+        await gate.OnFailureAsync(fn, new InvalidOperationException("boom"));
+        await gate.OnFailureAsync(fn, new InvalidOperationException("boom again"));
+        await gate.OnFailureAsync(fn, new InvalidOperationException("boom a third time"));  // §784.4
+
+        Assert.Equal(1, mail.Sends);
     }
 }

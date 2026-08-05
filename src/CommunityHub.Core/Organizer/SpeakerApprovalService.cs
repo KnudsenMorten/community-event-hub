@@ -121,23 +121,147 @@ public sealed class SpeakerApprovalService
         return true;
     }
 
+    /// <summary>§877 — the outcome of a one-click bulk approval, for the confirmation line.</summary>
+    public sealed record BulkApproveResult(int Count, IReadOnlyList<string> Names);
+
+    /// <summary>
+    /// §877 — approve EVERY currently-pending speaker in one action: same category, Ring 3.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-08-05: *"sets all pending speaker to community and ring 3. it will be
+    /// the case for most"*, plus the same for Guest and Sponsor — *"default for pending sponsor
+    /// should be ring 3. only difference is their speakercategory"*. So the ring is NOT a parameter
+    /// of his request; it is always <see cref="Rings.Default"/> (Ring 3), which is also what a new
+    /// speaker already arrives as.</para>
+    ///
+    /// <para>🔒 Operates on <see cref="PendingAsync"/>'s list, never on "all speakers": a speaker
+    /// who is already approved has a category an organizer CHOSE, and a bulk button must not
+    /// silently re-categorize them. It is therefore safe to click twice — the second click finds an
+    /// empty queue and reports 0.</para>
+    ///
+    /// <para>⚠️ One SaveChanges for the whole batch, so a mid-batch failure approves nobody rather
+    /// than half the queue.</para>
+    /// </remarks>
+    public async Task<BulkApproveResult> ApproveAllPendingAsync(
+        int eventId, SpeakerCategory category, CancellationToken ct = default)
+    {
+        var pending = await PendingAsync(eventId, ct);
+        if (pending.Speakers.Count == 0) return new BulkApproveResult(0, Array.Empty<string>());
+
+        var ids = pending.Speakers.Select(s => s.ParticipantId).ToList();
+
+        var profiles = await _db.SpeakerProfiles
+            .Where(sp => sp.EventId == eventId && ids.Contains(sp.ParticipantId)).ToListAsync(ct);
+        var participants = await _db.Participants
+            .Where(p => p.EventId == eventId && ids.Contains(p.Id)).ToListAsync(ct);
+
+        var now = _clock.GetUtcNow();
+        foreach (var profile in profiles)
+        {
+            profile.Category = category;
+            profile.UpdatedAt = now;
+        }
+        foreach (var participant in participants)
+        {
+            participant.Ring = Rings.Default;          // Ring 3 — his stated default for all three
+            participant.IsActive = true;
+            participant.LifecycleState = ParticipantLifecycleState.Active;
+        }
+
+        await _db.SaveChangesAsync(ct);
+
+        var names = pending.Speakers
+            .Select(s => string.IsNullOrWhiteSpace(s.FullName) ? s.Email : s.FullName)
+            .ToList();
+        return new BulkApproveResult(names.Count, names);
+    }
+
+    /// <summary>
+    /// §877 — the query value naming a bulk-approve category (<c>?approveAll=community</c>).
+    /// Returns false for anything unrecognised, so a stray value never approves anybody.
+    /// </summary>
+    public static bool TryParseApproveAll(string? value, out SpeakerCategory category)
+    {
+        category = default;
+        if (string.IsNullOrWhiteSpace(value)) return false;
+        switch (value.Trim().ToLowerInvariant())
+        {
+            case "community": category = SpeakerCategory.Community; return true;
+            case "guest":     category = SpeakerCategory.Guest;     return true;
+            case "sponsor":   category = SpeakerCategory.Sponsor;   return true;
+            default: return false;
+        }
+    }
+
     /// <summary>
     /// The immediate ops mail (§304) the import job sends when NEW speakers arrived and
     /// pending work exists. Lists every pending speaker with their blockers + the admin
     /// link. Returns null when nothing is pending (no mail).
+    ///
+    /// <para>§877 — plus three ONE-CLICK buttons that approve the whole queue at Ring 3,
+    /// differing only in category.</para>
     /// </summary>
     public static string? BuildPendingMailHtml(PendingResult pending, string baseUrl)
     {
         if (pending.Speakers.Count == 0) return null;
         string Enc(string? s) => System.Net.WebUtility.HtmlEncode(s ?? string.Empty);
+        var root = Enc(baseUrl.TrimEnd('/'));
         var rows = string.Join("", pending.Speakers.Select(s =>
             $"<li><strong>{Enc(s.FullName)}</strong> ({Enc(s.Email)}) — ring {(int)s.Ring}, "
             + $"category {(s.Category?.ToString() ?? "NONE")}: {Enc(string.Join("; ", s.Blockers))}</li>"));
+
+        var n = pending.Speakers.Count;
         return
-            $"<p><strong>{pending.Speakers.Count} speaker(s)</strong> need approval before they can "
+            $"<p><strong>{n} speaker(s)</strong> need approval before they can "
             + "flow to Zoho Backstage — set the speaker category, place the ring and activate:</p>"
             + $"<ul>{rows}</ul>"
-            + $"<p><a href=\"{Enc(baseUrl.TrimEnd('/'))}{AdminPath}\">Open Pending speakers →</a> "
+            // §877 — the common case is one click. Community first: "it will be the case for most".
+            + $"<p style=\"margin:18px 0 6px;font-weight:bold;\">Approve all {n} at ring 3:</p>"
+            + MailButton($"{root}{AdminPath}?approveAll=community", $"Approve all {n} as Community", primary: true)
+            + MailButton($"{root}{AdminPath}?approveAll=guest", $"Approve all {n} as Guest", primary: false)
+            + MailButton($"{root}{AdminPath}?approveAll=sponsor", $"Approve all {n} as Sponsor", primary: false)
+            + "<p style=\"font-size:13px;color:#4b5563;margin:4px 0 14px;\">Each button sets the "
+            + "category on every speaker above, places them at ring 3 and activates them. You will "
+            + "see exactly who was approved, and can still change any single one afterwards.</p>"
+            + $"<p><a href=\"{root}{AdminPath}\">Open Pending speakers →</a> "
             + $"(released Zoho ring today: {(int)pending.ReleasedRing})</p>";
+    }
+
+    /// <summary>
+    /// §877 — a mail button in the operator-verified house style (§865/§684.10).
+    /// </summary>
+    /// <remarks>
+    /// 🔒 <b>Desktop Outlook renders with the WORD engine</b>, which ignores <c>border-radius</c>
+    /// and will paint dark text on a dark fill. So a button emits a <b>VML roundrect</b> inside the
+    /// <c>mso</c> conditional and an ordinary anchor for every other client. This is the standard
+    /// already used by the task and welcome mails — do not "simplify" it to a styled anchor.
+    /// VML needs an explicit pixel width; the WORD engine will not size a roundrect to its content.
+    /// </remarks>
+    private static string MailButton(string href, string label, bool primary)
+    {
+        const string font = "Aptos,'Segoe UI',Arial,sans-serif";
+        var fill = primary ? "#1565c0" : "#4b5563";
+        var width = Math.Clamp(label.Length * 9 + 48, 200, 440);
+        return
+            "<table role=\"presentation\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\" "
+            + "style=\"margin:6px 0;\"><tr><td align=\"left\">"
+            + "<!--[if mso]>"
+            + "<v:roundrect xmlns:v=\"urn:schemas-microsoft-com:vml\" "
+            + "xmlns:w=\"urn:schemas-microsoft-com:office:word\" href=\"" + href
+            + "\" style=\"height:44px;v-text-anchor:middle;width:" + width
+            + "px;\" arcsize=\"50%\" stroke=\"f\" fillcolor=\"" + fill + "\">"
+            + "<w:anchorlock/>"
+            + "<center style=\"color:#ffffff;font-family:" + font
+            + ";font-size:15px;font-weight:bold;\">" + label + "</center>"
+            + "</v:roundrect>"
+            + "<![endif]-->"
+            + "<!--[if !mso]><!-- -->"
+            + "<a href=\"" + href + "\" style=\"background-color:" + fill
+            + ";border-radius:999px;color:#ffffff;display:inline-block;font-family:" + font
+            + ";font-size:15px;font-weight:700;line-height:44px;text-align:center;"
+            + "text-decoration:none;width:" + width
+            + "px;-webkit-text-size-adjust:none;\">" + label + "</a>"
+            + "<!--<![endif]-->"
+            + "</td></tr></table>";
     }
 }

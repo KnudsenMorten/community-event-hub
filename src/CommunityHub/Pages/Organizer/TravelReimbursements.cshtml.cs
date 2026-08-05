@@ -27,7 +27,9 @@ public class TravelReimbursementsModel : PageModel
         EmailTemplateProvider templates,
         CommunityHub.Branding.ActiveEventNameProvider activeEvent,
         ILogger<TravelReimbursementsModel> logger,
-        IEmailContextAccessor? context = null)
+        IEmailContextAccessor? context = null,
+        // §6.10 / §768.10 D5 — the reopen. Optional to match this page's existing constructions.
+        CommunityHub.Core.Entitlements.TravelClaimLock? claimLock = null)
     {
         _db = db;
         _participant = participant;
@@ -37,7 +39,10 @@ public class TravelReimbursementsModel : PageModel
         _activeEvent = activeEvent;
         _logger = logger;
         _context = context;
+        _claimLock = claimLock;
     }
+
+    private readonly CommunityHub.Core.Entitlements.TravelClaimLock? _claimLock;
 
     public bool AccessDenied { get; private set; }
     public string? Message { get; private set; }
@@ -63,6 +68,48 @@ public class TravelReimbursementsModel : PageModel
         var me = _participant.Current;
         if (me is null) return RedirectToPage("/Login");
         if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+        await LoadAsync(me.EventId, ct);
+        return Page();
+    }
+
+    /// <summary>
+    /// §6.10 / §768.10 D5 — return a submitted claim to the speaker so they can add what is missing.
+    /// </summary>
+    /// <remarks>
+    /// 🔒 <b>This handler is why the freeze is safe to ship at all.</b> Work-order §6.10 named the
+    /// consequence of locking without it: a speaker who submits after uploading 3 of 5 receipts is
+    /// locked out <b>with no recovery path</b>. Audit-logged inside
+    /// <c>TravelClaimLock.ReopenAsync</c> — who, when, and how many times, because a claim reopened
+    /// repeatedly is a story someone will want to read later.
+    /// </remarks>
+    public async Task<IActionResult> OnPostReopenAsync(int id, CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+        if (me.Role != ParticipantRole.Organizer) { AccessDenied = true; return Page(); }
+
+        var row = await _db.TravelReimbursements
+            .AsNoTracking()
+            .FirstOrDefaultAsync(t => t.Id == id && t.EventId == me.EventId, ct);
+
+        if (row is null)
+        {
+            Message = $"Claim #{id} was not found.";
+        }
+        else if (_claimLock is null)
+        {
+            // An honest refusal beats a button that silently does nothing.
+            Message = "Reopening is not available on this host.";
+        }
+        else if (await _claimLock.ReopenAsync(me.EventId, row.ParticipantId, me.Email, ct))
+        {
+            Message = $"Claim #{id} is open again — the speaker can add files and submit it once more.";
+        }
+        else
+        {
+            Message = $"Claim #{id} is not submitted, so there is nothing to reopen.";
+        }
+
         await LoadAsync(me.EventId, ct);
         return Page();
     }

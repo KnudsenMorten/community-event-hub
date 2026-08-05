@@ -32,6 +32,21 @@
         }
         else if (Model.Current is null)
         {
+            @* §824.10 — SHOW WHAT IS BEING APPROVED. LinkedIn rejects the whole consent screen when
+               the app lacks product access for ONE scope, and its error never says which one. Seeing
+               the list here is what turns "LinkedIn said no" into a one-look diagnosis. *@
+            <p style="font-size:13.5px;color:#6b7280;">
+                This will ask LinkedIn to approve:
+                @foreach (var s in Model.RequestedScopes)
+                {
+                    <code style="background:#f3f4f6;border-radius:3px;padding:1px 5px;margin-right:4px;">@s</code>
+                }
+                <br />
+                The <code>w_</code> scopes post; the <code>r_</code> scopes look up a sponsor's company
+                id so it can be tagged. If LinkedIn refuses the screen, the app is missing product
+                access for one of them — set <code>LinkedIn__Scopes</code> back to the two
+                <code>w_</code> scopes and connecting works as before (posting never needed the reads).
+            </p>
             <form method="post" asp-page-handler="Start">
                 <button type="submit" class="task-link-btn" style="border:none;cursor:pointer;">
                     🔗 Connect LinkedIn

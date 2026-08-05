@@ -51,13 +51,16 @@ public sealed class SoMeDispatchJob
     ///
     /// <para>⚠️ ONE KNOCK-ON, stated so it is a decision and not a surprise: the §326ca speaker
     /// PRE-ALERT is described as arriving *"~5 minutes before"* a post goes live, because that was
-    /// the tick. On a 15-minute tick the warning lands anywhere from 0 to 15 minutes ahead, so the
+    /// the tick. At a 15-minute cadence the warning lands anywhere from 0 to 15 minutes ahead, so the
     /// window to paste in a LinkedIn handle before publication is shorter and less predictable.
+    /// §869.3 — that window is now HIS to set: shortening the interval on the Jobs page narrows it.
     /// The publish itself is unaffected — only how much notice the organizer gets.</para>
     /// </summary>
     [Function("SoMeDispatchJob")]
     public async Task Run(
-        [TimerTrigger("0 */15 * * * *")] TimerInfo timer,
+        // §869.3 — BASE TICK ONLY. The real cadence is the operator's §510 interval on the Jobs
+        // page (JobCatalog default 15), enforced in JobsPauseMiddleware.
+        [TimerTrigger("0 */5 * * * *")] TimerInfo timer,
         CancellationToken ct)
     {
         var activeEventIds = await _db.Events

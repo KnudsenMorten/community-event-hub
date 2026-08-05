@@ -203,6 +203,10 @@
   <data name="Nav.SpeakerOnboarding" xml:space="preserve"><value>Get Started</value></data>
   <data name="Nav.GetStarted" xml:space="preserve"><value>Get Started</value></data>
   <data name="Nav.HelpPromote" xml:space="preserve"><value>Help Promote on Social Media</value></data>
+  <!-- §837/§838 — the sponsor- and speaker-facing announcement pages: what CEH will post about
+       them on LinkedIn, and when. Same label for both audiences; the pages differ, the idea does not. -->
+  <data name="Nav.SponsorAnnouncements" xml:space="preserve"><value>Social Media Announcements</value></data>
+  <data name="Nav.SpeakerAnnouncements" xml:space="preserve"><value>Social Media Announcements</value></data>
   <data name="Nav.Calendar" xml:space="preserve"><value>Calendar</value></data>
   <data name="Nav.SectionEventLogistics" xml:space="preserve"><value>Event Info</value></data>
   <data name="Nav.SectionRegister" xml:space="preserve"><value>Register/Update</value></data>
@@ -560,6 +564,9 @@
   <data name="Nav.OrgGroupPhotos" xml:space="preserve"><value>Group Photos</value></data>
   <data name="Nav.OrgAppGame" xml:space="preserve"><value>App Game</value></data>
   <data name="Nav.OrgImpersonationLog" xml:space="preserve"><value>Switch User Log</value></data>
+  <!-- §741: the main-menu slot that used to hold Switch User Log. The audit log is the wider
+       view (every user action + backend event); acting-as is one Category inside it. -->
+  <data name="Nav.OrgAuditTrail" xml:space="preserve"><value>Audit</value></data>
   <!-- §646: the two "is anything broken?" pages, promoted into the main organizer menu. -->
   <data name="Nav.OrgPlatformHealth" xml:space="preserve"><value>Platform Health</value></data>
   <data name="Nav.OrgJobs" xml:space="preserve"><value>Background Jobs</value></data>
@@ -626,7 +633,11 @@
   <data name="Hotel.Title" xml:space="preserve"><value>Hotel preference</value></data>
   <data name="Hotel.PolicyLead" xml:space="preserve"><value>Hotel policy:</value></data>
   <data name="Hotel.PolicyBody" xml:space="preserve"><value>we arrange and cover &lt;strong&gt;1 night&lt;/strong&gt; hotel for speakers checking in the day BEFORE the main conference day, and &lt;strong&gt;2 nights&lt;/strong&gt; for master-class speakers and speakers running a workshop on the pre-day. Pick &lt;em&gt;Yes, I need a hotel room&lt;/em&gt; and your check-in / check-out dates, OR pick &lt;em&gt;No, I don't need a hotel&lt;/em&gt; — either is a valid completed answer.</value></data>
-  <data name="Hotel.PolicySpeaker" xml:space="preserve"><value>If you'd like a hotel, we'll arrange and cover it based on the response you provide in the hub form. We will cover &lt;strong&gt;two nights for masterclass speakers&lt;/strong&gt; and &lt;strong&gt;one night for technical session speakers (main day)&lt;/strong&gt;. If you'd like to stay longer, any extra nights would be at your own expense.</value></data>
+  <!-- §725 (operator 2026-07-31): the recommended DATES were missing, so a speaker was told how many
+       nights we cover without being told which ones — and had to work the dates out themselves.
+       Master class speakers: 8-10 Feb 2027 (two nights). Main-day/technical session speakers:
+       9-10 Feb 2027 (one night). -->
+  <data name="Hotel.PolicySpeaker" xml:space="preserve"><value>If you'd like a hotel, we'll arrange and cover it based on the response you provide in the hub form. We will cover &lt;strong&gt;two nights for masterclass speakers (8-10 Feb 2027)&lt;/strong&gt; and &lt;strong&gt;one night for technical session speakers (main day) (9-10 Feb 2027)&lt;/strong&gt;. If you'd like to stay longer, any extra nights would be at your own expense.</value></data>
   <data name="Hotel.PolicyVolunteer" xml:space="preserve"><value>We will arrange and cover hotel, if you want it, based on your response in the hub form. Hotel coverage depends on the days where you have agreed to help us.</value></data>
   <data name="Hotel.PolicyCrew" xml:space="preserve"><value>We will arrange and cover hotel, if you want it, based on your response in the hub form. The organizer team confirms which nights are covered for your role — just tell us what you need below.</value></data>
   <data name="Hotel.NotRelevant" xml:space="preserve"><value>Hotel isn't part of your participation — attendees and sponsors arrange their own accommodation.</value></data>
@@ -772,6 +783,11 @@
   <!-- Forms: Volunteer wizard -->
   <data name="VolWiz.Title" xml:space="preserve"><value>Volunteer sign-up</value></data>
   <data name="SponsorWiz.Title" xml:space="preserve"><value>Get Started</value></data>
+  <!-- §680 - the welcome step (step 1, every role). The step's BODY is not here: it lives in
+       config/welcome/<edition>/<role>.md so the operator can edit it. These two strings are only
+       the card's heading and its one-line lead-in. -->
+  <data name="SponsorWiz.Step.welcome" xml:space="preserve"><value>Welcome</value></data>
+  <data name="SponsorWiz.Step.welcome.Desc" xml:space="preserve"><value>Start here — a quick hello, and what you will find in the Event Hub.</value></data>
   <data name="SponsorWiz.Step.company" xml:space="preserve"><value>Company details</value></data>
   <data name="SponsorWiz.Step.company.Desc" xml:space="preserve"><value>Your website, social links and company description.</value></data>
   <data name="SponsorWiz.Step.session" xml:space="preserve"><value>Your speaking session</value></data>
@@ -795,6 +811,8 @@
   <data name="SpeakerWiz.Title" xml:space="preserve"><value>Speaker onboarding</value></data>
   <data name="SpeakerWiz.Intro" xml:space="preserve"><value>Let's get you set up for the event. Complete the steps below — you can stop and come back any time; your progress is saved.</value></data>
   <data name="SpeakerWiz.Progress" xml:space="preserve"><value>{0} of {1} steps done</value></data>
+  <data name="SpeakerWiz.Step.welcome" xml:space="preserve"><value>Welcome</value></data>
+  <data name="SpeakerWiz.Step.welcome.Desc" xml:space="preserve"><value>Start here — a quick hello, and what you will find in the Event Hub.</value></data>
   <data name="SpeakerWiz.Continue" xml:space="preserve"><value>Continue — step {0} of {1}</value></data>
   <data name="SpeakerWiz.AllDone" xml:space="preserve"><value>All done — thank you! You can update any step below if anything changes.</value></data>
   <data name="SpeakerWiz.Nothing" xml:space="preserve"><value>There are no onboarding steps for you right now.</value></data>
@@ -817,7 +835,7 @@
   <data name="SpeakerWiz.Step.upload-preview" xml:space="preserve"><value>Upload preview presentation</value></data>
   <data name="SpeakerWiz.Step.upload-preview.Desc" xml:space="preserve"><value>Upload your draft presentation so attendees can plan their agenda.</value></data>
   <data name="SpeakerWiz.Step.upload-final" xml:space="preserve"><value>Upload final presentation</value></data>
-  <data name="SpeakerWiz.Step.upload-final.Desc" xml:space="preserve"><value>Upload your final presentation in PDF or PPTX format.</value></data>
+  <data name="SpeakerWiz.Step.upload-final.Desc" xml:space="preserve"><value>Upload your final presentation in PDF, PPTX or ZIP format.</value></data>
   <data name="SpeakerWiz.Step.promote" xml:space="preserve"><value>Help to promote your session(s)</value></data>
   <data name="SpeakerWiz.Step.promote.Desc" xml:space="preserve"><value>Share your session(s) on LinkedIn with #ELDK27 #ExpertsLiveDK.</value></data>
   <data name="SpeakerWiz.Step.signal" xml:space="preserve"><value>Join Signal chat &amp; broadcast group</value></data>
@@ -831,6 +849,8 @@
   <data name="RoleWiz.Title" xml:space="preserve"><value>Get Started</value></data>
   <data name="RoleWiz.Intro" xml:space="preserve"><value>Let's get you set up for the event. Complete the steps below — you can stop and come back any time; your progress is saved.</value></data>
   <data name="RoleWiz.Progress" xml:space="preserve"><value>{0} of {1} steps done</value></data>
+  <data name="RoleWiz.Step.welcome" xml:space="preserve"><value>Welcome</value></data>
+  <data name="RoleWiz.Step.welcome.Desc" xml:space="preserve"><value>Start here — a quick hello, and what you will find in the Event Hub.</value></data>
   <data name="RoleWiz.Continue" xml:space="preserve"><value>Continue — step {0} of {1}</value></data>
   <data name="RoleWiz.AllDone" xml:space="preserve"><value>All done — thank you! You can update any step below if anything changes.</value></data>
   <data name="RoleWiz.Nothing" xml:space="preserve"><value>There are no get-started steps for you right now.</value></data>
@@ -866,9 +886,12 @@
   <data name="RoleWiz.Step.accept.Desc" xml:space="preserve"><value>Review and accept our Code of Conduct and Privacy Policy.</value></data>
   <data name="RoleWiz.Step.deadlines" xml:space="preserve"><value>Your tasks &amp; deadlines</value></data>
   <data name="RoleWiz.Step.deadlines.Desc" xml:space="preserve"><value>Everything with a deadline that lives outside Get Started — plus a button to put it all in your calendar.</value></data>
+  <data name="Settings.Feat.GetStartedCompleteNotice.Name" xml:space="preserve"><value>Notify me when someone completes Get Started</value></data>
+  <data name="Settings.Feat.GetStartedCompleteNotice.Desc" xml:space="preserve"><value>E-mails the organizer mailbox once, the moment a participant finishes every Get Started step - so you can reach out and ask how the onboarding felt while it is still fresh.</value></data>
   <data name="Wizard.Next" xml:space="preserve"><value>Save &amp; next</value></data>
   <data name="Wizard.Previous" xml:space="preserve"><value>Previous</value></data>
   <data name="Wizard.Finish" xml:space="preserve"><value>Save &amp; finish</value></data>
+  <data name="Wizard.Save" xml:space="preserve"><value>Save</value></data>
   <data name="Wizard.Skip" xml:space="preserve"><value>Skip for now</value></data>
   <data name="Wizard.StepXofN" xml:space="preserve"><value>Step {0} of {1}</value></data>
   <data name="Wizard.Title" xml:space="preserve"><value>Get Started</value></data>
@@ -1302,7 +1325,9 @@
   <data name="Nav.OrgLogistics" xml:space="preserve"><value>Logistics</value></data>
   <data name="Nav.OrgSchedule" xml:space="preserve"><value>Schedule / Key Dates</value></data>
   <data name="Nav.OrgSoMe" xml:space="preserve"><value>Marketing / SoMe</value></data>
-  <data name="Nav.OrgContentStudio" xml:space="preserve"><value>Content Studio</value></data>
+  <!-- §832 (operator 2026-08-05): "this must be renamd to WordPress BlogPost Content". The nav +
+       hub-card label. 🔒 The ROUTE stays /Organizer/ContentStudio — he renamed the page, not the URL. -->
+  <data name="Nav.OrgContentStudio" xml:space="preserve"><value>WordPress BlogPost Content</value></data>
   <data name="Nav.OrgSetup" xml:space="preserve"><value>Setup</value></data>
   <data name="Nav.OrgQuizzes" xml:space="preserve"><value>Fun IT Games (Authoring)</value></data>
   <data name="Nav.OrgCalendarSettings" xml:space="preserve"><value>Calendar Sync</value></data>
@@ -1333,7 +1358,7 @@
   <data name="OrgPeople.Title" xml:space="preserve"><value>People</value></data>
   <data name="OrgPeople.Intro" xml:space="preserve"><value>Manage everyone in the event: participants, the pre-selection queue, onboarding progress, attendees and late-change action items.</value></data>
   <data name="OrgPeople.Participants" xml:space="preserve"><value>View all participants, filter by role and active/inactive status, and deactivate anyone who has dropped out.</value></data>
-  <data name="OrgPeople.Preselection" xml:space="preserve"><value>Prospective volunteers, speakers and media-team waiting for review. Validate the data, then preselect or activate.</value></data>
+  <data name="OrgPeople.Preselection" xml:space="preserve"><value>Prospective volunteers waiting for review. Validate the data, then preselect or activate. Speakers are reviewed on the Pending speakers page.</value></data>
   <data name="OrgPeople.Onboarding" xml:space="preserve"><value>Who has — and hasn't — completed each onboarding step (bio, picture, hotel, appreciation, swag). Re-open a step to queue a reminder.</value></data>
   <data name="OrgPeople.Attendees" xml:space="preserve"><value>Browse the full reconciled attendee list with filters, search and CSV export.</value></data>
   <data name="OrgPeople.ActionQueue" xml:space="preserve"><value>Late participant changes (hotel, dinner) made near the lock date that need re-confirming with a vendor.</value></data>
@@ -1391,7 +1416,7 @@
   <data name="Settings.DependsOn" xml:space="preserve"><value>Needs: {0}</value></data>
   <data name="Settings.DependencyWarning" xml:space="preserve"><value>{0} is on but its prerequisite {1} is off, so it stays inert until you enable {1}.</value></data>
   <data name="Settings.KillSwitchHeading" xml:space="preserve"><value>Outbound email</value></data>
-  <data name="Settings.KillSwitchHelp" xml:space="preserve"><value>The master switch for all email leaving the hub. Turn it off to instantly stop every send — sign-in codes, welcomes, reminders and digests — across the web app and the background jobs. Recipients are also limited by the safe-recipient allowlist; nothing is ever sent to people outside it.</value></data>
+  <data name="Settings.KillSwitchHelp" xml:space="preserve"><value>The master switch for all email leaving the hub. Turn it off to instantly stop every send — sign-in codes, welcomes, reminders and round-ups — across the web app and the background jobs. Recipients are also limited by the safe-recipient allowlist; nothing is ever sent to people outside it.</value></data>
   <data name="Settings.AllowlistLabel" xml:space="preserve"><value>Safe-recipient allowlist (read-only)</value></data>
   <data name="Settings.AllowlistEmpty" xml:space="preserve"><value>No allowlist configured — every send is blocked (fail-closed).</value></data>
   <data name="Settings.RedirectLabel" xml:space="preserve"><value>Redirect all mail to (test mode)</value></data>
@@ -1399,7 +1424,7 @@
   <data name="Settings.KillSwitchConfig" xml:space="preserve"><value>The master email switch is currently forced OFF by the environment configuration. Nothing will send until that is changed.</value></data>
   <!-- Background jobs master pause/resume switch -->
   <data name="Settings.JobsHeading" xml:space="preserve"><value>Background jobs</value></data>
-  <data name="Settings.JobsHelp" xml:space="preserve"><value>The master switch for every scheduled background job — welcome and reminder sends, the Backstage and WooCommerce pulls, digests, and all other timers. Pause it to instantly stop all of them; resume to start again. Each job re-checks this before it runs, so resume takes effect on the next scheduled tick.</value></data>
+  <data name="Settings.JobsHelp" xml:space="preserve"><value>The master switch for every scheduled background job — welcome and reminder sends, the Backstage and WooCommerce pulls, the review and round-up mails, and all other timers. Pause it to instantly stop all of them; resume to start again. Each job re-checks this before it runs, so resume takes effect on the next scheduled tick.</value></data>
   <data name="Settings.JobsRunHeading" xml:space="preserve"><value>All scheduled jobs</value></data>
   <data name="Settings.JobsDetail" xml:space="preserve"><value>When paused, every timer job no-ops without doing any work or sending anything. This does not change your per-feature switches or rings — it is a single operational stop/start for the whole scheduler.</value></data>
   <data name="Settings.JobsStateRunning" xml:space="preserve"><value>Running</value></data>
@@ -1490,13 +1515,18 @@
   <data name="Settings.Feat.Sessionize.Desc" xml:space="preserve"><value>Import accepted speakers and sessions from your Sessionize endpoint.</value></data>
   <data name="Settings.Feat.SessionChangeAlerts.Name" xml:space="preserve"><value>Session time / location change alerts</value></data>
   <data name="Settings.Feat.SessionChangeAlerts.Desc" xml:space="preserve"><value>Automatically detect when a session's time or room changes in Zoho Backstage and queue the change for your approval; the affected speaker(s) are emailed when you approve it. Ring-scoped; off by default.</value></data>
+  <data name="Settings.Feat.SignageAgendaSync.Name" xml:space="preserve"><value>Signage agenda (venue screens)</value></data>
+  <data name="Settings.Feat.SignageAgendaSync.Desc" xml:space="preserve"><value>Copies the complete Zoho Backstage agenda into CEH every 5 minutes so the screens around the venue can show it — including the breaks, registration, lunch and party that CEH does not otherwise store. A change you make in Backstage reaches the screens within one cycle. It only reads: &lt;b&gt;nothing is ever written back to Zoho&lt;/b&gt;. If Zoho cannot be reached, the screens keep showing the last agenda we pulled rather than going blank. Off by default — switch it on when the screens go up.</value></data>
   <data name="Settings.Feat.SpeakerChangeAlerts.Name" xml:space="preserve"><value>Speaker profile change alerts</value></data>
   <data name="Settings.Feat.SpeakerChangeAlerts.Desc" xml:space="preserve"><value>Automatically detect when a speaker's name, tagline, bio, country or social links change in Zoho Backstage and queue the change for your approval. Off by default; never auto-applied. Requires the speaker sync direction set to Zoho to CEH.</value></data>
   <data name="Settings.Feat.BackstageSync.Name" xml:space="preserve"><value>Backstage / Zoho exhibitor sync</value></data>
   <data name="Settings.Feat.BackstageSync.Desc" xml:space="preserve"><value>Mirror sponsors and exhibitors into Zoho Backstage and notify the coordinator.</value></data>
   <data name="Settings.Feat.SoMe.Name" xml:space="preserve"><value>Social-media scheduling</value></data>
   <data name="Settings.Feat.SoMe.Desc" xml:space="preserve"><value>Schedule and publish posts on a calendar across your social channels.</value></data>
-  <data name="Settings.Feat.ContentStudio.Name" xml:space="preserve"><value>Content Studio</value></data>
+  <!-- §832 — renamed with the page. The FEATURE SWITCH carries the same name on purpose: a page
+       called "WordPress BlogPost Content" governed by a switch called "Content Studio" is the
+       two-names-for-one-thing confusion that costs him a support round. Key unchanged (data). -->
+  <data name="Settings.Feat.ContentStudio.Name" xml:space="preserve"><value>WordPress BlogPost Content</value></data>
   <data name="Settings.Feat.ContentStudio.Desc" xml:space="preserve"><value>Generate WordPress drafts and LinkedIn post text from ticket-sales and master-class data. Drafts only — nothing is published automatically.</value></data>
   <data name="Settings.Feat.LinkedIn.Name" xml:space="preserve"><value>LinkedIn company-page queue</value></data>
   <data name="Settings.Feat.LinkedIn.Desc" xml:space="preserve"><value>Publish the scheduled posts to your LinkedIn company page, with a pre-alert before speaker posts.</value></data>
@@ -1504,16 +1534,20 @@
   <data name="Settings.Feat.Surveys.Desc" xml:space="preserve"><value>Collect session evaluations and event-wide survey responses from attendees.</value></data>
   <data name="Settings.Feat.ReminderJobs.Name" xml:space="preserve"><value>Reminder jobs</value></data>
   <data name="Settings.Feat.ReminderJobs.Desc" xml:space="preserve"><value>Run the daily background job that seeds deadlines and reminds people of upcoming tasks.</value></data>
-  <data name="Settings.Feat.DigestEmails.Name" xml:space="preserve"><value>Digest emails</value></data>
-  <data name="Settings.Feat.DigestEmails.Desc" xml:space="preserve"><value>Email speakers and organizers periodic digests (open questions, re-opened steps).</value></data>
+  <data name="Settings.Feat.DigestEmails.Name" xml:space="preserve"><value>Review &amp; round-up e-mails</value></data>
+  <data name="Settings.Feat.DigestEmails.Desc" xml:space="preserve"><value>The mails that tell someone work is waiting: speakers held from the Zoho flow (within 10 minutes), volunteers awaiting review (weekly), a speaker's open audience questions, and re-opened wizard steps.</value></data>
   <data name="Settings.Feat.SponsorOrderPull.Name" xml:space="preserve"><value>Sponsor order pull</value></data>
   <data name="Settings.Feat.SponsorOrderPull.Desc" xml:space="preserve"><value>Pull completed sponsor and exhibitor orders from the webshop and expand their onboarding tasks.</value></data>
   <data name="Settings.Feat.SponsorZohoProvision.Name" xml:space="preserve"><value>Sponsor Zoho provisioning</value></data>
   <data name="Settings.Feat.SponsorZohoProvision.Desc" xml:space="preserve"><value>After the order pull, create or link each sponsor and exhibitor in Zoho Backstage from webshop data (replaces the legacy sync script). Existing companies are never overwritten.</value></data>
   <data name="Settings.Feat.ErpWebshopReconcile.Name" xml:space="preserve"><value>ERP → webshop reconcile</value></data>
   <data name="Settings.Feat.ErpWebshopReconcile.Desc" xml:space="preserve"><value>Every 30 minutes, create missing webshop users from the e-conomic group-1 sponsor contacts and set each company default signer + event coordinator from the contact roles (never overwriting a curated value). Contacts missing a role are emailed to the organizer. Replaces the legacy ERP-contacts sync script.</value></data>
+  <data name="Settings.Feat.WebshopErpInvoicing.Name" xml:space="preserve"><value>Webshop → e-conomic draft invoices</value></data>
+  <data name="Settings.Feat.WebshopErpInvoicing.Desc" xml:space="preserve"><value>Every hour, turn each completed webshop order into a DRAFT invoice in e-conomic. It stops at the draft — nothing is booked and nothing is sent to the customer until you book it yourself. Each order is invoiced once: the draft carries the web order number, and an order that already appears on a draft or booked invoice is skipped. Att person and Your reference are the company's default signer. An order is left uninvoiced, with the reason logged, when the company has no ERP customer number, when a line has no price, or when the customer invoices in a currency with no exchange rate — CEH will not guess any of those. Replaces the hourly webshop invoicing script: turn that script OFF before you turn this ON.</value></data>
+  <data name="Settings.Feat.CouponErpInvoicing.Name" xml:space="preserve"><value>Coupon tickets → e-conomic draft invoices</value></data>
+  <data name="Settings.Feat.CouponErpInvoicing.Desc" xml:space="preserve"><value>Every hour, turn claimed coupon tickets into DRAFT invoices in e-conomic — one per coupon, so the partner sees the agreement they recognise. It stops at the draft: nothing is booked and nothing reaches the partner until you book it yourself. A coupon is invoiced once, and it bills the ticket's full price rather than the discounted total — a coupon that covers a ticket entirely leaves the total at zero, and billing that would send the partner an invoice for 0.00. A coupon nobody has mapped to an e-conomic customer is never guessed at: the tickets are left uninvoiced and you get an e-mail linking to the page where you set who pays. Set your coupon mappings under Setup → Coupon invoicing before switching this on.</value></data>
   <data name="Settings.Feat.SponsorLeads.Name" xml:space="preserve"><value>Sponsor leads pipeline</value></data>
-  <data name="Settings.Feat.SponsorLeads.Desc" xml:space="preserve"><value>Pull captured leads from the CRM and send each sponsor a delta digest of their new leads.</value></data>
+  <data name="Settings.Feat.SponsorLeads.Desc" xml:space="preserve"><value>Pull captured leads from the CRM and send each sponsor a round-up of the leads they have not seen yet.</value></data>
   <data name="Settings.Feat.SponsorUploadWatch.Name" xml:space="preserve"><value>Sponsor upload watcher</value></data>
   <data name="Settings.Feat.SponsorUploadWatch.Desc" xml:space="preserve"><value>Watch each sponsor's upload folder and notify the team when a file is added or replaced.</value></data>
   <data name="Settings.Feat.AttendeeReconcile.Name" xml:space="preserve"><value>Attendee reconciliation</value></data>
@@ -1724,6 +1758,8 @@
   <data name="Comms.Resend" xml:space="preserve"><value>Resend</value></data>
   <data name="Comms.ResendTemplateLabel" xml:space="preserve"><value>Template to resend</value></data>
   <data name="Comms.ResendHint" xml:space="preserve"><value>The resend uses the same per-person send as the Email Center and is itself logged here.</value></data>
+  <data name="Comms.Dismiss" xml:space="preserve"><value>Dismiss</value></data>
+  <data name="Comms.DismissTitle" xml:space="preserve"><value>Take this off the list. It does not resend anything, and it does not mark the mail as delivered.</value></data>
   <data name="Comms.UpcomingHeading" xml:space="preserve"><value>Going out next</value></data>
   <data name="Comms.NoUpcoming" xml:space="preserve"><value>Nothing is scheduled to go out.</value></data>
   <data name="Comms.WhoGotWhat" xml:space="preserve"><value>Who got what</value></data>

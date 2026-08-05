@@ -2,6 +2,7 @@ using System.Text;
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
 using CommunityHub.Core.Email;
+using CommunityHub.Core.Entitlements;
 using CommunityHub.Core.Resources;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc.ModelBinding;
@@ -95,6 +96,8 @@ public sealed class TravelFormService : IWizardFormService
     private readonly IStringLocalizer<SharedResource> _loc;
     private readonly IEmailSender _email;
     private readonly IEmailContextAccessor? _emailContext;
+    // §6.10 / §768.10 D5 — the ONE authority on whether a claim may still be changed.
+    private readonly CommunityHub.Core.Entitlements.TravelClaimLock? _lock;
     private readonly ILogger<TravelFormService> _logger;
 
     public TravelFormService(
@@ -103,7 +106,10 @@ public sealed class TravelFormService : IWizardFormService
         IStringLocalizer<SharedResource> loc,
         IEmailSender email,
         ILogger<TravelFormService> logger,
-        IEmailContextAccessor? emailContext = null)
+        IEmailContextAccessor? emailContext = null,
+        // §6.10 — the claim freeze. Optional so existing constructions/tests are unchanged; when it
+        // is absent the form behaves exactly as it did before locking existed.
+        CommunityHub.Core.Entitlements.TravelClaimLock? claimLock = null)
     {
         _db = db;
         _clock = clock;
@@ -111,6 +117,7 @@ public sealed class TravelFormService : IWizardFormService
         _email = email;
         _logger = logger;
         _emailContext = emailContext;
+        _lock = claimLock;
     }
 
     /// <summary>
@@ -187,6 +194,15 @@ public sealed class TravelFormService : IWizardFormService
     {
         model.SubmitInvoiceDueDate ??= await GetInvoiceDueDateAsync(eventId, ct);
 
+        // 🔒 §6.10 — the freeze, SERVER-SIDE. Hiding the control is not enforcement: a stale tab or
+        // a crafted POST arrives here and must be refused identically.
+        if (_lock is not null && await _lock.IsFrozenAsync(eventId, participantId, ct))
+        {
+            model.Error = TravelClaimLock.FrozenMessage;
+            await LoadFullStateAsync(model, eventId, participantId, ct);
+            return;
+        }
+
         var file = model.ReceiptFile;
         if (file is null || file.Length == 0)
         {
@@ -236,6 +252,15 @@ public sealed class TravelFormService : IWizardFormService
     {
         model.SubmitInvoiceDueDate ??= await GetInvoiceDueDateAsync(eventId, ct);
 
+        // 🔒 §6.10 — a submitted claim's receipts cannot be deleted either. DELETING was the more
+        // dangerous of the two: an "edit" that removes evidence from a claim already sent onward.
+        if (_lock is not null && await _lock.IsFrozenAsync(eventId, participantId, ct))
+        {
+            model.Error = TravelClaimLock.FrozenMessage;
+            await LoadFullStateAsync(model, eventId, participantId, ct);
+            return;
+        }
+
         var row = await _db.TravelReceipts.FirstOrDefaultAsync(
             r => r.Id == receiptId && r.EventId == eventId && r.ParticipantId == participantId, ct);
         if (row is not null)
@@ -269,6 +294,14 @@ public sealed class TravelFormService : IWizardFormService
         // Re-read receipts for the gate (NOT the reimbursement row — the posted editable
         // values must survive into a re-render).
         await LoadReceiptsAsync(model, eventId, participantId, ct);
+
+        // 🔒 §6.10 — the third write path. Upload and delete are refused above; re-SAVING a
+        // submitted claim is refused here, so all three fail the same way for the same reason.
+        if (_lock is not null && await _lock.IsFrozenAsync(eventId, participantId, ct))
+        {
+            model.Error = TravelClaimLock.FrozenMessage;
+            return WizardStepOutcome.Invalid;
+        }
 
         // ---- STEP-2 GATE (REQUIREMENTS §48). Step 2 is BLOCKED until ≥1 receipt exists.
         // The client disables the Step-2 controls, but the server re-checks regardless so a
@@ -349,6 +382,11 @@ public sealed class TravelFormService : IWizardFormService
         if (model.RequestReimbursement)
         {
             await MarkSubmitInvoiceTaskDoneAsync(eventId, participantId, ct);
+
+            // 🔒 §6.10 — THE CLAIM IS NOW COMPLETED AND FROZEN. Stamped here, at the end of the
+            // successful claim path, so a validation failure earlier never locks a speaker out of a
+            // claim they have not actually submitted. The organizer can reopen it (§768.10 D5).
+            if (_lock is not null) await _lock.MarkSubmittedAsync(eventId, participantId, ct);
         }
 
         // ---- ERP-INBOX COPY (REQUIREMENTS §48). On a real reimbursement request, also email

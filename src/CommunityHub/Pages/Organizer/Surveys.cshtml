@@ -190,6 +190,89 @@
                         </div>
                     </details>
 
+                    @* --- §6.5: inline results for a QUESTION survey --- *@
+                    @if (Model.ViewQuestionSummary is not null && Model.ViewSurvey is not null
+                         && string.Equals(Model.View, s.Slug, StringComparison.OrdinalIgnoreCase))
+                    {
+                        var qs = Model.ViewQuestionSummary;
+                        <div class="sv-results" id="inline-@s.Slug">
+                            <h3>@Localizer["OrgSurveys.InlineResultsTitle", s.Title]</h3>
+
+                            @if (qs.Responses == 0)
+                            {
+                                <p>No responses yet.</p>
+                            }
+                            else
+                            {
+                                <p><strong>@qs.Responses</strong> response(s).</p>
+
+                                @foreach (var r in qs.Ratings)
+                                {
+                                    <div style="margin:14px 0;">
+                                        <p style="margin:0 0 4px;font-weight:600;">@r.Prompt</p>
+                                        @* 🔒 The average NEVER stands alone. A mean of 3.0 is what
+                                           "everyone was lukewarm" and "half loved it, half hated it"
+                                           both look like — opposite problems, same number. *@
+                                        <p style="margin:0 0 6px;font-size:13px;color:#374151;">
+                                            Average <strong>@r.Average</strong> from @r.Answered answer(s)
+                                        </p>
+                                        <table style="font-size:13px;border-collapse:collapse;">
+                                            @foreach (var d in r.Distribution)
+                                            {
+                                                var pct = r.Answered == 0 ? 0 : (int)Math.Round(d.Count * 100.0 / r.Answered);
+                                                <tr>
+                                                    <td style="padding:2px 8px 2px 0;white-space:nowrap;">@d.Value</td>
+                                                    <td style="padding:2px 8px 2px 0;">
+                                                        <span style="display:inline-block;height:10px;background:#008BD2;width:@(pct * 2)px;"></span>
+                                                    </td>
+                                                    <td style="padding:2px 0;color:#6b7280;">@d.Count (@pct%)</td>
+                                                </tr>
+                                            }
+                                        </table>
+                                    </div>
+                                }
+
+                                @foreach (var c in qs.Choices)
+                                {
+                                    <div style="margin:14px 0;">
+                                        <p style="margin:0 0 4px;font-weight:600;">@c.Prompt</p>
+                                        <p style="margin:0 0 6px;font-size:13px;color:#6b7280;">@c.Answered answer(s)</p>
+                                        <ul style="margin:0;padding-left:18px;font-size:13px;">
+                                            @foreach (var o in c.Options)
+                                            {
+                                                <li>@o.Label — <strong>@o.Count</strong></li>
+                                            }
+                                        </ul>
+                                    </div>
+                                }
+
+                                @foreach (var f in qs.FreeText)
+                                {
+                                    <div style="margin:14px 0;">
+                                        <p style="margin:0 0 4px;font-weight:600;">@f.Prompt</p>
+                                        @if (f.Answers.Count == 0)
+                                        {
+                                            <p style="font-size:13px;color:#9ca3af;">No answers.</p>
+                                        }
+                                        else
+                                        {
+                                            @* ⚠️ Listed in full, never counted — this is the part
+                                               people actually say something in. Ordered by TEXT, not
+                                               by arrival: submission order can point at a person on
+                                               a form whose whole value is that it cannot. *@
+                                            <ul style="margin:0;padding-left:18px;font-size:13px;line-height:1.6;">
+                                                @foreach (var a in f.Answers)
+                                                {
+                                                    <li>@a</li>
+                                                }
+                                            </ul>
+                                        }
+                                    </div>
+                                }
+                            }
+                        </div>
+                    }
+
                     @* --- Inline results (reuses the shared aggregation) --- *@
                     @if (Model.ViewSummary is not null && Model.ViewSurvey is not null
                          && string.Equals(Model.View, s.Slug, StringComparison.OrdinalIgnoreCase))

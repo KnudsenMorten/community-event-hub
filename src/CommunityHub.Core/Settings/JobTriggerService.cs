@@ -47,12 +47,45 @@ public sealed class JobTriggerService
     private readonly JobTriggerOptions _options;
     private readonly ILogger<JobTriggerService>? _log;
 
+    // §766 — needed to clear the §510 interval stamp so a manual run is not silently throttled.
+    // Optional so existing constructions/tests are unchanged; without it the old (lying) behaviour
+    // would return, so production wiring passes it.
+    private readonly Data.CommunityHubDbContext? _db;
+
     public JobTriggerService(
-        HttpClient http, JobTriggerOptions options, ILogger<JobTriggerService>? log = null)
+        HttpClient http, JobTriggerOptions options, ILogger<JobTriggerService>? log = null,
+        Data.CommunityHubDbContext? db = null)
     {
         _http = http;
         _options = options;
         _log = log;
+        _db = db;
+    }
+
+    /// <summary>
+    /// §766 — let ONE manual run through the §510 interval gate. Never throws: failing to clear the
+    /// stamp must not stop the trigger, it just means the run may be throttled as before.
+    /// </summary>
+    private async Task ClearIntervalStampAsync(string functionName, CancellationToken ct)
+    {
+        if (_db is null) return;
+        try
+        {
+            var state = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions
+                .FirstOrDefaultAsync(_db.JobRunStates, s => s.FunctionName == functionName, ct);
+            if (state?.LastRunAt is null) return;   // never run ⇒ already un-throttled
+
+            state.LastRunAt = null;
+            await _db.SaveChangesAsync(ct);
+            _log?.LogInformation(
+                "Job {Function}: interval stamp cleared for a manual run (§766).", functionName);
+        }
+        catch (Exception ex)
+        {
+            _log?.LogWarning(ex,
+                "Job {Function}: could not clear the interval stamp; the manual run may be throttled.",
+                functionName);
+        }
     }
 
     public bool IsConfigured => _options.IsConfigured;
@@ -72,6 +105,29 @@ public sealed class JobTriggerService
                 "Manual triggering is not configured for this environment "
                 + "(JobTrigger:BaseUrl / JobTrigger:MasterKey).");
         }
+
+        // 🔴 §766 — CLEAR THE INTERVAL STAMP FIRST, or this button lies.
+        //
+        // JobsPauseMiddleware applies the §510 interval to EVERY invocation and cannot tell a timer
+        // tick from a deliberate manual start. So on an interval-driven job the admin endpoint
+        // answered 202, the middleware short-circuited the body, and this method reported "STARTED"
+        // for a run that never happened:
+        //     SpeakerPhotoArchiveJob skipped: runs every 1440 min; last run 2026-08-01 12:50:00Z.
+        //
+        // 🔑 §543 gave him "trigger now" because he said he could not; §510 then gave him the
+        // frequency dial and silently took the trigger away for exactly the jobs the dial governs.
+        // The two features cancelled each other, and a DAILY job is precisely the one you most need
+        // to run early — waiting 24 hours to see whether it works is not a debugging loop.
+        //
+        // 🔒 Nulling LastRunAt introduces no new rule: ShouldSkip already treats a job that has
+        // never run as never skippable. The middleware re-stamps it as this run starts, so the
+        // cadence resumes from the manual run and nothing accumulates. The INTERVAL is untouched —
+        // this forces ONE run, it does not widen the schedule.
+        //
+        // ⚠️ Done HERE rather than in the middleware on purpose: teaching the middleware to detect
+        // "programmatically called via the host APIs" would exempt anything else that reaches the
+        // admin endpoint, and that reason string is a host implementation detail, not a contract.
+        await ClearIntervalStampAsync(functionName, ct);
 
         var url = $"{_options.BaseUrl.TrimEnd('/')}/admin/functions/{functionName}";
         try

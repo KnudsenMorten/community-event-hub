@@ -83,6 +83,19 @@ public class IndexModel : PageModel
     /// </summary>
     [BindProperty] public string? Website { get; set; }
 
+    /// <summary>
+    /// §6.5 — the answers of a QUESTION survey, posted as <c>Answers[questionId]</c>.
+    /// </summary>
+    /// <remarks>
+    /// A dictionary rather than fixed properties, because the questions live in editable JSON: the
+    /// form is generated from the definition, so the binding has to be too. A multi-choice question
+    /// posts its selections comma-separated under the same key.
+    /// </remarks>
+    [BindProperty] public Dictionary<string, string?> Answers { get; set; } = new();
+
+    /// <summary>§6.5 — what was wrong with the submitted answers, in the respondent's words.</summary>
+    public IReadOnlyList<string> AnswerProblems { get; private set; } = [];
+
     public async Task<IActionResult> OnGetAsync(string slug, CancellationToken ct)
     {
         Slug = slug ?? string.Empty;
@@ -115,6 +128,11 @@ public class IndexModel : PageModel
             SubmittedOk = true;
             return Page();
         }
+
+        // §6.5 — a QUESTION survey takes a different path entirely. Branching here rather than
+        // teaching the wizard about ratings keeps the survey people are answering in production
+        // exactly as it was.
+        if (Survey.IsQuestionSurvey) return await SubmitQuestionSurveyAsync(ct);
 
         // --- Validate the wizard payload --------------------------------
         var track = Survey.FindTrack(SelectedTrackId);
@@ -191,6 +209,103 @@ public class IndexModel : PageModel
 
         SubmittedOk = true;
         return Page();
+    }
+
+    /// <summary>
+    /// §6.5 — store one question survey's answers.
+    /// </summary>
+    /// <remarks>
+    /// <para>🔒 <b>Validated server-side against the DEFINITION</b>, not against what the form
+    /// offered. The page is anonymous and public, so the rendered inputs constrain nobody who is
+    /// posting by hand — the rating range, the option ids and the text length are all re-checked
+    /// here.</para>
+    ///
+    /// <para>⚠️ <b>A blank answer is stored as NO ROW, not as an empty one.</b> "Skipped" and
+    /// "answered with nothing" are different facts, and a summary that counts empty rows as
+    /// responses would report a participation rate nobody achieved.</para>
+    /// </remarks>
+    private async Task<IActionResult> SubmitQuestionSurveyAsync(CancellationToken ct)
+    {
+        var inputs = Survey!.Questions
+            .Select(q => ToInput(q, Answers.TryGetValue(q.Id, out var raw) ? raw : null))
+            .Where(a => a is not null)
+            .Select(a => a!)
+            .ToList();
+
+        var problems = SurveyAnswerValidator.Validate(Survey.Questions, inputs);
+        if (problems.Count > 0)
+        {
+            AnswerProblems = problems;
+            return Page();
+        }
+
+        var response = new SurveyResponse
+        {
+            SurveySlug = Survey.Slug,
+            // The wizard's columns are required but meaningless here; a question survey has no
+            // track and its comment lives in its own free-text answers.
+            SelectedTrackId = string.Empty,
+            SubmittedAt = _clock.GetUtcNow(),
+            IpHash = HashIp(HttpContext.Connection.RemoteIpAddress?.ToString()),
+        };
+        _db.SurveyResponses.Add(response);
+
+        foreach (var a in inputs)
+        {
+            var q = Survey.Questions.First(
+                x => string.Equals(x.Id, a.QuestionId, StringComparison.OrdinalIgnoreCase));
+
+            _db.SurveyResponseAnswers.Add(new SurveyResponseAnswer
+            {
+                Response = response,
+                QuestionId = q.Id,
+                Kind = q.Kind,
+                Rating = a.Rating,
+                Text = string.IsNullOrWhiteSpace(a.Text) ? null : a.Text.Trim(),
+                ChoiceIds = a.ChoiceIds is { Count: > 0 } ids ? string.Join(",", ids) : null,
+            });
+        }
+
+        try
+        {
+            await _db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException ex)
+        {
+            _log.LogWarning(ex, "Survey response DB write failed for slug={Slug}", Slug);
+            ErrorMessage = _loc["Survey.ValSaveFailed"];
+            return Page();
+        }
+
+        // 🔒 The log records COUNTS, never the answers. This survey's whole value is that nobody
+        // can be identified from it, and a log line quoting free text would undo that.
+        _log.LogInformation(
+            "Survey response saved: slug={Slug} id={Id} answers={Answers}",
+            Slug, response.Id, inputs.Count);
+
+        SubmittedOk = true;
+        return Page();
+    }
+
+    /// <summary>Turn one posted form value into a typed answer, or null when it was left blank.</summary>
+    private static SurveyAnswerInput? ToInput(SurveyQuestion q, string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return null;
+
+        return q.Kind switch
+        {
+            SurveyQuestionKind.Rating =>
+                int.TryParse(raw, out var r)
+                    ? new SurveyAnswerInput(q.Id, Rating: r)
+                    // ⚠️ Unparseable is NOT the same as blank: dropping it would silently accept a
+                    // required question the respondent thinks they answered.
+                    : new SurveyAnswerInput(q.Id, Rating: int.MinValue),
+
+            SurveyQuestionKind.FreeText => new SurveyAnswerInput(q.Id, Text: raw),
+
+            _ => new SurveyAnswerInput(q.Id, ChoiceIds:
+                raw.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)),
+        };
     }
 
     private static string? HashIp(string? ip)

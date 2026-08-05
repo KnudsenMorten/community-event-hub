@@ -20,8 +20,21 @@
     .ceh-wiz { max-width: 600px; margin: 0 auto; }
     /* §301d/§309 (operator 2026-07-24): let the wizard breathe on desktop — the 600px
        column forced needless scrolling on big screens. Phones untouched. Breakpoint at
-       1000px so Windows display scaling still qualifies. */
-    @@media (min-width: 1000px) { .ceh-wiz { max-width: 1000px; } }
+       1000px so Windows display scaling still qualifies.
+
+       §715 (operator 2026-07-31: "on windows desktops, you are welcome to extend the width of
+       fx get started and tasks and other place relevant. most of us have large external
+       displays"). The 1000px cap was the LAST one left: `main` has been fluid since §301d/§308b
+       (min(94vw, 1700px) at ≥1000px), and /Tasks and the hub already fill it — measured at a
+       1920px viewport, main = 1732 and their cards = 1700, while Get Started stopped at 1000
+       and left ~700px of grey on either side.
+
+       `none`, not a bigger number: the wizard then simply FILLS the column `main` already
+       defines, so the app has ONE width to change and this cannot drift out of step with it
+       the way a second hard-coded 1000/1700 would. The most visible win is the step rail —
+       it scrolls horizontally, so the extra width shows more steps at once instead of hiding
+       them behind a swipe. Phones and tablets are untouched: this is a min-width rule only. */
+    @@media (min-width: 1000px) { .ceh-wiz { max-width: none; } }
     .ceh-wiz__title-lead { font-size: 26px; font-weight: 700; color: var(--el-darkblue); margin: 0 0 14px; }
 
     /* Progress */
@@ -76,6 +89,55 @@
     .ceh-wiz__nav .btn-next { min-width: 168px; display: inline-flex; align-items: center; gap: 8px;
         justify-content: center; font-weight: 600; }
     .ceh-wiz__nav-spacer { flex: 1; }
+
+    /* §713 (found while verifying §680, operator: "fix 713") — a button LABEL must never split.
+       At 360px the three actions (Previous · Save & exit · Save & next) need ~382px and the card
+       gives ~292px, so the browser broke the words instead: "Save & exit" rendered as three
+       stacked lines inside its own button. It read as a rendering fault rather than a control.
+       Two rules, in order of importance:
+         1. nowrap — a label is never a place to wrap, at ANY width. This alone fixes the report.
+         2. below 480px the primary takes its own full-width row, so the two secondary actions have
+            the whole line to themselves instead of being squeezed. 480px is where the three stop
+            fitting (card inner ≈ viewport − 68px, and the row needs ~382px).
+       DOM order already puts the primary last, so it lands at the BOTTOM of the sticky bar —
+       the biggest target, nearest the thumb. */
+    .ceh-wiz__nav button { white-space: nowrap; }
+    @@media (max-width: 480px) {
+        .ceh-wiz__nav { flex-wrap: wrap; row-gap: 10px; }
+        .ceh-wiz__nav .btn-next { flex: 1 0 100%; min-width: 0; }
+    }
+
+    /* §714 (operator: "fix 714") — the Community Helper must not sit ON the action bar.
+       The helper is `position: fixed; bottom: 16px; z-index: 1200` and the nav is sticky at the
+       bottom of the same viewport, so on any wizard step long enough to scroll they collide by
+       construction. Measured at 360px: the launcher covered the right edge of BOTH "Save & exit"
+       and "Save & next".
+
+       It never blocked a tap (the button stayed the top element at its own centre), but "a control
+       with a robot sitting on it" is not something to leave on the screen someone is trying to
+       complete.
+
+       🔒 The helper YIELDS; it is not hidden. The wizard is precisely where a confused person
+       reaches for help, so removing it here would answer a cosmetic problem by deleting the
+       feature. It is lifted to clear the bar and stays one tap away.
+
+       Restyling a global widget from a page's own <style> is deliberate: this block loads ONLY on
+       /Forms/Wizard, so it is page-scoped without a body class or a layout flag, and the wizard is
+       the ONLY page in the app with a sticky bottom bar (verified — no other `position: sticky`
+       with `bottom: 0` exists).
+
+       The offsets are the bar's real height plus a gap, and they are PINNED by the "gui 714" test,
+       which fails if the bar grows past them (do NOT write an @@-tag in here: Razor parses it as
+       C# even inside a CSS comment, and the build dies with "The name 'gui' does not exist"):
+         narrow (2 rows): 14 top + 35 + 10 gap + 35 + 6 bottom = 100  -> 112
+         wide   (1 row):  14 top + 35 + 6 bottom               =  55  ->  68            */
+       ⚠️ `body .ai-helper-widget`, not `.ai-helper-widget`. The widget ships its OWN
+       `<style>` (_AiHelperWidget.cshtml) and _Layout renders it AFTER the page body, so at equal
+       specificity the widget's `bottom: 16px` wins on source order and the page rule does nothing.
+       The first attempt at this fix looked correct and changed nothing on screen; the extra
+       `body ` (0-1-1 vs 0-1-0) makes it win regardless of order.                           */
+    body .ai-helper-widget { bottom: 68px; }
+    @@media (max-width: 480px) { body .ai-helper-widget { bottom: 112px; } }
 
     .ceh-wiz__alldone { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
         gap: 10px; background: #e7f6ec; border: 1px solid #b6e0c4; color: #1b5e34;
@@ -191,6 +253,10 @@
                 }
 
                 <input type="hidden" name="__step" value="@step.Key" />
+                @* §783.4/§783.5 — a step's own "save and stay" button writes what it just did here,
+                   so the confirmation names the ACTION ("Your logos were uploaded") rather than a
+                   generic "Saved". Empty for the ordinary Next/Finish path. *@
+                <input type="hidden" name="__stayMsg" value="" />
 
                 <div class="ceh-wiz__nav">
                     @if (!Model.IsFirstStep)
@@ -211,8 +277,9 @@
                        Hidden on the LAST step, where "Finish" already lands on the hub. *@
                     @if (Model.CurrentHandler is not null && !Model.IsLastStep)
                     {
+                        @* §713: the inline margin-right is gone — the nav is a flex row with its
+                           own gap, and an inline style is exactly what a media query cannot beat. *@
                         <button type="submit" name="__dir" value="exit" class="secondary"
-                                style="margin-right:8px;"
                                 title="Save this step and go back to the hub">
                             Save &amp; exit
                         </button>

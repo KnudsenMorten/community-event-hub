@@ -283,6 +283,23 @@ public class SpeakerProfile
     public string? PhotoSharePointPath { get; set; }
 
     /// <summary>
+    /// §764 — the exact <see cref="PhotoUrl"/> the SharePoint copy in the speakers folder was
+    /// fetched from, so the archive job knows whether the stored copy is still current.
+    /// </summary>
+    /// <remarks>
+    /// 🔒 <b>The URL, not a flag or a timestamp.</b> "Have we ever stored one?" is what the
+    /// import-time copy keys on, and it is why a speaker's first picture was frozen for ever — a
+    /// speaker who changed their photo kept the old one in SharePoint with nothing to notice.
+    /// Comparing the SOURCE URL makes a changed picture re-archive by itself and an unchanged one
+    /// cost a string comparison, so the daily pass does not re-pull every speaker from someone
+    /// else's CDN.
+    /// </remarks>
+    public string? PhotoArchivedFromUrl { get; set; }
+
+    /// <summary>UTC. When the SharePoint copy in the speakers folder was last written.</summary>
+    public DateTimeOffset? PhotoArchivedAt { get; set; }
+
+    /// <summary>
     /// Comma-separated set of bio field names the SPEAKER has edited in the hub
     /// (the per-field "dirty" set). A delta Sessionize re-import must NEVER
     /// overwrite a field listed here — the speaker's edit is authoritative. The
@@ -321,6 +338,36 @@ public class SpeakerProfile
 
     /// <summary>Last-known Zoho Backstage speaker COUNTRY.</summary>
     public string? BackstageCountry { get; set; }
+
+    /// <summary>
+    /// §762 — the COUNTRY value an organizer has confirmed is set in Zoho Backstage.
+    /// </summary>
+    /// <remarks>
+    /// <para>🔒 <b>An ACKNOWLEDGEMENT, because a verification is impossible.</b> §623: Backstage
+    /// NEVER returns <c>country</c> — not on the list, not on the per-id record — so
+    /// <see cref="BackstageCountry"/> is always null and CEH cannot tell whether the field is set.
+    /// The gap reporter therefore emitted "Country: DK — Backstage does not report this field, so
+    /// please confirm it is set" on EVERY comparison, for ever.</para>
+    ///
+    /// <para>Operator 2026-08-01: <i>"i have just completed all the changes. so i need to
+    /// approve/complete them somewhere so they dont come again - or is this mail a one-time
+    /// mail"</i>. He was right that there was no way to finish: every other field clears itself when
+    /// Backstage reports it back, and this one could not. Worse, the permanent country lines rode
+    /// along on every future re-send triggered by someone else's real gap, re-reporting work already
+    /// done.</para>
+    ///
+    /// <para>🔑 <b>It stores the VALUE, not a boolean.</b> A flag would go on suppressing the line
+    /// after CEH's country changed to something new — silently hiding a real, newly-wrong Backstage
+    /// record. Storing the confirmed value means a CHANGE re-asks, which is the whole point: a new
+    /// value is a new fact. Same reasoning as the §302d push-hash stamp.</para>
+    /// </remarks>
+    public string? CountryConfirmedInBackstage { get; set; }
+
+    /// <summary>UTC. When the country was confirmed, and by whom — so the claim is auditable.</summary>
+    public DateTimeOffset? CountryConfirmedAt { get; set; }
+
+    /// <summary>The organizer who confirmed it (email).</summary>
+    public string? CountryConfirmedBy { get; set; }
 
     /// <summary>Last-known Zoho Backstage speaker LINKEDIN url.</summary>
     public string? BackstageLinkedIn { get; set; }

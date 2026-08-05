@@ -96,12 +96,33 @@ public sealed class ZohoAccessTokenCacheTests
     }
 
     [Fact]
-    public async Task A_failed_refresh_is_NOT_cached_so_the_next_caller_retries()
+    public async Task A_failed_refresh_HOLDS_OFF_and_then_recovers_by_itself()
     {
-        // Caching a failure would turn a momentary throttle into an outage lasting an hour.
-        var cache = new ZohoAccessTokenCache(new Clock(T0));
+        // 🔄 §783.12 REPLACES the §525 test `A_failed_refresh_is_NOT_cached_so_the_next_caller_
+        // retries`, whose comment read: "Caching a failure would turn a momentary throttle into an
+        // outage lasting an hour."
+        //
+        // 🔒 PRODUCTION INVERTED THAT REASONING. Not caching the failure is what turned a momentary
+        // throttle into an outage — an unbounded one. Zoho's budget is 10 token requests per 10
+        // minutes per refresh token; with ~21 timer jobs across FOUR hosts sharing one token
+        // (§783.12b), "the next caller retries" means the budget is re-spent the instant it refills
+        // and can never recover. PROD showed the same 401 on every tick for hours.
+        //
+        // The corrected contract: hold off, then recover WITHOUT human intervention. Both halves
+        // matter — the hold-off is what lets the window reset, and the self-recovery is what keeps
+        // it from needing a redeploy.
+        var clock = new Clock(T0);
+        var cache = new ZohoAccessTokenCache(clock);
 
         Assert.Null(await cache.GetAsync(Yields(null!, 0)));
+        Assert.Equal(1, cache.RefreshCount);
+
+        // Immediately after: refused WITHOUT touching Zoho. This is the line the old test got wrong.
+        Assert.Null(await cache.GetAsync(Yields("tok-1", 3600)));
+        Assert.Equal(1, cache.RefreshCount);
+
+        // Once the window has had time to reset, the very next caller succeeds.
+        clock.Now = T0 + ZohoAccessTokenCache.FailureCooldown;
         Assert.Equal("tok-1", await cache.GetAsync(Yields("tok-1", 3600)));
         Assert.Equal(2, cache.RefreshCount);
     }
@@ -156,5 +177,89 @@ public sealed class ZohoAccessTokenCacheTests
 
         Assert.Equal("tok-2", await cache.GetAsync(Yields("tok-2", 3600)));
         Assert.Equal(2, cache.RefreshCount);
+    }
+
+    // ---- §783.12: a FAILED exchange must not free everyone to retry ---------
+    //
+    // 🔒 The PROD outage these pin: Zoho allows 10 token requests per 10 minutes. The cache used to
+    // clear its state on failure so "the next caller is free to try again", and with ~21 timer jobs
+    // that spends the budget the instant it refills — the retries are what keep the window empty, so
+    // a transient throttle sustains itself indefinitely. Each of these fails on the old behaviour.
+
+    private static Func<CancellationToken, Task<ZohoTokenResult>> Fails(Action? onCall = null)
+        => _ => { onCall?.Invoke(); return Task.FromResult(new ZohoTokenResult(null, 0)); };
+
+    [Fact]
+    public async Task A_failed_exchange_stops_the_next_caller_from_asking_zoho_again()
+    {
+        var cache = new ZohoAccessTokenCache(new Clock(T0));
+        var calls = 0;
+
+        Assert.Null(await cache.GetAsync(Fails(() => calls++)));
+        Assert.Equal(1, calls);
+
+        // The whole fleet wakes up behind the failure. NONE of them may reach Zoho.
+        for (var i = 0; i < 20; i++) Assert.Null(await cache.GetAsync(Fails(() => calls++)));
+
+        Assert.Equal(1, calls);
+        Assert.Equal(20, cache.SuppressedByCooldownCount);
+    }
+
+    [Fact]
+    public async Task The_cooldown_lifts_on_its_own_so_a_repaired_credential_needs_no_deploy()
+    {
+        var clock = new Clock(T0);
+        var cache = new ZohoAccessTokenCache(clock);
+        await cache.GetAsync(Fails());
+
+        // Still held one second before the cooldown expires...
+        clock.Now = T0 + ZohoAccessTokenCache.FailureCooldown - TimeSpan.FromSeconds(1);
+        Assert.Null(await cache.GetAsync(Yields("tok-late", 3600)));
+
+        // ...and free the moment it passes.
+        clock.Now = T0 + ZohoAccessTokenCache.FailureCooldown;
+        Assert.Equal("tok-late", await cache.GetAsync(Yields("tok-late", 3600)));
+    }
+
+    [Fact]
+    public async Task A_success_clears_a_standing_cooldown_and_invalidate_is_not_held_back()
+    {
+        var clock = new Clock(T0);
+        var cache = new ZohoAccessTokenCache(clock);
+        await cache.GetAsync(Fails());
+
+        clock.Now = T0 + ZohoAccessTokenCache.FailureCooldown;
+        Assert.Equal("tok-ok", await cache.GetAsync(Yields("tok-ok", 3600)));
+
+        // Invalidate mid-life (a genuine revoke). The earlier throttle must NOT mute a legitimate
+        // re-auth for 15 minutes.
+        cache.Invalidate();
+        Assert.Equal("tok-next", await cache.GetAsync(Yields("tok-next", 3600)));
+    }
+
+    [Fact]
+    public void The_cooldown_is_never_zero_and_outlasts_zohos_own_window()
+    {
+        // The single most important property: any positive value works, ZERO reproduces the outage.
+        Assert.True(ZohoAccessTokenCache.FailureCooldown > TimeSpan.Zero);
+
+        // And it must outlast Zoho's own 10-minute budget window, or the retry lands inside the
+        // same exhausted window it was meant to let recover.
+        Assert.True(ZohoAccessTokenCache.FailureCooldown >= TimeSpan.FromMinutes(10));
+    }
+
+    [Fact]
+    public async Task The_cooldown_reports_when_it_lifts_so_a_job_can_say_why_it_is_idle()
+    {
+        var clock = new Clock(T0);
+        var cache = new ZohoAccessTokenCache(clock);
+
+        Assert.Null(cache.RetryNotBeforeUtc);           // nothing has failed yet
+
+        await cache.GetAsync(Fails());
+        Assert.Equal(T0 + ZohoAccessTokenCache.FailureCooldown, cache.RetryNotBeforeUtc);
+
+        clock.Now = T0 + ZohoAccessTokenCache.FailureCooldown;
+        Assert.Null(cache.RetryNotBeforeUtc);           // expired ⇒ no longer reported
     }
 }

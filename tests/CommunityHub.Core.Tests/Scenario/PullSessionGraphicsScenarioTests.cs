@@ -27,22 +27,34 @@ namespace CommunityHub.Core.Tests.Scenario;
 /// </summary>
 public sealed class PullSessionGraphicsScenarioTests
 {
-    private const string MasterClassFolder = "Graphics/MasterClass";
-    private const string SessionsFolder = "Graphics/Sessions";
+    // 🔒 §768 — ONE folder for master classes AND technical sessions (operator: "master class and
+    // technical sessions gor into same folder" · "i dont see a need to split"). MasterClassFolder is
+    // deliberately the SAME value as SessionsFolder rather than a second constant, so a test that
+    // reintroduced two folders would have to say so out loud.
+    private static readonly string SessionsFolder = TestDocLibrary.PathFor(
+        CommunityHub.Core.Integrations.DocLibrary.DocLibraryPaths.SpeakerSessionGraphics);
+    private static readonly string MasterClassFolder = SessionsFolder;
+
+    // ⚰️ The §158 track pull keeps its LEGACY option — no registry key, unconfigured in every
+    // environment (§767 Round 9). It is still exercised here because the branch still exists.
     private const string TrackFolder = "Graphics/Tracks";
 
+    /// <param name="libraryConfigured">
+    /// False models an UNCONFIGURED document library — §768 made that an unset ROOT rather than a
+    /// blank per-folder path, so it is expressed here as a resolver with no root.
+    /// </param>
     private static GraphicsService NewService(
-        CommunityHubDbContext db, ISharePointFileStore store, GraphicsSharePointOptions options) =>
+        CommunityHubDbContext db, ISharePointFileStore store, GraphicsSharePointOptions options,
+        bool libraryConfigured = true) =>
         new(db, new GraphicCompositor(), store,
             new FakePictureFetcher(null), new DraftOnlySocialShareGateway(),
-            Options.Create(options));
+            Options.Create(options),
+            TestDocLibrary.Resolver(libraryConfigured ? TestDocLibrary.Root : string.Empty));
 
     private static GraphicsSharePointOptions ConfiguredOptions() => new()
     {
         Enabled = true,
         SiteUrl = "https://contoso.sharepoint.example.test/sites/eldk",
-        MasterClassFolderPath = MasterClassFolder,
-        SessionsFolderPath = SessionsFolder,
     };
 
     /// <summary>Session + Track folders both wired (§158 — the third pull source live).</summary>
@@ -93,10 +105,14 @@ public sealed class PullSessionGraphicsScenarioTests
 
         var store = new FakePullStore(canRead: true)
         {
-            // MasterClass folder file named with SPACES; Sessions folder file with DASHES
-            // + a different-case extension — both must still match the title slug.
-            [MasterClassFolder] = { File("Deep Dive Workshop.png") },
-            [SessionsFolder] = { File("cloud-native-talk.PNG") },
+            // 🔒 §768 — BOTH files live in the SAME folder now. One is named with SPACES and the
+            // other with DASHES and a different-case extension: both must still match their title
+            // slug, which is what makes a shared folder safe for two session types.
+            [SessionsFolder] =
+            {
+                File("Deep Dive Workshop.png"),
+                File("cloud-native-talk.PNG"),
+            },
         };
         var svc = NewService(db, store, ConfiguredOptions());
 
@@ -105,15 +121,17 @@ public sealed class PullSessionGraphicsScenarioTests
         Assert.Equal(2, result.Matched);     // both sessions matched a file
         Assert.Equal(0, result.Unmatched);
 
-        // Each folder was listed exactly ONCE (listing cached per folder).
-        Assert.Equal(1, store.ListCount(MasterClassFolder));
+        // 🔑 The shared folder is listed EXACTLY ONCE even though two session TYPES resolve it —
+        // the per-type branch survives, and the listing cache keys on the path. This is the property
+        // that made collapsing two folders into one free rather than a second Graph round-trip.
         Assert.Equal(1, store.ListCount(SessionsFolder));
 
         // MasterClass speaker → one row from the MasterClass folder file.
         var mcRow = await GetRowAsync(db, seed.EventId, mc.Id, seed.MasterclassSpeakerId);
         Assert.NotNull(mcRow);
         Assert.Equal(GraphicAssetType.Session, mcRow!.Type);
-        Assert.Equal(GraphicAssetStatus.Generated, mcRow.Status); // the review gate
+        // §784.12(a) — the review gate is retired; a pulled graphic is visible on arrival.
+        Assert.Equal(GraphicAssetStatus.Released, mcRow.Status);
         Assert.Equal("Deep Dive Workshop.png", mcRow.FileName);
         Assert.Equal($"{MasterClassFolder}/Deep Dive Workshop.png", mcRow.SharePointPath);
         Assert.Equal("item-Deep Dive Workshop.png", mcRow.StorageItemId);
@@ -127,9 +145,13 @@ public sealed class PullSessionGraphicsScenarioTests
         Assert.Equal("cloud-native-talk.PNG", row1!.FileName);
         Assert.Equal("cloud-native-talk.PNG", row2!.FileName);
 
-        // The pulled rows are in the organizer review queue (Generated, not released).
-        var queue = await svc.GetReviewQueueAsync(seed.EventId, GraphicAssetType.Session);
-        Assert.Equal(3, queue.Count); // 1 MC speaker + 2 talk speakers
+        // §784.12(a) — the organizer page LISTS them (it is a catalogue now, not a queue), and the
+        // review queue is empty because nothing is created Generated any more. Both are asserted:
+        // "the listing shows them" is the requirement, "the queue is empty" is why the page had to
+        // stop asking for the queue.
+        var listing = await svc.GetSpeakerFacingGraphicsAsync(seed.EventId);
+        Assert.Equal(3, listing.Count); // 1 MC speaker + 2 talk speakers
+        Assert.Empty(await svc.GetReviewQueueAsync(seed.EventId, GraphicAssetType.Session));
     }
 
     // ---- IDEMPOTENT: re-pull updates in place, no duplicates ----------------
@@ -223,9 +245,8 @@ public sealed class PullSessionGraphicsScenarioTests
         {
             [SessionsFolder] = { File("Cloud Native Talk.png") },
         };
-        // Store CAN read, but the operator has not set any folder path yet → inert.
-        var options = new GraphicsSharePointOptions { Enabled = true, SiteUrl = "https://x.example.test" };
-        var svc = NewService(db, store, options);
+        // Store CAN read, but the document library is not configured yet → inert.
+        var svc = NewService(db, store, ConfiguredOptions(), libraryConfigured: false);
 
         var result = await svc.PullSessionGraphicsAsync(seed.EventId);
 
@@ -272,7 +293,7 @@ public sealed class PullSessionGraphicsScenarioTests
         Assert.Equal("Cloud Native Talk.png", sessionRow.FileName);
         Assert.Equal("Security.png", trackRow.FileName);
         Assert.Equal($"{TrackFolder}/Security.png", trackRow.SharePointPath);
-        Assert.Equal(GraphicAssetStatus.Generated, trackRow.Status); // the review gate
+        Assert.Equal(GraphicAssetStatus.Released, trackRow.Status);  // §784.12(a) — gate retired
         Assert.Equal(talk.Id, trackRow.SessionId);                   // representative session
     }
 

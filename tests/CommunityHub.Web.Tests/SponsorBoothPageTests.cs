@@ -56,7 +56,8 @@ public sealed class SponsorBoothPageTests
         var svc = new VenueImageService(
             new NoReadStore(),
             Options.Create(new GraphicsSharePointOptions()),  // VenueRootFolderPath blank → inert
-            new MemoryCache(new MemoryCacheOptions()));
+            new MemoryCache(new MemoryCacheOptions()),
+            TestDocLibrary.Resolver(string.Empty));
         var webRoot = Path.Combine(Path.GetTempPath(), "ceh-booth-" + Guid.NewGuid().ToString("N"));
         return new VenueImageProvider(svc, new FakeEnv(webRoot));
     }

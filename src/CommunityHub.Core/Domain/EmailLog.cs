@@ -88,4 +88,27 @@ public class EmailLog
     public DateTimeOffset? LastRetryAt { get; set; }
 
     public DateTimeOffset SentAt { get; set; } = DateTimeOffset.UtcNow;
+
+    /// <summary>
+    /// §784.1 — when an organizer DISMISSED this row from the "Resend undelivered mail" queue.
+    /// Null (the default) = never dismissed.
+    /// </summary>
+    /// <remarks>
+    /// <para>The resend queue is DERIVED from this table rather than stored, so "I have dealt with
+    /// this one" had nowhere to live and the row reappeared on every page load. This is that memory,
+    /// and nothing more.</para>
+    ///
+    /// <para>🔒 <b>SCOPED TO THE QUEUE VIEW, DELIBERATELY.</b> It must never become a second answer
+    /// to "was this mail delivered". Delivery is <see cref="Error"/> / <see cref="Success"/>
+    /// reconciled against Brevo — these rows are ATTEMPTS, not sends. Dismissing hides a row from
+    /// ONE organizer list; it marks nothing delivered, resent or resolved, and no other query may
+    /// read it.</para>
+    ///
+    /// <para>⚠️ Additive + nullable on purpose: CEH auto-applies migrations on startup against a
+    /// populated PROD database, so a non-nullable column without a default would fail the boot.</para>
+    /// </remarks>
+    public DateTimeOffset? ResendDismissedAt { get; set; }
+
+    /// <summary>§784.1 — who dismissed it. Null when never dismissed.</summary>
+    public string? ResendDismissedByEmail { get; set; }
 }

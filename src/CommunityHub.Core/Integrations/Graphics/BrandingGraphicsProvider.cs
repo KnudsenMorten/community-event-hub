@@ -50,11 +50,21 @@ public sealed class BrandingGraphicsProvider : IBrandingGraphicsProvider
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// §767 phase 2 — the session graphic is now ONE file for the whole session
+    /// (<c>session:{id}</c>, no speaker in the key), so that is asked for first. The per-speaker
+    /// key is still tried as a fallback: it is what the SharePoint PULL writes for artwork the
+    /// operator uploaded himself, and dropping it would make his own files invisible here.
+    /// </remarks>
     public async Task<BrandingGraphicRef?> GetSessionGraphicAsync(
         int eventId, int sessionId, int participantId, CancellationToken ct = default)
     {
-        var asset = await ReleasedByKeyAsync(
-            eventId, GraphicStableKey.ForSession(sessionId, participantId), GraphicAssetType.Session, ct);
+        var asset =
+            await ReleasedByKeyAsync(
+                eventId, GraphicStableKey.ForSessionGraphic(sessionId), GraphicAssetType.Session, ct)
+            ?? await ReleasedByKeyAsync(
+                eventId, GraphicStableKey.ForSession(sessionId, participantId),
+                GraphicAssetType.Session, ct);
         if (asset is null) return null;
 
         var sessionTitle = await SessionTitleAsync(eventId, sessionId, ct);
@@ -143,17 +153,31 @@ public sealed class BrandingGraphicsProvider : IBrandingGraphicsProvider
 /// the live edition values.
 /// </summary>
 /// <param name="EventDisplayName">The edition display name (e.g. "Experts Live Denmark 2027").</param>
-/// <param name="EventDates">The human-readable date range (e.g. "4-5 Feb 2027").</param>
+/// <param name="EventDates">The human-readable date range (e.g. "9-10 Feb 2027").</param>
 /// <param name="TicketUrl">The public ticket URL.</param>
+/// <param name="EventLocation">
+/// Where it happens (e.g. "Copenhagen, Denmark") — the second half of the §767 bottom strip,
+/// which the operator settled as <c>9-10 FEB 2027 · COPENHAGEN, DENMARK</c> and nothing else.
+/// </param>
 public sealed record BrandingEventContext(
     string EventDisplayName,
     string EventDates,
-    string TicketUrl)
+    string TicketUrl,
+    string EventLocation = "Copenhagen, Denmark")
 {
     /// <summary>
     /// The default context — the shared event identity used across the share/SoMe
     /// surfaces. The ticket URL is the public, non-secret event address.
     /// </summary>
+    /// <remarks>
+    /// 🔒 <b>The date range MUST match <c>dates.day1</c>/<c>dates.day2</c> in the edition config.</b>
+    /// It read <i>"4-5 Feb 2027"</i> until 2026-08-01, when the operator caught it on a rendered
+    /// graphic. The edition is <b>9-10 Feb 2027</b> (config: day1 2027-02-09, day2 2027-02-10).
+    /// This is not decorative text — it goes out in the SoMe share drafts, so a wrong value here
+    /// invites people to the wrong days.
+    /// ⚠️ It is STILL A LITERAL, which is exactly how it went stale; §767 carries the follow-up to
+    /// read it from the same config every other surface uses.
+    /// </remarks>
     public static BrandingEventContext Default { get; } =
-        new("ELDK27", "4-5 Feb 2027", "eldk27.expertslive.dk");
+        new("ELDK27", "9-10 Feb 2027", "eldk27.expertslive.dk");
 }

@@ -15,7 +15,7 @@ namespace CommunityHub.Core.Diagnostics;
 ///
 /// <para><b>Tonight is the argument for it.</b> Zoho has had a credential alert since §524; nothing
 /// else did. In the same session a <b>dead SharePoint client secret in BOTH environments</b> (§598)
-/// and a never-set <c>Zoho:SpeakerReadEnabled</c> (§621) each hid for an unknown length of time.
+/// and a never-set Backstage read flag (§621; 🗑 deleted in §754.5) each hid for an unknown time.
 /// Every one of them was visible in a log and invisible to him.</para>
 ///
 /// <para>🔒 <b>Fail-soft, always.</b> An alert that throws would turn a recoverable 403 into a

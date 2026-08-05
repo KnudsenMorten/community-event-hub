@@ -177,6 +177,15 @@ public class LoginModel : PageModel
     }
 
     /// <summary>Step 2: the participant submitted the PIN.</summary>
+    // §728 — the STABLE sign-in code. This already reached the trail (as the auto-captured
+    // `POST /Login [VerifyPin]`, correctly categorised Auth), so nothing was MISSING — the row now
+    // moves onto the `auth.sign-in` constant that existed for it all along, so filtering by a
+    // stable code works for auth exactly as it now does for the wizard and the task list.
+    // ⚠️ The summary is a STATIC label: the filter never records posted values, so no e-mail or PIN
+    // can reach the trail through it.
+    [CommunityHub.Audit.Audit("Signed in with a PIN",
+        Action = CommunityHub.Core.Audit.AuditActions.SignIn,
+        Category = CommunityHub.Core.Domain.AuditCategory.Auth)]
     public async Task<IActionResult> OnPostVerifyPinAsync(CancellationToken ct)
     {
         var activeEventId = await GetActiveEventIdAsync(ct);

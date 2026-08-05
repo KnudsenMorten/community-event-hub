@@ -43,6 +43,16 @@ public class LinkedInConnectModel : PageModel
     public string? Message { get; private set; }
     public bool IsError { get; private set; }
 
+    /// <summary>
+    /// §824.10 — the scopes this connect will ask LinkedIn to approve, shown on the page.
+    /// </summary>
+    /// <remarks>
+    /// Printed because a consent failure is otherwise unattributable: LinkedIn rejects the whole
+    /// screen when the app lacks product access for ONE scope, and its error does not say which.
+    /// Seeing the list before pressing Connect is what makes that diagnosable in one look.
+    /// </remarks>
+    public IReadOnlyList<string> RequestedScopes => _options.ScopeList;
+
     private string RedirectUri => $"{Request.Scheme}://{Request.Host}/Organizer/LinkedInConnect?handler=Callback";
 
     public async Task<IActionResult> OnGetAsync(CancellationToken ct)
@@ -77,7 +87,13 @@ public class LinkedInConnectModel : PageModel
             + $"&client_id={Uri.EscapeDataString(_options.ClientId!)}"
             + $"&redirect_uri={Uri.EscapeDataString(RedirectUri)}"
             + $"&state={state}"
-            + "&scope=" + Uri.EscapeDataString("w_member_social w_organization_social");
+            // §824.10 — the scope list is CONFIGURATION now, not a literal. The two write scopes
+            // could POST but could not LOOK UP a sponsor's organization id, which is what
+            // {SponsorLinkedInUrl} needs to become a real company mention (§824.3).
+            // ⚠️ LinkedIn refuses the WHOLE consent screen when the app lacks product access for any
+            // single scope requested — so if this errors, set LinkedIn__Scopes back to
+            // "w_member_social w_organization_social". Posting never depended on the read scopes.
+            + "&scope=" + Uri.EscapeDataString(_options.Scopes ?? string.Empty);
         return Redirect(url);
     }
 

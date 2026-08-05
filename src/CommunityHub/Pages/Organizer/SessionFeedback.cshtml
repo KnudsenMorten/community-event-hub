@@ -1,0 +1,306 @@
+@page
+@model CommunityHub.Pages.Organizer.SessionFeedbackModel
+@using CommunityHub.Core.Domain
+@using CommunityHub.Core.Evaluation
+@{
+    ViewData["Title"] = "Session feedback";
+}
+
+@* 🔒 §784.7 — MOBILE-FIRST (~360px). One EXPANDING row per session, never a five-column grid:
+   five columns do not fit at 360px, and the merge would just move the confusion. The summary
+   line carries what you scan for (score, can it collect, has it a code, is its report out) and
+   <details> holds the rest. No JavaScript, so it works everywhere and survives a refresh. *@
+<style>
+    .sf-row { border:1px solid #e5e7eb; border-radius:10px; margin:10px 0; padding:10px 12px; }
+    .sf-sum { cursor:pointer; list-style:none; display:flex; flex-wrap:wrap; gap:8px; align-items:baseline; }
+    .sf-sum::-webkit-details-marker { display:none; }
+    .sf-title { font-weight:600; flex:1 1 200px; min-width:0; overflow-wrap:anywhere; }
+    .sf-chip { display:inline-block; border-radius:999px; padding:2px 9px; font-size:12px; font-weight:700; white-space:nowrap; }
+    .sf-chip.ok { background:#0a6; color:#fff; }
+    .sf-chip.warn { background:#fff3cd; color:#856404; }
+    .sf-chip.muted { background:#eef2f7; color:#475569; }
+    .sf-score { font-size:22px; font-weight:700; }
+    .sf-meta { color:#6b7280; font-size:13px; }
+    .sf-body { margin-top:10px; padding-top:10px; border-top:1px dashed #e5e7eb; }
+    .sf-actions { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-top:8px; }
+    .sf-actions form { display:inline; margin:0; }
+</style>
+
+<div class="card">
+    <h1>Session feedback</h1>
+
+    @if (Model.AccessDenied)
+    {
+        <p class="error">This area is for organizers only.</p>
+        <p><a asp-page="/Index">Back to hub</a></p>
+        return;
+    }
+
+    <p>
+        Everything about one session in one row: its <strong>QR code</strong>, whether it can
+        <strong>collect</strong> feedback, its <strong>score</strong>, and whether its
+        <strong>report</strong> has been released. Open a row for the detail.
+    </p>
+    <p class="sf-meta">
+        This page replaced <em>Evaluation sessions</em>, <em>Evaluation results</em>,
+        <em>Session QR codes</em> and the old session-evaluations list &mdash; the same facts,
+        gathered per session. The feedback <strong>devices</strong> are still set up under
+        <a asp-page="/Organizer/EvaluationDevices">Evaluation Devices</a>.
+    </p>
+    <p><a asp-page="/Organizer/Content">&larr; Back to speakers &amp; sessions</a></p>
+</div>
+
+@if (Model.Message is not null)
+{
+    <div class="card"><p role="status" style="color:#0a6;margin:0;">@Model.Message</p></div>
+}
+
+@if (Model.Changes.Count > 0 || Model.Warnings.Count > 0)
+{
+    <div class="card">
+        @if (Model.Changes.Count > 0)
+        {
+            <h3 style="margin-top:0;">What the sync changed</h3>
+            <ul>@foreach (var c in Model.Changes) { <li>@c</li> }</ul>
+        }
+        @if (Model.Warnings.Count > 0)
+        {
+            <h3>Worth a look</h3>
+            <ul>@foreach (var w in Model.Warnings) { <li style="color:#b45309;">@w</li> }</ul>
+        }
+    </div>
+}
+
+@* --- the event roll-up. §6: the two figures are DIFFERENT and must never share a label. --- *@
+<div class="card" style="background:#f8fafc;">
+    <h2 style="margin-top:0;">Event so far</h2>
+    @if (Model.Pooled is { } p && p.Score is { } score)
+    {
+        <p style="margin:0;">
+            <strong style="font-size:32px;">@score.ToString("0.0")</strong>
+            <span> index &middot; <strong>@p.Band</strong></span><br />
+            <span class="sf-meta">from @p.Responses response(s) &mdash; <em>pooled</em>: every
+            response counted once, so a packed session weighs more than a small one. This is the
+            figure for the event headline.</span>
+        </p>
+        @if (Model.MeanSession is { } mean)
+        {
+            <p style="margin:10px 0 0;">
+                <strong>@mean.ToString("0.0")</strong> index &mdash; <em>mean session</em><br />
+                <span class="sf-meta">every session weighted equally, sessions under
+                @Model.Threshold responses excluded. This is the figure for comparing tracks or
+                years, where a change in room sizes should not move the number.</span>
+            </p>
+        }
+    }
+    else
+    {
+        <p style="margin:0;">
+            <strong>Not enough responses yet</strong> &mdash;
+            @(Model.Pooled?.Responses ?? 0) of @Model.Threshold needed.
+        </p>
+    }
+
+    @if (Model.Unattributed > 0)
+    {
+        <p class="sf-meta" style="margin:10px 0 0;color:#b45309;">
+            @Model.Unattributed response(s) belong to no session. They still count toward the event
+            figure above &mdash; they are real feedback, only the attribution is missing &mdash; but
+            not toward any session below.
+        </p>
+    }
+</div>
+
+@* --- the three WRITE actions. §784.7: kept SEPARATE on purpose — different privileges, different
+       moments. Each is its own POST; none of them is a "do everything" control. --- *@
+<div class="card">
+    <h2 style="margin-top:0;">Actions</h2>
+    <div class="sf-actions">
+        <form method="post" asp-page-handler="Sync">
+            <button type="submit" class="btn">Sync sessions from CEH</button>
+        </form>
+        <form method="post" asp-page-handler="GenerateCodes">
+            <button type="submit" class="btn">Generate missing QR codes</button>
+        </form>
+        <a class="btn" asp-page-handler="DownloadAllQr">Download all QR codes (ZIP)</a>
+        <form method="post" asp-page-handler="RunPublish">
+            <button type="submit" class="btn">Run report publish now</button>
+        </form>
+    </div>
+    <p class="sf-meta" style="margin-top:10px;">
+        Sync reads the schedule from CEH (CEH is master &mdash; nothing here is edited).
+        Codes are <strong>permanent</strong>: a session that changes room or time keeps the code
+        already printed, which is why there is no regenerate.
+        Publishing waits @Model.QuietMinutes minutes after the last response before it releases a
+        report, and this button runs that same pass rather than forcing past it.
+    </p>
+    @if (!Model.PdfFolderConfigured)
+    {
+        <p style="color:#b45309;margin:0;">
+            ⚠️ No document folder is configured for evaluation reports, so nothing can be published
+            yet. Set it under <a asp-page="/Organizer/DocLibraryPaths">Document library paths</a>.
+        </p>
+    }
+    @if (Model.BaseUrlMissing)
+    {
+        <p style="color:#b45309;margin:8px 0 0;">
+            ⚠️ The public hub URL is not configured, so QR codes cannot be rendered.
+        </p>
+    }
+</div>
+
+@if (Model.PublishResult is { } pr)
+{
+    <div class="card">
+        <h3 style="margin-top:0;">What the publish pass decided</h3>
+        <p class="sf-meta">@pr</p>
+    </div>
+}
+
+<div class="card">
+    <h2 style="margin-top:0;">By session</h2>
+    <p class="sf-meta">
+        @Model.Rows.Count session(s) &middot; @Model.WithQrCode with a QR code
+        @if (Model.MissingQrCode > 0)
+        {
+            <text>&middot; <strong>@Model.MissingQrCode still without one</strong></text>
+        }
+    </p>
+
+    @if (Model.Rows.Count == 0)
+    {
+        <p>No sessions yet. Use <strong>Sync sessions from CEH</strong> above.</p>
+    }
+    else
+    {
+        foreach (var r in Model.Rows)
+        {
+            <details class="sf-row">
+                <summary class="sf-sum">
+                    <span class="sf-title">
+                        @r.Title
+                        <div class="sf-meta">
+                            @if (r.ScheduledStart is { } start)
+                            {
+                                <text>@start.UtcDateTime.ToString("ddd dd MMM HH:mm")</text>
+                            }
+                            else
+                            {
+                                <text>no scheduled time</text>
+                            }
+                            @if (r.Room is not null) { <text> &middot; @r.Room</text> }
+                            @if (r.SpeakerNames.Count > 0)
+                            {
+                                <text> &middot; @string.Join(", ", r.SpeakerNames)</text>
+                            }
+                        </div>
+                    </span>
+
+                    @* The score, with its BAND — §11: the band always accompanies the number, and
+                       the index NEVER carries a % sign (an all-light-green session scores 66.7 and
+                       would read as a failing grade). Below the threshold we show progress toward
+                       it rather than a number volatile enough to mislead. *@
+                    @if (r.Score is { } sc && sc.Score is { } value)
+                    {
+                        <span><span class="sf-score">@value.ToString("0.0")</span>
+                            <span class="sf-meta">index &middot; @sc.Band</span></span>
+                    }
+                    else if (r.Responses > 0)
+                    {
+                        <span class="sf-meta">@r.Responses of @Model.Threshold responses</span>
+                    }
+
+                    @if (!r.CanCollect)
+                    {
+                        <span class="sf-chip warn">not collecting</span>
+                    }
+                    @if (r.SessionId is not null && !r.HasQrCode)
+                    {
+                        <span class="sf-chip warn">no QR code</span>
+                    }
+                    @if (r.ReportReleased)
+                    {
+                        <span class="sf-chip ok">report released</span>
+                    }
+                    else
+                    {
+                        <span class="sf-chip muted">report not released</span>
+                    }
+                </summary>
+
+                <div class="sf-body">
+                    @* Each defect is named in WORDS, because "not collecting" alone sends the
+                       reader back to the pages this merge removed. *@
+                    @if (r.NotMirrored)
+                    {
+                        <p style="color:#b45309;margin:0 0 8px;">
+                            This session has not been mirrored into the feedback system, so it can
+                            collect nothing &mdash; a printed code for it scans to
+                            <em>&ldquo;not open yet&rdquo;</em>. Run <strong>Sync sessions from
+                            CEH</strong> above.
+                        </p>
+                    }
+                    else if (r.Room is null)
+                    {
+                        <p style="color:#b45309;margin:0 0 8px;">
+                            No room, so no feedback device can be placed for it. The room comes from
+                            CEH &mdash; set it there, then sync.
+                        </p>
+                    }
+                    @if (r.OrphanedFromCeh)
+                    {
+                        <p style="color:#b45309;margin:0 0 8px;">
+                            The feedback system holds this session but CEH does not, so it has no QR
+                            code and no report. Its responses still count toward the event figure.
+                        </p>
+                    }
+
+                    @if (r.Score is { } s2)
+                    {
+                        @* The four-way distribution, in the order the buttons sit on the unit. *@
+                        <p class="sf-meta" style="margin:0 0 8px;">
+                            @s2.Responses response(s) &middot;
+                            @s2.Distribution.Four fantastic &middot;
+                            @s2.Distribution.Three good &middot;
+                            @s2.Distribution.Two not great &middot;
+                            @s2.Distribution.One poor
+                        </p>
+                    }
+
+                    <div class="sf-actions">
+                        @if (r.SessionId is int sid && r.HasQrCode && !Model.BaseUrlMissing)
+                        {
+                            <a class="btn" asp-page-handler="Qr" asp-route-sessionId="@sid">
+                                Download this QR code
+                            </a>
+                        }
+                        @if (r.EvaluationSessionId is int eid && r.Responses > 0)
+                        {
+                            <a class="btn" asp-page-handler="Report" asp-route-evaluationSessionId="@eid">
+                                Download the report (PDF)
+                            </a>
+                        }
+                        @* §783.9 — the PUBLISHED files, served through the hub proxy (never a
+                           SharePoint link). These are what "released" means on this row; the button
+                           above renders a fresh report on request, which is a different thing and
+                           is why both are here. *@
+                        @if (r.SessionId is int psid && r.HasScorePdf)
+                        {
+                            <a class="btn" target="_blank" rel="noopener"
+                               href="@CommunityHub.Core.Integrations.Graphics.SessionEvalPdfService.ProxyUrlFor(psid, EvaluationPdfKind.Score)">
+                                &#128202; Published score
+                            </a>
+                        }
+                        @if (r.SessionId is int osid && r.HasOpenPdf)
+                        {
+                            <a class="btn" target="_blank" rel="noopener"
+                               href="@CommunityHub.Core.Integrations.Graphics.SessionEvalPdfService.ProxyUrlFor(osid, EvaluationPdfKind.Open)">
+                                &#128221; Published open feedback
+                            </a>
+                        }
+                    </div>
+                </div>
+            </details>
+        }
+    }
+</div>

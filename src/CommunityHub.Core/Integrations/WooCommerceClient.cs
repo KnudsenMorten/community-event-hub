@@ -12,11 +12,20 @@ namespace CommunityHub.Core.Integrations;
 /// line. Defaulted to 1 so every existing construction site keeps its meaning (one line ⇒ one item)
 /// rather than silently becoming zero.
 /// </param>
+/// <param name="UnitPrice">
+/// §786 — the per-unit price WooCommerce charged, in the WEBSHOP's currency (EUR). The hub now
+/// invoices these orders, and the retired PowerShell script read exactly this field.
+/// <para>🔒 Defaulted to 0 so every existing construction site is unchanged. The sponsor task
+/// pipeline reads this record for <i>"did he buy it"</i>, never for money, and must not start
+/// depending on a price it never asked for. A zero therefore means NOT SUPPLIED — and the invoicing
+/// service refuses such a line rather than sending a customer a 0.00 row.</para>
+/// </param>
 public sealed record WooLineItem(
     long ProductId,
     string ProductName,
     string CategoriesText,
-    int Quantity = 1);
+    int Quantity = 1,
+    decimal UnitPrice = 0m);
 
 /// <summary>A WooCommerce order, flattened to what the sponsor pipeline uses.</summary>
 public sealed record WooOrder(
@@ -274,7 +283,12 @@ public sealed class WooCommerceClient
                     // §666 — a missing/zero quantity falls back to 1. WooCommerce always sends
                     // "quantity", but a line that somehow lacks it still represents a purchase, and
                     // counting it as 0 would tell a sponsor they had booked nothing when they had.
-                    Quantity: Math.Max(1, (int)GetLong(item, "quantity"))));
+                    Quantity: Math.Max(1, (int)GetLong(item, "quantity")),
+                    // §786 — the UNIT price, which is what the retired invoicing script billed.
+                    // ⚠️ Not "total": WooCommerce's `total` is the line total (unit × quantity), and
+                    // billing that as a unit price would multiply a 2-item line by two a second
+                    // time. `price` is per unit.
+                    UnitPrice: GetDecimal(item, "price")));
             }
         }
 
@@ -327,6 +341,26 @@ public sealed class WooCommerceClient
 
     private static long GetLong(JsonElement e, string prop) =>
         e.TryGetProperty(prop, out var v) && v.TryGetInt64(out var n) ? n : 0;
+
+    /// <summary>
+    /// §786 — a money field. ⚠️ WooCommerce is INCONSISTENT about these: prices come back as a JSON
+    /// number on some endpoints and as a quoted string on others, so both are accepted. Parsed with
+    /// the invariant culture, because "13500.50" read under a Danish culture would become 1350050.
+    /// Anything unparseable is 0, which the invoicing service treats as "no price" and refuses.
+    /// </summary>
+    private static decimal GetDecimal(JsonElement e, string prop)
+    {
+        if (!e.TryGetProperty(prop, out var v)) return 0m;
+
+        return v.ValueKind switch
+        {
+            JsonValueKind.Number => v.TryGetDecimal(out var d) ? d : 0m,
+            JsonValueKind.String => decimal.TryParse(
+                v.GetString(), System.Globalization.NumberStyles.Any,
+                System.Globalization.CultureInfo.InvariantCulture, out var s) ? s : 0m,
+            _ => 0m,
+        };
+    }
 
     /// <summary>
     /// Widen a bare date (<c>YYYY-MM-DD</c>) to a full ISO 8601 timestamp

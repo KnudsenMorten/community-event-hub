@@ -21,8 +21,10 @@ namespace CommunityHub.Pages.Sponsor;
 /// scoped to (EventId, SponsorCompanyId).
 ///
 /// STAGE 2 (this change): adds the versioned SharePoint logo / exhibitor-wall
-/// uploads + per-upload notify emails (folders + recipients are edition config).
-/// Each upload is stored as <c>&lt;prefix&gt;&lt;sponsor&gt;_v&lt;N&gt;.&lt;ext&gt;</c> with an
+/// uploads + per-upload notify emails. §768.14 — the FOLDERS now come from the
+/// document-library registry, not this page; only the notify recipients are still
+/// edition config. Each upload is stored as
+/// <c>{sponsor}-{kind}-{version}.{ext}</c> (see <c>SponsorUploadNaming</c>) with an
 /// auto-incrementing version so the latest file is obvious. STAGE 3 will add the
 /// live "Save &amp; Sync to Zoho" + booth members + booth materials.
 /// </summary>
@@ -34,10 +36,14 @@ namespace CommunityHub.Pages.Sponsor;
 [RequestFormLimits(MultipartBodyLengthLimit = 1_073_741_824)]
 public class CompanyDetailsModel : PageModel
 {
-    public const int MaxOverview = 1000;
-    public const int MaxShort    = 80;
-    public const int MaxSocial   = 600;
-    public const int MaxUrl      = 400;
+    // §802.3 — the numbers now come from ONE place, because they are ZOHO's limits and were measured
+    // against the live API (§801.2). They lived here, in the wizard step, and hard-coded in this
+    // page's character counter; the sync needed a fourth copy, which is where it stopped being
+    // reasonable. These aliases stay so the .cshtml keeps compiling.
+    public const int MaxOverview = CommunityHub.Core.Integrations.ZohoExhibitorLimits.Overview;
+    public const int MaxShort    = CommunityHub.Core.Integrations.ZohoExhibitorLimits.ShortDescription;
+    public const int MaxSocial   = CommunityHub.Core.Integrations.ZohoExhibitorLimits.SocialBrandingText;
+    public const int MaxUrl      = CommunityHub.Core.Integrations.ZohoExhibitorLimits.Url;
 
     private const long Mb = 1024 * 1024;
 
@@ -52,6 +58,7 @@ public class CompanyDetailsModel : PageModel
     private readonly IEmailSender _email;
     private readonly SponsorZohoSyncService _zohoSync;
     private readonly CommunityHub.Core.Integrations.Erp.EconomicContactAdminService _erpContacts;
+    private readonly CommunityHub.Core.Integrations.DocLibrary.IDocLibraryPathResolver _paths;
     private readonly ILogger<CompanyDetailsModel> _log;
 
     /// <summary>§482b — pulls an ERP contact change back into the hub straight away. OPTIONAL so a
@@ -70,9 +77,11 @@ public class CompanyDetailsModel : PageModel
         IEmailSender email,
         SponsorZohoSyncService zohoSync,
         CommunityHub.Core.Integrations.Erp.EconomicContactAdminService erpContacts,
+        CommunityHub.Core.Integrations.DocLibrary.IDocLibraryPathResolver paths,
         ILogger<CompanyDetailsModel> log,
         CommunityHub.Core.Integrations.SponsorContactSyncService? contactSync = null)
     {
+        _paths = paths;
         _contactSync = contactSync;
         _db = db;
         _participant = participant;
@@ -109,11 +118,10 @@ public class CompanyDetailsModel : PageModel
     // Which upload buttons are available (SharePoint configured + folder set).
     public bool CanUploadSoMe { get; private set; }
     public bool CanUploadPrint { get; private set; }
-    public bool CanUploadZoho { get; private set; }
     public bool CanUploadWall { get; private set; }
 
     /// <summary>
-    /// §68 — the latest upload per logo/wall kind ("some"/"print"/"zoho"/"wall"),
+    /// §68 — the latest upload per logo/wall kind ("some"/"print"/"wall"),
     /// so the page can show the already-uploaded file (name + version + when + by
     /// whom) under each upload control on load. Empty until something is uploaded.
     /// </summary>
@@ -362,7 +370,7 @@ public class CompanyDetailsModel : PageModel
         var info = await _db.SponsorInfos.AsNoTracking().FirstOrDefaultAsync(
             s => s.EventId == me.EventId && s.SponsorCompanyId == companyId, ct);
         var isExhibitor = info?.HasBooth ?? false;
-        if (spec.ExhibitorOnly && !isExhibitor)
+        if (spec.IsWall && !isExhibitor)
         {
             Error = "The exhibitor wall upload is for exhibitors only.";
             await LoadAsync(me, prefill: true, ct);
@@ -383,9 +391,9 @@ public class CompanyDetailsModel : PageModel
             return Page();
         }
         var ext = Path.GetExtension(UploadFile.FileName).ToLowerInvariant();
-        if (!spec.Exts.Contains(ext))
+        if (!spec.Accepts(ext))
         {
-            Error = $"Unsupported file type. Allowed: {string.Join(", ", spec.Exts)}.";
+            Error = $"Unsupported file type. Allowed: {spec.AllowedText}.";
             await LoadAsync(me, prefill: true, ct);
             return Page();
         }
@@ -398,8 +406,8 @@ public class CompanyDetailsModel : PageModel
             // buffered the whole file into a MemoryStream then ToArray()'d it — the same double
             // copy that made the speaker slide upload fragile. Now streamed straight into Graph's
             // chunked session: peak memory is one chunk, whatever the artwork weighs.
-            var fileName = await NextVersionedNameAsync(
-                sp!.SiteUrl, sp.DriveName, spec.Folder, spec.Prefix, SanitizeNameComponent(sponsorName), ext, ct);
+            var fileName = await CommunityHub.Uploads.SponsorUploadKinds.NextVersionedNameAsync(
+                _sp, sp!.SiteUrl, sp.DriveName, spec.Folder, kind, sponsorName, ext, _log, ct);
             await using var wallUpload = UploadFile.OpenReadStream();
             var (_, webUrl, _) = await _sp.UploadFileStreamAsync(
                 sp.SiteUrl, sp.DriveName, spec.Folder, fileName, wallUpload, UploadFile.Length,
@@ -408,11 +416,11 @@ public class CompanyDetailsModel : PageModel
 
             // Persist the uploaded LOGO's location so the sponsor "Get started"
             // wizard's "Logos & artwork" step (SponsorWizardService, which checks
-            // LogoRasterPath / LogoVectorPath) can detect completion. SoMe + Zoho
-            // logos are raster PNGs -> LogoRasterPath; the print logo is vector
+            // LogoRasterPath / LogoVectorPath) can detect completion. The Web logo
+            // is a raster PNG -> LogoRasterPath; the print logo is vector
             // (EPS/AI/PDF) -> LogoVectorPath. The exhibitor-wall upload is not a
             // company logo, so it is intentionally NOT recorded on the logo fields.
-            if (kind is "some" or "zoho" or "print")
+            if (kind is "some" or "print")
             {
                 var logoInfo = await GetOrCreateInfoAsync(me.EventId, companyId!, ct);
                 if (kind == "print")
@@ -459,97 +467,50 @@ public class CompanyDetailsModel : PageModel
 
     // ---- upload kinds --------------------------------------------------------
 
-    private sealed record UploadSpec(
-        string Folder, string Prefix, IReadOnlyList<string> Notify,
-        string[] Exts, long MaxBytes, bool ExhibitorOnly);
-
-    private UploadSpec? ResolveKind(string kind, SharePointEditionConfig? sp)
-    {
-        if (sp is null || string.IsNullOrWhiteSpace(sp.SiteUrl) || !_sp.IsConfigured) return null;
-        return kind switch
-        {
-            "some" when !string.IsNullOrWhiteSpace(sp.LogoSoMeBrandingFolderPath) =>
-                new(sp.LogoSoMeBrandingFolderPath, "SoMeBrandingLogo_", sp.SponsorUploadNotify,
-                    new[] { ".png" }, 5 * Mb, false),
-            "print" when !string.IsNullOrWhiteSpace(sp.LogoPrintFolderPath) =>
-                new(sp.LogoPrintFolderPath, "PrintLogo_", sp.SponsorUploadNotify,
-                    new[] { ".eps", ".ai", ".pdf" }, 25 * Mb, false),
-            "zoho" when !string.IsNullOrWhiteSpace(sp.LogoZohoFolderPath) =>
-                new(sp.LogoZohoFolderPath, "ZohoLogo_", sp.SponsorUploadNotifyZoho,
-                    new[] { ".png" }, 5 * Mb, false),
-            "wall" when !string.IsNullOrWhiteSpace(sp.ExhibitorWallFolderPath) =>
-                // Exhibitor wall = print artwork: vector/PDF only, up to 1 GB (operator 2026-06-28).
-                new(sp.ExhibitorWallFolderPath, "ExhibitorWall_", sp.SponsorUploadNotify,
-                    new[] { ".eps", ".ai", ".pdf" }, 1024 * Mb, true),
-            _ => null,
-        };
-    }
+    /// <summary>
+    /// §768 — delegates to <see cref="SponsorUploadKinds.Resolve"/>, the ONE definition of what an
+    /// upload kind means.
+    /// </summary>
+    /// <remarks>
+    /// 🔒 This method used to be a SECOND, hand-maintained copy of those rules — same four kinds,
+    /// same folders, prefixes, extensions, size caps and notify lists — and
+    /// <c>SponsorUploadKinds</c>'s own doc comment admitted it: <i>"Mirrors
+    /// CompanyDetailsModel.ResolveKind exactly"</i>. A comment is not a mechanism. Two copies of a
+    /// rule drift the moment one is edited, and the §768 filename change (a new versioned naming
+    /// convention) is exactly the kind of edit that would have been applied to one and not the
+    /// other — leaving a sponsor's logo landing under two different names depending on which page
+    /// they used.
+    /// <para>§768.14 — the local <c>UploadSpec</c> shim is gone too: it re-shaped the shared spec
+    /// into a near-identical record, which is a copy of the DATA where there was already a copy of
+    /// the rules. The extra <c>_sp.IsConfigured</c> check stays — it asks whether the upload client
+    /// is wired, which is this page's concern rather than the kind registry's.</para>
+    /// </remarks>
+    private CommunityHub.Uploads.SponsorUploadSpec? ResolveKind(string kind, SharePointEditionConfig? sp) =>
+        _sp.IsConfigured
+            ? CommunityHub.Uploads.SponsorUploadKinds.Resolve(kind, _paths, sp)
+            : null;
 
     /// <summary>
-    /// Compute the next available versioned file name: lists the folder, finds the
-    /// highest existing <c>&lt;prefix&gt;&lt;sponsor&gt;_v&lt;N&gt;</c>, and returns
-    /// <c>&lt;prefix&gt;&lt;sponsor&gt;_v&lt;N+1&gt;&lt;ext&gt;</c>.
+    /// The version a stored name carries. §768.14 — the local <c>_v{N}</c> regex is gone; naming is
+    /// one file's job now (<see cref="SponsorUploadNaming"/>), and this stays tolerant of the
+    /// retired form only because historical audit rows are DISPLAYED here.
     /// </summary>
-    private async Task<string> NextVersionedNameAsync(
-        string siteUrl, string driveName, string folder, string prefix, string sponsor, string ext, CancellationToken ct)
-    {
-        var stem = $"{prefix}{sponsor}_v";
-        var next = 1;
-        try
-        {
-            var files = await _sp.ListFolderFilesAsync(siteUrl, driveName, folder, ct);
-            var rx = new Regex("^" + Regex.Escape(stem) + @"(\d+)\b", RegexOptions.IgnoreCase);
-            var max = files
-                .Select(f => rx.Match(f.Name))
-                .Where(m => m.Success)
-                .Select(m => int.TryParse(m.Groups[1].Value, out var n) ? n : 0)
-                .DefaultIfEmpty(0)
-                .Max();
-            next = max + 1;
-        }
-        catch (Exception ex)
-        {
-            // If listing fails, fall back to v1 + a timestamp-free unique-ish suffix is
-            // overkill; just start at v1 and let a re-upload bump it. Log and continue.
-            _log.LogWarning(ex, "CompanyDetails: could not list {Folder} to version; defaulting to v1.", folder);
-        }
-        return $"{stem}{next}{ext}";
-    }
+    private static int ParseVersion(string fileName) =>
+        CommunityHub.Uploads.SponsorUploadNaming.ParseVersion(fileName);
 
-    /// <summary>Parse the <c>_vN</c> version suffix from a versioned upload file name; defaults to 1.</summary>
-    private static int ParseVersion(string fileName)
-    {
-        var m = Regex.Match(fileName, @"_v(\d+)\b", RegexOptions.IgnoreCase);
-        return m.Success && int.TryParse(m.Groups[1].Value, out var n) && n > 0 ? n : 1;
-    }
-
-    private async Task NotifyUploadAsync(
-        UploadSpec spec, string sponsorName, string fileName, string? webUrl, string byEmail, CancellationToken ct)
-    {
-        if (spec.Notify.Count == 0) return;
-        string Enc(string? s) => System.Net.WebUtility.HtmlEncode(s ?? string.Empty);
-        // §155: the file link moved OUT of the "File:" line into a bigger, prominent button
-        // BELOW the details (was an inline "open" link next to the filename).
-        var button = string.IsNullOrWhiteSpace(webUrl)
-            ? ""
-            // §191: bulletproof button — explicit white text with !important so dark-mode
-            // mail clients can't darken it, background on the anchor itself.
-            : $"<p style=\"margin:18px 0 4px;\"><a href=\"{Enc(webUrl)}\" "
-              + "style=\"display:inline-block;padding:14px 30px;background-color:#1565c0;"
-              + "color:#ffffff !important;font-weight:700;font-size:16px;border-radius:6px;"
-              + "text-decoration:none;\">Open file</a></p>";
-        var html =
-            $"<p>Sponsor <b>{Enc(sponsorName)}</b> uploaded a new file via Company Details.</p>"
-            + $"<ul><li><b>File:</b> {Enc(fileName)}</li>"
-            + $"<li><b>Uploaded by:</b> {Enc(byEmail)}</li></ul>"
-            + button;
-        var subject = $"Sponsor upload — {sponsorName} — {fileName} [ELDK27]";
-        foreach (var to in spec.Notify)
-        {
-            try { await _email.SendAsync(to, subject, html, ct); }
-            catch (Exception ex) { _log.LogWarning(ex, "CompanyDetails: notify {To} failed.", to); }
-        }
-    }
+    /// <summary>
+    /// §768.14 — delegates to <see cref="SponsorUploadKinds.NotifyAsync"/>.
+    /// </summary>
+    /// <remarks>
+    /// This page carried its own byte-identical copy of the notification mail. §494d records what a
+    /// second copy costs here specifically: the direct-to-storage path silently sent NO designer
+    /// notification because it was written separately, so artwork arrived and nobody was told.
+    /// </remarks>
+    private Task NotifyUploadAsync(
+        CommunityHub.Uploads.SponsorUploadSpec spec, string sponsorName, string fileName, string? webUrl,
+        string byEmail, CancellationToken ct) =>
+        CommunityHub.Uploads.SponsorUploadKinds.NotifyAsync(
+            _email, spec, sponsorName, fileName, webUrl, byEmail, _log, ct);
 
     // ---- Sponsor self-service e-conomic contacts (ERP master) ----------------
 
@@ -709,13 +670,14 @@ public class CompanyDetailsModel : PageModel
 
         PublicName = await ResolveSponsorNameAsync(companyId, ct, allowFallback: false);
 
-        // Which upload buttons to show (SharePoint configured + folder set).
+        // Which upload buttons to show. §768.14 — asked of ResolveKind, so a control appears
+        // exactly when the POST handler would accept it. Reading the config keys directly (as this
+        // did) meant the button's condition and the handler's condition were two separate rules
+        // over two separate sources: a sponsor could be shown an upload that then refused the file.
         var sp = _cfg.Load(_cfgOptions.EventConfigPath).SharePoint;
-        var ready = sp is not null && !string.IsNullOrWhiteSpace(sp.SiteUrl) && _sp.IsConfigured;
-        CanUploadSoMe  = ready && !string.IsNullOrWhiteSpace(sp!.LogoSoMeBrandingFolderPath);
-        CanUploadPrint = ready && !string.IsNullOrWhiteSpace(sp!.LogoPrintFolderPath);
-        CanUploadZoho  = ready && !string.IsNullOrWhiteSpace(sp!.LogoZohoFolderPath);
-        CanUploadWall  = ready && IsExhibitor && !string.IsNullOrWhiteSpace(sp!.ExhibitorWallFolderPath);
+        CanUploadSoMe  = ResolveKind("some", sp) is not null;
+        CanUploadPrint = ResolveKind("print", sp) is not null;
+        CanUploadWall  = IsExhibitor && ResolveKind("wall", sp) is not null;
 
         // §68 — surface the latest upload per logo/wall kind so each upload control
         // can show the already-uploaded file (name + version + when + by whom).
@@ -730,14 +692,13 @@ public class CompanyDetailsModel : PageModel
         // LogoVectorPath, e.g. uploaded before the per-upload audit was recorded) with NO
         // audit row. Without this, the "current file" line would be blank on load even
         // though a logo is on file. Synthesize a display entry from the stored logo so the
-        // raster controls ("some"/"zoho") and the vector control ("print") still show the
+        // raster control ("some") and the vector control ("print") still show the
         // already-uploaded file (name + when) on load, like the booth-materials controls.
         if (info is not null)
         {
             var fallbacks = new[]
             {
                 ("some",  info.LogoRasterPath, info.LogoRasterFileName),
-                ("zoho",  info.LogoRasterPath, info.LogoRasterFileName),
                 ("print", info.LogoVectorPath, info.LogoVectorFileName),
             };
             foreach (var (kind, path, fileName) in fallbacks)
@@ -778,7 +739,11 @@ public class CompanyDetailsModel : PageModel
                 .ToListAsync(ct);
             BoothVideos = mats.Where(m => m.Kind == BoothMaterialKind.Video).ToList();
             BoothCollateral = mats.Where(m => m.Kind == BoothMaterialKind.Collateral).ToList();
-            CanUploadCollateral = ready && !string.IsNullOrWhiteSpace(sp!.BoothCollateralFolderPath);
+            CanUploadCollateral =
+                sp is not null && !string.IsNullOrWhiteSpace(sp.SiteUrl) && _sp.IsConfigured
+                && _paths.TryResolve(
+                       CommunityHub.Core.Integrations.DocLibrary.DocLibraryPaths.SponsorBoothCollateral,
+                       out _);
             // §64 — last-saved for the booth-materials section (latest video/file add).
             BoothMaterialsLastSavedAt = mats.Count > 0 ? mats.Max(m => m.CreatedAt) : (DateTimeOffset?)null;
         }
@@ -843,7 +808,10 @@ public class CompanyDetailsModel : PageModel
         if (redirect is not null) return redirect;
 
         var sp = _cfg.Load(_cfgOptions.EventConfigPath).SharePoint;
-        if (sp is null || string.IsNullOrWhiteSpace(sp.SiteUrl) || string.IsNullOrWhiteSpace(sp.BoothCollateralFolderPath) || !_sp.IsConfigured)
+        if (sp is null || string.IsNullOrWhiteSpace(sp.SiteUrl) || !_sp.IsConfigured
+            || !_paths.TryResolve(
+                   CommunityHub.Core.Integrations.DocLibrary.DocLibraryPaths.SponsorBoothCollateral,
+                   out var collateralFolder))
         { Error = "Collateral upload isn't available."; await LoadAsync(me!, prefill: true, ct); return Page(); }
 
         var count = await _db.SponsorBoothMaterials.CountAsync(
@@ -867,7 +835,7 @@ public class CompanyDetailsModel : PageModel
             var fileName = $"{SanitizeNameComponent(sponsorName)}_{SanitizeNameComponent(baseName)}{ext}";
             await using var upload = UploadFile.OpenReadStream();
             var (_, webUrl, _) = await _sp.UploadFileStreamAsync(
-                sp.SiteUrl, sp.DriveName, sp.BoothCollateralFolderPath, fileName,
+                sp.SiteUrl, sp.DriveName, collateralFolder, fileName,
                 upload, UploadFile.Length,
                 string.IsNullOrWhiteSpace(UploadFile.ContentType) ? "application/octet-stream" : UploadFile.ContentType, ct);
             _db.SponsorBoothMaterials.Add(new SponsorBoothMaterial
@@ -1167,8 +1135,14 @@ public class CompanyDetailsModel : PageModel
         return Uri.TryCreate(v, UriKind.Absolute, out _) ? null : $"{label} is not a valid URL.";
     }
 
+    // §802.1 — the save is REFUSED and the message carries the numbers. Operator 2026-08-04: *"tell
+    // the exhibitor the issue including number of chars and block them from saving until fixed"*.
+    // 🔒 Server-side, deliberately: the textarea's `maxlength` is a convenience, not a rule — it does
+    // not survive every paste path and does not exist at all for anything that posts without the page.
     private static string? ValidateLen(string label, string? value, int max) =>
-        (value?.Length ?? 0) > max ? $"{label} must be {max} characters or fewer." : null;
+        CommunityHub.Core.Integrations.ZohoExhibitorLimits.IsTooLong(value, max)
+            ? CommunityHub.Core.Integrations.ZohoExhibitorLimits.TooLongMessage(label, value, max)
+            : null;
 
     private static string? NormaliseOrNull(string? s) =>
         string.IsNullOrWhiteSpace(s) ? null : s.Trim();

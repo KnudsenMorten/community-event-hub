@@ -128,9 +128,71 @@ public sealed class ParticipantChecklistBuilderTests
 
         var row = Assert.Single(cl.Pending);
         Assert.Equal("Upload booth logo", row.Title);
-        // P6/§297: the sponsor: checklist deep-link points at the RIGHT Company Details section
-        // (#anchor) — "sponsor:logo" → the logos section.
-        Assert.Equal("/Sponsor/CompanyDetails#logos", row.Link);   // SourceKey deep-link mapping
+        // 🔒 §708.4 — A TASK LINKS TO THE TASK, anchored at its own row.
+        //
+        // This used to assert "/Sponsor/CompanyDetails#logos" (P6/§297), i.e. that the destination
+        // was GUESSED from the word "logo" in the title. That guessing produced a wrong destination
+        // three separate times (§674, §679, §708.4 — "Validate booth members have lead scan app +
+        // exhibitor guide" landing on the booth-MEMBER editor because its title contains "member"),
+        // and the page it guessed is the one §707.44 removed from the nav and §689.1 is retiring.
+        // The row now carries the body, the buttons and the upload control, so the row IS the
+        // destination.
+        Assert.Equal($"/Sponsor/Tasks{ParticipantChecklistBuilder.TaskAnchor(row.Id)}", row.Link);
+    }
+
+    /// <summary>
+    /// 🔒 §708.4 — the regression that keeps coming back: a task title whose words happen to name
+    /// another task's page. Both of these are real PROD rows from the operator's screenshot.
+    /// </summary>
+    [Theory]
+    // Contains "member" — used to land on /Sponsor/CompanyDetails#booth-members, an editor with
+    // nothing to do with a lead-scan app. This is the row he arrowed.
+    [InlineData("sponsor:acme:validate-booth-members-have-lead-scan-app--exhibitor-guide")]
+    // Contains "onboard" — used to land on /Sponsor/CompanyDetails#company.
+    [InlineData("sponsor:acme:initial-onboarding-of-sponsor")]
+    // Contains "member" — the one he named: "i see links to old company details booth member".
+    [InlineData("sponsor:acme:register-booth-members")]
+    public void Sponsor_task_links_to_its_own_row_never_to_company_details(string sourceKey)
+    {
+        var link = ParticipantChecklistBuilder.LinkForTask(42, sourceKey);
+
+        Assert.Equal("/Sponsor/Tasks#task-42", link);
+        Assert.DoesNotContain("CompanyDetails", link);
+    }
+
+    // ── §708.10 — THE THIRD ROW-OWNING FAMILY ───────────────────────────────────────────────
+    //
+    // The generic roles' step tasks now embed their form on their own row on /Tasks, so the row is
+    // the complete destination and "a task links to the TASK" (§708.4) applies to them too.
+
+    [Theory]
+    [InlineData("hotel-form:7")]
+    [InlineData("dinner-form:7")]
+    [InlineData("lunch-form:7")]
+    [InlineData("swag-form:7")]
+    [InlineData("signal:7")]
+    [InlineData("profile:7")]
+    [InlineData("accept:7")]
+    [InlineData("availability:7")]
+    public void Embedded_step_task_links_to_its_own_row_on_the_shared_tasks_page(string sourceKey)
+    {
+        var link = ParticipantChecklistBuilder.LinkForTask(42, sourceKey);
+
+        Assert.Equal("/Tasks#task-42", link);
+        // It must NOT reopen the whole Get-Started journey to change ONE answer — §708.2a decided
+        // the wizard is the first-run flow and a direct edit is a different thing.
+        Assert.DoesNotContain("Wizard", link);
+    }
+
+    [Theory]
+    // 🔒 §707.57b keeps party and master class on their own surfaces, and §351-6/§365 point these
+    // two at NAMED wizard steps for reasons the operator gave by name. If §708.10 ever swallows
+    // them, this fails loudly rather than the decision being lost quietly.
+    [InlineData("party-form:7", "/Forms/Wizard?step=party")]
+    [InlineData("masterclass-form:7", "/Forms/Wizard?step=masterclass")]
+    public void Party_and_master_class_keep_their_own_destinations(string sourceKey, string expected)
+    {
+        Assert.Equal(expected, ParticipantChecklistBuilder.LinkForTask(42, sourceKey));
     }
 
     [Fact]
@@ -153,13 +215,17 @@ public sealed class ParticipantChecklistBuilderTests
     [InlineData("lunch-form:7", "/Forms/Wizard?step=lunch")]
     // §161: manual mark-done steps now deep-link to the same page their Get-Started card opens.
     [InlineData("signal:7", "/Forms/Wizard?step=signal")]
-    // §314: the Promote step page is retired — promote rows (legacy) and the new
-    // speakerdl Help-Promote deadline both land on the Help Promote page.
+    // §314: the Promote step page is retired — a legacy promote: row still lands on Help Promote.
     [InlineData("promote:7", "/Speaker/Graphics")]
-    [InlineData("speakerdl:7:help-to-promote-your-sessions", "/Speaker/Graphics")]
-    // §322i: the upload deadlines deep-link to My Sessions (the on-card upload; never SharePoint).
-    [InlineData("speakerdl:7:upload-preview-presentation", "/Speaker")]
-    [InlineData("speakerdl:7:upload-final-presentation", "/Speaker")]
+    // 🔒 §708.4 — the speakerdl: family owns a rendered ROW, so it links to the row's page rather
+    // than to a page guessed from a word in its title. These three used to assert
+    // "/Speaker/Graphics", "/Speaker" and "/Speaker" respectively (§314/§322i), matched by
+    // `Contains("promote")` / `Contains("presentation")` — the same guessing that sent the sponsor
+    // rows to a retired page. §708 embeds the upload control IN the task, so "/Speaker" is no
+    // longer even where the work happens.
+    [InlineData("speakerdl:7:help-to-promote-your-sessions", "/Speaker/Tasks")]
+    [InlineData("speakerdl:7:upload-preview-presentation", "/Speaker/Tasks")]
+    [InlineData("speakerdl:7:upload-final-presentation", "/Speaker/Tasks")]
     [InlineData("party-form:7", "/Forms/Wizard?step=party")]
     [InlineData(null, null)]
     [InlineData("unknown:7", null)]

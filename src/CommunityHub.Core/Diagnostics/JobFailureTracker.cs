@@ -20,8 +20,22 @@ namespace CommunityHub.Core.Diagnostics;
 /// </summary>
 public sealed class JobFailureTracker
 {
-    /// <summary>Consecutive failures required before an alert is raised (operator: 2).</summary>
-    public const int DefaultAlertThreshold = 2;
+    /// <summary>Consecutive failures required before an alert is raised.</summary>
+    /// <remarks>
+    /// <para>🔴 <b>§784.4 — RAISED FROM 2 TO 3 (operator 2026-08-03).</b> <i>"I told you to NOT send
+    /// these when they happen first time, but only alert when it has happened for 3 consequtive
+    /// times. this is caused by a temporary hiccup in the integration. you are warning of something
+    /// which we cannto do anything about (503 service unavailable)"</i>.</para>
+    ///
+    /// <para>The §138 value was 2, chosen after the 2026-06-27 incident. It was not enough: an
+    /// upstream 503 routinely spans two consecutive ticks, so the threshold fired on exactly the
+    /// class of blip it existed to absorb.</para>
+    ///
+    /// <para>🔑 <b>Alerting too early does not cost noise, it costs DEAFNESS.</b> An alert nobody can
+    /// act on — someone else's server returning 503 — teaches the reader to skim past alerts, and the
+    /// one that matters then arrives in the same inbox as the ones that never did.</para>
+    /// </remarks>
+    public const int DefaultAlertThreshold = 3;
 
     private readonly CommunityHubDbContext _db;
     private readonly TimeProvider _clock;

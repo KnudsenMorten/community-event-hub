@@ -12,15 +12,8 @@ namespace CommunityHub.Surveys;
 /// subsequent calls hit the in-memory cache. Restart the app to pick up
 /// edits -- no DB migration needed.
 /// </summary>
-public sealed class SurveyDefinitionProvider
+public sealed class SurveyDefinitionProvider : CommunityHub.Core.Surveys.ISurveyDefinitionSource
 {
-    private static readonly JsonSerializerOptions JsonOpts = new()
-    {
-        PropertyNameCaseInsensitive = true,
-        ReadCommentHandling = JsonCommentHandling.Skip,
-        AllowTrailingCommas = true,
-    };
-
     private readonly IHostEnvironment _env;
     private readonly ILogger<SurveyDefinitionProvider> _log;
     private readonly ConcurrentDictionary<string, SurveyDefinition> _cache = new(StringComparer.OrdinalIgnoreCase);
@@ -76,12 +69,13 @@ public sealed class SurveyDefinitionProvider
             try
             {
                 var json = File.ReadAllText(path);
-                var def = JsonSerializer.Deserialize<SurveyDefinition>(json, JsonOpts);
+                // 🔒 ONE parser, shared with the jobs host — see SurveyDefinitionJsonLoader and §773.1.
+                var mismatch = SurveyDefinitionJsonLoader.SlugMismatch(json, s);
+                var def = SurveyDefinitionJsonLoader.Parse(json, s);
                 if (def is null) throw new InvalidOperationException("Deserialized to null");
-                if (!string.Equals(def.Slug, s, StringComparison.OrdinalIgnoreCase))
+                if (mismatch)
                 {
-                    _log.LogWarning("Survey slug mismatch in {Path}: file slug='{FileSlug}' but loaded as '{LoadedSlug}'. Using requested slug.", path, def.Slug, s);
-                    def.Slug = s;
+                    _log.LogWarning("Survey slug mismatch in {Path}: loaded as '{LoadedSlug}'. Using requested slug.", path, s);
                 }
                 _log.LogInformation("Loaded survey '{Slug}' from {Path} ({Tracks} tracks)", s, path, def.Tracks.Count);
                 return def;

@@ -65,35 +65,35 @@ public sealed class SponsorWelcomeEmailService
     public async Task<SponsorWelcomeResult> SendForCompanyAsync(
         int eventId, string sponsorCompanyId, CancellationToken ct = default)
     {
-        // DEPENDENCY GUARD (operator 2026-06-23): the welcome must NOT go out before
-        // a booth company's SharePoint upload folders are provisioned — otherwise the
-        // exhibitor lands on tasks whose upload links aren't ready. A booth company
-        // (package >= Gold) must have at least one provisioned upload folder
-        // (SponsorUploadLocation with an edit link) first; digital/Silver companies
-        // have nothing to provision and are never gated. Run the sponsor pull
-        // (WooCommercePullJob / OneShot pull-sponsors) to provision, then resend.
-        var hasBooth = await _db.SponsorInfos.AnyAsync(
-            s => s.EventId == eventId && s.SponsorCompanyId == sponsorCompanyId
-                 && s.SponsorPackage >= SponsorPackage.Gold, ct);
-        if (hasBooth)
-        {
-            var provisioned = await _db.SponsorUploadLocations.AnyAsync(
-                l => l.EventId == eventId && l.SponsorCompanyId == sponsorCompanyId
-                     && l.EditLinkUrl != null && l.EditLinkUrl != "", ct);
-            if (!provisioned)
-            {
-                return new SponsorWelcomeResult(
-                    sponsorCompanyId, 0, 0, 0,
-                    Blocked: true,
-                    // §326cd: NOT "run the sponsor pull" — the pull runs itself every 30 min and
-                    // PROVISIONS the folder (EnsureFolderWithEditLinkAsync), after which the
-                    // 15-min reconcile welcomes the company with no human involved. This block
-                    // is transient BY DESIGN; it only persists when provisioning cannot succeed.
-                    Reason: "Waiting for its SharePoint upload folder — the sponsor pull provisions "
-                            + "this automatically (~30 min) and the welcome then sends itself. If it "
-                            + "persists, SharePoint provisioning is failing or is not configured.");
-            }
-        }
+        // ⚰️ §816 — THE UPLOAD-FOLDER DEPENDENCY GUARD IS DELETED. DO NOT REINSTATE IT.
+        //
+        // It held every Gold+ booth company's welcome until a `SponsorUploadLocation` with an edit
+        // link existed — correct in June, when each company got its own provisioned folder under
+        // `/Sponsors/Sponsor Upload/` and welcoming earlier meant linking to a folder that did not
+        // exist yet.
+        //
+        // 🔴 **§784.14 RETIRED THAT TREE** (operator 2026-08-03: *"That tree /Sponsors/Sponsor Upload
+        // is retired and shouldn't be pre-created at all … retire the old logic and delete the old
+        // folders"*), the folders were deleted in DEV and PROD, and the wall task no longer declares
+        // an upload subfolder — so nothing writes those rows any more. **The guard was waiting for
+        // an artifact of a retired mechanism, and could never clear.**
+        //
+        // ⚠️ WHAT IT COST, measured on a live sponsor (§816): Glueckkanja — Platinum, booth E-2 —
+        // was pulled every 15 minutes, task-seeded (10 tasks), given a coordinator and provisioned
+        // in Zoho, and its welcome was silently withheld. Nothing looked broken: the pull logged it,
+        // the reconcile ran, the job reported success. The companies that PASS this guard hold
+        // LEGACY rows from when the old method was live, which is exactly why the first sponsor
+        // onboarded after the retirement was the first to be blocked.
+        //
+        // 🔑 §784.14 listed three things hanging off the provisioning loop (folder creation, the
+        // edit links in task descriptions, the rows the watcher and deliverables read) — **this
+        // guard was not one of them.** [[ceh-two-switch-trap]]: the upload model changed and the half
+        // that DEPENDED on the old model was never told.
+        //
+        // 🔒 Logos and collateral now live in a FLAT structure (`Sponsors/Logo/Web`,
+        // `Sponsors/Logo/Print`, …), which needs no per-company folder — so there is nothing left
+        // for a welcome to wait for. If a future upload model ever needs preparing again, gate on
+        // THAT model's own readiness signal, never on a row a retired service used to write.
 
         var coordinators = await _recipients.ResolveAsync(eventId, sponsorCompanyId, ct);
         int sent = 0, skipped = 0;

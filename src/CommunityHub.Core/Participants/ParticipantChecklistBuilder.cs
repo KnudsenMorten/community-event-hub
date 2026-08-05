@@ -96,7 +96,7 @@ public sealed class ParticipantChecklistBuilder
                 ? today.DayNumber - due.Value.DayNumber
                 : (int?)null;
             return new ChecklistRow(
-                id, title, due, state, overdue, LinkForSourceKey(sourceKey), description);
+                id, title, due, state, overdue, LinkForTask(id, sourceKey), description);
         }
 
         var pending = all
@@ -118,10 +118,94 @@ public sealed class ParticipantChecklistBuilder
     }
 
     /// <summary>
+    /// 🔒 §708.4 — WHERE A TASK'S TITLE LINKS. <b>A task links to the TASK.</b>
+    /// </summary>
+    /// <remarks>
+    /// <para>🔴 <b>The bug this closes, third occurrence.</b> Operator 2026-07-30, with a screenshot
+    /// of PROD Home as a sponsor: <i>"tasks in HOME for sponsor (and probably other roles) take to
+    /// the wrong tasks … for example i see links to old company details booth member"</i>. §674 and
+    /// §679 were the same complaint about the same method — each time the fix was to add or move ONE
+    /// keyword, and each time the next task with an unlucky title broke again.</para>
+    ///
+    /// <para><b>Why keyword-guessing could never work here.</b> The <c>sponsor:</c> branch matched
+    /// substrings of the title slug, so <i>"Validate booth members have lead scan app + exhibitor
+    /// guide"</i> matched <c>member</c> and landed on the booth-MEMBERS section of a page with
+    /// nothing to do with a lead-scan app — the row he arrowed. <i>"Initial onboarding of sponsor"</i>
+    /// matched <c>onboard</c>, and <i>"Register booth members"</i> matched <c>member</c>: both landed
+    /// on <c>/Sponsor/CompanyDetails</c>, whose nav entry §707.44 already REMOVED and which §689.1 is
+    /// retiring. This is the same string-derived-join failure as §707.43 and §707.54a.</para>
+    ///
+    /// <para>🔑 <b>And the destination is now obsolete anyway.</b> Since §684/§688.12 a registry task
+    /// renders its own body, its own buttons, its embedded booth-member editor and its own upload
+    /// control ON ITS ROW. Sending its title somewhere else was right when the row was a bare
+    /// sentence; today the row IS the place the work is done, so anywhere else is strictly worse.</para>
+    ///
+    /// <para>The FORM-OWNED tasks below are unchanged: <c>hotel-form:</c>, <c>signal:</c>, the §173e
+    /// wizard-step rows and friends have no row of their own to land on, and their form IS the task.
+    /// Only the two families that own a rendered row moved.</para>
+    /// </remarks>
+    public static string? LinkForTask(int taskId, string? sourceKey)
+    {
+        if (string.IsNullOrWhiteSpace(sourceKey)) return null;
+
+        // 🔒 Anchored at the row, not the top of the list. A task page carries a dozen rows with the
+        // completed ones collapsed inside a <details>, so "/Sponsor/Tasks" alone still leaves the
+        // reader hunting — which is the weaker half of the same complaint (§674's fall-through).
+        // _TaskListPanel stamps the matching id and opens the row.
+        if (sourceKey.StartsWith("sponsor:", StringComparison.Ordinal))
+            return $"/Sponsor/Tasks{TaskAnchor(taskId)}";
+        if (sourceKey.StartsWith("speakerdl:", StringComparison.Ordinal))
+            return $"/Speaker/Tasks{TaskAnchor(taskId)}";
+
+        // 🔒 §708.10 — THE THIRD ROW-OWNING FAMILY. The generic roles' step tasks now render their
+        // form ON THEIR ROW on the shared /Tasks page, so the row is the complete destination for
+        // them too and the same rule applies: a task links to the TASK.
+        //
+        // These were never keyword GUESSES — each prefix mapped explicitly to /Forms/Wizard?step=…,
+        // so nobody landed on the wrong page. But they still sent the reader OUT of the task list to
+        // a wizard that reopens the whole journey, which is precisely what §708.2a decided
+        // Get Started is for and a direct edit is not.
+        if (IsEmbeddedStepKey(sourceKey))
+            return $"/Tasks{TaskAnchor(taskId)}";
+
+        return LinkForSourceKey(sourceKey);
+    }
+
+    /// <summary>The fragment identifying one task's row. ONE place, so the link and the row agree.</summary>
+    public static string TaskAnchor(int taskId) => $"#task-{taskId}";
+
+    /// <summary>
+    /// §708.10 — the step-task families whose form is EMBEDDED in their row on <c>/Tasks</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>🔒 <b>Membership is decided by the SourceKey PREFIX, an exact statement of what seeded
+    /// the row</b> — never by a substring of the title. That is the §708.4 rule, and these prefixes
+    /// are the same constants the seeders write.</para>
+    ///
+    /// <para>⚠️ <b>Party and Master Class are deliberately NOT here.</b> §707.57b keeps both on their
+    /// own surfaces, and §351-6/§365 point their tasks at specific wizard steps for reasons the
+    /// operator gave by name. Adding them would silently undo two of his decisions.</para>
+    /// </remarks>
+    private static bool IsEmbeddedStepKey(string sourceKey) =>
+        sourceKey.StartsWith("hotel-form:", StringComparison.Ordinal)
+        || sourceKey.StartsWith("dinner-form:", StringComparison.Ordinal)
+        || sourceKey.StartsWith("lunch-form:", StringComparison.Ordinal)
+        || sourceKey.StartsWith("swag-form:", StringComparison.Ordinal)
+        || sourceKey.StartsWith("signal:", StringComparison.Ordinal)
+        || sourceKey.StartsWith(WizardStepTaskKeys.ProfilePrefix, StringComparison.Ordinal)
+        || sourceKey.StartsWith(WizardStepTaskKeys.AcceptPrefix, StringComparison.Ordinal)
+        || sourceKey.StartsWith(WizardStepTaskKeys.AvailabilityPrefix, StringComparison.Ordinal);
+
+    /// <summary>
     /// Map a <see cref="ParticipantTask.SourceKey"/> to the page that completes it,
     /// so every surface deep-links a pending task to its form. Returns null when no
     /// specific form is known (UI falls back to the generic tasks list).
     /// </summary>
+    /// <remarks>
+    /// ⚠️ <b>Prefer <see cref="LinkForTask"/></b> — it has the task id, so the two row-owning
+    /// families (<c>sponsor:</c> / <c>speakerdl:</c>) land on their own row. This overload cannot,
+    /// and answers with the role's task PAGE for them rather than guessing a form from the title.
+    /// </remarks>
     public static string? LinkForSourceKey(string? sourceKey)
     {
         if (string.IsNullOrWhiteSpace(sourceKey)) return null;
@@ -161,54 +245,22 @@ public sealed class ParticipantChecklistBuilder
         if (sourceKey.StartsWith(WizardStepTaskKeys.ProfilePrefix,        StringComparison.Ordinal)) return "/Forms/Wizard?step=profile";
         if (sourceKey.StartsWith(WizardStepTaskKeys.AcceptPrefix,         StringComparison.Ordinal)) return "/Forms/Wizard?step=accept";
         if (sourceKey.StartsWith(WizardStepTaskKeys.AvailabilityPrefix,   StringComparison.Ordinal)) return "/Forms/Wizard?step=availability";
-        if (sourceKey.StartsWith("speakerdl:",                    StringComparison.Ordinal))
-        {
-            // A speaker-deadline task mirrors a logistics form: deep-link to the
-            // form that completes it (matched by the form keyword the slugger
-            // embeds, same as FormTaskReconciler). Upload-deck deadlines carry no
-            // form, so they stay on the generic tasks list.
-            if (sourceKey.Contains("hotel",  StringComparison.Ordinal)) return "/Forms/Wizard?step=hotel";
-            if (sourceKey.Contains("dinner", StringComparison.Ordinal)) return "/Forms/Wizard?step=dinner";
-            if (sourceKey.Contains("lunch",  StringComparison.Ordinal)) return "/Forms/Wizard?step=lunch";
-            if (sourceKey.Contains("swag",   StringComparison.Ordinal)) return "/Forms/Wizard?step=swag";
-            // §679 (operator 2026-07-29: "clicking goes to wrong place ... found for speaker,
-            // pending tasks under HOME"). "travel" was missing from this keyword list, so the
-            // travel-reimbursement DEADLINE task fell through to the generic /Tasks list — even
-            // though the method already maps the `travel:` prefix to the form. Same defect as §674
-            // on the sponsor side: the fall-through, not the mapping, was wrong.
-            if (sourceKey.Contains("travel", StringComparison.Ordinal)) return "/Forms/Wizard?step=travel";
-            // §314: the Help-Promote deadline deep-links to the Help Promote page.
-            if (sourceKey.Contains("promote", StringComparison.Ordinal)) return "/Speaker/Graphics";
-            // §322i: the preview/final upload deadlines deep-link to My Sessions — the
-            // upload lives on each session card there (the standalone page is retired).
-            if (sourceKey.Contains("presentation", StringComparison.Ordinal)) return "/Speaker";
-            return "/Tasks";
-        }
-        if (sourceKey.StartsWith("sponsor:", StringComparison.Ordinal))
-        {
-            // §297/§298: deep-link to the RIGHT Company Details section (#anchor) so the task lands
-            // on its section, not the top of the page. Matched by the keyword the task slug embeds.
-            const string cd = "/Sponsor/CompanyDetails";
-            if (sourceKey.Contains("logo",        StringComparison.OrdinalIgnoreCase)) return cd + "#logos";
-            if (sourceKey.Contains("wall",        StringComparison.OrdinalIgnoreCase)) return cd + "#exhibitor-wall";
-            if (sourceKey.Contains("material",    StringComparison.OrdinalIgnoreCase)) return cd + "#booth-materials";
-            if (sourceKey.Contains("member",      StringComparison.OrdinalIgnoreCase)) return cd + "#booth-members";
-            if (sourceKey.Contains("check",       StringComparison.OrdinalIgnoreCase)) return cd + "#booth-checkin";
-            if (sourceKey.Contains("coordinator", StringComparison.OrdinalIgnoreCase)) return cd + "#coordinator";
-            if (sourceKey.Contains("contact",     StringComparison.OrdinalIgnoreCase)) return cd + "#contacts";
-            if (sourceKey.Contains("onboard",     StringComparison.OrdinalIgnoreCase)) return cd + "#company";
-
-            // §674 (operator 2026-07-29: "when i click a pending task, it does NOT take me to the
-            // tasks, but company details"). The fallback used to be Company Details itself, so EVERY
-            // sponsor task whose slug matches none of the keywords above — TV rental, attendee-bag
-            // swag, the app game, pre-event shipment, download leads — silently landed on a page
-            // with nothing to do with it. Six of his eight pending rows were in that bucket.
-            //
-            // The right fallback is the sponsor TASKS page, mirroring what the speakerdl: branch
-            // already does ("/Tasks"): a task we cannot deep-link belongs on the task list, not on
-            // an unrelated form. A keyword match is still a deep link; only the fall-through moved.
-            return "/Sponsor/Tasks";
-        }
+        // 🔒 §708.4 — THE TWO ROW-OWNING FAMILIES. No keyword guessing, by design.
+        //
+        // What used to live here was a ladder of `sourceKey.Contains("…")` tests over the task's
+        // TITLE SLUG, mapping each guess to a form page or a `/Sponsor/CompanyDetails#section`
+        // anchor. It produced a wrong destination three separate times (§674, §679, §708.4) because
+        // a substring of a title is not a statement about what a task IS: "Validate booth members
+        // have lead scan app + exhibitor guide" contains "member", so it landed on the booth-member
+        // editor, and "Initial onboarding of sponsor" contains "onboard", so it landed on a page
+        // §707.44 had already removed from the nav.
+        //
+        // Both families now render their own body, buttons, embedded editors and upload control on
+        // their own row (§684 / §688.12), so the row is the correct and complete destination. The
+        // caller that has the task id (LinkForTask, above) anchors to the exact row; without one we
+        // can still name the right PAGE, which is the part the guessing got wrong.
+        if (sourceKey.StartsWith("speakerdl:", StringComparison.Ordinal)) return "/Speaker/Tasks";
+        if (sourceKey.StartsWith("sponsor:",   StringComparison.Ordinal)) return "/Sponsor/Tasks";
         return null;
     }
 }

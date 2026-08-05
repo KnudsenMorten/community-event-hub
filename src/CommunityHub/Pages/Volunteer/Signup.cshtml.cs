@@ -48,6 +48,7 @@ public class SignupModel : PageModel
         EventConfigOptions cfgOptions,
         SharePointUploadClient sp,
         IEmailSender email,
+        CommunityHub.Core.Integrations.DocLibrary.IDocLibraryPathResolver paths,
         ILogger<SignupModel> log)
     {
         _db = db;
@@ -56,8 +57,11 @@ public class SignupModel : PageModel
         _cfgOptions = cfgOptions;
         _sp = sp;
         _email = email;
+        _paths = paths;
         _log = log;
     }
+
+    private readonly CommunityHub.Core.Integrations.DocLibrary.IDocLibraryPathResolver _paths;
 
     // --- Step 1: about you --------------------------------------------------
     [BindProperty] public string FullName    { get; set; } = string.Empty;
@@ -233,7 +237,9 @@ public class SignupModel : PageModel
         await SaveDayAvailabilityAsync(active.Id, applicant.Id, validDays, ct);
 
         // --- Photo upload (fail-soft) --------------------------------------
-        string? photoUrl = await TryUploadPhotoAsync(fullName, ct);
+        // §769.9 — keyed on the participant id now, not the name (operator: "volunteer pictures
+        // switch to id to make consistent"). The row is saved above, so the id exists here.
+        string? photoUrl = await TryUploadPhotoAsync(applicant.Id, ct);
 
         // --- Volunteer metadata (LinkedIn / photo / agreement) -------------
         await SaveVolunteerMetaAsync(active.Id, applicant.Id, linkedIn, photoUrl, ct);
@@ -311,14 +317,18 @@ public class SignupModel : PageModel
         await _db.SaveChangesAsync(ct);
     }
 
-    private async Task<string?> TryUploadPhotoAsync(string fullName, CancellationToken ct)
+    private async Task<string?> TryUploadPhotoAsync(int participantId, CancellationToken ct)
     {
         if (Photo is null || Photo.Length == 0) return null;
         try
         {
             var sp = _cfg.Load(_cfgOptions.EventConfigPath).SharePoint;
-            if (sp is null || string.IsNullOrWhiteSpace(sp.SiteUrl)
-                || string.IsNullOrWhiteSpace(sp.VolunteerPhotoFolderPath) || !_sp.IsConfigured)
+            // §768.14 — the folder is a registry key now (VolunteerPhotos), resolved under the one
+            // configured root rather than carried whole in the edition config.
+            if (sp is null || string.IsNullOrWhiteSpace(sp.SiteUrl) || !_sp.IsConfigured
+                || !_paths.TryResolve(
+                       CommunityHub.Core.Integrations.DocLibrary.DocLibraryPaths.VolunteerPhotos,
+                       out var photoFolder))
             {
                 _log.LogInformation("Volunteer photo upload skipped — SharePoint not configured.");
                 return null;
@@ -327,12 +337,16 @@ public class SignupModel : PageModel
             using var ms = new MemoryStream();
             await Photo.CopyToAsync(ms, ct);
 
-            var ext = Path.GetExtension(Photo.FileName);
-            if (string.IsNullOrWhiteSpace(ext)) ext = ".jpg";
-            var name = $"{SanitizeNameComponent(fullName)}{ext}";
+            // §769.9 — volunteer-photo-{id}.{ext}, composed by the ONE owner of this convention.
+            // It was {Full Name}.ext and lived here as a private helper — which was fine until a
+            // READER appeared that DELETES: a name cannot identify a person, so two volunteers with
+            // the same name shared one file and the departing one's cleanup would have taken the
+            // active one's photo.
+            var name = CommunityHub.Core.Integrations.Graphics.VolunteerPhotoFileName.Build(
+                participantId, Path.GetExtension(Photo.FileName));
 
             var (_, webUrl, _) = await _sp.UploadFileAsync(
-                sp.SiteUrl, sp.DriveName, sp.VolunteerPhotoFolderPath, name,
+                sp.SiteUrl, sp.DriveName, photoFolder, name,
                 ms.ToArray(),
                 string.IsNullOrWhiteSpace(Photo.ContentType) ? "application/octet-stream" : Photo.ContentType,
                 ct);
@@ -341,7 +355,9 @@ public class SignupModel : PageModel
         catch (Exception ex)
         {
             // Never fail the application because the photo couldn't be stored.
-            _log.LogError(ex, "Volunteer photo upload failed for {Name}; application kept.", fullName);
+            _log.LogError(ex,
+                "Volunteer photo upload failed for participant {ParticipantId}; application kept.",
+                participantId);
             return null;
         }
     }
@@ -398,13 +414,9 @@ public class SignupModel : PageModel
         _ => level.ToString(),
     };
 
-    private static string SanitizeNameComponent(string? name)
-    {
-        if (string.IsNullOrWhiteSpace(name)) return "Volunteer";
-        var cleaned = new string(name.Where(c => "\"*:<>?/\\|".IndexOf(c) < 0).ToArray());
-        cleaned = string.Join(" ", cleaned.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
-        return string.IsNullOrWhiteSpace(cleaned) ? "Volunteer" : cleaned;
-    }
+    // §6.9 — the volunteer photo naming rule moved to VolunteerPhotoFileName and this copy is
+    // DELETED, not left behind. A second implementation is what lets writer and reader drift, and
+    // the reader here deletes files.
 
     private async Task<IReadOnlyList<(DateOnly Day, string Label)>> EventDaysAsync(int eventId, CancellationToken ct)
     {

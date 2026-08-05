@@ -25,9 +25,9 @@ public sealed class AuditPurgeJob
         _log = log;
     }
 
-    /// <summary>Daily at 04:00 UTC (after the 03:30 welcome-grant prune).</summary>
+    /// <summary>§878 — base tick only; the cadence is the operator's interval on /Organizer/Jobs.</summary>
     [Function("AuditPurgeJob")]
-    public async Task Run([TimerTrigger("0 0 4 * * *")] TimerInfo timer, CancellationToken ct)
+    public async Task Run([TimerTrigger("0 */5 * * * *")] TimerInfo timer, CancellationToken ct)
     {
         var cutoff = _clock.GetUtcNow().AddMonths(-RetentionMonths);
         var removed = await _audit.PurgeOlderThanAsync(cutoff, ct);

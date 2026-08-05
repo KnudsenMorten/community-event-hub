@@ -1,0 +1,76 @@
+@page
+@model CommunityHub.Pages.Organizer.SoMeCalendarModel
+@{
+    ViewData["Title"] = "Post calendar";
+}
+
+<div class="card">
+    <h1>Post calendar</h1>
+
+    @if (Model.AccessDenied)
+    {
+        <p class="error">@Localizer["Common.OrganizersOnly"]</p>
+    }
+    else if (Model.Total == 0)
+    {
+        <p class="muted">
+            Nothing scheduled yet. Once the setup is complete the engine plans the campaign itself —
+            see <a asp-page="/Organizer/SoMeSetup">Set up social media</a>.
+        </p>
+    }
+    else
+    {
+        <p class="muted">
+            @Model.Total posts across @Model.Days.Count days ·
+            <strong>@Model.Held</strong> held for approval ·
+            <strong>@Model.Approved</strong> approved ·
+            <strong>@Model.Published</strong> published
+        </p>
+        <p class="muted">
+            Approve or edit any of these in the <a asp-page="/Organizer/SoMeQueue">queue</a>.
+        </p>
+    }
+</div>
+
+@if (!Model.AccessDenied)
+{
+    @foreach (var day in Model.Days)
+    {
+        <div class="card">
+            @* §844.5 — Danish date order (day first), not the US month-first form. *@
+            <h2>@day.Key.ToString("dddd dd-MM-yyyy")</h2>
+
+            @foreach (var post in day.OrderBy(p => p.ScheduledAtUtc))
+            {
+                <div style="border-left:3px solid #ddd;padding:8px 0 8px 12px;margin-bottom:14px;">
+                    <div style="display:flex;gap:8px;align-items:baseline;flex-wrap:wrap;">
+                        <strong>@CommunityHub.Core.Integrations.SoMeDisplayTime.Time(post.ScheduledAtUtc)</strong>
+                        <span class="set-tag opt">@post.KindLabel</span>
+                        @if (post.IsPublished)
+                        {
+                            <span class="set-tag on">published</span>
+                        }
+                        else if (post.IsApproved)
+                        {
+                            <span class="set-tag on">approved</span>
+                        }
+                        else
+                        {
+                            @* 🔒 §824.21a — held is the safety model, so the calendar states it
+                               plainly rather than letting a planned post look scheduled-to-send. *@
+                            <span class="set-tag off">held — not approved</span>
+                        }
+                    </div>
+
+                    @* "and how", not just when: the actual words, and the graphic that goes with them. *@
+                    <div style="margin-top:6px;white-space:pre-wrap;">@post.PreviewText</div>
+
+                    @if (!string.IsNullOrWhiteSpace(post.ImageRef))
+                    {
+                        <div class="muted" style="margin-top:4px;">🖼 @post.ImageRef</div>
+                    }
+                </div>
+            }
+        </div>
+    }
+}

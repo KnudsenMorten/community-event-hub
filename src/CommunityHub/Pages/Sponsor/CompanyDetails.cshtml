@@ -267,14 +267,14 @@
     </div>
 }
 
-@if (Model.CanUploadSoMe || Model.CanUploadPrint || Model.CanUploadZoho || Model.CanUploadWall)
+@if (Model.CanUploadSoMe || Model.CanUploadPrint || Model.CanUploadWall)
 {
     <div class="card">
         @{ var wallLocked = DateTimeOffset.UtcNow > new DateTimeOffset(2027, 1, 10, 23, 59, 59, TimeSpan.Zero); }
         <h2 id="logos">Logos &amp; artwork</h2>
         <p style="color:#4b5563;margin-top:0;font-size:13.5px;">
-            Each upload is versioned automatically (<code>_v1</code>, <code>_v2</code>, …): when you upload a new
-            file it <strong>automatically becomes the newest version</strong> — the latest file is always the one we use.
+            Each upload is versioned automatically: when you upload a new file it
+            <strong>automatically becomes the newest version</strong> — the latest file is always the one we use.
             The organizers are notified on every upload.
         </p>
         <p style="color:#8a5a00;background:#fff8e6;border:1px solid #f0dcb8;border-radius:6px;padding:9px 12px;font-size:13px;">
@@ -286,7 +286,7 @@
         {
             <form method="post" asp-page-handler="Upload" asp-route-kind="some" enctype="multipart/form-data" data-direct-upload="some"
                   style="margin:0 0 18px;padding-bottom:16px;border-bottom:1px solid #eee;">
-                <label style="display:block;font-weight:600;margin-bottom:2px;">Upload Logo for Social Media branding</label>
+                <label style="display:block;font-weight:600;margin-bottom:2px;">Upload Logo for Web</label>
                 <p style="font-size:12px;color:#6b7280;margin:0 0 6px;">PNG, good quality, max 5 MB.</p>
                 <input type="file" name="UploadFile" accept=".png,image/png" required
                        style="display:block;margin-bottom:8px;" />
@@ -308,23 +308,13 @@
             </form>
         }
 
-        @if (Model.CanUploadZoho)
-        {
-            <form method="post" asp-page-handler="Upload" asp-route-kind="zoho" enctype="multipart/form-data" data-direct-upload="zoho"
-                  style="margin:0 0 18px;@(Model.CanUploadWall ? "padding-bottom:16px;border-bottom:1px solid #eee;" : "")">
-                <label style="display:block;font-weight:600;margin-bottom:2px;">Upload Logo for Event System (Zoho) lead system</label>
-                <p style="font-size:12px;color:#6b7280;margin:0 0 6px;">PNG, optimal dimension 200×160px, max 5 MB.</p>
-                <input type="file" name="UploadFile" accept=".png,image/png" required
-                       style="display:block;margin-bottom:8px;" />
-                <button type="submit">Upload</button>
-                <partial name="_UploadedFile" model='Model.LatestUploads.GetValueOrDefault("zoho")' />
-            </form>
-        }
-
+        @* §6.7 / §768.14 — the third control, "Upload Logo for Event System (Zoho) lead system",
+           is gone. One Web PNG now serves both the promotion graphics and the external event
+           system, so a sponsor uploads their logo once. *@
     </div>
 
     @* §286: the exhibitor WALL is a LATER task, NOT onboarding — split into its own section so the
-       Get-Started logo step (which lands at #logos) focuses only on the 3 onboarding logos. *@
+       Get-Started logo step (which lands at #logos) focuses only on the onboarding logos. *@
     @if (Model.CanUploadWall)
     {
         <div class="card">

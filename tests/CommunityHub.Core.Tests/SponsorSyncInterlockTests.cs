@@ -71,12 +71,37 @@ public class SponsorSyncInterlockTests
     }
 
     /// <summary>
-    /// §542: <i>"it should run every 10 min"</i>. That cadence was applied to the legacy job in §510
-    /// and achieved nothing because the job was off (§637); it now has to hold on the job that runs.
+    /// The cadence the operator asked for — <b>hourly</b> since §825.
     /// </summary>
+    /// <remarks>
+    /// <para>The history is kept because this number has now been set twice by explicit instruction,
+    /// and a bare value invites someone to "restore" the earlier one:</para>
+    /// <list type="bullet">
+    ///   <item>§542: <i>"it should run every 10 min"</i> — applied to the LEGACY job in §510, which
+    ///   achieved nothing because that job was off (§637), so it had to be moved onto the job that
+    ///   actually runs.</item>
+    ///   <item><b>§825 (2026-08-04) SUPERSEDES it:</b> <i>"the queue functionality and notification
+    ///   mail for pending speakers must run every 1 hr"</i>. At ten minutes, this job and
+    ///   <c>SessionizeImportJob</c> together delivered five near-identical <c>[CEH→Zoho]</c> notices
+    ///   in half an hour — the pattern that trains someone to stop reading the Action queue.</item>
+    /// </list>
+    /// ⚠️ 10 is not a stale value waiting to be restored; it is a decision he replaced.
+    /// </remarks>
     [Fact]
     public void The_reconcile_runs_at_the_cadence_he_actually_asked_for()
     {
+        // 🔴 §878.5 — 60 → 10 (operator 2026-08-05: *"default for all are every 10 min"*, then a
+        // list of the seven jobs that stay at 1440; this is not among them).
+        //
+        // ⚠️ THIS REVERSES §825, WHICH HE ASKED FOR ONE DAY EARLIER, and the reason it existed is
+        // recorded above: at ten minutes this job and SessionizeImportJob together delivered five
+        // near-identical [CEH→Zoho] notices in half an hour. That risk is REAL and returns with
+        // this value — it was raised with him rather than silently re-applied, and the frequency is
+        // now a box on /Organizer/Jobs, so restoring 60 is one click and needs no deploy.
+        //
+        // 🔒 The note above ("10 is not a stale value waiting to be restored") described §825's
+        // decision and is now itself superseded. Keep BOTH facts visible: the next person needs to
+        // know the spam happened, and that he chose this anyway with the dial in reach.
         var job = JobCatalog.Find("SponsorZohoReconcileJob")!;
 
         Assert.True(job.IsIntervalDriven);

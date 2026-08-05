@@ -90,7 +90,14 @@ public sealed class EngineErrorAlertMiddleware : IFunctionsWorkerMiddleware
             // treating it as "did work" would quietly reset a streak the job is genuinely still in.
             var activity = context.InstanceServices.GetService<JobActivityReporter>();
             if (gate is not null && activity is { Reported: true })
-                await gate.OnActivityAsync(fn, activity.InactiveReason, ct);
+            {
+                // §707.42 — a gate turning the job away is a CHOICE, not news. Only DATA STARVATION
+                // (every gate passed, nothing arrived) is worth alerting about; see
+                // JobActivityReporter.InactiveIsDataStarvation for why this is a semantic split
+                // rather than a threshold tweak.
+                await gate.OnActivityAsync(
+                    fn, activity.InactiveReason, activity.InactiveIsDataStarvation, ct);
+            }
         }
         catch { /* success bookkeeping must never fail a successful job */ }
     }

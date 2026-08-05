@@ -28,11 +28,11 @@ namespace CommunityHub.Core.Integrations.Sessions;
 /// dead code after §59 and has been deleted; <c>FeatureSetting.ActiveFromForBroadRings</c>
 /// is retired.)</i>
 ///
-/// <b>SOURCE AVAILABILITY.</b> The Backstage agenda API needs the
-/// <c>ZohoBackstage.agenda.READ</c> scope. Until granted (and
-/// <see cref="ZohoOptions.AgendaReadEnabled"/> set) the pull returns IsAvailable=false and
-/// this engine NO-OPS with a clear result — it never treats an empty pull as "everything
-/// changed".
+/// <b>SOURCE AVAILABILITY.</b> A FAILED agenda pull returns IsAvailable=false and this engine
+/// NO-OPS with a clear result — it never treats an empty pull as "everything changed".
+/// 🗑 §754.5: it is no longer gated on a <c>ZohoBackstage.agenda.READ</c> config flag. That flag
+/// waited for a permission the Backstage credentials have always had, so it could only ever block.
+/// It is deleted — do not reintroduce it, and do not re-add a comment claiming the scope is missing.
 /// </summary>
 public sealed class SessionChangeDetectionService
 {

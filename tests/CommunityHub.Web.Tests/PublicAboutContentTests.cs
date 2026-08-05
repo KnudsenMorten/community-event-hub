@@ -80,13 +80,19 @@ public sealed class PublicAboutContentTests
         var pub = ContentMarkdownRenderer.StripInternalOnly(md);
 
         // The chapter heading and a representative sentence from inside it must be gone.
-        Assert.DoesNotContain("## 5. Security", pub, StringComparison.Ordinal);
+        // §707.48 — every chapter shifted by one when "2. CEH by the numbers" was inserted, so
+        // Security is now 6 and the survivors are 7 and 9. These assertions name the NUMBER on
+        // purpose: they are what proves the internal-only markers still wrap the RIGHT chapter after
+        // a renumber, which is precisely when a marker slips onto the wrong section and quietly
+        // publishes it.
+        Assert.DoesNotContain("## 6. Security", pub, StringComparison.Ordinal);
         Assert.DoesNotContain("Secrets and workload identity", pub, StringComparison.Ordinal);
 
         // …while the parts meant for the public survive.
         Assert.Contains("## 1. What is CEH?", pub, StringComparison.Ordinal);
-        Assert.Contains("## 6. How it is built and released", pub, StringComparison.Ordinal);
-        Assert.Contains("## 8. Who built it", pub, StringComparison.Ordinal);
+        Assert.Contains("## 2. CEH by the numbers", pub, StringComparison.Ordinal);
+        Assert.Contains("## 7. How it is built and released", pub, StringComparison.Ordinal);
+        Assert.Contains("## 9. Who built it", pub, StringComparison.Ordinal);
     }
 
     /// <summary>Walk up from the test binaries to the repo's config/content folder.</summary>

@@ -6,8 +6,9 @@ namespace CommunityHub.Core.Integrations.Sessions;
 /// Maps Zoho Backstage v3 JSON (halls + sessions) into the hub's neutral
 /// <see cref="SessionizeSession"/> shape so the existing
 /// <c>SessionImportService.ImportSessionsAsync</c> consumes Backstage exactly like
-/// Sessionize. Pure + static = unit-testable offline (the live fetch is gated on
-/// the <c>ZohoBackstage.agenda.READ</c> scope, REQUIREMENTS §6).
+/// Sessionize. Pure + static = unit-testable offline. (🗑 §754.5: this used to say the live fetch
+/// was gated on a <c>ZohoBackstage.agenda.READ</c> scope. It is not — the Backstage credentials
+/// carry every permission CEH needs. What is missing is the IMPORT wiring, not a permission.)
 ///
 /// Backstage delivers sessions <b>per agenda day</b> and rooms as <b>halls</b>;
 /// each session references its hall by id, resolved here to a room NAME via the

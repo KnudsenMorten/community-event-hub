@@ -100,7 +100,36 @@ public sealed class LiveLinkedInPostPublisher : ILinkedInPostPublisher
         // content.media. An upload failure fails the publish honestly (never a
         // text-only post when an image was requested).
         string? imageUrn = null;
-        if (post.ImageBytes is { Length: > 0 })
+        string? videoUrn = null;
+
+        // §844 — VIDEO WINS when the post carries one (§844.2: "we prefer videos more than
+        // graphics"). The graphic fallback is decided UPSTREAM by whoever builds the record; by the
+        // time bytes arrive here the choice has been made.
+        if (post.VideoBytes is { Length: > 0 })
+        {
+            try
+            {
+                videoUrn = await UploadVideoAsync(token, orgUrn, post.VideoBytes, ct);
+            }
+            catch (VideoStillProcessingException ex)
+            {
+                // 🔒 §844.2 — WAIT; DO NOT FALL BACK. The video exists and he prefers it, so
+                // publishing the graphic instead would quietly ship the asset he chose against.
+                // Returning not-published leaves the post QUEUED and the dispatcher retries it.
+                _log.LogInformation(
+                    "LinkedIn video {Urn} is still processing — the post stays queued.", ex.VideoUrn);
+                return new LinkedInPublishResult(
+                    false, null,
+                    "The video is still being processed by LinkedIn. The post stays queued and will "
+                    + "publish on a later run — it has NOT been downgraded to the graphic.");
+            }
+            catch (Exception ex)
+            {
+                _log.LogWarning(ex, "LinkedIn video upload failed.");
+                return new LinkedInPublishResult(false, null, $"LinkedIn video upload failed: {ex.Message}");
+            }
+        }
+        else if (post.ImageBytes is { Length: > 0 })
         {
             try
             {
@@ -133,7 +162,20 @@ public sealed class LiveLinkedInPostPublisher : ILinkedInPostPublisher
             ["lifecycleState"] = "PUBLISHED",
             ["isReshareDisabledByAuthor"] = false,
         };
-        if (imageUrn is not null)
+        if (videoUrn is not null)
+        {
+            // §844 — a video attaches through the SAME content.media shape as an image; only the
+            // urn differs (urn:li:video:… rather than urn:li:image:…).
+            payload["content"] = new Dictionary<string, object?>
+            {
+                ["media"] = new Dictionary<string, object?>
+                {
+                    ["id"] = videoUrn,
+                    ["title"] = post.ImageAltText ?? "Experts Live Denmark",
+                },
+            };
+        }
+        else if (imageUrn is not null)
         {
             payload["content"] = new Dictionary<string, object?>
             {
@@ -216,6 +258,163 @@ public sealed class LiveLinkedInPostPublisher : ILinkedInPostPublisher
             throw new InvalidOperationException($"image binary PUT returned {(int)putResp.StatusCode}.");
 
         return imageUrn;
+    }
+
+    /// <summary>
+    /// §844 — LinkedIn's MULTIPART native video upload, and the processing wait that follows it.
+    /// </summary>
+    /// <remarks>
+    /// <para>Four steps, and it is <b>not</b> the image flow with a different URL:</para>
+    /// <list type="number">
+    ///   <item><c>POST /rest/videos?action=initializeUpload</c> with the file SIZE — LinkedIn
+    ///         replies with an upload URL <b>per part</b>, a video urn and an upload token.</item>
+    ///   <item>Each part is PUT separately, and each response's <b>ETag must be kept</b>.</item>
+    ///   <item><c>POST /rest/videos?action=finalizeUpload</c> with those ETags in order.</item>
+    ///   <item>🔴 <b>The video is then PROCESSED ASYNCHRONOUSLY.</b> Attaching it before it is
+    ///         AVAILABLE produces a post whose video never plays, so its status is checked and
+    ///         <see cref="VideoStillProcessingException"/> is thrown while it is not ready.</item>
+    /// </list>
+    ///
+    /// <para>⚠️ His real samples are 19–80 MB (§844.7), so multipart is the normal path here, not an
+    /// edge case — a single PUT would not carry them.</para>
+    /// </remarks>
+    private async Task<string> UploadVideoAsync(
+        string token, string ownerUrn, byte[] bytes, CancellationToken ct)
+    {
+        // --- 1. initialize -------------------------------------------------------------------
+        using var initReq = new HttpRequestMessage(
+            HttpMethod.Post, $"{_options.ApiBaseUrl.TrimEnd('/')}/rest/videos?action=initializeUpload");
+        initReq.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        initReq.Headers.TryAddWithoutValidation("LinkedIn-Version", _options.ApiVersion);
+        initReq.Headers.TryAddWithoutValidation("X-Restli-Protocol-Version", "2.0.0");
+        initReq.Content = new StringContent(
+            JsonSerializer.Serialize(new
+            {
+                initializeUploadRequest = new
+                {
+                    owner = ownerUrn,
+                    fileSizeBytes = bytes.LongLength,
+                    uploadCaptions = false,
+                    uploadThumbnail = false,
+                },
+            }),
+            new UTF8Encoding(false), "application/json");
+
+        using var initResp = await _http.SendAsync(initReq, ct);
+        var initBody = await initResp.Content.ReadAsStringAsync(ct);
+        if (!initResp.IsSuccessStatusCode)
+        {
+            throw new InvalidOperationException(
+                $"video initializeUpload returned {(int)initResp.StatusCode}: {Trim(initBody, 300)}");
+        }
+
+        using var doc = JsonDocument.Parse(initBody);
+        var value = doc.RootElement.GetProperty("value");
+        var videoUrn = value.GetProperty("video").GetString()
+            ?? throw new InvalidOperationException("video initializeUpload returned no video urn.");
+        var uploadToken = value.TryGetProperty("uploadToken", out var ut) ? ut.GetString() ?? string.Empty : string.Empty;
+
+        // --- 2. upload each part, keeping the ETags IN ORDER ----------------------------------
+        var etags = new List<string>();
+        foreach (var instruction in value.GetProperty("uploadInstructions").EnumerateArray())
+        {
+            var url = instruction.GetProperty("uploadUrl").GetString()!;
+            var first = instruction.GetProperty("firstByte").GetInt64();
+            var last = instruction.GetProperty("lastByte").GetInt64();
+            var length = (int)(last - first + 1);
+
+            using var partReq = new HttpRequestMessage(HttpMethod.Put, url)
+            {
+                Content = new ByteArrayContent(bytes, (int)first, length),
+            };
+            partReq.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            partReq.Content.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
+
+            using var partResp = await _http.SendAsync(partReq, ct);
+            if (!partResp.IsSuccessStatusCode)
+            {
+                throw new InvalidOperationException(
+                    $"video part {first}-{last} PUT returned {(int)partResp.StatusCode}.");
+            }
+
+            // 🔒 The ETag is what finalize verifies each part by. A missing one fails the upload
+            // here rather than producing a corrupt video LinkedIn would reject later, opaquely.
+            var etag = partResp.Headers.ETag?.Tag
+                       ?? (partResp.Headers.TryGetValues("etag", out var v) ? v.FirstOrDefault() : null)
+                       ?? throw new InvalidOperationException(
+                           $"video part {first}-{last} returned no ETag; cannot finalize.");
+
+            etags.Add(etag.Trim('"'));
+        }
+
+        // --- 3. finalize ---------------------------------------------------------------------
+        using var finReq = new HttpRequestMessage(
+            HttpMethod.Post, $"{_options.ApiBaseUrl.TrimEnd('/')}/rest/videos?action=finalizeUpload");
+        finReq.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        finReq.Headers.TryAddWithoutValidation("LinkedIn-Version", _options.ApiVersion);
+        finReq.Headers.TryAddWithoutValidation("X-Restli-Protocol-Version", "2.0.0");
+        finReq.Content = new StringContent(
+            JsonSerializer.Serialize(new
+            {
+                finalizeUploadRequest = new
+                {
+                    video = videoUrn,
+                    uploadToken,
+                    uploadedPartIds = etags,
+                },
+            }),
+            new UTF8Encoding(false), "application/json");
+
+        using var finResp = await _http.SendAsync(finReq, ct);
+        if (!finResp.IsSuccessStatusCode)
+        {
+            var finBody = await finResp.Content.ReadAsStringAsync(ct);
+            throw new InvalidOperationException(
+                $"video finalizeUpload returned {(int)finResp.StatusCode}: {Trim(finBody, 300)}");
+        }
+
+        // --- 4. is it actually ready? ---------------------------------------------------------
+        if (!await IsVideoAvailableAsync(token, videoUrn, ct))
+        {
+            throw new VideoStillProcessingException(videoUrn);
+        }
+
+        return videoUrn;
+    }
+
+    /// <summary>
+    /// §844 — whether an uploaded video has finished processing and can be attached to a post.
+    /// </summary>
+    /// <remarks>
+    /// ⚠️ Treated as NOT-READY on any doubt (an unreadable status, an error response): holding a
+    /// post for one more tick costs a few minutes, whereas publishing a video that never plays is
+    /// public and permanent.
+    /// </remarks>
+    private async Task<bool> IsVideoAvailableAsync(string token, string videoUrn, CancellationToken ct)
+    {
+        try
+        {
+            using var req = new HttpRequestMessage(
+                HttpMethod.Get,
+                $"{_options.ApiBaseUrl.TrimEnd('/')}/rest/videos/{Uri.EscapeDataString(videoUrn)}");
+            req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            req.Headers.TryAddWithoutValidation("LinkedIn-Version", _options.ApiVersion);
+            req.Headers.TryAddWithoutValidation("X-Restli-Protocol-Version", "2.0.0");
+
+            using var resp = await _http.SendAsync(req, ct);
+            if (!resp.IsSuccessStatusCode) return false;
+
+            var body = await resp.Content.ReadAsStringAsync(ct);
+            using var doc = JsonDocument.Parse(body);
+
+            var status = doc.RootElement.TryGetProperty("status", out var s) ? s.GetString() : null;
+            return string.Equals(status, "AVAILABLE", StringComparison.OrdinalIgnoreCase);
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex, "Could not read LinkedIn video status for {Urn}; treating as not ready.", videoUrn);
+            return false;
+        }
     }
 
     private async Task<string> GetAccessTokenAsync(CancellationToken ct)

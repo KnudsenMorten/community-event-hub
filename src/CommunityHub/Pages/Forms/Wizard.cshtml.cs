@@ -39,6 +39,8 @@ public class WizardModel : PageModel
     private readonly Core.Reminders.PartyRsvpService? _partyRsvp;
     private readonly Core.Email.CalendarInviteEmailService? _calendarInvite;
     private readonly ILogger<WizardModel>? _log;
+    private readonly Core.Audit.IAuditTrail? _audit;   // §728
+    private readonly Core.Reminders.GetStartedCompletionNotifier? _completionNotice;   // §720
     private readonly Dictionary<string, IWizardStepHandler> _handlers;
 
     public WizardModel(
@@ -56,8 +58,14 @@ public class WizardModel : PageModel
         // §326ak (operator 2026-07-25 BUG: "get started is empty" as a 2-day attendee):
         // attendees DO have a wizard (§207: Master Class + Party) — this host just never
         // asked for it. Optional + last so existing unit tests keep compiling.
-        AttendeeWizardService? attendee = null)
+        AttendeeWizardService? attendee = null,
+        // §728 — optional + last, so every existing unit test that constructs this page model keeps
+        // compiling and simply records nothing.
+        Core.Audit.IAuditTrail? audit = null,
+        // §720 — the "someone finished Get Started" notice. Optional for the same reason.
+        Core.Reminders.GetStartedCompletionNotifier? completionNotice = null)
     {
+        _completionNotice = completionNotice;
         _participant = participant;
         _speaker = speaker;
         _role = role;
@@ -66,6 +74,7 @@ public class WizardModel : PageModel
         _partyRsvp = partyRsvp;
         _calendarInvite = calendarInvite;
         _log = log;
+        _audit = audit;
 
         // Key every discovered handler by its stable Key. In DEBUG a duplicate key is a
         // wiring bug (two handlers claim the same step) — fail loudly; in release last wins.
@@ -154,6 +163,22 @@ public class WizardModel : PageModel
             idx = 0;
         }
 
+        // §680 — a FIRST-RUN participant lands on the WELCOME step.
+        //
+        // 🔒 Without this the step would be built and never seen by anyone. The landing rule above
+        // picks the first INCOMPLETE step, and the welcome is marked Done: true (it asks nothing,
+        // so it must never hold the progress bar below 100% — the §400 deadlines precedent). At the
+        // END of the plan those two facts sit together fine: you walk INTO the deadlines step in
+        // sequence. At the START they cancel each other out, and "step 1" would be skipped straight
+        // past on the very first visit — the one visit it exists for.
+        //
+        // "First run" = nothing has been answered yet: no step is Done except the informational ones
+        // that are Done by construction. A returning participant who has completed even one real
+        // step resumes where they left off and is not re-welcomed; they can still reach the step any
+        // time from the rail. An explicit ?step= always wins — this only decides where an unqualified
+        // /Forms/Wizard lands.
+        if (string.IsNullOrEmpty(step) && IsFirstRun(Plan)) idx = 0;
+
         CurrentIndex = idx;
         CurrentHandler = ResolveHandler(Plan.Steps[idx].Key);
         if (CurrentHandler is not null)
@@ -209,6 +234,64 @@ public class WizardModel : PageModel
         if (dir == "exit" && outcome is WizardStepOutcome.Advance or WizardStepOutcome.NotRelevant)
         {
             return RedirectToPage("/Index");
+        }
+
+        // 🔒 §728 — NAME what the person just did. Operator 2026-07-31: *"i would like also to see
+        // things like selected master class, cancelled master class, signed up for waitlist, party
+        // sign-up, etc"*.
+        //
+        // Every wizard step posts to THIS one handler, so the auto-captured trail recorded 302 rows
+        // all reading `POST /Forms/Wizard` — choosing a Master Class, joining a waitlist, the party
+        // RSVP, the profile and the Code of Conduct, indistinguishable. The step key is only known
+        // at RUNTIME, so an [Audit] attribute cannot express it; the row has to be written here.
+        //
+        // Recorded only on a SUCCESSFUL save: an Invalid outcome is a failed attempt, and the
+        // generic capture still records it (the suppression flag is set inside RecordStepAsync,
+        // after the write, so a throw leaves the safety net in place).
+        if (outcome is WizardStepOutcome.Advance or WizardStepOutcome.NotRelevant)
+        {
+            await RecordStepAuditAsync(me, stepKey, outcome, ct);
+
+            // §720 (operator 2026-07-31: *"Fire at 100%"*) — tell the operator the moment someone
+            // finishes, so he can ask them about the experience while it is fresh.
+            //
+            // 🔒 The plan is REBUILT here on purpose. `Plan` above was computed BEFORE the handler
+            // saved, so it still shows the step that was just completed as outstanding — using it
+            // would mean the notice never fires on the save that actually finishes the wizard, and
+            // then fires on the NEXT unrelated visit instead. The wizard services are stateless
+            // reads, so rebuilding is the cheap, correct way to ask "are they done NOW?".
+            if (_completionNotice is not null)
+            {
+                var after = await BuildPlanAsync(me, ct);
+                if (after is { AllDone: true })
+                {
+                    await _completionNotice.NotifyIfNewlyCompleteAsync(
+                        me.EventId, me.ParticipantId, allDone: true, ct);
+                }
+            }
+        }
+
+        // 🔑 §783.4/§783.5 — SAVE AND STAY: the step's own action button.
+        //
+        // Operator 2026-08-03 on the Logos step: *"i am missing an upload button … problem is that
+        // the system hangs for 6 seconds when you click next so it is not user friendly. I prefer a
+        // buttn and it must show that it is uploading"*; and on Booth materials: *"i nded a button to
+        // SET booth videos URLs and a button to upload the booth collateral"*.
+        //
+        // 🔒 It is a DIRECTION, not a new handler. The wizard host owns the single form (§304b — a
+        // nested form would not post at all), and every step already saves through the one code path
+        // above with its validation, its §728 audit row and its completion notice. A second upload
+        // route would be a second place for those to be forgotten. So the button reuses all of it and
+        // only changes where it LANDS — back on this step, with the work visibly done, instead of
+        // silently three seconds into the next one. §473 previously answered this same complaint with
+        // a paragraph explaining that no button exists; that explained the surprise without removing
+        // it.
+        if (dir == "stay" && outcome is WizardStepOutcome.Advance or WizardStepOutcome.NotRelevant)
+        {
+            TempData["WizardStepSaved"] = Request.Form["__stayMsg"].ToString() is { Length: > 0 } m
+                ? m
+                : "Saved.";
+            return RedirectToStep(stepKey);
         }
 
         switch (outcome)
@@ -294,6 +377,66 @@ public class WizardModel : PageModel
     /// <c>MasterClassSignupService.RemoveAsync</c> the old page used, so the freed seat still
     /// promotes the next person on the waitlist exactly as before.</para>
     /// </summary>
+    /// <summary>
+    /// §734 — remove ONE speaker from the sponsor's session (operator 2026-07-31:
+    /// <i>"need option to remove a speaker here"</i> … <i>"remove from sesison only"</i>).
+    /// </summary>
+    /// <remarks>
+    /// Sponsor-only by construction: the service resolves the session from the ACTOR's own
+    /// <c>SponsorCompanyId</c>, so a posted e-mail can only ever remove a speaker from the caller's
+    /// own session — there is no session id on the wire to tamper with.
+    /// </remarks>
+    [CommunityHub.Audit.Audit("Removed a speaker from the sponsor session",
+        Action = "speaker.remove", TargetType = "SponsorSessionSpeaker")]
+    public async Task<IActionResult> OnPostRemoveSpeakerAsync(
+        string speakerEmail,
+        [FromServices] CommunityHub.Forms.Steps.SponsorSessionFormService sessions,
+        CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+        if (me.Role != ParticipantRole.Sponsor) return Forbid();
+
+        var removed = await sessions.RemoveSpeakerAsync(me.EventId, me.ParticipantId, speakerEmail, ct);
+        TempData["SponsorSessionMessage"] = removed is null
+            ? "That speaker was not found on your session."
+            : $"{removed} was removed from your session. We have told the organizers so Zoho can be "
+              + "tidied up.";
+
+        return RedirectToPage(new { step = "session" });
+    }
+
+    /// <summary>
+    /// §783.3 — remove one of the sponsor's e-conomic contacts from the Contacts step.
+    /// </summary>
+    /// <remarks>
+    /// Operator 2026-08-03: <i>"I am missing ability to remove contacts in the get started. I can
+    /// only ADD"</i>. Sponsor-only by construction: the service resolves the e-conomic customer from
+    /// the ACTOR's own <c>SponsorCompanyId</c>, so a posted contact number can only ever delete from
+    /// the caller's own record. The service refuses the LAST event coordinator and says why.
+    /// </remarks>
+    [CommunityHub.Audit.Audit("Removed a sponsor contact",
+        Action = "sponsor.contact.remove", TargetType = "SponsorContact")]
+    public async Task<IActionResult> OnPostRemoveContactAsync(
+        int contactNumber,
+        [FromServices] CommunityHub.Forms.Steps.SponsorContactsFormService contacts,
+        CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+        if (me.Role != ParticipantRole.Sponsor) return Forbid();
+
+        TempData["SponsorContactsMessage"] =
+            await contacts.RemoveContactAsync(me.ParticipantId, contactNumber, ct);
+
+        return RedirectToPage(new { step = "contacts" });
+    }
+
+    // §728 — this one already stood out in the trail (it has its own handler, so it read
+    // `POST /Forms/Wizard [MasterClassGiveUp]`). Naming it gives it a STABLE code an organizer can
+    // filter on, matching the wizard-step rows beside it.
+    [CommunityHub.Audit.Audit("Gave up their Master Class seat",
+        Action = Core.Audit.AuditActions.MasterClassCancel, TargetType = "MasterClass")]
     public async Task<IActionResult> OnPostMasterClassGiveUpAsync(
         [FromServices] Core.Reminders.MasterClassSignupService signups,
         [FromServices] Core.Email.MasterClassEmailService mcEmail,
@@ -530,6 +673,25 @@ public class WizardModel : PageModel
     }
 
     /// <summary>
+    /// §779 — the Signal step's "send me the join links"; back to the Signal step with a flash.
+    /// </summary>
+    /// <remarks>
+    /// ⚠️ <b>No save-first here, deliberately</b> — unlike the hotel and dinner invites above. The
+    /// Signal step has NO posted fields (joining is external), so there is nothing a §424-style save
+    /// could persist, and the links are read from config rather than from anything the user typed.
+    /// </remarks>
+    public async Task<IActionResult> OnPostMailSignalLinksAsync(
+        [FromServices] CommunityHub.Forms.Steps.SignalFormService signalForm, CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+
+        var (_, message) = await signalForm.SendLinksEmailAsync(me.EventId, me.ParticipantId, me.Role, ct);
+        TempData["SignalLinksMessage"] = message;
+        return RedirectToPage(new { step = "signal" });
+    }
+
+    /// <summary>
     /// §424 — persist the step the invite button lives on, BEFORE sending the invite.
     ///
     /// <para><b>Why.</b> The operator reported the buttons missing entirely (2026-07-27: <i>"i am
@@ -570,6 +732,81 @@ public class WizardModel : PageModel
 
     // ----- helpers --------------------------------------------------------
 
+    /// <summary>
+    /// §728 — write ONE named audit row for the step that was just saved, and suppress the generic
+    /// <c>POST /Forms/Wizard</c> capture for this request.
+    /// </summary>
+    /// <remarks>
+    /// <para>Best-effort by design: <c>IAuditTrail.RecordAsync</c> swallows its own write errors,
+    /// and this method never throws into the save it is describing — an audit problem must not turn
+    /// a successful step into a failed one.</para>
+    ///
+    /// <para>The SUMMARY is what he will actually read, so it names the step in the same words the
+    /// wizard rail uses rather than the internal key. The KEY still goes in <c>TargetId</c>, which
+    /// is what makes the trail filterable.</para>
+    /// </remarks>
+    private async Task RecordStepAuditAsync(
+        CurrentParticipant me, string stepKey, WizardStepOutcome outcome, CancellationToken ct)
+    {
+        if (_audit is null) return;
+
+        var label = StepLabel(stepKey);
+        await _audit.RecordAsync(new Core.Domain.AuditEntry
+        {
+            EventId = me.EventId,
+            OccurredUtc = DateTimeOffset.UtcNow,
+            Category = Core.Domain.AuditCategory.UserAction,
+            Action = Core.Audit.AuditActions.WizardStepSaved,
+            ActorParticipantId = me.ParticipantId,
+            ActorEmail = me.Email,
+            ActorRole = me.Role.ToString(),
+            TargetType = "WizardStep",
+            TargetId = stepKey,
+            Summary = outcome == WizardStepOutcome.NotRelevant
+                ? $"Get Started — skipped “{label}” (not applicable)"
+                : $"Get Started — saved “{label}”",
+            Outcome = Core.Domain.AuditOutcome.Success,
+            Source = Core.Domain.AuditSource.Web,
+            HttpMethod = "POST",
+            Path = Request.Path.Value,
+        }, ct);
+
+        // Set AFTER the write: if RecordAsync somehow does not run, the generic capture still
+        // records the action rather than the request vanishing from the trail entirely.
+        HttpContext.Items[CommunityHub.Audit.AuditPageFilter.SuppressGenericKey] = true;
+    }
+
+    /// <summary>
+    /// §728 — the human name for a step key, matching what the wizard rail shows. Kept here rather
+    /// than reading the resx: the audit trail is read by an organizer in one language, and a
+    /// localized summary would make the SAME action read differently row to row.
+    /// </summary>
+    private static string StepLabel(string stepKey) => stepKey switch
+    {
+        "welcome"              => "Welcome",
+        "masterclass"          => "Master Class selection",
+        "masterclass-waitlist" => "Master Class waitlist",
+        "party"                => "Party sign-up",
+        "profile"              => "Your profile",
+        "accept"               => "Code of Conduct & Privacy",
+        "calendar"             => "Calendar e-mail",
+        "details"              => "Speaker details",
+        "availability"         => "Volunteer availability",
+        "hotel"                => "Hotel",
+        "dinner"               => "Appreciation dinner",
+        "lunch"                => "Lunch",
+        "swag"                 => "Swag & gift",
+        "travel"               => "Travel reimbursement",
+        "signal"               => "Signal groups",
+        "deadlines"            => "Tasks & deadlines",
+        "company"              => "Company details",
+        "contacts"             => "Company contacts",
+        "logos"                => "Logos & artwork",
+        "booth-materials"      => "Booth materials",
+        "booth-checkin"        => "Booth check-in",
+        _                      => stepKey,
+    };
+
     private WizardStepContext BuildContext(CurrentParticipant me, CancellationToken ct) =>
         new(me.EventId, me.ParticipantId, me.Role, me.Email, me.FullName, this,
             // The host owns binding: run model binding for THIS request (flat, no prefix) into
@@ -577,6 +814,24 @@ public class WizardModel : PageModel
             // never need to derive from PageModel.
             model => TryUpdateModelAsync(model, model.GetType(), name: string.Empty),
             ct);
+
+    /// <summary>
+    /// §680 — steps that are INFORMATIONAL: they ask nothing, store nothing, and are therefore
+    /// marked <c>Done: true</c> by every wizard service. They are not evidence that the
+    /// participant has answered anything, which is what <see cref="IsFirstRun"/> needs to know.
+    /// </summary>
+    private static readonly HashSet<string> InformationalSteps =
+        new(StringComparer.Ordinal) { Core.Content.WelcomeCopyStore.StepKey, "deadlines" };
+
+    /// <summary>
+    /// Is this the participant's first run — the welcome step is step 1 and nothing REAL has been
+    /// completed yet? Static and plan-only so it is reachable from a unit test; the rule that
+    /// decides whether anybody ever sees the welcome must not live only in a page's control flow.
+    /// </summary>
+    public static bool IsFirstRun(WizardPlan? plan) =>
+        plan is { Steps.Count: > 0 }
+        && plan.Steps[0].Key == Core.Content.WelcomeCopyStore.StepKey
+        && !plan.Steps.Any(s => s.Done && !InformationalSteps.Contains(s.Key));
 
     private IWizardStepHandler? ResolveHandler(string key) =>
         _handlers.TryGetValue(key, out var h) ? h : null;
@@ -596,6 +851,10 @@ public class WizardModel : PageModel
     {
         "party" => "/Party",
         "deadlines" => "/Tasks",   // §400 — not a Company Details section; it IS the task list
+        // §680 — the welcome has no Company Details section to deep-link to; it exists only
+        // inside the wizard. Without this it would fall through to
+        // "/Sponsor/CompanyDetails#welcome", an anchor that does not exist on that page.
+        Core.Content.WelcomeCopyStore.StepKey => Core.Content.WelcomeCopyStore.StepRoute,
         _ => "/Sponsor/CompanyDetails#" + anchor,
     };
 

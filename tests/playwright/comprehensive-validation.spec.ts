@@ -162,12 +162,15 @@ const ORGANIZER_ROUTES = [
     '/Organizer/Participants', '/Organizer/Attendees', '/Organizer/Speakers',
     '/Organizer/Sponsors', '/Organizer/Sessions', '/Organizer/SessionEvaluations',
     '/Organizer/SessionQuestions',
-    '/Organizer/EmailCenter', '/Organizer/Broadcast', '/Organizer/EmailLog',
+    // 🗑 §705.12 (2026-07-29) deleted /Organizer/Broadcast and /Organizer/SendInvitations
+    // together with their pages, templates and feature keys. They are absent from this list
+    // on purpose — re-adding either turns the organizer leg permanently red.
+    '/Organizer/EmailCenter', '/Organizer/EmailLog', '/Organizer/SendWelcomeLogin',
     '/Organizer/DataGrid', '/Organizer/TasksTable',
     '/Organizer/Swag', '/Organizer/Lunch', '/Organizer/TravelReimbursements',
     '/Organizer/Hotels', '/Organizer/HotelAssignments',
     '/Organizer/GroupPhotos', '/Organizer/AppGame', '/Organizer/Graphics',
-    '/Organizer/SendInvitations', '/Organizer/SpeakerReminders',
+    '/Organizer/SpeakerReminders',
     '/Organizer/SessionizeImport', '/Organizer/SessionizeEndpointSettings',
     '/Organizer/BucketAllocation', '/Organizer/VolunteerStructure',
     '/Organizer/SoMeQueue', '/Organizer/SoMeSettings',

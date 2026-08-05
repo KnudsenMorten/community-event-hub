@@ -154,7 +154,14 @@ public class TaskBodyCatalogTests
         var body = Bodies.Load(definition.BodyRef);
 
         var hasDecisionBlock = HasDecision(body.Blocks);
-        var completesByDecision = definition.Completion is TaskCompletion.Decision;
+        // §687.5 — `DecisionAndPurchase` ALSO completes by choosing; it just adds a SECOND gate (the
+        // sponsor must have bought the packaging too). The buttons still post to a real handler,
+        // which is the only thing this test guards. Written as an explicit list rather than a
+        // loosened check, so a NEW completion kind that draws decision buttons has to be added here
+        // deliberately.
+        var completesByDecision =
+            definition.Completion is TaskCompletion.Decision
+                                  or TaskCompletion.DecisionAndPurchase;
 
         Assert.True(
             hasDecisionBlock == completesByDecision,
@@ -245,6 +252,26 @@ public class TaskBodyCatalogTests
                  })
         {
             placeholders[key] = $"[{key}]";
+        }
+
+        // 3. §708 — the canonical FORM ROUTES SpeakerTaskPlaceholderBuilder publishes to the speaker
+        //    bodies. Read from the builder's own list rather than repeated as literals here: a
+        //    second copy would drift, and the whole point of this test is that a body naming a
+        //    placeholder nothing supplies fails the BUILD instead of quietly rendering a button with
+        //    no destination (§688.4).
+        //
+        //    🔒 The value is a real app-relative route, not a "[key]" stand-in, because the parser
+        //    infers a button's target from its href (§671): anything not starting with "/" is
+        //    treated as leaving the hub and would carry the ↗ external indicator. Substituting a
+        //    placeholder-shaped value would hide that.
+        foreach (var (placeholder, formKey) in
+                 CommunityHub.Core.Tasks.SpeakerTaskPlaceholderBuilder.FormPlaceholders)
+        {
+            placeholders[placeholder] =
+                CommunityHub.Core.Forms.FormRoutes.For(formKey)
+                ?? throw new InvalidOperationException(
+                    $"FormRoutes has no canonical route for '{formKey}', so the speaker body "
+                    + $"naming {{{{{placeholder}}}}} would render a button with no destination.");
         }
 
         var data = DataSources(body.Blocks)

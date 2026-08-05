@@ -15,9 +15,13 @@ namespace CommunityHub.Jobs;
 /// affected speaker(s) on a real change (ring + date gated; first-populate seeds
 /// silently). Gated like <see cref="AttendeeBackstageSyncJob"/>: Zoho must be enabled,
 /// there must be an active edition, and the <c>session-change-alerts</c> feature must be
-/// enabled for it. The Backstage agenda API is currently inert (needs the
-/// <c>ZohoBackstage.agenda.READ</c> scope + Zoho:AgendaReadEnabled), so the service
-/// no-ops gracefully and the job logs the unavailable reason until the source is wired.
+/// enabled for it.
+///
+/// <para>🗑 <b>§754.5 — this summary used to say the Backstage agenda API "is currently inert"
+/// pending a <c>ZohoBackstage.agenda.READ</c> scope. Delete that idea on sight: the credentials
+/// have the permission and always did.</b> The only things that stop this engine are the ones above
+/// — Zoho off, no active edition, or the feature switch off. If a pull genuinely fails, the job logs
+/// the real reason from the API rather than a config excuse.</para>
 /// </summary>
 public sealed class SessionChangeDetectionJob
 {

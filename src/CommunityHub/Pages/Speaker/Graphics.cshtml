@@ -367,6 +367,19 @@
             var text = a.getAttribute('data-share-text') || '';
             var graphic = a.getAttribute('data-graphic-url');
             var composer = a.getAttribute('data-composer-url');
+            // §767 (operator 2026-08-01: "include filename in the helper text for linkedin image
+            // post so speaker selects correct file from his downloads folder"). A speaker with
+            // several sessions downloads several graphics that look alike in a file picker — and
+            // now some are .gif and some .png — so NAMING the file is what makes step 1 unambiguous.
+            // Derived from the URL the download actually used, so it can never disagree with the
+            // file that was saved. Query string and any path are stripped; blank ⇒ the old wording.
+            var savedName = '';
+            if (graphic) {
+                try {
+                    var noQuery = graphic.split('?')[0].split('#')[0];
+                    savedName = decodeURIComponent(noQuery.substring(noQuery.lastIndexOf('/') + 1));
+                } catch (e) { savedName = ''; }
+            }
             if (graphic) {
                 var dl = document.createElement('a');
                 dl.href = graphic;
@@ -393,8 +406,10 @@
                 (copied ? ' and your post text is on the clipboard' : '') + '. ' +
                 'Read these three steps, then press Continue.</strong>' +
                 '<ol>' +
-                '<li>In the LinkedIn composer, click the <strong>photo</strong> icon and pick the ' +
-                'image you just downloaded.</li>' +
+                '<li>In the LinkedIn composer, click the <strong>photo</strong> icon and pick ' +
+                (savedName
+                    ? '<strong>' + savedName + '</strong> from your Downloads folder.'
+                    : 'the image you just downloaded.') + '</li>' +
                 '<li>Paste your post text' + (copied ? ' (Ctrl+V / ⌘V)' : ' — use “Show the full post text” → Copy text') + '.</li>' +
                 '<li>Type <strong>@@Experts Live Denmark</strong> and pick us from the drop-down, then post.</li>' +
                 '</ol>' +

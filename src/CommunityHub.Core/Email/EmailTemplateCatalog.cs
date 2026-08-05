@@ -18,6 +18,16 @@ public static class EmailTemplateCatalog
         {
             ["welcome"]                    = ("Welcome", "welcome-email"),
             ["welcome-speaker"]            = ("Welcome: speaker", "welcome-email"),
+            // 🔒 §726 — SPLIT BY SpeakerCategory (operator 2026-07-31). All three RENDER
+            // welcome-speaker.html and differ only in the opening clause (WelcomeVariants
+            // .SpeakerIntroHtml): a community speaker was SELECTED and is congratulated, a
+            // sponsor-brought or hired guest speaker was not. Three KEYS rather than three files,
+            // because the ring is per (mail × role) — so this is what gives each category its own
+            // ring, exactly as §707.11 did for the task chasers. `welcome-speaker` stays for a
+            // speaker whose category is not set yet.
+            ["welcome-speaker-community"]  = ("Welcome: speaker (community)", "welcome-email"),
+            ["welcome-speaker-guest"]      = ("Welcome: speaker (guest)", "welcome-email"),
+            ["welcome-speaker-sponsor"]    = ("Welcome: speaker (sponsor)", "welcome-email"),
             ["welcome-volunteer"]          = ("Welcome: volunteer", "welcome-email"),
             ["welcome-sponsor"]            = ("Welcome: sponsor", "welcome-email"),
             ["welcome-media"]              = ("Welcome: media", "welcome-email"),
@@ -44,8 +54,20 @@ public static class EmailTemplateCatalog
             // MasterClassMonthReminderJob is retired; the template file stays on disk
             // only so historic sends can still be re-rendered from the email log.
             ["pin-signin"]                 = ("Sign-in code (PIN)", "outbound-email"),
+            // §779 — the Signal join links, mailed because the participant pressed "send them to
+            // me". Get Started is filled in on a desktop, and a signal.group link only does anything
+            // on a device with Signal installed, so this mail is the bridge to their phone.
+            // 🔒 RING-EXEMPT (see RingExemptTemplates): user-initiated, and a ring drop would leave
+            // somebody watching an inbox for a mail a rollout ring silently ate.
+            ["signal-join-links"]          = ("Signal join links (sent on request)", "outbound-email"),
             ["calendar-invite"]            = ("Activation calendar invite", "outbound-email"),
             ["session-evaluation-results"] = ("Session evaluation results", "session-eval-email"),
+            // §750 C7/C0 — the analysis engine's "report ready" notification. Its OWN mail identity,
+            // so it resolves its own (mail × role) ring, on the SAME feature switch as the results
+            // mail above. ⚠️ A NEW identity needs its ring ROW in the target environment: that row is
+            // DATA, it does NOT travel with a deploy, and a missing one means this mail reaches
+            // NOBODY — silently. Check /Organizer/Settings after deploying.
+            ["session-evaluation-report-ready"] = ("Session evaluation report ready", "session-eval-email"),
             // 🗑 §705.12 — "invitation" and "broadcast" DELETED 2026-07-29 (verified unused: zero
             // PROD SentReminders rows for either). Invitation was an early access mail superseded by
             // the welcome mails, which carry a magic link; broadcast was free-form mass mail whose
@@ -61,12 +83,15 @@ public static class EmailTemplateCatalog
             ["attendee-party-reminder"]        = ("Attendee: party sign-up chaser", "reminder-jobs"),
             ["attendee-masterclass-reminder"]  = ("Attendee: Master Class task chaser", "reminder-jobs"),
             ["task-manual-reminder"]       = ("Manual task reminder", "reminder-jobs"),
-            ["speaker-question-digest"]    = ("Speaker Q&A digest", "digest-emails"),
+            // 🔒 §879.2 — "digest" is banned vocabulary (operator: *"hate that word digest, dont use
+            // it and dont understand it"*). The KEY is a live DB row and NEVER moves (§595/§642: the
+            // ring row and the operator's switch are keyed on it); only the DISPLAY changes.
+            ["speaker-question-digest"]    = ("Speaker Q&A round-up", "digest-emails"),
             ["onboarding-getting-started"] = ("Onboarding: getting started", "welcome-email"),
             // §250: the biweekly Get-Started-incomplete digest (wizard steps ONLY) —
             // built by GetStartedDigestBuilder, sent by ReminderJob, ring-gated at the
             // transport under the welcome-email feature (same key it is filed under here).
-            ["getstarted-digest"]          = ("Get Started incomplete digest", "welcome-email"),
+            ["getstarted-digest"]          = ("Get Started still unfinished", "welcome-email"),   // §879.2 — display only; key unchanged
             // §326b: the ONE-SHOT speaker "complete Get Started before the deadline"
             // reminder (GetStartedDeadlineReminderBuilder; dates in the speaker-deadlines
             // config) — same welcome-email transport ring as the digest.
@@ -80,7 +105,7 @@ public static class EmailTemplateCatalog
             ["group-photo-invite"]         = ("Group-photo invite", "group-photo-invites"),
             ["app-game-gift-reminder"]     = ("App-game gift reminder", "sponsor-reminders"),
             ["volunteer-help-raised"]      = ("Volunteer help raised", "outbound-email"),
-            ["sponsor-leads-digest"]       = ("Sponsor leads digest", "sponsor-leads"),
+            ["sponsor-leads-digest"]       = ("Sponsor leads round-up", "sponsor-leads"),          // §879.2 — display only; key unchanged
             // §26c (2026-06-24): the only attendee chaser now — a 2-day-ticket holder
             // who hasn't selected a master class IN-HUB yet. (attendee-missing-booking,
             // attendee-missing-ticket and attendee-duplicate-booking were removed:
@@ -263,6 +288,11 @@ public static class EmailTemplateCatalog
             // not ask for it, so it keeps a ring (§705.14c).
             "calendar-dinner",
             "hotel-calendar-selfsend",
+            // §779 — SignalFormService: they pressed "send me the join links" and are about to walk
+            // to another device to use them. Same rule as the two above (user-initiated mail is never
+            // ring-gated), and the failure it prevents is specific: a ring drop leaves somebody
+            // refreshing a phone inbox for a mail that was never sent, with nothing to diagnose.
+            "signal-join-links",
             // §326ca — organizer ops alerts. Time-critical (~5 minutes to paste a speaker handle
             // before a post goes live) and sent to ONE designated organizer, never a participant.
             // An ops alert must not be silenceable by a participant rollout ring.
@@ -291,6 +321,48 @@ public static class EmailTemplateCatalog
 
     /// <summary>True when no ring can apply to this mail (see <see cref="RingExemptTemplates"/>).</summary>
     public static bool IsRingExempt(string templateKey) => RingExemptTemplates.Contains(templateKey);
+
+    /// <summary>
+    /// §818 — the mails that go to a MAILBOX, never to a person in a role.
+    /// </summary>
+    /// <remarks>
+    /// <para>Deliberately NOT the same set as <see cref="EmailAudience.Organizer"/>, which mixes
+    /// these with real organizer PARTICIPANT mail such as <c>hotel-cutoff-reminder</c>. That
+    /// distinction is exactly what the organizer Comms cockpit has to answer, so it is recorded here
+    /// beside the registry rather than re-derived by whoever is reading a log.</para>
+    ///
+    /// <para>🔒 <b>Do not use the RECIPIENT ADDRESS to answer this.</b> That was tried, and the DEV
+    /// render disproved it: engine alerts go to <c>mok@</c>, which is ALSO the organizer's own
+    /// participant address, so an address test files 252 alerts as his personal mail — the precise
+    /// burial §815.1 forbids. What a mail IS does not depend on who happens to read it.</para>
+    /// </remarks>
+    public static readonly IReadOnlySet<string> InternalMailboxTemplates =
+        new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "engine-alert",
+            "feedback-intake",
+            "travel-reimbursement-erp",
+            "evaluation-consolidated",
+        };
+
+    /// <summary>
+    /// §818 — true when a logged mail is OPS mail rather than a participant's.
+    /// </summary>
+    /// <remarks>
+    /// A REGISTERED <paramref name="templateKey"/> that is not an internal-mailbox mail identifies a
+    /// participant's mail. Everything else — no identity at all, an unregistered one, or an internal
+    /// one — is ops.
+    ///
+    /// <para>🔑 <b>A blank template counts as ops on purpose.</b> Ops senders carry no template
+    /// identity, measured against PROD on 2026-08-04: all 364 <c>engine-alert</c> / <c>other</c> /
+    /// <c>feedback-intake</c> rows have none, while every <c>session-eval</c> row has one. And of the
+    /// two ways to be wrong, showing a participant's mail inside a clearly labelled ops section is
+    /// far milder than hiding a failure alert inside one person's row.</para>
+    /// </remarks>
+    public static bool IsInternalMailboxMail(string? templateKey) =>
+        string.IsNullOrWhiteSpace(templateKey)
+        || InternalMailboxTemplates.Contains(templateKey)
+        || !Map.ContainsKey(templateKey);
 
     /// <summary>
     /// §704.1b — the real subject of a mail whose body is composed IN CODE rather than from a
@@ -322,6 +394,12 @@ public static class EmailTemplateCatalog
             // §707.11 — the two chasers split out of task-deadline-reminder RENDER that template's
             // body, so they have no file of their own to read a Subject: line from. Kept identical to
             // `task-deadline-reminder.html`'s subject, because that IS the subject that goes out.
+            // §726 — the three speaker-category welcomes have no file of their own (they render
+            // welcome-speaker.html), so they cannot read a Subject: line. Kept identical to that
+            // template's subject, because that IS the subject that goes out.
+            ["welcome-speaker-community"]        = "Welcome to {event}",
+            ["welcome-speaker-guest"]            = "Welcome to {event}",
+            ["welcome-speaker-sponsor"]          = "Welcome to {event}",
             ["attendee-party-reminder"]          = "{event} task {state}: {taskTitle}",
             ["attendee-masterclass-reminder"]    = "{event} task {state}: {taskTitle}",
             ["masterclass-question-posted"]      = "New question in {Master Class title}",
@@ -355,6 +433,12 @@ public static class EmailTemplateCatalog
         "calendar-invite" =>
             "Always sent — never ring-gated. The person pressed \"add to calendar\" and is waiting "
             + "for it; a rollout ring would silently drop a mail they explicitly asked for.",
+        // §779 — the Signal join links.
+        "signal-join-links" =>
+            "Always sent — never ring-gated. They pressed \"email me the join links\" and are about "
+            + "to open that mail on a DIFFERENT device, because a Signal link only works on a phone "
+            + "with Signal installed. A ring drop would leave somebody refreshing a phone inbox for "
+            + "a mail that was never sent, with nothing to tell them why.",
         "some-speaker-prealert" =>
             "Always sent — never ring-gated. It goes to one designated organizer and is "
             + "time-critical: about 5 minutes to paste in the speaker's handle before the post goes "
@@ -398,6 +482,9 @@ public static class EmailTemplateCatalog
     {
         // --- Speakers ---------------------------------------------------------------
         "welcome-speaker"                => EmailAudience.Speaker,
+        "welcome-speaker-community"      => EmailAudience.Speaker,   // §726
+        "welcome-speaker-guest"          => EmailAudience.Speaker,   // §726
+        "welcome-speaker-sponsor"        => EmailAudience.Speaker,   // §726
         "speaker-question-digest"        => EmailAudience.Speaker,
         "speaker-graphics-ready"         => EmailAudience.Speaker,
         "getstarted-digest"              => EmailAudience.Speaker,
@@ -405,6 +492,7 @@ public static class EmailTemplateCatalog
         "onboarding-getting-started"     => EmailAudience.Speaker,
         "onboarding-step-reset"          => EmailAudience.Speaker,
         "session-evaluation-results"     => EmailAudience.Speaker,
+        "session-evaluation-report-ready" => EmailAudience.Speaker,   // §750
         "travel-reimbursement-paid"      => EmailAudience.Speaker,
         // §705.13 — a speaker whose session moved room or time. Operator: "session-time-location-
         // changed must go to speakers and be sent in case of ceh changes where a session is moved to
@@ -520,6 +608,11 @@ public static class EmailTemplateCatalog
 
             // The generic welcome is the fallback for roles with no welcome-{role} variant.
             "welcome" => new[] { ParticipantRole.Organizer, ParticipantRole.Attendee },
+
+            // §726 — each speaker-category welcome reaches SPEAKERS only. Declared explicitly so
+            // the Settings page files them under Speaker rather than the generic section.
+            "welcome-speaker-community" or "welcome-speaker-guest" or "welcome-speaker-sponsor"
+                => new[] { ParticipantRole.Speaker },
 
             // The class: speakers of the session PLUS signed-up attendees (confirmed + waitlisted).
             "masterclass-question-posted" or "masterclass-instructions-updated" => new[]
@@ -656,13 +749,19 @@ public static class EmailTemplateCatalog
         "pin-signin"        => "Anyone signing in — the code goes to whoever asked for it, in any role.",
         // §705.12 — "invitation" / "broadcast" hints removed with their catalog entries.
         "calendar-invite"   => "The person activating their account, in any role.",
+        // §779 — every role with Signal groups in scope: today speakers, volunteers, event partners
+        // and media. Sent ONLY when that person presses the button asking for it.
+        "signal-join-links" => "Whoever pressed \"send me the Signal links\" — any role that has Signal groups.",
         "welcome"           => "The fallback welcome — used only for a role that has no welcome of its own.",
         // §561: "whoever OWNS the task" — which is why these are not filed under a single role.
         "task-deadline-reminder" => "Whoever owns the task, in any role — sent as its due date approaches.",
         "task-manual-reminder"   => "Whoever owns the task, in any role — sent when an organizer chases it by hand.",
 
         // --- speakers --------------------------------------------------------------------
-        "welcome-speaker"              => "Every speaker, once, when their account is created.",
+        "welcome-speaker"              => "Every speaker, once, when their account is created — used only until their category is set.",
+        "welcome-speaker-community"    => "A COMMUNITY speaker, once — the one that congratulates them on being selected.",
+        "welcome-speaker-guest"        => "A GUEST speaker (hired on individual terms), once.",
+        "welcome-speaker-sponsor"      => "A SPONSOR-brought speaker, once.",
         "speaker-question-digest"      => "A speaker who has unanswered questions on their session.",
         "speaker-graphics-ready"       => "A speaker whose promo graphics have just been released.",
         "getstarted-digest"            => "Speakers who have not finished Get Started — biweekly until they do.",
@@ -670,6 +769,11 @@ public static class EmailTemplateCatalog
         "onboarding-getting-started"   => "A speaker starting onboarding.",
         "onboarding-step-reset"        => "A speaker whose onboarding step an organizer has reopened.",
         "session-evaluation-results"   => "A speaker whose session has been evaluated.",
+        // §750 — distinct from the line above: that one CARRIES the results, this one says a PDF
+        // report has been published and links to it. Also re-sent when late data supersedes it.
+        "session-evaluation-report-ready" =>
+            "A speaker whose session evaluation report has just been published, or republished after "
+            + "late feedback changed the figures.",
         "travel-reimbursement-paid"    => "A speaker whose travel reimbursement has just been paid.",
         "session-time-location-changed" => "A speaker whose session has been moved to a new room or time.",
 

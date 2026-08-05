@@ -40,21 +40,25 @@ public sealed class SpeakerTemplateService
     private readonly IMemoryCache _cache;
     private readonly ILogger<SpeakerTemplateService>? _log;
 
+    private readonly DocLibrary.IDocLibraryPathResolver _paths;
+
     public SpeakerTemplateService(
         ISharePointFileStore store,
         IOptions<GraphicsSharePointOptions> options,
         IMemoryCache cache,
+        DocLibrary.IDocLibraryPathResolver paths,
         ILogger<SpeakerTemplateService>? log = null)
     {
         _store = store;
         _options = options.Value;
         _cache = cache;
+        _paths = paths;
         _log = log;
     }
 
-    private string? Folder => string.IsNullOrWhiteSpace(_options.SpeakerTemplateFolderPath)
-        ? null
-        : _options.SpeakerTemplateFolderPath.Trim().Trim('/');
+    /// <summary>§768 — resolved from the registry (was <c>SpeakerTemplateFolderPath</c>).</summary>
+    private string? Folder =>
+        _paths.TryResolve(DocLibrary.DocLibraryPaths.SpeakerTemplate, out var p) ? p : null;
 
     /// <summary>True when the live proxy can serve the template (store wired + folder set).</summary>
     public bool IsAvailable => _store.CanRead && Folder is not null;

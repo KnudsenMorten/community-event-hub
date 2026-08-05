@@ -51,6 +51,31 @@ public sealed class SyncDeltaQueueService
     /// <summary>§559 — the dead external id carried by a <see cref="SyncDeltaChangeKind.StaleLink"/>.</summary>
     public const string FieldBackstageId = "BackstageId";
 
+    /// <summary>
+    /// §737.2 — the <see cref="SyncDelta.DecidedByEmail"/> marker for a delta that was applied
+    /// WITHOUT asking anyone: an inbound (<see cref="SessionSyncDirection.ZohoToCeh"/>) Update,
+    /// where Zoho owns the field and the hub is only catching up.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-07-31, naming the exact row: *"2 examples of which should be
+    /// auto-approved … Update — Speaker: Thomas Naunheim"*. The row is <b>not hidden</b> — it goes
+    /// straight to <see cref="SyncDeltaStatus.Applied"/> carrying this marker, so the queue's
+    /// recently-decided list still shows what changed AND that nobody was asked. The notify mail
+    /// then stops listing it for free, because that mail lists PENDING only.</para>
+    ///
+    /// <para>🔒 <b>The policy lives at the DETECTION call sites, never in
+    /// <see cref="EnqueueAsync"/>.</b> Auto-applying inside the enqueue helper turned 12 tests red
+    /// — not because they were stale, but because they use <c>EnqueueAsync</c> as their ARRANGE
+    /// step and then approve/reject/list. <c>EnqueueAsync</c> stays a pure "put this in the queue";
+    /// the engine that detected a real inbound diff is what decides not to ask.</para>
+    ///
+    /// <para>Deletes are NEVER auto-applied (<c>Disappeared</c> / <c>New</c> / <c>StaleLink</c>
+    /// still wait for a human — §299 *"CEH never auto-deletes"*), and neither is a
+    /// <c>CehToZoho</c> Update: the hub CANNOT apply one, because the Backstage API is create-only.
+    /// That is exactly why the ops mail + the manual publish exist (§569/§737).</para>
+    /// </remarks>
+    public const string AutoDecider = "(auto)";
+
     private readonly CommunityHubDbContext _db;
     private readonly TimeProvider _clock;
     private readonly IAuditTrail? _audit;
@@ -348,11 +373,48 @@ public sealed class SyncDeltaQueueService
         var html = BuildNotifyHtml(eventId, pending);
 
         // Throttle per edition so a still-pending set won't email on every detection tick.
-        await _alerts.AlertAsync(subject, html, ct, throttleKey: $"sync-queue-{eventId}");
+        // §752.9 — DEV-silent: an approval queue over test sync deltas asks for work that does not
+        // exist. The queue itself still fills and is still visible in the organiser UI either way —
+        // what is suppressed is the mail, not the state (§707.42's rule).
+        await _alerts.AlertAsync(subject, html, ct, throttleKey: $"sync-queue-{eventId}",
+            devSilent: true);
         return true;
     }
 
-    private static string BuildNotifyHtml(int eventId, IReadOnlyList<SyncDelta> pending)
+    /// <summary>
+    /// §737 — the ABSOLUTE queue URL for the mail, from the edition's configured hub origin.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>A relative href in an e-mail is a broken link.</b> This said
+    /// <c>href="/Organizer/SyncQueue"</c>, which has no base once it leaves the app: Brevo's click
+    /// tracker resolved it against its OWN domain and the operator landed on Brevo's *"Page not
+    /// found"* (2026-07-31). The sibling notice in <c>SessionBackstagePushService</c> already used
+    /// an absolute URL — the two had simply drifted.
+    ///
+    /// <para>Read from <c>hubUrl</c> (the per-edition <c>EmailTemplateOptions.HubUrl</c>) rather
+    /// than hard-coded, so this cannot rot on the next edition — the evergreen rule. With no origin
+    /// configured we emit PLAIN TEXT instead of a link: a dead link is worse than none, because it
+    /// tells the reader the page does not exist.</para>
+    /// </remarks>
+    private string QueueLinkHtml()
+    {
+        string? origin = null;
+        try
+        {
+            if (_templates?.NewTokenSet().TryGetValue("hubUrl", out var h) == true
+                && !string.IsNullOrWhiteSpace(h))
+            {
+                origin = h.TrimEnd('/');
+            }
+        }
+        catch { /* token-set failure must never break the notice */ }
+
+        return origin is null
+            ? "<p>Open <strong>Organizer &rarr; Sync Approval Queue</strong> in the hub to decide.</p>"
+            : $"<p><a href=\"{origin}/Organizer/SyncQueue\">Open the sync approval queue</a></p>";
+    }
+
+    private string BuildNotifyHtml(int eventId, IReadOnlyList<SyncDelta> pending)
     {
         var sb = new System.Text.StringBuilder();
         sb.Append(
@@ -367,9 +429,15 @@ public sealed class SyncDeltaQueueService
         }
         sb.Append("</ul>");
         if (pending.Count > 20) sb.Append($"<p>…and {pending.Count - 20} more.</p>");
-        sb.Append("<p><a href=\"/Organizer/SyncQueue\">Open the sync approval queue</a></p>");
-        sb.Append("<p>(Stage-3 Zoho session changes auto-apply — §299 OPEN-28; everything else"
-            + " waits for approval here, and CEH never auto-deletes.)</p>");
+        sb.Append(QueueLinkHtml());   // §737 — absolute, or plain text; never a relative href
+        // §737.2: inbound (Zoho→CEH) UPDATES now auto-apply for sessions AND speakers — Zoho owns
+        // those fields, so there is nothing to decide. What reaches this mail is what genuinely
+        // needs you: outbound changes (a human must make them in Backstage) and anything that
+        // would remove something.
+        sb.Append("<p>(Zoho&rarr;CEH <em>updates</em> auto-apply — Zoho owns those fields (§299"
+            + " OPEN-28, §737.2). What waits here is what CEH cannot apply for you: changes that"
+            + " must be made manually in Zoho, and anything that would remove something — CEH"
+            + " never auto-deletes.)</p>");
         return sb.ToString();
     }
 

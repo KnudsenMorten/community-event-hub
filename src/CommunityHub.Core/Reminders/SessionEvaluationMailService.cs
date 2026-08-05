@@ -111,8 +111,9 @@ public sealed class SessionEvaluationMailService
             .ToDictionaryAsync(sp => sp.ParticipantId, sp => sp.ContactEmailOverride!, ct);
 
         // Address + the speaker's first name (for a per-speaker greeting token) + their
-        // Participant id (§169: the hub CTA becomes that speaker's personal magic-link).
-        var recipients = new List<(string Addr, string FirstName, int ParticipantId)>();
+        // Participant id (§169: the hub CTA becomes that speaker's personal magic-link)
+        // + their full name (§818 — the name the log row is filed under).
+        var recipients = new List<(string Addr, string FirstName, int ParticipantId, string FullName)>();
         foreach (var link in session.SessionSpeakers)
         {
             var p = link.Participant;
@@ -124,7 +125,7 @@ public sealed class SessionEvaluationMailService
                 && !recipients.Any(r => string.Equals(r.Addr, addr, StringComparison.OrdinalIgnoreCase)))
             {
                 var first = string.IsNullOrWhiteSpace(p.FullName) ? "there" : p.FullName.Split(' ')[0];
-                recipients.Add((addr, first, link.ParticipantId));
+                recipients.Add((addr, first, link.ParticipantId, p.FullName ?? string.Empty));
             }
         }
 
@@ -142,14 +143,25 @@ public sealed class SessionEvaluationMailService
         var subject = $"Your session evaluation — {session.Title}";
 
         // §707.2b — carries its MAIL IDENTITY, so it resolves its own (mail × role) ring instead of the
-        // session-eval-email feature ring. One context wraps the whole recipient loop: every send here
-        // is the same mail, so the identity is loop-invariant. ("session-eval" stays the CATEGORY — the
-        // ledger key — which is exactly the conflation §707 was about.)
-        using (_context?.Set(new EmailContext(
-            "session-eval",
-            TemplateName: "session-evaluation-results", FeatureKey: "session-eval-email")))
+        // session-eval-email feature ring. ("session-eval" stays the CATEGORY — the ledger key — which
+        // is exactly the conflation §707 was about.)
+        //
+        // 🔒 §818 — THE CONTEXT IS NOW PER RECIPIENT, NOT PER LOOP. It used to wrap the whole loop on
+        // the reasoning that "every send here is the same mail, so the identity is loop-invariant".
+        // The identity is; the RECIPIENT is not — and with no `eventId`/`participantId` on the context
+        // every one of these mails logged as `EventId = 0, ParticipantId = null`. Eleven real speakers
+        // were mailed their evaluation results on 1 Aug 2026 and **not one row could be attributed to a
+        // speaker or to the edition**, so both organizer views that answer "did she get it" filter them
+        // straight out. The mail was fine; only its record was anonymous.
+        //
+        // ⚠️ Ring-neutral, verified before the change: `ShouldRingDropAsync` gates on the recipient
+        // ADDRESS and consults `ParticipantId` only when the address is unknown, so stamping it can
+        // make a send findable, never droppable.
+        foreach (var (addr, firstName, participantId, fullName) in recipients)
         {
-            foreach (var (addr, firstName, participantId) in recipients)
+            using (_context?.Set(new EmailContext(
+                "session-eval", session.EventId, participantId, fullName,
+                TemplateName: "session-evaluation-results", FeatureKey: "session-eval-email")))
             {
                 var htmlBody = _templates is not null
                     ? RenderResults(firstName, session.Title, resultsText, eventName, participantId)

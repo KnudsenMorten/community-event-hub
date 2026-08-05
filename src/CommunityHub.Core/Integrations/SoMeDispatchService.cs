@@ -72,8 +72,23 @@ public sealed class SoMeDispatchService
         // §324: optional store — resolves a post's ImageRef graphic to RAW BYTES for the
         // native LinkedIn image upload. Absent (tests) ⇒ text-only, as before.
         Graphics.ISharePointFileStore? fileStore = null,
-        Microsoft.Extensions.Options.IOptions<EmailOptions>? emailOptions = null)
+        Microsoft.Extensions.Options.IOptions<EmailOptions>? emailOptions = null,
+        // §844: optional media library — resolves a post's ImageRef BY FILE NAME from the graphics
+        // or videos folder for its type. §828/§844 posts store a bare NAME, not a GraphicAssets row,
+        // so without this a Type 5 or video post would publish text-only. Absent (tests) ⇒ only the
+        // legacy GraphicAssets path resolves, exactly as before.
+        SoMeGraphicLibrary? mediaLibrary = null,
+        // §850 — eligibility re-checked at SEND time. Optional so existing test constructions keep
+        // working; absent ⇒ no gate, exactly as before.
+        SoMeApprovalGate? approvalGate = null,
+        // §864 — resolves {tokens} in the body AT PUBLISH TIME, so a sponsor's late text edit or a
+        // newly-linked speaker reaches a post planned months ago. Optional so existing test
+        // constructions keep working; absent ⇒ the body publishes as stored, exactly as before.
+        SoMePostComposer? composer = null)
     {
+        _composer = composer;
+        _approvalGate = approvalGate;
+        _mediaLibrary = mediaLibrary;
         _db = db;
         _publisher = publisher;
         _settings = settings;
@@ -108,6 +123,11 @@ public sealed class SoMeDispatchService
         string.IsNullOrWhiteSpace(eventName) ? subject : $"{eventName}: {subject}";
 
     private readonly Graphics.ISharePointFileStore? _fileStore;
+    private readonly SoMeGraphicLibrary? _mediaLibrary;
+    private readonly SoMeApprovalGate? _approvalGate;
+
+    /// <summary>§864 — token resolution at publish time. Null in tests ⇒ body publishes as stored.</summary>
+    private readonly SoMePostComposer? _composer;
 
     /// <summary>
     /// §324: resolve a post's ImageRef (the graphic's SharePoint URL/path) to raw
@@ -117,22 +137,71 @@ public sealed class SoMeDispatchService
     private async Task<(byte[]? Bytes, string? Alt)> ResolveImageAsync(
         SoMePost post, CancellationToken ct)
     {
-        if (string.IsNullOrWhiteSpace(post.ImageRef) || _fileStore is null || !_fileStore.CanRead)
-            return (null, null);
+        if (string.IsNullOrWhiteSpace(post.ImageRef)) return (null, null);
+
         try
         {
-            var graphic = await _db.GraphicAssets.AsNoTracking().FirstOrDefaultAsync(
-                g => g.EventId == post.EventId
-                     && (g.SharePointUrl == post.ImageRef || g.SharePointPath == post.ImageRef),
-                ct);
-            if (graphic?.StorageItemId is not { Length: > 0 } itemId) return (null, null);
-            var bytes = await _fileStore.DownloadAsync(itemId, ct);
-            return (bytes is { Length: > 0 } ? bytes : null, "Session graphic");
+            // The legacy path: a generated graphic tracked as a GraphicAssets row, referenced by
+            // its SharePoint URL or path.
+            if (_fileStore is { CanRead: true })
+            {
+                var graphic = await _db.GraphicAssets.AsNoTracking().FirstOrDefaultAsync(
+                    g => g.EventId == post.EventId
+                         && (g.SharePointUrl == post.ImageRef || g.SharePointPath == post.ImageRef),
+                    ct);
+
+                if (graphic?.StorageItemId is { Length: > 0 } itemId)
+                {
+                    var bytes = await _fileStore.DownloadAsync(itemId, ct);
+                    if (bytes is { Length: > 0 }) return (bytes, "Session graphic");
+                }
+            }
+
+            // §828/§844: a bare FILE NAME in the library folder for this post's type. This is how
+            // every imported event post and every hand-picked graphic is stored.
+            if (_mediaLibrary is not null)
+            {
+                var file = await _mediaLibrary.GetAsync(
+                    post.ImageRef, post.TemplateKind, Domain.SoMePostMediaKind.Graphic, ct);
+                if (file is not null) return (file.Content, "Experts Live Denmark");
+            }
+
+            return (null, null);
         }
         catch (Exception ex)
         {
             _log?.LogWarning(ex, "SoMeDispatch: image resolve failed for post {PostId}.", post.Id);
             return (null, null);
+        }
+    }
+
+    /// <summary>
+    /// §844 — the VIDEO bytes for a post whose medium is Video, or null.
+    /// </summary>
+    /// <remarks>
+    /// 🔒 §844.2 — when a post is marked Video and the file cannot be fetched, this returns null and
+    /// <see cref="ResolveImageAsync"/> is NOT consulted as a substitute: the caller refuses to
+    /// publish instead. Falling back to the graphic would quietly ship the asset he chose against.
+    /// </remarks>
+    private async Task<byte[]?> ResolveVideoAsync(SoMePost post, CancellationToken ct)
+    {
+        if (post.MediaKind != Domain.SoMePostMediaKind.Video
+            || string.IsNullOrWhiteSpace(post.ImageRef)
+            || _mediaLibrary is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            var file = await _mediaLibrary.GetAsync(
+                post.ImageRef, post.TemplateKind, Domain.SoMePostMediaKind.Video, ct);
+            return file?.Content;
+        }
+        catch (Exception ex)
+        {
+            _log?.LogWarning(ex, "SoMeDispatch: video resolve failed for post {PostId}.", post.Id);
+            return null;
         }
     }
 
@@ -145,6 +214,15 @@ public sealed class SoMeDispatchService
     {
         var now = _clock.GetUtcNow();
         var settings = await _settings.GetAsync(eventId, ct);
+
+        // 🔒 §861 — THE ORGANIZER CREDIT IS COMPOSED HERE, AT PUBLISH TIME, AND NEVER STORED.
+        // Read once per pass, not per post. This is what lets a credit that becomes an @-mention
+        // (§858) reach posts he has ALREADY EDITED — a stored credit could not, which is exactly
+        // the state posts 383 and 495 were in (§861.3).
+        var editionCode = await _db.Events
+            .Where(e => e.Id == eventId)
+            .Select(e => e.Code)
+            .FirstOrDefaultAsync(ct);
 
         // ----- T-5-minute speaker pre-alerts (independent of the posting gate;
         // the organizer needs the heads-up even before posting is enabled) -----
@@ -212,11 +290,88 @@ public sealed class SoMeDispatchService
                     continue;
                 }
 
-                // §324: attach the graphic's raw bytes for the native image upload.
-                var (imageBytes, imageAlt) = await ResolveImageAsync(post, ct);
+                // 🔒 §850 — RE-CHECK ELIGIBILITY AT SEND TIME, not only at approval.
+                //
+                // Approval is a MOMENT; eligibility is a STATE. A post approved while the sponsor's
+                // social-media text existed, and then the text cleared, must not publish — so the
+                // gate is consulted here as well as at the point of approval.
+                if (_approvalGate is not null
+                    && await _approvalGate.BlockedReasonAsync(post, ct) is { } notEligible)
+                {
+                    post.LastError = notEligible;
+                    _log?.LogWarning(
+                        "SoMeDispatch: post {PostId} is approved but no longer eligible — {Reason}",
+                        post.Id, notEligible);
+                    await _db.SaveChangesAsync(ct);
+                    continue;
+                }
+
+                // §844 — VIDEO FIRST when the post is a video post (§844.2: "we prefer videos more
+                // than graphics"), else §324's native image upload.
+                var videoBytes = await ResolveVideoAsync(post, ct);
+
+                byte[]? imageBytes = null;
+                string? imageAlt = null;
+
+                if (videoBytes is null && post.MediaKind == Domain.SoMePostMediaKind.Video)
+                {
+                    // 🔒 REFUSE rather than fall back. He marked this post as a video; publishing
+                    // its graphic instead would ship the asset he chose against, and nothing would
+                    // tell him it happened. Left queued, with the reason recorded.
+                    post.LastError = "This post is set to publish a video, but the video file could "
+                                   + "not be read from the library. It was NOT published as a "
+                                   + "graphic — fix the linked file and it will go out on a later run.";
+                    _log?.LogWarning(
+                        "SoMeDispatch: post {PostId} is a VIDEO post but its file '{File}' could not "
+                        + "be read; refusing to downgrade to the graphic.", post.Id, post.ImageRef);
+                    await _db.SaveChangesAsync(ct);
+                    continue;
+                }
+
+                if (videoBytes is null)
+                {
+                    (imageBytes, imageAlt) = await ResolveImageAsync(post, ct);
+                }
+
+                // 🔒 §864 — THE TEXT IS BUILT HERE, AT PUBLISH TIME, NOT AT PLAN TIME.
+                // This is what makes a sponsor's late edit to their social text, or a second speaker
+                // linked to a session, reach a post that was planned months earlier (§848 plans to
+                // 2027-02). Composing at plan time froze all of it.
+                var body = post.EffectiveText;
+                if (_composer is not null)
+                {
+                    var values = await _composer.ValuesForAsync(post, ct);
+
+                    // ⚠️ REPORTED, NEVER FATAL (§864.3). An unknown token at COMPOSE time is refused
+                    // (§858.4); at PUBLISH time refusing would mean the post silently does not go
+                    // out, which is far worse. The token survives verbatim and is logged.
+                    var unresolved = SoMePostComposer.UnresolvedTokens(body, values);
+                    if (unresolved.Count > 0)
+                    {
+                        _log?.LogWarning(
+                            "SoMeDispatch: post {PostId} publishes with {Count} unresolved token(s): "
+                            + "{Tokens}. The post still goes out — the token text is left as written.",
+                            post.Id, unresolved.Count, string.Join(", ", unresolved));
+                    }
+
+                    body = _composer.Resolve(body, values);
+                }
+
+                // §861 — the organizer credit. Appended ONLY when he has not placed an {Organizers}
+                // token himself: operator 2026-08-05 asked to embed variables where HE wants them,
+                // so a body that positions the credit must not then get a second copy stapled on.
+                var placesCreditHimself =
+                    post.EffectiveText.Contains("{Organizers}", StringComparison.OrdinalIgnoreCase)
+                    || post.EffectiveText.Contains("{OrganizerLinkedInUrls}", StringComparison.OrdinalIgnoreCase);
+
+                var textToPublish = placesCreditHimself
+                    ? body
+                    : SoMePostCredit.Compose(body, editionCode, settings?.OrganizerCredits);
+
                 var result = await _publisher.PublishAsync(
-                    new LinkedInPost(page!, post.EffectiveText, post.ImageRef, post.TagList,
-                        imageBytes, imageAlt), ct);
+                    new LinkedInPost(page!, textToPublish,
+                        post.ImageRef, post.TagList,
+                        imageBytes, imageAlt, AccessTokenOverride: null, VideoBytes: videoBytes), ct);
 
                 if (result.Published)
                 {
@@ -226,7 +381,10 @@ public sealed class SoMeDispatchService
                     post.LastError = null;
                     published++;
                     await _db.SaveChangesAsync(ct);
-                    await NotifyPublishedAsync(eventId, settings!, post, ct);
+                    // §865.3 — the COMPOSED text is passed in, not re-read from the post. The mail
+                    // must show what actually went to LinkedIn (body + resolved tokens + credit),
+                    // and post.EffectiveText is only the stored body (§861).
+                    await NotifyPublishedAsync(eventId, settings!, post, textToPublish, ct);
                 }
                 else
                 {
@@ -381,20 +539,61 @@ public sealed class SoMeDispatchService
     /// un-publishes the post (the post is already live).
     /// </summary>
     private async Task NotifyPublishedAsync(
-        int eventId, SoMeSettings settings, SoMePost post, CancellationToken ct)
+        int eventId, SoMeSettings settings, SoMePost post, string publishedText,
+        CancellationToken ct)
     {
         if (!settings.NotifyOnPublish) return;
         var recipients = settings.NotificationEmailList;
-        if (recipients.Count == 0) return;
+
+        // ⚠️ §865.3 — NO RECIPIENTS MEANS NOBODY IS TOLD, and that state is invisible: NotifyOnPublish
+        // was TRUE on PROD while the list was EMPTY, so the feature read as on and notified no one.
+        // Say so in the log rather than returning in silence — the §854 shape.
+        if (recipients.Count == 0)
+        {
+            _log?.LogWarning(
+                "SoMeDispatch: post {PostId} published, but NO publish notification was sent — "
+                + "NotifyOnPublish is on and the notification e-mail list is EMPTY. "
+                + "Set it on /Organizer/SoMeSettings.", post.Id);
+            return;
+        }
 
         // §707.27 C3 — the EVENT NAME, not "[SoMe]" (see the pre-alert above; the catalog's
         // InlineSubjects entry moves with it).
         var subject = WithEventPrefix(
             await EventDisplayNameAsync(eventId, ct), "A LinkedIn company-page post was published");
+
+        // 🔑 §865.3 — operator asked for "link to post + graphics + text".
+        // The LINK is built from the urn LinkedIn returned (§859 proved it is stored in
+        // ExternalPostId); the GRAPHIC is named and, where the library can read it, attached;
+        // the TEXT is what actually published, credit and resolved tokens included.
+        var postUrl = string.IsNullOrWhiteSpace(post.ExternalPostId)
+            ? null
+            : $"https://www.linkedin.com/feed/update/{post.ExternalPostId}";
+
         var body =
             "<p>A scheduled LinkedIn company-page post has just been published.</p>"
             + $"<p><strong>Type:</strong> {post.Type}</p>"
-            + $"<p><strong>Text:</strong><br/>{System.Net.WebUtility.HtmlEncode(post.EffectiveText)}</p>";
+            + $"<p><strong>Scheduled:</strong> {SoMeDisplayTime.ToDanish(post.ScheduledAtUtc):ddd dd MMM yyyy HH:mm} (Danish time)</p>";
+
+        if (postUrl is not null)
+        {
+            body += $"<p><strong>See it on LinkedIn:</strong> <a href=\"{postUrl}\">{postUrl}</a></p>";
+        }
+        else
+        {
+            // Published but no urn ⇒ say so rather than omitting the line, which would read as if
+            // the post had no link rather than as if we failed to record one.
+            body += "<p><strong>See it on LinkedIn:</strong> "
+                  + "(no post id was returned, so no direct link is available)</p>";
+        }
+
+        body += string.IsNullOrWhiteSpace(post.ImageRef)
+            ? "<p><strong>Media:</strong> none — this was a text-only post.</p>"
+            : $"<p><strong>Media:</strong> {System.Net.WebUtility.HtmlEncode(post.ImageRef)} "
+              + $"({(post.MediaKind == SoMePostMediaKind.Video ? "video" : "graphic")})</p>";
+
+        body += "<p><strong>Text as published:</strong><br/>"
+              + $"{System.Net.WebUtility.HtmlEncode(publishedText).Replace("\n", "<br/>")}</p>";
 
         foreach (var to in recipients)
         {

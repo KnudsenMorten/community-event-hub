@@ -3,6 +3,7 @@ using System.Text.Json.Serialization;
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
 using CommunityHub.Core.Entitlements;
+using CommunityHub.Core.Tasks.Definitions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -12,6 +13,18 @@ namespace CommunityHub.Core.Config;
 /// <summary>One speaker deadline from speaker-deadlines.&lt;edition&gt;.json.</summary>
 public sealed class SpeakerDeadlineDefinition
 {
+    /// <summary>
+    /// §708 — the STABLE key a migrated <c>SpeakerTaskDefinition</c> names via
+    /// <see cref="Tasks.Definitions.TaskDue.FromSpeakerConfig"/> to read this entry's date.
+    /// </summary>
+    /// <remarks>
+    /// 🔒 The DATE stays in config (per edition, evergreen) while the definition, audience and body
+    /// move into code — so a migrated entry keeps its row here purely as this file's date table.
+    /// Null/blank on an UNMIGRATED entry, which still seeds through the JSON path below.
+    /// </remarks>
+    [JsonPropertyName("key")]
+    public string? Key { get; set; }
+
     [JsonPropertyName("title")]
     public string Title { get; set; } = string.Empty;
 
@@ -69,6 +82,26 @@ public sealed class SpeakerDeadlineConfig
     /// <summary>§326b: optional Get-Started completion deadline block (null = inert).</summary>
     [JsonPropertyName("getStartedDeadline")]
     public GetStartedDeadlineDefinition? GetStartedDeadline { get; set; }
+
+    /// <summary>
+    /// §708 step 1 — this file as a DATE TABLE: every keyed entry's absolute due date, by key.
+    /// </summary>
+    /// <remarks>
+    /// 🔒 <b>A duplicate key keeps the FIRST entry rather than throwing.</b> This runs on speaker
+    /// page load and inside the Functions host (§326bb), so a config typo must degrade to one wrong
+    /// date, never to an exception on every speaker's task page — the §682 rule. The duplicate is a
+    /// build failure in <c>SpeakerTaskDefinitionTests</c>, which is where it is cheap to see.
+    /// </remarks>
+    public IReadOnlyDictionary<string, DateOnly> DueDatesByKey()
+    {
+        var map = new Dictionary<string, DateOnly>(StringComparer.Ordinal);
+        foreach (var dl in Deadlines)
+        {
+            if (string.IsNullOrWhiteSpace(dl.Key)) continue;
+            map.TryAdd(dl.Key.Trim(), dl.DueDate);
+        }
+        return map;
+    }
 }
 
 /// <summary>Where the speaker-deadlines config file is.</summary>
@@ -182,6 +215,25 @@ public sealed class SpeakerDeadlineSeeder
         var created = 0;
         var removed = 0;
 
+        // ── §708 — THE MIGRATED SPEAKER DEFINITIONS ────────────────────────────────────────
+        //
+        // The dates stay HERE (per edition, evergreen); the definition, audience, completion kind
+        // and body live in code. TaskDue.FromSpeakerConfig names the entry's stable `key`.
+        var dueDatesByKey = config.DueDatesByKey();
+
+        // Every title the registry now owns. A JSON entry whose title slugs to one of these is NOT
+        // seeded by the legacy loop below.
+        //
+        // 🔒 <b>This must be built from ALL speaker definitions, not from the ones a given speaker's
+        // audience matched.</b> Otherwise a speaker EXCLUDED from a definition (§456: an exhibitor
+        // speaker has no preview-upload task) would fall through to the JSON entry and be handed the
+        // very task the exclusion exists to withhold — silently, and with a reminder behind it.
+        // Exclusion has to mean NO task, not "the old task instead".
+        var migratedSlugs = TaskDefinitionRegistry.Shipped.All
+            .Where(d => d.Audience.Roles.Contains(ParticipantRole.Speaker))
+            .Select(d => SponsorTaskKeys.Slug(d.Title))
+            .ToHashSet(StringComparer.Ordinal);
+
         foreach (var speaker in speakers)
         {
             var days = daysBySpeaker.TryGetValue(speaker.Id, out var d) ? d : SpeakerDays.None;
@@ -198,8 +250,93 @@ public sealed class SpeakerDeadlineSeeder
             // the orphan-prune (no-longer-desired keys) below.
             var desiredKeys = new HashSet<string>(StringComparer.Ordinal);
 
+            // ── §708 — SEED THE REGISTRY DEFINITIONS FIRST ─────────────────────────────────
+            //
+            // Same table, same `speakerdl:{id}:{slug}` key shape, same due-date column as the JSON
+            // loop below — so every downstream consumer (the deadlines surface, the overdue badges,
+            // TaskReminderBuilder, the SentReminders dedup ledger) sees no change at all. That is
+            // §684.21's regression gate: this changes where a task's DEFINITION and BODY come from
+            // and must change nothing about who gets chased, when, or how.
+            //
+            // 🔒 Because the titles are carried across VERBATIM (§686.10), the key a registry-seeded
+            // row gets is byte-identical to the one the JSON-seeded row already has. The existing
+            // row is UPDATED IN PLACE: completion state survives, the reminder ledger still matches,
+            // and the orphan prune below sees the key in its desired set and leaves it alone.
+            var facts = TaskAudienceFacts.For(
+                ParticipantRole.Speaker, SpeakerPredicates(speaker.Category, speaker.Country, days, entitled));
+
+            foreach (var definition in TaskDefinitionRegistry.Shipped.For(facts))
+            {
+                var defKey = SponsorTaskKeys.ForSpeaker(speaker.Id, definition.Title);
+                desiredKeys.Add(defKey);
+
+                DateOnly? defDue = definition.Due switch
+                {
+                    TaskDue.FromSpeakerConfig fromSpeaker =>
+                        dueDatesByKey.TryGetValue(fromSpeaker.DeadlineKey, out var dt) ? dt : null,
+                    TaskDue.Fixed fixedDate => fixedDate.Date,
+                    TaskDue.EventMinus eventMinus => null, // no speaker definition uses this today
+                    _ => null,
+                };
+
+                // 🔒 An UNRESOLVED date is loud. A null DueDate drops the task out of the due-day
+                // chase entirely and greys out its badge — a silent loss of the deadline, which is
+                // the whole reason §708 forbade TaskDue.Fixed and keyed the lookup. The task is
+                // still seeded (a dateless task beats no task), but nobody has to guess why.
+                if (defDue is null && definition.Due is TaskDue.FromSpeakerConfig missing)
+                {
+                    _log.LogError(
+                        "Speaker definition '{Key}' names deadline key '{DeadlineKey}', which is not "
+                        + "in speaker-deadlines config. The task is seeded with NO due date, so it "
+                        + "will never be chased. Add the key to the edition's deadlines array.",
+                        definition.Key, missing.DeadlineKey);
+                }
+
+                var existingDef = await _db.Tasks.FirstOrDefaultAsync(
+                    t => t.EventId == eventId && t.SourceKey == defKey, ct);
+
+                if (existingDef is null)
+                {
+                    _db.Tasks.Add(new ParticipantTask
+                    {
+                        EventId = eventId,
+                        AssignedParticipantId = speaker.Id,
+                        Title = definition.Title,
+                        // §684.14 — rendered prose lives NOWHERE. Null, not empty: an empty string
+                        // would read as "this task has no body" to anything still inspecting the
+                        // column, whereas null is unambiguously "ask the registry".
+                        Description = null,
+                        DueDate = defDue,
+                        State = TaskState.Open,
+                        SourceKey = defKey,
+                        IsMandatory = definition.IsMandatory,
+                        FormStepKey = (definition.Completion as TaskCompletion.Form)?.StepKey,
+                        CreatedAt = now,
+                    });
+                    created++;
+                }
+                else
+                {
+                    existingDef.DueDate = defDue;
+                    existingDef.IsMandatory = definition.IsMandatory;
+                    existingDef.FormStepKey = (definition.Completion as TaskCompletion.Form)?.StepKey;
+                    // 🔒 CLEAR the stored prose on a row that was previously JSON-seeded. Leaving it
+                    // would be the two-sources-of-truth §684.16 forbids: the page would render the
+                    // new body while anything still reading the column served the old one.
+                    existingDef.Description = null;
+                }
+            }
+
             foreach (var dl in config.Deadlines)
             {
+                // §708 — a deadline the REGISTRY now owns is not seeded from JSON. Skipped by title
+                // slug, which is the same value the SourceKey is derived from, so the two paths can
+                // never both claim one key and overwrite each other's row.
+                if (migratedSlugs.Contains(Slug(dl.Title)))
+                {
+                    continue;
+                }
+
                 // A masterclass-only deadline is skipped unless this speaker
                 // PRESENTS on the pre-day — DERIVED from their linked sessions
                 // (§299 C5; the stored SpeakingPreDay flag is retired).
@@ -384,6 +521,65 @@ public sealed class SpeakerDeadlineSeeder
             await _db.SaveChangesAsync(ct);
         }
         return created;
+    }
+
+    /// <summary>
+    /// §708 — one speaker's audience facts, translated from the gates this seeder already applies.
+    /// </summary>
+    /// <remarks>
+    /// <para>🔒 <b>This is the migration's load-bearing translation, so each line names the rule it
+    /// carries across.</b> Every gate below exists in the legacy loop as a slug substring test; the
+    /// registry states it once, per definition, where a rename cannot break it. §708.3 recorded that
+    /// the §708 plan had counted only two of the three gate families — this is the third.</para>
+    ///
+    /// <para>⚠️ <b>The OR-pairs are deliberate and must not be tightened.</b>
+    /// <c>DeadlineAllowedByEntitlement</c> accepts <c>Swag OR Polo</c> for the swag deadline and
+    /// <c>LunchPreDay OR LunchMainDay</c> for lunch. Mapping either pair to a single entitlement
+    /// would silently WITHHOLD a task from speakers who hold only the other one.</para>
+    /// </remarks>
+    private static TaskAudiencePredicate[] SpeakerPredicates(
+        SpeakerCategory? category,
+        string? country,
+        SpeakerDays days,
+        IReadOnlySet<OrderItem> entitled)
+    {
+        var predicates = new List<TaskAudiencePredicate>();
+
+        // P12 entitlement gates — a speaker must not be given a logistics task they cannot act on.
+        if (entitled.Contains(OrderItem.Hotel))
+            predicates.Add(TaskAudiencePredicate.EntitledToHotel);
+        if (entitled.Contains(OrderItem.AppreciationDinner))
+            predicates.Add(TaskAudiencePredicate.EntitledToAppreciationDinner);
+        if (entitled.Contains(OrderItem.Swag) || entitled.Contains(OrderItem.Polo))
+            predicates.Add(TaskAudiencePredicate.EntitledToSwag);
+        if (entitled.Contains(OrderItem.LunchPreDay) || entitled.Contains(OrderItem.LunchMainDay))
+            predicates.Add(TaskAudiencePredicate.EntitledToLunchPreDay);
+        // §253 G10 — travel is a logistics entitlement too: a Guest or sponsor-funded speaker has
+        // none, and must never get the claim task or its due-day reminder.
+        if (entitled.Contains(OrderItem.TravelReimbursement))
+            predicates.Add(TaskAudiencePredicate.EntitledToTravelReimbursement);
+
+        // §143 — outside Denmark. 🔒 A speaker with NO country set yet counts as non-Denmark, i.e.
+        // they DO get the travel task. That asymmetry pre-dates this model and is deliberate:
+        // withholding a reimbursement task from someone whose country we have simply not asked for
+        // would quietly cost them money.
+        if (!IsDenmark(country))
+            predicates.Add(TaskAudiencePredicate.NonDenmark);
+
+        // §299 C5 — presenting on the pre-day is DERIVED from the linked sessions (the stored
+        // SpeakingPreDay flag is retired). No shipped speaker definition requires it yet; it is
+        // supplied so the matrix is complete and a masterclass-only task can be added in config-free
+        // fashion later.
+        if (days.PresentsPreDay)
+            predicates.Add(TaskAudiencePredicate.IsMasterClassSpeaker);
+
+        // §299 6.2 / §456 / §458 — an EXHIBITOR's speaker. Stated positively and EXCLUDED at the two
+        // definitions it applies to (Help Promote, preview upload); the final upload deliberately
+        // does NOT exclude it, which is the single exception he drew.
+        if (category == SpeakerCategory.Sponsor)
+            predicates.Add(TaskAudiencePredicate.IsSponsorCategorySpeaker);
+
+        return predicates.ToArray();
     }
 
     /// <summary>

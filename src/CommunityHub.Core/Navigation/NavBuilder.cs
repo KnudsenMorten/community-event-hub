@@ -204,7 +204,16 @@ public static class NavBuilder
             // §285: "Get Started" now opens the INLINE wizard (/Forms/Wizard) — the forms are
             // replicated inline step-by-step (Prev/Next/Finish), not dead links out to pages.
             items.Add(new("/Forms/Wizard", "Nav.SpeakerOnboarding"));
-            items.Add(new("/Speaker/Details", "Nav.SpeakerDetails"));
+            // 🔒 §707.56 — "Speaker Details" REMOVED from the nav. Operator 2026-07-30: *"in my
+            // opinion, it has now been replaced by get started menu"*, and the audit agrees with a
+            // clarity the sponsor case did not have: `/Speaker/Details` and
+            // `/Forms/Wizard?step=details` are not two implementations, they are ONE with two hosts.
+            // Both bind `SpeakerDetailsFormModel`, both call `SpeakerDetailsFormService`, and both
+            // render the same `_DetailsFields.cshtml` partial — whose own header says the host owns
+            // only the chrome. The page has exactly ONE save path, and the wizard step uses it.
+            // ⇒ ZERO capability gap, unlike `/Sponsor/CompanyDetails` (§707.44), which still owns
+            // three things nothing else does.
+            // items.Add(new("/Speaker/Details", "Nav.SpeakerDetails"));
             items.Add(new("/Speaker/Tasks", "Nav.MyTasks"));   // §301c: plain link — register forms moved to "Register"
             // §247 (operator 2026-07-07: "DROP THIS speaker readiness!"): the §234
             // "Am I ready?" menu entry is REMOVED again — the readiness rollup at the
@@ -262,11 +271,17 @@ public static class NavBuilder
                 // roles get it under Event Info, added after the content loop below).
                 items.Add(new(AttendeeSurveyResultsUrl, "Nav.AttendeeSurveyResults", SectionKey: SpeakerInfo, External: true, SubSectionKey: Prep));
                 items.Add(new("/Speaker/Graphics", "Nav.HelpPromote", SectionKey: SpeakerInfo, SubSectionKey: Prep)); // §267
+                // §838 — what CEH will post about their sessions, and when. Sits beside "Help
+                // promote" because it answers the same question from the other side: promote WHAT,
+                // and WHEN does the official post go out.
+                items.Add(new("/Speaker/Announcements", "Nav.SpeakerAnnouncements", SectionKey: SpeakerInfo, SubSectionKey: Prep));
                 AddSpeakerContent("speaker-template", Prep);
             }
-            // §320 (operator 2026-07-24): direct entry to the per-room evaluation-QR downloads
-            // (the anchored card on the Evaluations page).
-            items.Add(new("/Speaker/Evaluations#eval-qr", "Nav.SpeakerEvalQr", SectionKey: SpeakerInfo, SubSectionKey: Prep));
+            // 🙈 §748.5 (operator 2026-07-31: "hide the page until C10 exists") — the §320 entry
+            // (2026-07-24: direct entry to the per-ROOM evaluation-QR downloads) is REMOVED, not
+            // forgotten. §748 replaced room QRs with one QR per SESSION on his instruction, so this
+            // link pointed at the superseded mechanism. ⚠️ When C10 restores the page, point the
+            // link at the per-SESSION QR — do not re-add the room one.
             // §322k: the public slides catalogue — a speaker checks OTHER sessions' decks
             // while preparing their own. (Also under Event Info for every role.)
             // §326n: the slides catalogue is STANDALONE (no hub chrome, §322j) — open in
@@ -275,8 +290,15 @@ public static class NavBuilder
 
             AddSpeakerContent("av-stage-timer", Room);
 
-            // §234 UX: /Speaker/Evaluations (session ratings + per-room evaluation QR).
-            items.Add(new("/Speaker/Evaluations", "Nav.SpeakerEvaluations", SectionKey: SpeakerInfo, SubSectionKey: Eval)); // §267
+            // §752 C10 — the four-point results page, replacing the retired 1–5 one. This is what
+            // the report-ready mail links to, so a speaker who gets the mail can also find it in
+            // the menu afterwards.
+            items.Add(new("/Speaker/Results", "Nav.SpeakerEvaluations", SectionKey: SpeakerInfo, SubSectionKey: Eval));
+            // 🙈 §748.5 — the §234/§267 entry to /Speaker/Evaluations is REMOVED while the 1–5 scale
+            // is retired and C10 (the speaker view of the four-point model) does not exist yet.
+            // Left in the menu, it offered a speaker an empty ratings list, and an empty list reads
+            // as "nobody rated me" rather than as "not built yet". The page still EXISTS and
+            // redirects to /Speaker; C10 re-adds this line.
             AddSpeakerContent("session-feedback", Eval);
 
             // §267/§301c: EVERY register/claim form — Lunch included (operator 2026-07-24: "it
@@ -523,6 +545,9 @@ public static class NavBuilder
             }
 
             items.Add(new("/Sponsor/Tasks", "Nav.SponsorTasks"));
+            // §837 — the posts CEH will publish about this sponsor: their company, their tier and
+            // their sessions, each with the preview and the date it runs on LinkedIn.
+            items.Add(new("/Sponsor/Announcements", "Nav.SponsorAnnouncements"));
 
             // §135 (operator 2026-06-27): the booth run-of-show (key dates & times) is now a
             // LEAF inside the SHARED "Event logistics" fold-out (Nav.SectionEventLogistics) —
@@ -747,9 +772,18 @@ public static class NavBuilder
             new("/Organizer/PlatformHealth", "Nav.OrgPlatformHealth"),
             new("/Organizer/Jobs", "Nav.OrgJobs"),
 
-            new("/Organizer/ImpersonationLog", "Nav.OrgImpersonationLog"),
+            // §741 (operator 2026-07-31: "replace this with audit log instead on the main menu for
+            // organizer"). The slot held "Switch User Log", which is ONE Category inside the audit
+            // trail; the trail is the whole record (every user action + backend event), so the menu
+            // now points at the superset.
+            //
+            // 🔑 The impersonation page STAYS ROUTABLE — the §652/§167 treatment: losing a menu
+            // entry must not lose the page. /Organizer/Participants still links to it directly
+            // ("Acting-as audit log"), which is where someone is actually standing when they want it.
+            new("/Organizer/AuditTrail", "Nav.OrgAuditTrail"),
         };
 
         return new NavGroup(HeadingKey: "Nav.OrgArea", Items: items, IsManagement: true);
     }
 }
+

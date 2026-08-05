@@ -101,19 +101,41 @@ public sealed class SponsorSessionFormService : IWizardFormService
     private readonly Core.Config.EventConfigOptions? _cfgOptions;
     private readonly Core.Integrations.SharePointUploadClient? _sp;
 
+    // §734 — the ops notice for a removed speaker. Optional + last so existing constructions keep
+    // compiling; null simply means no mail (the removal itself still happens).
+    private readonly Core.Email.ZohoChangeNotifier? _zohoChanges;
+
     public SponsorSessionFormService(
         CommunityHubDbContext db,
         TimeProvider clock,
         Core.Config.EventEditionConfigLoader? cfg = null,
         Core.Config.EventConfigOptions? cfgOptions = null,
-        Core.Integrations.SharePointUploadClient? sp = null)
+        Core.Integrations.SharePointUploadClient? sp = null,
+        Core.Email.ZohoChangeNotifier? zohoChanges = null,
+        Core.Integrations.DocLibrary.IDocLibraryPathResolver? paths = null)
     {
         _db = db;
         _clock = clock;
         _cfg = cfg;
         _cfgOptions = cfgOptions;
         _sp = sp;
+        _zohoChanges = zohoChanges;
+        _paths = paths;
     }
+
+    private readonly Core.Integrations.DocLibrary.IDocLibraryPathResolver? _paths;
+
+    /// <summary>
+    /// §768.14 — the speaker-photo folder, from the registry. 🔒 It MUST be the same key
+    /// <c>SpeakerPhotoService</c> reads and <c>SpeakerPhotoArchiveService</c> writes: this is §764's
+    /// "speaker photos are in 1 place only" expressed as ONE key rather than three config lookups
+    /// that happen to hold the same string.
+    /// </summary>
+    private string? SpeakerPhotoFolder() =>
+        _paths is not null
+        && _paths.TryResolve(Core.Integrations.DocLibrary.DocLibraryPaths.SpeakerPhotos, out var f)
+            ? f
+            : null;
 
     private Task<string?> CompanyIdAsync(int participantId, CancellationToken ct) =>
         _db.Participants.Where(p => p.Id == participantId)
@@ -189,6 +211,92 @@ public sealed class SponsorSessionFormService : IWizardFormService
             .Distinct()
             .OrderBy(t => t)
             .ToListAsync(ct);
+
+    /// <summary>
+    /// §734 — remove ONE speaker from the sponsor's session.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-07-31: <i>"need option to remove a speaker here - it must set person as
+    /// inactive and also send email to info@expertslive.dk so we remember to remove speaker from
+    /// zoho manually"</i>, then, asked whether a dual-role person should lose their login:
+    /// <i>"remove from sesison only"</i>.</para>
+    ///
+    /// <para>🔒 <b>The link removal already existed</b> — clearing a speaker's name/email row and
+    /// saving drops the <see cref="SponsorSessionSpeaker"/> link (<i>"the Speaker participant row is
+    /// left intact"</i>). What was missing is that nobody could FIND it: it is discoverable only if
+    /// you guess that blanking three fields means "remove". So this is the same removal with a
+    /// button on it, plus the two things he asked for and the old path never did.</para>
+    ///
+    /// <para>⚠️ <b>DEACTIVATION IS CONDITIONAL, and that is his decision.</b> A sponsor-brought
+    /// speaker is very often ALSO that company's sponsor contact; deactivating them to tidy a
+    /// session line-up would take away their booth, logo and leads access as a side effect. So the
+    /// participant is deactivated ONLY when this session was their sole reason to be in the hub —
+    /// no other sponsor session, and not a Sponsor-role contact themselves. Everyone else simply
+    /// stops being on the session, which is what <i>"remove from session only"</i> asks for.</para>
+    ///
+    /// <para>The ops notice rides <see cref="Core.Email.ZohoChangeNotifier"/> rather than a new mail
+    /// identity: this IS a "CEH changed something that needs a manual Zoho action" notice, which is
+    /// exactly what that notifier is for — so it inherits §736's <c>info@</c> recipient, its
+    /// ring-exemption and its never-throws guarantee for free.</para>
+    /// </remarks>
+    public async Task<string?> RemoveSpeakerAsync(
+        int eventId, int actorParticipantId, string speakerEmail, CancellationToken ct)
+    {
+        var companyId = await CompanyIdAsync(actorParticipantId, ct);
+        if (string.IsNullOrWhiteSpace(companyId)) return null;
+
+        var wanted = (speakerEmail ?? string.Empty).Trim();
+        if (wanted.Length == 0) return null;
+
+        var session = await _db.SponsorSessions
+            .Include(s => s.Speakers)
+            .FirstOrDefaultAsync(s => s.EventId == eventId && s.SponsorCompanyId == companyId, ct);
+        if (session is null) return null;
+
+        var link = session.Speakers.FirstOrDefault(
+            s => string.Equals(s.Email, wanted, StringComparison.OrdinalIgnoreCase));
+        if (link is null) return null;
+
+        var name = link.Name;
+        var speakerPid = link.ParticipantId;
+        _db.SponsorSessionSpeakers.Remove(link);
+        await _db.SaveChangesAsync(ct);
+
+        var deactivated = false;
+        if (speakerPid is int pid)
+        {
+            // "Sole reason to be here": no OTHER sponsor-session link, and not a sponsor contact.
+            var onAnotherSession = await _db.SponsorSessionSpeakers
+                .AnyAsync(s => s.ParticipantId == pid, ct);
+            var person = await _db.Participants.FirstOrDefaultAsync(
+                p => p.Id == pid && p.EventId == eventId, ct);
+
+            if (person is not null
+                && !onAnotherSession
+                && person.Role != ParticipantRole.Sponsor
+                && person.IsActive)
+            {
+                person.IsActive = false;
+                await _db.SaveChangesAsync(ct);
+                deactivated = true;
+            }
+        }
+
+        if (_zohoChanges is not null)
+        {
+            var line = $"Removed speaker {name} ({wanted}) from sponsor session '{session.Title}'"
+                + (deactivated
+                    ? " — their hub login was deactivated (this session was their only role)."
+                    : " — their hub login was KEPT (they hold another role or session).")
+                + " Delete them in Zoho Backstage if they should no longer appear.";
+            // §763 — manualOnly: CEH removed the link on ITS side only. The Backstage speakers API
+            // has no delete endpoint either, so nothing changed over there and the mail must not say
+            // the hub "wrote" a change and ask him to publish it.
+            await _zohoChanges.NotifyAsync("Speakers", new[] { line }, ct, manualOnly: true);
+        }
+
+        return name;
+    }
 
     public async Task<WizardStepOutcome> SaveAsync(
         SponsorSessionModel model, int eventId, int participantId, string email,
@@ -288,7 +396,7 @@ public sealed class SponsorSessionFormService : IWizardFormService
             var li = Trim(linkedIns[i]);
             if (li is not null) profile.LinkedIn = li;
 
-            await TryUploadPhotoAsync(photos[i], i + 1, profile, speakers[i].Name, modelState, ct);
+            await TryUploadPhotoAsync(photos[i], i + 1, profile, modelState, ct);
         }
         await _db.SaveChangesAsync(ct);
 
@@ -344,7 +452,7 @@ public sealed class SponsorSessionFormService : IWizardFormService
     /// waits on the API question, which is a fact to look up, not a thing to try.</para>
     /// </summary>
     private async Task TryUploadPhotoAsync(
-        IFormFile? file, int rowNumber, SpeakerProfile profile, string speakerName,
+        IFormFile? file, int rowNumber, SpeakerProfile profile,
         ModelStateDictionary modelState, CancellationToken ct)
     {
         if (file is null || file.Length == 0) return;   // not provided this save
@@ -366,7 +474,8 @@ public sealed class SponsorSessionFormService : IWizardFormService
         var sp = _cfg is null || _cfgOptions is null
             ? null
             : _cfg.Load(_cfgOptions.EventConfigPath).SharePoint;
-        if (sp is null || _sp is null || string.IsNullOrWhiteSpace(sp.SpeakerPhotoFolderPath))
+        var photoFolder = SpeakerPhotoFolder();
+        if (sp is null || _sp is null || string.IsNullOrWhiteSpace(photoFolder))
         {
             // Honest failure. Silently dropping the file would leave the sponsor believing a photo
             // is on file for their speaker, and nobody would find out until the programme was laid
@@ -381,13 +490,14 @@ public sealed class SponsorSessionFormService : IWizardFormService
         {
             // Deterministic name per speaker, so re-uploading REPLACES rather than accumulating —
             // the same overwrite contract the SharePoint store documents, and it keeps PhotoUrl
-            // stable so anything already pointing at it keeps working.
-            var fileName = $"speaker-photo-{Sanitize(speakerName)}-{profile.ParticipantId}{ext}";
+            // stable so anything already pointing at it keeps working. §768.16: composed by the ONE
+            // naming function, keyed on the participant id alone.
+            var fileName = SpeakerPhotoFileName.Build(profile.ParticipantId, ext);
             // §455 — stream rather than buffer (was MemoryStream + ToArray, i.e. the file in RAM
             // twice before anything reached SharePoint).
             await using var upload = file.OpenReadStream();
             var (_, webUrl, _) = await _sp.UploadFileStreamAsync(
-                sp.SiteUrl, sp.DriveName, sp.SpeakerPhotoFolderPath, fileName, upload, file.Length,
+                sp.SiteUrl, sp.DriveName, photoFolder, fileName, upload, file.Length,
                 string.IsNullOrWhiteSpace(file.ContentType) ? "application/octet-stream" : file.ContentType,
                 ct);
 
@@ -405,14 +515,8 @@ public sealed class SponsorSessionFormService : IWizardFormService
         }
     }
 
-    /// <summary>File-name-safe form of a speaker's name (letters/digits/dash only).</summary>
-    private static string Sanitize(string name)
-    {
-        var chars = name.Trim().ToLowerInvariant()
-            .Select(c => char.IsLetterOrDigit(c) ? c : '-')
-            .ToArray();
-        return new string(chars).Trim('-') is { Length: > 0 } s ? s : "speaker";
-    }
+    // §768.16 — the name sanitiser is DELETED, not left unused: a speaker's name is no longer part
+    // of any file name, and a spare sanitiser is how a second convention comes back.
 
     /// <summary>Find an existing participant by email in the edition, or create a new Speaker
     /// participant (SponsorSelfFunded) linked to the sponsor company. Returns the participant id.</summary>

@@ -25,25 +25,48 @@ namespace CommunityHub.Jobs;
 /// </remarks>
 public sealed class SpeakerGapReportJob
 {
+    /// <summary>
+    /// §871 — the kill switch. Operator 2026-08-05: "it could be nice to have a button to DISABLE
+    /// this one, as i expect us to do that soon".
+    /// </summary>
+    /// <remarks>
+    /// ⚠️ §623 deliberately left this job UN-GATED, reasoning that a missing speaker detail must
+    /// surface regardless of any feature switch. <b>A later instruction reverses that</b>, and the
+    /// reasoning changed with the facts: most of the report is <c>Country</c>, which Backstage does
+    /// not return at all (§871.1), so the mail can never stop asking for it. An alert that cannot be
+    /// satisfied is one he learns to ignore, which is worse than no alert.
+    /// </remarks>
+    public const string FeatureKey = "speaker-gap-report";
+
     private readonly CommunityHubDbContext _db;
     private readonly SpeakerZohoGapReporter _reporter;
+    private readonly CommunityHub.Core.Settings.FeatureGateService _gate;
     private readonly ILogger<SpeakerGapReportJob> _log;
 
     public SpeakerGapReportJob(
-        CommunityHubDbContext db, SpeakerZohoGapReporter reporter, ILogger<SpeakerGapReportJob> log)
+        CommunityHubDbContext db, SpeakerZohoGapReporter reporter,
+        CommunityHub.Core.Settings.FeatureGateService gate, ILogger<SpeakerGapReportJob> log)
     {
-        _db = db; _reporter = reporter; _log = log;
+        _db = db; _reporter = reporter; _gate = gate; _log = log;
     }
 
     [Function("SpeakerGapReportJob")]
     public async Task Run(
-        // Daily at 06:20 UTC — after the nightly jobs, before the organizers start their day.
-        [TimerTrigger("0 20 6 * * *")] TimerInfo timer,
+        // §878 — BASE TICK ONLY; the cadence is the operator's interval on /Organizer/Jobs.
+        // 🔒 Safe to run often: the report is HASH-DEDUPED, so an unchanged gap set sends nothing.
+        [TimerTrigger("0 */5 * * * *")] TimerInfo timer,
         CancellationToken ct)
     {
         var eventId = await _db.Events.Where(e => e.IsActive).Select(e => (int?)e.Id)
             .FirstOrDefaultAsync(ct);
         if (eventId is null) { _log.LogWarning("SpeakerGapReportJob: no active event."); return; }
+
+        // §871 — his kill switch, checked before any Zoho call so switching it off costs nothing.
+        if (!await _gate.IsFeatureEnabledAsync(FeatureKey, eventId.Value, ct))
+        {
+            _log.LogInformation("SpeakerGapReportJob: feature '{Key}' is off — no gap mail sent.", FeatureKey);
+            return;
+        }
 
         var r = await _reporter.RunAsync(eventId.Value, ct);
 

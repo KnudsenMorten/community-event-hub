@@ -11,22 +11,26 @@ using Microsoft.Extensions.Logging;
 namespace CommunityHub.Forms.Steps;
 
 /// <summary>
-/// Render + edit model for the sponsor Logos wizard step (§32 / §285 Phase 2). Carries the three
-/// posted logo files (SoMe / Print / Zoho) + the currently-saved logo paths for display. Bound
-/// with an EMPTY prefix by the wizard host, so the IFormFile names match the partial.
+/// Render + edit model for the sponsor Logos wizard step (§32 / §285 Phase 2). Carries the two
+/// posted logo files (Web / Print) + the currently-saved logo names for display. Bound with an
+/// EMPTY prefix by the wizard host, so the IFormFile names match the partial.
 /// </summary>
+/// <remarks>
+/// §6.7 / §768.14 — there were THREE logos. The separate "Logo for the Event System (Zoho) lead
+/// system" upload is gone: one Web PNG now serves both the promotion graphics and the external
+/// event system, so a sponsor uploads their logo once instead of twice into two folders that had to
+/// be kept in step by hand.
+/// </remarks>
 public sealed class SponsorLogosModel
 {
-    public IFormFile? SoMeLogo { get; set; }    // PNG for social-media branding
+    public IFormFile? SoMeLogo { get; set; }    // PNG for web + social-media branding
     public IFormFile? PrintLogo { get; set; }   // vector (.eps/.ai/.pdf) for print
-    public IFormFile? ZohoLogo { get; set; }    // PNG for the Zoho lead system
 
-    // Display-only (never bound): the currently-saved file for EACH of the three logos, so a
-    // coordinator can see what's already uploaded (file inputs can't be pre-filled). SoMe + Zoho
-    // both persist to LogoRasterPath on SponsorInfo, so these come from the per-kind upload audit.
+    // Display-only (never bound): the currently-saved file for each logo, so a coordinator can see
+    // what's already uploaded (file inputs can't be pre-filled). They come from the per-kind upload
+    // audit rather than SponsorInfo, which stores only raster-vs-vector.
     public string? CurrentSoMeFileName { get; set; }
     public string? CurrentPrintFileName { get; set; }
-    public string? CurrentZohoFileName { get; set; }
 }
 
 /// <summary>
@@ -51,13 +55,17 @@ public sealed class SponsorLogosFormService : IWizardFormService
     private readonly SharePointUploadClient _sp;
     private readonly CompanyManagerClient _cm;
     private readonly CompanyManagerOptions _cmOptions;
+    private readonly CommunityHub.Core.Integrations.DocLibrary.IDocLibraryPathResolver _paths;
     private readonly ILogger<SponsorLogosFormService> _log;
 
     public SponsorLogosFormService(
         CommunityHubDbContext db, TimeProvider clock, EventEditionConfigLoader cfg,
         EventConfigOptions cfgOptions, SharePointUploadClient sp, CompanyManagerClient cm,
-        CompanyManagerOptions cmOptions, ILogger<SponsorLogosFormService> log)
+        CompanyManagerOptions cmOptions,
+        CommunityHub.Core.Integrations.DocLibrary.IDocLibraryPathResolver paths,
+        ILogger<SponsorLogosFormService> log)
     {
+        _paths = paths;
         _db = db;
         _clock = clock;
         _cfg = cfg;
@@ -67,8 +75,6 @@ public sealed class SponsorLogosFormService : IWizardFormService
         _cmOptions = cmOptions;
         _log = log;
     }
-
-    private sealed record UploadSpec(string Folder, string Prefix, string[] Exts, long MaxBytes);
 
     private Task<string?> CompanyIdAsync(int participantId, CancellationToken ct) =>
         _db.Participants.Where(p => p.Id == participantId)
@@ -80,21 +86,24 @@ public sealed class SponsorLogosFormService : IWizardFormService
         var model = new SponsorLogosModel();
         if (companyId is null) return model;
 
-        // Latest uploaded file per kind (some/print/zoho) from the audit — the only place all three
-        // are distinguishable (SoMe + Zoho share LogoRasterPath on SponsorInfo).
+        // Latest uploaded file per kind (some/print) from the audit — the only place the two are
+        // distinguishable, since SponsorInfo records only raster-vs-vector.
         var latest = await LatestByKindAsync(_db, eventId, companyId, ct);
         model.CurrentSoMeFileName = latest.GetValueOrDefault("some");
         model.CurrentPrintFileName = latest.GetValueOrDefault("print");
-        model.CurrentZohoFileName = latest.GetValueOrDefault("zoho");
         return model;
     }
 
-    /// <summary>Latest uploaded file name per logo kind (some/print/zoho) for a company.</summary>
+    /// <summary>Latest uploaded file name per logo kind (some/print) for a company.</summary>
+    /// <remarks>
+    /// §768.14 — historical <c>zoho</c> rows are deliberately NOT read back. The kind is retired, so
+    /// showing one would offer a sponsor a "current file" for an upload that no longer exists.
+    /// </remarks>
     internal static async Task<Dictionary<string, string>> LatestByKindAsync(
         CommunityHubDbContext db, int eventId, string companyId, CancellationToken ct) =>
         (await db.SponsorUploadAudits.AsNoTracking()
             .Where(a => a.EventId == eventId && a.SponsorCompanyId == companyId
-                        && (a.Kind == "some" || a.Kind == "print" || a.Kind == "zoho"))
+                        && (a.Kind == "some" || a.Kind == "print"))
             .GroupBy(a => a.Kind)
             .Select(g => new { Kind = g.Key, FileName = g.OrderByDescending(x => x.UploadedAt).Select(x => x.FileName).First() })
             .ToListAsync(ct))
@@ -110,11 +119,10 @@ public sealed class SponsorLogosFormService : IWizardFormService
         var sp = _cfg.Load(_cfgOptions.EventConfigPath).SharePoint;
         var sponsorName = await ResolveSponsorNameAsync(companyId, ct);
 
-        // Upload whichever of the three logos were provided this save; each is independent.
+        // Upload whichever of the two logos were provided this save; each is independent.
         var uploaded = 0;
         uploaded += await TryUploadAsync(model.SoMeLogo, "some", eventId, companyId, email, sponsorName, sp, modelState, ct);
         uploaded += await TryUploadAsync(model.PrintLogo, "print", eventId, companyId, email, sponsorName, sp, modelState, ct);
-        uploaded += await TryUploadAsync(model.ZohoLogo, "zoho", eventId, companyId, email, sponsorName, sp, modelState, ct);
 
         // A validation error on ANY file re-renders the step; otherwise advance (uploads are
         // optional — a sponsor may add a logo later).
@@ -129,7 +137,9 @@ public sealed class SponsorLogosFormService : IWizardFormService
     {
         if (file is null || file.Length == 0) return 0;   // not provided this save
 
-        var fieldKey = kind switch { "print" => nameof(SponsorLogosModel.PrintLogo), "zoho" => nameof(SponsorLogosModel.ZohoLogo), _ => nameof(SponsorLogosModel.SoMeLogo) };
+        var fieldKey = kind == "print"
+            ? nameof(SponsorLogosModel.PrintLogo)
+            : nameof(SponsorLogosModel.SoMeLogo);
 
         var spec = ResolveKind(kind, sp);
         if (spec is null)
@@ -143,9 +153,9 @@ public sealed class SponsorLogosFormService : IWizardFormService
             return 0;
         }
         var ext = Path.GetExtension(file.FileName).ToLowerInvariant();
-        if (!spec.Exts.Contains(ext))
+        if (!spec.Accepts(ext))
         {
-            modelState.AddModelError(fieldKey, $"Unsupported file type. Allowed: {string.Join(", ", spec.Exts)}.");
+            modelState.AddModelError(fieldKey, $"Unsupported file type. Allowed: {spec.AllowedText}.");
             return 0;
         }
 
@@ -154,15 +164,15 @@ public sealed class SponsorLogosFormService : IWizardFormService
             // §455 — STREAM rather than buffer. A print logo is a VECTOR file allowed up to 25 MB,
             // and the old path held it in memory twice (MemoryStream + ToArray) before anything
             // reached SharePoint. Same shape as the speaker-upload failure that motivated §455.
-            var fileName = await NextVersionedNameAsync(
-                sp!.SiteUrl, sp.DriveName, spec.Folder, spec.Prefix, SanitizeNameComponent(sponsorName), ext, ct);
+            var fileName = await CommunityHub.Uploads.SponsorUploadKinds.NextVersionedNameAsync(
+                _sp, sp!.SiteUrl, sp.DriveName, spec.Folder, kind, sponsorName, ext, _log, ct);
             await using var upload = file.OpenReadStream();
             var (_, webUrl, _) = await _sp.UploadFileStreamAsync(
                 sp.SiteUrl, sp.DriveName, spec.Folder, fileName, upload, file.Length,
                 string.IsNullOrWhiteSpace(file.ContentType) ? "application/octet-stream" : file.ContentType, ct);
 
-            // Persist the logo location so the "logos" step completes (§291). SoMe + Zoho are
-            // raster PNGs → LogoRasterPath; the print logo is vector → LogoVectorPath.
+            // Persist the logo location so the "logos" step completes (§291). The Web logo is a
+            // raster PNG → LogoRasterPath; the print logo is vector → LogoVectorPath.
             var info = await GetOrCreateInfoAsync(eventId, companyId, ct);
             if (kind == "print") { info.LogoVectorPath = webUrl; info.LogoVectorFileName = fileName; }
             else                 { info.LogoRasterPath = webUrl; info.LogoRasterFileName = fileName; }
@@ -186,56 +196,27 @@ public sealed class SponsorLogosFormService : IWizardFormService
         }
     }
 
-    // ---- helpers replicated from CompanyDetailsModel so the two stay byte-consistent ----------
+    // ---- the shared rules, no longer replicated ------------------------------------------------
 
-    private UploadSpec? ResolveKind(string kind, SharePointEditionConfig? sp)
-    {
-        if (sp is null || string.IsNullOrWhiteSpace(sp.SiteUrl) || !_sp.IsConfigured) return null;
-        return kind switch
-        {
-            "some" when !string.IsNullOrWhiteSpace(sp.LogoSoMeBrandingFolderPath) =>
-                new(sp.LogoSoMeBrandingFolderPath, "SoMeBrandingLogo_", new[] { ".png" }, 5 * Mb),
-            "print" when !string.IsNullOrWhiteSpace(sp.LogoPrintFolderPath) =>
-                new(sp.LogoPrintFolderPath, "PrintLogo_", new[] { ".eps", ".ai", ".pdf" }, 25 * Mb),
-            "zoho" when !string.IsNullOrWhiteSpace(sp.LogoZohoFolderPath) =>
-                new(sp.LogoZohoFolderPath, "ZohoLogo_", new[] { ".png" }, 5 * Mb),
-            _ => null,
-        };
-    }
+    /// <summary>
+    /// §768.14 — delegates to <see cref="SponsorUploadKinds.Resolve"/>.
+    /// </summary>
+    /// <remarks>
+    /// 🔒 This was the FOURTH copy of the upload rules, and its own section header described the
+    /// mechanism keeping it correct: <i>"helpers replicated from CompanyDetailsModel so the two stay
+    /// byte-consistent"</i>. Nothing enforced that. §768.13 collapsed the Company Details copy and
+    /// left this one, so for one day the wizard and the page really did disagree — this file still
+    /// wrote <c>ZohoLogo_</c>, <c>SoMeBrandingLogo_</c> and the old <c>_v{N}</c> names. A sponsor's
+    /// logo would land under a different name depending on whether they used the wizard or the page,
+    /// and the graphics matcher only ever looked for one of them.
+    /// </remarks>
+    private CommunityHub.Uploads.SponsorUploadSpec? ResolveKind(string kind, SharePointEditionConfig? sp) =>
+        _sp.IsConfigured
+            ? CommunityHub.Uploads.SponsorUploadKinds.Resolve(kind, _paths, sp)
+            : null;
 
-    private async Task<string> NextVersionedNameAsync(
-        string siteUrl, string driveName, string folder, string prefix, string sponsor, string ext, CancellationToken ct)
-    {
-        var stem = $"{prefix}{sponsor}_v";
-        var next = 1;
-        try
-        {
-            var files = await _sp.ListFolderFilesAsync(siteUrl, driveName, folder, ct);
-            var rx = new Regex("^" + Regex.Escape(stem) + @"(\d+)\b", RegexOptions.IgnoreCase);
-            var max = files.Select(f => rx.Match(f.Name)).Where(m => m.Success)
-                .Select(m => int.TryParse(m.Groups[1].Value, out var n) ? n : 0).DefaultIfEmpty(0).Max();
-            next = max + 1;
-        }
-        catch (Exception ex)
-        {
-            _log.LogWarning(ex, "Sponsor logos inline step: could not list {Folder} to version; defaulting to v1.", folder);
-        }
-        return $"{stem}{next}{ext}";
-    }
-
-    private static int ParseVersion(string fileName)
-    {
-        var m = Regex.Match(fileName, @"_v(\d+)\b", RegexOptions.IgnoreCase);
-        return m.Success && int.TryParse(m.Groups[1].Value, out var n) && n > 0 ? n : 1;
-    }
-
-    private static string SanitizeNameComponent(string? name)
-    {
-        if (string.IsNullOrWhiteSpace(name)) return "Sponsor";
-        var cleaned = new string(name.Where(c => "\"*:<>?/\\|".IndexOf(c) < 0).ToArray());
-        cleaned = string.Join(" ", cleaned.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
-        return string.IsNullOrWhiteSpace(cleaned) ? "Sponsor" : cleaned;
-    }
+    private static int ParseVersion(string fileName) =>
+        CommunityHub.Uploads.SponsorUploadNaming.ParseVersion(fileName);
 
     private async Task<SponsorInfo> GetOrCreateInfoAsync(int eventId, string companyId, CancellationToken ct)
     {

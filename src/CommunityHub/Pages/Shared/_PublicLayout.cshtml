@@ -9,6 +9,10 @@
     these pages look and behave identically — minus the chrome. Auth pages keep using
     _Layout and are completely unaffected by anything here.
 *@
+@* §839 — the EVENT NAME for the share card. ActiveEventNameProvider is a BRANDING lookup, not an
+   auth or nav service, so injecting it keeps the rule this layout is built on ("NO auth/nav
+   services", so an internal view cannot leak) fully intact. *@
+@inject CommunityHub.Branding.ActiveEventNameProvider ActiveEvent
 @{
     Layout = null;
 
@@ -22,6 +26,34 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>@ViewData["Title"]</title>
+    @* 🔴 §839 — THIS IS THE LAYOUT THAT ACTUALLY BIT HIM. The anonymous pages — sign-in, magic
+       link, the surveys, the volunteer signup — render here, NOT in _Layout. And the root "/"
+       redirects an anonymous visitor to /Login by design (2026-06-21, no public landing page), so
+       ANY shared CEH link that needs sign-in was previewed by LinkedIn/Teams as the sign-in page:
+       exactly "icons defaults to signin which confuses people".
+
+       ⇒ The card names the EVENT even when the page behind it is a sign-in form. The page still
+       asks for a login; the preview no longer says the event is behind one. *@
+    @{
+        var pubReq = Context.Request;
+        var pubOrigin = $"{pubReq.Scheme}://{pubReq.Host}";
+        var pubSite = ActiveEvent.GetCommunityName();
+        var pubTitle = (ViewData["OgTitle"] as string) ?? pubSite;
+        var pubDescription = (ViewData["OgDescription"] as string)
+                             ?? $"{pubSite} — agenda, sessions, speakers and sponsors.";
+        var pubImage = (ViewData["OgImage"] as string) ?? $"{pubOrigin}/img/logo-eldk27-event.png";
+    }
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="@pubSite" />
+    <meta property="og:title" content="@pubTitle" />
+    <meta property="og:description" content="@pubDescription" />
+    <meta property="og:url" content="@($"{pubOrigin}{pubReq.Path}")" />
+    <meta property="og:image" content="@pubImage" />
+    <meta name="description" content="@pubDescription" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="@pubTitle" />
+    <meta name="twitter:description" content="@pubDescription" />
+    <meta name="twitter:image" content="@pubImage" />
     <partial name="_LayoutStyles" />
 </head>
 <body>
