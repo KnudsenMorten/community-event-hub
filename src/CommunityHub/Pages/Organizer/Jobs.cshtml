@@ -220,11 +220,35 @@
                         </td>
                         <td>
                             @CommunityHub.Pages.Organizer.JobsModel.Ago(r.LastRunAt)
-                            @if (r.ThrottledCount > 0)
+                            @* 🔒 §868.2 — THIS READOUT WAS READ AS AN ALARM, AND IT IS NOT ONE.
+                               Operator 2026-08-05 screenshotted "skipped 1167x by the limit" beside
+                               Speaker change detection and reported the job as broken. Measured in
+                               PROD the same evening: it had run 5 minutes earlier and succeeded.
+
+                               1167 is a LIFETIME counter that is never reset, and since §878 made
+                               every timer job interval-driven, EVERY row now accumulates it forever
+                               by design: a 5-minute base tick under a 10-minute interval skips half
+                               its ticks on purpose. A bare, unbounded number next to "last run"
+                               therefore says "something is being blocked" when the truth is "this
+                               job is old". ⇒ Say what the number IS, and only where it can still
+                               mean something.
+
+                               ⚠️ It is NOT deleted: on a job the operator has deliberately slowed
+                               (his own MinIntervalMinutes), the skips are the control biting, and
+                               §327 put them here so a limit could be seen working rather than
+                               inferred. That case keeps the count; the base-tick case gets a
+                               sentence instead of a scoreboard. *@
+                            @if (r.ThrottledCount > 0 && r.MinIntervalMinutes > 0)
                             {
                                 <div class="jb-what">
-                                    skipped @r.ThrottledCount&times; by the limit
+                                    your limit has held it back @r.ThrottledCount&times; in total
                                     (last @CommunityHub.Pages.Organizer.JobsModel.Ago(r.LastThrottledAt))
+                                </div>
+                            }
+                            else if (r.ThrottledCount > 0)
+                            {
+                                <div class="jb-what" title="The timer offers this job a turn more often than its interval; the extra turns are skipped on purpose. This is normal and not a fault.">
+                                    spare ticks skipped between runs &mdash; normal
                                 </div>
                             }
                         </td>

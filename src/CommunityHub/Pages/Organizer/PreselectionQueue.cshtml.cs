@@ -78,18 +78,20 @@ public class PreselectionQueueModel : PageModel
 
         var result = await _activation.ActivateAndOnboardAsync(
             me.EventId, new[] { participantId }, ct);
-        string msg;
-        if (result.Queue.RefusedUncategorizedSpeakerIds.Contains(participantId))
-        {
-            // §299 6.1 hard gate: an uncategorized speaker cannot be activated.
-            msg = PreselectionQueueService.UncategorizedSpeakerMessage;
-        }
-        else
-        {
-            msg = result.Queue.Changed == 1
-                ? $"Participant activated, {result.OnboardingEmailsSent} onboarding email(s) sent."
-                : "No change (already at or beyond that state).";
-        }
+
+        // ⚰️ §880.4 — the "uncategorized SPEAKER refused" branch was here and is GONE. It could not
+        // fire: `PreselectionQueueService.QueueRows` filters `Role == Volunteer` (§756), so every id
+        // this page can submit belongs to a volunteer, and a volunteer has no speaker category to
+        // be missing. Its only real effect was to tell the next reader that speakers land in this
+        // queue. They do not — they have their own door at /Organizer/PendingSpeakers.
+        //
+        // 🔒 THE GATE ITSELF IS UNTOUCHED. `ParticipantActivationService` still refuses an
+        // uncategorized speaker and still reports it in `RefusedUncategorizedSpeakerIds`
+        // (§299 6.1, covered directly by PreselectionQueueServiceTests). What was removed is one
+        // page's rendering of an outcome that page cannot produce.
+        var msg = result.Queue.Changed == 1
+            ? $"Participant activated, {result.OnboardingEmailsSent} onboarding email(s) sent."
+            : "No change (already at or beyond that state).";
         return RedirectToPage(new { SourceFilter, Msg = msg });
     }
 
@@ -113,17 +115,14 @@ public class PreselectionQueueModel : PageModel
         var result = await _activation.ActivateAndOnboardAsync(me.EventId, SelectedIds, ct);
         var q = result.Queue;
         var skipped = q.Skipped(requested);
-        var refused = q.RefusedUncategorizedSpeakerIds.Count;
-        var alreadyThere = q.Matched - q.Changed - refused;
+        // ⚰️ §880.4 — the "N speaker(s) NOT activated" sentence was here and is GONE, for the reason
+        // given on the single-row handler above: this queue is volunteers only (§756), so the
+        // refusal it described cannot occur here. The service-side gate is untouched.
+        var alreadyThere = q.Matched - q.Changed;
         var msg = $"{q.Changed} row(s) activated"
             + (alreadyThere > 0 ? $", {alreadyThere} already there" : string.Empty)
             + (skipped > 0 ? $", {skipped} not found" : string.Empty)
-            + $", {result.OnboardingEmailsSent} onboarding email(s) sent."
-            // §299 6.1 hard gate: uncategorized speakers in the batch are refused.
-            + (refused > 0
-                ? $" {refused} speaker(s) NOT activated: "
-                  + PreselectionQueueService.UncategorizedSpeakerMessage
-                : string.Empty);
+            + $", {result.OnboardingEmailsSent} onboarding email(s) sent.";
         return RedirectToPage(new { SourceFilter, Msg = msg });
     }
 
