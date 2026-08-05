@@ -3129,3 +3129,17 @@ shared value — because `0` already means *"send once, never repeat"* and canno
 **Every interval counts from the last send to that person**, never from a fixed calendar date, and
 the chase still stops the moment that person is done. The shared box now also says when a role has
 broken away from it, so a number you are looking at never quietly governs fewer people than you think.
+
+## 74. The post editor tells you when an edit is unsaved *(✅ 2026-08-05)*
+
+Walking a campaign means pressing **Next** a lot — and **Next** is an ordinary link, so anything typed
+into the post text and not saved was simply gone, with nothing said. That is not hypothetical: it
+cost a post that published carrying a paragraph that had already been deleted.
+
+**Now the editor says so.** The moment the text differs from what loaded, an **"Unsaved changes"**
+marker appears next to **Save post text**, and leaving the page — pressing Next or Previous, or any
+other action on the page — asks you to confirm first. Saving never asks, because saving is the thing
+it is protecting.
+
+**Why the other buttons warn too:** approving, deleting or rescheduling reloads the page, which
+discards the box as well. If your edit would be lost, you are told — whichever button loses it.
