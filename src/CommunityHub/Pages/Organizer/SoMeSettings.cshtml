@@ -80,6 +80,104 @@
             <label for="notify">Email the notification list when a post publishes</label>
         </div>
 
+        @* 🔴 §918 — the two knobs, with the rules stated NEXT TO THEM. Operator 2026-08-06:
+           *"document the auto-approval process in the menu for us to understand"*. The full
+           explanation lives on the Post planner page; this is the short version at the switch,
+           because that is where someone decides. *@
+        <h3 style="margin-top:18px;">Auto-approval</h3>
+        <div class="som-check">
+            <input type="checkbox" id="autoapprove" name="AutoApproveEnabled" value="true" @(Model.AutoApproveEnabled ? "checked" : "") />
+            <label for="autoapprove">Approve template-built posts automatically</label>
+        </div>
+        <p class="muted">
+            Types 1–4 only, and only posts that are far enough ahead and have nothing missing.
+            Anything you wrote or edited yourself — including every event post — still waits for you.
+            <a asp-page="/Organizer/SoMeScheduler">How auto-approval works</a>.
+        </p>
+
+        <label for="autolead">Approve only posts at least this many days ahead</label>
+        <input id="autolead" name="AutoApproveLeadDays" type="number" min="1" max="365"
+               value="@Model.AutoApproveLeadDays" />
+        <p class="muted">
+            Doubles as your review window: an auto-approved post cannot publish for at least this
+            long, so there is always time to change or un-approve it. Posts sooner than this — and
+            any whose time has already passed — are always left for you.
+        </p>
+
+        @* §927 — his own exclusion list, with the matches shown next to it. A filter you cannot
+           see the effect of is a filter you have to test in production. *@
+        <label for="excltitles">Never announce sessions whose title matches</label>
+        <textarea id="excltitles" name="ExcludedSessionTitlePatterns" rows="3"
+                  placeholder="ask the experts*">@Model.ExcludedSessionTitlePatterns</textarea>
+        <p class="som-hint">
+            One pattern per line. <code>*</code> matches anything, so <code>ask the experts*</code>
+            covers every Ask-the-Experts session. Case does not matter. Empty = nothing excluded.
+            These sessions get no automatic post at all — write your own if you want one.
+        </p>
+        @if (Model.ExcludedSessionTitles.Count > 0)
+        {
+            <p class="muted" style="margin-top:-4px;">
+                Currently matching <strong>@Model.ExcludedSessionTitles.Count</strong> session(s):
+                @string.Join(" · ", Model.ExcludedSessionTitles)
+            </p>
+        }
+        else if (!string.IsNullOrWhiteSpace(Model.ExcludedSessionTitlePatterns))
+        {
+            <p class="muted" style="margin-top:-4px;">
+                No session titles match these patterns right now.
+            </p>
+        }
+
+        @* §928 — the two dates that decide WHEN a category is announced. They were previously
+           invisible: SpeakerAnnouncementFrom was set straight on the database and could only be
+           read there, which §925.1 called out as load-bearing and unprotectable. *@
+        <hr style="border:none;border-top:1px solid #e5e7eb;margin:26px 0;" />
+        <h2 style="margin-bottom:4px;">Announcement windows</h2>
+        <p class="som-hint" style="margin-top:0;">
+            When each part of the campaign is allowed to start. Leave a date empty to spread that
+            category evenly across the whole run-up like everything else.
+        </p>
+
+        <label for="speakerfrom">Speaker posts (tracks and sessions) not before</label>
+        <input type="date" id="speakerfrom" name="SpeakerAnnouncementFrom"
+               value="@(Model.SpeakerAnnouncementFrom?.ToString("yyyy-MM-dd"))" />
+        <p class="som-hint">
+            Your Call for Speakers deadline plus the week you spend selecting. A track post lists
+            that track's speakers, so publishing before this date announces a line-up that does not
+            exist yet — and a published post can never pick anyone up afterwards.
+        </p>
+        @if (Model.SpeakerAnnouncementFrom is null)
+        {
+            @* 🔴 §925.1 — this is not a tidy-up prompt. The settle signal cannot yet tell a track
+               that has FINISHED from one that has not STARTED, so with this cleared every track
+               reads as ready and all eight go out at once. *@
+            <p class="error" role="alert" style="font-size:13.5px;margin-top:-4px;">
+                Empty — so every speaker track can be announced <strong>immediately</strong>. Each
+                track currently holds only its confirmed master classes, so those posts would name a
+                handful of speakers out of the full programme. Set this date unless you mean it.
+            </p>
+        }
+
+        <label for="mcfrom">Master class announcements start</label>
+        <input type="date" id="mcfrom" name="MasterClassAnnouncementFrom"
+               value="@(Model.MasterClassAnnouncementFrom?.ToString("yyyy-MM-dd"))" />
+        <p class="som-hint">
+            The master classes go out <strong>together</strong> from this day, filling forward at
+            your normal posts-per-day, instead of being spread across the months to the event.
+            Empty = spread them like any other session.
+        </p>
+        @if (Model.MasterClassAnnouncementFrom is not null && Model.MasterClassTitles.Count > 0)
+        {
+            @* ⚠️ Said plainly: this is the one setting that moves posts you have already approved. *@
+            <p class="muted" style="margin-top:-4px;">
+                Covers <strong>@Model.MasterClassTitles.Count</strong> master class(es):
+                @string.Join(" · ", Model.MasterClassTitles).
+                Saving moves their posts — <strong>including ones you have already approved</strong>
+                — into this window on the next scheduler run. Only the date changes; the wording and
+                the approval stay as they are.
+            </p>
+        }
+
         <label for="notifylist">Publish notification email list</label>
         <textarea id="notifylist" name="NotificationEmails" rows="3"
                   placeholder="one@example.org, two@example.org">@Model.NotificationEmails</textarea>
@@ -121,9 +219,36 @@
         <textarea id="orgcredits" name="OrganizerCredits" rows="2"
                   placeholder="Morten Waltorp Knudsen [MVP] | Martin Byskov | Kent Agerlund | Morten Leth Hedegaard">@Model.OrganizerCredits</textarea>
         <p class="som-hint">
-            Names as they should read. <strong>Not @@-mentions</strong> — LinkedIn only turns a name
-            into a mention when a human types it in their own composer, and a personal profile cannot
-            be resolved to a mention through the API.
+            Names as they should read, in plain text. Real <strong>@@-mentions</strong> of people are
+            handled separately by <code>{Speakers}</code>, <code>{SponsorSigner}</code> and
+            <code>{SponsorEventCoordinators}</code> — those tag anyone who <strong>follows the
+            page</strong> and fall back to a plain name for everyone else.
+        </p>
+
+        <label for="venuecitycountry">City &amp; country (<code>{EventVenueCityCountry}</code>)</label>
+        <input id="venuecitycountry" name="EventVenueCityCountry" type="text"
+               value="@Model.EventVenueCityCountry" placeholder="Bella Center, Copenhagen, Denmark" />
+        <p class="som-hint">
+            As a post should read it. Typed rather than derived: the venue is stored as one name
+            ("Bella Center Copenhagen"), and splitting a city out of that would be a guess printed
+            on a live post.
+        </p>
+
+        <label for="actioncatalog">Action phrases (<code>{Action_catalog_random}</code>)</label>
+        <textarea id="actioncatalog" name="ActionCatalog" rows="6"
+                  placeholder="See you there! &#127881;&#10;Grab your ticket now &#127915;&#10;Don't miss it &#9889;">@Model.ActionCatalog</textarea>
+        <p class="som-hint">
+            <strong>One phrase per line</strong>, emoji welcome. Each post draws one at random when it
+            is created, so a long campaign does not close the same way every time.
+            @if (Model.ActionPhraseCount > 0)
+            {
+                <strong>@Model.ActionPhraseCount phrase(s) in the catalog.</strong>
+            }
+            <br />
+            A post <strong>keeps</strong> the phrase it drew, so editing this list changes
+            <strong>future</strong> posts — it never rewrites one you have already approved.
+            Avoid <code>@@ [ ] ( )</code>: LinkedIn treats them as formatting and the post would
+            publish with backslashes through it (saving will tell you which phrase is at fault).
         </p>
 
         <div><button type="submit" class="btn">Save settings</button></div>
@@ -131,5 +256,5 @@
 </div>
 
 <p><a asp-page="/Organizer/SoMeTemplates">SoMe post templates</a> ·
-   <a asp-page="/Organizer/SoMeQueue">Go to the SoMe queue</a> ·
+   <a asp-page="/Organizer/SoMeQueue">Go to the Calendar for LinkedIn Posts</a> ·
    <a asp-page="/Index">Back to hub</a></p>

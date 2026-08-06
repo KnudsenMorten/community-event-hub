@@ -1946,6 +1946,25 @@ steps. Posts whose sponsor has not yet delivered both their **logo and their soc
 held back and named, so you know exactly who to chase. When a post does go out, the organizers are
 e-mailed with a **link to the live post**, the graphic it used, and the exact text that published.
 
+### What a post waits for, and what never gets one *(✅ 2026-08-06)*
+
+**A post cannot go out with a blank in it.** If any value the post needs is still missing — a
+sponsor's own social-media text, a session's teaser — the post is held and **tells you which value it
+is waiting for**, in words you can act on. It becomes approvable by itself the moment the value
+arrives; nobody has to come back and re-check it.
+
+**A session is announced from its description.** The short teaser in a session post is written from
+the session's own description, so a session that has none is held rather than announced — an
+announcement assembled without it would describe the talk in words nobody wrote. Add the description
+and the post is ready.
+
+**Sessions you never want posted about.** Some sessions are a format rather than a talk — open
+"ask the experts" slots, house-keeping items — and an automatic announcement for them makes no
+sense. Enter a **title filter** in the social-media settings (one per line; `*` matches anything, so
+`ask the experts*` covers all of them) and those sessions are left out of the campaign entirely. The
+settings page **lists the sessions each filter currently matches**, so you can see what a filter does
+before it does it, and an empty filter list excludes nothing.
+
 ## 15. Social-media graphics & shared file store *(✅ 2026-06-15)*
 
 The hub now produces **ready-to-share social graphics** for speakers and sponsors, keeps every
@@ -3143,3 +3162,121 @@ it is protecting.
 
 **Why the other buttons warn too:** approving, deleting or rescheduling reloads the page, which
 discards the box as well. If your edit would be lost, you are told — whichever button loses it.
+
+## 75. Tag your speakers in the event's social posts *(✅ 2026-08-06)*
+
+A post that names a speaker is worth far more when it actually **tags** them — the speaker is
+notified, it appears on their profile, and their network sees it. Until now the hub could only write
+names as plain text, so every tag was a manual job somebody did afterwards, if they remembered.
+
+**Now the hub tags them for you.** A new `{Speakers}` variable lists the speakers on a session or a
+track and turns each one into a real LinkedIn mention wherever it can. Drop it into any post template
+and the tagging happens at publish time.
+
+**It uses LinkedIn's own official lookup** — no third-party service, no scraping, nothing that puts
+the event's page at risk, and no personal data leaving the hub to anyone else.
+
+**The honest part: not everyone can be tagged.** LinkedIn only allows a company page to mention people
+who **follow that page**. That is their rule, not a limitation of the hub, and it applies even when
+the hub knows exactly who the person is. So:
+
+- a speaker who follows the page is **tagged properly**;
+- a speaker who does not is shown by their **full name**, exactly as before — the post still reads
+  correctly and nobody is left out of the text.
+
+**You are told who was not tagged, every time.** Rather than quietly publishing a half-tagged post,
+the hub lists each speaker it could not mention, why, and a link straight to their profile — so you
+can tag them by hand in seconds if you want to. Measured on a real line-up, roughly **three in four**
+speakers could be tagged automatically.
+
+**A practical tip that costs nothing:** ask your speakers to follow the event page during onboarding.
+Every one who does becomes automatically taggable in every future post — the coverage goes up on its
+own, with no work from the organizing team.
+
+**`{SpeakerNames}` is unchanged**, and still writes plain names for copy where you would rather not
+tag anybody.
+
+## 76. Tag the sponsor's own people in their announcement *(✅ 2026-08-06)*
+
+A sponsor announcement that tags the **company** is good. One that also tags the **people who signed
+the deal and run the event for them** is far better — they are notified personally, it appears on
+their own feed, and their colleagues see it. That is the difference between a post the sponsor
+notices and one they scroll past.
+
+**Two new variables for the sponsor template:**
+
+- **`{SponsorSigner}`** — whoever signed the sponsorship
+- **`{SponsorEventCoordinators}`** — the people running the event on the sponsor's side
+
+They sit on their own line after a blank one, so the post reads normally and the tags are clearly a
+footer rather than part of the sentence:
+
+```
+… Learn more at contoso.com.
+
+Tag: {SponsorSigner} {SponsorEventCoordinators}
+```
+
+**Everyone is tagged, not just the first.** A company with two signers or three coordinators gets all
+of them — nobody is silently dropped from their own announcement. Somebody who is both signer and
+coordinator appears once, because being tagged twice in one post looks like a mistake.
+
+**The same honest limit as speaker tagging applies.** LinkedIn only lets a company page mention people
+who **follow that page**. Anyone who doesn't is shown by their full name instead, and the hub tells
+you who it could not tag so you can do it by hand. On a real sponsor list roughly **half** of signers
+and coordinators are taggable today — so expect the fallback here more often than for speakers, and
+treat "ask them to follow the page" as part of sponsor onboarding.
+
+**If a sponsor has no contacts on file, the "Tag:" line simply does not appear** — the post never
+publishes a bare label with nothing after it.
+
+## 77. Every mentionable person is remembered, once *(✅ 2026-08-06)*
+
+Looking someone up on LinkedIn is slow and rate-limited, and their id never changes — so the hub
+resolves each person **once** and remembers it. A daily background job quietly fills in anyone new,
+skipping everybody already known.
+
+**It covers speakers and sponsor contacts alike**, because a speaker, a signer and an event
+coordinator are all just people with a LinkedIn account.
+
+**Two things it deliberately refuses to do:**
+
+- **It never guesses.** If two people with the same name both follow your page, the hub compares their
+  actual profile links before deciding — and if it still cannot tell, it says so rather than tagging
+  the wrong person on your company page.
+- **It never treats a failure as an answer.** If a lookup fails because LinkedIn is rate-limiting,
+  that is reported as a failure — not as "this person doesn't follow you". The distinction matters:
+  one is permanent, the other clears by itself, and the job retries the second next time.
+
+## 78. Announce your master classes together, in the week you choose *(✅ 2026-08-06)*
+
+The scheduler's default instinct is to **spread** — every announcement gets its own day, evenly across
+the months before the event, so no single week is crowded and no type of post disappears for a month.
+That is right for almost everything, and wrong for the one thing you want to land as a **moment**.
+
+Master classes are that thing. They are confirmed long before the rest of the programme, they are what
+people buy an extra day for, and announcing them one at a time from August to February is not an
+announcement — it is a drip.
+
+**Now you can name the week.** Set a start date for the master-class announcements and they all go out
+from that day, filling forward at your normal posts-per-day, in one recognisable run. Leave the date
+empty and nothing changes: they spread like every other session, exactly as before.
+
+**It moves the posts you have already approved — and it tells you it did.** This is the part that
+makes the feature actually work rather than merely exist. Once a post has been approved it is frozen
+against re-planning, on purpose: the scheduler must never quietly rewrite something you have read and
+accepted. So a date that only steered *future* posts would have changed nothing you could see. Instead
+the hub moves the existing rows, in **both directions** — a master class that had drifted into December
+comes back to your week — and the run report says how many were moved.
+
+**Only the date changes.** The wording, the picture, the approval and everything else stay exactly as
+you left them. Nothing is re-written, nothing needs approving again.
+
+**Your posts-per-day limit still wins.** Master classes fill in *around* whatever is already booked
+that week rather than pushing anything aside, so a busy week simply carries the last couple of
+announcements into the following days. A crowded feed was never the goal.
+
+**Both announcement dates now live on the settings page.** The date that holds the *speaker* campaign
+back until your Call for Speakers has been decided used to be invisible — it could only be changed in
+the database. It is now shown alongside the master-class date, with a warning when it is empty,
+because a setting that important should be one you can check rather than one you have to remember.

@@ -121,21 +121,26 @@ public sealed record BackstageSpeaker(
     string? Email = null)
 {
     /// <summary>
-    /// 🔒 §623 / §582 — <b>COUNTRY IS NOT READABLE FROM ZOHO. NEVER DIFF IT.</b>
+    /// ✅ §893 — <b>COUNTRY *IS* READABLE. THE §623 FINDING WAS AN ARTEFACT OF THE SAMPLE.</b>
     /// </summary>
     /// <remarks>
-    /// Verified live 2026-07-29 against BOTH the speakers list and the per-id record: the response
-    /// carries `id, email, first_name, last_name, status, featured, joined_on, added_on, company,
-    /// designation, description, skills, telephone, alternate_telephone, twitter, facebook,
-    /// telegram, linkedin, instagram, medium` — and **no `country` at all**. <see cref="Country"/>
-    /// is therefore always null on a read, whatever Zoho actually holds.
+    /// <para>🔴 <b>Why the old conclusion was wrong, and it is worth knowing:</b> Zoho <b>omits an
+    /// unset field entirely</b> — the key is absent from the JSON, not returned as null or "". On
+    /// 2026-07-29 every speaker inspected happened to have no country set, so the field was missing
+    /// from every record and that read as "the API does not return country". It does; nobody had
+    /// filled it in.</para>
     ///
-    /// <para>Comparing it would report EVERY speaker as missing a country, forever, and no action
-    /// could ever close it — the §594 "Tags missing" mail all over again, which the operator
-    /// received for tags he had already entered. §582 is the rule: honour the declared limitation,
-    /// because a false gap is worse than no gap — he acts on it.</para>
+    /// <para>✅ Measured 2026-08-06 across the live roster: <b>25 speakers, 9 carry a `country` key
+    /// (`DK`, `DE`, `GB`), 16 omit it.</b> Setting it in the Backstage GUI makes it appear.</para>
+    ///
+    /// <para>🔒 <b>ABSENT ≠ EMPTY, and this is the trap the fix must respect.</b> A missing key means
+    /// NO INFORMATION — never "cleared". Anything that maps missing→null and writes it back would
+    /// erase the country for those 16 speakers (§553: "not found" vs "could not look").</para>
+    ///
+    /// <para>⚠️ The value is an <b>ISO-2 code</b> (`DK`), not a display name (`Denmark`) — compare
+    /// accordingly, or every speaker differs forever.</para>
     /// </remarks>
-    public static bool CountryIsReadable => false;
+    public static bool CountryIsReadable => true;
 }
 
 /// <summary>

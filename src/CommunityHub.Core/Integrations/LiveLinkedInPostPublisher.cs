@@ -1,6 +1,7 @@
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Microsoft.Extensions.Logging;
 
 namespace CommunityHub.Core.Integrations;
@@ -151,7 +152,7 @@ public sealed class LiveLinkedInPostPublisher : ILinkedInPostPublisher
         var payload = new Dictionary<string, object?>
         {
             ["author"] = orgUrn,
-            ["commentary"] = EscapeCommentary(post.Text ?? string.Empty),
+            ["commentary"] = EscapeCommentaryPreservingMentions(post.Text ?? string.Empty),
             ["visibility"] = "PUBLIC",
             ["distribution"] = new Dictionary<string, object?>
             {
@@ -494,6 +495,42 @@ public sealed class LiveLinkedInPostPublisher : ILinkedInPostPublisher
         }
         return sb.ToString();
     }
+
+    /// <summary>
+    /// §858.13d: a little-text-format MENTION is written <c>@[Display Name](urn:li:person:{id})</c> —
+    /// built from the very characters <see cref="EscapeCommentary"/> escapes. Escaping the whole
+    /// string therefore posts the markup as visible text (measured live 2026-08-06: LinkedIn returned
+    /// 201 and rendered the raw construct, because it never recognised a mention at all).
+    /// <para>So: escape everything EXCEPT well-formed mention spans, which pass through verbatim.
+    /// §326k's protection is unchanged for all other text — the parentheses that truncated posts are
+    /// still escaped.</para>
+    /// <para>🔒 Only the SHORT id form is treated as a mention. <c>urn:li:fsd_profile:</c> and numeric
+    /// ids are NOT mentions to LinkedIn (both rejected/ignored live), so they escape as plain text
+    /// rather than silently producing markup.</para>
+    /// </summary>
+    public static string EscapeCommentaryPreservingMentions(string text)
+    {
+        if (string.IsNullOrEmpty(text)) return text;
+
+        var sb = new StringBuilder(text.Length + 16);
+        var last = 0;
+        foreach (Match m in MentionSpan.Matches(text))
+        {
+            sb.Append(EscapeCommentary(text[last..m.Index]));
+            sb.Append(m.Value);          // verbatim — this is the mention
+            last = m.Index + m.Length;
+        }
+        sb.Append(EscapeCommentary(text[last..]));
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// A well-formed person mention. The display name may not contain brackets, and the id is
+    /// restricted to LinkedIn's short-URN charset, so a stray "@[" in prose cannot be mistaken
+    /// for a mention and smuggle unescaped text past §326k.
+    /// </summary>
+    private static readonly Regex MentionSpan = new(
+        @"@\[[^\[\]]+\]\(urn:li:person:[A-Za-z0-9_-]+\)", RegexOptions.Compiled);
 
     private static string? HeaderValue(HttpResponseMessage resp, string name) =>
         resp.Headers.TryGetValues(name, out var v) ? v.FirstOrDefault() : null;

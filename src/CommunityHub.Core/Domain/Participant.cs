@@ -81,6 +81,28 @@ public class Participant
     /// </summary>
     public int? CmUserId { get; set; }
 
+    /// <summary>
+    /// §895 — the e-conomic <c>customerContactNumber</c>. <b>The identity of a sponsor contact.</b>
+    /// </summary>
+    /// <remarks>
+    /// <para>🔑 <b>Why this exists, and why neither of the other two keys will do.</b> CEH used to
+    /// find a sponsor contact by e-mail, mirrored from Company Manager. On 2026-08-06 the operator
+    /// renamed three contacts' addresses in e-conomic; Company Manager cannot change a user's
+    /// e-mail, so the users had to be deleted and recreated, which minted new CM ids. <b>Both keys
+    /// CEH could match on changed at once</b>, so the sync would have created three duplicate
+    /// participants and left the originals active — six contacts for one company.</para>
+    ///
+    /// <para>🔒 <b>The e-conomic contact number survived all of it</b> (6, 31, 103), because ERP is
+    /// where a rename is a RENAME rather than a delete-and-recreate. ERP is the master (§482), so
+    /// its id is the identity and e-mail is demoted to an attribute — which is what it always was.
+    /// <see cref="CmUserId"/> stays as a LINK to the webshop seat, never as an identity.</para>
+    ///
+    /// <para>⚠️ Null for non-sponsor participants, and for sponsor rows created before this column
+    /// existed — those are adopted on the next sync by matching e-mail once, then keyed by id
+    /// forever after.</para>
+    /// </remarks>
+    public int? ErpContactNumber { get; set; }
+
     // --- Sponsor-contact roles (independent flags) --------------------------
     /// <summary>
     /// For a Sponsor-role contact: this person is a <b>signer</b> for the company
@@ -94,6 +116,40 @@ public class Participant
     /// no per-user roles — see REQUIREMENTS §7c), and editable by an organizer.
     /// </summary>
     public bool IsSigner { get; set; }
+
+    /// <summary>
+    /// §884.1 — this person's LinkedIn person URN in the SHORT form the Posts API accepts in a
+    /// mention (<c>urn:li:person:c3hh-hQmZ3</c>), resolved once and kept.
+    /// <para>🔒 <b>It lives on the PERSON, not on a role profile.</b> It began on
+    /// <c>SpeakerProfiles</c> (§858.16) and moved here the moment sponsors needed it too — a signer,
+    /// an event coordinator, a volunteer and a speaker are all just people with a LinkedIn account,
+    /// and a column per role would be the same fact stored four times
+    /// ([[ceh-count-the-shared-things]]).</para>
+    /// <para>⚠️ A member URN NEVER changes, so this is a permanent cache, not a snapshot. Null means
+    /// "not resolved" — read <see cref="LinkedInPersonUrnStatus"/> before concluding they cannot be
+    /// mentioned, because a failed lookup and a confirmed non-follower are different things.</para>
+    /// </summary>
+    public string? LinkedInPersonUrn { get; set; }
+
+    /// <summary>
+    /// §884.1 — the outcome of the last resolution: <c>Resolved</c>, <c>NotAFollower</c>,
+    /// <c>Ambiguous</c>, <c>KeywordUnusable</c> or <c>LookupFailed</c>.
+    /// 🔒 Kept so a throttled sweep can never be mistaken for "nobody follows the page" (§858.16h).
+    /// </summary>
+    public string? LinkedInPersonUrnStatus { get; set; }
+
+    /// <summary>
+    /// §884.1 — when resolution last ran, so the job can retry the unresolved without re-asking for
+    /// the ones already found. Someone who follows the page tomorrow becomes mentionable by itself.
+    /// </summary>
+    public DateTimeOffset? LinkedInPersonUrnCheckedAt { get; set; }
+
+    /// <summary>
+    /// §884.1 — the LinkedIn vanity slug confirmed for this person during disambiguation (§858.17).
+    /// Stored because it is the only thing that separates two followers with the same name, and
+    /// re-deriving it costs an API call against a day-throttled endpoint.
+    /// </summary>
+    public string? LinkedInVanityName { get; set; }
 
     /// <summary>
     /// For a Sponsor-role contact: this person is an <b>event coordinator</b> for

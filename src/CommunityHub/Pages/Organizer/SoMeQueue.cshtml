@@ -2,13 +2,13 @@
 @using CommunityHub.Core.Domain
 @model CommunityHub.Pages.Organizer.SoMeQueueModel
 @{
-    ViewData["Title"] = "SoMe queue";
+    ViewData["Title"] = "Calendar for LinkedIn Posts";
 }
 
 @if (Model.AccessDenied)
 {
     <div class="card">
-        <h1>SoMe queue</h1>
+        <h1>Calendar for LinkedIn Posts</h1>
         <p class="error" role="alert">This page is for organizers.</p>
         <p><a asp-page="/Index">Back to hub</a></p>
     </div>
@@ -33,6 +33,40 @@
     .som-inline { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
     .som-preview { border:1px solid #c7d2fe; background:#eef2ff; border-radius:8px; padding:10px; }
     details > summary { cursor:pointer; font-weight:600; }
+
+    /* §889 — the list. */
+    .sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden;
+               clip:rect(0,0,0,0); white-space:nowrap; border:0; }
+    .som-filters { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:8px 0 10px; }
+    .som-filters input[type=search] { flex:1 1 260px; min-width:0; padding:6px 8px; }
+    .som-filters select { padding:6px 8px; }
+    /* Wide content scrolls INSIDE its own box; the page itself never scrolls sideways. */
+    .som-listwrap { overflow-x:auto; }
+    .som-list { width:100%; border-collapse:collapse; font-size:14px; }
+    .som-list th, .som-list td { text-align:left; padding:7px 8px; border-bottom:1px solid #e5e7eb;
+                                 vertical-align:top; }
+    .som-list th { font-size:12px; text-transform:uppercase; letter-spacing:.03em; color:#4b5563;
+                   white-space:nowrap; }
+    .som-list tbody tr:hover { background:#f9fafb; }
+    .som-id { font-family:ui-monospace, monospace; color:#6b7280; }
+    .som-snippet { color:#374151; max-width:420px; }
+    .som-actions { white-space:nowrap; }
+    .som-actions .btn { padding:4px 10px; font-size:12px; }
+    .som-errrow td { border-bottom:1px solid #e5e7eb; padding-top:0; }
+
+    /* 🔒 Mobile-first: a 7-column table cannot work at ~360px, so each row BECOMES a card and the
+       column headers travel with the values as labels. Same data, no horizontal scrolling. */
+    @@media (max-width: 720px) {
+        .som-list thead { display:none; }
+        .som-list, .som-list tbody, .som-list tr, .som-list td { display:block; width:100%; }
+        .som-list tr { border:1px solid #e5e7eb; border-radius:8px; margin:0 0 10px; padding:6px 4px; }
+        .som-list td { border:0; padding:3px 8px; }
+        .som-list td[data-label]:not([data-label=""])::before {
+            content:attr(data-label) ": "; font-weight:600; color:#4b5563;
+        }
+        .som-snippet { max-width:none; }
+        .som-actions { white-space:normal; padding-top:8px; }
+    }
 </style>
 
 @if (Model.Message is not null)
@@ -40,14 +74,26 @@
     <div class="card"><p role="status" style="color:#0a6;">@Model.Message</p></div>
 }
 
+@* §889.4 — the heading SAYS what the page is. The nav called it "SoMe queue", the heading called it
+   "Social-media calendar", and the thing he was hunting for — a list of all posts — was called
+   neither: *"i still dont see the list functionality where it lists all posts"* … *"i found it
+   under calendar"*. *@
 <div class="card">
-    <h1>Social-media calendar — LinkedIn company page</h1>
+    <h1>Calendar for LinkedIn Posts</h1>
     <p>
-        Scheduled posts for your event's LinkedIn company page. Posts publish at their
-        scheduled time when they are <strong>Active</strong>. Use Preview to see exactly
-        what will publish; the override text always wins over the auto text.
+        Every scheduled post for your event's LinkedIn company page, in one list. Search or filter
+        to find one, then <strong>Edit</strong> to open it. Posts publish at their scheduled time
+        only when they are <strong>Active</strong>.
     </p>
-    <p><a asp-page="/Organizer/SoMeSettings">SoMe settings &amp; connection</a></p>
+    @* §914 — the SoMe hub had THIRTEEN cards, three of which were this same set of posts seen three
+       ways. They are merged into one card pointing here, so the other two views must be reachable
+       FROM here — a card removed without a route left in its place is a page nobody can open, which
+       is exactly the §889.4 complaint. *@
+    <p class="som-meta">
+        <a asp-page="/Organizer/SoMeCalendar">Day-by-day calendar view</a> ·
+        <a asp-page="/Organizer/SoMePostEditor">Walk posts one at a time</a> ·
+        <a asp-page="/Organizer/SoMeSettings">SoMe settings &amp; connection</a>
+    </p>
 </div>
 
 @if (Model.Preview is not null && Model.PreviewPostId is not null)
@@ -77,87 +123,158 @@
     </div>
 }
 
-@* §834.5 (operator 2026-08-05: "empty post is i will write post from scratch") — this IS that
-   feature. It already worked; it was called "ad-hoc" and sat unexplained under the queue, so it did
-   not read as the thing he was asking for.
-   🔒 CEH composes NOTHING here: no template, no generated intro, no variables. What he types is what
-   publishes — the deliberate escape hatch from the five generated types. *@
-<div class="card" id="write-from-scratch">
-    <h3>Write a post from scratch</h3>
-    <p class="muted">
-        An empty post — no template, no generated text. What you write here is exactly what
-        publishes. Use it for anything the five automatic post types do not cover.
-    </p>
-    <form method="post" asp-page-handler="AdHoc" class="som-grid">
-        <label for="adhoc-text">Post text</label>
-        <textarea id="adhoc-text" name="AdHocText" rows="3" required>@Model.AdHocText</textarea>
+@* 🔴 §889 — THE LIST IS THE LANDING, and the editor is one click from any row.
+   Operator 2026-08-06: *"i need to see everything in list format first and then have edit option -
+   i cannot go through 72 not approved every time to find number 33"*.
+   This page used to render every post as a full card, which is a WALL rather than a list: 80 posts
+   of body text with no way to scan, sort or search them. *@
+<div class="card">
+    <h2 style="margin-top:0;">All posts</h2>
+    <form method="get" class="som-filters">
+        <label for="q" class="sr-only">Search</label>
+        <input id="q" name="Q" type="search" value="@Model.Q" placeholder="Search text, subject or #id — e.g. 500 tickets" />
 
-        <label for="adhoc-img">Image reference (URL / SharePoint path, optional)</label>
-        <input id="adhoc-img" name="AdHocImageRef" type="text" value="@Model.AdHocImageRef" />
+        <label for="state" class="sr-only">State</label>
+        <select id="state" name="State">
+            @foreach (var s in new[] { "all", "planned", "scheduled", "published" })
+            {
+                var sel = string.Equals(Model.State ?? "all", s, StringComparison.OrdinalIgnoreCase);
+                <option value="@s" selected="@sel">@(s == "all" ? "All states" : s)</option>
+            }
+        </select>
 
-        <label for="adhoc-when">Scheduled date/time (UTC)</label>
-        <input id="adhoc-when" name="AdHocScheduledAt" type="datetime-local" required />
+        <label for="kind" class="sr-only">Type</label>
+        <select id="kind" name="Kind">
+            <option value="">All types</option>
+            @foreach (var k in Enum.GetValues<CommunityHub.Core.Integrations.SoMeTemplateKind>())
+            {
+                <option value="@((int)k)" selected="@(Model.Kind == k)">
+                    @CommunityHub.Core.Integrations.SoMeTemplateCatalog.Title(k)
+                </option>
+            }
+        </select>
 
-        <div><button type="submit" class="btn">Add to queue</button></div>
+        <label for="sort" class="sr-only">Sort</label>
+        <select id="sort" name="Sort">
+            <option value="date" selected="@(string.IsNullOrEmpty(Model.Sort) || Model.Sort == "date")">By date</option>
+            <option value="id" selected="@(Model.Sort == "id")">Newest first</option>
+            <option value="type" selected="@(Model.Sort == "type")">By type</option>
+            <option value="state" selected="@(Model.Sort == "state")">By state</option>
+        </select>
+
+        <button type="submit" class="btn">Filter</button>
+        <a class="btn btn-ghost" asp-page="/Organizer/SoMeQueue">Clear</a>
     </form>
+
+    <p class="som-meta" role="status" style="margin-bottom:0;">
+        Showing <strong>@Model.Posts.Count</strong> of @Model.TotalPosts post(s).
+        @* 🔒 §889.1 — a post that is APPROVED leaves the "planned" filter and looked LOST. Say so
+           here, next to the filter that does it, rather than leaving him to work it out. *@
+        @if (!string.IsNullOrWhiteSpace(Model.State)
+             && !string.Equals(Model.State, "all", StringComparison.OrdinalIgnoreCase))
+        {
+            <span> Filtered to <strong>@Model.State</strong> — a post changes state when you approve it,
+            so it moves to another filter rather than disappearing.
+            <a asp-page="/Organizer/SoMeQueue" asp-route-Q="@Model.Q" asp-route-State="all">Show all states</a>.</span>
+        }
+    </p>
 </div>
 
 @if (Model.Posts.Count == 0)
 {
-    <div class="card"><p>No posts scheduled yet.</p></div>
-}
-
-@foreach (var p in Model.Posts)
-{
-    <div class="card som-post">
-        <div class="som-inline">
-            <strong>#@p.Id · @p.Type</strong>
-            <span class="som-badge @(p.IsActive ? "som-on" : "som-off")">@(p.IsActive ? "Active" : "Inactive")</span>
-            <span class="som-badge som-status">@p.Status</span>
-            @if (p.AutoGenerated) { <span class="som-meta">auto</span> } else { <span class="som-meta">static</span> }
-            @if (p.IsAwaitingApprovedGraphic) { <span class="som-badge som-off" role="status">awaiting approved graphic</span> }
-        </div>
-        <p class="som-meta">Scheduled: @CommunityHub.Core.Integrations.SoMeDisplayTime.DateTime(p.ScheduledAtUtc) (Danish time)</p>
-        @if (!string.IsNullOrWhiteSpace(p.LastError))
-        {
-            <p class="error" role="alert">Last error: @p.LastError</p>
-        }
-        <p style="white-space:pre-wrap;">@p.EffectiveText</p>
-        @if (p.TagList.Count > 0)
-        {
-            <p class="som-tags">Tags: @string.Join(", ", p.TagList)</p>
-        }
-
-        <div class="som-inline">
-            <form method="post" asp-page-handler="Preview">
-                <input type="hidden" name="PostId" value="@p.Id" />
-                <button type="submit" class="btn btn-ghost">Preview</button>
-            </form>
-            <form method="post" asp-page-handler="ToggleActive">
-                <input type="hidden" name="PostId" value="@p.Id" />
-                <input type="hidden" name="SetActive" value="@((!p.IsActive).ToString().ToLowerInvariant())" />
-                <button type="submit" class="btn btn-ghost">@(p.IsActive ? "Deactivate" : "Activate")</button>
-            </form>
-        </div>
-
-        <details>
-            <summary>Fine-tune / reschedule</summary>
-            <form method="post" asp-page-handler="Edit" class="som-grid" style="margin-top:8px;">
-                <input type="hidden" name="PostId" value="@p.Id" />
-                <label for="edit-text-@p.Id">Override text (blank = use auto text)</label>
-                <textarea id="edit-text-@p.Id" name="EditText" rows="3">@p.ManualTextOverride</textarea>
-                <label for="edit-img-@p.Id">Image reference</label>
-                <input id="edit-img-@p.Id" name="EditImageRef" type="text" value="@p.ImageRef" />
-                <div><button type="submit" class="btn">Save text/image</button></div>
-            </form>
-            <form method="post" asp-page-handler="Reschedule" class="som-grid" style="margin-top:8px;">
-                <input type="hidden" name="PostId" value="@p.Id" />
-                <label for="resch-@p.Id">Reschedule to (UTC)</label>
-                <input id="resch-@p.Id" name="RescheduleAt" type="datetime-local" />
-                <div><button type="submit" class="btn">Reschedule</button></div>
-            </form>
-        </details>
+    <div class="card">
+        <p>No posts match. @if (!string.IsNullOrWhiteSpace(Model.Q) || Model.Kind is not null
+             || (!string.IsNullOrWhiteSpace(Model.State) && Model.State != "all"))
+           { <a asp-page="/Organizer/SoMeQueue">Clear the filters</a> } else { <text>Nothing is scheduled yet.</text> }</p>
     </div>
 }
+else
+{
+    <div class="card som-listwrap">
+        <table class="som-list">
+            <caption class="sr-only">Scheduled social-media posts</caption>
+            <thead>
+                <tr>
+                    <th scope="col">#</th>
+                    <th scope="col">When</th>
+                    <th scope="col">Type</th>
+                    <th scope="col">State</th>
+                    <th scope="col">Subject</th>
+                    <th scope="col">Text</th>
+                    <th scope="col"><span class="sr-only">Actions</span></th>
+                </tr>
+            </thead>
+            <tbody>
+            @foreach (var p in Model.Posts)
+            {
+                var state = CommunityHub.Pages.Organizer.SoMeQueueModel.StateOf(p);
+                <tr>
+                    <td data-label="#" class="som-id">@p.Id</td>
+                    <td data-label="When">@CommunityHub.Core.Integrations.SoMeDisplayTime.DateTime(p.ScheduledAtUtc)</td>
+                    <td data-label="Type">
+                        @(p.TemplateKind is null
+                            ? "—"
+                            : CommunityHub.Core.Integrations.SoMeTemplateCatalog.Title(p.TemplateKind.Value))
+                    </td>
+                    <td data-label="State">
+                        <span class="som-badge @(state == "published" ? "som-status" : state == "scheduled" ? "som-on" : "som-off")">@state</span>
+                        @if (p.IsAwaitingApprovedGraphic)
+                        {
+                            <span class="som-badge som-off" role="status" title="No released graphic yet — publishes text-only until there is one.">no graphic</span>
+                        }
+                    </td>
+                    <td data-label="Subject">@Model.SubjectLabels.GetValueOrDefault(p.Id)</td>
+                    <td data-label="Text" class="som-snippet">@CommunityHub.Pages.Organizer.SoMeQueueModel.Snippet(p)</td>
+                    <td data-label="" class="som-actions">
+                        @* 🔒 §889.2 — the row opens the EXISTING editor. Next/Previous stays there:
+                           the walk is good for reviewing a batch, it was only bad as the only way in. *@
+                        <a class="btn" asp-page="/Organizer/SoMePostEditor" asp-route-id="@p.Id">Edit</a>
+                        <form method="post" asp-page-handler="ToggleActive" style="display:inline;">
+                            <input type="hidden" name="PostId" value="@p.Id" />
+                            <input type="hidden" name="SetActive" value="@((!p.IsActive).ToString().ToLowerInvariant())" />
+                            <button type="submit" class="btn btn-ghost">@(p.IsActive ? "Deactivate" : "Activate")</button>
+                        </form>
+                    </td>
+                </tr>
+                @if (!string.IsNullOrWhiteSpace(p.LastError))
+                {
+                    <tr class="som-errrow">
+                        <td colspan="7"><span class="error" role="alert">#@p.Id last error: @p.LastError</span></td>
+                    </tr>
+                }
+            }
+            </tbody>
+        </table>
+    </div>
+}
+
+@* §834.5 (operator 2026-08-05: "empty post is i will write post from scratch") — this IS that
+   feature. It already worked; it was called "ad-hoc" and sat unexplained under the queue, so it did
+   not read as the thing he was asking for.
+   🔒 CEH composes NOTHING here: no template, no generated intro, no variables. What he types is what
+   publishes — the deliberate escape hatch from the five generated types.
+   §889.4 — moved BELOW the list and collapsed. It is a tall form, and above the list it was the
+   first thing on a page whose whole job is helping him find an EXISTING post. *@
+<div class="card" id="write-from-scratch">
+    <details>
+        <summary>Write a post from scratch</summary>
+        <p class="muted">
+            An empty post — no template, no generated text. What you write here is exactly what
+            publishes. Use it for anything the five automatic post types do not cover.
+        </p>
+        <form method="post" asp-page-handler="AdHoc" class="som-grid">
+            <label for="adhoc-text">Post text</label>
+            <textarea id="adhoc-text" name="AdHocText" rows="3" required>@Model.AdHocText</textarea>
+
+            <label for="adhoc-img">Image reference (URL / SharePoint path, optional)</label>
+            <input id="adhoc-img" name="AdHocImageRef" type="text" value="@Model.AdHocImageRef" />
+
+            <label for="adhoc-when">Scheduled date/time (UTC)</label>
+            <input id="adhoc-when" name="AdHocScheduledAt" type="datetime-local" required />
+
+            <div><button type="submit" class="btn">Add to queue</button></div>
+        </form>
+    </details>
+</div>
 
 <p><a asp-page="/Index">Back to hub</a></p>

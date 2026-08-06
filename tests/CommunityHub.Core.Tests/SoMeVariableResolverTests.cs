@@ -56,8 +56,12 @@ public sealed class SoMeVariableResolverTests
         Assert.Equal("https://eldk27.expertslive.dk", v["EventSystemUrl"]);
         Assert.Equal("#ELDK27 #ExpertsLiveDK", v["EventTags"]);
         Assert.Equal("Morten Waltorp Knudsen [MVP] | Martin Byskov", v["OrganizerLinkedInUrls"]);
-        // His own phrasing: "24+25th February 2026" → same shape for a two-day February edition.
-        Assert.Equal("9+10 February 2027", v["EventDates"]);
+        // ⚠️ §904 — this used to read "9+10 February 2027", citing his 2026 phrasing
+        // ("24+25th February 2026"). It was a real preference, so it is worth saying why it moved:
+        // the ELDK27 deck he wrote himself says "9–10 February 2027" in ALL 21 posts that carry the
+        // dates, and those posts now take the string from HERE (§904 tokenised the deck). The newer
+        // and far more numerous evidence wins. 🔒 One character in FormatDates puts "+" back.
+        Assert.Equal("9–10 February 2027", v["EventDates"]);
     }
 
     [Fact]
@@ -184,7 +188,9 @@ public sealed class SoMeVariableResolverTests
     }
 
     [Theory]
-    [InlineData(2027, 2, 9, 2027, 2, 10, "9+10 February 2027")]
+    // §904 — an EN DASH. This asserted "9+10 February 2027" under a test name saying dates read the
+    // way a person writes them, which is the one thing a plus sign does not do.
+    [InlineData(2027, 2, 9, 2027, 2, 10, "9–10 February 2027")]
     [InlineData(2027, 2, 9, 2027, 2, 9, "9 February 2027")]
     [InlineData(2027, 1, 31, 2027, 2, 1, "31 January - 1 February 2027")]
     public void Dates_read_the_way_a_person_writes_them(

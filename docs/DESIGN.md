@@ -1928,8 +1928,19 @@ publishes, not when it was planned.** The model that makes that work:
 - **Everything else is a variable.** `{Organizers}`, `{EventTags}`, `{SponsorTier}`, `{Speakers}` and
   the rest resolve from settings and event data **at publish time**, through the same resolver the
   editor's preview uses — so the preview shows exactly what will publish.
-- **The organizer credit is appended at publish** unless the body places `{Organizers}` itself, so
-  the author chooses its position without the value ever freezing into the text.
+- **The organizer credit is an ordinary variable.** It used to be appended at publish time, which
+  made it the one value that was not in the body, not editable and not movable — and, because it
+  bypassed the variable pipeline, not eligible for @-mention resolution either. `{Organizers}` now
+  lives in the template and in every body, and resolves through the same path as everything else.
+- **The PLANNER seeds a post with the TEMPLATE, not a rendering of it.** This is the rule the whole
+  model rests on, and it is the one that was quietly broken: the scheduler resolved the template and
+  stored the *result*, so a post was frozen the moment it was planned. Every token is written to the
+  row as a token.
+- **One deliberate exception: the AI opening line.** `{IntroText}` is a generative call, so it cannot
+  be resolved late — re-running it at publish would spend a round-trip per post and publish a
+  paragraph nobody approved. It is drawn ONCE at plan time, stored in its own column, and read back
+  as an ordinary value at compose time. The call-to-action phrase is stored the same way and for the
+  same reason. Null is an ordinary state for both: the token empties and the renderer closes the gap.
 - **An unresolved token never blocks a post.** At compose time an unknown token is refused; at
   publish time it is preserved verbatim, logged and the post still goes out — a silent
   non-publication is far worse than a visible gap.
@@ -1938,11 +1949,91 @@ publishes, not when it was planned.** The model that makes that work:
 > true on planning day. Editing a post captured the footer as literal text, so a later change reached
 > the un-edited posts and silently skipped the edited ones. Storing only the body removes that class
 > of defect by construction rather than by discipline.
+>
+> ⚠️ **And "by construction" is exactly what it was not, until 2026-08-06.** The design above was
+> real, the editor and the publisher both honoured it — and the *planner* did not, so every post it
+> minted arrived pre-frozen. A post whose speaker list was empty on planning day said "Meet our tech
+> legends:" above a blank line and **could never repair itself**. The lesson is that a late-resolution
+> guarantee has to hold at the WRITE sites too, not just at the read sites; the two halves had drifted
+> for months without a test noticing, because the test asserted the frozen output was correct.
 
 **Readiness is asked in one place** (`SoMeApprovalGate`), for a single-sponsor post and a sponsor-tier
 post alike: a sponsor owes **both** their social-media text and a logo, and the refusal names what is
 missing so it can be chased. The dispatcher consults the same gate at send time — approval is a
 moment, eligibility is a state.
+
+**Emptiness is a blocker, and it is derived from the post's own content.** `SoMeEmptyVariableGate`
+reads the variables the body actually uses and blocks on any that resolve **empty**, so a new
+template with a new variable is covered the day it ships. A **known-but-empty** value is missing (⇒
+block); an **unknown token** is a template typo, which is published verbatim rather than hidden
+behind a post that never goes out. A short explicit optional list covers the values a template is
+built to drop — the "Tag:" line for a sponsor with no mentionable contact, an empty action catalog.
+- 🔴 **Some dependencies sit one level BEHIND the text, and the general rule cannot see them.** A
+  session post prints the AI teaser, never `{SessionAbstract}` — yet the abstract is what the teaser
+  is written *from*. An empty one yields not a shorter post but an **invented** one, made permanent by
+  the teaser reuse. `SoMeApprovalGate` therefore carries an explicit check for the session's
+  description. The general rule is the floor, not the ceiling.
+
+**A subject can be excluded outright**, which is different from being blocked. `SoMeTitleExclusions`
+matches operator-authored **title patterns** (one per line, `*` wildcard, anchored, case-insensitive)
+and the planner drops those sessions from subject collection alongside test data — so nothing is
+proposed at all, rather than proposed and held forever. The setting is deliberately a *setting*: an
+inferred rule ("titles containing Test") would eventually delete a real talk, and nobody chose it.
+The settings page lists the titles a pattern matches today, and a blank list excludes nothing.
+
+**Test data is asked in one place too** (`TestDataScope`), because it was previously asked nowhere.
+A participant carries `IsTestUser`; a sponsor company carries `IsTestData`, and where that is unset
+a company counts as test when it has contacts and **every** contact is a test user. The planner, the
+variable resolver and both graphics builders all consult it, so a fixture cannot be announced,
+listed in a tier, or rendered into a graphic.
+- ⚠️ **`IsActive` is not a proxy for it.** A test account is normally active — that is the point of
+  a fixture — so filtering on activity catches test rows only by luck.
+- 🔒 **"Every contact" rather than "any contact"** is deliberate: a real, paying sponsor may carry
+  test contacts alongside real ones (the operator's own firm does), and the stricter reading would
+  delete a genuine sponsor from the campaign — a §842.5 contract breach caused by a tidy-up. A
+  company with no contacts is not test either; that is the state every newly signed sponsor is in.
+
+**A category can be announced as a burst instead of a spread**, and the difference is expressed as a
+*window* rather than a *floor*. `SpeakerAnnouncementFrom` is a floor: it says "not before this" and
+leaves the even spread free to choose the day. `MasterClassAnnouncementFrom` is a window opening:
+master-class round 1 is placed as an **explicit round**, filling forward from the date at the normal
+posts-per-day, so the confirmed master classes land as one recognisable run instead of one a month
+for six months. Both are per-edition settings — the mechanism belongs to the platform, the date
+belongs to the edition — and both are now editable on the SoMe settings page. A blank window means
+"no opinion" and restores the ordinary spread.
+
+**The window also moves rows that already exist**, which is the half a planner cannot do. The planner
+only creates posts that do not exist yet, and auto-approval freezes everything the operator has
+accepted — so a window that steered only *new* posts would leave the queue disagreeing with the rule
+that produced it. `SoMeSchedulePlanner.RetimeIntoWindow` is a pure pass over the stored rows: it packs
+the unpublished round-1 master-class posts into the window, **in both directions** (a post that had
+drifted months out comes back), writing nothing but `ScheduledAtUtc` — the words, the picture, the
+approval and the plan state are untouched, because a re-time is not a re-plan.
+- 🔒 **Idempotent by construction.** The order is taken from the posts' *current* slots, so a second
+  run sees the order the first produced, assigns the same slots and reports nothing. It is a fixed
+  point, not a shuffle that settles — which matters because the scheduler runs on a timer and a post
+  the operator read yesterday must not be somewhere else today.
+- ⚠️ **The per-day ceiling still wins.** Master classes fill *around* the posts already holding slots
+  that week rather than evicting them, so a busy window carries the tail into the following days.
+- 🔒 **No room ⇒ the post keeps the slot it has.** Never dropped; same reasoning as the planner's
+  late-is-better-than-never pass.
+- The run message names the count, because this is the one thing a run does to posts already
+  approved, and moving them silently would be worse than not moving them.
+
+**Planning is one transaction.** The planner discards its own un-accepted proposals and plans them
+again (§848.2). Those two halves must commit together: when the delete was committed first and the
+replacements composed afterwards, anything throwing in between left the queue **emptied**. This is
+not hypothetical — an AI-intro call that hung did exactly that, taking the queue from 83 posts to 5.
+The failure mode is now "nothing changed" rather than "everything gone".
+
+> **On the AI opening line specifically.** It is the one value composed at PLAN time (see above), so
+> it is also the one that can fail at plan time. Every failure resolves to null and the post composes
+> without an intro — but that guarantee has to include the failure endpoints actually exhibit, which
+> is **hanging**, not throwing. `HttpClient` reports its own timeout as `TaskCanceledException`,
+> a subclass of `OperationCanceledException`; a catch filter that excludes cancellation in order to
+> respect host shutdown will silently let every timeout through. The two are told apart by asking
+> whether the *caller's* token was cancelled, and the client is bounded well below the default 100s
+> because the planner makes one call per post.
 
 ### LinkedIn company-page SoMe scheduling queue (REQUIREMENTS §19)
 
@@ -1958,7 +2049,9 @@ operator wires it.
   (`ParticipantId`/`SessionId` soft pointers with `NoAction` FKs; `SponsorCompanyId` external id),
   `ScheduledAtUtc`, `Status` (`SoMePostStatus`: Queued/Published/Failed), `IsActive` (the
   publish-or-not toggle, distinct from status), `AutoText` + `ManualTextOverride` (the override wins via
-  `EffectiveText`), `ImageRef`, `Tags` (newline-separated handle/URN list → `TagList`), `AutoGenerated`,
+  `EffectiveText`; **both hold TOKEN bodies, never renderings** — see "composed at PUBLISH time" above),
+  `IntroText` + `ActionPhrase` (the two values drawn once at plan time and read back at compose),
+  `ImageRef`, `Tags` (newline-separated handle/URN list → `TagList`), `AutoGenerated`,
   and the dispatch audit (`PublishedAtUtc`, `ExternalPostId`, `LastError`, `SpeakerPreAlertSent`). Indexed
   `(EventId, Status, IsActive, ScheduledAtUtc)` for the dispatcher's due-query.
 - **`SoMeSettings`** — one row per edition: `Enabled`, `CompanyPageUrlOrOrgId` (operator config, NOT a
@@ -4978,3 +5071,81 @@ the window living in process memory, so a deploy can allow one repeat.
 
 ⚠️ Fires in a dry run too: dry run governs whether CEH may WRITE to e-conomic, never whether a human
 is told something cannot be billed (the §787 precedent).
+
+## 22. LinkedIn person mentions (§858.16)
+
+### 22.1 The mechanism, and why it is the only one
+
+A mention in the Posts API is written into `commentary` in LinkedIn's "little text format":
+
+```
+@[Display Name](urn:li:person:{shortId})
+```
+
+**Only the SHORT id form is accepted**, and it is validated strictly. Everything else was measured
+live against the production page and rejected:
+
+| URN written into the mention | LinkedIn's answer |
+|---|---|
+| `urn:li:person:{shortId}` | ✅ real mention, renders as a clickable link |
+| `urn:li:person:{opaque ACoAA… id}` | 🔴 `400 INVALID_MENTION_PERSON_URN_ID` |
+| `urn:li:person:{numeric member id}` | 🔴 `400 INVALID_MENTION_PERSON_URN_ID` |
+| `urn:li:fsd_profile:{ACoAA… id}` | ⚠️ **201 Created — but NOT a mention.** The construct is kept as literal text and rendered as visible markup |
+
+🔒 **That last row is the trap: "accepted" and "renders as a mention" are different questions.** A
+test that stops at the status code reports success on a post that publishes raw markup to readers.
+**The only reliable check is to read the post back and confirm the `urn:li:person:` markup survived** —
+if the response shows a bare display name, no mention was created.
+
+### 22.2 The lookup: `peopleTypeahead`
+
+The short id has exactly one source available to us — LinkedIn's own finder:
+
+```
+GET /rest/peopleTypeahead?q=organizationFollowers&organization={orgUrn}&keywords={oneNameToken}&count=50
+    LinkedIn-Version: 202607        X-Restli-Protocol-Version: 2.0.0
+    scope: r_organization_followers (3-legged token)
+ → elements[]: { member: "urn:li:person:{shortId}", firstName, lastName, headline, photo? }
+```
+
+**Measured constraints, each of which has already caused a wrong answer:**
+
+- **`keywords` accepts at most ONE space.** A three-part name returns
+  `400 INVALID_SPACE_CHARACTER_COUNT_IN_SEARCH_KEYWORD`. We therefore send a **single token**,
+  preferring the surname (it is far more selective — one given name matched nine followers).
+- **Letters, space, apostrophe, hyphen and dot only.** `æ ø å` return
+  `400 NOT_ALLOWED_CHARACTERS_IN_SEARCH_KEYWORD`. 🔒 **Strip the diacritic (`ø→o`); do NOT expand it
+  (`oe`), which matched nobody.** LinkedIn folds diacritics on its own side, so stripping is enough.
+- **`count` defaults to 10** and silently truncates common surnames. Always pass it.
+- **There is NO slug lookup.** A vanity name as `keywords` returns zero results, and `vanityName` as a
+  parameter is rejected outright.
+- **A name is not unique.** One given name returned seven different followers, so the matcher requires
+  the surname to appear among the candidate's name parts AND the given name to line up, and reports
+  **Ambiguous** rather than ever taking `elements[0]`.
+
+### 22.3 The follower boundary — enforced by LinkedIn, at post time
+
+**Typeahead only returns members who follow the page**, and the restriction is not merely about
+lookup: posting a mention with a genuine short URN for a **non-follower** produces a bare display
+name with the markup consumed. ⇒ **Holding a valid URN is not sufficient.** The plain-name fallback
+is therefore a property of the platform, not a design compromise, and roughly one speaker in four
+lands there on a real roster.
+
+### 22.4 Shape in CEH
+
+| Piece | Role |
+|---|---|
+| `PersonMentionMatcher` | Pure: builds the sendable keyword, folds names, selects the single correct candidate, renders the mention span |
+| `LinkedInPeopleTypeaheadClient` | The HTTP call. Distinguishes a 403 (missing scope ⇒ re-consent) from a 429 (day throttle ⇒ **not** a permission answer) |
+| `SpeakerMentionResolutionService` | **The only caller of LinkedIn for mentions.** A scheduled routine that caches the URN per speaker |
+| `SpeakerProfiles.LinkedInPersonUrn` + `…Status` + `…CheckedAt` | The cache. A member URN never changes, so resolution happens once; the status distinguishes a confirmed non-follower from a failed lookup |
+| `{Speakers}` in `SoMeVariableResolver` | Reads the cache only — **no network call at publish time** |
+| `SpeakerMentionComposer` | Joins the names and produces the organizer-facing fallback report |
+
+🔒 **`EscapeCommentaryPreservingMentions` is load-bearing.** §326k escapes `@ [ ] ( )` because
+unescaped parentheses truncate a post — the exact characters a mention is built from. The escaper
+therefore passes well-formed mention spans through verbatim and escapes everything else. Without it a
+correct URN still publishes as markup.
+
+🔒 **Scopes are fixed at consent.** Adding `r_organization_followers` required a fresh
+authorization-code round trip; a token refresh will never acquire a new scope.

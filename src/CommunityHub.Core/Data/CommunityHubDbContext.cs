@@ -227,6 +227,9 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
     /// where an edition diverges from <c>SoMeTemplateCatalog</c>; no row means the default is live.</summary>
     public DbSet<SoMeTemplate> SoMeTemplates => Set<SoMeTemplate>();
 
+    /// <summary>§908 — the pool of alternative wordings a post type draws from.</summary>
+    public DbSet<SoMeBodySample> SoMeBodySamples => Set<SoMeBodySample>();
+
     // --- Volunteer work structure (Category -> Subcategory -> Task) ----------
     public DbSet<VolunteerCategory> VolunteerCategories => Set<VolunteerCategory>();
     public DbSet<VolunteerSubcategory> VolunteerSubcategories => Set<VolunteerSubcategory>();
@@ -1758,6 +1761,10 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
                 .HasSentinel(CommunityHub.Core.Settings.Ring.Broad)
                 .HasDefaultValue(CommunityHub.Core.Settings.Ring.Broad);
 
+            // §905 — the company-level test flag. Defaults to FALSE, so every existing sponsor is
+            // real until he marks one; a real sponsor wrongly hidden is the worse failure (§842.5).
+            e.Property(x => x.IsTestData).HasDefaultValue(false);
+
             e.HasOne(x => x.Event).WithMany()
                 .HasForeignKey(x => x.EventId)
                 .OnDelete(DeleteBehavior.Cascade);
@@ -2499,6 +2506,21 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
                 .OnDelete(DeleteBehavior.Cascade);
         });
 
+        // §908 — the POOL of wordings per type. ⚠️ Deliberately NOT unique on (EventId, Kind):
+        // many rows per type is the entire point, which is what separates this from SoMeTemplate.
+        b.Entity<SoMeBodySample>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Kind).HasConversion<int>();
+            e.Property(x => x.Body).HasMaxLength(8000);
+            e.Property(x => x.SourceFileName).HasMaxLength(260);
+            e.Property(x => x.LastUpdatedByEmail).HasMaxLength(320);
+            // The planner reads the whole pool for one kind on every run; this is that lookup.
+            e.HasIndex(x => new { x.EventId, x.Kind, x.SortOrder });
+            e.HasOne(x => x.Event).WithMany().HasForeignKey(x => x.EventId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
         b.Entity<SoMePost>(e =>
         {
             e.HasKey(x => x.Id);
@@ -2513,6 +2535,8 @@ public class CommunityHubDbContext : DbContext, IDataProtectionKeyContext
             // Post bodies: LinkedIn caps a company post at 3000 chars; 8000 is ample.
             e.Property(x => x.AutoText).HasMaxLength(8000);
             e.Property(x => x.ManualTextOverride).HasMaxLength(8000);
+            // §901 — the AI intro, drawn once at plan time. A paragraph, not a body.
+            e.Property(x => x.IntroText).HasMaxLength(4000);
             e.Property(x => x.ImageRef).HasMaxLength(2000);
             // Tags: newline-separated handle/URN list; 2000 is generous.
             e.Property(x => x.Tags).HasMaxLength(2000);

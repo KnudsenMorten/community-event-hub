@@ -153,6 +153,12 @@ public sealed class AlertCoverageTests
         // it plans nothing, and the only symptom would be an empty queue nobody was expecting to be
         // full — an absence, which is what nobody notices.
         "SoMeScheduleJob",
+        // §858.16c — speaker mention resolution. Instrumented from birth because EVERY one of its
+        // quiet outcomes is invisible from the outside and they mean opposite things: the feature is
+        // off, no company page is configured, everyone is already resolved, nobody follows the page,
+        // or the lookup FAILED. Without this the page would show one silence for all five, and a
+        // throttled night would read exactly like "no speaker can be tagged".
+        "SpeakerMentionResolutionJob",
         "SponsorWelcomeReconcileJob",   // welcome-email off ⇒ new sponsor contacts never welcomed
         "WelcomeReconcileJob",          // welcome-email off ⇒ sign-ups accumulate unwelcomed
         // §640 — the new scheduled sponsor reconcile. Instrumented from birth, so the job created

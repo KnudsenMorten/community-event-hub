@@ -591,7 +591,12 @@ public sealed class SponsorZohoSyncService
         $"<strong>{System.Net.WebUtility.HtmlEncode(record)}</strong> · "
         + $"{System.Net.WebUtility.HtmlEncode(company)} · "
         + $"<em>{System.Net.WebUtility.HtmlEncode(field)}</em><br>"
-        + $"<code style=\"word-break:break-all;\">{System.Net.WebUtility.HtmlEncode(value ?? string.Empty)}</code>";
+        // §898 — a highlighted SPAN, not <code>. The value is usually a person's name, an e-mail or
+        // a URL that he copies into Backstage; rendering "Laura Gulbe" in a monospace code face made
+        // the mail look broken (operator 2026-08-06: *"font looks weird"*). The tint keeps the
+        // copy-me boundary visible without pretending the value is source code.
+        + $"<span style=\"word-break:break-all;background:#f6f8fa;padding:2px 6px;border-radius:3px;\">"
+        + $"{System.Net.WebUtility.HtmlEncode(value ?? string.Empty)}</span>";
 
     /// <summary>
     /// §792 — the stamp of everything the hand-entry mail can report, so the operator gets ONE mail

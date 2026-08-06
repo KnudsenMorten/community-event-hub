@@ -143,6 +143,53 @@ public sealed class LiveLinkedInPostPublisherTests
         Assert.Equal("Hope to see you there!", LiveLinkedInPostPublisher.EscapeCommentary("Hope to see you there!"));
     }
 
+    /// <summary>
+    /// §858.13d. Measured live 2026-08-06: a mention is written from the exact characters
+    /// §326k escapes, so escaping the whole string posts the markup as visible text — LinkedIn
+    /// answered 201 and rendered "@[Morten Waltorp Knudsen](urn:li:fsd_profile:ACoAA…)" to readers.
+    /// A mention span must survive verbatim while everything around it stays escaped.
+    /// </summary>
+    [Fact]
+    public void A_person_mention_survives_escaping_while_the_prose_around_it_does_not()
+    {
+        var raw = "Meet @[Kasper Nørregaard](urn:li:person:TRlhoSVMoX) at ELDK27 (room 300) #ELDK27";
+        var escaped = LiveLinkedInPostPublisher.EscapeCommentaryPreservingMentions(raw);
+
+        // The mention passes through untouched — this is what makes it a mention at all.
+        Assert.Contains("@[Kasper Nørregaard](urn:li:person:TRlhoSVMoX)", escaped);
+        // …and §326k still protects the prose around it.
+        Assert.Contains(@"\(room 300\)", escaped);
+        Assert.Contains("#ELDK27", escaped);
+    }
+
+    /// <summary>
+    /// §858.13b measured that LinkedIn rejects <c>urn:li:person:{numeric}</c> and IGNORES
+    /// <c>urn:li:fsd_profile:</c> (201, but rendered as literal text). Neither is a mention, so
+    /// neither may pass through unescaped — otherwise we ship markup to readers, which is the
+    /// precise failure that was observed live.
+    /// </summary>
+    [Theory]
+    [InlineData("@[Morten](urn:li:fsd_profile:ACoAAAAjxdwBLwjEKJf2b3eyDRQs8rFh4JtKb9g)")]
+    [InlineData("@[Morten](urn:li:person:2344412 )")]
+    [InlineData("@[Bad[Name]](urn:li:person:TRlhoSVMoX)")]
+    public void Only_a_wellformed_short_person_urn_counts_as_a_mention(string raw)
+    {
+        var escaped = LiveLinkedInPostPublisher.EscapeCommentaryPreservingMentions(raw);
+
+        // Not a mention ⇒ it must be escaped like any other prose, never emitted verbatim.
+        Assert.DoesNotContain("@[", escaped);
+        Assert.Contains(@"\@", escaped);
+    }
+
+    [Fact]
+    public void Text_with_no_mention_escapes_exactly_as_before()
+    {
+        var raw = "Zero Trust (300) — see [my] session @ ELDK27 #ELDK27";
+        Assert.Equal(
+            LiveLinkedInPostPublisher.EscapeCommentary(raw),
+            LiveLinkedInPostPublisher.EscapeCommentaryPreservingMentions(raw));
+    }
+
     [Fact]
     public async Task Payload_commentary_is_escaped_at_the_chokepoint()
     {

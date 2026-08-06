@@ -29,7 +29,21 @@ public sealed record CompanyManagerCompany(
     // department can match it against their own PO — the usual reason a correct invoice goes unpaid.
     // A property of the COMPANY, not of an order, so every invoice for that customer carries it
     // until they change it in CM. Empty when they have not given one.
-    string BillingReference = "");
+    string BillingReference = "",
+    // §891.4 — the billing block. ERP is master for ALL of these and they are compared on every
+    // sync, unlike the names above where a rename is the only trigger. Names are the REAL API keys
+    // from GET /companies/{id}, not the UI labels ("Postcode (ERP: zip)" is `billing_postcode`).
+    string Email = "",
+    string BillingEmail = "",
+    string BillingAddress1 = "",
+    string BillingAddress2 = "",
+    string BillingCity = "",
+    string BillingState = "",
+    string BillingPostcode = "",
+    // ⚠️ A 2-letter code ("DK"), not a country name — the sync refuses to overwrite it with
+    // e-conomic's spelled-out form, which would not match Company Manager's country list.
+    string BillingCountry = "",
+    string BillingCompany = "");
 
 /// <summary>One user linked to a Company Manager company.</summary>
 public sealed record CompanyManagerUser(
@@ -136,7 +150,18 @@ public sealed class CompanyManagerClient
             Notes: GetString(o, "notes"),
             // §821 — verified against the live payload for company 18 on 2026-08-04:
             // "billing_reference": "POCUG000347". The retired script read the same key.
-            BillingReference: GetString(o, "billing_reference"));
+            BillingReference: GetString(o, "billing_reference"),
+            // §891.4 — read so the ERP sync can COMPARE before writing; without these it could only
+            // push blindly on every run.
+            Email: GetString(o, "email"),
+            BillingEmail: GetString(o, "billing_email"),
+            BillingAddress1: GetString(o, "billing_address_1"),
+            BillingAddress2: GetString(o, "billing_address_2"),
+            BillingCity: GetString(o, "billing_city"),
+            BillingState: GetString(o, "billing_state"),
+            BillingPostcode: GetString(o, "billing_postcode"),
+            BillingCountry: GetString(o, "billing_country"),
+            BillingCompany: GetString(o, "billing_company"));
     }
 
     /// <summary>

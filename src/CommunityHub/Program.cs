@@ -1004,6 +1004,8 @@ else
 }
 builder.Services.AddScoped<CommunityHub.Core.Integrations.SoMeSettingsService>();
 builder.Services.AddScoped<CommunityHub.Core.Integrations.SoMeQueueService>();
+// §889 — what each queued post is ABOUT, in words, for the list view.
+builder.Services.AddScoped<CommunityHub.Core.Integrations.SoMeSubjectLabeller>();
 // §824.2C/§824.16 — the post-template editor and the variable resolver behind its preview.
 // 🔒 WEB-ONLY is deliberate for now: the editor is a page, and nothing in the Functions host
 // composes posts yet. The moment the scheduler (§824.2E) does, BOTH hosts need these —
@@ -1023,7 +1025,10 @@ builder.Services.AddScoped<CommunityHub.Core.Integrations.SoMePostComposer>();
 // [[ceh-di-two-hosts]].
 builder.Services.AddScoped<CommunityHub.Core.Integrations.EventSoMePostImportService>();
 // §824.2D — the AI intro writer, on the same Azure OpenAI options the AiHelper binds above.
-builder.Services.AddHttpClient<CommunityHub.Core.Integrations.SoMeIntroGenerator>();
+// 🔒 §906 — bounded, same reason as the jobs host: one call per post, so an unresponsive endpoint
+// must fail fast and let the post compose without an intro.
+builder.Services.AddHttpClient<CommunityHub.Core.Integrations.SoMeIntroGenerator>(
+    c => c.Timeout = TimeSpan.FromSeconds(15));
 builder.Services.AddScoped<CommunityHub.Core.Integrations.SoMeDispatchService>();
 // §833 — the scheduler was JOBS-ONLY, which is why it had no page and he could not find it. The
 // planner page reads its readiness and can run it on demand, so it is registered here too.
@@ -1041,6 +1046,8 @@ builder.Services.AddScoped<CommunityHub.Core.Integrations.SoMeCadenceService>();
 // §850 — the approval blocker. Registered in BOTH hosts: the queue/editor approve through it, and
 // the DISPATCHER re-checks eligibility at send time. [[ceh-di-two-hosts]].
 builder.Services.AddScoped<CommunityHub.Core.Integrations.SoMeApprovalGate>();
+// §918 — auto-approval; the settings page reads and writes its two knobs.
+builder.Services.AddScoped<CommunityHub.Core.Integrations.SoMeAutoApproveService>();
 // Speaker self-service LinkedIn publish (REQUIREMENTS §52): a speaker pushes their
 // RELEASED announcement graphic + generated text to the event's LinkedIn page
 // through the SAME gated queue/publisher path above — so the credential gate and

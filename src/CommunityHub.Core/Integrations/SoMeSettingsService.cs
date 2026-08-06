@@ -55,7 +55,31 @@ public sealed class SoMeSettingsService
         string? eventSystemUrl = null,
         string? eventTags = null,
         string? organizerCredits = null,
-        bool updatePostCopy = false)
+        // §885 — the call-to-action phrase catalog, under the same ownership flag and for the same
+        // reason: a caller that knows nothing about post copy must not wipe it by omission.
+        string? actionCatalog = null,
+        // §888.2 — the city+country line, under the same ownership rule.
+        string? eventVenueCityCountry = null,
+        // §927 — the session-title exclusion list, under the same ownership flag.
+        string? excludedSessionTitlePatterns = null,
+        bool updatePostCopy = false,
+        // §918 — auto-approval, under the SAME ownership rule as the post copy above and for the
+        // same reason: a caller that knows nothing about it must not be able to switch it on (or
+        // off) by omission. Null means "leave as it is".
+        bool? autoApproveEnabled = null,
+        int? autoApproveLeadDays = null,
+        // §928 — the two announcement date gates, under an ownership FLAG rather than "null means
+        // leave alone", because for these two null is a real value: it is how a gate is CLEARED.
+        //
+        // 🔴 The flag is the guard §925.1 asked for by name. `SpeakerAnnouncementFrom` (7 Sep) is
+        // *"load-bearing, do not clear it"* — it is the only thing keeping eight tracks from being
+        // announced today naming 1–2 speakers out of an expected hundred. With plain optional
+        // parameters, ANY caller that saved the LinkedIn wiring and knew nothing about announcement
+        // dates would wipe it by omission, and the damage would be invisible until the campaign
+        // published early.
+        DateOnly? speakerAnnouncementFrom = null,
+        DateOnly? masterClassAnnouncementFrom = null,
+        bool updateAnnouncementWindows = false)
     {
         var now = _clock.GetUtcNow();
         var row = await GetAsync(eventId, ct);
@@ -78,7 +102,31 @@ public sealed class SoMeSettingsService
             row.EventSystemUrl = Trim(eventSystemUrl);
             row.EventTags = Trim(eventTags);
             row.OrganizerCredits = Trim(organizerCredits);
+            // 🔒 NOT Trim()ed to a single line — this one is deliberately multi-line (one phrase per
+            // line). Trimming only the ends preserves the list while dropping stray whitespace.
+            row.ActionCatalog = string.IsNullOrWhiteSpace(actionCatalog) ? null : actionCatalog.Trim();
+            row.EventVenueCityCountry = Trim(eventVenueCityCountry);
+            // §927 — multi-line like the action catalog, and for the same reason: one pattern per
+            // line. Blank means exclude nothing.
+            row.ExcludedSessionTitlePatterns =
+                string.IsNullOrWhiteSpace(excludedSessionTitlePatterns)
+                    ? null : excludedSessionTitlePatterns.Trim();
         }
+
+        if (updateAnnouncementWindows)
+        {
+            // §928 — assigned exactly as given, null included: clearing a gate is a decision he is
+            // allowed to make, once he has said he owns the fields.
+            row.SpeakerAnnouncementFrom = speakerAnnouncementFrom;
+            row.MasterClassAnnouncementFrom = masterClassAnnouncementFrom;
+        }
+
+        // §918 — only when the caller says so (see the parameter note).
+        if (autoApproveEnabled is { } auto) row.AutoApproveEnabled = auto;
+        // 🔒 Floored at 1: a zero lead would mean "approve posts that are due now", which is exactly
+        // the §889.1 burst the guard exists to prevent. Refused here as well as in the service, so
+        // the stored value can never express it.
+        if (autoApproveLeadDays is { } lead) row.AutoApproveLeadDays = Math.Max(1, lead);
 
         row.UpdatedAt = now;
         row.LastUpdatedByEmail = Trim(byEmail);

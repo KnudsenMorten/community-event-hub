@@ -38,7 +38,14 @@ public sealed class ErpWebshopContactSyncService
         EconomicContactAdminService erp, CompanyManagerClient cm, CompanyManagerOptions cmOptions,
         IEmailSender email, ILogger<ErpWebshopContactSyncService> log,
         Data.CommunityHubDbContext? db = null,
-        Organizer.ParticipantDeactivationService? deactivate = null)
+        Organizer.ParticipantDeactivationService? deactivate = null,
+        // §891.4 — the address block lives on the e-conomic CUSTOMER, which only this client reads.
+        // 🔒 Optional so an unconfigured/absent invoice client cannot stop the contact sync running;
+        // the billing comparison then simply covers the e-mail fields it already has.
+        IEconomicInvoiceClient? invoice = null,
+        // §921 — the consecutive-failure gate, PER COMPANY. Optional so an unconfigured caller
+        // still runs; without it the old behaviour (report every blip) applies.
+        Diagnostics.JobFailureTracker? failures = null)
     {
         _erp = erp;
         _cm = cm;
@@ -47,6 +54,66 @@ public sealed class ErpWebshopContactSyncService
         _log = log;
         _db = db;
         _deactivate = deactivate;
+        _invoice = invoice;
+        _failures = failures;
+    }
+
+    private readonly IEconomicInvoiceClient? _invoice;
+    private readonly Diagnostics.JobFailureTracker? _failures;
+
+    /// <summary>
+    /// 🔴 §921 — HOW LONG A COMPANY MUST KEEP FAILING BEFORE IT IS WORTH AN E-MAIL.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-08-06, the <b>NINTH</b> escalation of this same alert: <i>"if for some
+    /// reason an api is down, I dont want to be boughtered with it when it happend 1 time, 2 time,
+    /// 3 times, after 1 hour of issues like 6 x 10 min, it is ok to get notification … i have said
+    /// it now 9 times!"</i></para>
+    ///
+    /// <para>🔴 <b>Why raising the threshold to 3 in §784.4 did not work, and why he had to say it
+    /// again.</b> <see cref="Diagnostics.JobFailureTracker"/> gates the JOB — it is consulted when a
+    /// job THROWS. This loop <b>catches the per-company exception on purpose</b> so one bad company
+    /// cannot stop the fleet reconciling, so the job never throws, so the gate was never consulted.
+    /// The note went straight into the alert every single time. <b>The fix was applied to the right
+    /// idea and the wrong code path — twice.</b></para>
+    ///
+    /// <para>🔒 Six consecutive runs at the reconcile's 10-minute cadence is his stated hour.</para>
+    /// </remarks>
+    private const int CompanyFailureAlertThreshold = 6;
+
+    /// <summary>
+    /// §891.4 — the ERP customer's address block. Returns null on any failure: a billing address we
+    /// could not READ must never be treated as a billing address that changed.
+    /// </summary>
+    /// <summary>
+    /// §897 — read one Company Manager field back by its API key, so a write can be VERIFIED rather
+    /// than trusted. Kept beside the push it serves: if a new field is added to the billing block
+    /// and not added here, it reads as "refused" and is reported — which is the safe direction.
+    /// </summary>
+    private static string? ReadField(CompanyManagerCompany c, string apiKey) => apiKey switch
+    {
+        "billing_email" => c.BillingEmail,
+        "billing_address_1" => c.BillingAddress1,
+        "billing_address_2" => c.BillingAddress2,
+        "billing_city" => c.BillingCity,
+        "billing_state" => c.BillingState,
+        "billing_postcode" => c.BillingPostcode,
+        "billing_country" => c.BillingCountry,
+        "billing_company" => c.BillingCompany,
+        "email" => c.Email,
+        "name" => c.Name,
+        "company_name_public" => c.PublicName,
+        _ => null,
+    };
+
+    private async Task<EconomicCustomerDetail?> SafeGetCustomerAsync(int customerNumber, CancellationToken ct)
+    {
+        try { return await _invoice!.GetCustomerAsync(customerNumber, ct); }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex, "ERP sync: could not read customer {Num} for billing compare.", customerNumber);
+            return null;
+        }
     }
 
     public bool CanRun => _erp.CanWrite && _cmOptions.Enabled;
@@ -99,6 +166,175 @@ public sealed class ErpWebshopContactSyncService
                 continue;
             }
 
+            // 🔴 §891 — PROPAGATE A RENAME. Operator renamed CVR 32559735 from "SoftwareCentral A/S"
+            // to "RoboPack A/S" in e-conomic and it reached nothing: this sync matched the company by
+            // erp_customer_number and then only ever synced CONTACTS — the customer name was used in
+            // log lines and never written anywhere.
+            //
+            // 🔑 The match key stays the ERP customer number. A rename is not a new customer, and
+            // matching on NAME would both miss this and risk pairing two different companies.
+            //
+            // 🔑 §891.3 — A LEGAL-NAME CHANGE IS THE *ONLY* EVENT THAT LETS CEH TOUCH THE NAMES.
+            // Operator 2026-08-06, final wording: *"the only time where i allow CEH to change the
+            // public name is if the legal name (rename of company) happens"* · corrected to
+            // *"otherwise company PUBLIC name must be owned by CM"*.
+            //
+            // So the trigger is the EVENT, not the field: nothing is written on an ordinary run, and
+            // a rename writes BOTH names. That is why this compares first and pushes second —
+            // syncing the legal name unconditionally would make CM's copy unowned, and pushing the
+            // public name unconditionally would stamp on his marketing string
+            // ("Robopack - empowered by SOFTWARECENTRAL") on every single run.
+            var cmCompany = await _cm.GetCompanyAsync(company.Id, ct);
+            var legalRenamed = cmCompany is not null
+                && !string.IsNullOrWhiteSpace(cu.Name)
+                && !string.Equals(cmCompany.Name, cu.Name, StringComparison.Ordinal);
+
+            if (legalRenamed)
+            {
+                var push = new Dictionary<string, object?> { ["name"] = cu.Name };
+
+                // The public name follows ONLY here — it usually contains the old company name, so
+                // a rename is exactly when it becomes wrong. It is left alone every other run.
+                var publicFollows = !string.IsNullOrWhiteSpace(cmCompany!.PublicName)
+                    && !string.Equals(cmCompany.PublicName, cu.Name, StringComparison.Ordinal);
+                if (publicFollows) push["company_name_public"] = cu.Name;
+
+                var renameOk = false;
+                try { renameOk = await _cm.UpdateCompanyAsync(company.Id, push, ct); }
+                catch (Exception ex)
+                {
+                    _log.LogWarning(ex, "ERP sync: rename failed for company {Co}.", company.Id);
+                }
+
+                // §56 — reported, naming both old values, because a rename changes what sponsors
+                // see on their own material.
+                notes.Add(renameOk
+                    ? $"RENAMED from ERP — e-conomic #{cu.CustomerNumber}: legal name "
+                      + $"<i>{E(cmCompany.Name)}</i> → <b>{E(cu.Name)}</b>"
+                      + (publicFollows
+                            ? $", and the public name <i>{E(cmCompany.PublicName)}</i> followed it "
+                              + "(a rename is the only time CEH touches that field — edit it if you "
+                              + "want different wording)."
+                            : ".")
+                      + " Zoho is not touched by this sync."
+                    : $"{E(cu.Name)} (e-conomic #{cu.CustomerNumber}): renamed in e-conomic (was "
+                      + $"<i>{E(cmCompany!.Name)}</i>) but the Company Manager update FAILED — it will retry.");
+            }
+
+            // 🔑 §891.4 — BILLING FIELDS FOLLOW ERP ON EVERY RUN, UNCONDITIONALLY.
+            // Operator 2026-08-06: *"This comparison must happen at every sync and be updated, as
+            // contacts in the webshop will be wrong if data is not updated - erp is master"*.
+            // ⚠️ Deliberately NOT event-driven like the names above (§891.3): CM owns the public
+            // name, but it owns nothing in the billing block. Two rules on one record, on purpose.
+            // 🔒 Field names are the REAL ones, read from GET /companies/{id} — not inferred from
+            // the UI labels. A wrong key here is a silent no-op on a billing address.
+            if (cmCompany is not null)
+            {
+                var billing = new Dictionary<string, object?>();
+                void Follow(string key, string? erpValue, string? cmValue)
+                {
+                    if (string.IsNullOrWhiteSpace(erpValue)) return;          // ERP blank ⇒ leave CM alone
+                    if (string.Equals(erpValue.Trim(), cmValue?.Trim(), StringComparison.OrdinalIgnoreCase)) return;
+                    billing[key] = erpValue.Trim();
+                }
+
+                // 🔴 §897 — `email` IS NOT WRITABLE, PROVEN. Company Manager answers 200 with the
+                // full record and even moves `updated_at`, but the value never changes. Pushing it
+                // therefore "succeeded" on every run and reported a BILLING update that had not
+                // happened — a mail to him every ten minutes, for twenty companies.
+                // Measured 2026-08-06 on company 10: POST {email:"penaw@robopack.com"} → 200, and a
+                // re-read still says penaw@softwarecentral.com.
+                // 🔒 `billing_email` IS writable and is the one invoices actually use, so that is the
+                // field we keep. Do NOT re-add `email` without re-running that read-back test.
+                Follow("billing_email", cu.Email, cmCompany.BillingEmail);
+
+                var detail = _invoice is null ? null
+                    : await SafeGetCustomerAsync(cu.CustomerNumber, ct);
+                if (detail is not null)
+                {
+                    // 🔑 §899 — e-conomic keeps ONE address field and lets it hold NEWLINES
+                    // ("c/o Per Skanne\nSvennevägen 13"); Company Manager has TWO single-line
+                    // fields. Pushing the whole thing into line 1 stored only part of it, so the
+                    // §897 read-back correctly reported a value that "did not change" — and six
+                    // companies were mailed as un-writable every ten minutes.
+                    //
+                    // 🔒 The field was never the problem: single-line addresses wrote perfectly.
+                    // We were sending a two-line value into a one-line field. Split it.
+                    var lines = (detail.Address ?? string.Empty)
+                        .Replace("\r\n", "\n")
+                        .Split('\n', StringSplitOptions.RemoveEmptyEntries)
+                        .Select(l => l.Trim())
+                        .Where(l => l.Length > 0)
+                        .ToList();
+
+                    Follow("billing_address_1", lines.FirstOrDefault(), cmCompany.BillingAddress1);
+                    // Everything after the first line goes to line 2 — joined rather than dropped,
+                    // because an address that loses its "c/o" line is worse than a long line 2.
+                    if (lines.Count > 1)
+                        Follow("billing_address_2", string.Join(", ", lines.Skip(1)), cmCompany.BillingAddress2);
+
+                    Follow("billing_city", detail.City, cmCompany.BillingCity);
+                    Follow("billing_postcode", detail.Zip, cmCompany.BillingPostcode);
+
+                    // ✅ §894 — MAP the country instead of refusing it. e-conomic stores free text
+                    // ("Danmark", "USA", "United States Of America", "United Kingdom (UK)") while
+                    // Company Manager stores an ISO-2 code.
+                    //
+                    // 🔴 The first version simply refused anything that was not already 2 letters and
+                    // reported it — which produced SIXTY "not a 2-letter code" lines in one e-mail.
+                    // A safety valve that becomes the noise it was meant to prevent is not a safety
+                    // valve (operator: *"make a Country function mapper ... and dont throw this at me"*).
+                    //
+                    // 🔒 An UNMAPPED spelling still writes nothing and says nothing — mapping is the
+                    // fix for names we recognise, not a licence to guess (§582).
+                    var iso = CountryCodeMapper.ToIso2(detail.Country);
+                    if (iso is not null) Follow("billing_country", iso, cmCompany.BillingCountry);
+                }
+
+                if (billing.Count > 0)
+                {
+                    var ok = false;
+                    try { ok = await _cm.UpdateCompanyAsync(company.Id, billing, ct); }
+                    catch (Exception ex)
+                    {
+                        _log.LogWarning(ex, "ERP sync: billing update failed for company {Co}.", company.Id);
+                    }
+
+                    // 🔑 §897 — VERIFY THE WRITE BY READING IT BACK. A 200 is not evidence a field
+                    // was stored: Company Manager accepts `email`, echoes it in the response, moves
+                    // `updated_at`, and keeps the old value. Trusting the status code made the sync
+                    // announce twenty BILLING updates every ten minutes that had never happened.
+                    //
+                    // 🔒 So the mail now reports what CHANGED, measured — never what we asked for.
+                    // A field that silently refuses the write is named as such, once, instead of
+                    // being re-announced as a success for ever.
+                    var after = ok ? await _cm.GetCompanyAsync(company.Id, ct) : null;
+                    var applied = new List<string>();
+                    var refused = new List<string>();
+
+                    foreach (var kv in billing)
+                    {
+                        var want = kv.Value as string;
+                        var now = after is null ? null : ReadField(after, kv.Key);
+                        if (after is null) { refused.Add(kv.Key); continue; }
+                        if (string.Equals(now?.Trim(), want?.Trim(), StringComparison.OrdinalIgnoreCase))
+                            applied.Add(kv.Key);
+                        else
+                            refused.Add(kv.Key);
+                    }
+
+                    if (applied.Count > 0)
+                        notes.Add($"BILLING updated from ERP — {E(cu.Name)} (e-conomic #{cu.CustomerNumber}): "
+                                  + E(string.Join(", ", applied)) + ".");
+
+                    if (refused.Count > 0)
+                        notes.Add($"⚠️ {E(cu.Name)} (e-conomic #{cu.CustomerNumber}): Company Manager "
+                                  + $"did NOT store {E(string.Join(", ", refused))} — the call succeeded "
+                                  + "but the value did not change. Set it by hand in Company Manager; "
+                                  + "CEH cannot write that field.");
+                }
+            }
+
             var contacts = await _erp.ListContactsAsync(cu.CustomerNumber, ct);
 
             // §503 (operator 2026-07-28: "it is important, that I get an email and it becomes
@@ -144,16 +380,40 @@ public sealed class ErpWebshopContactSyncService
                 {
                     var uid = await _cm.CreateUserAsync(c.Email.Trim(), first, last, company.Id, ct);
                     if (uid > 0) { emailToUserId[em] = uid; usersCreated++; }
-                    // uid <= 0 means Company Manager rejected the create — almost always
-                    // because the email already exists as a user (a person can be linked to
-                    // only ONE company in the webshop). That's expected, NOT an error: just
-                    // skip it (no alert) per operator 2026-06-24. The org handles shared
-                    // people via a manual override (e.g. FASTTRACK).
-                    else _log.LogInformation(
-                        "ERP sync: skipped {Email} for {Customer} — user already exists in the webshop (1-company limit).",
-                        c.Email, cu.Name);
+                    else
+                    {
+                        // 🔴 §891.5 — THIS USED TO BE SILENT, AND THAT IS THE BUG HE HIT.
+                        // Operator 2026-08-06 renamed three contacts' addresses in e-conomic; the
+                        // creates were rejected, nothing was said, and the only visible symptom was
+                        // a later "no Role:1 contact" alert about people who are plainly still there.
+                        // A create we could not perform is a FAILURE, not a no-op (§854).
+                        //
+                        // ⚠️ The 2026-06-24 decision to stay quiet was about a SHARED person
+                        // legitimately belonging to another company. That is still not an error —
+                        // but it must be VISIBLE, because it is also exactly what a renamed address
+                        // looks like, and he is the only one who can tell them apart.
+                        _log.LogInformation(
+                            "ERP sync: skipped {Email} for {Customer} — webshop rejected the create.",
+                            c.Email, cu.Name);
+                        notes.Add(
+                            $"NOT LINKED — {E(cu.Name)} (e-conomic #{cu.CustomerNumber}): "
+                            + $"<b>{E(c.Name)}</b> &lt;{E(c.Email)}&gt; could not be added to the webshop. "
+                            + "Either that address already exists as a user (a person can belong to "
+                            + "only ONE company), or the address was recently CHANGED in e-conomic and "
+                            + "the old user still holds the seat. "
+                            + "<b>Your action:</b> delete or re-link the old user in WordPress, then "
+                            + "re-run — the new address will be created and linked. "
+                            + "<i>Until then this contact holds no role here.</i>");
+                    }
                 }
-                catch (Exception ex) { _log.LogInformation(ex, "ERP sync: skipped {Email} — webshop create rejected (already exists).", c.Email); }
+                catch (Exception ex)
+                {
+                    _log.LogInformation(ex, "ERP sync: create rejected for {Email}.", c.Email);
+                    notes.Add(
+                        $"NOT LINKED — {E(cu.Name)} (e-conomic #{cu.CustomerNumber}): "
+                        + $"<b>{E(c.Name)}</b> &lt;{E(c.Email)}&gt; was rejected by the webshop "
+                        + $"({E(ex.Message)}). <b>Your action:</b> check that address in WordPress.");
+                }
             }
 
             // Resolve defaults from the FIRST contact holding each role (list order).
@@ -251,10 +511,23 @@ public sealed class ErpWebshopContactSyncService
             // signing. "Never overwrite a curated value" was the right rule for a VALID default;
             // it is the wrong rule for one that has ceased to be real.
             var orphanUserIds = orphans.Select(o => o.UserId).ToHashSet();
-            var signerOrphaned = company.DefaultSignerUserId > 0
-                                 && orphanUserIds.Contains(company.DefaultSignerUserId);
-            var coordinatorOrphaned = company.EventCoordinationDefaultContactUserId > 0
-                                      && orphanUserIds.Contains(company.EventCoordinationDefaultContactUserId);
+
+            // 🔴 §894.2 — A DELETED DEFAULT IS NOT AN ORPHAN, AND THAT IS WHY IT NEVER GOT FIXED.
+            // "Orphan" means a user still LINKED to the company that the ERP no longer lists. When
+            // the operator DELETED the old WordPress users (2026-08-06, to free the renamed
+            // addresses), those ids stopped being linked at all — so they were never in the orphan
+            // set, the guard below never fired, and Company Manager kept pointing default_signer_id
+            // at user 115 and the coordinator at 51, both of which no longer exist.
+            //
+            // 🔑 The real question is not "was this user orphaned" but "is this user still one of
+            // ours". A default that names nobody on the company is stale however it got that way —
+            // deleted, unlinked, or moved to another company.
+            var currentUserIds = emailToUserId.Values.ToHashSet();
+            bool IsStale(int userId) => userId > 0
+                && (orphanUserIds.Contains(userId) || !currentUserIds.Contains(userId));
+
+            var signerOrphaned = IsStale(company.DefaultSignerUserId);
+            var coordinatorOrphaned = IsStale(company.EventCoordinationDefaultContactUserId);
 
             var fields = new Dictionary<string, object?>();
             if ((company.DefaultSignerUserId <= 0 || signerOrphaned) && signer is int s)
@@ -265,19 +538,28 @@ public sealed class ErpWebshopContactSyncService
             // Say it out loud when a curated default was REPLACED — that is a change to something
             // a human chose, so it must never happen silently.
             if (signerOrphaned)
-                notes.Add($"{E(cu.Name)} (e-conomic #{cu.CustomerNumber}): the default SIGNER was an "
+                notes.Add($"{E(cu.Name)} (e-conomic #{cu.CustomerNumber}): the default SIGNER no longer exists on this company "
                           + (signer is null
-                             ? "orphan and there is no Role:1 contact to replace them — <b>the company now has NO default signer</b>. Add a Signer in e-conomic."
-                             : "orphan; it has been reassigned to the current Role:1 contact."));
+                             ? "and there is no Role:1 contact to replace them — <b>the company now has NO default signer</b>. Add a Signer in e-conomic."
+                             : "— it has been reassigned to the current Role:1 contact."));
             if (coordinatorOrphaned)
-                notes.Add($"{E(cu.Name)} (e-conomic #{cu.CustomerNumber}): the default EVENT COORDINATOR "
+                notes.Add($"{E(cu.Name)} (e-conomic #{cu.CustomerNumber}): the default EVENT COORDINATOR no longer exists on this company "
                           + (coordinator is null
-                             ? "was an orphan and there is no Role:2 contact to replace them — <b>the company now has NO default coordinator</b>. Add an Event Coordinator in e-conomic."
-                             : "was an orphan; it has been reassigned to the current Role:2 contact."));
+                             ? "and there is no Role:2 contact to replace them — <b>the company now has NO default coordinator</b>. Add an Event Coordinator in e-conomic."
+                             : "— it has been reassigned to the current Role:2 contact."));
             if (fields.Count > 0)
             {
                 try { if (await _cm.UpdateCompanyAsync(company.Id, fields, ct)) defaultsSet++; }
                 catch (Exception ex) { _log.LogWarning(ex, "ERP sync: set defaults failed for company {Co}.", company.Id); }
+            }
+
+            // 🔒 §921 — this company reconciled, so its failure streak is over. Without this reset
+            // the counter would creep up across unrelated blips weeks apart and eventually alert on
+            // a company that is perfectly healthy — an alert with no incident behind it, which is
+            // the same deafness by a slower route.
+            if (_failures is not null)
+            {
+                await _failures.RecordSuccessAsync($"erp-webshop-cm:{cu.CustomerNumber}", ct);
             }
           }
           catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
@@ -285,11 +567,43 @@ public sealed class ErpWebshopContactSyncService
             // One company failed (after the HttpClient already retried any transient
             // upstream error). Log + note it and KEEP GOING so the rest of the fleet
             // still reconciles; the next run reconverges this company.
+            // 🔒 ALWAYS logged — observability is not what he objected to. The log is where a
+            // transient blip belongs; his inbox is not.
             _log.LogWarning(ex,
                 "ERP sync: company {Customer} (e-conomic #{Num}) failed; skipping and continuing.",
                 cu.Name, cu.CustomerNumber);
-            notes.Add($"{E(cu.Name)} (e-conomic #{cu.CustomerNumber}): Company Manager call failed "
-                + $"({E(ex.Message)}); skipped this company — it will retry on the next run.");
+
+            // 🔴 §921 — ONLY REPORT A COMPANY THAT HAS BEEN FAILING FOR AN HOUR.
+            //
+            // The HttpClient already retried the transient fault (TransientFaultRetryHandler:
+            // 5xx/408/429/timeout), so arriving here means the retries were also exhausted — which
+            // for a 503 simply means the far end is down right now. There is nothing he can do
+            // about that, and telling him on the first tick is what taught him to skim these mails.
+            var key = $"erp-webshop-cm:{cu.CustomerNumber}";
+            var shouldReport = true;
+            var consecutive = 0;
+
+            if (_failures is not null)
+            {
+                var decision = await _failures.RecordFailureAsync(
+                    key, ex.Message, ct, CompanyFailureAlertThreshold);
+                shouldReport = decision.ShouldAlert;
+                consecutive = decision.ConsecutiveFailures;
+            }
+
+            if (shouldReport)
+            {
+                notes.Add($"{E(cu.Name)} (e-conomic #{cu.CustomerNumber}): Company Manager has been "
+                    + $"failing for <b>{consecutive} consecutive runs</b> (about "
+                    + $"{consecutive * 10} minutes) — {E(ex.Message)}. This one needs looking at; "
+                    + "everything else reconciled normally.");
+            }
+            else
+            {
+                _log.LogInformation(
+                    "§921: company {Num} failed {Count}/{Threshold} consecutive runs — not reported yet.",
+                    cu.CustomerNumber, consecutive, CompanyFailureAlertThreshold);
+            }
           }
         }
 
@@ -321,11 +635,50 @@ public sealed class ErpWebshopContactSyncService
             // fragment could only destroy the formatting, never add protection the per-value
             // encoding does not already give.
             var items = string.Concat(notes.Select(n => $"<li style=\"margin-bottom:14px;\">{n}</li>"));
-            var html = "<p>The ERP→webshop sponsor reconcile found items needing attention "
-                + "(mostly contacts missing a Signer/Event-Coordinator role in e-conomic):</p>"
+
+            // 🔑 §894.1 — THE HEADER AND FOOTER MUST NOT DESCRIBE A PROBLEM THAT IS NOT IN THE LIST.
+            // Operator 2026-08-06: *"last line is also impossible to work with - who is the company /
+            // contact"*. The mail always claimed the items were "mostly contacts missing a role" and
+            // always closed with "fix the role in e-conomic" — regardless of what was actually in it.
+            // On the run he complained about, the list was 60 country lines and a dozen billing
+            // updates, and not one missing role. A standing instruction that names nobody is
+            // unactionable, and it teaches him to stop reading the last line.
+            var roleNotes = notes.Where(n =>
+                n.Contains("Role:1", StringComparison.OrdinalIgnoreCase)
+                || n.Contains("Signer role", StringComparison.OrdinalIgnoreCase)
+                || n.Contains("Event Coordinator role", StringComparison.OrdinalIgnoreCase)
+                || n.Contains("default SIGNER", StringComparison.Ordinal)
+                || n.Contains("default EVENT COORDINATOR", StringComparison.Ordinal)).ToList();
+
+            var html = "<p>The ERP→webshop sponsor reconcile has "
+                + $"<b>{notes.Count}</b> item(s) to report:</p>"
                 + $"<ul style=\"padding-left:18px;\">{items}</ul>"
-                + "<p>Fix the role in e-conomic (contact notes <code>Role:1,2</code>) and the next sync will set the default.</p>";
-            await _email.SendAsync(AlertEmail, "Sponsor ERP/webshop reconcile — action needed [ELDK27]", html, ct);
+                + (roleNotes.Count > 0
+                    // Only when a role really IS missing — and it says how many, so the instruction
+                    // points at lines above it rather than at nothing.
+                    ? $"<p><b>{roleNotes.Count}</b> of the item(s) above are about a missing role. "
+                      + "For those, set the contact's notes in e-conomic to <code>Role:1</code> "
+                      + "(Signer) and/or <code>Role:2</code> (Event Coordinator) — the next sync then "
+                      + "sets the default automatically.</p>"
+                    // Everything else already carries its own action, so the mail ends there.
+                    : "<p>Each line above states its own action. Nothing here needs a role change.</p>");
+            // 🔑 §900 — THE SUBJECT MUST MATCH THE CONTENT. It read "action needed" on every run,
+            // including one whose six lines were all "BILLING updated from ERP" — work CEH had
+            // already done for him. Operator 2026-08-06: *"but why subject with ACTION NEEDED"*.
+            // A subject that always cries wolf is one he stops opening, and this is the mail that
+            // carries the genuine blockers: a contact that could not be linked, a missing role, a
+            // field Company Manager refused.
+            //
+            // 🔒 Actionable = something he must DO. "Updated"/"Renamed from ERP" is a receipt.
+            var actionable = notes.Count(n =>
+                !n.StartsWith("BILLING updated from ERP", StringComparison.Ordinal)
+                && !n.StartsWith("RENAMED from ERP", StringComparison.Ordinal));
+
+            var subject = actionable > 0
+                ? $"Sponsor ERP/webshop reconcile — {actionable} need(s) your attention [ELDK27]"
+                : $"Sponsor ERP/webshop reconcile — {notes.Count} updated, nothing to do [ELDK27]";
+
+            await _email.SendAsync(AlertEmail, subject, html, ct);
         }
         catch (Exception ex) { _log.LogWarning(ex, "ERP sync: alert email to {To} failed.", AlertEmail); }
     }

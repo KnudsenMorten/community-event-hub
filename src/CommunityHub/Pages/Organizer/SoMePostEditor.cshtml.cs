@@ -209,7 +209,22 @@ public class SoMePostEditorModel : PageModel
             .Where(e => e.Id == post.EventId).Select(e => e.Code).FirstOrDefaultAsync(ct);
         var text = (EditText ?? string.Empty).Trim();
         if (SoMePostCredit.TryStrip(text, editionCode, out var bodyOnly)) text = bodyOnly;
-        post.ManualTextOverride = text.Length == 0 ? null : text;
+
+        // 🔴 §907.2 — SAVING WITHOUT CHANGING ANYTHING MUST NOT CREATE AN "EDIT".
+        //
+        // An override is what makes a post untouchable to the planner (§848.2 skips any row with
+        // one). So a Save on an UNCHANGED post silently detaches it from the engine for ever —
+        // and on 2026-08-06 that turned a display bug into a stuck row: post 8764 showed
+        // "{EventPostBody}" (the §907 regression), he pressed Save, and the plumbing became his
+        // "edit". The post was then broken BECAUSE it was protected, and protected BECAUSE it was
+        // broken. It could not heal when the planner was fixed, and had to be repaired by hand.
+        //
+        // 🔒 Identical text ⇒ no override, exactly as if he had cleared the box. An edit is a
+        // DIFFERENCE, not a button press.
+        var composed = post.AutoText?.Trim() ?? string.Empty;
+        var unchanged = string.Equals(text, composed, StringComparison.Ordinal);
+
+        post.ManualTextOverride = text.Length == 0 || unchanged ? null : text;
 
         // A bare file name in the matching library folder, or blank for a text-only post.
         var img = (ImageRef ?? string.Empty).Trim();
@@ -234,10 +249,22 @@ public class SoMePostEditorModel : PageModel
         post.UpdatedAt = DateTimeOffset.UtcNow;
         post.LastUpdatedByEmail = me.Email;
 
-        // ⚠️ IsActive is deliberately NOT touched here. Approving is its own act, in the queue.
+        // ⚠️ IsActive is deliberately NOT touched here. Approving is its own act (§887).
+        var changed = _db.ChangeTracker.HasChanges();
         await _db.SaveChangesAsync(ct);
 
-        Message = "Saved.";
+        // 🔒 §887.2 — SAY WHAT WAS SAVED, not just that something was. Operator 2026-08-06: *"make a
+        // note when i click save so i can see it actually saved something"*. A bare "Saved." renders
+        // at the TOP of a long page, so pressing Save beside the date field appeared to do nothing —
+        // the confirmation was real but off-screen. Naming the values makes the save VERIFIABLE:
+        // if the date echoed back is not the one he typed, he can see that immediately.
+        var savedWhen = SoMeDisplayTime.ToDanish(post.ScheduledAtUtc)
+            .ToString("ddd dd MMM yyyy 'at' HH:mm");
+        Message = changed
+            ? $"Saved at {DateTimeOffset.UtcNow:HH:mm} — posting date & time is now {savedWhen} "
+              + $"(Danish time), and the post text was saved ({(post.ManualTextOverride?.Length ?? 0)} characters)."
+            : $"Nothing had changed — this post is already saved as {savedWhen} (Danish time).";
+
         await LoadAsync(me.EventId, PostId, ct);
         return Page();
     }
@@ -249,8 +276,18 @@ public class SoMePostEditorModel : PageModel
     /// 🔒 Accepting LOCKS the post: the planner never re-plans, moves or removes a Scheduled post
     /// again. Handing it back makes it a proposal once more, and the next run may move it.
     ///
-    /// ⚠️ Accepting is NOT approving-to-publish. <c>IsActive</c> remains the publish gate, so a post
-    /// can be accepted (its slot is settled) and still switched off. Two different questions.
+    /// 🔑 <b>ACCEPTING APPROVES (operator 2026-08-06).</b> It used to settle only the slot, leaving
+    /// <c>IsActive</c> — the publish gate — untouched, so an accepted post still read
+    /// "PLANNED (not approved)" and the only approve control was on a different page. He reported
+    /// both as bugs on the same post: *"i have no approve buton anymore"* and *"this is wrong as it
+    /// is now scheduled (approved)"*.
+    /// <para>⚠️ §872 split these two axes deliberately and the distinction is real — a slot lock and
+    /// a publish gate ARE different questions. But he makes ONE decision while walking the queue, and
+    /// a second switch on another page is not a distinction he asked for. So accepting now does both,
+    /// and handing back withdraws both.</para>
+    /// <para>🔒 The §850 readiness guard still binds: a post that is not ready gets its slot locked
+    /// but is NOT approved, and the refusal says why. Locking a date is harmless; publishing a post
+    /// whose sponsor has not delivered their text is not.</para>
     /// </remarks>
     public async Task<IActionResult> OnPostSetPlanStateAsync(
         int id, SoMePostPlanState state, CancellationToken ct)
@@ -270,13 +307,38 @@ public class SoMePostEditorModel : PageModel
         else
         {
             post.PlanState = state;
+
+            if (state == SoMePostPlanState.Scheduled)
+            {
+                // §850 — approve only if it is actually ready. The slot lock is safe either way;
+                // the publish gate is not.
+                var blocked = await _approvalGate.BlockedReasonAsync(post, ct);
+                if (blocked is null)
+                {
+                    post.IsActive = true;
+                    Message = "Accepted and approved — locked, and it will publish at its scheduled time.";
+                }
+                else
+                {
+                    // 🔒 Say what is missing. A silent "accepted" on a post that still cannot publish
+                    // is precisely the confusion he reported.
+                    post.IsActive = false;
+                    Message = $"Slot locked, but NOT approved — {blocked}";
+                    MessageIsError = true;
+                }
+            }
+            else
+            {
+                // Handing back withdraws the approval too: it is a proposal again, and a proposal
+                // that could still publish would be the same disagreement in reverse.
+                post.IsActive = false;
+                Message = "Handed back to the planner. It may be moved or replaced on the next run, "
+                        + "and it will not publish until you accept it again.";
+            }
+
             post.UpdatedAt = DateTimeOffset.UtcNow;
             post.LastUpdatedByEmail = me.Email;
             await _db.SaveChangesAsync(ct);
-
-            Message = state == SoMePostPlanState.Scheduled
-                ? "Accepted. This post is locked — the planner will not move it again."
-                : "Handed back to the planner. It may be moved or replaced on the next run.";
         }
 
         await LoadAsync(me.EventId, id, ct);
@@ -294,6 +356,89 @@ public class SoMePostEditorModel : PageModel
     /// <para>⚠️ Deleting a PUBLISHED post removes it from CEH only — it is already on LinkedIn and
     /// nothing here retracts it. The page says so before he does it.</para>
     /// </remarks>
+    /// <summary>
+    /// §913 — DUPLICATE THIS POST. Operator 2026-08-06: *"request for feature duplication post
+    /// button"*.
+    /// </summary>
+    /// <remarks>
+    /// <para>🔑 <b>The copy is HIS post from birth, not a planner proposal.</b> A duplicate that
+    /// arrived as <c>Proposed</c> would be <b>discarded by the very next planning tick</b> (§848.2
+    /// deletes un-accepted proposals) — the one outcome that would make the button look broken.
+    /// So it is created <c>Accepted</c>, and with <c>AutoGenerated = false</c>: nobody planned it.</para>
+    ///
+    /// <para>🔒 <b>It carries no SUBJECT.</b> Keeping the source's <c>SubjectKey</c> would put two
+    /// posts on the same (subject, occurrence) — a pair the planner's "have I already planned this?"
+    /// lookup counts as one, and §824.2E's placement assumes it is one. A duplicate is therefore an
+    /// ad-hoc post in the §834.5 sense: his own words, standing alone.</para>
+    ///
+    /// <para>⚠️ <b>Which means the copy is FLATTENED, deliberately.</b> With no subject, a variable
+    /// like <c>{SessionTitle}</c> has nothing to resolve against and would publish as literal text.
+    /// The body is therefore resolved AS IT READS TODAY and stored as words. That is the honest
+    /// trade and the reason it is stated in the confirmation message: a duplicate is a snapshot, not
+    /// a second live copy.</para>
+    ///
+    /// <para>🔒 <b>Never published, never approved, never scheduled.</b> Status, publish time and
+    /// external id are all left clean — a duplicate of a post that has already gone out is a NEW,
+    /// unpublished post, and copying the external id would make CEH believe it had already been
+    /// sent. It arrives HELD (§824.8 Q2) with <b>no date</b>, so it cannot publish until he gives it
+    /// one.</para>
+    /// </remarks>
+    public async Task<IActionResult> OnPostDuplicateAsync(int id, CancellationToken ct)
+    {
+        var me = _participant.Current;
+        if (me is null) return RedirectToPage("/Login");
+        if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
+
+        var source = await _db.SoMePosts
+            .AsNoTracking()
+            .FirstOrDefaultAsync(p => p.Id == id && p.EventId == me.EventId, ct);
+
+        if (source is null)
+        {
+            Message = "That post no longer exists.";
+            MessageIsError = true;
+            await LoadAsync(me.EventId, null, ct);
+            return Page();
+        }
+
+        // Resolved NOW — see the flattening note above.
+        var values = await _composer.ValuesForAsync(source, ct);
+        var text = _composer.Resolve(source.EffectiveText, values);
+
+        var copy = new CommunityHub.Core.Domain.SoMePost
+        {
+            EventId = source.EventId,
+            Type = CommunityHub.Core.Domain.SoMePostType.AdHoc,
+            // 🔒 No TemplateKind and no SubjectKey: it belongs to nothing, so the planner ignores it.
+            ManualTextOverride = text,
+            AutoText = string.Empty,
+            ImageRef = source.ImageRef,
+            MediaKind = source.MediaKind,
+            Tags = source.Tags,
+            AutoGenerated = false,
+            // 🔒 `Scheduled` is the "he has accepted it" state — the planner never re-plans, moves
+            // or removes such a post. NOT `Proposed`, which the next tick would delete.
+            PlanState = CommunityHub.Core.Domain.SoMePostPlanState.Scheduled,
+            IsActive = false,
+            Status = CommunityHub.Core.Domain.SoMePostStatus.Queued,
+            // ⚠️ Deliberately the SOURCE's slot, so the copy is not lost in the queue — but held,
+            // so the date is a starting point he changes rather than a publication he did not ask
+            // for. §889.1: a post whose time has passed publishes the moment it is approved.
+            ScheduledAtUtc = source.ScheduledAtUtc,
+            CreatedAt = DateTimeOffset.UtcNow,
+            LastUpdatedByEmail = me.Email,
+        };
+
+        _db.SoMePosts.Add(copy);
+        await _db.SaveChangesAsync(ct);
+
+        Message = $"Duplicated as post #{copy.Id} — held, and yours to edit. Its text was copied as "
+                + "WORDS (the variables are filled in as they read today), because a copy belongs to "
+                + "no session or sponsor. Give it a date before approving it.";
+
+        return RedirectToPage(new { id = copy.Id });
+    }
+
     public async Task<IActionResult> OnPostDeleteAsync(int id, bool restore, CancellationToken ct)
     {
         var me = _participant.Current;

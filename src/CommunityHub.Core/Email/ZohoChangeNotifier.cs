@@ -217,7 +217,16 @@ public sealed class ZohoChangeNotifier
     /// </summary>
     private static bool RendersAsHtml(string s) =>
         s.Contains("<b>", StringComparison.OrdinalIgnoreCase)
-        || s.Contains("<code>", StringComparison.OrdinalIgnoreCase)
-        || s.Contains("<br>", StringComparison.OrdinalIgnoreCase)
-        || s.Contains("<i>", StringComparison.OrdinalIgnoreCase);
+        || s.Contains("<code", StringComparison.OrdinalIgnoreCase)
+        || s.Contains("<br", StringComparison.OrdinalIgnoreCase)
+        || s.Contains("<i>", StringComparison.OrdinalIgnoreCase)
+        // 🔴 §898 — <strong> and <em> were MISSING, and the callers use them. An intro written as
+        // "Zoho Backstage <strong>ignores API updates</strong>…" failed this test, was encoded, and
+        // printed the raw tags in his inbox. Same defect as §558 and §518, a third time — which is
+        // the argument for matching the OPENING bracket of the tags we actually emit rather than
+        // an exact spelling that keeps drifting out of date.
+        || s.Contains("<strong", StringComparison.OrdinalIgnoreCase)
+        || s.Contains("<em", StringComparison.OrdinalIgnoreCase)
+        || s.Contains("<span", StringComparison.OrdinalIgnoreCase)
+        || s.Contains("<a ", StringComparison.OrdinalIgnoreCase);
 }

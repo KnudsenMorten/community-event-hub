@@ -91,10 +91,21 @@
                 <strong>@view.Engine.Published</strong> published
             </p>
             <p class="muted">
-                Approve them in the <a asp-page="/Organizer/SoMeQueue">queue</a>, or see the whole
-                campaign in the <a asp-page="/Organizer/SoMeScheduler">post planner</a>.
+                Approve them in the <a asp-page="/Organizer/SoMeQueue">Calendar for LinkedIn Posts</a>,
+                or see the whole campaign in the
+                <a asp-page="/Organizer/SoMeScheduler">post planner</a>.
             </p>
         }
+
+        @* §914 — this page absorbed three hub cards (SoMe settings, Connect LinkedIn, Asset
+           locations). They MUST be reachable from here: a card removed without a route left behind
+           is a page nobody can open. *@
+        <p class="muted" style="margin-top:12px;">
+            Also here:
+            <a asp-page="/Organizer/SoMeSettings">SoMe settings</a> ·
+            <a asp-page="/Organizer/LinkedInConnect">Connect LinkedIn</a> ·
+            <a asp-page="/Organizer/AssetLocations">Asset locations</a>
+        </p>
 
         @* §834.5 — the escape hatch, named the way he named it. *@
         <p class="muted" style="margin-top:12px;">

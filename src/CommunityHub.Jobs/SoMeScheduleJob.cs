@@ -23,6 +23,7 @@ public sealed class SoMeScheduleJob
 {
     private readonly CommunityHubDbContext _db;
     private readonly SoMeScheduleService _scheduler;
+    private readonly SoMeAutoApproveService? _autoApprove;
     private readonly ILogger<SoMeScheduleJob> _log;
     private readonly CommunityHub.Core.Diagnostics.JobActivityReporter? _activity;
 
@@ -30,12 +31,14 @@ public sealed class SoMeScheduleJob
         CommunityHubDbContext db,
         SoMeScheduleService scheduler,
         ILogger<SoMeScheduleJob> log,
-        CommunityHub.Core.Diagnostics.JobActivityReporter? activity = null)
+        CommunityHub.Core.Diagnostics.JobActivityReporter? activity = null,
+        SoMeAutoApproveService? autoApprove = null)
     {
         _db = db;
         _scheduler = scheduler;
         _log = log;
         _activity = activity;
+        _autoApprove = autoApprove;
     }
 
     [Function("SoMeScheduleJob")]
@@ -59,6 +62,18 @@ public sealed class SoMeScheduleJob
         _log.LogInformation(
             "SoMeScheduleJob: {Created} post(s) queued (held for approval), {Already} already planned. {Message}",
             result.Created, result.AlreadyPlanned, result.Message);
+
+        // §918 — AFTER planning, never before: a post has to exist before it can be approved, and
+        // running it here means the same tick that creates a post can also approve it once it is
+        // far enough out. 🔒 The service is a no-op unless he has switched it on.
+        if (_autoApprove is not null)
+        {
+            var auto = await _autoApprove.RunAsync(eventId.Value, ct);
+            if (auto.Approved > 0 || auto.Blocked > 0)
+            {
+                _log.LogInformation("§918 {Message}", auto.Message);
+            }
+        }
 
         if (result.Created == 0 && result.AlreadyPlanned == 0 && result.Message.Contains("footer"))
         {

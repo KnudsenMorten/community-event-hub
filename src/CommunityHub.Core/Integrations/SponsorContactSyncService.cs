@@ -34,18 +34,24 @@ public sealed class SponsorContactSyncService
     private readonly TimeProvider _clock;
     private readonly ILogger<SponsorContactSyncService> _log;
 
+    // §895 — e-conomic is the master for WHO the contacts are. Optional so an unconfigured ERP
+    // cannot stop the CM mirror running; without it the service behaves exactly as before.
+    private readonly Erp.EconomicContactAdminService? _erpContacts;
+
     public SponsorContactSyncService(
         CommunityHubDbContext db,
         CompanyManagerClient cm,
         CompanyManagerOptions options,
         TimeProvider clock,
-        ILogger<SponsorContactSyncService> log)
+        ILogger<SponsorContactSyncService> log,
+        Erp.EconomicContactAdminService? erpContacts = null)
     {
         _db = db;
         _cm = cm;
         _options = options;
         _clock = clock;
         _log = log;
+        _erpContacts = erpContacts;
     }
 
     /// <summary>
@@ -64,6 +70,109 @@ public sealed class SponsorContactSyncService
     {
         if (!_options.Enabled) return null;
         return await _cm.GetCompanyAsync(companyId, ct);
+    }
+
+    /// <summary>
+    /// §895 — bring CEH's sponsor contacts in line with <b>e-conomic</b>, keyed on the e-conomic
+    /// contact number so a renamed e-mail UPDATES the existing participant instead of duplicating it.
+    /// </summary>
+    /// <remarks>
+    /// <para>🔒 <b>Three-step match, in this order:</b> by <c>ErpContactNumber</c> (the identity);
+    /// then, once, by e-mail — which ADOPTS a row created before this column existed and stamps the
+    /// id on it; then create. After the adoption pass a contact is keyed by id for ever.</para>
+    ///
+    /// <para>🔒 <b>Deactivate, never delete</b> (§502). A participant carrying an ERP contact number
+    /// that e-conomic no longer lists is switched off, keeping their history and any links.</para>
+    ///
+    /// <para>⚠️ <b>An EMPTY contact list changes nothing.</b> An empty read is evidence the source
+    /// cannot be trusted, never evidence that everyone left — the same safety stop as
+    /// <c>ErpWebshopContactSyncService</c>, which exists because one such pass could otherwise
+    /// deactivate a company's entire staff.</para>
+    /// </remarks>
+    private async Task ReconcileFromErpAsync(
+        int eventId, int companyId, string? erpCustomerNumber, CancellationToken ct)
+    {
+        if (_erpContacts is null) return;
+        if (!int.TryParse((erpCustomerNumber ?? string.Empty).Trim(), out var erpNo) || erpNo <= 0) return;
+
+        IReadOnlyList<Erp.EconomicContactAdminService.ContactView> erp;
+        try { erp = await _erpContacts.ListContactsAsync(erpNo, ct); }
+        catch (Exception ex)
+        {
+            // A read we could not perform is not a roster that emptied.
+            _log.LogWarning(ex, "SponsorContactSync: could not read e-conomic contacts for {ErpNo}.", erpNo);
+            return;
+        }
+
+        if (erp.Count == 0) return;   // ⚠️ see remarks — never treated as "everyone left".
+
+        var companyIdStr = companyId.ToString();
+        var now = _clock.GetUtcNow();
+        var seen = new HashSet<int>();
+
+        foreach (var c in erp)
+        {
+            var email = (c.Email ?? string.Empty).Trim().ToLowerInvariant();
+            if (email.Length == 0) continue;
+            seen.Add(c.ContactNumber);
+
+            var row = await _db.Participants
+                .FirstOrDefaultAsync(p => p.EventId == eventId && p.ErpContactNumber == c.ContactNumber, ct);
+
+            // Adoption: an existing row that predates this column, found once by e-mail.
+            row ??= await _db.Participants
+                .FirstOrDefaultAsync(p => p.EventId == eventId && p.Email == email, ct);
+
+            if (row is null)
+            {
+                _db.Participants.Add(new Participant
+                {
+                    EventId = eventId,
+                    Email = email,
+                    FullName = string.IsNullOrWhiteSpace(c.Name) ? email : c.Name.Trim(),
+                    Role = ParticipantRole.Sponsor,
+                    SponsorCompanyId = companyIdStr,
+                    ErpContactNumber = c.ContactNumber,
+                    IsSigner = c.IsSigner,
+                    IsEventCoordinator = c.IsEventCoordinator,
+                    IsActive = true,
+                    LifecycleState = ParticipantLifecycleState.Active,
+                    CreatedAt = now,
+                });
+                continue;
+            }
+
+            // 🔒 Never clobber a non-sponsor role — the same guard the CM pass applies.
+            if (row.Role != ParticipantRole.Sponsor) continue;
+
+            // 🔑 THE RENAME, IN PLACE. Same CEH id, new address — tasks, links and history survive.
+            row.ErpContactNumber = c.ContactNumber;
+            if (!string.Equals(row.Email, email, StringComparison.Ordinal)) row.Email = email;
+            if (!string.IsNullOrWhiteSpace(c.Name)) row.FullName = c.Name.Trim();
+            row.SponsorCompanyId = companyIdStr;
+            row.IsSigner = c.IsSigner;
+            row.IsEventCoordinator = c.IsEventCoordinator;
+        }
+
+        // §502 — gone from e-conomic ⇒ switched off here. Only rows we have already keyed by id,
+        // so a never-adopted legacy row is never deactivated by a rule it was not part of.
+        var stale = await _db.Participants
+            .Where(p => p.EventId == eventId
+                        && p.SponsorCompanyId == companyIdStr
+                        && p.Role == ParticipantRole.Sponsor
+                        && p.IsActive
+                        && p.ErpContactNumber != null)
+            .ToListAsync(ct);
+
+        foreach (var p in stale.Where(p => !seen.Contains(p.ErpContactNumber!.Value)))
+        {
+            p.IsActive = false;
+            _log.LogInformation(
+                "SponsorContactSync: {Email} deactivated — e-conomic contact {No} no longer exists.",
+                p.Email, p.ErpContactNumber);
+        }
+
+        await _db.SaveChangesAsync(ct);
     }
 
     public async Task<SponsorContactSyncResult> SyncCompanyAsync(
@@ -95,6 +204,17 @@ public sealed class SponsorContactSyncService
         var company = await _cm.GetCompanyAsync(companyId, ct);
         var signerUserId = company?.DefaultSignerUserId ?? 0;
         var coordinatorUserId = company?.EventCoordinationDefaultContactUserId ?? 0;
+
+        // 🔑 §895 — ERP FIRST. e-conomic is the master (§482), so a contact's identity and its
+        // current e-mail come from there — keyed on the e-conomic contact number, which survives a
+        // rename. The Company Manager pass below then only fills in the webshop seat.
+        //
+        // 🔴 Why this had to change: CEH matched on E-MAIL, mirrored from CM. When the operator
+        // renamed three addresses in e-conomic, CM could not update a user's e-mail, so the users
+        // were deleted and recreated with new ids — and BOTH keys CEH could match on changed at
+        // once. The next sync would have created three duplicates and left the originals active.
+        // The e-conomic contact number was the only thing that survived.
+        await ReconcileFromErpAsync(eventId, companyId, company?.ErpCustomerNumber, ct);
 
         var companyIdStr = companyId.ToString();
         var now = _clock.GetUtcNow();

@@ -1,13 +1,17 @@
 @page
 @model CommunityHub.Pages.Sponsor.AnnouncementsModel
 @{
-    ViewData["Title"] = "Social media announcements";
+    ViewData["Title"] = "Social Media Announcements (managed by ELDK)";
 }
 
 <div class="card">
-    <h1>Social media announcements</h1>
+    <h1>Social Media Announcements (managed by ELDK)</h1>
+    @* §916 — the medium and the ownership, both said plainly. See the speaker page for why
+       "(managed by ELDK)" is in the title: a sponsor also has their own social material here, and
+       two menu entries called "social media" is how the two get confused. *@
     <p class="muted">
-        The posts we will publish about you on LinkedIn — what they say, and when they run.
+        Posts <strong>we</strong> publish about you on the event's <strong>LinkedIn</strong> company
+        page — what they say and when they run. These are written and scheduled by the organizers.
     </p>
 
     @if (Model.AccessDenied)

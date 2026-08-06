@@ -302,6 +302,29 @@ public class SponsorInfo
     /// </summary>
     public Ring Ring { get; set; } = Rings.Default;
 
+    /// <summary>
+    /// §905 — this company is TEST DATA: never announced, never rendered into a graphic, never
+    /// named in a sponsor-tier post.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-08-06: <i>"we need to have that, so we fx can control test sponsors"</i>.
+    /// The sibling of <see cref="Participant.IsTestUser"/>, which had no company-level counterpart —
+    /// so "is this sponsor a fixture?" could only be INFERRED from its contacts.</para>
+    ///
+    /// <para>🔑 <b>Explicit beats derived, and the reason is a real company.</b> The derived rule is
+    /// "every contact is a test user", and it is still applied as a fallback
+    /// (<see cref="Integrations.TestDataScope"/>) so existing fixtures keep working with no data
+    /// entry. But it cannot express a MIXED company: measured on PROD, the operator's own firm is a
+    /// paying Gold sponsor carrying six test contacts beside six real ones. Only a column he sets
+    /// himself can say which of those a company is.</para>
+    ///
+    /// <para>🔒 Defaults to <c>false</c>, so every existing sponsor is real until he says otherwise —
+    /// the safe direction: a fixture that slips through is visible in the queue he approves, while a
+    /// real sponsor wrongly marked test would silently vanish from the campaign (§842.5 makes that a
+    /// contract breach).</para>
+    /// </remarks>
+    public bool IsTestData { get; set; }
+
     // --- Booth check-in (pre-day expected arrival, REQUIREMENTS §229) ---------
     /// <summary>
     /// §229: when the sponsor expects to arrive at their booth on the pre-day

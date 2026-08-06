@@ -71,6 +71,46 @@ public class SoMeSettings
     public int MaxPostsPerDay { get; set; } = 2;
 
     /// <summary>
+    /// §918 — approve template-built posts automatically, once they are far enough out.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-08-06: <i>"as they run from the templates, i see no reason why we should
+    /// not auto-approve them"</i> — with 79 posts held and one approved, approving them one at a
+    /// time was not a workflow.</para>
+    /// <para>🔒 <b>OFF by default</b>, and it stays a choice: §824.8 Q2 ("publish only after your
+    /// approval") is the safety model, and turning it on is him deciding to delegate that approval
+    /// to a rule he can read.</para>
+    /// </remarks>
+    public bool AutoApproveEnabled { get; set; }
+
+    /// <summary>
+    /// §918 — how many days ahead a post must be scheduled before it may auto-approve.
+    /// </summary>
+    /// <remarks>
+    /// <para>🔴 <b>This is the guard that stops §889.1 happening at scale.</b> He approved #495, its
+    /// 09:00 slot had already passed, and it published <b>thirty seconds later</b>. Auto-approving a
+    /// whole queue with no lead time would do that to every post whose time has gone by — a burst of
+    /// publications, at once, with no chance to look.</para>
+    /// <para>🔒 The lead time is also the REVIEW WINDOW: nothing can publish for at least this many
+    /// days after it is approved, so there is always time to catch and un-approve it.</para>
+    /// </remarks>
+    public int AutoApproveLeadDays { get; set; } = 7;
+
+    /// <summary>
+    /// §927 — session TITLE patterns that must never be announced. One per line, <c>*</c> wildcard.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-08-06: <i>"exclude option with title filters must be build like ask the
+    /// experts*"</i>. His case: the Ask-the-Experts sessions are a format, not a talk — they have no
+    /// abstract to announce and he covers them in one Type 5 post of his own.</para>
+    /// <para>🔑 <b>A setting, not a heuristic.</b> §909 refused to infer "test" from a title because
+    /// nobody had chosen that rule; this one he writes and can see, so a wrong exclusion is one edit
+    /// away from being right. Matching lives in <see cref="Integrations.SoMeTitleExclusions"/>.</para>
+    /// <para>🔒 Empty means <b>exclude nothing</b> — never "match everything".</para>
+    /// </remarks>
+    public string? ExcludedSessionTitlePatterns { get; set; }
+
+    /// <summary>
     /// §843.3 — the ceiling a day may reach for posts that <b>cannot otherwise be placed</b>.
     /// </summary>
     /// <remarks>
@@ -105,6 +145,34 @@ public class SoMeSettings
     /// </remarks>
     public DateOnly? SpeakerAnnouncementFrom { get; set; }
 
+    /// <summary>
+    /// §928 — the date the MASTER CLASS announcements start. Null = no window; master-class posts
+    /// are spread across the campaign like any other session.
+    /// </summary>
+    /// <remarks>
+    /// <para>🔑 Operator 2026-08-06: <i>"reschedule master classes to last week august"</i>. For
+    /// ELDK27 the value is <b>2026-08-24</b> — the Monday of the last full week of August.</para>
+    ///
+    /// <para>🔒 <b>This is a WINDOW OPENING, not a floor, and the difference is the whole feature.</b>
+    /// <see cref="SpeakerAnnouncementFrom"/> says "not before this" and lets the generic spread
+    /// choose the day; that is what put the master classes one at a time from August to February.
+    /// He asked for them TOGETHER, in one named week — so the date is an INSTRUCTION (§908's
+    /// explicit round), and the posts fill forward from it as densely as
+    /// <see cref="MaxPostsPerDay"/> allows instead of being spread.</para>
+    ///
+    /// <para>⚠️ It moves posts he has ALREADY APPROVED, in BOTH directions — a master class sitting
+    /// in December comes back to August. That is deliberate and it is the half §928 warned about:
+    /// auto-approval (§918) freezes a post against re-planning, so a window that only steered NEW
+    /// posts would leave the queue disagreeing with the rule that produced it (§901). Nothing is
+    /// re-composed and nothing loses its approval; only the slot changes.</para>
+    ///
+    /// <para>🔒 A window can only ever be as dense as the day ceiling: master classes do not evict
+    /// the sponsor and event posts already holding slots that week, they fill around them. Nine
+    /// master classes at <c>MaxPostsPerDay = 2</c> need five weekdays, so a busy week pushes the
+    /// tail into the following one rather than breaking §843.3.</para>
+    /// </remarks>
+    public DateOnly? MasterClassAnnouncementFrom { get; set; }
+
     // --- §824.16: the three edition-level values every template ends with --------------------
     // They live HERE, per edition and editable, rather than in code: the tag block and the
     // organizer credit differ between editions (ELDK26's list is not ELDK27's, §824.3), and a
@@ -135,6 +203,36 @@ public class SoMeSettings
     /// such affordance.
     /// </remarks>
     public string? OrganizerCredits { get; set; }
+
+    /// <summary>
+    /// §885 <c>{Action_catalog_random}</c> — a prestaged list of call-to-action phrases (text and
+    /// emoji), ONE PER LINE, from which each post is given one at random.
+    /// </summary>
+    /// <remarks>
+    /// <para>🔑 <b>The point is variety across the campaign</b>: 80+ planned posts should not all
+    /// close with the same sentence. Blank lines are ignored, so the box can be grouped readably.</para>
+    /// <para>🔒 <b>The phrase is rolled ONCE per post and stored</b> on
+    /// <see cref="SoMePost.ActionPhrase"/> — never re-rolled at render time. A variable that changed
+    /// on every render would make the preview disagree with what publishes, which is exactly the
+    /// defect §863.4 was built to stop.</para>
+    /// <para>⚠️ Phrases must avoid <c>@ [ ] ( )</c> — §326k escapes them as little-text-format
+    /// control characters, so they would publish with visible backslashes.</para>
+    /// </remarks>
+    public string? ActionCatalog { get; set; }
+
+    /// <summary>
+    /// §888.2 <c>{EventVenueCityCountry}</c> — the city and country as a post should read them,
+    /// e.g. <c>Copenhagen, Denmark</c>.
+    /// </summary>
+    /// <remarks>
+    /// 🔒 <b>Stored, not derived.</b> <c>Event.VenueName</c> holds only "Bella Center Copenhagen" —
+    /// no city and no country — so splitting one out of it would be a GUESS printed on a live post,
+    /// which §824.16 forbids outright. He types it once instead.
+    /// <para>It lives here beside <c>{EventTags}</c> rather than on the Event because it is post
+    /// COPY: the wording is a social-media choice ("Copenhagen, Denmark" vs "København"), not a fact
+    /// about the venue (operator 2026-08-06: *"its own field on some settings"*).</para>
+    /// </remarks>
+    public string? EventVenueCityCountry { get; set; }
 
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? UpdatedAt { get; set; }

@@ -155,10 +155,20 @@ public sealed class SoMeApprovalGateTests
     [Fact]
     public async Task Non_sponsor_posts_are_never_blocked_by_this_gate()
     {
-        // A track, session or event post has no sponsor deliverable to wait for; gating them would
-        // stall the campaign for no reason.
+        // A track, session or event post has no SPONSOR deliverable to wait for; gating them on one
+        // would stall the campaign for no reason.
         using var db = NewDb();
         await SeedAsync(db, socialText: null);
+
+        // 🔒 §926 — the session must carry an abstract, or the OTHER rule blocks it and this test
+        // would pass for the wrong reason. Session 5 does not exist in the seed, so the sponsor
+        // half is what is being measured either way; adding it makes that explicit.
+        db.Sessions.Add(new Session
+        {
+            Id = 5, EventId = EventId, Title = "Deep Dive: Entra ID",
+            Abstract = "What we cover, and who it is for.",
+        });
+        await db.SaveChangesAsync();
 
         var sessionPost = new SoMePost
         {
@@ -167,6 +177,53 @@ public sealed class SoMeApprovalGateTests
         };
 
         Assert.Null(await new SoMeApprovalGate(db).BlockedReasonAsync(sessionPost));
+    }
+
+    /// <summary>
+    /// 🔴 §926 — A SESSION WITH NO DESCRIPTION IS NOT READY. Operator 2026-08-06: <i>"master class
+    /// announcement and sessions has dependency to description. if empty it is not ready"</i>.
+    /// </summary>
+    /// <remarks>
+    /// ⚠️ §922's general empty-variable rule CANNOT catch this: his 38 session wordings never print
+    /// {SessionAbstract}, they print the AI teaser — and the abstract is what that teaser is written
+    /// FROM. Measured the same day: "ELDK27 Welcome" has no abstract and had already been given an
+    /// invented teaser ("where the energy is high and the community comes alive"), which §911 would
+    /// then have stored and reused for ever.
+    /// </remarks>
+    [Theory]
+    [InlineData(null, true)]
+    [InlineData("", true)]
+    [InlineData("   ", true)]
+    [InlineData("A real description of the talk.", false)]
+    public async Task Session_post_waits_for_the_session_description(string? text, bool blocked)
+    {
+        using var db = NewDb();
+        await SeedAsync(db, socialText: null);
+
+        db.Sessions.Add(new Session
+        {
+            Id = 7, EventId = EventId, Title = "Master Class: Identity", Abstract = text,
+        });
+        await db.SaveChangesAsync();
+
+        var post = new SoMePost
+        {
+            Id = 12, EventId = EventId, Type = SoMePostType.Speaker,
+            TemplateKind = SoMeTemplateKind.Session, SubjectKey = "session:7", Occurrence = 1,
+        };
+
+        var reason = await new SoMeApprovalGate(db).BlockedReasonAsync(post);
+
+        if (blocked)
+        {
+            Assert.NotNull(reason);
+            // §850 — a refusal carries its reason, in words he can act on.
+            Assert.Contains("description", reason, StringComparison.OrdinalIgnoreCase);
+        }
+        else
+        {
+            Assert.Null(reason);
+        }
     }
 
     [Fact]

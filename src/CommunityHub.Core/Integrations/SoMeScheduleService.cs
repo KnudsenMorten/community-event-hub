@@ -45,6 +45,36 @@ public sealed class SoMeScheduleService
     /// </summary>
     private readonly SoMeIntroGenerator? _intro;
 
+    /// <summary>
+    /// §911 — how many teasers ONE run may generate. The rest arrive on later ticks.
+    /// </summary>
+    /// <remarks>
+    /// 🔒 The number is chosen against the failure it prevents: the intro client is bounded to 15s
+    /// (§906), so 12 is a worst case of ~3 minutes inside a run that also has to plan ~100 posts.
+    /// Unbounded is what died on 2026-08-06. With the timer at 5 minutes a backlog of 78 fills in
+    /// well under an hour, and every run in between is a normal, fast run.
+    /// </remarks>
+    private const int MaxIntroGenerationsPerRun = 12;
+
+    /// <summary>
+    /// §925 — how long a track must receive NO new session before it counts as settled.
+    /// </summary>
+    /// <remarks>
+    /// 🔑 Chosen against the shape of the arrival, not picked round: the Call for Speakers closes and
+    /// its sessions sync in a batch, so a week of quiet after the last arrival means the batch has
+    /// landed. Shorter would announce a track mid-import; much longer would delay every track for a
+    /// single late addition.
+    /// <para>⚠️ It is a FLOOR, never a ceiling — a track that settles early still waits for
+    /// <see cref="Domain.SoMeSettings.SpeakerAnnouncementFrom"/> if he has set one.</para>
+    /// </remarks>
+    private static readonly TimeSpan TrackSettlePeriod = TimeSpan.FromDays(7);
+
+    /// <summary>§911 — teasers already written, keyed by (subject, occurrence). Per-run.</summary>
+    private Dictionary<(string SubjectKey, int Occurrence), string> _introReuse = new();
+
+    /// <summary>§911 — what is left of this run's generation budget.</summary>
+    private int _introBudget;
+
     public SoMeScheduleService(
         CommunityHubDbContext db,
         SoMeTemplateService templates,
@@ -61,7 +91,33 @@ public sealed class SoMeScheduleService
         _intro = intro;
     }
 
-    public async Task<SoMeScheduleRunResult> RunAsync(int eventId, CancellationToken ct = default)
+    /// <summary>
+    /// 🔴 §906.2 — RUN THROUGH THE EXECUTION STRATEGY, because §906.1's transaction cannot exist
+    /// without it.
+    /// </summary>
+    /// <remarks>
+    /// <para>Both hosts configure <c>EnableRetryOnFailure</c> (Azure SQL Serverless cold-starts,
+    /// error 40613). EF then <b>refuses a user-initiated transaction outright</b>: "the configured
+    /// execution strategy 'SqlServerRetryingExecutionStrategy' does not support user-initiated
+    /// transactions". So §906.1's `BeginTransactionAsync` threw on the FIRST tick after deploy and
+    /// the planner stopped running entirely — 22 minutes with no run before the gap in
+    /// <c>MAX(CreatedAt)</c> gave it away.</para>
+    ///
+    /// <para>🔒 Nothing was lost: it throws BEFORE the discard, so the queue simply froze intact.
+    /// That is the right side of the failure to be on, and it is the reason §906.1 put the
+    /// transaction first.</para>
+    ///
+    /// <para>⚠️ <b>The tests could not have caught it</b>, and that is the lesson worth keeping.
+    /// They run on the in-memory provider, where the <c>IsRelational()</c> guard makes the
+    /// transaction a no-op — so the one line that only executes against SQL Server was the one line
+    /// with no coverage. A guard that says "skip this in tests" is a guard that says "this is
+    /// untested".</para>
+    /// </remarks>
+    public Task<SoMeScheduleRunResult> RunAsync(int eventId, CancellationToken ct = default) =>
+        _db.Database.CreateExecutionStrategy()
+            .ExecuteAsync(() => RunCoreAsync(eventId, ct));
+
+    private async Task<SoMeScheduleRunResult> RunCoreAsync(int eventId, CancellationToken ct)
     {
         var now = _clock.GetUtcNow();
 
@@ -117,7 +173,21 @@ public sealed class SoMeScheduleService
                 + "without part of their footer. Fill it in on /Organizer/SoMeSettings.");
         }
 
-        var subjects = await CollectSubjectsAsync(eventId, ct);
+        // §842.7/§843.3 — the everyday RHYTHM, and the ceiling reserved for what will not otherwise
+        // fit. Both clamped to the number of preferred times: a further post would have to share a
+        // minute with another or break his 08:00–16:00 rule, and silently doing either is worse than
+        // refusing the extra slot.
+        //
+        // ⚠️ Read HERE rather than just before planning, because §928's re-time runs first and has to
+        // honour the same ceiling — a window that packed master classes four to a day would move his
+        // announcements and break §843.3 in the same stroke.
+        var slots = SoMeSchedulePlanner.PreferredTimes.Length;
+        var normalPerDay = Math.Clamp(footer?.MaxPostsPerDay ?? 2, 1, slots);
+        var exceptionPerDay = Math.Clamp(footer?.ExceptionPostsPerDay ?? normalPerDay, normalPerDay, slots);
+
+        // §908 — the planner's two clocks travel with it: "now" for round 1's floor, the event start
+        // for round 2's ("one month out"), so neither is re-derived and neither can drift.
+        var subjects = await CollectSubjectsAsync(eventId, now, eventStartUtc, ct);
 
         // 🔑 §848.2 — DISCARD THE OLD PROPOSALS AND PLAN AGAIN.
         //
@@ -130,6 +200,42 @@ public sealed class SoMeScheduleService
         // 🔒 §824.21a IS NOT REPEALED, it is narrowed to where it belongs. Anything he has ACCEPTED
         // (Scheduled), EDITED (a manual override), or that has already PUBLISHED is untouchable —
         // and now provably so, because "locked" is a column rather than a promise.
+        // 🔴 §906 — DISCARD AND RE-PLAN MUST BE ONE UNIT OF WORK.
+        //
+        // The delete below is committed immediately, and the replacements are composed afterwards.
+        // Anything that throws in between leaves the queue EMPTIED — which is not a theory: on
+        // 2026-08-06 an AI intro call timed out mid-compose and his queue went from 83 posts to 5
+        // (§906 in REQUIREMENTS). The planner rebuilds proposals on the next tick, so nothing is
+        // lost for ever, but an empty SoMe queue is alarming and the window is real.
+        //
+        // 🔒 One transaction around discard + re-plan makes the failure mode "nothing changed"
+        // instead of "everything gone". Null on a non-relational provider — the in-memory provider
+        // the tests use has no transactions, and the behaviour under test is the planning, not the
+        // atomicity.
+        await using var tx = _db.Database.IsRelational()
+            ? await _db.Database.BeginTransactionAsync(ct)
+            : null;
+
+        // 🔴 §911 — READ THE EXISTING TEASERS BEFORE THE DISCARD BELOW WIPES THE ROWS THAT HOLD
+        // THEM. This is the whole reuse mechanism: the teaser is keyed by (subject, occurrence), so
+        // it outlives the row being deleted and re-created, and the next run spends no AI call on a
+        // subject that already has one.
+        //
+        // ⚠️ Deleted posts are included on purpose. A tombstone (§853) still carries the words that
+        // were written for that subject, and re-generating them because the row was retired would
+        // pay twice for the same paragraph.
+        _introReuse = (await _db.SoMePosts
+                .AsNoTracking()
+                .Where(p => p.EventId == eventId
+                            && p.IntroText != null && p.IntroText != ""
+                            && p.SubjectKey != null && p.Occurrence != null)
+                .Select(p => new { p.SubjectKey, p.Occurrence, p.IntroText })
+                .ToListAsync(ct))
+            .GroupBy(p => (p.SubjectKey!, p.Occurrence!.Value))
+            .ToDictionary(g => g.Key, g => g.First().IntroText!);
+
+        _introBudget = MaxIntroGenerationsPerRun;
+
         var stale = await _db.SoMePosts
             .Where(p => p.EventId == eventId
                         // 🔒 §853 — a DELETED post is never discarded: it is the record that says
@@ -157,6 +263,14 @@ public sealed class SoMeScheduleService
                 "§848.2: discarded {Count} un-accepted proposal(s) before re-planning.", stale.Count);
         }
 
+        // 🔴 §928 — MOVE THE ROWS, THEN PLAN. Both halves, in this order, or the data and the rule
+        // disagree (§901): re-timing after planning would place new posts around slots that are
+        // about to be vacated, and the next tick would find a queue it did not predict.
+        //
+        // 🔒 AFTER the discard above, so the slots held by proposals that were just thrown away are
+        // free for the master classes to move into rather than being obstacles that no longer exist.
+        var retimed = await RetimeMasterClassesAsync(eventId, now, eventStartUtc, normalPerDay, ct);
+
         // §853 — the subject+occurrences he has DELETED. They are excluded from the plan afterwards
         // rather than reserving a slot: a deleted post must not keep occupying the day it had.
         var suppressed = await _db.SoMePosts
@@ -178,14 +292,6 @@ public sealed class SoMeScheduleService
         var existingTuples = existing
             .Select(e => (e.SubjectKey!, e.Occurrence!.Value, e.ScheduledAtUtc))
             .ToList();
-
-        // §842.7/§843.3 — the everyday RHYTHM, and the ceiling reserved for what will not otherwise
-        // fit. Both clamped to the number of preferred times: a further post would have to share a
-        // minute with another or break his 08:00–16:00 rule, and silently doing either is worse than
-        // refusing the extra slot.
-        var slots = SoMeSchedulePlanner.PreferredTimes.Length;
-        var normalPerDay = Math.Clamp(footer?.MaxPostsPerDay ?? 2, 1, slots);
-        var exceptionPerDay = Math.Clamp(footer?.ExceptionPostsPerDay ?? normalPerDay, normalPerDay, slots);
 
         var plan = SoMeSchedulePlanner.Plan(
             subjects, existingTuples, now, eventStartUtc, normalPerDay, exceptionPerDay);
@@ -211,9 +317,23 @@ public sealed class SoMeScheduleService
 
         var editionValues = await _variables.EditionValuesAsync(eventId, ct);
 
+        // 🔴 §915 — PRE-STAGE THE PICTURE. Operator 2026-08-06: *"you need to pre-stage the linking
+        // + picture, so i dont have to do that"*.
+        //
+        // The post already knew its SUBJECT (that is what SubjectKey is, and what fills the
+        // variables) — but only Type 5 carried an ImageRef, so for every track, session, tier and
+        // sponsor post he had to open the editor and pick the graphic by hand from a dropdown.
+        //
+        // 🔑 The planner ALREADY looks these graphics up: §846/§854 gate announceability on the
+        // graphic EXISTING. It read the date and threw the file name away. Now it keeps it.
+        // §917 — shared with the PUBLISHER, which re-resolves the same map at send time so a
+        // rebuilt graphic reaches a post that has not gone out. What is stamped here is a default
+        // for the editor to show, not the answer.
+        var graphicFiles = await new SoMeSubjectGraphic(_db).FileNamesAsync(eventId, ct);
+
         foreach (var p in plan)
         {
-            var body = await ComposeAsync(eventId, p, editionValues, ct);
+            var composed = await ComposeAsync(eventId, p, editionValues, ct);
 
             _db.SoMePosts.Add(new SoMePost
             {
@@ -232,7 +352,13 @@ public sealed class SoMeScheduleService
                 // §848.2 — a PROPOSAL until he accepts it; re-plannable on any later run.
                 PlanState = SoMePostPlanState.Proposed,
                 AutoGenerated = true,
-                AutoText = body,
+                // 🔒 §901 — the TEMPLATE. Resolved at preview and at publish, never here.
+                AutoText = composed.Template,
+                IntroText = composed.Intro,
+                // §915 — the subject's own graphic, attached at birth. Null when none exists yet,
+                // which stays an ordinary state: §846 already refuses to announce most subjects
+                // before their graphic is built, and the editor still lets him override.
+                ImageRef = SoMeSubjectGraphic.Lookup(graphicFiles, p.SubjectKey),
                 CreatedAt = now,
             });
         }
@@ -243,12 +369,24 @@ public sealed class SoMeScheduleService
 
         await _db.SaveChangesAsync(ct);
 
+        // §906 — the discard and its replacements land together, or neither does.
+        if (tx is not null) await tx.CommitAsync(ct);
+
         var created = plan.Count + eventPostCount;
 
         var msg = created == 0
             ? $"Nothing new to schedule ({already.Count} post(s) already planned)."
             : $"{created} post(s) scheduled and HELD for approval.";
         if (eventPostCount > 0) msg += $" {eventPostCount} of them are your own event posts.";
+
+        // 🔒 §928 — SAID OUT LOUD, because this is the one thing the run does to posts he has already
+        // approved. A date silently changing under an accepted post is exactly the surprise §824.21a
+        // exists to prevent; moving it and not mentioning it would be worse than not moving it.
+        if (retimed > 0)
+        {
+            msg += $" {retimed} already-approved master-class announcement(s) were MOVED into your "
+                 + "master-class window — their wording and approval are unchanged, only the date.";
+        }
         if (noRoom.Count > 0) msg += $" {noRoom.Count} could not fit before the event.";
 
         // 🔴 §842.5 — A SPONSOR POST THAT DOES NOT FIT IS A CONTRACT BREACH, not a cosmetic miss.
@@ -398,6 +536,10 @@ public sealed class SoMeScheduleService
             var planned = new PlannedSoMePost(
                 SoMeTemplateKind.EventPost, key, run.Sequence, scheduled);
 
+            // §901 — Type 5 never has an intro (§834.5: its copy is his own), so this is the
+            // template alone. It goes through the same call so there is one seeding path, not two.
+            var composed = await ComposeAsync(eventId, planned, editionValues, ct);
+
             _db.SoMePosts.Add(new SoMePost
             {
                 EventId = eventId,
@@ -413,7 +555,8 @@ public sealed class SoMeScheduleService
                 // itself is still the planner's until he accepts it.
                 PlanState = SoMePostPlanState.Proposed,
                 AutoGenerated = true,
-                AutoText = await ComposeAsync(eventId, planned, editionValues, ct),
+                AutoText = composed.Template,
+                IntroText = composed.Intro,
                 // §828.7 — the run names its own graphic, so the post carries it from the start.
                 ImageRef = run.GraphicFileName,
                 CreatedAt = now,
@@ -435,45 +578,193 @@ public sealed class SoMeScheduleService
     /// <para>(This used to read "there is no subject CEH can derive one from". §828 supplied that
     /// subject: the imported post's slug. §834.4 closed the gap.)</para>
     /// </remarks>
-    private async Task<List<SoMeSubject>> CollectSubjectsAsync(int eventId, CancellationToken ct)
+    private async Task<List<SoMeSubject>> CollectSubjectsAsync(
+        int eventId, DateTimeOffset now, DateTimeOffset eventStartUtc, CancellationToken ct)
     {
         var subjects = new List<SoMeSubject>();
 
         // §842.2 — his per-type frequency, or the shipped §824.1 defaults where he has not set one.
         var cadence = await new SoMeCadenceService(_db).GetAllAsync(eventId, ct);
 
-        // 🔴 §851 — SPEAKERS ARE NOT KNOWN UNTIL THE CALL FOR SPEAKERS IS DECIDED.
+        // 🔴 §920 — THE DEPENDENCY IS THE DATA, NOT A DATE. Operator 2026-08-06: *"remove the 7th
+        // sept blocker. we will change the dependency as only active sessions in ceh can be planned.
+        // and since the sessions in cfs will not sync until after 5th sept, it comes in
+        // automatically and will be active"* … *"this principle change will also allow me to start
+        // schedule for example master class session which are approved"*.
         //
-        // Operator 2026-08-05: "call for speakers ends 31 aug 2026 and then we spend 1 week deciding
-        // who is selected … we wont have the complete list of speakers until 7th of sept 2026".
-        // A track post LISTS its speakers, so publishing one before the selection would announce a
-        // line-up that does not exist. Gates Type 1 and Type 2 only.
-        var speakerGateDate = await _db.SoMeSettings
+        // 🔑 §851 put a hard 7 Sep floor under EVERY track and session because the CfS decision was
+        // not made yet. That is a date standing in for a fact, and it was wrong in both directions:
+        // it blocked the NINE master classes that are already confirmed, and it would have expired
+        // on 7 Sep whether or not the CfS had actually synced.
+        //
+        // ⇒ A SESSION is announceable because it EXISTS in CEH. Nothing syncs before it is decided,
+        // so the arrival of the row IS the decision — no gate needed, and the master classes become
+        // schedulable today.
+        //
+        // ⚠️ A TRACK is different and keeps the floor. A track post lists the speakers of a whole
+        // track, so it is only complete once that track's sessions have arrived — and today the 9
+        // master classes are a fraction of the ~65 sessions expected. Un-gating tracks too would
+        // publish a track post naming a handful of a hundred speakers, which is the one thing he
+        // said he wanted to avoid when asked (§908). §901's late resolution does not save it: once
+        // PUBLISHED, a post cannot pick anyone up.
+        var gateSettings = await _db.SoMeSettings
             .Where(s => s.EventId == eventId)
-            .Select(s => s.SpeakerAnnouncementFrom)
+            .Select(s => new
+            {
+                s.SpeakerAnnouncementFrom,
+                s.ExcludedSessionTitlePatterns,
+                s.MasterClassAnnouncementFrom,
+            })
             .FirstOrDefaultAsync(ct);
+
+        var speakerGateDate = gateSettings?.SpeakerAnnouncementFrom;
 
         DateTimeOffset? speakerGate = speakerGateDate is { } d
             ? SoMeSchedulePlanner.ToUtc(d, SoMeSchedulePlanner.PreferredTimes[0])
             : null;
 
-        // Combine the type gate with a subject's own readiness — the LATER of the two wins, because
-        // both are "not before this" and neither excuses the other.
+        // 🔒 §920 — TRACKS ONLY now. Combine the track floor with a subject's own readiness: the
+        // LATER of the two wins, because both are "not before this" and neither excuses the other.
         DateTimeOffset? GatedBySpeakers(DateTimeOffset? subjectEarliest) =>
             speakerGate is null ? subjectEarliest
             : subjectEarliest is null ? speakerGate
             : (subjectEarliest > speakerGate ? subjectEarliest : speakerGate);
 
+        // 🔴 §905 — TEST DATA IS NOT ANNOUNCEABLE. Operator 2026-08-06: *"same with SoMe publishing
+        // service, it must not include test users"* / *"sponsor categories and sponsor individual of
+        // type test should not be included"*.
+        //
+        // ⚠️ This was NOT hypothetical: two posts announcing "Test Exhibitor Session Preday" and
+        // "…MainDay" were already queued for 18 Jan and 1 Feb 2027. They were held (IsActive=false),
+        // so the approval gate was the only thing standing between a test fixture and the company
+        // page — and a gate a human has to remember is not a control.
+        var testCompanies = await TestDataScope.TestSponsorCompanyIdsAsync(_db, eventId, ct);
+
+        // 🔴 §909 — THE FLAG FIRST, the inference second. Operator 2026-08-06: *"remove test
+        // sessions"*. §905's derived rule ("has speakers and every one is a test user") caught the
+        // two exhibitor fixtures and missed "Test Master Class" and "Test Session" completely,
+        // because those carry FOUR REAL SPEAKERS each. A session is test because of what it IS.
+        var testSessionIds = (await _db.Sessions
+                .Where(s => s.EventId == eventId && (s.IsTestData || s.SessionSpeakers.Any()))
+                .Select(s => new
+                {
+                    s.Id,
+                    s.IsTestData,
+                    HasSpeakers = s.SessionSpeakers.Any(),
+                    // ⚠️ An unresolvable participant is NOT test — so a session containing one is
+                    // never classified as a fixture and dropped from the campaign.
+                    AllTest = s.SessionSpeakers.All(ss => ss.Participant != null && ss.Participant.IsTestUser),
+                })
+                .ToListAsync(ct))
+            // The derived half still applies, so fixtures seeded before the column keep working
+            // with no data entry — same arrangement as TestDataScope for sponsors.
+            .Where(x => x.IsTestData || (x.HasSpeakers && x.AllTest))
+            .Select(x => x.Id)
+            .ToHashSet();
+
+        // 🔴 §927 — HIS OWN EXCLUSION LIST, matched on the session TITLE. Operator 2026-08-06:
+        // *"exclude option with title filters must be build like ask the experts*"*.
+        //
+        // 🔑 Test data is decided by the system; this is decided by HIM. The Ask-the-Experts
+        // sessions are a format rather than a talk — no abstract to announce, and he covers them in
+        // one Type 5 post he writes himself. Same treatment either way: not a subject at all, so the
+        // planner never proposes it and no held post accumulates waiting for an abstract that is
+        // never coming (which is exactly what §926 would otherwise do to every one of them).
+        var titlePatterns = SoMeTitleExclusions.Parse(gateSettings?.ExcludedSessionTitlePatterns);
+        if (titlePatterns.Count > 0)
+        {
+            var excludedByTitle = (await _db.Sessions
+                    .Where(s => s.EventId == eventId)
+                    .Select(s => new { s.Id, s.Title })
+                    .ToListAsync(ct))
+                // ⚠️ Matched in memory: the wildcard is his syntax, not SQL's, and translating it
+                // to LIKE would quietly change what `_` and `%` in a real title mean.
+                .Where(s => SoMeTitleExclusions.IsExcluded(s.Title, titlePatterns))
+                .Select(s => s.Id)
+                .ToList();
+
+            if (excludedByTitle.Count > 0)
+            {
+                _log?.LogInformation(
+                    "SoMe planner: {Count} session(s) excluded by title filter ({Patterns}).",
+                    excludedByTitle.Count, string.Join(" | ", titlePatterns));
+                testSessionIds.UnionWith(excludedByTitle);
+            }
+        }
+
         // --- Type 1: one per TRACK, twice --------------------------------------------------
+        // 🔒 A track is derived from its sessions, so a track that exists ONLY because of a test
+        // session is not a track worth announcing.
         var tracks = await _db.Sessions
-            .Where(s => s.EventId == eventId && !s.IsServiceSession && s.Track != null && s.Track != "")
+            .Where(s => s.EventId == eventId && !s.IsServiceSession && s.Track != null && s.Track != ""
+                        && !testSessionIds.Contains(s.Id))
             .Select(s => s.Track!)
             .Distinct()
             .ToListAsync(ct);
         // §851 — a track post lists its speakers, so it waits for the CfS decision.
-        subjects.AddRange(tracks.Select(t => new SoMeSubject(
-            SoMeTemplateKind.SpeakerTracks, $"track:{t}", Times(cadence, SoMeTemplateKind.SpeakerTracks),
-            EarliestUtc: GatedBySpeakers(null))));
+        //
+        // 🔑 §908 — TWO ROUNDS, NOT A FREQUENCY. Operator 2026-08-06: *"build post for each
+        // speakertracks so they run 2 times; now and jan 2027"*.
+        //
+        // The generic spread distributes a subject's occurrences evenly, which put the eight tracks
+        // one per month from September to February — announced once and then not mentioned again for
+        // weeks. He wants every track announced as soon as it CAN be, and every track repeated in
+        // the run-up to the event.
+        //
+        // ⚠️ "Now" is honoured as "as soon as the gate allows", his choice when asked: a track post
+        // lists {Speakers}, the CfS closes 31 Aug and selection completes 7 Sep (§851), so posting
+        // before the gate would announce a half-finished line-up that the post can never correct.
+        //
+        // 🔒 Round 2 is derived from the EVENT, not hard-coded to January — one month out. ELDK27
+        // starts 9 Feb 2027, so this reads "jan 2027" as asked, and the next edition computes its
+        // own without anyone editing code.
+        // 🔴 §925 — A TRACK IS READY WHEN ITS LINE-UP HAS SETTLED, not on a date.
+        //
+        // §920 made a SESSION's readiness data-driven (it exists ⇒ it was decided) and left tracks
+        // on a hand-set date, because a track post lists a WHOLE track's speakers and is incomplete
+        // until that track's sessions have arrived. That date was the last thing standing in for a
+        // fact, and it has the §851 flaw in miniature: it expires whether or not the sessions came.
+        //
+        // 🔑 The data already says it. A track whose newest session arrived N days ago has stopped
+        // growing; one still receiving sessions has not. So readiness = the newest session in THAT
+        // track + a settle period — per track, and self-adjusting: if the CfS sync slips a week, the
+        // track's readiness slips with it, with nobody editing anything.
+        //
+        // ⚠️ His SpeakerAnnouncementFrom still applies as a FLOOR where he has set one, so this can
+        // only ever make a track wait LONGER than he asked, never publish earlier than he allowed.
+        var trackNewestSession = (await _db.Sessions
+                .Where(s => s.EventId == eventId && !s.IsServiceSession && !s.IsTestData
+                            && s.Track != null && s.Track != "")
+                .Select(s => new { s.Track, s.CreatedAt })
+                .ToListAsync(ct))
+            .GroupBy(s => s.Track!, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.Max(x => x.CreatedAt), StringComparer.OrdinalIgnoreCase);
+
+        var round2 = eventStartUtc.AddMonths(-1);
+
+        subjects.AddRange(tracks.Select(t =>
+        {
+            // Settled = nothing new in this track for TrackSettlePeriod.
+            var settled = trackNewestSession.TryGetValue(t, out var newest)
+                ? newest + TrackSettlePeriod
+                : now;
+
+            // The later of "settled" and his own floor — both are "not before this".
+            var round1 = GatedBySpeakers(settled) ?? settled;
+            if (round1 < now) round1 = now;
+
+            return new SoMeSubject(
+                SoMeTemplateKind.SpeakerTracks, $"track:{t}",
+                Times(cadence, SoMeTemplateKind.SpeakerTracks),
+                EarliestUtc: round1,
+                EarliestByOccurrence: new Dictionary<int, DateTimeOffset>
+                {
+                    [1] = round1,
+                    // Guard the degenerate case: a track that settles inside the final month must
+                    // not have round 2 scheduled BEFORE round 1.
+                    [2] = round2 > round1 ? round2 : round1,
+                });
+        }));
 
         // §846 — when each session's graphic was built: the moment it became announceable.
         var sessionGraphicReady = await _db.GraphicAssets
@@ -487,16 +778,64 @@ public sealed class SoMeScheduleService
         // --- Type 2: one per SESSION ---------------------------------------------------------
         // His order — master classes, then technical, then panels — is carried by the ORDER the
         // subjects are added, which the planner preserves within a type.
-        foreach (var type in new[] { SessionType.MasterClass, SessionType.TechnicalSession, SessionType.PanelDiscussion })
+        //
+        // 🔑 §912 — WHICH SESSION KINDS ARE ANNOUNCED, AND HOW OFTEN (operator 2026-08-06, reading
+        // his own §824.1 back to me):
+        //   • Keynote                  — 1 post, 2 × ("key 1 post x 2 times")
+        //   • Master class / technical — 1 ×
+        //   • Panel discussion         — 1 × ("panels is not 2 but 1" — §845.1's ELDK26 history
+        //                                showed 5+5, but the TABLE is the rule, not the history)
+        //   • Sponsor speaker session  — 2 × (below; it is not a Sessions row at all)
+        //   • Ask the Experts          — NOT announced individually: "ask the experts comes as
+        //                                type 5 (not individual)", i.e. his own event-post deck
+        //                                covers it. Its absence here is now a DECISION, not an
+        //                                oversight.
+        var sessionTimes = Times(cadence, SoMeTemplateKind.Session);
+
+        // 🔴 §928 — THE MASTER CLASSES GO OUT TOGETHER, IN ONE NAMED WEEK.
+        //
+        // Operator 2026-08-06: *"reschedule master classes to last week august"*, after *"i expect
+        // some master classes to be moved up earlier"*. §920 made them schedulable the moment their
+        // rows existed, and §848.1 then did what it is supposed to do — spread them evenly across
+        // the six months to the event. Nine master classes arrived one at a time from August to
+        // February, which is the opposite of an announcement.
+        //
+        // 🔑 THE DATE IS AN INSTRUCTION, NOT A FLOOR, so this is §908's explicit round rather than
+        // §851's gate: a round listed in EarliestByOccurrence is placed from its own window and is
+        // NOT spread. Nine posts then fill forward from the Monday at MaxPostsPerDay, which is the
+        // week he asked for — whereas a plain EarliestUtc would only have said "not before 24 Aug"
+        // and left the spread free to scatter them into December all over again.
+        //
+        // ⚠️ Round 1 only. If he ever sets the session frequency to 2, the repeat is an ordinary
+        // spread post — the window describes when a master class is ANNOUNCED, not how often it is
+        // mentioned afterwards.
+        var masterClassWindow = gateSettings?.MasterClassAnnouncementFrom is { } mcFrom
+            ? Later(SoMeSchedulePlanner.ToUtc(mcFrom, SoMeSchedulePlanner.PreferredTimes[0]), now)
+            : (DateTimeOffset?)null;
+
+        foreach (var type in new[]
+                 {
+                     SessionType.Keynote, SessionType.MasterClass,
+                     SessionType.TechnicalSession, SessionType.PanelDiscussion,
+                 })
         {
-            var ids = await _db.Sessions
-                .Where(s => s.EventId == eventId && !s.IsServiceSession && s.Type == type)
-                .OrderBy(s => s.Id)
-                .Select(s => s.Id)
-                .ToListAsync(ct);
+            // 🔒 A disabled type (0) stays disabled for every kind — his on/off switch (§842.2)
+            // outranks a per-kind minimum, or turning Type 2 off would leave keynotes posting.
+            var times = type == SessionType.Keynote && sessionTimes > 0
+                ? Math.Max(sessionTimes, 2)
+                : sessionTimes;
+
+            var ids = (await _db.Sessions
+                    .Where(s => s.EventId == eventId && !s.IsServiceSession && s.Type == type)
+                    .OrderBy(s => s.Id)
+                    .Select(s => s.Id)
+                    .ToListAsync(ct))
+                // §905 — no announcement for a session whose whole line-up is test accounts.
+                .Where(id => !testSessionIds.Contains(id))
+                .ToList();
 
             subjects.AddRange(ids.Select(id => new SoMeSubject(
-                SoMeTemplateKind.Session, $"session:{id}", Times(cadence, SoMeTemplateKind.Session),
+                SoMeTemplateKind.Session, $"session:{id}", times,
                 // 🔴 §846 — A SESSION IS ANNOUNCEABLE WHEN ITS GRAPHIC EXISTS, not when the session
                 // row does. Operator 2026-08-05: "there are some eligle steps that are required
                 // befoe a speaker og sponsor can be considered eligble in the panning, ikke speaker
@@ -510,21 +849,85 @@ public sealed class SoMeScheduleService
                 // ⚠️ Null when no graphic exists yet ⇒ "as soon as the plan allows", which is the
                 // pre-§846 behaviour and the right fallback: a session with no graphic still gets
                 // announced rather than silently dropped from the campaign.
-                // §851 — and never before the speaker selection is complete, whichever is later.
-                EarliestUtc: GatedBySpeakers(
-                    sessionGraphicReady.TryGetValue(id, out var ready) ? ready : null),
+                // 🔑 §920 — NO SPEAKER GATE ON A SESSION. It is announceable because it EXISTS in
+                // CEH: a session only syncs from Sessionize once it has been decided, so the row's
+                // arrival IS the decision (operator: *"active is also when they are synced from
+                // sessionize and exist in ceh"*). Its own speakers are complete by definition —
+                // they are the people on THAT session, not a track-wide list still being filled.
+                // ⇒ The nine confirmed master classes become schedulable today instead of waiting
+                // for a date that described a CfS deadline rather than their own readiness.
+                EarliestUtc: sessionGraphicReady.TryGetValue(id, out var ready) ? ready : null,
                 // 🔒 The session's OWN graphic date is the prompt signal — the speaker gate is a
                 // type-wide floor and must not hurry every session at once (§851).
                 PromptFromUtc: sessionGraphicReady.TryGetValue(id, out var sessionReady)
-                    ? sessionReady : null)));
+                    ? sessionReady : null,
+                // §928 — master classes only, round 1 only. Null everywhere else, so every other
+                // session type behaves exactly as it did.
+                EarliestByOccurrence: type == SessionType.MasterClass && masterClassWindow is { } w
+                    ? new Dictionary<int, DateTimeOffset> { [1] = w }
+                    : null)));
+        }
+
+        // --- Type 2b: SPONSOR SPEAKER SESSIONS, twice (§824.1, built in §912) -----------------
+        //
+        // 🔴 These were never announced AT ALL, and the reason is structural rather than a wrong
+        // number: a sponsor speaker session is a SponsorSession row (§292 — entered in the sponsor's
+        // wizard, pushed one-way to the Backstage agenda later), and the planner reads Sessions. It
+        // could not see them.
+        //
+        // §824.1: *"sponsor speaker sessions 2 × — when available (depends on when the sponsor has
+        // assigned a person to their session) + 14–21 days before the event"*. Both halves are
+        // honoured below.
+        if (sessionTimes > 0)
+        {
+            var sponsorSessions = await _db.SponsorSessions
+                .Where(x => x.EventId == eventId
+                            // 🔒 "WHEN AVAILABLE" IS A REAL GATE: a session with no speaker assigned
+                            // yet has nobody to announce, and {Speakers} would render empty into a
+                            // post that can never repair itself (§901).
+                            && x.Speakers.Any(sp => sp.ParticipantId != null
+                                                    && sp.Participant!.IsActive
+                                                    && !sp.Participant.IsTestUser)
+                            // §905 — and never a test company's session.
+                            && !testCompanies.Contains(x.SponsorCompanyId))
+                .OrderBy(x => x.Id)
+                .Select(x => x.Id)
+                .ToListAsync(ct);
+
+            // Round 2 is a WINDOW, not a date: "14–21 days before the event". The window OPENS at
+            // 21 days out and the planner places inside it; 14 days is where it must not slip past,
+            // which the ordinary forward search respects because the event start is its ceiling.
+            var sponsorSessionRound2 = eventStartUtc.AddDays(-21);
+
+            subjects.AddRange(sponsorSessions.Select(id => new SoMeSubject(
+                SoMeTemplateKind.Session,
+                SoMeSponsorSessionKey.For(id),
+                Math.Max(sessionTimes, 2),
+                // 🔑 §920 — NO SPEAKER GATE, same as any other session. Its readiness is its OWN
+                // speaker being assigned, which the query above already requires — a CfS deadline
+                // has nothing to do with a sponsor naming someone from their own company.
+                EarliestUtc: null,
+                // 🔑 §843.6 — the sponsor naming their speaker IS an individual arrival, so round 1
+                // goes PROMPTLY rather than being spread across the campaign.
+                PromptFromUtc: now,
+                EarliestByOccurrence: new Dictionary<int, DateTimeOffset>
+                {
+                    [2] = sponsorSessionRound2 > now ? sponsorSessionRound2 : now,
+                })));
         }
 
         // --- Type 3: one per sponsor TIER that actually has sponsors, twice -------------------
-        var tiers = await _db.SponsorInfos
-            .Where(s => s.EventId == eventId)
+        // §905 — a tier is announceable because REAL companies are in it. A tier whose only member
+        // is a test company must not get a post, and the tier list itself is filtered in
+        // SoMeVariableResolver.SponsorTierValuesAsync so the two agree.
+        var tiers = (await _db.SponsorInfos
+                .Where(s => s.EventId == eventId)
+                .Select(s => new { s.SponsorPackage, s.SponsorCompanyId })
+                .ToListAsync(ct))
+            .Where(s => s.SponsorCompanyId == null || !testCompanies.Contains(s.SponsorCompanyId))
             .Select(s => s.SponsorPackage)
             .Distinct()
-            .ToListAsync(ct);
+            .ToList();
         subjects.AddRange(tiers.Select(t => new SoMeSubject(
             SoMeTemplateKind.SponsorCategory, $"tier:{t}", Times(cadence, SoMeTemplateKind.SponsorCategory))));
 
@@ -541,10 +944,16 @@ public sealed class SoMeScheduleService
         // announcing them before they signed, only later in the chain. The signup date survives
         // solely as a fallback for a sponsor whose graphic is not built yet, so they are not simply
         // dropped from the plan.
-        var sponsorRows = await _db.SponsorInfos
-            .Where(s => s.EventId == eventId && s.SponsorCompanyId != null && s.SponsorCompanyId != "")
-            .Select(s => new { s.SponsorCompanyId, s.CreatedAt })
-            .ToListAsync(ct);
+        var sponsorRows = (await _db.SponsorInfos
+                .Where(s => s.EventId == eventId && s.SponsorCompanyId != null && s.SponsorCompanyId != "")
+                .Select(s => new { s.SponsorCompanyId, s.CreatedAt })
+                .ToListAsync(ct))
+            // §905 — no Type 4 post for a test company. 🔒 Excluded HERE rather than at the
+            // NotPlannableSponsors split below, so a test company is not reported as a sponsor
+            // "owed two announcements" (§842.5) — that alert is a contractual warning and must
+            // never fire for a fixture.
+            .Where(s => !testCompanies.Contains(s.SponsorCompanyId!))
+            .ToList();
 
         // When the sponsor's graphic was built — the moment they became announceable.
         var graphicReady = await _db.GraphicAssets
@@ -607,8 +1016,134 @@ public sealed class SoMeScheduleService
         return c.Enabled ? c.Occurrences : 0;
     }
 
-    /// <summary>Render the edition's template for one planned post.</summary>
-    private async Task<string> ComposeAsync(
+    /// <summary>
+    /// The later of two instants — used wherever a configured date has to be clamped to "not in the
+    /// past", because a window whose Monday has already gone by is simply "now".
+    /// </summary>
+    private static DateTimeOffset Later(DateTimeOffset a, DateTimeOffset b) => a > b ? a : b;
+
+    /// <summary>
+    /// §928 — move the master-class posts that ALREADY EXIST into his announcement window.
+    /// Returns how many actually moved.
+    /// </summary>
+    /// <remarks>
+    /// <para>🔴 <b>This is the half that re-planning cannot do.</b> Operator 2026-08-06:
+    /// <i>"reschedule master classes to last week august"</i>. §918's auto-approval had accepted the
+    /// whole open queue, and §848.2 only discards proposals he has NOT accepted — so every post he
+    /// wanted moved was frozen against the planner. Steering only NEW posts would have left the rule
+    /// and the queue disagreeing, which is §901's shape exactly.</para>
+    ///
+    /// <para>🔒 <b>Round 1 only, and unpublished only.</b> The window says when a master class is
+    /// ANNOUNCED. A post that has already gone out is history and is never touched; a second
+    /// occurrence, if his cadence ever asks for one, is an ordinary spread post.</para>
+    ///
+    /// <para>🔒 Nothing but <c>ScheduledAtUtc</c> changes — not the words, not the approval, not the
+    /// plan state. A re-time is not a re-plan.</para>
+    /// </remarks>
+    private async Task<int> RetimeMasterClassesAsync(
+        int eventId, DateTimeOffset now, DateTimeOffset eventStartUtc, int maxPerDay,
+        CancellationToken ct)
+    {
+        var from = await _db.SoMeSettings
+            .Where(s => s.EventId == eventId)
+            .Select(s => s.MasterClassAnnouncementFrom)
+            .FirstOrDefaultAsync(ct);
+
+        // ⚠️ No window set = no opinion. Master classes spread like any other session, which is the
+        // pre-§928 behaviour and the right thing for an edition that has not chosen a week.
+        if (from is null) return 0;
+
+        var windowStart = Later(
+            SoMeSchedulePlanner.ToUtc(from.Value, SoMeSchedulePlanner.PreferredTimes[0]), now);
+        if (windowStart >= eventStartUtc) return 0;
+
+        var masterClassKeys = (await _db.Sessions
+                .Where(s => s.EventId == eventId
+                            && s.Type == SessionType.MasterClass
+                            && !s.IsServiceSession)
+                .Select(s => s.Id)
+                .ToListAsync(ct))
+            .Select(id => $"session:{id}")
+            .ToHashSet(StringComparer.Ordinal);
+
+        if (masterClassKeys.Count == 0) return 0;
+
+        var rows = await _db.SoMePosts
+            .Where(p => p.EventId == eventId && !p.IsDeleted
+                        && p.SubjectKey != null && p.Occurrence != null)
+            .Select(p => new
+            {
+                p.Id, p.SubjectKey, p.Occurrence, p.ScheduledAtUtc, p.Status, p.PublishedAtUtc,
+            })
+            .ToListAsync(ct);
+
+        var movable = rows
+            .Where(p => masterClassKeys.Contains(p.SubjectKey!)
+                        && p.Occurrence == 1
+                        && p.PublishedAtUtc == null
+                        && p.Status == SoMePostStatus.Queued)
+            .Select(p => (p.Id, p.SubjectKey!, p.ScheduledAtUtc))
+            .ToList();
+
+        if (movable.Count == 0) return 0;
+
+        // 🔒 Every OTHER post is an obstacle, including the ones already published: their day is
+        // spent whether or not the post is still pending.
+        var movableIds = movable.Select(m => m.Id).ToHashSet();
+        var otherOccupied = rows
+            .Where(p => !movableIds.Contains(p.Id))
+            .Select(p => p.ScheduledAtUtc)
+            .ToList();
+
+        var moves = SoMeSchedulePlanner.RetimeIntoWindow(
+            movable, otherOccupied, windowStart, eventStartUtc, maxPerDay);
+
+        if (moves.Count == 0) return 0;
+
+        var byId = moves.ToDictionary(m => m.PostId, m => m.ScheduledAtUtc);
+        var ids = byId.Keys.ToList();
+
+        var posts = await _db.SoMePosts.Where(p => ids.Contains(p.Id)).ToListAsync(ct);
+        foreach (var p in posts) p.ScheduledAtUtc = byId[p.Id];
+
+        await _db.SaveChangesAsync(ct);
+
+        _log?.LogInformation(
+            "§928: moved {Count} master-class announcement(s) into the window opening {Window:yyyy-MM-dd}.",
+            moves.Count, windowStart);
+
+        return moves.Count;
+    }
+
+    /// <summary>
+    /// What a newly planned post is seeded with: the edition's TEMPLATE, and the one value that has
+    /// to be drawn now rather than at publish time.
+    /// </summary>
+    /// <param name="Template">
+    /// 🔴 §901 — the raw token body, stored VERBATIM as <see cref="SoMePost.AutoText"/>.
+    /// </param>
+    /// <param name="Intro">The AI opening line (§824.2D), or null — see <see cref="SoMePost.IntroText"/>.</param>
+    private readonly record struct PlannedBody(string Template, string? Intro);
+
+    /// <summary>
+    /// §901 — build the body for one planned post: the TEMPLATE plus its plan-time intro.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>This used to RENDER the template and hand back the result, which the planner stored.</b>
+    /// That froze every variable at plan time (operator 2026-08-06: <i>"why do you make {organizers}
+    /// differently than {speakers}"</i> — the answer was that CEH froze BOTH, and every other token
+    /// too). A post planned in August published August's speaker list in January; a post whose
+    /// speaker list was empty when it was planned said <i>"Meet our tech legends:"</i> above a blank
+    /// line for ever, and <b>could not repair itself</b> — which is the exact failure §864's late
+    /// resolution exists to prevent. It was also silently undoing §892, which had just converted 82
+    /// bodies to variables for ELDK28 reuse: the two changes were fighting.
+    ///
+    /// <para>🔑 <b>The resolution below is still needed — but as INPUT TO THE INTRO, not as the body.</b>
+    /// The model is told what the post is about (a sponsor's name, a session's abstract), which is
+    /// why the values are gathered here at all. What gets persisted is the template they were
+    /// gathered for, and <see cref="SoMePostComposer"/> resolves it again at preview and at publish.</para>
+    /// </remarks>
+    private async Task<PlannedBody> ComposeAsync(
         int eventId, PlannedSoMePost p,
         IReadOnlyDictionary<string, string?> editionValues, CancellationToken ct)
     {
@@ -620,6 +1155,12 @@ public sealed class SoMeScheduleService
         {
             case SoMeTemplateKind.SpeakerTracks:
                 Merge(values, await _variables.TrackValuesAsync(eventId, id, ct));
+                break;
+            // 🔒 §912 — the sponsor-session prefix is tested FIRST. Both keys end in a number, and a
+            // bare int.TryParse would resolve sponsorsession:1 as Sessions row 1 — a different talk.
+            case SoMeTemplateKind.Session
+                when SoMeSponsorSessionKey.TryParse(p.SubjectKey, out var sponsorSessionId):
+                Merge(values, await _variables.SponsorSessionValuesAsync(eventId, sponsorSessionId, ct));
                 break;
             case SoMeTemplateKind.Session when int.TryParse(id, out var sessionId):
                 Merge(values, await _variables.SessionValuesAsync(sessionId, ct));
@@ -645,17 +1186,104 @@ public sealed class SoMeScheduleService
         // 🔒 §834.5 — NOT FOR TYPE 5. Its body is his own finished copy, so generating an opening
         // line for it would put a machine sentence above what he wrote. The Type 5 template does not
         // reference {IntroText} at all; skipping the call also saves a pointless AI round-trip.
+        // 🔴 §911 — GENERATED ONCE PER SUBJECT, THEN REUSED. This is the fix that makes the feature
+        // affordable at all.
+        //
+        // The planner discards and re-plans its un-accepted proposals on EVERY tick (§848.2, every
+        // 5 minutes). Generating here unconditionally therefore meant ~78 AI calls per run, forever
+        // — which is what killed the run on 2026-08-06 (§906) and emptied the queue. The endpoint
+        // was never the problem: it answers in well under a second. The COUNT was.
+        //
+        // 🔒 A teaser belongs to (subject, occurrence), not to a row id, so it survives the row
+        // being discarded and re-created. Steady state is ZERO calls.
+        // 🔑 §923 — PICK THE BODY FIRST, so the next block can ask whether it even USES a teaser.
+        // (This selection used to sit below the generation, which is why the generation could not
+        // consult it.)
+        var pool = await _db.SoMeBodySamples
+            .Where(s => s.EventId == eventId && s.Kind == p.Kind)
+            .OrderBy(s => s.SortOrder).ThenBy(s => s.Id)
+            .Select(s => s.Body)
+            .ToListAsync(ct);
+
+        var template = SoMeBodySampleCatalog.Pick(pool, p.SubjectKey, p.Occurrence)
+                       ?? await _templates.BodyAsync(eventId, p.Kind, ct);
+
+        // 🔴 §923 — DO NOT WRITE A TEASER NOBODY WILL READ.
+        //
+        // Measured on PROD 2026-08-06, minutes after the AI was switched on: Type 1 had 16 posts,
+        // ZERO of whose bodies reference {IntroText} — and 11 teasers had already been generated
+        // for them. His 10 track wordings simply do not use a teaser; the session wordings do.
+        //
+        // ⚠️ The cost is not only the wasted call. §911's budget is 12 generations per RUN, so a
+        // teaser written for a track post is a slot NOT spent on a session post that needs one —
+        // it delays exactly the work he was waiting for.
+        var bodyUsesTeaser =
+            template.Contains("{IntroText}", StringComparison.OrdinalIgnoreCase)
+            || template.Contains("{SessionTeaserTextAI}", StringComparison.OrdinalIgnoreCase);
+
         string? intro = null;
-        if (p.Kind != SoMeTemplateKind.EventPost && _intro is { IsConfigured: true })
+        var reuseKey = (p.SubjectKey, p.Occurrence);
+
+        if (p.Kind != SoMeTemplateKind.EventPost && bodyUsesTeaser)
         {
-            intro = await _intro.GenerateAsync(
-                new SoMeIntroRequest(p.Kind, IntroTitle(p.Kind, id, values), IntroDetail(p.Kind, values)),
-                ct);
+            if (_introReuse.TryGetValue(reuseKey, out var kept) && !string.IsNullOrWhiteSpace(kept))
+            {
+                intro = kept;
+            }
+            // ⚠️ A BUDGET PER RUN, because reuse alone does not save the FIRST run: with an empty
+            // store every post is a miss, and 78 × up-to-15s is far past the function's execution
+            // window. Bounded, the backlog simply fills in over successive ticks — a few posts a
+            // run, every 5 minutes — and no single run can ever be the one that dies.
+            else if (_intro is { IsConfigured: true } && _introBudget > 0)
+            {
+                _introBudget--;
+                intro = await _intro.GenerateAsync(
+                    new SoMeIntroRequest(p.Kind, IntroTitle(p.Kind, id, values), IntroDetail(p.Kind, values)),
+                    ct);
+
+                // Remembered immediately, so a second occurrence of the same subject in THIS run
+                // reuses it rather than spending a second call on the same words.
+                if (!string.IsNullOrWhiteSpace(intro)) _introReuse[reuseKey] = intro;
+            }
         }
+        // Kept in the dictionary because IntroTitle/IntroDetail above read from it, and because the
+        // rendering below is what a caller wanting a PREVIEW would use. It is not what is stored.
         values["IntroText"] = intro;
 
-        var template = await _templates.BodyAsync(eventId, p.Kind, ct);
-        return SoMeTemplateRenderer.Render(template, values);
+        // 🔑 §908 — A POOL OF WORDINGS, WHERE HE HAS GIVEN ONE. Operator 2026-08-06: *"the
+        // speakersession is a catalog of samples, which you can randomize to make new posts. this
+        // way it will be a mix of many different wordings"* — 38 session wordings, 10 track ones.
+        //
+        // 🔒 The draw is deterministic (see SoMeBodySampleCatalog): varied across posts, identical
+        // for the same post on every re-plan. An empty pool falls through to the single template,
+        // which is exactly the pre-§908 behaviour, so a type he has written no samples for is
+        // unaffected.
+        // 🔴 §907 — TYPE 5 IS SEEDED WITH HIS COPY, NOT WITH A POINTER TO IT.
+        //
+        // Operator 2026-08-06: *"i have NOT asked for a eventPostBody variable - it makes NO sense"*.
+        // He is right. {EventPostBody} is a hole in the Type 5 template for copy that is already
+        // finished and already his (§834.4) — it is plumbing, not a variable he would ever want to
+        // position or reuse. Left unresolved by §901 it became the entire post text: the editor
+        // showed three lines of tokens where his post used to be ("all text is gone").
+        //
+        // 🔑 So it is substituted HERE, at plan time, and ONE LEVEL ONLY. What lands in the post is
+        // the deck's text — which §904 tokenised, so it still carries {EventTags},
+        // {EventSystemUrl}, {EventDates} and the rest. Nothing about §901 is given up: the values
+        // that must stay live are still tokens, resolved at publish. The only thing resolved early
+        // is WHICH TEXT this post is, and that was never a variable.
+        if (p.Kind == SoMeTemplateKind.EventPost)
+        {
+            var deckBody = values.GetValueOrDefault("EventPostBody");
+            if (!string.IsNullOrWhiteSpace(deckBody))
+            {
+                template = template.Replace("{EventPostBody}", deckBody);
+            }
+        }
+
+        // 🔒 §901 — otherwise THE TEMPLATE, NOT `SoMeTemplateRenderer.Render(template, values)`.
+        // That one call is the whole defect: its output is correct as a preview and wrong as a
+        // stored body.
+        return new PlannedBody(template, intro);
     }
 
     private static void Merge(

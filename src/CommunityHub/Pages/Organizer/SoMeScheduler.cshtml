@@ -96,10 +96,48 @@
             </table>
         </div>
 
+        @* 🔴 §918 — THE AUTO-APPROVAL RULES, WRITTEN WHERE HE WORKS. Operator 2026-08-06:
+           *"document the auto-approval process in the menu for us to understand"*. A rule that
+           publishes on your behalf has to be readable by the people it acts for — otherwise the
+           only way to learn what it does is to watch what it did. *@
+        <div class="card" style="margin-top:14px;background:#f8fafc;border:1px solid #e2e8f0;">
+            <h3 style="margin-top:0;">How auto-approval works</h3>
+            <p class="muted">
+                Posts are always <strong>planned automatically</strong> from the templates, and are
+                always created <strong>held</strong> — nothing reaches LinkedIn until it is approved.
+                Auto-approval does the approving for you, under three rules it will not break:
+            </p>
+            <ol class="muted" style="margin:0 0 8px 18px;">
+                <li>
+                    <strong>Only template-built posts.</strong> Types 1–4, untouched. Anything you
+                    wrote or edited yourself — including every event post — still waits for you,
+                    because those carry your words.
+                </li>
+                <li>
+                    <strong>Only posts far enough ahead.</strong> A post must be at least the lead
+                    time away before it can be approved. Anything sooner, or already overdue, is
+                    left for you. <em>This is what stops a queue of past-dated posts publishing all
+                    at once the moment approval is switched on.</em>
+                </li>
+                <li>
+                    <strong>Only posts with nothing missing.</strong> The same readiness check you
+                    see on a post — a sponsor still owing their logo or social text is never
+                    auto-approved, and the reason is shown on their own page.
+                </li>
+            </ol>
+            <p class="muted" style="margin-bottom:0;">
+                The lead time doubles as your review window: an auto-approved post cannot publish for
+                at least that many days, so there is always time to change or un-approve it. Turn it
+                on, and set the lead time, in
+                <a asp-page="/Organizer/SoMeSettings">SoMe settings</a>.
+            </p>
+        </div>
+
         <p class="muted" style="margin-top:12px;">
             Approve, edit or reschedule an individual post in the
-            <a asp-page="/Organizer/SoMeQueue">SoMe queue</a>. Change the wording every post is built
-            from in <a asp-page="/Organizer/SoMeTemplates">post templates</a>.
+            <a asp-page="/Organizer/SoMeQueue">Calendar for LinkedIn Posts</a>. Change the wording every post is built
+            from in <a asp-page="/Organizer/SoMeTemplates">post templates</a>, and how OFTEN each
+            type is announced in <a asp-page="/Organizer/SoMeCadence">posting frequency</a>.
         </p>
     </div>
 }

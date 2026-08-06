@@ -131,6 +131,39 @@ public class SoMePost
     public string AutoText { get; set; } = string.Empty;
 
     /// <summary>
+    /// §885 — the call-to-action phrase this post drew from <see cref="SoMeSettings.ActionCatalog"/>,
+    /// resolving <c>{Action_catalog_random}</c>.
+    /// </summary>
+    /// <remarks>
+    /// 🔒 <b>Rolled ONCE, then it is ordinary stored data.</b> "Random" means varied across the
+    /// campaign, NOT different on every render: a phrase that re-rolled would make the preview
+    /// disagree with the published post, and re-opening the editor would look like data loss.
+    /// <para>⚠️ <b>Deliberately unlike the credit above.</b> The credit is resolved LATE so a post
+    /// written months ago picks up today's rule (§864); this is frozen EARLY for the opposite and
+    /// equally deliberate reason — he approves a specific sentence, and that is the one that goes
+    /// out. A re-roll is an explicit action, not a side effect of opening the page.</para>
+    /// </remarks>
+    public string? ActionPhrase { get; set; }
+
+    /// <summary>
+    /// §901 — the AI opening paragraph this post was given when it was planned, resolving
+    /// <c>{IntroText}</c> (§824.2D).
+    /// </summary>
+    /// <remarks>
+    /// 🔒 <b>Stored for the same reason as <see cref="ActionPhrase"/> above, and it is the reason
+    /// the planner can stop freezing the whole body.</b> Every other token resolves late (§864); this
+    /// one cannot, because it is a generative call — re-running it at publish time would spend an AI
+    /// round-trip per post and, worse, would publish a paragraph he never approved. So it is written
+    /// ONCE at plan time and read back as an ordinary value by
+    /// <see cref="Integrations.SoMePostComposer.ValuesForAsync"/>.
+    /// <para>⚠️ <b>Null is an ordinary state, not a failure</b> — Type 5 never has one (§834.5, its
+    /// copy is his own), and every AI failure path resolves to null by design. A known token holding
+    /// null renders empty and the renderer tidies the blank line away, so the post is composed
+    /// without its opening line and still publishes.</para>
+    /// </remarks>
+    public string? IntroText { get; set; }
+
+    /// <summary>
     /// His edit of the post BODY. Blank = use <see cref="AutoText"/>.
     /// </summary>
     /// <remarks>

@@ -120,6 +120,31 @@ public sealed class SoMeIntroGenerator
             var body = await resp.Content.ReadFromJsonAsync<ChatResponse>(JsonOpts, ct);
             return Clean(body?.Choices?.FirstOrDefault()?.Message?.Content);
         }
+        // 🔴 §906 — A TIMEOUT IS A FAILURE, NOT A CANCELLATION, and this filter has to tell them
+        // apart because .NET gives them the SAME TYPE.
+        //
+        // `HttpClient` throws TaskCanceledException — which derives from OperationCanceledException
+        // — when its own timeout elapses. The filter below used to read
+        // `when (ex is not OperationCanceledException)`, meaning to let a genuine host shutdown
+        // through, and it let every endpoint timeout through with it.
+        //
+        // ⚠️ WHAT THAT COST, 2026-08-06: the moment the OpenAI settings were added to the JOBS host,
+        // the planner started making one AI call per post. The endpoint did not answer, each call
+        // threw after the default 100-second HttpClient timeout, the exception escaped
+        // ComposeAsync and killed the run — AFTER §848.2 had already committed the deletion of the
+        // 78 un-accepted proposals. His queue went from 83 posts to 5. Nothing was lost permanently
+        // (the planner rebuilds proposals), but "every failure returns null" was not true, and this
+        // is the line that made it false.
+        //
+        // 🔒 `ct` is the CALLER's token: cancelled ⇒ the host really is shutting down, so rethrow.
+        // Not cancelled ⇒ it was our own HTTP timeout, which is an ordinary bad minute.
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            _log?.LogWarning(
+                "§824.2D: intro generation TIMED OUT for '{Title}'; composing without an intro.",
+                request.Title);
+            return null;
+        }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             // 🔒 Swallowed on purpose. The scheduler's job is to plan the campaign; an AI endpoint

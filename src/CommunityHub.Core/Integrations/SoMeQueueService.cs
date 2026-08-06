@@ -167,7 +167,14 @@ public sealed class SoMeQueueService
             ManualTextOverride = string.IsNullOrWhiteSpace(text) ? null : text.Trim(),
             ImageRef = string.IsNullOrWhiteSpace(imageRef) ? null : imageRef.Trim(),
             Tags = tags is null ? string.Empty : string.Join('\n', tags),
-            IsActive = true,
+            // 🔴 §915.1 — HELD, like every other post. This was `IsActive = true`: a post written
+            // from scratch was born APPROVED and immediately eligible to publish, which contradicts
+            // §824.8 Q2 outright ("nothing reaches the company page until he turns it on").
+            //
+            // ⚠️ Not theoretical. §889.1 is the same shape already happening once: a post whose slot
+            // had passed published THIRTY SECONDS after it became active. An ad-hoc post is the one
+            // kind a human types in a hurry, and it was the one kind that skipped the gate.
+            IsActive = false,
             Status = SoMePostStatus.Queued,
             CreatedAt = _clock.GetUtcNow(),
             LastUpdatedByEmail = byEmail,
@@ -292,6 +299,37 @@ public sealed class SoMeQueueService
     /// caller saves. The manual override + an explicitly-set image are never
     /// overwritten.
     /// </summary>
+    /// <summary>
+    /// §885 — draw this post's <c>{Action_catalog_random}</c> phrase, ONCE.
+    /// </summary>
+    /// <remarks>
+    /// 🔒 <b>Only ever fills an EMPTY phrase.</b> Re-composing a post must not silently swap the
+    /// sentence he approved — "random" means varied across the campaign, not different every time
+    /// the page is opened. A deliberate re-roll clears the field first.
+    /// <para>Picks something different from the previous post's phrase where the catalog allows it,
+    /// so two posts in a row do not read identically — true randomness repeats more than it feels
+    /// like it should.</para>
+    /// </remarks>
+    public async Task RollActionPhraseAsync(SoMePost post, CancellationToken ct)
+    {
+        if (!string.IsNullOrWhiteSpace(post.ActionPhrase)) return;
+
+        var catalog = await _db.SoMeSettings
+            .Where(s => s.EventId == post.EventId)
+            .Select(s => s.ActionCatalog)
+            .FirstOrDefaultAsync(ct);
+
+        if (string.IsNullOrWhiteSpace(catalog)) return;
+
+        var previous = await _db.SoMePosts
+            .Where(p => p.EventId == post.EventId && p.Id != post.Id && p.ActionPhrase != null)
+            .OrderByDescending(p => p.Id)
+            .Select(p => p.ActionPhrase)
+            .FirstOrDefaultAsync(ct);
+
+        post.ActionPhrase = SoMeActionCatalog.PickDifferentFrom(catalog, previous);
+    }
+
     private async Task PopulateAutoAsync(SoMePost post, CancellationToken ct)
     {
         var evt = await _db.Events
@@ -299,6 +337,8 @@ public sealed class SoMeQueueService
             .Select(e => new { e.DisplayName })
             .FirstOrDefaultAsync(ct);
         var eventDisplay = evt?.DisplayName ?? string.Empty;
+
+        await RollActionPhraseAsync(post, ct);
 
         if (post.Type == SoMePostType.Speaker && post.ParticipantId is int pid)
         {

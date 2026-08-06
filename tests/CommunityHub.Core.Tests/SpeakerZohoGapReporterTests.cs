@@ -21,8 +21,9 @@ public class SpeakerZohoGapReporterTests
 {
     private static BackstageSpeaker Zoho(
         string? company = null, string? tagline = null, string? bio = null,
-        string? skills = null, string? linkedIn = null, string? twitter = null) =>
-        new("bs-1", "Per Larsen", tagline, bio, Country: null, linkedIn, twitter,
+        string? skills = null, string? linkedIn = null, string? twitter = null,
+        string? country = null) =>
+        new("bs-1", "Per Larsen", tagline, bio, Country: country, linkedIn, twitter,
             Company: company, Skills: skills, Email: "per.larsen@microsoft.com");
 
     // ---------- the operator's own example ----------
@@ -61,24 +62,73 @@ public class SpeakerZohoGapReporterTests
         Assert.DoesNotContain(gaps, g => g.Contains("Country"));
     }
 
+    /// <summary>
+    /// ✅ §893 — country IS readable; the §623 "not returned" finding was an artefact of a sample in
+    /// which nobody had set one. Zoho OMITS an unset field, so an empty roster looked like a missing
+    /// feature. Measured 2026-08-06: 9 of 25 speakers carry the key.
+    /// </summary>
     [Fact]
-    public void COUNTRY_is_reported_as_UNVERIFIABLE_and_carries_the_answer()
+    public void A_country_MISSING_from_Backstage_is_a_real_gap_now()
     {
-        // When CEH HAS a country the line is worth sending — but it must be honest that this is a
-        // "please confirm", not a detected deviation, and it must carry the value so the fix is one
-        // paste rather than a lookup.
         var ceh = new SpeakerProfile { Country = "DK" };
 
         var gap = Assert.Single(SpeakerZohoGapReporter.GapsFor(ceh, Zoho()), g => g.Contains("Country"));
 
         Assert.Contains("DK", gap);
-        Assert.Contains("does not report this field", gap);
+        Assert.Contains("not set in Backstage", gap);
+        // The old wording was an unverifiable chore he could only silence with a tick-box.
+        Assert.DoesNotContain("does not report this field", gap);
     }
 
+    /// <summary>
+    /// 🔑 The operator's actual complaint: *"i now get a daily mail saying to check country. but
+    /// that is wrong as we have new knowledge now"*. A country that IS set must produce silence.
+    /// </summary>
     [Fact]
-    public void The_unreadable_flag_is_explicit_so_nobody_reintroduces_the_diff()
+    public void A_country_that_matches_Backstage_is_SILENT()
     {
-        Assert.False(BackstageSpeaker.CountryIsReadable);
+        var ceh = new SpeakerProfile { Country = "DK" };
+
+        Assert.DoesNotContain(
+            SpeakerZohoGapReporter.GapsFor(ceh, Zoho(country: "DK")), g => g.Contains("Country"));
+    }
+
+    /// <summary>
+    /// ⚠️ Zoho returns an ISO-2 CODE ("DK"); CEH may hold a display name ("Denmark"). A plain string
+    /// compare would mark every speaker as differing forever — §594's "Tags missing" mail again.
+    /// </summary>
+    [Theory]
+    [InlineData("Denmark", "DK")]
+    [InlineData("denmark", "dk")]
+    [InlineData("Germany", "DE")]
+    [InlineData("United Kingdom", "GB")]
+    public void A_display_name_and_its_ISO_code_are_the_same_country(string ceh, string zoho)
+        => Assert.True(SpeakerZohoGapReporter.CountryMatches(ceh, zoho));
+
+    [Fact]
+    public void A_genuine_disagreement_IS_reported_with_both_values()
+    {
+        var ceh = new SpeakerProfile { Country = "Denmark" };
+
+        var gap = Assert.Single(
+            SpeakerZohoGapReporter.GapsFor(ceh, Zoho(country: "DE")), g => g.Contains("Country"));
+
+        Assert.Contains("Denmark", gap);
+        Assert.Contains("DE", gap);
+    }
+
+    /// <summary>
+    /// 🔒 §582 — a code we cannot map is NOT evidence of a mismatch. A false gap is worse than no
+    /// gap, because he acts on it.
+    /// </summary>
+    [Fact]
+    public void An_unmappable_code_stays_silent_rather_than_accusing()
+        => Assert.True(SpeakerZohoGapReporter.CountryMatches("Faroe Islands", "FO"));
+
+    [Fact]
+    public void The_readable_flag_records_that_the_field_IS_available()
+    {
+        Assert.True(BackstageSpeaker.CountryIsReadable);
     }
 
     /// <summary>
@@ -91,22 +141,36 @@ public class SpeakerZohoGapReporterTests
     /// never returns it — so the line repeated on every comparison for ever, and rode along on every
     /// re-send triggered by someone else's real gap. An organizer acknowledges it instead.
     /// </remarks>
+    /// <summary>
+    /// 🔴 §893 — THE TICK-BOX NO LONGER MASKS A REAL GAP, and that is the point of the fix.
+    /// </summary>
+    /// <remarks>
+    /// §762's manual confirmation existed ONLY because Backstage could not be read, so the line
+    /// could never clear itself. Now it can. A speaker whose country is genuinely absent in
+    /// Backstage must still be reported even if someone once ticked "confirmed" — otherwise the
+    /// acknowledgement silences a fact we can now verify, which is worse than the nagging it was
+    /// invented to stop.
+    /// </remarks>
     [Fact]
-    public void A_CONFIRMED_country_is_no_longer_reported()
+    public void A_stale_confirmation_does_NOT_hide_a_country_that_is_really_missing()
     {
         var ceh = new SpeakerProfile { Country = "DK", CountryConfirmedInBackstage = "DK" };
 
-        Assert.DoesNotContain(SpeakerZohoGapReporter.GapsFor(ceh, Zoho()), g => g.Contains("Country"));
+        var gap = Assert.Single(SpeakerZohoGapReporter.GapsFor(ceh, Zoho()), g => g.Contains("Country"));
+        Assert.Contains("not set in Backstage", gap);
     }
 
+    /// <summary>
+    /// …and when Backstage really does have it, the line is silent WITHOUT needing the tick-box —
+    /// which is what makes the confirmation field obsolete rather than merely ignored.
+    /// </summary>
     [Fact]
-    public void The_confirmation_tolerates_case_and_whitespace()
+    public void A_set_country_needs_no_confirmation_to_go_quiet()
     {
-        // Both sides are typed by a human. Re-nagging him over "dk " vs "DK" would be the original
-        // defect wearing a different hat.
-        var ceh = new SpeakerProfile { Country = "DK", CountryConfirmedInBackstage = " dk " };
+        var ceh = new SpeakerProfile { Country = "DK", CountryConfirmedInBackstage = null };
 
-        Assert.DoesNotContain(SpeakerZohoGapReporter.GapsFor(ceh, Zoho()), g => g.Contains("Country"));
+        Assert.DoesNotContain(
+            SpeakerZohoGapReporter.GapsFor(ceh, Zoho(country: "DK")), g => g.Contains("Country"));
     }
 
     [Fact]

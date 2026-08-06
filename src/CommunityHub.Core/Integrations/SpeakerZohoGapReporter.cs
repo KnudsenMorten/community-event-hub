@@ -215,16 +215,53 @@ public sealed class SpeakerZohoGapReporter
         // 🔑 Compared by VALUE, not by a flag: if CEH's country later changes, the confirmation no
         // longer matches and the line comes back — a new value is a new fact, and suppressing it
         // would silently hide a genuinely wrong Backstage record.
-        if (!BackstageSpeaker.CountryIsReadable && Has(ceh.Country)
-            && !CountryIsConfirmed(ceh))
+        // ✅ §893 — COUNTRY IS NOW A REAL COMPARISON. The §623 "not readable" finding was an
+        // artefact: Zoho OMITS an unset field, and on the day it was measured no speaker had a
+        // country set, so an empty sample read as a missing feature.
+        //
+        // 🔑 That fixes the actual complaint — operator 2026-08-06: *"i now get a daily mail saying
+        // to check country. but that is wrong as we have new knowledge now"*. The line used to be
+        // an unverifiable chore that could only be silenced by ticking a box; it is now either a
+        // genuine gap or absent.
+        //
+        // 🔒 ABSENT ≠ EMPTY: a missing key means Backstage has NO country, which IS the gap worth
+        // reporting. A present key that matches is silence.
+        if (BackstageSpeaker.CountryIsReadable && Has(ceh.Country))
         {
-            gaps.Add($"{ZohoFieldMap.Speaker.Country.GuiLabel}: {ceh.Country!.Trim()} "
-                     + "— Backstage does not report this field, so please confirm it is set "
-                     + "(tick it off on the speaker's page in CEH once you have)");
+            if (!Has(z.Country))
+            {
+                gaps.Add($"{ZohoFieldMap.Speaker.Country.GuiLabel}: {ceh.Country!.Trim()} "
+                         + "— not set in Backstage");
+            }
+            else if (!CountryMatches(ceh.Country, z.Country))
+            {
+                // ⚠️ Zoho stores an ISO-2 CODE ("DK"); CEH may hold a name ("Denmark"). Only a
+                // real disagreement is reported — otherwise every speaker would differ forever.
+                gaps.Add($"{ZohoFieldMap.Speaker.Country.GuiLabel}: CEH has "
+                         + $"{ceh.Country!.Trim()}, Backstage has {z.Country!.Trim()}");
+            }
         }
 
         return gaps;
     }
+
+    /// <summary>
+    /// §893 — does CEH's country agree with Backstage's? Zoho returns an <b>ISO-2 code</b> (`DK`);
+    /// CEH may hold a display name (`Denmark`), so a plain string compare would mark every speaker
+    /// as differing forever — the §594 "Tags missing" mail again.
+    /// </summary>
+    /// <remarks>
+    /// 🔒 <b>Unknown ⇒ treated as MATCHING, deliberately.</b> §582: a false gap is worse than no
+    /// gap, because he acts on it. If the code is not one we can map, we say nothing rather than
+    /// accuse a record that may be perfectly correct.
+    /// </remarks>
+    /// <remarks>
+    /// 🔑 §894 — delegates to the SHARED <see cref="CountryCodeMapper"/> rather than keeping a second
+    /// list. Two country maps in one codebase drift, and then the ERP sync and the speaker report
+    /// disagree about what "Danmark" means ([[ceh-count-the-shared-things]]).
+    /// </remarks>
+    public static bool CountryMatches(string? cehCountry, string? zohoCountry) =>
+        CountryCodeMapper.SameCountry(cehCountry, zohoCountry);
 
     /// <summary>
     /// §762 — has an organizer confirmed that THIS country value is set in Backstage?

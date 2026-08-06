@@ -188,6 +188,31 @@ public class Session
     public bool IsServiceSession { get; set; }
 
     /// <summary>
+    /// §909 — this session is TEST DATA: never announced on social media, never rendered into a
+    /// graphic.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-08-06: <i>"remove test sessions"</i> — said while looking at
+    /// "Test Master Class" and "Test Session" sitting in the SoMe queue, scheduled to publish.</para>
+    ///
+    /// <para>🔴 <b>§905's derived rule could not see them, and this is exactly why an explicit flag
+    /// exists.</b> That rule reads "the session HAS speakers and every one is a test user" — true of
+    /// the two exhibitor fixtures, and FALSE of these: <c>Test Master Class</c> and
+    /// <c>Test Session</c> each carry <b>four REAL speakers</b>. A session is test because of what it
+    /// IS, not because of who happens to be on it, and no amount of inference fixes that.</para>
+    ///
+    /// <para>🔒 The sibling of <see cref="SponsorInfo.IsTestData"/>, added for the same reason and
+    /// with the same default: <c>false</c>, so every existing session stays real until it is marked.
+    /// A real session wrongly hidden is the worse failure — it silently drops a speaker's
+    /// announcement, and nobody notices an absence.</para>
+    ///
+    /// <para>⚠️ Deliberately NOT a title match. "Test" appears in legitimate session titles
+    /// ("Penetration Testing", "A/B Testing"), and a heuristic that reads names would eventually
+    /// delete a real talk from the campaign.</para>
+    /// </remarks>
+    public bool IsTestData { get; set; }
+
+    /// <summary>
     /// True when this session was added directly in the hub (not from Sessionize),
     /// e.g. a sponsor session. Hub-added sessions carry a synthetic
     /// <see cref="SessionizeId"/> (<c>hub-&lt;guid&gt;</c>) so the Sessionize import

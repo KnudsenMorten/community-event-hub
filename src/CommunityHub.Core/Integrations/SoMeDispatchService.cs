@@ -137,7 +137,33 @@ public sealed class SoMeDispatchService
     private async Task<(byte[]? Bytes, string? Alt)> ResolveImageAsync(
         SoMePost post, CancellationToken ct)
     {
-        if (string.IsNullOrWhiteSpace(post.ImageRef)) return (null, null);
+        // 🔴 §917 — THE SUBJECT'S CURRENT GRAPHIC WINS OVER THE ONE STAMPED AT PLAN TIME.
+        //
+        // Operator 2026-08-06: *"the picture … takes the current list of speaker - and not stamp
+        // them at planning time. so i dont have to worry about wrong speaker assigned"*. §901
+        // already gave the WORDS that property; §915 accidentally took it away from the PICTURE by
+        // copying the file name onto the post when it was planned.
+        //
+        // ⚠️ The session graphic is the case that breaks: one speaker renders `session-12.png`,
+        // two render `session-12.gif` (§767 — the extension carries single-vs-multi). A second
+        // speaker joining a session leaves the stamped `.png` pointing at artwork that no longer
+        // shows the line-up. §767 Round 8 named this exactly: "a queued SoMe post must point at the
+        // asset ROW and not a copied path".
+        //
+        // 🔒 Types 1–4 ONLY (SoMeSubjectGraphic.IsSubjectOwned). Type 5 names its own file in the
+        // deck and an ad-hoc post has no subject — for those the stored ref IS the answer, and
+        // overriding it would discard a choice somebody made deliberately.
+        var imageRef = post.ImageRef;
+        var current = await new SoMeSubjectGraphic(_db).CurrentFileNameAsync(post, ct);
+        if (!string.IsNullOrWhiteSpace(current) && !string.Equals(current, imageRef, StringComparison.OrdinalIgnoreCase))
+        {
+            _log?.LogInformation(
+                "§917: post {PostId} publishes with its subject's CURRENT graphic {Current} "
+                + "(the post was planned with {Stamped}).", post.Id, current, imageRef ?? "none");
+            imageRef = current;
+        }
+
+        if (string.IsNullOrWhiteSpace(imageRef)) return (null, null);
 
         try
         {
@@ -147,7 +173,7 @@ public sealed class SoMeDispatchService
             {
                 var graphic = await _db.GraphicAssets.AsNoTracking().FirstOrDefaultAsync(
                     g => g.EventId == post.EventId
-                         && (g.SharePointUrl == post.ImageRef || g.SharePointPath == post.ImageRef),
+                         && (g.SharePointUrl == imageRef || g.SharePointPath == imageRef),
                     ct);
 
                 if (graphic?.StorageItemId is { Length: > 0 } itemId)
@@ -162,7 +188,7 @@ public sealed class SoMeDispatchService
             if (_mediaLibrary is not null)
             {
                 var file = await _mediaLibrary.GetAsync(
-                    post.ImageRef, post.TemplateKind, Domain.SoMePostMediaKind.Graphic, ct);
+                    imageRef, post.TemplateKind, Domain.SoMePostMediaKind.Graphic, ct);
                 if (file is not null) return (file.Content, "Experts Live Denmark");
             }
 
@@ -261,7 +287,8 @@ public sealed class SoMeDispatchService
                 + $"LinkedIn publisher); {due.Count} due post(s) left Queued, nothing faked.");
         }
 
-        int published = 0, failed = 0, withdrawn = 0;
+        // §922 — "waiting" is its own outcome: not published, not failed, nothing wrong with it.
+        int published = 0, failed = 0, withdrawn = 0, waiting = 0;
         foreach (var post in due)
         {
             try
@@ -342,9 +369,9 @@ public sealed class SoMeDispatchService
                 {
                     var values = await _composer.ValuesForAsync(post, ct);
 
-                    // ⚠️ REPORTED, NEVER FATAL (§864.3). An unknown token at COMPOSE time is refused
-                    // (§858.4); at PUBLISH time refusing would mean the post silently does not go
-                    // out, which is far worse. The token survives verbatim and is logged.
+                    // ⚠️ REPORTED, NEVER FATAL (§864.3). An UNKNOWN token — a typo nothing can
+                    // resolve — survives verbatim and is logged: refusing would withhold the post
+                    // for ever and tell nobody, which is worse than a visible oddity.
                     var unresolved = SoMePostComposer.UnresolvedTokens(body, values);
                     if (unresolved.Count > 0)
                     {
@@ -354,19 +381,41 @@ public sealed class SoMeDispatchService
                             post.Id, unresolved.Count, string.Join(", ", unresolved));
                     }
 
+                    // 🔴 §922 — BUT A KNOWN VARIABLE WITH NO VALUE STOPS THE POST.
+                    //
+                    // Operator 2026-08-06: *"a post can NOT go out if a variable is empty in the
+                    // post. that is the blocker."* The check runs HERE as well as at approval
+                    // because everything resolves late (§901/§917): a post that was complete when
+                    // he approved it can become incomplete afterwards — a speaker removed, a
+                    // sponsor's text cleared — and approval would otherwise be a stale snapshot of
+                    // readiness.
+                    //
+                    // 🔒 Left QUEUED, not failed: nothing is wrong with the post, something it
+                    // depends on is missing. It publishes by itself once the value arrives, which
+                    // is the whole point of resolving late.
+                    if (SoMeEmptyVariableGate.ReasonFor(body, values) is { Length: > 0 } incomplete)
+                    {
+                        _log?.LogWarning(
+                            "§922: post {PostId} NOT published — {Reason}. It stays queued and goes "
+                            + "out on a later tick once the value exists.", post.Id, incomplete);
+                        post.LastError = Truncate($"Waiting: {incomplete}", 2000);
+                        await _db.SaveChangesAsync(ct);
+                        waiting++;
+                        continue;
+                    }
+
                     body = _composer.Resolve(body, values);
                 }
 
-                // §861 — the organizer credit. Appended ONLY when he has not placed an {Organizers}
-                // token himself: operator 2026-08-05 asked to embed variables where HE wants them,
-                // so a body that positions the credit must not then get a second copy stapled on.
-                var placesCreditHimself =
-                    post.EffectiveText.Contains("{Organizers}", StringComparison.OrdinalIgnoreCase)
-                    || post.EffectiveText.Contains("{OrganizerLinkedInUrls}", StringComparison.OrdinalIgnoreCase);
-
-                var textToPublish = placesCreditHimself
-                    ? body
-                    : SoMePostCredit.Compose(body, editionCode, settings?.OrganizerCredits);
+                // 🔑 §888.3 — THE ORGANIZER CREDIT IS AN ORDINARY VARIABLE. Nothing is appended here.
+                // It used to be stapled on at publish time, which made it the one value that was not
+                // in the body, not editable, not movable — and, because it bypassed the variable
+                // pipeline, not eligible for the §858 mention resolution either. It published as
+                // plain text while {Speakers} tagged people properly.
+                // Operator 2026-08-06: *"remove the crap you build for organizer and make it as a
+                // variable like others"*. The token lives in the template and in every body; it
+                // resolves through the same path as every other variable.
+                var textToPublish = body;
 
                 var result = await _publisher.PublishAsync(
                     new LinkedInPost(page!, textToPublish,
@@ -405,6 +454,7 @@ public sealed class SoMeDispatchService
 
         var msg = $"Dispatch complete: {published} published, {failed} failed, "
                   + (withdrawn > 0 ? $"{withdrawn} withdrawn (subject gone), " : string.Empty)
+                  + (waiting > 0 ? $"{waiting} waiting on a missing value, " : string.Empty)
                   + $"{preAlerts} pre-alert(s) sent.";
         _log?.LogInformation("SoMeDispatch: event {EventId} — {Message}", eventId, msg);
         return new SoMeDispatchResult(published, failed, 0, preAlerts, msg);

@@ -190,6 +190,14 @@
             {
                 <span class="btn walk-btn" aria-disabled="true">Next →</span>
             }
+
+            @* 🔴 §889.4 — THE WAY OUT OF THE WALK. §889 built the list, and he still could not find
+               it: *"i still dont see the list functionality where it lists all posts so i quickly
+               can select right post and click edit"* … *"i found it under calendar"*.
+               The list existed and was reachable only by knowing that "Social-media calendar" is
+               where posts are listed. A feature nobody can navigate to has not been delivered. *@
+            <a class="btn walk-btn" asp-page="/Organizer/SoMeQueue"
+               title="See every post in one list — search, filter, and jump straight to one">☰ All posts</a>
         </div>
 
         @* 🔑 §863.3(1)(2) — WHICH post is this, and WHEN does it go out.
@@ -265,22 +273,53 @@
         @* The accept / hand-back action, beside the state it changes. *@
         <form method="post" asp-page-handler="SetPlanState" style="margin-top:10px;">
             <input type="hidden" name="id" value="@post.Id" />
-            @if (post.PlanState == CommunityHub.Core.Domain.SoMePostPlanState.Scheduled)
+            @* 🔴 §887.1 — THE THIRD STATE, and the one he was actually stuck in. The two axes can
+               disagree: a post accepted under the OLD code got its slot locked and was never
+               approved, so a two-branch button showed "Withdraw approval" and offered no way to
+               approve at all. Operator: "hard for me to approve it when you removed the button".
+               Locked-but-unapproved must therefore offer APPROVE, not only withdrawal. *@
+            @if (post.PlanState == CommunityHub.Core.Domain.SoMePostPlanState.Scheduled
+                 && !post.IsActive
+                 && post.Status != CommunityHub.Core.Domain.SoMePostStatus.Published)
+            {
+                <input type="hidden" name="state" value="@CommunityHub.Core.Domain.SoMePostPlanState.Scheduled" />
+                <button type="submit" class="btn primary">Approve to publish</button>
+                <span class="muted" style="margin-left:8px;">
+                    The date is locked but this post is <strong>not approved</strong>, so it will not
+                    publish. Approving lets it go out at its scheduled time.
+                </span>
+            }
+            else if (post.PlanState == CommunityHub.Core.Domain.SoMePostPlanState.Scheduled)
             {
                 <input type="hidden" name="state" value="@CommunityHub.Core.Domain.SoMePostPlanState.Proposed" />
-                <button type="submit" class="btn">Hand back to the planner</button>
+                <button type="submit" class="btn">Withdraw approval</button>
                 <span class="muted" style="margin-left:8px;">
-                    Locked — this date and post are yours. The planner leaves it alone.
+                    Locked — this date and post are yours. Withdrawing hands it back to the planner
+                    and stops it publishing.
                 </span>
             }
             else
             {
                 <input type="hidden" name="state" value="@CommunityHub.Core.Domain.SoMePostPlanState.Scheduled" />
-                <button type="submit" class="btn primary">Accept this slot</button>
+                @* 🔑 §887 — ONE decision, one button. This locks the slot AND approves, because that
+                   is the single act he performs while walking the queue. §850 still refuses approval
+                   on a post that is not ready, and says why. *@
+                <button type="submit" class="btn primary">Accept &amp; approve</button>
                 <span class="muted" style="margin-left:8px;">
-                    A proposal — the planner may still move or replace it. Accepting locks it.
+                    A proposal — the planner may still move or replace it. Accepting locks the date
+                    and approves it to publish.
                 </span>
             }
+        </form>
+
+        @* §913 — duplicate. Operator 2026-08-06: *"request for feature duplication post button"*.
+           🔒 The copy is HELD, unscheduled-in-spirit and belongs to no subject — the confirmation
+           says so, because "duplicate" could reasonably be read as "a second live copy of this
+           post" and it is not: its variables are flattened to the words they read today. *@
+        <form method="post" asp-page-handler="Duplicate" style="margin-top:10px;display:inline;"
+              onsubmit="return confirm('Duplicate this post?\n\nThe copy is yours to edit and is held for approval. Its text is copied as WORDS — the variables are filled in as they read today — because a copy belongs to no session or sponsor.');">
+            <input type="hidden" name="id" value="@post.Id" />
+            <button type="submit" class="btn btn-ghost">Duplicate this post</button>
         </form>
 
         @* §853 — delete. A soft delete: the row survives so the planner will not re-propose the
@@ -349,6 +388,13 @@
                       style="display:none;font-weight:600;align-items:center;gap:6px;">
                     ● Unsaved changes — press <strong>Save post text</strong> or they are lost
                 </span>
+
+                @* §887.2 — the same confirmation beside the text Save, so whichever button he uses
+                   the answer appears where he is looking. *@
+                @if (Model.Message is not null && !Model.MessageIsError)
+                {
+                    <span class="success" role="status" style="font-weight:600;">✔ @Model.Message</span>
+                }
                 <span class="muted">
                     Clear the box completely to go back to the text the engine composed.
                 </span>
@@ -371,9 +417,33 @@
                     var saveForm = document.getElementById('save-post-form');
                     if (saveForm) saveForm.addEventListener('submit', function () { dirty = false; });
 
-                    // 🔑 EVERY OTHER navigation warns, including the other action forms on this page
-                    // (approve, delete, reschedule). That is not over-zealous: each one re-renders
-                    // the page and discards the box, so the edit really would be gone.
+                    // 🔴 §887.3 — THE ACTION FORMS MUST NOT BE BLOCKED SILENTLY.
+                    // These used to fall under the beforeunload guard below, so pressing
+                    // "Accept & approve" with anything typed in the box raised a vague browser
+                    // prompt — and dismissing it cancelled the submit with NO message at all.
+                    // Operator: "nothing happens when i click accept & approve. state is still
+                    // planned". A guard that silently eats a deliberate action is worse than the
+                    // lost edit it was protecting against.
+                    //
+                    // 🔒 They still warn — but with a question that names the consequence, and only
+                    // when there is genuinely something to lose. Confirming proceeds for real.
+                    document.querySelectorAll('form[method="post"]').forEach(function (f) {
+                        if (f === saveForm) return;
+                        f.addEventListener('submit', function (e) {
+                            if (dirty &&
+                                !confirm('You have unsaved post text. This action reloads the page '
+                                       + 'and your unsaved text will be lost. Continue?')) {
+                                e.preventDefault();
+                                return;
+                            }
+                            // Confirmed (or nothing to lose) — release the guard so the browser
+                            // does not ask a second, vaguer question on top.
+                            dirty = false;
+                        });
+                    });
+
+                    // 🔑 LINK navigation still warns — Next/Previous are plain GETs that throw the
+                    // box away without a word, which is exactly how §859.6 lost a real edit.
                     window.addEventListener('beforeunload', function (e) {
                         if (!dirty) return;
                         e.preventDefault();
@@ -472,11 +542,15 @@
                         <button type="button" class="tok" onclick="insertToken('@t')">@t</button>
                     }
                 </div>
+                @* §888.3 — nothing is appended automatically any more. A post with no
+                   {Organizers} token simply has no credit, which is now a real (and visible)
+                   state rather than something the publisher silently papered over. *@
                 @if (!Model.BodyPlacesCredit)
                 {
                     <div class="muted" style="margin-top:8px;font-size:.9rem;">
-                        The organizer credit is added at the end automatically. Insert
-                        <code>{Organizers}</code> above to place it yourself instead.
+                        ⚠️ This post has no <code>{Organizers}</code> line, so it will publish
+                        <strong>without an organizer credit</strong>. Insert the variable above to
+                        add it.
                     </div>
                 }
             </div>
@@ -497,6 +571,30 @@
             <label for="when">Posting date &amp; time (Danish time)</label>
             <input id="when" name="ScheduledAt" type="datetime-local"
                    value="@(Model.ScheduledAt?.ToString("yyyy-MM-ddTHH:mm"))" />
+
+            @* 🔒 §887 — SAVE SITS WITH THE DATE, for the same reason §863.4 put one beside the text.
+               This field is ~170 lines below the "Save post text" button and shares its form, so a
+               changed date looked unsaveable: nothing on the page said what would commit it, and the
+               only button in sight was labelled as if it saved text only. Operator: "i changed
+               date/time but no button to save schedule change". *@
+            <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:8px 0 4px;">
+                <button type="submit" class="btn primary"
+                        style="min-width:150px;min-height:44px;font-weight:600;">
+                    Save date &amp; time
+                </button>
+                <span class="muted">Saves the whole post — the text above too.</span>
+            </div>
+
+            @* 🔒 §887.2 — THE CONFIRMATION, WHERE THE BUTTON IS. The page-level message renders at
+               the very top, so saving from down here looked like nothing happened at all. Echoing it
+               beside the control that was pressed is what makes the save visible — and it names the
+               stored date, so a wrong value is caught at once rather than at publish time. *@
+            @if (Model.Message is not null && !Model.MessageIsError)
+            {
+                <p class="success" role="status"
+                   style="margin:6px 0 0;font-weight:600;">✔ @Model.Message</p>
+            }
+
             <p class="muted">
                 Danish local time. Changing this moves only the schedule — it does not approve or
                 un-approve the post.

@@ -36,12 +36,25 @@ public sealed record PlannedSoMePost(
 /// was built yesterday is one subject becoming ready and should go out now; a date on which a whole
 /// category unlocks is simply the start of that category's window.</para>
 /// </param>
+/// <param name="EarliestByOccurrence">
+/// §908 — a window for a SPECIFIC occurrence, overriding <paramref name="EarliestUtc"/> for it.
+///
+/// <para>🔑 Operator 2026-08-06: <i>"build post for each speakertracks so they run 2 times; now and
+/// jan 2027"</i> — which is not a frequency, it is two named ROUNDS. The generic spread cannot say
+/// that: it distributes a subject's occurrences evenly across the window, which is why the eight
+/// tracks were landing one per month from September through February instead of a burst now and a
+/// reminder in January.</para>
+///
+/// <para>🔒 An occurrence listed here is placed from its own window and is NOT spread — the date is
+/// the instruction. Occurrences not listed behave exactly as before.</para>
+/// </param>
 public sealed record SoMeSubject(
     SoMeTemplateKind Kind,
     string SubjectKey,
     int Occurrences,
     DateTimeOffset? EarliestUtc = null,
-    DateTimeOffset? PromptFromUtc = null);
+    DateTimeOffset? PromptFromUtc = null,
+    IReadOnlyDictionary<int, DateTimeOffset>? EarliestByOccurrence = null);
 
 /// <summary>
 /// §824.2E — decides WHEN each post goes out. Pure: no database, no clock of its own, no randomness
@@ -257,7 +270,14 @@ public static class SoMeSchedulePlanner
 
         foreach (var (subject, occurrence) in wanted)
         {
-            var earliest = subject.EarliestUtc is { } e && e > fromUtc ? e : fromUtc;
+            // §908 — a ROUND has its own window, and it wins over the subject-wide floor.
+            var roundStart = subject.EarliestByOccurrence is { } byOcc
+                             && byOcc.TryGetValue(occurrence, out var ro)
+                ? (DateTimeOffset?)ro
+                : null;
+
+            var floor = roundStart ?? subject.EarliestUtc;
+            var earliest = floor is { } e && e > fromUtc ? e : fromUtc;
 
             // Where this post WANTS to sit, before availability is considered.
             var target = windowStart.AddDays(windowDays * index / count);
@@ -276,7 +296,11 @@ public static class SoMeSchedulePlanner
             // arrival hurries; a category unlocking simply starts its window.
             var isLateArrival = subject.PromptFromUtc is { } ready && ready > fromUtc;
 
-            var searchFrom = isLateArrival
+            // 🔒 §908 — AN EXPLICIT ROUND IS NOT SPREAD. "now and jan 2027" names the dates, so
+            // pushing the post further out to hit a spread target would answer a question he did
+            // not ask. Placement still respects the per-day ceiling, so a round of eight tracks
+            // fills the days after its window rather than stacking on one.
+            var searchFrom = isLateArrival || roundStart is not null
                 ? earliest
                 : (target > earliest ? target : earliest);
 
@@ -376,6 +400,119 @@ public static class SoMeSchedulePlanner
             used[day] = used.GetValueOrDefault(day) + 1;
             planned.Add(new PlannedSoMePost(subject.Kind, subject.SubjectKey, occurrence, slot));
         }
+    }
+
+    /// <summary>
+    /// §928 — pack posts that ALREADY EXIST into a window that opens on a given day, in order,
+    /// as densely as the per-day ceiling allows. Returns only the posts whose slot actually changes.
+    /// </summary>
+    /// <remarks>
+    /// <para>🔴 <b>Why this exists at all, and why <see cref="Plan"/> could not do it.</b> Operator
+    /// 2026-08-06: <i>"reschedule master classes to last week august"</i>. The planner only ever
+    /// creates posts that do not exist yet — that is what protects his approvals — and §918's
+    /// auto-approval had already accepted the whole open queue. So the nine master classes he wanted
+    /// moved were exactly the nine posts re-planning is forbidden to touch. Moving them means moving
+    /// the ROWS.</para>
+    ///
+    /// <para>🔒 <b>Only the slot changes.</b> Nothing is re-composed, no approval is revoked, no
+    /// teaser is regenerated — which is the whole reason this is a re-time and not a discard-and-plan.
+    /// §848.2 would have thrown away the words he accepted to move a date.</para>
+    ///
+    /// <para>🔑 <b>It moves posts EARLIER as well as later</b>, and that is the point: the spread had
+    /// scattered master classes as far out as February, so a floor ("not before X") could never have
+    /// brought them back. This is §908's "the date is the instruction" applied to stored rows.</para>
+    ///
+    /// <para>🔒 <b>Idempotent, and it must be</b> — the scheduler runs on a timer. The order is taken
+    /// from the posts' CURRENT slots, so a second run sees the order the first run produced, assigns
+    /// the same slots, and reports nothing changed. A fixed point, not a shuffle that settles.</para>
+    ///
+    /// <para>⚠️ <b>The day ceiling still wins.</b> Master classes fill AROUND the sponsor and event
+    /// posts already holding slots that week rather than evicting them, so a busy window pushes the
+    /// tail into the following days instead of breaking §843.3. And a post that finds no room at all
+    /// KEEPS THE SLOT IT HAS: being announced on the wrong day is a preference missed, being dropped
+    /// out of the queue is a post that never goes out.</para>
+    /// </remarks>
+    /// <param name="movable">The posts to place, with the slots they hold today.</param>
+    /// <param name="otherOccupied">
+    /// Slots held by every OTHER post — they are obstacles, not candidates. Must not include
+    /// <paramref name="movable"/>, or each post would collide with its own current slot.
+    /// </param>
+    /// <param name="windowStartUtc">The day the window opens. Callers clamp this to "not the past".</param>
+    /// <param name="eventStartUtc">Nothing is scheduled on or after the event.</param>
+    /// <param name="maxPerDay">The everyday rhythm (§843.3). No exception ceiling here.</param>
+    public static IReadOnlyList<(int PostId, DateTimeOffset ScheduledAtUtc)> RetimeIntoWindow(
+        IReadOnlyCollection<(int PostId, string SubjectKey, DateTimeOffset ScheduledAtUtc)> movable,
+        IReadOnlyCollection<DateTimeOffset> otherOccupied,
+        DateTimeOffset windowStartUtc,
+        DateTimeOffset eventStartUtc,
+        int maxPerDay)
+    {
+        ArgumentNullException.ThrowIfNull(movable);
+        ArgumentNullException.ThrowIfNull(otherOccupied);
+
+        var used = new Dictionary<DateOnly, int>();
+        var taken = new HashSet<DateTimeOffset>();
+        foreach (var slot in otherOccupied)
+        {
+            taken.Add(slot);
+            var d = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(slot, DanishTime).DateTime);
+            used[d] = used.GetValueOrDefault(d) + 1;
+        }
+
+        // The order is their CURRENT order, so the one he already sees first stays first — the
+        // smallest rearrangement that satisfies the instruction. SubjectKey breaks ties so two posts
+        // sharing a minute cannot swap between runs.
+        var ordered = movable
+            .OrderBy(m => m.ScheduledAtUtc)
+            .ThenBy(m => m.SubjectKey, StringComparer.Ordinal)
+            .ToList();
+
+        var firstDay = DateOnly.FromDateTime(
+            TimeZoneInfo.ConvertTime(windowStartUtc, DanishTime).DateTime);
+        var lastDay = DateOnly.FromDateTime(
+            TimeZoneInfo.ConvertTime(eventStartUtc, DanishTime).DateTime);
+
+        var moved = new List<(int PostId, DateTimeOffset ScheduledAtUtc)>();
+
+        foreach (var post in ordered)
+        {
+            // The time of day still varies per subject (§824.2E) — a burst week should not be five
+            // days of the same two clock times — but the DAY is filled densely from the window,
+            // because packing is the instruction.
+            var timeIndex = (int)((StableHash(post.SubjectKey) / 7) % (uint)PreferredTimes.Length);
+
+            DateTimeOffset? slot = null;
+            for (var day = firstDay; day < lastDay && slot is null; day = day.AddDays(1))
+            {
+                if (IsWeekend(day)) continue;
+                if (used.GetValueOrDefault(day) >= maxPerDay) continue;
+
+                for (var i = 0; i < PreferredTimes.Length; i++)
+                {
+                    var time = PreferredTimes[(timeIndex + i) % PreferredTimes.Length];
+                    if (time < EarliestTime || time > LatestTime) continue;
+
+                    var utc = ToUtc(day, time);
+                    if (utc < windowStartUtc || utc >= eventStartUtc) continue;
+                    if (taken.Contains(utc)) continue;
+
+                    slot = utc;
+                    break;
+                }
+            }
+
+            // ⚠️ No room anywhere in the window: the post keeps the slot it has. Its day is still
+            // marked used, so the posts after it are placed around it rather than on top of it.
+            var final = slot ?? post.ScheduledAtUtc;
+
+            taken.Add(final);
+            var finalDay = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(final, DanishTime).DateTime);
+            used[finalDay] = used.GetValueOrDefault(finalDay) + 1;
+
+            if (final != post.ScheduledAtUtc) moved.Add((post.PostId, final));
+        }
+
+        return moved;
     }
 
     private static DateTimeOffset? FindSlot(

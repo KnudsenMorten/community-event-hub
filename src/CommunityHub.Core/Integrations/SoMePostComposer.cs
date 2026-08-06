@@ -53,25 +53,43 @@ public sealed class SoMePostComposer
     /// 🔒 Only tokens that CAN resolve for that type are offered — offering <c>{SponsorTier}</c> on
     /// an event post would produce a token that renders as itself forever.
     /// </remarks>
-    public static IReadOnlyList<string> TokensFor(SoMeTemplateKind? kind) => kind switch
-    {
-        SoMeTemplateKind.SpeakerTracks =>
-            ["{TrackName}", "{SpeakerNames}", "{Speakers}", "{EventSystemUrl}", "{EventTags}",
-             "{EventDates}", "{EventVenue}", "{EditionCode}", "{Organizers}"],
-        SoMeTemplateKind.Session =>
-            ["{SessionTitle}", "{SessionAbstract}", "{SpeakerNames}", "{Speakers}", "{EventSystemUrl}",
-             "{EventTags}", "{EventDates}", "{EventVenue}", "{EditionCode}", "{Organizers}"],
-        SoMeTemplateKind.SponsorCategory =>
-            ["{SponsorTier}", "{SponsorList}", "{EventSystemUrl}", "{EventTags}", "{EventDates}",
-             "{EventVenue}", "{EditionCode}", "{Organizers}"],
-        SoMeTemplateKind.Sponsor =>
-            ["{SponsorName}", "{SponsorTier}", "{SponsorLinkedInUrl}", "{SponsorWebsite}",
-             "{SponsorSocialMediaCompanyDescription}", "{SponsorHashtag}", "{EventSystemUrl}",
-             "{EventTags}", "{EditionCode}", "{Organizers}"],
-        _ =>
-            ["{EventSystemUrl}", "{EventTags}", "{EventDates}", "{EventVenue}", "{EditionCode}",
-             "{Organizers}"],
-    };
+    /// <summary>
+    /// §888.4 — the edition-wide tokens EVERY post type can use. Shared rather than repeated five
+    /// times: a new variable was added in three of the five lists and missing from the others, which
+    /// is exactly how the operator ended up looking at a chip row with half the variables on it
+    /// (2026-08-06: *"i am missing many variables here — both sponsors + the new ones"*).
+    /// </summary>
+    private static readonly string[] EditionTokens =
+    [
+        "{EventSystemUrl}", "{EventTags}", "{EventDates}", "{EventVenue}",
+        "{EventVenueCityCountry}", "{EventNameShort}", "{EventNameLong}",
+        "{Action_catalog_random}", "{Organizers}",
+    ];
+
+    public static IReadOnlyList<string> TokensFor(SoMeTemplateKind? kind) =>
+    [
+        .. kind switch
+        {
+            // 🔒 §908.5 — ONE NAME PER VALUE IS WHAT THE EDITOR OFFERS. His catalog originally wrote
+            // {SpeakerTrack} and {SessionTeaserTextAI}; those bodies were normalised to the names
+            // CEH already resolves, so the chips teach a single spelling rather than presenting two
+            // that do the same thing (§858.4b: "no need to have 2 or 3 similar").
+            // ⚠️ The old spellings still RESOLVE (see ValuesForAsync / TrackValuesAsync) so a body
+            // pasted with them cannot publish a literal token — they are compatibility, not choice.
+            SoMeTemplateKind.SpeakerTracks =>
+                (string[])["{TrackName}", "{SpeakerNames}", "{Speakers}"],
+            SoMeTemplateKind.Session =>
+                ["{SessionTitle}", "{SessionAbstract}", "{TrackName}", "{SpeakerNames}", "{Speakers}"],
+            SoMeTemplateKind.SponsorCategory =>
+                ["{SponsorTier}", "{SponsorList}"],
+            SoMeTemplateKind.Sponsor =>
+                ["{SponsorName}", "{SponsorTier}", "{SponsorLinkedInUrl}", "{SponsorWebsite}",
+                 "{SponsorSocialMediaCompanyDescription}", "{SponsorHashtag}",
+                 "{SponsorSigner}", "{SponsorEventCoordinators}"],
+            _ => [],
+        },
+        .. EditionTokens,
+    ];
 
     /// <summary>Every value this post's tokens can draw on, resolved NOW.</summary>
     public async Task<Dictionary<string, string?>> ValuesForAsync(
@@ -87,6 +105,25 @@ public sealed class SoMePostComposer
             values["Organizers"] = credits;
         }
 
+        // §885 — this post's own call-to-action phrase, drawn ONCE when the post was created and
+        // stored on the row. 🔒 Read here, never re-rolled: composing must be repeatable, or the
+        // preview stops matching the published post (§863.4). Null ⇒ §824.15 drops the line, so an
+        // empty catalog publishes no dangling label.
+        values["Action_catalog_random"] = post.ActionPhrase;
+
+        // 🔴 §901 — the AI opening line, written ONCE when the post was planned and read back here.
+        // This is what lets the planner store the TEMPLATE instead of the rendering: {IntroText} is
+        // the one token that cannot resolve late (it is a generative call), so without this line a
+        // stored template would publish the literal text "{IntroText}" at the top of the post.
+        // Null ⇒ empty ⇒ the renderer tidies the line away (§824.2D's documented failure path).
+        values["IntroText"] = post.IntroText;
+
+        // §908 — HIS name for the same paragraph, from the session wordings he wrote:
+        // {SessionTeaserTextAI}. It says out loud what {IntroText} only implies — that this line is
+        // machine-written — which is worth keeping in the token he reads in the editor. 🔒 One
+        // value, two spellings; never two mechanisms (§858.4b).
+        values["SessionTeaserTextAI"] = post.IntroText;
+
         var key = post.SubjectKey ?? string.Empty;
         var id = key.Contains(':') ? key[(key.IndexOf(':') + 1)..] : key;
 
@@ -94,6 +131,12 @@ public sealed class SoMePostComposer
         {
             case SoMeTemplateKind.SpeakerTracks when id.Length > 0:
                 Merge(values, await _variables.TrackValuesAsync(post.EventId, id, ct));
+                break;
+            // 🔒 §912 — prefix first, exactly as the planner does. Two id spaces, one shaped key.
+            case SoMeTemplateKind.Session
+                when SoMeSponsorSessionKey.TryParse(post.SubjectKey, out var sponsorSessionId):
+                Merge(values, await _variables.SponsorSessionValuesAsync(
+                    post.EventId, sponsorSessionId, ct));
                 break;
             case SoMeTemplateKind.Session when int.TryParse(id, out var sessionId):
                 Merge(values, await _variables.SessionValuesAsync(sessionId, ct));

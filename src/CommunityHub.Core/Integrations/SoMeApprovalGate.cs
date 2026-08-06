@@ -38,6 +38,54 @@ public sealed class SoMeApprovalGate
     /// </remarks>
     public async Task<string?> BlockedReasonAsync(SoMePost post, CancellationToken ct = default)
     {
+        // 🔴 §922 — THE GENERAL RULE, ASKED FIRST. Operator 2026-08-06: *"a post can NOT go out if a
+        // variable is empty in the post. that is the blocker."*
+        //
+        // 🔑 It runs BEFORE the per-type checks below because it subsumes most of them and is
+        // derived from the post's OWN body: a sponsor owing their social text shows up here as
+        // {SponsorSocialMediaCompanyDescription} being empty, without this class needing to know
+        // what a sponsor is. The type-specific checks stay for what a body cannot express — a
+        // missing LOGO is not a variable in the text, and §842.5 makes it contractual.
+        //
+        // ⚠️ Empty ≠ unknown: a token nothing can resolve is a template bug and still publishes
+        // verbatim (§864.3), because withholding a post for ever and telling nobody is worse.
+        var values = await new SoMePostComposer(_db, new SoMeVariableResolver(_db))
+            .ValuesForAsync(post, ct);
+        if (SoMeEmptyVariableGate.ReasonFor(post.EffectiveText, values) is { Length: > 0 } emptyVariable)
+        {
+            return emptyVariable;
+        }
+
+        // 🔴 §926 — A SESSION POST NEEDS THE SESSION'S DESCRIPTION. Operator 2026-08-06:
+        // *"master class announcement and sessions has dependency to description. if empty it is
+        // not ready"*.
+        //
+        // ⚠️ §922's general rule CANNOT catch this, and that is why the check is here. The rule
+        // inspects variables IN the body — and his 38 session wordings do not print the abstract,
+        // they print {SessionTeaserTextAI}. The abstract is the source the teaser is WRITTEN FROM,
+        // one level behind the text.
+        //
+        // 🔴 An empty abstract therefore does not produce a shorter post, it produces an INVENTED
+        // one. Measured 2026-08-06: "ELDK27 Welcome" has no abstract, and the assistant had already
+        // written *"where the energy is high and the community comes alive"* from the title alone —
+        // and §911 stores a teaser permanently, so that invention would have been reused for ever.
+        if (post.TemplateKind == SoMeTemplateKind.Session
+            && !SoMeSponsorSessionKey.TryParse(post.SubjectKey, out _)
+            && SessionIdOf(post) is { } sessionId)
+        {
+            var hasAbstract = await _db.Sessions
+                .Where(s => s.Id == sessionId && s.EventId == post.EventId)
+                .Select(s => s.Abstract != null && s.Abstract.Trim() != "")
+                .FirstOrDefaultAsync(ct);
+
+            if (!hasAbstract)
+            {
+                return "waiting for the session description — the announcement is written from it, "
+                     + "so without one there is nothing to describe. Add the abstract and this "
+                     + "becomes approvable.";
+            }
+        }
+
         // 🔴 §865.4 — A TIER POST IS A SPONSOR POST TOO, AND THE GATE NEVER RAN ON IT.
         // Operator 2026-08-05: "guards are not working - it still shows posts which are NOT ready",
         // on post #540 (Silver) — whose THREE sponsors have all failed to deliver their text.
@@ -200,6 +248,26 @@ public sealed class SoMeApprovalGate
             && key.StartsWith(SoMeAnnouncementQuery.SponsorPrefix, StringComparison.OrdinalIgnoreCase))
         {
             return key[SoMeAnnouncementQuery.SponsorPrefix.Length..];
+        }
+
+        return null;
+    }
+
+    /// <summary>§926 — the Sessions row a Type 2 post announces, or null when it is not one.</summary>
+    /// <remarks>
+    /// ⚠️ <c>sponsorsession:{id}</c> is a DIFFERENT table (§912) and its ids overlap with
+    /// <c>session:{id}</c>, so the caller rules it out first — a bare int parse would read
+    /// sponsorsession:1 as Sessions row 1 and gate the wrong talk (the §864.2 trap).
+    /// </remarks>
+    private static int? SessionIdOf(SoMePost post)
+    {
+        const string prefix = "session:";
+
+        if (post.SubjectKey is { } key
+            && key.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
+            && int.TryParse(key[prefix.Length..], out var id))
+        {
+            return id;
         }
 
         return null;

@@ -29,8 +29,22 @@ public sealed record SoMeAnnouncement(
     bool IsApproved,
     string PreviewText,
     string? ImageRef,
-    string MentionLine)
+    string MentionLine,
+    string? Blocker = null)
 {
+    /// <summary>
+    /// §916 — the post's STATE in his words: planned · scheduled · published.
+    /// </summary>
+    /// <remarks>
+    /// Operator 2026-08-06: <i>"also include the state of the post (planned/scheduled)"</i>.
+    /// 🔒 The same three words the organizer list uses (§889), so the two views cannot describe the
+    /// same post differently.
+    /// </remarks>
+    public string State =>
+        IsPublished ? "published"
+        : IsApproved ? "scheduled"
+        : "planned";
+
     /// <summary>Held for approval — planned but not yet turned on (§824.21a). Organizer-only view.</summary>
     public bool IsHeld => Status == SoMePostStatus.Queued && !IsApproved;
 
@@ -174,14 +188,27 @@ public sealed class SoMeAnnouncementQuery
         var tierKey = tier is null ? null : TierPrefix + tier.Value;
         var sponsorKey = SponsorPrefix + sponsorCompanyId;
 
-        var posts = await BaseQuery(eventId, approvedOnly: true)
+        // 🔴 §916 — PLANNED POSTS ARE SHOWN TOO, with their state on the row.
+        //
+        // This was `approvedOnly: true` on an explicit earlier decision (operator 2026-08-05: "only
+        // show approved posts"), whose reason was sound: an unapproved post's wording may still
+        // change, so showing it promises words that then get edited.
+        //
+        // ⚠️ What that reason did not account for is that NOTHING is auto-approved — every type 1–4
+        // post is created HELD (§824.8 Q2) and waits for him. Measured on PROD 2026-08-06: 79
+        // planned, 1 approved. So the page was empty for every speaker and sponsor, which is why he
+        // asked where the posts were.
+        //
+        // 🔒 The state badge is what makes this safe now: a "planned" post SAYS it is planned, and
+        // the blocker line says what it is still waiting for.
+        var posts = await BaseQuery(eventId, approvedOnly: false)
             .Where(p => p.SubjectKey != null
                         && (p.SubjectKey == sponsorKey
                             || (tierKey != null && p.SubjectKey == tierKey)
                             || sessionKeys.Contains(p.SubjectKey)))
             .ToListAsync(ct);
 
-        var all = Project(posts);
+        var all = await ProjectWithBlockersAsync(posts, ct);
 
         return new SponsorAnnouncements(
             Company: all.Where(a => a.SubjectKey == sponsorKey).ToList(),
@@ -209,12 +236,25 @@ public sealed class SoMeAnnouncementQuery
             .Select(s => TrackPrefix + s.Track!)
             .ToHashSet();
 
-        var posts = await BaseQuery(eventId, approvedOnly: true)
+        // 🔴 §916 — PLANNED POSTS ARE SHOWN TOO, with their state on the row.
+        //
+        // This was `approvedOnly: true` on an explicit earlier decision (operator 2026-08-05: "only
+        // show approved posts"), whose reason was sound: an unapproved post's wording may still
+        // change, so showing it promises words that then get edited.
+        //
+        // ⚠️ What that reason did not account for is that NOTHING is auto-approved — every type 1–4
+        // post is created HELD (§824.8 Q2) and waits for him. Measured on PROD 2026-08-06: 79
+        // planned, 1 approved. So the page was empty for every speaker and sponsor, which is why he
+        // asked where the posts were.
+        //
+        // 🔒 The state badge is what makes this safe now: a "planned" post SAYS it is planned, and
+        // the blocker line says what it is still waiting for.
+        var posts = await BaseQuery(eventId, approvedOnly: false)
             .Where(p => p.SubjectKey != null
                         && (sessionKeys.Contains(p.SubjectKey) || trackKeys.Contains(p.SubjectKey)))
             .ToListAsync(ct);
 
-        var all = Project(posts);
+        var all = await ProjectWithBlockersAsync(posts, ct);
 
         return new SpeakerAnnouncements(
             Sessions: all.Where(a => a.SubjectKey != null && sessionKeys.Contains(a.SubjectKey)).ToList(),
@@ -223,17 +263,56 @@ public sealed class SoMeAnnouncementQuery
 
     private IQueryable<SoMePost> BaseQuery(int eventId, bool approvedOnly)
     {
-        var q = _db.SoMePosts.Where(p => p.EventId == eventId);
+        // 🔴 §916 — A DELETED POST IS A TOMBSTONE, NOT CONTENT. §853 keeps the row so the planner
+        // cannot re-propose what he deleted; it is not something to show ANY audience, and this
+        // query had no such filter at all. It mattered less while external views were
+        // approved-only; the moment planned posts became visible it would have put a post he
+        // deleted back in front of a sponsor.
+        var q = _db.SoMePosts.Where(p => p.EventId == eventId && !p.IsDeleted);
 
-        // 🔒 The external-audience gate. IsActive IS the approval (§824.21a) — a post is created
-        // held and an organizer turns it on. Failed posts are excluded too: an external audience
-        // should not be shown a post that errored on publish.
+        // 🔒 IsActive IS the approval (§824.21a) — a post is created held and an organizer turns it
+        // on. Kept for the ORGANIZER views that ask for it.
         if (approvedOnly)
         {
             q = q.Where(p => p.IsActive && p.Status != SoMePostStatus.Failed);
         }
 
         return q.OrderBy(p => p.ScheduledAtUtc).AsNoTracking();
+    }
+
+    /// <summary>
+    /// §916 — the same projection, with each post's BLOCKER filled in.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-08-06: <i>"and any missing depencies (blockers)"</i>. A planned post that
+    /// is waiting on something says so — a sponsor who has not sent their social text or logo reads
+    /// the reason on their own page instead of wondering why nothing is scheduled.</para>
+    ///
+    /// <para>🔒 The reason comes from <see cref="SoMeApprovalGate"/>, the SAME sentence the organizer
+    /// sees. Two wordings for one condition is how the two views start disagreeing about whether a
+    /// post is ready.</para>
+    ///
+    /// <para>⚠️ Only for the small per-audience lists (a speaker's or sponsor's own handful). The
+    /// gate is a query per post, so the edition-wide calendar deliberately does NOT use this.</para>
+    /// </remarks>
+    private async Task<IReadOnlyList<SoMeAnnouncement>> ProjectWithBlockersAsync(
+        IReadOnlyList<SoMePost> posts, CancellationToken ct)
+    {
+        var gate = new SoMeApprovalGate(_db);
+        var result = new List<SoMeAnnouncement>(posts.Count);
+
+        foreach (var p in posts)
+        {
+            // A post already approved or published has nothing left to wait for — asking the gate
+            // would spend a query to be told what its state already says.
+            var blocker = p.IsActive || p.Status == SoMePostStatus.Published
+                ? null
+                : await gate.BlockedReasonAsync(p, ct);
+
+            result.Add(Project([p])[0] with { Blocker = blocker });
+        }
+
+        return result;
     }
 
     private static IReadOnlyList<SoMeAnnouncement> Project(IReadOnlyList<SoMePost> posts) =>

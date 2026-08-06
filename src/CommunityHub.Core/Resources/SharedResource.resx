@@ -205,8 +205,8 @@
   <data name="Nav.HelpPromote" xml:space="preserve"><value>Help Promote on Social Media</value></data>
   <!-- §837/§838 — the sponsor- and speaker-facing announcement pages: what CEH will post about
        them on LinkedIn, and when. Same label for both audiences; the pages differ, the idea does not. -->
-  <data name="Nav.SponsorAnnouncements" xml:space="preserve"><value>Social Media Announcements</value></data>
-  <data name="Nav.SpeakerAnnouncements" xml:space="preserve"><value>Social Media Announcements</value></data>
+  <data name="Nav.SponsorAnnouncements" xml:space="preserve"><value>Social Media Announcements (managed by ELDK)</value></data>
+  <data name="Nav.SpeakerAnnouncements" xml:space="preserve"><value>Social Media Announcements (managed by ELDK)</value></data>
   <data name="Nav.Calendar" xml:space="preserve"><value>Calendar</value></data>
   <data name="Nav.SectionEventLogistics" xml:space="preserve"><value>Event Info</value></data>
   <data name="Nav.SectionRegister" xml:space="preserve"><value>Register/Update</value></data>

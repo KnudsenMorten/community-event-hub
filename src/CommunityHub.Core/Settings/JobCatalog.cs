@@ -448,6 +448,13 @@ public static class JobCatalog
             // reminder. Hashing it would go quiet exactly when nobody has got round to the queue.
             FeatureKey: "digest-emails", DefaultIntervalMinutes: 10080, System: JobSystem.Platform),
 
+        // §858.16c — the ONLY caller of LinkedIn's people lookup. Daily because the input changes
+        // when the speaker list does or when someone follows the page, and because the endpoint
+        // carries a DAY throttle. Re-running is cheap: resolved speakers are skipped without a call.
+        new JobDescriptor("SpeakerMentionResolutionJob", "LinkedIn mentions (speakers + sponsors)", "Every 30 minutes", "0 */5 * * * *",
+            "CEH (internal): looks up each speaker's and sponsor contact's LinkedIn person id so posts can TAG them instead of just naming them. Anyone already resolved is skipped without a call, so a new person is picked up within half an hour. LinkedIn only allows mentioning people who FOLLOW the page, so the rest stay as plain names — the run reports how many of each.",
+            FeatureKey: "linkedin-queue", DefaultIntervalMinutes: 30, System: JobSystem.Social),
+
         new JobDescriptor("WelcomeGrantPruneJob", "Welcome link prune", "Daily", "0 */5 * * * *",
             "CEH (internal): expires used/old welcome auto-login grants so a stale link cannot sign anyone in.",
             DefaultIntervalMinutes: 1440, System: JobSystem.Platform),   // §878.5 — his list

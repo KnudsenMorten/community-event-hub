@@ -1,14 +1,24 @@
 @page
 @model CommunityHub.Pages.Speaker.AnnouncementsModel
 @{
-    ViewData["Title"] = "Social media announcements";
+    ViewData["Title"] = "Social Media Announcements (managed by ELDK)";
 }
 
 <div class="card">
-    <h1>Social media announcements</h1>
+    <h1>Social Media Announcements (managed by ELDK)</h1>
+    @* §916 — "(managed by ELDK)" in the title, and said again here in plain words. Operator
+       2026-08-06: the menu item had to be renamed *"to not confuse with fx speaker some"* — a
+       speaker also has their OWN social-media material in CEH (their graphics and share drafts),
+       and two menu entries both called "social media" is how someone comes here expecting the
+       posts they publish themselves. *@
     <p class="muted">
-        The posts we will publish about your sessions on LinkedIn — what they say, and when they run.
-        Handy if you want to share or comment on them on the day.
+        Posts <strong>we</strong> publish about your sessions on the event's
+        <strong>LinkedIn</strong> company page — what they say and when they run. Handy if you want
+        to share or comment on them on the day.
+    </p>
+    <p class="muted">
+        These are written and scheduled by the organizers. For material <em>you</em> post yourself,
+        see <a asp-page="/Speaker/Graphics">your speaker graphics</a>.
     </p>
 
     @if (Model.AccessDenied)

@@ -250,6 +250,11 @@ public class SpeakerProfile
     public string? LinkedIn { get; set; }
     public string? Twitter { get; set; }
 
+    // §884.1 — the mention URN used to live HERE (§858.16). It moved to Participant the moment
+    // sponsors needed one too: a signer, a coordinator, a volunteer and a speaker are all just
+    // people with a LinkedIn account, and a column per role stores the same fact four times.
+    // See Participant.LinkedInPersonUrn / …Status / …CheckedAt / LinkedInVanityName.
+
     /// <summary>
     /// Speaker photo URL. Imported from the Sessionize <c>profilePicture</c>
     /// field and editable by the speaker. Treated as one of the bio fields for

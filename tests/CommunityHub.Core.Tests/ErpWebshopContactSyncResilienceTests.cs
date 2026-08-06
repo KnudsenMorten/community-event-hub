@@ -122,8 +122,14 @@ public sealed class ErpWebshopContactSyncResilienceTests
         Assert.Equal(1, cmHandler.CreateUserCalls);
 
         // Company 1's failure was recorded as an alert-note (and CONTINUED).
+        // §921 — the WORDING changed: the note now states how long the company has been failing
+        // rather than that one call failed, because a single failed call is no longer reportable.
+        // ⚠️ This construction passes NO JobFailureTracker, so the gate is bypassed and the note is
+        // produced on the first failure — which is what keeps THIS test about resilience (one
+        // company failing must not abort the others) rather than about the alert threshold. The
+        // threshold itself is pinned by ErpWebshopCompanyAlertGateTests.
         Assert.Contains(result.AlertNotes, n =>
-            n.Contains("Alpha") && n.Contains("failed", StringComparison.OrdinalIgnoreCase));
+            n.Contains("Alpha") && n.Contains("failing", StringComparison.OrdinalIgnoreCase));
         Assert.True(result.Alerts >= 1);
     }
 }

@@ -139,37 +139,48 @@
                                 <div style="color:#8a8f9c;font-size:11px;font-family:monospace;">id @c.CompanyId</div>
                             </td>
                             <td style="padding:6px;">
+                                @{
+                                    @* §905 — DEACTIVATED CONTACTS ARE NOT LISTED (operator 2026-08-06:
+                                       "remove inactiv accounts").
+
+                                       §530 used to render them struck-through with an INACTIVE pill.
+                                       That was the fix for them looking IDENTICAL to active ones
+                                       (2026-07-28: "the reconsile should run every 10 min and have
+                                       set these to inactive, but they still show") — but the ERP
+                                       reconcile keeps producing them, and a company like Robopack
+                                       ended up listing every contact twice, once dead once live,
+                                       which is harder to read than the problem §530 solved.
+
+                                       🔒 The COUNT stays. That is what §530 actually needed: proof
+                                       the reconcile ran. The row itself is untouched in the DB —
+                                       deactivation is still reversible and still the audit trail. *@
+                                    var activeContacts = c.Contacts.Where(x => x.IsActive).ToList();
+                                    var inactiveCount = c.Contacts.Count - activeContacts.Count;
+                                }
                                 @if (c.Contacts.Count == 0)
                                 {
                                     <em style="color:#c0392b;">no contacts in this edition</em>
                                 }
+                                else if (activeContacts.Count == 0)
+                                {
+                                    <em style="color:#c0392b;">no active contacts in this edition</em>
+                                }
                                 else
                                 {
-                                    @for (int i = 0; i < c.Contacts.Count; i++)
+                                    @for (int i = 0; i < activeContacts.Count; i++)
                                     {
-                                        var cn = c.Contacts[i];
-                                        @* §530 — a DEACTIVATED contact rendered identically to an
-                                           active one, so after the ERP reconcile deactivated the
-                                           orphans the operator still saw them unchanged and
-                                           reasonably concluded the job had not run (2026-07-28:
-                                           "the reconsile should run every 10 min and have set these
-                                           to inactive, but they still show"). They are shown, not
-                                           hidden — deactivation is reversible and the row is the
-                                           audit trail — but they must LOOK deactivated. *@
-                                        @if (cn.IsActive)
-                                        {
-                                            <span>@cn.Name <span style="color:#8a8f9c;font-size:11px;">&lt;@cn.Email&gt;</span></span>
-                                        }
-                                        else
-                                        {
-                                            <span style="opacity:.55;">
-                                                <s>@cn.Name</s>
-                                                <span style="color:#8a8f9c;font-size:11px;">&lt;@cn.Email&gt;</span>
-                                                <span style="font-size:10px;background:#f3f4f6;color:#6b7280;border-radius:999px;padding:1px 6px;">INACTIVE</span>
-                                            </span>
-                                        }
-                                        @if (i < c.Contacts.Count - 1) { <br /> }
+                                        var cn = activeContacts[i];
+                                        <span>@cn.Name <span style="color:#8a8f9c;font-size:11px;">&lt;@cn.Email&gt;</span></span>
+                                        @if (i < activeContacts.Count - 1) { <br /> }
                                     }
+                                }
+                                @if (inactiveCount > 0)
+                                {
+                                    <br />
+                                    <span style="font-size:11px;color:#8a8f9c;"
+                                          title="Deactivated contacts are kept as the audit trail but not listed here.">
+                                        +@inactiveCount deactivated
+                                    </span>
                                 }
                             </td>
                             <td style="padding:6px;text-align:right;">@c.Open</td>

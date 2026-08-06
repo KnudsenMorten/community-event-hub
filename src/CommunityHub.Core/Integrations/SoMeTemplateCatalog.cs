@@ -109,6 +109,12 @@ public static class SoMeTemplateCatalog
             + "{SponsorSocialMediaCompanyDescription}"
             + Break
             + "Learn more at {SponsorWebsite}."
+            // §884.3 — the sponsor's own people, on their own line after a BLANK one (operator
+            // 2026-08-06). 🔒 §824.15's renderer drops a line whose variables all resolve empty, so a
+            // sponsor with no mentionable contact simply has no "Tag:" line — it never publishes a
+            // bare label. Both variables mention EVERY signer / coordinator, not just the first.
+            + Break
+            + "Tag: {SponsorSigner} {SponsorEventCoordinators}"
             + Break
             + "{SponsorHashtag} " + Footer,
 
@@ -165,6 +171,28 @@ public static class SoMeTemplateCatalog
         // Named here rather than invented at render time: a template that mentions a variable the
         // resolver does not know renders the literal "{TrackName}" into a live post.
         "{TrackName}", "{SpeakerNames}", "{SessionTitle}", "{SessionAbstract}",
+        // §908 — HIS names for two of the above, taken from the wording catalogs he wrote. Both
+        // spellings resolve to one value; listing them here is what stops the template editor
+        // flagging his own samples as using unknown placeholders.
+        "{SpeakerTrack}", "{SessionTeaserTextAI}",
+        // §858.16 — {Speakers} is {SpeakerNames} with real LinkedIn MENTIONS for whoever follows
+        // the page, and plain names for the rest (LinkedIn will not mention a non-follower, so the
+        // fallback is enforced by them, not chosen by us). {SpeakerNames} stays as the deliberately
+        // untagged spelling for copy that does not want mentions — two spellings, one rule (§858.4).
+        "{Speakers}",
+        // §884.3 — the sponsor's signer(s) and event coordinator(s), mentioned where LinkedIn allows
+        // it and named in plain text otherwise. Measured follower rates: signers 7/14, coordinators
+        // 6/15 — so roughly half of each will render as text, which is why the fallback is reported.
+        "{SponsorSigner}", "{SponsorEventCoordinators}",
+        // §885 — one call-to-action phrase drawn per post from the operator's own catalog, so a
+        // campaign of 80+ posts does not close the same way every time. Rolled ONCE at creation and
+        // stored on the post: varied across the campaign, fixed within a post.
+        "{Action_catalog_random}",
+        // §888.2 — his preferred names. Same values as {EditionCode} / {EventDisplayName}, which stay
+        // registered until the stored bodies that use them are migrated.
+        "{EventNameShort}", "{EventNameLong}",
+        // §888.2 — typed on SoMe settings; there is no city/country on the Event to derive it from.
+        "{EventVenueCityCountry}",
         "{SponsorName}", "{SponsorTier}",
         // §834.5 — Type 5's own copy, imported from his event-post deck (§828). Without these the
         // Type 5 template had no way to render the post he wrote.

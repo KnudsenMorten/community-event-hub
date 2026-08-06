@@ -123,6 +123,23 @@ public sealed class SoMePhase2GraphicsScenarioTests
         foreach (var pid in speakerIds)
             db.SessionSpeakers.Add(new SessionSpeaker { SessionId = session.Id, ParticipantId = pid });
         await db.SaveChangesAsync();
+
+        // 🔴 §905 — THIS SUITE'S SPEAKERS ARE REAL SPEAKERS, so say so.
+        //
+        // ScenarioSeed flags EVERY row it creates `IsTestUser = true` ("every seeded row is
+        // synthetic") for the benefit of the go-live cleanup tests. Once the graphics sweep started
+        // honouring that flag, this whole suite quietly built zero assets — 8 tests failing with
+        // "expected 1, actual 0", which reads like the renderer broke and is really the fixture
+        // telling the truth about itself.
+        //
+        // 🔒 Cleared for the WHOLE edition, not just the ids passed in: one test links a second
+        // speaker AFTER this call, and a per-id version would leave that one flagged and rebuild
+        // nothing. The exclusion itself is covered by TestDataScopeTests and by the planner test.
+        await db.Participants
+            .Where(p => p.EventId == eventId)
+            .ForEachAsync(p => p.IsTestUser = false);
+        await db.SaveChangesAsync();
+
         return session;
     }
 
@@ -436,6 +453,13 @@ public sealed class SoMePhase2GraphicsScenarioTests
         sponsor.Status = SponsorStatus.Active;
         // The sweep matches a logo file by the COMPANY NAME — the seed carries only the id.
         sponsor.CompanyName = ScenarioSeed.SponsorPublicName;
+
+        // §905 — a REAL sponsor, so its contacts must not all be test users. ScenarioSeed flags
+        // every seeded row synthetic, and the derived rule ("every contact is a test user") would
+        // otherwise classify this company as a fixture and build no graphic for it.
+        await db.Participants
+            .Where(p => p.EventId == seed.EventId)
+            .ForEachAsync(p => p.IsTestUser = false);
         await db.SaveChangesAsync();
 
         var store = StoreWithPhotos();

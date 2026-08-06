@@ -18,10 +18,15 @@ else
                 <strong>@CommunityHub.Core.Integrations.SoMeDisplayTime.DayHeading(post.ScheduledAtUtc)</strong>
                 <span class="muted">@CommunityHub.Core.Integrations.SoMeDisplayTime.Time(post.ScheduledAtUtc)</span>
                 <span class="set-tag opt">@post.KindLabel</span>
-                @if (post.IsPublished)
-                {
-                    <span class="set-tag on">published</span>
-                }
+                @* §916 — the MEDIUM, stated on every row. Operator 2026-08-06: *"it must add a
+                   preview of the post + date & time + media = LinkedIn"*. A speaker or sponsor
+                   reading "we will publish this about you" has to know WHERE: the answer is the
+                   event's LinkedIn company page, and it is the same for every post here. *@
+                <span class="set-tag opt">in LinkedIn</span>
+                @* §916 — the STATE, on every row. Operator 2026-08-06: *"also include the state of
+                   the post (planned/scheduled)"*. Nothing is auto-approved (§824.8 Q2), so most of
+                   these are "planned" and saying so is what stops the date reading as a promise. *@
+                <span class="set-tag @(post.IsPublished ? "on" : post.IsApproved ? "on" : "opt")">@post.State</span>
             </div>
 
             <div style="margin-top:6px;white-space:pre-wrap;">@post.PreviewText</div>
@@ -29,6 +34,18 @@ else
             @if (!string.IsNullOrWhiteSpace(post.ImageRef))
             {
                 <div class="muted" style="margin-top:4px;">🖼 @post.ImageRef</div>
+            }
+
+            @* 🔴 §916 — WHAT IT IS STILL WAITING FOR. Operator 2026-08-06: *"and any missing
+               depencies (blockers)"*. The sentence comes from SoMeApprovalGate — the SAME one the
+               organizer reads — so a sponsor is told "we are waiting for your logo" on their own
+               page instead of wondering why their post is not scheduled. *@
+            @if (!string.IsNullOrWhiteSpace(post.Blocker))
+            {
+                <div style="margin-top:6px;color:#92400e;background:#fffbeb;border:1px solid #fde68a;
+                            border-radius:6px;padding:6px 8px;font-size:13px;" role="status">
+                    ⏳ Waiting on: @post.Blocker
+                </div>
             }
 
             @* 🔒 §824.14c — the honest line about tagging. CEH names people in the TEXT; it cannot

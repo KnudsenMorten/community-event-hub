@@ -185,14 +185,27 @@ public sealed class SoMeBundleBuildService
             .AsNoTracking()
             .Where(s => s.EventId == eventId
                         && !s.IsServiceSession
+                        && !s.IsTestData   // §909
                         && s.Track != null && s.Track != ""
                         && s.SessionSpeakers.Any())
-            .SelectMany(s => s.SessionSpeakers.Select(ss => new
-            {
-                Track = s.Track!,
-                ss.ParticipantId,
-                Name = ss.Participant.FullName,
-            }))
+            // 🔴 §905 — NO TEST SPEAKERS IN A PUBLISHED GRAPHIC. Operator 2026-08-06:
+            // *"all have the test flag but some service doesn't handle it"*. He is right, and this
+            // was one of them: `Participant.IsTestUser` was set correctly on every seeded account,
+            // and this query simply never read it — so two test exhibitor speakers were rendered as
+            // frames in the Security track GIF, a file that goes on the company page.
+            // 🔒 Filtered in the QUERY, not after the group-by: a test speaker must not even reach
+            // the hash, or the graphic rebuilds whenever a test account is touched.
+            // ⚠️ NULL-TOLERANT on purpose: a speaker row whose participant cannot be resolved is
+            // NOT a test account, and must keep its frame. Writing `!ss.Participant.IsTestUser`
+            // alone silently dropped every such speaker (8 graphics scenarios went to zero assets).
+            .SelectMany(s => s.SessionSpeakers
+                .Where(ss => ss.Participant == null || !ss.Participant.IsTestUser)
+                .Select(ss => new
+                {
+                    Track = s.Track!,
+                    ss.ParticipantId,
+                    Name = ss.Participant.FullName,
+                }))
             .ToListAsync(ct);
 
         if (rows.Count == 0) return (0, 0, 0);
@@ -273,12 +286,21 @@ public sealed class SoMeBundleBuildService
             .AsNoTracking()
             .Where(s => s.EventId == eventId
                         && !s.IsServiceSession
+                        // §909 — a test session gets no graphic either. The graphic is what makes a
+                        // session announceable (§846), so building one for a fixture would put it
+                        // back in the running through a side door.
+                        && !s.IsTestData
                         && s.SessionSpeakers.Any())
             .Select(s => new
             {
                 s.Id,
                 s.Title,
+                // §905 — same test-speaker exclusion as the track sweep above. A session whose ONLY
+                // speakers are test accounts ends up with an empty frame list and is skipped by the
+                // "every frame would be an empty ring" guard below, so it never reaches
+                // GenerateSessionBundleAsync's zero-speaker throw.
                 Speakers = s.SessionSpeakers
+                    .Where(ss => ss.Participant == null || !ss.Participant.IsTestUser)
                     .Select(ss => new { ss.ParticipantId, Name = ss.Participant.FullName })
                     .ToList(),
             })
@@ -362,11 +384,16 @@ public sealed class SoMeBundleBuildService
             return (0, 0);
         }
 
-        var sponsors = await _db.SponsorInfos
-            .AsNoTracking()
-            .Where(s => s.EventId == eventId && s.Status == SponsorStatus.Active)
-            .Select(s => new { s.SponsorCompanyId, s.CompanyName, s.SponsorPackage })
-            .ToListAsync(ct);
+        // §905 — a test company gets neither its own graphic nor a frame in its tier's GIF.
+        var testCompanies = await TestDataScope.TestSponsorCompanyIdsAsync(_db, eventId, ct);
+
+        var sponsors = (await _db.SponsorInfos
+                .AsNoTracking()
+                .Where(s => s.EventId == eventId && s.Status == SponsorStatus.Active)
+                .Select(s => new { s.SponsorCompanyId, s.CompanyName, s.SponsorPackage })
+                .ToListAsync(ct))
+            .Where(s => s.SponsorCompanyId == null || !testCompanies.Contains(s.SponsorCompanyId))
+            .ToList();
 
         if (sponsors.Count == 0) return (0, 0);
 

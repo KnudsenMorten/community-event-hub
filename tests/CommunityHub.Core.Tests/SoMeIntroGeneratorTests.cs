@@ -53,6 +53,16 @@ public sealed class SoMeIntroGeneratorTests
             => throw new HttpRequestException("the endpoint is having a bad minute");
     }
 
+    /// <summary>
+    /// An endpoint that never answers, exactly as <c>HttpClient</c> reports it: a
+    /// <see cref="TaskCanceledException"/> when its own timeout elapses.
+    /// </summary>
+    private sealed class TimingOutHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage r, CancellationToken ct)
+            => throw new TaskCanceledException("the request timed out");
+    }
+
     private static OpenAiOptions Configured() => new()
     {
         Enabled = true, Endpoint = "https://example.openai.azure.com",
@@ -81,6 +91,42 @@ public sealed class SoMeIntroGeneratorTests
 
         Assert.Null(await gen.GenerateAsync(Session));
         Assert.Equal(0, handler.Calls);   // and it does not even try
+    }
+
+    /// <summary>
+    /// 🔴 §906 — A TIMEOUT IS A FAILURE LIKE ANY OTHER, and it is the one that got away.
+    /// </summary>
+    /// <remarks>
+    /// <para><c>HttpClient</c> signals its own timeout with <see cref="TaskCanceledException"/>,
+    /// which derives from <see cref="OperationCanceledException"/> — and the catch filter excluded
+    /// that type in order to let a genuine host shutdown through. So "every failure returns null"
+    /// held for every failure except the most likely one.</para>
+    ///
+    /// <para>⚠️ Measured, not imagined: on 2026-08-06 enabling the OpenAI settings on the jobs host
+    /// made the planner call this once per post, the calls timed out, the exception escaped, and the
+    /// run died AFTER §848.2 had committed the deletion of the un-accepted proposals. The queue went
+    /// from 83 posts to 5.</para>
+    /// </remarks>
+    [Fact]
+    public async Task An_endpoint_that_TIMES_OUT_yields_null_rather_than_emptying_the_queue()
+    {
+        Assert.Null(await Gen(new TimingOutHandler()).GenerateAsync(Session));
+    }
+
+    /// <summary>🔒 …but a REAL cancellation still propagates — the host is shutting down.</summary>
+    /// <remarks>
+    /// The two are the same exception type, so the only thing that separates them is whether the
+    /// CALLER's token was cancelled. Losing this distinction would make a shutdown look like a bad
+    /// minute and keep the run going.
+    /// </remarks>
+    [Fact]
+    public async Task A_genuine_cancellation_is_NOT_swallowed()
+    {
+        using var cts = new CancellationTokenSource();
+        await cts.CancelAsync();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => Gen(new TimingOutHandler()).GenerateAsync(Session, cts.Token));
     }
 
     [Fact]

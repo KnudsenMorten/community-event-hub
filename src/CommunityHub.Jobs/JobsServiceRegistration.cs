@@ -807,6 +807,13 @@ public static class JobsServiceRegistration
         }
         services.AddScoped<CommunityHub.Core.Integrations.SoMeSettingsService>();
         services.AddScoped<CommunityHub.Core.Integrations.SoMeDispatchService>();
+        // §858.16 — speaker→mention resolution. Registered unconditionally (unlike the publisher):
+        // the client reports "not connected" honestly rather than throwing, and the job is gated on
+        // the LinkedIn feature anyway. 🔒 This host is the ONLY place that calls the lookup — the
+        // endpoint carries a DAY throttle and a member URN never changes, so it is a cache fill.
+        services.AddHttpClient<CommunityHub.Core.Integrations.LinkedInPeopleTypeaheadClient>()
+            .AddCredentialFailureAlert("LinkedIn");
+        services.AddScoped<CommunityHub.Core.Integrations.SpeakerMentionResolutionService>();
         // 🔒 §844 — the media library, HERE as well as in the web host. The DISPATCHER resolves a
         // post's graphic or video by file name through it, and the dispatcher runs in THIS host: web
         // registration alone would deploy green and then publish every §828/§844 post text-only,
@@ -817,6 +824,8 @@ public static class JobsServiceRegistration
         // approved before the sponsor's text was cleared cannot publish. Web-only registration
         // would leave that check silently absent on the one host that does the sending.
         services.AddScoped<CommunityHub.Core.Integrations.SoMeApprovalGate>();
+        // §918 — auto-approval, run by SoMeScheduleJob after planning. No-op unless switched on.
+        services.AddScoped<CommunityHub.Core.Integrations.SoMeAutoApproveService>();
         // §824.21 — the announcement planner (SoMeScheduleJob) and the two services it composes
         // with. 🔒 These are ALSO registered in the web host for the template editor; both hosts need
         // them now that a JOB composes posts. [[ceh-di-two-hosts]]: registering in one host only
@@ -834,7 +843,12 @@ public static class JobsServiceRegistration
         var openAi = new CommunityHub.Core.Assistant.OpenAiOptions();
         config.GetSection(CommunityHub.Core.Assistant.OpenAiOptions.SectionName).Bind(openAi);
         services.AddSingleton(openAi);
-        services.AddHttpClient<CommunityHub.Core.Integrations.SoMeIntroGenerator>();
+        // 🔒 §906 — BOUNDED, because the planner makes ONE CALL PER POST. At the default 100-second
+        // HttpClient timeout, a dead endpoint costs 78 × 100s and the timer function dies long
+        // before it finishes. 15s is generous for one paragraph; exceeding it means the endpoint is
+        // unwell, and a post composed without its intro is the correct outcome (§824.2D).
+        services.AddHttpClient<CommunityHub.Core.Integrations.SoMeIntroGenerator>(
+            c => c.Timeout = TimeSpan.FromSeconds(15));
         // §304: pending-speaker approval — the import job mails info@ immediately
         // when new speakers arrive held from the Zoho flow.
         services.AddScoped<CommunityHub.Core.Organizer.SpeakerApprovalService>();

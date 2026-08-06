@@ -174,5 +174,19 @@ public sealed class SoMeTemplateService
             ["EventTags"] = "#ELDK27 #ExpertsLiveDK …",
             ["EditionCode"] = "ELDK27",
             ["OrganizerLinkedInUrls"] = "Organizer One | Organizer Two",
+            // §858.16 / §884.3 — the mention variables. The samples show BOTH outcomes on purpose:
+            // roughly a quarter of speakers and half of sponsor contacts cannot be mentioned at all
+            // (LinkedIn only tags people who follow the page), so a preview showing every name as a
+            // tag would set an expectation the live post cannot meet.
+            ["Speakers"] = "Sample Speaker | Another Speaker (not tagged — does not follow the page)",
+            ["SponsorSigner"] = "Sample Signer",
+            ["SponsorEventCoordinators"] = "Sample Coordinator | Another Coordinator",
+            // §885 — one phrase from his own catalog. The sample says so, because a preview showing
+            // a fixed sentence would hide the fact that each post draws a different one.
+            ["Action_catalog_random"] = "(one call-to-action phrase from your catalog)",
+            // §888.2 — same values as EditionCode / EventDisplayName above, under his names.
+            ["EventNameShort"] = "ELDK27",
+            ["EventNameLong"] = "Experts Live Denmark 2027",
+            ["EventVenueCityCountry"] = "Bella Center, Copenhagen, Denmark",
         });
 }
