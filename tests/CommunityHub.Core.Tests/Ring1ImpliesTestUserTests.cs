@@ -52,8 +52,27 @@ public sealed class Ring1ImpliesTestUserTests
 
     // ---------------------------------------------------------------- the rule itself
 
+    /// <summary>
+    /// 🔒 <b>RING 0 IS A DECISION NOW, NOT AN UNANSWERED QUESTION (§940a, operator 2026-08-07).</b>
+    /// §940 shipped "Ring 1 ⇒ test data" and deliberately left open whether Ring 0 (dev) should imply
+    /// it too. Asked directly, he answered <b>no</b>.
+    ///
+    /// <para>🔑 <b>Why the answer is right, not just recorded.</b> Ring 0 is the DEV rollout ring — it
+    /// says "this person sees features first", which is a statement about rollout, not about whether
+    /// the human is real. A real organizer sitting on Ring 0 to trial something would, under the
+    /// opposite rule, silently drop out of the hotel list, the lunch count and the party head count
+    /// (§81) — and the flag is deliberately ONE-WAY, so moving them back off Ring 0 would not undo it.
+    /// That is the §948 mistake in reverse: excluding a real person because of a property that does
+    /// not mean what it looks like.</para>
+    ///
+    /// <para>Verified against PROD the day the decision was taken: 4 Ring-0 participants, none
+    /// flagged — the code and the live data already agreed with the answer.</para>
+    ///
+    /// <para>⚠️ Do NOT "complete" this rule by adding Ring 0 to <c>TestUserRule</c>. It looks like an
+    /// omission and it is not.</para>
+    /// </summary>
     [Theory]
-    [InlineData(Ring.Ring0, false)]
+    [InlineData(Ring.Ring0, false)]   // §940a — his explicit answer, not an oversight
     [InlineData(Ring.Ring1, true)]
     [InlineData(Ring.Ring2, false)]
     [InlineData(Ring.Broad, false)]

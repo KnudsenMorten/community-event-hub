@@ -3507,3 +3507,26 @@ done.
 
 *Built as a shared capability rather than a fix for one step, because every step that reads its state
 from your data had the same silence.*
+
+## 84. Move a batch of volunteer tasks into the right category *(✅ 2026-08-07)*
+
+Importing a volunteer plan from a spreadsheet gets the work into the hub, but it all lands in one
+bucket. Meanwhile the categories you carefully set up — with a lead and a supervisor already
+appointed — sit empty. The structure exists and the work does not live in it.
+
+**Now you can move a batch of tasks into any sub-category in one action.** Tick the ones you want,
+choose where they belong, move. It is reversible: move them back the same way.
+
+**Finding the right ones is the part that actually takes the time**, so there is a search over the
+task text — including each task's description, which the list does not show — and a **"Select all
+matching"** button that ticks every result at once. Searches add up, so you can gather "check-in",
+then "registration desk", and move the lot together. Anything a search selects inside a collapsed
+category is opened up, so you are never moving rows you cannot see.
+
+**Nobody loses their place.** A volunteer already assigned to a task stays assigned to it — moving a
+task changes where it sits in your structure, not who is doing it.
+
+**And the long lists fold away.** A category big enough to be hard to scan starts collapsed, showing
+its name, its lead and supervisor, and how much is inside — so a category with a handful of tasks is
+no longer pushed off the screen by the one holding a hundred. Your category's own settings stay
+visible either way.

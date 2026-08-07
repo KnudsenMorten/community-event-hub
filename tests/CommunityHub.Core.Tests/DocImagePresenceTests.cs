@@ -113,7 +113,11 @@ public sealed class DocImagePresenceTests
     /// happens to embed it.
     /// </summary>
     [Theory]
-    [InlineData("public-landing.png")]            // public site (no login)
+    // §962 — was "public-landing.png" until 2026-08-07. `/Welcome` is NOT public: the marketing
+    // landing page was removed entirely (operator 2026-06-21) and it now answers anonymous traffic
+    // with a 302 to /Login, so the docs were illustrating a "public landing page" that no longer
+    // exists. The sign-in page is the real public front door.
+    [InlineData("public-login.png")]              // public site (no login)
     [InlineData("organizer-command-center.png")]  // organizer
     [InlineData("organizer-dashboard.png")]       // organizer
     [InlineData("speaker-hub.png")]               // speaker
@@ -134,7 +138,7 @@ public sealed class DocImagePresenceTests
     /// doc set (so the screenshots are illustrated, not just present on disk).
     /// </summary>
     [Theory]
-    [InlineData("public-landing.png")]
+    [InlineData("public-login.png")]
     [InlineData("organizer-command-center.png")]
     [InlineData("speaker-hub.png")]
     [InlineData("volunteer-schedule.png")]

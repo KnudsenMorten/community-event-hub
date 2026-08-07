@@ -51,6 +51,13 @@ public class VolunteerStructureModel : PageModel
     /// <summary>The status a bulk change-status applies (posted form field).</summary>
     [BindProperty] public VolunteerTaskStatus BulkStatus { get; set; }
 
+    /// <summary>
+    /// §942 — the bulk-MOVE destination, as <c>c:&lt;categoryId&gt;</c> (whole category) or
+    /// <c>s:&lt;subcategoryId&gt;</c> (one sub-category). A prefixed string rather than two fields:
+    /// it is ONE choice in one dropdown, and two ids would allow the invalid state where both are set.
+    /// </summary>
+    [BindProperty] public string? MoveTarget { get; set; }
+
     public bool AccessDenied { get; private set; }
     public string? Notice { get; private set; }
     [BindProperty(SupportsGet = true)] public string? Msg { get; set; }
@@ -63,6 +70,14 @@ public class VolunteerStructureModel : PageModel
     public List<SelectListItem> OrganizerOptions { get; private set; } = new();
     /// <summary>Volunteers in the edition (candidate supervisors / assignees).</summary>
     public List<SelectListItem> VolunteerOptions { get; private set; } = new();
+
+    /// <summary>
+    /// §942 — every sub-category as a bulk-MOVE target, labelled <c>Category → Sub-category</c>.
+    /// The category has to be in the label: sub-category names are only unique WITHIN a category
+    /// ("General" can exist under three of them), so a bare name would make the organizer guess
+    /// which one they are moving 127 tasks into.
+    /// </summary>
+    public List<SelectListItem> SubcategoryOptions { get; private set; } = new();
 
     public async Task<IActionResult> OnGetAsync(CancellationToken ct)
     {
@@ -204,10 +219,83 @@ public class VolunteerStructureModel : PageModel
         return RedirectToPage(new { Msg = msg });
     }
 
+    /// <summary>
+    /// §942 — BULK MOVE the ticked tasks under another sub-category. Operator 2026-08-07: the whole
+    /// Excel import (127 tasks) landed in one bucket while the categories he had set up — Check-in
+    /// with a lead and a supervisor already appointed — sat empty. Safe semantics live in
+    /// <see cref="VolunteerTaskBulkOperationService.MoveAsync"/>: event-scoped, idempotent, target
+    /// validated, and volunteer ASSIGNMENTS untouched so nobody loses their placement.
+    /// </summary>
+    public async Task<IActionResult> OnPostBulkMoveTasksAsync(CancellationToken ct)
+    {
+        var actor = Actor();
+        if (actor is null) return Forbid();
+
+        var requested = SelectedTaskIds.Where(id => id > 0).Distinct().Count();
+        if (requested == 0)
+            return RedirectToPage(new { Msg = "Pick at least one task first." });
+        var target = (MoveTarget ?? string.Empty).Trim();
+        if (target.Length < 3 || (target[0] != 'c' && target[0] != 's') || target[1] != ':'
+            || !int.TryParse(target[2..], out var targetId) || targetId <= 0)
+            return RedirectToPage(new { Msg = "Choose where to move them." });
+
+        try
+        {
+            VolunteerTaskBulkOperationService.BulkMoveResult result;
+            string landedIn;
+            if (target[0] == 'c')
+            {
+                (result, landedIn) = await _bulk.MoveToCategoryAsync(
+                    actor.Value.EventId, SelectedTaskIds, targetId, ct);
+            }
+            else
+            {
+                result = await _bulk.MoveAsync(actor.Value.EventId, SelectedTaskIds, targetId, ct);
+                landedIn = "the chosen sub-category";
+            }
+
+            var skipped = result.Skipped(requested);
+            // Reported the same way as the other bulk actions: what changed, what was already
+            // right, and what was not found — so a partial outcome never reads as a full one.
+            // 🔑 It also NAMES where they landed: with "whole category" the destination can be a
+            // sub-category the organizer never picked (or one just created), and a move that does
+            // not say where things went is how work goes missing.
+            var msg = $"{result.Moved} task(s) moved to {landedIn}"
+                + (result.AlreadyThere > 0 ? $", {result.AlreadyThere} already there" : string.Empty)
+                + (skipped > 0 ? $", {skipped} not found" : string.Empty)
+                + ". Volunteer assignments were kept.";
+            return RedirectToPage(new { Msg = msg });
+        }
+        catch (InvalidOperationException ex) { return RedirectToPage(new { Msg = ex.Message }); }
+    }
+
     private async Task LoadAsync(int eventId, CancellationToken ct)
     {
         Tree = await _svc.LoadTreeAsync(eventId, ct);
         AllTasks = await _svc.LoadAllTasksAsync(eventId, ct);
+
+        // §942 — built from the already-loaded tree, so the move targets can never disagree with
+        // the structure shown on the page (and it costs no extra query).
+        //
+        // 🔴 EVERY CATEGORY IS OFFERED, sub-categories or not. The first live run listed exactly ONE
+        // target because Check-in — the category he actually wanted to fill — had no sub-category,
+        // and tasks hang off sub-categories. A picker that cannot name the destination he asked for
+        // is a feature that does not do its job. "c:<id>" moves into the whole category (resolving
+        // or creating its landing sub-category); "s:<id>" targets one precisely.
+        SubcategoryOptions = Tree
+            .OrderBy(c => c.Name)
+            .SelectMany(c => new[]
+                {
+                    new SelectListItem(
+                        c.Subcategories.Count == 0
+                            ? $"{c.Name}  (whole category — creates “General”)"
+                            : $"{c.Name}  (whole category)",
+                        $"c:{c.Id}"),
+                }
+                .Concat(c.Subcategories
+                    .OrderBy(s => s.Name)
+                    .Select(s => new SelectListItem($"  {c.Name} → {s.Name}", $"s:{s.Id}"))))
+            .ToList();
 
         var people = await _db.Participants
             .Where(p => p.EventId == eventId && p.IsActive

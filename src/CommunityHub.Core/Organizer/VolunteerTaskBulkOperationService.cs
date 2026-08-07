@@ -144,6 +144,124 @@ public sealed class VolunteerTaskBulkOperationService
             Matched: targets.Count, Deleted: deletable.Count, Blocked: blocked.Count);
     }
 
+    /// <summary>Outcome of a bulk move.</summary>
+    /// <param name="Matched">Distinct ids that resolved to a task in this event.</param>
+    /// <param name="Moved">Of those, how many actually changed subcategory.</param>
+    /// <param name="AlreadyThere">Matched tasks that were already in the target (no-ops).</param>
+    public sealed record BulkMoveResult(int Matched, int Moved, int AlreadyThere)
+    {
+        /// <summary>How many requested ids did NOT resolve in this event (ignored).</summary>
+        public int Skipped(int requested) => Math.Max(0, requested - Matched);
+    }
+
+    /// <summary>
+    /// §942 — RE-PARENT every selected task under <paramref name="targetSubcategoryId"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-08-07: <i>"we have all the imported tasks from the excel file, but they
+    /// have landed in one bucket: ELDK-Volunteers. We need a MOVE button so we can link (or MOVE) a
+    /// group of tasks related to the category"</i>. His structure existed and the work did not live
+    /// in it: Check-in had a lead and a supervisor appointed and <b>0 tasks</b>, while the import
+    /// bucket held 127.</para>
+    ///
+    /// <para>🔑 <b>MOVE, not LINK — and it is a one-line data change because of it.</b> He said
+    /// "link (or MOVE)"; MOVE is the reading that matches <i>"move all tasks related to check-in to
+    /// that category"</i>, and a task's home is already a single <see cref="VolunteerTask.SubcategoryId"/>,
+    /// so re-parenting needs <b>no schema change</b> and is fully reversible — move them back. LINK
+    /// (one task under several categories) is a many-to-many model that would change how coverage is
+    /// counted everywhere it is read, and it is not undone by moving anything back.</para>
+    ///
+    /// <para>🔒 <b>ASSIGNMENTS SURVIVE.</b> A volunteer already placed on a task keeps that placement:
+    /// assignments hang off the TASK, not off its category, so re-parenting does not touch them and
+    /// this method deliberately does not go near
+    /// <see cref="VolunteerTaskAssignment"/>. That is the difference between this and delete, where
+    /// the links are cleaned on purpose — and it is asserted in the tests, because "we did not write
+    /// that code" is not the same guarantee as "we checked".</para>
+    ///
+    /// <para>⚠️ <b>The target is validated, not trusted.</b> A subcategory id from another edition
+    /// would silently relocate this edition's work into somebody else's structure, so an unknown or
+    /// foreign target moves NOTHING and says so.</para>
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">
+    /// The target subcategory does not exist in this event.
+    /// </exception>
+    /// <summary>
+    /// §942 — move into a whole CATEGORY, resolving (or creating) the sub-category to land in.
+    /// </summary>
+    /// <remarks>
+    /// <para>🔴 <b>This is the call his actual sentence needs.</b> He said <i>"move all tasks related
+    /// to check-in to that <b>category</b>"</i> — but tasks hang off a SUB-category, and the first
+    /// live run of the sub-category-only version offered exactly ONE target, because <b>Check-in had
+    /// zero sub-categories</b>. §942 recorded that in its own table ("Check-in: 0 subcategories, 0
+    /// tasks") and the implication was missed: the feature existed and could not do the thing it was
+    /// built for.</para>
+    ///
+    /// <para>🔑 Lands in the category's FIRST sub-category by name, or creates a <c>General</c> one
+    /// when it has none. Creating is the honest behaviour here: the alternative is refusing the move
+    /// and telling an organizer holding 127 tasks to go and make a container first, which is the
+    /// tedium this feature exists to remove.</para>
+    /// </remarks>
+    /// <returns>The move result, plus the sub-category actually used.</returns>
+    public async Task<(BulkMoveResult Result, string LandedIn)> MoveToCategoryAsync(
+        int eventId, IEnumerable<int> taskIds, int targetCategoryId,
+        CancellationToken ct = default)
+    {
+        var category = await _db.VolunteerCategories
+            .FirstOrDefaultAsync(c => c.Id == targetCategoryId && c.EventId == eventId, ct);
+        if (category is null)
+            throw new InvalidOperationException("That target category is not part of this event.");
+
+        var sub = await _db.VolunteerSubcategories
+            .Where(s => s.EventId == eventId && s.CategoryId == targetCategoryId)
+            .OrderBy(s => s.Name)
+            .FirstOrDefaultAsync(ct);
+
+        if (sub is null)
+        {
+            sub = new VolunteerSubcategory
+            {
+                EventId = eventId, CategoryId = targetCategoryId, Name = "General",
+                Description = "Created automatically to receive moved tasks.",
+            };
+            _db.VolunteerSubcategories.Add(sub);
+            await _db.SaveChangesAsync(ct);
+        }
+
+        var result = await MoveAsync(eventId, taskIds, sub.Id, ct);
+        return (result, $"{category.Name} → {sub.Name}");
+    }
+
+    public async Task<BulkMoveResult> MoveAsync(
+        int eventId, IEnumerable<int> taskIds, int targetSubcategoryId,
+        CancellationToken ct = default)
+    {
+        var ids = Normalize(taskIds);
+        if (ids.Count == 0) return new BulkMoveResult(0, 0, 0);
+
+        var targetExists = await _db.VolunteerSubcategories
+            .AnyAsync(s => s.Id == targetSubcategoryId && s.EventId == eventId, ct);
+        if (!targetExists)
+            throw new InvalidOperationException("That target sub-category is not part of this event.");
+
+        var targets = await _db.VolunteerTasks
+            .Where(t => t.EventId == eventId && ids.Contains(t.Id))
+            .ToListAsync(ct);
+
+        int moved = 0, already = 0;
+        foreach (var t in targets)
+        {
+            // Idempotent, like ChangeStatusAsync: moving a task to where it already is
+            // is not a change, and must not be reported as one.
+            if (t.SubcategoryId == targetSubcategoryId) { already++; continue; }
+            t.SubcategoryId = targetSubcategoryId;
+            t.UpdatedAt = DateTimeOffset.UtcNow;
+            moved++;
+        }
+
+        if (moved > 0) await _db.SaveChangesAsync(ct);
+        return new BulkMoveResult(targets.Count, moved, already);
+    }
+
     // Distinct + drop non-positive ids so a stray "0"/duplicate from a posted form
     // never widens the match set.
     private static List<int> Normalize(IEnumerable<int> ids) =>

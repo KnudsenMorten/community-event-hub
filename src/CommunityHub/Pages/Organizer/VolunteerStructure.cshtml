@@ -100,11 +100,55 @@
                 </button>
                 <span id="vsBulkCount" role="status" style="font-size:12.5px;color:#6b7280;">0 selected</span>
             </div>
+
+            @*
+                §942 — MOVE. Operator 2026-08-07: the whole Excel import landed in one bucket while
+                the categories he had set up (Check-in, with a lead and supervisor already appointed)
+                sat empty. Second row, not squeezed beside status/delete: this is the action he came
+                for, and it needs a target picker of its own.
+            *@
+            <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:10px;padding-top:10px;border-top:1px solid #e6eaf2;">
+                <strong style="font-size:13.5px;color:var(--el-darkblue,#1D3380);">Move selected to</strong>
+                <select id="vsMoveTarget" style="padding:7px 9px;border:1px solid #c4c8d4;border-radius:6px;font-size:13px;max-width:100%;">
+                    <option value="">— choose a category or sub-category —</option>
+                    @foreach (var o in Model.SubcategoryOptions)
+                    {
+                        <option value="@o.Value">@o.Text</option>
+                    }
+                </select>
+                <button type="button" id="vsBulkMoveBtn"
+                        style="background:#1D3380;color:#fff;border:0;border-radius:6px;padding:8px 14px;font-size:13px;font-weight:600;cursor:pointer;">
+                    Move selected
+                </button>
+            </div>
+
+            @*
+                🔑 §942 — SELECTING the right tasks IS the work, not the moving. "All tasks related to
+                check-in" is a judgement over 127 free-text rows; without this, the button exists and
+                the tedium does not go away. Filter, then tick every match in one click.
+            *@
+            <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:10px;">
+                <label for="vsFilter" style="margin:0;font-size:13px;">Find tasks containing</label>
+                <input id="vsFilter" type="search" placeholder="e.g. check-in" autocomplete="off"
+                       style="padding:7px 9px;border:1px solid #c4c8d4;border-radius:6px;font-size:13px;min-width:180px;" />
+                <button type="button" id="vsSelectMatchBtn"
+                        style="background:#eef2f7;color:#1D3380;border:1px solid #c4c8d4;border-radius:6px;padding:8px 12px;font-size:13px;font-weight:600;cursor:pointer;">
+                    Select all matching
+                </button>
+                <button type="button" id="vsClearSelBtn"
+                        style="background:#eef2f7;color:#374151;border:1px solid #c4c8d4;border-radius:6px;padding:8px 12px;font-size:13px;cursor:pointer;">
+                    Clear selection
+                </button>
+                <span id="vsMatchCount" role="status" style="font-size:12.5px;color:#6b7280;"></span>
+            </div>
+
             <p style="font-size:12px;color:#9ca3af;margin:6px 0 0;">
+                Moving keeps each task's volunteer assignments — nobody loses their placement.
                 Tasks with help-request history are protected from delete (you will be told how many were kept).
             </p>
             <form method="post" id="vsBulkForm" hidden>
                 <input type="hidden" name="BulkStatus" id="vsBulkStatusField" />
+                <input type="hidden" name="MoveTarget" id="vsMoveTargetField" />
                 <div id="vsBulkIds"></div>
             </form>
         </div>
@@ -157,6 +201,37 @@
                     <button type="submit">Appoint supervisor</button>
                 </form>
 
+                @*
+                    §942 — EXPAND / COLLAPSE per category. Operator 2026-08-07: *"we need
+                    expand/collapse in the view as well"*. His concrete complaint was that Check-in's
+                    own settings were pushed off-screen by the 127-task import bucket sitting below
+                    it — so the CATEGORY SETTINGS above stay visible always, and only the
+                    subcategory/task list folds. Folding the settings too would have moved the
+                    problem rather than fixed it.
+
+                    🔑 Open by default UNTIL the list is big enough to be the problem. A category
+                    with a handful of tasks is scannable and closing it just adds a click; the
+                    bucket with 127 is exactly what he could not see past. Threshold, not a fixed
+                    choice, so the page behaves the same way as the structure changes.
+                    <details> works with no JS and is keyboard-accessible.
+                *@
+                @*
+                    ⚠️ `open` is a BOOLEAN html attribute — presence is what counts, so a literal
+                    open="False" would render the element OPEN. This relies on Razor's conditional
+                    attribute rendering: an attribute whose value is a single bool expression is
+                    OMITTED ENTIRELY when false. That is the documented behaviour and the reason
+                    this is written as one expression rather than string concatenation.
+                    (An @if/else around the start tag is not an option — Razor requires balanced
+                    tags, so each branch would be an unclosed element.)
+                *@
+                @{ var vsCollapsed = taskCount > 20; }
+                <details class="vs-catfold" open="@(!vsCollapsed)">
+                    <summary style="cursor:pointer;font-size:13.5px;color:var(--el-darkblue,#1D3380);font-weight:600;padding:6px 0;">
+                        @cat.Subcategories.Count subcategor@(cat.Subcategories.Count == 1 ? "y" : "ies"),
+                        @taskCount task@(taskCount == 1 ? "" : "s")
+                        @if (vsCollapsed) { <text>— click to expand</text> }
+                    </summary>
+
                 @foreach (var sub in cat.Subcategories.OrderBy(s => s.Name))
                 {
                     <div class="vs-sub">
@@ -170,7 +245,14 @@
                         @foreach (var t in sub.Tasks.OrderBy(t => t.Title))
                         {
                             <div class="vs-task">
+                                @*
+                                    §942 — the filter matches TITLE + DESCRIPTION, carried here as
+                                    data rather than read off the rendered row: the description is
+                                    not displayed in the tree, and "all tasks related to check-in"
+                                    is often only decidable from it.
+                                *@
                                 <input class="vstaskChk" type="checkbox" value="@t.Id"
+                                       data-vs-text="@(((t.Title ?? "") + " " + (t.Description ?? "")).ToLowerInvariant())"
                                        aria-label="Select task @t.Title" style="margin-right:6px;vertical-align:middle;" />
                                 <strong>@t.Title</strong>
                                 <span class="meta">
@@ -206,6 +288,7 @@
                         </form>
                     </div>
                 }
+                </details>@* §942 — end of the per-category fold *@
 
                 <form method="post" asp-page-handler="CreateSubcategory" class="vs-form">
                     <input type="hidden" name="categoryId" value="@cat.Id" />
@@ -364,6 +447,78 @@
                     submitTo('BulkStatus');
                 });
             }
+            // §942 — MOVE. A native confirm rather than the delete modal, and deliberately so:
+            // moving is REVERSIBLE (move them back) where deleting is not, so it earns a
+            // proportionate speed bump, not the same red dialog. It still states the count and the
+            // destination, because "127 tasks" and "which category?" are exactly what you want to
+            // re-read before committing.
+            var moveBtn = document.getElementById('vsBulkMoveBtn');
+            var moveSel = document.getElementById('vsMoveTarget');
+            var moveField = document.getElementById('vsMoveTargetField');
+            if (moveBtn && moveSel && moveField) {
+                moveBtn.addEventListener('click', function () {
+                    var n = checked().length;
+                    if (n === 0) { alert('Pick at least one task first.'); return; }
+                    if (!moveSel.value) { alert('Choose where to move them.'); return; }
+                    var where = moveSel.options[moveSel.selectedIndex].text;
+                    if (!confirm('Move ' + n + ' task(s) into "' + where + '"?\n\nVolunteer assignments are kept, and you can move them back.')) return;
+                    moveField.value = moveSel.value;
+                    submitTo('BulkMoveTasks');
+                });
+            }
+
+            // §942 — FILTER + SELECT-ALL-MATCHING. Picking the right rows out of 127 is the actual
+            // work; a move button without this just relocates the tedium.
+            var filterEl = document.getElementById('vsFilter');
+            var matchEl = document.getElementById('vsMatchCount');
+            var selMatchBtn = document.getElementById('vsSelectMatchBtn');
+            var clearSelBtn = document.getElementById('vsClearSelBtn');
+
+            function matches() {
+                var q = (filterEl && filterEl.value || '').trim().toLowerCase();
+                var all = Array.prototype.slice.call(document.querySelectorAll('.vstaskChk'));
+                if (!q) return { q: '', list: [] };
+                return { q: q, list: all.filter(function (c) { return (c.getAttribute('data-vs-text') || '').indexOf(q) !== -1; }) };
+            }
+            function refreshFilter() {
+                var m = matches();
+                // Dim non-matching rows so the eye goes to the matches — but never HIDE them: a
+                // hidden row that is still ticked would be moved without being seen.
+                document.querySelectorAll('.vstaskChk').forEach(function (c) {
+                    var row = c.closest('.vs-task');
+                    if (!row) return;
+                    row.style.opacity = (!m.q || m.list.indexOf(c) !== -1) ? '' : '.4';
+                });
+                if (matchEl) matchEl.textContent = m.q ? (m.list.length + ' match' + (m.list.length === 1 ? '' : 'es')) : '';
+            }
+            if (filterEl) filterEl.addEventListener('input', refreshFilter);
+            if (selMatchBtn) {
+                selMatchBtn.addEventListener('click', function () {
+                    var m = matches();
+                    if (!m.q) { alert('Type something to match first.'); return; }
+                    if (m.list.length === 0) { alert('Nothing matches "' + m.q + '".'); return; }
+                    // ADDS to the selection rather than replacing it, so several searches can be
+                    // combined into one move ("check-in", then "registration desk").
+                    //
+                    // 🔒 And OPEN the fold around anything it ticks. A big category is collapsed by
+                    // default, so without this the button would silently select rows the organizer
+                    // cannot see and then move them — selecting what is invisible is the same class
+                    // of mistake as hiding filtered-out rows, which is why neither is done here.
+                    m.list.forEach(function (c) {
+                        c.checked = true;
+                        var fold = c.closest('details.vs-catfold');
+                        if (fold && !fold.open) fold.open = true;
+                    });
+                    refreshCount();
+                });
+            }
+            if (clearSelBtn) {
+                clearSelBtn.addEventListener('click', function () {
+                    document.querySelectorAll('.vstaskChk:checked').forEach(function (c) { c.checked = false; });
+                    refreshCount();
+                });
+            }
+
             if (delBtn) {
                 delBtn.addEventListener('click', function () {
                     if (checked().length === 0) { alert('Pick at least one task first.'); return; }
