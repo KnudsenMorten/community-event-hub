@@ -56,7 +56,7 @@ public sealed class SoMeTemplateTests
         }
 
         Assert.Contains("{EventNameShort} Organizers:", body);   // §933 — {EditionCode} retired
-        Assert.EndsWith("{OrganizerLinkedInUrls}", body);
+        Assert.EndsWith("{Organizers}", body);   // §935 — his spelling, same value
     }
 
     [Fact]
@@ -71,12 +71,13 @@ public sealed class SoMeTemplateTests
                 ("SpeakerNames", "Andreas Sobczyk | Sherry List"),
                 ("EventTags", "#ELDK27 #ExpertsLiveDK"),
                 ("EventNameShort", "ELDK27"),
-                ("OrganizerLinkedInUrls", "Morten Waltorp Knudsen | Martin Byskov")));
+                ("Organizers", "Organizer One | Organizer Two")));
 
         Assert.StartsWith("✨ Track Speakers: AI ✨", body);
         Assert.Contains("🤘 Meet our tech legends: Andreas Sobczyk | Sherry List", body);
         Assert.Contains("#ELDK27 #ExpertsLiveDK", body);
-        Assert.EndsWith("ELDK27 Organizers:\nMorten Waltorp Knudsen | Martin Byskov", body);
+        // §935 — the credit is supplied under his spelling, {Organizers}. Same value as before.
+        Assert.EndsWith("ELDK27 Organizers:\nOrganizer One | Organizer Two", body);
         Assert.DoesNotContain("{", body);
     }
 

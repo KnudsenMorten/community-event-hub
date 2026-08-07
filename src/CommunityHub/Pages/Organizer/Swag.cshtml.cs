@@ -29,7 +29,7 @@ public class SwagModel : PageModel
     public int GiftYesCount { get; private set; }
     public int CredlyYesCount { get; private set; }
 
-    /// <summary>(Role, Size) → count, polo only, "yes" rows only. Sorted by role then size.</summary>
+    /// <summary>(Role, Size) â count, polo only, "yes" rows only. Sorted by role then size.</summary>
     public IReadOnlyList<PoloLine> PoloLines { get; private set; } = Array.Empty<PoloLine>();
 
     public record PoloLine(string Role, string Size, int Count);
@@ -44,15 +44,15 @@ public class SwagModel : PageModel
         return Page();
     }
 
-    // §326bu (operator 2026-07-25: "download excel must be 1 file per polo, award,
+    // Â§326bu (operator 2026-07-25: "download excel must be 1 file per polo, award,
     // credly. it must also contain the name of the person (critical to handout, send
     // to people)"). Three separate downloads, each PER PERSON and named.
     //
-    // The old single workbook aggregated polos to (Role × Size) counts with no names at
-    // all — fine for placing a vendor order, useless on the day, when someone has to
+    // The old single workbook aggregated polos to (Role Ã Size) counts with no names at
+    // all â fine for placing a vendor order, useless on the day, when someone has to
     // hand a specific shirt to a specific person. Each file now leads with the person
     // list; the polo file keeps the size totals as a SECOND sheet so the vendor order
-    // is not lost. Jackets are gone entirely (§326bt).
+    // is not lost. Jackets are gone entirely (Â§326bt).
 
     public Task<IActionResult> OnGetPoloXlsxAsync(CancellationToken ct) =>
         BuildAsync("polo", ct);
@@ -70,15 +70,17 @@ public class SwagModel : PageModel
         if (!OrganizerAuth.IsRealOrganizer(me)) { AccessDenied = true; return Page(); }
 
         // ACTIVE people only (§253 G5): these sheets drive what is ORDERED and what is
-        // physically handed over — a drop-out's row would be paid for and printed.
+        // physically handed over — a drop-out’s row would be paid for and printed.
+        // §946 (operator 2026-08-07): and NOT a test user — a simulation account in here is a polo
+        // printed in a size nobody wears. The predicate is the FLAG (IsTestUser), never Ring 1.
         var rows = await _db.SwagPreferences
             .Where(s => s.EventId == me.EventId)
             .Join(_db.Participants, s => s.ParticipantId, p => p.Id, (s, p) => new
             {
-                p.Id, p.FullName, p.Email, p.Role, p.IsActive,
+                p.Id, p.FullName, p.Email, p.Role, p.IsActive, p.IsTestUser,
                 s.WantsPolo, s.PoloSize, s.WantsGift, s.WantsCredlyBadge, s.Notes,
             })
-            .Where(x => x.IsActive)
+            .Where(x => x.IsActive && !x.IsTestUser)
             .ToListAsync(ct);
 
         var (categoryByPid, daysBySpeaker) = await LoadSpeakerPoloInputsAsync(me.EventId, ct);
@@ -94,7 +96,7 @@ public class SwagModel : PageModel
                 .OrderBy(r => r.Role.ToString()).ThenBy(r => r.FullName)
                 .ToList();
 
-            // Sheet 1: WHO gets what — the hand-out list.
+            // Sheet 1: WHO gets what â the hand-out list.
             var ws = wb.Worksheets.Add("Polo per person");
             WriteHeader(ws, "Name", "Email", "Role", "Size", "Polos");
             var row = 2;
@@ -104,7 +106,7 @@ public class SwagModel : PageModel
                 ws.Cell(row, 2).Value = r.Email;
                 ws.Cell(row, 3).Value = r.Role.ToString();
                 ws.Cell(row, 4).Value = r.PoloSize;
-                // §299 6.3: a master-class speaker is funded for 2 (pre-day + main day).
+                // Â§299 6.3: a master-class speaker is funded for 2 (pre-day + main day).
                 ws.Cell(row, 5).Value = PoloCount(r.Role, r.Id, categoryByPid, daysBySpeaker);
                 row++;
             }
@@ -112,7 +114,7 @@ public class SwagModel : PageModel
             ws.Columns().AdjustToContents();
             ws.SheetView.FreezeRows(1);
 
-            // Sheet 2: the vendor order — same numbers, rolled up by role + size.
+            // Sheet 2: the vendor order â same numbers, rolled up by role + size.
             var agg = wb.Worksheets.Add("Size totals");
             WriteHeader(agg, "Role", "Size", "Polo_Total");
             var lines = people
@@ -205,21 +207,21 @@ public class SwagModel : PageModel
 
     private async Task LoadAggregatesAsync(int eventId, CancellationToken ct)
     {
-        // ACTIVE people only (§253 G5) — the on-screen aggregates must equal the
+        // ACTIVE people only (Â§253 G5) â the on-screen aggregates must equal the
         // vendor sheets built in OnGetDownloadAsync.
         var rows = await _db.SwagPreferences
             .Where(s => s.EventId == eventId)
             .Join(_db.Participants, s => s.ParticipantId, p => p.Id, (s, p) => new
             {
-                p.Id, p.Role, p.IsActive,
+                p.Id, p.Role, p.IsActive, p.IsTestUser,
                 s.WantsPolo, s.PoloSize,
 
                 s.WantsGift, s.WantsCredlyBadge,
             })
-            .Where(x => x.IsActive)
+            .Where(x => x.IsActive && !x.IsTestUser)
             .ToListAsync(ct);
 
-        // §299 6.3 — same category + derived-days polo rule the vendor sheet uses, so
+        // Â§299 6.3 â same category + derived-days polo rule the vendor sheet uses, so
         // the on-screen preview totals equal the downloaded Polo_Total.
         var (categoryByPid, daysBySpeaker) = await LoadSpeakerPoloInputsAsync(eventId, ct);
 
@@ -235,14 +237,14 @@ public class SwagModel : PageModel
             .OrderBy(x => x.Role).ThenBy(x => x.Size)
             .ToList();
 
-        // §326bt: jackets are no longer offered in the portal, so there is no jacket
-        // preview. The stored columns are untouched — whatever was collected before the
+        // Â§326bt: jackets are no longer offered in the portal, so there is no jacket
+        // preview. The stored columns are untouched â whatever was collected before the
         // change is still in the database.
     }
 
     /// <summary>
-    /// §299 6.3 polo inputs: each speaker profile's organizer-set category
-    /// (participant id → category, null = uncategorized) and the DERIVED
+    /// Â§299 6.3 polo inputs: each speaker profile's organizer-set category
+    /// (participant id â category, null = uncategorized) and the DERIVED
     /// presenting days from linked sessions (<see cref="SpeakerDayScope"/>).
     /// </summary>
     private async Task<(IReadOnlyDictionary<int, SpeakerCategory?> CategoryByPid,
@@ -257,15 +259,15 @@ public class SwagModel : PageModel
     }
 
     /// <summary>
-    /// §299 6.3 — polo count for one "wants polo" row. A person WITHOUT a speaker
+    /// Â§299 6.3 â polo count for one "wants polo" row. A person WITHOUT a speaker
     /// hat keeps their single role-hat polo (organizer / volunteer / booth member /
     /// media / partner). A person WITH a speaker hat gets the funded speaker count:
     /// Community/Guest = one per DISTINCT presenting day (0 with no linked
-    /// sessions); Sponsor-category or uncategorized = 0 from the speaker hat — a
+    /// sessions); Sponsor-category or uncategorized = 0 from the speaker hat â a
     /// pure Speaker row is therefore EXCLUDED from the tally, while a non-Speaker
     /// role who also speaks never drops below their single role-hat polo.
     /// </summary>
-    /// <summary>§299 OPEN-14 (operator 2026-07-23): every ORGANIZER gets 5 polos —
+    /// <summary>Â§299 OPEN-14 (operator 2026-07-23): every ORGANIZER gets 5 polos â
     /// a flat per-organizer quantity that supersedes any speaker-hat day count.
     /// Candidate for the per-edition config block arriving with batch 3.</summary>
     internal const int OrganizerPoloCount = 5;
@@ -275,11 +277,11 @@ public class SwagModel : PageModel
         IReadOnlyDictionary<int, SpeakerCategory?> categoryByPid,
         IReadOnlyDictionary<int, SpeakerDays> daysBySpeaker)
     {
-        // OPEN-14: organizers are a flat ×5, whether or not they also speak.
+        // OPEN-14: organizers are a flat Ã5, whether or not they also speak.
         if (role == ParticipantRole.Organizer) return OrganizerPoloCount;
 
         if (!categoryByPid.TryGetValue(participantId, out var category))
-            return 1; // no speaker hat — one role-hat polo
+            return 1; // no speaker hat â one role-hat polo
 
         var days = daysBySpeaker.TryGetValue(participantId, out var d) ? d : SpeakerDays.None;
         var funded = SpeakerDayScope.FundedPolos(category, days);

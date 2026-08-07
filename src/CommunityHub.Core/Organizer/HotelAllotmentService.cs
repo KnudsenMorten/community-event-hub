@@ -135,7 +135,7 @@ public sealed class HotelAllotmentService
         var bookings = await _db.HotelBookings
             .Where(b => b.EventId == eventId
                         && b.NeedsRoom
-                        && b.Participant.IsActive
+                        && b.Participant.IsActive && !b.Participant.IsTestUser
                         && b.CheckInDate != null
                         && b.CheckOutDate != null)
             .Select(b => new

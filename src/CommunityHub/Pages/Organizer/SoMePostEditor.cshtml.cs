@@ -522,10 +522,22 @@ public class SoMePostEditorModel : PageModel
         // reads the calendar. Id breaks ties so the order is stable across loads.
         // §853 — deleted posts are gone from the walk. The row survives only to stop the planner
         // re-proposing the subject; it is not something he steps through.
-        var all = await _db.SoMePosts
-            .Where(p => p.EventId == eventId && !p.IsDeleted)
-            .OrderBy(p => p.ScheduledAtUtc)
-            .ThenBy(p => p.Id)
+        //
+        // 🔑 §936 — EXCEPT FOR PUBLISHED, WHICH READS NEWEST FIRST. Operator 2026-08-07: *"when i
+        // filter on fx to Published, i want the sorting to show the most recent first"*.
+        //
+        // The two filters answer opposite questions. Planned and Scheduled are about what is COMING:
+        // the next thing to deal with is the nearest one, so ascending puts it first. Published is a
+        // HISTORY — you look at what just went out, not at what went out in June — so the newest
+        // belongs at the top. Same list, reversed, because "first" means something different in each.
+        var newestFirst = StateFilter == SoMePostState.Published;
+
+        var ordered = _db.SoMePosts
+            .Where(p => p.EventId == eventId && !p.IsDeleted);
+
+        var all = await (newestFirst
+                ? ordered.OrderByDescending(p => p.ScheduledAtUtc).ThenByDescending(p => p.Id)
+                : ordered.OrderBy(p => p.ScheduledAtUtc).ThenBy(p => p.Id))
             .Select(p => new
             {
                 p.Id, p.SponsorCompanyId, p.TemplateKind, p.SubjectKey,

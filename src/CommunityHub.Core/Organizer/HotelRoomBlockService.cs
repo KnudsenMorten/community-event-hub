@@ -150,8 +150,10 @@ public sealed class HotelRoomBlockService
         // ACTIVE people only (§253 G2): a deactivated participant's placement /
         // room need must not consume the block or inflate the unassigned count —
         // the rooming-list export (DataGrid.OnGetRoomingListAsync) set the pattern.
+        // §946 (operator 2026-08-07): and NOT test users — a room block is rooms the hotel holds
+        // for us and we pay for. The predicate is the FLAG (IsTestUser), never Ring 1.
         var placements = await _db.Participants
-            .Where(p => p.EventId == eventId && p.IsActive)
+            .Where(p => p.EventId == eventId && p.IsActive && !p.IsTestUser)
             .Select(p => new { p.Id, p.HotelId, p.HotelConfirmationNumber })
             .ToListAsync(ct);
 

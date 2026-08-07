@@ -86,14 +86,18 @@ public class LunchModel : PageModel
 
         // ACTIVE people only (§253 G4): a drop-out's surviving lunch sign-up must
         // not count toward the caterer numbers or list on this page.
+        // §946 (operator 2026-08-07): and NOT a test user — "IsTestUsers should not count towards
+        // these logistics". Every number on this page becomes a meal the caterer prepares. The
+        // predicate is the FLAG, not Ring 1: the seeded test-*@ accounts carry IsTestUser without
+        // being Ring 1, so a ring-based filter would have left them all in the order.
         var rows = await _db.LunchSignups
             .Where(l => l.EventId == me.EventId)
             .Join(_db.Participants, l => l.ParticipantId, p => p.Id, (l, p) => new
             {
-                p.Id, p.FullName, p.Email, p.Role, p.IsActive,
+                p.Id, p.FullName, p.Email, p.Role, p.IsActive, p.IsTestUser,
                 l.LunchEarlySetupDay, l.LunchSetupDay, l.LunchPreDay, l.Notes
             })
-            .Where(x => x.IsActive)
+            .Where(x => x.IsActive && !x.IsTestUser)
             .ToListAsync(ct);
 
         // (Rows are assembled AFTER the auto-count set is known — see below, §326bv: the
@@ -114,7 +118,7 @@ public class LunchModel : PageModel
         // table; a head that appears only in a tile cannot be checked.
         var crew = await _db.Participants
             .Where(ParticipantActivation.IsActiveExpr)
-            .Where(p => p.EventId == me.EventId
+            .Where(p => p.EventId == me.EventId && !p.IsTestUser
                 && (p.Role == ParticipantRole.Organizer
                     || p.Role == ParticipantRole.Media
                     || p.Role == ParticipantRole.EventPartner))
@@ -165,7 +169,7 @@ public class LunchModel : PageModel
         // crew side is simply every ACTIVE participant — no checkbox, no dedup needed.
         CrewMainDayCount = await _db.Participants
             .Where(ParticipantActivation.IsActiveExpr)
-            .CountAsync(p => p.EventId == me.EventId, ct);
+            .CountAsync(p => p.EventId == me.EventId && !p.IsTestUser, ct);
 
         PreDayCount = preDaySet.Count + boothMemberCount + AttendeePreDayCount;
 

@@ -287,12 +287,27 @@ public sealed class EngineFailureAlertGateTests
     }
 
     /// <summary>
-    /// 🔒 The other half, and why this is a SEMANTIC split rather than switching the alert off:
-    /// DATA STARVATION still alerts. Every gate passed and nothing arrived — §545/§585's real case,
-    /// where nothing is misconfigured and something is genuinely wrong.
+    /// ⚰️ §951 (operator 2026-08-07) — DATA STARVATION NO LONGER ALERTS EITHER. The "engine inactive"
+    /// mail is now off in every environment, for every reason.
     /// </summary>
+    /// <remarks>
+    /// <para>This asserted the OPPOSITE until today, and was right to: starvation was the one case
+    /// where nothing was misconfigured and something might genuinely be wrong (§545/§585). What
+    /// changed is evidence, not taste. He quoted the notice back — *"The background engine
+    /// CouponInvoiceJob has now run 300 times in a row WITHOUT DOING ANYTHING"* — and said it
+    /// *"doesnt add value to me"*. For a pre-event edition there ARE no claimed coupon tickets and
+    /// will not be for months, so the last surviving case fires hardest exactly when it is least
+    /// informative, and repeats every 100 runs for ever.</para>
+    ///
+    /// <para>🔑 The mail argued itself out of existence: it ends *"If that is deliberate, nothing
+    /// needs doing"*. An alert that has to ask the reader whether it matters is not an alert — it is
+    /// a thing he learns to delete, which then costs him the ones that DO matter.</para>
+    ///
+    /// <para>🔒 What survives is in <c>Failures_still_alert...</c>: an engine that THROWS still pages,
+    /// in every environment. A silent stop and a crash are not the same event.</para>
+    /// </remarks>
     [Fact]
-    public async Task Data_starvation_still_alerts_at_the_threshold()
+    public async Task Data_starvation_no_longer_alerts()
     {
         using var db = NewDb();
         var mail = new RecordingEmailSender();
@@ -305,7 +320,30 @@ public sealed class EngineFailureAlertGateTests
                 fn, "Ran normally but found NO orders in Zoho at all.", isDataStarvation: true);
         }
 
-        Assert.Equal(1, mail.Sends);
+        Assert.Equal(0, mail.Sends);
+    }
+
+    /// <summary>
+    /// 🔒 §951 — the STREAK IS STILL RECORDED. Suppressing the mail must not suppress the state:
+    /// `/Organizer/Jobs` still answers "how long has this been idle, and why" when he chooses to ask.
+    /// That is §707.42's rule, and it is what makes retiring the mail safe rather than blind.
+    /// </summary>
+    [Fact]
+    public async Task The_streak_is_still_recorded_even_though_nothing_is_mailed()
+    {
+        using var db = NewDb();
+        var mail = new RecordingEmailSender();
+        var gate = NewGate(db, mail);
+        var fn = NewFn();
+
+        for (var i = 0; i < EngineFailureAlertGate.ConsecutiveNoOpAlertThreshold; i++)
+        {
+            await gate.OnActivityAsync(fn, "Nothing arrived.", isDataStarvation: true);
+        }
+
+        Assert.Equal(0, mail.Sends);
+        var marker = await db.JobHealthMarkers.SingleAsync(m => m.JobKey == fn);
+        Assert.True(marker.ConsecutiveNoOps >= EngineFailureAlertGate.ConsecutiveNoOpAlertThreshold);
     }
 
     // ---------- §716 — DEV never sends the INACTIVE alert ----------
@@ -343,11 +381,11 @@ public sealed class EngineFailureAlertGateTests
     }
 
     /// <summary>
-    /// The other half: PROD is untouched — this alert is genuinely news there, where an engine that
-    /// has quietly stopped feeding something is a real defect (§545/§585).
+    /// ⚰️ §951 — PROD no longer sends it either. This is the test that named the change: the alert
+    /// was kept alive FOR prod, and prod is exactly where he was receiving it and deleting it.
     /// </summary>
     [Fact]
-    public async Task Prod_still_sends_the_inactive_alert()
+    public async Task Prod_no_longer_sends_the_inactive_alert()
     {
         using var db = NewDb();
         var mail = new RecordingEmailSender();
@@ -359,16 +397,16 @@ public sealed class EngineFailureAlertGateTests
             await gate.OnActivityAsync(fn, "Nothing arrived.", isDataStarvation: true);
         }
 
-        Assert.Equal(1, mail.Sends);
+        Assert.Equal(0, mail.Sends);
     }
 
     /// <summary>
-    /// 🔒 An UNRECOGNISED host still alerts. Silence is granted only to a positively-identified DEV —
-    /// the §702 principle that an environment we cannot name must never be guessed, applied to
-    /// suppression: guessing "probably dev" would silence a real production alert.
+    /// 🔒 An UNRECOGNISED host is silent too (§951). The §702 principle it encoded — never
+    /// GUESS an environment — still holds; there is simply no longer an inactivity mail for either
+    /// answer to gate. Kept as a test so the retirement is proven to be unconditional.
     /// </summary>
     [Fact]
-    public async Task An_unknown_environment_still_alerts()
+    public async Task An_unknown_environment_is_silent_too()
     {
         using var db = NewDb();
         var mail = new RecordingEmailSender();
@@ -380,7 +418,7 @@ public sealed class EngineFailureAlertGateTests
             await gate.OnActivityAsync(fn, "Nothing arrived.", isDataStarvation: true);
         }
 
-        Assert.Equal(1, mail.Sends);
+        Assert.Equal(0, mail.Sends);
     }
 
     /// <summary>

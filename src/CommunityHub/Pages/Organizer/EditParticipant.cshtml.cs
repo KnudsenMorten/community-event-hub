@@ -132,6 +132,26 @@ public class EditParticipantModel : PageModel
 
     [BindProperty] public string Email { get; set; } = string.Empty;
     [BindProperty] public string FullName { get; set; } = string.Empty;
+
+    /// <summary>
+    /// §941 — first / last name, asked SEPARATELY on the pre-stage (create) form only.
+    /// </summary>
+    /// <remarks>
+    /// <para>Operator 2026-08-07: <i>"used to prestage a person and fill out the initial information
+    /// like firstname, lastname, email, state (active/inactive) and link to a role"</i>.</para>
+    ///
+    /// <para>🔑 <b>No schema change.</b> The domain stores one <c>FullName</c>, and it stays that
+    /// way — these two are composed into it on save. Splitting the column would ripple through every
+    /// page, mail template and export that reads a name, which is exactly the "new subsystem" §941
+    /// said this must not become.</para>
+    ///
+    /// <para>🔒 <b>Create only, and that is deliberate.</b> The EDIT form keeps the single Full name
+    /// field. An existing row holds one string, so showing it as two boxes means guessing where to
+    /// cut — and the guess is wrong for every "van der Berg", "de Jong" or mononym in the database.
+    /// Typing a name in two halves is safe; splitting one that already exists is not.</para>
+    /// </remarks>
+    [BindProperty] public string? FirstName { get; set; }
+    [BindProperty] public string? LastName { get; set; }
     [BindProperty] public string? Phone { get; set; }
     [BindProperty] public ParticipantRole Role { get; set; } = ParticipantRole.Speaker;
     [BindProperty] public bool IsActive { get; set; } = true;
@@ -210,9 +230,24 @@ public class EditParticipantModel : PageModel
         {
             Error = "A valid email is required."; IsNew = (Id is null); return Page();
         }
+        // §941 — the pre-stage form asks for first + last name; the domain stores one FullName.
+        // Compose here rather than in the view, so a post that bypasses the form still lands in a
+        // consistent shape. Only when FullName was not itself supplied, so the edit form is untouched.
+        if (Id is null && string.IsNullOrWhiteSpace(FullName))
+        {
+            FullName = string.Join(' ', new[] { FirstName, LastName }
+                .Where(s => !string.IsNullOrWhiteSpace(s))
+                .Select(s => s!.Trim()));
+        }
+
         if (string.IsNullOrWhiteSpace(FullName))
         {
-            Error = "Full name is required."; IsNew = (Id is null); return Page();
+            // Name the fields the organizer is actually looking at — on the create form there is no
+            // box labelled "Full name" to go back and fill in.
+            Error = Id is null
+                ? "First name and last name are required."
+                : "Full name is required.";
+            IsNew = (Id is null); return Page();
         }
 
         Participant? p = Id is null

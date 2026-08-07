@@ -174,6 +174,10 @@ public sealed class SoMeTemplateService
             ["EventTags"] = "#ELDK27 #ExpertsLiveDK …",
             ["EditionCode"] = "ELDK27",
             ["OrganizerLinkedInUrls"] = "Organizer One | Organizer Two",
+            // §935 — his spelling needs its own sample, or the preview renders a literal
+            // "{Organizers}". Caught by the "preview leaves no braces" test the moment the shipped
+            // Footer switched spellings — the same class of miss as the KnownVariables gap.
+            ["Organizers"] = "Organizer One | Organizer Two",
             // §858.16 / §884.3 — the mention variables. The samples show BOTH outcomes on purpose:
             // roughly a quarter of speakers and half of sponsor contacts cannot be mentioned at all
             // (LinkedIn only tags people who follow the page), so a preview showing every name as a

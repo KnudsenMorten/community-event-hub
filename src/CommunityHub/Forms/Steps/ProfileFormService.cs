@@ -81,12 +81,16 @@ public sealed class ProfileFormService : IWizardFormService
     public Task<bool> IsRelevantAsync(int eventId, int participantId, ParticipantRole role, CancellationToken ct)
         => Task.FromResult(true);
 
-    /// <summary>Completion detection (REQUIREMENTS §148) — the participant has filled in a
-    /// phone number. Mirrors RoleWizardService's 'profile' done rule.</summary>
+    /// <summary>
+    /// Completion detection (REQUIREMENTS §148, §945) — full name + email + phone all filled in.
+    /// 🔒 It does NOT "mirror" RoleWizardService's rule any more, it IS that rule: both call
+    /// <see cref="Core.Forms.ProfileCompletion"/>. The two used to carry separate copies that agreed
+    /// only by coincidence, and two answers to "am I finished?" is the §939 defect.
+    /// </summary>
     public Task<bool> IsDoneAsync(int eventId, int participantId, CancellationToken ct) =>
-        _db.Participants.AnyAsync(
-            p => p.Id == participantId && p.EventId == eventId
-                 && p.Phone != null && p.Phone != "", ct);
+        _db.Participants
+            .Where(p => p.Id == participantId && p.EventId == eventId)
+            .AnyAsync(Core.Forms.ProfileCompletion.IsComplete, ct);
 
     /// <summary>
     /// Load the form's current state — the SAME load the standalone page's OnGet used:
@@ -157,10 +161,19 @@ public sealed class ProfileFormService : IWizardFormService
         var trimmedPhone = string.IsNullOrWhiteSpace(model.Phone) ? null : model.Phone.Trim();
         if (trimmedPhone is { Length: > 40 })
             return Fail(model, modelState, nameof(model.Phone), "That phone number is too long (max 40 characters).");
-        // §262: phone is REQUIRED for volunteers (we must be able to reach them on the day),
-        // OPTIONAL for every other role. Enforce it server-side so the profile step can only
-        // complete for a volunteer once a phone is on file.
-        if (role == ParticipantRole.Volunteer && trimmedPhone is null)
+        // §945 (operator 2026-08-07): *"Phone is mandatory to fill out."* — phone is now REQUIRED
+        // for EVERY role, not only volunteers.
+        //
+        // 🔴 This SUPERSEDES §262 (phone required for volunteers, optional for everyone else), and
+        // the reason is a dead end that §262 left behind: COMPLETION has always tested phone for all
+        // roles, while VALIDATION only demanded it from volunteers. So a speaker or organizer could
+        // save their profile with no phone, be told it saved, and watch the Get Started step stay
+        // incomplete for ever — with nothing on the page explaining why. One rule required it and
+        // another did not, and the person is the one who paid for the disagreement.
+        //
+        // ⚠️ The volunteer-specific reason §262 gave (*"we must be able to reach them on the day"*)
+        // is still true; it is simply no longer the only reason.
+        if (trimmedPhone is null)
         {
             model.FullName = trimmedName;
             return Fail(model, modelState, nameof(model.Phone), "Please enter your phone number.");

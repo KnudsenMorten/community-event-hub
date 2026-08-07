@@ -198,11 +198,11 @@ public class DataGridModel : PageModel
                 h => h.ParticipantId, p => p.Id,
                 (h, p) => new
                 {
-                    p.FullName, p.Email, p.Phone, p.IsActive,
+                    p.FullName, p.Email, p.Phone, p.IsActive, p.IsTestUser,
                     h.CheckInDate, h.CheckOutDate, h.RoomType, h.RoomShareWith,
                     h.ConfirmationState, h.ConfirmationNumber, h.Notes,
                 })
-            .Where(x => x.IsActive)
+            .Where(x => x.IsActive && !x.IsTestUser)   // §946 — the hotel is sent this file
             .OrderBy(x => x.FullName)
             .ToListAsync(ct);
 

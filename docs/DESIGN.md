@@ -2850,6 +2850,22 @@ messages.
   done **once there is ≥1 persisted save for it** — completion is *read from each page's data*, never a
   separate "mark complete" flag, so wizard state and the task list always agree. Steps are numbered +
   counted so "Step X of N" always equals the displayed list.
+- **The PROFILE step's rule — `Core/Forms/ProfileCompletion` (§945, 2026-08-07).** Done =
+  **FullName + Email + Phone**, all non-blank (`Trim()`, which EF translates, so it stays a SQL query —
+  a single space is not a phone number). Operator: *"if full name, email, phone is set … then it is
+  completed"*.
+  🔴 **The rule used to exist TWICE** — `RoleWizardService` (progress bar) and
+  `ProfileFormService.IsDoneAsync` (step view) each carried their own `Phone != null && Phone != ""`.
+  They agreed by coincidence; two answers to "am I finished?" is the §939 defect, which showed a
+  finished volunteer 90% and sent them looking for work that did not exist. One expression now, called
+  by both, with a test asserting they never disagree in the half-filled states.
+  🔴 **Phone is now REQUIRED at save for EVERY role, superseding §262** (which required it of
+  volunteers only). §262 left a dead end: completion always tested phone for all roles while validation
+  did not, so a speaker could save, be told it saved, and watch the step stay incomplete for ever —
+  with the field labelled "optional" while the progress bar treated it as required. The label and the
+  HTML5 hint in `_ProfileFields` now say "required" for everyone.
+  🔑 **The "no name" state is `""`, not `null`** — `Participant.FullName` is non-nullable, so a rule
+  testing only for null would miss every real pre-staged row (§941).
 - **Old entry points are thin redirects.** `/Forms/SpeakerWizard` and `/Forms/GetStarted` now redirect
   into the generic `/Forms/Wizard` host, so existing links keep working.
 
@@ -2986,7 +3002,14 @@ union of every form; each role gets a deliberately trimmed list of exactly what 
 Two mechanisms keep these menus tidy: **fold-out sections** — an optional `NavItem.SectionKey` (a
 `Nav.Section*` resx key, e.g. `Nav.SectionEventLogistics`) that `NavGroup.Sections()` buckets into
 ordered, named collapsible sub-groups (first-seen order preserved) so secondary entries
-(event-logistics, sponsor webshop, leads) tuck under a heading instead of crowding the top level — and
+(event-logistics, sponsor webshop, leads) tuck under a heading instead of crowding the top level. ⚠️
+**"First-seen order" makes a section's POSITION in the bar an emergent property of where its first
+`items.Add` sits in `NavBuilder`, not a declared order** — so the way to move a fold-out left or right
+is to move its earliest leaf, and adding a new leaf too early silently drags the whole section
+forward. §944 (2026-08-07) is exactly that: "Register/Update" was moved left of "Event Info" for
+volunteers by relocating one attendee-telemetry `items.Add` from the shared evergreen block into the
+volunteer block after the Register forms. `NavBuilderTests.Volunteer_register_menu_sits_left_of_event_info`
+pins the resulting SECTION order so it cannot drift back. — and
 an **`External` flag** on `NavItem` (`bool External`) that marks a link as off-site (e.g. the Zoho
 exhibitor-dashboard URLs, the sponsor buy-services webshop) so `_Layout` opens it in a **new tab** and
 the hub stays open behind it; internal hub routes leave it false (same-tab). Both are pure view data —
@@ -3330,6 +3353,15 @@ landing surfaces. Two parts:
   email now" tick on create plus a "Send/Resend welcome email" action on edit. Both route through
   `WelcomeEmailService.SendWelcomeAsync`, which is idempotent via the `SentReminder` ledger (same
   guarantee as the Sessionize import path), so a person is never welcomed twice.
+  **§941 pre-staging (2026-08-07):** the create form is reached from a **`+ New participant`** button
+  rendered in the **Participants page header** — above both the desktop table and the mobile card
+  list, so one element serves both layouts and neither can be missed. The create branch asks for
+  **`FirstName` + `LastName`** and composes them into the single stored `FullName` **in
+  `OnPostAsync`** (not in the view, so a post that bypasses the form lands in the same shape);
+  composition fires only when `Id is null` **and** `FullName` was not supplied, which is what keeps
+  the edit path — which posts no first/last — from blanking an existing name. The **edit** branch
+  deliberately keeps one `FullName` box: an existing row stores one string, and splitting it guesses
+  wrong for compound surnames and mononyms. No schema change; `Participant` still has one name column.
 - Data grids — `/Organizer/DataGrid` (Participant + HotelBooking inline edits, CSV export) and
   `/Organizer/TasksTable` (task inline edits, CSV export) via `CsvWriter`. Attendee data is
   intentionally **not** editable (Zoho-synced).
@@ -3458,7 +3490,17 @@ landing surfaces. Two parts:
   occasion to `Rsvp == Yes`, so its allergen and diet counts always reconcile with the run-sheet's seats
   (a diet filled in by someone who then declined must not reach the kitchen order). An occasion with no rows
   is omitted rather than printed as zeros — which is why `SpeakerCatering` does not appear while nothing
-  writes it. The screen page renders each as a captioned table; the page model serves the **same** projection
+  writes it.
+  🔒 **§946 — WHO COUNTS is now `IsActive && !IsTestUser` on EVERY artifact here, not just the badge
+  export** (operator 2026-08-07: *"IsTestUsers should not count towards these logistics"*). The lunch,
+  dinner, dietary and rota builders previously filtered `IsActive` alone, so every simulation account
+  was a meal ordered and a seat laid. **The predicate is the FLAG, never the ring** — his explicit
+  correction (*"dont map against ring 1 - but the flag IsTestUsers"*): §940 makes Ring 1 imply the flag
+  but not the reverse, and the seeded `test-*@` accounts are `IsTestUser` on the DEFAULT ring, so a
+  ring-based filter would have missed the majority of test data. ⚠️ The two error directions are not
+  equal — over-counting buys a meal nobody eats, under-counting leaves a real person without one — so
+  the filter excludes rows that are FLAGGED and never guesses at who looks synthetic.
+  The screen page renders each as a captioned table; the page model serves the **same** projection
   as CSV via the shared `Export.CsvWriter` (UTF-8 BOM so Excel reads Danish names) through one GET handler
   per artifact. The view is **print-optimized** — an `@media print` block hides the app chrome + the
   download/print buttons (`.ex-no-print`) and drops colour so a browser **Print → PDF** produces a clean
@@ -3625,6 +3667,27 @@ dev/test/prod stage + `#Test=On` idea.
   ring is always persisted (never reset to Broad). **Effective ring of a sponsor contact =
   `contact.Ring ?? company.Ring ?? Broad`** (contact supersedes; a contact on the default inherits an
   earlier company ring); other roles = own ring or Broad.
+- **RING 1 IMPLIES TEST DATA — `Settings.TestUserRule` (§940, 2026-08-07).** Assigning **Ring 1** to a
+  person also sets `Participant.IsTestUser`. 🔴 Before this, NOTHING in the application ever wrote that
+  flag — only the SQL seeds (`tools/seed-demo.sql`, `Sync-CehParity.ps1`) and the scenario seeder did,
+  and all of them select rows by the `test-*@` **naming convention**. A role-simulation account named
+  anything else was a Ring-1 account that `Integrations.TestDataScope` (§905) read as a **real person**,
+  so it could be announced on the public company page. `TestUserRule.AssignRing(participant, ring)` is
+  now the ONLY way a ring is written, and every entry point routes through it: `ResourceRingService`
+  (the ring admin), `ParticipantBulkOperationService.SetRingAsync` (the People-grid bulk action) and
+  `SpeakerApprovalService` (one-click + bulk approve). The **sponsor-company** ring is an entry point
+  too — a contact on the platform default inherits the company ring, so `SetSponsorCompanyRingAsync`
+  applies the rule from each contact's EFFECTIVE ring (`TestUserRule.ApplyEffectiveRing`); a contact
+  explicitly narrowed to another ring keeps their own ring and is left alone.
+  🔒 **Strictly one-way:** moving OFF Ring 1 never clears the flag — auto-clearing would promote rows
+  created as test data into the real exports and the public surfaces, which is §940 reversed. An
+  organizer converting a test account into a real person clears it by hand. 🔑 Re-applying Ring 1 to
+  someone already on it **repairs** a missing flag and counts as a change, so the bulk action doubles
+  as the repair tool. Backfilled by data-only migration `BackfillRing1IsTestUser` (both paths: own ring
+  = 1, and sponsor contacts on the default under a Ring-1 company; `Down` is deliberately empty —
+  flagged rows are indistinguishable from seeded ones, so an undo would destroy correct state).
+  ◻ Ring 0 (dev) is NOT swept in — his rule named Ring 1, and the platform already labels Ring 1
+  "Test" / Ring 2 "Design" (`Rings.RingFlagLabel`); open question in REQUIREMENTS §940a.
 - **`RingResolver`** (EF-backed, SQL-translatable) is the ONE resolver the GUI, engines and
   schedulers/jobs all call. `GetEffectiveRingAsync(participantId)` joins the sponsor company default
   for sponsor contacts; an unknown participant fails OPEN to Broad. Pure rule exposed as

@@ -236,22 +236,33 @@ public sealed class PartyRsvpService
     /// plus the RSVPs of still-ACTIVE participants. A deactivated participant's
     /// row is excluded belt-and-braces (the G1 cascade also cancels it) so the
     /// venue food order never counts someone who left.
+    ///
+    /// <para>🔒 §946 — <b>and never a TEST USER</b> (operator 2026-08-07:
+    /// <i>"IsTestUsers should not count towards these logistics"</i>). A party RSVP is a seat and a
+    /// meal the venue is told to prepare. The predicate is the FLAG, not the ring — the seeded
+    /// <c>test-*@</c> accounts are <c>IsTestUser</c> without being Ring 1.</para>
+    ///
+    /// <para>⚠️ An ANONYMOUS RSVP (no participant link) still counts: there is no flag to read and no
+    /// way to know it is synthetic, and dropping unlinked rows would silently lose real public
+    /// sign-ups — the expensive direction.</para>
     /// </summary>
     public Task<List<PartyRsvp>> GetAllAsync(int eventId, CancellationToken ct = default) =>
         _db.PartyRsvps.AsNoTracking().Where(r => r.EventId == eventId)
             .Where(r => r.ParticipantId == null
-                        || _db.Participants.Any(p => p.Id == r.ParticipantId && p.IsActive))
+                        || _db.Participants.Any(p => p.Id == r.ParticipantId && p.IsActive && !p.IsTestUser))
             .OrderByDescending(r => r.UpdatedAt).ToListAsync(ct);
 
-    /// <summary>(total submissions, attending count) for an edition — active-only,
-    /// same §253 G3 filter as <see cref="GetAllAsync"/> so the headline number and
-    /// the list always agree.</summary>
+    /// <summary>(total submissions, attending count) for an edition — active-only and non-test,
+    /// the same §253 G3 + §946 filter as <see cref="GetAllAsync"/> so the headline number and
+    /// the list always agree. 🔒 They MUST stay identical: a total that drops by three while the
+    /// roster beside it still shows the three rows makes an organizer reconcile by hand and trust
+    /// neither.</summary>
     public async Task<(int Total, int Attending)> CountsAsync(int eventId, CancellationToken ct = default)
     {
         var rows = await _db.PartyRsvps.AsNoTracking()
             .Where(r => r.EventId == eventId)
             .Where(r => r.ParticipantId == null
-                        || _db.Participants.Any(p => p.Id == r.ParticipantId && p.IsActive))
+                        || _db.Participants.Any(p => p.Id == r.ParticipantId && p.IsActive && !p.IsTestUser))
             .Select(r => r.Attending).ToListAsync(ct);
         return (rows.Count, rows.Count(a => a));
     }

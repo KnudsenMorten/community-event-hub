@@ -335,20 +335,27 @@ public sealed class CommandCenterService
         // Every headcount tile counts ACTIVE people only (§253 G2/G4/G5/G6): a
         // deactivated participant's surviving preference rows must not inflate the
         // rooms / vendor / caterer / venue numbers an organizer orders against.
+        //
+        // §946 (operator 2026-08-07): and NOT test users — "IsTestUsers should not count towards
+        // these logistics". These four tiles ARE the numbers he orders against, so a simulation
+        // account here is a room booked, a polo printed and two meals prepared.
+        // 🔑 The predicate is the FLAG (IsTestUser), never Ring 1 — his words: "dont map against
+        // ring 1 - but the flag IsTestUsers". §940 makes Ring 1 imply the flag but not the reverse,
+        // so the seeded test-*@ accounts would all have survived a ring-based filter.
         var hotelRooms = await _db.HotelBookings
             .CountAsync(h => h.EventId == eventId && h.NeedsRoom
-                             && _db.Participants.Any(p => p.Id == h.ParticipantId && p.IsActive), ct);
+                             && _db.Participants.Any(p => p.Id == h.ParticipantId && p.IsActive && !p.IsTestUser), ct);
         var swag = await _db.SwagPreferences
             .CountAsync(w => w.EventId == eventId
                              && (w.WantsPolo || w.WantsJacket || w.WantsGift)
-                             && _db.Participants.Any(p => p.Id == w.ParticipantId && p.IsActive), ct);
+                             && _db.Participants.Any(p => p.Id == w.ParticipantId && p.IsActive && !p.IsTestUser), ct);
         var lunch = await _db.LunchSignups
             .CountAsync(l => l.EventId == eventId && (l.LunchSetupDay || l.LunchPreDay)
-                             && _db.Participants.Any(p => p.Id == l.ParticipantId && p.IsActive), ct);
+                             && _db.Participants.Any(p => p.Id == l.ParticipantId && p.IsActive && !p.IsTestUser), ct);
         // Dinner headcount = attendees (Attending) + their plus-ones.
         var dinnerRows = await _db.DinnerSignups
             .Where(d => d.EventId == eventId && d.Attending
-                        && _db.Participants.Any(p => p.Id == d.ParticipantId && p.IsActive))
+                        && _db.Participants.Any(p => p.Id == d.ParticipantId && p.IsActive && !p.IsTestUser))
             .Select(d => d.PlusOneCount)
             .ToListAsync(ct);
         var dinner = dinnerRows.Count + dinnerRows.Sum();

@@ -129,23 +129,30 @@ public sealed class ParticipantBulkOperationServiceTests
         Assert.True((await db.Participants.FindAsync(a.Id))!.IsActive);
     }
 
+    /// <summary>
+    /// ⚠️ Uses <b>Ring 2</b>, not Ring 1, and that is deliberate. §940 made Ring 1 also set
+    /// <c>IsTestUser</c>, so a row already ON Ring 1 without the flag is REPAIRED — and therefore
+    /// counted as changed. This test pins the plain "already on that ring ⇒ no-op" contract, which
+    /// only holds for a ring that carries no side effect; the Ring-1 repair is pinned separately in
+    /// <c>Ring1ImpliesTestUserTests.Bulk_ring_assignment_repairs_an_unflagged_Ring1_row</c>.
+    /// </summary>
     [Fact]
     public async Task SetRing_assigns_ring_and_skips_rows_already_on_that_ring()
     {
         using var db = NewDb();
         var a = P(EventId, "a@example.test");           // default ring
         var b = P(EventId, "b@example.test");
-        b.Ring = Ring.Ring1;                              // already on the target
+        b.Ring = Ring.Ring2;                              // already on the target
         db.Participants.AddRange(a, b);
         await db.SaveChangesAsync();
 
         var svc = NewSvc(db);
-        var result = await svc.SetRingAsync(EventId, new[] { a.Id, b.Id }, Ring.Ring1, default);
+        var result = await svc.SetRingAsync(EventId, new[] { a.Id, b.Id }, Ring.Ring2, default);
 
         Assert.Equal(2, result.Matched);
         Assert.Equal(1, result.Changed);                 // only a moved
-        Assert.Equal(Ring.Ring1, (await db.Participants.FindAsync(a.Id))!.Ring);
-        Assert.Equal(Ring.Ring1, (await db.Participants.FindAsync(b.Id))!.Ring);
+        Assert.Equal(Ring.Ring2, (await db.Participants.FindAsync(a.Id))!.Ring);
+        Assert.Equal(Ring.Ring2, (await db.Participants.FindAsync(b.Id))!.Ring);
     }
 
     [Fact]

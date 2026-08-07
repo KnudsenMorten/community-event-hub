@@ -114,7 +114,7 @@ public sealed class SpeakerApprovalService
 
         profile.Category = category;
         profile.UpdatedAt = _clock.GetUtcNow();
-        participant.Ring = ring;
+        TestUserRule.AssignRing(participant, ring);   // §940 — Ring 1 also flags them as test data
         participant.IsActive = true;
         participant.LifecycleState = ParticipantLifecycleState.Active;
         await _db.SaveChangesAsync(ct);
@@ -163,7 +163,10 @@ public sealed class SpeakerApprovalService
         }
         foreach (var participant in participants)
         {
-            participant.Ring = Rings.Default;          // Ring 3 — his stated default for all three
+            // Ring 3 — his stated default for all three. Through the §940 rule like every other
+            // ring write, so there is exactly one way a ring is assigned (this path never flags,
+            // because Ring 3 is not the test ring).
+            TestUserRule.AssignRing(participant, Rings.Default);
             participant.IsActive = true;
             participant.LifecycleState = ParticipantLifecycleState.Active;
         }

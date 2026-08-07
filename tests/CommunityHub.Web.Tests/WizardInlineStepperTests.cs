@@ -349,9 +349,35 @@ public sealed class WizardInlineStepperTests
     }
 
     // ===== 7. Save & next ALWAYS moves forward — even when the step stays "not done" =========
-    // Regression: Profile is "done" only once a phone is present, but you may Save & next without
-    // one. The host used to redirect to the FIRST-INCOMPLETE step, which was THIS step again →
-    // Save & next silently looped back ("nothing happens"). It must advance to the NEXT step.
+    // Regression: the host used to redirect to the FIRST-INCOMPLETE step, which after saving an
+    // incomplete step was THIS step again → Save & next silently looped back ("nothing happens").
+    // It must advance to the NEXT step.
+
+    /// <summary>
+    /// A step handler that SAVES SUCCESSFULLY while leaving the step "not done" — the exact loop
+    /// condition, and nothing else.
+    /// </summary>
+    /// <remarks>
+    /// ⚠️ This used to be driven through the REAL profile step: post a name with no phone, which was
+    /// a valid save that left profile incomplete. §945 removed that state (phone is now mandatory for
+    /// every role, so a successful profile save always completes the step) and this test broke —
+    /// even though the host behaviour it guards had not changed at all.
+    ///
+    /// <para>🔑 That is the lesson worth keeping: this is a test about the HOST'S REDIRECT RULE, and
+    /// it was borrowing one form's validation to manufacture its precondition. A stub states the
+    /// precondition directly, so the contract survives any step's rules changing. The plan still
+    /// comes from the real <c>RoleWizardService</c>, so "not done" is genuinely computed, not
+    /// asserted.</para>
+    /// </remarks>
+    private sealed class SavesButStaysIncompleteHandler : IWizardStepHandler
+    {
+        public string Key => "profile";
+        public string PartialName => "/Pages/_ProfileFields.cshtml";
+        public object? Model { get; private set; } = new ProfileFormModel();
+        public Task LoadAsync(WizardStepContext ctx) => Task.CompletedTask;
+        public Task<WizardStepOutcome> SaveAsync(WizardStepContext ctx)
+            => Task.FromResult(WizardStepOutcome.Advance);
+    }
 
     [Fact]
     public async Task Save_and_next_advances_even_when_the_step_is_not_marked_done()
@@ -359,13 +385,16 @@ public sealed class WizardInlineStepperTests
         using var db = NewDb();
         var (_, me) = await SeedAsync(db, ParticipantRole.Organizer); // generic role wizard; first step = profile
 
+        // Precondition: the participant has NO phone, so the real plan reports 'profile' incomplete.
+        me.Phone = null;
+        await db.SaveChangesAsync();
+
         var http = WizardBindingHarness.PostContext(Session(me), new Dictionary<string, string?>
         {
             ["__step"] = "profile",
             ["__dir"] = "next",
-            ["FullName"] = "Olive Organizer",   // valid name, but NO phone → step stays "not done"
         });
-        var host = Host(db, http, new ProfileStepHandler(new ProfileFormService(db, new FixedClock())));
+        var host = Host(db, http, new SavesButStaysIncompleteHandler());
 
         var result = await host.OnPostAsync(default);
 
@@ -375,10 +404,8 @@ public sealed class WizardInlineStepperTests
             ? s as string : null;   // null => redirected to the hub (also forward, never a loop)
         Assert.NotEqual("profile", nextStep);
 
-        // The save persisted (name) yet the step is still not "done" (no phone) — proving the
-        // advance happened despite the not-done state (the exact loop condition).
+        // The step really is still "not done" — otherwise this test would prove nothing.
         var saved = await db.Participants.SingleAsync(p => p.Id == me.Id);
-        Assert.Equal("Olive Organizer", saved.FullName);
         Assert.True(string.IsNullOrEmpty(saved.Phone));
     }
 

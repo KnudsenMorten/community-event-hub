@@ -131,6 +131,12 @@ public sealed class ParticipantBulkOperationService
     /// ring (<see cref="Participant.Ring"/>) — no-op for rows already on that ring
     /// (operator 2026-06-23). Edition-scoped; does not touch IsActive or role.
     /// </summary>
+    /// <remarks>
+    /// §940 — routed through <see cref="TestUserRule.AssignRing"/>: assigning Ring 1 also flags each
+    /// person as test data. 🔑 That makes the "no-op for rows already on that ring" shortcut
+    /// conditional rather than absolute — a row already ON Ring 1 with the flag missing IS changed
+    /// (repaired) and counted, so re-applying Ring 1 to a selection is a usable repair action.
+    /// </remarks>
     public async Task<BulkResult> SetRingAsync(
         int eventId, IEnumerable<int> participantIds, Ring ring,
         CancellationToken ct = default)
@@ -145,9 +151,7 @@ public sealed class ParticipantBulkOperationService
         int changed = 0;
         foreach (var p in targets)
         {
-            if (p.Ring == ring) continue;
-            p.Ring = ring;
-            changed++;
+            if (TestUserRule.AssignRing(p, ring)) changed++;
         }
 
         if (changed > 0) await _db.SaveChangesAsync(ct);

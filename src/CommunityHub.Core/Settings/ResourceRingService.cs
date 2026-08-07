@@ -167,19 +167,32 @@ public sealed class ResourceRingService
         return q.CountAsync(ct);
     }
 
-    /// <summary>Set a participant's own ring (sponsor contact / speaker / volunteer / attendee). Edition-scoped.</summary>
+    /// <summary>
+    /// Set a participant's own ring (sponsor contact / speaker / volunteer / attendee). Edition-scoped.
+    /// §940 — routed through <see cref="TestUserRule.AssignRing"/>, so landing on Ring 1 also flags the
+    /// person as test data.
+    /// </summary>
     public async Task<bool> SetParticipantRingAsync(
         int eventId, int participantId, Ring ring, CancellationToken ct = default)
     {
         var p = await _db.Participants
             .FirstOrDefaultAsync(x => x.Id == participantId && x.EventId == eventId, ct);
         if (p is null) return false;
-        p.Ring = ring;
+        TestUserRule.AssignRing(p, ring);
         await _db.SaveChangesAsync(ct);
         return true;
     }
 
-    /// <summary>Set a sponsor COMPANY's default ring (the fallback for its contacts). Edition-scoped.</summary>
+    /// <summary>
+    /// Set a sponsor COMPANY's default ring (the fallback for its contacts). Edition-scoped.
+    /// </summary>
+    /// <remarks>
+    /// §940 — the company ring is an entry point for making PEOPLE Ring 1: a contact still on the
+    /// platform default inherits the company default (<see cref="RingResolver.EffectiveForContact"/>),
+    /// so a company moved to Ring 1 turns those contacts into Ring-1 people without their own column
+    /// ever changing. Their flag is set from the EFFECTIVE ring; a contact who was explicitly narrowed
+    /// to another ring keeps their own ring and is left alone.
+    /// </remarks>
     public async Task<bool> SetSponsorCompanyRingAsync(
         int eventId, string companyId, Ring ring, string? byEmail, CancellationToken ct = default)
     {
@@ -190,6 +203,21 @@ public sealed class ResourceRingService
         s.Ring = ring;
         s.UpdatedAt = _clock.GetUtcNow();
         s.LastUpdatedByEmail = string.IsNullOrWhiteSpace(byEmail) ? s.LastUpdatedByEmail : byEmail.Trim();
+
+        if (TestUserRule.ImpliesTestUser(ring))
+        {
+            var contacts = await _db.Participants
+                .Where(p => p.EventId == eventId
+                            && p.Role == ParticipantRole.Sponsor
+                            && p.SponsorCompanyId == companyId)
+                .ToListAsync(ct);
+            foreach (var contact in contacts)
+            {
+                TestUserRule.ApplyEffectiveRing(
+                    contact, RingResolver.EffectiveForContact(contact.Ring, ring));
+            }
+        }
+
         await _db.SaveChangesAsync(ct);
         return true;
     }

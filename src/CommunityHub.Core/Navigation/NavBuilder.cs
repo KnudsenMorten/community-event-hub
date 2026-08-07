@@ -119,11 +119,22 @@ public static class NavBuilder
         // excluded from My tasks / My profile / Resources / Sessions here.
         // Speakers excluded too (operator 2026-06-23 menu: Home, My Hub Profile,
         // Bio, My sessions, Event Logistics, Contact — no top-level My tasks).
-        // Volunteers excluded here too (§47): they still get the /Tasks list, but
-        // relocated to AFTER "My Hub Profile" and relabelled "My Onboarding Tasks"
-        // inside the volunteer block below — so it does not appear before profile.
-        if (role != ParticipantRole.Sponsor && role != ParticipantRole.Attendee
-            && role != ParticipantRole.Speaker && role != ParticipantRole.Volunteer)
+        // ⚰️ §950 — TASKS v1 IS RETIRED for the generic non-organizer roles. Operator 2026-08-07:
+        // *"if tasks v1 module still exist for volunteers, media, event partners, then you can retire
+        // that, as we now replaced it with get started"*.
+        //
+        // 🔴 Volunteers went first (§939) because the legacy list scored a FINISHED volunteer at 90%
+        // from a task model they no longer use — two answers to "am I done?", and the false one sends
+        // somebody looking for work that does not exist. Media and Event Partner ran the same risk;
+        // they simply had not been looked at yet. Get Started is now the single answer for all three.
+        //
+        // ⚠️ ORGANIZERS KEEP IT — he named volunteers, media and event partners, not organizers.
+        // Organizers are staff and use the list as an admin surface; removing it is a separate call.
+        // ⚠️ The PAGE and the task DEFINITIONS stay: `ParticipantTaskDefinitions.GenericRoles` still
+        // seeds these rows for all four generic roles, and `FormTaskReconciler` opens/closes them from
+        // the same saved form data Get Started reads (§173e). Retiring the MENU is reversible;
+        // deleting the model is not, and reminders/digests/organizer views also read those rows.
+        if (role == ParticipantRole.Organizer)
         {
             // §301c (operator 2026-07-24, "i want it to be consistent"): every "(Register)" form
             // lives under the "Register" fold-out for EVERY role (the §288/§288b rule that moved
@@ -142,8 +153,17 @@ public static class NavBuilder
             // §294 (operator 2026-07-11): for SPEAKERS, attendee telemetry moves OUT of the top
             // level and INTO the "Speaker Info" fold-out (added with the other Speaker Info items
             // below, so the section stays contiguous). Other crew keep it at the top level.
-            if (role is ParticipantRole.Volunteer
-                     or ParticipantRole.Media or ParticipantRole.EventPartner)
+            // §939 (operator 2026-08-07): for VOLUNTEERS it moves into the "Event Info" fold-out —
+            // the same shape §294 gave speakers. It is context about the event, not a thing a
+            // volunteer acts on, so it belongs with the other reference material rather than
+            // competing with their own tasks at the top level.
+            // 🔑 §944 — the volunteer's copy is added LATER, inside the volunteer block, and that
+            // position is load-bearing: a section takes its place in the bar from where its FIRST
+            // item appears (NavModel.Sections), so adding telemetry here would pin "Event Info"
+            // ahead of "Register/Update". See the §944 note in the volunteer block below.
+            // ⚠️ Media and EventPartner deliberately KEEP it at the top level: he was reviewing the
+            // volunteer menu, and moving theirs was not asked for.
+            if (role is ParticipantRole.Media or ParticipantRole.EventPartner)
                 items.Add(new("/Sponsor/Telemetry", "Nav.AttendeeTelemetry"));
             else if (role == ParticipantRole.Organizer)
                 items.Add(new("/Organizer/Telemetry", "Nav.AttendeeTelemetry"));
@@ -337,15 +357,23 @@ public static class NavBuilder
             // the §47 order that follows — My Onboarding Tasks, My Availability, My
             // Assignments — is preserved.
             items.Add(new("/Forms/Wizard", "Nav.GetStarted"));
-            // §47: "My Onboarding Tasks" (the generic /Tasks list, volunteer-only
-            // label) is placed here so it renders AFTER "My Hub Profile" (added
-            // above) instead of before it. The shared "Nav.MyTasks" key is left
-            // untouched (organizer/media/speaker still read it); volunteers use the
-            // dedicated "Nav.MyOnboardingTasks" label so other roles are unaffected.
-            items.Add(new("/Tasks", "Nav.MyTasks")); // §301c: plain link — register forms moved to "Register"
-            // My Availability first (operator 2026-06-23) — volunteers set it before
-            // they have a schedule to look at.
-            items.Add(new("/volunteer/availability", "Nav.MyAvailability"));
+            // ⚰️ §939 — "My Tasks" REMOVED for volunteers. Operator 2026-08-07: *"My tasks is
+            // pointing towards the old tasks model and shows a 90% completion, which is wrong …
+            // volunteers dont have any extra tasks outside of the get started, so once they complete
+            // the get started, they are done (100%). remove My Tasks menu item, as it is legacy."*
+            //
+            // 🔴 It was not merely redundant, it was WRONG: the legacy /Tasks list computes its
+            // percentage from a task model volunteers no longer use, so a volunteer who had finished
+            // everything still saw 90%. Two answers to "am I done?", one of them false — and the
+            // false one is the one that makes somebody go looking for work that does not exist.
+            // ⇒ Get Started is the single source of truth for a volunteer's completion.
+            // 🔒 The shared "Nav.MyTasks" key is untouched — organizer/media/speaker still use it.
+
+            // §939 — My Availability now points at the WIZARD STEP, not the retired standalone page.
+            // Operator: the old /volunteer/availability *"should be retired"*; the menu must land on
+            // the same form the Get Started flow walks him through, so there is one availability
+            // form rather than two that can disagree.
+            items.Add(new("/Forms/Wizard?step=availability", "Nav.MyAvailability"));
             // §47: relabelled "My Assignments" (was "My schedule"); volunteer-only key.
             items.Add(new("/volunteer/myschedule", "Nav.MyAssignments"));
             // Supervisor dashboard: shown ONLY to volunteers who actually supervise a
@@ -361,6 +389,18 @@ public static class NavBuilder
             items.Add(new("/Forms/Dinner", "Nav.Dinner", SectionKey: Register));
             items.Add(new("/Forms/Lunch", "Nav.Lunch", SectionKey: Register));
             items.Add(new("/Forms/Swag", "Nav.VolunteerGift", SectionKey: Register));
+
+            // §944 (operator 2026-08-07): *"register/update menu item must be moved 1x left so event
+            // info is next to contact organizers"* ⇒ Register/Update comes BEFORE Event Info, leaving
+            // the two informational fold-outs (Event Info, Contact Organizers) together at the end.
+            // 🔑 A section's place in the bar is where its FIRST item appears (NavModel.Sections), so
+            // the swap is done by adding the volunteer's Event Info anchor HERE — after Register —
+            // rather than by reordering anything. §939 put attendee telemetry in this fold-out; it is
+            // simply the earliest Event Info item a volunteer has, and therefore the one that decides
+            // the position. The rest of the fold-out (the shared content pages) is added further down
+            // and joins this section wherever it already sits.
+            items.Add(new("/Sponsor/Telemetry", "Nav.AttendeeTelemetry",
+                SectionKey: "Nav.SectionEventLogistics"));
             // (Calendar "Important dates" entry removed: the user-facing calendar UI is retired.)
         }
 

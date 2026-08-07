@@ -146,6 +146,31 @@ public sealed class EngineFailureAlertGate
             return;
         }
 
+        // ⚰️ §951 (operator 2026-08-07) — THE "ENGINE INACTIVE" MAIL IS OFF EVERYWHERE.
+        // *"i would like you to turn off these types of alerts, as it doesnt add value to me"*,
+        // quoting the CouponInvoiceJob 300-run notice verbatim.
+        //
+        // 🔑 He is right, and the mail itself says why: it ends with *"If that is deliberate, nothing
+        // needs doing"* — an alert that has to ask the reader whether it matters is not telling him
+        // anything. §707.42 and §716 already carved away the cases it got wrong (a gate turned the
+        // job away; DEV's switched-off features); what remained is DATA STARVATION, which for a
+        // pre-event edition is simply the truth — there ARE no claimed coupon tickets yet, and there
+        // will not be for months. So the last surviving case fires hardest exactly when it is least
+        // informative, and repeats every 100 runs for ever.
+        //
+        // ⚠️ SUPPRESSES THE MAIL ONLY, and only for INACTIVITY:
+        //   • the streak is still RECORDED above, so /Organizer/Jobs still shows how long a job has
+        //     been idle and why — the question "is anything stalled?" is still answerable, on a page,
+        //     when he chooses to ask it (§707.42's rule: suppress the mail, never the state);
+        //   • OnFailureAsync is UNTOUCHED — an engine that THROWS is a genuine fault and still pages.
+        //     A silent stop and a crash are not the same event, and only one of them is news.
+        _log.LogInformation(
+            "EngineFailureAlertGate[{Fn}]: inactive for {N} runs — NOT alerting (§951, retired). "
+            + "Reason: {Reason}. Visible on the Jobs page instead.",
+            functionName, streak, inactiveReason);
+        return;
+#pragma warning disable CS0162 // unreachable — kept so the retired alert can be restored verbatim
+
         // 🔒 §707.42 — the streak is RECORDED above whatever happens, so the Jobs page still shows
         // how long this job has been idle and why. What stops here is the MAIL: a job skipped
         // because its feature is switched off is reporting the operator's own configuration back to
@@ -176,6 +201,7 @@ public sealed class EngineFailureAlertGate
         _log.LogWarning(
             "EngineFailureAlertGate[{Fn}]: INACTIVE for {N} consecutive runs — {Reason}.",
             functionName, streak, inactiveReason);
+#pragma warning restore CS0162
     }
 
     /// <summary>

@@ -129,6 +129,11 @@ public sealed class FailedMailRetryService
         // Pre-filter in SQL to the plausible rows; the real decision is the pure rule above.
         var candidates = await _db.EmailLogs
             .Where(l => l.Error != null && l.Error != ""
+                        // 🔴 §938 — NEVER RETRY A DELIBERATE DROP. A ring-gated or kill-switched
+                        // send is a decision, not a failure: retrying it drops again, spends the
+                        // retry budget, and writes another "failure" for a gate working as designed.
+                        // Selecting on "has an Error" made every policy drop look retryable.
+                        && !l.Dropped
                         && l.SentAt >= since
                         && l.RetryCount < MaxRetries
                         && l.ParticipantId != null)

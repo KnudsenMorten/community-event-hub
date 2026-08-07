@@ -60,7 +60,13 @@ public static class SoMeTemplateCatalog
         "{EventTags}"
         + Break
         + "{EventNameShort} Organizers:"
-        + "\n{OrganizerLinkedInUrls}";
+        // 🔴 §935 — {Organizers}, which is HIS spelling. Operator 2026-08-07: *"some refer to some
+        // other {OrganizerLinkedUrl} link, which must be changed to {Organizer}"*.
+        //
+        // 🔑 The two are the SAME value — SoMePostComposer maps both to the organizer credit — so
+        // this changes no published text. What it removes is a body that names one thing two ways:
+        // 75 of 76 unpublished posts carried the long spelling purely because this line emitted it.
+        + "\n{Organizers}";
 
     /// <summary>The shipped default body for one post type.</summary>
     public static string DefaultBody(SoMeTemplateKind kind) => kind switch
@@ -142,7 +148,7 @@ public static class SoMeTemplateCatalog
             "{EventPostBody}"
             + Break
             + "{EventNameShort} Organizers:"
-            + "\n{OrganizerLinkedInUrls}",
+            + "\n{Organizers}",   // §935 — his spelling, same value (see Footer above)
 
         _ => "{IntroText}" + Break + Footer,
     };
@@ -180,6 +186,13 @@ public static class SoMeTemplateCatalog
         // fallback is enforced by them, not chosen by us). {SpeakerNames} stays as the deliberately
         // untagged spelling for copy that does not want mentions — two spellings, one rule (§858.4).
         "{Speakers}",
+        // 🔴 §935 — {Organizers} is to {OrganizerLinkedInUrls} exactly what {Speakers} is to
+        // {SpeakerNames}: his spelling for the same value, mentioned where LinkedIn allows it.
+        //
+        // ⚠️ IT WAS MISSING FROM THIS LIST, and the shipped-template test caught it the moment the
+        // Footer started using it — `UnknownPlaceholders` would have let a literal "{Organizers}"
+        // publish to the company page. That is the guard this list exists for, doing its job.
+        "{Organizers}",
         // §884.3 — the sponsor's signer(s) and event coordinator(s), mentioned where LinkedIn allows
         // it and named in plain text otherwise. Measured follower rates: signers 7/14, coordinators
         // 6/15 — so roughly half of each will render as text, which is why the fallback is reported.

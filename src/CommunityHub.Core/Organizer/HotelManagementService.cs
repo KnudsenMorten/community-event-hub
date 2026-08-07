@@ -157,7 +157,7 @@ public sealed class HotelManagementService
         // ghost surfaces — it emailed drop-outs a confirmed booking).
         var people = await _db.Participants
             .Where(p => p.EventId == eventId && p.HotelId == hotelId
-                        && p.IsActive
+                        && p.IsActive && !p.IsTestUser
                         && p.Role != ParticipantRole.Sponsor)
             .Select(p => new { p.Id, p.FullName, p.Email })
             .ToListAsync(ct);
@@ -279,7 +279,7 @@ public sealed class HotelManagementService
         // badges (the cascade also un-places them, this is the belt-and-braces).
         var people = await _db.Participants
             .Where(p => p.EventId == eventId
-                        && p.IsActive
+                        && p.IsActive && !p.IsTestUser
                         && p.Role != ParticipantRole.Sponsor)
             .Select(p => new
             {

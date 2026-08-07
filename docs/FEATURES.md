@@ -21,7 +21,7 @@ Hosting & Reliability.
 
 ## Feature index
 
-The complete delivered set — **80 features**, in the order they shipped.
+The complete delivered set — **82 features**, in the order they shipped.
 Everything listed is live in the product today; nothing here is planned or partial.
 
 | # | Feature | Shipped |
@@ -106,6 +106,8 @@ Everything listed is live in the product today; nothing here is planned or parti
 | 77 | [Every mentionable person is remembered, once](#77-every-mentionable-person-is-remembered-once--2026-08-06) | 2026-08-06 |
 | 78 | [Announce your master classes together, in the week you choose](#78-announce-your-master-classes-together-in-the-week-you-choose--2026-08-06) | 2026-08-06 |
 | 79 | [Track announcements wait for the line-up, not for a date](#79-track-announcements-wait-for-the-line-up-not-for-a-date--2026-08-07) | 2026-08-07 |
+| 80 | [A test account is marked as one, whatever you call it](#80-a-test-account-is-marked-as-one-whatever-you-call-it--2026-08-07) | 2026-08-07 |
+| 81 | [Your test accounts stop ordering lunch](#81-your-test-accounts-stop-ordering-lunch--2026-08-07) | 2026-08-07 |
 
 ---
 
@@ -3405,3 +3407,83 @@ stalled-job problem, and the hub's job-silence alerting is what watches for it.
 
 *Leave the close date empty and track readiness works from session arrivals alone, exactly as before
 — the settings page tells you so where the field is blank.*
+
+## 80. A test account is marked as one, whatever you call it *(✅ 2026-08-07)*
+
+You set up accounts to try things out — a volunteer, a speaker, a sponsor contact you sign in as to
+see what they see. The hub has a rollout level called **Ring 1**, and that is what Ring 1 means:
+*this is an internal test person, not a real one*.
+
+**Separately, the hub keeps a "test data" mark**, and that mark is what keeps rehearsal accounts out
+of the places the public can see — social posts, sponsor tier listings, the generated graphics, the
+badge export. The two were never actually connected. The mark was applied by a **naming pattern**
+when accounts were seeded, so an account you created any other way looked, to every one of those
+surfaces, like a genuine participant. A rehearsal account could be announced on your company page.
+
+**Now the rollout level decides it.** Putting anybody on Ring 1 — any role, from the rings screen,
+from the people list in bulk, from a speaker approval, or by putting their whole sponsor company on
+Ring 1 — marks them as test data in the same action. There is nothing extra to remember and no
+naming convention to obey. **Existing Ring 1 accounts were marked in the same update**, so this is
+not only true for people added from today.
+
+**Taking someone off Ring 1 does not unmark them, on purpose.** An account created for testing has
+test bookings, test tasks and test answers behind it, and quietly promoting all of that into your
+real exports is the more expensive mistake. If a rehearsal account genuinely becomes a real person,
+you clear the mark yourself — a deliberate action, which is what it should be.
+
+**One useful side effect:** re-applying Ring 1 to people who are already on it repairs anyone whose
+mark is missing. Select them in the people list, set Ring 1, and the hub reports how many it fixed.
+
+*Ring 2 (design partner) and Ring 0 (developer) are untouched — only Ring 1 carries the meaning
+"test", which is what the rings screen has always labelled it.*
+
+## 81. Your test accounts stop ordering lunch *(✅ 2026-08-07)*
+
+Rehearsal accounts fill in forms. That is the point of them — you sign in as a volunteer, walk the
+sign-up, and check it works. But those answers were real answers as far as the hub was concerned, so
+they landed in the numbers you order against: a hotel room held, a polo printed in a size nobody
+wears, two meals prepared, a seat laid at the appreciation dinner.
+
+**Anything marked as test data is now out of every operational total.** Hotel rooms and allotments,
+the rooming list your hotel is sent, lunch, the polo and swag vendor sheets, the party head count, the
+appreciation dinner, the kitchen's allergy roll-up, and the headcount tiles on your Command Center.
+The lists and the numbers were changed together, so a total and the names printed beside it always
+still agree — a figure that drops without the roster changing is a figure nobody trusts.
+
+**The mark is what counts, not the rollout ring.** A test account is excluded because it is *marked as
+test data*, which is a deliberate property of the account. Rehearsal accounts you created before rings
+existed carry that mark too, and they are excluded on exactly the same footing. Moving somebody to a
+different rollout ring — to trial a feature with them — never quietly adds them to the lunch order.
+
+**Erring in the safe direction.** The hub excludes accounts that are *marked*; it never guesses which
+ones look synthetic. Counting one meal too many wastes a meal, but missing one leaves a real person
+standing without lunch, and those are not the same mistake.
+
+*Test accounts are still fully visible where you manage people — you can see them, edit them and sign
+in as them. They simply stop being something a supplier gets an invoice for.*
+
+## 82. Add somebody the sync has not heard of yet *(✅ 2026-08-07)*
+
+People arrive before the systems know about them. A volunteer says yes in a corridor, a speaker is
+confirmed over the phone, a sponsor names their booth contact a fortnight before the paperwork
+catches up. Until now, everybody in your people list got there by being imported — so a person who
+existed in real life but not yet in a feed had nowhere to be.
+
+**Your people list now has a "New participant" button.** It opens a short form: first name, last
+name, email, whether they are active, and which role they hold. That is the whole form, and the
+shortness is deliberate — pre-staging is about getting somebody into the system so they can be
+worked with, not about filling in a profile on their behalf. They can complete the rest themselves
+once they sign in.
+
+**They are a real participant from the moment you save.** Not a placeholder or a draft: they can be
+assigned tasks, added to a booth, given a role's checklist, and they appear everywhere anybody else
+does. If the import later brings the same person in, their email is what identifies them, so you get
+one person rather than two.
+
+**Nobody is emailed unless you say so.** The welcome mail is a tick box on the form, and it starts
+off. Adding ten people while you work through a list should not send ten people a message you were
+not ready to send.
+
+**Setting them inactive is a normal thing to do.** An inactive person is recorded, visible and
+editable, but cannot sign in — which is exactly right for somebody you are noting down now and
+opening up later.

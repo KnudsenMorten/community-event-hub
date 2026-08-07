@@ -593,7 +593,8 @@ public sealed class NavBuilderTests
 
         var vol = NavBuilder.Build(ParticipantRole.Volunteer, isVolunteerSupervisor: true).AllItems.Select(i => i.Href).ToList();
         Assert.Contains("/volunteer/myschedule", vol);   // merged shifts + tasks home
-        Assert.Contains("/volunteer/availability", vol); // per-day available/blocked
+        // §939 — the standalone availability page is retired; the wizard step replaces it.
+        Assert.Contains("/Forms/Wizard?step=availability", vol); // per-day available/blocked
         Assert.Contains("/volunteer/supervisor", vol);   // only for actual supervisors
     }
 
@@ -772,10 +773,20 @@ public sealed class NavBuilderTests
 
         // Kept: My schedule (merged), My availability, supervisor (for supervisors).
         Assert.Contains("/volunteer/myschedule", hrefs);
-        Assert.Contains("/volunteer/availability", hrefs);
         Assert.Contains("/volunteer/supervisor", hrefs);
-        Assert.True(hrefs.IndexOf("/volunteer/availability") < hrefs.IndexOf("/volunteer/myschedule"),
+
+        // 🔴 §939 — My Availability points at the WIZARD STEP; the standalone page is retired.
+        // Operator 2026-08-07: one availability form, not two that can disagree.
+        Assert.Contains("/Forms/Wizard?step=availability", hrefs);
+        Assert.DoesNotContain("/volunteer/availability", hrefs);
+        Assert.True(
+            hrefs.IndexOf("/Forms/Wizard?step=availability") < hrefs.IndexOf("/volunteer/myschedule"),
             "My availability comes before My schedule (operator 2026-06-23).");
+
+        // ⚰️ §939 — "My Tasks" is GONE for volunteers: the legacy list scored them 90% complete
+        // from a task model they no longer use, while Get Started said they were done. Two answers
+        // to "am I finished?", and the wrong one sends people looking for work that does not exist.
+        Assert.DoesNotContain("/Tasks", hrefs);
 
         // §285: the guided Get-Started wizard is the inline /Forms/Wizard, top-level.
         var getStarted = g.Items.Single(i => i.Href == "/Forms/Wizard");
@@ -783,15 +794,16 @@ public sealed class NavBuilderTests
         Assert.Null(getStarted.SectionKey);
         // §290: "Attendee telemetry" is a MAIN-menu item for volunteer crew (the shared
         // limited /Sponsor/Telemetry "who's coming" view).
+        // §939 (operator 2026-08-07): for volunteers this moved OUT of the top level and INTO the
+        // "Event Info" fold-out — context about the event, not a thing a volunteer acts on.
         var telemetry = g.Items.Single(i => i.Href == "/Sponsor/Telemetry");
         Assert.Equal("Nav.AttendeeTelemetry", telemetry.LabelKey);
-        Assert.Null(telemetry.SectionKey);
+        Assert.Equal("Nav.SectionEventLogistics", telemetry.SectionKey);
 
-        // §301c (operator 2026-07-24): "My Tasks" is a PLAIN link again — the register
-        // forms moved to the "Register" fold-out.
-        var myTasks = g.Items.Single(i => i.Href == "/Tasks");
-        Assert.Equal("Nav.MyTasks", myTasks.LabelKey);
-        Assert.Null(myTasks.SectionKey);
+        // ⚰️ §939 — "My Tasks" is GONE for volunteers (the §301c assertion above is retired with
+        // it). The legacy /Tasks list scored a finished volunteer at 90% from a task model they no
+        // longer use, while Get Started said they were done. Get Started is now the only answer.
+        Assert.DoesNotContain(g.Items, i => i.Href == "/Tasks");
 
         // §317: the Event Info fold-out in the operator's order — the four content leaves,
         // then the Sessions catalogue + the survey-results leaf, then the nested Policies
@@ -802,6 +814,14 @@ public sealed class NavBuilderTests
         Assert.DoesNotContain("/Forms/Lunch", lh);
         Assert.Equal(new[]
         {
+            // §939 — Attendee telemetry LEADS the fold-out for volunteers, because it is added
+            // before the content leaves. It is also the only live, changing item in here, so
+            // leading is defensible — but it is a consequence of add-order rather than a decision,
+            // and moving it to the end is a one-line change.
+            // 🔑 §944 — it is now added in the VOLUNTEER block (after Register) rather than the
+            // evergreen block, and that is what puts "Register/Update" left of "Event Info": a
+            // section takes its position from its first item. Still first WITHIN the fold-out.
+            "/Sponsor/Telemetry",
             "/Info/last-event-videos", "/Info/good-to-know", "/Info/addresses", "/Info/wayfinding",
             "/Info/ceh-introduction",   // §326ag
             "/Sessions", "/Sessions/Slides",
@@ -815,6 +835,40 @@ public sealed class NavBuilderTests
         Assert.Equal(new[] { "/Forms/Hotel", "/Forms/Dinner", "/Forms/Lunch", "/Forms/Swag", "/Forms/Wizard?step=party" },
             register.Items.Select(i => i.Href).ToList());
         Assert.Equal("Nav.VolunteerGift", register.Items.Single(i => i.Href == "/Forms/Swag").LabelKey);
+    }
+
+    /// <summary>
+    /// §944 (operator 2026-08-07): *"register/update menu item must be moved 1x left so event info is
+    /// next to contact organizers"*. The bar ends with the two INFORMATIONAL items together —
+    /// Event Info, then Contact Organizers (which <c>_Layout</c> always renders furthest right) — with
+    /// the action fold-out before them.
+    ///
+    /// <para>🔑 Pinned as SECTION ORDER, not as an item index, because that is what he can see. A
+    /// section takes its place in the bar from where its FIRST item is added
+    /// (<c>NavModel.Sections</c>), so this ordering is an emergent property of add-order in
+    /// <c>NavBuilder</c> — exactly the kind that drifts back the next time somebody adds an Event Info
+    /// leaf a few lines too early.</para>
+    /// </summary>
+    [Fact]
+    public void Volunteer_register_menu_sits_left_of_event_info()
+    {
+        var g = NavBuilder.Build(ParticipantRole.Volunteer, isVolunteerSupervisor: true).Groups[0];
+
+        var headings = g.Sections()
+            .Where(s => s.HeadingKey is not null)
+            .Select(s => s.HeadingKey!)
+            .ToList();
+
+        var register = headings.IndexOf("Nav.SectionRegister");
+        var eventInfo = headings.IndexOf("Nav.SectionEventLogistics");
+
+        Assert.True(register >= 0, "the Register/Update fold-out must exist for volunteers");
+        Assert.True(eventInfo >= 0, "the Event Info fold-out must exist for volunteers");
+        Assert.True(register < eventInfo,
+            $"Register/Update must render LEFT of Event Info (§944); got register={register}, eventInfo={eventInfo}");
+
+        // …and Event Info is the LAST fold-out, so nothing separates it from Contact Organizers.
+        Assert.Equal(eventInfo, headings.Count - 1);
     }
 
     [Fact]
@@ -920,12 +974,20 @@ public sealed class NavBuilderTests
         // /Sponsor/Telemetry "who's coming" view; the Organizer links to the fuller
         // /Organizer/Telemetry. Speakers get it under "Speaker Info" instead (§294 —
         // asserted in Speaker_menu_matches_redesign); attendees never see it.
-        foreach (var role in new[] { ParticipantRole.Volunteer, ParticipantRole.Media, ParticipantRole.EventPartner })
+        // §939 (operator 2026-08-07) — VOLUNTEERS now get it inside the "Event Info" fold-out
+        // instead, the same shape §294 gave speakers: it is context about the event, not something
+        // a volunteer acts on. Media and EventPartner deliberately keep it at the top level.
+        foreach (var role in new[] { ParticipantRole.Media, ParticipantRole.EventPartner })
         {
             var item = NavBuilder.Build(role).Groups[0].Items.Single(i => i.Href == "/Sponsor/Telemetry");
             Assert.Equal("Nav.AttendeeTelemetry", item.LabelKey);
             Assert.Null(item.SectionKey);
         }
+
+        var volunteerTelemetry = NavBuilder.Build(ParticipantRole.Volunteer).Groups[0]
+            .Items.Single(i => i.Href == "/Sponsor/Telemetry");
+        Assert.Equal("Nav.AttendeeTelemetry", volunteerTelemetry.LabelKey);
+        Assert.Equal("Nav.SectionEventLogistics", volunteerTelemetry.SectionKey);
 
         var organizer = NavBuilder.Build(ParticipantRole.Organizer).Groups[0]
             .Items.Single(i => i.Href == "/Organizer/Telemetry");

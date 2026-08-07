@@ -18,11 +18,13 @@
 <label for="ProfileRole">Role <span style="font-weight:400;color:#6b7280;">(set by organizers &mdash; read-only)</span></label>
 <input type="text" id="ProfileRole" value="@CommunityHub.Branding.RoleDisplay.Name(Model.Role)" disabled />
 
-@* §262: phone is REQUIRED for volunteers (we must be able to reach them on the day),
-   OPTIONAL for every other role — the label + the HTML5 required hint follow the role. *@
-@{ var phoneRequired = Model.Role == CommunityHub.Core.Domain.ParticipantRole.Volunteer; }
-<label for="Phone">Phone <span style="font-weight:400;color:#6b7280;">(@(phoneRequired ? "required" : "optional"))</span></label>
-<input type="tel" asp-for="Phone" autocomplete="tel" maxlength="40" required="@phoneRequired" />
+@* §945 (operator 2026-08-07): *"Phone is mandatory to fill out."* — REQUIRED for every role now,
+   superseding §262's volunteers-only rule. The label and the HTML5 hint must say so, because the
+   server has always refused to mark the Get Started step complete without a phone: while this said
+   "optional" for non-volunteers, the page was telling them the opposite of what the progress bar
+   would do. *@
+<label for="Phone">Phone <span style="font-weight:400;color:#6b7280;">(required)</span></label>
+<input type="tel" asp-for="Phone" autocomplete="tel" maxlength="40" required />
 
 @* One additional-email field only (operator 2026-06-25 — the separate "secondary
    CC" field was redundant): an alternate address you can ALSO sign in with.

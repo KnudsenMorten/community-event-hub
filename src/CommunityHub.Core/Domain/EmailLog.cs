@@ -65,6 +65,26 @@ public class EmailLog
     public string? Error { get; set; }
 
     /// <summary>
+    /// §938 — TRUE when the hub DECIDED not to send: the recipient was outside the released ring
+    /// (§234), or the global kill switch was on.
+    /// </summary>
+    /// <remarks>
+    /// <para>🔴 <b>A drop is not a failure, and conflating the two had teeth.</b> Both were written
+    /// as <c>Success = false</c> with a reason in <see cref="Error"/>, and the retry service selects
+    /// candidates on "has an Error" — so it kept RETRYING deliberate policy decisions. Each retry
+    /// dropped again, spending the retry budget and writing another "failure" for a gate working
+    /// exactly as designed.</para>
+    ///
+    /// <para>🔑 Operator 2026-08-07, on a welcome to a Ring-3 volunteer:
+    /// <i>"the welcome showed as failed even though the ring gate was active … it should drop the
+    /// ring gate so it did not try (dropped instead of failure)"</i>.</para>
+    ///
+    /// <para>🔒 <see cref="Success"/> stays FALSE for a drop. Nothing was delivered, and a reader who
+    /// only knows about <c>Success</c> must never conclude the mail went out.</para>
+    /// </remarks>
+    public bool Dropped { get; set; }
+
+    /// <summary>
     /// The branded template this send rendered, when it came through a template
     /// path (the per-participant <see cref="ParticipantEmailService"/>). Lets the
     /// organizer Email Log <b>re-send a failed row</b> faithfully — same template,

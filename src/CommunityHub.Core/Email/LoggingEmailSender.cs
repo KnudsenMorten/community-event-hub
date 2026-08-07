@@ -132,6 +132,9 @@ public sealed class LoggingEmailSender : IEmailSender
 
         bool success;
         string? error;
+        // §938 — a POLICY drop (ring gate / kill switch) is not a send failure. Tracked separately
+        // so the retry service can skip what the hub deliberately decided not to send.
+        var dropped = false;
         try
         {
             await send();
@@ -141,6 +144,7 @@ public sealed class LoggingEmailSender : IEmailSender
                 // send is a DROP (Success=false + reason), never a successful send.
                 success = _outcome.LastSendDelivered;
                 error = success ? null : DropError(_outcome.LastDropReason);
+                dropped = !success;
             }
             else
             {
@@ -155,11 +159,11 @@ public sealed class LoggingEmailSender : IEmailSender
         {
             success = false;
             error = ex.Message;
-            await WriteLogAsync(ctx, toEmail, actualTo, cc, subject, success, error);
+            await WriteLogAsync(ctx, toEmail, actualTo, cc, subject, success, error, dropped);
             throw;                          // preserve the original throw-on-failure contract
         }
 
-        await WriteLogAsync(ctx, toEmail, actualTo, cc, subject, success, error);
+        await WriteLogAsync(ctx, toEmail, actualTo, cc, subject, success, error, dropped);
     }
 
     // §234: human-readable drop marker for the EmailLog row / audit line, keyed on
@@ -175,7 +179,8 @@ public sealed class LoggingEmailSender : IEmailSender
 
     private async Task WriteLogAsync(
         EmailContext? ctx, string toEmail, string actualTo,
-        IReadOnlyCollection<string>? cc, string subject, bool success, string? error)
+        IReadOnlyCollection<string>? cc, string subject, bool success, string? error,
+        bool dropped = false)
     {
         try
         {
@@ -195,6 +200,7 @@ public sealed class LoggingEmailSender : IEmailSender
                 TemplateName = ctx?.TemplateName is { } t ? Trim(t, 200) : null,
                 Subject = Trim(subject, 998),
                 Success = success,
+                Dropped = dropped,
                 Error = error is null ? null : Trim(error, 2000),
                 SentAt = _clock.GetUtcNow(),
             });

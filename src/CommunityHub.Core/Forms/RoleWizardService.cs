@@ -1,6 +1,7 @@
 using CommunityHub.Core.Config;
 using CommunityHub.Core.Data;
 using CommunityHub.Core.Domain;
+using CommunityHub.Core.Forms;
 using Microsoft.EntityFrameworkCore;
 
 namespace CommunityHub.Forms;
@@ -108,13 +109,14 @@ public sealed class RoleWizardService
                 Core.Content.WelcomeCopyStore.StepKey, Core.Content.WelcomeCopyStore.StepRoute, true));
         }
 
-        // 0. Profile — always, for every role. Done = the participant has filled in a
-        //    phone number (the meaningful "I completed my contact basics"; name is
-        //    pre-seeded from import, phone is the field people actually add here).
-        var phoneDone = await _db.Participants.AnyAsync(
-            p => p.Id == participantId && p.EventId == eventId
-                 && p.Phone != null && p.Phone != "", ct);
-        steps.Add(new("profile", "/Profile", phoneDone));
+        // 0. Profile — always, for every role. §945 (operator 2026-08-07): done = FULL NAME +
+        //    EMAIL + PHONE are all filled in. The rule itself lives in ProfileCompletion because
+        //    ProfileFormService.IsDoneAsync answers the same question elsewhere, and two copies of
+        //    "am I finished?" is the §939 defect (a finished volunteer told 90%).
+        var profileDone = await _db.Participants
+            .Where(p => p.Id == participantId && p.EventId == eventId)
+            .AnyAsync(ProfileCompletion.IsComplete, ct);
+        steps.Add(new("profile", "/Profile", profileDone));
 
         // 1. Volunteer availability — volunteers only (their first scheduling input).
         //    Done = ≥1 saved per-day availability row.

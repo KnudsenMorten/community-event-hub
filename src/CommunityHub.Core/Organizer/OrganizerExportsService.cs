@@ -103,6 +103,25 @@ public sealed record DietaryCountRow(string Occasion, string Kind, string Item, 
 /// Distinct from <see cref="OrganizerOverviewService"/> /
 /// <see cref="CommandCenterService"/> (which AGGREGATE into counts): this flattens
 /// to row-level artifacts an organizer prints or downloads.
+///
+/// <para>🔒 <b>§946 — WHO COUNTS: active AND NOT a test user.</b> Operator 2026-08-07:
+/// <i>"IsTestUsers should not count towards these logistics"</i>. Every export here becomes an order,
+/// a booking or a head-count somebody pays for, so the audience rule is
+/// <see cref="Integrations.DocLibrary.LogisticsAudience"/>'s:
+/// <c>IsActive &amp;&amp; !IsTestUser</c>. It used to be applied on the badge export ALONE — the
+/// lunch, dinner, dietary and rota builders filtered only <c>IsActive</c>, so every simulation account
+/// was a meal ordered and a bed blocked.</para>
+///
+/// <para>🔑 <b>The predicate is the FLAG, never the ring</b> (operator, explicitly:
+/// <i>"dont map against ring 1 - but the flag IsTestUsers"</i>). §940 makes Ring 1 imply the flag but
+/// not the reverse: the seeded <c>test-*@</c> accounts and anything he flags by hand are
+/// <c>IsTestUser</c> WITHOUT being Ring 1, and filtering on the ring would leave every one of them in
+/// the caterer's order. It also keeps logistics independent of the rollout model — moving somebody to
+/// Ring 2 to trial a feature must not silently add them to the lunch count.</para>
+///
+/// <para>⚠️ <b>The two directions are not equally bad.</b> Over-counting buys a meal nobody eats;
+/// UNDER-counting leaves a real person without one. So the filter excludes rows that are FLAGGED, and
+/// never guesses at who looks synthetic.</para>
 /// </summary>
 public sealed class OrganizerExportsService
 {
@@ -168,7 +187,7 @@ public sealed class OrganizerExportsService
         // ACTIVE people only (§253 G4): the caterer order must never count a
         // sign-up whose person has been deactivated.
         var signups = await _db.LunchSignups
-            .Where(l => l.EventId == eventId && l.Participant.IsActive)
+            .Where(l => l.EventId == eventId && l.Participant.IsActive && !l.Participant.IsTestUser)
             .Select(l => new { l.LunchSetupDay, l.LunchPreDay })
             .ToListAsync(ct);
 
@@ -188,7 +207,7 @@ public sealed class OrganizerExportsService
         // run-sheet names always sum to the headcount.
         var rows = await _db.LunchSignups
             .Where(l => l.EventId == eventId && (l.LunchSetupDay || l.LunchPreDay)
-                        && l.Participant.IsActive)
+                        && l.Participant.IsActive && !l.Participant.IsTestUser)
             .Select(l => new
             {
                 l.Participant.FullName,
@@ -235,7 +254,7 @@ public sealed class OrganizerExportsService
         var plusOnes = await _db.DinnerSignups
             .Where(d => d.EventId == eventId
                         && d.Rsvp == DinnerRsvp.Yes
-                        && d.Participant.IsActive)
+                        && d.Participant.IsActive && !d.Participant.IsTestUser)
             .Select(d => d.PlusOneCount)
             .ToListAsync(ct);
 
@@ -253,7 +272,7 @@ public sealed class OrganizerExportsService
         var signups = await _db.DinnerSignups
             .Where(d => d.EventId == eventId
                         && d.Rsvp == DinnerRsvp.Yes
-                        && d.Participant.IsActive)
+                        && d.Participant.IsActive && !d.Participant.IsTestUser)
             .Select(d => new
             {
                 d.ParticipantId,
@@ -305,14 +324,14 @@ public sealed class OrganizerExportsService
         int eventId, CancellationToken ct = default)
     {
         var rows = await _db.DietaryRequirements
-            .Where(x => x.EventId == eventId && x.Participant.IsActive)
+            .Where(x => x.EventId == eventId && x.Participant.IsActive && !x.Participant.IsTestUser)
             .ToListAsync(ct);
         if (rows.Count == 0) return Array.Empty<DietaryCountRow>();
 
         var dinnerAttending = (await _db.DinnerSignups
                 .Where(d => d.EventId == eventId
                             && d.Rsvp == DinnerRsvp.Yes
-                            && d.Participant.IsActive)
+                            && d.Participant.IsActive && !d.Participant.IsTestUser)
                 .Select(d => d.ParticipantId)
                 .ToListAsync(ct))
             .ToHashSet();
@@ -475,7 +494,7 @@ public sealed class OrganizerExportsService
         var rows = await _db.VolunteerTaskAssignments
             .Where(a => a.EventId == eventId
                         && a.Task.Status != VolunteerTaskStatus.Cancelled
-                        && a.Participant.IsActive
+                        && a.Participant.IsActive && !a.Participant.IsTestUser
                         && a.DecisionStatus != ShiftDecisionStatus.Declined)
             .Select(a => new
             {

@@ -43,8 +43,22 @@
             <label for="Email">Email (unique within this edition)</label>
             <input type="email" asp-for="Email" required autocomplete="email" />
 
-            <label for="FullName">Full name</label>
-            <input type="text" asp-for="FullName" required />
+            @* §941 — first + last on the PRE-STAGE form, one Full name box when editing. An
+               existing row stores a single string, and guessing where to cut it breaks every
+               "van der Berg" in the database (see EditParticipantModel.FirstName). *@
+            @if (Model.IsNew)
+            {
+                <label for="FirstName">First name</label>
+                <input type="text" asp-for="FirstName" required autocomplete="given-name" />
+
+                <label for="LastName">Last name</label>
+                <input type="text" asp-for="LastName" required autocomplete="family-name" />
+            }
+            else
+            {
+                <label for="FullName">Full name</label>
+                <input type="text" asp-for="FullName" required />
+            }
 
             <label for="Phone">Phone (optional)</label>
             <input type="text" asp-for="Phone" />

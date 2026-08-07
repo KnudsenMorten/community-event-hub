@@ -100,6 +100,27 @@ public sealed class SoMePostEditorApproveAndSaveTests
         Assert.Contains("post.IsActive = false;", handler, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// §936 — the PUBLISHED filter reads newest first; the forward-looking filters do not.
+    /// </summary>
+    /// <remarks>
+    /// Operator 2026-08-07: <i>"when i filter on fx to Published, i want the sorting to show the most
+    /// recent first"</i>. The filters answer opposite questions — Planned and Scheduled are about
+    /// what is COMING (the nearest thing first), Published is a HISTORY (what just went out). Same
+    /// list, reversed, because "first" means something different in each.
+    /// </remarks>
+    [Fact]
+    public void The_published_filter_walks_newest_first()
+    {
+        var code = ReadPage(Path.Combine("Organizer", "SoMePostEditor.cshtml.cs"));
+
+        Assert.Contains("StateFilter == SoMePostState.Published", code, StringComparison.Ordinal);
+        Assert.Contains("OrderByDescending(p => p.ScheduledAtUtc)", code, StringComparison.Ordinal);
+
+        // 🔒 …and the other two keep their ascending campaign order — the reversal is for ONE filter.
+        Assert.Contains("OrderBy(p => p.ScheduledAtUtc)", code, StringComparison.Ordinal);
+    }
+
     private static string ReadPage(string relative) =>
         File.ReadAllText(Path.Combine(FindDir("src", "CommunityHub", "Pages"), relative));
 
