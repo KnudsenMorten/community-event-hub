@@ -162,9 +162,10 @@ public sealed class ContentFeatureDirectiveTests
 
         // …and the untagged prose is untouched in both directions.
         // §707.48 — was "## 7." until "2. CEH by the numbers" was inserted and shifted every
-        // chapter by one.
-        Assert.Contains("## 8. Features per role", off, StringComparison.Ordinal);
-        Assert.Contains("## 8. Features per role", on, StringComparison.Ordinal);
+        // chapter by one. §931.1 — and now "## 3.", because the operator moved Features ahead of
+        // the engineering chapters: a reader wants to know what it DOES before how it is built.
+        Assert.Contains("## 3. Features", off, StringComparison.Ordinal);
+        Assert.Contains("## 3. Features", on, StringComparison.Ordinal);
     }
 
     /// <summary>Walk up from the test binaries to the repo's config/content folder.</summary>

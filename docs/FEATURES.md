@@ -19,6 +19,96 @@ Hosting & Reliability.
 
 ---
 
+## Feature index
+
+The complete delivered set — **80 features**, in the order they shipped.
+Everything listed is live in the product today; nothing here is planned or partial.
+
+| # | Feature | Shipped |
+| --- | --- | --- |
+| 1 | [Platform — built for every edition](#1-platform--built-for-every-edition) |  |
+| 2 | [Sign-in & embedding — frictionless, no new passwords](#2-sign-in--embedding--frictionless-no-new-passwords) |  |
+| 3 | [Crew profiles & roles — the right hub for each person](#3-crew-profiles--roles--the-right-hub-for-each-person) |  |
+| 4 | [Self-service forms — crew fill in their own details](#4-self-service-forms--crew-fill-in-their-own-details) |  |
+| 5 | [Tasks & reminders — nothing slips, no inbox spam](#5-tasks--reminders--nothing-slips-no-inbox-spam) |  |
+| 6 | [Sessions & surveys — from call-for-speakers to the schedule](#6-sessions--surveys--from-call-for-speakers-to-the-schedule) |  |
+| 7 | [Sponsors — managed as companies, with the right tasks](#7-sponsors--managed-as-companies-with-the-right-tasks) |  |
+| 8 | [Sponsor leads — capture, screen and route booth leads](#8-sponsor-leads--capture-screen-and-route-booth-leads) |  |
+| 9 | [Attendees & masterclass reconciliation — one clear picture](#9-attendees--masterclass-reconciliation--one-clear-picture) |  |
+| 10 | [Email & notifications — on-brand, controllable, safe](#10-email--notifications--on-brand-controllable-safe) |  |
+| 11 | [Organizer hub — run the whole event from one place](#11-organizer-hub--run-the-whole-event-from-one-place) |  |
+| 12 | [Hosting & reliability — production-grade by design](#12-hosting--reliability--production-grade-by-design) |  |
+| 13 | [Accessibility — usable by keyboard and screen reader](#13-accessibility--usable-by-keyboard-and-screen-reader--2026-06-15) | 2026-06-15 |
+| 14 | [Bilingual UI — English and Danish *(✅ 2026-06-15)*](#14-bilingual-ui--english-and-danish--2026-06-15-retired-2026-07-07) | 2026-06-15 |
+| 15a | [Social-media post editor: one field, live variables, first publish](#15a-social-media-post-editor-one-field-live-variables-first-publish--2026-08-05) | 2026-08-05 |
+| 15 | [Social-media graphics & shared file store](#15-social-media-graphics--shared-file-store--2026-06-15) | 2026-06-15 |
+| 16 | [Feature settings — turn capabilities on when you're ready](#16-feature-settings--turn-capabilities-on-when-youre-ready--2026-06-17) | 2026-06-17 |
+| 17 | [Exhibitor & booth sync — sponsors who exhibit, kept in step](#17-exhibitor--booth-sync--sponsors-who-exhibit-kept-in-step--2026-06-25) | 2026-06-25 |
+| 18 | [Get-started wizards for every role](#18-get-started-wizards-for-every-role--2026-06-25) | 2026-06-25 |
+| 19 | [Forms, saving and timeliness polish](#19-forms-saving-and-timeliness-polish--2026-06-25) | 2026-06-25 |
+| 20 | [Attendee telemetry, for organizers and sponsors too](#20-attendee-telemetry-for-organizers-and-sponsors-too--2026-06-25) | 2026-06-25 |
+| 21 | [Speaker area — session truth, reminders and sharing](#21-speaker-area--session-truth-reminders-and-sharing--2026-06-25) | 2026-06-25 |
+| 22 | [AI Community Helper — ask anything, grounded and privacy-gated](#22-ai-community-helper--ask-anything-grounded-and-privacy-gated--2026-06-27) | 2026-06-27 |
+| 23 | [Task allocation pipeline & task management](#23-task-allocation-pipeline--task-management--2026-06-27) | 2026-06-27 |
+| 24 | [Richer session catalog — track, level, length and live filters](#24-richer-session-catalog--track-level-length-and-live-filters--2026-06-29) | 2026-06-29 |
+| 25 | [One-tap sign-in from email, and stay signed in](#25-one-tap-sign-in-from-email-and-stay-signed-in--2026-06-29) | 2026-06-29 |
+| 26 | [Get-started, your way — edit any step, any time](#26-get-started-your-way--edit-any-step-any-time--2026-06-29) | 2026-06-29 |
+| 27 | [Party RSVP — a quick yes or no, and a head count](#27-party-rsvp--a-quick-yes-or-no-and-a-head-count--2026-06-29) | 2026-06-29 |
+| 28 | [Final session evaluations, delivered to speakers](#28-final-session-evaluations-delivered-to-speakers--2026-06-29) | 2026-06-29 |
+| 29 | [A tidy graphics hand-off for your designer](#29-a-tidy-graphics-hand-off-for-your-designer--2026-06-29) | 2026-06-29 |
+| 30 | [Fun, timed learning games with a leaderboard](#30-fun-timed-learning-games-with-a-leaderboard--2026-06-29) | 2026-06-29 |
+| 31 | [Share a single session -- with its graphic in the post](#31-share-a-single-session----with-its-graphic-in-the-post--2026-06-30) | 2026-06-30 |
+| 32 | [Get-started and your task list, finally in step](#32-get-started-and-your-task-list-finally-in-step--2026-06-30) | 2026-06-30 |
+| 33 | [A clearer party sign-up](#33-a-clearer-party-sign-up--2026-06-30) | 2026-06-30 |
+| 34 | [A warm welcome for every attendee](#34-a-warm-welcome-for-every-attendee--2026-06-30) | 2026-06-30 |
+| 35 | [Tickets that keep themselves tidy](#35-tickets-that-keep-themselves-tidy--2026-06-30) | 2026-06-30 |
+| 36 | [A calmer master-class morning](#36-a-calmer-master-class-morning--2026-06-30) | 2026-06-30 |
+| 37 | [Session evaluations -- score and open feedback, delivered to speakers](#37-session-evaluations----score-and-open-feedback-delivered-to-speakers--2026-06-30) | 2026-06-30 |
+| 38 | [Calendar invites, straight to your inbox](#38-calendar-invites-straight-to-your-inbox--2026-06-30) | 2026-06-30 |
+| 39 | [Sponsor logistics that name your company](#39-sponsor-logistics-that-name-your-company--2026-06-30) | 2026-06-30 |
+| 40 | [A heads-up before you leave the hub](#40-a-heads-up-before-you-leave-the-hub--2026-06-30) | 2026-06-30 |
+| 41 | [A simpler lunch sign-up](#41-a-simpler-lunch-sign-up--2026-06-30) | 2026-06-30 |
+| 42 | [Survey results you can actually read](#42-survey-results-you-can-actually-read--2026-06-30) | 2026-06-30 |
+| 43 | [A cleaner people list for organizers](#43-a-cleaner-people-list-for-organizers--2026-06-30) | 2026-06-30 |
+| 44 | [Every event email, consistently tagged and gently paced](#44-every-event-email-consistently-tagged-and-gently-paced--2026-06-30) | 2026-06-30 |
+| 45 | [Every master-class seat counted exactly once](#45-every-master-class-seat-counted-exactly-once--2026-06-30) | 2026-06-30 |
+| 46 | [One-tap sign-in that genuinely signs you in](#46-one-tap-sign-in-that-genuinely-signs-you-in--2026-06-30) | 2026-06-30 |
+| 47 | [Nothing waiting slips through](#47-nothing-waiting-slips-through--2026-06-30) | 2026-06-30 |
+| 48 | [Welcome emails that point at your first step](#48-welcome-emails-that-point-at-your-first-step--2026-07-07) | 2026-07-07 |
+| 49 | [One party reservation for your whole sponsor team](#49-one-party-reservation-for-your-whole-sponsor-team--2026-07-07) | 2026-07-07 |
+| 50 | [Tickets, sync and email cadence — tightened](#50-tickets-sync-and-email-cadence--tightened--2026-07-07) | 2026-07-07 |
+| 51 | [Lifecycle truth — drop-outs stop costing money](#51-lifecycle-truth--drop-outs-stop-costing-money--2026-07-0708) | 2026-07-07/08 |
+| 52 | [Sync direction, order-driven sponsor tasks and funded counts — now documented](#52-sync-direction-order-driven-sponsor-tasks-and-funded-counts--now-documented--2026-07-23) | 2026-07-23 |
+| 53 | [Safer sponsor orders, gated 1-day access and test sessions](#53-safer-sponsor-orders-gated-1-day-access-and-test-sessions--2026-07-23) | 2026-07-23 |
+| 54 | [Speaker categories — Community, Sponsor, Guest](#54-speaker-categories--community-sponsor-guest--2026-07-23) | 2026-07-23 |
+| 55 | [Rooms, lengths and levels — configured, validated, flexible](#55-rooms-lengths-and-levels--configured-validated-flexible--2026-07-23) | 2026-07-23 |
+| 56 | [Every hub-made change on the public event site is flagged for the operator](#56-every-hub-made-change-on-the-public-event-site-is-flagged-for-the-operator--2026-07-23) | 2026-07-23 |
+| 57 | [The introduction page only lists features this event actually has](#57-the-introduction-page-only-lists-features-this-event-actually-has--2026-07-26) | 2026-07-26 |
+| 58 | [Session graphics: told the moment they're ready, shared as a real picture](#58-session-graphics-told-the-moment-theyre-ready-shared-as-a-real-picture--2026-07-27) | 2026-07-27 |
+| 59 | [Your tasks now do the work in the task](#59-your-tasks-now-do-the-work-in-the-task--2026-07-29) | 2026-07-29 |
+| 60 | [Controls that say exactly what they do](#60-controls-that-say-exactly-what-they-do--2026-07-29) | 2026-07-29 |
+| 61 | [Find every e-mail under every role it reaches](#61-find-every-e-mail-under-every-role-it-reaches--2026-07-30) | 2026-07-30 |
+| 62 | [Get Started now opens with a welcome](#62-get-started-now-opens-with-a-welcome--2026-07-31) | 2026-07-31 |
+| 63 | [Session reports your other systems can collect for themselves](#63-session-reports-your-other-systems-can-collect-for-themselves--2026-07-31) | 2026-07-31 |
+| 64 | [Rate a session by scanning its QR code](#64-rate-a-session-by-scanning-its-qr-code--2026-07-31) | 2026-07-31 |
+| 65 | [Your promo graphics are yours the moment they exist](#65-your-promo-graphics-are-yours-the-moment-they-exist--2026-08-04) | 2026-08-04 |
+| 66 | [Comms: see the actual e-mails, and clear the ones you have dealt with](#66-comms-see-the-actual-e-mails-and-clear-the-ones-you-have-dealt-with--2026-08-04) | 2026-08-04 |
+| 67 | [Speaker readiness now includes the get-started steps](#67-speaker-readiness-now-includes-the-get-started-steps--2026-08-04) | 2026-08-04 |
+| 68 | [Partner coupon pools: what is left, and whether anyone was billed](#68-partner-coupon-pools-what-is-left-and-whether-anyone-was-billed--2026-08-04) | 2026-08-04 |
+| 69 | [A prepaid pool warns you before it runs out](#69-a-prepaid-pool-warns-you-before-it-runs-out--2026-08-04) | 2026-08-04 |
+| 70 | [New coupon codes announce themselves, and a prepaid pool can grow](#70-new-coupon-codes-announce-themselves-and-a-prepaid-pool-can-grow--2026-08-04) | 2026-08-04 |
+| 71 | [Set how often the background jobs run — yourself](#71-set-how-often-the-background-jobs-run--yourself--2026-08-05) | 2026-08-05 |
+| 72 | [Two separate mails: a held speaker, and volunteers waiting](#72-two-separate-mails-a-held-speaker-and-volunteers-waiting--2026-08-05) | 2026-08-05 |
+| 73 | [Set the reminder interval separately for each role](#73-set-the-reminder-interval-separately-for-each-role--2026-08-05) | 2026-08-05 |
+| 74 | [The post editor tells you when an edit is unsaved](#74-the-post-editor-tells-you-when-an-edit-is-unsaved--2026-08-05) | 2026-08-05 |
+| 75 | [Tag your speakers in the event's social posts](#75-tag-your-speakers-in-the-events-social-posts--2026-08-06) | 2026-08-06 |
+| 76 | [Tag the sponsor's own people in their announcement](#76-tag-the-sponsors-own-people-in-their-announcement--2026-08-06) | 2026-08-06 |
+| 77 | [Every mentionable person is remembered, once](#77-every-mentionable-person-is-remembered-once--2026-08-06) | 2026-08-06 |
+| 78 | [Announce your master classes together, in the week you choose](#78-announce-your-master-classes-together-in-the-week-you-choose--2026-08-06) | 2026-08-06 |
+| 79 | [Track announcements wait for the line-up, not for a date](#79-track-announcements-wait-for-the-line-up-not-for-a-date--2026-08-07) | 2026-08-07 |
+
+---
+
 ## 1. Platform — built for every edition
 
 ![The public front door — event details, programme and a no-login sign-in, the same generic platform behind every edition](img/public-landing.png)

@@ -80,18 +80,28 @@ public sealed class PublicAboutContentTests
         var pub = ContentMarkdownRenderer.StripInternalOnly(md);
 
         // The chapter heading and a representative sentence from inside it must be gone.
-        // §707.48 — every chapter shifted by one when "2. CEH by the numbers" was inserted, so
-        // Security is now 6 and the survivors are 7 and 9. These assertions name the NUMBER on
-        // purpose: they are what proves the internal-only markers still wrap the RIGHT chapter after
-        // a renumber, which is precisely when a marker slips onto the wrong section and quietly
-        // publishes it.
-        Assert.DoesNotContain("## 6. Security", pub, StringComparison.Ordinal);
+        // §707.48 — every chapter shifted by one when "2. CEH by the numbers" was inserted.
+        // §931.1 — and shifted again when Features moved ahead of the engineering chapters, so
+        // Security is now 7 and the survivors are 8 and 9.
+        //
+        // 🔑 These assertions name the NUMBER on purpose, and this renumber is exactly why: they
+        // are what proves the internal-only markers still wrap the RIGHT chapter afterwards, which
+        // is precisely the moment a marker slips onto the wrong section and quietly publishes it.
+        // Both times the chapters moved, this test failed first — which is the job.
+        Assert.DoesNotContain("## 7. Security", pub, StringComparison.Ordinal);
         Assert.DoesNotContain("Secrets and workload identity", pub, StringComparison.Ordinal);
+
+        // 🔴 §931.1 — AND NO LINK TO IT EITHER, which is a real leak this caught. Fencing the
+        // chapter is not enough: the page has TWO navigation blocks (Quick links and Contents), and
+        // a new "check how my data is protected" row in the first one pointed straight at the
+        // hidden chapter. The section was gone and the signpost to it was still on the public page.
+        Assert.DoesNotContain("#7-security", pub, StringComparison.OrdinalIgnoreCase);
 
         // …while the parts meant for the public survive.
         Assert.Contains("## 1. What is CEH?", pub, StringComparison.Ordinal);
         Assert.Contains("## 2. CEH by the numbers", pub, StringComparison.Ordinal);
-        Assert.Contains("## 7. How it is built and released", pub, StringComparison.Ordinal);
+        Assert.Contains("## 3. Features", pub, StringComparison.Ordinal);
+        Assert.Contains("## 8. How it is built and released", pub, StringComparison.Ordinal);
         Assert.Contains("## 9. Who built it", pub, StringComparison.Ordinal);
     }
 

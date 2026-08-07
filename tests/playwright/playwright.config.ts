@@ -25,15 +25,26 @@ export default defineConfig({
   },
   projects: [
     {
+      // §931.3 -- the documentation screenshot harness. Its own project because it
+      // drives its own contexts (desktop AND mobile in one run) and must NOT be
+      // multiplied by the three device projects below.
+      name: 'docs',
+      testMatch: /docs-screenshots\.spec\.ts/,
+      use: { ...devices['Desktop Chrome'] },
+    },
+    {
       name: 'iPhone 13',
+      testIgnore: /docs-screenshots\.spec\.ts/,
       use: { ...devices['iPhone 13'] },
     },
     {
       name: 'Pixel 5',
+      testIgnore: /docs-screenshots\.spec\.ts/,
       use: { ...devices['Pixel 5'] },
     },
     {
       name: 'iPhone SE (narrow viewport)',
+      testIgnore: /docs-screenshots\.spec\.ts/,
       // iPhone SE is 375x667 -- the small viewport that exposed the
       // hero-band clip on the original min-height + flex centring.
       use: { ...devices['iPhone SE'] ?? devices['iPhone 12 mini'] },

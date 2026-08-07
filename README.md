@@ -121,6 +121,93 @@ Every screenshot below is captured **headlessly** against a locally-run instance
 
 > The new views above are also phone-first — mobile captures: [unified task list](docs/img/unified-task-checklist-mobile.png), [inline stepper](docs/img/wizard-inline-stepper-mobile.png), [sponsor "Our Booth"](docs/img/sponsor-our-booth-mobile.png) and the [organizer allocation queue](docs/img/organizer-allocation-queue-mobile.png).
 
+## Full screen gallery
+
+Every screen below is the real product, captured automatically by a headless test that signs in, walks the hub and photographs each page at desktop **and** phone width. **Names, e-mail addresses, companies and photographs are synthetic** — the capture replaces every one before the picture is taken, and the run fails if a single real value survives, so nothing here is anybody's data.
+
+Each entry links to its full-size desktop capture; append `-mobile` to any filename for the phone version.
+
+<details>
+<summary><strong>Public pages</strong> — what a visitor sees before signing in</summary>
+
+| Screen | What it shows |
+|---|---|
+| [Landing](docs/img/public-landing.png) | The event front door — dates, tickets, and the way in |
+| [Sessions](docs/img/public-sessions.png) | The public catalogue with live filters for type, length, room, date, track and level |
+| [Master classes](docs/img/public-masterclasses.png) | Full-day sessions, with capacity and booking state |
+| [Speakers](docs/img/public-speakers.png) | The published line-up (unpublished speakers are never shown) |
+| [Sponsors](docs/img/public-sponsors.png) | Sponsors by tier, from the sponsor records themselves |
+| [Agenda](docs/img/public-agenda.png) | The schedule grid |
+| [Contributors](docs/img/public-contributors.png) | Everyone who helped build the event |
+| [About / introduction](docs/img/public-about.png) | The in-hub product introduction |
+| [Sign in](docs/img/public-login.png) | Passwordless: an e-mailed one-time code, or one-tap from any hub e-mail |
+
+</details>
+
+<details>
+<summary><strong>Role hubs</strong> — speaker, sponsor, volunteer, attendee</summary>
+
+| Screen | What it shows |
+|---|---|
+| [Hub home](docs/img/hub-home.png) | Where every role lands: what you owe, when it is due |
+| [Your tasks](docs/img/unified-task-checklist.png) | Every obligation with a deadline and a progress rollup |
+| [Speaker hub](docs/img/speaker-hub.png) | A speaker's own sessions, times, rooms and outstanding items |
+| [Speaker tasks](docs/img/speaker-tasks.png) | Bio, photo, slides, travel — each dated, each with its own reminder rhythm |
+| [Speaker readiness](docs/img/speaker-readiness.png) | "Am I done?" answered, rather than guessed |
+| [Speaker graphics](docs/img/speaker-graphics.png) | Ready-made promotion artwork to download and share |
+| [Speaker announcements](docs/img/speaker-announcements.png) | The posts the hub has planned about their session |
+| [Sponsor portal](docs/img/sponsor-portal.png) | Self-service for the whole sponsorship |
+| [Sponsor booth](docs/img/sponsor-our-booth.png) | Stand number, expo map and what is still owed |
+| [Sponsor deliverables](docs/img/sponsor-deliverables.png) | Every contracted item, tracked with a deadline |
+| [Sponsor announcements](docs/img/sponsor-announcements.png) | Their own posts, and what each is waiting for |
+| [Volunteer sign-up](docs/img/volunteer-signup.png) | Availability in the volunteer's own words |
+| [Volunteer schedule](docs/img/volunteer-schedule.png) | The shifts that availability turned into |
+| [Attendee My Event](docs/img/attendee-my-event.png) | Their master class, party booking and agenda |
+| [Profile](docs/img/profile.png) | The details every role maintains themselves |
+
+</details>
+
+<details>
+<summary><strong>Organizer</strong> — running the event</summary>
+
+| Screen | What it shows |
+|---|---|
+| [Dashboard](docs/img/organizer-dashboard.png) | The state of the edition at a glance |
+| [Command centre](docs/img/organizer-command-center.png) | What needs a human today, ranked |
+| [Participants](docs/img/organizer-participants.png) | Everyone, filterable by role, status, company and rollout ring |
+| [Attendees](docs/img/organizer-attendees.png) | Ticket holders, reconciled against the ticketing system |
+| [Sessions](docs/img/organizer-sessions.png) | The programme, with rooms, tracks and levels |
+| [Action queue](docs/img/organizer-allocation-queue.png) | Allocate organizer-owned work with live coverage |
+| [E-mail centre](docs/img/organizer-email-center.png) | Preview exactly what will be sent, before it sends |
+| [E-mail log](docs/img/organizer-email-log.png) | Every message, its state, and retries |
+| [Background jobs](docs/img/organizer-jobs.png) | Cadence and health of every scheduled routine |
+| [Graphics](docs/img/organizer-graphics.png) | Speaker, session and sponsor artwork generation |
+| [Exports](docs/img/organizer-exports.png) | Excel and CSV for anything you need outside the hub |
+| [Audit trail](docs/img/organizer-audit-trail.png) | Who changed what, and when |
+| [Data freshness](docs/img/organizer-data-freshness.png) | Whether each integration is actually flowing |
+| [Hotels](docs/img/organizer-hotels.png) | Allotments, room blocks and assignments |
+| [Volunteers](docs/img/organizer-volunteers.png) | Structure, areas and coverage |
+| [Evaluation results](docs/img/organizer-evaluation-results.png) | Session scores and written feedback |
+| [Coupon invoicing](docs/img/organizer-coupon-invoicing.png) | Partner coupon pools and what has been billed |
+| [Group photos](docs/img/organizer-group-photos.png) | Company photo registrations |
+
+</details>
+
+<details>
+<summary><strong>Social-media campaign</strong> — planned by the hub, approved by a human</summary>
+
+| Screen | What it shows |
+|---|---|
+| [Marketing hub](docs/img/some-hub.png) | The campaign's home |
+| [Content studio](docs/img/some-content-studio.png) | Walk the queue, edit, approve — one post at a time |
+| [Event posts](docs/img/some-event-posts.png) | Your own dated posts alongside the generated ones |
+| [Campaign settings](docs/img/some-settings.png) | Cadence, auto-approval, exclusions and the announcement windows |
+| [Post templates](docs/img/some-templates.png) | The wordings each post type draws from |
+
+</details>
+
+**Looking for the written catalogue instead?** [`docs/FEATURES.md`](docs/FEATURES.md) lists every delivered feature with the date it shipped.
+
 ## Role menus (2026 redesign)
 
 Each role sees only what's theirs — a focused, mobile-first menu. `▸` marks a fold-out section; `↗` opens an external site (Zoho exhibitor dashboard / webshop) in a new tab.
