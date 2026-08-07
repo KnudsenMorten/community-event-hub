@@ -3280,3 +3280,38 @@ announcements into the following days. A crowded feed was never the goal.
 back until your Call for Speakers has been decided used to be invisible — it could only be changed in
 the database. It is now shown alongside the master-class date, with a warning when it is empty,
 because a setting that important should be one you can check rather than one you have to remember.
+
+## 79. Track announcements wait for the line-up, not for a date *(✅ 2026-08-07)*
+
+A track announcement names the speakers in that track, and once it has published it can never pick
+anyone up. So it should go out when the track is **complete** — not on a date somebody guessed months
+earlier and then had to remember to change.
+
+The hub already worked that out from the data: a track whose newest session arrived a week ago has
+stopped growing, so it is ready. **That rule had a blind spot, and it was found by measuring rather
+than reasoning.** Every track scored as *finished* while the Call for Speakers was still open — each
+held only its handful of early confirmed sessions, so "nothing new for weeks" looked exactly like a
+settled line-up. A quiet period cannot tell a batch that has **ended** from one that has never
+**begun**.
+
+**Now the hub asks a question a single track cannot answer.** Whether the intake has landed is a
+property of the whole programme, so readiness is the latest of three things: this track's newest
+session, the newest session **anywhere in the edition**, and the day your **Call for Speakers
+closes** — the one new date, and one you already publish. Nothing counts as settled until the call
+has closed and the sessions have genuinely arrived.
+
+**After that, the data takes over again and the date stops mattering.** If your intake lands a
+fortnight late, every track announcement moves a fortnight with it — automatically, with nobody
+editing anything. That is the part a fixed announcement date could never do, and it is why this is a
+floor under the signal rather than a replacement for it.
+
+**A track that keeps growing still waits longer than one that has finished.** The correction adds a
+floor; it does not flatten every track onto the same day.
+
+**What it does not claim to do.** This makes the campaign wait for your intake — it cannot conjure
+one from a broken import. If the speaker sync were silently failing, tracks would still become
+announceable a settle period after your deadline, naming whoever the hub already had. That is a
+stalled-job problem, and the hub's job-silence alerting is what watches for it.
+
+*Leave the close date empty and track readiness works from session arrivals alone, exactly as before
+— the settings page tells you so where the field is blank.*

@@ -138,6 +138,25 @@
             category evenly across the whole run-up like everything else.
         </p>
 
+        @* §925.2 — the fact the track settle signal was missing. *@
+        <label for="cfscloses">Call for Speakers closes</label>
+        <input type="date" id="cfscloses" name="CallForSpeakersClosesOn"
+               value="@(Model.CallForSpeakersClosesOn?.ToString("yyyy-MM-dd"))" />
+        <p class="som-hint">
+            A track is only announced once its line-up has stopped growing — but a track that is
+            still <em>empty</em> looks exactly like one that is <em>finished</em>. This date tells
+            them apart: nothing counts as settled until the Call for Speakers has closed and the
+            sessions have actually arrived. After that the data takes over, so if the intake runs
+            late the announcements move with it on their own.
+        </p>
+        @if (Model.CallForSpeakersClosesOn is null)
+        {
+            <p class="muted" style="margin-top:-4px;">
+                Empty — track readiness then relies on session arrivals alone, which reads a track
+                that has not received its sessions yet as one that has finished receiving them.
+            </p>
+        }
+
         <label for="speakerfrom">Speaker posts (tracks and sessions) not before</label>
         <input type="date" id="speakerfrom" name="SpeakerAnnouncementFrom"
                value="@(Model.SpeakerAnnouncementFrom?.ToString("yyyy-MM-dd"))" />

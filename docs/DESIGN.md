@@ -1993,6 +1993,31 @@ listed in a tier, or rendered into a graphic.
   delete a genuine sponsor from the campaign — a §842.5 contract breach caused by a tidy-up. A
   company with no contacts is not test either; that is the state every newly signed sponsor is in.
 
+**A track waits for its line-up to settle, and "settled" needs three facts, not one.** A track post
+lists a whole track's speakers, so it is incomplete until that track's sessions have arrived. The
+readiness signal is the **latest** of: the track's own newest session, the **edition's** newest
+session, and the **Call for Speakers close date** — plus a seven-day settle period, still floored by
+the speaker-announcement date where one is set.
+- 🔴 **A quiet track is not necessarily a finished one.** Measured when the per-track rule first
+  shipped: every track scored as settled, because each held only its confirmed master classes from
+  months earlier. "Nothing new for six weeks" was read as *the line-up has finished* when it meant
+  *the intake has not started*, and from inside a single track those are indistinguishable.
+- 🔑 **The missing fact is edition-wide, and no track can know it.** Whether the Call for Speakers
+  has landed is a property of the whole import; a track's own silence is not evidence about it. There
+  is no per-track rule that could have worked.
+- 🔒 **Per-track behaviour survives.** Once the wave is over, a track still receiving stragglers
+  pushes its readiness out further than one that has gone quiet — the correction adds a floor rather
+  than flattening every track onto one day.
+- 🔒 **Not "the import job has run since the deadline".** A run that imported nothing is not evidence
+  the line-up arrived; it is a rumour of it. The arrival of sessions is the fact, and it is already
+  in the table the rule reads — so no run marker and no job change were needed.
+- ⚠️ **Residual limit, stated rather than papered over:** this makes the campaign wait for the
+  intake, not appear from a broken one. With the sync dead the tracks still become announceable a
+  settle period after the deadline, naming whatever the hub already had. That is a silent job, which
+  job-silence alerting catches; no scheduling rule can see it from the inside.
+- ⚠️ A blank close date restores the arrival-only signal, blind spot included — said on the settings
+  page where the field is empty rather than left to be rediscovered.
+
 **A category can be announced as a burst instead of a spread**, and the difference is expressed as a
 *window* rather than a *floor*. `SpeakerAnnouncementFrom` is a floor: it says "not before this" and
 leaves the even spread free to choose the day. `MasterClassAnnouncementFrom` is a window opening:

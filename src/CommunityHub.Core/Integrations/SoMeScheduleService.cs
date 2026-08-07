@@ -614,6 +614,7 @@ public sealed class SoMeScheduleService
                 s.SpeakerAnnouncementFrom,
                 s.ExcludedSessionTitlePatterns,
                 s.MasterClassAnnouncementFrom,
+                s.CallForSpeakersClosesOn,
             })
             .FirstOrDefaultAsync(ct);
 
@@ -740,14 +741,58 @@ public sealed class SoMeScheduleService
             .GroupBy(s => s.Track!, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(g => g.Key, g => g.Max(x => x.CreatedAt), StringComparer.OrdinalIgnoreCase);
 
+        // 🔴 §925.2 — A QUIET TRACK IS NOT NECESSARILY A FINISHED ONE.
+        //
+        // §925.1, measured on PROD the day §925 shipped and the only reason it was caught: all eight
+        // tracks scored as SETTLED, because each held only its one or two confirmed master classes
+        // from 24–26 June. "Nothing new for six weeks" was read as *the line-up has finished* when it
+        // actually meant *the intake has not started* — and from inside a single track those two are
+        // indistinguishable. The rule was right in SHAPE and thin in SIGNAL.
+        //
+        // 🔑 THE MISSING FACT IS EDITION-WIDE, AND NO TRACK CAN KNOW IT. Whether the Call for
+        // Speakers has landed is a property of the whole import, so readiness now measures the newest
+        // session in the EDITION as well as in the track, and neither may sit before the CfS close.
+        //
+        // ⇒ settle base = the LATEST of: this track's newest session, the edition's newest session,
+        //   and the day the CfS closes. Before the intake the third term binds and nothing is
+        //   announceable early; after it the data governs again and the date stops mattering.
+        //
+        // 🔒 §925's PER-TRACK behaviour is refined, not replaced. Once the wave is over, a track that
+        // keeps receiving stragglers pushes its own readiness out further than one that has gone
+        // quiet — which is the self-adjusting property §925 was built for, now with a floor under it.
+        //
+        // 🔒 NOT "has the import job run since the CfS closed", which is what §925.1 sketched. A run
+        // that imported NOTHING is not evidence that the line-up arrived — it is a rumour of it. The
+        // arrival of the sessions is the fact, and it is already in the table being read here.
+        //
+        // ⚠️ THE HONEST RESIDUAL LIMIT: this makes the campaign wait for the intake, and it cannot
+        // make a broken import produce one. With the sync dead the tracks still become announceable a
+        // settle period after the CfS closes, naming whatever CEH already had. That is a SILENT JOB,
+        // which the job-silence alerting exists to catch; no scheduling rule can see it from inside.
+        var editionNewestSession = trackNewestSession.Count > 0
+            ? trackNewestSession.Values.Max()
+            : (DateTimeOffset?)null;
+
+        var cfsClosesUtc = gateSettings?.CallForSpeakersClosesOn is { } cfs
+            ? SoMeSchedulePlanner.ToUtc(cfs, SoMeSchedulePlanner.PreferredTimes[0])
+            : (DateTimeOffset?)null;
+
         var round2 = eventStartUtc.AddMonths(-1);
 
         subjects.AddRange(tracks.Select(t =>
         {
-            // Settled = nothing new in this track for TrackSettlePeriod.
-            var settled = trackNewestSession.TryGetValue(t, out var newest)
-                ? newest + TrackSettlePeriod
-                : now;
+            // Settled = nothing new in this track — NOR anywhere in the edition — for
+            // TrackSettlePeriod, and never counted from before the intake could have finished.
+            var settleBase = trackNewestSession.TryGetValue(t, out var newest)
+                ? (DateTimeOffset?)newest
+                : null;
+
+            if (editionNewestSession is { } ed && (settleBase is null || ed > settleBase))
+                settleBase = ed;
+            if (cfsClosesUtc is { } close && (settleBase is null || close > settleBase))
+                settleBase = close;
+
+            var settled = settleBase is { } b ? b + TrackSettlePeriod : now;
 
             // The later of "settled" and his own floor — both are "not before this".
             var round1 = GatedBySpeakers(settled) ?? settled;

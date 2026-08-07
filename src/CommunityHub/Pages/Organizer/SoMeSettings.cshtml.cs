@@ -106,6 +106,16 @@ public class SoMeSettingsModel : PageModel
     [BindProperty] public DateOnly? MasterClassAnnouncementFrom { get; set; }
 
     /// <summary>
+    /// §925.2 — the day the Call for Speakers closes; the floor under the track settle signal.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 Without it a track that is merely EMPTY reads as FINISHED (§925.1): every track held only
+    /// its June master classes, so "nothing new for six weeks" scored as a settled line-up while the
+    /// CfS was still open.
+    /// </remarks>
+    [BindProperty] public DateOnly? CallForSpeakersClosesOn { get; set; }
+
+    /// <summary>
     /// The master classes this window governs — shown for §927's reason: a rule whose effect you
     /// cannot see is a rule you have to test in production.
     /// </summary>
@@ -145,6 +155,7 @@ public class SoMeSettingsModel : PageModel
         ExcludedSessionTitlePatterns = s.ExcludedSessionTitlePatterns;
         SpeakerAnnouncementFrom = s.SpeakerAnnouncementFrom;
         MasterClassAnnouncementFrom = s.MasterClassAnnouncementFrom;
+        CallForSpeakersClosesOn = s.CallForSpeakersClosesOn;
         await LoadExcludedTitlesAsync(me.EventId, ct);
         await LoadMasterClassTitlesAsync(me.EventId, ct);
         return Page();
@@ -186,6 +197,7 @@ public class SoMeSettingsModel : PageModel
             // two a BLANK is a real instruction ("no window") rather than "leave it alone".
             speakerAnnouncementFrom: SpeakerAnnouncementFrom,
             masterClassAnnouncementFrom: MasterClassAnnouncementFrom,
+            callForSpeakersClosesOn: CallForSpeakersClosesOn,
             updateAnnouncementWindows: true);
 
         await LoadExcludedTitlesAsync(me.EventId, ct);

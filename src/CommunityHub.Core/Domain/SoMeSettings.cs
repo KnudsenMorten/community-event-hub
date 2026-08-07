@@ -173,6 +173,40 @@ public class SoMeSettings
     /// </remarks>
     public DateOnly? MasterClassAnnouncementFrom { get; set; }
 
+    /// <summary>
+    /// §925.2 — the day the Call for Speakers CLOSES. Null = the intake is not modelled and track
+    /// readiness falls back to §925's session-arrival signal alone.
+    /// </summary>
+    /// <remarks>
+    /// <para>🔑 Operator 2026-08-05: <i>"call for speakers ends 31 aug 2026 and then we spend 1 week
+    /// deciding who is selected"</i>. For ELDK27 the value is <b>2026-08-31</b>.</para>
+    ///
+    /// <para>🔴 <b>This is what §925's settle signal was missing, and the gap was measured rather
+    /// than reasoned about (§925.1).</b> "This track's newest session is six weeks old" was read as
+    /// <i>the line-up has finished</i> when it actually meant <i>the intake has not started</i>: all
+    /// eight tracks held only their confirmed master classes from June, so every one of them scored
+    /// as SETTLED while the CfS was still open. A quiet period cannot tell a batch that has ENDED
+    /// from one that has not BEGUN — the two look identical from inside a single track.</para>
+    ///
+    /// <para>🔑 <b>The missing fact is edition-wide, and no track can know it.</b> Whether the intake
+    /// has landed is a property of the whole import, so the settle signal now measures the newest
+    /// session in the EDITION as well as in the track, and neither can be earlier than this date.
+    /// A track's own quiet period still applies on top, so a track that keeps receiving stragglers
+    /// after the wave waits longer than one that does not — §925's per-track behaviour is refined,
+    /// not replaced.</para>
+    ///
+    /// <para>⚠️ <b>The honest residual limit.</b> This makes the campaign wait for the intake; it
+    /// cannot make a broken import produce one. If the Sessionize sync were dead, the tracks would
+    /// still become announceable a settle period after this date, holding only whatever CEH already
+    /// had. That failure is a silent job, and silent jobs are what the job-silence alerting exists to
+    /// catch — it is not something a scheduling rule can detect from the inside.</para>
+    ///
+    /// <para>🔒 Deliberately NOT "the import job has run since this date". A run that imported
+    /// NOTHING is not evidence that the line-up arrived, so a run marker would answer a question
+    /// nobody asked. The arrival of sessions is the fact; the job running is only a rumour of it.</para>
+    /// </remarks>
+    public DateOnly? CallForSpeakersClosesOn { get; set; }
+
     // --- §824.16: the three edition-level values every template ends with --------------------
     // They live HERE, per edition and editable, rather than in code: the tag block and the
     // organizer credit differ between editions (ELDK26's list is not ELDK27's, §824.3), and a

@@ -79,6 +79,10 @@ public sealed class SoMeSettingsService
         // published early.
         DateOnly? speakerAnnouncementFrom = null,
         DateOnly? masterClassAnnouncementFrom = null,
+        // §925.2 — the CfS close date rides the same flag: it is the third value that decides WHEN a
+        // category may be announced, and clearing it by omission would quietly restore the §925.1
+        // defect (every track reading as settled while the intake had not started).
+        DateOnly? callForSpeakersClosesOn = null,
         bool updateAnnouncementWindows = false)
     {
         var now = _clock.GetUtcNow();
@@ -119,6 +123,7 @@ public sealed class SoMeSettingsService
             // allowed to make, once he has said he owns the fields.
             row.SpeakerAnnouncementFrom = speakerAnnouncementFrom;
             row.MasterClassAnnouncementFrom = masterClassAnnouncementFrom;
+            row.CallForSpeakersClosesOn = callForSpeakersClosesOn;
         }
 
         // §918 — only when the caller says so (see the parameter note).
