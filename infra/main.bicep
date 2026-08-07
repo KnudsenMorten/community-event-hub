@@ -41,6 +41,16 @@ param baseName string = 'communityhub'
 // template never enables. Emitting a Sql__Admin* app setting made the app take
 // the SQL-auth path and Migrate() failed 500 against the AAD-only server.
 
+// §961 — the Entra SQL admin group moved UP to here (and on into the per-environment parameters
+// files, which are denylisted from the public mirror). It used to be a hardcoded default inside
+// modules/sql.bicep, which published a real Entra group name + object id AND silently baked our
+// admin group into anyone else's deployment of this template.
+@description('Entra (Azure AD) group that administers the SQL server. Supply your own — members can connect as SQL admin via Entra auth.')
+param sqlAadAdminLogin string
+
+@description('Object id (sid) of the Entra group named in sqlAadAdminLogin.')
+param sqlAadAdminObjectId string
+
 @description('Zoho Backstage origin allowed to embed the hub in an iframe (e.g. https://eldk27.expertslive.dk). Empty until confirmed - see CONTEXT.md 5a / open question 13.')
 param backstageEmbedOrigin string = ''
 
@@ -116,6 +126,8 @@ module sql 'modules/sql.bicep' = {
     sqlServerName:    names.sqlServer
     sqlDatabaseName:  names.sqlDatabase
     tags:             tags
+    aadAdminLogin:    sqlAadAdminLogin
+    aadAdminObjectId: sqlAadAdminObjectId
     // No sqlAdminLogin / sqlAdminPassword passed: the server is Azure-AD-only
     // and authenticates app traffic via managed identity. sql.bicep's optional
     // login/password params stay defaulted (unused while azureADOnlyAuthentication=true).

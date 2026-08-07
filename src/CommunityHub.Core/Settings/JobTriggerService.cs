@@ -8,7 +8,7 @@ public sealed class JobTriggerOptions
 {
     public const string SectionName = "JobTrigger";
 
-    /// <summary>e.g. <c>https://eldk27hub-fn-prodpdrq.azurewebsites.net</c>. Blank ⇒ feature off.</summary>
+    /// <summary>e.g. <c>https://communityhub-fn-prodx1.azurewebsites.net</c>. Blank ⇒ feature off.</summary>
     public string BaseUrl { get; set; } = string.Empty;
 
     /// <summary>The Functions host MASTER key. Blank ⇒ feature off (the button reports why).</summary>

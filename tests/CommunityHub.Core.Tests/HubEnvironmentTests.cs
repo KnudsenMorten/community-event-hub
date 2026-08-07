@@ -21,15 +21,15 @@ public sealed class HubEnvironmentTests
     [InlineData("dev", null, "DEV")]
     [InlineData("Development", null, "DEV")]
     // No setting ⇒ fall back to the App Service site name (present on web AND Functions hosts).
-    [InlineData(null, "eldk27hub-web-prodpdrq", "PROD")]
-    [InlineData(null, "eldk27hub-fn-prodpdrq", "PROD")]
-    [InlineData(null, "eldk27hub-web-devz237e", "DEV")]
-    [InlineData(null, "eldk27hub-fn-devz237e", "DEV")]
+    [InlineData(null, "communityhub-web-prodx1", "PROD")]
+    [InlineData(null, "communityhub-fn-prodx1", "PROD")]
+    [InlineData(null, "communityhub-web-devx1", "DEV")]
+    [InlineData(null, "communityhub-fn-devx1", "DEV")]
     // The real staging slot name must still read PROD — it is the prod app.
-    [InlineData(null, "eldk27hub-web-prodpdrq__staging", "PROD")]
+    [InlineData(null, "communityhub-web-prodx1__staging", "PROD")]
     // Blank/whitespace is not a value.
-    [InlineData("", "eldk27hub-fn-devz237e", "DEV")]
-    [InlineData("   ", "eldk27hub-web-prodpdrq", "PROD")]
+    [InlineData("", "communityhub-fn-devx1", "DEV")]
+    [InlineData("   ", "communityhub-web-prodx1", "PROD")]
     public void Resolves_the_environment_label(string? configured, string? site, string expected) =>
         Assert.Equal(expected, HubEnvironment.Resolve(configured, site));
 
@@ -51,8 +51,8 @@ public sealed class HubEnvironmentTests
     [Fact]
     public void An_explicit_label_beats_the_site_name()
     {
-        Assert.Equal("DEV", HubEnvironment.Resolve("DEV", "eldk27hub-web-prodpdrq"));
-        Assert.Equal("PROD", HubEnvironment.Resolve("PROD", "eldk27hub-fn-devz237e"));
+        Assert.Equal("DEV", HubEnvironment.Resolve("DEV", "communityhub-web-prodx1"));
+        Assert.Equal("PROD", HubEnvironment.Resolve("PROD", "communityhub-fn-devx1"));
     }
 
     /// <summary>
@@ -61,7 +61,7 @@ public sealed class HubEnvironmentTests
     /// </summary>
     [Fact]
     public void An_unrecognised_label_is_surfaced_not_mapped() =>
-        Assert.Equal("STAGING2", HubEnvironment.Resolve("staging2", "eldk27hub-web-prodpdrq"));
+        Assert.Equal("STAGING2", HubEnvironment.Resolve("staging2", "communityhub-web-prodx1"));
 
     /// <summary>
     /// 🔒 THE REGRESSION THIS CLASS EXISTS FOR. Both live editions report
@@ -82,15 +82,15 @@ public sealed class HubEnvironmentTests
 
         // Fed what this class actually uses, they separate cleanly.
         Assert.NotEqual(
-            HubEnvironment.Resolve(null, "eldk27hub-fn-devz237e"),
-            HubEnvironment.Resolve(null, "eldk27hub-fn-prodpdrq"));
+            HubEnvironment.Resolve(null, "communityhub-fn-devx1"),
+            HubEnvironment.Resolve(null, "communityhub-fn-prodx1"));
     }
 
     [Fact]
     public void Subject_tag_is_bracketed()
     {
         Assert.Equal("[DEV]", new HubEnvironment("DEV", null).SubjectTag);
-        Assert.Equal("[PROD]", new HubEnvironment(null, "eldk27hub-web-prodpdrq").SubjectTag);
+        Assert.Equal("[PROD]", new HubEnvironment(null, "communityhub-web-prodx1").SubjectTag);
         Assert.Equal("[UNKNOWN]", new HubEnvironment(null, null).SubjectTag);
         Assert.False(new HubEnvironment(null, null).IsKnown);
         Assert.True(new HubEnvironment("PROD", null).IsKnown);

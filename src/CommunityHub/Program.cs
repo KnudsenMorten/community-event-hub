@@ -96,7 +96,7 @@ builder.Services.AddHealthChecks()
 // fast-arriving request), a slot swap (a gap in requests + a cold start), and Zoho/Brevo latency (a
 // slow outbound dependency). Guarded on the setting, so a local run with no connection string is
 // unchanged — DEV in Azure DOES have one (operator 2026-07-26: "did you also add the telemetry to
-// the dev env"), verified set on eldk27hub-web-devz237e against eldk27hub-ai-dev, so DEV emits too.
+// the dev env"), verified set on communityhub-web-devx1 against communityhub-ai-dev, so DEV emits too.
 if (!string.IsNullOrWhiteSpace(
         builder.Configuration["APPLICATIONINSIGHTS_CONNECTION_STRING"]))
 {

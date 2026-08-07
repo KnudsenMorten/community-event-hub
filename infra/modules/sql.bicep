@@ -28,11 +28,16 @@ param sqlAdminLogin string = 'communityhubadmin'
 @secure()
 param sqlAdminPassword string = ''
 
-@description('Entra (Azure AD) admin group for the SQL server. Members can connect as SQL admin via Entra auth. Defaults to the ELDK SQL Admins group.')
-param aadAdminLogin string = 'ELDK SQL Admins'
+// §961 — NO DEFAULTS ON EITHER OF THESE, DELIBERATELY. They used to default to a specific Entra
+// group and its real object id, which meant (a) the id was published to the public mirror, and
+// (b) anyone deploying this template got OUR admin group silently baked in unless they noticed.
+// A required parameter fails loudly at deploy time, which is the correct behaviour for "who
+// administers your database".
+@description('Entra (Azure AD) admin group for the SQL server. Members can connect as SQL admin via Entra auth. REQUIRED — supply your own group.')
+param aadAdminLogin string
 
-@description('Object id (sid) of the Entra admin group.')
-param aadAdminObjectId string = '27338212-954e-41c4-95ce-71c2778991e9'
+@description('Object id (sid) of the Entra admin group. REQUIRED — supply your own.')
+param aadAdminObjectId string
 
 @description('Entra tenant id the admin principal belongs to.')
 param aadAdminTenantId string = subscription().tenantId

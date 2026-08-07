@@ -57,3 +57,7 @@ playwright-report/
 
 # Test run artifacts (trx logger output) - never source.
 TestResults/
+
+# §961 — an 'az functionapp function list' dump that was committed by accident. 20 KB of
+# production function-app URLs, and it publishes. Not an input to anything; regenerate on demand.
+fn.json

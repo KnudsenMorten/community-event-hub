@@ -364,7 +364,7 @@ public sealed class EngineFailureAlertGateTests
     {
         using var db = NewDb();
         var mail = new RecordingEmailSender();
-        var gate = NewGate(db, mail, EnvOf("eldk27hub-fn-devz237e"));
+        var gate = NewGate(db, mail, EnvOf("communityhub-fn-devx1"));
         var fn = NewFn();
 
         for (var i = 0; i < EngineFailureAlertGate.ConsecutiveNoOpAlertThreshold * 2; i++)
@@ -389,7 +389,7 @@ public sealed class EngineFailureAlertGateTests
     {
         using var db = NewDb();
         var mail = new RecordingEmailSender();
-        var gate = NewGate(db, mail, EnvOf("eldk27hub-web-prodpdrq"));
+        var gate = NewGate(db, mail, EnvOf("communityhub-web-prodx1"));
         var fn = NewFn();
 
         for (var i = 0; i < EngineFailureAlertGate.ConsecutiveNoOpAlertThreshold; i++)
@@ -430,7 +430,7 @@ public sealed class EngineFailureAlertGateTests
     {
         using var db = NewDb();
         var mail = new RecordingEmailSender();
-        var gate = NewGate(db, mail, EnvOf("eldk27hub-fn-devz237e"));
+        var gate = NewGate(db, mail, EnvOf("communityhub-fn-devx1"));
         var fn = NewFn();
 
         await gate.OnFailureAsync(fn, new InvalidOperationException("boom"));

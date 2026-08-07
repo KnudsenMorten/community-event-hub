@@ -20,7 +20,7 @@ namespace CommunityHub.Core.Diagnostics;
 ///         source. Set it on BOTH web slots: app settings swap with the slot, so a
 ///         production-slot-only setting is lost at the next swap.</item>
 ///   <item><c>WEBSITE_SITE_NAME</c> — the App Service built-in, present on web AND Functions hosts
-///         (<c>eldk27hub-fn-devz237e</c> / <c>eldk27hub-web-prodpdrq</c>). A safety net so the tag
+///         (<c>communityhub-fn-devx1</c> / <c>communityhub-web-prodx1</c>). A safety net so the tag
 ///         is right even before the setting is deployed.</item>
 ///   <item><see cref="Unknown"/> — when neither resolves (a local run, or a host we do not
 ///         recognise). 🔑 It reports <c>UNKNOWN</c> rather than guessing: an alert that names the
