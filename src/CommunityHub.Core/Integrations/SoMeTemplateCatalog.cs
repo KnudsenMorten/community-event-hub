@@ -59,7 +59,7 @@ public static class SoMeTemplateCatalog
     public const string Footer =
         "{EventTags}"
         + Break
-        + "{EditionCode} Organizers:"
+        + "{EventNameShort} Organizers:"
         + "\n{OrganizerLinkedInUrls}";
 
     /// <summary>The shipped default body for one post type.</summary>
@@ -141,7 +141,7 @@ public static class SoMeTemplateCatalog
         SoMeTemplateKind.EventPost =>
             "{EventPostBody}"
             + Break
-            + "{EditionCode} Organizers:"
+            + "{EventNameShort} Organizers:"
             + "\n{OrganizerLinkedInUrls}",
 
         _ => "{IntroText}" + Break + Footer,
@@ -198,6 +198,15 @@ public static class SoMeTemplateCatalog
         // Type 5 template had no way to render the post he wrote.
         "{EventPostTitle}", "{EventPostBody}",
         "{SponsorList}", "{SponsorWebsite}", "{SponsorHashtag}",
-        "{EventDisplayName}", "{EventDates}", "{EventVenue}", "{EditionCode}",
+        // 🔴 §933 — {EditionCode} IS RETIRED and is deliberately absent from this list. Operator
+        // 2026-08-07: *"replace {EditionCode} to {EventNameShort} … i dont like that name and prefer
+        // {EventNameShort} and {EventNameLong} instead"*. It named an internal concept (the edition
+        // key) in a list of things a reader recognises — the event's short name and its long one.
+        //
+        // 🔒 It still RESOLVES (see SoMeVariableResolver) — retiring a token from the offered list
+        // must never turn a body that already contains it into literal "{EditionCode}" on LinkedIn.
+        // The stored bodies were rewritten by migration, so this is belt and braces for anything
+        // pasted from an old post.
+        "{EventDisplayName}", "{EventDates}", "{EventVenue}",
     };
 }

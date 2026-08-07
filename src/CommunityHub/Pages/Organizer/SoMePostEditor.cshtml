@@ -542,17 +542,11 @@
                         <button type="button" class="tok" onclick="insertToken('@t')">@t</button>
                     }
                 </div>
-                @* §888.3 — nothing is appended automatically any more. A post with no
-                   {Organizers} token simply has no credit, which is now a real (and visible)
-                   state rather than something the publisher silently papered over. *@
-                @if (!Model.BodyPlacesCredit)
-                {
-                    <div class="muted" style="margin-top:8px;font-size:.9rem;">
-                        ⚠️ This post has no <code>{Organizers}</code> line, so it will publish
-                        <strong>without an organizer credit</strong>. Insert the variable above to
-                        add it.
-                    </div>
-                }
+                @* 🔴 §932 — no bespoke warning for this ONE variable. Operator 2026-08-07:
+                   *"we have 10+ variables and each of them must be handled the same way"*.
+                   A missing organizer credit is reported by the APPROVAL GATE, in the same place
+                   and the same words as every other missing value (§850's BlockedReason above),
+                   rather than by a hand-written notice that only this token gets. *@
             </div>
 
             <script>

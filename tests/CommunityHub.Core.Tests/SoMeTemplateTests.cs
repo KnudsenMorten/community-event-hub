@@ -55,7 +55,7 @@ public sealed class SoMeTemplateTests
             Assert.Contains("{EventTags}", body);
         }
 
-        Assert.Contains("{EditionCode} Organizers:", body);
+        Assert.Contains("{EventNameShort} Organizers:", body);   // §933 — {EditionCode} retired
         Assert.EndsWith("{OrganizerLinkedInUrls}", body);
     }
 
@@ -70,7 +70,7 @@ public sealed class SoMeTemplateTests
                 ("EventSystemUrl", "https://eldk27.expertslive.dk"),
                 ("SpeakerNames", "Andreas Sobczyk | Sherry List"),
                 ("EventTags", "#ELDK27 #ExpertsLiveDK"),
-                ("EditionCode", "ELDK27"),
+                ("EventNameShort", "ELDK27"),
                 ("OrganizerLinkedInUrls", "Morten Waltorp Knudsen | Martin Byskov")));
 
         Assert.StartsWith("✨ Track Speakers: AI ✨", body);

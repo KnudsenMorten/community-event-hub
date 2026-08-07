@@ -61,7 +61,7 @@ public class SoMePostEditorModel : PageModel
     public IReadOnlyList<string> AvailableTokens { get; private set; } = Array.Empty<string>();
 
     /// <summary>True when the body places the credit itself, so it is not appended a second time.</summary>
-    public bool BodyPlacesCredit { get; private set; }
+    // §932 — removed: the credit is an ordinary token, so it needs no property of its own.
 
     public bool AccessDenied { get; private set; }
     public string? Message { get; private set; }
@@ -126,15 +126,9 @@ public class SoMePostEditorModel : PageModel
     /// <summary>§861 — the edition code, so the credit block can be composed and recognised.</summary>
     public string? EditionCode { get; private set; }
 
-    /// <summary>
-    /// §861 — the organizer credit exactly as it will publish, shown READ-ONLY under the text box.
-    /// </summary>
-    /// <remarks>
-    /// 🔒 He asked for the credit to become a variable (*"you must replace it with variables"*), so
-    /// it is displayed rather than edited. Showing it matters: it is part of the post, and hiding it
-    /// entirely would make the editor lie about what publishes.
-    /// </remarks>
-    public string? CreditPreview { get; private set; }
+    // §932 — removed: the credit is part of the BODY now, shown in the text box and the preview
+    //   like every other token. A separate read-only display of one variable is the drift the
+    //   operator called out: "we have 10+ variables and each of them must be handled the same way".
 
     /// <summary>What the picker offers. Empty when the library is not wired — text still edits.</summary>
     public IReadOnlyList<SoMeGraphicRef> Graphics { get; private set; } = Array.Empty<SoMeGraphicRef>();
@@ -201,14 +195,23 @@ public class SoMePostEditorModel : PageModel
         // His edit, not AutoText. Blank clears it and the composed text takes over again — which is
         // how he undoes an edit without needing a "revert" button.
         //
-        // 🔒 §861 — STORE THE BODY ONLY. The credit is appended at publish time, so it must never
-        // come back in here. Stripped defensively: the box does not contain it, but a paste from an
-        // older post (or a legacy row opened before this shipped) would otherwise re-freeze it and
-        // silently opt the post out of the §858 mention upgrade.
-        var editionCode = await _db.Events
-            .Where(e => e.Id == post.EventId).Select(e => e.Code).FirstOrDefaultAsync(ct);
+        // 🔴 §932 — THE CREDIT IS STORED WITH THE BODY, LIKE EVERY OTHER TOKEN. Operator
+        // 2026-08-07: *"credit must NOT live outside"*.
+        //
+        // ⚠️ THIS LINE PUBLISHED A POST WITH NO ORGANIZER CREDIT. §861 stripped the credit on save
+        // because back then the publisher stapled it on afterwards. §888.3 reversed that on
+        // 2026-08-06 07:59 — *"remove the crap you build for organizer and make it as a variable
+        // like others"* — and put the token INTO the body, but this strip stayed behind. So from
+        // that morning every save quietly deleted the credit out of the stored body while the
+        // PREVIEW went on re-appending it for display.
+        //
+        // ⇒ What he approved and what published were different documents. Post 495, edited 07:44
+        // that morning, kept its credit; 6345 and 496, edited at 18:02, lost it, and 6345 went to
+        // the company page bare at 07:00 the next day.
+        //
+        // 🔒 The body is now saved EXACTLY as he wrote it. Preview and publish read the same text
+        // through the same resolver, so they cannot disagree again — which is the only durable fix.
         var text = (EditText ?? string.Empty).Trim();
-        if (SoMePostCredit.TryStrip(text, editionCode, out var bodyOnly)) text = bodyOnly;
 
         // 🔴 §907.2 — SAVING WITHOUT CHANGING ANYTHING MUST NOT CREATE AN "EDIT".
         //
@@ -507,9 +510,13 @@ public class SoMePostEditorModel : PageModel
         // §861 — the credit is composed from settings, never stored on the post.
         EditionCode = await _db.Events
             .Where(e => e.Id == eventId).Select(e => e.Code).FirstOrDefaultAsync(ct);
-        var credits = await _db.SoMeSettings
-            .Where(s => s.EventId == eventId).Select(s => s.OrganizerCredits).FirstOrDefaultAsync(ct);
-        CreditPreview = SoMePostCredit.Suffix(EditionCode, credits).TrimStart('\n');
+        // 🔴 §932 — NOTHING SPECIAL IS READ FOR THE CREDIT HERE ANY MORE.
+        //
+        // Operator 2026-08-07: *"no difference between {organizers} and {speakers}"* — and he is
+        // right down to the mentions: `{Organizers}` resolves through the SAME mention pipeline as
+        // `{Speakers}` (§888.3), so the one thing that looked like a reason to special-case it never
+        // was one. `{Organizers}` is resolved by the ordinary resolver, coloured as a variable by
+        // the ordinary Segments(), and published by the ordinary publisher.
 
         // The walk order IS the campaign order, so previous/next moves through time — the way he
         // reads the calendar. Id breaks ties so the order is stable across loads.
@@ -608,16 +615,14 @@ public class SoMePostEditorModel : PageModel
         {
             PostId = Post.Id;
 
-            // 🔒 §861 — HE EDITS THE BODY ONLY. The organizer credit is deliberately NOT in this
-            // box: a credit he can edit is a credit that FREEZES (§861.3 — posts 383 and 495 did
-            // exactly that) and would then miss the §858 mention upgrade he is expecting.
+            // 🔴 §932 — THE BOX SHOWS THE WHOLE BODY, credit token included. §861 hid it here to
+            // stop it FREEZING as literal words; §888.3 solved that properly by making it a token,
+            // so hiding it now only guarantees that saving deletes it.
             //
-            // ⚠️ Legacy rows still have it baked in, so it is stripped on the way IN as well as by
-            // the migration — otherwise the first person to open an un-migrated post would re-save
-            // the frozen copy and put it straight back.
-            EditText = SoMePostCredit.TryStrip(Post.EffectiveText, EditionCode, out var strippedBody)
-                ? strippedBody
-                : Post.EffectiveText;
+            // 🔑 §861.3's real worry is answered by the TOKEN, not by concealment: `{Organizers}`
+            // resolves at publish, so it still picks up the §858 mention upgrade no matter when the
+            // post was written or edited.
+            EditText = Post.EffectiveText;
             ImageRef = Post.ImageRef;
 
             // §865.2(5) — resolve the body's {tokens} NOW so the preview shows real values, while
@@ -625,22 +630,17 @@ public class SoMePostEditorModel : PageModel
             // what he reads here is what will go out.
             var values = await _composer.ValuesForAsync(Post, ct);
             AvailableTokens = SoMePostComposer.TokensFor(Post.TemplateKind);
-            BodyPlacesCredit =
-                (EditText ?? string.Empty).Contains("{Organizers}", StringComparison.OrdinalIgnoreCase)
-                || (EditText ?? string.Empty).Contains("{OrganizerLinkedInUrls}", StringComparison.OrdinalIgnoreCase);
 
-            // 🔴 §872.1 — APPEND THE CREDIT AS A **TOKEN**, NOT AS RESOLVED TEXT.
-            // Operator 2026-08-05: "the organizers variable is not colored as a variable". He was
-            // right: composing it with SoMePostCredit.Compose() produced literal words, so
-            // Segments() correctly classified it as HIS text and left it uncoloured — the preview
-            // then lied about which parts update themselves, which is the one job the colour has.
-            var previewBody = BodyPlacesCredit
-                ? EditText
-                : (EditText ?? string.Empty).TrimEnd()
-                  + (string.IsNullOrWhiteSpace(credits)
-                      ? string.Empty
-                      : "\n\n{EditionCode} Organizers:\n{Organizers}");
-            PreviewSegments = SoMePostComposer.Segments(previewBody, values);
+            // 🔴 §932 — THE PREVIEW SHOWS THE BODY. NOTHING IS ADDED TO IT.
+            //
+            // ⚠️ This append is the other half of the defect. It made the preview show a credit that
+            // the stored body did not contain, so "exactly what publishes" was a promise the page
+            // could not keep — he approved a post with an organizer line and a post without one went
+            // out. A preview that adds anything is a preview of a different document.
+            //
+            // 🔒 Preview and publish now render the SAME text through the SAME resolver, so the only
+            // way to see a credit here is for the body to actually contain the token.
+            PreviewSegments = SoMePostComposer.Segments(EditText, values);
             // §844.5 — shown and edited in DANISH wall-clock; stored as UTC.
             ScheduledAt = SoMeDisplayTime.ToDanish(Post.ScheduledAtUtc).DateTime;
             VideoSupported = SoMeGraphicLibrary.SupportsVideo(Post.TemplateKind);

@@ -1993,6 +1993,21 @@ listed in a tier, or rendered into a graphic.
   delete a genuine sponsor from the campaign — a §842.5 contract breach caused by a tidy-up. A
   company with no contacts is not test either; that is the state every newly signed sponsor is in.
 
+**Every value in a post is a token in the body — including the organizer credit.** The credit once
+lived outside the body: the editor stripped it on load and on save, and the publisher stapled it back
+on. That produced a post whose stored words were not the words that published, and it eventually did
+exactly what that arrangement always risked — a post went to the company page with **no organizer
+credit at all**, after a preview that showed one.
+- 🔒 **The invariant is now structural, not procedural.** The editor stores the body verbatim and the
+  preview renders that same body through the same resolver the publisher uses. Preview and publish
+  cannot disagree, because there is only one text and one code path — rather than two that are
+  expected to stay in step.
+- 🔑 **Nothing about the credit justified special-casing it.** The one apparent difference — it
+  @-mentions people — is the same mention pipeline the speaker variable uses.
+- ⚠️ **A retired token keeps resolving.** Names are retired from the *offered* list only; a body
+  pasted from an older post must never publish a literal `{…}`. The renderer closes a gap silently,
+  which is precisely what makes that failure mode expensive to detect.
+
 **A track waits for its line-up to settle, and "settled" needs three facts, not one.** A track post
 lists a whole track's speakers, so it is incomplete until that track's sessions have arrived. The
 readiness signal is the **latest** of: the track's own newest session, the **edition's** newest
