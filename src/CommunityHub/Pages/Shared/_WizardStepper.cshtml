@@ -69,6 +69,22 @@
                 <span style="flex:1;">
                     <strong>@step.Number. @step.Title</strong>
                     <span class="muted" style="display:block;font-size:13px;">@step.Description</span>
+                    @*
+                        §949 — WHY this step is not done, on the card itself. Operator reported the
+                        same step twice; both times the answer was a chip with no tick, and the one
+                        blank field was below the fold. Shown only while PENDING (on a done step it
+                        would be stale noise), and styled as a real notice rather than muted text —
+                        the whole failure was that the reason was easy to miss.
+                    *@
+                    @if (step.Done != true && !string.IsNullOrWhiteSpace(step.Blocker))
+                    {
+                        <span role="note"
+                              style="display:block;margin-top:6px;font-size:13px;font-weight:600;
+                                     color:#8a5a00;background:#fff7e6;border:1px solid #f0d9a8;
+                                     border-radius:6px;padding:6px 8px;">
+                            @step.Blocker
+                        </span>
+                    }
                 </span>
                 <a href="@WithReturn(step.Url)"
                    class="@(step.Done == true ? "" : "btn-primary")" style="flex:0 0 auto;align-self:center;">

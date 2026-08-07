@@ -7,7 +7,7 @@
 
 | Public landing page | …and on a phone |
 |---|---|
-| [![Public landing page](docs/img/public-landing.png)](docs/img/public-landing.png) | [![Public landing page on mobile](docs/img/public-landing-mobile.png)](docs/img/public-landing-mobile.png) |
+| [![The public sign-in page](docs/img/public-login.png)](docs/img/public-login.png) | [![The public sign-in page on mobile](docs/img/public-login-mobile.png)](docs/img/public-login-mobile.png) |
 
 *The public front door — event details, programme and a sign-in, no login required. The whole hub is mobile-first, so it looks and works the same on the phone in an attendee's hand at the venue.*
 
@@ -132,7 +132,7 @@ Each entry links to its full-size desktop capture; append `-mobile` to any filen
 
 | Screen | What it shows |
 |---|---|
-| [Landing](docs/img/public-landing.png) | The event front door — dates, tickets, and the way in |
+| [Sign-in](docs/img/public-login.png) | The public front door — the passwordless way in |
 | [Sessions](docs/img/public-sessions.png) | The public catalogue with live filters for type, length, room, date, track and level |
 | [Master classes](docs/img/public-masterclasses.png) | Full-day sessions, with capacity and booking state |
 | [Speakers](docs/img/public-speakers.png) | The published line-up (unpublished speakers are never shown) |

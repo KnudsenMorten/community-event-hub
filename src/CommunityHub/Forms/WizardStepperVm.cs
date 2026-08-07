@@ -12,8 +12,20 @@ namespace CommunityHub.Forms;
 /// <param name="Done">true = done (green check), false = pending, null = guided link whose
 /// state can't be determined (shown, never counted — e.g. the sponsor ERP-contacts step).</param>
 /// <param name="Url">Where the Edit/Open link points (the step's route, or a section anchor).</param>
+/// <param name="Blocker">
+/// §949 — a short, ALREADY-LOCALISED sentence naming what would complete this step (e.g. "To finish
+/// this step, add: Phone number"). Rendered only when the step is pending. Null = nothing more
+/// specific to say than the description already says.
+/// </param>
+/// <remarks>
+/// <para>🔴 <b>§949, reported twice.</b> A pending step used to be a chip without a tick and nothing
+/// else, so a person whose only gap was below the fold could not tell what to do — the platform kept
+/// answering "not done" without ever answering "why". It lives on the SHARED card rather than on the
+/// role wizard alone because <b>every data-backed step has the same silence</b>; speaker and sponsor
+/// steps can populate it the moment they can name a field.</para>
+/// </remarks>
 public sealed record WizardStepperCard(
-    int Number, string Title, string Description, bool? Done, string Url);
+    int Number, string Title, string Description, bool? Done, string Url, string? Blocker = null);
 
 /// <summary>
 /// View-model for the shared <c>_WizardStepper</c> partial (REQUIREMENTS §161): the one

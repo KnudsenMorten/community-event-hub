@@ -56,6 +56,25 @@ const ANON_SOURCE = process.env.ANON_SOURCE ?? '';
 const OUT_DIR = path.resolve(__dirname, '../../docs/img');
 
 /**
+ * 🔴 THE SECOND HOME FOR THESE IMAGES, AND THE BUG THAT MADE IT NECESSARY (2026-08-07).
+ *
+ * The CEH introduction page does NOT read `docs/img/`. It is served by the app, so it loads
+ * `/content/<edition>/img/…` from `wwwroot`. Refreshing `docs/img/` therefore updated the README and
+ * the public mirror while the **intro kept showing the previous capture** — and because the previous
+ * capture was the pre-§952 one, the operator was still looking at *"The speaker hub is only for
+ * speakers and master-class speakers. (Organizer)"* published as the illustration of the speaker
+ * experience, hours after that defect was supposedly fixed.
+ *
+ * 🔑 Mirrored HERE, in the capture, rather than by remembering to copy: a second copy kept in step by
+ * hand agrees only by coincidence (§945, §939 — the same lesson twice already).
+ *
+ * ⚠️ ONLY files that ALREADY exist there are refreshed. That folder is a deliberate CURATED SUBSET
+ * (~29 of 94) shipped inside the app payload; blindly copying all 94 would inflate every deploy with
+ * images no page references.
+ */
+const APP_IMG_DIR = path.resolve(__dirname, '../../src/CommunityHub/wwwroot/content/eldk27/img');
+
+/**
  * 🔒 THE ACCOUNTS ARE NOT IN THIS FILE, AND THAT IS THE POINT. `tests/` publishes to the public
  * mirror (it is not on the publish denylist), so the five addresses hardcoded here on 2026-08-07
  * were personal e-mail addresses on their way to a public GitHub repo. They now live in
@@ -383,7 +402,11 @@ async function refusalReason(page: Page, role: string | undefined): Promise<stri
  */
 const TARGETS: { slug: string; url: string; auth: boolean; role?: string }[] = [
     // --- public -----------------------------------------------------------------
-    { slug: 'public-landing', url: '/Welcome', auth: false },
+    // ⚠️ NO `public-landing` / `/Welcome`. It is NOT a public page: the marketing landing page was
+    // removed entirely (operator 2026-06-21) and `/Welcome` now answers anonymous traffic with a 302
+    // to `/Login`. It sat here skipping every run as "(no access)" — a skip that read like a
+    // transient problem while actually meaning "this target has been wrong since June". The real
+    // public front door is the sign-in page (`public-login`).
     { slug: 'public-sessions', url: '/Sessions', auth: false },
     { slug: 'public-session-detail', url: '/Sessions?type=MasterClass', auth: false },
     { slug: 'public-speakers', url: '/Speakers', auth: false },
@@ -490,6 +513,7 @@ test.describe('documentation screenshots', () => {
         const written: string[] = [];
         const skipped: string[] = [];
         const refused: string[] = [];
+        const mirrored: string[] = [];
 
         async function capture(page: Page, t: typeof TARGETS[number], suffix: string, role?: string) {
             const name = `${t.slug}${suffix}`;
@@ -519,6 +543,14 @@ test.describe('documentation screenshots', () => {
                 // scroll to.
                 await page.screenshot({ path: file, fullPage: false });
                 written.push(name);
+
+                // Mirror into the app's own content folder, so the CEH intro page shows THIS
+                // capture rather than whatever was there last. Existing files only — see APP_IMG_DIR.
+                const appCopy = path.join(APP_IMG_DIR, `${name}.png`);
+                if (fs.existsSync(appCopy)) {
+                    fs.copyFileSync(file, appCopy);
+                    mirrored.push(name);
+                }
             } catch (e) {
                 skipped.push(`${name} (${(e as Error).message.split('\n')[0].slice(0, 80)})`);
             }
@@ -587,6 +619,23 @@ test.describe('documentation screenshots', () => {
         fs.mkdirSync(reportDir, { recursive: true });
         fs.writeFileSync(path.join(reportDir, 'docs-capture-report.txt'),
             `captured:\n${written.join('\n')}\n\nskipped:\n${skipped.join('\n')}\n\nrefused:\n${refused.join('\n')}\n`);
+
+        console.log(`\n=== mirrored into the app content folder: ${mirrored.length} ===`);
+
+        // 🔴 THE INTRO'S IMAGES MUST NOT SURVIVE A CAPTURE UNREFRESHED. This is the check that would
+        // have caught the 2026-08-07 miss: `docs/img` was regenerated, the app folder was not, and
+        // the intro went on showing a published refusal for hours. Any file sitting in the app
+        // folder that this run did NOT rewrite is, by definition, older than the capture.
+        const staleInApp = fs.existsSync(APP_IMG_DIR)
+            ? fs.readdirSync(APP_IMG_DIR)
+                .filter(f => f.toLowerCase().endsWith('.png'))
+                .map(f => f.replace(/\.png$/i, ''))
+                .filter(slug => !mirrored.includes(slug))
+            : [];
+        expect(staleInApp,
+            'images the CEH intro serves that this capture did not refresh — they are older than the '
+            + 'rest of the set, and a stale one is what published a refusal as the feature:\n'
+            + staleInApp.join('\n')).toEqual([]);
 
         // 🔴 A REFUSAL FAILS THE RUN. Not writing the file is necessary but not sufficient: a
         // refusal means a page the operator expects to see documented has no picture AND the role

@@ -113,7 +113,7 @@ Everything listed is live in the product today; nothing here is planned or parti
 
 ## 1. Platform — built for every edition
 
-![The public front door — event details, programme and a no-login sign-in, the same generic platform behind every edition](img/public-landing.png)
+![The public front door — event details, programme and a no-login sign-in, the same generic platform behind every edition](img/public-login.png)
 *The public front door of an edition: event details, programme and a sign-in, with no login required. A new edition is a new configuration row, not a new build.*
 
 - **One hub, every year, every community.** The same platform powers each edition
@@ -3487,3 +3487,23 @@ not ready to send.
 **Setting them inactive is a normal thing to do.** An inactive person is recorded, visible and
 editable, but cannot sign in — which is exactly right for somebody you are noting down now and
 opening up later.
+
+## 83. A step that is not finished tells you what is missing *(✅ 2026-08-07)*
+
+Your get-started checklist has always been able to tell you *that* a step was unfinished. It could not
+tell you *why*. A step you had genuinely filled in — your name there, your email there — would sit
+without its tick, and the one blank field might be below the fold where you would never scroll.
+
+"9 of 10 steps done" is a scoreboard, not a diagnosis. It is a correct answer with nothing you can act
+on, which costs you exactly as much time as a wrong one.
+
+**Now an unfinished step names the field that would finish it** — *"To finish this step, add: your
+phone number"* — on the step itself, where you are already looking, before you open anything.
+
+**It always agrees with the tick.** A step is unfinished if and only if it can name something
+outstanding, and a finished step says nothing at all. You will never be sent to a form to fill in
+something that is already filled in, and you will never see a leftover instruction under a step that is
+done.
+
+*Built as a shared capability rather than a fix for one step, because every step that reads its state
+from your data had the same silence.*

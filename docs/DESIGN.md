@@ -538,7 +538,7 @@ Embedding mechanics:
   never `*`. The exact origin list is the `Embedding__BackstageOrigin` app setting (§14).
 - The session cookie is `SameSite=None; Secure` so it survives the cross-site iframe.
 
-![The public front door / sign-in, the same surface that renders inside the embedded portal iframe](img/public-landing.png)
+![The public front door / sign-in, the same surface that renders inside the embedded portal iframe](img/public-login.png)
 *The public front door + sign-in. The same surface renders inside the embedding portal's iframe — PIN login and magic-link tokens work in-frame because the cookie is `SameSite=None; Secure`.*
 
 **Acting-as sessions (organizer "switch to user" + secretary token).** Both reuse the *same* cookie
@@ -2864,6 +2864,17 @@ messages.
   did not, so a speaker could save, be told it saved, and watch the step stay incomplete for ever —
   with the field labelled "optional" while the progress bar treated it as required. The label and the
   HTML5 hint in `_ProfileFields` now say "required" for everyone.
+- **Why a step is not done — §949 (2026-08-07).** A pending step used to be a chip without a tick and
+  nothing else: correct, and unactionable. `RoleWizardStep.MissingFields` now carries **stable field
+  KEYS** (`FullName` / `Email` / `Phone`) — not prose, because `CommunityHub.Core` cannot know the
+  request language and the hub ships en + da-DK. The view composes them via `RoleWiz.Missing` +
+  `RoleWiz.Field.<key>` into `WizardStepperCard.Blocker`, and the **shared** `_WizardStepper` partial
+  renders it on any pending card — so speaker and sponsor wizards inherit the capability the moment
+  they can name a field. Profile is the first caller, not a special case.
+  🔒 **The reason is derived from the SAME `ProfileCompletion` rule that decides done-ness**, off one
+  projection: a second, parallel test of the fields is exactly the two-copies defect above, and it
+  would drift into naming a field that is already filled in. Invariant, asserted: a step is incomplete
+  **if and only if** it names ≥1 outstanding field — so a done step carries no stale instruction.
   🔑 **The "no name" state is `""`, not `null`** — `Participant.FullName` is non-nullable, so a rule
   testing only for null would miss every real pre-staged row (§941).
 - **Old entry points are thin redirects.** `/Forms/SpeakerWizard` and `/Forms/GetStarted` now redirect

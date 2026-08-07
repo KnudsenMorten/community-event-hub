@@ -10,7 +10,23 @@ namespace CommunityHub.Forms;
 /// <param name="Key">Stable key → resx label/description (RoleWiz.Step.&lt;key&gt;[.Desc]).</param>
 /// <param name="Route">The existing form/page this step opens (design A — pages untouched).</param>
 /// <param name="Done">True when the participant has already completed this step (data exists).</param>
-public sealed record RoleWizardStep(string Key, string Route, bool Done);
+/// <param name="MissingFields">
+/// §949 — WHICH field(s) would complete this step, when the step can name them. Empty/null means
+/// "this step just has not been answered yet", which its description already says.
+/// </param>
+/// <remarks>
+/// <para>🔴 <b>Why this exists</b> (operator 2026-08-07, reported TWICE): <i>"i still dont see that
+/// 'User Profile' is completed in the get started wizard. i reported this earlier."</i> The rule was
+/// right — his phone was blank — but the screen showed a filled-in name, a filled-in e-mail, and a
+/// chip with no tick. The phone field was below the fold. <b>"9 of 10" is a scoreboard, not a
+/// diagnosis</b>, and a correct answer with no reason attached costs as much time as a wrong one.</para>
+///
+/// <para>🔑 <b>FIELD KEYS, NOT SENTENCES.</b> These are stable identifiers the VIEW localises
+/// (<c>RoleWiz.Field.&lt;key&gt;</c>), because this assembly has no business composing English —
+/// the hub ships en + da-DK and a hardcoded sentence here would be untranslatable.</para>
+/// </remarks>
+public sealed record RoleWizardStep(
+    string Key, string Route, bool Done, IReadOnlyList<string>? MissingFields = null);
 
 /// <summary>
 /// A role's "Get started" progress (REQUIREMENTS §43), mirroring
@@ -113,10 +129,28 @@ public sealed class RoleWizardService
         //    EMAIL + PHONE are all filled in. The rule itself lives in ProfileCompletion because
         //    ProfileFormService.IsDoneAsync answers the same question elsewhere, and two copies of
         //    "am I finished?" is the §939 defect (a finished volunteer told 90%).
-        var profileDone = await _db.Participants
+        //
+        //    §949 — and when it is NOT done, say WHICH of the three is blank. One projection
+        //    fetches the fields; completeness is then decided by the SAME shared rule
+        //    (ProfileCompletion.IsCompleteFor), never by re-testing the fields here — re-deriving
+        //    "am I complete?" beside the reason is exactly how §945's two copies drifted apart.
+        var profile = await _db.Participants
             .Where(p => p.Id == participantId && p.EventId == eventId)
-            .AnyAsync(ProfileCompletion.IsComplete, ct);
-        steps.Add(new("profile", "/Profile", profileDone));
+            .Select(p => new { p.FullName, p.Email, p.Phone })
+            .FirstOrDefaultAsync(ct);
+
+        var profileDone = profile is not null
+            && ProfileCompletion.IsCompleteFor(profile.FullName, profile.Email, profile.Phone);
+
+        List<string>? profileMissing = null;
+        if (!profileDone)
+        {
+            profileMissing = new List<string>();
+            if (string.IsNullOrWhiteSpace(profile?.FullName)) profileMissing.Add("FullName");
+            if (string.IsNullOrWhiteSpace(profile?.Email)) profileMissing.Add("Email");
+            if (string.IsNullOrWhiteSpace(profile?.Phone)) profileMissing.Add("Phone");
+        }
+        steps.Add(new("profile", "/Profile", profileDone, profileMissing));
 
         // 1. Volunteer availability — volunteers only (their first scheduling input).
         //    Done = ≥1 saved per-day availability row.

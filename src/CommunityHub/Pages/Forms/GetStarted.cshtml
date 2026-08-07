@@ -5,6 +5,16 @@
     ViewData["Title"] = Localizer["RoleWiz.Title"].Value;
     string StepTitle(string key) => Localizer["RoleWiz.Step." + key].Value;
     string StepDesc(string key) => Localizer["RoleWiz.Step." + key + ".Desc"].Value;
+
+    // §949 — turn the step's field KEYS into one localised sentence naming what is still needed.
+    // The service deliberately returns keys rather than prose (it cannot know the language), so the
+    // composition happens here, where the localizer is.
+    string? Blocker(IReadOnlyList<string>? missing)
+    {
+        if (missing is null || missing.Count == 0) return null;
+        var names = missing.Select(f => Localizer["RoleWiz.Field." + f].Value);
+        return string.Format(Localizer["RoleWiz.Missing"].Value, string.Join(", ", names));
+    }
 }
 
 @* §161: the generic-role Get-Started is the same sponsor-style stepper as every other role —
@@ -25,7 +35,9 @@ else
     foreach (var step in v.Steps)
     {
         n++;
-        cards.Add(new WizardStepperCard(n, StepTitle(step.Key), StepDesc(step.Key), step.Done, Url.Page(step.Route)!));
+        cards.Add(new WizardStepperCard(
+            n, StepTitle(step.Key), StepDesc(step.Key), step.Done, Url.Page(step.Route)!,
+            Blocker(step.MissingFields)));
     }
     string? continueUrl = null, continueLabel = null;
     if (!v.AllDone && v.NextStep is not null)
