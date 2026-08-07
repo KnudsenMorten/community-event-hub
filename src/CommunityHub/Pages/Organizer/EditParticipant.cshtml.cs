@@ -478,8 +478,34 @@ public class EditParticipantModel : PageModel
         {
             try
             {
-                var sent = await _welcome.SendWelcomeAsync(p.Id, ct);
-                Message = sent ? "Welcome email sent." : "Welcome email was already sent earlier — nothing re-sent.";
+                // 🔴 §964 — THE RESEND BUTTON MUST ACTUALLY RESEND. It was labelled "Resend welcome
+                // email" but called SendWelcomeAsync WITHOUT `force`, so the once-ever ledger check
+                // short-circuited every click: nothing sent, and — because the send never reached the
+                // transport — no EmailLog row either, so it was invisible in the Email Log too. The
+                // helper text under the button even admitted it ("this will not send again"), which
+                // made the control say two opposite things at once.
+                //
+                // 🔑 FORCE ONLY WHEN THIS REALLY IS A RE-SEND. A first send must keep the ledger
+                // guard, so the ordinary path stays idempotent and an import cannot double-welcome.
+                var alreadyWelcomed = await WelcomeSentAsync(p, ct);
+                var sent = await _welcome.SendWelcomeAsync(p.Id, ct, force: alreadyWelcomed);
+
+                if (sent)
+                {
+                    Message = alreadyWelcomed ? "Welcome email re-sent." : "Welcome email sent.";
+                }
+                else
+                {
+                    // ⚠️ Do NOT report this as "already sent" — with force on, that is no longer what
+                    // a false means. §234: a ring-dropped or kill-switched send returns false ON
+                    // PURPOSE so the ledger is not written and a later reconcile can retry. Naming
+                    // the real candidates beats a cheerful message that is wrong, and the Email Log
+                    // carries the recorded reason (§938 writes a Dropped row, not a failure).
+                    Error = "Nothing was sent. The usual reasons are that this person is outside the "
+                          + "released email rings, the email kill-switch is on, or this role does not "
+                          + "use the generic welcome (attendees get the Master Class invite instead). "
+                          + "Check the Email Log — a ring-drop is recorded there with its reason.";
+                }
             }
             catch (Exception ex)
             {

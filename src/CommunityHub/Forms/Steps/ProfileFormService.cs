@@ -161,19 +161,20 @@ public sealed class ProfileFormService : IWizardFormService
         var trimmedPhone = string.IsNullOrWhiteSpace(model.Phone) ? null : model.Phone.Trim();
         if (trimmedPhone is { Length: > 40 })
             return Fail(model, modelState, nameof(model.Phone), "That phone number is too long (max 40 characters).");
-        // §945 (operator 2026-08-07): *"Phone is mandatory to fill out."* — phone is now REQUIRED
-        // for EVERY role, not only volunteers.
+        // 🔴 §945a (operator 2026-08-07, correcting §945): *"i enforced only for volunteers the phone
+        // otherwise disable so it is not mandatory and a shared form"*. Phone is REQUIRED of
+        // VOLUNTEERS ONLY — §262's rule, which is what he had actually set. §945 read his *"Phone is
+        // mandatory"* as covering every role.
         //
-        // 🔴 This SUPERSEDES §262 (phone required for volunteers, optional for everyone else), and
-        // the reason is a dead end that §262 left behind: COMPLETION has always tested phone for all
-        // roles, while VALIDATION only demanded it from volunteers. So a speaker or organizer could
-        // save their profile with no phone, be told it saved, and watch the Get Started step stay
-        // incomplete for ever — with nothing on the page explaining why. One rule required it and
-        // another did not, and the person is the one who paid for the disagreement.
+        // 🔑 §945's real lesson survives, and it is NOT the scope: completion and validation must
+        // MOVE TOGETHER. The dead end §945 fixed was completion testing phone for all roles while
+        // validation demanded it only from volunteers — a speaker saved, was told it saved, and
+        // watched the step stay incomplete for ever. Both sides now read the SAME predicate
+        // (ProfileCompletion.PhoneRequiredFor), so they cannot drift apart again in either direction.
         //
-        // ⚠️ The volunteer-specific reason §262 gave (*"we must be able to reach them on the day"*)
-        // is still true; it is simply no longer the only reason.
-        if (trimmedPhone is null)
+        // ⚠️ The volunteer reason §262 gave — *"we must be able to reach them on the day"* — is why
+        // this one role keeps it.
+        if (trimmedPhone is null && Core.Forms.ProfileCompletion.PhoneRequiredFor(p.Role))
         {
             model.FullName = trimmedName;
             return Fail(model, modelState, nameof(model.Phone), "Please enter your phone number.");

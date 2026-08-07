@@ -473,14 +473,40 @@ test.describe('documentation screenshots', () => {
         'ANON_SOURCE not set — dump the real strings first so redaction can be ASSERTED, not assumed');
     test.setTimeout(45 * 60_000);
 
+    /**
+     * 🔴 §965 — SIGN IN WITHOUT ASKING FOR A CODE. This used to fill the e-mail and click
+     * "Send my sign-in code", which fires a REAL PIN e-mail to the operator, and only THEN type the
+     * planted PIN. Planting sends nothing — but the click did, on every login. Five roles × two
+     * viewports × several runs came to **55 PIN e-mails to him in one afternoon** (measured in
+     * EmailLogs), which is exactly what he objected to on 2026-08-02: *"i get tons of pin sign in
+     * right now"*. The harness was the thing generating them while its own comments claimed no mail
+     * was sent.
+     *
+     * 🔑 The planted PIN is ALREADY valid, so requesting another one was never needed — step 1 of
+     * the login exists to deliver a code we already have. `VerifyPin` is a separate handler with no
+     * state guard, so posting straight to it skips the send entirely. The antiforgery token is
+     * lifted from the page's own form, so this is the real endpoint with the real protections, not
+     * a test back door.
+     */
     async function login(page: Page, email: string, pin: string) {
         await page.goto(`${BASE}/Login`, { waitUntil: 'domcontentloaded' });
-        await page.locator('input[name="Email"]').fill(email);
-        await page.getByRole('button', { name: /send.*code|email me|request/i }).click();
-        const pinInput = page.locator('input[name="Pin"]');
-        await expect(pinInput).toBeVisible();
-        await pinInput.fill(pin);
-        await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+        await page.evaluate(({ email, pin }) => {
+            const token = document.querySelector<HTMLInputElement>(
+                'input[name="__RequestVerificationToken"]')?.value ?? '';
+            const form = document.createElement('form');
+            form.method = 'post';
+            form.action = '/Login?handler=VerifyPin';
+            const add = (name: string, value: string) => {
+                const i = document.createElement('input');
+                i.type = 'hidden'; i.name = name; i.value = value;
+                form.appendChild(i);
+            };
+            add('__RequestVerificationToken', token);
+            add('Email', email);
+            add('Pin', pin);
+            document.body.appendChild(form);
+            form.submit();
+        }, { email, pin });
         // ⚠️ ATTACHED, not visible. The sign-out control lives inside the collapsed navigation on a
         // desktop viewport, so "visible" fails on a session that is perfectly valid — the button
         // renders at all only when signed in, which is the property being asserted.

@@ -76,7 +76,59 @@ public sealed class ProfileCompletionTests
     public void The_rule_requires_name_email_and_phone(
         string? fullName, string? email, string? phone, bool expected)
     {
-        Assert.Equal(expected, ProfileCompletion.IsCompleteFor(fullName, email, phone));
+        Assert.Equal(expected, ProfileCompletion.IsCompleteFor(fullName, email, phone, ParticipantRole.Volunteer));
+    }
+
+    // ------------------------------------------------ §945a — phone is a VOLUNTEER rule
+
+    /// <summary>
+    /// 🔴 §945a (operator 2026-08-07, correcting §945): <i>"i enforced only for volunteers the phone
+    /// otherwise disable so it is not mandatory and a shared form"</i>.
+    /// </summary>
+    /// <remarks>
+    /// <para>📊 <b>Measured, not argued.</b> 51 real active people on PROD had no phone — 20 speakers,
+    /// 24 sponsors, 3 organizers, 3 other, and <b>exactly ONE volunteer</b>. Under §945's
+    /// every-role rule all 51 carried an open profile step and would have been chased by the
+    /// get-started digest the day the e-mail rings opened. This rule makes that one person.</para>
+    ///
+    /// <para>⚠️ Name and e-mail stay required of everyone — the narrowing is only about phone.</para>
+    /// </remarks>
+    [Theory]
+    [InlineData(ParticipantRole.Volunteer, false)]   // must give a phone — reachable on the day
+    [InlineData(ParticipantRole.Speaker, true)]
+    [InlineData(ParticipantRole.Sponsor, true)]
+    [InlineData(ParticipantRole.Organizer, true)]
+    [InlineData(ParticipantRole.Attendee, true)]
+    public void Only_a_volunteer_needs_a_phone_to_be_complete(ParticipantRole role, bool completeWithoutPhone)
+    {
+        Assert.Equal(completeWithoutPhone,
+            ProfileCompletion.IsCompleteFor("Robin Solberg", "p@example.test", null, role));
+
+        // Everyone is complete WITH a phone, and nobody is complete without a name.
+        Assert.True(ProfileCompletion.IsCompleteFor("Robin Solberg", "p@example.test", "+4512345678", role));
+        Assert.False(ProfileCompletion.IsCompleteFor("", "p@example.test", "+4512345678", role));
+    }
+
+    /// <summary>
+    /// 🔒 The SQL-translatable expression must narrow with the in-memory helper. Narrowing one alone
+    /// is §945's original defect in mirror image — the progress bar and the form disagreeing about
+    /// whether somebody is finished.
+    /// </summary>
+    [Theory]
+    [InlineData(ParticipantRole.Volunteer, false)]
+    [InlineData(ParticipantRole.Speaker, true)]
+    [InlineData(ParticipantRole.Sponsor, true)]
+    public async Task The_query_narrows_with_the_helper(ParticipantRole role, bool expected)
+    {
+        using var db = NewDb();
+        var p = await SeedAsync(db, role, "Robin Solberg", phone: null);
+
+        var viaQuery = await db.Participants
+            .Where(x => x.Id == p.Id && x.EventId == EventId)
+            .AnyAsync(ProfileCompletion.IsComplete);
+
+        Assert.Equal(expected, viaQuery);
+        Assert.Equal(viaQuery, ProfileCompletion.IsCompleteFor(p.FullName, p.Email, p.Phone, p.Role));
     }
 
     /// <summary>
@@ -104,7 +156,7 @@ public sealed class ProfileCompletionTests
             .AnyAsync(ProfileCompletion.IsComplete);
 
         Assert.Equal(expected, viaQuery);
-        Assert.Equal(viaQuery, ProfileCompletion.IsCompleteFor(p.FullName, p.Email, p.Phone));
+        Assert.Equal(viaQuery, ProfileCompletion.IsCompleteFor(p.FullName, p.Email, p.Phone, p.Role));
     }
 
     // ---------------------------------------------------------------- one rule, not two
@@ -131,22 +183,28 @@ public sealed class ProfileCompletionTests
             .AnyAsync(ProfileCompletion.IsComplete);
 
         Assert.Equal(viaWizard, viaStepService);
-        Assert.Equal(ProfileCompletion.IsCompleteFor(fullName, p.Email, phone), viaStepService);
+        Assert.Equal(ProfileCompletion.IsCompleteFor(fullName, p.Email, phone, p.Role), viaStepService);
     }
 
-    // ---------------------------------------------------------------- phone is mandatory, all roles
+    // ------------------------------------------- §945a — phone is mandatory for VOLUNTEERS only
 
     /// <summary>
-    /// §945 supersedes §262. Saving with no phone is REFUSED for every role — not only volunteers.
-    /// 🔴 The dead end this removes: completion always tested phone for everyone, so a non-volunteer
-    /// who saved without one was told the save succeeded while the step stayed incomplete for ever.
+    /// §945a (operator 2026-08-07) narrows §945 back to §262's scope: <i>"i enforced only for
+    /// volunteers the phone otherwise disable so it is not mandatory and a shared form"</i>.
     /// </summary>
+    /// <remarks>
+    /// 🔴 <b>This test used to assert the opposite</b> (<c>..._for_every_role</c>) and was rewritten
+    /// rather than deleted, because the pair of facts below is the point: a volunteer is refused, and
+    /// everyone else is <b>saved AND immediately complete</b>. The second half is what stops §945's
+    /// dead end reappearing in mirror image — a save that succeeds while the step stays incomplete.
+    /// </remarks>
     [Theory]
-    [InlineData(ParticipantRole.Volunteer)]
-    [InlineData(ParticipantRole.Speaker)]
-    [InlineData(ParticipantRole.Organizer)]
-    [InlineData(ParticipantRole.Sponsor)]
-    public async Task Saving_without_a_phone_is_refused_for_every_role(ParticipantRole role)
+    [InlineData(ParticipantRole.Volunteer, true)]    // refused — must be reachable on the day (§262)
+    [InlineData(ParticipantRole.Speaker, false)]
+    [InlineData(ParticipantRole.Organizer, false)]
+    [InlineData(ParticipantRole.Sponsor, false)]
+    public async Task Saving_without_a_phone_is_refused_for_volunteers_only(
+        ParticipantRole role, bool expectRefused)
     {
         using var db = NewDb();
         var p = await SeedAsync(db, role, phone: null);
@@ -156,24 +214,40 @@ public sealed class ProfileCompletionTests
             new ProfileFormModel { FullName = "Test Person", Phone = null },
             EventId, p.Id, role, ms, default);
 
-        Assert.Equal(WizardStepOutcome.Invalid, outcome);
-        Assert.True(ms.ContainsKey(nameof(ProfileFormModel.Phone)));
-        Assert.False(await db.Participants.Where(x => x.Id == p.Id).AnyAsync(ProfileCompletion.IsComplete));
+        if (expectRefused)
+        {
+            Assert.Equal(WizardStepOutcome.Invalid, outcome);
+            Assert.True(ms.ContainsKey(nameof(ProfileFormModel.Phone)));
+            Assert.False(await db.Participants.Where(x => x.Id == p.Id).AnyAsync(ProfileCompletion.IsComplete));
+        }
+        else
+        {
+            Assert.NotEqual(WizardStepOutcome.Invalid, outcome);
+            Assert.False(ms.ContainsKey(nameof(ProfileFormModel.Phone)));
+            // 🔑 Saved AND complete — the form and the progress bar agreeing is the whole guarantee.
+            Assert.True(await db.Participants.Where(x => x.Id == p.Id).AnyAsync(ProfileCompletion.IsComplete));
+        }
     }
 
-    /// <summary>Whitespace is refused the same way — otherwise a space would satisfy "mandatory".</summary>
-    [Fact]
-    public async Task Saving_a_whitespace_phone_is_refused()
+    /// <summary>
+    /// Whitespace is not a phone number — but only where a phone number is demanded. A volunteer is
+    /// refused; a speaker typing a stray space is not blocked over a field that is optional for them.
+    /// </summary>
+    [Theory]
+    [InlineData(ParticipantRole.Volunteer, true)]
+    [InlineData(ParticipantRole.Speaker, false)]
+    public async Task A_whitespace_phone_is_refused_only_where_a_phone_is_required(
+        ParticipantRole role, bool expectRefused)
     {
         using var db = NewDb();
-        var p = await SeedAsync(db, ParticipantRole.Speaker, phone: null);
+        var p = await SeedAsync(db, role, phone: null);
         var ms = new ModelStateDictionary();
 
         var outcome = await new ProfileFormService(db, new FixedClock()).SaveAsync(
             new ProfileFormModel { FullName = "Test Person", Phone = "   " },
-            EventId, p.Id, ParticipantRole.Speaker, ms, default);
+            EventId, p.Id, role, ms, default);
 
-        Assert.Equal(WizardStepOutcome.Invalid, outcome);
+        Assert.Equal(expectRefused, outcome == WizardStepOutcome.Invalid);
     }
 
     /// <summary>The whole point: fill all three in and the step is complete.</summary>

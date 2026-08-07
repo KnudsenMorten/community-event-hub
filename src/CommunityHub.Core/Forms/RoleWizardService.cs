@@ -136,11 +136,12 @@ public sealed class RoleWizardService
         //    "am I complete?" beside the reason is exactly how §945's two copies drifted apart.
         var profile = await _db.Participants
             .Where(p => p.Id == participantId && p.EventId == eventId)
-            .Select(p => new { p.FullName, p.Email, p.Phone })
+            .Select(p => new { p.FullName, p.Email, p.Phone, p.Role })
             .FirstOrDefaultAsync(ct);
 
         var profileDone = profile is not null
-            && ProfileCompletion.IsCompleteFor(profile.FullName, profile.Email, profile.Phone);
+            && ProfileCompletion.IsCompleteFor(
+                profile.FullName, profile.Email, profile.Phone, profile.Role);
 
         List<string>? profileMissing = null;
         if (!profileDone)
@@ -148,7 +149,13 @@ public sealed class RoleWizardService
             profileMissing = new List<string>();
             if (string.IsNullOrWhiteSpace(profile?.FullName)) profileMissing.Add("FullName");
             if (string.IsNullOrWhiteSpace(profile?.Email)) profileMissing.Add("Email");
-            if (string.IsNullOrWhiteSpace(profile?.Phone)) profileMissing.Add("Phone");
+            // 🔒 §945a — only name a phone when this role actually needs one. Telling a speaker to
+            // "add your phone number to finish this step" when phone is optional for them would be
+            // the §949 defect inverted: a reason that is worse than no reason, because it sends
+            // somebody to fill in a field that will not change their status.
+            if (profile is not null
+                && ProfileCompletion.PhoneRequiredFor(profile.Role)
+                && string.IsNullOrWhiteSpace(profile.Phone)) profileMissing.Add("Phone");
         }
         steps.Add(new("profile", "/Profile", profileDone, profileMissing));
 

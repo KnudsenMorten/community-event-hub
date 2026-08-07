@@ -18,13 +18,23 @@
 <label for="ProfileRole">Role <span style="font-weight:400;color:#6b7280;">(set by organizers &mdash; read-only)</span></label>
 <input type="text" id="ProfileRole" value="@CommunityHub.Branding.RoleDisplay.Name(Model.Role)" disabled />
 
-@* §945 (operator 2026-08-07): *"Phone is mandatory to fill out."* — REQUIRED for every role now,
-   superseding §262's volunteers-only rule. The label and the HTML5 hint must say so, because the
-   server has always refused to mark the Get Started step complete without a phone: while this said
-   "optional" for non-volunteers, the page was telling them the opposite of what the progress bar
-   would do. *@
-<label for="Phone">Phone <span style="font-weight:400;color:#6b7280;">(required)</span></label>
-<input type="tel" asp-for="Phone" autocomplete="tel" maxlength="40" required />
+@*
+    §945a (operator 2026-08-07): *"i enforced only for volunteers the phone otherwise disable so it
+    is not mandatory and a shared form"* — phone is REQUIRED of VOLUNTEERS ONLY, which is §262's
+    original rule. §945 had briefly widened it to every role.
+
+    🔑 The label is driven by the SAME predicate the server validates and the progress bar reads
+    (ProfileCompletion.PhoneRequiredFor), never by a hardcoded word. That is the whole §945 lesson:
+    when the page said one thing and the server did another, a speaker saved their profile, was told
+    it saved, and watched the step stay incomplete for ever. It is a shared form across roles, so
+    this is the one place the difference can be stated correctly.
+*@
+@{ var phoneRequired = CommunityHub.Core.Forms.ProfileCompletion.PhoneRequiredFor(Model.Role); }
+<label for="Phone">
+    Phone
+    <span style="font-weight:400;color:#6b7280;">(@(phoneRequired ? "required" : "optional"))</span>
+</label>
+<input type="tel" asp-for="Phone" autocomplete="tel" maxlength="40" required="@phoneRequired" />
 
 @* One additional-email field only (operator 2026-06-25 — the separate "secondary
    CC" field was redundant): an alternate address you can ALSO sign in with.
